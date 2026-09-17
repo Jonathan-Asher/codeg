@@ -31,6 +31,17 @@ just never indexed.
 
 **Estimate:** parser integration is the only risky part; everything else is additive.
 
+### 1b. cmd+F — find within the open chat (user requirement, 2026-09-17)
+
+Separate, simpler feature than the global index: find-in-conversation over the already-parsed
+turns of the open session. Client-side only (works from the remote-workspace Mac with no server
+change); highlight matches, next/prev navigation, optional case sensitivity. Ships before the
+FTS indexer; the indexer complements it for cross-conversation reach.
+
+**Upstream status (checked 2026-09-17): no open PRs or issues for any of our pains** —
+search, cmd+F, tree UI, pi resume, battery are all unclaimed. Closest neighbor: #596
+(perf: bound transcript/live-tool resource usage) — rebase our battery work on it if merged.
+
 ---
 
 ## Pain 2 — Can't go back in sessions / can't edit or delete past messages
