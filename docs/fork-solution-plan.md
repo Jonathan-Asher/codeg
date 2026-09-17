@@ -38,9 +38,15 @@ turns of the open session. Client-side only (works from the remote-workspace Mac
 change); highlight matches, next/prev navigation, optional case sensitivity. Ships before the
 FTS indexer; the indexer complements it for cross-conversation reach.
 
-**Upstream status (checked 2026-09-17): no open PRs or issues for any of our pains** —
-search, cmd+F, tree UI, pi resume, battery are all unclaimed. Closest neighbor: #596
-(perf: bound transcript/live-tool resource usage) — rebase our battery work on it if merged.
+**Upstream status (deep search 2026-09-17): no PRs for any of our pains; issue landscape:**
+- **Resume (Pain 3) is a known upstream bug class:** #528 open (Claude historical sessions
+  spawn + never connect; #529 closed dup explicitly asks for auto-connect on open) and #697
+  open (Gemini sessions lost). Our fix = PR with proven demand; link both.
+- **Tree UI (Pain 2) has demand:** #328 open FR asks for a double-esc rewind button ("really
+  important") — same user need as the branch switcher; reference it in the PR.
+- **Search / cmd+F / battery:** unclaimed. Only neighbor: #596 perf PR (bound transcript and
+  live-tool resource usage) — rebase battery work on it if merged; #427 (closed) was a
+  Linux/EGL 100%-CPU startup bug, unrelated to our macOS webview drain.
 
 ---
 
