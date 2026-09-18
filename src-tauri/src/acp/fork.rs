@@ -137,6 +137,13 @@ pub fn resolve_fork_point(
         // fingerprint alongside an id costs nothing: both adapters stop at the
         // first id that matches and never look at it.
         //
+        // Pi (pi-acp ≥ our fork) resolves by fingerprint only: its adapter
+        // hashes the normalized text of each assistant message in the linear
+        // transcript and forks from the first user message AFTER the match
+        // (pi's fork RPC takes a user-message entryId). The id half is sent
+        // but ignored there; the empty-text guard below still matters — a
+        // textless turn would hash to the empty-string digest.
+        //
         // The `text.trim().is_empty()` guard below is load-bearing on Claude,
         // not just tidiness. Every turn `parsers::claude` leaves unnamed is one
         // codeg SYNTHESIZED with no text of its own (a `/goal` marker, a bare
@@ -144,7 +151,7 @@ pub fn resolve_fork_point(
         // match every text-free grouping on the agent's side at once and then
         // pick between them by occurrence, forking somewhere arbitrary. A tail
         // fork is the honest answer for those.
-        AgentType::ClaudeCode | AgentType::DeepSeek => {
+        AgentType::ClaudeCode | AgentType::DeepSeek | AgentType::Pi => {
             let text = turn_text(turn);
             let fingerprint = (!text.trim().is_empty()).then(|| fingerprint_agent_message(&text));
             // Neither half can name this turn — an assistant bubble opened by a
