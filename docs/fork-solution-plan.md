@@ -5,6 +5,20 @@
 **Priority order agreed:** ① Search index ② Session tree UI ③ Resume/deep-link fork bug ④ Battery.
 Destructive-action safety nets: **not a priority**.
 
+**Status 2026-09-17:** Pain 1b (cmd+F) implemented → upstream PR #764; first fork build produced
+`target/release/bundle/macos/codeg.app` (DMG bundling step fails — cosmetic, needs Finder/hdiutil).
+
+**Backlog (Jonathan, 2026-09-17 evening):**
+- ⑤ **⌘⇧W closes the whole window** — with a remote-workspace window AND a local-workspace window
+  open, it should close only the focused one. Investigate the keybinding scope in the frontend.
+- ⑥ **Stale transcript after MacBook wake** — prompt a Claude Code session, close the lid, reopen:
+  streamed replies are missing until the remote workspace is closed and reopened. The client's
+  WS/event stream dies on sleep and nothing re-syncs on wake. Fix direction: on window focus /
+  network reconnect, re-fetch the session snapshot (codeg already has `acp_get_session_snapshot`
+  and turn-window machinery) before trusting the local view.
+- ⑦ **Reorder pinned sessions by dragging** — sidebar pinned order currently derives from
+  `pinned_at`; needs a per-folder sort order plus drag-and-drop in the sidebar.
+
 ---
 
 ## Pain 1 — Search doesn't find chat content
