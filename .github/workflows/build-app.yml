@@ -1,0 +1,44 @@
+name: build-app
+on:
+  workflow_dispatch:
+  push:
+    branches: [fork/solution-plan]
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install pnpm deps
+        run: pnpm install --frozen-lockfile
+      - name: Build app
+        run: pnpm tauri build
+        env:
+          # DMG bundling needs a GUI session; skip it, take the .app
+          TAURI_BUNDLER_DISABLE_DMG: "true"
+      - name: Upload app
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeg-app
+          path: src-tauri/target/release/bundle/macos/codeg.app
+      - name: Update release (fork-latest)
+        if: github.ref == 'refs/heads/fork/solution-plan'
+        run: |
+          ditto -c -k --keepParent src-tauri/target/release/bundle/macos/codeg.app codeg-fork.app.zip
+          gh release delete fork-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create fork-latest codeg-fork.app.zip \
+            --title "codeg fork (auto-build)" \
+            --notes "Latest fork build. Install: curl -sL https://github.com/Jonathan-Asher/codeg/releases/download/fork-latest/install.sh | bash"
+          gh release upload fork-latest scripts/install-remote.sh --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
