@@ -14,7 +14,7 @@ else
 fi
 
 echo "==> 2/4 Downloading codeg fork app (~90MB)"
-curl -sL -o /tmp/codeg-fork.app.zip https://github.com/Jonathan-Asher/codeg/releases/download/fork-1/codeg-fork.app.zip || { echo "FAILED: app download"; exit 1; }
+curl -sL -o /tmp/codeg-fork.app.zip https://github.com/Jonathan-Asher/codeg/releases/download/fork-latest/codeg-fork.app.zip || { echo "FAILED: app download"; exit 1; }
 
 echo "==> 3/4 Installing app (backup of the old one at /Applications/codeg.app.bak)"
 osascript -e 'tell application "codeg" to quit' 2>/dev/null || true
