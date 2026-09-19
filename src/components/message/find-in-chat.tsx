@@ -172,6 +172,19 @@ export function useFindHighlights(
     const q = query.toLowerCase()
     let raf = 0
 
+    // ::highlight() styles injected at runtime — the build-time CSS
+    // transformer (Lightning CSS) rejects the pseudo-element on some
+    // versions, so the stylesheet never carries it.
+    const styleId = "find-in-chat-highlights"
+    if (!document.getElementById(styleId)) {
+      const style = document.createElement("style")
+      style.id = styleId
+      style.textContent = `
+::highlight(find-match) { background-color: rgba(251, 191, 36, 0.3); color: inherit; }
+::highlight(find-match-active) { background-color: rgba(251, 146, 60, 0.85); color: #1c1917; }`
+      document.head.appendChild(style)
+    }
+
     const paint = () => {
       const ranges: Range[] = []
       let activeRange: Range | null = null

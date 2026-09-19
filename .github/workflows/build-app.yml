@@ -20,7 +20,7 @@ jobs:
       - name: Install pnpm deps
         run: pnpm install --frozen-lockfile
       - name: Build app
-        run: pnpm tauri build
+        run: pnpm tauri build --bundles app
         env:
           # DMG bundling needs a GUI session; skip it, take the .app
           TAURI_BUNDLER_DISABLE_DMG: "true"
