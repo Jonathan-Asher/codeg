@@ -19,24 +19,50 @@ jobs:
           workspaces: src-tauri
       - name: Install pnpm deps
         run: pnpm install --frozen-lockfile
-      - name: Build app
-        run: pnpm tauri build --bundles app
+      - name: Build app (signed for the fork update feed)
+        run: pnpm tauri build
         env:
-          # DMG bundling needs a GUI session; skip it, take the .app
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # DMG bundling needs a GUI session; the .app + updater artifacts are enough
           TAURI_BUNDLER_DISABLE_DMG: "true"
-      - name: Upload app
+      - name: Assemble update feed (latest.json)
+        run: |
+          VERSION=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
+          BUNDLE_DIR=src-tauri/target/release/bundle
+          # Updater artifact: codeg.app.tar.gz + .sig (created by tauri's updater bundler)
+          ls -la "$BUNDLE_DIR" || true
+          SIG=$(cat "$BUNDLE_DIR"/codeg.app.tar.gz.sig 2>/dev/null || cat "$BUNDLE_DIR/macos/codeg.app.tar.gz.sig")
+          DL="https://github.com/Jonathan-Asher/codeg/releases/download/fork-latest/codeg.app.tar.gz"
+          cat > latest.json <<JSON
+          {
+            "version": "$VERSION",
+            "notes": "codeg fork build (auto-updates with features intact)",
+            "pub_date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "platforms": {
+              "darwin-aarch64": { "signature": "$SIG", "url": "$DL" }
+            }
+          }
+          JSON
+          cat latest.json
+      - name: Upload app artifact
         uses: actions/upload-artifact@v4
         with:
           name: codeg-app
           path: src-tauri/target/release/bundle/macos/codeg.app
-      - name: Update release (fork-latest)
+      - name: Update rolling release (fork-latest)
         if: github.ref == 'refs/heads/fork/solution-plan'
         run: |
-          ditto -c -k --keepParent src-tauri/target/release/bundle/macos/codeg.app codeg-fork.app.zip
+          BUNDLE_DIR=src-tauri/target/release/bundle
+          ditto -c -k --keepParent "$BUNDLE_DIR/macos/codeg.app" codeg-fork.app.zip
           gh release delete fork-latest --yes --cleanup-tag 2>/dev/null || true
-          gh release create fork-latest codeg-fork.app.zip \
+          gh release create fork-latest \
+            codeg-fork.app.zip \
+            "$BUNDLE_DIR"/codeg.app.tar.gz \
+            "$BUNDLE_DIR"/codeg.app.tar.gz.sig \
+            latest.json \
+            scripts/install-remote.sh \
             --title "codeg fork (auto-build)" \
-            --notes "Latest fork build. Install: curl -sL https://github.com/Jonathan-Asher/codeg/releases/download/fork-latest/install.sh | bash"
-          gh release upload fork-latest scripts/install-remote.sh --clobber
+            --notes "Latest fork build — signed for the fork update feed. Features: cmd+F find-in-chat (+ word highlighting), Pi session fork-points, pi-acp fork/resume. Install: curl -sL https://github.com/Jonathan-Asher/codeg/releases/download/fork-latest/install.sh | bash"
         env:
           GH_TOKEN: ${{ github.token }}
