@@ -62,12 +62,13 @@ jobs:
           echo "updater artifact: $TARGZ / $SIG"
           ditto -c -k --keepParent "$BUNDLE_DIR/macos/codeg.app" codeg-fork.app.zip
           gh release delete fork-latest --yes --cleanup-tag 2>/dev/null || true
+          cp scripts/install-remote.sh /tmp/install.sh
           gh release create fork-latest \
             codeg-fork.app.zip \
             "$TARGZ" \
             "$SIG" \
             latest.json \
-            scripts/install-remote.sh \
+            /tmp/install.sh \
             --title "codeg fork (auto-build)" \
             --notes "Latest fork build — signed for the fork update feed. Features: cmd+F find-in-chat (+ word highlighting), Pi session fork-points, wake resync, pinned drag-reorder, Markdown export, pi-acp fork/resume. Install: curl -sL https://github.com/Jonathan-Asher/codeg/releases/download/fork-latest/install.sh | bash"
         env:
