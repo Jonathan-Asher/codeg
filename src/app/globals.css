@@ -2955,8 +2955,6 @@ div.monaco-diff-editor.side-by-side .editor.modified {
   cursor: grabbing !important;
 }
 
-/* Find-in-chat (⌘F): CSS Custom Highlight API layers. The regular layer
-   covers every match in mounted rows; the active layer paints over the
-   occurrence the find bar currently points at. Both stack — the active
-   background must be near-opaque to read over the regular one. */
-(injected at runtime by useFindHighlights — Lightning CSS rejects ::highlight at build time)
+/* Find-in-chat highlight layers are injected at runtime by useFindHighlights
+   (src/components/message/find-in-chat.tsx) — Lightning CSS rejects
+   ::highlight() at build time, so the stylesheet never carries them. */
