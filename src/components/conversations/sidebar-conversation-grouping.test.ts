@@ -474,6 +474,8 @@ describe("buildRows", () => {
       kind: "conversation",
       conversation: p1,
       depth: 0,
+      // Pinned rows carry the flag for the drag-reorder affordance.
+      pinned: true,
     })
     expect(rows[2]).toEqual({
       kind: "section",

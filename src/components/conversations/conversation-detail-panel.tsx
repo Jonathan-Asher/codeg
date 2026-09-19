@@ -105,6 +105,7 @@ import {
 } from "@/stores/conversation-runtime-store"
 import { useShallow } from "zustand/react/shallow"
 import { useConversationDetail } from "@/hooks/use-conversation-detail"
+import { useWakeResync } from "@/hooks/use-wake-resync"
 import {
   buildSteerPayload,
   extractUserImagesFromDraft,
@@ -627,6 +628,18 @@ const ConversationTabView = memo(function ConversationTabView({
     ),
   })
   const { status: connStatus, sessionId: connSessionId } = conn
+
+  // Wake/resync: re-fetch the transcript when the machine wakes or the
+  // transport reconnects — the WS stream dies during sleep and nothing else
+  // re-fetches what it missed (stale view until the workspace is reopened).
+  // Never fires mid-stream (a refetch would clobber live updates); debounced;
+  // background tabs gate themselves off.
+  useWakeResync({
+    enabled: isActive && hasPersistedConversation,
+    conversationId: effectiveConversationId,
+    isStreaming: connStatus === "prompting",
+    refetch: refetchDetail,
+  })
   const messageQueue = useMessageQueue()
   const {
     queue: msgQueue,
