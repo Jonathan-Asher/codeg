@@ -4,6 +4,9 @@ on:
   push:
     branches: [fork/solution-plan]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-14
