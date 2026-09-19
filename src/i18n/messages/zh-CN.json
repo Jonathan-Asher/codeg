@@ -2104,7 +2104,10 @@
       "typeToSearch": "输入关键词搜索会话",
       "typeToSearchFiles": "输入关键词搜索文件或目录",
       "noResults": "未找到结果。",
-      "untitledConversation": "未命名会话"
+      "untitledConversation": "未命名会话",
+      "tabMessages": "消息",
+      "typeToSearchMessages": "输入以搜索消息内容…",
+      "messagesHeading": "匹配的消息"
     },
     "folderTitleBar": {
       "showSidebar": "显示侧边栏",

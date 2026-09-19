@@ -2104,7 +2104,10 @@
       "typeToSearch": "入力して会話を検索",
       "typeToSearchFiles": "入力してファイルまたはディレクトリを検索",
       "noResults": "結果が見つかりません。",
-      "untitledConversation": "無題の会話"
+      "untitledConversation": "無題の会話",
+      "tabMessages": "Messages",
+      "typeToSearchMessages": "Type to search message content…",
+      "messagesHeading": "Matching messages"
     },
     "folderTitleBar": {
       "showSidebar": "サイドバーを表示",

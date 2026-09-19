@@ -2097,7 +2097,11 @@ export function SidebarConversationList({
   const [draggingPinId, setDraggingPinId] = useState<number | null>(null)
   const [dragOverPinId, setDragOverPinId] = useState<number | null>(null)
 
-  const handlePinDragStart = useCallback((id: number) => {
+  const handlePinDragStart = useCallback((id: number, e: React.DragEvent) => {
+    // WebKit silently aborts HTML5 drags that never set drag data — the
+    // payload is also what the drop handler routes on.
+    e.dataTransfer.setData("text/plain", String(id))
+    e.dataTransfer.effectAllowed = "move"
     setDraggingPinId(id)
   }, [])
 
@@ -3113,7 +3117,7 @@ export function SidebarConversationList({
       return (
         <div
           draggable={!isDragging}
-          onDragStart={() => handlePinDragStart(conv.id)}
+          onDragStart={(e) => handlePinDragStart(conv.id, e)}
           onDragOver={(e) => handlePinDragOver(e, conv.id)}
           onDragLeave={() =>
             setDragOverPinId((v) => (v === conv.id ? null : v))

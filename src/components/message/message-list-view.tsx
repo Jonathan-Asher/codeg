@@ -83,6 +83,7 @@ import {
   FindInChatBar,
   useFindHighlights,
 } from "@/components/message/find-in-chat"
+import { takePendingFind } from "@/lib/pending-find"
 import { extractSessionFilesGrouped } from "@/lib/session-files"
 import { unescapeComposerText } from "@/lib/composer-copy-text"
 import { useStickToBottomContext } from "use-stick-to-bottom"
@@ -1340,6 +1341,24 @@ export function MessageListView({
   const [findOpen, setFindOpen] = useState(false)
   const [findQuery, setFindQuery] = useState("")
   const [findHit, setFindHit] = useState(0)
+
+  // Cross-conversation search → find-in-chat handoff: a ⌘K hit that opened
+  // this conversation leaves a pending query here; consume it once the
+  // conversation id settles (virtual → real id) so the find bar opens
+  // prefilled and the matched turns paint immediately.
+  // Adjust-on-render (the React pattern for state reacting to props): the
+  // pending query is consumed exactly once per settled conversation id.
+  const [consumedPendingFor, setConsumedPendingFor] = useState<number | null>(
+    null
+  )
+  if (conversationId > 0 && consumedPendingFor !== conversationId) {
+    setConsumedPendingFor(conversationId)
+    const pendingQuery = takePendingFind(conversationId)
+    if (pendingQuery != null) {
+      setFindOpen(true)
+      setFindQuery(pendingQuery)
+    }
+  }
 
   const findClose = useCallback(() => {
     setFindOpen(false)

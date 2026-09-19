@@ -2104,7 +2104,10 @@
       "typeToSearch": "Tippen, um Konversationen zu suchen",
       "typeToSearchFiles": "Tippen, um Dateien oder Verzeichnisse zu suchen",
       "noResults": "Keine Ergebnisse gefunden.",
-      "untitledConversation": "Unbenannte Konversation"
+      "untitledConversation": "Unbenannte Konversation",
+      "tabMessages": "Messages",
+      "typeToSearchMessages": "Type to search message content…",
+      "messagesHeading": "Matching messages"
     },
     "folderTitleBar": {
       "showSidebar": "Seitenleiste anzeigen",

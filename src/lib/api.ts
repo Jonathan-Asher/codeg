@@ -3383,6 +3383,36 @@ export async function updateConversationPinned(
   })
 }
 
+/** One message-content search hit (⌘K "Messages" tab). */
+export interface MessageSearchHit {
+  conversation_id: number
+  folder_id: number
+  agent_type: string
+  title: string | null
+  turn_idx: number
+  role: string
+  /** `[[mark]]query[[/mark]]`-wrapped snippet — render your own highlight. */
+  snippet: string
+  rank: number
+}
+
+/** FTS5 message-content search across every non-deleted conversation. */
+export async function searchMessages(
+  query: string,
+  limit?: number
+): Promise<MessageSearchHit[]> {
+  return getTransport().call("message_search", { query, limit })
+}
+
+/** Re-index one conversation's turns into the message search index. */
+export async function messageSearchIndexConversation(
+  conversationId: number
+): Promise<number> {
+  return getTransport().call("message_search_index_conversation", {
+    conversationId,
+  })
+}
+
 /** Persist a manual drag order for the sidebar's Pinned section. `orderedIds`
  *  is the full visible pinned order, top to bottom (server writes pin_order =
  *  index per id and echoes one upsert per conversation). */

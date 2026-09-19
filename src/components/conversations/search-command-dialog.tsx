@@ -11,7 +11,12 @@ import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { useTabActions } from "@/contexts/tab-context"
 import { useWorkbenchRoute } from "@/contexts/workbench-route-context"
 import { useWorkspaceActions } from "@/contexts/workspace-context"
-import { listAllConversations } from "@/lib/api"
+import {
+  listAllConversations,
+  searchMessages,
+  type MessageSearchHit as ApiMessageSearchHit,
+} from "@/lib/api"
+import { setPendingFind } from "@/lib/pending-find"
 import type {
   AgentType,
   ConversationStatus,
@@ -34,7 +39,7 @@ import {
 import { cn } from "@/lib/utils"
 import { formatConversationTitle } from "@/lib/conversation-title"
 
-type SearchTab = "conversations" | "files"
+type SearchTab = "conversations" | "messages" | "files"
 
 interface SearchCommandDialogProps {
   open: boolean
@@ -68,6 +73,9 @@ export function SearchCommandDialog({
   const [query, setQuery] = useState("")
   const [agentFilter, setAgentFilter] = useState<AgentType | null>(null)
   const [results, setResults] = useState<DbConversationSummary[]>([])
+  const [messageHits, setMessageHits] = useState<ApiMessageSearchHit[]>([])
+  const [messageSearching, setMessageSearching] = useState(false)
+  const messageDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [searching, setSearching] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
@@ -131,6 +139,31 @@ export function SearchCommandDialog({
     }
   }, [query, agentFilter, doSearch, activeTab])
 
+  // Message-content search (FTS5): runs WITHOUT agent filter across every
+  // non-deleted conversation. Indexed at app start / turn completion; hits
+  // may miss the newest tokens of a streaming turn until its TurnComplete
+  // beats the debounce — acceptable for a search surface.
+  useEffect(() => {
+    if (activeTab !== "messages") return
+    if (messageDebounceRef.current) clearTimeout(messageDebounceRef.current)
+    messageDebounceRef.current = setTimeout(() => {
+      const q = query.trim()
+      if (!q) {
+        setMessageHits([])
+        setMessageSearching(false)
+        return
+      }
+      setMessageSearching(true)
+      searchMessages(q, 40)
+        .then((hits) => setMessageHits(hits))
+        .catch(() => setMessageHits([]))
+        .finally(() => setMessageSearching(false))
+    }, 250)
+    return () => {
+      if (messageDebounceRef.current) clearTimeout(messageDebounceRef.current)
+    }
+  }, [query, activeTab])
+
   // Reset state when dialog closes
   useEffect(() => {
     if (!open) {
@@ -142,6 +175,34 @@ export function SearchCommandDialog({
     }
   }, [open, resetFileTree])
 
+  const renderSnippet = useCallback((snippet: string) => {
+    // FTS5 snippet() wrapped matches with [[mark]]...[[/mark]]; split keeps
+    // the delimiters so parity is the highlight state (never innerHTML).
+    const parts = snippet.split(/(\[\[mark\]\]|\[\[\/mark\]\])/g)
+    let marked = false
+    return parts.map((part, i) => {
+      if (part === "[[mark]]") {
+        marked = true
+        return null
+      }
+      if (part === "[[/mark]]") {
+        marked = false
+        return null
+      }
+      if (marked && part.length > 0) {
+        return (
+          <mark
+            key={i}
+            className="rounded-[0.25rem] bg-amber-400/40 px-0.5 text-inherit"
+          >
+            {part}
+          </mark>
+        )
+      }
+      return part.length > 0 ? <span key={i}>{part}</span> : null
+    })
+  }, [])
+
   const handleSelectConversation = useCallback(
     (conv: DbConversationSummary) => {
       // Leave any workbench route (e.g. Automations) so the picked conversation
@@ -152,6 +213,19 @@ export function SearchCommandDialog({
       onOpenChange(false)
     },
     [openTab, onOpenChange, openConversations]
+  )
+
+  const handleSelectMessageHit = useCallback(
+    (hit: ApiMessageSearchHit) => {
+      // Open the conversation and hand the matched query to its find bar —
+      // the hit's turn autoplains via the same highlighted loop ⌘F paints,
+      // so the match is visible in context even when it sits pages deep.
+      openConversations()
+      openTab(hit.folder_id, hit.conversation_id, hit.agent_type as never, true)
+      setPendingFind(hit.conversation_id, query.trim())
+      onOpenChange(false)
+    },
+    [openTab, onOpenChange, openConversations, query]
   )
 
   const handleSelectFile = useCallback(
@@ -208,6 +282,20 @@ export function SearchCommandDialog({
         >
           {t("tabConversations")}
           {activeTab === "conversations" && (
+            <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-foreground rounded-full" />
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab("messages")}
+          className={cn(
+            "relative h-9 px-3 text-sm font-medium transition-colors",
+            activeTab === "messages"
+              ? "text-foreground"
+              : "text-muted-foreground hover:text-foreground"
+          )}
+        >
+          {t("tabMessages")}
+          {activeTab === "messages" && (
             <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-foreground rounded-full" />
           )}
         </button>
@@ -305,6 +393,47 @@ export function SearchCommandDialog({
                         locale: dateFnsLocale,
                       })}
                     </span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
+          </>
+        )}
+
+        {/* Messages tab — FTS5 content search across every conversation */}
+        {activeTab === "messages" && (
+          <>
+            <CommandEmpty>
+              {messageSearching
+                ? t("searching")
+                : !query.trim()
+                  ? t("typeToSearchMessages")
+                  : t("noResults")}
+            </CommandEmpty>
+            {messageHits.length > 0 && (
+              <CommandGroup heading={t("messagesHeading")}>
+                {messageHits.map((hit) => (
+                  <CommandItem
+                    key={`${hit.conversation_id}-${hit.turn_idx}`}
+                    value={`m-${hit.conversation_id}-${hit.turn_idx}`}
+                    onSelect={() => handleSelectMessageHit(hit)}
+                  >
+                    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate text-[0.8125rem] font-medium">
+                          {hit.title || t("untitledConversation")}
+                        </span>
+                        <span className="shrink-0 text-[0.6875rem] text-muted-foreground">
+                          {getAgentLabel(hit.agent_type as never)}
+                        </span>
+                      </div>
+                      <div className="truncate text-[0.75rem] text-muted-foreground">
+                        <span className="me-1 font-medium capitalize">
+                          {hit.role}:
+                        </span>
+                        {renderSnippet(hit.snippet)}
+                      </div>
+                    </div>
                   </CommandItem>
                 ))}
               </CommandGroup>

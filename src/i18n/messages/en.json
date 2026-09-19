@@ -2104,7 +2104,10 @@
       "typeToSearch": "Type to search conversations",
       "typeToSearchFiles": "Type to search files or directories",
       "noResults": "No results found.",
-      "untitledConversation": "Untitled conversation"
+      "untitledConversation": "Untitled conversation",
+      "tabMessages": "Messages",
+      "typeToSearchMessages": "Type to search message content…",
+      "messagesHeading": "Matching messages"
     },
     "folderTitleBar": {
       "showSidebar": "Show Sidebar",

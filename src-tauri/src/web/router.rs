@@ -122,6 +122,14 @@ pub fn build_router(
             post(handlers::conversation_export::conversation_export_markdown),
         )
         .route(
+            "/message_search",
+            post(handlers::message_search::message_search),
+        )
+        .route(
+            "/message_search_index_conversation",
+            post(handlers::message_search::message_search_index_conversation),
+        )
+        .route(
             "/get_folder_conversation_turns",
             post(handlers::conversations::get_folder_conversation_turns),
         )

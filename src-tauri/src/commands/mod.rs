@@ -9,6 +9,7 @@ pub mod chat_authoring;
 pub mod chat_channel;
 pub mod config_sync;
 pub mod conversation_export;
+pub mod message_search;
 pub mod conversations;
 pub mod custom_agents;
 pub mod custom_skills;
