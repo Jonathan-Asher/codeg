@@ -18,7 +18,6 @@
   },
   "bundle": {
     "active": true,
-    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/32x32.png",
@@ -30,7 +29,9 @@
     "resources": {
       "../out": "web/"
     },
-    "externalBin": ["binaries/codeg-mcp"],
+    "externalBin": [
+      "binaries/codeg-mcp"
+    ],
     "windows": {
       "nsis": {
         "installerHooks": "./windows/installer-hooks.nsh"
@@ -48,7 +49,9 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["codeg"]
+        "schemes": [
+          "codeg"
+        ]
       }
     },
     "updater": {
