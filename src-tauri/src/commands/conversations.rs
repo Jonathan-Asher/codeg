@@ -2540,7 +2540,7 @@ pub async fn reorder_conversation_pins(
 ) -> Result<Vec<i32>, AppCommandError> {
     reorder_conversation_pins_core(&db.conn, &ordered_ids).await?;
     for id in &ordered_ids {
-        emit_conversation_upsert(&EventEmitter::Tauri(app), &db.conn, *id).await;
+        emit_conversation_upsert(&EventEmitter::Tauri(app.clone()), &db.conn, *id).await;
     }
     Ok(ordered_ids)
 }
@@ -2730,6 +2730,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             pinned_at: None,
+            pin_order: None,
             parent_id: Some(1),
             parent_tool_use_id: Some(parent_tool_use_id.into()),
             delegation_call_id: Some("call-1".into()),
@@ -6368,6 +6369,7 @@ mod tests {
                 created_at: at(-100),
                 updated_at: at(0),
                 pinned_at: None,
+            pin_order: None,
                 parent_id: None,
                 parent_tool_use_id: None,
                 delegation_call_id: None,

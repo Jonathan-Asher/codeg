@@ -119,6 +119,7 @@ async fn create_inner(
         updated_at: Set(now),
         deleted_at: Set(None),
         pinned_at: Set(None),
+        pin_order: Set(None),
         origin_cwd: Set(None),
     };
     Ok(model.insert(conn).await?)
@@ -580,6 +581,8 @@ pub async fn reorder_pins(
     conn: &DatabaseConnection,
     ordered_ids: &[i32],
 ) -> Result<(), DbError> {
+    use sea_orm::sea_query::Expr;
+    use sea_orm::TransactionTrait;
     let txn = conn.begin().await?;
     for (index, id) in ordered_ids.iter().enumerate() {
         conversation::Entity::update_many()
@@ -1001,6 +1004,7 @@ impl CarriedOverRow {
             // Pinning is a view preference attached to the row the user pinned,
             // not to the history.
             pinned_at: Set(None),
+            pin_order: Set(None),
             origin_cwd: Set(self.origin_cwd),
         }
     }

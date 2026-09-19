@@ -104,7 +104,7 @@ pub async fn conversation_export_markdown_core(
     conn: &sea_orm::DatabaseConnection,
     conversation_id: i32,
 ) -> Result<String, AppCommandError> {
-    let (detail, parsed_title) = get_folder_conversation_core(conn, conversation_id)?;
+    let (detail, parsed_title) = get_folder_conversation_core(conn, conversation_id).await?;
     let title = parsed_title.or(detail.summary.title.clone());
     let turns = detail.turns;
 
@@ -145,6 +145,9 @@ pub async fn conversation_export_markdown_core(
     Ok(path.to_string_lossy().to_string())
 }
 
+/// Desktop-only command wrapper: `tauri::State` exists only with the
+/// `tauri-runtime` feature (the `codeg-mcp` bin compiles the lib without it).
+#[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn conversation_export_markdown(
     conversation_id: i32,

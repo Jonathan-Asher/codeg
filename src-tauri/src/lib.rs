@@ -83,6 +83,7 @@ mod tauri_app {
         canvas as canvas_commands,
         chat_authoring as chat_authoring_commands, chat_channel as chat_channel_commands,
         config_sync,
+        conversation_export as conversation_export_commands,
         conversations,
         custom_skills as custom_skills_commands,
         deepseek_settings as deepseek_settings_commands, delegation as delegation_commands,
@@ -1252,7 +1253,7 @@ mod tauri_app {
                 // Workspace state (open folders, opened tabs, active tab) is
                 // restored by the frontend via `list_open_folder_details` /
                 // `list_opened_tabs` inside the main window.
-                ensure_main_window(app, &workspace_path);
+                ensure_main_window(app.handle(), std::path::Path::new(&workspace_path));
 
                 Ok(())
             })
@@ -1455,7 +1456,7 @@ mod tauri_app {
                 conversations::scan_importable_sessions,
                 conversations::import_selected_sessions,
                 conversations::get_folder_conversation,
-                conversation_export::conversation_export_markdown,
+                conversation_export_commands::conversation_export_markdown,
                 conversations::get_folder_conversation_turns,
                 conversations::list_folders,
                 conversations::get_stats,
@@ -2007,7 +2008,10 @@ mod tauri_app {
                                 &[],
                             ),
                         );
-                        ensure_main_window(app, &workspace_path);
+                        ensure_main_window(
+                            app.app_handle(),
+                            std::path::Path::new(&workspace_path),
+                        );
                     }
                     windows::show_main_window(app);
                 }
