@@ -54,15 +54,18 @@ jobs:
         if: github.ref == 'refs/heads/fork/solution-plan'
         run: |
           BUNDLE_DIR=src-tauri/target/release/bundle
+          TARGZ=$(find "$BUNDLE_DIR" -name 'codeg.app.tar.gz' | head -1)
+          SIG=$(find "$BUNDLE_DIR" -name 'codeg.app.tar.gz.sig' | head -1)
+          echo "updater artifact: $TARGZ / $SIG"
           ditto -c -k --keepParent "$BUNDLE_DIR/macos/codeg.app" codeg-fork.app.zip
           gh release delete fork-latest --yes --cleanup-tag 2>/dev/null || true
           gh release create fork-latest \
             codeg-fork.app.zip \
-            "$BUNDLE_DIR"/codeg.app.tar.gz \
-            "$BUNDLE_DIR"/codeg.app.tar.gz.sig \
+            "$TARGZ" \
+            "$SIG" \
             latest.json \
             scripts/install-remote.sh \
             --title "codeg fork (auto-build)" \
-            --notes "Latest fork build — signed for the fork update feed. Features: cmd+F find-in-chat (+ word highlighting), Pi session fork-points, pi-acp fork/resume. Install: curl -sL https://github.com/Jonathan-Asher/codeg/releases/download/fork-latest/install.sh | bash"
+            --notes "Latest fork build — signed for the fork update feed. Features: cmd+F find-in-chat (+ word highlighting), Pi session fork-points, wake resync, pinned drag-reorder, Markdown export, pi-acp fork/resume. Install: curl -sL https://github.com/Jonathan-Asher/codeg/releases/download/fork-latest/install.sh | bash"
         env:
           GH_TOKEN: ${{ github.token }}
