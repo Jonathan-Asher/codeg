@@ -2061,6 +2061,16 @@ const ConversationTabView = memo(function ConversationTabView({
         onNewSession={
           canShowDetailErrorActions ? handleOpenNewSession : undefined
         }
+        onRetryTurn={
+          composerAvailable
+            ? (text) => {
+                lifecycleSend(
+                  { blocks: [{ type: "text", text }], displayText: text },
+                  null
+                )
+              }
+            : undefined
+        }
         onQuoteSelection={composerAvailable ? handleQuoteSelection : undefined}
         // Asking opens its own conversation, so it needs a folder to open it in
         // rather than a usable composer here — a transcript whose composer is

@@ -3432,7 +3432,8 @@
         "findNoResults": "No results",
         "findPrev": "Previous match",
         "findNext": "Next match",
-        "findClose": "Close find"
+        "findClose": "Close find",
+        "retry": "Retry"
       },
       "liveTurnStats": {
         "thinking": "Denkt nach...",

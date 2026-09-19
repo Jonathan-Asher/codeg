@@ -59,6 +59,7 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  RotateCcw,
   ListTodo,
 } from "lucide-react"
 import { useCreateTaskFromMessage } from "./use-create-task-from-message"
@@ -110,6 +111,9 @@ interface MessageListViewProps {
   hideEmptyState?: boolean
   onReload?: () => void
   onNewSession?: () => void
+  /** Re-send the text of a trailing user turn that got no response. Omitted
+   *  on read-only surfaces (sub-agent dialogs, task transcripts). */
+  onRetryTurn?: (text: string) => void
   /**
    * Renders the per-conversation message navigator rail. Enabled in the main
    * conversation view; disabled in compact embeds (e.g. the sub-agent dialog).
@@ -1042,6 +1046,7 @@ export function MessageListView({
   hideEmptyState = false,
   onReload,
   onNewSession,
+  onRetryTurn,
   showMessageNav = true,
   userTurnHeader = null,
   onQuoteSelection,
@@ -1443,6 +1448,16 @@ export function MessageListView({
               ? userTurnHeader(item.group)
               : null
           const isFindHit = findOpen && activeFindHit?.key === item.key
+          // Retry affordance: a trailing user turn that got NO assistant
+          // response (send failed, agent died, connection dropped) — offered
+          // again once the connection is not mid-stream. The turn's text is
+          // exactly the findable prose (text parts).
+          const canRetry =
+            onRetryTurn != null &&
+            item.group.role === "user" &&
+            item.isThreadTail &&
+            item.phase === "persisted" &&
+            connStatus !== "prompting"
           return (
             <div
               style={pt > 0 ? { paddingTop: pt } : undefined}
@@ -1477,6 +1492,20 @@ export function MessageListView({
                 forkDisabled={forkBusy}
                 isThreadTail={item.isThreadTail}
               />
+              {canRetry && (
+                <div className="flex justify-end pe-1 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => onRetryTurn(extractFindableText(item))}
+                    title={t("retry")}
+                    aria-label={t("retry")}
+                    className="flex items-center gap-1 rounded-full border border-border bg-background/90 px-2 py-[0.125rem] text-[0.6875rem] text-muted-foreground shadow-sm transition-colors hover:bg-muted/90 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <RotateCcw className="h-3 w-3" aria-hidden />
+                    {t("retry")}
+                  </button>
+                </div>
+              )}
             </div>
           )
         }
@@ -1503,6 +1532,9 @@ export function MessageListView({
       forkBusy,
       findOpen,
       activeFindHit?.key,
+      onRetryTurn,
+      connStatus,
+      t,
     ]
   )
 

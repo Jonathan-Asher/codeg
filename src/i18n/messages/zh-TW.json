@@ -3432,7 +3432,8 @@
         "findNoResults": "無結果",
         "findPrev": "上一個匹配",
         "findNext": "下一個匹配",
-        "findClose": "關閉查找"
+        "findClose": "關閉查找",
+        "retry": "重試"
       },
       "liveTurnStats": {
         "thinking": "思考中...",
