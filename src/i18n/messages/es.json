@@ -1889,7 +1889,10 @@
         "updateGroupFailed": "Error al actualizar el grupo: {message}",
         "deleteGroupFailed": "Error al eliminar el grupo: {message}",
         "moveToGroupFailed": "Error al mover la carpeta: {message}",
-        "applyLayoutFailed": "Error al guardar el orden de las carpetas: {message}"
+        "applyLayoutFailed": "Error al guardar el orden de las carpetas: {message}",
+        "reorderPinsFailed": "Failed to reorder pinned conversations: {message}",
+        "exportMarkdownDone": "Exported: {path}",
+        "exportMarkdownFailed": "Failed to export conversation: {message}"
       },
       "statsLabel": "{folders} carpetas · {convos} conversaciones",
       "reorderHandle": "Arrastrar para reordenar",
@@ -2086,7 +2089,8 @@
       "markCompleted": "Marcar como completada",
       "reopen": "Reabrir",
       "expandSubsessions": "Expandir subconversaciones",
-      "collapseSubsessions": "Contraer subconversaciones"
+      "collapseSubsessions": "Contraer subconversaciones",
+      "exportMarkdown": "Export as Markdown"
     },
     "search": {
       "dialogTitle": "Buscar",

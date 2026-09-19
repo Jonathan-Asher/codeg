@@ -562,6 +562,40 @@ pub async fn update_pin(
     Ok(())
 }
 
+/// Persist a manual order for the sidebar's "Pinned" section: writes
+/// `pin_order = index` for each id in `ordered_ids` (0-based, ascending =
+/// top-to-bottom on screen). Only PINNED rows participate — an id that is not
+/// pinned (or does not exist) is skipped, never resurrected; unpinned rows
+/// keep whatever stale value they had, which is invisible because the sidebar
+/// comparator consults `pin_order` only for pinned rows.
+///
+/// Ids absent from `ordered_ids` keep their existing `pin_order`. That is
+/// deliberate: the frontend sends the full visible pinned order, so absent
+/// means "pinned after this snapshot" and a NULL / stale value sorts by
+/// `pinned_at` until the next reorder touches it.
+///
+/// One statement per id (never a table rewrite); a Transaction wraps the loop
+/// so a mid-way failure cannot leave a torn ordering.
+pub async fn reorder_pins(
+    conn: &DatabaseConnection,
+    ordered_ids: &[i32],
+) -> Result<(), DbError> {
+    let txn = conn.begin().await?;
+    for (index, id) in ordered_ids.iter().enumerate() {
+        conversation::Entity::update_many()
+            .filter(conversation::Column::Id.eq(*id))
+            .filter(conversation::Column::PinnedAt.is_not_null())
+            .col_expr(
+                conversation::Column::PinOrder,
+                Expr::value(index as i32),
+            )
+            .exec(&txn)
+            .await?;
+    }
+    txn.commit().await?;
+    Ok(())
+}
+
 /// Bind an agent session id (`external_id`) to a conversation row WITHOUT ever
 /// orphaning the session it was previously bound to.
 ///
@@ -1139,6 +1173,7 @@ fn conv_to_summary(r: conversation::Model) -> DbConversationSummary {
         created_at: r.created_at,
         updated_at: r.updated_at,
         pinned_at: r.pinned_at,
+        pin_order: r.pin_order,
         parent_id: r.parent_id,
         parent_tool_use_id: r.parent_tool_use_id,
         delegation_call_id: r.delegation_call_id,

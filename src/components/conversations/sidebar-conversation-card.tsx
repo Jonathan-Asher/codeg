@@ -17,6 +17,7 @@ import {
   XCircle,
   Pin,
   PinOff,
+  FileDown,
   CheckCircle2,
   FolderX,
   Info,
@@ -181,6 +182,9 @@ interface SidebarConversationCardProps {
   onStatusChange: (id: number, status: ConversationStatus) => Promise<void>
   onNewConversation?: (folderId: number) => void
   onTogglePin?: (id: number, nextPinned: boolean) => void
+  /** Export the conversation to a Markdown file (server-side serializer).
+   *  Offered on pinned rows; absent keeps the menu without the item. */
+  onExportMarkdown?: (id: number) => void
   /** Delegation-tree nesting depth (0 = root). Drives the per-level indent. */
   depth?: number
   /** True when `child_count > 0`: the conversation has delegation children, so
@@ -204,6 +208,7 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   onStatusChange,
   onNewConversation,
   onTogglePin,
+  onExportMarkdown,
   depth = 0,
   hasChildren = false,
   expanded = false,
@@ -653,6 +658,14 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                   <Pin className="h-4 w-4" />
                 )}
                 {isPinned ? t("unpin") : t("pin")}
+              </ContextMenuItem>
+            )}
+            {onExportMarkdown && (
+              <ContextMenuItem
+                onSelect={() => onExportMarkdown(conversation.id)}
+              >
+                <FileDown className="h-4 w-4" />
+                {t("exportMarkdown")}
               </ContextMenuItem>
             )}
             <ContextMenuItem onSelect={() => setDetailsOpen(true)}>

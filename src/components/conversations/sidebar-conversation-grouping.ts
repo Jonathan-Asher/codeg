@@ -86,6 +86,15 @@ export function compareByPinnedAtDesc(
   left: DbConversationSummary,
   right: DbConversationSummary
 ): number {
+  // Manual drag order wins when both sides have one (pin section drag-reorder):
+  // pin_order is contiguous from a reorder, so ordering by it reproduces the
+  // user's drag exactly; NULLs (never reordered) fall through to recency so a
+  // newly pinned conversation still surfaces on top of the unordered tail.
+  const lo = left.pin_order ?? null
+  const ro = right.pin_order ?? null
+  if (lo != null && ro != null) return lo - ro
+  if (lo != null) return -1
+  if (ro != null) return 1
   const diff =
     parseTimestamp(right.pinned_at ?? "") - parseTimestamp(left.pinned_at ?? "")
   if (diff !== 0) return diff
@@ -907,6 +916,13 @@ export interface ConversationRow {
    * Absent — never `false` — so existing row-shape assertions are unaffected.
    */
   recent?: true
+  /**
+   * Set (only) on rows emitted by the Pinned section. Drives the card wrapper's
+   * drag-reorder affordance (drag handles live on the section's rows only —
+   * the same conversation re-listed under its folder must not be draggable).
+   * Absent — never `false` — matching {@link ConversationRow.recent}.
+   */
+  pinned?: true
 }
 
 export interface EmptyHintRow {
@@ -1109,10 +1125,15 @@ function pushConversationRow(
   childrenLoading: ReadonlySet<number>,
   // Tags this row — and its whole subtree — as a Recent-section copy. See
   // {@link ConversationRow.recent}.
-  recent = false
+  recent = false,
+  // Tags this row as a Pinned-section member (drag-reorder affordance).
+  // Only the row itself: delegation children of a pinned conversation are not
+  // drag targets.
+  pinned = false
 ): void {
   const row: ConversationRow = { kind: "conversation", conversation, depth }
   if (recent) row.recent = true
+  if (pinned) row.pinned = true
   rows.push(row)
   if (
     depth >= MAX_RENDER_DEPTH ||
@@ -1304,7 +1325,9 @@ export function buildRows(args: {
           0,
           conversationExpanded,
           childrenByParent,
-          childrenLoading
+          childrenLoading,
+          false,
+          true
         )
       }
     }

@@ -105,6 +105,42 @@ mod tauri_app {
 
     static APP_QUITTING: AtomicBool = AtomicBool::new(false);
 
+    /// Any window other than `main` that hosts a workspace — the
+    /// `remote-workspace-{id}` windows. Aux windows (settings, commit, pets)
+    /// are deliberately excluded: they follow the workspace, they are not
+    /// workspaces.
+    fn other_workspace_windows_open(app: &tauri::AppHandle) -> bool {
+        app.webview_windows()
+            .keys()
+            .any(|label| label.starts_with("remote-workspace-"))
+    }
+
+    /// Create the main workspace window if it is gone (startup, or after the
+    /// window was closed while remote-workspace windows kept the app alive).
+    /// Workspace state (open folders, opened tabs, active tab) is restored by
+    /// the frontend via `list_open_folder_details` / `list_opened_tabs` inside
+    /// the main window.
+    fn ensure_main_window(app: &tauri::AppHandle, workspace_path: &std::path::Path) {
+        if app.get_webview_window("main").is_some() {
+            return;
+        }
+        let url = tauri::WebviewUrl::App(workspace_path.to_path_buf());
+        let builder = tauri::WebviewWindowBuilder::new(app, "main", url)
+            .title("Codeg")
+            .inner_size(1260.0, 860.0)
+            .min_inner_size(400.0, 600.0);
+        let builder = windows::apply_platform_window_style(builder);
+        // The workspace title bar is taller than the shared default (it hosts
+        // the tab strips), so nudge the native macOS traffic lights down to
+        // stay vertically centred.
+        #[cfg(target_os = "macos")]
+        let builder =
+            builder.traffic_light_position(windows::workspace_window_traffic_light_position());
+        if let Ok(w) = builder.build() {
+            windows::post_window_setup(&w);
+        }
+    }
+
     /// Routes one close-button press to hide, exit, or a prompt.
     ///
     /// Called with the close already prevented; every branch is responsible
@@ -190,6 +226,17 @@ mod tauri_app {
                 let _ = window.hide();
             }
             CloseWindowBehavior::Exit => {
+                // Closing the focused workspace window must not take other
+                // workspace windows down with it: with remote-workspace
+                // windows alive, a close destroys ONLY `main` — the app (and
+                // the feed those windows render) keeps running, and a dock
+                // click recreates the window. Only when no other workspace
+                // window remains does close fold into the app exit it has
+                // always been.
+                if other_workspace_windows_open(&app) {
+                    window.destroy();
+                    return;
+                }
                 let count = running_terminals(&app);
                 // Nothing to lose, or the confirmation could not be shown —
                 // either way the pinned choice stands.
@@ -202,8 +249,15 @@ mod tauri_app {
                 if !prompt("ask", count) {
                     // Fall back to the behavior codeg has always had. Exiting
                     // on a press the user never got to answer would discard
-                    // work; hiding discards nothing.
-                    let _ = window.hide();
+                    // work; hiding discards nothing. With other workspace
+                    // windows open the press means "close THIS window" —
+                    // destroy it (scoped like the Exit branch above) instead
+                    // of hiding what would look like a broken close button.
+                    if other_workspace_windows_open(&app) {
+                        window.destroy();
+                    } else {
+                        let _ = window.hide();
+                    }
                 }
             }
         }
@@ -1198,24 +1252,7 @@ mod tauri_app {
                 // Workspace state (open folders, opened tabs, active tab) is
                 // restored by the frontend via `list_open_folder_details` /
                 // `list_opened_tabs` inside the main window.
-                if app.get_webview_window("main").is_none() {
-                    let url = tauri::WebviewUrl::App(workspace_path.into());
-                    let builder = tauri::WebviewWindowBuilder::new(app, "main", url)
-                        .title("Codeg")
-                        .inner_size(1260.0, 860.0)
-                        .min_inner_size(400.0, 600.0);
-                    let builder = windows::apply_platform_window_style(builder);
-                    // The workspace title bar is taller than the shared default
-                    // (it hosts the tab strips), so nudge the native macOS
-                    // traffic lights down to stay vertically centred.
-                    #[cfg(target_os = "macos")]
-                    let builder = builder.traffic_light_position(
-                        windows::workspace_window_traffic_light_position(),
-                    );
-                    if let Ok(w) = builder.build() {
-                        windows::post_window_setup(&w);
-                    }
-                }
+                ensure_main_window(app, &workspace_path);
 
                 Ok(())
             })
@@ -1418,6 +1455,7 @@ mod tauri_app {
                 conversations::scan_importable_sessions,
                 conversations::import_selected_sessions,
                 conversations::get_folder_conversation,
+                conversation_export::conversation_export_markdown,
                 conversations::get_folder_conversation_turns,
                 conversations::list_folders,
                 conversations::get_stats,
@@ -1428,6 +1466,7 @@ mod tauri_app {
                 conversations::update_conversation_status,
                 conversations::update_conversation_title,
                 conversations::update_conversation_pinned,
+                conversations::reorder_conversation_pins,
                 conversations::delete_conversation,
                 folders::load_folder_history,
                 folders::get_folder,
@@ -1955,6 +1994,21 @@ mod tauri_app {
                     // `show_main_window` is idempotent — already-visible
                     // windows just get re-focused, which is what dock
                     // activation should do anyway.
+                    //
+                    // After a scoped close (main destroyed while
+                    // remote-workspace windows kept the app alive), there is
+                    // nothing to focus — recreate the window instead.
+                    if app.get_webview_window("main").is_none() {
+                        let workspace_path = tauri::async_runtime::block_on(
+                            crate::deep_link::startup_workspace_path(
+                                &db::AppDatabase {
+                                    conn: app.state::<db::AppDatabase>().conn.clone(),
+                                },
+                                &[],
+                            ),
+                        );
+                        ensure_main_window(app, &workspace_path);
+                    }
                     windows::show_main_window(app);
                 }
                 _ => {}

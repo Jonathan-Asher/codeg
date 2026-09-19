@@ -1889,7 +1889,10 @@
         "updateGroupFailed": "그룹 업데이트 실패: {message}",
         "deleteGroupFailed": "그룹 삭제 실패: {message}",
         "moveToGroupFailed": "폴더 이동 실패: {message}",
-        "applyLayoutFailed": "폴더 순서 저장 실패: {message}"
+        "applyLayoutFailed": "폴더 순서 저장 실패: {message}",
+        "reorderPinsFailed": "Failed to reorder pinned conversations: {message}",
+        "exportMarkdownDone": "Exported: {path}",
+        "exportMarkdownFailed": "Failed to export conversation: {message}"
       },
       "statsLabel": "{folders}개 폴더 · {convos}개 대화",
       "reorderHandle": "드래그하여 순서 변경",
@@ -2086,7 +2089,8 @@
       "markCompleted": "완료로 표시",
       "reopen": "다시 열기",
       "expandSubsessions": "하위 대화 펼치기",
-      "collapseSubsessions": "하위 대화 접기"
+      "collapseSubsessions": "하위 대화 접기",
+      "exportMarkdown": "Export as Markdown"
     },
     "search": {
       "dialogTitle": "검색",

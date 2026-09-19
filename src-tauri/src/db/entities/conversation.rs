@@ -66,6 +66,11 @@ pub struct Model {
     /// the sidebar's "Pinned" section (sorted by this timestamp descending).
     /// Pinning never bumps `updated_at` — it is a view preference, not activity.
     pub pinned_at: Option<DateTimeUtc>,
+    /// Manual position within the "Pinned" section, written only by the
+    /// drag-reorder command (`reorder_conversation_pins`). NULL = never
+    /// explicitly ordered; the sidebar comparator sorts NULL after set values
+    /// (by `pinned_at`), which reproduces the pre-column order exactly.
+    pub pin_order: Option<i32>,
     /// The working directory this conversation actually ran in, when that
     /// differs from its (current) folder's path — written when a deleted task
     /// worktree's conversations are re-parented to the project folder. The

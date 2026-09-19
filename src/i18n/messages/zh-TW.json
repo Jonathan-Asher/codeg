@@ -1889,7 +1889,10 @@
         "updateGroupFailed": "更新分組失敗：{message}",
         "deleteGroupFailed": "刪除分組失敗：{message}",
         "moveToGroupFailed": "移動資料夾失敗：{message}",
-        "applyLayoutFailed": "儲存資料夾順序失敗：{message}"
+        "applyLayoutFailed": "儲存資料夾順序失敗：{message}",
+        "reorderPinsFailed": "置頂會話排序失敗：{message}",
+        "exportMarkdownDone": "已匯出：{path}",
+        "exportMarkdownFailed": "匯出會話失敗：{message}"
       },
       "statsLabel": "{folders} 個資料夾 · {convos} 個對話",
       "reorderHandle": "拖拽排序",
@@ -2086,7 +2089,8 @@
       "markCompleted": "標記為已完成",
       "reopen": "重新開啟",
       "expandSubsessions": "展開子會話",
-      "collapseSubsessions": "摺疊子會話"
+      "collapseSubsessions": "摺疊子會話",
+      "exportMarkdown": "匯出為 Markdown"
     },
     "search": {
       "dialogTitle": "搜尋",

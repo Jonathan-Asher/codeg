@@ -508,6 +508,9 @@ export interface DbConversationSummary {
    *  Drives the sidebar's "Pinned" section (sorted by this descending); a pinned
    *  conversation is shown there instead of in its folder group. */
   pinned_at: string | null
+  /** Manual drag-order within the Pinned section (lower = higher). NULL sorts
+   *  after set values — the pre-drag-reorder behaviour for never-reordered pins. */
+  pin_order?: number | null
   parent_id?: number | null
   parent_tool_use_id?: string | null
   delegation_call_id?: string | null

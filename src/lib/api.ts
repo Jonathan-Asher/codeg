@@ -3383,6 +3383,27 @@ export async function updateConversationPinned(
   })
 }
 
+/** Persist a manual drag order for the sidebar's Pinned section. `orderedIds`
+ *  is the full visible pinned order, top to bottom (server writes pin_order =
+ *  index per id and echoes one upsert per conversation). */
+export async function reorderConversationPins(
+  orderedIds: number[]
+): Promise<void> {
+  return getTransport().call("reorder_conversation_pins", {
+    orderedIds,
+  })
+}
+
+/** Export a conversation's transcript to a Markdown file next to its
+ *  workspace. Returns the written file path (shown in a toast). */
+export async function conversationExportMarkdown(
+  conversationId: number
+): Promise<string> {
+  return getTransport().call("conversation_export_markdown", {
+    conversationId,
+  })
+}
+
 export async function deleteConversation(
   conversationId: number
 ): Promise<void> {

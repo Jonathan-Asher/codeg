@@ -57,6 +57,8 @@ import {
   updateConversationTitle,
   updateConversationStatus,
   updateConversationPinned,
+  reorderConversationPins,
+  conversationExportMarkdown,
   updateFolderColor,
   updateFolderAlias,
   updateFolderDefaultAgent,
@@ -2087,6 +2089,80 @@ export function SidebarConversationList({
     [updateConversationLocal]
   )
 
+  // ── Pinned-section drag reorder ──────────────────────────────────────────
+  // Native HTML5 drag on pinned cards: hold and move a pinned row onto another
+  // pinned row; the drop commits the whole visible pinned order via the
+  // reorder_conversation_pins command (server writes pin_order = index per id
+  // and echoes one upsert per conversation, which re-sorts the section).
+  const [draggingPinId, setDraggingPinId] = useState<number | null>(null)
+  const [dragOverPinId, setDragOverPinId] = useState<number | null>(null)
+
+  const handlePinDragStart = useCallback((id: number) => {
+    setDraggingPinId(id)
+  }, [])
+
+  const handlePinDragOver = useCallback(
+    (e: React.DragEvent, id: number) => {
+      if (draggingPinId == null || draggingPinId === id) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = "move"
+      setDragOverPinId(id)
+    },
+    [draggingPinId]
+  )
+
+  const handlePinDrop = useCallback(
+    async (targetId: number) => {
+      const draggedId = draggingPinId
+      setDraggingPinId(null)
+      setDragOverPinId(null)
+      if (draggedId == null || draggedId === targetId) return
+      // Re-commit the CURRENT visible pinned order with the dragged row moved
+      // onto the target's slot — the array already reflects pin_order (see
+      // selectPinnedWithReuse), so moving within it IS the new order.
+      const ids = pinned.map((c) => c.id)
+      const from = ids.indexOf(draggedId)
+      const to = ids.indexOf(targetId)
+      if (from === -1 || to === -1) return
+      ids.splice(to, 0, ids.splice(from, 1)[0]!)
+      try {
+        await reorderConversationPins(ids)
+      } catch (err) {
+        toast.error(
+          t("toasts.reorderPinsFailed", {
+            message: toErrorMessage(err),
+          })
+        )
+      }
+    },
+    [draggingPinId, pinned, t]
+  )
+
+  const handlePinDragEnd = useCallback(() => {
+    setDraggingPinId(null)
+    setDragOverPinId(null)
+  }, [])
+
+  // Export to Markdown from the card's context menu (offered on pinned rows —
+  // the section that reads as "my go-to conversations"). The server serializes
+  // the transcript and writes it next to the conversation's workspace; we just
+  // surface the path.
+  const handleExportMarkdown = useCallback(
+    async (id: number) => {
+      try {
+        const path = await conversationExportMarkdown(id)
+        toast.success(t("toasts.exportMarkdownDone", { path }))
+      } catch (err) {
+        toast.error(
+          t("toasts.exportMarkdownFailed", {
+            message: toErrorMessage(err),
+          })
+        )
+      }
+    },
+    [t]
+  )
+
   const handleNewConversation = useCallback(() => {
     // Starting a conversation returns to the conversation workspace if a
     // workbench route (e.g. Automations) was taking over the content region.
@@ -3001,7 +3077,7 @@ export function SidebarConversationList({
     // No folder tint reaches this row: a card always renders in the app theme,
     // whichever colour its folder carries. The colour is a label for the FOLDER,
     // not a skin for the sessions inside it.
-    return (
+    const cardEl = (
       <SidebarConversationCard
         conversation={conv}
         isSelected={
@@ -3020,12 +3096,44 @@ export function SidebarConversationList({
         onStatusChange={handleStatusChange}
         onNewConversation={handleNewConversationForFolder}
         onTogglePin={handleTogglePin}
+        onExportMarkdown={row.pinned ? handleExportMarkdown : undefined}
         depth={row.depth}
         hasChildren={conv.child_count > 0}
         expanded={conversationExpanded.has(conv.id)}
         onToggleExpand={toggleConversation}
       />
     )
+    if (row.pinned && conv.pinned_at != null) {
+      // Pinned rows are drag initiators/targets for the Pinned section's
+      // manual order. Native HTML5 drag: no library, no pointer-fight with the
+      // card's own click/hover affordances (browsers suppress the trailing
+      // click after a real drag).
+      const isDragging = draggingPinId === conv.id
+      const isDragOver = dragOverPinId === conv.id
+      return (
+        <div
+          draggable={!isDragging}
+          onDragStart={() => handlePinDragStart(conv.id)}
+          onDragOver={(e) => handlePinDragOver(e, conv.id)}
+          onDragLeave={() =>
+            setDragOverPinId((v) => (v === conv.id ? null : v))
+          }
+          onDrop={(e) => {
+            e.preventDefault()
+            void handlePinDrop(conv.id)
+          }}
+          onDragEnd={handlePinDragEnd}
+          className={cn(
+            "rounded-[0.375rem]",
+            isDragging && "opacity-50",
+            isDragOver && "ring-1 ring-sidebar-ring"
+          )}
+        >
+          {cardEl}
+        </div>
+      )
+    }
+    return cardEl
   }
 
   // Keys must be unique across the WHOLE flat array, and the Recent section

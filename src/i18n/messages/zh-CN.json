@@ -1889,7 +1889,10 @@
         "updateGroupFailed": "更新分组失败：{message}",
         "deleteGroupFailed": "删除分组失败：{message}",
         "moveToGroupFailed": "移动文件夹失败：{message}",
-        "applyLayoutFailed": "保存文件夹顺序失败：{message}"
+        "applyLayoutFailed": "保存文件夹顺序失败：{message}",
+        "reorderPinsFailed": "置顶会话排序失败：{message}",
+        "exportMarkdownDone": "已导出：{path}",
+        "exportMarkdownFailed": "导出会话失败：{message}"
       },
       "statsLabel": "{folders} 个文件夹 · {convos} 个会话",
       "reorderHandle": "拖拽排序",
@@ -2086,7 +2089,8 @@
       "markCompleted": "标记为已完成",
       "reopen": "重新打开",
       "expandSubsessions": "展开子会话",
-      "collapseSubsessions": "折叠子会话"
+      "collapseSubsessions": "折叠子会话",
+      "exportMarkdown": "导出为 Markdown"
     },
     "search": {
       "dialogTitle": "搜索",

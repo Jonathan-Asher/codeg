@@ -2520,6 +2520,31 @@ pub async fn update_conversation_pinned(
     Ok(())
 }
 
+pub async fn reorder_conversation_pins_core(
+    conn: &sea_orm::DatabaseConnection,
+    ordered_ids: &[i32],
+) -> Result<Vec<i32>, AppCommandError> {
+    conversation_service::reorder_pins(conn, ordered_ids).await?;
+    Ok(ordered_ids.to_vec())
+}
+
+/// Persist a manual drag order for the sidebar's "Pinned" section. `ordered_ids`
+/// is the full visible pinned order, top to bottom. Emits one upsert per id so
+/// every client's sidebar re-sorts from the persisted `pin_order`.
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn reorder_conversation_pins(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, AppDatabase>,
+    ordered_ids: Vec<i32>,
+) -> Result<Vec<i32>, AppCommandError> {
+    reorder_conversation_pins_core(&db.conn, &ordered_ids).await?;
+    for id in &ordered_ids {
+        emit_conversation_upsert(&EventEmitter::Tauri(app), &db.conn, *id).await;
+    }
+    Ok(ordered_ids)
+}
+
 pub async fn delete_conversation_core(
     conn: &sea_orm::DatabaseConnection,
     conversation_id: i32,

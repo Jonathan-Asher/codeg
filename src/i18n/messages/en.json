@@ -1889,7 +1889,10 @@
         "updateGroupFailed": "Failed to update group: {message}",
         "deleteGroupFailed": "Failed to delete group: {message}",
         "moveToGroupFailed": "Failed to move folder: {message}",
-        "applyLayoutFailed": "Failed to save the folder order: {message}"
+        "applyLayoutFailed": "Failed to save the folder order: {message}",
+        "reorderPinsFailed": "Failed to reorder pinned conversations: {message}",
+        "exportMarkdownDone": "Exported: {path}",
+        "exportMarkdownFailed": "Failed to export conversation: {message}"
       },
       "statsLabel": "{folders} folders · {convos} conversations",
       "reorderHandle": "Drag to reorder",
@@ -2086,7 +2089,8 @@
       "markCompleted": "Mark as completed",
       "reopen": "Reopen",
       "expandSubsessions": "Expand sub-conversations",
-      "collapseSubsessions": "Collapse sub-conversations"
+      "collapseSubsessions": "Collapse sub-conversations",
+      "exportMarkdown": "Export as Markdown"
     },
     "search": {
       "dialogTitle": "Search",

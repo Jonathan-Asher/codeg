@@ -118,6 +118,10 @@ pub fn build_router(
             post(handlers::conversations::get_folder_conversation),
         )
         .route(
+            "/conversation_export_markdown",
+            post(handlers::conversation_export::conversation_export_markdown),
+        )
+        .route(
             "/get_folder_conversation_turns",
             post(handlers::conversations::get_folder_conversation_turns),
         )
@@ -170,6 +174,10 @@ pub fn build_router(
         .route(
             "/update_conversation_pinned",
             post(handlers::conversations::update_conversation_pinned),
+        )
+        .route(
+            "/reorder_conversation_pins",
+            post(handlers::conversations::reorder_conversation_pins),
         )
         .route(
             "/delete_conversation",
