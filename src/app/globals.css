@@ -2954,3 +2954,16 @@ div.monaco-diff-editor.side-by-side .editor.modified {
 .canvas-surface[data-canvas-panning] * {
   cursor: grabbing !important;
 }
+
+/* Find-in-chat (⌘F): CSS Custom Highlight API layers. The regular layer
+   covers every match in mounted rows; the active layer paints over the
+   occurrence the find bar currently points at. Both stack — the active
+   background must be near-opaque to read over the regular one. */
+::highlight(find-match) {
+  background-color: rgba(251, 191, 36, 0.3);
+  color: inherit;
+}
+::highlight(find-match-active) {
+  background-color: rgba(251, 146, 60, 0.85);
+  color: #1c1917;
+}

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, type RefObject } from "react"
 import { useTranslations } from "next-intl"
 import { ArrowDown, ArrowUp, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -131,4 +131,142 @@ export function FindInChatBar({
       </Button>
     </div>
   )
+}
+
+export interface FindHighlightTarget {
+  enabled: boolean
+  query: string
+  /** Row keys that contain ≥1 match (drives which mounted rows get walked). */
+  matchKeys: Set<string>
+  /** The row the find bar currently points at. */
+  activeKey: string | null
+  /** 1-based occurrence of the active match WITHIN its row. */
+  activeOccInRow: number
+}
+
+/**
+ * Paint find matches onto the rendered transcript with the CSS Custom
+ * Highlight API (`::highlight(find-match)` / `::highlight(find-match-active)`
+ * — see globals.css). Walking text nodes + Ranges means the rendered Markdown
+ * is never mutated, which matters here: rows are virtualized (mount/unmount as
+ * you scroll) and re-render from streaming.
+ *
+ * Re-walks on a MutationObserver of the thread container so rows that mount
+ * later (scrolling, streaming, paging in older history) get painted too. All
+ * layer bookkeeping is torn down when the find bar closes.
+ */
+export function useFindHighlights(
+  containerRef: RefObject<HTMLElement | null>,
+  target: FindHighlightTarget
+) {
+  const { enabled, query, matchKeys, activeKey, activeOccInRow } = target
+
+  useEffect(() => {
+    const root = containerRef.current
+    const registry = typeof CSS !== "undefined" ? CSS.highlights : undefined
+    if (!root || !registry || !enabled || query.trim().length === 0) {
+      registry?.delete("find-match")
+      registry?.delete("find-match-active")
+      return
+    }
+    const q = query.toLowerCase()
+    let raf = 0
+
+    const paint = () => {
+      const ranges: Range[] = []
+      let activeRange: Range | null = null
+
+      const rows = root.querySelectorAll<HTMLElement>("[data-find-key]")
+      rows.forEach((row) => {
+        const key = row.dataset.findKey ?? ""
+        if (!matchKeys.has(key)) return
+
+        // Accumulate the row's text with per-node offsets (matches span
+        // Markdown element boundaries, code blocks, plain text — anything
+        // with a text node).
+        const nodes: Text[] = []
+        const offsets: number[] = []
+        let full = ""
+        const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT)
+        let node: Node | null
+        while ((node = walker.nextNode())) {
+          const text = node as Text
+          offsets.push(full.length)
+          full += text.data
+          nodes.push(text)
+        }
+        if (!full) return
+
+        const lower = full.toLowerCase()
+        let occ = 0
+        let pos = lower.indexOf(q)
+        while (pos !== -1) {
+          occ++
+          const start = pos
+          const end = pos + q.length
+          let startNode: Text | null = null
+          let startOffset = 0
+          let endNode: Text | null = null
+          let endOffset = 0
+          for (let i = nodes.length - 1; i >= 0; i--) {
+            if (offsets[i]! <= start) {
+              startNode = nodes[i]!
+              startOffset = start - offsets[i]!
+              break
+            }
+          }
+          for (let i = nodes.length - 1; i >= 0; i--) {
+            if (offsets[i]! < end) {
+              endNode = nodes[i]!
+              endOffset = end - offsets[i]!
+              break
+            }
+          }
+          if (startNode && endNode) {
+            try {
+              const range = document.createRange()
+              range.setStart(startNode, startOffset)
+              range.setEnd(endNode, endOffset)
+              ranges.push(range)
+              if (key === activeKey && occ === activeOccInRow) {
+                activeRange = range
+              }
+            } catch {
+              // Range across a boundary the engine refuses (rare) — skip.
+            }
+          }
+          pos = lower.indexOf(q, end)
+        }
+      })
+
+      registry.delete("find-match")
+      registry.delete("find-match-active")
+      if (ranges.length > 0) {
+        registry.set("find-match", new Highlight(...ranges))
+      }
+      if (activeRange) {
+        registry.set("find-match-active", new Highlight(activeRange))
+      }
+    }
+
+    // Virtualized rows mount/unmount on scroll; stream tokens mutate text.
+    // Either invalidates the painted ranges, so re-walk on DOM change.
+    const observer = new MutationObserver(() => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(paint)
+    })
+    observer.observe(root, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    })
+    paint()
+
+    return () => {
+      observer.disconnect()
+      cancelAnimationFrame(raf)
+      registry.delete("find-match")
+      registry.delete("find-match-active")
+    }
+  }, [containerRef, enabled, query, matchKeys, activeKey, activeOccInRow])
 }

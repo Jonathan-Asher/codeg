@@ -80,6 +80,7 @@ import type { MessageScrollContextValue } from "@/components/message/message-scr
 import {
   extractFindableText,
   FindInChatBar,
+  useFindHighlights,
 } from "@/components/message/find-in-chat"
 import { extractSessionFilesGrouped } from "@/lib/session-files"
 import { unescapeComposerText } from "@/lib/composer-copy-text"
@@ -1352,9 +1353,9 @@ export function MessageListView({
   const findMatches = useMemo(() => {
     const q = findQuery.trim().toLowerCase()
     if (!findOpen || q.length === 0) {
-      return [] as { threadIndex: number; key: string }[]
+      return [] as { threadIndex: number; key: string; occInRow: number }[]
     }
-    const out: { threadIndex: number; key: string }[] = []
+    const out: { threadIndex: number; key: string; occInRow: number }[] = []
     // Occurrence-level granularity: one row can hold several hits. The cap
     // keeps a pathological query ("e") over a huge window bounded.
     const MAX_MATCHES = 500
@@ -1363,8 +1364,10 @@ export function MessageListView({
       if (item.kind !== "turn") continue
       const hay = extractFindableText(item).toLowerCase()
       let pos = hay.indexOf(q)
+      let occInRow = 0
       while (pos !== -1 && out.length < MAX_MATCHES) {
-        out.push({ threadIndex: i, key: item.key })
+        occInRow++
+        out.push({ threadIndex: i, key: item.key, occInRow })
         pos = hay.indexOf(q, pos + q.length)
       }
     }
@@ -1377,6 +1380,13 @@ export function MessageListView({
       ? findMatches[Math.min(findHit, findMatchCount - 1)]
       : null
   const activeFindThreadIndex = activeFindHit?.threadIndex ?? null
+
+  // Find-match keys (rows that hold ≥1 hit) — input for the DOM highlighter.
+  const findMatchKeys = useMemo(() => {
+    const keys = new Set<string>()
+    for (const m of findMatches) keys.add(m.key)
+    return keys
+  }, [findMatches])
 
   // Scoped to the active transcript so background tabs never steal the
   // shortcut. Declines inside terminal regions, where ⌘F may belong to the
@@ -1436,6 +1446,7 @@ export function MessageListView({
           return (
             <div
               style={pt > 0 ? { paddingTop: pt } : undefined}
+              data-find-key={item.key}
               className={cn(
                 "rounded-lg",
                 isFindHit &&
@@ -1554,6 +1565,16 @@ export function MessageListView({
   // (non-scrolling) frame, so the bubble is clipped to the message area and
   // never overlaps the composer or the tab strip.
   const selectionBoxRef = useRef<HTMLDivElement | null>(null)
+
+  // Paint find matches onto the rendered text (CSS Custom Highlight API).
+  // The transcript's outer frame is the walker root; rows carry data-find-key.
+  useFindHighlights(selectionBoxRef, {
+    enabled: findOpen,
+    query: findQuery,
+    matchKeys: findMatchKeys,
+    activeKey: activeFindHit?.key ?? null,
+    activeOccInRow: activeFindHit?.occInRow ?? 1,
+  })
 
   // Cheap user-message tally for the collapsed chip — counts user turns without
   // parsing any file diffs.
