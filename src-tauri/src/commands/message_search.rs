@@ -7,7 +7,9 @@ use crate::db::service::message_search::{index_conversation_core, search_message
 
 /// Global message-content search across every non-deleted conversation.
 /// The dialog debounces input client-side; this call is read-only over the
-/// FTS5 index.
+/// FTS5 index. Desktop-only wrapper (tauri::State requires the
+/// tauri-runtime feature — server/mcp bins build the lib without it).
+#[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn message_search(
     query: String,
@@ -24,6 +26,8 @@ pub async fn message_search(
 /// conversation-by-conversation from the frontend (it owns progress UX), so
 /// this stays a bounded single-conversation call — no unbounded loop in the
 /// backend, no blocking of the event loop while parsers chew a session file.
+/// Desktop-only wrapper (same gating rationale).
+#[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn message_search_index_conversation(
     conversation_id: i32,
