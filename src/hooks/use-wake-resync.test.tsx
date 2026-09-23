@@ -92,7 +92,7 @@ describe("useWakeResync", () => {
     expect(refetch).toHaveBeenCalledTimes(1)
   })
 
-  it("drops the trigger while streaming (dropped, not queued)", () => {
+  it("defers a wake that lands mid-stream and releases it when the stream settles", () => {
     const refetch = vi.fn()
     const view = renderHook((props) => useWakeResync(props), {
       initialProps: {
@@ -103,20 +103,80 @@ describe("useWakeResync", () => {
       },
     })
     fireVisibility("visible")
+    // Mid-stream: never refetch under a live stream.
     expect(refetch).not.toHaveBeenCalled()
-    // Stream settles (isStreaming -> false): the NEXT trigger still fires —
-    // the dropped wake doesn't block later syncs.
+    // Stream settles (isStreaming -> false): the owed wake fires by itself —
+    // after sleep this is the only chance, no later trigger is coming.
     view.rerender({
       enabled: true,
       conversationId: 7,
       isStreaming: false,
       refetch,
     })
-    act(() => {
-      vi.advanceTimersByTime(2100)
-    })
-    window.dispatchEvent(new Event("focus"))
     expect(refetch).toHaveBeenCalledTimes(1)
+    expect(refetch).toHaveBeenCalledWith(7)
+    // Released once: a later settle without a new trigger stays quiet.
+    view.rerender({
+      enabled: true,
+      conversationId: 7,
+      isStreaming: true,
+      refetch,
+    })
+    view.rerender({
+      enabled: true,
+      conversationId: 7,
+      isStreaming: false,
+      refetch,
+    })
+    expect(refetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("defers a reconnect that arrives while the client still believes it is streaming", () => {
+    // The sleep case: the turn ended server-side while the socket was dead,
+    // so the client is still `prompting` when the WS comes back. The
+    // reconnect callback fires BEFORE the re-attach snapshot flips the
+    // status — it must wait for that flip, not be lost.
+    const refetch = vi.fn()
+    const view = renderHook((props) => useWakeResync(props), {
+      initialProps: {
+        enabled: true,
+        conversationId: 7,
+        isStreaming: true,
+        refetch,
+      },
+    })
+    act(() => {
+      for (const cb of onReconnectCallbacks) cb()
+    })
+    expect(refetch).not.toHaveBeenCalled()
+    view.rerender({
+      enabled: true,
+      conversationId: 7,
+      isStreaming: false,
+      refetch,
+    })
+    expect(refetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("forgets a deferred trigger when the conversation changes", () => {
+    const refetch = vi.fn()
+    const view = renderHook((props) => useWakeResync(props), {
+      initialProps: {
+        enabled: true,
+        conversationId: 7,
+        isStreaming: true,
+        refetch,
+      },
+    })
+    fireVisibility("visible")
+    view.rerender({
+      enabled: true,
+      conversationId: 8,
+      isStreaming: false,
+      refetch,
+    })
+    // The wake was owed to conversation 7; it must not fire against 8.
+    expect(refetch).not.toHaveBeenCalled()
   })
 
   it("debounces trigger bursts to one refetch", () => {

@@ -15,7 +15,6 @@
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbErr, TransactionTrait};
 
 use crate::app_error::AppCommandError;
-use crate::commands::conversations::get_folder_conversation_core;
 use crate::models::message::{ContentBlock, MessageTurn, TurnRole};
 
 /// Rows written into `message_fts` for one turn.

@@ -28,8 +28,15 @@ const RESYNC_DEBOUNCE_MS = 2000
  *
  * Guards:
  * - never refetches while the agent is streaming (a refetch would clobber
- *   the live stream) — the trigger is DROPPED, not queued; the next focus
- *   or reconnect after the stream settles catches up;
+ *   the live stream) — the trigger is DEFERRED, not dropped: it fires as
+ *   soon as the stream settles. This is what makes sleep recovery work: a
+ *   turn that finished server-side while the socket was dead leaves the
+ *   client believing it is still `prompting`, because the events that
+ *   would have ended it never arrived. Every wake/reconnect trigger lands
+ *   in that stale state. The reconnect's snapshot then flips the status,
+ *   and that flip releases the deferred refetch — there is no later focus
+ *   or reconnect to catch up on, so a dropped trigger would mean a stale
+ *   view until the workspace is reopened;
  * - debounced to one resync per RESYNC_DEBOUNCE_MS;
  * - inert unless the panel is the active tab bound to a persisted
  *   conversation (background tabs never refetch — each panel owns its
@@ -57,16 +64,39 @@ export function useWakeResync(options: {
 
   // Survives listener re-binds: one resync per debounce window.
   const lastResyncAt = useRef(0)
+  // A trigger that arrived mid-stream, owed to the next settle. Survives the
+  // re-binds too — the settle itself is a re-bind (isStreaming flips).
+  const pendingRef = useRef(false)
+
+  // A deferred trigger belongs to the conversation it fired for. Declared
+  // before the main effect so a conversation switch clears it in the same
+  // commit, before the main effect could release it against the new one.
+  useEffect(() => {
+    pendingRef.current = false
+  }, [conversationId])
 
   useEffect(() => {
     if (!enabled || conversationId == null) return
 
-    const resync = () => {
-      if (isStreaming) return
+    const runResync = () => {
       const now = Date.now()
       if (now - lastResyncAt.current < RESYNC_DEBOUNCE_MS) return
       lastResyncAt.current = now
       refetch(conversationId)
+    }
+
+    const resync = () => {
+      if (isStreaming) {
+        pendingRef.current = true
+        return
+      }
+      runResync()
+    }
+
+    // Stream settled with a wake still owed: release it now.
+    if (!isStreaming && pendingRef.current) {
+      pendingRef.current = false
+      runResync()
     }
 
     const onVisibility = () => {

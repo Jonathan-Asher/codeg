@@ -236,7 +236,7 @@ mod tauri_app {
                 // window remains does close fold into the app exit it has
                 // always been.
                 if other_workspace_windows_open(&app) {
-                    window.destroy();
+                    let _ = window.destroy();
                     return;
                 }
                 let count = running_terminals(&app);
@@ -256,7 +256,7 @@ mod tauri_app {
                     // destroy it (scoped like the Exit branch above) instead
                     // of hiding what would look like a broken close button.
                     if other_workspace_windows_open(&app) {
-                        window.destroy();
+                        let _ = window.destroy();
                     } else {
                         let _ = window.hide();
                     }
@@ -1607,6 +1607,7 @@ mod tauri_app {
                 remote_proxy_commands::remote_ws_subscribe,
                 remote_proxy_commands::remote_ws_unsubscribe,
                 remote_proxy_commands::remote_ws_send_text,
+                remote_proxy_commands::remote_ws_probe,
                 windows::open_pet_window,
                 windows::close_pet_window,
                 windows::pet_window_record_position,

@@ -67,6 +67,17 @@ export function onTransportReconnect(
 }
 
 /**
+ * Ask the active transport to verify its WebSocket link is alive (see
+ * `Transport.probeLiveness`). Call on wake-up signals — tab visible, network
+ * restored — so a socket that died during sleep is replaced within seconds
+ * rather than whenever the OS finally times it out. No-op on the desktop
+ * Tauri transport (local IPC never sleeps).
+ */
+export function probeTransportLiveness(): void {
+  getTransport().probeLiveness?.()
+}
+
+/**
  * Per-connection Subscribe-with-Snapshot stream. Returns `null` only on
  * the desktop Tauri transport (which uses local IPC and is race-free, so
  * the legacy `subscribe()` flow stays as the fallback). Web and remote-

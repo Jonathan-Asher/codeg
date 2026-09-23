@@ -16,6 +16,14 @@ Destructive-action safety nets: **not a priority**.
   WS/event stream dies on sleep and nothing re-syncs on wake. Fix direction: on window focus /
   network reconnect, re-fetch the session snapshot (codeg already has `acp_get_session_snapshot`
   and turn-window machinery) before trusting the local view.
+  **Status 2026-09-23 — fixed.** Two gaps, both closed: (a) neither transport ever checked the
+  socket was alive — a socket that died during sleep stays OPEN until the OS times it out, so no
+  reconnect, no re-attach snapshot, no status flip (`web-transport.ts` heartbeat + wake probe via
+  the connection guard; Rust `remote_proxy.rs` heartbeat + `remote_ws_probe`); (b) `useWakeResync`
+  dropped its refetch while the client still believed a turn was streaming — after sleep that belief
+  is stale, so the trigger is now deferred until the reconnect snapshot settles the status. Also:
+  the desktop proxy no longer reports a session as expired after three *network* failures (Wi-Fi
+  still coming up after wake); only auth rejections on the handshake count.
 - ⑦ **Reorder pinned sessions by dragging** — sidebar pinned order currently derives from
   `pinned_at`; needs a per-folder sort order plus drag-and-drop in the sidebar.
 

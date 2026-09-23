@@ -39,12 +39,11 @@ fn turn_to_markdown(turn: &MessageTurn) -> String {
             ContentBlock::ToolUse { tool_name, .. } => {
                 out.push_str(&format!("> used tool: {}\n\n", tool_name));
             }
-            ContentBlock::ToolResult { is_error, .. } => {
-                if *is_error {
-                    out.push_str("> tool result: error\n\n");
-                }
-                // Successful tool results are omitted — the matching
-                // `used tool:` line already marks the activity.
+            // Successful tool results are omitted (they fall through to the
+            // catch-all) — the matching `used tool:` line already marks the
+            // activity.
+            ContentBlock::ToolResult { is_error: true, .. } => {
+                out.push_str("> tool result: error\n\n");
             }
             // Thinking, images, image generation: skipped (spec).
             _ => {}
