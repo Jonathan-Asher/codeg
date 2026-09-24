@@ -51,21 +51,20 @@ import { useTabArrangeStore } from "@/stores/tab-arrangement-store"
 import { useConversationAttentionStore } from "@/stores/conversation-attention-store"
 import { TabItem, type TabMoveTarget } from "./tab-item"
 
-/** i18n keys (Folder.tabs) for the arrange menu and the status band labels. */
-const ARRANGE_MODE_LABEL: Record<
-  TabArrangeMode,
-  { label: string; hint: string }
-> = {
+/** i18n keys (Folder.tabs) for the arrange menu and the status band labels.
+ *  `as const` keeps them literal: next-intl's `t` is typed against the
+ *  message catalogue and rejects a plain `string` key. */
+const ARRANGE_MODE_LABEL = {
   manual: { label: "arrangeManual", hint: "arrangeManualHint" },
   folder: { label: "arrangeByFolder", hint: "arrangeByFolderHint" },
   status: { label: "arrangeByStatus", hint: "arrangeByStatusHint" },
-}
-const STATUS_BAND_LABEL: Record<TabStatusBand, string> = {
+} as const satisfies Record<TabArrangeMode, { label: string; hint: string }>
+const STATUS_BAND_LABEL = {
   needs_you: "bandNeedsYou",
   awaiting_reply: "bandAwaitingReply",
   running: "bandRunning",
   other: "bandOther",
-}
+} as const satisfies Record<TabStatusBand, string>
 
 interface TabBarProps {
   /** Split-group strip: render only this group's tabs, highlight the GROUP's
