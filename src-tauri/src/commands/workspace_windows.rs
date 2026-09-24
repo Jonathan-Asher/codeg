@@ -183,15 +183,24 @@ pub(crate) fn ensure_main_window(app: &AppHandle, workspace_path: &Path, visible
             return;
         }
     };
-    // On the main thread, like the plugin's own restore. From any other thread
-    // `restore_state` would hold the plugin's state cache while it waits on the
-    // main thread for the monitor list — and the main thread, registering this
-    // very window with the plugin, would be waiting on that cache.
-    let restored = window.clone();
+    // On the main thread, like the plugin's own restore. Launch, the dock and
+    // the tray already run there, so the restore happens right away — before
+    // the window is first drawn, as the plugin's on-creation restore did, so
+    // it never shows at the default size and then jumps. From any other thread
+    // (a remote window's "Local workspace" command) it is posted instead:
+    // there `restore_state` would hold the plugin's state cache while it waits
+    // on the main thread for the monitor list — and the main thread,
+    // registering this very window with the plugin, would be waiting on that
+    // cache.
     let flags = main_window_restore_flags(visible);
-    let _ = app.run_on_main_thread(move || {
-        let _ = restored.restore_state(flags);
-    });
+    if std::thread::current().name() == Some("main") {
+        let _ = window.restore_state(flags);
+    } else {
+        let restored = window.clone();
+        let _ = app.run_on_main_thread(move || {
+            let _ = restored.restore_state(flags);
+        });
+    }
     windows::post_window_setup(&window);
 }
 
