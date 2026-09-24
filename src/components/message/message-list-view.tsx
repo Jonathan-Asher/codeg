@@ -1693,6 +1693,14 @@ export function MessageListView({
   const rememberEditDraft = useCallback((key: string, text: string) => {
     editDraftsRef.current.set(key, text)
   }, [])
+  // The editor that should take focus when it mounts: only the one just
+  // opened. A remount from scrolling back to it must leave focus alone.
+  const editFocusKeyRef = useRef<string | null>(null)
+  const takeEditFocus = useCallback((key: string) => {
+    if (editFocusKeyRef.current !== key) return false
+    editFocusKeyRef.current = null
+    return true
+  }, [])
 
   const editTargets = useMemo(
     () =>
@@ -1706,6 +1714,7 @@ export function MessageListView({
     if (editSavingRef.current) return
     // Every opening starts from the message as it was sent.
     editDraftsRef.current.delete(key)
+    editFocusKeyRef.current = key
     setEditing({ key, saving: false })
   }, [])
 
@@ -1825,6 +1834,7 @@ export function MessageListView({
                   initialText={editableUserMessageText(item.sourceTurns[0])}
                   recallDraft={recallEditDraft}
                   rememberDraft={rememberEditDraft}
+                  takeFocus={takeEditFocus}
                   images={item.group.images}
                   startsNewConversation={editTarget.kind === "first"}
                   saving={editing?.saving ?? false}
@@ -1922,6 +1932,7 @@ export function MessageListView({
       hasQueuedMessages,
       recallEditDraft,
       rememberEditDraft,
+      takeEditFocus,
       handleStartEdit,
       handleCancelEdit,
       handleSaveEdit,

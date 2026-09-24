@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 import { describe, expect, it, vi } from "vitest"
@@ -45,6 +45,16 @@ describe("UserMessageEditor", () => {
         key === "persisted-user-turn-2" ? "half-edited" : undefined,
     })
     expect(field).toHaveValue("half-edited")
+  })
+
+  it("takes focus when opened, but not when it only comes back into view", () => {
+    // Scrolling back to an open editor remounts it; the user may be typing in
+    // the composer by then.
+    const { field } = renderEditor({ takeFocus: () => true })
+    expect(field).toHaveFocus()
+    cleanup()
+    const again = renderEditor({ takeFocus: () => false })
+    expect(again.field).not.toHaveFocus()
   })
 
   it("hands every keystroke to the host's draft keeper", async () => {
