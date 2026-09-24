@@ -2,6 +2,8 @@
 //! (see `db::service::message_search` for the index lifecycle).
 
 use crate::app_error::AppCommandError;
+// Only the desktop command wrappers take `tauri::State<AppDatabase>`.
+#[cfg(feature = "tauri-runtime")]
 use crate::db::AppDatabase;
 use crate::db::service::message_search::{index_conversation_core, search_messages, MessageSearchHit};
 

@@ -12,6 +12,8 @@ use std::path::PathBuf;
 use crate::app_error::AppCommandError;
 use crate::commands::conversations::get_folder_conversation_core;
 use crate::db::service::folder_service;
+// Only the desktop command wrappers take `tauri::State<AppDatabase>`.
+#[cfg(feature = "tauri-runtime")]
 use crate::db::AppDatabase;
 use crate::models::message::{ContentBlock, MessageTurn, TurnRole};
 
