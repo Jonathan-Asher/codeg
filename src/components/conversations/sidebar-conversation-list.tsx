@@ -1335,8 +1335,9 @@ export function SidebarConversationList({
   }, [conversations, showCompleted])
 
   // Pinned bucket: the FULL conversation list (ignores "Show completed" — a
-  // pinned conversation stays visible regardless), sorted most-recently-pinned
-  // first, with reference reuse so an unrelated status event doesn't rebuild it.
+  // pinned conversation stays visible regardless), in the section's order (the
+  // user's drag order, newer unplaced pins on top), with reference reuse so an
+  // unrelated status event doesn't rebuild it.
   const pinnedRef = useRef<DbConversationSummary[]>([])
   const pinned = useMemo(() => {
     const next = selectPinnedWithReuse(conversations, pinnedRef.current)
@@ -2112,8 +2113,10 @@ export function SidebarConversationList({
       // `pinned_at`; on failure the next refresh / WS reconnect corrects it
       // (mirrors handleStatusChange's lenient pattern). Stable callback — only
       // `updateConversationLocal` as a dep — so the card memo keeps bailing out.
+      // Like the backend, a pin toggle drops any manual Pinned-section position.
       updateConversationLocal(id, {
         pinned_at: nextPinned ? new Date().toISOString() : null,
+        pin_order: null,
       })
       await updateConversationPinned(id, nextPinned)
     },
@@ -2122,10 +2125,9 @@ export function SidebarConversationList({
 
   // ── Pinned-section drag reorder ──────────────────────────────────────────
   // Pointer-driven (see `usePinnedPointerReorder` for why not HTML5 drag):
-  // press a pinned row, move it, release; the new order applies locally at once
-  // and is committed via reorder_conversation_pins (server writes
-  // pin_order = index per id and echoes an upsert per conversation, so every
-  // other client re-sorts too).
+  // press a pinned row, move it, release. The new order applies locally at once
+  // and is then persisted; the server echoes an upsert per conversation, so
+  // every other client re-sorts too.
   const pinnedIds = useMemo(() => pinned.map((c) => c.id), [pinned])
   const pinnedIndexById = useMemo(
     () => new Map(pinnedIds.map((id, index) => [id, index])),
@@ -2138,9 +2140,7 @@ export function SidebarConversationList({
       )
       reorderConversationPins(orderedIds).catch((err: unknown) => {
         toast.error(
-          t("toasts.reorderPinsFailed", {
-            message: toErrorMessage(err),
-          })
+          t("toasts.reorderPinsFailed", { message: toErrorMessage(err) })
         )
       })
     },
@@ -3108,7 +3108,7 @@ export function SidebarConversationList({
     // No folder tint reaches this row: a card always renders in the app theme,
     // whichever colour its folder carries. The colour is a label for the FOLDER,
     // not a skin for the sessions inside it.
-    const cardEl = (
+    const card = (
       <SidebarConversationCard
         conversation={conv}
         isSelected={
@@ -3134,42 +3134,40 @@ export function SidebarConversationList({
         onToggleExpand={toggleConversation}
       />
     )
-    if (row.pinned && conv.pinned_at != null) {
-      // Pinned rows are the Pinned section's drag handles (pointer-driven —
-      // see `usePinnedPointerReorder`). The drop line shows where the row
-      // will land: above this row, or below the last one.
-      const index = pinnedIndexById.get(conv.id) ?? -1
-      const isDragging = draggingPinId === conv.id
-      const lineAbove = draggingPinId != null && pinDropIndex === index
-      const lineBelow =
-        draggingPinId != null &&
-        index === pinnedIds.length - 1 &&
-        pinDropIndex === pinnedIds.length
-      return (
-        <div
-          {...{ [PINNED_ROW_ATTR]: conv.id }}
-          onPointerDown={(e) => beginPinDrag(conv.id, e)}
-          className={cn(
-            "relative rounded-[0.375rem]",
-            draggingPinId != null && "cursor-grabbing",
-            isDragging && "opacity-50"
-          )}
-        >
-          {(lineAbove || lineBelow) && (
-            <span
-              aria-hidden
-              data-pin-drop-line
-              className={cn(
-                "pointer-events-none absolute inset-x-2 z-10 h-0.5 rounded-full bg-primary",
-                lineAbove ? "-top-px" : "-bottom-px"
-              )}
-            />
-          )}
-          {cardEl}
-        </div>
-      )
-    }
-    return cardEl
+    if (!row.pinned) return card
+    // A Pinned-section row is also the handle that drags it to a new place in
+    // the section (see `usePinnedPointerReorder`). During a drag, a line marks
+    // where the row will land: above this row, or below the last one.
+    const pinIndex = pinnedIndexById.get(conv.id) ?? -1
+    const pinDragging = draggingPinId != null
+    const lineAbove = pinDragging && pinDropIndex === pinIndex
+    const lineBelow =
+      pinDragging &&
+      pinIndex === pinnedIds.length - 1 &&
+      pinDropIndex === pinnedIds.length
+    return (
+      <div
+        {...{ [PINNED_ROW_ATTR]: conv.id }}
+        onPointerDown={(e) => beginPinDrag(conv.id, e)}
+        className={cn(
+          "relative",
+          pinDragging && "cursor-grabbing",
+          draggingPinId === conv.id && "opacity-50"
+        )}
+      >
+        {(lineAbove || lineBelow) && (
+          <span
+            aria-hidden
+            data-pin-drop-line
+            className={cn(
+              "pointer-events-none absolute inset-x-2 z-10 h-0.5 rounded-full bg-primary",
+              lineAbove ? "-top-px" : "-bottom-px"
+            )}
+          />
+        )}
+        {card}
+      </div>
+    )
   }
 
   // Keys must be unique across the WHOLE flat array, and the Recent section

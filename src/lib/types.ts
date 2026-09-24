@@ -505,11 +505,14 @@ export interface DbConversationSummary {
   created_at: string
   updated_at: string
   /** When the user pinned this conversation (ISO string), or null if not pinned.
-   *  Drives the sidebar's "Pinned" section (sorted by this descending); a pinned
-   *  conversation is shown there instead of in its folder group. */
+   *  Drives the sidebar's "Pinned" section (sorted by this descending, except
+   *  for rows placed by hand — see `pin_order`); a pinned conversation is shown
+   *  there instead of in its folder group. */
   pinned_at: string | null
-  /** Manual drag-order within the Pinned section (lower = higher). NULL sorts
-   *  after set values — the pre-drag-reorder behaviour for never-reordered pins. */
+  /** Manual position within the "Pinned" section (0 = top), set when the user
+   *  drags the section into an order of their own. Null until then, and again
+   *  after every pin / unpin; those rows sort above the placed ones, most
+   *  recently pinned first. */
   pin_order?: number | null
   parent_id?: number | null
   parent_tool_use_id?: string | null

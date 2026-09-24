@@ -1913,7 +1913,7 @@
         "deleteGroupFailed": "グループの削除に失敗しました: {message}",
         "moveToGroupFailed": "フォルダの移動に失敗しました: {message}",
         "applyLayoutFailed": "フォルダの並び順の保存に失敗しました: {message}",
-        "reorderPinsFailed": "Failed to reorder pinned conversations: {message}",
+        "reorderPinsFailed": "ピン留めした会話の並べ替えに失敗しました: {message}",
         "exportMarkdownDone": "Exported: {path}",
         "exportMarkdownFailed": "Failed to export conversation: {message}"
       },

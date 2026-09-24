@@ -1,32 +1,23 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import { dropIndexFromMidpoints } from "@/lib/tab-drag-drop"
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react"
 
-/**
- * Drag-to-reorder for the sidebar's Pinned section, on POINTER events.
- *
- * Not HTML5 drag-and-drop: in the desktop app, Tauri's native drag-drop handler
- * (which lets files be dropped from Finder into the composer) reports every
- * drag over the webview as handled, and on macOS wry then never forwards the
- * drag to WebKit — the page gets `dragstart` but never `dragover`/`drop`, so
- * an HTML5 reorder silently does nothing there (it only worked in a browser).
- * Pointer events are the webview's own and are never intercepted; the tab
- * strip and the folder reorder rely on them for the same reason.
- *
- * A press becomes a drag only after the pointer travels
- * {@link DRAG_THRESHOLD_PX}, so a plain click still opens the conversation;
- * the click that follows a real drag is swallowed. Escape cancels.
- */
+/** How far a press must travel vertically (px) before it becomes a drag. */
 const DRAG_THRESHOLD_PX = 4
 
 /** Rows opt in with this attribute; its value is the conversation id. */
 export const PINNED_ROW_ATTR = "data-pinned-row-id"
 
 /**
- * The pinned order after dropping `draggedId` at `dropIndex` (an insertion
- * index into the CURRENT order, 0 = before the first row). Null when the drop
- * changes nothing.
+ * The pinned order after dropping `draggedId` at `dropIndex` — an insertion
+ * index into the CURRENT order (0 = before the first row, `ids.length` = after
+ * the last). Null when the drop changes nothing.
  */
 export function reorderedPinIds(
   ids: readonly number[],
@@ -36,6 +27,7 @@ export function reorderedPinIds(
   const from = ids.indexOf(draggedId)
   if (from === -1) return null
   const next = ids.filter((id) => id !== draggedId)
+  // Taking the dragged row out shifts every slot below it up by one.
   const to = Math.max(
     0,
     Math.min(dropIndex > from ? dropIndex - 1 : dropIndex, next.length)
@@ -44,17 +36,63 @@ export function reorderedPinIds(
   return next.every((id, i) => id === ids[i]) ? null : next
 }
 
-/** Insertion index for a pointer at `clientY`, from the rendered pinned rows. */
-function dropIndexAt(clientY: number): number {
-  const mids = Array.from(
-    document.querySelectorAll<HTMLElement>(`[${PINNED_ROW_ATTR}]`)
-  )
-    .map((row) => {
+/** A pinned row as laid out on screen: its id and vertical midpoint. */
+export interface PinnedRowBox {
+  id: number
+  midY: number
+}
+
+/**
+ * Insertion index into `ids` (the section's full order) for a pointer at
+ * `clientY`, given the pinned rows that are currently mounted. The sidebar list
+ * is virtualized, so rows scrolled far out of view may be missing; counting on
+ * from the first mounted row's own position keeps the index true to the full
+ * order. Null when no pinned row is mounted.
+ */
+export function pinInsertionIndex(
+  ids: readonly number[],
+  rows: readonly PinnedRowBox[],
+  clientY: number
+): number | null {
+  let first = Infinity
+  let above = 0
+  for (const row of rows) {
+    const index = ids.indexOf(row.id)
+    if (index === -1) continue
+    first = Math.min(first, index)
+    if (row.midY < clientY) above += 1
+  }
+  return first === Infinity ? null : first + above
+}
+
+/** {@link pinInsertionIndex} against the pinned rows currently in the DOM. */
+function dropIndexAt(ids: readonly number[], clientY: number): number | null {
+  const rows = Array.from(
+    document.querySelectorAll<HTMLElement>(`[${PINNED_ROW_ATTR}]`),
+    (row) => {
       const box = row.getBoundingClientRect()
-      return box.top + box.height / 2
-    })
-    .sort((a, b) => a - b)
-  return dropIndexFromMidpoints(clientY, mids)
+      return {
+        id: Number(row.getAttribute(PINNED_ROW_ATTR)),
+        midY: box.top + box.height / 2,
+      }
+    }
+  )
+  return pinInsertionIndex(ids, rows, clientY)
+}
+
+/**
+ * Swallow the click the browser fires right after the pointerup that ends a
+ * drag, so the drop does not also open the conversation under the pointer. If
+ * no click follows (a release outside the window), the listener is dropped on
+ * the next task instead of eating a later, real click.
+ */
+function swallowNextClick() {
+  const swallow = (event: MouseEvent) => {
+    event.stopPropagation()
+    event.preventDefault()
+  }
+  window.addEventListener("click", swallow, { capture: true, once: true })
+  setTimeout(() => window.removeEventListener("click", swallow, true), 0)
 }
 
 interface PressState {
@@ -64,18 +102,36 @@ interface PressState {
   started: boolean
 }
 
+/**
+ * Drag-to-reorder for the sidebar's "Pinned" section, driven by pointer events.
+ *
+ * Not HTML5 drag-and-drop: in the desktop app a drag over the webview is handed
+ * to Tauri's native drag-drop handler (the one that takes files dropped into
+ * the composer), and WebKit then never delivers the target-side `dragover` /
+ * `drop` to the page — only `dragstart` / `dragend` arrive. An HTML5 reorder
+ * would therefore only ever work in a browser. Pointer events always reach the
+ * page, which is why the folder reorder is built on them too.
+ *
+ * A press becomes a drag only once the pointer has moved
+ * {@link DRAG_THRESHOLD_PX} vertically, so a plain click still opens the
+ * conversation, and the click that ends a real drag is swallowed. Escape
+ * cancels. Mouse and pen only: on touch the same gesture scrolls the list.
+ */
 export function usePinnedPointerReorder({
   pinnedIds,
   onCommit,
 }: {
-  /** The Pinned section's current display order, top to bottom. */
+  /** The Pinned section's current order, top to bottom. */
   pinnedIds: readonly number[]
+  /** Called once per finished drag that changes the order. */
   onCommit: (orderedIds: number[]) => void
 }) {
+  // The row being dragged and the insertion index it would drop at; both null
+  // while no drag is in progress.
   const [draggingId, setDraggingId] = useState<number | null>(null)
   const [dropIndex, setDropIndex] = useState<number | null>(null)
 
-  // Read at event time, so the window listeners never go stale.
+  // Read at event time, so the window listeners never act on a stale order.
   const pinnedIdsRef = useRef(pinnedIds)
   const onCommitRef = useRef(onCommit)
   useEffect(() => {
@@ -93,20 +149,24 @@ export function usePinnedPointerReorder({
     setDraggingId(null)
     setDropIndex(null)
   }, [])
+  // Safety net: drop the window listeners if the list unmounts mid-drag.
   useEffect(() => finish, [finish])
 
   const beginPinDrag = useCallback(
-    (id: number, event: React.PointerEvent) => {
-      // Mouse / pen, primary button only: on touch the same gesture scrolls.
+    (id: number, event: ReactPointerEvent) => {
       if (event.button !== 0 || event.pointerType === "touch") return
       if (pressRef.current) return
-      // The row's small action buttons (unpin, mark done) stay plain
-      // buttons. The row itself is also a <button> — the one carrying
-      // `data-conversation-id` — and that one IS the drag handle.
-      const control = (event.target as Element).closest(
-        "button, a, input, textarea"
-      )
+      const target = event.target as Element
+      // React bubbles events out of portals, so a press inside the row's
+      // context menu, hover card or dialogs arrives here too — only a press on
+      // the row itself may start a drag.
+      if (!event.currentTarget.contains(target)) return
+      // The row's own controls (expand, pin, status) stay plain buttons. The
+      // row body is a <button> as well — the one carrying
+      // `data-conversation-id` — and that one is the drag handle.
+      const control = target.closest("button, a, input, textarea")
       if (control && !control.hasAttribute("data-conversation-id")) return
+
       pressRef.current = {
         id,
         pointerId: event.pointerId,
@@ -124,53 +184,36 @@ export function usePinnedPointerReorder({
           document.body.style.userSelect = "none"
           setDraggingId(press.id)
         }
-        e.preventDefault()
-        setDropIndex(dropIndexAt(e.clientY))
+        setDropIndex(dropIndexAt(pinnedIdsRef.current, e.clientY))
       }
       const onUp = (e: PointerEvent) => {
         const press = pressRef.current
         if (!press || e.pointerId !== press.pointerId) return
+        let next: number[] | null = null
         if (press.started) {
-          // The click that ends a drag must not also open the conversation.
-          const swallow = (ce: MouseEvent) => {
-            ce.stopPropagation()
-            ce.preventDefault()
-          }
-          window.addEventListener("click", swallow, {
-            capture: true,
-            once: true,
-          })
-          setTimeout(
-            () =>
-              window.removeEventListener("click", swallow, { capture: true }),
-            0
-          )
-          const next = reorderedPinIds(
-            pinnedIdsRef.current,
-            press.id,
-            dropIndexAt(e.clientY)
-          )
-          if (next) onCommitRef.current(next)
+          swallowNextClick()
+          const ids = pinnedIdsRef.current
+          const index = dropIndexAt(ids, e.clientY)
+          if (index != null) next = reorderedPinIds(ids, press.id, index)
         }
         finish()
+        if (next) onCommitRef.current(next)
       }
       const onCancel = (e: PointerEvent) => {
-        if (pressRef.current && e.pointerId === pressRef.current.pointerId) {
-          finish()
-        }
+        if (e.pointerId === pressRef.current?.pointerId) finish()
       }
-      const onKey = (e: KeyboardEvent) => {
+      const onKeyDown = (e: KeyboardEvent) => {
         if (e.key === "Escape" && pressRef.current?.started) finish()
       }
       window.addEventListener("pointermove", onMove)
       window.addEventListener("pointerup", onUp)
       window.addEventListener("pointercancel", onCancel)
-      window.addEventListener("keydown", onKey)
+      window.addEventListener("keydown", onKeyDown)
       cleanupRef.current = () => {
         window.removeEventListener("pointermove", onMove)
         window.removeEventListener("pointerup", onUp)
         window.removeEventListener("pointercancel", onCancel)
-        window.removeEventListener("keydown", onKey)
+        window.removeEventListener("keydown", onKeyDown)
         document.body.style.userSelect = prevUserSelect
       }
     },

@@ -390,8 +390,8 @@ pub async fn reorder_conversation_pins(
     Json(params): Json<ReorderConversationPinsParams>,
 ) -> Result<Json<()>, AppCommandError> {
     conv_commands::reorder_conversation_pins_core(&state.db.conn, &params.ordered_ids).await?;
-    for id in &params.ordered_ids {
-        conv_commands::emit_conversation_upsert(&state.emitter, &state.db.conn, *id).await;
+    for id in params.ordered_ids {
+        conv_commands::emit_conversation_upsert(&state.emitter, &state.db.conn, id).await;
     }
     Ok(Json(()))
 }
