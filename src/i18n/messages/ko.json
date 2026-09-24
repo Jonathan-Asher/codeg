@@ -3444,7 +3444,13 @@
         "completedAt": "완료 시각",
         "jumpToPreviousUserMessage": "이전 사용자 메시지로 이동",
         "showMore": "더보기",
-        "showLess": "접기"
+        "showLess": "접기",
+        "findPlaceholder": "대화에서 찾기",
+        "findMatchOf": "{index} / {count}",
+        "findNoResults": "일치 항목 없음",
+        "findPrev": "이전 찾기",
+        "findNext": "다음 찾기",
+        "findClose": "찾기 닫기"
       },
       "liveTurnStats": {
         "thinking": "생각 중...",

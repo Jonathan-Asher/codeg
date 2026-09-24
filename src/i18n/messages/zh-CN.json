@@ -3444,7 +3444,13 @@
         "completedAt": "完成时间",
         "jumpToPreviousUserMessage": "跳转到上一条用户消息",
         "showMore": "展开",
-        "showLess": "收起"
+        "showLess": "收起",
+        "findPlaceholder": "在会话中查找",
+        "findMatchOf": "{index} / {count}",
+        "findNoResults": "无匹配",
+        "findPrev": "上一个",
+        "findNext": "下一个",
+        "findClose": "关闭查找"
       },
       "liveTurnStats": {
         "thinking": "思考中...",

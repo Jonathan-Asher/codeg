@@ -3444,7 +3444,13 @@
         "completedAt": "完成時間",
         "jumpToPreviousUserMessage": "跳轉到上一條使用者訊息",
         "showMore": "展開",
-        "showLess": "收合"
+        "showLess": "收合",
+        "findPlaceholder": "在會話中尋找",
+        "findMatchOf": "{index} / {count}",
+        "findNoResults": "無相符項",
+        "findPrev": "上一個",
+        "findNext": "下一個",
+        "findClose": "關閉尋找"
       },
       "liveTurnStats": {
         "thinking": "思考中...",

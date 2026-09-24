@@ -3444,7 +3444,13 @@
         "completedAt": "Concluído às",
         "jumpToPreviousUserMessage": "Ir para a mensagem do usuário",
         "showMore": "Mostrar mais",
-        "showLess": "Mostrar menos"
+        "showLess": "Mostrar menos",
+        "findPlaceholder": "Localizar na conversa",
+        "findMatchOf": "{index} de {count}",
+        "findNoResults": "Nenhum resultado",
+        "findPrev": "Anterior",
+        "findNext": "Próxima",
+        "findClose": "Fechar busca"
       },
       "liveTurnStats": {
         "thinking": "Pensando...",

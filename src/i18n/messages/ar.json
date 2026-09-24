@@ -3444,7 +3444,13 @@
         "completedAt": "وقت الإنجاز",
         "jumpToPreviousUserMessage": "الانتقال إلى رسالة المستخدم",
         "showMore": "عرض المزيد",
-        "showLess": "طي"
+        "showLess": "طي",
+        "findPlaceholder": "البحث في المحادثة",
+        "findMatchOf": "{index} من {count}",
+        "findNoResults": "لا توجد نتائج",
+        "findPrev": "السابق",
+        "findNext": "التالي",
+        "findClose": "إغلاق البحث"
       },
       "liveTurnStats": {
         "thinking": "جارٍ التفكير...",
