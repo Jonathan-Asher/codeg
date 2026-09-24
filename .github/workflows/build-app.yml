@@ -3,6 +3,10 @@ on:
   workflow_dispatch:
   push:
     branches: [fork/solution-plan]
+    # A docs-only push must not cost a 25-minute build.
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
 
 permissions:
   contents: write

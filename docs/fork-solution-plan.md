@@ -36,6 +36,19 @@ Destructive-action safety nets: **not a priority**.
 - ⑦ **Reorder pinned sessions by dragging** — sidebar pinned order currently derives from
   `pinned_at`; needs a per-folder sort order plus drag-and-drop in the sidebar.
 
+**Backlog (Jonathan, 2026-09-24):**
+- ⑧ **Sidebar folder view: recently-messaged session should float to the top of its folder.**
+  With sessions grouped by work folder, sending a message to a session does not move it to the
+  first position in that folder. Sort each folder's sessions by last activity (last message
+  sent/received), pinned ones excepted.
+- ⑨ **Sidebar session timestamps: show last-message time, not creation time.** The row next to a
+  session shows how long ago it was created; Jonathan wants the time since the last message
+  (confirm whether creation time should go entirely or sit second). Pairs with ⑧ — both hang off a
+  per-conversation "last activity" that the row and the sort share.
+- ⑩ **⌘⇧W does not close the window** (2026-09-24 report; ⑤ above is the older report that it closed
+  the *wrong* window). Trace the shortcut from the keybinding registry to the Tauri window close and
+  fix whichever half is broken; scope it to the focused window.
+
 ---
 
 ## Pain 1 — Search doesn't find chat content
