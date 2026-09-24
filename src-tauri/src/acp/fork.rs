@@ -10,6 +10,7 @@ use agent_client_protocol::schema::v1::{
     ForkSessionRequest, ForkSessionResponse, Meta, SessionId, AGENT_METHOD_NAMES,
 };
 use agent_client_protocol::{Agent, ConnectionTo};
+use serde::Deserialize;
 
 use crate::acp::connection::send_capturing_models;
 
@@ -186,6 +187,85 @@ pub fn resolve_fork_point(
         // it; forking at the tail is the honest fallback.
         _ => None,
     }
+}
+
+/// What a fork is for. Decides what happens when the chosen fork point cannot
+/// be named, and how the two rows the fork leaves behind are titled.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ForkMode {
+    /// "Fork from here": branch the conversation at a reply. A point the agent
+    /// cannot name degrades to a tail fork rather than refusing the click, and
+    /// the forked row is marked `[Fork]`.
+    #[default]
+    Branch,
+    /// "Edit message": fork at the reply just BEFORE a message the user is
+    /// rewriting, then send the edited text there. The fork has to end exactly
+    /// at that reply — a tail fork still holds the message being replaced, so
+    /// the edit would continue the wrong conversation — which makes a point
+    /// that cannot be named an error, never a fallback. The forked row keeps
+    /// its title (it IS the conversation being edited), and the sibling that
+    /// preserves the original branch is named `<title> (before edit)`.
+    Edit,
+}
+
+/// Whether this agent's adapter forks EXACTLY at a named message or refuses —
+/// the only kind of fork an edit can be built on.
+///
+/// The `ClaudeCode`, `Codex` and `DeepSeek` adapters all answer
+/// `invalid_params` when they cannot resolve the point. Pi's adapter matches by
+/// fingerprint too, but forks at the tail when nothing matches, so a miss there
+/// looks exactly like a hit. Every other agent has no fork point at all.
+pub fn honours_fork_point_strictly(agent_type: AgentType) -> bool {
+    matches!(agent_type, AgentType::ClaudeCode | AgentType::Codex | AgentType::DeepSeek)
+}
+
+/// Settle where a fork aimed at `turn_id` lands, given the conversation's
+/// parsed turns — or why they could not be read.
+///
+/// `Ok(None)` is a tail fork. [`ForkMode::Branch`] degrades to it whenever the
+/// point cannot be named, as "fork from here" always has; [`ForkMode::Edit`]
+/// refuses instead, for the reason given on the variant.
+pub fn settle_fork_point(
+    turns: Result<&[MessageTurn], &str>,
+    turn_id: &str,
+    agent_type: AgentType,
+    mode: ForkMode,
+) -> Result<Option<ForkPoint>, AcpError> {
+    let strict = mode == ForkMode::Edit;
+    if strict && !honours_fork_point_strictly(agent_type) {
+        return Err(AcpError::ForkPointUnresolved(format!(
+            "{agent_type} cannot fork a session at a chosen message"
+        )));
+    }
+    match turns {
+        Ok(turns) => match resolve_fork_point(turns, turn_id, agent_type) {
+            Some(point) => Ok(Some(point)),
+            // Not found, or found but with nothing the agent could match it by
+            // (see `resolve_fork_point`) — either way there is no exact point.
+            None if strict => Err(AcpError::ForkPointUnresolved(
+                "the agent cannot fork at the reply before this message".to_string(),
+            )),
+            None => Ok(None),
+        },
+        Err(reason) if strict => Err(AcpError::ForkPointUnresolved(format!(
+            "the conversation could not be read ({reason})"
+        ))),
+        Err(_) => Ok(None),
+    }
+}
+
+/// The `(before edit)` marker an edit fork gives the row holding the original
+/// branch. Plain English on purpose: conversation titles are data, not UI
+/// copy — the `[Fork] ` prefix is not localized either.
+const BEFORE_EDIT_SUFFIX: &str = " (before edit)";
+
+/// Title for the sibling row that keeps the pre-edit branch: `title` with the
+/// `(before edit)` marker, never stacked — editing again inside a branch that
+/// already carries it must not produce `… (before edit) (before edit)`.
+pub fn before_edit_title(title: &str) -> String {
+    let base = title.strip_suffix(BEFORE_EDIT_SUFFIX).unwrap_or(title);
+    format!("{base}{BEFORE_EDIT_SUFFIX}")
 }
 
 impl ForkPoint {
@@ -568,5 +648,128 @@ mod tests {
             fingerprint_agent_message("abc"),
             "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
+    }
+
+    /// A reply the agent named, then the user message an edit would replace.
+    fn history() -> Vec<MessageTurn> {
+        vec![
+            turn("turn-0", TurnRole::User, "hi", None),
+            turn("turn-1", TurnRole::Assistant, "hello", Some("msg_01")),
+            turn("turn-2", TurnRole::User, "the message being edited", None),
+        ]
+    }
+
+    /// [`settle_fork_point`] over a readable [`history`].
+    fn settle(
+        turn_id: &str,
+        agent: AgentType,
+        mode: ForkMode,
+    ) -> Result<Option<ForkPoint>, AcpError> {
+        settle_fork_point(Ok(history().as_slice()), turn_id, agent, mode)
+    }
+
+    /// Both modes agree whenever the point resolves: an edit forks exactly
+    /// where "fork from here" would.
+    #[test]
+    fn a_resolvable_point_forks_there_in_both_modes() {
+        for mode in [ForkMode::Branch, ForkMode::Edit] {
+            let point = settle("turn-1", AgentType::ClaudeCode, mode)
+                .expect("a nameable reply settles")
+                .expect("and is a real fork point, not the tail");
+            assert_eq!(point.message_id, "msg_01");
+        }
+    }
+
+    /// "Fork from here" never refuses a click: a point it cannot name is a
+    /// tail fork, exactly as before edit mode existed.
+    #[test]
+    fn branch_degrades_an_unnameable_point_to_the_tail() {
+        assert!(settle("turn-9", AgentType::ClaudeCode, ForkMode::Branch)
+            .unwrap()
+            .is_none());
+        let unreadable = settle_fork_point(
+            Err("session file missing"),
+            "turn-1",
+            AgentType::ClaudeCode,
+            ForkMode::Branch,
+        );
+        assert!(unreadable.unwrap().is_none());
+    }
+
+    /// The tail still holds the message being edited, so an edit that cannot
+    /// name its point must fail instead of quietly continuing the original.
+    #[test]
+    fn edit_refuses_a_point_it_cannot_name() {
+        let err = settle("turn-9", AgentType::ClaudeCode, ForkMode::Edit)
+            .expect_err("an unknown turn must not become a tail fork");
+        assert!(matches!(err, AcpError::ForkPointUnresolved(_)), "got {err:?}");
+        assert_eq!(err.code(), Some("fork_point_unresolved"));
+
+        // A user turn is never a fork point, so aiming an edit at one is the
+        // same miss — never "fork up to and including the message".
+        assert!(settle("turn-2", AgentType::ClaudeCode, ForkMode::Edit).is_err());
+    }
+
+    /// Not being able to read the conversation is no excuse to guess either.
+    #[test]
+    fn edit_refuses_when_the_conversation_cannot_be_read() {
+        let err = settle_fork_point(
+            Err("session file missing"),
+            "turn-1",
+            AgentType::Codex,
+            ForkMode::Edit,
+        )
+        .expect_err("an unreadable conversation must not become a tail fork");
+        assert!(
+            err.to_string().contains("session file missing"),
+            "the reason reaches the user: {err}"
+        );
+    }
+
+    /// Only adapters that refuse a point they cannot resolve can carry an
+    /// edit; pi-acp falls back to the tail, which would look like success.
+    #[test]
+    fn edit_is_limited_to_agents_that_honour_the_point_strictly() {
+        for agent in [AgentType::ClaudeCode, AgentType::Codex, AgentType::DeepSeek] {
+            assert!(honours_fork_point_strictly(agent), "{agent}");
+        }
+        for agent in [AgentType::Pi, AgentType::Gemini, AgentType::Custom("acme")] {
+            assert!(!honours_fork_point_strictly(agent), "{agent}");
+        }
+        // Refused up front — even a turn pi COULD fingerprint…
+        assert!(matches!(
+            settle("turn-1", AgentType::Pi, ForkMode::Edit),
+            Err(AcpError::ForkPointUnresolved(_))
+        ));
+        // …while "fork from here" on pi is unchanged.
+        assert!(settle("turn-1", AgentType::Pi, ForkMode::Branch)
+            .unwrap()
+            .is_some());
+    }
+
+    /// The wire form both transports send.
+    #[test]
+    fn fork_mode_reads_its_wire_names() {
+        assert_eq!(
+            serde_json::from_value::<ForkMode>(serde_json::json!("edit")).unwrap(),
+            ForkMode::Edit
+        );
+        assert_eq!(
+            serde_json::from_value::<ForkMode>(serde_json::json!("branch")).unwrap(),
+            ForkMode::Branch
+        );
+        // An absent mode is a plain branch — every caller that predates edit.
+        assert_eq!(ForkMode::default(), ForkMode::Branch);
+    }
+
+    #[test]
+    fn before_edit_title_marks_the_original_branch_once() {
+        assert_eq!(before_edit_title("Topic"), "Topic (before edit)");
+        assert_eq!(
+            before_edit_title("Topic (before edit)"),
+            "Topic (before edit)",
+            "editing inside a pre-edit branch must not stack the marker"
+        );
+        assert_eq!(before_edit_title("[Fork] Topic"), "[Fork] Topic (before edit)");
     }
 }

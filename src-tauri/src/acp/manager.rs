@@ -19,6 +19,7 @@ use crate::acp::feedback::{
     bounded_feedback_batch, FeedbackItem, FeedbackStatus, PendingFeedback,
     SessionFeedbackAccess, MAX_FEEDBACK_CHARS, MAX_FEEDBACK_RESPONSE_BYTES,
 };
+use crate::acp::fork::ForkMode;
 use crate::acp::plan_approval::{
     PlanApprovalAnswer, RegisteredPlanApproval, SessionPlanApprovalAccess,
 };
@@ -1898,6 +1899,10 @@ impl ConnectionManager {
     /// no longer touches `external_id` or fork-related row creation —
     /// the wire `ForkResultInfo` carries `sibling_conversation_id` for tab/UI
     /// reconciliation.
+    ///
+    /// `mode` is what the fork is for: [`ForkMode::Edit`] (editing a past
+    /// message) refuses a fork point it cannot name instead of forking at the
+    /// tail, and titles the two rows differently — see [`ForkMode`].
     pub async fn fork_session(
         &self,
         db: &AppDatabase,
@@ -1917,8 +1922,9 @@ impl ConnectionManager {
         // Fork at this rendered turn instead of at the tail ("fork from here").
         // Resolved to an agent-specific `ForkPoint` below; a turn this agent
         // cannot name simply forks at the tail, which is what fork-send has
-        // always done.
+        // always done — unless `mode` is `Edit`, which refuses instead.
         fork_from_turn_id: Option<String>,
+        mode: ForkMode,
     ) -> Result<ForkResultInfo, AcpError> {
         let (state_arc, cmd_tx, emitter) = {
             let connections = self.connections.lock().await;
@@ -1979,44 +1985,49 @@ impl ConnectionManager {
 
         // Resolve the fork point BEFORE the cancellation shield below: this is
         // a read-only parse, so a caller that disappears here has changed
-        // nothing. Failing to resolve is not an error — it degrades to the tail
-        // fork rather than refusing the user's click.
+        // nothing. For a plain fork, failing to resolve is not an error — it
+        // degrades to the tail fork rather than refusing the user's click. An
+        // edit refuses instead (see `ForkMode::Edit`), and doing it here means
+        // the agent was never asked to fork at all.
         let fork_point = match fork_from_turn_id {
+            None if mode == ForkMode::Edit => {
+                return Err(AcpError::ForkPointUnresolved(
+                    "no reply to fork at was named".to_string(),
+                ));
+            }
             None => None,
             Some(turn_id) => {
                 let agent_type = state_arc.read().await.agent_type;
-                match crate::commands::conversations::get_folder_conversation_core(
+                let turns = crate::commands::conversations::get_folder_conversation_core(
                     &db.conn,
                     conversation_id,
                 )
                 .await
-                {
-                    Ok((detail, _)) => {
-                        let point = crate::acp::fork::resolve_fork_point(
-                            &detail.turns,
-                            &turn_id,
-                            agent_type,
-                        );
-                        if point.is_none() {
-                            tracing::info!(
-                                connection_id = %conn_id,
-                                turn_id = %turn_id,
-                                agent = %agent_type,
-                                "[ACP] no fork point for this turn; forking at the tail"
-                            );
-                        }
-                        point
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            connection_id = %conn_id,
-                            turn_id = %turn_id,
-                            "[ACP] could not read the conversation to resolve a fork point \
-                             ({e}); forking at the tail"
-                        );
-                        None
-                    }
+                .map(|(detail, _)| detail.turns)
+                .map_err(|e| e.to_string());
+                if let Err(e) = &turns {
+                    tracing::warn!(
+                        connection_id = %conn_id,
+                        turn_id = %turn_id,
+                        ?mode,
+                        "[ACP] could not read the conversation to resolve a fork point ({e})"
+                    );
                 }
+                let point = crate::acp::fork::settle_fork_point(
+                    turns.as_deref().map_err(String::as_str),
+                    &turn_id,
+                    agent_type,
+                    mode,
+                )?;
+                if point.is_none() {
+                    tracing::info!(
+                        connection_id = %conn_id,
+                        turn_id = %turn_id,
+                        agent = %agent_type,
+                        "[ACP] no fork point for this turn; forking at the tail"
+                    );
+                }
+                point
             }
         };
 
@@ -2079,6 +2090,7 @@ impl ConnectionManager {
                     conversation_id,
                     forked_session_id.clone(),
                     original_session_id.clone(),
+                    mode,
                 )
                 .await?;
 
@@ -2134,6 +2146,11 @@ impl ConnectionManager {
     /// pre-fork (S1) history at `PendingReview`, which inherits the original's
     /// title lock. Returns the sibling row id.
     ///
+    /// An edit fork ([`ForkMode::Edit`]) names the rows the other way round:
+    /// the current row — still the conversation the user is editing — keeps
+    /// its title and lock untouched, and the sibling holding the original
+    /// branch is titled `<title> (before edit)` under a lock.
+    ///
     /// Both titles outlive the per-turn auto-title backfill by design: neither
     /// the user's own name nor codeg's `[Fork] ` marker exists in the session
     /// file the backfill re-parses, so an unlocked row would silently revert to
@@ -2176,6 +2193,7 @@ impl ConnectionManager {
         conversation_id: i32,
         forked_session_id: String,
         original_session_id: String,
+        mode: ForkMode,
     ) -> Result<i32, AcpError> {
         use sea_orm::sea_query::Expr;
         use sea_orm::{ColumnTrait, QueryFilter};
@@ -2232,16 +2250,42 @@ impl ConnectionManager {
                     let folder_id = current.folder_id;
                     let agent_type_str = current.agent_type.clone();
                     let git_branch = current.git_branch.clone();
-                    // The lock rides along with the title it protects: the
-                    // sibling holds the pre-fork history of the very row the
-                    // user renamed, so a hand-picked name has to stay locked
-                    // there too. Born unlocked, the sibling's first detail load
-                    // re-parses S1 and lets `refresh_auto_title` adopt the
-                    // session-file title — the rename silently reverting on the
-                    // conversation the fork was supposed to leave untouched.
-                    // Inheriting (not forcing) keeps an auto-titled sibling
-                    // eligible for later backfills.
-                    let title_locked = current.title_locked;
+                    // Which row carries which name depends on what the fork is
+                    // for. A branch marks the row moving to the fork `[Fork] …`
+                    // and hands the sibling the clean title. An edit leaves
+                    // this row's name alone — it is still the conversation the
+                    // user is editing — and marks the sibling instead.
+                    let (forked_title, sibling_title, sibling_title_locked) = match mode {
+                        ForkMode::Branch => (
+                            clean_title.as_ref().map(|clean| format!("[Fork] {clean}")),
+                            clean_title,
+                            // The lock rides along with the title it protects:
+                            // the sibling holds the pre-fork history of the
+                            // very row the user renamed, so a hand-picked name
+                            // has to stay locked there too. Born unlocked, the
+                            // sibling's first detail load re-parses S1 and lets
+                            // `refresh_auto_title` adopt the session-file title
+                            // — the rename silently reverting on the
+                            // conversation the fork was supposed to leave
+                            // untouched. Inheriting (not forcing) keeps an
+                            // auto-titled sibling eligible for later backfills.
+                            current.title_locked,
+                        ),
+                        ForkMode::Edit => {
+                            let marked = current
+                                .title
+                                .as_deref()
+                                .map(crate::acp::fork::before_edit_title);
+                            // `(before edit)` is codeg's own, like `[Fork] `: no
+                            // transcript carries it, so an unlocked sibling
+                            // would lose it to the auto-title backfill on its
+                            // first detail load and end up wearing the SAME
+                            // name as the edited conversation. A titleless row
+                            // has nothing to protect and keeps its lock as is.
+                            let locked = marked.is_some() || current.title_locked;
+                            (None, marked, locked)
+                        }
+                    };
                     // The sibling keeps the original's sidebar routing (a forked
                     // chat conversation must stay in the Chat group). `Delegate`
                     // is unreachable here — children are never forked from the
@@ -2257,8 +2301,8 @@ impl ConnectionManager {
                     // after this fn returns; the lifecycle subscriber's later
                     // SessionStarted{S2} write is an idempotent no-op.
                     let mut active: conversation::ActiveModel = current.into();
-                    if let Some(ref clean) = clean_title {
-                        active.title = Set(Some(format!("[Fork] {clean}")));
+                    if let Some(title) = forked_title {
+                        active.title = Set(Some(title));
                         // ...and lock it. The `[Fork] ` marker is codeg's own —
                         // no parser derives it from a transcript — so on an
                         // unlocked row it survives only until the next detail
@@ -2271,7 +2315,8 @@ impl ConnectionManager {
                         // forked row stops tracking the session file's title,
                         // exactly as a rename would. A titleless row writes no
                         // title here and stays unlocked, so the backfill can
-                        // still give it its first name.
+                        // still give it its first name. (An edit writes none
+                        // either: the row keeps its name and its lock as is.)
                         active.title_locked = Set(true);
                     }
                     active.external_id = Set(Some(forked_session_id));
@@ -2302,6 +2347,18 @@ impl ConnectionManager {
                         .one(txn)
                         .await?
                     {
+                        // An edit still marks the branch it preserved, whoever
+                        // inserted the row: the lifecycle side copies the
+                        // original's title, which is the edited conversation's
+                        // own name, so left alone both rows would wear it.
+                        if mode == ForkMode::Edit && sibling_title.is_some() {
+                            let adopted_id = existing.id;
+                            let mut adopted: conversation::ActiveModel = existing.into();
+                            adopted.title = Set(sibling_title);
+                            adopted.title_locked = Set(sibling_title_locked);
+                            adopted.update(txn).await?;
+                            return Ok(adopted_id);
+                        }
                         return Ok(existing.id);
                     }
 
@@ -2310,8 +2367,8 @@ impl ConnectionManager {
                     let sibling = conversation::ActiveModel {
                         id: NotSet,
                         folder_id: Set(folder_id),
-                        title: Set(clean_title),
-                        title_locked: Set(title_locked),
+                        title: Set(sibling_title),
+                        title_locked: Set(sibling_title_locked),
                         agent_type: Set(agent_type_str),
                         status: Set(ConversationStatus::PendingReview),
                         kind: Set(sibling_kind),
@@ -5629,7 +5686,9 @@ mod tests {
             s.turn_in_flight = true; // a turn is already running
         }
 
-        let res = mgr.fork_session(&db, conn_id, None, None, None).await;
+        let res = mgr
+            .fork_session(&db, conn_id, None, None, None, ForkMode::Branch)
+            .await;
         assert!(
             matches!(res, Err(AcpError::TurnInProgress)),
             "fork must reject with TurnInProgress while a turn is in flight, got {res:?}"
@@ -5668,7 +5727,9 @@ mod tests {
             .await
             .conversation_id = Some(9);
 
-        let res = mgr.fork_session(&db, conn_id, None, None, None).await;
+        let res = mgr
+            .fork_session(&db, conn_id, None, None, None, ForkMode::Branch)
+            .await;
         assert!(res.is_err(), "fork with a dead receiver must fail");
         assert!(
             !mgr.get_state(conn_id)
@@ -5764,7 +5825,7 @@ mod tests {
         // DROPS this caller future. The detached persistence task must survive.
         let timed = tokio::time::timeout(
             std::time::Duration::from_millis(100),
-            mgr.fork_session(&db, "c-shield", None, None, None),
+            mgr.fork_session(&db, "c-shield", None, None, None, ForkMode::Branch),
         )
         .await;
         assert!(
@@ -7393,13 +7454,14 @@ mod tests {
     /// Build a connection whose cmd_rx is drained by a spawned task that
     /// fakes the protocol-level fork reply. Returns the manager so the test
     /// can call `fork_session`. The fake reply task lives until it processes
-    /// one Fork command, then exits.
+    /// one Fork command, then exits with the fork point that command carried
+    /// (`None` = a tail fork, or no Fork command at all).
     async fn manager_with_fake_fork(
         conn_id: &str,
         conversation_id: i32,
         forked_session_id: &str,
         original_session_id: &str,
-    ) -> (Arc<ConnectionManager>, tokio::task::JoinHandle<()>) {
+    ) -> (Arc<ConnectionManager>, tokio::task::JoinHandle<Option<crate::acp::fork::ForkPoint>>) {
         use crate::acp::connection::ConnectionCommand;
         let (tx, mut rx) = mpsc::channel::<ConnectionCommand>(4);
         let mut state = SessionState::new(
@@ -7434,14 +7496,15 @@ mod tests {
         let original = original_session_id.to_string();
         let join = tokio::spawn(async move {
             while let Some(cmd) = rx.recv().await {
-                if let ConnectionCommand::Fork { reply, .. } = cmd {
+                if let ConnectionCommand::Fork { fork_point, reply } = cmd {
                     let _ = reply.send(Ok(crate::acp::types::ForkProtocolResult {
                         forked_session_id: forked.clone(),
                         original_session_id: original.clone(),
                     }));
-                    return;
+                    return fork_point;
                 }
             }
+            None
         });
         (mgr, join)
     }
@@ -7471,7 +7534,7 @@ mod tests {
         let (mgr, join) =
             manager_with_fake_fork("c-fork", pre.id, "session-S2", "session-S1").await;
         let result = mgr
-            .fork_session(&db, "c-fork", None, None, None)
+            .fork_session(&db, "c-fork", None, None, None, ForkMode::Branch)
             .await
             .expect("fork_session should succeed");
         let _ = join.await;
@@ -7517,7 +7580,10 @@ mod tests {
         .unwrap();
         let (mgr, join) =
             manager_with_fake_fork("c-restack", pre.id, "session-S2", "session-S1").await;
-        let result = mgr.fork_session(&db, "c-restack", None, None, None).await.unwrap();
+        let result = mgr
+            .fork_session(&db, "c-restack", None, None, None, ForkMode::Branch)
+            .await
+            .unwrap();
         let _ = join.await;
 
         let current = conversation_service::get_by_id(&db.conn, pre.id)
@@ -7572,7 +7638,7 @@ mod tests {
         let (mgr, join) =
             manager_with_fake_fork("c-raced", pre.id, "session-S2", "session-S1").await;
         let result = mgr
-            .fork_session(&db, "c-raced", None, None, None)
+            .fork_session(&db, "c-raced", None, None, None, ForkMode::Branch)
             .await
             .expect("fork must survive the lifecycle subscriber winning the race");
         let _ = join.await;
@@ -7624,7 +7690,9 @@ mod tests {
         .unwrap();
         let (mgr, join) =
             manager_with_fake_fork("c-nosp", pre.id, "session-S2", "session-S1").await;
-        mgr.fork_session(&db, "c-nosp", None, None, None).await.unwrap();
+        mgr.fork_session(&db, "c-nosp", None, None, None, ForkMode::Branch)
+            .await
+            .unwrap();
         let _ = join.await;
 
         let current = conversation_service::get_by_id(&db.conn, pre.id)
@@ -7670,7 +7738,10 @@ mod tests {
 
         let (mgr, join) =
             manager_with_fake_fork("c-latest", pre.id, "session-S2", "session-S1").await;
-        let result = mgr.fork_session(&db, "c-latest", None, None, None).await.unwrap();
+        let result = mgr
+            .fork_session(&db, "c-latest", None, None, None, ForkMode::Branch)
+            .await
+            .unwrap();
         let _ = join.await;
 
         let current = conversation_service::get_by_id(&db.conn, pre.id)
@@ -7720,7 +7791,10 @@ mod tests {
 
         let (mgr, join) =
             manager_with_fake_fork("c-fork-lock", pre.id, "session-S2", "session-S1").await;
-        let result = mgr.fork_session(&db, "c-fork-lock", None, None, None).await.unwrap();
+        let result = mgr
+            .fork_session(&db, "c-fork-lock", None, None, None, ForkMode::Branch)
+            .await
+            .unwrap();
         let _ = join.await;
 
         let sibling_id = result.sibling_conversation_id;
@@ -7790,7 +7864,7 @@ mod tests {
         let (mgr, join) =
             manager_with_fake_fork("c-fork-prefix", pre.id, "session-S2", "session-S1").await;
         let result = mgr
-            .fork_session(&db, "c-fork-prefix", None, None, None)
+            .fork_session(&db, "c-fork-prefix", None, None, None, ForkMode::Branch)
             .await
             .unwrap();
         let _ = join.await;
@@ -7846,7 +7920,7 @@ mod tests {
         let (mgr, join) =
             manager_with_fake_fork("c-fork-untitled", pre.id, "session-S2", "session-S1").await;
         let result = mgr
-            .fork_session(&db, "c-fork-untitled", None, None, None)
+            .fork_session(&db, "c-fork-untitled", None, None, None, ForkMode::Branch)
             .await
             .unwrap();
         let _ = join.await;
@@ -7898,7 +7972,7 @@ mod tests {
         let (mgr, join) =
             manager_with_fake_fork("c-fork-unlocked", pre.id, "session-S2", "session-S1").await;
         let result = mgr
-            .fork_session(&db, "c-fork-unlocked", None, None, None)
+            .fork_session(&db, "c-fork-unlocked", None, None, None, ForkMode::Branch)
             .await
             .unwrap();
         let _ = join.await;
@@ -7941,7 +8015,7 @@ mod tests {
         )
         .await;
         let err = mgr
-            .fork_session(&db, "c-missing", None, None, None)
+            .fork_session(&db, "c-missing", None, None, None, ForkMode::Branch)
             .await
             .expect_err("fork against a missing row must error");
         let _ = join.await;
@@ -7990,7 +8064,7 @@ mod tests {
         let (mgr, join) =
             manager_with_fake_fork("c-deleted", pre.id, "session-S2", "session-S1").await;
         let err = mgr
-            .fork_session(&db, "c-deleted", None, None, None)
+            .fork_session(&db, "c-deleted", None, None, None, ForkMode::Branch)
             .await
             .expect_err("fork against a soft-deleted row must error");
         let _ = join.await;
@@ -8036,7 +8110,7 @@ mod tests {
             map.insert("c-unbound".into(), fake_connection("c-unbound", None));
         }
         let err = mgr
-            .fork_session(&db, "c-unbound", None, None, None)
+            .fork_session(&db, "c-unbound", None, None, None, ForkMode::Branch)
             .await
             .expect_err("unbound fork must error");
         assert!(
@@ -8113,7 +8187,14 @@ mod tests {
         });
 
         let result = mgr
-            .fork_session(&db, "c-relink", Some(pre.id), Some(folder_id), None)
+            .fork_session(
+                &db,
+                "c-relink",
+                Some(pre.id),
+                Some(folder_id),
+                None,
+                ForkMode::Branch,
+            )
             .await
             .expect("fork must link the unbound row from caller ids and succeed");
         let _ = join.await;
@@ -8133,6 +8214,292 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(sibling.external_id.as_deref(), Some("session-S1"));
+    }
+
+    // ---------- fork_session in edit mode (`ForkMode::Edit`) ----------
+    //
+    // Editing a past message forks at the reply just before it and sends the
+    // edit there, so the fork has to end EXACTLY at that reply. Naming a reply
+    // needs a readable transcript, which these tests don't have — so they pin
+    // the refusal through `fork_session` and the row layout on
+    // `persist_fork_outcome`, the one place that decides it.
+
+    #[tokio::test]
+    async fn fork_session_edit_refuses_an_unnameable_point_before_forking() {
+        // A plain fork aimed at a turn it cannot name forks at the tail — but
+        // the tail still holds the message being edited, so an edit sent there
+        // would continue the ORIGINAL conversation. It must refuse instead, and
+        // before the agent is asked to fork at all: nothing enqueued, nothing
+        // written, and the connection left usable.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-edit-strict").await;
+        // No session bound, so the conversation reads back with no turns and
+        // the named reply is nowhere in it.
+        let pre = conversation_service::create(
+            &db.conn,
+            folder_id,
+            AgentType::ClaudeCode,
+            Some("Topic".into()),
+            None,
+        )
+        .await
+        .unwrap();
+
+        let mgr = ConnectionManager::new();
+        let conn_id = "c-edit-strict";
+        let mut cmd_rx = insert_live_connection(&mgr, conn_id, AgentType::ClaudeCode, None).await;
+        mgr.get_state(conn_id)
+            .await
+            .unwrap()
+            .write()
+            .await
+            .conversation_id = Some(pre.id);
+
+        // An unknown reply, and no reply named at all.
+        for turn_id in [Some("turn-1".to_string()), None] {
+            let err = mgr
+                .fork_session(&db, conn_id, None, None, turn_id.clone(), ForkMode::Edit)
+                .await
+                .expect_err("an edit must never fall back to a tail fork");
+            assert!(
+                matches!(err, AcpError::ForkPointUnresolved(_)),
+                "{turn_id:?}: expected ForkPointUnresolved, got {err:?}"
+            );
+        }
+
+        assert!(
+            cmd_rx.try_recv().is_err(),
+            "a refused edit must NOT enqueue a Fork command"
+        );
+        let lock = mgr.clone_prompt_lock(conn_id).await.unwrap();
+        assert!(
+            lock.try_lock().is_ok(),
+            "a refused edit must release prompt_lock so the connection stays usable"
+        );
+        let all = conversation::Entity::find().all(&db.conn).await.unwrap();
+        assert_eq!(all.len(), 1, "a refused edit inserts no sibling");
+        assert_eq!(all[0].title.as_deref(), Some("Topic"));
+    }
+
+    #[tokio::test]
+    async fn fork_session_branch_still_forks_an_unnameable_point_at_the_tail() {
+        // The same unnameable turn under a plain "fork from here" keeps the old
+        // contract: never refuse the click, fork at the tail.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-branch-tail").await;
+        let pre = conversation_service::create(
+            &db.conn,
+            folder_id,
+            AgentType::ClaudeCode,
+            Some("Topic".into()),
+            None,
+        )
+        .await
+        .unwrap();
+
+        let (mgr, join) =
+            manager_with_fake_fork("c-branch-tail", pre.id, "session-S2", "session-S1").await;
+        mgr.fork_session(
+            &db,
+            "c-branch-tail",
+            None,
+            None,
+            Some("turn-1".into()),
+            ForkMode::Branch,
+        )
+        .await
+        .expect("a plain fork never refuses the click");
+        let sent = join.await.unwrap();
+        assert!(sent.is_none(), "the Fork command must carry no fork point (tail)");
+    }
+
+    #[tokio::test]
+    async fn fork_session_edit_keeps_the_title_and_marks_the_original_branch() {
+        // The row the user is editing stays THE conversation: same name, no
+        // `[Fork]` marker, lock untouched — only its session moves to S2. The
+        // original branch moves to the sibling, named so the two can be told
+        // apart, and locked because no transcript carries that name: unlocked,
+        // the auto-title backfill would hand it the edited row's name again.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-edit-titles").await;
+        let pre = conversation_service::create(
+            &db.conn,
+            folder_id,
+            AgentType::ClaudeCode,
+            Some("Topic".into()),
+            Some("feature/x".into()),
+        )
+        .await
+        .unwrap();
+        conversation_service::bind_external_id(&db.conn, pre.id, "session-S1", &[])
+            .await
+            .unwrap();
+        assert!(!pre.title_locked, "an auto-titled row starts unlocked");
+
+        let sibling_id = ConnectionManager::persist_fork_outcome(
+            &db.conn,
+            pre.id,
+            "session-S2".into(),
+            "session-S1".into(),
+            ForkMode::Edit,
+        )
+        .await
+        .expect("the edit layout persists");
+        assert_ne!(sibling_id, pre.id, "sibling row must be a fresh row");
+
+        let current = conversation_service::get_by_id(&db.conn, pre.id)
+            .await
+            .unwrap();
+        assert_eq!(current.external_id.as_deref(), Some("session-S2"));
+        assert_eq!(current.title.as_deref(), Some("Topic"), "no [Fork] prefix");
+        assert!(!current.title_locked, "an edit leaves the row's lock alone");
+
+        let sibling = conversation_service::get_by_id(&db.conn, sibling_id)
+            .await
+            .unwrap();
+        assert_eq!(sibling.external_id.as_deref(), Some("session-S1"));
+        assert_eq!(sibling.title.as_deref(), Some("Topic (before edit)"));
+        assert!(sibling.title_locked, "the marker must outlive the backfill");
+        assert_eq!(sibling.status, "pending_review");
+        assert_eq!(sibling.folder_id, folder_id);
+        assert_eq!(sibling.git_branch.as_deref(), Some("feature/x"));
+        // What the sibling's first detail load does with the S1 transcript's
+        // own title: nothing.
+        assert!(
+            !conversation_service::refresh_auto_title(&db.conn, sibling_id, "Topic".into())
+                .await
+                .unwrap(),
+            "the auto-title backfill must not strip `(before edit)`"
+        );
+    }
+
+    #[tokio::test]
+    async fn fork_session_edit_keeps_a_renamed_title_and_does_not_stack_the_marker() {
+        // A hand-picked name survives on the edited row with its lock, and a
+        // second edit inside a branch that already says `(before edit)` must
+        // not produce `(before edit) (before edit)`.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-edit-rename").await;
+        let pre = conversation_service::create(
+            &db.conn,
+            folder_id,
+            AgentType::ClaudeCode,
+            Some("XXX".into()),
+            None,
+        )
+        .await
+        .unwrap();
+        conversation_service::update_title(&db.conn, pre.id, "Plan (before edit)".into())
+            .await
+            .unwrap();
+
+        let sibling_id = ConnectionManager::persist_fork_outcome(
+            &db.conn,
+            pre.id,
+            "session-S2".into(),
+            "session-S1".into(),
+            ForkMode::Edit,
+        )
+        .await
+        .unwrap();
+
+        let current = conversation_service::get_by_id(&db.conn, pre.id)
+            .await
+            .unwrap();
+        assert_eq!(current.title.as_deref(), Some("Plan (before edit)"));
+        assert!(current.title_locked, "the rename's lock stays with the row");
+        let sibling = conversation_service::get_by_id(&db.conn, sibling_id)
+            .await
+            .unwrap();
+        assert_eq!(sibling.title.as_deref(), Some("Plan (before edit)"));
+        assert!(sibling.title_locked);
+    }
+
+    #[tokio::test]
+    async fn fork_session_edit_leaves_a_titleless_row_unlocked() {
+        // Nothing to mark means nothing to protect: both rows stay open to the
+        // auto-title backfill, so neither reads "Untitled" forever.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-edit-untitled").await;
+        let pre =
+            conversation_service::create(&db.conn, folder_id, AgentType::ClaudeCode, None, None)
+                .await
+                .unwrap();
+
+        let sibling_id = ConnectionManager::persist_fork_outcome(
+            &db.conn,
+            pre.id,
+            "session-S2".into(),
+            "session-S1".into(),
+            ForkMode::Edit,
+        )
+        .await
+        .unwrap();
+
+        for id in [pre.id, sibling_id] {
+            let row = conversation_service::get_by_id(&db.conn, id).await.unwrap();
+            assert_eq!(row.title, None);
+            assert!(!row.title_locked, "row {id} must stay open to the backfill");
+        }
+    }
+
+    #[tokio::test]
+    async fn fork_session_edit_marks_a_sibling_the_lifecycle_subscriber_already_made() {
+        // The race `fork_session_adopts_a_sibling_the_lifecycle_subscriber_…`
+        // covers, under an edit: the lifecycle side preserved S1 first, on a
+        // row carrying the ORIGINAL title — the edited conversation's own name.
+        // The edit must still mark the row it adopts, or the sidebar would show
+        // two conversations with the same name and no way to tell them apart.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-edit-raced").await;
+        let pre = conversation_service::create(
+            &db.conn,
+            folder_id,
+            AgentType::ClaudeCode,
+            Some("Topic".into()),
+            None,
+        )
+        .await
+        .unwrap();
+        conversation_service::bind_external_id(&db.conn, pre.id, "session-S1", &[])
+            .await
+            .unwrap();
+        let preserved_id = conversation_service::bind_external_id(&db.conn, pre.id, "session-S2", &[])
+            .await
+            .unwrap()
+            .expect("the lifecycle bind preserves S1");
+
+        let sibling_id = ConnectionManager::persist_fork_outcome(
+            &db.conn,
+            pre.id,
+            "session-S2".into(),
+            "session-S1".into(),
+            ForkMode::Edit,
+        )
+        .await
+        .expect("an edit must survive the lifecycle subscriber winning the race");
+
+        assert_eq!(sibling_id, preserved_id, "the edit adopts the row holding S1");
+        let adopted = conversation_service::get_by_id(&db.conn, preserved_id)
+            .await
+            .unwrap();
+        assert_eq!(adopted.title.as_deref(), Some("Topic (before edit)"));
+        assert!(adopted.title_locked);
+        let current = conversation_service::get_by_id(&db.conn, pre.id)
+            .await
+            .unwrap();
+        assert_eq!(current.title.as_deref(), Some("Topic"));
+        assert_eq!(
+            conversation::Entity::find().all(&db.conn).await.unwrap().len(),
+            2,
+            "exactly two rows regardless of who won the race"
+        );
     }
 
     // --- wait_for_session_options polling ----------------------------------

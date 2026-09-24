@@ -68,12 +68,22 @@ import {
   CheckIcon,
   CopyIcon,
   Loader2,
+  Pencil,
   Plus,
   RefreshCw,
   RotateCcw,
   ListTodo,
 } from "lucide-react"
 import { useCreateTaskFromMessage } from "./use-create-task-from-message"
+import {
+  USER_EDIT_BLOCKED_LABEL,
+  UserMessageEditor,
+  type UserEditBlock,
+} from "./user-message-editor"
+import {
+  editableUserMessageText,
+  type UserMessageEditRequest,
+} from "@/lib/edit-message"
 import { isRetryNudge } from "@/lib/retry-nudge"
 import { Button } from "@/components/ui/button"
 import { useTranslations } from "next-intl"
@@ -177,6 +187,26 @@ interface MessageListViewProps {
    * (see `forkBusy`) rather than making every reply's footer flicker.
    */
   onForkFromTurn?: (turnId: string) => void
+  /**
+   * Edit a past user message and continue from there (see `lib/edit-message`).
+   * The host forks at the reply before the message — or, for the first
+   * message, opens a new conversation — and sends the edited text. Resolves
+   * `true` once the edit went out, which closes the editor, and `false` when it
+   * did not: the host has reported why, and the editor stays open with the
+   * text. Undefined hides the affordance everywhere — pass it only where an
+   * edit can run (a live connection, an agent whose fork lands exactly on the
+   * named reply). MUST be referentially stable.
+   *
+   * Like forking, a turn in flight greys the buttons out rather than taking
+   * them away.
+   */
+  onEditUserMessage?: (request: UserMessageEditRequest) => Promise<boolean>
+  /**
+   * Messages are waiting in the composer's queue. Editing greys out until they
+   * have gone: they were written after the message being edited, and would
+   * otherwise follow the edit into the new branch.
+   */
+  hasQueuedMessages?: boolean
 }
 
 export interface ResolvedMessageGroup {
@@ -406,6 +436,10 @@ const EMPTY_DELEGATIONS: DelegationCardSource[] = []
 // Stable empty reference so the navigator memo / equality checks don't churn
 // when a conversation has no user messages.
 const EMPTY_NAV_ENTRIES: MessageNavEntry[] = []
+
+// What a surface that can't edit messages looks up: nothing, without walking
+// the thread on every streaming batch.
+const EMPTY_EDIT_TARGETS: ReadonlyMap<string, UserEditTarget> = new Map()
 
 // A single turn's `sourceTurns` is just `[turn]`. Cache the wrapper per turn
 // object so an unchanged historical turn keeps a stable `sourceTurns` reference
@@ -872,6 +906,41 @@ const UserMessageTaskButton = memo(function UserMessageTaskButton({
 })
 
 /**
+ * Opens the message's in-place editor. Greyed out rather than removed while an
+ * edit can't run (`blocked`), with the reason as its tooltip — the fork
+ * button's `aria-disabled` pattern (`TurnStats`), for the same reason: a
+ * native `disabled` button gets no hover, so the tooltip would never say why.
+ */
+const UserMessageEditButton = memo(function UserMessageEditButton({
+  itemKey,
+  blocked,
+  onStart,
+}: {
+  itemKey: string
+  blocked: UserEditBlock | null
+  onStart: (itemKey: string) => void
+}) {
+  const t = useTranslations("Folder.chat.messageList")
+  return (
+    <MessageAction
+      tooltip={blocked ? t(USER_EDIT_BLOCKED_LABEL[blocked]) : t("editMessage")}
+      label={t("editMessage")}
+      aria-disabled={blocked ? true : undefined}
+      className={cn(
+        "self-end opacity-0 transition-opacity focus-visible:opacity-100",
+        blocked
+          ? "cursor-not-allowed hover:bg-transparent group-hover/user-msg:opacity-50"
+          : "group-hover/user-msg:opacity-100"
+      )}
+      onClick={blocked ? undefined : () => onStart(itemKey)}
+      size="icon-xs"
+    >
+      <Pencil size={12} />
+    </MessageAction>
+  )
+})
+
+/**
  * Flag the thread's last rendered element, which is where the backend's tail
  * fork would land — a user message or a compaction divider after the newest
  * reply means that reply is NOT it. Blocks that render nothing are stepped
@@ -917,6 +986,74 @@ export function isForkPointUnnamed(
   return forkPoint.source_turn_id == null && isLiveTurnId(forkPoint.id)
 }
 
+/**
+ * Where editing a user message takes the conversation (see `lib/edit-message`).
+ *
+ * - `fork` — fork at the reply right before the message, up to and including
+ *   it, so the forked session ends exactly where the message was. `ready` is
+ *   false while that reply can't be named yet: still being written, or a live
+ *   reply the post-turn reparse hasn't named (`isForkPointUnnamed` — never the
+ *   thread tail here, since the message follows it).
+ * - `first` — nothing precedes the message, so the edit opens a new
+ *   conversation instead.
+ */
+export type UserEditTarget =
+  | { kind: "fork"; forkPoint: MessageTurn; ready: boolean }
+  | { kind: "first" }
+
+/**
+ * The edit target of each user message in the thread, keyed by item key.
+ *
+ * A message with no entry can't be edited here. That is the case whenever
+ * what precedes it is not a reply — another message (the one before got no
+ * answer, or this one was sent mid-turn), a compaction, a system note: forking
+ * at the reply further up would silently drop those from the history the edit
+ * continues from. So is the first LOADED message while older history sits
+ * unloaded above it: the reply before it is not in hand.
+ *
+ * Never the message's own id, whatever precedes it: a fork keeps its point, so
+ * forking AT the message would keep the very text the edit replaces. Exported
+ * for tests.
+ */
+export function computeUserEditTargets(
+  items: ThreadRenderItem[],
+  hasOlderTurns: boolean
+): Map<string, UserEditTarget> {
+  const targets = new Map<string, UserEditTarget>()
+  let previous: ThreadRenderItem | null = null
+  for (const item of items) {
+    // Neither takes a place in the thread: the typing dots only ever trail it,
+    // and an empty turn renders nothing.
+    if (item.kind === "typing") continue
+    if (item.kind === "turn" && isEmptyTurnItem(item)) continue
+    if (item.kind === "turn" && item.group.role === "user") {
+      const target = userEditTargetAfter(previous, hasOlderTurns)
+      if (target) targets.set(item.key, target)
+    }
+    previous = item
+  }
+  return targets
+}
+
+function userEditTargetAfter(
+  previous: ThreadRenderItem | null,
+  hasOlderTurns: boolean
+): UserEditTarget | null {
+  if (previous === null) return hasOlderTurns ? null : { kind: "first" }
+  if (previous.kind !== "turn" || previous.group.role !== "assistant") {
+    return null
+  }
+  // The reply's LAST turn, as for "fork from here": a merged reply ends where
+  // its last sub-turn does.
+  const forkPoint = previous.sourceTurns[previous.sourceTurns.length - 1]
+  if (!forkPoint) return null
+  return {
+    kind: "fork",
+    forkPoint,
+    ready: previous.isResponseComplete && !isForkPointUnnamed(forkPoint, false),
+  }
+}
+
 const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
   group,
   dimmed = false,
@@ -931,6 +1068,9 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
   onForkFromTurn,
   forkDisabled = false,
   isThreadTail = false,
+  editKey,
+  editBlocked = null,
+  onStartEdit,
 }: {
   group: ResolvedMessageGroup
   dimmed?: boolean
@@ -947,6 +1087,13 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
   /** Whether nothing follows this group in the thread — the one position where
    *  a turn the backend cannot name still forks where the user pointed. */
   isThreadTail?: boolean
+  /** Set on a USER message that can be edited: the key its editor opens
+   *  under. Absent → no Edit button. Plain values rather than a per-item
+   *  callback, so a streaming token doesn't re-render every message. */
+  editKey?: string
+  /** Why the Edit button is greyed out, or null when it can be clicked. */
+  editBlocked?: UserEditBlock | null
+  onStartEdit?: (itemKey: string) => void
 }) {
   if (group.role === "system") {
     return <CollapsibleSystemMessage parts={group.parts} />
@@ -969,6 +1116,13 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
           <div className="group/user-msg flex w-fit ml-auto max-w-full items-start gap-1">
             <UserMessageTaskButton parts={group.parts} />
             <UserMessageCopyButton parts={group.parts} />
+            {editKey !== undefined && onStartEdit && (
+              <UserMessageEditButton
+                itemKey={editKey}
+                blocked={editBlocked}
+                onStart={onStartEdit}
+              />
+            )}
             <MessageContent>
               <CollapsibleUserMessage parts={group.parts} />
             </MessageContent>
@@ -1088,6 +1242,8 @@ export function MessageListView({
   onAskSelection,
   onSaveNoteSelection,
   onForkFromTurn,
+  onEditUserMessage,
+  hasQueuedMessages = false,
 }: MessageListViewProps) {
   const t = useTranslations("Folder.chat.messageList")
   const sharedT = useTranslations("Folder.chat.shared")
@@ -1513,6 +1669,78 @@ export function MessageListView({
   // "not right now" instead of dropping its button and shifting the icon row.
   const forkBusy = connStatus === "prompting"
 
+  // --- Edit message ---------------------------------------------------------
+  // Busy like forking — plus a message just sent that isn't a turn yet: an
+  // edit forking under it would carry it into the new branch.
+  const editBusy = forkBusy || sessionSyncState === "awaiting_persist"
+  // The user message open in its editor, and whether its save is under way.
+  // One at a time: opening another message's editor closes this one.
+  const [editing, setEditing] = useState<{
+    key: string
+    saving: boolean
+  } | null>(null)
+  // Set synchronously, so a second Save landing before `saving` renders can't
+  // start a second edit while the first is still forking.
+  const editSavingRef = useRef(false)
+  // What was typed into the open editor, by message key. The thread is
+  // virtualized: scrolling the editor out of view unmounts it, and the draft
+  // must outlive that. Only ever touched from the editor's callbacks.
+  const editDraftsRef = useRef(new Map<string, string>())
+  const recallEditDraft = useCallback(
+    (key: string) => editDraftsRef.current.get(key),
+    []
+  )
+  const rememberEditDraft = useCallback((key: string, text: string) => {
+    editDraftsRef.current.set(key, text)
+  }, [])
+
+  const editTargets = useMemo(
+    () =>
+      onEditUserMessage
+        ? computeUserEditTargets(threadItems, hasOlderTurns)
+        : EMPTY_EDIT_TARGETS,
+    [onEditUserMessage, threadItems, hasOlderTurns]
+  )
+
+  const handleStartEdit = useCallback((key: string) => {
+    if (editSavingRef.current) return
+    // Every opening starts from the message as it was sent.
+    editDraftsRef.current.delete(key)
+    setEditing({ key, saving: false })
+  }, [])
+
+  const handleCancelEdit = useCallback((key: string) => {
+    if (editSavingRef.current) return
+    editDraftsRef.current.delete(key)
+    setEditing((prev) => (prev?.key === key ? null : prev))
+  }, [])
+
+  const handleSaveEdit = useCallback(
+    async (key: string, request: UserMessageEditRequest) => {
+      if (!onEditUserMessage || editSavingRef.current) return
+      editSavingRef.current = true
+      setEditing({ key, saving: true })
+      let sent = false
+      try {
+        sent = await onEditUserMessage(request)
+      } catch (err) {
+        // The host reports its own failures; this only keeps a throw from
+        // stranding the editor in its saving state.
+        console.error("[MessageListView] edit message:", err)
+      } finally {
+        editSavingRef.current = false
+      }
+      // Sent: the message this editor stood on has usually left the thread
+      // already (the forked history ends before it). Not sent: the host said
+      // why, and the text stays for another try.
+      if (sent) editDraftsRef.current.delete(key)
+      setEditing((prev) =>
+        prev?.key !== key ? prev : sent ? null : { key, saving: false }
+      )
+    },
+    [onEditUserMessage]
+  )
+
   const renderThreadItem = useCallback(
     (item: ThreadRenderItem) => {
       switch (item.kind) {
@@ -1537,6 +1765,29 @@ export function MessageListView({
             item.isThreadTail &&
             item.phase === "persisted" &&
             connStatus !== "prompting"
+          // Edit affordance: a settled user message the host can run an edit
+          // for, with a reply right before it or nothing at all (see
+          // `computeUserEditTargets`). Not on a message still on its way
+          // (optimistic / streaming), nor on a Retry marker — codeg wrote
+          // that one, not the user.
+          const editTarget =
+            onEditUserMessage &&
+            item.group.role === "user" &&
+            item.phase === "persisted" &&
+            !isRetryMarker
+              ? editTargets.get(item.key)
+              : undefined
+          const editBlocked: UserEditBlock | null = !editTarget
+            ? null
+            : editBusy
+              ? "busy"
+              : hasQueuedMessages
+                ? "queued"
+                : editTarget.kind === "fork" && !editTarget.ready
+                  ? "notReady"
+                  : null
+          const isEditing =
+            editTarget !== undefined && editing?.key === item.key
           return (
             <div
               style={pt > 0 ? { paddingTop: pt } : undefined}
@@ -1568,6 +1819,33 @@ export function MessageListView({
                   </span>
                   <span aria-hidden="true" className="h-px flex-1 bg-border" />
                 </div>
+              ) : isEditing && editTarget ? (
+                <UserMessageEditor
+                  draftKey={item.key}
+                  initialText={editableUserMessageText(item.sourceTurns[0])}
+                  recallDraft={recallEditDraft}
+                  rememberDraft={rememberEditDraft}
+                  images={item.group.images}
+                  startsNewConversation={editTarget.kind === "first"}
+                  saving={editing?.saving ?? false}
+                  blocked={editBlocked}
+                  onCancel={() => handleCancelEdit(item.key)}
+                  onSave={(text) => {
+                    void handleSaveEdit(item.key, {
+                      // The parser's name for the reply, as "fork from here"
+                      // sends it: a live `live-…` id means nothing to the
+                      // backend (`isForkPointUnnamed` keeps Save from getting
+                      // here with one).
+                      forkFromTurnId:
+                        editTarget.kind === "fork"
+                          ? (editTarget.forkPoint.source_turn_id ??
+                            editTarget.forkPoint.id)
+                          : null,
+                      text,
+                      sourceTurn: item.sourceTurns[0],
+                    })
+                  }}
+                />
               ) : (
                 <HistoricalMessageGroup
                   group={item.group}
@@ -1583,6 +1861,11 @@ export function MessageListView({
                   onForkFromTurn={onForkFromTurn}
                   forkDisabled={forkBusy}
                   isThreadTail={item.isThreadTail}
+                  editKey={editTarget ? item.key : undefined}
+                  // Another message's edit being saved greys this one out
+                  // too: one edit at a time.
+                  editBlocked={editing?.saving ? "busy" : editBlocked}
+                  onStartEdit={handleStartEdit}
                 />
               )}
               {canRetry && (
@@ -1632,6 +1915,16 @@ export function MessageListView({
       onRetryTurn,
       connStatus,
       t,
+      onEditUserMessage,
+      editTargets,
+      editBusy,
+      editing,
+      hasQueuedMessages,
+      recallEditDraft,
+      rememberEditDraft,
+      handleStartEdit,
+      handleCancelEdit,
+      handleSaveEdit,
     ]
   )
 

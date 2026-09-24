@@ -426,7 +426,7 @@ describe("ConversationDetailPanel send-path hardening", () => {
     )
     expect(effectWithDeps).toContain("if (queueSteerInFlight) return")
     // …and as a dependency, so releasing the hold re-runs the flush.
-    expect(effectWithDeps).toContain("queueSteerInFlight])")
+    expect(effectWithDeps).toMatch(/queueSteerInFlight,?\s*\]\)$/)
 
     const steerStart = source.indexOf("const handleQueueSteer = useCallback")
     expect(steerStart).toBeGreaterThan(-1)
@@ -440,6 +440,46 @@ describe("ConversationDetailPanel send-path hardening", () => {
     )
     expect(steerHandler).toContain("finally {")
     expect(steerHandler).toContain("setQueueSteerInFlight(false)")
+  })
+
+  it("holds the queue auto-flush, and queues direct sends, while an edit forks", () => {
+    // An edited message waits on a fork that holds the backend's prompt lock
+    // and then hands it to whoever is waiting — so anything sent in that window
+    // would reach the forked session AHEAD of the edit. The flush holds (and
+    // re-runs once the hold lifts), direct sends go to the queue, and the edit
+    // itself is sent as the queue head.
+    const start = source.indexOf("// Flush queued messages whenever the agent")
+    const depsEnd = source.indexOf("clearTimeout(timer)", start)
+    const effectWithDeps = source.slice(
+      start,
+      source.indexOf("])", depsEnd) + 2
+    )
+    expect(effectWithDeps).toContain("if (editInFlight) return")
+    expect(effectWithDeps).toMatch(/\beditInFlight,\s*queueSteerInFlight/)
+
+    const sendStart = source.indexOf("const handleSend = useCallback(")
+    const sendGuard = source.slice(
+      sendStart,
+      source.indexOf("shouldRejectDuplicateCreate(", sendStart)
+    )
+    expect(sendGuard).toContain("(!fromQueueFlush && editInFlightRef.current)")
+
+    const editStart = source.indexOf(
+      "const handleEditUserMessage = useCallback("
+    )
+    expect(editStart).toBeGreaterThan(-1)
+    const editHandler = source.slice(
+      editStart,
+      source.indexOf("// Receiving end of the hand-off above", editStart)
+    )
+    // Held from before the fork until after the send, released in a finally.
+    expect(editHandler.indexOf("editInFlightRef.current = true")).toBeLessThan(
+      editHandler.indexOf("await acpFork(")
+    )
+    expect(editHandler).toContain('"edit"')
+    expect(editHandler).toContain("fromQueueFlush: true")
+    expect(editHandler).toContain("finally {")
+    expect(editHandler).toContain("setEditInFlight(false)")
   })
 
   it("disables the welcome composer while connected-but-not-ready", () => {

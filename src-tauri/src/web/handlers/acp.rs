@@ -354,6 +354,10 @@ pub struct AcpForkParams {
     /// tail, the composer's fork-send behaviour.
     #[serde(default)]
     pub fork_from_turn_id: Option<String>,
+    /// What the fork is for. Absent (or null) = a plain branch; `edit` refuses
+    /// a fork point it cannot name — see `ForkMode`.
+    #[serde(default)]
+    pub mode: Option<crate::acp::fork::ForkMode>,
 }
 
 #[derive(Deserialize)]
@@ -462,16 +466,22 @@ pub async fn acp_fork(
             params.conversation_id,
             params.folder_id,
             params.fork_from_turn_id,
+            params.mode.unwrap_or_default(),
         )
         .await
         .map_err(|e| {
             let message = e.to_string();
             // A fork requested while a turn is in flight is an expected,
             // recoverable condition (409) — the frontend re-queues — not a
-            // server fault (500). Mirror `acp_prompt`. Other errors stay 500.
+            // server fault (500). Mirror `acp_prompt`. So is an edit whose fork
+            // point cannot be named: the request is refused, nothing broke
+            // (400). Other errors stay 500.
             match e {
                 AcpError::TurnInProgress => {
                     AppCommandError::new(AppErrorCode::TurnInProgress, message)
+                }
+                AcpError::ForkPointUnresolved(_) => {
+                    AppCommandError::new(AppErrorCode::InvalidInput, message)
                 }
                 _ => AppCommandError::task_execution_failed(message),
             }

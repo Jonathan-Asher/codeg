@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   advanceReplyFold,
   compactionOnlyPart,
+  computeUserEditTargets,
   dedupeCompactionItems,
   extractDelegationSources,
   isForkPointUnnamed,
@@ -818,5 +819,112 @@ describe("compactionOnlyPart", () => {
     expect(compactionOnlyPart(compactionGroup("output-available"))?.state).toBe(
       "output-available"
     )
+  })
+})
+
+/**
+ * Editing a user message forks at the reply right BEFORE it, so the forked
+ * session ends where the message was. Which reply that is — or whether there
+ * is a clean one at all — is decided per message here.
+ */
+describe("computeUserEditTargets", () => {
+  function reply(id: string, turns: MessageTurn[] = [turn(id)]): ThreadItem {
+    const item = assistantItem(id)
+    if (item.kind === "turn") item.sourceTurns = turns
+    return item
+  }
+  const user = (id: string) => makeUserItem(id, 0)
+  const forkPointOf = (items: ThreadItem[], index: number) => {
+    const target = computeUserEditTargets(items, false).get(items[index].key)
+    return target?.kind === "fork" ? target.forkPoint.id : null
+  }
+
+  it("forks at the reply before the message, never at the message itself", () => {
+    const items = [user("u0"), reply("a1"), user("u2")]
+    expect(
+      computeUserEditTargets(items, false).get(items[2].key)
+    ).toMatchObject({ kind: "fork", ready: true })
+    expect(forkPointOf(items, 2)).toBe("a1")
+  })
+
+  it("forks at a merged reply's LAST turn, where the reply ends", () => {
+    const items = [
+      user("u0"),
+      reply("a1", [turn("a1-part-1"), turn("a1-part-2")]),
+      user("u2"),
+    ]
+    expect(forkPointOf(items, 2)).toBe("a1-part-2")
+  })
+
+  it("opens a new conversation for the first message", () => {
+    const items = [user("u0"), reply("a1")]
+    expect(computeUserEditTargets(items, false).get(items[0].key)).toEqual({
+      kind: "first",
+    })
+  })
+
+  it("can't tell the first LOADED message from the first one", () => {
+    // Older history sits unloaded above it, so the reply it follows is not in
+    // hand — and it is certainly not the conversation's first message.
+    const items = [user("u9"), reply("a10")]
+    expect(computeUserEditTargets(items, true).has(items[0].key)).toBe(false)
+  })
+
+  it("skips a message that follows another message, not a reply", () => {
+    // Forking at the reply further up would silently drop the message in
+    // between from the history the edit continues from.
+    const items = [user("u0"), reply("a1"), user("u2"), user("u3")]
+    const targets = computeUserEditTargets(items, false)
+    expect(targets.has(items[2].key)).toBe(true)
+    expect(targets.has(items[3].key)).toBe(false)
+  })
+
+  it("skips a message right after a compaction", () => {
+    const compaction: ThreadItem = {
+      key: "persisted-compact",
+      kind: "compaction",
+      meta: { contextCompaction: true },
+    }
+    const items = [user("u0"), reply("a1"), compaction, user("u3")]
+    expect(computeUserEditTargets(items, false).has(items[3].key)).toBe(false)
+  })
+
+  it("steps over a turn that renders nothing", () => {
+    const items = [
+      user("u0"),
+      reply("a1"),
+      assistantItem("empty", { parts: [] }),
+      user("u3"),
+    ]
+    // The empty turn takes no place in the thread: the reply is still the
+    // message's neighbour.
+    expect(forkPointOf(items, 3)).toBe("a1")
+  })
+
+  it("is not ready while the reply before has no parser id yet", () => {
+    const items = [user("u0"), reply("live-7-lm-1"), user("u2")]
+    expect(
+      computeUserEditTargets(items, false).get(items[2].key)
+    ).toMatchObject({ kind: "fork", ready: false })
+  })
+
+  it("is ready once the reparse has named that reply", () => {
+    const named: MessageTurn = {
+      ...turn("live-7-lm-1"),
+      source_turn_id: "turn-1",
+    }
+    const items = [user("u0"), reply("live-7-lm-1", [named]), user("u2")]
+    expect(
+      computeUserEditTargets(items, false).get(items[2].key)
+    ).toMatchObject({ kind: "fork", ready: true })
+  })
+
+  it("is not ready while the reply before is still being written", () => {
+    const streaming = reply("a1")
+    if (streaming.kind === "turn") streaming.isResponseComplete = false
+    const items = [user("u0"), streaming, user("u2")]
+    expect(
+      computeUserEditTargets(items, false).get(items[2].key)
+    ).toMatchObject({ kind: "fork", ready: false })
   })
 })

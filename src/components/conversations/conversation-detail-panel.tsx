@@ -138,6 +138,11 @@ import {
   type SessionFailureAction,
 } from "@/lib/session-failures"
 import { userPromptHistory } from "@/lib/composer-history"
+import {
+  buildEditedMessageDraft,
+  supportsMessageEdit,
+  type UserMessageEditRequest,
+} from "@/lib/edit-message"
 import { contentBlocksFromUserMessage } from "@/lib/user-message-blocks"
 import { getAgentLabel } from "@/lib/custom-agents"
 import {
@@ -236,6 +241,21 @@ function buildUserTurnFromMessageBlocks(
     timestamp: new Date().toISOString(),
   }
 }
+
+/** A fork made for an edited message, until the message has gone out. */
+interface ForkedEdit {
+  /** The reply the fork was aimed at. */
+  forkFromTurnId: string
+  forkedSessionId: string
+  /** Live turns of the pre-fork history, to drop once the fork's history is
+   *  loaded. */
+  staleLiveTurnIds: string[]
+}
+
+/** How many times an edit re-reads the just-forked history, and how far apart
+ *  (linear back-off), before reporting that it didn't load. */
+const FORKED_HISTORY_ATTEMPTS = 4
+const FORKED_HISTORY_RETRY_MS = 400
 
 function buildVirtualConversationId(seed: string): number {
   let hash = 0
@@ -832,7 +852,7 @@ const ConversationTabView = memo(function ConversationTabView({
     (
       draft: PromptDraft,
       modeId?: string | null,
-      opts?: { fromQueueFlush?: boolean }
+      opts?: { fromQueueFlush?: boolean; onSendFailed?: () => void }
     ) => void
   >(() => {})
   // Timestamp of the last send that bounced with TurnBusyError. The flush below
@@ -849,6 +869,14 @@ const ConversationTabView = memo(function ConversationTabView({
   // round-trip is enough, and cannot strand the queue: `handleQueueSteer`
   // always clears this in a `finally`, which re-runs the flush effect.
   const [queueSteerInFlight, setQueueSteerInFlight] = useState(false)
+  // Whether an edited message is between its Save and its send (see
+  // `handleEditUserMessage`). The fork it waits on holds the backend's prompt
+  // lock and then hands it to whoever is waiting, so a message sent in that
+  // window would reach the forked session AHEAD of the edit. Direct sends
+  // queue instead (`handleSend`) and the flush below holds, so they follow the
+  // edit in the order the user wrote them. The ref is the synchronous read.
+  const [editInFlight, setEditInFlight] = useState(false)
+  const editInFlightRef = useRef(false)
 
   // Flush queued messages whenever the agent is idle. This is the queue's send
   // engine, covering BOTH:
@@ -873,6 +901,9 @@ const ConversationTabView = memo(function ConversationTabView({
     // lifecycle reconnects — which, for a not-installed target, never happens.
     if (!connectionReady) return
     if (runtimeSyncState === "awaiting_persist") return
+    // An edit is forking the session its message goes into; anything queued
+    // meanwhile follows it rather than racing ahead. See `editInFlight`.
+    if (editInFlight) return
     // A row being inserted into the (just-ended) turn is still queued; sending
     // it now would deliver it twice. See `queueSteerInFlight`.
     if (queueSteerInFlight) return
@@ -902,7 +933,13 @@ const ConversationTabView = memo(function ConversationTabView({
     return () => clearTimeout(timer)
     // `connectionReady` subsumes connStatus, the connection's cwd and its agent,
     // so it is the only connection dependency this effect needs.
-  }, [connectionReady, runtimeSyncState, msgQueue.length, queueSteerInFlight])
+  }, [
+    connectionReady,
+    runtimeSyncState,
+    msgQueue.length,
+    editInFlight,
+    queueSteerInFlight,
+  ])
 
   // Mirror the connection's liveMessage into the runtime session OUTSIDE React.
   // The connection dispatch invokes this sink synchronously whenever liveMessage
@@ -1104,7 +1141,11 @@ const ConversationTabView = memo(function ConversationTabView({
       // input send (no flag) must NOT jump ahead of already-queued items: when
       // a queue exists it tail-enqueues instead of sending, and on a bounce it
       // re-queues at the TAIL.
-      opts?: { fromQueueFlush?: boolean }
+      //
+      // `onSendFailed` runs after a send that failed for good has been rolled
+      // back (the lifecycle hook has toasted it) — for a caller that holds
+      // something the rollback would otherwise lose.
+      opts?: { fromQueueFlush?: boolean; onSendFailed?: () => void }
     ) => {
       // Capture the tab's chat-draft state + eager scratch dir synchronously,
       // before any await. A folderless chat draft is NOT special-cased here:
@@ -1129,7 +1170,12 @@ const ConversationTabView = memo(function ConversationTabView({
       // Preserve FIFO: a direct send issued while the queue is non-empty joins
       // the tail rather than racing ahead of the queued items. Read the
       // queue length synchronously (it reflects a same-tick bounce requeue).
-      if (shouldQueueDirectSend(fromQueueFlush, mqGetQueueLength())) {
+      // Likewise while an edit is forking the session: the edited message is
+      // the one owed next (see `editInFlight`).
+      if (
+        shouldQueueDirectSend(fromQueueFlush, mqGetQueueLength()) ||
+        (!fromQueueFlush && editInFlightRef.current)
+      ) {
         mqEnqueue(draft, selectedModeIdArg ?? null)
         return
       }
@@ -1191,6 +1237,7 @@ const ConversationTabView = memo(function ConversationTabView({
       // bounce): a deterministic failure would retry — and toast — forever.
       const onSendFailed = () => {
         removeOptimisticTurn(effectiveConversationId, optimisticTurn.id)
+        opts?.onSendFailed?.()
       }
 
       // Pin the tab if it was a temporary preview (single-click opened)
@@ -1806,6 +1853,217 @@ const ConversationTabView = memo(function ConversationTabView({
     ]
   )
 
+  // An edit whose fork went through but whose forked history then failed to
+  // load. Saving the same edit again resumes from it: forking once more would
+  // fork the forked session and leave a stray "(before edit)" copy behind.
+  const pendingEditForkRef = useRef<ForkedEdit | null>(null)
+
+  // Wait until the forked history has replaced the one on screen. The send
+  // captures its history baseline from whatever is loaded
+  // (`APPEND_OPTIMISTIC_TURN`), so sending over the ORIGINAL history leaves the
+  // reply without its stats and parser id — and the pre-fork turns still
+  // standing would show the edit landing in the old branch. Re-read a few
+  // times: the forked transcript may not be readable the instant the fork
+  // returns, and a concurrent refetch can supersede ours.
+  const awaitForkedHistory = useCallback(
+    async ({ forkedSessionId, staleLiveTurnIds }: ForkedEdit) => {
+      const stale = new Set(staleLiveTurnIds)
+      let onFork = false
+      for (let attempt = 0; attempt < FORKED_HISTORY_ATTEMPTS; attempt++) {
+        if (attempt > 0) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, FORKED_HISTORY_RETRY_MS * attempt)
+          )
+        }
+        if (!mountedRef.current) return false
+        // Same removal as "fork from here": the turns this session streamed
+        // belong to the pre-fork history, and ride out with the refetch.
+        await refetchDetail(effectiveConversationId, {
+          preserveLive: true,
+          dropLiveTurnIds: staleLiveTurnIds,
+        })
+        const session = getRuntimeSession(effectiveConversationId)
+        const detail = session?.detail
+        onFork =
+          detail?.summary.external_id === forkedSessionId &&
+          !session?.localTurns.some((turn) => stale.has(turn.id))
+        if (onFork && detail && detail.turns.length > 0) return true
+      }
+      // The forked history is in place but still reads back empty — its
+      // transcript may yet be being written. The thread has already moved to
+      // it (the message being edited is gone from screen), and the session IS
+      // the fork, so the edit goes there rather than being lost with it.
+      return onFork
+    },
+    [effectiveConversationId, refetchDetail]
+  )
+
+  /**
+   * "Edit message" (see `lib/edit-message`): continue this conversation from a
+   * past user message, with new text.
+   *
+   * The reply right before the message is the fork point, so the forked
+   * session ends exactly where the message was; the edited text is then sent
+   * there through the ordinary send path — optimistic turn, queueing and stats
+   * all as for any other send. The fork is strict (`"edit"`): a point the agent
+   * cannot name fails it, where "fork from here" would fork at the tail — a
+   * tail that still holds the message being replaced.
+   *
+   * Resolves `true` once the edit is out (sent, or queued at the head when the
+   * connection isn't ready this instant) and `false` after reporting why it is
+   * not, which keeps the transcript's editor open with the text.
+   */
+  const handleEditUserMessage = useCallback(
+    async (request: UserMessageEditRequest): Promise<boolean> => {
+      const draft = buildEditedMessageDraft(
+        request.text,
+        request.sourceTurn,
+        conn.promptCapabilities
+      )
+      if (!draft) return false
+
+      // The first message has no reply before it to fork at. The edit starts a
+      // new conversation on this agent, in this folder, instead — the "ask
+      // about this selection" hand-off — and this one stays as it is.
+      if (request.forkFromTurnId === null) {
+        if (askFolderId == null || workingDirForConnection == null) {
+          notify({
+            level: "error",
+            key: `edit-failed:${tabId}`,
+            title: t("editMessageNewConversationFailed"),
+          })
+          return false
+        }
+        const target = openNewConversationTab(
+          askFolderId,
+          workingDirForConnection,
+          { targetGroup: groupId, forceAgent: selectedAgent }
+        )
+        parkAskSelectionPrompt(target.tabId, {
+          prompt: draft.displayText,
+          blocks: draft.blocks,
+          agentType: target.agentType,
+          folderId: target.folderId,
+        })
+        return true
+      }
+
+      const connectionId = conn.connectionId
+      if (!connectionId || editInFlightRef.current) return false
+      const failKey = `edit-failed:${connectionId}`
+      // Re-checked here, not left to the greyed-out button: both can change
+      // while the editor is open. A send still on its way to becoming a turn
+      // counts as busy too — forking under it would carry it into the branch.
+      if (
+        connStatusRef.current !== "connected" ||
+        getRuntimeSession(effectiveConversationId)?.syncState ===
+          "awaiting_persist"
+      ) {
+        notify({ level: "error", key: failKey, title: t("editMessageBusy") })
+        return false
+      }
+      if (mqGetQueueLength() > 0) {
+        notify({ level: "error", key: failKey, title: t("editMessageQueued") })
+        return false
+      }
+
+      editInFlightRef.current = true
+      setEditInFlight(true)
+      try {
+        const forkFromTurnId = request.forkFromTurnId
+        let fork = pendingEditForkRef.current
+        if (
+          fork === null ||
+          fork.forkFromTurnId !== forkFromTurnId ||
+          sessionIdRef.current !== fork.forkedSessionId
+        ) {
+          pendingEditForkRef.current = null
+          // Snapshot before the await, as `handleForkFromTurn` does: these
+          // are the pre-fork session's turns.
+          const staleLiveTurnIds = (
+            getRuntimeSession(effectiveConversationId)?.localTurns ?? []
+          ).map((turn) => turn.id)
+          const { forkedSessionId } = await acpFork(
+            connectionId,
+            dbConvIdRef.current,
+            folderId,
+            forkFromTurnId,
+            "edit"
+          )
+          sessionIdRef.current = forkedSessionId
+          setExternalId(effectiveConversationId, forkedSessionId)
+          // This row now holds the forked session; a new sibling row holds the
+          // original branch.
+          refreshConversations()
+          fork = { forkFromTurnId, forkedSessionId, staleLiveTurnIds }
+          pendingEditForkRef.current = fork
+        }
+
+        if (!(await awaitForkedHistory(fork))) {
+          // A tab closed mid-edit has nobody left to tell.
+          if (mountedRef.current) {
+            notify({
+              level: "error",
+              key: failKey,
+              title: t("editMessageHistoryFailed"),
+            })
+          }
+          return false
+        }
+        pendingEditForkRef.current = null
+
+        const modeId = selectedModeIdRef.current
+        if (!connectionReadyRef.current) {
+          // Not ready this instant: the head of the queue is where the flush
+          // looks first, and the message is already aimed at the fork.
+          mqRequeueFront(draft, modeId)
+          return true
+        }
+        // Sent as the queue head: anything typed while the edit ran was
+        // queued behind it, and a busy bounce must put it back in FRONT.
+        handleSendRef.current(draft, modeId, {
+          fromQueueFlush: true,
+          // The message it replaces is not in the forked history, so a send
+          // that fails for good would lose the text — hand it to the composer.
+          onSendFailed: () =>
+            setComposerInject({ text: draft.displayText, mode: "append" }),
+        })
+        return true
+      } catch (err) {
+        notify({
+          level: "error",
+          key: failKey,
+          title:
+            err instanceof TurnBusyError
+              ? t("editMessageBusy")
+              : t("editMessageFailed", { error: toErrorMessage(err) }),
+        })
+        return false
+      } finally {
+        editInFlightRef.current = false
+        setEditInFlight(false)
+      }
+    },
+    [
+      askFolderId,
+      awaitForkedHistory,
+      conn.connectionId,
+      conn.promptCapabilities,
+      effectiveConversationId,
+      folderId,
+      groupId,
+      mqGetQueueLength,
+      mqRequeueFront,
+      openNewConversationTab,
+      refreshConversations,
+      selectedAgent,
+      setExternalId,
+      t,
+      tabId,
+      workingDirForConnection,
+    ]
+  )
+
   // Receiving end of the hand-off above, for asks aimed at THIS tab. Draining on
   // mount covers a brand-new draft tab; the event covers the case where the
   // target draft tab was already open (each split group keeps one, and inactive
@@ -1823,18 +2081,14 @@ const ConversationTabView = memo(function ConversationTabView({
   // the tab is self-consistently the OLD one.
   useEffect(() => {
     const drain = () => {
-      const prompts = consumeAskSelectionPrompts(tabId, {
+      const drafts = consumeAskSelectionPrompts(tabId, {
         agentType: selectedAgent,
         folderId,
       })
-      for (const text of prompts) {
+      for (const draft of drafts) {
         // `adoptSendTimeMode`: this tab has no modes yet (it is still
         // connecting), so the flush stamps the resolved one when it sends.
-        mqEnqueue(
-          { blocks: [{ type: "text", text }], displayText: text },
-          null,
-          { adoptSendTimeMode: true }
-        )
+        mqEnqueue(draft, null, { adoptSendTimeMode: true })
       }
     }
     drain()
@@ -2163,6 +2417,19 @@ const ConversationTabView = memo(function ConversationTabView({
             ? handleForkFromTurn
             : undefined
         }
+        // Editing is a fork too, so it takes the fork's gate — plus an agent
+        // whose fork lands exactly on the named reply or refuses (see
+        // `supportsMessageEdit`). A turn in flight and a non-empty queue grey
+        // the buttons out in the view instead of taking them away.
+        onEditUserMessage={
+          (connStatus === "connected" || connStatus === "prompting") &&
+          hasPersistedConversation &&
+          conn.supportsFork &&
+          supportsMessageEdit(selectedAgent)
+            ? handleEditUserMessage
+            : undefined
+        }
+        hasQueuedMessages={msgQueue.length > 0}
       />
     </GoalControlProvider>
   )

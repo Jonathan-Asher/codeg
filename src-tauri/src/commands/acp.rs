@@ -10774,6 +10774,9 @@ pub async fn acp_fork(
     // "Fork from here": the rendered turn to fork at. `None` = fork at the
     // tail, the composer's fork-send behaviour.
     fork_from_turn_id: Option<String>,
+    // What the fork is for; absent = a plain branch. `edit` (editing a past
+    // message) refuses a fork point it cannot name — see `ForkMode`.
+    mode: Option<crate::acp::fork::ForkMode>,
     db: State<'_, AppDatabase>,
     manager: State<'_, ConnectionManager>,
 ) -> Result<ForkResultInfo, AcpError> {
@@ -10784,6 +10787,7 @@ pub async fn acp_fork(
             conversation_id,
             folder_id,
             fork_from_turn_id,
+            mode.unwrap_or_default(),
         )
         .await
 }

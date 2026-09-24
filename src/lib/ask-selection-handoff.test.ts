@@ -23,6 +23,12 @@ const park = (
   } = CODEX_IN_1
 ) => parkAskSelectionPrompt(tabId, { prompt, ...identity })
 
+/** What a drain hands the tab, read as the text its queue rows show. */
+const take = (
+  tabId: string,
+  state: { agentType: "codex" | "claude_code"; folderId: number }
+) => consumeAskSelectionPrompts(tabId, state).map((draft) => draft.displayText)
+
 beforeEach(() => {
   resetAskSelectionPromptsForTests()
 })
@@ -34,34 +40,29 @@ afterEach(() => {
 describe("ask-selection hand-off", () => {
   it("delivers a prompt to the tab it was parked for", () => {
     park("new-1", "> quoted\n\nwhy?")
-    expect(consumeAskSelectionPrompts("new-1", CODEX_IN_1)).toEqual([
-      "> quoted\n\nwhy?",
-    ])
+    expect(take("new-1", CODEX_IN_1)).toEqual(["> quoted\n\nwhy?"])
   })
 
   it("gives nothing to any other tab", () => {
     // Each split group keeps its own draft tab; a sibling draft panel draining
     // on mount must not swallow a prompt meant for the other one.
     park("new-1", "mine")
-    expect(consumeAskSelectionPrompts("new-2", CODEX_IN_1)).toEqual([])
-    expect(consumeAskSelectionPrompts("new-1", CODEX_IN_1)).toEqual(["mine"])
+    expect(take("new-2", CODEX_IN_1)).toEqual([])
+    expect(take("new-1", CODEX_IN_1)).toEqual(["mine"])
   })
 
   it("is one-shot", () => {
     // The panel drains on mount AND on the event, so a second read of the same
     // prompt would send the question twice.
     park("new-1", "once")
-    expect(consumeAskSelectionPrompts("new-1", CODEX_IN_1)).toEqual(["once"])
-    expect(consumeAskSelectionPrompts("new-1", CODEX_IN_1)).toEqual([])
+    expect(take("new-1", CODEX_IN_1)).toEqual(["once"])
+    expect(take("new-1", CODEX_IN_1)).toEqual([])
   })
 
   it("keeps both prompts when two asks land on one tab before it drains", () => {
     park("new-1", "first")
     park("new-1", "second")
-    expect(consumeAskSelectionPrompts("new-1", CODEX_IN_1)).toEqual([
-      "first",
-      "second",
-    ])
+    expect(take("new-1", CODEX_IN_1)).toEqual(["first", "second"])
   })
 
   it.each([
@@ -74,23 +75,17 @@ describe("ask-selection hand-off", () => {
     // question through the wrong agent, in the wrong workspace.
     park("new-1", "for codex in folder 1", CODEX_IN_1)
 
-    expect(consumeAskSelectionPrompts("new-1", current)).toEqual([])
+    expect(take("new-1", current)).toEqual([])
     // Still there, waiting for the retarget to land.
-    expect(consumeAskSelectionPrompts("new-1", CODEX_IN_1)).toEqual([
-      "for codex in folder 1",
-    ])
+    expect(take("new-1", CODEX_IN_1)).toEqual(["for codex in folder 1"])
   })
 
   it("releases only the prompts that match, keeping the rest parked", () => {
     park("new-1", "for codex", CODEX_IN_1)
     park("new-1", "for claude", CLAUDE_IN_1)
 
-    expect(consumeAskSelectionPrompts("new-1", CLAUDE_IN_1)).toEqual([
-      "for claude",
-    ])
-    expect(consumeAskSelectionPrompts("new-1", CODEX_IN_1)).toEqual([
-      "for codex",
-    ])
+    expect(take("new-1", CLAUDE_IN_1)).toEqual(["for claude"])
+    expect(take("new-1", CODEX_IN_1)).toEqual(["for codex"])
   })
 
   it("drops what was parked for a tab that closes", () => {
@@ -98,7 +93,7 @@ describe("ask-selection hand-off", () => {
     // prompt held back by the match guard would sit in the map all session.
     park("new-1", "orphaned")
     discardAskSelectionPrompts("new-1")
-    expect(consumeAskSelectionPrompts("new-1", CODEX_IN_1)).toEqual([])
+    expect(take("new-1", CODEX_IN_1)).toEqual([])
   })
 
   it("announces the target tab so an already-mounted panel can drain", () => {
@@ -112,9 +107,39 @@ describe("ask-selection hand-off", () => {
       expect(event.detail.tabId).toBe("new-7")
       // The prompt itself is NOT in the event: the buffer is the source of
       // truth, so a panel mounting after the event still finds it.
-      expect(consumeAskSelectionPrompts("new-7", CODEX_IN_1)).toEqual(["hi"])
+      expect(take("new-7", CODEX_IN_1)).toEqual(["hi"])
     } finally {
       window.removeEventListener(ASK_SELECTION_PARKED_EVENT, listener)
     }
+  })
+
+  it("hands a plain prompt over as one text block", () => {
+    park("new-1", "why?")
+    expect(consumeAskSelectionPrompts("new-1", CODEX_IN_1)).toEqual([
+      { blocks: [{ type: "text", text: "why?" }], displayText: "why?" },
+    ])
+  })
+
+  it("hands an edited first message over with the images it carries", () => {
+    // Editing a conversation's first message starts a new conversation with
+    // it, and the images attached to the original must go along — not just
+    // the text the queue row shows.
+    const blocks = [
+      { type: "text" as const, text: "look at this" },
+      {
+        type: "image" as const,
+        data: "iVBORw0KGgo=",
+        mime_type: "image/png",
+        uri: null,
+      },
+    ]
+    parkAskSelectionPrompt("new-1", {
+      prompt: "look at this",
+      blocks,
+      ...CLAUDE_IN_1,
+    })
+    expect(consumeAskSelectionPrompts("new-1", CLAUDE_IN_1)).toEqual([
+      { blocks, displayText: "look at this" },
+    ])
   })
 })
