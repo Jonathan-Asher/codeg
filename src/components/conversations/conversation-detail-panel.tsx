@@ -140,6 +140,7 @@ import {
 import { userPromptHistory } from "@/lib/composer-history"
 import {
   buildEditedMessageDraft,
+  resolveEditForkTurnId,
   supportsMessageEdit,
   type UserMessageEditRequest,
 } from "@/lib/edit-message"
@@ -1898,6 +1899,20 @@ const ConversationTabView = memo(function ConversationTabView({
     [effectiveConversationId, refetchDetail]
   )
 
+  // A fresh parse of this conversation, for `resolveEditForkTurnId`: from the
+  // turn the thread on screen starts at — the loaded window's first turn, or
+  // the very first — so the two line up turn for turn.
+  const readTranscriptForEdit = useCallback(async () => {
+    const dbId = dbConvIdRef.current
+    if (dbId == null) return []
+    const loaded = getRuntimeSession(effectiveConversationId)?.detail ?? null
+    const fromIndex = isWindowedDetail(loaded) ? loaded.turns_offset : 0
+    const fresh = await getFolderConversation(dbId, { fromIndex })
+    // Started anywhere else, the turns wouldn't line up — nothing to match.
+    if (isWindowedDetail(fresh) && fresh.turns_offset !== fromIndex) return []
+    return fresh.turns
+  }, [effectiveConversationId])
+
   /**
    * "Edit message" (see `lib/edit-message`): continue this conversation from a
    * past user message, with new text.
@@ -1983,11 +1998,36 @@ const ConversationTabView = memo(function ConversationTabView({
           const staleLiveTurnIds = (
             getRuntimeSession(effectiveConversationId)?.localTurns ?? []
           ).map((turn) => turn.id)
+          // A reply this session streamed may still carry only its `live-…`
+          // id — a follow-up sent within seconds cancels the reparse that
+          // names it — and the backend can't fork at that. Find the parser's
+          // name in a fresh read of the transcript instead. Read straight
+          // from the backend rather than through `refetchDetail`: loading it
+          // into the store would swap this session's turns for their parsed
+          // copies under new ids, unmounting the editor mid-save.
+          const forkPointId = await resolveEditForkTurnId({
+            forkFromTurnId,
+            message: request.sourceTurn,
+            thread: getTimelineTurns(effectiveConversationId)
+              .filter((entry) => entry.phase === "persisted")
+              .map((entry) => entry.turn),
+            readTranscript: () => readTranscriptForEdit(),
+          })
+          if (forkPointId === null) {
+            notify({
+              level: "error",
+              key: failKey,
+              title: t("editMessageFailed", {
+                error: t("editMessageReplyNotFound"),
+              }),
+            })
+            return false
+          }
           const { forkedSessionId } = await acpFork(
             connectionId,
             dbConvIdRef.current,
             folderId,
-            forkFromTurnId,
+            forkPointId,
             "edit"
           )
           sessionIdRef.current = forkedSessionId
@@ -2055,6 +2095,7 @@ const ConversationTabView = memo(function ConversationTabView({
       mqGetQueueLength,
       mqRequeueFront,
       openNewConversationTab,
+      readTranscriptForEdit,
       refreshConversations,
       selectedAgent,
       setExternalId,

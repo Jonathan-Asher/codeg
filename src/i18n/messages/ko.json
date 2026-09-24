@@ -2039,6 +2039,7 @@
       "editMessageQueued": "대기열에 메시지가 남아 있는 동안에는 메시지를 편집할 수 없습니다",
       "editMessageHistoryFailed": "새 분기는 만들어졌지만 기록을 불러오지 못해 편집한 메시지를 보내지 않았습니다. '저장 후 보내기'를 다시 시도하세요",
       "editMessageNewConversationFailed": "편집한 메시지로 새 대화를 열지 못했습니다",
+      "editMessageReplyNotFound": "저장된 대화에서 이 메시지 바로 앞의 답변을 찾을 수 없습니다",
       "exportConversation": "대화 내보내기",
       "exportImage": "이미지",
       "exportMarkdown": "Markdown",

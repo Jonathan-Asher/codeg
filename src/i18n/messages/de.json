@@ -2039,6 +2039,7 @@
       "editMessageQueued": "Nachricht kann nicht bearbeitet werden, solange Nachrichten in der Warteschlange warten",
       "editMessageHistoryFailed": "Der neue Zweig wurde erstellt, sein Verlauf ließ sich aber nicht laden – die bearbeitete Nachricht wurde nicht gesendet. Versuche es mit „Speichern & senden“ erneut.",
       "editMessageNewConversationFailed": "Für die bearbeitete Nachricht konnte keine neue Konversation geöffnet werden",
+      "editMessageReplyNotFound": "die Antwort vor dieser Nachricht wurde in der gespeicherten Konversation nicht gefunden",
       "exportConversation": "Konversation exportieren",
       "exportImage": "Bild",
       "exportMarkdown": "Markdown",

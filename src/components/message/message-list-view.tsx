@@ -991,9 +991,10 @@ export function isForkPointUnnamed(
  *
  * - `fork` — fork at the reply right before the message, up to and including
  *   it, so the forked session ends exactly where the message was. `ready` is
- *   false while that reply can't be named yet: still being written, or a live
- *   reply the post-turn reparse hasn't named (`isForkPointUnnamed` — never the
- *   thread tail here, since the message follows it).
+ *   false only while that reply is still being written. A reply the post-turn
+ *   reparse never named is ready all the same — unlike "fork from here" (see
+ *   `isForkPointUnnamed`) — because the host names it on save, from a fresh
+ *   read of the transcript (`resolveEditForkTurnId`).
  * - `first` — nothing precedes the message, so the edit opens a new
  *   conversation instead.
  */
@@ -1047,11 +1048,7 @@ function userEditTargetAfter(
   // its last sub-turn does.
   const forkPoint = previous.sourceTurns[previous.sourceTurns.length - 1]
   if (!forkPoint) return null
-  return {
-    kind: "fork",
-    forkPoint,
-    ready: previous.isResponseComplete && !isForkPointUnnamed(forkPoint, false),
-  }
+  return { kind: "fork", forkPoint, ready: previous.isResponseComplete }
 }
 
 const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
@@ -1842,10 +1839,10 @@ export function MessageListView({
                   onCancel={() => handleCancelEdit(item.key)}
                   onSave={(text) => {
                     void handleSaveEdit(item.key, {
-                      // The parser's name for the reply, as "fork from here"
-                      // sends it: a live `live-…` id means nothing to the
-                      // backend (`isForkPointUnnamed` keeps Save from getting
-                      // here with one).
+                      // The parser's name for the reply where it has one, as
+                      // "fork from here" sends it. A reply still named only
+                      // `live-…` goes as is: the host looks its parser name up
+                      // in a fresh read before forking.
                       forkFromTurnId:
                         editTarget.kind === "fork"
                           ? (editTarget.forkPoint.source_turn_id ??

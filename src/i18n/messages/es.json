@@ -2039,6 +2039,7 @@
       "editMessageQueued": "No se puede editar el mensaje mientras hay mensajes esperando en la cola",
       "editMessageHistoryFailed": "Se creó la nueva rama, pero su historial no se cargó, así que el mensaje editado no se envió. Vuelve a intentarlo con Guardar y enviar.",
       "editMessageNewConversationFailed": "No se pudo abrir una nueva conversación para el mensaje editado",
+      "editMessageReplyNotFound": "no se encontró la respuesta anterior a este mensaje en la conversación guardada",
       "exportConversation": "Exportar conversación",
       "exportImage": "Imagen",
       "exportMarkdown": "Markdown",

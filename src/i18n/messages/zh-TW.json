@@ -2039,6 +2039,7 @@
       "editMessageQueued": "佇列中還有待發送的訊息，暫不可編輯訊息",
       "editMessageHistoryFailed": "新分支已建立，但其歷史未能載入，編輯後的訊息沒有送出。請再次點擊「儲存並送出」",
       "editMessageNewConversationFailed": "無法為編輯後的訊息新建會話",
+      "editMessageReplyNotFound": "在已儲存的會話中找不到這則訊息之前的回覆",
       "exportConversation": "匯出對話",
       "exportImage": "圖片",
       "exportMarkdown": "Markdown",

@@ -2039,6 +2039,7 @@
       "editMessageQueued": "لا يمكن تعديل الرسالة بينما توجد رسائل تنتظر في الطابور",
       "editMessageHistoryFailed": "أُنشئ الفرع الجديد، لكن تعذّر تحميل سجله، لذا لم تُرسل الرسالة المعدّلة. جرّب «حفظ وإرسال» مرة أخرى.",
       "editMessageNewConversationFailed": "تعذّر فتح محادثة جديدة للرسالة المعدّلة",
+      "editMessageReplyNotFound": "تعذّر العثور على الرد السابق لهذه الرسالة في المحادثة المحفوظة",
       "exportConversation": "تصدير المحادثة",
       "exportImage": "صورة",
       "exportMarkdown": "Markdown",

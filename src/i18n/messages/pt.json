@@ -2039,6 +2039,7 @@
       "editMessageQueued": "Não é possível editar a mensagem enquanto há mensagens esperando na fila",
       "editMessageHistoryFailed": "O novo ramo foi criado, mas o histórico dele não carregou, então a mensagem editada não foi enviada. Tente Salvar e enviar de novo.",
       "editMessageNewConversationFailed": "Não foi possível abrir uma nova conversa para a mensagem editada",
+      "editMessageReplyNotFound": "a resposta anterior a esta mensagem não foi encontrada na conversa salva",
       "exportConversation": "Exportar conversa",
       "exportImage": "Imagem",
       "exportMarkdown": "Markdown",

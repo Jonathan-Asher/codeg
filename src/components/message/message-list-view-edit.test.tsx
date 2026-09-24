@@ -281,22 +281,32 @@ describe("MessageListView: when Edit is greyed out", () => {
     expect(screen.queryByRole("group", { name: L.editMessage })).toBeNull()
   })
 
-  it("while the reply before it has no parser id yet", async () => {
+  it("but not when the reply before it was never given its parser id", async () => {
     // A reply this session streamed is `live-…` until the post-turn reparse
-    // names it; the backend can't fork at that.
+    // names it, and a follow-up sent within seconds cancels that reparse for
+    // good. Edit doesn't wait on it: the live id goes to the host, which looks
+    // the parser's name up in a fresh read before forking.
     await seed([
       userTurn("turn-0", "question"),
       replyTurn("live-7-lm-1", "streamed answer"),
       userTurn("turn-2", "next question"),
       replyTurn("turn-3", "next answer"),
     ])
-    const { container } = renderList({ onEditUserMessage: vi.fn() })
+    const onEditUserMessage = vi.fn<
+      (request: UserMessageEditRequest) => Promise<boolean>
+    >(() => Promise.resolve(true))
+    const { container } = renderList({ onEditUserMessage })
     const button = editButton(container, "turn-2")!
-    expect(button).toHaveAttribute("aria-disabled", "true")
-    await userEvent.hover(button)
-    expect(await screen.findByRole("tooltip")).toHaveTextContent(L.editNotReady)
-    // The first message has no reply before it, so nothing to wait for.
-    expect(editButton(container, "turn-0")).not.toHaveAttribute("aria-disabled")
+    expect(button).not.toHaveAttribute("aria-disabled")
+
+    await userEvent.click(button)
+    await userEvent.click(screen.getByRole("button", { name: L.editSave }))
+    expect(onEditUserMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        forkFromTurnId: "live-7-lm-1",
+        text: "next question",
+      })
+    )
   })
 })
 

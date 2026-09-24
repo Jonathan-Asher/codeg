@@ -482,6 +482,44 @@ describe("ConversationDetailPanel send-path hardening", () => {
     expect(editHandler).toContain("setEditInFlight(false)")
   })
 
+  it("names a never-named reply from a fresh read before an edit forks at it", () => {
+    // A reply this session streamed can stay `live-…` for the whole session (a
+    // quick follow-up cancels the reparse that names it), and the backend
+    // can't fork at that. The edit resolves the parser's name first, forks
+    // with THAT id, and gives up — editor open — when there is none.
+    const editStart = source.indexOf(
+      "const handleEditUserMessage = useCallback("
+    )
+    const editHandler = source.slice(
+      editStart,
+      source.indexOf("// Receiving end of the hand-off above", editStart)
+    )
+    const resolveAt = editHandler.indexOf("await resolveEditForkTurnId(")
+    const forkAt = editHandler.indexOf("await acpFork(")
+    expect(resolveAt).toBeGreaterThan(-1)
+    expect(resolveAt).toBeLessThan(forkAt)
+    const unresolved = editHandler.slice(
+      editHandler.indexOf("if (forkPointId === null)"),
+      forkAt
+    )
+    expect(unresolved).toContain('t("editMessageReplyNotFound")')
+    expect(unresolved).toContain("return false")
+    expect(editHandler.slice(forkAt)).toMatch(
+      /acpFork\(\s*connectionId,\s*dbConvIdRef\.current,\s*folderId,\s*forkPointId,/
+    )
+
+    // The read goes to the backend directly: loading it through the store
+    // would swap the session's own turns for parsed copies under new ids,
+    // unmounting the very editor that is saving.
+    const readStart = source.indexOf(
+      "const readTranscriptForEdit = useCallback("
+    )
+    expect(readStart).toBeGreaterThan(-1)
+    const read = source.slice(readStart, editStart)
+    expect(read).toContain("getFolderConversation(")
+    expect(read).not.toContain("refetchDetail(")
+  })
+
   it("disables the welcome composer while connected-but-not-ready", () => {
     // The composer reads a downgraded status so its send affordance is disabled
     // during the transient mismatch window instead of inviting a rejected send.
