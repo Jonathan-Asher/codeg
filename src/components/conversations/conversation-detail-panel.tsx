@@ -113,6 +113,7 @@ import {
 } from "@/stores/conversation-runtime-store"
 import { useShallow } from "zustand/react/shallow"
 import { useConversationDetail } from "@/hooks/use-conversation-detail"
+import { useWakeResync } from "@/hooks/use-wake-resync"
 import {
   buildSteerPayload,
   extractUserImagesFromDraft,
@@ -646,6 +647,18 @@ const ConversationTabView = memo(function ConversationTabView({
     ),
   })
   const { status: connStatus, sessionId: connSessionId } = conn
+
+  // Re-fetch the transcript after sleep or a transport reconnect: a turn that
+  // finished while this client's socket was down lives only in the persisted
+  // transcript, and nothing else re-reads it (the view would stay stale until
+  // the conversation is reopened). Held while a turn streams; debounced;
+  // background tabs gate themselves off. See `useWakeResync`.
+  useWakeResync({
+    enabled: isActive && hasPersistedConversation,
+    conversationId: effectiveConversationId,
+    isStreaming: connStatus === "prompting",
+    refetch: refetchDetail,
+  })
   const messageQueue = useMessageQueue()
   const {
     queue: msgQueue,
