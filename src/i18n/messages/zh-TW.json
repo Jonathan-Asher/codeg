@@ -2117,6 +2117,7 @@
       "tabFiles": "檔案",
       "placeholder": "搜尋會話...",
       "filePlaceholder": "搜尋檔案或目錄...",
+      "messagePlaceholder": "搜尋訊息內容...",
       "allAgents": "全部",
       "searching": "搜尋中...",
       "typeToSearch": "輸入關鍵字搜尋會話",

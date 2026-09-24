@@ -2117,6 +2117,7 @@
       "tabFiles": "Arquivos",
       "placeholder": "Buscar conversas...",
       "filePlaceholder": "Buscar arquivos ou diretórios...",
+      "messagePlaceholder": "Buscar no conteúdo das mensagens...",
       "allAgents": "Todos",
       "searching": "Buscando...",
       "typeToSearch": "Digite para buscar conversas",

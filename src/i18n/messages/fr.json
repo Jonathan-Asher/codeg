@@ -2117,6 +2117,7 @@
       "tabFiles": "Fichiers",
       "placeholder": "Rechercher des conversations...",
       "filePlaceholder": "Rechercher des fichiers ou répertoires...",
+      "messagePlaceholder": "Rechercher dans le contenu des messages...",
       "allAgents": "Tout",
       "searching": "Recherche...",
       "typeToSearch": "Tapez pour rechercher des conversations",

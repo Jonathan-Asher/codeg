@@ -2117,6 +2117,7 @@
       "tabFiles": "파일",
       "placeholder": "대화 검색...",
       "filePlaceholder": "파일 또는 디렉토리 검색...",
+      "messagePlaceholder": "메시지 내용 검색...",
       "allAgents": "전체",
       "searching": "검색 중...",
       "typeToSearch": "입력하여 대화를 검색하세요",

@@ -2117,6 +2117,7 @@
       "tabFiles": "文件",
       "placeholder": "搜索会话...",
       "filePlaceholder": "搜索文件或目录...",
+      "messagePlaceholder": "搜索消息内容...",
       "allAgents": "全部",
       "searching": "搜索中...",
       "typeToSearch": "输入关键词搜索会话",
