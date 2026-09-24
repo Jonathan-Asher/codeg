@@ -8,8 +8,13 @@ FAILURES=""
 echo "==> 1/4 Installing patched pi-acp (session fork/resume + extension commands)"
 if command -v npm >/dev/null 2>&1; then
   npm install -g github:Jonathan-Asher/pi-acp#main || FAILURES="$FAILURES pi-acp(npm)"
+  # The Claude adapter is what decides which models the picker offers (its
+  # bundled Claude Code build carries the catalog); codeg launches whatever
+  # `claude-agent-acp` is on PATH. Keep it on the version codeg pins so new
+  # models (Opus 5.5 arrived with 0.81.x) show up without a codeg rebuild.
+  npm install -g @agentclientprotocol/claude-agent-acp@0.81.1 || FAILURES="$FAILURES claude-agent-acp(npm)"
 else
-  echo "   npm not found — skipping pi-acp (app install continues)"
+  echo "   npm not found — skipping pi-acp / claude-agent-acp (app install continues)"
   FAILURES="$FAILURES pi-acp(no-npm)"
 fi
 

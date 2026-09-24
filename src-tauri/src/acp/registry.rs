@@ -1039,8 +1039,8 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             // the same fortnight, on the one adapter where codeg is not the
             // client that sees it.
             distribution: AgentDistribution::Npx {
-                version: "0.78.0",
-                package: "@agentclientprotocol/claude-agent-acp@0.78.0",
+                version: "0.81.1",
+                package: "@agentclientprotocol/claude-agent-acp@0.81.1",
                 cmd: "claude-agent-acp",
                 args: &[],
                 env: &[],
@@ -2632,8 +2632,8 @@ mod tests {
     fn registry_pins_current_acp_agent_versions() {
         assert_npx_version(
             AgentType::ClaudeCode,
-            "0.78.0",
-            "@agentclientprotocol/claude-agent-acp@0.78.0",
+            "0.81.1",
+            "@agentclientprotocol/claude-agent-acp@0.81.1",
             Some("22.0.0"),
         );
         assert_npx_version(
