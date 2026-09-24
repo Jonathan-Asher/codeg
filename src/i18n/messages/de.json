@@ -1701,6 +1701,13 @@
     "behaviorExit": "codeg beenden",
     "saveFailed": "Schließverhalten konnte nicht gespeichert werden: {message}"
   },
+  "StartupWorkspaceSettings": {
+    "title": "Beim Start von codeg öffnen",
+    "description": "Ein Remote-Arbeitsbereich öffnet sich in einem eigenen Fenster; der lokale Arbeitsbereich bleibt unter Schnellaktionen nur einen Klick entfernt.",
+    "noRemote": "Noch keine Remote-Arbeitsbereiche gespeichert. Speichern Sie einen, damit codeg ihn beim Start öffnet.",
+    "local": "Lokaler Arbeitsbereich",
+    "saveFailed": "Start-Arbeitsbereich konnte nicht gespeichert werden: {message}"
+  },
   "CloseRequestDialog": {
     "askTitle": "codeg schließen?",
     "askDescription": "codeg kann im Infobereich weiterlaufen, damit Agenten und Terminals aktiv bleiben – oder vollständig beendet werden.",
@@ -4688,6 +4695,11 @@
     "saveFailed": "Failed to save remote connection",
     "deleteFailed": "Failed to delete remote connection",
     "openFailed": "Failed to open remote workspace",
+    "localWorkspace": "Lokaler Arbeitsbereich",
+    "showLocalFailed": "Lokaler Arbeitsbereich konnte nicht geöffnet werden",
+    "openAtStartup": "Beim Start von codeg öffnen",
+    "openAtStartupDescription": "codeg öffnet diesen Arbeitsbereich bei jedem Start in einem eigenen Fenster.",
+    "startupSaveFailed": "Start-Arbeitsbereich konnte nicht gespeichert werden",
     "connectionLoadFailed": "Failed to load remote connection: {message}",
     "disconnectedTitle": "Verbindung zu {name} getrennt",
     "tokenRejected": "Der Server hat das Zugriffstoken dieses Fensters abgelehnt. Wenn sich das Token auf dem Server geändert hat, aktualisiere es hier und verbinde dich dann neu.",

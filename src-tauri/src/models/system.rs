@@ -166,6 +166,21 @@ pub struct SystemAutostartSettings {
     pub enabled: bool,
 }
 
+/// What a launch opens: the local workspace (`None`, the default) or a saved
+/// remote workspace connection, by the id of its `remote_workspace_connection`
+/// row on this machine.
+///
+/// The id is only a pointer — the connection can be deleted after it was
+/// picked. The launch and the settings page both read it through
+/// [`crate::commands::system_settings::resolve_startup_remote_connection`],
+/// which answers such a stale id with the local workspace.
+#[cfg(feature = "tauri-runtime")]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(default)]
+pub struct SystemStartupWorkspaceSettings {
+    pub remote_connection_id: Option<i32>,
+}
+
 // --- Version Control ---
 
 /// Explicit credentials for a single git remote operation.

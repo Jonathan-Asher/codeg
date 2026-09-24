@@ -54,6 +54,9 @@ pub const FORBIDDEN_PREFERENCE_KEYS: &[&str] = &[
     super::webdav_sync::CONFIG_SYNC_STATE_KEY,
     "system_proxy_settings",
     "system_terminal_settings",
+    // Names a row of THIS machine's `remote_workspace_connection` table; the
+    // same id is a different connection, or none, anywhere else.
+    "system_startup_workspace_settings",
     "web_service_port",
     "web_service_token",
     "web_service_auto_start",

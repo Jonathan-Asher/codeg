@@ -8,11 +8,14 @@ use crate::acp::terminal_runtime::TerminalShellRuntimeConfig;
 use crate::app_error::AppCommandError;
 use crate::db::service::app_metadata_service;
 #[cfg(feature = "tauri-runtime")]
+use crate::db::service::remote_workspace_connection_service;
+#[cfg(feature = "tauri-runtime")]
 use crate::db::AppDatabase;
 #[cfg(feature = "tauri-runtime")]
 use crate::models::{
-    CloseWindowBehavior, SystemAutostartSettings, SystemCloseBehaviorSettings,
-    SystemCloseBehaviorSettingsView, SystemRenderingSettings,
+    CloseWindowBehavior, RemoteWorkspaceConnectionInfo, SystemAutostartSettings,
+    SystemCloseBehaviorSettings, SystemCloseBehaviorSettingsView, SystemRenderingSettings,
+    SystemStartupWorkspaceSettings,
 };
 use crate::models::{
     AvailableTerminalShells, SystemLanguageSettings, SystemProxySettings, SystemTerminalSettings,
@@ -28,6 +31,8 @@ pub(crate) const SYSTEM_LANGUAGE_SETTINGS_KEY: &str = "system_language_settings"
 pub(crate) const SYSTEM_TERMINAL_SETTINGS_KEY: &str = "system_terminal_settings";
 #[cfg(feature = "tauri-runtime")]
 pub(crate) const SYSTEM_CLOSE_BEHAVIOR_SETTINGS_KEY: &str = "system_close_behavior_settings";
+#[cfg(feature = "tauri-runtime")]
+pub(crate) const SYSTEM_STARTUP_WORKSPACE_SETTINGS_KEY: &str = "system_startup_workspace_settings";
 #[cfg(feature = "tauri-runtime")]
 pub(crate) const CLOSE_REQUEST_EVENT: &str = "app://close-request";
 pub(crate) const LANGUAGE_SETTINGS_UPDATED_EVENT: &str = "app://language-settings-updated";
@@ -684,6 +689,119 @@ pub async fn resolve_close_request(
     }
 
     Ok(())
+}
+
+// --- Startup workspace ---
+
+/// The stored row, as written. Never returns an error: a launch must not fail —
+/// or open somewhere unexpected — over a preference it cannot read, so anything
+/// unreadable is the local workspace, which is what every launch opened before
+/// the preference existed.
+#[cfg(feature = "tauri-runtime")]
+pub(crate) async fn load_system_startup_workspace_settings(
+    conn: &DatabaseConnection,
+) -> SystemStartupWorkspaceSettings {
+    let raw =
+        match app_metadata_service::get_value(conn, SYSTEM_STARTUP_WORKSPACE_SETTINGS_KEY).await {
+            Ok(Some(raw)) => raw,
+            Ok(None) => return SystemStartupWorkspaceSettings::default(),
+            Err(err) => {
+                tracing::warn!("[settings] failed to read startup workspace, opening local: {err}");
+                return SystemStartupWorkspaceSettings::default();
+            }
+        };
+
+    match serde_json::from_str::<SystemStartupWorkspaceSettings>(&raw) {
+        Ok(settings) => settings,
+        Err(err) => {
+            tracing::warn!("[settings] failed to parse startup workspace, opening local: {err}");
+            SystemStartupWorkspaceSettings::default()
+        }
+    }
+}
+
+/// The saved remote connection a launch opens, or `None` for the local
+/// workspace. A connection deleted since it was picked — or one that cannot be
+/// looked up — is `None` too: the launch then opens the local workspace instead
+/// of a window with nothing to connect to.
+#[cfg(feature = "tauri-runtime")]
+pub(crate) async fn resolve_startup_remote_connection(
+    conn: &DatabaseConnection,
+) -> Option<RemoteWorkspaceConnectionInfo> {
+    let id = load_system_startup_workspace_settings(conn)
+        .await
+        .remote_connection_id?;
+    match remote_workspace_connection_service::get(conn, id).await {
+        Ok(Some(connection)) => Some(connection),
+        Ok(None) => {
+            tracing::info!("[settings] startup remote workspace {id} is gone, opening local");
+            None
+        }
+        Err(err) => {
+            tracing::warn!("[settings] failed to look up startup remote workspace {id}: {err}");
+            None
+        }
+    }
+}
+
+/// What the settings page shows: the stored choice with a stale id already read
+/// back as the local workspace, so the picker never names a connection that is
+/// gone.
+#[cfg(feature = "tauri-runtime")]
+pub(crate) async fn get_system_startup_workspace_settings_core(
+    conn: &DatabaseConnection,
+) -> SystemStartupWorkspaceSettings {
+    SystemStartupWorkspaceSettings {
+        remote_connection_id: resolve_startup_remote_connection(conn)
+            .await
+            .map(|connection| connection.id),
+    }
+}
+
+/// Refuses a connection that does not exist instead of storing it: the save
+/// would report success for a launch that then opens the local workspace.
+#[cfg(feature = "tauri-runtime")]
+pub(crate) async fn update_system_startup_workspace_settings_core(
+    conn: &DatabaseConnection,
+    settings: SystemStartupWorkspaceSettings,
+) -> Result<SystemStartupWorkspaceSettings, AppCommandError> {
+    if let Some(id) = settings.remote_connection_id {
+        let exists = remote_workspace_connection_service::get(conn, id)
+            .await
+            .map_err(AppCommandError::db)?
+            .is_some();
+        if !exists {
+            return Err(AppCommandError::not_found(format!(
+                "Remote connection {id} not found"
+            )));
+        }
+    }
+
+    let serialized = serde_json::to_string(&settings).map_err(|e| {
+        AppCommandError::invalid_input("Failed to serialize startup workspace settings")
+            .with_detail(e.to_string())
+    })?;
+    app_metadata_service::upsert_value(conn, SYSTEM_STARTUP_WORKSPACE_SETTINGS_KEY, &serialized)
+        .await
+        .map_err(AppCommandError::from)?;
+    Ok(settings)
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn get_system_startup_workspace_settings(
+    db: State<'_, AppDatabase>,
+) -> Result<SystemStartupWorkspaceSettings, AppCommandError> {
+    Ok(get_system_startup_workspace_settings_core(&db.conn).await)
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn update_system_startup_workspace_settings(
+    settings: SystemStartupWorkspaceSettings,
+    db: State<'_, AppDatabase>,
+) -> Result<SystemStartupWorkspaceSettings, AppCommandError> {
+    update_system_startup_workspace_settings_core(&db.conn, settings).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -1873,5 +1991,157 @@ mod close_behavior_tests {
         mark_close_prompt_listener_ready();
 
         assert!(close_prompt_listener_ready());
+    }
+}
+
+#[cfg(all(test, feature = "tauri-runtime"))]
+mod startup_workspace_tests {
+    use super::*;
+    use crate::db::test_helpers::fresh_in_memory_db;
+
+    async fn seed_connection(conn: &DatabaseConnection, name: &str) -> i32 {
+        remote_workspace_connection_service::create(
+            conn,
+            name,
+            "http://127.0.0.1:3080",
+            "token",
+            &[],
+        )
+        .await
+        .expect("create remote connection")
+        .id
+    }
+
+    fn remote(id: i32) -> SystemStartupWorkspaceSettings {
+        SystemStartupWorkspaceSettings {
+            remote_connection_id: Some(id),
+        }
+    }
+
+    #[tokio::test]
+    async fn defaults_to_the_local_workspace() {
+        let db = fresh_in_memory_db().await;
+
+        let settings = get_system_startup_workspace_settings_core(&db.conn).await;
+
+        assert_eq!(settings.remote_connection_id, None);
+        assert!(resolve_startup_remote_connection(&db.conn).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_picked_remote_workspace_roundtrips() {
+        let db = fresh_in_memory_db().await;
+        let id = seed_connection(&db.conn, "Studio").await;
+
+        let saved = update_system_startup_workspace_settings_core(&db.conn, remote(id))
+            .await
+            .expect("save startup workspace");
+
+        assert_eq!(saved, remote(id));
+        assert_eq!(
+            get_system_startup_workspace_settings_core(&db.conn).await,
+            remote(id)
+        );
+        let resolved = resolve_startup_remote_connection(&db.conn)
+            .await
+            .expect("the picked connection resolves");
+        assert_eq!(resolved.id, id);
+        assert_eq!(resolved.name, "Studio");
+    }
+
+    #[tokio::test]
+    async fn picking_local_again_clears_the_choice() {
+        let db = fresh_in_memory_db().await;
+        let id = seed_connection(&db.conn, "Studio").await;
+        update_system_startup_workspace_settings_core(&db.conn, remote(id))
+            .await
+            .expect("save remote");
+
+        update_system_startup_workspace_settings_core(
+            &db.conn,
+            SystemStartupWorkspaceSettings::default(),
+        )
+        .await
+        .expect("save local");
+
+        assert_eq!(
+            get_system_startup_workspace_settings_core(&db.conn).await,
+            SystemStartupWorkspaceSettings::default()
+        );
+        assert!(resolve_startup_remote_connection(&db.conn).await.is_none());
+    }
+
+    /// The stored id is a pointer into a table the user edits. Deleting the
+    /// picked connection has to turn the next launch into a local one — and the
+    /// picker back to "Local workspace" — rather than aim either at a row that
+    /// no longer exists.
+    #[tokio::test]
+    async fn a_deleted_connection_reads_back_as_local() {
+        let db = fresh_in_memory_db().await;
+        let id = seed_connection(&db.conn, "Studio").await;
+        update_system_startup_workspace_settings_core(&db.conn, remote(id))
+            .await
+            .expect("save remote");
+
+        remote_workspace_connection_service::delete(&db.conn, id)
+            .await
+            .expect("delete connection");
+
+        assert!(resolve_startup_remote_connection(&db.conn).await.is_none());
+        assert_eq!(
+            get_system_startup_workspace_settings_core(&db.conn).await,
+            SystemStartupWorkspaceSettings::default()
+        );
+        // The row itself is left alone; only its reading changed.
+        assert_eq!(
+            load_system_startup_workspace_settings(&db.conn).await,
+            remote(id)
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unknown_connection_is_refused_and_the_old_choice_kept() {
+        let db = fresh_in_memory_db().await;
+        let id = seed_connection(&db.conn, "Studio").await;
+        update_system_startup_workspace_settings_core(&db.conn, remote(id))
+            .await
+            .expect("save remote");
+
+        let err = update_system_startup_workspace_settings_core(&db.conn, remote(id + 1000))
+            .await
+            .expect_err("an unknown connection must be refused");
+
+        assert!(matches!(err.code, crate::app_error::AppErrorCode::NotFound));
+        assert_eq!(
+            get_system_startup_workspace_settings_core(&db.conn).await,
+            remote(id)
+        );
+    }
+
+    /// A row this build cannot read — hand-edited, written by a newer build,
+    /// truncated — must still launch the app, and into the local workspace.
+    #[tokio::test]
+    async fn an_unreadable_row_opens_the_local_workspace() {
+        for raw in [
+            r#"not json"#,
+            r#"{"remote_connection_id":"studio"}"#,
+            r#"{}"#,
+        ] {
+            let db = fresh_in_memory_db().await;
+            app_metadata_service::upsert_value(
+                &db.conn,
+                SYSTEM_STARTUP_WORKSPACE_SETTINGS_KEY,
+                raw,
+            )
+            .await
+            .expect("seed row");
+
+            assert_eq!(
+                load_system_startup_workspace_settings(&db.conn).await,
+                SystemStartupWorkspaceSettings::default(),
+                "row {raw} should read as the local workspace"
+            );
+            assert!(resolve_startup_remote_connection(&db.conn).await.is_none());
+        }
     }
 }

@@ -1701,6 +1701,13 @@
     "behaviorExit": "codeg 종료",
     "saveFailed": "닫기 동작 저장 실패: {message}"
   },
+  "StartupWorkspaceSettings": {
+    "title": "codeg 시작 시 열기",
+    "description": "원격 워크스페이스는 별도 창에서 열리며, 로컬 워크스페이스는 언제든 빠른 작업에서 열 수 있습니다.",
+    "noRemote": "저장된 원격 워크스페이스가 아직 없습니다. 저장하면 codeg 시작 시 바로 열 수 있습니다.",
+    "local": "로컬 워크스페이스",
+    "saveFailed": "시작 워크스페이스 저장 실패: {message}"
+  },
   "CloseRequestDialog": {
     "askTitle": "codeg를 닫을까요?",
     "askDescription": "트레이에서 계속 실행해 에이전트와 터미널을 유지하거나, 완전히 종료할 수 있습니다.",
@@ -4688,6 +4695,11 @@
     "saveFailed": "Failed to save remote connection",
     "deleteFailed": "Failed to delete remote connection",
     "openFailed": "Failed to open remote workspace",
+    "localWorkspace": "로컬 워크스페이스",
+    "showLocalFailed": "로컬 워크스페이스를 열지 못했습니다",
+    "openAtStartup": "codeg 시작 시 열기",
+    "openAtStartupDescription": "codeg를 시작할 때마다 이 워크스페이스를 별도 창에서 엽니다.",
+    "startupSaveFailed": "시작 워크스페이스 저장 실패",
     "connectionLoadFailed": "Failed to load remote connection: {message}",
     "disconnectedTitle": "{name}와(과)의 연결이 끊어졌습니다",
     "tokenRejected": "서버가 이 창의 액세스 토큰을 거부했습니다. 서버에서 토큰이 바뀌었다면 여기에서 업데이트한 뒤 다시 연결하세요.",

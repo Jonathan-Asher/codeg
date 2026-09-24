@@ -1701,6 +1701,13 @@
     "behaviorExit": "Quitter codeg",
     "saveFailed": "Échec de l'enregistrement du comportement de fermeture : {message}"
   },
+  "StartupWorkspaceSettings": {
+    "title": "Au démarrage de codeg, ouvrir",
+    "description": "Un espace de travail distant s'ouvre dans sa propre fenêtre ; l'espace de travail local reste à un clic dans les Actions rapides.",
+    "noRemote": "Aucun espace de travail distant enregistré pour l'instant. Enregistrez-en un pour que codeg l'ouvre au démarrage.",
+    "local": "Espace de travail local",
+    "saveFailed": "Échec de l'enregistrement de l'espace de travail de démarrage : {message}"
+  },
   "CloseRequestDialog": {
     "askTitle": "Fermer codeg ?",
     "askDescription": "codeg peut continuer à s'exécuter dans la zone de notification pour garder les agents et les terminaux actifs, ou quitter complètement.",
@@ -4688,6 +4695,11 @@
     "saveFailed": "Échec de l’enregistrement de la connexion distante",
     "deleteFailed": "Échec de la suppression de la connexion distante",
     "openFailed": "Échec de l’ouverture de l’espace de travail distant",
+    "localWorkspace": "Espace de travail local",
+    "showLocalFailed": "Échec de l’ouverture de l’espace de travail local",
+    "openAtStartup": "Ouvrir au démarrage de codeg",
+    "openAtStartupDescription": "codeg ouvre cet espace de travail dans sa propre fenêtre à chaque démarrage.",
+    "startupSaveFailed": "Échec de l’enregistrement de l’espace de travail de démarrage",
     "connectionLoadFailed": "Échec du chargement de la connexion distante : {message}",
     "disconnectedTitle": "Déconnecté de {name}",
     "tokenRejected": "Le serveur a refusé le jeton d’accès de cette fenêtre. Si le jeton a changé sur le serveur, mettez-le à jour ici, puis reconnectez-vous.",

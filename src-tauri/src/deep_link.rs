@@ -257,8 +257,11 @@ pub fn handle_raw_urls(app: &tauri::AppHandle, urls: &[String]) {
     use crate::commands::windows;
     use tauri::{Emitter, Manager};
 
+    // No link at all is codeg launched again while it runs (Windows / Linux):
+    // the same "bring codeg back" as a macOS dock click, which after a launch
+    // into a remote workspace means that window, not the hidden main one.
     if urls.is_empty() {
-        windows::show_main_window(app);
+        crate::commands::workspace_windows::reopen_workspace(app);
         return;
     }
 
@@ -313,9 +316,11 @@ pub fn handle_argv(app: &tauri::AppHandle, argv: &[String]) {
 }
 
 /// Resolve the first session-targeting startup URL so the main window can
-/// load `/workspace?folderId=…` on a cold start. `DeepLinkBootstrap` then
-/// opens the tab after folders/tabs hydrate — an event emitted here would
-/// race the webview's subscription.
+/// load `/workspace?folderId=…` ([`FocusTarget::workspace_path`]) on a cold
+/// start. `DeepLinkBootstrap` then opens the tab after folders/tabs hydrate —
+/// an event emitted here would race the webview's subscription. A target also
+/// tells setup that this launch is about the local workspace, which overrides
+/// a startup remote workspace.
 ///
 /// This only fires where the plugin already knows the launch URL by the time
 /// the setup hook runs, i.e. Windows/Linux (argv, parsed during plugin setup).
@@ -323,7 +328,7 @@ pub fn handle_argv(app: &tauri::AppHandle, argv: &[String]) {
 /// empty here and the cold start is carried by [`PENDING_FOCUS`] instead. The
 /// two paths are mutually exclusive: whichever delivery populated the plugin
 /// before our `on_open_url` listener existed is the one that wins.
-pub async fn startup_workspace_path(db: &AppDatabase, urls: &[String]) -> String {
+pub async fn startup_focus_target(db: &AppDatabase, urls: &[String]) -> Option<FocusTarget> {
     for raw in urls {
         let Some(link) = parse_deep_link(raw) else {
             continue;
@@ -332,12 +337,12 @@ pub async fn startup_workspace_path(db: &AppDatabase, urls: &[String]) -> String
             continue;
         }
         match resolve_deep_link(db, &link).await {
-            Ok(Some(target)) => return target.workspace_path(),
+            Ok(Some(target)) => return Some(target),
             Ok(None) => tracing::info!("[deep-link] startup url did not match a live session: {raw}"),
             Err(err) => tracing::warn!("[deep-link] startup {raw}: {err}"),
         }
     }
-    "workspace".into()
+    None
 }
 
 #[cfg(test)]
@@ -570,30 +575,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn startup_path_resolves_first_session_url_else_plain_workspace() {
+    async fn startup_focus_resolves_the_first_session_url_only() {
         let db = fresh_in_memory_db().await;
         let folder = seed_folder(&db, "/tmp/codeg-deep-link-startup").await;
         let id = seed_conversation(&db, folder, AgentType::Grok).await;
 
-        assert_eq!(startup_workspace_path(&db, &[]).await, "workspace");
+        assert_eq!(startup_focus_target(&db, &[]).await, None);
         assert_eq!(
-            startup_workspace_path(&db, &["codeg://open".into()]).await,
-            "workspace"
+            startup_focus_target(&db, &["codeg://open".into()]).await,
+            None
         );
         assert_eq!(
-            startup_workspace_path(&db, &["codeg://session/999999".into()]).await,
-            "workspace"
+            startup_focus_target(&db, &["codeg://session/999999".into()]).await,
+            None
         );
+        let target = startup_focus_target(
+            &db,
+            &[
+                "--some-flag".into(),
+                "codeg://open".into(),
+                format!("codeg://session/{id}"),
+            ],
+        )
+        .await
+        .expect("the session url resolves");
         assert_eq!(
-            startup_workspace_path(
-                &db,
-                &[
-                    "--some-flag".into(),
-                    "codeg://open".into(),
-                    format!("codeg://session/{id}"),
-                ]
-            )
-            .await,
+            target.workspace_path(),
             format!("workspace?folderId={folder}&conversationId={id}&agent=grok")
         );
     }

@@ -55,7 +55,7 @@ pub use work_task::{
 #[cfg(feature = "tauri-runtime")]
 pub use system::{
     CloseWindowBehavior, SystemAutostartSettings, SystemCloseBehaviorSettings,
-    SystemCloseBehaviorSettingsView, SystemRenderingSettings,
+    SystemCloseBehaviorSettingsView, SystemRenderingSettings, SystemStartupWorkspaceSettings,
 };
 pub use system::{
     AvailableTerminalShells, GitCredentials, GitDetectResult, GitHubAccount,

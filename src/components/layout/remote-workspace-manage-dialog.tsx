@@ -22,9 +22,11 @@ import { useTranslations } from "next-intl"
 import {
   createRemoteWorkspaceConnection,
   deleteRemoteWorkspaceConnection,
+  getStartupWorkspaceSettings,
   listRemoteWorkspaceConnections,
   reorderRemoteWorkspaceConnections,
   updateRemoteWorkspaceConnection,
+  updateStartupWorkspaceSettings,
 } from "@/lib/remote-workspace"
 import { toErrorMessage } from "@/lib/app-error"
 import type {
@@ -60,6 +62,7 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable"
+import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 
 const LEFT_MIN_WIDTH = 260
@@ -180,6 +183,14 @@ export function RemoteWorkspaceManageDialog({
   const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null)
   const [reordering, setReordering] = useState(false)
   const [headersOpen, setHeadersOpen] = useState(false)
+  // The connection a launch opens (Settings › System), `undefined` until read.
+  // One value for the whole list, not part of the draft: it applies the moment
+  // it is switched, and switching it on for one connection takes it from any
+  // other.
+  const [startupConnectionId, setStartupConnectionId] = useState<
+    number | null | undefined
+  >(undefined)
+  const [savingStartup, setSavingStartup] = useState(false)
   const pendingOrderRef = useRef<number[] | null>(null)
   const panelContainerRef = useRef<HTMLDivElement | null>(null)
   const [panelContainerWidth, setPanelContainerWidth] = useState(0)
@@ -216,6 +227,23 @@ export function RemoteWorkspaceManageDialog({
       void refresh()
     }
   }, [open, refresh])
+
+  // Kept apart from `refresh`: a preference that fails to load only costs the
+  // switch, never the connection list.
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    getStartupWorkspaceSettings()
+      .then((settings) => {
+        if (!cancelled) setStartupConnectionId(settings.remote_connection_id)
+      })
+      .catch((err) => {
+        console.error("[RemoteWorkspace] load startup workspace failed:", err)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open])
 
   useEffect(() => {
     const container = panelContainerRef.current
@@ -398,6 +426,28 @@ export function RemoteWorkspaceManageDialog({
     }
   }, [draft, onChanged, t])
 
+  const handleStartupChange = useCallback(
+    async (connectionId: number, enabled: boolean) => {
+      const prev = startupConnectionId
+      const next = enabled ? connectionId : null
+      setStartupConnectionId(next)
+      setSavingStartup(true)
+      setFormError(null)
+      try {
+        const result = await updateStartupWorkspaceSettings({
+          remote_connection_id: next,
+        })
+        setStartupConnectionId(result.remote_connection_id)
+      } catch (err) {
+        setStartupConnectionId(prev)
+        setFormError(`${t("startupSaveFailed")}: ${toErrorMessage(err)}`)
+      } finally {
+        setSavingStartup(false)
+      }
+    },
+    [startupConnectionId, t]
+  )
+
   const handleDelete = useCallback(async () => {
     if (deleteTargetId === null) return
     const target = deleteTargetId
@@ -412,6 +462,9 @@ export function RemoteWorkspaceManageDialog({
         )
         return next
       })
+      // The backend reads a deleted startup connection as the local
+      // workspace; mirror that instead of holding on to a dead id.
+      setStartupConnectionId((current) => (current === target ? null : current))
       onChanged()
       setDeleteTargetId(null)
     } catch (err) {
@@ -655,6 +708,33 @@ export function RemoteWorkspaceManageDialog({
                         </Button>
                       </CollapsibleContent>
                     </Collapsible>
+                    {/* Saved connections only: a draft has no id a launch
+                        could open. Applies on its own — not with Save — so it
+                        sits apart from the fields Save sends. */}
+                    {draft.id !== null && startupConnectionId !== undefined ? (
+                      <div className="flex items-start justify-between gap-3 border-t pt-4">
+                        <div className="min-w-0 space-y-1">
+                          <Label
+                            htmlFor="remote-workspace-open-at-startup"
+                            className="text-xs"
+                          >
+                            {t("openAtStartup")}
+                          </Label>
+                          <p className="text-2xs text-muted-foreground">
+                            {t("openAtStartupDescription")}
+                          </p>
+                        </div>
+                        <Switch
+                          id="remote-workspace-open-at-startup"
+                          checked={startupConnectionId === draft.id}
+                          disabled={savingStartup}
+                          onCheckedChange={(checked) => {
+                            if (draft.id === null) return
+                            void handleStartupChange(draft.id, checked)
+                          }}
+                        />
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="space-y-3 border-t px-4 py-3">

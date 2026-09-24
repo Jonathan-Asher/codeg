@@ -6,6 +6,7 @@ import {
   FolderOpenDot,
   GamepadDirectional,
   Globe,
+  Laptop,
   LayoutTemplate,
   ListTodo,
   Map as MapIcon,
@@ -39,6 +40,8 @@ import { toErrorMessage } from "@/lib/app-error"
 import { BLANK_PAGE_URL } from "@/lib/browser/browser-url"
 import { useBrowserCapabilities } from "@/lib/browser/use-browser-capabilities"
 import { openPetWindow } from "@/lib/pet/api"
+import { isRemoteDesktopWindow } from "@/lib/platform"
+import { showLocalWorkspace } from "@/lib/remote-workspace"
 import { CloneDialog } from "./clone-dialog"
 import { RemoteWorkspaceManageDialog } from "./remote-workspace-manage-dialog"
 import { WorkspaceFolderDialog } from "./workspace-folder-dialog"
@@ -53,7 +56,8 @@ import { WorkspaceFolderDialog } from "./workspace-folder-dialog"
  * disappear with the sidebar collapsed — or, for the file strip, whenever no
  * file tab is open. The status bar never unmounts, so this menu is the one
  * always-on path to all of them. Items are grouped by what they act on rather
- * than by where they used to live: workspace (open/clone/boot/remote),
+ * than by where they used to live: workspace (open/clone/boot/remote, plus —
+ * in a remote workspace window — the way back to the local one),
  * navigation (every full-page workbench route), and then the two window-level
  * extras — a browser tab and the desktop pet. Search and the
  * per-folder session actions (manage / import) are the deliberate omissions —
@@ -95,6 +99,18 @@ export function QuickActionsDropdown() {
     refresh: refreshRemote,
     open: handleOpenRemote,
   } = useRemoteWorkspaceConnections()
+
+  // A remote workspace window's way back to this machine's own workspace —
+  // the only visible one when a launch opened the remote workspace and kept
+  // the local window hidden (the tray and the dock are the others).
+  const remoteWindow = isRemoteDesktopWindow()
+  const handleShowLocal = useCallback(() => {
+    showLocalWorkspace().catch((err) => {
+      toast.error(tRemote("showLocalFailed"), {
+        description: toErrorMessage(err),
+      })
+    })
+  }, [tRemote])
 
   const handleProjectBoot = useCallback(() => {
     openProjectBootWindow().catch((err) => {
@@ -166,6 +182,12 @@ export function QuickActionsDropdown() {
             <Rocket />
             {tFolderDropdown("projectBoot")}
           </DropdownMenuItem>
+          {remoteWindow && (
+            <DropdownMenuItem onSelect={handleShowLocal}>
+              <Laptop />
+              {tRemote("localWorkspace")}
+            </DropdownMenuItem>
+          )}
           {desktop && (
             <DropdownMenuSub
               onOpenChange={(open) => open && void refreshRemote()}

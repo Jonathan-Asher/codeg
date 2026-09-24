@@ -2,6 +2,7 @@ import { getShellTransport } from "@/lib/transport"
 import type {
   RemoteWorkspaceConnection,
   RemoteWorkspaceConnectionInput,
+  SystemStartupWorkspaceSettings,
 } from "@/lib/types"
 
 export async function listRemoteWorkspaceConnections(): Promise<
@@ -56,4 +57,32 @@ export async function reorderRemoteWorkspaceConnections(
 
 export async function openRemoteWorkspace(id: number): Promise<void> {
   return getShellTransport().call("open_remote_workspace", { id })
+}
+
+/**
+ * Show this machine's local workspace window, rebuilding it if it was closed.
+ * The way back from a remote workspace window once a launch opened that
+ * workspace instead of the local one.
+ */
+export async function showLocalWorkspace(): Promise<void> {
+  return getShellTransport().call("show_local_workspace")
+}
+
+/**
+ * The workspace this machine's codeg opens at launch. A preference of the
+ * local app like the connections themselves, so it goes through the shell
+ * transport too — also from a remote window, whose own transport would ask the
+ * server it is bound to.
+ */
+export async function getStartupWorkspaceSettings(): Promise<SystemStartupWorkspaceSettings> {
+  return getShellTransport().call("get_system_startup_workspace_settings")
+}
+
+/** Rejects (`not_found`) a connection id that no longer exists. */
+export async function updateStartupWorkspaceSettings(
+  settings: SystemStartupWorkspaceSettings
+): Promise<SystemStartupWorkspaceSettings> {
+  return getShellTransport().call("update_system_startup_workspace_settings", {
+    settings,
+  })
 }

@@ -3830,6 +3830,15 @@ export interface SystemAutostartSettings {
 }
 
 /**
+ * What a desktop launch opens: the local workspace (`null`) or the saved remote
+ * workspace connection with this id. The backend reads an id whose connection
+ * was deleted back as `null`, so a stale choice never reaches the UI.
+ */
+export interface SystemStartupWorkspaceSettings {
+  remote_connection_id: number | null
+}
+
+/**
  * What the main window's close button does.
  *
  * `ask` is the shipped default and exists for discoverability: codeg has always

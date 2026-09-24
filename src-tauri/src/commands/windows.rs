@@ -891,7 +891,7 @@ pub async fn open_import_sessions_window(
 /// (macOS returns early; Windows first syncs the flag from `IsIconic`, so the
 /// diff it applies is empty), and `show` preserves the maximized flag — a
 /// tray-hidden maximized workspace comes back maximized.
-fn show_and_focus_window(app: &AppHandle, label: &str) {
+pub(crate) fn show_and_focus_window(app: &AppHandle, label: &str) {
     let Some(window) = app.get_webview_window(label) else {
         return;
     };
@@ -2333,10 +2333,12 @@ fn wait_for_macos_fullscreen_space_release(window: &tauri::WebviewWindow) {
 }
 
 /// Bring the hidden / minimized main workspace window back to the
-/// foreground. Used by:
-///   * single-instance plugin (second launch)
-///   * tray icon left-click and "Show Workspace" menu item
-///   * macOS dock-icon reopen
+/// foreground. A no-op once a close destroyed it — callers that must rebuild
+/// it go through `workspace_windows::show_local_workspace_window`. Used by:
+///   * `codeg://` links and the pet panel, which focus a local conversation
+///   * tray icon left-click and "Show Workspace" menu item, the macOS dock
+///     and a second launch (all through `workspace_windows`)
+///   * the last remote workspace window closing over a hidden `main`
 #[cfg(feature = "tauri-runtime")]
 pub fn show_main_window(app: &AppHandle) {
     show_and_focus_window(app, "main");
@@ -2395,11 +2397,11 @@ fn tray_labels_for(locale: crate::models::system::AppLocale) -> TrayLabels {
     }
 }
 
-/// Install the system tray icon and its right-click menu. Left-click
-/// (Linux/Windows) and dock-style activation behaviors map to
-/// `show_main_window`. Menu wiring lives in the app-wide
-/// `on_menu_event` callback in `lib.rs` so the tray and pet menus share
-/// one dispatcher.
+/// Install the system tray icon and its right-click menu. Left-click, like
+/// the "Show Workspace" item, shows the local workspace and rebuilds it if a
+/// close destroyed it (`workspace_windows::show_local_workspace_window`).
+/// Menu wiring lives in the app-wide `on_menu_event` callback in `lib.rs` so
+/// the tray and pet menus share one dispatcher.
 #[cfg(feature = "tauri-runtime")]
 pub fn install_tray_icon(
     app: &AppHandle,
@@ -2464,7 +2466,7 @@ pub fn install_tray_icon(
                 ..
             } = event
             {
-                show_main_window(tray.app_handle());
+                crate::commands::workspace_windows::show_local_workspace_window(tray.app_handle());
             }
         })
         .build(app)?;

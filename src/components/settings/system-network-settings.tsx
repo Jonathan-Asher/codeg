@@ -22,6 +22,7 @@ import { toast } from "sonner"
 import { useAppI18n } from "@/components/i18n-provider"
 import { DataSyncSettings } from "@/components/settings/data-sync-settings"
 import { ReleaseNotes } from "@/components/settings/release-notes"
+import { StartupWorkspaceSettingsSection } from "@/components/settings/startup-workspace-settings"
 import { SettingsSection } from "@/components/shared/settings-section"
 import {
   AlertDialog,
@@ -706,6 +707,11 @@ export function SystemNetworkSettings() {
             )}
           </SettingsSection>
         )}
+
+        {/* Unlike launch at login this one stays in remote workspace windows:
+            it is a preference of the app on this machine, and it hides itself
+            off the desktop. */}
+        <StartupWorkspaceSettingsSection />
 
         <section className="rounded-xl border bg-card p-4 space-y-4">
           <div className="flex items-center gap-2">
