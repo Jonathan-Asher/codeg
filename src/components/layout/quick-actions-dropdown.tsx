@@ -101,8 +101,8 @@ export function QuickActionsDropdown() {
   } = useRemoteWorkspaceConnections()
 
   // A remote workspace window's way back to this machine's own workspace —
-  // the only visible one when a launch opened the remote workspace and kept
-  // the local window hidden (the tray and the dock are the others).
+  // the one on screen when a launch opened the remote workspace and kept the
+  // local window hidden (the tray's "Show Workspace" is the other).
   const remoteWindow = isRemoteDesktopWindow()
   const handleShowLocal = useCallback(() => {
     showLocalWorkspace().catch((err) => {

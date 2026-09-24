@@ -219,10 +219,15 @@ pub(crate) fn reopen_workspace(app: &AppHandle) {
     }
 }
 
-/// Runs once a remote workspace window is gone: shows `main` when
-/// [`main_needs_resurfacing`] finds it stranded.
-pub(crate) fn resurface_main_if_stranded(app: &AppHandle) {
-    let remaining = remote_workspace_windows(app).len();
+/// Runs once the remote workspace window `closed` is gone: shows `main` when
+/// [`main_needs_resurfacing`] finds it stranded. `closed` is left out of the
+/// count by name rather than trusting it to have left the window registry
+/// already.
+pub(crate) fn resurface_main_if_stranded(app: &AppHandle, closed: &str) {
+    let remaining = remote_workspace_windows(app)
+        .iter()
+        .filter(|(label, _)| label != closed)
+        .count();
     let main = app
         .get_webview_window("main")
         .map(|window| presence(&window));
