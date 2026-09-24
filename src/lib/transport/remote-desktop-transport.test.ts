@@ -74,17 +74,31 @@ describe("RemoteDesktopTransport connection health", () => {
     expect(seen).toEqual(["connected", "reconnecting", "connected"])
   })
 
-  it("leaves a rejected token to the window's gate instead of a state", async () => {
+  it("hands a rejected token to the window's gate, even mid-reconnect", async () => {
     const onUnauthorized = vi.fn()
     const transport = makeTransport(onUnauthorized)
     await startLink(transport)
     frame("__ready__")
+    frame("__disconnected__")
 
     frame("__unauthorized__")
-    transport.markUnauthorized()
 
-    expect(onUnauthorized).toHaveBeenCalledTimes(2)
-    expect(transport.getConnectionSnapshot()).toBe("connected")
+    expect(onUnauthorized).toHaveBeenCalledTimes(1)
+    // No longer "reconnecting": the dialog must not stack on the gate.
+    expect(transport.getConnectionSnapshot()).toBe("unauthorized")
+  })
+
+  it("treats a 401 on a call as a rejected token", async () => {
+    const onUnauthorized = vi.fn()
+    const transport = makeTransport(onUnauthorized)
+    const rejected = { code: "authentication_failed", message: "invalid" }
+    tauri.invoke.mockImplementation(async (command: string) => {
+      if (command === "remote_http_call") throw rejected
+    })
+
+    await expect(transport.call("list_folders")).rejects.toBe(rejected)
+    expect(onUnauthorized).toHaveBeenCalledTimes(1)
+    expect(transport.getConnectionSnapshot()).toBe("unauthorized")
   })
 
   it("asks the proxy to retry now on Reconnect once the link has started", async () => {

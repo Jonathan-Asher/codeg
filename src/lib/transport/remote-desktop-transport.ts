@@ -148,9 +148,9 @@ export class RemoteDesktopTransport
   private sendFailRetryTimer: ReturnType<typeof setTimeout> | null = null
   /// Link health for the global connection dialog. The Rust WS task is the
   /// judge: "connecting" until its first `__ready__`, "reconnecting" after a
-  /// `__disconnected__`, "connected" on `__ready__`. A rejected token is not
-  /// a state here — it goes to `onUnauthorized`, whose full-window screen
-  /// (`RemoteConnectionGate`) owns that case.
+  /// `__disconnected__`, "connected" on `__ready__`, "unauthorized" once the
+  /// token is rejected — a case `onUnauthorized`'s full-window screen
+  /// (`RemoteConnectionGate`) owns, so the dialog stands down for it.
   private connState: ConnectionHealth = "connecting"
   private connListeners = new Set<() => void>()
   /// A call failed because the remote was unreachable. Whatever the UI
@@ -218,7 +218,7 @@ export class RemoteDesktopTransport
       // UI in just the calling window (the rest stay live until they
       // themselves hit a 401 — per design we don't broadcast).
       if (isAuthenticationFailed(err)) {
-        this.config.onUnauthorized?.()
+        this.markUnauthorized()
       } else if (isRemoteUnreachable(err)) {
         this.missedWhileDown = true
         // A failed request only asks the WS task to check the link now: a
@@ -314,6 +314,7 @@ export class RemoteDesktopTransport
 
   markUnauthorized(): void {
     if (this.destroyed) return
+    this.setConnState("unauthorized")
     this.config.onUnauthorized?.()
   }
 
@@ -503,7 +504,7 @@ export class RemoteDesktopTransport
     if (channel === WS_UNAUTHORIZED_CHANNEL) {
       // Rust gave up after WS_RECONNECT_FAIL_THRESHOLD failures, OR the
       // remote rejected the handshake. Either way, surface as expired.
-      this.config.onUnauthorized?.()
+      this.markUnauthorized()
       return
     }
     const handlers = this.handlers.get(channel)

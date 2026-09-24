@@ -93,4 +93,9 @@ describe("connection store in a desktop window", () => {
     unsubscribe()
     expect(env.changeListeners.size).toBe(0)
   })
+
+  it("stands down for a remote window's rejected token (the gate shows it)", () => {
+    env.bind(env.makeSource("unauthorized"))
+    expect(getWebConnectionSnapshot()).toBe("connected")
+  })
 })

@@ -8,9 +8,9 @@
 //      "connected", so the dialog never renders server-side and hydration
 //      stays clean.
 //   2. Remote-workspace desktop window → its `RemoteDesktopTransport`, whose
-//      link runs through the Rust proxy. A rejected token is not reported
-//      here: that case belongs to the window's full-screen gate (see
-//      remote-connection-context.tsx), so the two never stack.
+//      link runs through the Rust proxy. A rejected token reads as
+//      "connected" here: that case belongs to the window's full-screen gate
+//      (see remote-connection-context.tsx), so the two never stack.
 //   3. Browser client → the `WebTransport`.
 //   4. Local desktop window → none: IPC has no link to lose.
 //
@@ -77,7 +77,12 @@ export function subscribeWebConnection(callback: () => void): () => void {
 }
 
 export function getWebConnectionSnapshot(): ConnectionHealth {
-  return connectionSource()?.getConnectionSnapshot() ?? CONNECTED
+  const state = connectionSource()?.getConnectionSnapshot() ?? CONNECTED
+  // A remote window's rejected token is shown by its own full-window screen
+  // (RemoteConnectionGate): the dialog stays out of the way rather than
+  // stacking a second, web-only "sign in again" prompt on top of it.
+  if (state === "unauthorized" && isRemoteDesktopMode()) return CONNECTED
+  return state
 }
 
 export function getWebConnectionServerSnapshot(): ConnectionHealth {
