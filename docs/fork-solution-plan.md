@@ -70,6 +70,12 @@ Destructive-action safety nets: **not a priority**.
   pulsing rose dot on the row's agent glyph, a rose icon badge with a tooltip (shield / question
   bubble / clipboard), and a rose bell count on folder and group headers so collapsed folders still
   signal.
+- ⑬ **Arrange the tab strip** (Jonathan, 2026-09-24). **Done:** an "Arrange tabs" button beside the
+  new-tab button — manual order (draggable, as before), group by work folder (a colored label per
+  folder plus a color stripe on each tab; uncolored folders get a stable auto color), or sort by
+  status (needs you → awaiting your reply → running → other, each band labeled). Display-only:
+  the manual order and its persistence are untouched, and dragging is off while a derived layout is
+  shown. Per-device preference (`workspace:tab-arrange-mode`); applies to split strips too.
 
 ---
 
