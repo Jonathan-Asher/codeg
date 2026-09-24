@@ -89,11 +89,16 @@ import {
   NO_MEASURED_ROWS,
   resolveFindCursor,
   totalMatches,
+  transcriptOwnsKeystroke,
   useFindHighlights,
   type FindCursor,
   type FindRow,
   type MeasuredRows,
 } from "@/components/message/find-in-chat"
+import { useOptionalWorkspaceView } from "@/contexts/workspace-context"
+import { useOptionalWorkbenchRoute } from "@/contexts/workbench-route-context"
+import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
+import { matchShortcutEvent } from "@/lib/keyboard-shortcuts"
 import { extractSessionFilesGrouped } from "@/lib/session-files"
 import { useModelLabels } from "@/hooks/use-model-labels"
 import { usePageHandoffName } from "@/lib/browser/use-page-handoff-name"
@@ -1505,7 +1510,8 @@ export function MessageListView({
   // Positioning box for the text-selection bubble. It is the transcript's outer
   // (non-scrolling) frame, so the bubble is clipped to the message area and
   // never overlaps the composer or the tab strip. Find in chat searches the
-  // rows under it.
+  // rows under it and marks it `data-transcript` (see
+  // `transcriptOwnsKeystroke`).
   const selectionBoxRef = useRef<HTMLDivElement | null>(null)
 
   // Cheap user-message tally for the collapsed chip — counts user turns without
@@ -1567,7 +1573,7 @@ export function MessageListView({
   }, [showMessageNav, navExpanded, timelineTurns, threadItems])
 
   // --- Find in chat -----------------------------------------------------------
-  // ⌘F / Ctrl+F opens a find bar over the transcript.
+  // ⌘F / Ctrl+F (`find_in_conversation`) opens a find bar over the transcript.
   // It searches the message prose of the LOADED window only — the navigator's
   // accepted degradation; paging in older history extends what's findable.
   // The counter, stepping and highlights share one source: a mounted row's
@@ -1675,30 +1681,46 @@ export function MessageListView({
     }
   }, [activeFindKey, activeFindThreadIndex])
 
-  // Scoped to the active transcript so background tabs never steal the
-  // shortcut. Declines inside terminal regions, where ⌘F may belong to the
-  // multiplexer (same precedent as the tab-switch chord decline in
-  // workspace-chrome-controller).
+  // Who owns the chord. The built-in browser binds the same ⌘F on its own view
+  // (find in page) and the file column has finders of its own, so it is the
+  // conversation's only while the conversation column is the active pane —
+  // the pane the tab chords route to (see `workspace-chrome-controller`) — and
+  // there only for the transcript the keyboard is in. Surfaces outside the
+  // workspace columns (canvas cards, windows with no workspace) skip the pane
+  // half.
+  const { shortcuts } = useShortcutSettings()
+  const findShortcut = shortcuts.find_in_conversation
+  const workspaceView = useOptionalWorkspaceView()
+  const workbenchRoute = useOptionalWorkbenchRoute()
+  const filesPaneHasKeyboard =
+    workbenchRoute?.isConversations !== false &&
+    workspaceView?.mode === "fusion" &&
+    (workspaceView.activePane === "files" || workspaceView.filesMaximized)
+
+  // Scoped to the active transcript so background tabs never take the chord.
   useEffect(() => {
     if (!isActive) return
     const onKeyDown = (e: KeyboardEvent) => {
-      if (findOpen && e.key === "Escape") {
-        e.preventDefault()
+      // Claimed by a handler nearer the focus — the browser view's own ⌘F,
+      // for one: React dispatches at the document before this listener runs.
+      if (e.defaultPrevented) return
+      const closing = findOpen && e.key === "Escape"
+      if (!closing && !(findShortcut && matchShortcutEvent(e, findShortcut))) {
+        return
+      }
+      if (filesPaneHasKeyboard) return
+      if (!transcriptOwnsKeystroke(e.target, selectionBoxRef.current)) return
+      e.preventDefault()
+      if (closing) {
         closeFind()
         return
       }
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "f") return
-      const target = e.target as Element | null
-      if (target && target.closest('[data-terminal-panel-region="true"]')) {
-        return
-      }
-      e.preventDefault()
       setFindOpen(true)
       setFindFocusToken((n) => n + 1)
     }
     document.addEventListener("keydown", onKeyDown)
     return () => document.removeEventListener("keydown", onKeyDown)
-  }, [isActive, findOpen, closeFind])
+  }, [isActive, findOpen, findShortcut, filesPaneHasKeyboard, closeFind])
 
   const hasRenderableContent = threadItems.length > 0 || Boolean(liveMessage)
 
@@ -1782,6 +1804,7 @@ export function MessageListView({
       <div
         ref={selectionBoxRef}
         className="relative flex h-full min-h-0 flex-col"
+        data-transcript=""
       >
         <MessageThread
           className="flex-1 min-h-0"

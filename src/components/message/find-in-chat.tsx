@@ -730,6 +730,41 @@ export function useFindHighlights(
   useEffect(() => () => publishHighlights(owner, null), [owner])
 }
 
+// ── Keyboard ownership ───────────────────────────────────────────────────────
+
+const TRANSCRIPT_FRAME = "[data-transcript]"
+
+/**
+ * Whether a keystroke aimed at `target` — the find shortcut, or the Escape that
+ * closes the bar — belongs to the transcript whose frame is `frame`. It does
+ * not while a full-page route or the maximized file column covers the
+ * transcript (`inert`), inside a terminal (the chord may be the multiplexer's,
+ * the same precedent as the tab-switch chords in `workspace-chrome-controller`),
+ * inside a dialog or drawer the transcript is not part of (the command palette,
+ * the side-panel browser), or when another transcript is nearer the focus
+ * (canvas cards, side-by-side groups). Focus on nothing in particular leaves it
+ * to the caller's notion of the active transcript.
+ */
+export function transcriptOwnsKeystroke(
+  target: EventTarget | null,
+  frame: Element | null
+): boolean {
+  if (!frame || frame.closest("[inert]")) return false
+  if (!(target instanceof Element)) return true
+  if (target.closest('[data-terminal-panel-region="true"]')) return false
+  const dialog = target.closest('[role="dialog"], [role="alertdialog"]')
+  if (dialog && !dialog.contains(frame)) return false
+  const body = target.ownerDocument.body
+  for (let el: Element | null = target; el && el !== body; ) {
+    if (el.contains(frame)) return true
+    if (el.matches(TRANSCRIPT_FRAME) || el.querySelector(TRANSCRIPT_FRAME)) {
+      return false
+    }
+    el = el.parentElement
+  }
+  return true
+}
+
 // ── Find bar ─────────────────────────────────────────────────────────────────
 
 interface FindInChatBarProps {

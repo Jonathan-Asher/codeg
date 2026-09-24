@@ -409,6 +409,10 @@
         "title": "検索を開く",
         "description": "会話検索パネルを表示または非表示にします"
       },
+      "find_in_conversation": {
+        "title": "会話内を検索",
+        "description": "開いている会話のメッセージ内のテキストを検索します"
+      },
       "toggle_sidebar": {
         "title": "左サイドバーを切り替え",
         "description": "会話一覧サイドバーを表示または非表示にします"

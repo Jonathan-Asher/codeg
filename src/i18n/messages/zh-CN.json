@@ -409,6 +409,10 @@
         "title": "打开搜索",
         "description": "打开或关闭会话搜索面板"
       },
+      "find_in_conversation": {
+        "title": "在会话中查找",
+        "description": "在当前会话的消息中查找文本"
+      },
       "toggle_sidebar": {
         "title": "切换左侧边栏",
         "description": "显示或隐藏会话列表侧边栏"

@@ -19,6 +19,7 @@ import {
   mergeMeasuredRows,
   resolveFindCursor,
   totalMatches,
+  transcriptOwnsKeystroke,
   useFindHighlights,
   type FindRow,
   type MeasuredRows,
@@ -324,6 +325,46 @@ describe("mergeMeasuredRows / measuredCount", () => {
     expect(
       measuredCount(measured, "other", 0, { ...item, group: groupA })
     ).toBeUndefined()
+  })
+})
+
+describe("transcriptOwnsKeystroke", () => {
+  it("belongs to the transcript the keyboard is in", () => {
+    el(`
+      <div id="shell-a">
+        <div data-transcript="" id="frame-a"><button id="in-a"></button></div>
+        <textarea id="composer-a"></textarea>
+      </div>
+      <div id="shell-b">
+        <div data-transcript="" id="frame-b"></div>
+        <textarea id="composer-b"></textarea>
+      </div>
+      <div data-terminal-panel-region="true"><textarea id="term"></textarea></div>
+      <div role="dialog"><input id="palette" /></div>
+      <div role="dialog">
+        <div data-transcript="" id="frame-c"></div>
+        <input id="in-c" />
+      </div>
+    `)
+    const byId = (id: string) => document.getElementById(id)
+    const frameA = byId("frame-a")
+
+    expect(transcriptOwnsKeystroke(byId("in-a"), frameA)).toBe(true)
+    expect(transcriptOwnsKeystroke(byId("composer-a"), frameA)).toBe(true)
+    expect(transcriptOwnsKeystroke(document.body, frameA)).toBe(true)
+    expect(transcriptOwnsKeystroke(null, frameA)).toBe(true)
+
+    expect(transcriptOwnsKeystroke(byId("composer-b"), frameA)).toBe(false)
+    expect(transcriptOwnsKeystroke(byId("term"), frameA)).toBe(false)
+    expect(transcriptOwnsKeystroke(byId("palette"), frameA)).toBe(false)
+    expect(transcriptOwnsKeystroke(byId("in-c"), byId("frame-c"))).toBe(true)
+  })
+
+  it("declines while the transcript is covered", () => {
+    el(`<div inert=""><div data-transcript="" id="frame"></div></div>`)
+    expect(
+      transcriptOwnsKeystroke(document.body, document.getElementById("frame"))
+    ).toBe(false)
   })
 })
 

@@ -409,6 +409,10 @@
         "title": "Abrir busca",
         "description": "Mostra ou oculta o painel de busca de conversas"
       },
+      "find_in_conversation": {
+        "title": "Localizar na conversa",
+        "description": "Localiza texto nas mensagens da conversa aberta"
+      },
       "toggle_sidebar": {
         "title": "Alternar barra lateral esquerda",
         "description": "Mostra ou oculta a barra lateral da lista de conversas"
