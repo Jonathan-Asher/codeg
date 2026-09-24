@@ -224,8 +224,10 @@ mod tauri_app {
                 // Closing the focused workspace window must not take other
                 // workspace windows down with it: with remote-workspace
                 // windows alive, a close destroys ONLY `main` — the app (and
-                // the feed those windows render) keeps running, and a dock
-                // click recreates the window. Only when no other workspace
+                // the feed those windows render) keeps running, and the
+                // tray's "Show Workspace", a remote window's "Local
+                // workspace" action, or a dock click once no remote window is
+                // left recreates the window. Only when no other workspace
                 // window remains does close fold into the app exit it has
                 // always been.
                 if other_workspace_windows_open(&app) {
@@ -1514,13 +1516,13 @@ mod tauri_app {
                         //     the preference cannot apply. Letting only `main`
                         //     close would orphan the desktop pet and other
                         //     aux windows in a process with no workspace and
-                        //     no way to bring it back — `pet` runs with
-                        //     `skip_taskbar(true)`, and the single-instance
-                        //     callback's `show_main_window` is a no-op once
-                        //     main is destroyed. So the choice folds to Exit,
-                        //     rather than exiting right here: folding keeps
-                        //     the running-terminal confirmation below on the
-                        //     path for this platform too.
+                        //     nothing on screen to bring it back — `pet` runs
+                        //     with `skip_taskbar(true)`, and only launching
+                        //     codeg again would rebuild the window. So the
+                        //     choice folds to Exit, rather than exiting right
+                        //     here: folding keeps the running-terminal
+                        //     confirmation below on the path for this
+                        //     platform too.
                         //
                         // ExitRequested itself reaches this branch with
                         // APP_QUITTING already set — that's the only path
