@@ -3470,7 +3470,8 @@
         "findPrev": "Previous match",
         "findNext": "Next match",
         "findClose": "Close find",
-        "retry": "Retry"
+        "retry": "Retry",
+        "retried": "Reintentado"
       },
       "liveTurnStats": {
         "thinking": "Pensando...",

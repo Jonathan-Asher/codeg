@@ -66,6 +66,7 @@ import {
   ListTodo,
 } from "lucide-react"
 import { useCreateTaskFromMessage } from "./use-create-task-from-message"
+import { isRetryNudge } from "@/lib/retry-nudge"
 import { Button } from "@/components/ui/button"
 import { useTranslations } from "next-intl"
 import {
@@ -116,9 +117,10 @@ interface MessageListViewProps {
   hideEmptyState?: boolean
   onReload?: () => void
   onNewSession?: () => void
-  /** Re-send the text of a trailing user turn that got no response. Omitted
-   *  on read-only surfaces (sub-agent dialogs, task transcripts). */
-  onRetryTurn?: (text: string) => void
+  /** Ask the agent to answer a trailing user turn that got no response —
+   *  without re-sending that message (see `lib/retry-nudge`). Omitted on
+   *  read-only surfaces (sub-agent dialogs, task transcripts). */
+  onRetryTurn?: () => void
   /**
    * Renders the per-conversation message navigator rail. Enabled in the main
    * conversation view; disabled in compact embeds (e.g. the sub-agent dialog).
@@ -1495,10 +1497,14 @@ export function MessageListView({
               ? userTurnHeader(item.group)
               : null
           const isFindHit = findOpen && activeFindHit?.key === item.key
+          // A Retry instruction the chat sent on the user's behalf: shown as a
+          // slim marker, not as a second user message (see `lib/retry-nudge`).
+          const isRetryMarker =
+            item.group.role === "user" &&
+            isRetryNudge(extractFindableText(item))
           // Retry affordance: a trailing user turn that got NO assistant
-          // response (send failed, agent died, connection dropped) — offered
-          // again once the connection is not mid-stream. The turn's text is
-          // exactly the findable prose (text parts).
+          // response (agent died, turn cut off, connection dropped) — offered
+          // again once the connection is not mid-stream.
           const canRetry =
             onRetryTurn != null &&
             item.group.role === "user" &&
@@ -1524,26 +1530,40 @@ export function MessageListView({
                   <span aria-hidden="true" className="h-px flex-1 bg-border" />
                 </div>
               ) : null}
-              <HistoricalMessageGroup
-                group={item.group}
-                dimmed={item.phase === "optimistic"}
-                showStats={item.showStats}
-                previousUserIndex={item.previousUserIndex}
-                isResponseComplete={item.isResponseComplete}
-                sourceTurns={item.sourceTurns}
-                currentRound={item.isLastAssistantRun && fold.armed}
-                roundOpen={fold.roundOpen}
-                onRoundOpenChange={handleRoundOpenChange}
-                foldEpoch={fold.epoch}
-                onForkFromTurn={onForkFromTurn}
-                forkDisabled={forkBusy}
-                isThreadTail={item.isThreadTail}
-              />
+              {isRetryMarker ? (
+                <div
+                  data-retry-marker
+                  className="flex items-center gap-2 px-1 py-1"
+                >
+                  <span aria-hidden="true" className="h-px flex-1 bg-border" />
+                  <span className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[0.625rem] font-medium leading-none text-muted-foreground">
+                    <RotateCcw className="h-2.5 w-2.5" aria-hidden />
+                    {t("retried")}
+                  </span>
+                  <span aria-hidden="true" className="h-px flex-1 bg-border" />
+                </div>
+              ) : (
+                <HistoricalMessageGroup
+                  group={item.group}
+                  dimmed={item.phase === "optimistic"}
+                  showStats={item.showStats}
+                  previousUserIndex={item.previousUserIndex}
+                  isResponseComplete={item.isResponseComplete}
+                  sourceTurns={item.sourceTurns}
+                  currentRound={item.isLastAssistantRun && fold.armed}
+                  roundOpen={fold.roundOpen}
+                  onRoundOpenChange={handleRoundOpenChange}
+                  foldEpoch={fold.epoch}
+                  onForkFromTurn={onForkFromTurn}
+                  forkDisabled={forkBusy}
+                  isThreadTail={item.isThreadTail}
+                />
+              )}
               {canRetry && (
                 <div className="flex justify-end pe-1 pt-1">
                   <button
                     type="button"
-                    onClick={() => onRetryTurn(extractFindableText(item))}
+                    onClick={() => onRetryTurn()}
                     title={t("retry")}
                     aria-label={t("retry")}
                     className="flex items-center gap-1 rounded-full border border-border bg-background/90 px-2 py-[0.125rem] text-[0.6875rem] text-muted-foreground shadow-sm transition-colors hover:bg-muted/90 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

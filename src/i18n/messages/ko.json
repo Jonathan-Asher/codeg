@@ -3470,7 +3470,8 @@
         "findPrev": "Previous match",
         "findNext": "Next match",
         "findClose": "Close find",
-        "retry": "Retry"
+        "retry": "Retry",
+        "retried": "재시도함"
       },
       "liveTurnStats": {
         "thinking": "생각 중...",

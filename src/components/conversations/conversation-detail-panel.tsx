@@ -106,6 +106,7 @@ import {
 import { useShallow } from "zustand/react/shallow"
 import { useConversationDetail } from "@/hooks/use-conversation-detail"
 import { useWakeResync } from "@/hooks/use-wake-resync"
+import { RETRY_NUDGE_TEXT } from "@/lib/retry-nudge"
 import {
   buildSteerPayload,
   extractUserImagesFromDraft,
@@ -2063,9 +2064,14 @@ const ConversationTabView = memo(function ConversationTabView({
         }
         onRetryTurn={
           composerAvailable
-            ? (text) => {
+            ? () => {
+                // Answer the message the agent already has — never re-send
+                // it (that duplicated it in the session and on screen).
                 lifecycleSend(
-                  { blocks: [{ type: "text", text }], displayText: text },
+                  {
+                    blocks: [{ type: "text", text: RETRY_NUDGE_TEXT }],
+                    displayText: RETRY_NUDGE_TEXT,
+                  },
                   null
                 )
               }
