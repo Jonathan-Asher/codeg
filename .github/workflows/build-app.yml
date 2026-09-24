@@ -2,7 +2,9 @@ name: build-app
 on:
   workflow_dispatch:
   push:
-    branches: [fork/solution-plan]
+    # feat/** branches get the checks only (see the build job's `if`), so
+    # work in progress is verified on the same machines before it merges.
+    branches: [fork/solution-plan, "feat/**"]
     # A docs-only push must not cost a build.
     paths-ignore:
       - "docs/**"
@@ -96,6 +98,7 @@ jobs:
           cargo check --no-default-features --bin codeg-mcp
 
   build:
+    if: github.ref == 'refs/heads/fork/solution-plan' || github.event_name == 'workflow_dispatch'
     runs-on: ${{ fromJSON(vars.BUILD_RUNS_ON || '"macos-14"') }}
     timeout-minutes: 90
     steps:
