@@ -246,6 +246,13 @@ vi.mock("@/components/layout/clone-dialog", () => ({ CloneDialog: () => null }))
 // The sub-session realtime sync hook reaches @/lib/platform (transport), which
 // these tests don't load; stub it to a no-op — it has its own unit tests.
 vi.mock("@/hooks/use-subsession-sync", () => ({ useSubsessionSync: () => {} }))
+// The pinned-drag suite asserts what a drop persists; every other api call
+// stays real.
+const pinReorder = vi.hoisted(() => vi.fn(() => Promise.resolve()))
+vi.mock("@/lib/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api")>()),
+  reorderConversationPins: pinReorder,
+}))
 vi.mock("@/components/shared/directory-browser-dialog", () => ({
   DirectoryBrowserDialog: () => null,
 }))
@@ -455,6 +462,107 @@ describe("SidebarConversationList — Pinned section (migration semantics)", () 
     const text = document.body.textContent ?? ""
     expect(text).not.toContain("Pinned")
     expect(text).toContain("Folders")
+  })
+})
+
+describe("SidebarConversationList — pinned drag gesture", () => {
+  // Most recently pinned first, so the section starts out as 11, 12, 13.
+  const PINNED = [11, 12, 13]
+  let rectSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    localStorage.clear()
+    pinReorder.mockClear()
+    store.activeTabId = null
+    store.tabSpec = []
+    const folders = [folder(1, "F1")]
+    useAppWorkspaceStore.setState({
+      folders,
+      allFolders: folders,
+      conversations: PINNED.map((id, i) =>
+        conv(id, 1, { pinned_at: new Date(FIXED - i * MINUTE).toISOString() })
+      ),
+      // The real action, so the drop's local re-sort shows up on screen.
+      updateConversationLocal:
+        useAppWorkspaceStore.getInitialState().updateConversationLocal,
+    })
+    // Pinned rows stacked 32px apart from y=0 in their starting order; any
+    // other element gets a tall box clear of them.
+    rectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        const index = PINNED.indexOf(
+          Number(this.getAttribute("data-pinned-row-id"))
+        )
+        const top = index === -1 ? 0 : index * 32
+        const height = index === -1 ? 600 : 32
+        return {
+          top,
+          bottom: top + height,
+          left: 0,
+          right: 200,
+          width: 200,
+          height,
+          x: 0,
+          y: top,
+          toJSON: () => ({}),
+        } as DOMRect
+      })
+  })
+
+  afterEach(() => {
+    // Drain the one-shot click swallower a finished drag leaves behind.
+    window.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    rectSpy.mockRestore()
+  })
+
+  const pinnedOrder = () =>
+    Array.from(document.querySelectorAll("[data-pinned-row-id]"), (row) =>
+      Number(row.getAttribute("data-pinned-row-id"))
+    )
+
+  it("moves the row, shows the drop line, and persists the new order", async () => {
+    render(tree())
+    expect(pinnedOrder()).toEqual([11, 12, 13])
+    const rowBody = document.querySelector(
+      '[data-pinned-row-id="11"] [data-conversation-id="11"]'
+    )
+    if (!rowBody) throw new Error("pinned row 11 not found")
+
+    act(() => firePointer(rowBody, "pointerdown", { clientY: 16 }))
+    act(() => firePointer(window, "pointermove", { clientY: 90 }))
+    // Below every row's midpoint: one line, under the last row.
+    const lines = document.querySelectorAll("[data-pin-drop-line]")
+    expect(lines).toHaveLength(1)
+    expect(lines[0].closest("[data-pinned-row-id]")).toBe(
+      document.querySelector('[data-pinned-row-id="13"]')
+    )
+
+    await act(async () => {
+      firePointer(window, "pointerup", { clientY: 90 })
+    })
+    expect(pinReorder).toHaveBeenCalledTimes(1)
+    expect(pinReorder).toHaveBeenCalledWith([12, 13, 11])
+    // Applied locally at once, not after a round trip.
+    expect(pinnedOrder()).toEqual([12, 13, 11])
+    expect(document.querySelector("[data-pin-drop-line]")).toBeNull()
+  })
+
+  it("leaves the order alone when the press never becomes a drag", async () => {
+    render(tree())
+    const rowBody = document.querySelector(
+      '[data-pinned-row-id="11"] [data-conversation-id="11"]'
+    )
+    if (!rowBody) throw new Error("pinned row 11 not found")
+
+    act(() => firePointer(rowBody, "pointerdown", { clientY: 16 }))
+    act(() => firePointer(window, "pointermove", { clientY: 18 })) // 2px < 4px
+    expect(document.querySelector("[data-pin-drop-line]")).toBeNull()
+    await act(async () => {
+      firePointer(window, "pointerup", { clientY: 18 })
+    })
+    expect(pinReorder).not.toHaveBeenCalled()
+    expect(pinnedOrder()).toEqual([11, 12, 13])
   })
 })
 
