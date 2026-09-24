@@ -2253,7 +2253,7 @@ async fn connect_events_ws(
 /// is what browser WebSocket clients use because browsers cannot set arbitrary
 /// headers on WS handshakes; we follow the same convention here so both
 /// transports share one server-side codepath.
-pub(crate) async fn connect_with_subprotocol_auth(
+async fn connect_with_subprotocol_auth(
     ws_url: &str,
     protocol: &str,
     token: &str,
