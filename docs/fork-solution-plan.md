@@ -48,6 +48,15 @@ Destructive-action safety nets: **not a priority**.
 - ⑩ **⌘⇧W does not close the window** (2026-09-24 report; ⑤ above is the older report that it closed
   the *wrong* window). Trace the shortcut from the keybinding registry to the Tauri window close and
   fix whichever half is broken; scope it to the focused window.
+- ⑪ **OS notifications don't say which session they are about** (2026-09-24). Root cause, in
+  `acp-connections-context.tsx`: every banner (turn finished, permission, question, error, background
+  task) is titled `<folder> - Codeg`, where `<folder>` is the window's ACTIVE folder — not the folder of
+  the session that raised it — and the body only names the agent ("Claude Code has finished
+  responding"). With several sessions across folders the banner is unattributable, and can even name
+  the wrong folder. Clicking it doesn't open the session either (the native notification carries no
+  action). Fix: title = the session's own title (fallback: its folder), body = folder + agent + event;
+  keep the "hide notification contents" redaction honoured, since a session title is user-authored
+  text. Stretch: click → focus that session.
 
 ---
 
