@@ -7,22 +7,29 @@ import { useTabStore } from "@/stores/tab-store"
 /**
  * Which session an OS notification is about, in words a user recognises.
  *
- * A banner used to be titled with the window's ACTIVE folder — not the folder
- * of the session that raised it — and to name only the agent, so with several
- * sessions running a "Claude Code needs permission" banner pointed at nothing
- * (and could name the wrong folder outright). The connection's context key is
- * its tab id; from the tab we reach the persisted conversation (its title, its
- * own folder), falling back to the tab's label for a draft that has no row yet.
+ * A notification used to be titled with the window's ACTIVE folder — not the
+ * folder of the session that raised it — and to name only the agent, so with
+ * several sessions running an "<agent> needs permission" notification pointed
+ * at none of them in particular, and could name the wrong folder outright.
+ *
+ * The connection's context key is its tab id. From the tab we reach the
+ * persisted conversation (its title, its own folder), falling back to the
+ * tab's label for a draft that has no row yet. A key no tab owns — a canvas
+ * card, a delegated sub-agent's own connection — keeps the old active-folder
+ * title.
  */
-export function describeNotificationSession(
+function describeNotificationSession(
   contextKey: string,
-  activeFolderName?: string | null
+  activeFolderName: string | null | undefined
 ): { sessionTitle: string | null; folderName: string | null } {
   const tab = useTabStore.getState().tabs.find((t) => t.id === contextKey)
-  const workspace = useAppWorkspaceStore.getState()
+  if (!tab) return { sessionTitle: null, folderName: activeFolderName || null }
 
-  let conversationId = tab?.conversationId ?? null
-  if (conversationId == null && tab?.runtimeConversationId != null) {
+  const workspace = useAppWorkspaceStore.getState()
+  // The runtime session learns the row id on the first send, which can be
+  // before the draft's tab is bound to it.
+  let conversationId = tab.conversationId
+  if (conversationId == null && tab.runtimeConversationId != null) {
     conversationId =
       useConversationRuntimeStore
         .getState()
@@ -34,30 +41,30 @@ export function describeNotificationSession(
       ? workspace.conversations.find((c) => c.id === conversationId)
       : undefined
 
-  const folderId = conversation?.folder_id ?? tab?.folderId ?? null
-  const folder =
-    folderId != null
-      ? workspace.folders.find((f) => f.id === folderId)
-      : undefined
+  // `allFolders`, not `folders`: a chat-mode conversation lives in a hidden
+  // folder the sidebar's list leaves out. A chat draft has no folder at all,
+  // and then no folder is named rather than the active one.
+  const folderId = conversation?.folder_id ?? tab.folderId
+  const folder = workspace.allFolders.find((f) => f.id === folderId)
 
-  const title =
-    formatConversationTitle(conversation?.title).trim() ||
-    tab?.title?.trim() ||
-    null
   return {
-    sessionTitle: title,
-    folderName: folder?.alias || folder?.name || activeFolderName || null,
+    sessionTitle:
+      formatConversationTitle(conversation?.title).trim() ||
+      tab.title.trim() ||
+      null,
+    folderName: folder?.alias || folder?.name || null,
   }
 }
 
 /**
  * Build an event notification that says which session it is about: the
- * session's title as the banner title, its folder ahead of the message.
+ * session's title as the notification title, its folder ahead of the message.
  *
- * With "hide notification contents" on, the title falls back to the old
- * `<folder> - Codeg` form — a session title is the user's own words (often the
- * first line of their prompt), exactly what that setting exists to keep out of
- * the notification centre.
+ * With "hide notification contents" on, it reads as it always did —
+ * `<folder> - Codeg` over the message alone — except that the folder is the
+ * session's own. A session title is the user's own words (often the first
+ * line of their prompt), exactly what that setting exists to keep out of the
+ * notification centre.
  */
 export function sessionNotificationPayload(
   contextKey: string,
@@ -69,15 +76,13 @@ export function sessionNotificationPayload(
     activeFolderName
   )
   const folderTitle = folderName ? `${folderName} - Codeg` : "Codeg"
-  // The folder moves into the body only when the title no longer carries it.
-  const withFolder = (text: string) =>
-    sessionTitle && folderName ? `${folderName} · ${text}` : text
+  if (!sessionTitle) return { title: folderTitle, ...content }
   return {
-    title: sessionTitle ?? folderTitle,
+    title: sessionTitle,
     redactedTitle: folderTitle,
-    body: withFolder(content.body),
-    ...(content.redactedBody !== undefined
-      ? { redactedBody: withFolder(content.redactedBody) }
-      : {}),
+    // The title no longer names the folder, so the body does — except in the
+    // redacted form, whose title names it again.
+    body: folderName ? `${folderName} · ${content.body}` : content.body,
+    redactedBody: content.redactedBody ?? content.body,
   }
 }
