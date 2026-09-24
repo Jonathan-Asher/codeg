@@ -890,6 +890,15 @@ mod tauri_app {
                     });
                 }
 
+                // ⌘K message search: keep the full-text index current (backfill
+                // after start, then every minute for changed conversations).
+                {
+                    let db_for_index = app.state::<db::AppDatabase>().conn.clone();
+                    tauri::async_runtime::spawn(
+                        crate::db::service::message_search::run_message_indexer(db_for_index),
+                    );
+                }
+
                 // Label worktree folders registered before aliases were seeded at
                 // creation with the branch they have checked out, so the sidebar
                 // names them by branch rather than by their (long, derived)

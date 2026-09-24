@@ -556,6 +556,11 @@ async fn async_main() -> ExitCode {
         });
     }
 
+    // ⌘K message search: keep the full-text index current (mirrors lib.rs).
+    tokio::spawn(codeg_lib::db::service::message_search::run_message_indexer(
+        state.db.conn.clone(),
+    ));
+
     // Label worktree folders registered before aliases were seeded at creation
     // with the branch they have checked out (mirrors lib.rs setup). Background;
     // changed folders are broadcast, so a browser that already fetched its

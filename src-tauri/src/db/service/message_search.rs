@@ -2,10 +2,13 @@
 //! "message content" mode.
 //!
 //! Index lifecycle: a conversation's rows are written wholesale by
-//! [`index_conversation`] (one DELETE + batch INSERT), triggered at app
-//! start for every non-deleted conversation, after each completed turn
-//! (via the TurnComplete path in `commands/acp.rs`), and by the
-//! explicit reindex command `message_search_reindex`.
+//! [`index_conversation`] (one DELETE + batch INSERT). [`run_message_indexer`]
+//! — started by both the desktop app and the standalone server — backfills
+//! every conversation shortly after start, then every minute re-indexes the
+//! ones whose `updated_at` moved since their last indexing (tracked in
+//! `message_fts_state`), which covers finished turns, imports and renames
+//! without hooking any of those paths. The per-conversation
+//! `message_search_index_conversation` command remains for on-demand use.
 //!
 //! Queries run through `message_fts MATCH` with
 //! [`snippet()`](sea_query) post-processing: match terms wrapped in
@@ -80,7 +83,12 @@ pub async fn index_conversation(
             conn.get_database_backend(),
             "INSERT INTO message_fts (content, conversation_id, turn_idx, role) \
              VALUES (?, ?, ?, ?)",
-            [text.into(), conversation_id.into(), (idx as i32).into(), role.into()],
+            [
+                text.into(),
+                conversation_id.into(),
+                (idx as i32).into(),
+                role.into(),
+            ],
         ))
         .await?;
         inserted += 1;
@@ -132,7 +140,7 @@ pub async fn search_messages(
                     snippet(message_fts, 0, '[[mark]]', '[[/mark]]', '…', 14) AS snip, \
                     rank \
              FROM message_fts f \
-             JOIN conversations c ON c.id = f.conversation_id \
+             JOIN conversation c ON c.id = f.conversation_id \
              WHERE message_fts MATCH '{}' AND c.deleted_at IS NULL \
              ORDER BY rank LIMIT {}",
             sanitized.replace('\'', "''"),
@@ -201,4 +209,208 @@ pub async fn index_conversation_core(
     index_conversation(conn, conversation_id, &detail.turns)
         .await
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))
+}
+
+// ── Background indexer ─────────────────────────────────────────────────────
+
+/// Conversations indexed per pass before the loop yields.
+const INDEX_BATCH: usize = 25;
+/// Wait after start before the first pass, so indexing never competes with
+/// workspace boot (folder scan, session load, agent connect).
+const INDEX_START_DELAY: std::time::Duration = std::time::Duration::from_secs(15);
+/// Gap between passes once caught up.
+const INDEX_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+/// A conversation touched more recently than this is left for a later pass:
+/// every turn-end signal races the agent CLI flushing its transcript file, so
+/// indexing at once could record the transcript without its last reply and,
+/// with `updated_at` then unchanged, never look again.
+const SETTLE_SECS: i64 = 20;
+
+/// Index up to `batch` conversations that are new or changed since their last
+/// indexing and have settled. Returns how many were processed; a full batch
+/// means more may be waiting.
+pub async fn index_stale_conversations(
+    conn: &DatabaseConnection,
+    batch: usize,
+) -> Result<usize, DbErr> {
+    use crate::db::entities::conversation;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Statement};
+    use std::collections::HashMap;
+
+    let indexed: HashMap<i32, String> = conn
+        .query_all(Statement::from_string(
+            conn.get_database_backend(),
+            "SELECT conversation_id, indexed_updated_at FROM message_fts_state",
+        ))
+        .await?
+        .into_iter()
+        .filter_map(|row| {
+            Some((
+                row.try_get_by_index::<i32>(0).ok()?,
+                row.try_get_by_index::<String>(1).ok()?,
+            ))
+        })
+        .collect();
+
+    let settled_before = chrono::Utc::now() - chrono::Duration::seconds(SETTLE_SECS);
+    let candidates: Vec<(i32, chrono::DateTime<chrono::Utc>)> = conversation::Entity::find()
+        .select_only()
+        .column(conversation::Column::Id)
+        .column(conversation::Column::UpdatedAt)
+        .filter(conversation::Column::DeletedAt.is_null())
+        .filter(conversation::Column::UpdatedAt.lt(settled_before))
+        .order_by_desc(conversation::Column::UpdatedAt)
+        .into_tuple()
+        .all(conn)
+        .await?;
+
+    let mut done = 0;
+    for (id, updated_at) in candidates {
+        let stamp = updated_at.to_rfc3339();
+        if indexed.get(&id) == Some(&stamp) {
+            continue;
+        }
+        if let Err(err) = index_conversation_core(conn, id).await {
+            // A session file that can't be read (moved, agent uninstalled) is
+            // recorded anyway: retrying every minute would not fix it, and the
+            // next real change to the conversation retries by itself.
+            tracing::debug!("[message-search] indexing conversation {id} failed: {err}");
+        }
+        conn.execute(Statement::from_sql_and_values(
+            conn.get_database_backend(),
+            "INSERT INTO message_fts_state (conversation_id, indexed_updated_at, indexed_at) \
+             VALUES (?, ?, ?) \
+             ON CONFLICT(conversation_id) DO UPDATE SET \
+               indexed_updated_at = excluded.indexed_updated_at, \
+               indexed_at = excluded.indexed_at",
+            [
+                id.into(),
+                stamp.into(),
+                chrono::Utc::now().to_rfc3339().into(),
+            ],
+        ))
+        .await?;
+        done += 1;
+        if done >= batch {
+            break;
+        }
+    }
+    Ok(done)
+}
+
+/// Keep `message_fts` current for the lifetime of the app. See the module
+/// docs for the lifecycle.
+pub async fn run_message_indexer(conn: DatabaseConnection) {
+    tokio::time::sleep(INDEX_START_DELAY).await;
+    loop {
+        match index_stale_conversations(&conn, INDEX_BATCH).await {
+            // A full batch: more are waiting — keep going, briefly yielding.
+            Ok(n) if n >= INDEX_BATCH => {
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                continue;
+            }
+            Ok(_) => {}
+            Err(err) => tracing::warn!("[message-search] indexer pass failed: {err}"),
+        }
+        tokio::time::sleep(INDEX_INTERVAL).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::test_helpers::{fresh_in_memory_db, seed_conversation, seed_folder};
+    use crate::models::agent::AgentType;
+
+    fn turn(role: TurnRole, text: &str) -> MessageTurn {
+        serde_json::from_value(serde_json::json!({
+            "id": format!("t-{text}"),
+            "role": match role { TurnRole::User => "user", TurnRole::Assistant => "assistant", TurnRole::System => "system" },
+            "blocks": [{ "type": "text", "text": text }],
+            "timestamp": "2026-09-24T10:00:00Z",
+        }))
+        .expect("turn fixture")
+    }
+
+    #[tokio::test]
+    async fn indexed_text_is_found_and_deleted_conversations_are_not() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/fts-proj").await;
+        let a = seed_conversation(&db, folder, AgentType::ClaudeCode).await;
+        let b = seed_conversation(&db, folder, AgentType::ClaudeCode).await;
+        index_conversation(
+            &db.conn,
+            a,
+            &[
+                turn(TurnRole::User, "why does the upload retry loop race"),
+                turn(
+                    TurnRole::Assistant,
+                    "the retry loop re-enters before the lock",
+                ),
+            ],
+        )
+        .await
+        .unwrap();
+        index_conversation(
+            &db.conn,
+            b,
+            &[turn(TurnRole::User, "unrelated upload talk")],
+        )
+        .await
+        .unwrap();
+
+        let hits = search_messages(&db.conn, "retry loop", 10).await.unwrap();
+        assert_eq!(hits.len(), 2, "both turns of `a` mention the phrase");
+        assert!(hits.iter().all(|h| h.conversation_id == a));
+        assert!(hits[0].snippet.contains("[[mark]]"));
+
+        crate::db::service::conversation_service::soft_delete(&db.conn, a)
+            .await
+            .unwrap();
+        assert!(search_messages(&db.conn, "retry loop", 10)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            search_messages(&db.conn, "upload", 10).await.unwrap().len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_pass_records_each_conversation_once_until_it_changes() {
+        use crate::db::entities::conversation;
+        use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/fts-proj").await;
+        let id = seed_conversation(&db, folder, AgentType::ClaudeCode).await;
+        let backdate = |secs: i64| chrono::Utc::now() - chrono::Duration::seconds(secs);
+        let set_updated = |at: chrono::DateTime<chrono::Utc>| {
+            let conn = db.conn.clone();
+            async move {
+                let row = conversation::Entity::find_by_id(id)
+                    .one(&conn)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let mut active: conversation::ActiveModel = row.into();
+                active.updated_at = Set(at);
+                active.update(&conn).await.unwrap();
+            }
+        };
+
+        // Fresh (inside the settle window): left alone.
+        assert_eq!(index_stale_conversations(&db.conn, 25).await.unwrap(), 0);
+
+        // Settled: processed once (the session file doesn't exist here, which
+        // is recorded rather than retried), then skipped while unchanged.
+        set_updated(backdate(120)).await;
+        assert_eq!(index_stale_conversations(&db.conn, 25).await.unwrap(), 1);
+        assert_eq!(index_stale_conversations(&db.conn, 25).await.unwrap(), 0);
+
+        // A later change (a finished turn, a rename) makes it stale again.
+        set_updated(backdate(60)).await;
+        assert_eq!(index_stale_conversations(&db.conn, 25).await.unwrap(), 1);
+    }
 }
