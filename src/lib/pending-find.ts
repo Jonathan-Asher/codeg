@@ -6,14 +6,20 @@
  *
  * Module-scope singleton — set by the search dialog right before
  * `openTab`, consumed (taken) once by the MessageListView whose
- * conversationId matches. Any race (tab closed before load) simply leaves
- * the value stale for the next open of the SAME conversation, which is the
- * only consumer keyed to it.
+ * conversationId matches. Subscribable, because the target transcript may
+ * already be mounted (the hit is in a conversation that is open right now):
+ * it has to hear about a new query, not only look once when it first renders.
+ * Any race (tab closed before load) leaves the value for the next open of the
+ * SAME conversation, the only consumer keyed to it.
  */
 let pending: { conversationId: number; query: string } | null = null
+let version = 0
+const listeners = new Set<() => void>()
 
 export function setPendingFind(conversationId: number, query: string) {
   pending = { conversationId, query }
+  version += 1
+  for (const listener of listeners) listener()
 }
 
 export function takePendingFind(conversationId: number): string | null {
@@ -23,4 +29,16 @@ export function takePendingFind(conversationId: number): string | null {
     return query
   }
   return null
+}
+
+/** `useSyncExternalStore` plumbing: bumps on every `setPendingFind`. */
+export function subscribePendingFind(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+export function getPendingFindVersion(): number {
+  return version
 }

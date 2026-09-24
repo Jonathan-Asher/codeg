@@ -1,6 +1,14 @@
 "use client"
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import {
   isLiveTurnId,
   selectTimelineTurns,
@@ -87,7 +95,11 @@ import {
   FindInChatBar,
   useFindHighlights,
 } from "@/components/message/find-in-chat"
-import { takePendingFind } from "@/lib/pending-find"
+import {
+  getPendingFindVersion,
+  subscribePendingFind,
+  takePendingFind,
+} from "@/lib/pending-find"
 import { extractSessionFilesGrouped } from "@/lib/session-files"
 import { useModelLabels } from "@/hooks/use-model-labels"
 import { unescapeComposerText } from "@/lib/composer-copy-text"
@@ -1372,17 +1384,28 @@ export function MessageListView({
   const [findQuery, setFindQuery] = useState("")
   const [findHit, setFindHit] = useState(0)
 
-  // Cross-conversation search → find-in-chat handoff: a ⌘K hit that opened
-  // this conversation leaves a pending query here; consume it once the
-  // conversation id settles (virtual → real id) so the find bar opens
-  // prefilled and the matched turns paint immediately.
-  // Adjust-on-render (the React pattern for state reacting to props): the
-  // pending query is consumed exactly once per settled conversation id.
-  const [consumedPendingFor, setConsumedPendingFor] = useState<number | null>(
-    null
+  // Cross-conversation search → find-in-chat handoff: a ⌘K hit leaves a
+  // pending query for its conversation; this transcript takes it once its
+  // conversation id settles (virtual → real id) AND again whenever a new query
+  // is posted — the hit may be in a conversation that is already open, which
+  // never re-mounts. The find bar then opens prefilled and the matched turns
+  // paint immediately. Adjust-on-render (the React pattern for state reacting
+  // to props): each (conversation, posted query) pair is looked at once.
+  const pendingFindVersion = useSyncExternalStore(
+    subscribePendingFind,
+    getPendingFindVersion,
+    getPendingFindVersion
   )
-  if (conversationId > 0 && consumedPendingFor !== conversationId) {
-    setConsumedPendingFor(conversationId)
+  const [consumedPending, setConsumedPending] = useState<{
+    conversationId: number
+    version: number
+  } | null>(null)
+  if (
+    conversationId > 0 &&
+    (consumedPending?.conversationId !== conversationId ||
+      consumedPending.version !== pendingFindVersion)
+  ) {
+    setConsumedPending({ conversationId, version: pendingFindVersion })
     const pendingQuery = takePendingFind(conversationId)
     if (pendingQuery != null) {
       setFindOpen(true)
