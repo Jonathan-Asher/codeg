@@ -1400,7 +1400,7 @@ mod tauri_app {
                     && matches!(event, tauri::WindowEvent::Destroyed)
                     && !APP_QUITTING.load(Ordering::Relaxed)
                 {
-                    workspace_windows::resurface_main_if_stranded(window.app_handle());
+                    workspace_windows::resurface_main_if_stranded(window.app_handle(), &label);
                 }
 
                 if (label == "settings" || label.starts_with("remote-settings-"))
