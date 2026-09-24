@@ -204,7 +204,8 @@ pub enum ForkMode {
     /// at that reply — a tail fork still holds the message being replaced, so
     /// the edit would continue the wrong conversation — which makes a point
     /// that cannot be named an error, never a fallback. The forked row keeps
-    /// its title (it IS the conversation being edited), and the sibling that
+    /// its title (it IS the conversation being edited), locked so a title the
+    /// forked transcript carries can't replace it, and the sibling that
     /// preserves the original branch is named `<title> (before edit)`.
     Edit,
 }
