@@ -2039,6 +2039,7 @@
       "editMessageQueued": "Impossible de modifier le message tant que des messages attendent dans la file",
       "editMessageHistoryFailed": "La nouvelle branche a été créée, mais son historique ne s'est pas chargé : le message modifié n'a pas été envoyé. Réessayez avec Enregistrer et envoyer.",
       "editMessageNewConversationFailed": "Impossible d'ouvrir une nouvelle conversation pour le message modifié",
+      "editMessageReplyNotFound": "la réponse précédant ce message est introuvable dans la conversation enregistrée",
       "exportConversation": "Exporter la conversation",
       "exportImage": "Image",
       "exportMarkdown": "Markdown",

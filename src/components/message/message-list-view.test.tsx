@@ -901,22 +901,15 @@ describe("computeUserEditTargets", () => {
     expect(forkPointOf(items, 3)).toBe("a1")
   })
 
-  it("is not ready while the reply before has no parser id yet", () => {
+  it("stays ready when the reply before was never given its parser id", () => {
+    // A follow-up sent within seconds cancels the reparse that names the
+    // reply, for as long as the session is open. Unlike "fork from here",
+    // editing doesn't wait on it: the host looks the name up on save.
     const items = [user("u0"), reply("live-7-lm-1"), user("u2")]
     expect(
       computeUserEditTargets(items, false).get(items[2].key)
-    ).toMatchObject({ kind: "fork", ready: false })
-  })
-
-  it("is ready once the reparse has named that reply", () => {
-    const named: MessageTurn = {
-      ...turn("live-7-lm-1"),
-      source_turn_id: "turn-1",
-    }
-    const items = [user("u0"), reply("live-7-lm-1", [named]), user("u2")]
-    expect(
-      computeUserEditTargets(items, false).get(items[2].key)
     ).toMatchObject({ kind: "fork", ready: true })
+    expect(forkPointOf(items, 2)).toBe("live-7-lm-1")
   })
 
   it("is not ready while the reply before is still being written", () => {

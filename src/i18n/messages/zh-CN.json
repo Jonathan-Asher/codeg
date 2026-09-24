@@ -2039,6 +2039,7 @@
       "editMessageQueued": "队列中还有待发送的消息，暂不可编辑消息",
       "editMessageHistoryFailed": "新分支已创建，但其历史未能加载，编辑后的消息没有发送。请再次点击「保存并发送」",
       "editMessageNewConversationFailed": "无法为编辑后的消息新建会话",
+      "editMessageReplyNotFound": "在已保存的会话中找不到这条消息之前的回复",
       "exportConversation": "导出会话",
       "exportImage": "图片",
       "exportMarkdown": "Markdown",

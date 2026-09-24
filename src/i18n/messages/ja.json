@@ -2039,6 +2039,7 @@
       "editMessageQueued": "キューにメッセージが待機している間はメッセージを編集できません",
       "editMessageHistoryFailed": "新しい分岐は作成されましたが、履歴を読み込めなかったため、編集したメッセージは送信されていません。もう一度「保存して送信」をお試しください",
       "editMessageNewConversationFailed": "編集したメッセージ用の新規会話を開けませんでした",
+      "editMessageReplyNotFound": "このメッセージの直前の返信が保存済みの会話に見つかりませんでした",
       "exportConversation": "会話をエクスポート",
       "exportImage": "画像",
       "exportMarkdown": "Markdown",

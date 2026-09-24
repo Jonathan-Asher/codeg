@@ -2039,6 +2039,7 @@
       "editMessageQueued": "Can't edit the message while messages are waiting in the queue",
       "editMessageHistoryFailed": "The new branch was created, but its history didn't load, so the edited message wasn't sent. Try Save & send again.",
       "editMessageNewConversationFailed": "Couldn't open a new conversation for the edited message",
+      "editMessageReplyNotFound": "the reply before this message couldn't be found in the saved conversation",
       "exportConversation": "Export Conversation",
       "exportImage": "Image",
       "exportMarkdown": "Markdown",

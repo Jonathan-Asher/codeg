@@ -1,3 +1,4 @@
+import { isLiveTurnId } from "@/stores/conversation-runtime-store"
 import type {
   AgentType,
   ContentBlock,
@@ -43,9 +44,13 @@ export function supportsMessageEdit(agentType: AgentType): boolean {
 /** What the transcript asks its host to do when an edit is saved. */
 export interface UserMessageEditRequest {
   /**
-   * Parser id of the reply right before the message — where the session forks
-   * — or `null` when the message opens the conversation, in which case the
-   * edit starts a new conversation instead.
+   * Id of the reply right before the message — where the session forks — or
+   * `null` when the message opens the conversation, in which case the edit
+   * starts a new conversation instead.
+   *
+   * The parser's id where the reply has one. A reply streamed in this session
+   * may still carry only its `live-…` id — see {@link resolveEditForkTurnId},
+   * which the host runs to find the parser's id before forking.
    */
   forkFromTurnId: string | null
   /** The edited text. */
@@ -76,6 +81,96 @@ export function editableUserMessageText(turn: MessageTurn): string {
     .flatMap((block) => (block.type === "text" ? [block.text] : []))
     .join("\n")
     .trim()
+}
+
+/** Text compared as a person reads it: runs of whitespace are one space. */
+function comparableText(text: string): string {
+  return text.replace(/\s+/g, " ").trim()
+}
+
+/**
+ * The reply an edit forks at, found in a freshly parsed transcript instead of
+ * on screen — for a reply this session streamed that was never given the
+ * parser's name (see {@link resolveEditForkTurnId}).
+ *
+ * The message is found by position: `userOrdinal` is its index among the user
+ * turns on screen, which line up one for one with the user turns of a parse
+ * read from the same starting turn. Its text has to match too: if anything
+ * shifted the count — a command the transcript keeps out of its turns, a turn
+ * not written yet — the edit fails rather than forking somewhere else.
+ *
+ * The fork point is then the turn right before the message, stepping over
+ * empty ones: the LAST turn of the reply before it. Anything other than a
+ * reply there (another message, a system note) has no clean point to fork at
+ * — the rule `computeUserEditTargets` applies on screen. `null` when the
+ * message or its reply can't be found.
+ */
+export function resolveEditForkPointInTranscript(
+  turns: MessageTurn[],
+  userOrdinal: number,
+  messageText: string
+): string | null {
+  let userIndex = -1
+  let usersSeen = 0
+  for (let i = 0; i < turns.length; i++) {
+    if (turns[i].role !== "user") continue
+    if (usersSeen === userOrdinal) {
+      userIndex = i
+      break
+    }
+    usersSeen += 1
+  }
+  if (userIndex < 0) return null
+  if (
+    comparableText(editableUserMessageText(turns[userIndex])) !==
+    comparableText(messageText)
+  ) {
+    return null
+  }
+  for (let i = userIndex - 1; i >= 0; i--) {
+    if (turns[i].blocks.length === 0) continue
+    return turns[i].role === "assistant" ? turns[i].id : null
+  }
+  return null
+}
+
+/**
+ * The parser's id of the reply an edit forks at — the one the backend can
+ * resolve.
+ *
+ * A reply streamed in this session is named `live-…` until the post-turn
+ * reparse gives it the parser's name, and that reparse is cancelled when the
+ * next reply lands first: a follow-up sent within seconds leaves the reply
+ * before it unnamed for as long as the session is open (see
+ * `computeTurnMetadataPatches`). Rather than wait on that, read the
+ * transcript afresh — a full parse names every turn — and find the reply
+ * there by the message's place among the user turns.
+ *
+ * `thread` is the settled turns on screen, in order; `readTranscript` returns
+ * a fresh parse starting at the same turn the thread does. `null` when the
+ * reply can't be found; a failed read rejects.
+ */
+export async function resolveEditForkTurnId({
+  forkFromTurnId,
+  message,
+  thread,
+  readTranscript,
+}: {
+  forkFromTurnId: string
+  message: MessageTurn
+  thread: MessageTurn[]
+  readTranscript: () => Promise<MessageTurn[]>
+}): Promise<string | null> {
+  if (!isLiveTurnId(forkFromTurnId)) return forkFromTurnId
+  const userOrdinal = thread
+    .filter((turn) => turn.role === "user")
+    .findIndex((turn) => turn.id === message.id)
+  if (userOrdinal < 0) return null
+  return resolveEditForkPointInTranscript(
+    await readTranscript(),
+    userOrdinal,
+    editableUserMessageText(message)
+  )
 }
 
 /**
