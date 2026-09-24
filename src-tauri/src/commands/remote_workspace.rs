@@ -19,6 +19,11 @@ use crate::models::{RemoteWorkspaceConnectionInfo, RemoteWorkspaceHeader, ToHead
 #[cfg(feature = "tauri-runtime")]
 const REMOTE_HEALTH_TIMEOUT: Duration = Duration::from_secs(8);
 
+/// Label prefix of the window that hosts a saved connection's workspace —
+/// `remote-workspace-{id}`, one per connection.
+#[cfg(feature = "tauri-runtime")]
+pub(crate) const REMOTE_WORKSPACE_LABEL_PREFIX: &str = "remote-workspace-";
+
 #[cfg(feature = "tauri-runtime")]
 pub(crate) fn new_remote_window_instance_id() -> String {
     format!("rw-{}", uuid::Uuid::new_v4().simple())
@@ -205,7 +210,37 @@ pub async fn open_remote_workspace(
         .map_err(AppCommandError::db)?
         .ok_or_else(|| AppCommandError::not_found(format!("Remote connection {id} not found")))?;
 
-    let label = format!("remote-workspace-{id}");
+    // The pre-flight of a user-initiated open: a server that does not answer,
+    // or rejects the token, gets an error where the user clicked instead of a
+    // window that cannot load. A window that is already open is only brought
+    // forward, so it needs none.
+    let label = remote_workspace_window_label(id);
+    if app.get_webview_window(&label).is_none() {
+        validate_remote_health(&connection.base_url, &connection.token, &connection.headers)
+            .await?;
+    }
+
+    show_remote_workspace_window(&app, &connection)
+}
+
+#[cfg(feature = "tauri-runtime")]
+fn remote_workspace_window_label(id: i32) -> String {
+    format!("{REMOTE_WORKSPACE_LABEL_PREFIX}{id}")
+}
+
+/// Bring the connection's workspace window forward, building it if it is not
+/// open. No health check: `open_remote_workspace` runs one first, and a launch
+/// into the startup workspace deliberately does not — it has nowhere to show
+/// that error, and waiting out the check would hold the launch for up to
+/// `REMOTE_HEALTH_TIMEOUT` only to open nothing. The window reports an
+/// unreachable server itself.
+#[cfg(feature = "tauri-runtime")]
+pub(crate) fn show_remote_workspace_window(
+    app: &AppHandle,
+    connection: &RemoteWorkspaceConnectionInfo,
+) -> Result<(), AppCommandError> {
+    let id = connection.id;
+    let label = remote_workspace_window_label(id);
     if let Some(existing) = app.get_webview_window(&label) {
         let _ = existing.unminimize();
         existing.set_focus().map_err(|e| {
@@ -214,13 +249,11 @@ pub async fn open_remote_workspace(
         return Ok(());
     }
 
-    validate_remote_health(&connection.base_url, &connection.token, &connection.headers).await?;
-
     let window_instance_id = new_remote_window_instance_id();
     let url = WebviewUrl::App(
         format!("workspace?remoteConnectionId={id}&remoteWindowId={window_instance_id}").into(),
     );
-    let builder = WebviewWindowBuilder::new(&app, &label, url)
+    let builder = WebviewWindowBuilder::new(app, &label, url)
         .title(format!("Codeg - {}", connection.name))
         .inner_size(1260.0, 860.0)
         .min_inner_size(400.0, 600.0)

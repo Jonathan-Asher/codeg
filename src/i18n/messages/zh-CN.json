@@ -1701,6 +1701,13 @@
     "behaviorExit": "退出 codeg",
     "saveFailed": "保存关闭行为失败：{message}"
   },
+  "StartupWorkspaceSettings": {
+    "title": "启动 codeg 时打开",
+    "description": "远端工作区会在独立窗口中打开，本地工作区随时可从“快捷操作”中打开。",
+    "noRemote": "尚未保存任何远端工作区。保存一个后，codeg 启动时即可直接打开它。",
+    "local": "本地工作区",
+    "saveFailed": "保存启动工作区失败：{message}"
+  },
   "CloseRequestDialog": {
     "askTitle": "要关闭 codeg 吗？",
     "askDescription": "codeg 可以最小化到托盘继续运行，智能体和终端保持活动；也可以完全退出。",
@@ -4707,6 +4714,11 @@
     "saveFailed": "保存远端连接失败",
     "deleteFailed": "删除远端连接失败",
     "openFailed": "打开远端工作区失败",
+    "localWorkspace": "本地工作区",
+    "showLocalFailed": "打开本地工作区失败",
+    "openAtStartup": "启动 codeg 时打开",
+    "openAtStartupDescription": "每次启动 codeg 时，在独立窗口中打开此工作区。",
+    "startupSaveFailed": "保存启动工作区失败",
     "connectionLoadFailed": "加载远端连接失败：{message}",
     "disconnectedTitle": "已与 {name} 断开连接",
     "tokenRejected": "服务器拒绝了此窗口的访问 Token。如果服务器上的 Token 已更改，请在此更新后重新连接。",

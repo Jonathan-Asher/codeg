@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -16,10 +16,12 @@ const mocks = vi.hoisted(() => {
     openProjectBootWindow: vi.fn(() => Promise.resolve()),
     openPetWindow: vi.fn(() => Promise.resolve()),
     openRemoteWorkspace: vi.fn(() => Promise.resolve()),
+    showLocalWorkspace: vi.fn(() => Promise.resolve()),
     listRemoteWorkspaceConnections: vi.fn(() => Promise.resolve(connections)),
     setRoute: vi.fn(),
     openConversations: vi.fn(),
     openBrowserTab: vi.fn(() => "browser:new"),
+    toastError: vi.fn(),
   }
 })
 
@@ -28,7 +30,13 @@ const mocks = vi.hoisted(() => {
 let browserAvailable = true
 
 let desktop = true
-vi.mock("@/lib/platform", () => ({ isDesktop: () => desktop }))
+// A remote workspace window is a desktop window bound to another machine's
+// server — the one place the menu offers the way back to the local workspace.
+let remoteWindow = false
+vi.mock("@/lib/platform", () => ({
+  isDesktop: () => desktop,
+  isRemoteDesktopWindow: () => desktop && remoteWindow,
+}))
 
 vi.mock("@/lib/api", () => ({
   openProjectBootWindow: mocks.openProjectBootWindow,
@@ -39,7 +47,10 @@ vi.mock("@/lib/pet/api", () => ({ openPetWindow: mocks.openPetWindow }))
 vi.mock("@/lib/remote-workspace", () => ({
   listRemoteWorkspaceConnections: mocks.listRemoteWorkspaceConnections,
   openRemoteWorkspace: mocks.openRemoteWorkspace,
+  showLocalWorkspace: mocks.showLocalWorkspace,
 }))
+
+vi.mock("sonner", () => ({ toast: { error: mocks.toastError } }))
 
 vi.mock("@/contexts/automations-view-context", () => ({
   useAutomationsView: () => ({ unseenFailures: 2 }),
@@ -112,6 +123,7 @@ const FORGE_ROW = "Repository panel"
 
 beforeEach(() => {
   desktop = true
+  remoteWindow = false
   browserAvailable = true
   vi.clearAllMocks()
 })
@@ -265,5 +277,42 @@ describe("QuickActionsDropdown", () => {
     await reopen()
     await clickItem("Clone Repository")
     expect(await screen.findByText("CLONE-DIALOG")).toBeVisible()
+  })
+
+  it("offers the way back to the local workspace in a remote window", async () => {
+    remoteWindow = true
+    await mountAndOpen()
+
+    // A launch into a remote workspace keeps the local window hidden; this
+    // row is how that window comes back without the tray or the dock.
+    await clickItem("Local workspace")
+    expect(mocks.showLocalWorkspace).toHaveBeenCalledTimes(1)
+  })
+
+  it("says so when the local workspace cannot be shown", async () => {
+    remoteWindow = true
+    mocks.showLocalWorkspace.mockRejectedValueOnce(new Error("no window"))
+    await mountAndOpen()
+
+    await clickItem("Local workspace")
+
+    await waitFor(() =>
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        "Failed to open the local workspace",
+        { description: "no window" }
+      )
+    )
+  })
+
+  it("has no local workspace row in the local window itself", async () => {
+    await mountAndOpen()
+
+    // The rest of the workspace group is there, so this is the gate.
+    expect(
+      await screen.findByRole("menuitem", { name: "Open remote workspace" })
+    ).toBeVisible()
+    expect(
+      screen.queryByRole("menuitem", { name: "Local workspace" })
+    ).toBeNull()
   })
 })

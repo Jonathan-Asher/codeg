@@ -105,7 +105,7 @@ mod tauri_app {
         system_settings, terminal as terminal_commands,
         token_usage as token_usage_commands,
         forge as forge_commands, version_control, windows, work_task as work_task_commands,
-        workspace_state as workspace_state_commands,
+        workspace_state as workspace_state_commands, workspace_windows,
     };
     use crate::terminal::manager::TerminalManager;
     use crate::{db, git_credential, network, paths, process, web};
@@ -118,35 +118,9 @@ mod tauri_app {
     /// are deliberately excluded: they follow the workspace, they are not
     /// workspaces.
     fn other_workspace_windows_open(app: &tauri::AppHandle) -> bool {
-        app.webview_windows()
-            .keys()
-            .any(|label| label.starts_with("remote-workspace-"))
-    }
-
-    /// Create the main workspace window if it is gone (startup, or after the
-    /// window was closed while remote-workspace windows kept the app alive).
-    /// Workspace state (open folders, opened tabs, active tab) is restored by
-    /// the frontend via `list_open_folder_details` / `list_opened_tabs` inside
-    /// the main window.
-    fn ensure_main_window(app: &tauri::AppHandle, workspace_path: &std::path::Path) {
-        if app.get_webview_window("main").is_some() {
-            return;
-        }
-        let url = tauri::WebviewUrl::App(workspace_path.to_path_buf());
-        let builder = tauri::WebviewWindowBuilder::new(app, "main", url)
-            .title("Codeg")
-            .inner_size(1260.0, 860.0)
-            .min_inner_size(400.0, 600.0);
-        let builder = windows::apply_platform_window_style(builder);
-        // The workspace title bar is taller than the shared default (it hosts
-        // the tab strips), so nudge the native macOS traffic lights down to
-        // stay vertically centred.
-        #[cfg(target_os = "macos")]
-        let builder =
-            builder.traffic_light_position(windows::workspace_window_traffic_light_position());
-        if let Ok(w) = builder.build() {
-            windows::post_window_setup(&w);
-        }
+        app.webview_windows().keys().any(|label| {
+            label.starts_with(remote_workspace_commands::REMOTE_WORKSPACE_LABEL_PREFIX)
+        })
     }
 
     /// Routes one close-button press to hide, exit, or a prompt.
@@ -535,19 +509,17 @@ mod tauri_app {
         }));
 
         builder
-            // Persist every window flag EXCEPT decorations. Decorations are a
-            // per-platform decision made by `apply_platform_window_style`
-            // (undecorated on Windows/Linux so the app draws its own chrome),
-            // not a user preference. Restoring a stale `decorated: true` saved
-            // by an older build would call `set_decorations(true)` after the
-            // window is built and re-add the native title bar on top of the
-            // app's own toolbar — the Linux "double title bar".
+            // Persist every window flag EXCEPT decorations — see
+            // `WINDOW_STATE_FLAGS` for why. `main` is still tracked and saved
+            // like every other window, but skips the restore the plugin runs
+            // on creation: that restore calls `show()` + `set_focus()` for a
+            // window last seen on screen, and a launch into a remote workspace
+            // builds `main` hidden. `ensure_main_window` restores it instead,
+            // with the flags that keep a hidden window hidden.
             .plugin(
                 tauri_plugin_window_state::Builder::new()
-                    .with_state_flags(
-                        tauri_plugin_window_state::StateFlags::all()
-                            & !tauri_plugin_window_state::StateFlags::DECORATIONS,
-                    )
+                    .with_state_flags(workspace_windows::WINDOW_STATE_FLAGS)
+                    .skip_initial_state("main")
                     .build(),
             )
             .plugin(tauri_plugin_deep_link::init())
@@ -1297,13 +1269,26 @@ mod tauri_app {
                         .map(|url| url.to_string())
                         .collect()
                 };
-                let workspace_path = tauri::async_runtime::block_on(
-                    crate::deep_link::startup_workspace_path(
-                        &db::AppDatabase {
-                            conn: app.state::<db::AppDatabase>().conn.clone(),
-                        },
-                        &startup_urls,
-                    ),
+                // What this launch opens. A launch URL that names a local
+                // conversation asks for the local workspace, so it wins over
+                // the saved startup workspace (Settings › System).
+                let startup_db = db::AppDatabase {
+                    conn: app.state::<db::AppDatabase>().conn.clone(),
+                };
+                let startup_focus = tauri::async_runtime::block_on(
+                    crate::deep_link::startup_focus_target(&startup_db, &startup_urls),
+                );
+                let startup_remote = tauri::async_runtime::block_on(
+                    system_settings::resolve_startup_remote_connection(&startup_db.conn),
+                );
+                let startup_plan = workspace_windows::plan_startup(
+                    startup_focus.is_some(),
+                    startup_remote.as_ref().map(|connection| connection.id),
+                    windows::can_hide_to_tray(),
+                );
+                let workspace_path = startup_focus.as_ref().map_or_else(
+                    || workspace_windows::MAIN_WORKSPACE_PATH.to_string(),
+                    crate::deep_link::FocusTarget::workspace_path,
                 );
 
                 // Before any inspectable webview exists: web inspectors in
@@ -1316,11 +1301,33 @@ mod tauri_app {
                 #[cfg(target_os = "macos")]
                 crate::browser::shim::macos::prefer_detached_inspector();
 
-                // Single-window workspace: ensure the main window exists.
-                // Workspace state (open folders, opened tabs, active tab) is
-                // restored by the frontend via `list_open_folder_details` /
-                // `list_opened_tabs` inside the main window.
-                ensure_main_window(app.handle(), std::path::Path::new(&workspace_path));
+                // The main window always exists: it hosts the local workspace,
+                // whose state (open folders, opened tabs, active tab) the
+                // frontend restores inside it. A launch into a remote
+                // workspace only builds it hidden, behind that window.
+                workspace_windows::ensure_main_window(
+                    app.handle(),
+                    std::path::Path::new(&workspace_path),
+                    !startup_plan.hide_main,
+                );
+                if let Some(connection) = startup_remote
+                    .filter(|connection| startup_plan.remote_connection_id == Some(connection.id))
+                {
+                    // At once, without the health check a user-initiated open
+                    // runs: the window reports an unreachable server itself.
+                    // If it cannot be built at all, the hidden main window is
+                    // the only workspace left, so it comes out.
+                    if let Err(err) = remote_workspace_commands::show_remote_workspace_window(
+                        app.handle(),
+                        &connection,
+                    ) {
+                        tracing::error!(
+                            "[startup] failed to open remote workspace {}: {err}",
+                            connection.id
+                        );
+                        windows::show_main_window(app.handle());
+                    }
+                }
 
                 #[cfg(all(
                     feature = "browser-child",
@@ -1342,7 +1349,9 @@ mod tauri_app {
                 // with no UI state to coordinate.
                 if id.starts_with(windows::TRAY_MENU_ID_PREFIX) {
                     match id.as_str() {
-                        windows::TRAY_MENU_ID_SHOW => windows::show_main_window(app),
+                        windows::TRAY_MENU_ID_SHOW => {
+                            workspace_windows::show_local_workspace_window(app)
+                        }
                         windows::TRAY_MENU_ID_QUIT => app.exit(0),
                         _ => {}
                     }
@@ -1380,6 +1389,16 @@ mod tauri_app {
                 // destroyed by the platform, owned windows are closed here.
                 if matches!(event, tauri::WindowEvent::Destroyed) {
                     browser_commands::close_all_for_owner(window.app_handle(), &label);
+                }
+
+                // With the last remote workspace window gone, a main window
+                // that is still hidden — a launch into a remote workspace hid
+                // it — would leave the app running with nothing on screen.
+                if label.starts_with(remote_workspace_commands::REMOTE_WORKSPACE_LABEL_PREFIX)
+                    && matches!(event, tauri::WindowEvent::Destroyed)
+                    && !APP_QUITTING.load(Ordering::Relaxed)
+                {
+                    workspace_windows::resurface_main_if_stranded(window.app_handle());
                 }
 
                 if (label == "settings" || label.starts_with("remote-settings-"))
@@ -1719,6 +1738,7 @@ mod tauri_app {
                 remote_workspace_commands::get_remote_workspace_connection,
                 remote_workspace_commands::reorder_remote_workspace_connections,
                 remote_workspace_commands::open_remote_workspace,
+                workspace_windows::show_local_workspace,
                 remote_proxy_commands::remote_http_call,
                 remote_proxy_commands::remote_upload_attachment,
                 remote_proxy_commands::remote_upload_workspace_paths,
@@ -1790,6 +1810,8 @@ mod tauri_app {
                 system_settings::get_system_close_behavior_settings,
                 system_settings::update_system_close_behavior_settings,
                 system_settings::resolve_close_request,
+                system_settings::get_system_startup_workspace_settings,
+                system_settings::update_system_startup_workspace_settings,
                 logging_commands::get_log_settings,
                 logging_commands::set_log_settings,
                 logging_commands::get_recent_logs,
@@ -2116,33 +2138,14 @@ mod tauri_app {
                 }
                 #[cfg(target_os = "macos")]
                 tauri::RunEvent::Reopen { .. } => {
-                    // Dock-icon click: bring the workspace forward
-                    // unconditionally. `has_visible_windows` is true
-                    // whenever any aux window (pet, settings, commit…)
-                    // is alive, so gating on it would suppress recovery
-                    // even though `main` itself is hidden.
-                    // `show_main_window` is idempotent — already-visible
-                    // windows just get re-focused, which is what dock
-                    // activation should do anyway.
-                    //
-                    // After a scoped close (main destroyed while
-                    // remote-workspace windows kept the app alive), there is
-                    // nothing to focus — recreate the window instead.
-                    if app.get_webview_window("main").is_none() {
-                        let workspace_path = tauri::async_runtime::block_on(
-                            crate::deep_link::startup_workspace_path(
-                                &db::AppDatabase {
-                                    conn: app.state::<db::AppDatabase>().conn.clone(),
-                                },
-                                &[],
-                            ),
-                        );
-                        ensure_main_window(
-                            app.app_handle(),
-                            std::path::Path::new(&workspace_path),
-                        );
-                    }
-                    windows::show_main_window(app);
+                    // Dock-icon click: always bring a workspace window
+                    // forward. `has_visible_windows` is true whenever any
+                    // aux window (pet, settings, commit…) is alive, so
+                    // gating on it would suppress recovery even though no
+                    // workspace is on screen — which one comes forward, and
+                    // whether a closed or hidden main returns, is decided
+                    // from the workspace windows alone.
+                    workspace_windows::reopen_workspace(app);
                 }
                 _ => {}
             });

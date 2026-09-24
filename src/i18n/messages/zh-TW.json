@@ -1701,6 +1701,13 @@
     "behaviorExit": "結束 codeg",
     "saveFailed": "儲存關閉行為失敗：{message}"
   },
+  "StartupWorkspaceSettings": {
+    "title": "啟動 codeg 時開啟",
+    "description": "遠端工作區會在獨立視窗中開啟，本機工作區隨時可從「快捷操作」中開啟。",
+    "noRemote": "尚未儲存任何遠端工作區。儲存一個後，codeg 啟動時即可直接開啟它。",
+    "local": "本機工作區",
+    "saveFailed": "儲存啟動工作區失敗：{message}"
+  },
   "CloseRequestDialog": {
     "askTitle": "要關閉 codeg 嗎？",
     "askDescription": "codeg 可以最小化到系統匣繼續執行，讓智能體與終端機保持運作；也可以完全結束。",
@@ -4688,6 +4695,11 @@
     "saveFailed": "Failed to save remote connection",
     "deleteFailed": "Failed to delete remote connection",
     "openFailed": "Failed to open remote workspace",
+    "localWorkspace": "本機工作區",
+    "showLocalFailed": "開啟本機工作區失敗",
+    "openAtStartup": "啟動 codeg 時開啟",
+    "openAtStartupDescription": "每次啟動 codeg 時，在獨立視窗中開啟此工作區。",
+    "startupSaveFailed": "儲存啟動工作區失敗",
     "connectionLoadFailed": "Failed to load remote connection: {message}",
     "disconnectedTitle": "已與 {name} 中斷連線",
     "tokenRejected": "伺服器拒絕了此視窗的存取權杖。如果伺服器上的權杖已變更，請在此更新後重新連線。",

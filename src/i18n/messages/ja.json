@@ -1701,6 +1701,13 @@
     "behaviorExit": "codeg を終了",
     "saveFailed": "閉じる動作の保存に失敗しました: {message}"
   },
+  "StartupWorkspaceSettings": {
+    "title": "codeg の起動時に開く",
+    "description": "リモートワークスペースは専用のウィンドウで開きます。ローカルワークスペースはいつでも「クイック操作」から開けます。",
+    "noRemote": "保存済みのリモートワークスペースはまだありません。保存すると、codeg の起動時にそのワークスペースを開けます。",
+    "local": "ローカルワークスペース",
+    "saveFailed": "起動時のワークスペースの保存に失敗しました: {message}"
+  },
   "CloseRequestDialog": {
     "askTitle": "codeg を閉じますか？",
     "askDescription": "通知領域に常駐してエージェントとターミナルを動かし続けることも、完全に終了することもできます。",
@@ -4688,6 +4695,11 @@
     "saveFailed": "Failed to save remote connection",
     "deleteFailed": "Failed to delete remote connection",
     "openFailed": "Failed to open remote workspace",
+    "localWorkspace": "ローカルワークスペース",
+    "showLocalFailed": "ローカルワークスペースを開けませんでした",
+    "openAtStartup": "codeg の起動時に開く",
+    "openAtStartupDescription": "codeg を起動するたびに、このワークスペースを専用のウィンドウで開きます。",
+    "startupSaveFailed": "起動時のワークスペースの保存に失敗しました",
     "connectionLoadFailed": "Failed to load remote connection: {message}",
     "disconnectedTitle": "{name} から切断されました",
     "tokenRejected": "サーバーがこのウィンドウのアクセストークンを拒否しました。サーバー側でトークンが変更された場合は、ここで更新してから再接続してください。",

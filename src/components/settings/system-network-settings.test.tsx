@@ -64,6 +64,27 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), message: vi.fn() },
 }))
 
+// The startup-workspace picker talks to the local app through its own module
+// (the shell transport), not through `@/lib/api`.
+vi.mock("@/lib/remote-workspace", () => ({
+  listRemoteWorkspaceConnections: vi.fn(async () => [
+    {
+      id: 7,
+      name: "studio",
+      base_url: "https://studio.example",
+      token: "secret",
+      headers: [],
+      sort_order: 0,
+      created_at: "2026-09-24T00:00:00Z",
+      updated_at: "2026-09-24T00:00:00Z",
+    },
+  ]),
+  getStartupWorkspaceSettings: vi.fn(async () => ({
+    remote_connection_id: 7,
+  })),
+  updateStartupWorkspaceSettings: vi.fn(),
+}))
+
 // Launch at login is gated on a LOCAL desktop shell. Model the two axes
 // separately rather than as one "is desktop" flag, so a case can pin the gate
 // itself: a remote-workspace window IS a desktop shell, and asking it about
@@ -616,6 +637,20 @@ describe("SystemNetworkSettings — launch at login", () => {
     await waitFor(() =>
       expect(autostart).toHaveAttribute("data-state", "checked")
     )
+  })
+
+  it("keeps the startup workspace in a remote-workspace window", async () => {
+    // Where the app on this machine starts is this machine's business from any
+    // of its windows — the picker stays even where launch at login goes.
+    desktopShell = true
+    remoteWorkspace = true
+
+    renderWithIntl()
+
+    expect(
+      await screen.findByLabelText("When codeg starts, open")
+    ).toHaveTextContent("studio")
+    expect(screen.queryByLabelText("Launch at login")).not.toBeInTheDocument()
   })
 
   it("keeps the rest of the page alive when the OS won't report login items", async () => {

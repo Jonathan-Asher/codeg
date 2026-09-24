@@ -1701,6 +1701,13 @@
     "behaviorExit": "Salir de codeg",
     "saveFailed": "No se pudo guardar el comportamiento de cierre: {message}"
   },
+  "StartupWorkspaceSettings": {
+    "title": "Al iniciar codeg, abrir",
+    "description": "Un espacio de trabajo remoto se abre en su propia ventana, y el local sigue a un clic en Acciones rápidas.",
+    "noRemote": "Aún no hay espacios de trabajo remotos guardados. Guarda uno para que codeg lo abra al iniciarse.",
+    "local": "Espacio de trabajo local",
+    "saveFailed": "No se pudo guardar el espacio de trabajo de inicio: {message}"
+  },
   "CloseRequestDialog": {
     "askTitle": "¿Cerrar codeg?",
     "askDescription": "codeg puede seguir ejecutándose en la bandeja para mantener activos los agentes y las terminales, o salir por completo.",
@@ -4688,6 +4695,11 @@
     "saveFailed": "Failed to save remote connection",
     "deleteFailed": "Failed to delete remote connection",
     "openFailed": "Failed to open remote workspace",
+    "localWorkspace": "Espacio de trabajo local",
+    "showLocalFailed": "No se pudo abrir el espacio de trabajo local",
+    "openAtStartup": "Abrir al iniciar codeg",
+    "openAtStartupDescription": "codeg abre este espacio de trabajo en su propia ventana cada vez que se inicia.",
+    "startupSaveFailed": "No se pudo guardar el espacio de trabajo de inicio",
     "connectionLoadFailed": "Failed to load remote connection: {message}",
     "disconnectedTitle": "Desconectado de {name}",
     "tokenRejected": "El servidor rechazó el token de acceso de esta ventana. Si el token cambió en el servidor, actualízalo aquí y vuelve a conectar.",

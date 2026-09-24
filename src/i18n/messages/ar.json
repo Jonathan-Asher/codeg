@@ -1701,6 +1701,13 @@
     "behaviorExit": "إنهاء codeg",
     "saveFailed": "تعذر حفظ سلوك الإغلاق: {message}"
   },
+  "StartupWorkspaceSettings": {
+    "title": "عند بدء codeg، افتح",
+    "description": "تُفتح مساحة العمل البعيدة في نافذة خاصة بها، وتبقى مساحة العمل المحلية على بُعد نقرة واحدة من الإجراءات السريعة.",
+    "noRemote": "لا توجد مساحات عمل بعيدة محفوظة بعد. احفظ واحدة ليفتحها codeg عند بدء التشغيل.",
+    "local": "مساحة العمل المحلية",
+    "saveFailed": "تعذر حفظ مساحة عمل بدء التشغيل: {message}"
+  },
   "CloseRequestDialog": {
     "askTitle": "إغلاق codeg؟",
     "askDescription": "يمكن أن يستمر codeg في العمل ضمن منطقة الإشعارات لإبقاء الوكلاء والطرفيات نشطة، أو أن يُنهى تمامًا.",
@@ -4688,6 +4695,11 @@
     "saveFailed": "Failed to save remote connection",
     "deleteFailed": "Failed to delete remote connection",
     "openFailed": "Failed to open remote workspace",
+    "localWorkspace": "مساحة العمل المحلية",
+    "showLocalFailed": "تعذر فتح مساحة العمل المحلية",
+    "openAtStartup": "الفتح عند بدء codeg",
+    "openAtStartupDescription": "يفتح codeg مساحة العمل هذه في نافذة خاصة بها في كل مرة يبدأ فيها.",
+    "startupSaveFailed": "تعذر حفظ مساحة عمل بدء التشغيل",
     "connectionLoadFailed": "Failed to load remote connection: {message}",
     "disconnectedTitle": "انقطع الاتصال بـ {name}",
     "tokenRejected": "رفض الخادم رمز الوصول الخاص بهذه النافذة. إذا تغيّر الرمز على الخادم، فحدّثه هنا ثم أعد الاتصال.",
