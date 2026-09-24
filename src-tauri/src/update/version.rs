@@ -15,13 +15,24 @@ use crate::app_error::AppCommandError;
 
 /// Update manifest URL — mirrors the `endpoints` entry in `tauri.conf.json`
 /// so desktop and server modes consult the same source of truth.
+///
+/// This is the FORK's feed. Every build the app ever offers is therefore a
+/// fork build, so nothing carried on the fork can be wiped by an update;
+/// upstream changes arrive by rebase and ship as the next fork build. The
+/// embedded server in a desktop build answers update checks for remote
+/// windows from here too — before this pointed at upstream, a remote
+/// workspace window would advertise upstream releases and link to them.
 pub const UPDATE_MANIFEST_URL: &str =
-    "https://github.com/xintaofei/codeg/releases/latest/download/latest.json";
+    "https://github.com/Jonathan-Asher/codeg/releases/latest/download/latest.json";
 
 /// Deterministic base for "latest" release assets (server tarballs + their
-/// `.sig` detached signatures). Same channel as the manifest.
+/// `.sig` detached signatures). Same channel as the manifest. The fork's
+/// rolling release carries only the desktop app today, so a standalone
+/// fork-built server finds no tarball here and self-update stays
+/// unavailable — the safe outcome, as opposed to replacing itself with an
+/// upstream build.
 pub const RELEASE_DOWNLOAD_BASE: &str =
-    "https://github.com/xintaofei/codeg/releases/latest/download";
+    "https://github.com/Jonathan-Asher/codeg/releases/latest/download";
 
 /// Short-timeout client for the small manifest fetch. Proxy env vars are
 /// sampled at build time, so `init_proxy_from_db` must run before the first

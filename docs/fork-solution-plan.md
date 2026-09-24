@@ -24,6 +24,15 @@ Destructive-action safety nets: **not a priority**.
   is stale, so the trigger is now deferred until the reconnect snapshot settles the status. Also:
   the desktop proxy no longer reports a session as expired after three *network* failures (Wi-Fi
   still coming up after wake); only auth rejections on the handshake count.
+- **Updater (2026-09-24, Jonathan: "we are holding the fork").** Everything update-related now points
+  at the fork: the desktop feed already did (`tauri.conf.json`), and now so do the server-side manifest
+  (`src-tauri/src/update/version.rs`, which answers update checks for remote-workspace windows) and the
+  two "view release" links. Before, a remote window advertised upstream 0.32.1 and linked to it — installing
+  that DMG would have wiped every fork feature. Fork builds carry their own version, stamped by CI:
+  `<upstream major.minor.(patch+1)>-fork.<run number>` (e.g. `0.30.11-fork.42`), which is what makes the
+  in-app update button deliver fork builds at all (the updater installs only a strictly newer semver, and
+  the feed used to repeat the upstream version). The scheme stays above whatever upstream version the
+  branch is rebased onto. Upstream ships fast (0.30.10 → 0.32.1 in four days): rebase soon.
 - ⑦ **Reorder pinned sessions by dragging** — sidebar pinned order currently derives from
   `pinned_at`; needs a per-folder sort order plus drag-and-drop in the sidebar.
 

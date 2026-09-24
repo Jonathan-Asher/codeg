@@ -28,7 +28,10 @@ const ReleaseNotes = dynamic(
   { ssr: false }
 )
 
-const RELEASES_URL = "https://github.com/xintaofei/codeg/releases/latest"
+// The fork's releases — the only place a build with the fork's features
+// comes from. Never point this at upstream: a user following the link would
+// install an app without them.
+const RELEASES_URL = "https://github.com/Jonathan-Asher/codeg/releases/latest"
 
 function Spinner({ className }: { className?: string }) {
   return (
