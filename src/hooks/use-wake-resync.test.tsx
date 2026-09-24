@@ -1,17 +1,21 @@
-import { act, renderHook } from "@testing-library/react"
+import { renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useWakeResync } from "./use-wake-resync"
 
 const onReconnectCallbacks = new Set<() => void>()
-const onReconnect = vi.fn((cb: () => void) => {
+// False models an IPC-only transport (the local desktop app), where
+// `onTransportReconnect` returns null: there is no reconnect lifecycle.
+let hasReconnectLifecycle = true
+const onTransportReconnect = vi.fn((cb: () => void) => {
+  if (!hasReconnectLifecycle) return null
   onReconnectCallbacks.add(cb)
   return () => {
     onReconnectCallbacks.delete(cb)
   }
 })
 
-vi.mock("@/lib/transport", () => ({
-  getTransport: () => ({ onReconnect }),
+vi.mock("@/lib/platform", () => ({
+  onTransportReconnect: (cb: () => void) => onTransportReconnect(cb),
 }))
 
 function fireVisibility(state: "visible" | "hidden") {
@@ -22,11 +26,44 @@ function fireVisibility(state: "visible" | "hidden") {
   document.dispatchEvent(new Event("visibilitychange"))
 }
 
+// The page comes back after being hidden for `hiddenMs` — long enough by
+// default to count as a wake from sleep.
+function fireWake(hiddenMs = 30_000) {
+  fireVisibility("hidden")
+  vi.advanceTimersByTime(hiddenMs)
+  fireVisibility("visible")
+}
+
+function fireReconnect() {
+  for (const cb of onReconnectCallbacks) cb()
+}
+
+type WakeResyncProps = Parameters<typeof useWakeResync>[0]
+
+function setup(initial?: Partial<WakeResyncProps>) {
+  const refetch = vi.fn()
+  const base: WakeResyncProps = {
+    enabled: true,
+    conversationId: 7,
+    isStreaming: false,
+    refetch,
+  }
+  const view = renderHook((props: WakeResyncProps) => useWakeResync(props), {
+    initialProps: { ...base, ...initial },
+  })
+  return {
+    refetch,
+    rerender: (next: Partial<WakeResyncProps>) =>
+      view.rerender({ ...base, ...next }),
+  }
+}
+
 describe("useWakeResync", () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    hasReconnectLifecycle = true
     onReconnectCallbacks.clear()
-    onReconnect.mockClear()
+    onTransportReconnect.mockClear()
     Object.defineProperty(document, "visibilityState", {
       configurable: true,
       get: () => "visible",
@@ -36,174 +73,153 @@ describe("useWakeResync", () => {
     vi.useRealTimers()
   })
 
-  type WakeResyncProps = Parameters<typeof useWakeResync>[0]
-
-  const setup = (overrides?: Partial<WakeResyncProps>) => {
-    const refetch = vi.fn()
-    const rerun = (next?: Partial<WakeResyncProps>) =>
-      renderHook((props: WakeResyncProps) => useWakeResync(props), {
-        initialProps: {
-          enabled: true,
-          conversationId: 7,
-          isStreaming: false,
-          refetch,
-          ...overrides,
-          ...next,
-        },
-      })
-    const view = rerun()
-    return {
-      refetch,
-      view,
-      rerun: (n: Partial<WakeResyncProps>) =>
-        view.rerender({
-          enabled: true,
-          conversationId: 7,
-          isStreaming: false,
-          refetch,
-          ...n,
-        }),
-    }
-  }
-
-  it("refetches when the document becomes visible (wake)", () => {
+  it("refetches when the page comes back from a long absence (wake)", () => {
     const { refetch } = setup()
-    fireVisibility("visible")
+    fireWake()
     expect(refetch).toHaveBeenCalledTimes(1)
     expect(refetch).toHaveBeenCalledWith(7)
   })
 
-  it("does not refetch when hidden", () => {
+  it("ignores a quick tab or window switch, and window focus alone", () => {
+    // Nothing is lost while the socket stays up, and each resync is a full
+    // transcript refetch the status bar reports while it runs.
     const { refetch } = setup()
-    fireVisibility("hidden")
+    fireWake(29_999)
+    window.dispatchEvent(new Event("focus"))
     expect(refetch).not.toHaveBeenCalled()
   })
 
-  it("refetches on window focus", () => {
+  it("does not refetch when the page is hidden", () => {
     const { refetch } = setup()
-    window.dispatchEvent(new Event("focus"))
-    expect(refetch).toHaveBeenCalledTimes(1)
+    fireVisibility("hidden")
+    vi.advanceTimersByTime(60_000)
+    expect(refetch).not.toHaveBeenCalled()
   })
 
   it("refetches on transport reconnect", () => {
     const { refetch } = setup()
-    expect(onReconnect).toHaveBeenCalledTimes(1)
-    for (const cb of onReconnectCallbacks) cb()
+    expect(onTransportReconnect).toHaveBeenCalledTimes(1)
+    fireReconnect()
     expect(refetch).toHaveBeenCalledTimes(1)
   })
 
-  it("defers a wake that lands mid-stream and releases it when the stream settles", () => {
-    const refetch = vi.fn()
-    const view = renderHook((props) => useWakeResync(props), {
-      initialProps: {
-        enabled: true,
-        conversationId: 7,
-        isStreaming: true,
-        refetch,
-      },
-    })
-    fireVisibility("visible")
+  it("stays inert on a transport with no reconnect lifecycle (local desktop)", () => {
+    // Local IPC loses nothing across sleep; a refetch there could only race
+    // the transcript flush of a turn that just ended.
+    hasReconnectLifecycle = false
+    const { refetch } = setup()
+    fireWake()
+    expect(refetch).not.toHaveBeenCalled()
+  })
+
+  it("holds a wake that lands mid-stream and releases it when the stream settles", () => {
+    const { refetch, rerender } = setup({ isStreaming: true })
+    fireWake()
     // Mid-stream: never refetch under a live stream.
     expect(refetch).not.toHaveBeenCalled()
-    // Stream settles (isStreaming -> false): the owed wake fires by itself —
+    // Stream settles (isStreaming -> false): the held wake fires by itself —
     // after sleep this is the only chance, no later trigger is coming.
-    view.rerender({
-      enabled: true,
-      conversationId: 7,
-      isStreaming: false,
-      refetch,
-    })
+    rerender({ isStreaming: false })
     expect(refetch).toHaveBeenCalledTimes(1)
     expect(refetch).toHaveBeenCalledWith(7)
     // Released once: a later settle without a new trigger stays quiet.
-    view.rerender({
-      enabled: true,
-      conversationId: 7,
-      isStreaming: true,
-      refetch,
-    })
-    view.rerender({
-      enabled: true,
-      conversationId: 7,
-      isStreaming: false,
-      refetch,
-    })
+    rerender({ isStreaming: true })
+    rerender({ isStreaming: false })
     expect(refetch).toHaveBeenCalledTimes(1)
   })
 
-  it("defers a reconnect that arrives while the client still believes it is streaming", () => {
+  it("holds a reconnect that arrives while the client still believes it is streaming", () => {
     // The sleep case: the turn ended server-side while the socket was dead,
     // so the client is still `prompting` when the WS comes back. The
     // reconnect callback fires BEFORE the re-attach snapshot flips the
     // status — it must wait for that flip, not be lost.
-    const refetch = vi.fn()
-    const view = renderHook((props) => useWakeResync(props), {
-      initialProps: {
-        enabled: true,
-        conversationId: 7,
-        isStreaming: true,
-        refetch,
-      },
-    })
-    act(() => {
-      for (const cb of onReconnectCallbacks) cb()
-    })
+    const { refetch, rerender } = setup({ isStreaming: true })
+    fireReconnect()
     expect(refetch).not.toHaveBeenCalled()
-    view.rerender({
-      enabled: true,
-      conversationId: 7,
-      isStreaming: false,
-      refetch,
-    })
+    rerender({ isStreaming: false })
     expect(refetch).toHaveBeenCalledTimes(1)
   })
 
-  it("forgets a deferred trigger when the conversation changes", () => {
-    const refetch = vi.fn()
-    const view = renderHook((props) => useWakeResync(props), {
-      initialProps: {
-        enabled: true,
-        conversationId: 7,
-        isStreaming: true,
-        refetch,
-      },
-    })
+  it("lets a hold lapse when the turn keeps streaming past it", () => {
+    // The turn was genuinely live: its content reached the view through the
+    // stream, and a refetch at its natural end would race the agent's
+    // transcript flush.
+    const { refetch, rerender } = setup({ isStreaming: true })
+    fireReconnect()
+    vi.advanceTimersByTime(10_001)
+    rerender({ isStreaming: false })
+    expect(refetch).not.toHaveBeenCalled()
+  })
+
+  it("re-arms the hold on each trigger, so a reconnect after the wake counts from its own arrival", () => {
+    const { refetch, rerender } = setup({ isStreaming: true })
+    fireWake() // lid opened; the dead socket is not replaced yet
+    vi.advanceTimersByTime(8_000)
+    fireReconnect() // replaced; its re-attach is on the way
+    vi.advanceTimersByTime(5_000)
+    rerender({ isStreaming: false }) // the re-attach settles the stale turn
+    expect(refetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("skips a wake that comes right after a turn settled on its own", () => {
+    // The user comes back on the turn's completion notification: the reply
+    // arrived live, and the agent may still be flushing it to its transcript,
+    // so a refetch now could only replace it with a truncated read.
+    const { refetch, rerender } = setup({ isStreaming: true })
+    fireVisibility("hidden")
+    vi.advanceTimersByTime(60_000)
+    rerender({ isStreaming: false }) // the turn completes while away
+    vi.advanceTimersByTime(3_000)
     fireVisibility("visible")
-    view.rerender({
-      enabled: true,
-      conversationId: 8,
-      isStreaming: false,
-      refetch,
-    })
+    expect(refetch).not.toHaveBeenCalled()
+    // Past the quiet period a trigger refetches again.
+    vi.advanceTimersByTime(7_000)
+    fireReconnect()
+    expect(refetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps counting an absence across re-binds", () => {
+    // The turn ends while the page is away (isStreaming flips, the listeners
+    // re-bind); the wake that follows still sees the whole absence.
+    const { refetch, rerender } = setup({ isStreaming: true })
+    fireVisibility("hidden")
+    vi.advanceTimersByTime(20_000)
+    rerender({ isStreaming: false })
+    vi.advanceTimersByTime(20_000)
+    fireVisibility("visible")
+    expect(refetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("forgets a held trigger when the conversation changes", () => {
+    const { refetch, rerender } = setup({ isStreaming: true })
+    fireWake()
+    rerender({ conversationId: 8, isStreaming: false })
     // The wake was owed to conversation 7; it must not fire against 8.
     expect(refetch).not.toHaveBeenCalled()
   })
 
-  it("debounces trigger bursts to one refetch", () => {
+  it("debounces a wake and the reconnect that follows it to one refetch", () => {
     const { refetch } = setup()
-    fireVisibility("visible")
-    window.dispatchEvent(new Event("focus"))
-    for (const cb of onReconnectCallbacks) cb()
+    fireWake()
+    fireReconnect()
     expect(refetch).toHaveBeenCalledTimes(1)
     // After the debounce window a new trigger fires again.
-    act(() => {
-      vi.advanceTimersByTime(2100)
-    })
-    window.dispatchEvent(new Event("focus"))
+    vi.advanceTimersByTime(2_100)
+    fireReconnect()
     expect(refetch).toHaveBeenCalledTimes(2)
   })
 
   it("does not fire when disabled (background tab)", () => {
     const { refetch } = setup({ enabled: false })
-    fireVisibility("visible")
-    window.dispatchEvent(new Event("focus"))
-    for (const cb of onReconnectCallbacks) cb()
+    fireWake()
+    fireReconnect()
     expect(refetch).not.toHaveBeenCalled()
   })
 
   it("does not fire without a conversation id", () => {
     const { refetch } = setup({ conversationId: null })
-    fireVisibility("visible")
+    fireWake()
+    fireReconnect()
     expect(refetch).not.toHaveBeenCalled()
   })
 })
