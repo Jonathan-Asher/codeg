@@ -7,7 +7,21 @@ FAILURES=""
 
 echo "==> 1/4 Installing patched pi-acp (session fork/resume + extension commands)"
 if command -v npm >/dev/null 2>&1; then
-  npm install -g github:Jonathan-Asher/pi-acp#main || FAILURES="$FAILURES pi-acp(npm)"
+  # Not `npm install -g github:...`: for a git dependency npm links the global
+  # entry to its temporary clone and then deletes the clone, leaving a
+  # dangling `pi-acp` (seen on 2026-09-18 — codeg then had no Pi adapter at
+  # all). Build and pack it here, then install the tarball, which npm copies.
+  PI_ACP_TMP=$(mktemp -d)
+  if git clone -q --depth 1 https://github.com/Jonathan-Asher/pi-acp.git "$PI_ACP_TMP/src" \
+     && (cd "$PI_ACP_TMP/src" && npm install --silent && npm pack --silent --pack-destination "$PI_ACP_TMP" >/dev/null) \
+     && { npm uninstall -g pi-acp >/dev/null 2>&1 || true; } \
+     && npm install -g "$PI_ACP_TMP"/pi-acp-*.tgz \
+     && command -v pi-acp >/dev/null 2>&1; then
+    echo "   pi-acp installed: $(command -v pi-acp)"
+  else
+    FAILURES="$FAILURES pi-acp(npm)"
+  fi
+  rm -rf "$PI_ACP_TMP"
   # The Claude adapter is what decides which models the picker offers (its
   # bundled Claude Code build carries the catalog); codeg launches whatever
   # `claude-agent-acp` is on PATH. Keep it on the version codeg pins so new
