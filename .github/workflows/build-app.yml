@@ -17,15 +17,15 @@ concurrency:
 permissions:
   contents: write
 
-# WHERE THIS RUNS. Two self-hosted runners on Jonathan's M4 Max (installed in
-# ~/actions-runner, one for checks and one for the build, so they run side by
-# side). Selected by repository variables:
-#   CHECKS_RUNS_ON = ["self-hosted","codeg-m4-checks"]
-#   BUILD_RUNS_ON  = ["self-hosted","codeg-m4-build"]
+# WHERE THIS RUNS. Three self-hosted runners on Jonathan's M4 Max (installed in
+# ~/actions-runner), so the frontend checks, the Rust checks and the build all
+# run side by side. Selected by repository variables:
+#   FRONTEND_CHECKS_RUNS_ON = ["self-hosted","codeg-m4-frontend"]
+#   CHECKS_RUNS_ON          = ["self-hosted","codeg-m4-checks"]   (Rust)
+#   BUILD_RUNS_ON           = ["self-hosted","codeg-m4-build"]
 # If the Mac is off for a while, point them back at GitHub's hosted machines
-# (slower, but always there):
+# (slower, but always there), e.g.:
 #   gh variable set CHECKS_RUNS_ON --body '"macos-14"'
-#   gh variable set BUILD_RUNS_ON  --body '"macos-14"'
 # Unset variables also fall back to macos-14.
 #
 # Self-hosted runs keep their workspace between builds (`clean: false`), so
@@ -33,12 +33,9 @@ permissions:
 # changed; GitHub-hosted runs start clean and use rust-cache instead.
 
 jobs:
-  checks:
-    runs-on: ${{ fromJSON(vars.CHECKS_RUNS_ON || '"macos-14"') }}
-    timeout-minutes: 90
-    env:
-      RUST_BACKTRACE: short
-      INSTA_UPDATE: "no"
+  checks-frontend:
+    runs-on: ${{ fromJSON(vars.FRONTEND_CHECKS_RUNS_ON || '"macos-14"') }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,13 +44,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-        if: runner.environment == 'github-hosted'
-        with:
-          workspaces: src-tauri
       - name: Install pnpm deps
         run: pnpm install --frozen-lockfile
       - name: Lint
@@ -62,6 +52,31 @@ jobs:
         run: npx tsc --noEmit -p tsconfig.json
       - name: Frontend tests
         run: pnpm vitest run
+
+  checks-rust:
+    runs-on: ${{ fromJSON(vars.CHECKS_RUNS_ON || '"macos-14"') }}
+    timeout-minutes: 90
+    env:
+      RUST_BACKTRACE: short
+      INSTA_UPDATE: "no"
+      # Line tables only: backtraces keep file:line, but the debug target is a
+      # fraction of full-debuginfo size (it passed 24 GB) and links faster.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: ${{ runner.environment == 'github-hosted' }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        if: runner.environment == 'github-hosted'
+        with:
+          workspaces: src-tauri
+      - name: Keep the build cache bounded
+        if: runner.environment == 'self-hosted'
+        run: scripts/ci-bound-target.sh src-tauri/target 20
       - name: Rust clippy + tests (desktop)
         working-directory: src-tauri
         env:
@@ -96,6 +111,9 @@ jobs:
         if: runner.environment == 'github-hosted'
         with:
           workspaces: src-tauri
+      - name: Keep the build cache bounded
+        if: runner.environment == 'self-hosted'
+        run: scripts/ci-bound-target.sh src-tauri/target 20
       - name: Install pnpm deps
         run: pnpm install --frozen-lockfile
       # Fork builds carry their own version so the in-app updater — which only
@@ -170,7 +188,7 @@ jobs:
   # Publishing waits for BOTH: nothing reaches the update feed unless the
   # checks passed. Runs on a GitHub-hosted Linux box — it only moves files.
   publish:
-    needs: [checks, build]
+    needs: [checks-frontend, checks-rust, build]
     if: github.ref == 'refs/heads/fork/solution-plan'
     runs-on: ubuntu-latest
     steps:
