@@ -1913,7 +1913,7 @@
         "deleteGroupFailed": "Falha ao excluir o grupo: {message}",
         "moveToGroupFailed": "Falha ao mover a pasta: {message}",
         "applyLayoutFailed": "Falha ao salvar a ordem das pastas: {message}",
-        "reorderPinsFailed": "Failed to reorder pinned conversations: {message}",
+        "reorderPinsFailed": "Falha ao reordenar as conversas fixadas: {message}",
         "exportMarkdownDone": "Exported: {path}",
         "exportMarkdownFailed": "Failed to export conversation: {message}"
       },

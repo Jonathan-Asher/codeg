@@ -3440,15 +3440,13 @@ export async function messageSearchIndexConversation(
   })
 }
 
-/** Persist a manual drag order for the sidebar's Pinned section. `orderedIds`
- *  is the full visible pinned order, top to bottom (server writes pin_order =
- *  index per id and echoes one upsert per conversation). */
+/** Persist a manual order for the sidebar's "Pinned" section. `orderedIds` is
+ *  the section's full order, top to bottom; each id's index becomes its
+ *  `pin_order`. */
 export async function reorderConversationPins(
   orderedIds: number[]
 ): Promise<void> {
-  return getTransport().call("reorder_conversation_pins", {
-    orderedIds,
-  })
+  return getTransport().call("reorder_conversation_pins", { orderedIds })
 }
 
 /** Export a conversation's transcript to a Markdown file next to its

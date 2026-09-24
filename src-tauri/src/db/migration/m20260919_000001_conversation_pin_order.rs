@@ -6,14 +6,14 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Manual position within the sidebar's "Pinned" section, written by the
-        // drag-reorder flow (`reorder_conversation_pins`). Nullable with no
-        // default: rows pinned before this migration (and rows pinned later
-        // without an explicit reorder) keep NULL and sort after explicitly
-        // ordered ones by their `pinned_at` — the exact pre-migration order.
-        // Unpinning leaves a stale value behind on purpose: the sidebar
-        // comparator only consults `pin_order` for pinned rows, so a re-pin
-        // without a reorder keeps the pre-migration behaviour.
+        // Manual position within the sidebar's "Pinned" section, written when
+        // the user drags pinned conversations into an order of their own
+        // (`reorder_conversation_pins`). Pinning or unpinning clears it again.
+        //
+        // Nullable with no default: a row without a position sorts by
+        // `pinned_at` exactly as the whole section did before this column
+        // existed, so every pre-existing row is already correct and no backfill
+        // is needed.
         manager
             .alter_table(
                 Table::alter()
