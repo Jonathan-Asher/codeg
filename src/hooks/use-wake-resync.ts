@@ -1,50 +1,78 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { getTransport } from "@/lib/transport"
+import { onTransportReconnect } from "@/lib/platform"
 
 /**
- * Debounce window: macOS fires `focus`/`visibilitychange` in bursts when a
- * lid is opened (webview re-activation, Tailscale re-route, WKWebView
- * internals). Without this, one wake can trigger a burst of refetches —
- * exactly the "polling catches the main thread" failure mode the fork
- * avoids. 2s matches the cadence of repeated lid bounces without delaying
- * a genuine stale view meaningfully.
+ * One resync per window. A wake shows the page again and, once the dead
+ * socket is replaced, reconnects the transport within seconds; either alone
+ * is reason enough to resync, so the pair collapses into one refetch.
  */
-const RESYNC_DEBOUNCE_MS = 2000
+const RESYNC_DEBOUNCE_MS = 2_000
 
 /**
- * Re-fetch the conversation transcript when the machine wakes or the
- * transport reconnects.
+ * A page shown again counts as a wake only after being hidden this long.
+ * Switching tabs or windows loses nothing (the socket stays up), and every
+ * resync is a full transcript refetch that the status bar reports while it
+ * runs; the sleep this trigger is for hides the page far longer.
+ */
+const RESYNC_MIN_HIDDEN_MS = 30_000
+
+/**
+ * How long a trigger that landed mid-stream stays owed (see the guards
+ * below). Comfortably longer than a re-attach round trip, which is what
+ * settles a status that went stale while the socket was down; a turn still
+ * streaming past this is being delivered live.
+ */
+const RESYNC_HOLD_MS = 10_000
+
+/**
+ * Quiet period after a stream settles. A reply that streamed in live may
+ * still be flushing to the agent's transcript (seconds, for some agents; see
+ * the sync backoffs in the runtime store), so a refetch this soon could only
+ * replace it with a truncated read.
+ */
+const RESYNC_AFTER_SETTLE_MS = 10_000
+
+/**
+ * Re-fetch the open conversation's transcript when the client wakes from
+ * sleep or its event stream reconnects.
  *
- * The WebSocket event stream dies during sleep; on wake the client
- * reconnects but nothing re-fetches what the server streamed to the dead
- * socket, so replies stay invisible until the workspace is reopened. This
- * hook closes that gap by triggering the canonical `refetchDetail` path on:
+ * Whatever the server broadcast while this client's WebSocket was down is
+ * gone for good. The re-attach that follows restores the LIVE state (replay
+ * or snapshot), but a turn that finished inside the gap has left the live
+ * state: its reply now exists only in the persisted transcript, while the
+ * view keeps whatever it had streamed before the drop — until the
+ * conversation is reopened. This hook runs the canonical `refetchDetail` path
+ * on:
  *
- * - `visibilitychange` → visible (lid open / tab re-activation)
- * - window `focus`
- * - transport reconnect (WS re-established after a drop)
+ * - transport reconnect (the socket was replaced after a drop);
+ * - the page becoming visible after RESYNC_MIN_HIDDEN_MS or more hidden, i.e.
+ *   a wake. This also covers a socket that survived the sleep but fell
+ *   behind: its lagged re-attach settles a turn exactly like a reconnect's,
+ *   with no reconnect to announce it.
  *
  * Guards:
- * - never refetches while the agent is streaming (a refetch would clobber
- *   the live stream) — the trigger is DEFERRED, not dropped: it fires as
- *   soon as the stream settles. This is what makes sleep recovery work: a
- *   turn that finished server-side while the socket was dead leaves the
- *   client believing it is still `prompting`, because the events that
- *   would have ended it never arrived. Every wake/reconnect trigger lands
- *   in that stale state. The reconnect's snapshot then flips the status,
- *   and that flip releases the deferred refetch — there is no later focus
- *   or reconnect to catch up on, so a dropped trigger would mean a stale
- *   view until the workspace is reopened;
+ * - inert on transports with no reconnect lifecycle (the local desktop app):
+ *   its IPC loses nothing across sleep, and a refetch just after a turn ends
+ *   races the agent's transcript flush (see `completeTurn` in the runtime
+ *   store) for no benefit;
+ * - never refetches under a live stream. A trigger that lands while the
+ *   client believes a turn is streaming is HELD until the stream settles:
+ *   after sleep that belief is stale by construction (the events that ended
+ *   the turn died with the socket), the re-attach snapshot is what flips the
+ *   status, and no later trigger is coming to catch up on. A hold lapses
+ *   after RESYNC_HOLD_MS — a turn still streaming by then reaches the view
+ *   live, and refetching at its natural end would race the transcript flush;
+ * - for the same reason, a trigger within RESYNC_AFTER_SETTLE_MS of a stream
+ *   settling (say, the user returning on the turn's completion
+ *   notification) is skipped;
  * - debounced to one resync per RESYNC_DEBOUNCE_MS;
  * - inert unless the panel is the active tab bound to a persisted
- *   conversation (background tabs never refetch — each panel owns its
- *   own listener set and gates itself).
+ *   conversation (each panel owns its own listener set and gates itself).
  *
- * Listeners re-bind when the gating inputs change (cheap: three DOM
- * listeners) so the callback always reads current truth — no refs captured
- * at bind time that the React Compiler would flag.
+ * Listeners re-bind when the gating inputs change (cheap) so every callback
+ * reads current truth rather than refs captured at bind time.
  */
 export function useWakeResync(options: {
   /** Panel is the active tab AND bound to a persisted conversation. */
@@ -64,16 +92,29 @@ export function useWakeResync(options: {
 
   // Survives listener re-binds: one resync per debounce window.
   const lastResyncAt = useRef(0)
-  // A trigger that arrived mid-stream, owed to the next settle. Survives the
-  // re-binds too — the settle itself is a re-bind (isStreaming flips).
-  const pendingRef = useRef(false)
+  // When the page was hidden, while it still is. Survives the re-binds too:
+  // a turn can settle while the page is away.
+  const hiddenAt = useRef<number | null>(null)
+  // When the trigger held for the stream to settle arrived; null when none
+  // is held. Survives the re-binds too — the settle itself is one.
+  const heldSince = useRef<number | null>(null)
+  // When the stream last went from streaming to settled.
+  const settledAt = useRef(0)
+  const wasStreaming = useRef(isStreaming)
 
-  // A deferred trigger belongs to the conversation it fired for. Declared
-  // before the main effect so a conversation switch clears it in the same
-  // commit, before the main effect could release it against the new one.
+  // A held trigger belongs to the conversation it fired for. Declared before
+  // the main effect so a conversation switch clears it in the same commit,
+  // before the main effect could release it against the new one.
   useEffect(() => {
-    pendingRef.current = false
+    heldSince.current = null
   }, [conversationId])
+
+  // Tracked apart from the gated effect below so a settle is on record even
+  // if it happened while the panel was in the background.
+  useEffect(() => {
+    if (wasStreaming.current && !isStreaming) settledAt.current = Date.now()
+    wasStreaming.current = isStreaming
+  }, [isStreaming])
 
   useEffect(() => {
     if (!enabled || conversationId == null) return
@@ -85,35 +126,44 @@ export function useWakeResync(options: {
       refetch(conversationId)
     }
 
+    // The stream settled with a trigger held: release it if the settle came
+    // promptly (the re-attach correcting a stale status), drop it otherwise.
+    if (!isStreaming && heldSince.current !== null) {
+      const settledPromptly = Date.now() - heldSince.current <= RESYNC_HOLD_MS
+      heldSince.current = null
+      if (settledPromptly) runResync()
+    }
+
     const resync = () => {
       if (isStreaming) {
-        pendingRef.current = true
+        heldSince.current = Date.now()
         return
       }
+      if (Date.now() - settledAt.current < RESYNC_AFTER_SETTLE_MS) return
       runResync()
     }
 
-    // Stream settled with a wake still owed: release it now.
-    if (!isStreaming && pendingRef.current) {
-      pendingRef.current = false
-      runResync()
-    }
+    // Null on a transport with no reconnect lifecycle: nothing to recover.
+    const offReconnect = onTransportReconnect(resync)
+    if (!offReconnect) return
 
     const onVisibility = () => {
-      if (document.visibilityState === "visible") resync()
+      if (document.visibilityState !== "visible") {
+        hiddenAt.current = Date.now()
+        return
+      }
+      const since = hiddenAt.current
+      hiddenAt.current = null
+      if (since !== null && Date.now() - since >= RESYNC_MIN_HIDDEN_MS) {
+        resync()
+      }
     }
-    const onFocus = () => resync()
 
     document.addEventListener("visibilitychange", onVisibility)
-    window.addEventListener("focus", onFocus)
-    // Optional in the Transport interface: the desktop-local transport has no
-    // reconnect lifecycle (nothing sleeps server-side in desktop mode).
-    const offReconnect = getTransport().onReconnect?.(resync)
 
     return () => {
+      offReconnect()
       document.removeEventListener("visibilitychange", onVisibility)
-      window.removeEventListener("focus", onFocus)
-      offReconnect?.()
     }
   }, [enabled, conversationId, isStreaming, refetch])
 }
