@@ -4689,7 +4689,16 @@
     "deleteFailed": "Failed to delete remote connection",
     "openFailed": "Failed to open remote workspace",
     "connectionLoadFailed": "Failed to load remote connection: {message}",
-    "connectionExpired": "Remote connection \"{name}\" is expired. Update its token and reload this window."
+    "disconnectedTitle": "已與 {name} 中斷連線",
+    "tokenRejected": "伺服器拒絕了此視窗的存取權杖。如果伺服器上的權杖已變更，請在此更新後重新連線。",
+    "reconnect": "重新連線",
+    "reconnecting": "正在重新連線…",
+    "editConnection": "編輯連線",
+    "closeWindow": "關閉視窗",
+    "stillCantConnect": "仍然無法連線：{message}",
+    "loadFailedTitle": "無法開啟此遠端工作區",
+    "tryAgain": "重試",
+    "retry": "重試"
   },
   "ServerFileBrowser": {
     "title": "選擇伺服器檔案",
@@ -4946,6 +4955,8 @@
     "disconnectedTitle": "連線已中斷",
     "reconnectingDescription": "正在嘗試重新連線伺服器，通常會在幾秒內自動恢復。",
     "reconnectNow": "立即重新連線",
+    "connectingTitle": "正在連線伺服器",
+    "connectingDescription": "伺服器尚未回應。一旦回應，此視窗會自動連線。",
     "sessionExpiredTitle": "工作階段已過期",
     "sessionExpiredDescription": "登入狀態已失效，請重新登入以繼續。",
     "goToLogin": "前往登入"

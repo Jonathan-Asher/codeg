@@ -4689,7 +4689,16 @@
     "deleteFailed": "Échec de la suppression de la connexion distante",
     "openFailed": "Échec de l’ouverture de l’espace de travail distant",
     "connectionLoadFailed": "Échec du chargement de la connexion distante : {message}",
-    "connectionExpired": "La connexion distante « {name} » a expiré. Mettez son jeton à jour, puis rechargez cette fenêtre."
+    "disconnectedTitle": "Déconnecté de {name}",
+    "tokenRejected": "Le serveur a refusé le jeton d’accès de cette fenêtre. Si le jeton a changé sur le serveur, mettez-le à jour ici, puis reconnectez-vous.",
+    "reconnect": "Se reconnecter",
+    "reconnecting": "Reconnexion…",
+    "editConnection": "Modifier la connexion",
+    "closeWindow": "Fermer la fenêtre",
+    "stillCantConnect": "Toujours impossible de se connecter : {message}",
+    "loadFailedTitle": "Impossible d’ouvrir cet espace de travail distant",
+    "tryAgain": "Réessayer",
+    "retry": "Réessayer"
   },
   "ServerFileBrowser": {
     "title": "Sélectionner un fichier serveur",
@@ -4946,6 +4955,8 @@
     "disconnectedTitle": "Connexion perdue",
     "reconnectingDescription": "Tentative de reconnexion au serveur. Cela se rétablit généralement tout seul en quelques secondes.",
     "reconnectNow": "Se reconnecter maintenant",
+    "connectingTitle": "Connexion au serveur",
+    "connectingDescription": "Le serveur ne répond pas encore. Cette fenêtre se connectera d’elle-même dès qu’il répondra.",
     "sessionExpiredTitle": "Session expirée",
     "sessionExpiredDescription": "Votre session n'est plus valide. Veuillez vous reconnecter pour continuer.",
     "goToLogin": "Aller à la connexion"

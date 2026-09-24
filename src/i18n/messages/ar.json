@@ -4689,7 +4689,16 @@
     "deleteFailed": "Failed to delete remote connection",
     "openFailed": "Failed to open remote workspace",
     "connectionLoadFailed": "Failed to load remote connection: {message}",
-    "connectionExpired": "Remote connection \"{name}\" is expired. Update its token and reload this window."
+    "disconnectedTitle": "انقطع الاتصال بـ {name}",
+    "tokenRejected": "رفض الخادم رمز الوصول الخاص بهذه النافذة. إذا تغيّر الرمز على الخادم، فحدّثه هنا ثم أعد الاتصال.",
+    "reconnect": "إعادة الاتصال",
+    "reconnecting": "جارٍ إعادة الاتصال…",
+    "editConnection": "تعديل الاتصال",
+    "closeWindow": "إغلاق النافذة",
+    "stillCantConnect": "لا يزال الاتصال متعذرًا: {message}",
+    "loadFailedTitle": "تعذّر فتح مساحة العمل البعيدة هذه",
+    "tryAgain": "حاول مرة أخرى",
+    "retry": "إعادة المحاولة"
   },
   "ServerFileBrowser": {
     "title": "اختر ملفًا من الخادم",
@@ -4946,6 +4955,8 @@
     "disconnectedTitle": "انقطع الاتصال",
     "reconnectingDescription": "تتم محاولة إعادة الاتصال بالخادم. عادةً ما يُستعاد الاتصال تلقائيًا خلال ثوانٍ قليلة.",
     "reconnectNow": "إعادة الاتصال الآن",
+    "connectingTitle": "جارٍ الاتصال بالخادم",
+    "connectingDescription": "لا يستجيب الخادم بعد. ستتصل هذه النافذة تلقائيًا بمجرد أن يستجيب.",
     "sessionExpiredTitle": "انتهت الجلسة",
     "sessionExpiredDescription": "لم تعد جلستك صالحة. يُرجى تسجيل الدخول مرة أخرى للمتابعة.",
     "goToLogin": "الانتقال إلى تسجيل الدخول"

@@ -2,6 +2,31 @@ import type { EventEnvelope, LiveSessionSnapshot } from "@/lib/types"
 
 export type UnsubscribeFn = () => void
 
+/**
+ * Health of the link to a codeg server over the network — a browser client's
+ * or a remote-workspace window's — as the global connection dialog shows it.
+ * Distinct from the per-agent `ConnectionStatus`: this is the client↔server
+ * link, not an agent session.
+ *   - "connecting":   not connected yet since this window opened
+ *   - "reconnecting": was connected, lost the link, retrying on its own
+ *   - "unauthorized": the server rejected the token
+ */
+export type ConnectionHealth =
+  | "connected"
+  | "connecting"
+  | "reconnecting"
+  | "unauthorized"
+
+/** What a transport exposes so the connection dialog can follow its link. */
+export interface ConnectionHealthSource {
+  getConnectionSnapshot(): ConnectionHealth
+  subscribeConnection(callback: () => void): UnsubscribeFn
+  /** Retry at once instead of at the end of the current backoff. */
+  reconnectNow(): void
+  /** A definitive 401 seen outside the transport's own calls. */
+  markUnauthorized(): void
+}
+
 export interface RemoteTransportConfig {
   id: number
   name: string

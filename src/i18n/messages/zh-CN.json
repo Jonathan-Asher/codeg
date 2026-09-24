@@ -4708,7 +4708,16 @@
     "deleteFailed": "删除远端连接失败",
     "openFailed": "打开远端工作区失败",
     "connectionLoadFailed": "加载远端连接失败：{message}",
-    "connectionExpired": "远端连接“{name}”已失效。请更新 Token 后重新加载此窗口。"
+    "disconnectedTitle": "已与 {name} 断开连接",
+    "tokenRejected": "服务器拒绝了此窗口的访问 Token。如果服务器上的 Token 已更改，请在此更新后重新连接。",
+    "reconnect": "重新连接",
+    "reconnecting": "正在重新连接…",
+    "editConnection": "编辑连接",
+    "closeWindow": "关闭窗口",
+    "stillCantConnect": "仍然无法连接：{message}",
+    "loadFailedTitle": "无法打开此远端工作区",
+    "tryAgain": "重试",
+    "retry": "重试"
   },
   "BackupSettings": {
     "tabs": {
@@ -4946,6 +4955,8 @@
     "disconnectedTitle": "连接已断开",
     "reconnectingDescription": "正在尝试重新连接服务器，通常会在几秒内自动恢复。",
     "reconnectNow": "立即重连",
+    "connectingTitle": "正在连接服务器",
+    "connectingDescription": "服务器尚未响应。一旦响应，此窗口会自动连接。",
     "sessionExpiredTitle": "会话已过期",
     "sessionExpiredDescription": "登录状态已失效，请重新登录以继续。",
     "goToLogin": "前往登录"

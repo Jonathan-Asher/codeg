@@ -4689,7 +4689,16 @@
     "deleteFailed": "Failed to delete remote connection",
     "openFailed": "Failed to open remote workspace",
     "connectionLoadFailed": "Failed to load remote connection: {message}",
-    "connectionExpired": "Remote connection \"{name}\" is expired. Update its token and reload this window."
+    "disconnectedTitle": "{name}와(과)의 연결이 끊어졌습니다",
+    "tokenRejected": "서버가 이 창의 액세스 토큰을 거부했습니다. 서버에서 토큰이 바뀌었다면 여기에서 업데이트한 뒤 다시 연결하세요.",
+    "reconnect": "다시 연결",
+    "reconnecting": "다시 연결하는 중…",
+    "editConnection": "연결 편집",
+    "closeWindow": "창 닫기",
+    "stillCantConnect": "여전히 연결할 수 없습니다: {message}",
+    "loadFailedTitle": "이 원격 작업 공간을 열 수 없습니다",
+    "tryAgain": "다시 시도",
+    "retry": "재시도"
   },
   "ServerFileBrowser": {
     "title": "서버 파일 선택",
@@ -4946,6 +4955,8 @@
     "disconnectedTitle": "연결이 끊어졌습니다",
     "reconnectingDescription": "서버에 다시 연결하는 중입니다. 보통 몇 초 내에 자동으로 복구됩니다.",
     "reconnectNow": "지금 다시 연결",
+    "connectingTitle": "서버에 연결하는 중",
+    "connectingDescription": "서버가 아직 응답하지 않습니다. 응답하는 즉시 이 창이 자동으로 연결됩니다.",
     "sessionExpiredTitle": "세션이 만료되었습니다",
     "sessionExpiredDescription": "세션이 더 이상 유효하지 않습니다. 계속하려면 다시 로그인하세요.",
     "goToLogin": "로그인으로 이동"

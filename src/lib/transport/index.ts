@@ -1,11 +1,41 @@
 import { detectEnvironment } from "./detect"
 import type { RemoteTransportConfig, Transport } from "./types"
 
-export type { RemoteTransportConfig, Transport, UnsubscribeFn } from "./types"
+export type {
+  ConnectionHealth,
+  ConnectionHealthSource,
+  RemoteTransportConfig,
+  Transport,
+  UnsubscribeFn,
+} from "./types"
 
 let _shellTransport: Transport | null = null
 let _remoteTransport: Transport | null = null
 let _remoteConfig: RemoteTransportConfig | null = null
+const _transportChangeListeners = new Set<() => void>()
+
+/**
+ * Notified when a window binds to (or drops) a remote codeg server. Anything
+ * that subscribed to the transport before the binding — the connection
+ * dialog is mounted at the root, before `RemoteConnectionGate` configures
+ * the remote transport — re-subscribes to the new one from here.
+ */
+export function onActiveTransportChange(callback: () => void): () => void {
+  _transportChangeListeners.add(callback)
+  return () => {
+    _transportChangeListeners.delete(callback)
+  }
+}
+
+function notifyTransportChange() {
+  for (const callback of _transportChangeListeners) {
+    try {
+      callback()
+    } catch (err) {
+      console.error("[transport] change listener threw:", err)
+    }
+  }
+}
 
 function createTauriTransport(): Transport {
   // Use dynamic require to avoid bundling tauri deps in web mode.
@@ -45,12 +75,15 @@ export function configureRemoteDesktopTransport(
     RemoteDesktopTransport: new (config: RemoteTransportConfig) => Transport
   }
   _remoteTransport = new RemoteDesktopTransport(config)
+  notifyTransportChange()
 }
 
 export function clearRemoteDesktopTransport(): void {
+  const hadRemote = _remoteTransport !== null
   _remoteTransport?.destroy?.()
   _remoteTransport = null
   _remoteConfig = null
+  if (hadRemote) notifyTransportChange()
 }
 
 export function getActiveRemoteConnectionId(): number | null {

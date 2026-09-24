@@ -5,11 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 // Controllable stand-in for the connection store. `vi.hoisted` guarantees the
 // shared object exists before the hoisted `vi.mock` factory runs.
 const store = vi.hoisted(() => {
-  let state: "connected" | "reconnecting" | "unauthorized" = "connected"
+  type State = "connected" | "connecting" | "reconnecting" | "unauthorized"
+  let state: State = "connected"
   const listeners = new Set<() => void>()
   return {
     getState: () => state,
-    setState: (s: "connected" | "reconnecting" | "unauthorized") => {
+    setState: (s: State) => {
       state = s
       for (const l of listeners) l()
     },
@@ -89,6 +90,30 @@ describe("WebConnectionGuard", () => {
     expect(
       screen.getByRole("button", { name: "Reconnect now" })
     ).toBeInTheDocument()
+  })
+
+  it("says it is still connecting when the link never came up", () => {
+    renderGuard()
+    act(() => store.setState("connecting"))
+    act(() => {
+      vi.advanceTimersByTime(4000)
+    })
+    expect(screen.getByText("Connecting to the server")).toBeInTheDocument()
+    expect(screen.queryByText("Connection lost")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect now" }))
+    expect(store.reconnectWebNow).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps the dialog up, as a lost link, when connecting turns into reconnecting", () => {
+    renderGuard()
+    act(() => store.setState("connecting"))
+    act(() => {
+      vi.advanceTimersByTime(4000)
+    })
+    act(() => store.setState("reconnecting"))
+    // No second grace window: the link has been down all along.
+    expect(screen.getByText("Connection lost")).toBeInTheDocument()
   })
 
   it("fires reconnectWebNow when the reconnect button is clicked", () => {

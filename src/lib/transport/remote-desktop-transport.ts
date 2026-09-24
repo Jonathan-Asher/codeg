@@ -5,6 +5,8 @@ import type { AttachTransportHost } from "./web-event-stream"
 import { WebEventStream } from "./web-event-stream"
 import type {
   CallOptions,
+  ConnectionHealth,
+  ConnectionHealthSource,
   EventStream,
   RemoteTransportConfig,
   Transport,
@@ -71,6 +73,25 @@ function isAuthenticationFailed(err: unknown): boolean {
 }
 
 /**
+ * The Rust proxy could not reach the remote at all (connect / read error), or
+ * something in front of it — a tunnel, a reverse proxy — answered 5xx without
+ * codeg's JSON error body. Errors the remote codeg server returns itself come
+ * back structured with their own code, its own `network_error`s included (a
+ * failed outbound fetch on the server says nothing about this link), so the
+ * proxy's two fixed messages (`remote_http_call` in `remote_proxy.rs`) are
+ * what identify the case.
+ */
+function isRemoteUnreachable(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false
+  const { code, message } = err as RustError
+  if (code !== "network_error" || typeof message !== "string") return false
+  return (
+    message === "Remote HTTP request failed" ||
+    /^Remote returned HTTP 5\d\d/.test(message)
+  )
+}
+
+/**
  * Transport that the desktop client uses when a window is bound to a
  * remote codeg-server. Every HTTP call and WebSocket event is routed
  * through Rust commands (`remote_http_call`, `remote_ws_subscribe`,
@@ -86,7 +107,9 @@ function isAuthenticationFailed(err: unknown): boolean {
  * `app.emit` broadcasting. Two remote workspaces opened side-by-side
  * see entirely separate event streams.
  */
-export class RemoteDesktopTransport implements Transport {
+export class RemoteDesktopTransport
+  implements Transport, ConnectionHealthSource
+{
   private handlers = new Map<string, Set<(payload: unknown) => void>>()
   private config: RemoteTransportConfig
   private readyPromise!: Promise<void>
@@ -123,6 +146,18 @@ export class RemoteDesktopTransport implements Transport {
   /// `wsReadyCallbacks` after a short delay so `WebEventStream.reattachAll`
   /// runs once per failure burst rather than once per failed frame.
   private sendFailRetryTimer: ReturnType<typeof setTimeout> | null = null
+  /// Link health for the global connection dialog. The Rust WS task is the
+  /// judge: "connecting" until its first `__ready__`, "reconnecting" after a
+  /// `__disconnected__`, "connected" on `__ready__`. A rejected token is not
+  /// a state here — it goes to `onUnauthorized`, whose full-window screen
+  /// (`RemoteConnectionGate`) owns that case.
+  private connState: ConnectionHealth = "connecting"
+  private connListeners = new Set<() => void>()
+  /// A call failed because the remote was unreachable. Whatever the UI
+  /// loaded then is an error state, so the next `__ready__` fires the
+  /// reconnect callbacks even when it is the first one — a window opened
+  /// while the server was down otherwise kept its errors until reloaded.
+  private missedWhileDown = false
 
   constructor(config: RemoteTransportConfig) {
     this.config = {
@@ -184,6 +219,12 @@ export class RemoteDesktopTransport implements Transport {
       // themselves hit a 401 — per design we don't broadcast).
       if (isAuthenticationFailed(err)) {
         this.config.onUnauthorized?.()
+      } else if (isRemoteUnreachable(err)) {
+        this.missedWhileDown = true
+        // A failed request only asks the WS task to check the link now: a
+        // live socket answers the ping and nothing changes; a dead one is
+        // replaced, and the dialog follows the task's state from there.
+        this.probeLiveness()
       }
       throw err
     }
@@ -240,6 +281,55 @@ export class RemoteDesktopTransport implements Transport {
         console.warn("[RemoteDesktopTransport] remote_ws_probe failed:", err)
       }
     )
+  }
+
+  // ── Connection health (consumed by the global connection dialog) ────────
+
+  getConnectionSnapshot(): ConnectionHealth {
+    return this.connState
+  }
+
+  subscribeConnection(callback: () => void): UnsubscribeFn {
+    this.connListeners.add(callback)
+    return () => {
+      this.connListeners.delete(callback)
+    }
+  }
+
+  /**
+   * "Reconnect now": have the Rust proxy retry at once instead of at the end
+   * of its backoff (or re-check a socket it still believes is open), and
+   * start the WS if nothing had started it yet.
+   */
+  reconnectNow(): void {
+    if (this.destroyed) return
+    if (!this.wsStarted) {
+      void this.startWs().catch((err) => {
+        console.warn("[RemoteDesktopTransport] reconnect startWs failed:", err)
+      })
+      return
+    }
+    this.probeLiveness()
+  }
+
+  markUnauthorized(): void {
+    if (this.destroyed) return
+    this.config.onUnauthorized?.()
+  }
+
+  private setConnState(next: ConnectionHealth) {
+    if (this.connState === next) return
+    this.connState = next
+    for (const callback of this.connListeners) {
+      try {
+        callback()
+      } catch (err) {
+        console.error(
+          "[RemoteDesktopTransport] connection listener threw:",
+          err
+        )
+      }
+    }
   }
 
   eventStream(): EventStream {
@@ -368,6 +458,7 @@ export class RemoteDesktopTransport implements Transport {
     if (channel === WS_READY_CHANNEL) {
       this.wsOpen = true
       this.readyResolve()
+      this.setConnState("connected")
       // Notify EventStream so it can re-issue attach frames for any
       // active subscriptions. Fires on initial connect AND every reconnect.
       for (const cb of this.wsReadyCallbacks) {
@@ -377,11 +468,15 @@ export class RemoteDesktopTransport implements Transport {
           console.error("[RemoteDesktopTransport] wsReady callback threw:", err)
         }
       }
-      if (this.hasReadiedOnce) {
+      if (this.hasReadiedOnce || this.missedWhileDown) {
         // Reconnect path: server-side receiver_count was 0 during the
         // disconnect window, so any event fired in that gap was dropped.
         // Notify consumers to recover state (e.g. refetch snapshots).
+        // Also the first connect after calls failed for want of a link: the
+        // snapshots those calls should have loaded are missing.
         // Errors in user callbacks must not break sibling callbacks.
+        this.missedWhileDown = false
+        this.hasReadiedOnce = true
         for (const cb of this.reconnectCallbacks) {
           try {
             cb()
@@ -399,6 +494,7 @@ export class RemoteDesktopTransport implements Transport {
     }
     if (channel === WS_DISCONNECTED_CHANNEL) {
       this.wsOpen = false
+      this.setConnState("reconnecting")
       // New subscribers (and any concurrent subscribe() calls in flight)
       // must wait for the next `__ready__` before resolving.
       this.resetReady()
@@ -443,6 +539,7 @@ export class RemoteDesktopTransport implements Transport {
     }
     this.handlers.clear()
     this.reconnectCallbacks.clear()
+    this.connListeners.clear()
     this.wsReadyCallbacks.clear()
     this.eventStreamInstance?.destroy()
     this.eventStreamInstance = null

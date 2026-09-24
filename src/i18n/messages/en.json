@@ -4708,7 +4708,16 @@
     "deleteFailed": "Failed to delete remote connection",
     "openFailed": "Failed to open remote workspace",
     "connectionLoadFailed": "Failed to load remote connection: {message}",
-    "connectionExpired": "Remote connection \"{name}\" is expired. Update its token and reload this window."
+    "disconnectedTitle": "Disconnected from {name}",
+    "tokenRejected": "The server refused this window's access token. If the token changed on the server, update it here, then reconnect.",
+    "reconnect": "Reconnect",
+    "reconnecting": "Reconnecting…",
+    "editConnection": "Edit connection",
+    "closeWindow": "Close window",
+    "stillCantConnect": "Still can't connect: {message}",
+    "loadFailedTitle": "Couldn't open this remote workspace",
+    "tryAgain": "Try again",
+    "retry": "Retry"
   },
   "BackupSettings": {
     "tabs": {
@@ -4946,6 +4955,8 @@
     "disconnectedTitle": "Connection lost",
     "reconnectingDescription": "Trying to reconnect to the server. This usually recovers on its own within a few seconds.",
     "reconnectNow": "Reconnect now",
+    "connectingTitle": "Connecting to the server",
+    "connectingDescription": "The server isn't answering yet. This window connects on its own as soon as it does.",
     "sessionExpiredTitle": "Session expired",
     "sessionExpiredDescription": "Your session is no longer valid. Please sign in again to continue.",
     "goToLogin": "Go to login"

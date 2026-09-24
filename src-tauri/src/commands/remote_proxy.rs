@@ -120,6 +120,12 @@ const WS_PONG_TIMEOUT: Duration = Duration::from_secs(10);
 /// tab-visible / lid-open). Tight on purpose: the user is looking at the
 /// screen, and a false positive only costs one reconnect + re-attach.
 const WS_PROBE_PONG_TIMEOUT: Duration = Duration::from_secs(4);
+/// Bound on one handshake attempt (TCP + TLS + upgrade). A connect toward a
+/// host that silently drops packets — a laptop that just woke, a VPN still
+/// re-establishing — otherwise waits out the OS's own connect timeout, which
+/// can take minutes, before the reconnect loop gets to try again. Timing out
+/// is a transient failure like any other network error.
+const WS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Bound on writing a heartbeat ping. A dead socket normally accepts the
 /// write into the kernel buffer (the missing pong is what catches it), but a
 /// socket whose buffer is wedged must not stall the read loop either.
@@ -167,7 +173,8 @@ struct WsTaskEntry {
     /// Wake-time liveness probe requested by the frontend
     /// (`remote_ws_probe`): the WS task pings at once under the short
     /// `WS_PROBE_PONG_TIMEOUT` instead of waiting for the next quiet
-    /// interval. A `Notify` so a request landing between two loop
+    /// interval — or, while it is between reconnect attempts, skips the rest
+    /// of the backoff wait. A `Notify` so a request landing between two loop
     /// iterations is kept as a permit, not lost.
     probe: Notify,
 }
@@ -1764,11 +1771,13 @@ pub async fn remote_ws_unsubscribe(
 }
 
 /// Ask the WS task for `connection_id` to verify its socket is alive right
-/// now (see `Heartbeat::on_probe`). The frontend calls this on wake-up
-/// signals — tab visible, lid open — so a socket that died during sleep is
-/// replaced within seconds instead of at the next quiet-interval ping. No
-/// entry (nothing subscribed, or already torn down) is not an error: there
-/// is no socket to check.
+/// now (see `Heartbeat::on_probe`), or — while it is waiting to reconnect —
+/// to retry at once. The frontend calls this on wake-up signals (tab
+/// visible, lid open, network back) and from the "Reconnect now" button, so
+/// a socket that died during sleep is replaced within seconds instead of at
+/// the next quiet-interval ping or the end of a 32 s backoff. No entry
+/// (nothing subscribed, or already torn down) is not an error: there is no
+/// socket to check.
 #[tauri::command]
 pub async fn remote_ws_probe(
     proxy: State<'_, Arc<RemoteProxyState>>,
@@ -1939,7 +1948,7 @@ async fn run_ws_task(
                 }
                 continue;
             }
-            res = connect_with_subprotocol_auth(&ws_url, WS_EVENT_PROTOCOL, &token, &custom_headers) => res,
+            res = connect_events_ws(&ws_url, &token, &custom_headers) => res,
         };
 
         let mut socket = match connect_result {
@@ -1954,7 +1963,7 @@ async fn run_ws_task(
                         break;
                     }
                 }
-                if backoff_sleep(&mut shutdown_rx, backoff_step).await {
+                if backoff_sleep(&mut shutdown_rx, &entry.probe, backoff_step).await {
                     break;
                 }
                 continue;
@@ -2068,7 +2077,7 @@ async fn run_ws_task(
         *entry.ready.write().await = false;
         emit_internal(&app, &entry, &event_name, WS_DISCONNECTED_CHANNEL).await;
         backoff_step = backoff_step.saturating_add(1);
-        if backoff_sleep(&mut shutdown_rx, backoff_step).await {
+        if backoff_sleep(&mut shutdown_rx, &entry.probe, backoff_step).await {
             break;
         }
     }
@@ -2091,12 +2100,23 @@ async fn run_ws_task(
 /// `fail_count` (1s, 2s, 4s, … capped at `WS_BACKOFF_MAX_SECS`). Returns
 /// `true` if shutdown was requested during the wait — caller should exit
 /// its loop in that case.
-async fn backoff_sleep(shutdown_rx: &mut watch::Receiver<bool>, fail_count: u32) -> bool {
+///
+/// `wake` (the entry's probe signal) cuts the wait short: a wake-up probe
+/// (lid opened, network back) or the user's "Reconnect now" means "try now",
+/// not "after the remaining 32 s". A request that landed while a connect
+/// attempt was in flight is kept as a `Notify` permit, so the retry after
+/// that attempt starts at once too.
+async fn backoff_sleep(
+    shutdown_rx: &mut watch::Receiver<bool>,
+    wake: &Notify,
+    fail_count: u32,
+) -> bool {
     let shift = fail_count.saturating_sub(1).min(8) as u64;
     let secs = (WS_BACKOFF_INITIAL_SECS << shift).min(WS_BACKOFF_MAX_SECS);
     tokio::select! {
         biased;
         changed = shutdown_rx.changed() => changed.is_ok() && *shutdown_rx.borrow(),
+        _ = wake.notified() => false,
         _ = tokio::time::sleep(Duration::from_secs(secs)) => false,
     }
 }
@@ -2206,6 +2226,23 @@ fn classify_ws_connect_error(err: tokio_tungstenite::tungstenite::Error) -> WsCo
             ))
         }
         other => WsConnectError::Transient(format!("connect_async: {other}")),
+    }
+}
+
+/// One handshake attempt for the events WebSocket, bounded by
+/// `WS_CONNECT_TIMEOUT` (a timeout is transient: retried, never "expired").
+async fn connect_events_ws(
+    ws_url: &str,
+    token: &str,
+    custom_headers: &HeaderMap,
+) -> Result<RemoteWsStream, WsConnectError> {
+    let attempt = connect_with_subprotocol_auth(ws_url, WS_EVENT_PROTOCOL, token, custom_headers);
+    match tokio::time::timeout(WS_CONNECT_TIMEOUT, attempt).await {
+        Ok(result) => result,
+        Err(_) => Err(WsConnectError::Transient(format!(
+            "connect_async: no answer within {}s",
+            WS_CONNECT_TIMEOUT.as_secs()
+        ))),
     }
 }
 
@@ -2982,6 +3019,43 @@ mod tests {
         let name = "a".repeat(300);
         let result = sanitize_upload_file_name(&name);
         assert_eq!(result.chars().count(), 255);
+    }
+
+    // ─── Reconnect backoff ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn a_wake_request_cuts_the_backoff_short() {
+        let (_shutdown_tx, mut shutdown_rx) = watch::channel(false);
+        let wake = Notify::new();
+        // A probe or "Reconnect now" that landed while a connect attempt was
+        // still in flight: kept as a permit, so the next wait ends at once.
+        wake.notify_one();
+        let started = std::time::Instant::now();
+        let shutdown = backoff_sleep(&mut shutdown_rx, &wake, 6).await; // a 32 s step
+        assert!(!shutdown);
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn backoff_sleep_reports_a_shutdown() {
+        let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+        let wake = Notify::new();
+        let (shutdown, _) = tokio::join!(backoff_sleep(&mut shutdown_rx, &wake, 6), async {
+            shutdown_tx.send(true).unwrap();
+        });
+        assert!(shutdown);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_handshake_that_never_answers_times_out_as_transient() {
+        // The kernel completes the TCP connect into the listen backlog, but
+        // nothing ever answers the upgrade — a host that went quiet mid-way.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}/ws/events", listener.local_addr().unwrap());
+        let err = connect_events_ws(&url, "token", &HeaderMap::new())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, WsConnectError::Transient(_)), "got {err}");
     }
 
     // ─── MIME guess ────────────────────────────────────────────────────

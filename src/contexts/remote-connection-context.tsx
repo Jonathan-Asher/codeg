@@ -12,6 +12,7 @@ import {
 import { Loader2 } from "lucide-react"
 import { useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
+import { RemoteConnectionProblem } from "@/components/connection/remote-connection-problem"
 import {
   clearRemoteDesktopTransport,
   configureRemoteDesktopTransport,
@@ -88,6 +89,9 @@ export function RemoteConnectionGate({ children }: { children: ReactNode }) {
     error: null,
     expired: false,
   })
+  // Bumped by "Try again" on the load-failure screen to read the saved
+  // connection again.
+  const [loadAttempt, setLoadAttempt] = useState(0)
 
   useEffect(() => {
     if (remoteConnectionId === null || !Number.isFinite(remoteConnectionId)) {
@@ -133,7 +137,7 @@ export function RemoteConnectionGate({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [remoteConnectionId, remoteWindowId])
+  }, [remoteConnectionId, remoteWindowId, loadAttempt])
 
   // ── Backend-identity invariant ─────────────────────────────────────────────
   // A workspace realm's backend identity — (remoteConnectionId, remoteWindowId),
@@ -194,19 +198,17 @@ export function RemoteConnectionGate({ children }: { children: ReactNode }) {
     )
   }
 
-  if (error) {
+  if (error || expired) {
     return (
-      <div className="flex h-screen items-center justify-center bg-background p-6 text-sm text-destructive">
-        {t("connectionLoadFailed", { message: error })}
-      </div>
-    )
-  }
-
-  if (expired) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background p-6 text-sm text-destructive">
-        {t("connectionExpired", { name: connection?.name ?? "" })}
-      </div>
+      <RemoteConnectionProblem
+        connection={connection}
+        loadError={error}
+        onRetryLoad={() => {
+          // Back to the loading state while the saved connection is re-read.
+          setState((prev) => ({ ...prev, loadedId: null, error: null }))
+          setLoadAttempt((n) => n + 1)
+        }}
+      />
     )
   }
 

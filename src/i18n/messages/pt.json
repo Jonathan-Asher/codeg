@@ -4689,7 +4689,16 @@
     "deleteFailed": "Failed to delete remote connection",
     "openFailed": "Failed to open remote workspace",
     "connectionLoadFailed": "Failed to load remote connection: {message}",
-    "connectionExpired": "Remote connection \"{name}\" is expired. Update its token and reload this window."
+    "disconnectedTitle": "Desconectado de {name}",
+    "tokenRejected": "O servidor recusou o token de acesso desta janela. Se o token mudou no servidor, atualize-o aqui e reconecte.",
+    "reconnect": "Reconectar",
+    "reconnecting": "Reconectando…",
+    "editConnection": "Editar conexão",
+    "closeWindow": "Fechar janela",
+    "stillCantConnect": "Ainda não foi possível conectar: {message}",
+    "loadFailedTitle": "Não foi possível abrir este espaço de trabalho remoto",
+    "tryAgain": "Tentar novamente",
+    "retry": "Tentar de novo"
   },
   "ServerFileBrowser": {
     "title": "Selecionar arquivo do servidor",
@@ -4946,6 +4955,8 @@
     "disconnectedTitle": "Conexão perdida",
     "reconnectingDescription": "Tentando reconectar ao servidor. Normalmente isso se resolve sozinho em alguns segundos.",
     "reconnectNow": "Reconectar agora",
+    "connectingTitle": "Conectando ao servidor",
+    "connectingDescription": "O servidor ainda não está respondendo. Esta janela se conecta sozinha assim que ele responder.",
     "sessionExpiredTitle": "Sessão expirada",
     "sessionExpiredDescription": "Sua sessão não é mais válida. Faça login novamente para continuar.",
     "goToLogin": "Ir para o login"

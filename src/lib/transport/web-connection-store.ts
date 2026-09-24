@@ -1,67 +1,100 @@
-// SSR-safe adapter between the `WebTransport` connection-health state machine
-// and React's `useSyncExternalStore`. Kept as plain functions (no context,
-// no hooks) so the single global `<WebConnectionGuard>` can subscribe without
-// threading the transport singleton through the tree.
+// SSR-safe adapter between a network transport's connection-health state
+// machine and React's `useSyncExternalStore`. Kept as plain functions (no
+// context, no hooks) so the single global `<WebConnectionGuard>` can subscribe
+// without threading the transport singleton through the tree.
 //
-// Every accessor is guarded three ways:
-//   1. SSR / static-export prerender (`window` undefined) → stable "connected"
-//      so the dialog never renders server-side and hydration stays clean.
-//   2. Non-web runtime (Tauri desktop) → no-op; desktop has no browser WS.
-//   3. Remote-desktop windows → no-op; those use their own full-screen
-//      "connection expired" gate (see remote-connection-context.tsx) and must
-//      not stack a second dialog.
+// Which transport it follows:
+//   1. SSR / static-export prerender (`window` undefined) → none: a stable
+//      "connected", so the dialog never renders server-side and hydration
+//      stays clean.
+//   2. Remote-workspace desktop window → its `RemoteDesktopTransport`, whose
+//      link runs through the Rust proxy. A rejected token is not reported
+//      here: that case belongs to the window's full-screen gate (see
+//      remote-connection-context.tsx), so the two never stack.
+//   3. Browser client → the `WebTransport`.
+//   4. Local desktop window → none: IPC has no link to lose.
+//
+// The remote transport is configured after the guard has mounted (the gate
+// sets it up from the URL), so subscriptions re-bind on
+// `onActiveTransportChange`.
 
 import { detectEnvironment } from "./detect"
-import { getShellTransport, isRemoteDesktopMode } from "./index"
-import type { WebConnState, WebTransport } from "./web-transport"
+import {
+  getShellTransport,
+  getTransport,
+  isRemoteDesktopMode,
+  onActiveTransportChange,
+} from "./index"
+import type {
+  ConnectionHealth,
+  ConnectionHealthSource,
+  Transport,
+} from "./types"
 
 // Module-level constant so `getServerSnapshot` returns a STABLE reference on
 // every call — React warns / loops if the server snapshot identity changes.
-const CONNECTED: WebConnState = "connected"
+const CONNECTED: ConnectionHealth = "connected"
 
 const noop = () => {}
 
-// Resolve the active WebTransport, or null when the reconnect dialog must stay
-// dormant (SSR, desktop, remote-desktop). The shape check is belt-and-braces:
-// the env guard already guarantees a WebTransport, but it keeps a future
-// transport swap from crashing the dialog plumbing.
-function webTransport(): WebTransport | null {
+function hasHealthSurface(
+  transport: Transport
+): transport is Transport & ConnectionHealthSource {
+  return (
+    typeof (transport as Partial<ConnectionHealthSource>)
+      .subscribeConnection === "function"
+  )
+}
+
+// Resolve the transport whose link the dialog follows, or null when it must
+// stay dormant (SSR, local desktop). The shape check is belt-and-braces: it
+// keeps a future transport swap from crashing the dialog plumbing.
+function connectionSource(): ConnectionHealthSource | null {
   if (typeof window === "undefined") return null
-  if (detectEnvironment() !== "web" || isRemoteDesktopMode()) return null
-  const transport = getShellTransport()
-  if (
-    typeof (transport as Partial<WebTransport>).subscribeConnection !==
-    "function"
-  ) {
+  let transport: Transport
+  if (isRemoteDesktopMode()) {
+    transport = getTransport()
+  } else if (detectEnvironment() === "web") {
+    transport = getShellTransport()
+  } else {
     return null
   }
-  return transport as WebTransport
+  return hasHealthSurface(transport) ? transport : null
 }
 
 export function subscribeWebConnection(callback: () => void): () => void {
-  const transport = webTransport()
-  if (!transport) return noop
-  return transport.subscribeConnection(callback)
+  if (typeof window === "undefined") return noop
+  let unsubscribeSource = connectionSource()?.subscribeConnection(callback)
+  const unsubscribeChange = onActiveTransportChange(() => {
+    unsubscribeSource?.()
+    unsubscribeSource = connectionSource()?.subscribeConnection(callback)
+    callback()
+  })
+  return () => {
+    unsubscribeSource?.()
+    unsubscribeChange()
+  }
 }
 
-export function getWebConnectionSnapshot(): WebConnState {
-  return webTransport()?.getConnectionSnapshot() ?? CONNECTED
+export function getWebConnectionSnapshot(): ConnectionHealth {
+  return connectionSource()?.getConnectionSnapshot() ?? CONNECTED
 }
 
-export function getWebConnectionServerSnapshot(): WebConnState {
+export function getWebConnectionServerSnapshot(): ConnectionHealth {
   return CONNECTED
 }
 
-/** Manual "Reconnect now" from the dialog: forces an immediate health probe. */
+/** Manual "Reconnect now" from the dialog: retry at once. */
 export function reconnectWebNow(): void {
-  webTransport()?.reconnectNow()
+  connectionSource()?.reconnectNow()
 }
 
 /**
  * Funnel a definitive HTTP 401 (e.g. from a raw file-upload fetch in
- * `lib/api.ts` that bypasses `WebTransport.call`) into the same unauthorized
- * dialog state, rather than an abrupt redirect. No-op off the web shell.
+ * `lib/api.ts` that bypasses the transport's `call`) into the same
+ * unauthorized handling the transport uses for its own calls, rather than an
+ * abrupt redirect. No-op in a local desktop window.
  */
 export function notifyWebUnauthorized(): void {
-  webTransport()?.markUnauthorized()
+  connectionSource()?.markUnauthorized()
 }

@@ -33,13 +33,15 @@ const RECONNECT_DIALOG_GRACE_MS = 4_000
 
 /**
  * Global, single-instance guard mounted once at the root layout. Watches the
- * web transport's connection health and renders a blocking dialog when the
- * link is lost (auto-reconnecting, with a manual "Reconnect now") or the
- * session has expired (prompting re-login). The dialog is inert outside web
- * mode — the store returns "connected" for SSR / desktop / remote-desktop, so
- * it renders nothing there. The wake-time liveness probe below is not: it
- * goes through whichever transport is active, so a remote-workspace desktop
- * window gets the same post-sleep recovery via its Rust-side proxy.
+ * connection health of the window's network transport — a browser client's
+ * link, or a remote-workspace window's link through the Rust proxy — and
+ * renders a blocking dialog while the server can't be reached (not connected
+ * yet, or lost and auto-reconnecting; both with a manual "Reconnect now") or
+ * when a browser session has expired (prompting re-login). A remote window's
+ * rejected token is shown by its own full-window screen instead. The dialog
+ * is inert in a local desktop window — the store returns "connected" there.
+ * The wake-time liveness probe below goes through whichever transport is
+ * active, so a remote-workspace window gets the same post-sleep recovery.
  */
 export function WebConnectionGuard() {
   const t = useTranslations("WebConnection")
@@ -55,8 +57,9 @@ export function WebConnectionGuard() {
   // `state` changes (recovered, or escalated to unauthorized), so the next
   // outage starts a fresh grace window rather than flashing instantly.
   const [graceElapsed, setGraceElapsed] = useState(false)
+  const linkDown = state === "reconnecting" || state === "connecting"
   useEffect(() => {
-    if (state !== "reconnecting") return
+    if (!linkDown) return
     const id = setTimeout(
       () => setGraceElapsed(true),
       RECONNECT_DIALOG_GRACE_MS
@@ -65,7 +68,7 @@ export function WebConnectionGuard() {
       clearTimeout(id)
       setGraceElapsed(false)
     }
-  }, [state])
+  }, [linkDown])
 
   // Fast recovery on network restore / tab wake. Two things can be wrong when
   // the machine wakes. Either the transport already knows the link is down —
@@ -94,8 +97,9 @@ export function WebConnectionGuard() {
     }
   }, [])
 
-  const showReconnecting = state === "reconnecting" && graceElapsed
+  const showReconnecting = linkDown && graceElapsed
   const showUnauthorized = state === "unauthorized"
+  const neverConnected = state === "connecting"
   const open = showReconnecting || showUnauthorized
 
   if (!open) return null
@@ -119,12 +123,16 @@ export function WebConnectionGuard() {
           <AlertDialogTitle>
             {showUnauthorized
               ? t("sessionExpiredTitle")
-              : t("disconnectedTitle")}
+              : neverConnected
+                ? t("connectingTitle")
+                : t("disconnectedTitle")}
           </AlertDialogTitle>
           <AlertDialogDescription>
             {showUnauthorized
               ? t("sessionExpiredDescription")
-              : t("reconnectingDescription")}
+              : neverConnected
+                ? t("connectingDescription")
+                : t("reconnectingDescription")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

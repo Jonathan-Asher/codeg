@@ -15,8 +15,9 @@ import type { RemoteWorkspaceConnection } from "@/lib/types"
  * Shared state + actions behind every "Open remote workspace" menu (the status
  * bar's quick-actions submenu, the sidebar list's context menu). Each of them
  * renders its own markup — one is a dropdown, one a context menu — but the
- * loading, the opening and the two failure toasts are identical, so they live
- * here instead of being copy-pasted per surface.
+ * loading, the opening and the two failure toasts (opening's with a Retry
+ * action) are identical, so they live here instead of being copy-pasted per
+ * surface.
  *
  * `refresh` is deliberately NOT called on mount: connections are only needed
  * once a submenu actually opens, and these menus are mounted for the whole
@@ -44,9 +45,18 @@ export function useRemoteWorkspaceConnections() {
 
   const open = useCallback(
     (connectionId: number) => {
-      openRemoteWorkspace(connectionId).catch((err) => {
-        toast.error(t("openFailed"), { description: toErrorMessage(err) })
-      })
+      // Opening checks the server first, so a server that is briefly
+      // unreachable (just woke, restarting) fails here: offer the retry
+      // right on the toast.
+      const attempt = () => {
+        openRemoteWorkspace(connectionId).catch((err) => {
+          toast.error(t("openFailed"), {
+            description: toErrorMessage(err),
+            action: { label: t("retry"), onClick: attempt },
+          })
+        })
+      }
+      attempt()
     },
     [t]
   )

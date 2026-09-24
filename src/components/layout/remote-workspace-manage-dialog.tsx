@@ -69,6 +69,8 @@ interface RemoteWorkspaceManageDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onChanged: () => void
+  /** Connection to select when the dialog opens (default: the first). */
+  initialSelectedId?: number
 }
 
 interface Draft {
@@ -161,6 +163,7 @@ export function RemoteWorkspaceManageDialog({
   open,
   onOpenChange,
   onChanged,
+  initialSelectedId,
 }: RemoteWorkspaceManageDialogProps) {
   const t = useTranslations("RemoteWorkspace")
   const [connections, setConnections] = useState<RemoteWorkspaceConnection[]>(
@@ -189,6 +192,9 @@ export function RemoteWorkspaceManageDialog({
       setConnections(list)
       setSelectedId((prev) => {
         if (prev === null) {
+          if (list.some((item) => item.id === initialSelectedId)) {
+            return initialSelectedId ?? null
+          }
           return list[0]?.id ?? null
         }
         if (list.some((item) => item.id === prev)) {
@@ -202,7 +208,7 @@ export function RemoteWorkspaceManageDialog({
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [initialSelectedId])
 
   useEffect(() => {
     if (open) {
