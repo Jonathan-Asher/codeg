@@ -50,8 +50,13 @@ const IDLE_STATE: AppUpdateState = { seq: 0, status: "idle" }
 
 /** How long a completed check stays fresh. Also the polling period for a
  * long-lived window — codeg workspaces are commonly left open for days, so a
- * check-on-boot alone would never surface a release. */
-const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
+ * check-on-boot alone would never surface a release.
+ *
+ * Fork: 15 minutes, not upstream's 6 hours. Fork builds ship several times a
+ * day, and a 6-hour window meant a published fix could sit unnoticed for most
+ * of a working day. The manifest is a static release asset (not the rate-limited
+ * REST API), so polling it every 15 minutes costs nothing. */
+const CHECK_INTERVAL_MS = 15 * 60 * 1000
 /** Delay before the first automatic check, so the manifest fetch doesn't
  * compete with workspace boot (folder scan, session load, agent connect). */
 const FIRST_CHECK_DELAY_MS = 8000

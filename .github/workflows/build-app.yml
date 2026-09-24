@@ -3,25 +3,97 @@ on:
   workflow_dispatch:
   push:
     branches: [fork/solution-plan]
-    # A docs-only push must not cost a 25-minute build.
+    # A docs-only push must not cost a build.
     paths-ignore:
       - "docs/**"
       - "**/*.md"
 
+# A newer push supersedes a build still in flight: nobody wants the older one,
+# and on the self-hosted runners it would only hold the machine.
+concurrency:
+  group: build-app-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
+# WHERE THIS RUNS. Two self-hosted runners on Jonathan's M4 Max (installed in
+# ~/actions-runner, one for checks and one for the build, so they run side by
+# side). Selected by repository variables:
+#   CHECKS_RUNS_ON = ["self-hosted","codeg-m4-checks"]
+#   BUILD_RUNS_ON  = ["self-hosted","codeg-m4-build"]
+# If the Mac is off for a while, point them back at GitHub's hosted machines
+# (slower, but always there):
+#   gh variable set CHECKS_RUNS_ON --body '"macos-14"'
+#   gh variable set BUILD_RUNS_ON  --body '"macos-14"'
+# Unset variables also fall back to macos-14.
+#
+# Self-hosted runs keep their workspace between builds (`clean: false`), so
+# node_modules and src-tauri/target survive and a build only recompiles what
+# changed; GitHub-hosted runs start clean and use rust-cache instead.
+
 jobs:
-  build:
-    runs-on: macos-14
+  checks:
+    runs-on: ${{ fromJSON(vars.CHECKS_RUNS_ON || '"macos-14"') }}
+    timeout-minutes: 90
+    env:
+      RUST_BACKTRACE: short
+      INSTA_UPDATE: "no"
     steps:
       - uses: actions/checkout@v4
+        with:
+          clean: ${{ runner.environment == 'github-hosted' }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        if: runner.environment == 'github-hosted'
+        with:
+          workspaces: src-tauri
+      - name: Install pnpm deps
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm eslint .
+      - name: Type check
+        run: npx tsc --noEmit -p tsconfig.json
+      - name: Frontend tests
+        run: pnpm vitest run
+      - name: Rust clippy + tests (desktop)
+        working-directory: src-tauri
+        env:
+          # rust-toolchain pins this to 0 for CI caches; on a persistent
+          # workspace incremental debug builds are the whole point.
+          CARGO_INCREMENTAL: ${{ runner.environment == 'self-hosted' && '1' || '0' }}
+        run: |
+          mkdir -p ../out   # tauri-build requires frontendDist to exist
+          cargo clippy --all-targets --features test-utils -- -D warnings
+          cargo test --features test-utils
+      - name: Rust clippy (server) + mcp companion
+        working-directory: src-tauri
+        env:
+          CARGO_INCREMENTAL: ${{ runner.environment == 'self-hosted' && '1' || '0' }}
+        run: |
+          cargo clippy --no-default-features --bin codeg-server --lib -- -D warnings
+          cargo check --no-default-features --bin codeg-mcp
+
+  build:
+    runs-on: ${{ fromJSON(vars.BUILD_RUNS_ON || '"macos-14"') }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: ${{ runner.environment == 'github-hosted' }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        if: runner.environment == 'github-hosted'
         with:
           workspaces: src-tauri
       - name: Install pnpm deps
@@ -33,7 +105,8 @@ jobs:
       # across fork builds, and it moves up by itself after a rebase. Stamped
       # into all three version fields so the app, its embedded server
       # (CARGO_PKG_VERSION, which answers update checks for remote windows)
-      # and latest.json agree on what is running.
+      # and latest.json agree on what is running. The stamp is undone by the
+      # next checkout (a forced checkout resets tracked files).
       - name: Stamp the fork version
         run: |
           python3 - <<'PY'
@@ -50,54 +123,65 @@ jobs:
           cargo.write_text(re.sub(r'^version = "[^"]+"', f'version = "{fork}"', cargo.read_text(), count=1, flags=re.M))
           print("fork version:", fork)
           PY
+      # `--bundles app`: the .app plus its signed updater archive — all the
+      # update feed and the installer use. No DMG step.
       - name: Build app (signed for the fork update feed)
-        run: pnpm tauri build
+        run: pnpm tauri build --bundles app
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # DMG bundling needs a GUI session; the .app + updater artifacts are enough
-          TAURI_BUNDLER_DISABLE_DMG: "true"
-      - name: Assemble update feed (latest.json)
+      - name: Assemble release files
         run: |
           VERSION=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
           BUNDLE_DIR=src-tauri/target/release/bundle
-          # Updater artifact: codeg.app.tar.gz + .sig (created by tauri's updater bundler)
-          ls -la "$BUNDLE_DIR" || true
-          SIG=$(cat "$BUNDLE_DIR"/codeg.app.tar.gz.sig 2>/dev/null || cat "$BUNDLE_DIR/macos/codeg.app.tar.gz.sig")
+          TARGZ=$(find "$BUNDLE_DIR" -name 'codeg.app.tar.gz' | head -1)
+          SIG=$(find "$BUNDLE_DIR" -name 'codeg.app.tar.gz.sig' | head -1)
+          test -n "$TARGZ" && test -n "$SIG" || { echo "updater artifacts missing"; ls -laR "$BUNDLE_DIR"; exit 1; }
+          rm -rf release && mkdir release
+          cp "$TARGZ" "$SIG" release/
+          cp scripts/install-remote.sh release/install.sh
           DL="https://github.com/Jonathan-Asher/codeg/releases/download/fork-latest/codeg.app.tar.gz"
-          cat > latest.json <<JSON
+          cat > release/latest.json <<JSON
           {
             "version": "$VERSION",
             "notes": "codeg fork build $VERSION (${GITHUB_SHA::7}) — auto-updates with features intact",
             "pub_date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
             "platforms": {
-              "darwin-aarch64": { "signature": "$SIG", "url": "$DL" }
+              "darwin-aarch64": { "signature": "$(cat "$SIG")", "url": "$DL" }
             }
           }
           JSON
-          cat latest.json
-      - name: Upload app artifact
-        uses: actions/upload-artifact@v4
+          echo "$VERSION" > release/VERSION
+          cat release/latest.json
+      - uses: actions/upload-artifact@v4
         with:
-          name: codeg-app
-          path: src-tauri/target/release/bundle/macos/codeg.app
+          name: release
+          path: release/
+          retention-days: 3
+
+  # Publishing waits for BOTH: nothing reaches the update feed unless the
+  # checks passed. Runs on a GitHub-hosted Linux box — it only moves files.
+  publish:
+    needs: [checks, build]
+    if: github.ref == 'refs/heads/fork/solution-plan'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
       - name: Update rolling release (fork-latest)
-        if: github.ref == 'refs/heads/fork/solution-plan'
-        run: |
-          BUNDLE_DIR=src-tauri/target/release/bundle
-          TARGZ=$(find "$BUNDLE_DIR" -name 'codeg.app.tar.gz' | head -1)
-          SIG=$(find "$BUNDLE_DIR" -name 'codeg.app.tar.gz.sig' | head -1)
-          echo "updater artifact: $TARGZ / $SIG"
-          ditto -c -k --keepParent "$BUNDLE_DIR/macos/codeg.app" codeg-fork.app.zip
-          gh release delete fork-latest --yes --cleanup-tag 2>/dev/null || true
-          cp scripts/install-remote.sh /tmp/install.sh
-          gh release create fork-latest \
-            codeg-fork.app.zip \
-            "$TARGZ" \
-            "$SIG" \
-            latest.json \
-            /tmp/install.sh \
-            --title "codeg fork (auto-build)" \
-            --notes "Latest fork build — signed for the fork update feed. Features: cmd+F find-in-chat (+ word highlighting), Pi session fork-points, wake resync, pinned drag-reorder, Markdown export, pi-acp fork/resume. Install: curl -sL https://github.com/Jonathan-Asher/codeg/releases/download/fork-latest/install.sh | bash"
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          VERSION=$(cat release/VERSION)
+          gh release delete fork-latest -R "$REPO" --yes --cleanup-tag 2>/dev/null || true
+          gh release create fork-latest -R "$REPO" \
+            --target "$GITHUB_SHA" \
+            release/codeg.app.tar.gz \
+            release/codeg.app.tar.gz.sig \
+            release/latest.json \
+            release/install.sh \
+            --title "codeg fork $VERSION" \
+            --notes "Latest fork build ($VERSION, ${GITHUB_SHA::7}) — signed for the fork update feed; installed apps update from here. Fresh install: curl -sL https://github.com/Jonathan-Asher/codeg/releases/download/fork-latest/install.sh | bash"

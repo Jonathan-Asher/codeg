@@ -33,16 +33,22 @@ else
 fi
 
 echo "==> 2/4 Downloading codeg fork app (~90MB)"
-curl -sL -o /tmp/codeg-fork.app.zip "https://github.com/Jonathan-Asher/codeg/releases/download/fork-latest/codeg-fork.app.zip?cb=$(date +%s)" || { echo "FAILED: app download"; exit 1; }
+# The signed updater archive — the same file the in-app Update button installs.
+# Downloaded and unpacked BEFORE anything is touched: a failed download must
+# leave the installed app exactly as it was.
+STAGE=/tmp/codeg-fork-install
+rm -rf "$STAGE" && mkdir -p "$STAGE"
+curl -fsSL -o "$STAGE/codeg.app.tar.gz" "https://github.com/Jonathan-Asher/codeg/releases/download/fork-latest/codeg.app.tar.gz?cb=$(date +%s)" || { echo "FAILED: app download"; exit 1; }
+tar -xzf "$STAGE/codeg.app.tar.gz" -C "$STAGE" || { echo "FAILED: extract"; exit 1; }
+[ -d "$STAGE/codeg.app/Contents" ] || { echo "FAILED: archive has no codeg.app"; exit 1; }
 
 echo "==> 3/4 Installing app (backup of the old one at /Applications/codeg.app.bak)"
 osascript -e 'tell application "codeg" to quit' 2>/dev/null || true
 sleep 2
 rm -rf /Applications/codeg.app.bak
 [ -d /Applications/codeg.app ] && mv /Applications/codeg.app /Applications/codeg.app.bak
-unzip -oq /tmp/codeg-fork.app.zip -d /tmp/codeg-unzip || { echo "FAILED: unzip"; exit 1; }
-ditto /tmp/codeg-unzip/codeg.app /Applications/codeg.app
-rm -rf /tmp/codeg-fork.app.zip /tmp/codeg-unzip
+ditto "$STAGE/codeg.app" /Applications/codeg.app
+rm -rf "$STAGE"
 xattr -dr com.apple.quarantine /Applications/codeg.app 2>/dev/null || true
 
 echo "==> 4/4 Relaunching codeg"
