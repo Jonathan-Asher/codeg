@@ -359,6 +359,20 @@ export interface ForkResult {
   siblingConversationId: number
 }
 
+/**
+ * What a fork is for (Rust `ForkMode`).
+ *
+ * - `"branch"` — "Fork from here". A turn the agent cannot name forks at the
+ *   tail rather than failing, and the forked conversation is titled
+ *   `[Fork] …`.
+ * - `"edit"` — editing a past message: the fork is the history the edited
+ *   message continues from, so it must end EXACTLY at the named reply. The
+ *   backend refuses (instead of forking at the tail) when it cannot, the
+ *   conversation keeps its title, and the row holding the original branch is
+ *   named `… (before edit)`.
+ */
+export type ForkMode = "branch" | "edit"
+
 export async function acpFork(
   connectionId: string,
   // Linkage for a conversation opened from history: its connection resumed via
@@ -371,8 +385,10 @@ export async function acpFork(
   folderId?: number | null,
   // "Fork from here": the rendered turn to fork at. The UI always passes one;
   // omitting it forks at the tail, which the backend also falls back to for a
-  // turn the agent cannot name — its call, see `resolve_fork_point`.
-  forkFromTurnId?: string | null
+  // turn the agent cannot name — its call, see `resolve_fork_point`. An
+  // `"edit"` fork never falls back: see `ForkMode`.
+  forkFromTurnId?: string | null,
+  mode?: ForkMode | null
 ): Promise<ForkResult> {
   try {
     return await getTransport().call("acp_fork", {
@@ -380,6 +396,7 @@ export async function acpFork(
       conversationId: conversationId ?? null,
       folderId: folderId ?? null,
       forkFromTurnId: forkFromTurnId ?? null,
+      mode: mode ?? null,
     })
   } catch (e) {
     // A fork is serialized with prompts on the backend: it returns

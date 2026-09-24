@@ -78,6 +78,14 @@ pub enum AcpError {
     /// and points at the agent's own settings panel, which knows the path.
     #[error("{0}")]
     AgentAuthRequired(String),
+    /// A fork that has to land EXACTLY on the chosen message could not be aimed
+    /// there — editing a past message, which continues from the history just
+    /// before it. A plain "fork from here" degrades to a tail fork instead, but
+    /// for an edit the tail still holds the message being replaced, so the fork
+    /// is refused rather than sending the edit into the wrong context. Carries
+    /// the reason shown to the user.
+    #[error("{0}")]
+    ForkPointUnresolved(String),
 }
 
 impl AcpError {
@@ -132,6 +140,7 @@ impl AcpError {
             Self::ConnectionNotFound(_) => Some("connection_not_found"),
             Self::McpRejectedByAgent(_) => Some("mcp_rejected_by_agent"),
             Self::AgentAuthRequired(_) => Some("agent_auth_required"),
+            Self::ForkPointUnresolved(_) => Some("fork_point_unresolved"),
             Self::Protocol(_) => None,
         }
     }

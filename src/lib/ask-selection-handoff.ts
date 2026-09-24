@@ -1,4 +1,4 @@
-import type { AgentType } from "@/lib/types"
+import type { AgentType, PromptDraft, PromptInputBlock } from "@/lib/types"
 
 /**
  * "Ask about this selection" hand-off: the selection bubble composes a prompt
@@ -14,6 +14,10 @@ import type { AgentType } from "@/lib/types"
  *    already-mounted fast path.
  * Keying by tab id is what keeps a second group's draft panel from swallowing a
  * prompt meant for the first. Mirrors the `task-compose-events` idiom.
+ *
+ * Editing a conversation's FIRST message rides the same hand-off: with no reply
+ * before it to fork at, the edited message starts a new conversation on the
+ * same agent instead — carrying its images along (see `blocks`).
  */
 
 export const ASK_SELECTION_PARKED_EVENT = "codeg:ask-selection-parked"
@@ -24,8 +28,15 @@ export interface AskSelectionParkedDetail {
 }
 
 export interface ParkedAskPrompt {
-  /** The composed prompt: quoted selection, blank line, the user's question. */
+  /** The composed prompt: quoted selection, blank line, the user's question.
+   *  Also what the queued row shows. */
   prompt: string
+  /**
+   * The full block list to send, when the prompt carries more than its text —
+   * an edited first message re-sends the images it had. Absent → the prompt
+   * goes out as a single text block.
+   */
+  blocks?: PromptInputBlock[]
   /**
    * The state the target tab must be in before this prompt may be taken —
    * exactly what `openNewConversationTab` reported it would end up as.
@@ -75,27 +86,30 @@ export function parkAskSelectionPrompt(
 
 /**
  * Take the prompts parked for `tabId` that match the tab's CURRENT state, in
- * order. Anything that doesn't match stays parked for a later drain — the
- * caller re-runs this when its agent or folder changes, which is precisely when
- * a pending retarget lands.
+ * order, as drafts ready to send. Anything that doesn't match stays parked for
+ * a later drain — the caller re-runs this when its agent or folder changes,
+ * which is precisely when a pending retarget lands.
  *
  * Returns [] when nothing was parked, or nothing parked matches yet.
  */
 export function consumeAskSelectionPrompts(
   tabId: string,
   state: AskSelectionDrainState
-): string[] {
+): PromptDraft[] {
   const queued = parked.get(tabId)
   if (!queued) return []
 
-  const taken: string[] = []
+  const taken: PromptDraft[] = []
   const held: ParkedAskPrompt[] = []
   for (const entry of queued) {
     if (
       entry.agentType === state.agentType &&
       entry.folderId === state.folderId
     ) {
-      taken.push(entry.prompt)
+      taken.push({
+        blocks: entry.blocks ?? [{ type: "text", text: entry.prompt }],
+        displayText: entry.prompt,
+      })
     } else {
       held.push(entry)
     }
