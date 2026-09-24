@@ -141,6 +141,10 @@ import { useRemoteWorkspaceConnections } from "@/hooks/use-remote-workspace-conn
 import { useSubsessionSync } from "@/hooks/use-subsession-sync"
 import { SidebarSectionHeader } from "./sidebar-section-header"
 import { AttentionCountBadge } from "./attention-count-badge"
+import {
+  PINNED_ROW_ATTR,
+  usePinnedPointerReorder,
+} from "./use-pinned-pointer-reorder"
 import { useConversationAttentionStore } from "@/stores/conversation-attention-store"
 import { SidebarFolderGroupHeader } from "./sidebar-folder-group-header"
 import { ConversationManageDialog } from "./conversation-manage-dialog"
@@ -2117,62 +2121,36 @@ export function SidebarConversationList({
   )
 
   // ── Pinned-section drag reorder ──────────────────────────────────────────
-  // Native HTML5 drag on pinned cards: hold and move a pinned row onto another
-  // pinned row; the drop commits the whole visible pinned order via the
-  // reorder_conversation_pins command (server writes pin_order = index per id
-  // and echoes one upsert per conversation, which re-sorts the section).
-  const [draggingPinId, setDraggingPinId] = useState<number | null>(null)
-  const [dragOverPinId, setDragOverPinId] = useState<number | null>(null)
-
-  const handlePinDragStart = useCallback((id: number, e: React.DragEvent) => {
-    // WebKit silently aborts HTML5 drags that never set drag data — the
-    // payload is also what the drop handler routes on.
-    e.dataTransfer.setData("text/plain", String(id))
-    e.dataTransfer.effectAllowed = "move"
-    setDraggingPinId(id)
-  }, [])
-
-  const handlePinDragOver = useCallback(
-    (e: React.DragEvent, id: number) => {
-      if (draggingPinId == null || draggingPinId === id) return
-      e.preventDefault()
-      e.dataTransfer.dropEffect = "move"
-      setDragOverPinId(id)
-    },
-    [draggingPinId]
+  // Pointer-driven (see `usePinnedPointerReorder` for why not HTML5 drag):
+  // press a pinned row, move it, release; the new order applies locally at once
+  // and is committed via reorder_conversation_pins (server writes
+  // pin_order = index per id and echoes an upsert per conversation, so every
+  // other client re-sorts too).
+  const pinnedIds = useMemo(() => pinned.map((c) => c.id), [pinned])
+  const pinnedIndexById = useMemo(
+    () => new Map(pinnedIds.map((id, index) => [id, index])),
+    [pinnedIds]
   )
-
-  const handlePinDrop = useCallback(
-    async (targetId: number) => {
-      const draggedId = draggingPinId
-      setDraggingPinId(null)
-      setDragOverPinId(null)
-      if (draggedId == null || draggedId === targetId) return
-      // Re-commit the CURRENT visible pinned order with the dragged row moved
-      // onto the target's slot — the array already reflects pin_order (see
-      // selectPinnedWithReuse), so moving within it IS the new order.
-      const ids = pinned.map((c) => c.id)
-      const from = ids.indexOf(draggedId)
-      const to = ids.indexOf(targetId)
-      if (from === -1 || to === -1) return
-      ids.splice(to, 0, ids.splice(from, 1)[0]!)
-      try {
-        await reorderConversationPins(ids)
-      } catch (err) {
+  const commitPinOrder = useCallback(
+    (orderedIds: number[]) => {
+      orderedIds.forEach((id, index) =>
+        updateConversationLocal(id, { pin_order: index })
+      )
+      reorderConversationPins(orderedIds).catch((err: unknown) => {
         toast.error(
           t("toasts.reorderPinsFailed", {
             message: toErrorMessage(err),
           })
         )
-      }
+      })
     },
-    [draggingPinId, pinned, t]
+    [t, updateConversationLocal]
   )
-
-  const handlePinDragEnd = useCallback(() => {
-    setDraggingPinId(null)
-    setDragOverPinId(null)
-  }, [])
+  const {
+    draggingId: draggingPinId,
+    dropIndex: pinDropIndex,
+    beginPinDrag,
+  } = usePinnedPointerReorder({ pinnedIds, onCommit: commitPinOrder })
 
   // Export to Markdown from the card's context menu (offered on pinned rows —
   // the section that reads as "my go-to conversations"). The server serializes
@@ -3157,31 +3135,36 @@ export function SidebarConversationList({
       />
     )
     if (row.pinned && conv.pinned_at != null) {
-      // Pinned rows are drag initiators/targets for the Pinned section's
-      // manual order. Native HTML5 drag: no library, no pointer-fight with the
-      // card's own click/hover affordances (browsers suppress the trailing
-      // click after a real drag).
+      // Pinned rows are the Pinned section's drag handles (pointer-driven —
+      // see `usePinnedPointerReorder`). The drop line shows where the row
+      // will land: above this row, or below the last one.
+      const index = pinnedIndexById.get(conv.id) ?? -1
       const isDragging = draggingPinId === conv.id
-      const isDragOver = dragOverPinId === conv.id
+      const lineAbove = draggingPinId != null && pinDropIndex === index
+      const lineBelow =
+        draggingPinId != null &&
+        index === pinnedIds.length - 1 &&
+        pinDropIndex === pinnedIds.length
       return (
         <div
-          draggable={!isDragging}
-          onDragStart={(e) => handlePinDragStart(conv.id, e)}
-          onDragOver={(e) => handlePinDragOver(e, conv.id)}
-          onDragLeave={() =>
-            setDragOverPinId((v) => (v === conv.id ? null : v))
-          }
-          onDrop={(e) => {
-            e.preventDefault()
-            void handlePinDrop(conv.id)
-          }}
-          onDragEnd={handlePinDragEnd}
+          {...{ [PINNED_ROW_ATTR]: conv.id }}
+          onPointerDown={(e) => beginPinDrag(conv.id, e)}
           className={cn(
-            "rounded-[0.375rem]",
-            isDragging && "opacity-50",
-            isDragOver && "ring-1 ring-sidebar-ring"
+            "relative rounded-[0.375rem]",
+            draggingPinId != null && "cursor-grabbing",
+            isDragging && "opacity-50"
           )}
         >
+          {(lineAbove || lineBelow) && (
+            <span
+              aria-hidden
+              data-pin-drop-line
+              className={cn(
+                "pointer-events-none absolute inset-x-2 z-10 h-0.5 rounded-full bg-primary",
+                lineAbove ? "-top-px" : "-bottom-px"
+              )}
+            />
+          )}
           {cardEl}
         </div>
       )

@@ -95,7 +95,10 @@ export interface AppWorkspaceStoreState {
   updateConversationLocal: (
     id: number,
     patch: Partial<
-      Pick<DbConversationSummary, "status" | "title" | "pinned_at">
+      Pick<
+        DbConversationSummary,
+        "status" | "title" | "pinned_at" | "pin_order"
+      >
     >
   ) => void
   applyConversationUpsert: (summary: DbConversationSummary) => void
@@ -421,7 +424,8 @@ export const useAppWorkspaceStore = create<AppWorkspaceStoreState>()(
       // A pin toggle is a view preference, not activity — mirror the backend
       // (`update_pin`) and leave `updated_at` untouched so an updated-sorted
       // folder doesn't briefly float the row. Status/title patches still bump.
-      const bumpUpdatedAt = !("pinned_at" in patch)
+      // Nor is a manual pin reorder.
+      const bumpUpdatedAt = !("pinned_at" in patch) && !("pin_order" in patch)
       next[idx] = {
         ...next[idx],
         ...patch,
