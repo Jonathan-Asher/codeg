@@ -26,6 +26,13 @@ export interface UserMessageEditorProps {
    */
   recallDraft: (key: string) => string | undefined
   rememberDraft: (key: string, text: string) => void
+  /**
+   * Whether this mount should take focus: true once per opening, so a mount
+   * that only brings the editor back into view (the user scrolled away and
+   * back) doesn't pull focus out of wherever they went meanwhile. Absent →
+   * every mount takes it.
+   */
+  takeFocus?: (key: string) => boolean
   /** The message's images: shown, not editable, and sent again with it. */
   images: UserImageDisplay[]
   /** The message opens the conversation, so saving starts a new one instead
@@ -55,6 +62,7 @@ export function UserMessageEditor({
   initialText,
   recallDraft,
   rememberDraft,
+  takeFocus,
   images,
   startsNewConversation,
   saving,
@@ -70,13 +78,14 @@ export function UserMessageEditor({
   const ime = useImeGuard()
   const fieldRef = useRef<HTMLTextAreaElement | null>(null)
 
-  // Open with the caret at the end, the way the message was left.
+  // Open with the caret at the end, the way the message was left. Both
+  // dependencies hold still for a mount, so this is the mount itself.
   useEffect(() => {
     const field = fieldRef.current
-    if (!field) return
+    if (!field || (takeFocus && !takeFocus(draftKey))) return
     field.focus()
     field.setSelectionRange(field.value.length, field.value.length)
-  }, [])
+  }, [draftKey, takeFocus])
 
   const hasContent = text.trim().length > 0 || images.length > 0
   const canSave = !saving && blocked === null && hasContent
