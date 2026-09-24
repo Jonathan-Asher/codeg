@@ -22,12 +22,21 @@ import {
   FolderX,
   Info,
   ChevronRight,
+  ShieldAlert,
+  MessageCircleQuestion,
+  ClipboardCheck,
+  type LucideIcon,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useImeGuard } from "@/hooks/use-ime-guard"
 import { useTabStore } from "@/contexts/tab-context"
 import { emitAttachSessionToSession } from "@/lib/session-attachment-events"
-import type { DbConversationSummary, ConversationStatus } from "@/lib/types"
+import type {
+  AttentionKind,
+  DbConversationSummary,
+  ConversationStatus,
+} from "@/lib/types"
+import { useConversationAttention } from "@/stores/conversation-attention-store"
 import { STATUS_ORDER } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { formatConversationTitle } from "@/lib/conversation-title"
@@ -196,6 +205,19 @@ interface SidebarConversationCardProps {
   onToggleExpand?: (id: number) => void
 }
 
+/** Icon and sidebar-message key for each "waiting on you" kind. */
+const ATTENTION_BADGE: Record<
+  AttentionKind,
+  {
+    icon: LucideIcon
+    label: "attentionPermission" | "attentionQuestion" | "attentionPlanApproval"
+  }
+> = {
+  permission: { icon: ShieldAlert, label: "attentionPermission" },
+  question: { icon: MessageCircleQuestion, label: "attentionQuestion" },
+  plan_approval: { icon: ClipboardCheck, label: "attentionPlanApproval" },
+}
+
 export const SidebarConversationCard = memo(function SidebarConversationCard({
   conversation,
   isSelected,
@@ -308,6 +330,11 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
 
   const status = conversation.status as ConversationStatus
   const isRunning = status === "in_progress"
+  // Blocked on the user (permission / question / plan approval). Outranks
+  // "running" everywhere it shows: the session IS in progress, but the thing
+  // to know about it is that it can't continue without you.
+  const attention = useConversationAttention(conversation.id)
+  const attentionBadge = attention ? ATTENTION_BADGE[attention] : null
   const isCancelled = status === "cancelled"
   const isPinned = conversation.pinned_at != null
   const isCompleted = status === "completed"
@@ -419,11 +446,21 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                         agentType={conversation.agent_type}
                         className="h-[0.75rem] w-[0.75rem]"
                       />
-                      <ConversationStatusDot
-                        status={status}
-                        size="sm"
-                        className="absolute -right-0.5 -bottom-0.5 ring-2 ring-sidebar"
-                      />
+                      {attention ? (
+                        // Left-edge cue, on the agent glyph where the status dot
+                        // sits: visible in a scan down the list even before the
+                        // right-hand badge is read.
+                        <span
+                          data-testid="conversation-attention-dot"
+                          className="absolute -right-0.5 -bottom-0.5 h-1.5 w-1.5 animate-pulse rounded-full bg-rose-500 ring-2 ring-sidebar dark:bg-rose-400"
+                        />
+                      ) : (
+                        <ConversationStatusDot
+                          status={status}
+                          size="sm"
+                          className="absolute -right-0.5 -bottom-0.5 ring-2 ring-sidebar"
+                        />
+                      )}
                     </div>
 
                     <span
@@ -529,7 +566,22 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                         !isSubsession && "group-hover:hidden"
                       )}
                     >
-                      {isRunning ? (
+                      {attentionBadge ? (
+                        <span
+                          className="relative inline-flex shrink-0 items-center justify-center"
+                          title={tSidebar(attentionBadge.label)}
+                          data-testid="conversation-attention-badge"
+                          data-attention={attention}
+                        >
+                          <attentionBadge.icon
+                            className="h-3.5 w-3.5 text-rose-600 dark:text-rose-400"
+                            aria-hidden
+                          />
+                          <span className="sr-only">
+                            {tSidebar(attentionBadge.label)}
+                          </span>
+                        </span>
+                      ) : isRunning ? (
                         <span
                           className="relative inline-flex shrink-0 items-center justify-center"
                           title={tSidebar("statusRunningBadge")}

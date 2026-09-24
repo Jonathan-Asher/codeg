@@ -20,6 +20,7 @@ import {
   type ThemeColor,
 } from "@/lib/theme-presets"
 import { cn } from "@/lib/utils"
+import { AttentionCountBadge } from "./attention-count-badge"
 import { Button } from "@/components/ui/button"
 import {
   ContextMenu,
@@ -61,6 +62,7 @@ export const SidebarFolderGroupHeader = memo(function SidebarFolderGroupHeader({
   groupId,
   name,
   runningCount,
+  attentionCount,
   expanded,
   onToggle,
   onRename,
@@ -82,6 +84,8 @@ export const SidebarFolderGroupHeader = memo(function SidebarFolderGroupHeader({
    * badge, and the rows under an open group already answer it.
    */
   runningCount: number
+  /** Sessions across the group blocked waiting on the user. */
+  attentionCount: number
   expanded: boolean
   onToggle?: (groupId: number) => void
   onRename?: (groupId: number, name: string) => void
@@ -196,6 +200,10 @@ export const SidebarFolderGroupHeader = memo(function SidebarFolderGroupHeader({
                       match the spinner on the cards, and nothing at all when
                       none are. A collapsed group is exactly when this is the
                       only way to see that work is under way in there. */}
+            <AttentionCountBadge
+              count={attentionCount}
+              label={t("attentionCountBadge", { count: attentionCount })}
+            />
             {runningCount > 0 && (
               <span
                 title={t("runningCountBadge", { count: runningCount })}

@@ -530,6 +530,30 @@ export type ConversationChange =
 
 export const CONVERSATION_CHANGED_EVENT = "conversation://changed"
 
+/** What a live session is blocked on, waiting for the user. Mirrors
+ *  `AttentionKind` in `src-tauri/src/acp/session_state.rs`. */
+export type AttentionKind = "permission" | "question" | "plan_approval"
+
+/** Payload for the global `conversation://attention` side-channel: a session
+ *  started or stopped waiting on the user. `id` is the conversation its
+ *  connection is bound to — for a delegation sub-agent that is a hidden child
+ *  row, which the `list_conversation_attention` snapshot maps to its visible
+ *  root. `kind: null` clears. */
+export interface ConversationAttentionChange {
+  id: number
+  kind: AttentionKind | null
+}
+
+export const CONVERSATION_ATTENTION_EVENT = "conversation://attention"
+
+/** One row of the `list_conversation_attention` snapshot. */
+export interface ConversationAttentionEntry {
+  conversation_id: number
+  kind: AttentionKind
+  /** The top-level row the sidebar shows for it (itself unless a sub-agent). */
+  root_conversation_id: number
+}
+
 /** Payload for the global `folder://changed` side-channel. A folder created or
  *  updated headlessly — e.g. the automation engine minting a per-run worktree —
  *  reaches every client's workspace list so a conversation produced inside it can

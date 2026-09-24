@@ -4,6 +4,7 @@ import { useEffect, type ReactNode } from "react"
 import { getGitHead } from "@/lib/api"
 import { onTransportReconnect, subscribe } from "@/lib/platform"
 import { useAcpEvent } from "@/contexts/acp-connections-context"
+import { useConversationAttentionSync } from "@/hooks/use-conversation-attention-sync"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { useConversationRuntimeStore } from "@/stores/conversation-runtime-store"
 import { useTabStore } from "@/stores/tab-store"
@@ -44,6 +45,9 @@ function syncOpenViewerDetail(conversationId: number): void {
  * poll.
  */
 export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
+  // "Waiting on you" flags for the sidebar rows (permission / question / plan).
+  useConversationAttentionSync()
+
   useEffect(() => {
     const { fetchFolders, refreshConversations } =
       useAppWorkspaceStore.getState()

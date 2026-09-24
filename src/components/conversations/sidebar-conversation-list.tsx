@@ -140,6 +140,8 @@ import {
 import { useRemoteWorkspaceConnections } from "@/hooks/use-remote-workspace-connections"
 import { useSubsessionSync } from "@/hooks/use-subsession-sync"
 import { SidebarSectionHeader } from "./sidebar-section-header"
+import { AttentionCountBadge } from "./attention-count-badge"
+import { useConversationAttentionStore } from "@/stores/conversation-attention-store"
 import { SidebarFolderGroupHeader } from "./sidebar-folder-group-header"
 import { ConversationManageDialog } from "./conversation-manage-dialog"
 import { CloneDialog } from "@/components/layout/clone-dialog"
@@ -203,6 +205,7 @@ const FolderHeader = memo(function FolderHeader({
   folderAlias,
   folderPath,
   runningCount,
+  attentionCount,
   expanded,
   themeColor,
   appThemeColor,
@@ -245,6 +248,9 @@ const FolderHeader = memo(function FolderHeader({
    * a total-count chip on every row was noise (expanding shows the rows).
    */
   runningCount: number
+  /** Sessions in this folder blocked waiting on the user (see
+   *  `AttentionCountBadge`). Counted like `runningCount`, off the full list. */
+  attentionCount: number
   expanded: boolean
   themeColor: FolderThemeColor
   appThemeColor: ThemeColor
@@ -499,6 +505,10 @@ const FolderHeader = memo(function FolderHeader({
                       amber-600) carries the light-mode fill: at 0.625rem this is
                       small text, and amber-600 on the tinted surface lands near
                       3:1 — under the AA floor amber-700 (~4.7:1) clears. */}
+                  <AttentionCountBadge
+                    count={attentionCount}
+                    label={t("attentionCountBadge", { count: attentionCount })}
+                  />
                   {runningCount > 0 && (
                     <span
                       title={t("runningCountBadge", { count: runningCount })}
@@ -1425,6 +1435,23 @@ export function SidebarConversationList({
     }
     return map
   }, [conversations, displayChildToParent])
+
+  // Sessions blocked waiting on the user, per display group — the rose chip
+  // beside the running one. Same counting rules as `folderRunningCounts` (full
+  // list, pinned included, never a `buildRows` input).
+  const attentionByConversationId = useConversationAttentionStore(
+    (s) => s.byConversationId
+  )
+  const folderAttentionCounts = useMemo(() => {
+    const map = new Map<number, number>()
+    if (attentionByConversationId.size === 0) return map
+    for (const conv of conversations) {
+      if (!attentionByConversationId.has(conv.id)) continue
+      const groupId = displayChildToParent.get(conv.folder_id) ?? conv.folder_id
+      map.set(groupId, (map.get(groupId) ?? 0) + 1)
+    }
+    return map
+  }, [conversations, displayChildToParent, attentionByConversationId])
 
   // The REORDERABLE folders: worktree child folders are excluded (they follow
   // their parent, never reorder on their own). Hidden chat folders never reach
@@ -2706,6 +2733,23 @@ export function SidebarConversationList({
     return total
   }
 
+  // The attention chip rolls up exactly like the running one.
+  const containerAttentionCount = (repoId: number): number => {
+    let total = folderAttentionCounts.get(repoId) ?? 0
+    const kids = containerChildren.get(repoId)
+    if (kids) {
+      for (const kid of kids) total += folderAttentionCounts.get(kid) ?? 0
+    }
+    return total
+  }
+  const groupAttentionCount = (groupId: number): number => {
+    let total = 0
+    for (const memberId of layout.membersByGroup.get(groupId) ?? []) {
+      total += containerAttentionCount(memberId)
+    }
+    return total
+  }
+
   const folderHeaderElement = (
     folderId: number,
     opts: {
@@ -2746,6 +2790,9 @@ export function SidebarConversationList({
     const runningCount = isContainer
       ? containerRunningCount(folderId)
       : (folderRunningCounts.get(folderId) ?? 0)
+    const attentionCount = isContainer
+      ? containerAttentionCount(folderId)
+      : (folderAttentionCounts.get(folderId) ?? 0)
     const expanded = isRootGroup
       ? !rootGroupCollapsed.has(folderId)
       : opts.collapsed
@@ -2758,6 +2805,7 @@ export function SidebarConversationList({
         folderAlias={folderEntry?.alias ?? null}
         folderPath={folderEntry?.path ?? ""}
         runningCount={runningCount}
+        attentionCount={attentionCount}
         expanded={expanded}
         themeColor={folderThemeColor(folderId)}
         appThemeColor={appThemeColor}
@@ -2866,6 +2914,7 @@ export function SidebarConversationList({
           groupId={row.groupId}
           name={group.name}
           runningCount={groupRunningCount(row.groupId)}
+          attentionCount={groupAttentionCount(row.groupId)}
           expanded={row.expanded}
           onToggle={toggleFolderGroup}
           onRename={handleRenameGroup}
@@ -3287,6 +3336,7 @@ export function SidebarConversationList({
                               groupId={groupId}
                               name={group.name}
                               runningCount={groupRunningCount(groupId)}
+                              attentionCount={groupAttentionCount(groupId)}
                               expanded={false}
                               themeColor={normalizeFolderThemeColor(
                                 group.color

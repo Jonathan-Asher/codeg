@@ -17,6 +17,7 @@ pub mod chat_channel;
 /// run without the tauri stack.
 pub mod clipboard;
 pub mod config_sync;
+pub mod attention;
 pub mod conversation_export;
 pub mod message_search;
 pub mod conversations;

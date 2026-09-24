@@ -130,6 +130,10 @@ pub fn build_router(
             post(handlers::conversation_export::conversation_export_markdown),
         )
         .route(
+            "/list_conversation_attention",
+            post(handlers::attention::list_conversation_attention),
+        )
+        .route(
             "/message_search",
             post(handlers::message_search::message_search),
         )

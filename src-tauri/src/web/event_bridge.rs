@@ -4,6 +4,7 @@ use std::sync::Arc;
 use serde::{ser::SerializeStruct, Serialize, Serializer};
 use tokio::sync::{broadcast, RwLock};
 
+use crate::acp::session_state::AttentionKind;
 use crate::acp::{AcpEvent, EventBusMetrics, EventEnvelope, InternalEventBus, SessionState};
 
 /// Broadcast-delivered event.
@@ -148,6 +149,30 @@ impl EventEmitter {
 
 /// Global side-channel for cross-client conversation list/status sync.
 pub const CONVERSATION_CHANGED_EVENT: &str = "conversation://changed";
+
+/// Global side-channel for "this session is waiting on the user" (a parked
+/// permission, a blocking question, a plan approval) and its clearing. Emitted
+/// centrally from [`emit_with_state_gated`] whenever an event changes a
+/// session's [`AttentionKind`], so every client's sidebar can flag the session
+/// — including clients that have it in no tab at all, which are the ones that
+/// most need telling.
+///
+/// Deliberately its own channel rather than a new `conversation://changed`
+/// kind: a client built before it would read an unknown kind as a status
+/// change and blank the row's status (its handler's fallback branch), and a
+/// mixed-version fleet — a desktop app talking to a newer remote server — is
+/// the normal state during a rollout.
+pub const CONVERSATION_ATTENTION_EVENT: &str = "conversation://attention";
+
+/// Payload for [`CONVERSATION_ATTENTION_EVENT`]. `id` is the conversation the
+/// connection is bound to, which for a delegation sub-agent is the (hidden)
+/// child row; clients resolve it to the visible root through the
+/// `list_conversation_attention` snapshot. `kind: None` clears.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ConversationAttentionChange {
+    pub id: i32,
+    pub kind: Option<AttentionKind>,
+}
 
 /// Global side-channel announcing a live-feedback enable/disable. The settings
 /// UI runs in a SEPARATE window (`openSettingsWindow`), so the conversation
@@ -476,12 +501,17 @@ pub async fn emit_with_state_gated<F>(
 where
     F: FnOnce(&SessionState) -> bool,
 {
-    let (envelope_arc, stream, evicted) = {
+    let (envelope_arc, stream, evicted, attention_change) = {
         let mut s = state.write().await;
         if !gate(&s) {
             return false;
         }
+        // Sampled around `apply_event`, under the same lock, so the change is
+        // exactly this event's effect: a request, its resolution, the turn end
+        // that clears every pending card, or the disconnect that ends them.
+        let attention_before = (s.conversation_id, s.attention_kind());
         s.apply_event(&payload);
+        let attention_after = (s.conversation_id, s.attention_kind());
         s.event_seq += 1;
         let envelope = Arc::new(EventEnvelope {
             seq: s.event_seq,
@@ -489,7 +519,12 @@ where
             payload,
         });
         let evicted = s.push_recent_event(Arc::clone(&envelope));
-        (envelope, s.event_stream(), evicted)
+        (
+            envelope,
+            s.event_stream(),
+            evicted,
+            attention_transition(attention_before, attention_after),
+        )
     };
 
     // Per-connection broadcaster — primary delivery path for web/remote-
@@ -551,12 +586,82 @@ where
             );
         }
     }
+
+    // Same idea for "waiting on the user": the per-connection stream above only
+    // reaches clients attached to this connection, and a blocked session is
+    // precisely the one nobody is looking at.
+    if let Some(change) = attention_change {
+        emit_event(emitter, CONVERSATION_ATTENTION_EVENT, change);
+    }
     true
+}
+
+/// The attention broadcast owed by one event, given the session's
+/// `(conversation_id, attention)` before and after it. `None` when nothing a
+/// sidebar shows changed.
+///
+/// Rebinding counts as a change when it matters: a session linked to its row
+/// while already blocked (a request can arrive before the link on a fresh
+/// chat) has to announce itself under the new id, since no later event on it
+/// will. An unbound session has no row to flag, so it never emits.
+fn attention_transition(
+    before: (Option<i32>, Option<AttentionKind>),
+    after: (Option<i32>, Option<AttentionKind>),
+) -> Option<ConversationAttentionChange> {
+    let (Some(id), kind) = after else {
+        return None;
+    };
+    let changed = before.1 != kind || (before.0 != Some(id) && kind.is_some());
+    changed.then_some(ConversationAttentionChange { id, kind })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attention_transition_emits_only_on_a_visible_change() {
+        use AttentionKind::*;
+        let t = attention_transition;
+        // Request and resolution on a bound session.
+        assert_eq!(
+            t((Some(7), None), (Some(7), Some(Permission))),
+            Some(ConversationAttentionChange {
+                id: 7,
+                kind: Some(Permission)
+            })
+        );
+        assert_eq!(
+            t((Some(7), Some(Permission)), (Some(7), None)),
+            Some(ConversationAttentionChange { id: 7, kind: None })
+        );
+        // Escalation between kinds is a change.
+        assert_eq!(
+            t((Some(7), Some(Question)), (Some(7), Some(Permission))),
+            Some(ConversationAttentionChange {
+                id: 7,
+                kind: Some(Permission)
+            })
+        );
+        // Every other event on the session is not.
+        assert_eq!(t((Some(7), None), (Some(7), None)), None);
+        assert_eq!(
+            t((Some(7), Some(Question)), (Some(7), Some(Question))),
+            None
+        );
+        // Unbound sessions have no row to flag.
+        assert_eq!(t((None, None), (None, Some(Permission))), None);
+        // Linked while already blocked: announce under the new id.
+        assert_eq!(
+            t((None, Some(Permission)), (Some(9), Some(Permission))),
+            Some(ConversationAttentionChange {
+                id: 9,
+                kind: Some(Permission)
+            })
+        );
+        // Linked while idle: nothing to say.
+        assert_eq!(t((None, None), (Some(9), None)), None);
+    }
     use crate::db::entities::conversation::ConversationStatus;
     use crate::models::AgentType;
 

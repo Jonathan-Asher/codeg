@@ -239,6 +239,48 @@ pub struct PendingUserMessage {
     pub blocks: Vec<crate::acp::types::UserMessageBlock>,
 }
 
+/// What a live session is blocked on, waiting for the user to act. Drives the
+/// sidebar's "needs you" indicator and its folder counts, which must reach
+/// every client — a session stuck on a permission is exactly the one the user
+/// is NOT looking at. Variants are ordered by precedence (see
+/// [`SessionState::attention_kind`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttentionKind {
+    /// A tool call is parked on the user's allow / reject.
+    Permission,
+    /// A blocking `ask_user_question` card is waiting for an answer.
+    Question,
+    /// A Grok `exit_plan_mode` plan is waiting for approval.
+    PlanApproval,
+}
+
+impl SessionState {
+    /// Whether (and on what) this session is blocked waiting for the user.
+    /// Permission wins over a question, which wins over a plan approval: all
+    /// three stop the agent, and the row can only show one.
+    ///
+    /// A disconnected session never needs attention, whatever its pending
+    /// fields say: the lifecycle's cleanup guard emits `StatusChanged
+    /// {Disconnected}` through `emit_with_state` right before the state is
+    /// discarded, and this is what turns that emit into the "cleared" signal
+    /// clients rely on — nothing else clears the pendings on that path.
+    pub fn attention_kind(&self) -> Option<AttentionKind> {
+        if self.status == ConnectionStatus::Disconnected {
+            return None;
+        }
+        if self.pending_permission.is_some() {
+            Some(AttentionKind::Permission)
+        } else if self.pending_question.is_some() {
+            Some(AttentionKind::Question)
+        } else if self.pending_plan_approval.is_some() {
+            Some(AttentionKind::PlanApproval)
+        } else {
+            None
+        }
+    }
+}
+
 /// 后端权威的会话状态。每个 AgentConnection 持有一个 Arc<RwLock<SessionState>>。
 ///
 /// 字段范围：仅当前 turn 的 in-flight 数据 + 元信息 + 协商出的能力。
@@ -2349,6 +2391,86 @@ mod tests {
             "win-test".to_string(),
             None,
         )
+    }
+
+    fn permission_request(id: &str) -> AcpEvent {
+        AcpEvent::PermissionRequest {
+            request_id: id.into(),
+            tool_call: serde_json::json!({"toolCallId": "tc-1", "title": "rm -rf"}),
+            options: vec![],
+            queued: 0,
+        }
+    }
+
+    fn question_request(id: &str) -> AcpEvent {
+        AcpEvent::QuestionRequest {
+            question_id: id.into(),
+            questions: vec![],
+        }
+    }
+
+    fn plan_request(id: &str) -> AcpEvent {
+        AcpEvent::PlanApprovalRequest {
+            approval_id: id.into(),
+            tool_call_id: "tc-plan".into(),
+            plan_markdown: "1. do it".into(),
+        }
+    }
+
+    #[test]
+    fn attention_follows_each_blocking_request_and_its_resolution() {
+        let mut s = fresh_state();
+        assert_eq!(s.attention_kind(), None);
+
+        s.apply_event(&permission_request("p-1"));
+        assert_eq!(s.attention_kind(), Some(AttentionKind::Permission));
+        s.apply_event(&AcpEvent::PermissionResolved {
+            request_id: "p-1".into(),
+        });
+        assert_eq!(s.attention_kind(), None);
+
+        s.apply_event(&question_request("q-1"));
+        assert_eq!(s.attention_kind(), Some(AttentionKind::Question));
+        s.apply_event(&AcpEvent::QuestionResolved {
+            question_id: "q-1".into(),
+        });
+        assert_eq!(s.attention_kind(), None);
+
+        s.apply_event(&plan_request("a-1"));
+        assert_eq!(s.attention_kind(), Some(AttentionKind::PlanApproval));
+        s.apply_event(&AcpEvent::PlanApprovalResolved {
+            approval_id: "a-1".into(),
+        });
+        assert_eq!(s.attention_kind(), None);
+    }
+
+    #[test]
+    fn attention_prefers_permission_then_question_then_plan() {
+        let mut s = fresh_state();
+        s.apply_event(&plan_request("a-1"));
+        s.apply_event(&question_request("q-1"));
+        assert_eq!(s.attention_kind(), Some(AttentionKind::Question));
+        s.apply_event(&permission_request("p-1"));
+        assert_eq!(s.attention_kind(), Some(AttentionKind::Permission));
+        // Answering the permission falls back to what is still pending.
+        s.apply_event(&AcpEvent::PermissionResolved {
+            request_id: "p-1".into(),
+        });
+        assert_eq!(s.attention_kind(), Some(AttentionKind::Question));
+    }
+
+    #[test]
+    fn attention_clears_on_disconnect_even_with_pendings_left_behind() {
+        // Disconnect does not clear the pending fields (the state is dropped
+        // right after), so the kind itself must read None — that is the only
+        // "cleared" signal a client gets on this path.
+        let mut s = fresh_state();
+        s.apply_event(&permission_request("p-1"));
+        s.apply_event(&AcpEvent::StatusChanged {
+            status: ConnectionStatus::Disconnected,
+        });
+        assert!(s.pending_permission.is_some());
+        assert_eq!(s.attention_kind(), None);
     }
 
     /// `ConversationLinked` must forget the live-title skip-cache.

@@ -136,6 +136,35 @@ describe("hidden contents", () => {
     expect(deliver).toHaveBeenCalledWith("t", "Claude ran into an error")
   })
 
+  it("substitutes the redacted title", async () => {
+    // A session's title is the user's own words — hidden with the contents.
+    withPrefs({ hideBody: true })
+
+    await notifyDesktop("permission_request", {
+      title: "Fix the login bug",
+      redactedTitle: "proj - Codeg",
+      body: "proj · Claude: needs permission",
+    })
+
+    expect(deliver).toHaveBeenCalledWith(
+      "proj - Codeg",
+      "proj · Claude: needs permission"
+    )
+  })
+
+  it("shows the real title when contents are not hidden", async () => {
+    await notifyDesktop("permission_request", {
+      title: "Fix the login bug",
+      redactedTitle: "proj - Codeg",
+      body: "proj · Claude: needs permission",
+    })
+
+    expect(deliver).toHaveBeenCalledWith(
+      "Fix the login bug",
+      "proj · Claude: needs permission"
+    )
+  })
+
   it("keeps a body that has no redacted variant", async () => {
     // A body with nothing to redact — a fixed localized line plus the agent's
     // name — passes through rather than being blanked.

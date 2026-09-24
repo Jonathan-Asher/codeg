@@ -107,6 +107,7 @@ import type {
   WorktreeResolution,
   GitWorktreeRemoval,
   DbConversationSummary,
+  ConversationAttentionEntry,
   ImportResult,
   ImportSelectedResult,
   ScanResult,
@@ -188,6 +189,13 @@ import type {
   TokenUsageSyncResult,
   TokenUsageSyncStatus,
 } from "./types"
+
+/** Sessions waiting on the user right now (see `commands/attention.rs`). */
+export async function listConversationAttention(): Promise<
+  ConversationAttentionEntry[]
+> {
+  return getTransport().call("list_conversation_attention")
+}
 
 export async function listConversations(params?: {
   agent_type?: AgentType | null

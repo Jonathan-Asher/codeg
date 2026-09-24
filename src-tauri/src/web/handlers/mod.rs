@@ -8,6 +8,7 @@ pub mod browser_bridge;
 pub mod browser_tools;
 pub mod chat_authoring;
 pub mod chat_channel;
+pub mod attention;
 pub mod conversation_export;
 pub mod message_search;
 pub mod config_sync;

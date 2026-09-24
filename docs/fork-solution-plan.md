@@ -57,6 +57,19 @@ Destructive-action safety nets: **not a priority**.
   action). Fix: title = the session's own title (fallback: its folder), body = folder + agent + event;
   keep the "hide notification contents" redaction honoured, since a session title is user-authored
   text. Stretch: click → focus that session.
+  **Status 2026-09-24 — done** (with ⑫): banners are titled with the session's own title, the body
+  leads with the session's real folder, and "hide notification contents" swaps the title back to
+  `<folder> - Codeg` (`src/lib/notification-session.ts`). Click-to-open is still open.
+- ⑫ **Sidebar "waiting on you" indicator** (Jonathan, 2026-09-24: "if a session is stuck on a
+  permission or asking a question I have no idea which session it is"). **Done:** the central
+  `emit_with_state` hook diffs each session's `AttentionKind` (permission > question > plan approval;
+  none once disconnected) around every event and broadcasts changes on `conversation://attention` —
+  its own channel, because older clients would misread a new `conversation://changed` kind as a
+  status and blank the row. `list_conversation_attention` is the snapshot (start, reconnect, and
+  250 ms after live events), and maps a blocked delegation sub-agent to its visible root row. UI: a
+  pulsing rose dot on the row's agent glyph, a rose icon badge with a tooltip (shield / question
+  bubble / clipboard), and a rose bell count on folder and group headers so collapsed folders still
+  signal.
 
 ---
 

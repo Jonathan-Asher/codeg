@@ -104,6 +104,7 @@ import {
   notifyDesktop,
   withDesktopNotificationsSuppressed,
 } from "@/lib/desktop-notification"
+import { sessionNotificationPayload } from "@/lib/notification-session"
 import {
   playEventSound,
   primeNotificationSoundOutput,
@@ -4189,13 +4190,14 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
               ? null
               : storeRef.current.connections.get(contextKey)
             if (nc) {
-              const fn = folderNameRef.current
-              void notifyDesktop("question_request", {
-                title: fn ? `${fn} - Codeg` : "Codeg",
-                body: t("notificationQuestion", {
-                  agent: getAgentLabel(nc.agentType),
-                }),
-              })
+              void notifyDesktop(
+                "question_request",
+                sessionNotificationPayload(contextKey, folderNameRef.current, {
+                  body: t("notificationQuestion", {
+                    agent: getAgentLabel(nc.agentType),
+                  }),
+                })
+              )
             }
           }
           break
@@ -4297,34 +4299,34 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             if (!echo) {
               const nc = storeRef.current.connections.get(contextKey)
               const agentLabel = nc ? getAgentLabel(nc.agentType) : "Agent"
-              const fn = folderNameRef.current
-              const title = fn ? `${fn} - Codeg` : "Codeg"
               const count = e.settled.length
               const many = tChat("backgroundTasks.notifySettledMany", {
                 agent: agentLabel,
                 count,
               })
               const single = e.settled[0]
-              void notifyDesktop("background_task", {
-                body:
-                  count === 1
-                    ? `${agentLabel}: ${
-                        single.summary ??
-                        tChat("backgroundTasks.settledFallback", {
-                          status: single.status,
+              void notifyDesktop(
+                "background_task",
+                sessionNotificationPayload(contextKey, folderNameRef.current, {
+                  body:
+                    count === 1
+                      ? `${agentLabel}: ${
+                          single.summary ??
+                          tChat("backgroundTasks.settledFallback", {
+                            status: single.status,
+                          })
+                        }`
+                      : many,
+                  // A summary is the sub-agent's own prose; the count form names
+                  // nothing and is safe to reuse as the redacted body.
+                  redactedBody:
+                    count === 1
+                      ? tChat("backgroundTasks.notifySettledOne", {
+                          agent: agentLabel,
                         })
-                      }`
-                    : many,
-                // A summary is the sub-agent's own prose; the count form names
-                // nothing and is safe to reuse as the redacted body.
-                redactedBody:
-                  count === 1
-                    ? tChat("backgroundTasks.notifySettledOne", {
-                        agent: agentLabel,
-                      })
-                    : many,
-                title,
-              })
+                      : many,
+                })
+              )
             }
             // 4. flip each async sub-agent's launch card to its terminal
             //    (completed + result) state IN-MEMORY, by rewriting the
@@ -4377,14 +4379,15 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
               : storeRef.current.connections.get(contextKey)
             if (nc) {
               const agentLabel = getAgentLabel(nc.agentType)
-              const fn = folderNameRef.current
-              const title = fn ? `${fn} - Codeg` : "Codeg"
-              // No redacted variant: the body is a fixed localized string
-              // plus the agent's name, and names nothing of the user's.
-              void notifyDesktop("permission_request", {
-                title,
-                body: `${agentLabel}: ${tChat("permissionDialog.subtitle")}`,
-              })
+              // No redacted body: it is a fixed localized string plus the
+              // agent's name, and names nothing of the user's. (The TITLE now
+              // does — the session's own — and carries its own redaction.)
+              void notifyDesktop(
+                "permission_request",
+                sessionNotificationPayload(contextKey, folderNameRef.current, {
+                  body: `${agentLabel}: ${tChat("permissionDialog.subtitle")}`,
+                })
+              )
             }
           }
           break
@@ -4706,12 +4709,12 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
               : storeRef.current.connections.get(contextKey)
             if (nc) {
               const agentLabel = getAgentLabel(nc.agentType)
-              const fn = folderNameRef.current
-              const title = fn ? `${fn} - Codeg` : "Codeg"
-              void notifyDesktop("turn_complete", {
-                title,
-                body: t("notificationTurnComplete", { agent: agentLabel }),
-              })
+              void notifyDesktop(
+                "turn_complete",
+                sessionNotificationPayload(contextKey, folderNameRef.current, {
+                  body: t("notificationTurnComplete", { agent: agentLabel }),
+                })
+              )
             }
           }
           break
@@ -4859,18 +4862,18 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           // quote agent stderr for codes we don't recognize, which is what the
           // redacted variant drops.
           if (nc && !echo) {
-            const fn = folderNameRef.current
-            const title = fn ? `${fn} - Codeg` : "Codeg"
-            void notifyDesktop("error", {
-              title,
-              body: t("notificationError", {
-                agent: agentLabel,
-                message: localizedMessage,
-              }),
-              redactedBody: t("notificationErrorRedacted", {
-                agent: agentLabel,
-              }),
-            })
+            void notifyDesktop(
+              "error",
+              sessionNotificationPayload(contextKey, folderNameRef.current, {
+                body: t("notificationError", {
+                  agent: agentLabel,
+                  message: localizedMessage,
+                }),
+                redactedBody: t("notificationErrorRedacted", {
+                  agent: agentLabel,
+                }),
+              })
+            )
           }
           break
         }

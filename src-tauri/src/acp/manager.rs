@@ -2904,6 +2904,25 @@ impl ConnectionManager {
         out
     }
 
+    /// `(conversation_id, kind)` for every live session blocked on the user —
+    /// the snapshot half of the `conversation://attention` broadcast (see
+    /// `SessionState::attention_kind`). Connections not yet bound to a
+    /// conversation are skipped: there is no row to flag. Lock discipline
+    /// mirrors `list_active_sessions`.
+    pub async fn list_attention(&self) -> Vec<(i32, crate::acp::session_state::AttentionKind)> {
+        let connections = self.connections.lock().await;
+        let mut out = Vec::new();
+        for conn in connections.values() {
+            let state = conn.state.read().await;
+            if let (Some(conversation_id), Some(kind)) =
+                (state.conversation_id, state.attention_kind())
+            {
+                out.push((conversation_id, kind));
+            }
+        }
+        out
+    }
+
     /// Clone the `Arc<RwLock<SessionState>>` for a given connection id so the
     /// caller can read/write state without holding the connections mutex.
     /// Returns `None` if no such connection is registered.

@@ -15,6 +15,10 @@ import {
   type AttachSessionToSessionDetail,
 } from "@/lib/session-attachment-events"
 import type { DbConversationSummary } from "@/lib/types"
+import {
+  __resetConversationAttentionForTests,
+  useConversationAttentionStore,
+} from "@/stores/conversation-attention-store"
 import enMessages from "@/i18n/messages/en.json"
 
 // AgentIcon renders exactly once per card body execution, so counting its
@@ -644,4 +648,60 @@ describe("SidebarConversationCard hover details bubble", () => {
   // jsdom ships no `PointerEvent`, so every synthetic pointer event arrives as a
   // `MouseEvent` with `pointerType: undefined` and the branch can't be reached.
   // Verify that one in a real browser, not here.
+})
+
+describe("SidebarConversationCard waiting-on-you indicator", () => {
+  afterEach(() => {
+    cleanup()
+    __resetConversationAttentionForTests()
+  })
+
+  it("flags only the session that is waiting, with what it waits for", () => {
+    act(() => {
+      useConversationAttentionStore.setState({
+        byConversationId: new Map([[2, "permission"]]),
+      })
+    })
+    renderWithIntl(<CardList conversations={BASE} now={NOW} />)
+
+    const badges = screen.getAllByTestId("conversation-attention-badge")
+    expect(badges).toHaveLength(1)
+    expect(badges[0]).toHaveAttribute("data-attention", "permission")
+    expect(badges[0]).toHaveAttribute("title", "Waiting for your permission")
+    expect(screen.getAllByTestId("conversation-attention-dot")).toHaveLength(1)
+  })
+
+  it("outranks the running spinner and names a question", () => {
+    act(() => {
+      useConversationAttentionStore.setState({
+        byConversationId: new Map([[1, "question"]]),
+      })
+    })
+    renderWithIntl(
+      <CardList
+        conversations={[{ ...conv(1), status: "in_progress" }]}
+        now={NOW}
+      />
+    )
+    expect(screen.getByTestId("conversation-attention-badge")).toHaveAttribute(
+      "title",
+      "Waiting for your answer"
+    )
+    expect(screen.queryByTitle("Running")).not.toBeInTheDocument()
+  })
+
+  it("re-renders only the card whose attention changed", () => {
+    renderWithIntl(<CardList conversations={BASE} now={NOW} />)
+    probe.agentIconRenders = 0
+    act(() => {
+      useConversationAttentionStore.setState({
+        byConversationId: new Map([[3, "plan_approval"]]),
+      })
+    })
+    expect(probe.agentIconRenders).toBe(1)
+    expect(screen.getByTestId("conversation-attention-badge")).toHaveAttribute(
+      "title",
+      "Waiting for you to approve the plan"
+    )
+  })
 })
