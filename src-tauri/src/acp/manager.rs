@@ -2148,8 +2148,8 @@ impl ConnectionManager {
     ///
     /// An edit fork ([`ForkMode::Edit`]) names the rows the other way round:
     /// the current row — still the conversation the user is editing — keeps
-    /// its title and lock untouched, and the sibling holding the original
-    /// branch is titled `<title> (before edit)` under a lock.
+    /// its title, now locked, and the sibling holding the original branch is
+    /// titled `<title> (before edit)` under a lock.
     ///
     /// Both titles outlive the per-turn auto-title backfill by design: neither
     /// the user's own name nor codeg's `[Fork] ` marker exists in the session
@@ -2252,9 +2252,10 @@ impl ConnectionManager {
                     let git_branch = current.git_branch.clone();
                     // Which row carries which name depends on what the fork is
                     // for. A branch marks the row moving to the fork `[Fork] …`
-                    // and hands the sibling the clean title. An edit leaves
-                    // this row's name alone — it is still the conversation the
-                    // user is editing — and marks the sibling instead.
+                    // and hands the sibling the clean title. An edit keeps this
+                    // row's name — it is still the conversation the user is
+                    // editing — and marks the sibling instead. Either way the
+                    // forked row's name is written back under a lock (below).
                     let (forked_title, sibling_title, sibling_title_locked) = match mode {
                         ForkMode::Branch => (
                             clean_title.as_ref().map(|clean| format!("[Fork] {clean}")),
@@ -2283,7 +2284,7 @@ impl ConnectionManager {
                             // name as the edited conversation. A titleless row
                             // has nothing to protect and keeps its lock as is.
                             let locked = marked.is_some() || current.title_locked;
-                            (None, marked, locked)
+                            (current.title.clone(), marked, locked)
                         }
                     };
                     // The sibling keeps the original's sidebar routing (a forked
@@ -2315,8 +2316,15 @@ impl ConnectionManager {
                         // forked row stops tracking the session file's title,
                         // exactly as a rename would. A titleless row writes no
                         // title here and stays unlocked, so the backfill can
-                        // still give it its first name. (An edit writes none
-                        // either: the row keeps its name and its lock as is.)
+                        // still give it its first name.
+                        //
+                        // An edit writes back the name the row already had and
+                        // locks it for a reason of its own: the forked
+                        // transcript can carry a title of its own — the
+                        // `ClaudeCode` adapter's fork stamps a custom title,
+                        // `<title> (fork)`, into it — which the backfill would
+                        // otherwise adopt on the next detail load, renaming the
+                        // very conversation the edit was meant to continue.
                         active.title_locked = Set(true);
                     }
                     active.external_id = Set(Some(forked_session_id));
@@ -8318,7 +8326,10 @@ mod tests {
     #[tokio::test]
     async fn fork_session_edit_keeps_the_title_and_marks_the_original_branch() {
         // The row the user is editing stays THE conversation: same name, no
-        // `[Fork]` marker, lock untouched — only its session moves to S2. The
+        // `[Fork]` marker — only its session moves to S2. The name is locked,
+        // because the forked transcript can carry a title of its own (the
+        // `ClaudeCode` adapter's fork writes `<title> (fork)` into it as a
+        // custom title) that the auto-title backfill would otherwise adopt. The
         // original branch moves to the sibling, named so the two can be told
         // apart, and locked because no transcript carries that name: unlocked,
         // the auto-title backfill would hand it the edited row's name again.
@@ -8355,7 +8366,23 @@ mod tests {
             .unwrap();
         assert_eq!(current.external_id.as_deref(), Some("session-S2"));
         assert_eq!(current.title.as_deref(), Some("Topic"), "no [Fork] prefix");
-        assert!(!current.title_locked, "an edit leaves the row's lock alone");
+        assert!(current.title_locked, "the kept name must outlive the backfill");
+        // What the edited row's next detail load does with the title the
+        // forked transcript carries: nothing.
+        assert!(
+            !conversation_service::refresh_auto_title(&db.conn, pre.id, "Topic (fork)".into())
+                .await
+                .unwrap(),
+            "the forked transcript's own title must not rename the edited conversation"
+        );
+        assert_eq!(
+            conversation_service::get_by_id(&db.conn, pre.id)
+                .await
+                .unwrap()
+                .title
+                .as_deref(),
+            Some("Topic")
+        );
 
         let sibling = conversation_service::get_by_id(&db.conn, sibling_id)
             .await
@@ -8495,6 +8522,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(current.title.as_deref(), Some("Topic"));
+        assert!(current.title_locked, "the edited row's name is locked here too");
         assert_eq!(
             conversation::Entity::find().all(&db.conn).await.unwrap().len(),
             2,
