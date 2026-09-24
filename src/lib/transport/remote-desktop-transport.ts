@@ -502,8 +502,8 @@ export class RemoteDesktopTransport
       return
     }
     if (channel === WS_UNAUTHORIZED_CHANNEL) {
-      // Rust gave up after WS_RECONNECT_FAIL_THRESHOLD failures, OR the
-      // remote rejected the handshake. Either way, surface as expired.
+      // Rust gave up: the remote rejected the handshake's credentials
+      // WS_RECONNECT_FAIL_THRESHOLD times in a row. Surface as expired.
       this.markUnauthorized()
       return
     }

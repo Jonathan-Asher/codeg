@@ -2005,6 +2005,39 @@ async fn run_ws_task(
                         break 'reconnect;
                     }
                 },
+                // Polled before the heartbeat branches: a frame that has
+                // already arrived must count as proof of life before an
+                // overdue deadline is judged.
+                msg = socket.next() => {
+                    if let Some(Ok(_)) = &msg {
+                        heartbeat.on_inbound(Instant::now());
+                    }
+                    match msg {
+                        Some(Ok(Message::Text(text))) => {
+                            if let Err(err) = forward_text_message(&app, &entry, &event_name, &text).await {
+                                tracing::error!(
+                                    "[RemoteProxy] failed to forward WS message on connection {connection_id}: {err}"
+                                );
+                            }
+                        }
+                        Some(Ok(Message::Binary(_))) => {
+                            // Server only emits text frames today; ignore binary.
+                        }
+                        Some(Ok(Message::Ping(payload))) => {
+                            let _ = socket.send(Message::Pong(payload)).await;
+                        }
+                        Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {}
+                        Some(Ok(Message::Close(_))) | None => {
+                            break;
+                        }
+                        Some(Err(err)) => {
+                            tracing::error!(
+                                "[RemoteProxy] WS read error on connection {connection_id}: {err}"
+                            );
+                            break;
+                        }
+                    }
+                }
                 // Frontend-requested liveness probe (tab visible / lid open):
                 // ping now under the short deadline instead of waiting for
                 // the next quiet interval.
@@ -2036,36 +2069,6 @@ async fn run_ws_task(
                             break;
                         }
                         HeartbeatAction::Wait => {}
-                    }
-                }
-                msg = socket.next() => {
-                    if let Some(Ok(_)) = &msg {
-                        heartbeat.on_inbound(Instant::now());
-                    }
-                    match msg {
-                        Some(Ok(Message::Text(text))) => {
-                            if let Err(err) = forward_text_message(&app, &entry, &event_name, &text).await {
-                                tracing::error!(
-                                    "[RemoteProxy] failed to forward WS message on connection {connection_id}: {err}"
-                                );
-                            }
-                        }
-                        Some(Ok(Message::Binary(_))) => {
-                            // Server only emits text frames today; ignore binary.
-                        }
-                        Some(Ok(Message::Ping(payload))) => {
-                            let _ = socket.send(Message::Pong(payload)).await;
-                        }
-                        Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {}
-                        Some(Ok(Message::Close(_))) | None => {
-                            break;
-                        }
-                        Some(Err(err)) => {
-                            tracing::error!(
-                                "[RemoteProxy] WS read error on connection {connection_id}: {err}"
-                            );
-                            break;
-                        }
                     }
                 }
             }
