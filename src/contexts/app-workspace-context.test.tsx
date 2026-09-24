@@ -45,6 +45,14 @@ vi.mock("@/stores/tab-store", () => ({
   },
 }))
 
+// The provider also mounts the "waiting on you" attention sync, which registers
+// its own subscription and reconnect handler. It has its own suite
+// (`conversation-attention-store.test.ts`); stubbing it here keeps this
+// harness's exact handler / reconnect slots for the workspace sync alone.
+vi.mock("@/hooks/use-conversation-attention-sync", () => ({
+  useConversationAttentionSync: () => {},
+}))
+
 vi.mock("@/lib/platform", () => ({
   // The provider registers four subscriptions — `conversation://changed`,
   // `conversations://bulk-changed`, `folder://changed` and
