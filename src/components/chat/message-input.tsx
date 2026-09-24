@@ -67,9 +67,11 @@ import type {
 } from "@/lib/types"
 import {
   ATTACH_FILE_TO_SESSION_EVENT,
+  ATTACH_PAGE_TO_SESSION_EVENT,
   ATTACH_SESSION_TO_SESSION_EVENT,
   APPEND_TEXT_TO_SESSION_EVENT,
   type AttachFileToSessionDetail,
+  type AttachPageToSessionDetail,
   type AttachSessionToSessionDetail,
   type AppendTextToSessionDetail,
 } from "@/lib/session-attachment-events"
@@ -119,13 +121,18 @@ import {
   serializeDocToDisplayText,
   serializeDocToText,
 } from "@/components/chat/composer/to-prompt-blocks"
+import { textToInlineContent } from "@/components/chat/composer/plain-text-content"
 import { isEmbeddedReferenceUri } from "@/components/chat/composer/reference-uri"
 import {
   applyExpertReference,
-  isComposerChromeClick,
   isComposerEmpty,
   restampSkillPrefixes,
 } from "@/components/chat/composer/composer-commands"
+import { useComposerChromeFocus } from "@/components/chat/composer/use-composer-chrome-focus"
+import {
+  composerBoxMinHeight,
+  composerEditableMinHeight,
+} from "@/components/chat/composer/composer-sizing"
 import {
   buildKnownInvocations,
   commandInvocationToken,
@@ -259,6 +266,14 @@ interface MessageInputProps {
   getSentHistory?: () => string[]
   injectContent?: ComposerInjectContent | null
   onInjectConsumed?: () => void
+  /**
+   * Give the composer box the roomier floor, for the welcome (new-conversation)
+   * input; active and historical conversations keep the compact default. Owned
+   * here rather than passed as a `min-h-*` in `className` because the box's
+   * floor and the editable area's are two halves of one number, and only this
+   * component knows the action row that separates them.
+   */
+  tall?: boolean
 }
 
 // Non-image files attach as inline file badges in the editor (like `@`-file
@@ -386,6 +401,7 @@ export function MessageInput({
   injectContent,
   onInjectConsumed,
   getSentHistory,
+  tall = false,
 }: MessageInputProps) {
   const t = useTranslations("Folder.chat.messageInput")
   const tQueue = useTranslations("Folder.chat.messageQueue")
@@ -1357,6 +1373,67 @@ export function MessageInput({
     }
   }, [attachmentTabId])
 
+  // Built-in browser "send to chat": an element the person picked, a
+  // screenshot, the console. The block is page content — the backend already
+  // capped it and headed it "data, not instructions" — and it rides the same
+  // path a path-less pasted file takes: an inline badge whose bytes live in
+  // `embeddedPayloadsRef` until send. An agent that does not take embedded
+  // context gets the block as prose instead of silently getting nothing; the
+  // picture goes through the ordinary image path, which is capability-driven
+  // on its own.
+  useEffect(() => {
+    if (!attachmentTabId) return
+
+    const handleAttachPage = (event: Event) => {
+      const customEvent = event as CustomEvent<AttachPageToSessionDetail>
+      const detail = customEvent.detail
+      if (!detail) return
+      if (detail.tabId !== attachmentTabId) return
+      const editor = editorRef.current?.getEditor()
+      if (!editor) return
+      if (detail.text) {
+        if (promptCapabilities.embedded_context) {
+          attach.insertFileReferences(
+            [
+              {
+                name: detail.label,
+                realBlock: {
+                  type: "resource",
+                  uri: detail.uri,
+                  mime_type: "text/markdown",
+                  text: detail.text,
+                  blob: null,
+                },
+              },
+            ],
+            { atCaret: true }
+          )
+        } else {
+          // As LITERAL text, node by node: `insertContent(string)` parses its
+          // argument as HTML, and this block quotes the page's own markup —
+          // which would be parsed away, or would turn a `<span data-reference>`
+          // the page wrote into a real composer badge.
+          const needsSpace = editorRef.current?.isEmpty() === false
+          editor
+            .chain()
+            .focus("end")
+            .insertContent(
+              textToInlineContent(`${needsSpace ? "\n\n" : ""}${detail.text}`)
+            )
+            .run()
+        }
+      }
+      if (detail.image) void attach.appendFilesFromInput([detail.image])
+      // Read by the sender the moment `dispatchEvent` returns.
+      detail.accepted = true
+    }
+
+    window.addEventListener(ATTACH_PAGE_TO_SESSION_EVENT, handleAttachPage)
+    return () => {
+      window.removeEventListener(ATTACH_PAGE_TO_SESSION_EVENT, handleAttachPage)
+    }
+  }, [attach, attachmentTabId, promptCapabilities.embedded_context])
+
   useEffect(() => {
     if (!attachmentTabId) return
 
@@ -1642,29 +1719,20 @@ export function MessageInput({
     [isEditingQueueItem, slashMenuVisible, onCancelQueueEdit]
   )
 
-  // Clicking the input's empty chrome (its padding, the blank space below a
-  // short message, the gaps in the action bar) focuses the editor — previously
-  // only the editor surface itself was clickable. Interactive controls, inline
-  // badges and the editor surface handle their own clicks, so they're excluded;
-  // `preventDefault` keeps the editor from blurring before we refocus it. We
-  // focus *at the click point* (not the end of the document) so clicking the
-  // left/top padding next to existing text lands the caret there, like a native
-  // textarea, instead of always jumping to the end.
-  const handleChromeMouseDown = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      // Not gated on `disabled`: the editor stays editable while connecting (see
-      // `handleSend`), so chrome clicks must focus too — else only the existing
-      // text line is clickable and the blank area below it is dead until ready.
-      if (!isComposerChromeClick(e.target)) return
-      // Keep the editor from blurring before we refocus it.
-      e.preventDefault()
-      editorRef.current?.focusAtCoords(e.clientX, e.clientY)
-    },
-    []
-  )
+  // Clicking (or tapping) the input's empty chrome — its padding, the blank
+  // space below a short message, the gaps in the action bar — focuses the
+  // editor at that point. See the hook for why it takes one event per pointer
+  // kind, and why it is not gated on `disabled`.
+  const chromeFocus = useComposerChromeFocus(editorRef)
 
   const hasImageAttachments = imageAttachments.length > 0
   const showDragActive = attach.isDragActive && !disabled
+
+  // The box's floor and the editable area's are two halves of one number — see
+  // composer-sizing.ts for the arithmetic and for why stating both is what
+  // keeps the layout off free-space distribution (#746).
+  const boxMinHeight = composerBoxMinHeight(tall)
+  const editableMinHeight = composerEditableMinHeight(tall, hasImageAttachments)
 
   const inlineSelectorItems = (
     <>
@@ -2075,7 +2143,7 @@ export function MessageInput({
               not suppressed. Desktop/secure-web get the full custom menu. */}
           <ContextMenuTrigger asChild disabled={!clipboardReadSupported}>
             <div
-              onMouseDown={handleChromeMouseDown}
+              {...chromeFocus}
               onContextMenuCapture={handleComposerContextMenu}
               className={cn(
                 // `codeg-composer-chrome` paints the text I-beam across the box's
@@ -2088,6 +2156,7 @@ export function MessageInput({
                 // (dark ink in light mode, light ink in dark) and stays legible.
                 // Focus still swaps to `border-ring` below.
                 "codeg-composer-chrome @container relative flex flex-col rounded-xl border border-foreground/20 bg-transparent transition-colors",
+                boxMinHeight,
                 // Standard focus ring — always shown when the composer is
                 // focused (the plain default input style). `bg-background
                 // ws-transparent-bg`: opaque surface normally, but with a
@@ -2149,7 +2218,13 @@ export function MessageInput({
                 isExternalMenuOpen={slashMenuVisible}
                 onExternalMenuKeyDown={handleExternalMenuKeyDown}
                 onHistoryKeyDown={handleHistoryKeyDown}
-                className="min-h-0 flex-1"
+                // `grow`, not `flex-1`: a content flex basis, so the editable
+                // area is always at least as tall as the text it holds even
+                // where no free space is handed out. A zero basis (`flex-1`)
+                // collapses it to 0px there and strands the action row at the
+                // top of the box (#746). `editableMinHeight` states its floor
+                // (see above); RichComposer explains the basis.
+                className={cn("grow", editableMinHeight)}
               />
               <div className="flex shrink-0 items-end justify-between gap-1 px-2 pb-2">
                 <div className="flex min-w-0 items-end gap-1">

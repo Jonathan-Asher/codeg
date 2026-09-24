@@ -56,6 +56,7 @@ import {
   ContextCompactionCard,
   isContextCompactionMeta,
 } from "./context-compaction-card"
+import { contextCompactionSummary } from "@/lib/context-compaction"
 import { FeedbackCheckResultCard } from "./feedback-check-result-card"
 import { SearchResultsOutput } from "./search-results-output"
 import {
@@ -888,8 +889,11 @@ function getToolIcon(
   if (name === "edit") return <FilePenLineIcon className={ICON_CLASS} />
   if (name === "write" || name === "notebookedit")
     return <FilePlusIcon className={ICON_CLASS} />
-  // `powershell` is pi's Windows stand-in for `bash` — same tool, same icon.
-  if (name === "bash" || name === "exec_command" || name === "powershell")
+  // No `powershell` arm: every caller passes the NORMALIZED name, and
+  // `normalizeToolName` now aliases the Windows shells onto `bash` so the icon
+  // and the card body can no longer disagree about what the call is. The raw
+  // name still reaches `classifyToolKind`, which keeps its own arm.
+  if (name === "bash" || name === "exec_command")
     return <TerminalIcon className={ICON_CLASS} />
   if (name === CODEX_SCRIPT_TOOL_NAME)
     return <CodeIcon className={ICON_CLASS} />
@@ -2644,7 +2648,13 @@ const ToolCallPart = memo(function ToolCallPart({
   // with `_meta.contextCompaction` (not addressed by tool name) → a subtle
   // status card instead of the generic tool shell.
   if (isContextCompactionMeta(part.meta)) {
-    return <ContextCompactionCard state={part.state} meta={part.meta} />
+    return (
+      <ContextCompactionCard
+        state={part.state}
+        meta={part.meta}
+        summary={contextCompactionSummary(part.meta, part.output)}
+      />
+    )
   }
 
   // Agent/subagent tools get a dedicated container rendering

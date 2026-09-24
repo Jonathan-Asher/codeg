@@ -29,7 +29,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sacp::schema::{
+use agent_client_protocol::schema::v1::{
     CreateElicitationRequest, CreateElicitationResponse, ElicitationAcceptAction, ElicitationAction,
     ElicitationContentValue, ElicitationMode, ElicitationPropertySchema, ElicitationScope,
     MultiSelectItems, StringPropertySchema,
@@ -447,7 +447,7 @@ pub fn build_outcome(questions: &[QuestionSpec], answer: &QuestionAnswer) -> Que
 /// question text. Synthesize one from the leading characters, bounded to
 /// [`MAX_HEADER_CHARS`]. Always returns a non-empty, in-bounds string so
 /// [`validate_specs`] accepts it.
-fn synthesize_header(question: &str) -> String {
+pub(crate) fn synthesize_header(question: &str) -> String {
     let header: String = question.trim().chars().take(MAX_HEADER_CHARS).collect();
     let header = header.trim();
     if header.is_empty() {
@@ -679,6 +679,31 @@ pub fn pi_select_option_id(outcome: &QuestionOutcome, ask: &PiSelectAsk) -> Opti
         .map(|(_, option_id)| option_id.clone())
 }
 
+/// True when a host's name for a tool is codeg's OWN `ask_user_question`
+/// companion tool, in whatever spelling the host composed it
+/// (`mcp__codeg-mcp__ask_user_question` from claude-agent-acp,
+/// `codeg-mcp/ask_user_question`, `codeg-mcp: ask_user_question`, …). Separators
+/// are folded and case is ignored, so only the two identifying words matter.
+///
+/// BOTH halves have to be present — the server name codeg itself injects
+/// (`codeg-mcp`, see `acp::connection::inject_codeg_mcp`) AND the tool name.
+/// The frontend can afford a bare `*ask_user_question` suffix rule because a
+/// wrong match there only picks a nicer card; this one unlocks an AUTO-APPROVAL
+/// of a blocked `session/request_permission`, and a third-party MCP server's
+/// similarly named tool is the user's to approve, not codeg's.
+///
+/// Auto-approving codeg's own ask tool is not a permission being skipped: the
+/// tool's entire effect is to put the interactive question card on screen and
+/// block until the user answers it. The consent IS the next dialog, so gating it
+/// behind a generic "run this tool?" card asks the user to approve being asked.
+pub fn is_codeg_ask_tool_name(name: &str) -> bool {
+    let normalized = name
+        .trim()
+        .to_ascii_lowercase()
+        .replace(['-', ' ', '.', '/', ':'], "_");
+    normalized.ends_with("ask_user_question") && normalized.contains("codeg_mcp")
+}
+
 /// Serialize a resolved [`QuestionOutcome`] into grok's `AskUserQuestionExtResponse`
 /// — the reply to a `_x.ai/ask_user_question` ext request. Verified against grok
 /// 0.2.101 on a real run: the response is internally tagged by `outcome`; the
@@ -773,7 +798,7 @@ fn multi_select_choices(items: &MultiSelectItems) -> Vec<ElicitationChoice> {
                 value: o.value.clone(),
             })
             .collect(),
-        MultiSelectItems::Untitled(u) => u
+        MultiSelectItems::String(u) => u
             .values
             .iter()
             .map(|v| ElicitationChoice {
@@ -983,7 +1008,8 @@ impl ElicitationPeer {
 /// stamps it on every `request_user_input` field (question properties carry
 /// `isOther`/`isSecret`, companions carry `questionId` plus the role marker),
 /// and on nothing else — a generic MCP server's form has no `codex` namespace.
-/// The typed sacp property structs drop `_meta`, so this reads the raw JSON.
+/// The typed schema property structs carry no `_meta`, so this reads the raw
+/// JSON.
 fn codex_property_meta<'a>(raw: &'a Value, id: &str) -> Option<&'a Value> {
     raw.get("requestedSchema")?
         .get("properties")?
@@ -1138,8 +1164,8 @@ fn is_codex_synthetic_other_choice(raw: &Value, id: &str, label: &str, value: &s
 /// marker means codeg keeps collapsing the companion into the card's built-in
 /// "Other" input no matter which adapter produced the form.
 ///
-/// Like [`is_secret_property`], this reads the raw JSON: the typed sacp
-/// property structs drop `_meta`.
+/// Like [`is_secret_property`], this reads the raw JSON: the typed schema
+/// property structs carry no `_meta`.
 fn is_custom_answer_property(raw: &Value, id: &str) -> bool {
     raw.get("requestedSchema")
         .and_then(|s| s.get("properties"))
@@ -1159,17 +1185,6 @@ fn is_mcp_tool_call_approval(raw: &Value) -> bool {
         .and_then(|m| m.get("codex_approval_kind"))
         .and_then(Value::as_str)
         == Some("mcp_tool_call")
-}
-
-/// Codex's auto-resolution timeout for a `request_user_input` elicitation
-/// (`_meta.codex.autoResolutionMs`). When set, codex-acp races the elicitation
-/// against this timer and answers `{answers: {}}` itself on expiry — the
-/// connection handler mirrors it to reap the by-then-pointless card.
-pub fn elicitation_auto_resolution_ms(raw: &Value) -> Option<u64> {
-    raw.get("_meta")?
-        .get("codex")?
-        .get("autoResolutionMs")?
-        .as_u64()
 }
 
 /// Classify a form `elicitation/create` request (the raw JSON params) into its
@@ -1274,7 +1289,7 @@ fn decline_approval_option() -> ElicitationApprovalOption {
 /// Allow/Decline. Mirrors codex-acp's own `request_permission` fallback
 /// (`buildToolApprovalOptions`) so approvals look identical either way.
 fn approval_from_form(
-    form: &sacp::schema::ElicitationFormMode,
+    form: &agent_client_protocol::schema::v1::ElicitationFormMode,
     message: String,
     tool_call_id: Option<String>,
 ) -> ElicitationApproval {
@@ -1334,8 +1349,8 @@ fn approval_from_form(
 }
 
 /// True when the raw schema property carries codex's secret marker
-/// (`_meta.codex.isSecret`). The typed sacp property structs drop `_meta`, so
-/// this reads the raw JSON alongside them.
+/// (`_meta.codex.isSecret`). The typed schema property structs carry no
+/// `_meta`, so this reads the raw JSON alongside them.
 fn is_secret_property(raw: &Value, id: &str) -> bool {
     raw.get("requestedSchema")
         .and_then(|s| s.get("properties"))
@@ -1353,7 +1368,7 @@ fn is_secret_property(raw: &Value, id: &str) -> bool {
 /// always-present "Other" input) — including plain strings, numbers, integers,
 /// and choice fields whose options were all empty/duplicate.
 fn parse_form_questions(
-    form: &sacp::schema::ElicitationFormMode,
+    form: &agent_client_protocol::schema::v1::ElicitationFormMode,
     raw: &Value,
     peer: ElicitationPeer,
 ) -> ElicitationQuestions {
@@ -2626,16 +2641,6 @@ mod tests {
     }
 
     #[test]
-    fn elicitation_auto_resolution_ms_reads_codex_meta() {
-        let mut raw = elicitation_raw(json!({}), json!([]));
-        assert_eq!(elicitation_auto_resolution_ms(&raw), None);
-        raw["_meta"] = json!({"codex": {"autoResolutionMs": 30000}});
-        assert_eq!(elicitation_auto_resolution_ms(&raw), Some(30000));
-        raw["_meta"] = json!({"codex": {"autoResolutionMs": null}});
-        assert_eq!(elicitation_auto_resolution_ms(&raw), None);
-    }
-
-    #[test]
     fn validate_specs_accepts_well_formed_and_rejects_malformed() {
         // What parse_questions mints passes the request-side re-check.
         let good = parse_questions(&valid_args()).unwrap();
@@ -3110,6 +3115,50 @@ mod tests {
             ("deny".to_string(), "Deny".to_string()),
         ];
         assert!(parse_pi_select_ask(&pi_select_tool_call(), &foreign).is_none());
+    }
+
+    #[test]
+    fn is_codeg_ask_tool_name_accepts_every_host_spelling_of_codegs_own_tool() {
+        for spelling in [
+            // claude-agent-acp: an MCP tool's permission card title IS the
+            // raw tool name.
+            "mcp__codeg-mcp__ask_user_question",
+            "codeg-mcp/ask_user_question",
+            "codeg-mcp: ask_user_question",
+            "mcp.codeg-mcp.ask_user_question",
+            // Hosts that title-case or pad it.
+            "  MCP__Codeg-MCP__Ask_User_Question  ",
+        ] {
+            assert!(
+                is_codeg_ask_tool_name(spelling),
+                "{spelling} is codeg's own ask tool"
+            );
+        }
+    }
+
+    #[test]
+    fn is_codeg_ask_tool_name_rejects_tools_that_are_not_codegs_ask() {
+        for other in [
+            // A third-party MCP server's similarly named tool: approving it is
+            // the user's decision, so the bare suffix must NOT be enough.
+            "mcp__other-server__ask_user_question",
+            "ask_user_question",
+            // grok's NATIVE ask arrives on its own ext channel, never as a
+            // permission request — and it is not codeg-mcp's tool either.
+            "_x.ai/ask_user_question",
+            // Codeg's other companion tools keep their approval gate.
+            "mcp__codeg-mcp__delegate_to_agent",
+            "mcp__codeg-mcp__check_user_feedback",
+            // Right server, right words, wrong tool — the match is anchored at
+            // the END so a longer name cannot borrow it.
+            "mcp__codeg-mcp__ask_user_question_twice",
+            "",
+        ] {
+            assert!(
+                !is_codeg_ask_tool_name(other),
+                "{other} must keep its approval card"
+            );
+        }
     }
 
     #[test]

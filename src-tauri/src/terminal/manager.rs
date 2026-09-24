@@ -9,6 +9,9 @@ use super::error::TerminalError;
 #[cfg(target_os = "windows")]
 use super::shell_flavor::ShellFamily;
 use super::types::{TerminalEvent, TerminalInfo, TerminalSnapshot};
+use crate::browser::service_url::ServiceScanner;
+use crate::browser::services::ServiceWatch;
+use crate::browser::types::ServiceSource;
 use crate::web::event_bridge::EventEmitter;
 
 /// How much recent PTY output a terminal keeps for re-attaching viewers. Sized
@@ -71,6 +74,35 @@ struct TerminalInstance {
 
 pub struct TerminalManager {
     terminals: Arc<Mutex<HashMap<String, TerminalInstance>>>,
+}
+
+/// Lock the terminal table, ignoring the poison flag.
+///
+/// Every reader and writer of this map goes through here, so the policy is one
+/// decision rather than a per-call-site one.
+///
+/// The flag guards nothing here. A `HashMap<String, TerminalInstance>` cannot be
+/// observed half-updated: a panic between two of its mutations leaves entries
+/// that are each individually whole, and the callers below all re-read the map
+/// rather than caching a view of it. What the flag WOULD do is convert an
+/// unrelated earlier panic — one tokio swallowed, in a task that touched a
+/// terminal — into a permanent failure of every later terminal operation.
+///
+/// Two of those operations make that fatal rather than merely broken.
+/// [`TerminalManager::kill_by_owner_window`] runs inside Tauri's
+/// `on_window_event` and [`TerminalManager::kill_all`] inside
+/// `RunEvent::ExitRequested`: both on the main thread, inside the platform
+/// event loop, where a panic unwinds across an `extern "system"` boundary and
+/// Rust turns that into an immediate `abort` (Windows reports it as
+/// `0xc0000409`). So a poisoned mutex would take the whole process down at the
+/// next window close. The reader thread's own removal is the mirror case — it
+/// would leak the entry and its temp files for the rest of the process.
+///
+/// Matches the form already used in `office_watch` and `background_watch`.
+fn lock_terminals(
+    terminals: &Mutex<HashMap<String, TerminalInstance>>,
+) -> std::sync::MutexGuard<'_, HashMap<String, TerminalInstance>> {
+    terminals.lock().unwrap_or_else(|p| p.into_inner())
 }
 
 pub(crate) fn resolve_shell() -> String {
@@ -277,7 +309,7 @@ impl TerminalManager {
     ) -> Result<String, TerminalError> {
         // Reject duplicate IDs to prevent orphaning an existing PTY process.
         {
-            let terminals = self.terminals.lock().unwrap();
+            let terminals = lock_terminals(&self.terminals);
             if terminals.contains_key(&opts.terminal_id) {
                 return Err(TerminalError::SpawnFailed(format!(
                     "terminal id '{}' already exists",
@@ -340,6 +372,7 @@ impl TerminalManager {
         let (write_tx, write_rx) = mpsc::channel::<Vec<u8>>();
         let scrollback = Arc::new(Mutex::new(Scrollback::default()));
 
+        let owner_window = opts.owner_window_label.clone();
         let instance = TerminalInstance {
             write_tx,
             master: pair.master,
@@ -350,10 +383,7 @@ impl TerminalManager {
             temp_files: opts.temp_files,
         };
 
-        self.terminals
-            .lock()
-            .unwrap()
-            .insert(terminal_id.clone(), instance);
+        lock_terminals(&self.terminals).insert(terminal_id.clone(), instance);
 
         // Named writer thread
         std::thread::Builder::new()
@@ -366,10 +396,22 @@ impl TerminalManager {
         // Named reader thread — emits per-terminal events
         let id_for_reader = terminal_id.clone();
         let terminals_ref = self.terminals.clone();
+        // The watch that notices a dev server announcing itself in this
+        // terminal's output. Built here because this is where the owning
+        // window is known; it probes and emits on threads of its own, so the
+        // reader below never waits on a socket.
+        let watch = ServiceWatch::new(emitter.clone(), owner_window, ServiceSource::Terminal);
         std::thread::Builder::new()
             .name(format!("pty-reader-{short_id}"))
             .spawn(move || {
-                read_loop(reader, id_for_reader, &emitter, &terminals_ref, &scrollback);
+                read_loop(
+                    reader,
+                    id_for_reader,
+                    &emitter,
+                    &terminals_ref,
+                    &scrollback,
+                    &watch,
+                );
             })
             .map_err(|e| TerminalError::SpawnFailed(e.to_string()))?;
 
@@ -377,7 +419,7 @@ impl TerminalManager {
     }
 
     pub fn write(&self, terminal_id: &str, data: &[u8]) -> Result<(), TerminalError> {
-        let terminals = self.terminals.lock().unwrap();
+        let terminals = lock_terminals(&self.terminals);
         let instance = terminals
             .get(terminal_id)
             .ok_or_else(|| TerminalError::NotFound(terminal_id.to_string()))?;
@@ -389,7 +431,7 @@ impl TerminalManager {
     }
 
     pub fn resize(&self, terminal_id: &str, cols: u16, rows: u16) -> Result<(), TerminalError> {
-        let terminals = self.terminals.lock().unwrap();
+        let terminals = lock_terminals(&self.terminals);
         let instance = terminals
             .get(terminal_id)
             .ok_or_else(|| TerminalError::NotFound(terminal_id.to_string()))?;
@@ -415,7 +457,7 @@ impl TerminalManager {
     /// so a large scrollback is never copied while output is blocked.
     pub fn snapshot(&self, terminal_id: &str) -> TerminalSnapshot {
         let buffer = {
-            let terminals = self.terminals.lock().unwrap();
+            let terminals = lock_terminals(&self.terminals);
             match terminals.get(terminal_id) {
                 Some(instance) => instance.scrollback.clone(),
                 None => {
@@ -439,10 +481,7 @@ impl TerminalManager {
     }
 
     pub fn kill(&self, terminal_id: &str) -> Result<(), TerminalError> {
-        let mut instance = self
-            .terminals
-            .lock()
-            .unwrap()
+        let mut instance = lock_terminals(&self.terminals)
             .remove(terminal_id)
             .ok_or_else(|| TerminalError::NotFound(terminal_id.to_string()))?;
         terminate_terminal(&mut instance);
@@ -490,7 +529,7 @@ impl TerminalManager {
     }
 
     pub fn list_with_exit_check(&self, emitter: Option<&EventEmitter>) -> Vec<TerminalInfo> {
-        let mut terminals = self.terminals.lock().unwrap();
+        let mut terminals = lock_terminals(&self.terminals);
         let exited_terminal_ids = Self::reap_exited(&mut terminals);
 
         let infos = terminals
@@ -522,7 +561,7 @@ impl TerminalManager {
         owner_window_label: &str,
         emitter: Option<&EventEmitter>,
     ) -> usize {
-        let mut terminals = self.terminals.lock().unwrap();
+        let mut terminals = lock_terminals(&self.terminals);
         let exited_terminal_ids = Self::reap_exited(&mut terminals);
 
         let live = terminals
@@ -543,7 +582,7 @@ impl TerminalManager {
 
     pub fn kill_by_owner_window(&self, owner_window_label: &str) -> usize {
         let mut instances = {
-            let mut terminals = self.terminals.lock().unwrap();
+            let mut terminals = lock_terminals(&self.terminals);
             let ids: Vec<String> = terminals
                 .iter()
                 .filter_map(|(id, instance)| {
@@ -571,9 +610,11 @@ impl TerminalManager {
         killed
     }
 
+    /// Poison-tolerant for the reason given on [`Self::kill_by_owner_window`]:
+    /// the quit path runs inside `RunEvent::ExitRequested` on the main thread.
     pub fn kill_all(&self) -> usize {
         let mut instances: Vec<TerminalInstance> = {
-            let mut terminals = self.terminals.lock().unwrap();
+            let mut terminals = lock_terminals(&self.terminals);
             terminals.drain().map(|(_, inst)| inst).collect()
         };
         let killed = instances.len();
@@ -619,9 +660,12 @@ fn read_loop(
     emitter: &EventEmitter,
     terminals: &Arc<Mutex<HashMap<String, TerminalInstance>>>,
     scrollback: &Arc<Mutex<Scrollback>>,
+    watch: &ServiceWatch,
 ) {
     let output_event = format!("terminal://output/{}", terminal_id);
     let mut buf = [0u8; 8192];
+    // Thread-confined, so the carry buffer and the rate limit need no lock.
+    let mut services = ServiceScanner::new();
 
     loop {
         match reader.read(&mut buf) {
@@ -640,6 +684,11 @@ fn read_loop(
                     .lock()
                     .map(|mut s| s.append(&data))
                     .unwrap_or_default();
+                // Before the emit, not after: this is the only place a
+                // terminal's output passes through in one piece, and a viewer
+                // that is not mounted (the mobile drawer, a canvas card on
+                // another route) never sees it at all.
+                watch.feed(&mut services, &data, &terminal_id);
                 let event = TerminalEvent {
                     terminal_id: terminal_id.clone(),
                     data,
@@ -651,8 +700,11 @@ fn read_loop(
         }
     }
 
-    // Terminal exited — remove from map and clean up temp files
-    if let Some(mut instance) = terminals.lock().unwrap().remove(&terminal_id) {
+    // Terminal exited — remove from map and clean up temp files. Poison-tolerant
+    // like the scrollback lock above: this runs on the long-lived `pty-reader-*`
+    // thread, and refusing the removal would leak the entry and its temp files
+    // for the rest of the process.
+    if let Some(mut instance) = lock_terminals(terminals).remove(&terminal_id) {
         cleanup_temp_files(&mut instance.temp_files);
     }
 
@@ -687,6 +739,8 @@ fn thread_name_prefix(terminal_id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(target_os = "windows"))]
+    use super::{Arc, EventEmitter, SpawnOptions, TerminalManager};
     use super::{thread_name_prefix, Scrollback, SCROLLBACK_MAX_CHARS};
 
     #[test]
@@ -772,5 +826,70 @@ mod tests {
             .expect("spawn with sanitized name")
             .join()
             .expect("join");
+    }
+
+    /// The whole local-server path over a REAL pty: a real shell prints a real
+    /// banner, the watch reads it out of the output stream, connects to the
+    /// socket, and the frontend's event arrives naming the window that owns
+    /// the terminal.
+    ///
+    /// The pieces have unit tests of their own; what only an end-to-end run
+    /// can show is that the watch is wired into the reader at all, and that a
+    /// banner survives a real PTY (its line endings, its echo, its shell).
+    #[cfg(not(target_os = "windows"))]
+    #[tokio::test]
+    async fn a_server_announced_in_a_terminal_reaches_the_frontend() {
+        use crate::browser::types::SERVICE_DETECTED_EVENT;
+        use crate::web::event_bridge::WebEventBroadcaster;
+        use std::time::Duration;
+
+        // Something really listening, so the probe has something to find.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+
+        let broadcaster = Arc::new(WebEventBroadcaster::new());
+        // Subscribed before the spawn: the broadcaster drops what it sends
+        // with no receivers, and a shell prints fast.
+        let mut events = broadcaster.subscribe();
+        let emitter = EventEmitter::test_web_only(broadcaster);
+
+        let manager = TerminalManager::new();
+        manager
+            .spawn_with_id(
+                SpawnOptions {
+                    terminal_id: "svc-e2e".to_string(),
+                    working_dir: std::env::temp_dir().to_string_lossy().to_string(),
+                    owner_window_label: "main".to_string(),
+                    shell: Some("/bin/sh".to_string()),
+                    initial_command: Some(format!(
+                        "printf '  ➜  Local:   http://127.0.0.1:{port}/\\n'"
+                    )),
+                    extra_env: None,
+                    temp_files: vec![],
+                },
+                emitter,
+            )
+            .expect("spawn");
+
+        let detected = tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                let event = events.recv().await.expect("event bus");
+                if event.channel == SERVICE_DETECTED_EVENT {
+                    return event;
+                }
+            }
+        })
+        .await
+        .expect("the service event");
+
+        let payload = detected.payload;
+        assert_eq!(payload["origin"], format!("http://127.0.0.1:{port}"));
+        assert_eq!(payload["url"], format!("http://127.0.0.1:{port}/"));
+        assert_eq!(payload["authority"], format!("127.0.0.1:{port}"));
+        assert_eq!(payload["ownerWindow"], "main");
+        assert_eq!(payload["source"], "terminal");
+        assert_eq!(payload["terminalId"], "svc-e2e");
+
+        let _ = manager.kill("svc-e2e");
     }
 }

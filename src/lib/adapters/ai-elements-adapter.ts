@@ -14,7 +14,10 @@ import {
   isDelegationStatusToolName,
 } from "@/lib/adapters/tool-kind-classifier"
 import { normalizeToolName } from "@/lib/tool-call-normalization"
-import { isCodexGrepNoMatchEnvelope } from "@/lib/codex-command-action"
+import {
+  CODEX_SEARCH_ACTION_META_KEY,
+  isCodexGrepNoMatchEnvelope,
+} from "@/lib/codex-command-action"
 import { isBackgroundTaskToolCall } from "@/lib/background-task"
 import { isContextCompactionMeta } from "@/lib/context-compaction"
 import { isUnsettledToolCall } from "@/lib/tool-call-lifecycle"
@@ -34,6 +37,11 @@ import {
   unwrapReferenceDestination,
 } from "@/lib/reference-link"
 import { imageCardLabel } from "@/lib/image-tool-label"
+// The composer's own serialization of a reference badge, so a badge rebuilt
+// here is the same inline token the transcript already knows how to parse —
+// including the escaping, which decides whether a label containing `]` or `)`
+// survives the round trip.
+import { referenceToMarkdown } from "@/components/chat/composer/reference-text"
 
 /**
  * Adapted content part types for AI SDK Elements components
@@ -1088,18 +1096,189 @@ function handleMarkdownLink(
   return isFileUri ? match : ""
 }
 
+/**
+ * An embedded context block as it comes back out of an agent's own record of
+ * the prompt: `\n<context ref="URI">\n…\n</context>`, which is what the ACP
+ * adapter writes for a `resource` block the composer sent (page content from
+ * the built-in browser's "send to chat", a pasted file with no path on disk).
+ *
+ * The composer never shows that text to the person who wrote it — an embedded
+ * attachment is a badge in the prose and a chip under the bubble — so a turn
+ * that read as one line while it was being sent came back, once the history
+ * was re-read from the agent, as a screenful of page dump with a "show more"
+ * under it. Same message, two renderings, and the unreadable one is the one
+ * that lasts.
+ *
+ * `[^"\n]*` for the ref and a lazy body ending at a line-leading `</context>`:
+ * a block is one attachment, and a page that contains the closing tag inside
+ * its own content would otherwise swallow everything after it. The body also
+ * refuses to cross another opener, so an unclosed `<context ref="…">` somebody
+ * typed cannot reach forward to a real block's closer and take the prose in
+ * between with it. `\r?` because nothing between the composer and here
+ * promises to have left the line endings alone, and a block that fails to
+ * match is a wall of text on screen.
+ */
+const EMBEDDED_CONTEXT_RE =
+  /(?:\r?\n)*<context ref="([^"\r\n]*)">\r?\n(?:(?!<context ref=")[\s\S])*?\r?\n<\/context>/g
+
+/** A ``` fence opener, at the start of a line and indented like CommonMark
+ *  allows. */
+const FENCE_RE = /^ {0,3}(?:```|~~~)/gm
+
+/**
+ * Whether `index` falls inside a fenced code block.
+ *
+ * Counted, not parsed: the only question is whether an opener above it is
+ * still unclosed. It exists for the person who pastes one of these blocks into
+ * a message to ask about it — their own words, inside their own fence, must
+ * not be lifted out of their message as an attachment.
+ */
+function insideFence(text: string, index: number): boolean {
+  let fences = 0
+  FENCE_RE.lastIndex = 0
+  for (const match of text.matchAll(FENCE_RE)) {
+    if ((match.index ?? 0) >= index) break
+    fences += 1
+  }
+  return fences % 2 === 1
+}
+
+/** The line the built-in browser's hand-off block names what was picked on
+ *  (`browser/handoff.rs`, `render_element`). */
+const ELEMENT_LINE_RE = /^- element: (.+)$/m
+
+/**
+ * What the composer's badge said, recovered from the block itself.
+ *
+ * For a picked element that is exact: the badge's label and the block's
+ * `- element:` line are the same string, so a message re-read from history
+ * names its attachment the way it did while it was being written. A screenshot
+ * or a page's console lines carry no such line — their badge was named in the
+ * app's own language, which is nowhere in the block — so those fall back to the
+ * address, which is at least the same page.
+ *
+ * A block that has never been near the browser (a pasted file with no path on
+ * disk) falls back the same way, to its file name.
+ */
+function embeddedContextName(uri: string, body: string): string {
+  const element = ELEMENT_LINE_RE.exec(body)?.[1]?.trim()
+  if (element) return element
+  return embeddedRefName(uri)
+}
+
+/** Whatever of a ref a person would recognise on a chip: the site and path for
+ *  a web address, the file name for anything else. */
+function embeddedRefName(uri: string): string {
+  try {
+    const url = new URL(uri)
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      const path = url.pathname === "/" ? "" : url.pathname
+      return `${url.host}${path}${url.search}`
+    }
+    // Everything else names a file. `file:///dir/report.pdf` carries it in the
+    // path; the composer's own `clipboard://report.pdf-<uuid>` (a pasted file
+    // with no path on disk) has no path at all and carries it as the host,
+    // percent-encoded — which is why both are decoded rather than shown raw.
+    const segment = url.pathname.split("/").filter(Boolean).pop() ?? ""
+    const name = decodeURIComponent(segment || url.host)
+    if (name) return name
+  } catch {
+    /* not a uri at all; the fallback handles it */
+  }
+  return uri
+}
+
+/**
+ * The display uri an embedded attachment's badge and chip carry.
+ *
+ * The same `codeg://embedded/…` shape the composer mints for one
+ * (`buildEmbeddedReferenceUri`), so the transcript renders the rebuilt badge
+ * through exactly the same branch: an inert file badge, never a link to
+ * anywhere. Built from the ref rather than a fresh id so the badge and the
+ * block's own chip land on one entry instead of two.
+ */
+function embeddedDisplayUri(ref: string): string {
+  return `codeg://embedded/${encodeURIComponent(ref)}`
+}
+
+/** The badge the composer showed in place of an embedded attachment, written
+ *  back as the inline token the transcript parses into one. */
+function embeddedBadge(name: string, ref: string): string {
+  return referenceToMarkdown({
+    refType: "file",
+    id: name,
+    label: name,
+    uri: embeddedDisplayUri(ref),
+    meta: { fileKind: "file" },
+  })
+}
+
+/** Lift each embedded context block out of the prose and onto the chip row,
+ *  the way the composer showed it when the message was written. */
+function liftEmbeddedContext(
+  text: string,
+  resources: UserResourceDisplay[]
+): string {
+  return text.replace(
+    EMBEDDED_CONTEXT_RE,
+    (match: string, ref: string, offset: number) => {
+      const uri = ref.trim()
+      const name = uri ? embeddedContextName(uri, match) : ""
+      // A block naming nothing leaves nothing to put on a chip, and dropping
+      // it would be deleting content with no trace of it anywhere. Left in
+      // place — as is one inside a code fence, which is a person quoting the
+      // shape rather than an agent reporting a prompt.
+      if (!name || insideFence(text, offset)) return match
+      addResource(resources, {
+        name,
+        uri: embeddedDisplayUri(uri),
+        mime_type: null,
+      })
+      return ""
+    }
+  )
+}
+
+/**
+ * Every embedded attachment in one user turn, by the ref its block names.
+ *
+ * One `resource` block reaches an agent's own record of the prompt as TWO
+ * pieces — the ACP adapter writes the bare uri where the badge was and appends
+ * the block at the end of the message — so the two have to be read together:
+ * on its own, that uri is indistinguishable from a link the person typed.
+ */
+function embeddedAttachmentNames(
+  parts: AdaptedContentPart[]
+): Map<string, string> {
+  const found = new Map<string, string>()
+  for (const part of parts) {
+    if (part.type !== "text") continue
+    EMBEDDED_CONTEXT_RE.lastIndex = 0
+    for (const match of part.text.matchAll(EMBEDDED_CONTEXT_RE)) {
+      const ref = (match[1] ?? "").trim()
+      if (!ref || insideFence(part.text, match.index ?? 0)) continue
+      if (!found.has(ref)) found.set(ref, embeddedContextName(ref, match[0]))
+    }
+  }
+  return found
+}
+
 export function extractUserResourcesFromText(text: string): {
   text: string
   resources: UserResourceDisplay[]
 } {
   const resources: UserResourceDisplay[] = []
+  // Before anything else: the block is page content, and the `[…](…)` and
+  // `@name` shapes inside it are the page's, not the sender's. Tokenizing
+  // first would let a link a page happens to contain become a chip of its own.
+  const prose = liftEmbeddedContext(text, resources)
   // Tokenize into alternating [prose, link, prose, link, …] so the
   // blocked-mention pass only ever touches PLAIN PROSE — never the inside of a
   // kept Markdown file link, whose label/uri could otherwise coincidentally
   // contain an `@…[blocked…]` pattern and be mutated before extraction. The link
   // segments are handled verbatim by `handleMarkdownLink`.
   let out = ""
-  for (const token of tokenizeReferenceLinks(text)) {
+  for (const token of tokenizeReferenceLinks(prose)) {
     out +=
       token.type === "link"
         ? handleMarkdownLink(
@@ -1126,20 +1305,55 @@ function splitUserTextAndResources(
 } {
   const resources: UserResourceDisplay[] = []
   const nextParts: AdaptedContentPart[] = []
+  const attachments = embeddedAttachmentNames(parts)
+  const badges: string[] = []
 
   for (const part of parts) {
     if (part.type !== "text") {
       nextParts.push(part)
       continue
     }
-    const extracted = extractUserResourcesFromText(part.text)
+    // A part that is nothing but the ref of a block this turn carries is the
+    // stand-in the ACP adapter wrote for the badge. Held back rather than kept
+    // in place: a bare address sitting in the prose reads as something the
+    // person typed, and it is the one piece of the message they never wrote.
+    const ref = part.text.trim()
+    const name = attachments.get(ref)
+    const source = name ? embeddedBadge(name, ref) : part.text
+    const extracted = extractUserResourcesFromText(source)
     if (extracted.resources.length > 0) {
-      resources.push(...extracted.resources)
-      if (extracted.text.length > 0) {
-        nextParts.push({ type: "text", text: extracted.text })
-      }
+      // Through `addResource`, not a splice: one attachment reaches the row
+      // from two parts (the badge's stand-in and the block itself), and the
+      // composer showed one chip for it.
+      for (const resource of extracted.resources)
+        addResource(resources, resource)
+      if (extracted.text.length === 0) continue
+      if (name) badges.push(extracted.text)
+      else nextParts.push({ type: "text", text: extracted.text })
     } else {
-      nextParts.push(part)
+      nextParts.push(
+        source === part.text ? part : { type: "text", text: extracted.text }
+      )
+    }
+  }
+
+  // The badges go in FRONT of the prose, and on the same line as it.
+  //
+  // Not because the record says so — it cannot. Whatever the person did, the
+  // composer appends an embedded attachment's block after everything they
+  // typed (`message-input`'s `buildDraft`), so the stand-in's position in the
+  // message is an artifact of sending and says nothing about where the badge
+  // stood. What does say something is how these messages come about: the page
+  // is picked in the browser, which puts the badge in an empty composer, and
+  // the question is typed after it. So that is where it is put back.
+  if (badges.length > 0) {
+    const first = nextParts.findIndex((part) => part.type === "text")
+    const prose = first >= 0 ? nextParts[first] : null
+    const line = badges.join(" ")
+    if (prose && prose.type === "text") {
+      nextParts[first] = { type: "text", text: `${line} ${prose.text}` }
+    } else {
+      nextParts.unshift({ type: "text", text: line })
     }
   }
 
@@ -1975,25 +2189,42 @@ function buildToolResultMap(
 }
 
 /**
- * Codex reports a ripgrep search with no matches as a failed ACP tool result:
- * exit 1 with an otherwise empty command envelope. Treat only that exact shape
- * as a successful presentation state. The ContentBlock and its raw envelope
- * stay untouched, and every other nonzero result remains an error.
+ * Codex reports a ripgrep search with no matches as a failed ACP tool result.
+ * Treat only its two no-match shapes as a successful presentation state; the
+ * ContentBlock stays untouched, and every other failure remains an error.
  *
- * Shares `isCodexGrepNoMatchEnvelope` with the search body in
- * `content-parts-renderer`, which recognises the same envelope to render "No
- * matches" instead of a raw JSON dump. Two predicates for one fact would let
- * the card's status and its body disagree.
+ * 1. The command envelope: exit 1 with otherwise empty output. Shares
+ *    `isCodexGrepNoMatchEnvelope` with the search body in
+ *    `content-parts-renderer`, which recognises the same envelope to render
+ *    "No matches" instead of a raw JSON dump. Two predicates for one fact
+ *    would let the card's status and its body disagree.
+ * 2. A live `failed` with NO output at all, on a call the backend marked as
+ *    codex's own search (`CODEX_SEARCH_ACTION_META_KEY`). codeg advertises
+ *    `_meta.terminal_output_delta` to codex, and with it codex-acp stops
+ *    sending `rawOutput` on every command completion — so a search that
+ *    printed nothing arrives as a bare status, with no exit code left to
+ *    check. Output is the discriminator that remains: rg/grep print a
+ *    diagnostic on a real failure (exit 2), and that text streams in like any
+ *    other output. The marker is what keeps this to codex: an interrupted
+ *    grep from another adapter can look exactly the same. A persisted row
+ *    carries neither the marker nor a status and keeps its own rendering.
+ *    The caller renders the absent body as `""`, i.e. "No matches".
  */
 function isCodexGrepNoMatchResult(
-  toolName: string,
+  toolUse: ContentBlock & { type: "tool_use" },
   result: ContentBlock & { type: "tool_result" }
 ): boolean {
-  if (!result.is_error || typeof result.output_preview !== "string")
-    return false
-  if (normalizeToolName(toolName) !== "grep") return false
+  if (!result.is_error) return false
+  if (normalizeToolName(toolUse.tool_name) !== "grep") return false
 
-  return isCodexGrepNoMatchEnvelope(result.output_preview)
+  if (typeof result.output_preview === "string") {
+    if (isCodexGrepNoMatchEnvelope(result.output_preview)) return true
+  }
+  return (
+    toolUse.status === "failed" &&
+    toolUse.meta?.[CODEX_SEARCH_ACTION_META_KEY] === true &&
+    (result.output_preview ?? "").trim().length === 0
+  )
 }
 
 /**
@@ -2157,10 +2388,7 @@ export function adaptMessageTurn(
           adaptedContent.push(...imageParts)
           continue
         }
-        const isNoMatch = isCodexGrepNoMatchResult(
-          block.tool_name,
-          matchedResult
-        )
+        const isNoMatch = isCodexGrepNoMatchResult(block, matchedResult)
         adaptedContent.push({
           type: "tool-call",
           toolCallId,
@@ -2171,7 +2399,9 @@ export function adaptMessageTurn(
             : matchedResult.is_error && !isNoMatch
               ? "output-error"
               : "output-available",
-          output: matchedResult.output_preview,
+          output: isNoMatch
+            ? (matchedResult.output_preview ?? "")
+            : matchedResult.output_preview,
           errorText:
             matchedResult.is_error && !isNoMatch
               ? matchedResult.output_preview || undefined
@@ -2202,10 +2432,7 @@ export function adaptMessageTurn(
             adaptedContent.push(...imageParts)
             continue
           }
-          const isNoMatch = isCodexGrepNoMatchResult(
-            block.tool_name,
-            positionalResult
-          )
+          const isNoMatch = isCodexGrepNoMatchResult(block, positionalResult)
           adaptedContent.push({
             type: "tool-call",
             toolCallId,
@@ -2215,7 +2442,9 @@ export function adaptMessageTurn(
               positionalResult.is_error && !isNoMatch
                 ? "output-error"
                 : "output-available",
-            output: positionalResult.output_preview,
+            output: isNoMatch
+              ? (positionalResult.output_preview ?? "")
+              : positionalResult.output_preview,
             errorText:
               positionalResult.is_error && !isNoMatch
                 ? positionalResult.output_preview || undefined
@@ -2368,6 +2597,7 @@ interface TurnCacheEntry {
   duration_ms: number | null | undefined
   model: string | null | undefined
   completed_at: string | null | undefined
+  source_turn_id: string | null | undefined
   adapted: AdaptedMessage
 }
 
@@ -2401,8 +2631,14 @@ export interface MessageTurnAdapter {
  * `syncTurnMetadata` after a stream finishes (initial blocks land first,
  * token totals arrive on a later DB roundtrip), so excluding them would
  * freeze the turn at its pre-patch state and the post-stream stats row
- * would never appear. Turns no longer present are GC'd at the end of
- * every adapt() call so the cache size tracks the conversation.
+ * would never appear. `source_turn_id` rides along for the same reason even
+ * though nothing here renders it: a LATER sync can place the parser's name on
+ * a turn whose stats an earlier one already pinned, and downstream caches take
+ * "same adapted message" to mean "same turn object" — `mergedRunCache` reuses a
+ * merged run's frozen `sourceTurns` on that basis, which would leave the reply's
+ * "fork from here" greyed out as unnamed for the rest of the session. Turns no
+ * longer present are GC'd at the end of every adapt() call so the cache size
+ * tracks the conversation.
  */
 export function createMessageTurnAdapter(): MessageTurnAdapter {
   const cache = new Map<string, TurnCacheEntry>()
@@ -2433,7 +2669,8 @@ export function createMessageTurnAdapter(): MessageTurnAdapter {
             cached.usage === turn.usage &&
             cached.duration_ms === turn.duration_ms &&
             cached.model === turn.model &&
-            cached.completed_at === turn.completed_at
+            cached.completed_at === turn.completed_at &&
+            cached.source_turn_id === turn.source_turn_id
           ) {
             out[i] = cached.adapted
             continue
@@ -2468,6 +2705,7 @@ export function createMessageTurnAdapter(): MessageTurnAdapter {
             duration_ms: turn.duration_ms,
             model: turn.model,
             completed_at: turn.completed_at,
+            source_turn_id: turn.source_turn_id,
             adapted,
           })
         } else {

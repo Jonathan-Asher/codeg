@@ -15,13 +15,17 @@ import type { Editor } from "@tiptap/core"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { RichComposerHandle } from "./composer/rich-composer"
-import { serializeDocToText } from "./composer/to-prompt-blocks"
+import {
+  serializeDocToDisplayText,
+  serializeDocToText,
+} from "./composer/to-prompt-blocks"
 import {
   clearMessageInputDraftV2,
   loadMessageInputDraftV2,
 } from "@/lib/message-input-draft"
 import {
   emitAttachFileToSession,
+  emitAttachPageToSession,
   emitAttachSessionToSession,
 } from "@/lib/session-attachment-events"
 import type { DbConversationSummary } from "@/lib/types"
@@ -90,8 +94,8 @@ vi.mock("@/components/chat/conversation-context-bar", () => ({
   ConversationFolderBranchPicker: () => null,
   useConversationFolderBranchPickerVisible: () => false,
 }))
-// `openUrl` is where link-safety lands a web-mode link, and so where the
-// right-click menu's "Open link" ends up.
+// The platform opener is the DESKTOP arm of the shared opener; this suite runs
+// in web mode, where a system-browser target lands on `window.open` instead.
 const platform = vi.hoisted(() => ({ openUrl: vi.fn(async () => {}) }))
 vi.mock("@/lib/platform", () => ({
   isDesktop: () => false,
@@ -101,6 +105,7 @@ vi.mock("@/lib/platform", () => ({
 vi.mock("@/lib/transport", () => ({
   getActiveRemoteConnectionId: () => null,
   isDesktop: () => false,
+  isRemoteDesktopMode: () => false,
 }))
 // A local-file link target routes to the workspace file column, whose provider
 // this suite deliberately renders without.
@@ -198,11 +203,32 @@ import type {
 } from "@/lib/types"
 
 import { MessageInput } from "./message-input"
+import {
+  composerBoxMinHeight,
+  composerEditableMinHeight,
+} from "./composer/composer-sizing"
 
 const CAPS: PromptCapabilitiesInfo = {
   image: true,
   audio: false,
   embedded_context: true,
+}
+
+/**
+ * Dispatch a pointer-driven event that actually names its `pointerType`. jsdom
+ * ships no `PointerEvent`, so `fireEvent.pointerDown(el, { pointerType })`
+ * silently drops the property and every event reads as an unnamed one; React
+ * takes `pointerType` straight off the native event, so setting it by hand on a
+ * MouseEvent is what the composer's handlers actually see in a browser.
+ */
+function firePointer(
+  element: Element,
+  type: "pointerdown" | "click",
+  pointerType: "mouse" | "touch" | "pen"
+): boolean {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true })
+  Object.defineProperty(event, "pointerType", { value: pointerType })
+  return fireEvent(element, event)
 }
 
 function renderInput(
@@ -240,13 +266,13 @@ describe("MessageInput (RichComposer integration)", () => {
     expect(sendButton).toBeDisabled()
   })
 
-  it("claims a mousedown on the input's empty chrome (P8d focus wiring)", async () => {
+  it("claims a mouse press on the input's empty chrome (P8d focus wiring)", async () => {
     const { container } = renderInput({})
     await waitFor(() =>
       expect(container.querySelector('[role="textbox"]')).not.toBeNull()
     )
-    // The bordered card carries the chrome-focus handler; a mousedown on the
-    // card itself (not on the editor or a control) is claimed via preventDefault
+    // The bordered card carries the chrome-focus handler; a press on the card
+    // itself (not on the editor or a control) is claimed via preventDefault
     // before refocusing the editor. Asserting preventDefault (fireEvent returns
     // false when the event was canceled) avoids relying on jsdom focus.
     const card = container.querySelector('[class~="@container"]') as HTMLElement
@@ -254,7 +280,81 @@ describe("MessageInput (RichComposer integration)", () => {
     // The same box paints the text I-beam across its blank chrome (see the
     // `.codeg-composer-chrome` rule in globals.css).
     expect(card.className).toContain("codeg-composer-chrome")
+    expect(firePointer(card, "pointerdown", "mouse")).toBe(false)
+  })
+
+  // A tap's compatibility `mousedown` lands after the gesture has resolved, and
+  // cancelling it — which the mouse path above must do — is itself enough to
+  // stop the soft keyboard coming up. So touch must NOT go through the press
+  // path; it gets the caret from the `click` the tap produces instead.
+  it("leaves a touch press on the chrome alone and focuses on the tap", async () => {
+    const { container } = renderInput({})
+    await waitFor(() =>
+      expect(container.querySelector('[role="textbox"]')).not.toBeNull()
+    )
+    const card = container.querySelector('[class~="@container"]') as HTMLElement
+    const editor = container.querySelector('[role="textbox"]') as HTMLElement
+
+    // Not claimed: no preventDefault, so the browser's own tap handling runs.
+    expect(firePointer(card, "pointerdown", "touch")).toBe(true)
+    expect(document.activeElement).not.toBe(editor)
+
+    // The tap itself is what puts the caret in the editor.
+    firePointer(card, "click", "touch")
+    await waitFor(() => expect(document.activeElement).toBe(editor))
+  })
+
+  // The press already focused a mouse; focusing again on release would collapse
+  // a selection dragged out of the chrome.
+  it("ignores a mouse click on the chrome (the press owns it)", async () => {
+    const { container } = renderInput({})
+    await waitFor(() =>
+      expect(container.querySelector('[role="textbox"]')).not.toBeNull()
+    )
+    const card = container.querySelector('[class~="@container"]') as HTMLElement
+    const editor = container.querySelector('[role="textbox"]') as HTMLElement
+
+    firePointer(card, "click", "mouse")
+    expect(document.activeElement).not.toBe(editor)
+    // An event that names no pointer kind at all counts as a mouse too.
+    fireEvent.click(card)
+    expect(document.activeElement).not.toBe(editor)
+  })
+
+  // A browser with no Pointer Events dispatches no `pointerdown` and names no
+  // pointer kind on its clicks, so both paths above stand down and plain
+  // `mousedown` is all there is — jsdom is exactly such an environment, which
+  // is what lets this assert the fallback rather than describe it.
+  it("falls back to mousedown where the browser has no pointer events", async () => {
+    expect("PointerEvent" in window).toBe(false)
+    const { container } = renderInput({})
+    await waitFor(() =>
+      expect(container.querySelector('[role="textbox"]')).not.toBeNull()
+    )
+    const card = container.querySelector('[class~="@container"]') as HTMLElement
+    const editor = container.querySelector('[role="textbox"]') as HTMLElement
+
+    // Claimed (preventDefault) and focused, the way it behaved before the
+    // press/tap split.
     expect(fireEvent.mouseDown(card)).toBe(false)
+    await waitFor(() => expect(document.activeElement).toBe(editor))
+  })
+
+  // A tap on a control inside the box must reach the control, not be swallowed
+  // into "put the caret here" — same exclusion the mouse path has always had.
+  it("leaves a touch tap on a control inside the box to the control", async () => {
+    const { container } = renderInput({ isPrompting: true, onCancel: vi.fn() })
+    await waitFor(() =>
+      expect(container.querySelector('[role="textbox"]')).not.toBeNull()
+    )
+    const stop = container.querySelector(
+      `button[title="${enMessages.Folder.chat.messageInput.cancel}"]`
+    ) as HTMLElement
+    expect(stop).not.toBeNull()
+
+    const editor = container.querySelector('[role="textbox"]') as HTMLElement
+    firePointer(stop, "click", "touch")
+    expect(document.activeElement).not.toBe(editor)
   })
 })
 
@@ -323,6 +423,169 @@ describe("MessageInput attach-to-chat insertion position", () => {
       expect(serializeDocToText(editor.state.doc)).toContain(link)
     )
     assertBetweenHelloAndWorld(serializeDocToText(editor.state.doc), link)
+  })
+
+  // The built-in browser's "send to chat". The block is page content, so it
+  // goes behind a badge rather than into the prose — but only where the agent
+  // takes embedded context; the alternative there would be an agent silently
+  // receiving nothing at all.
+  it("puts a handed-over page behind a badge", async () => {
+    const editor = await mountWithEditor()
+    seedWithMidCaret(editor)
+    act(() => {
+      emitAttachPageToSession({
+        tabId: "tab-1",
+        label: "button#export",
+        text: "Captured from a web page…\n\n- element: button#export",
+        uri: "https://example.com/orders",
+      })
+    })
+    // The DISPLAY serialization, which is the one that keeps an embedded
+    // badge inline; the send serialization drops it and appends the real
+    // bytes-bearing block instead.
+    await waitFor(() =>
+      expect(serializeDocToDisplayText(editor.state.doc)).toContain(
+        "button#export"
+      )
+    )
+    const text = serializeDocToDisplayText(editor.state.doc)
+    // A badge, not the block itself.
+    expect(text).not.toContain("Captured from a web page")
+    expect(text).toMatch(/\[button#export]\(codeg:\/\/embedded\//)
+  })
+
+  // Nobody typed this badge, so taking it back has to be as cheap as one key.
+  // It used to take two: the insertion leaves a space after the badge, and the
+  // first Backspace went on that — an invisible change that reads as "Backspace
+  // cannot delete this".
+  it("takes a handed-over page back out on one Backspace", async () => {
+    const editor = await mountWithEditor()
+    act(() => {
+      emitAttachPageToSession({
+        tabId: "tab-1",
+        label: "button#export",
+        text: "Captured from a web page…\n\n- element: button#export",
+        uri: "https://example.com/orders",
+      })
+    })
+    await waitFor(() =>
+      expect(serializeDocToDisplayText(editor.state.doc)).toContain(
+        "button#export"
+      )
+    )
+
+    act(() => {
+      editor.view.dom.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Backspace",
+          keyCode: 8,
+          bubbles: true,
+          cancelable: true,
+        })
+      )
+    })
+
+    expect(editor.isEmpty).toBe(true)
+    expect(serializeDocToDisplayText(editor.state.doc)).not.toContain(
+      "button#export"
+    )
+  })
+
+  // The block quotes the page's own markup. `insertContent(string)` would
+  // parse it as HTML — the tags would vanish and a `<span data-reference>` the
+  // page wrote would become a real composer badge.
+  it("writes page markup into the prose literally, not as HTML", async () => {
+    renderInput({
+      attachmentTabId: "tab-1",
+      promptCapabilities: {
+        image: true,
+        audio: false,
+        embedded_context: false,
+      },
+    })
+    await waitFor(
+      () => expect(composerHandle.current?.getEditor()).toBeTruthy(),
+      { timeout: 5000 }
+    )
+    const editor = composerHandle.current?.getEditor()
+    if (!editor) throw new Error("composer editor not mounted")
+    const block = [
+      "- element: button#export",
+      "",
+      "```html",
+      '<button id="export">Export</button>',
+      '<span data-reference data-ref-type="file" data-uri="file:///etc/passwd"></span>',
+      "```",
+    ].join("\n")
+    act(() => {
+      emitAttachPageToSession({
+        tabId: "tab-1",
+        label: "button#export",
+        text: block,
+        uri: "https://example.com/orders",
+      })
+    })
+    await waitFor(() =>
+      expect(serializeDocToDisplayText(editor.state.doc)).toContain(
+        "- element: button#export"
+      )
+    )
+    const text = serializeDocToDisplayText(editor.state.doc)
+    // Every line of the block, verbatim, tags and all.
+    for (const line of block.split("\n").filter(Boolean)) {
+      expect(text).toContain(line)
+    }
+    // …and the page's badge markup is text, not a badge.
+    expect(editor.state.doc.textContent).toContain("data-reference")
+  })
+
+  it("writes the page into the prose for an agent that takes no embedded context", async () => {
+    renderInput({
+      attachmentTabId: "tab-1",
+      promptCapabilities: {
+        image: true,
+        audio: false,
+        embedded_context: false,
+      },
+    })
+    await waitFor(
+      () => expect(composerHandle.current?.getEditor()).toBeTruthy(),
+      { timeout: 5000 }
+    )
+    const editor = composerHandle.current?.getEditor()
+    if (!editor) throw new Error("composer editor not mounted")
+    act(() => {
+      emitAttachPageToSession({
+        tabId: "tab-1",
+        label: "button#export",
+        text: "Captured from a web page - element: button#export",
+        uri: "https://example.com/orders",
+      })
+    })
+    await waitFor(() =>
+      expect(serializeDocToText(editor.state.doc)).toContain(
+        "Captured from a web page"
+      )
+    )
+    expect(serializeDocToText(editor.state.doc)).not.toContain(
+      "codeg://embedded/"
+    )
+  })
+
+  it("ignores a page handed to another conversation", async () => {
+    const editor = await mountWithEditor()
+    act(() => {
+      emitAttachPageToSession({
+        tabId: "tab-2",
+        label: "button#export",
+        text: "Captured from a web page…",
+        uri: "https://example.com/orders",
+      })
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(serializeDocToDisplayText(editor.state.doc)).not.toContain(
+      "button#export"
+    )
   })
 })
 
@@ -1750,10 +2013,21 @@ describe("MessageInput right-click token selection", () => {
     const open = await screen.findByRole("menuitem", { name: "Open link" })
     expect(selectedText(editor)).toBe("example.com/docs")
 
-    fireEvent.click(open)
-    await waitFor(() =>
-      expect(platform.openUrl).toHaveBeenCalledWith("https://example.com/docs")
-    )
+    // No built-in browser here (web mode, no capability answer), so the link
+    // decision resolves to the system browser — `window.open` in web mode.
+    const windowOpen = vi.spyOn(window, "open").mockReturnValue(null)
+    try {
+      fireEvent.click(open)
+      await waitFor(() =>
+        expect(windowOpen).toHaveBeenCalledWith(
+          "https://example.com/docs",
+          "_blank",
+          "noreferrer"
+        )
+      )
+    } finally {
+      windowOpen.mockRestore()
+    }
   })
 
   it("selects a plain word without inventing an action for it", async () => {
@@ -1963,5 +2237,88 @@ describe("MessageInput prompt history", () => {
 
     // A recall here would replace the queued message being edited.
     expect(handle.getText()).toBe("queued edit")
+  })
+})
+
+/**
+ * The composer box is a flex column: editor on top, action row pinned under
+ * it. On mobile web the editor was collapsing to 0px, which floated the add /
+ * agent / stop controls to the TOP of the box and left the rest of it as blank
+ * dead space that could not be focused (#746).
+ *
+ * jsdom cannot measure any of that, so these lock the declared contract the
+ * geometry rests on. Real pixel behaviour is covered by the manual pass in the
+ * PR description.
+ */
+describe("MessageInput composer box sizing (#746)", () => {
+  it("sizes the editor off a content basis so it cannot collapse to zero", async () => {
+    const { container } = renderInput({})
+    await waitFor(() =>
+      expect(container.querySelector('[role="textbox"]')).not.toBeNull()
+    )
+
+    const chrome = container.querySelector(".codeg-composer-chrome")
+    expect(chrome).not.toBeNull()
+    const chromeClasses = chrome!.className.split(/\s+/)
+    expect(chromeClasses).toContain("flex")
+    expect(chromeClasses).toContain("flex-col")
+
+    const editorRoot = chrome!.querySelector(".codeg-composer")
+    expect(editorRoot).not.toBeNull()
+    const editorClasses = editorRoot!.className.split(/\s+/)
+    // A zero basis (`flex-1`) only reaches its intended height by absorbing the
+    // box's free space. Engines that read a min-height-only flex column as
+    // main-size-indefinite hand out none, and the editor lands at 0px.
+    expect(editorClasses).not.toContain("flex-1")
+    expect(editorClasses).toContain("grow")
+  })
+
+  // Both floors have to actually land, and on the right element: the box's on
+  // the box, the editable area's on the editor. Only then does the box reach
+  // its floor by summing its children, which is what makes the layout come out
+  // right on an engine that hands its flex-grow children no free space.
+  for (const tall of [false, true]) {
+    it(`states both height floors on the ${tall ? "tall" : "compact"} box`, async () => {
+      const { container } = renderInput({ tall })
+      await waitFor(() =>
+        expect(container.querySelector('[role="textbox"]')).not.toBeNull()
+      )
+
+      const chrome = container.querySelector(".codeg-composer-chrome")!
+      const editorRoot = chrome.querySelector(".codeg-composer")!
+      expect(chrome.className.split(/\s+/)).toContain(
+        composerBoxMinHeight(tall)
+      )
+      expect(editorRoot.className.split(/\s+/)).toContain(
+        composerEditableMinHeight(tall, false)
+      )
+    })
+  }
+
+  it("keeps the action row a fixed-height last child, below the editor", async () => {
+    const { container } = renderInput({ isPrompting: true, onCancel: vi.fn() })
+    await waitFor(() =>
+      expect(container.querySelector('[role="textbox"]')).not.toBeNull()
+    )
+
+    const chrome = container.querySelector(".codeg-composer-chrome")!
+    const editorRoot = chrome.querySelector(".codeg-composer")!
+    // The row holding the add menu / agent settings / stop button.
+    const actionRow = chrome.querySelector(":scope > .shrink-0.items-end")
+    expect(actionRow).not.toBeNull()
+
+    // Stop lives in that row (it is what appeared top-right in the report).
+    expect(
+      actionRow!.querySelector(
+        `button[title="${enMessages.Folder.chat.messageInput.cancel}"]`
+      )
+    ).not.toBeNull()
+
+    // Document order: editor first, action row after it. Anything else and the
+    // controls render above the text, which is the reported symptom.
+    expect(
+      editorRoot.compareDocumentPosition(actionRow!) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
   })
 })

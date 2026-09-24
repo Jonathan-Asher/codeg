@@ -106,6 +106,14 @@ pub fn build_router(
             post(handlers::session_info::set_session_info_settings),
         )
         .route(
+            "/get_browser_tools_settings",
+            post(handlers::browser_tools::get_browser_tools_settings),
+        )
+        .route(
+            "/set_browser_tools_settings",
+            post(handlers::browser_tools::set_browser_tools_settings),
+        )
+        .route(
             "/get_chat_authoring_settings",
             post(handlers::chat_authoring::get_chat_authoring_settings),
         )
@@ -1174,6 +1182,19 @@ pub fn build_router(
             post(handlers::custom_skills::custom_delete_skills),
         )
         // ─── Office tools ───
+        // ─── Web-mode port bridge (dev servers on the host, shown in an iframe) ───
+        .route(
+            "/browser_bridge_status",
+            post(handlers::browser_bridge::browser_bridge_status),
+        )
+        .route(
+            "/browser_bridge_open",
+            post(handlers::browser_bridge::browser_bridge_open),
+        )
+        .route(
+            "/browser_bridge_close",
+            post(handlers::browser_bridge::browser_bridge_close),
+        )
         .route(
             "/officecli_detect",
             post(handlers::office_tools::officecli_detect),
@@ -1868,11 +1889,20 @@ pub fn build_router(
         .layer(cors)
         .layer(Extension(state))
         .layer(Extension(shutdown_signal))
-        // Outermost: compress API JSON and static text assets. Allowlist
-        // predicate — binary downloads keep their exact Content-Length (the
-        // remote proxy's progress source) and SSE stays unbuffered; see
+        // Compress API JSON and static text assets. Allowlist predicate —
+        // binary downloads keep their exact Content-Length (the remote
+        // proxy's progress source) and SSE stays unbuffered; see
         // `web::compression`.
         .layer(crate::web::compression::compression_layer())
+        // Outermost, and outside everything above on purpose: a request
+        // addressed to a bridge hostname is a dev server's, not codeg's, and
+        // is answered by the bridge exactly as a listener of its own would —
+        // no CORS, no compression, no body limit, no static fallback. Only
+        // when `CODEG_BRIDGE_HOST_PATTERN` is set; every other request goes
+        // straight through. See `web::browser_bridge`.
+        .layer(middleware::from_fn(
+            crate::web::browser_bridge::route_by_host,
+        ))
 }
 
 async fn health_check() -> impl IntoResponse {

@@ -56,6 +56,8 @@ const h = vi.hoisted(() => {
     pushAlert: vi.fn(),
     notifyDesktop: vi.fn(async () => true),
     toastWarning: vi.fn(),
+    toastError: vi.fn(),
+    toastInfo: vi.fn(),
     // Every `t(key, values)` this render made. The mock below still returns
     // the bare key (what most assertions compare against), so interpolated
     // values would otherwise be unobservable — this is how a test checks the
@@ -96,7 +98,11 @@ vi.mock("@/lib/desktop-notification", () => ({
 }))
 
 vi.mock("sonner", () => ({
-  toast: { warning: h.toastWarning },
+  toast: {
+    warning: h.toastWarning,
+    error: h.toastError,
+    info: h.toastInfo,
+  },
 }))
 
 vi.mock("@/lib/selector-prefs-storage", () => ({
@@ -2908,6 +2914,72 @@ describe("AcpConnectionsProvider Grok cross-agent-type model switch", () => {
     expect(h.toastWarning).toHaveBeenCalledWith("configOptionAdjusted")
   })
 
+  it("raises a notice as a toast and mirrors only the graded levels to the banner", async () => {
+    // Advertising `session.notices` makes both adapters route their ADVISORY
+    // records here instead of the AIR lane, so the banner has to keep its rows
+    // or the upgrade is a net loss. Text is adapter-authored and shown
+    // verbatim — unlike the localized `configOptionAdjusted` above.
+    const handlers = await connectGrokOwner()
+    h.toastWarning.mockClear()
+    h.toastError.mockClear()
+    h.toastInfo.mockClear()
+
+    emitAcpEvent(handlers, {
+      seq: 1,
+      connection_id: "spawned-conn",
+      type: "session_notice",
+      notice: {
+        severity: "info",
+        title: "Model rerouted",
+        description: "Switched from gpt-6-astra to gpt-5.6-sol (capacity).",
+      },
+    })
+    expect(h.toastInfo).toHaveBeenCalledWith(
+      "Model rerouted — Switched from gpt-6-astra to gpt-5.6-sol (capacity)."
+    )
+    // `info` is toast-only: a reroute does not deserve a persistent row.
+    expect(h.store!.getConnection(TAB)?.sessionFailures ?? []).toHaveLength(0)
+
+    emitAcpEvent(handlers, {
+      seq: 2,
+      connection_id: "spawned-conn",
+      type: "session_notice",
+      notice: { severity: "warning", title: "Fast mode turned off" },
+    })
+    expect(h.toastWarning).toHaveBeenCalledWith("Fast mode turned off")
+    const table = h.store!.getConnection(TAB)?.sessionFailures ?? []
+    expect(table).toHaveLength(1)
+    expect(table[0]).toMatchObject({
+      severity: "warning",
+      title: "Fast mode turned off",
+    })
+
+    // A repeat revises the one row rather than stacking a second — the bug a
+    // fixed revision would cause is the banner freezing on the first text.
+    emitAcpEvent(handlers, {
+      seq: 3,
+      connection_id: "spawned-conn",
+      type: "session_notice",
+      notice: {
+        severity: "warning",
+        title: "Fast mode turned off",
+        description: "The selected model does not support it.",
+      },
+    })
+    const revised = h.store!.getConnection(TAB)?.sessionFailures ?? []
+    expect(revised).toHaveLength(1)
+    expect(revised[0].details).toBe("The selected model does not support it.")
+
+    emitAcpEvent(handlers, {
+      seq: 4,
+      connection_id: "spawned-conn",
+      type: "session_notice",
+      notice: { severity: "error", title: "Provider degraded" },
+    })
+    expect(h.toastError).toHaveBeenCalledWith("Provider degraded")
+    expect(h.store!.getConnection(TAB)?.sessionFailures ?? []).toHaveLength(2)
+  })
+
   it("stays silent for option snapshots nobody asked for", async () => {
     // codex-acp flips `collaboration_mode` mid-turn, and pi answers one
     // `set_config_option` with TWO snapshots (response + notification). None of
@@ -3182,7 +3254,7 @@ describe("empty-turn error diagnostics", () => {
     h.notifyDesktop.mockClear()
 
     const details =
-      "dropped 1 update(s) (0 decode, 1 dispatch)\nstderr (this turn, last 1 lines):\n  Error: 401 Unauthorized"
+      "dropped 1 unreadable update(s)\nstderr (this turn, last 1 lines):\n  Error: 401 Unauthorized"
     emitAcpEvent(handlers, {
       seq: 1,
       connection_id: "spawned-conn",

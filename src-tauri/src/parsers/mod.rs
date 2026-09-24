@@ -677,6 +677,38 @@ pub fn title_from_user_text(text: &str) -> String {
     truncate_str(&fold_reference_links(text), 100)
 }
 
+/// Widen one projected prompt block into a rendered turn's block type.
+///
+/// The projection itself is [`crate::acp::types::project_user_prompt_block`] —
+/// the SINGLE rule shared with the live broadcast. This only carries the result
+/// across into `models::message`, keeping the image `uri` that the live wire
+/// type has nowhere to put but the frontend uses for an image's display name.
+pub fn user_turn_block(block: &crate::acp::types::PromptInputBlock) -> ContentBlock {
+    match crate::acp::types::project_user_prompt_block(block) {
+        crate::acp::types::UserTurnBlock::Text { text } => ContentBlock::Text { text },
+        crate::acp::types::UserTurnBlock::Image {
+            data,
+            mime_type,
+            uri,
+        } => ContentBlock::Image {
+            data,
+            mime_type,
+            uri,
+        },
+    }
+}
+
+/// Read one recorded ACP content block off disk and project it the way the
+/// live path projects the same prompt. `None` when the block has nothing to
+/// render — see [`crate::acp::types::prompt_block_from_wire`].
+///
+/// Every history parser that reconstructs a user turn from raw ACP content
+/// goes through here, so "how an attachment appears in a user message" is
+/// decided once rather than per agent.
+pub fn user_turn_block_from_wire(item: &serde_json::Value) -> Option<ContentBlock> {
+    crate::acp::types::prompt_block_from_wire(item).map(|b| user_turn_block(&b))
+}
+
 /// Fill in `duration_ms` for assistant turns whose agent reports no timing of
 /// its own, by *tiling* the conversation timeline: a reply took as long as the
 /// span between the end of the previous activity and its own completion.
@@ -1014,6 +1046,44 @@ pub fn merge_context_window_stats(
             context_window_used_tokens: used_tokens,
             context_window_max_tokens: max_tokens,
             context_window_usage_percent: usage_percent,
+        }),
+    }
+}
+
+/// Stamp a context-window occupancy the AGENT stated directly, overriding
+/// whatever [`merge_context_window_stats`] recomputed from used/max.
+///
+/// Most agents publish token counts and codeg derives the percentage. Qoder
+/// publishes the percentage (`usage.context_usage_ratio`) and, for its own
+/// hosted models, redacts the token counters to zero — so for those sessions
+/// the stated figure is the ONLY occupancy signal that exists, and
+/// `merge_context_window_stats` has nothing to divide. It wins even when the
+/// counters ARE present, because a recomputation would divide by a window this
+/// parser had to back-derive or guess.
+///
+/// `None` leaves `stats` untouched. A non-finite value is dropped and an
+/// out-of-range one is clamped rather than dropped: a gauge is drawn from this,
+/// and "no ring" is a worse answer than "pinned at 100%".
+pub fn with_reported_context_percent(
+    stats: Option<SessionStats>,
+    percent: Option<f64>,
+) -> Option<SessionStats> {
+    let Some(percent) = percent.filter(|p| p.is_finite()) else {
+        return stats;
+    };
+    let percent = percent.clamp(0.0, 100.0);
+    match stats {
+        Some(mut s) => {
+            s.context_window_usage_percent = Some(percent);
+            Some(s)
+        }
+        None => Some(SessionStats {
+            total_usage: None,
+            total_tokens: None,
+            total_duration_ms: 0,
+            context_window_used_tokens: None,
+            context_window_max_tokens: None,
+            context_window_usage_percent: Some(percent),
         }),
     }
 }
