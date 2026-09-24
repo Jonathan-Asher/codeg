@@ -332,6 +332,25 @@ describe("WebTransport heartbeat (dead-socket detection)", () => {
     expect(t.getConnectionSnapshot()).toBe("connected")
   })
 
+  it("makes waitForReady() wait for the socket that replaces a dead one", async () => {
+    fetchMock.mockResolvedValue(ok200())
+    const { t, ws } = connectReady()
+    await vi.advanceTimersByTimeAsync(25_000) // pinged at 15s, overdue at 25s
+    const ws2 = lastWs()
+    expect(ws2).not.toBe(ws)
+    let ready = false
+    void t.waitForReady().then(() => {
+      ready = true
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    // The dead socket's `__ready__` must not vouch for its replacement.
+    expect(ready).toBe(false)
+    ws2.open()
+    ws2.ready()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(ready).toBe(true)
+  })
+
   it("counts any inbound frame as proof of life, so a busy stream is never pinged", () => {
     const { ws } = connectReady()
     for (let i = 0; i < 8; i++) {

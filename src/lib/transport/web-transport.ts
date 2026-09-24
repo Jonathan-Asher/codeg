@@ -423,9 +423,6 @@ export class WebTransport implements Transport {
           typeof parsed === "object" &&
           "type" in (parsed as object)
         ) {
-          // Heartbeat reply. `noteInbound` already took it as proof of
-          // life; no subscription is waiting for it.
-          if ((parsed as { type: unknown }).type === "pong") return
           this.eventStreamInstance?.handleServerFrame(parsed)
           return
         }
@@ -469,6 +466,7 @@ export class WebTransport implements Transport {
     this.ws.onclose = () => {
       this.ws = null
       this.wsOpen = false
+      this.stopHeartbeat()
       // New subscribers (and any concurrent subscribe() calls in flight)
       // must wait for the next connection's `__ready__` before resolving.
       this.resetReady()
@@ -649,10 +647,14 @@ export class WebTransport implements Transport {
   // backoff, the new socket's `onopen` re-attaches every live subscription
   // with its running cursor (replay or snapshot), and its `__ready__` fires
   // the reconnect callbacks that re-fetch whatever the dead socket swallowed.
+  // `onclose` never runs for this socket (`reconnectNow` detaches it first),
+  // so reset the ready gate here as `onclose` would: `waitForReady()` callers
+  // must wait for the replacement, not pass on the dead socket's `__ready__`.
   private onSocketDead(reason: string) {
     console.warn(
       `[WebTransport] socket presumed dead (${reason}); reconnecting`
     )
+    this.resetReady()
     this.reconnectNow()
   }
 
