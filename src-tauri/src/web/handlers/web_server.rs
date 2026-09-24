@@ -176,7 +176,7 @@ fn server_self_update_blocker() -> Option<AppCommandError> {
 pub async fn check_app_update() -> Result<Json<AppUpdateCheckResult>, AppCommandError> {
     use crate::update::{runtime, version};
 
-    let current_version = env!("CARGO_PKG_VERSION").to_string();
+    let current_version = version::running_app_version().to_string();
     let manifest = version::fetch_latest_manifest().await?;
 
     let update = if version::is_newer(&manifest.version, &current_version) {
@@ -243,7 +243,7 @@ pub struct ServerUpdateStatus {
 pub async fn app_update_status() -> Json<ServerUpdateStatus> {
     use crate::update::runtime;
     Json(ServerUpdateStatus {
-        current_version: env!("CARGO_PKG_VERSION").to_string(),
+        current_version: crate::update::version::running_app_version().to_string(),
         self_update_supported: server_self_update_supported(),
         capability: runtime::capability(),
         runtime: runtime::runtime_label().to_string(),

@@ -102,11 +102,15 @@ jobs:
       # installs a strictly newer semver — actually delivers them:
       #   <upstream major.minor.(patch+1)>-fork.<run number>
       # Always above the upstream version the branch is based on, monotonic
-      # across fork builds, and it moves up by itself after a rebase. Stamped
-      # into all three version fields so the app, its embedded server
-      # (CARGO_PKG_VERSION, which answers update checks for remote windows)
-      # and latest.json agree on what is running. The stamp is undone by the
-      # next checkout (a forced checkout resets tracked files).
+      # across fork builds, and it moves up by itself after a rebase.
+      #
+      # Stamped into the app bundle (tauri.conf.json — what the updater and
+      # the embedded server's update check read, see
+      # `update::version::running_app_version`) and package.json, but NOT into
+      # Cargo.toml: a crate version change alters the crate's metadata hash,
+      # which discards every incremental artifact and recompiles the whole
+      # crate from scratch on every build. The stamp is undone by the next
+      # checkout (a forced checkout resets tracked files).
       - name: Stamp the fork version
         run: |
           python3 - <<'PY'
@@ -119,8 +123,6 @@ jobs:
           conf.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
           pkg = pathlib.Path("package.json")
           pkg.write_text(re.sub(r'"version": "[^"]+"', f'"version": "{fork}"', pkg.read_text(), count=1))
-          cargo = pathlib.Path("src-tauri/Cargo.toml")
-          cargo.write_text(re.sub(r'^version = "[^"]+"', f'version = "{fork}"', cargo.read_text(), count=1, flags=re.M))
           print("fork version:", fork)
           PY
       # `--bundles app`: the .app plus its signed updater archive — all the
@@ -130,6 +132,12 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Persistent workspace: recompile only what changed. (rust-toolchain
+          # pins this to 0 for CI caches, where it would be wasted.)
+          CARGO_INCREMENTAL: ${{ runner.environment == 'self-hosted' && '1' || '0' }}
+          # The checks job type-checks the frontend; the build need not do it
+          # a second time inside `next build`.
+          CODEG_BUILD_SKIP_TYPECHECK: "1"
       - name: Assemble release files
         run: |
           VERSION=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")

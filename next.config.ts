@@ -27,6 +27,11 @@ const withNextIntl = createNextIntlPlugin({
 })
 
 const nextConfig: NextConfig = {
+  // CI's build job sets this: its checks job already runs `tsc`, so `next
+  // build` repeating the type check only lengthens every release build.
+  typescript: {
+    ignoreBuildErrors: process.env.CODEG_BUILD_SKIP_TYPECHECK === "1",
+  },
   output: "export",
   images: {
     unoptimized: true,

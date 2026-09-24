@@ -699,6 +699,12 @@ mod tauri_app {
                     }
                 }
 
+                // The bundle version is what the updater compares against; the
+                // embedded server answers update checks for remote windows with
+                // it (see `update::version::running_app_version`).
+                crate::update::version::set_running_app_version(
+                    app.package_info().version.to_string(),
+                );
                 let app_version = env!("CARGO_PKG_VERSION");
                 let database = tauri::async_runtime::block_on(db::init_database(
                     &effective_data_dir,

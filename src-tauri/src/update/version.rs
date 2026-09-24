@@ -6,12 +6,36 @@
 //! platform tarball from the deterministic `releases/latest/download/`
 //! path (see `install.rs`).
 
-use std::sync::LazyLock;
+use std::sync::{LazyLock, OnceLock};
 use std::time::Duration;
 
 use serde::Deserialize;
 
 use crate::app_error::AppCommandError;
+
+/// The version the running app reports for update checks and `/health`.
+///
+/// Desktop builds register their bundle version (`tauri.conf.json`, which the
+/// fork's CI stamps per build as `<x.y.z>-fork.<run>`) at startup. The crate
+/// version (`CARGO_PKG_VERSION`) is deliberately NOT stamped per build: a
+/// version change alters the crate's metadata hash, which throws away every
+/// incremental-compilation artifact and forces a from-scratch compile of the
+/// whole crate on each build. Server builds, which register nothing, report
+/// the crate version as before.
+static RUNNING_APP_VERSION: OnceLock<String> = OnceLock::new();
+
+/// Record the running app's version (desktop startup). First call wins.
+pub fn set_running_app_version(version: String) {
+    let _ = RUNNING_APP_VERSION.set(version);
+}
+
+/// See [`RUNNING_APP_VERSION`].
+pub fn running_app_version() -> &'static str {
+    RUNNING_APP_VERSION
+        .get()
+        .map(String::as_str)
+        .unwrap_or(env!("CARGO_PKG_VERSION"))
+}
 
 /// Update manifest URL — mirrors the `endpoints` entry in `tauri.conf.json`
 /// so desktop and server modes consult the same source of truth.

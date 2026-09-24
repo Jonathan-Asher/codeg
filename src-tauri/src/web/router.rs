@@ -1916,7 +1916,7 @@ async fn health_check() -> impl IntoResponse {
     // remote update manifest.
     Json(serde_json::json!({
         "status": "ok",
-        "version": env!("CARGO_PKG_VERSION"),
+        "version": crate::update::version::running_app_version(),
     }))
 }
 
