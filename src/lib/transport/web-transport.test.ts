@@ -401,6 +401,54 @@ describe("WebTransport heartbeat (dead-socket detection)", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it("gives up on a socket that never opens after the health probe passed, and retries", async () => {
+    // The server answers /api/health, but the upgrade black-holes: the socket
+    // sits in CONNECTING with no deadline of its own.
+    fetchMock.mockResolvedValue(ok200())
+    const { t, ws } = connectReady()
+    const onReconnect = vi.fn()
+    t.onReconnect(onReconnect)
+    ws.drop()
+    await vi.advanceTimersByTimeAsync(1_000) // backoff → probe → 200
+    const stuck = lastWs()
+    expect(stuck).not.toBe(ws)
+    expect(stuck.readyState).toBe(MockWebSocket.CONNECTING)
+
+    await vi.advanceTimersByTimeAsync(9_999)
+    expect(lastWs()).toBe(stuck)
+    await vi.advanceTimersByTimeAsync(1)
+    // Dropped at the 10s deadline, and the retry backs off like any failure.
+    expect(stuck.readyState).toBe(MockWebSocket.CLOSED)
+    expect(t.getConnectionSnapshot()).toBe("reconnecting")
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const ws3 = lastWs()
+    expect(ws3).not.toBe(stuck)
+    ws3.open()
+    ws3.ready()
+    expect(t.getConnectionSnapshot()).toBe("connected")
+    expect(onReconnect).toHaveBeenCalledTimes(1)
+  })
+
+  it("probeLiveness() replaces a socket stuck opening past its deadline before its timer runs", async () => {
+    fetchMock.mockResolvedValue(ok200())
+    const { t, ws } = connectReady()
+    ws.drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+    const stuck = lastWs()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    // The machine sleeps with the handshake in flight: the clock moves on,
+    // the deadline timer does not fire.
+    vi.setSystemTime(Date.now() + 10_000)
+    t.probeLiveness()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(stuck.readyState).toBe(MockWebSocket.CLOSED)
+    // Straight to the health probe, as for any link known to be down.
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(lastWs()).not.toBe(stuck)
+  })
+
   it("probeLiveness() is inert once unauthorized", () => {
     const { t } = connectReady()
     t.markUnauthorized()
