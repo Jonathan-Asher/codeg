@@ -11,6 +11,7 @@ Destructive-action safety nets: **not a priority**.
 **Backlog (Jonathan, 2026-09-17 evening):**
 - ⑤ **⌘⇧W closes the whole window** — with a remote-workspace window AND a local-workspace window
   open, it should close only the focused one. Investigate the keybinding scope in the frontend.
+  **Status 2026-09-25 — fixed with ⑩:** ⌘⇧W is a registered "Close Window" shortcut that only the focused window receives.
 - ⑥ **Stale transcript after MacBook wake** — prompt a Claude Code session, close the lid, reopen:
   streamed replies are missing until the remote workspace is closed and reopened. The client's
   WS/event stream dies on sleep and nothing re-syncs on wake. Fix direction: on window focus /
@@ -41,13 +42,16 @@ Destructive-action safety nets: **not a priority**.
   With sessions grouped by work folder, sending a message to a session does not move it to the
   first position in that folder. Sort each folder's sessions by last activity (last message
   sent/received), pinned ones excepted.
+  **Status 2026-09-25 — fixed:** the sidebar defaults to "Last updated" order; a send bumps the session (status change), so it rises at once. An explicit View-options choice is kept.
 - ⑨ **Sidebar session timestamps: show last-message time, not creation time.** The row next to a
   session shows how long ago it was created; Jonathan wants the time since the last message
   (confirm whether creation time should go entirely or sit second). Pairs with ⑧ — both hang off a
   per-conversation "last activity" that the row and the sort share.
+  **Status 2026-09-25 — fixed with ⑧:** in "Last updated" order the row shows time since last activity.
 - ⑩ **⌘⇧W does not close the window** (2026-09-24 report; ⑤ above is the older report that it closed
   the *wrong* window). Trace the shortcut from the keybinding registry to the Tauri window close and
   fix whichever half is broken; scope it to the focused window.
+  **Status 2026-09-25 — fixed:** new `close_window` shortcut (default mod+shift+w, shared with close-all-file-tabs like ⌘W is shared): file pane → close file tabs, elsewhere → close the focused window via its own close path.
 - ⑪ **OS notifications don't say which session they are about** (2026-09-24). Root cause, in
   `acp-connections-context.tsx`: every banner (turn finished, permission, question, error, background
   task) is titled `<folder> - Codeg`, where `<folder>` is the window's ACTIVE folder — not the folder of
@@ -60,6 +64,7 @@ Destructive-action safety nets: **not a priority**.
   **Status 2026-09-24 — done** (with ⑫): banners are titled with the session's own title, the body
   leads with the session's real folder, and "hide notification contents" swaps the title back to
   `<folder> - Codeg` (`src/lib/notification-session.ts`). Click-to-open is still open.
+  **Status 2026-09-24 — fixed:** notifications are titled with the session and name its own folder (upstream PR xintaofei/codeg#834).
 - ⑫ **Sidebar "waiting on you" indicator** (Jonathan, 2026-09-24: "if a session is stuck on a
   permission or asking a question I have no idea which session it is"). **Done:** the central
   `emit_with_state` hook diffs each session's `AttentionKind` (permission > question > plan approval;
@@ -218,3 +223,14 @@ WKWebView repaints even occluded windows unless `occlusion` is respected.
 - Rebase often: upstream ships ~1 release every few days (0.30.5 → 0.30.9 within a week).
 - Local build: `pnpm i && pnpm tauri dev` (desktop), tests via `pnpm test` /
   `cargo test --features test-utils`.
+
+**Delivered 2026-09-24/25 (Jonathan's asks):** launch straight into a remote workspace (Settings › System
+"When codeg starts, open"), a Reconnect path for remote windows (connection dialog, full-window screen with
+Reconnect / Edit connection / Close window, Retry on the open toast), edit a past message (fork at the reply
+before it, then send; Claude Code / Codex / DeepSeek), ⌘K opens with the cursor in the box, message search that
+finds partial words and Chinese/Japanese text.
+
+**Upstream PRs (xintaofei/codeg):** #764 find in conversation (refreshed), #833 ⌘K focus, #834 session-named
+notifications, #835 arrange tabs, #836 pinned drag reorder, #840 sleep/wake recovery, #841 message search.
+The sidebar "needs you" indicator stays fork-only (upstream #782 covers it); Retry and Pi fork points too.
+
