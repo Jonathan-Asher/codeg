@@ -7,6 +7,12 @@ import { onTransportReconnect } from "@/lib/platform"
  * One resync per window. A wake shows the page again and, once the dead
  * socket is replaced, reconnects the transport within seconds; either alone
  * is reason enough to resync, so the pair collapses into one refetch.
+ *
+ * The window opens when a refetch LANDS, not when it is issued. One that
+ * failed (the page shown while the Wi-Fi was still coming back) must not
+ * swallow the reconnect that follows it, and one still in flight may be stuck
+ * on that same dead link, so a trigger meanwhile issues a fresh one (the
+ * store keeps only the newest response).
  */
 const RESYNC_DEBOUNCE_MS = 2_000
 
@@ -67,7 +73,8 @@ const RESYNC_AFTER_SETTLE_MS = 10_000
  * - for the same reason, a trigger within RESYNC_AFTER_SETTLE_MS of a stream
  *   settling (say, the user returning on the turn's completion
  *   notification) is skipped;
- * - debounced to one resync per RESYNC_DEBOUNCE_MS;
+ * - debounced to one resync per RESYNC_DEBOUNCE_MS, counted from when a
+ *   refetch lands: a failed one leaves the next trigger free to retry;
  * - inert unless the panel is the active tab bound to a persisted
  *   conversation (each panel owns its own listener set and gates itself).
  *
@@ -85,13 +92,17 @@ export function useWakeResync(options: {
   conversationId: number | null
   /** True while the agent is streaming (connStatus === "prompting"). */
   isStreaming: boolean
-  /** The store's `refetchDetail`. */
-  refetch: (conversationId: number) => void
+  /**
+   * The store's `refetchDetail`: resolves true once its response is in the
+   * store, false when it failed or was superseded.
+   */
+  refetch: (conversationId: number) => Promise<boolean>
 }): void {
   const { enabled, conversationId, isStreaming, refetch } = options
 
-  // Survives listener re-binds: one resync per debounce window.
-  const lastResyncAt = useRef(0)
+  // When a resync last landed. Survives listener re-binds: one resync per
+  // debounce window.
+  const landedAt = useRef(0)
   // When the page was hidden, while it still is. Survives the re-binds too:
   // a turn can settle while the page is away.
   const hiddenAt = useRef<number | null>(null)
@@ -120,10 +131,10 @@ export function useWakeResync(options: {
     if (!enabled || conversationId == null) return
 
     const runResync = () => {
-      const now = Date.now()
-      if (now - lastResyncAt.current < RESYNC_DEBOUNCE_MS) return
-      lastResyncAt.current = now
-      refetch(conversationId)
+      if (Date.now() - landedAt.current < RESYNC_DEBOUNCE_MS) return
+      void refetch(conversationId).then((landed) => {
+        if (landed) landedAt.current = Date.now()
+      })
     }
 
     // The stream settled with a trigger held: release it if the settle came
