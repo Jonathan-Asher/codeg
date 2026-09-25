@@ -48,6 +48,7 @@ mod m20260907_000001_canvas_node_path;
 mod m20260919_000001_conversation_pin_order;
 mod m20260919_000002_message_fts;
 mod m20260924_000001_message_fts_state;
+mod m20260925_000001_message_fts_trigram;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -102,6 +103,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260919_000001_conversation_pin_order::Migration),
             Box::new(m20260919_000002_message_fts::Migration),
             Box::new(m20260924_000001_message_fts_state::Migration),
+            Box::new(m20260925_000001_message_fts_trigram::Migration),
         ]
     }
 }

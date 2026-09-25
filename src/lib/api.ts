@@ -3414,30 +3414,23 @@ export async function updateConversationPinned(
 export interface MessageSearchHit {
   conversation_id: number
   folder_id: number
-  agent_type: string
+  agent_type: AgentType
   title: string | null
+  /** Position of the matching turn in the conversation. */
   turn_idx: number
-  role: string
-  /** `[[mark]]query[[/mark]]`-wrapped snippet — render your own highlight. */
+  role: "user" | "assistant" | "system"
+  /** Excerpt around the match, matched terms wrapped in `[[mark]]…[[/mark]]`. */
   snippet: string
+  /** BM25 rank; lower is better. Hits arrive best first. */
   rank: number
 }
 
-/** FTS5 message-content search across every non-deleted conversation. */
+/** Full-text search over the messages of every conversation. */
 export async function searchMessages(
   query: string,
   limit?: number
 ): Promise<MessageSearchHit[]> {
   return getTransport().call("message_search", { query, limit })
-}
-
-/** Re-index one conversation's turns into the message search index. */
-export async function messageSearchIndexConversation(
-  conversationId: number
-): Promise<number> {
-  return getTransport().call("message_search_index_conversation", {
-    conversationId,
-  })
 }
 
 /** Persist a manual order for the sidebar's "Pinned" section. `orderedIds` is

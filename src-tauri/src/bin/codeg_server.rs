@@ -556,8 +556,9 @@ async fn async_main() -> ExitCode {
         });
     }
 
-    // ⌘K message search: keep the full-text index current (mirrors lib.rs).
-    tokio::spawn(codeg_lib::db::service::message_search::run_message_indexer(
+    // Message search indexer (mirrors lib.rs setup): backfills shortly after
+    // start, then re-indexes changed conversations every minute.
+    tokio::spawn(codeg_lib::commands::message_search::run_message_indexer(
         state.db.conn.clone(),
     ));
 

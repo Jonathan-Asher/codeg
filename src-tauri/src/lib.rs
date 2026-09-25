@@ -865,13 +865,13 @@ mod tauri_app {
                     });
                 }
 
-                // ⌘K message search: keep the full-text index current (backfill
-                // after start, then every minute for changed conversations).
+                // Keep the ⌘K message search index current: backfill shortly
+                // after start, then re-index changed conversations every minute.
                 {
                     let db_for_index = app.state::<db::AppDatabase>().conn.clone();
-                    tauri::async_runtime::spawn(
-                        crate::db::service::message_search::run_message_indexer(db_for_index),
-                    );
+                    tauri::async_runtime::spawn(message_search_commands::run_message_indexer(
+                        db_for_index,
+                    ));
                 }
 
                 // Label worktree folders registered before aliases were seeded at
@@ -1602,7 +1602,6 @@ mod tauri_app {
                 conversation_export_commands::conversation_export_markdown,
                 attention_commands::list_conversation_attention,
                 message_search_commands::message_search,
-                message_search_commands::message_search_index_conversation,
                 conversations::get_folder_conversation_turns,
                 conversations::list_folders,
                 conversations::get_stats,

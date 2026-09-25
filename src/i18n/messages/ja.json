@@ -2143,9 +2143,12 @@
       "typeToSearchFiles": "入力してファイルまたはディレクトリを検索",
       "noResults": "結果が見つかりません。",
       "untitledConversation": "無題の会話",
-      "tabMessages": "Messages",
-      "typeToSearchMessages": "Type to search message content…",
-      "messagesHeading": "Matching messages"
+      "tabMessages": "メッセージ",
+      "typeToSearchMessages": "入力してメッセージの内容を検索",
+      "messagesHeading": "一致するメッセージ",
+      "roleUser": "ユーザー",
+      "roleAssistant": "アシスタント",
+      "roleSystem": "システム"
     },
     "folderTitleBar": {
       "showSidebar": "サイドバーを表示",
