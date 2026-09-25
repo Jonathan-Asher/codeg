@@ -2133,9 +2133,12 @@
       "typeToSearchFiles": "입력하여 파일 또는 디렉토리를 검색하세요",
       "noResults": "검색 결과가 없습니다.",
       "untitledConversation": "제목 없는 대화",
-      "tabMessages": "Messages",
-      "typeToSearchMessages": "Type to search message content…",
-      "messagesHeading": "Matching messages"
+      "tabMessages": "메시지",
+      "typeToSearchMessages": "입력하여 메시지 내용을 검색하세요",
+      "messagesHeading": "일치하는 메시지",
+      "roleUser": "사용자",
+      "roleAssistant": "어시스턴트",
+      "roleSystem": "시스템"
     },
     "folderTitleBar": {
       "showSidebar": "사이드바 표시",

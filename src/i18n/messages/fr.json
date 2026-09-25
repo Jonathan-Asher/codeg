@@ -2134,8 +2134,11 @@
       "noResults": "Aucun résultat trouvé.",
       "untitledConversation": "Conversation sans titre",
       "tabMessages": "Messages",
-      "typeToSearchMessages": "Type to search message content…",
-      "messagesHeading": "Matching messages"
+      "typeToSearchMessages": "Tapez pour rechercher dans le contenu des messages",
+      "messagesHeading": "Messages correspondants",
+      "roleUser": "Utilisateur",
+      "roleAssistant": "Assistant",
+      "roleSystem": "Système"
     },
     "folderTitleBar": {
       "showSidebar": "Afficher la barre latérale",

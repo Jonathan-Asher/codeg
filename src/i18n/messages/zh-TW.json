@@ -2134,8 +2134,11 @@
       "noResults": "找不到結果。",
       "untitledConversation": "未命名會話",
       "tabMessages": "訊息",
-      "typeToSearchMessages": "輸入以搜尋訊息內容…",
-      "messagesHeading": "匹配的訊息"
+      "typeToSearchMessages": "輸入關鍵字搜尋訊息內容",
+      "messagesHeading": "符合的訊息",
+      "roleUser": "使用者",
+      "roleAssistant": "助手",
+      "roleSystem": "系統"
     },
     "folderTitleBar": {
       "showSidebar": "顯示側邊欄",

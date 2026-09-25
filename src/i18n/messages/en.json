@@ -2134,8 +2134,11 @@
       "noResults": "No results found.",
       "untitledConversation": "Untitled conversation",
       "tabMessages": "Messages",
-      "typeToSearchMessages": "Type to search message content…",
-      "messagesHeading": "Matching messages"
+      "typeToSearchMessages": "Type to search message content",
+      "messagesHeading": "Matching messages",
+      "roleUser": "User",
+      "roleAssistant": "Assistant",
+      "roleSystem": "System"
     },
     "folderTitleBar": {
       "showSidebar": "Show Sidebar",

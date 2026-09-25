@@ -2133,9 +2133,12 @@
       "typeToSearchFiles": "اكتب للبحث في الملفات أو المجلدات",
       "noResults": "لم يتم العثور على نتائج.",
       "untitledConversation": "محادثة بدون عنوان",
-      "tabMessages": "Messages",
-      "typeToSearchMessages": "Type to search message content…",
-      "messagesHeading": "Matching messages"
+      "tabMessages": "الرسائل",
+      "typeToSearchMessages": "اكتب للبحث في محتوى الرسائل",
+      "messagesHeading": "الرسائل المطابقة",
+      "roleUser": "المستخدم",
+      "roleAssistant": "المساعد",
+      "roleSystem": "النظام"
     },
     "folderTitleBar": {
       "showSidebar": "إظهار الشريط الجانبي",

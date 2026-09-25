@@ -1,7 +1,7 @@
 use sea_orm_migration::prelude::*;
 
-/// Bookkeeping for the ⌘K message-search indexer: which conversations are in
-/// `message_fts`, and as of which `conversation.updated_at`. The indexer
+/// Bookkeeping for the message search indexer: which conversations
+/// `message_fts` covers, and as of which `conversation.updated_at`. The indexer
 /// re-indexes a conversation only when its `updated_at` no longer matches, so
 /// a pass over an unchanged workspace parses nothing. Created with raw SQL to
 /// sit next to the FTS5 table it describes (no entity: only the indexer reads
