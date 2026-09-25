@@ -453,6 +453,10 @@
         "title": "Alle Dateitabs schließen",
         "description": "Schließt alle geöffneten Dateitabs, wenn der Dateibereich aktiv ist"
       },
+      "close_window": {
+        "title": "Fenster schließen",
+        "description": "Schließt das aktuelle Fenster (im Dateibereich schließt dasselbe Kürzel alle Dateitabs)"
+      },
       "next_tab": {
         "title": "Nächster Tab",
         "description": "Zum nächsten Konversations- oder Datei-Tab wechseln"

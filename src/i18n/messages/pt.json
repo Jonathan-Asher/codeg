@@ -453,6 +453,10 @@
         "title": "Fechar todas as abas de arquivo",
         "description": "Fecha todas as abas de arquivo abertas quando o painel de arquivos está ativo"
       },
+      "close_window": {
+        "title": "Fechar janela",
+        "description": "Fecha a janela atual (no painel de arquivos, o mesmo atalho fecha todas as abas de arquivo)"
+      },
       "next_tab": {
         "title": "Próxima aba",
         "description": "Mudar para a próxima aba de conversa ou arquivo"

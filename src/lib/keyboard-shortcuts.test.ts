@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 
 import {
   DEFAULT_SHORTCUTS,
+  canShareShortcut,
   SHORTCUTS_STORAGE_KEY,
   NUMBERED_TAB_ACTION_IDS,
   SHORTCUT_DEFINITIONS,
@@ -125,6 +126,27 @@ describe("reopen last closed tab", () => {
         DEFAULT_SHORTCUTS.reopen_last_closed_tab
       )
     ).toBe(false)
+  })
+})
+
+describe("close window", () => {
+  it("defaults to Ctrl/Cmd+Shift+W, shared with closing all file tabs", () => {
+    const ids = SHORTCUT_DEFINITIONS.map((definition) => definition.id)
+    expect(ids).toContain("close_window")
+    expect(DEFAULT_SHORTCUTS.close_window).toBe("mod+shift+w")
+    expect(
+      matchShortcutEvent(
+        keyEvent("w", { ctrlKey: true, shiftKey: true }),
+        DEFAULT_SHORTCUTS.close_window
+      )
+    ).toBe(true)
+    // The file pane keeps its own use of the chord; everywhere else it is
+    // the window's close. Sharing is allowed for exactly this pair.
+    expect(DEFAULT_SHORTCUTS.close_all_file_tabs).toBe(
+      DEFAULT_SHORTCUTS.close_window
+    )
+    expect(canShareShortcut("close_all_file_tabs", "close_window")).toBe(true)
+    expect(canShareShortcut("close_window", "close_current_tab")).toBe(false)
   })
 })
 

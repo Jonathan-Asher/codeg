@@ -453,6 +453,10 @@
         "title": "Close All File Tabs",
         "description": "Close all open file tabs when the file pane is active"
       },
+      "close_window": {
+        "title": "Close Window",
+        "description": "Close the current window (in the file pane, the same shortcut closes all file tabs)"
+      },
       "next_tab": {
         "title": "Next Tab",
         "description": "Switch to the next conversation or file tab"

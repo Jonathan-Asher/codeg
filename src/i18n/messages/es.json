@@ -453,6 +453,10 @@
         "title": "Cerrar todas las pestañas de archivos",
         "description": "Cierra todas las pestañas de archivos abiertas cuando el panel de archivos está activo"
       },
+      "close_window": {
+        "title": "Cerrar ventana",
+        "description": "Cierra la ventana actual (en el panel de archivos, el mismo atajo cierra todas las pestañas de archivos)"
+      },
       "next_tab": {
         "title": "Pestaña siguiente",
         "description": "Cambiar a la siguiente pestaña de conversación o archivo"

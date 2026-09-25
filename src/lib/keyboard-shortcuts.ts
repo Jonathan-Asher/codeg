@@ -11,6 +11,7 @@ export type ShortcutActionId =
   | "close_current_tab"
   | "reopen_last_closed_tab"
   | "close_all_file_tabs"
+  | "close_window"
   | "next_tab"
   | "prev_tab"
   | "switch_tab_1"
@@ -71,6 +72,9 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     id: "close_all_file_tabs",
   },
   {
+    id: "close_window",
+  },
+  {
     id: "next_tab",
   },
   {
@@ -118,6 +122,8 @@ export const INPUT_SHORTCUT_IDS = new Set<ShortcutActionId>([
 const SHARED_SHORTCUT_PAIRS: Array<[ShortcutActionId, ShortcutActionId]> = [
   ["new_terminal_tab", "new_conversation"],
   ["close_current_terminal_tab", "close_current_tab"],
+  // In the file pane the chord closes every file tab; anywhere else, the window.
+  ["close_all_file_tabs", "close_window"],
 ]
 
 export function canShareShortcut(
@@ -145,6 +151,7 @@ export const DEFAULT_SHORTCUTS: ShortcutSettings = {
   close_current_tab: "mod+w",
   reopen_last_closed_tab: "mod+shift+t",
   close_all_file_tabs: "mod+shift+w",
+  close_window: "mod+shift+w",
   next_tab: "mod+tab",
   prev_tab: "mod+shift+tab",
   switch_tab_1: "mod+1",

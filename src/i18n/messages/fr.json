@@ -453,6 +453,10 @@
         "title": "Fermer tous les onglets de fichiers",
         "description": "Fermer tous les onglets de fichiers ouverts lorsque le panneau de fichiers est actif"
       },
+      "close_window": {
+        "title": "Fermer la fenêtre",
+        "description": "Fermer la fenêtre actuelle (dans le panneau de fichiers, le même raccourci ferme tous les onglets de fichiers)"
+      },
       "next_tab": {
         "title": "Onglet suivant",
         "description": "Passer à l'onglet de conversation ou de fichier suivant"

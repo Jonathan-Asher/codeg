@@ -38,6 +38,8 @@ describe("tab close/navigation shortcuts live in the always-mounted controller",
     expect(controllerSource).toMatch(/shortcuts\.reopen_last_closed_tab/)
     expect(controllerSource).toMatch(/popClosedTab/)
     expect(controllerSource).toMatch(/shortcuts\.close_all_file_tabs/)
+    expect(controllerSource).toMatch(/shortcuts\.close_window/)
+    expect(controllerSource).toMatch(/closeCurrentWindow\(/)
     // ...and actually drives the tab / file-tab actions. The e.preventDefault()
     // calls next to these are what stop mod+w reaching the window-close default.
     expect(controllerSource).toMatch(/switchTab\(/)

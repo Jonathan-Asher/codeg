@@ -453,6 +453,10 @@
         "title": "关闭全部文件标签",
         "description": "当文件面板处于活动状态时关闭所有打开的文件标签"
       },
+      "close_window": {
+        "title": "关闭窗口",
+        "description": "关闭当前窗口（在文件面板中，同一快捷键会关闭所有文件标签）"
+      },
       "next_tab": {
         "title": "下一个标签页",
         "description": "切换到下一个会话或文件标签页"

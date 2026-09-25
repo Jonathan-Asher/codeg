@@ -21,6 +21,7 @@ import {
   useAppWorkspaceStore,
 } from "@/stores/app-workspace-store"
 import { popClosedTab } from "@/lib/closed-tab-stack"
+import { closeCurrentWindow, isDesktop } from "@/lib/platform"
 import {
   matchShortcutEvent,
   numberedTabIndexFromEvent,
@@ -188,10 +189,26 @@ export function WorkspaceChromeController() {
         return
       }
 
-      if (matchShortcutEvent(e, shortcuts.close_all_file_tabs)) {
-        if (!filesPaneActive) return
+      // mod+shift+w by default, shared with close_window below: in the file
+      // pane it closes every file tab, anywhere else the window.
+      if (
+        filesPaneActive &&
+        matchShortcutEvent(e, shortcuts.close_all_file_tabs)
+      ) {
         e.preventDefault()
         closeAllFileTabs()
+        return
+      }
+
+      if (matchShortcutEvent(e, shortcuts.close_window)) {
+        // The same close as the window's own close button (for the main
+        // window that runs its close-behavior preference; a remote workspace
+        // window simply closes). Only the focused window sees the key, so
+        // another window is never taken down. A browser tab can't close
+        // itself, so the web build leaves the key alone.
+        if (!isDesktop()) return
+        e.preventDefault()
+        void closeCurrentWindow()
         return
       }
 
