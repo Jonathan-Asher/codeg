@@ -6,6 +6,7 @@
  */
 import { renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { LiveMessage } from "@/contexts/acp-connections-context"
 import type { DbConversationDetail, MessageTurn } from "@/lib/types"
 import {
   getTimelineTurns,
@@ -121,6 +122,7 @@ function renderResync(initial?: Partial<WakeResyncProps>) {
     enabled: true,
     conversationId: CID,
     isStreaming: false,
+    turnReachedView: () => false,
     refetch: actions().refetchDetail,
   }
   const view = renderHook((props: WakeResyncProps) => useWakeResync(props), {
@@ -136,6 +138,25 @@ async function openConversation() {
     detail([FIRST_PROMPT, FIRST_REPLY])
   )
   await actions().refetchDetail(CID)
+}
+
+function streamed(text: string): LiveMessage {
+  return {
+    id: "live-1",
+    role: "assistant",
+    content: [{ type: "text", text }],
+    startedAt: Date.parse("2026-09-24T10:05:00.000Z"),
+  }
+}
+
+// This client sends the second prompt and its reply starts streaming.
+function sendSecondPrompt(firstChunk: string) {
+  actions().appendOptimisticTurn(
+    CID,
+    { ...SECOND_PROMPT, id: "optimistic-1" },
+    "token-1"
+  )
+  actions().setLiveMessage(CID, streamed(firstChunk), true)
 }
 
 beforeEach(() => {
@@ -177,6 +198,75 @@ describe("useWakeResync with the runtime store", () => {
     await flush()
 
     expect(mockGetFolderConversation).toHaveBeenCalledTimes(3)
+    expect(shownTexts()).toEqual([
+      "what does the worker do?",
+      "It polls the queue.",
+      "and on shutdown?",
+      "It drains the queue, then closes the pool.",
+    ])
+  })
+
+  it("keeps a reply that ended in view after a mid-stream reconnect, however far the transcript lags", async () => {
+    await openConversation()
+    sendSecondPrompt("It drains the queue")
+    // The connection keeps the turn's live message through its natural end.
+    const rerender = renderResync({
+      isStreaming: true,
+      turnReachedView: () => true,
+    })
+
+    fireReconnect() // the socket blipped mid-reply and came straight back
+    vi.advanceTimersByTime(2_000)
+    // The stream carries on and the turn ends normally, inside the hold.
+    actions().setLiveMessage(
+      CID,
+      streamed("It drains the queue, then closes the pool."),
+      true
+    )
+    actions().completeTurn(CID)
+    // The agent is still flushing the reply: a read now returns it cut short.
+    mockGetFolderConversation.mockResolvedValue(
+      detail([
+        FIRST_PROMPT,
+        FIRST_REPLY,
+        SECOND_PROMPT,
+        turn("turn-4", "assistant", "It drains the queue"),
+      ])
+    )
+    rerender({ isStreaming: false })
+    await flush()
+
+    expect(shownTexts()).toEqual([
+      "what does the worker do?",
+      "It polls the queue.",
+      "and on shutdown?",
+      "It drains the queue, then closes the pool.",
+    ])
+    expect(mockGetFolderConversation).toHaveBeenCalledTimes(1) // the open only
+  })
+
+  it("replaces the partial reply from the transcript when the re-attach reports the turn over", async () => {
+    await openConversation()
+    sendSecondPrompt("It drains")
+    let connectionHoldsLiveMessage = true
+    const rerender = renderResync({
+      isStreaming: true,
+      turnReachedView: () => connectionHoldsLiveMessage,
+    })
+
+    // The lid closed mid-reply and the turn finished on the server meanwhile.
+    fireReconnect()
+    // The re-attach snapshot reports the session idle, with no live message;
+    // the view promotes the partial it had streamed before the drop.
+    connectionHoldsLiveMessage = false
+    actions().completeTurn(CID)
+    expect(shownTexts()).toContain("It drains")
+    mockGetFolderConversation.mockResolvedValueOnce(
+      detail([FIRST_PROMPT, FIRST_REPLY, SECOND_PROMPT, SECOND_REPLY])
+    )
+    rerender({ isStreaming: false })
+    await flush()
+
     expect(shownTexts()).toEqual([
       "what does the worker do?",
       "It polls the queue.",
