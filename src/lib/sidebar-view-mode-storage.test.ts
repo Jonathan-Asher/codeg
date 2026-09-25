@@ -5,10 +5,12 @@ import {
   loadSectionCollapsed,
   loadSectionOrder,
   loadShowRecent,
+  loadSortMode,
   moveSectionInOrder,
   normalizeSectionOrder,
   saveSectionOrder,
   saveShowRecent,
+  saveSortMode,
 } from "./sidebar-view-mode-storage"
 
 const SECTION_ORDER_KEY = "workspace:sidebar-section-order"
@@ -141,5 +143,18 @@ describe("loadSectionCollapsed", () => {
       JSON.stringify({ recent: true, chats: false, bogus: 1 })
     )
     expect(loadSectionCollapsed()).toEqual({ recent: true, chats: false })
+  })
+})
+
+describe("loadSortMode", () => {
+  beforeEach(() => localStorage.clear())
+
+  it("puts the most recently active sessions first by default", () => {
+    expect(loadSortMode()).toBe("updated")
+  })
+
+  it("keeps a sort order the user picked", () => {
+    saveSortMode("created")
+    expect(loadSortMode()).toBe("created")
   })
 })

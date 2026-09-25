@@ -336,15 +336,22 @@ export function saveNavItemVisibility(state: SidebarNavItemVisibility): void {
   }
 }
 
+/**
+ * Last activity first unless the user picked otherwise: a session that just
+ * got a message rises to the top of its folder, and its row shows the time
+ * since that activity rather than since it was created.
+ */
+export const DEFAULT_SORT_MODE: SidebarSortMode = "updated"
+
 export function loadSortMode(): SidebarSortMode {
-  if (typeof window === "undefined") return "created"
+  if (typeof window === "undefined") return DEFAULT_SORT_MODE
   try {
     const raw = localStorage.getItem(SORT_MODE_KEY)
     if (raw === "updated" || raw === "created") return raw
   } catch {
     /* ignore */
   }
-  return "created"
+  return DEFAULT_SORT_MODE
 }
 
 export function saveSortMode(value: SidebarSortMode): void {

@@ -69,6 +69,7 @@ import {
   type SidebarNavItemVisibility,
   type SidebarSectionId,
   type SidebarSortMode,
+  DEFAULT_SORT_MODE,
   type SidebarSectionOrder,
 } from "@/lib/sidebar-view-mode-storage"
 import { SidebarSectionOrderControl } from "./sidebar-section-order-control"
@@ -177,7 +178,7 @@ export function Sidebar() {
   // Empty = every nav row shown, which is also the hydrated default — so the
   // pre-hydration render matches for a user who never hid one.
   const [navItems, setNavItems] = useState<SidebarNavItemVisibility>({})
-  const [sortMode, setSortMode] = useState<SidebarSortMode>("created")
+  const [sortMode, setSortMode] = useState<SidebarSortMode>(DEFAULT_SORT_MODE)
   const [sectionOrder, setSectionOrder] = useState<SidebarSectionOrder>(
     DEFAULT_SECTION_ORDER
   )
