@@ -1,0 +1,55 @@
+name: e2e-build
+# Builds a standalone codeg-server (macOS arm64) plus the static web export of
+# any ref, for end-to-end checks in a real browser away from the desktop app.
+# Run: gh workflow run e2e-build.yml --ref ci/e2e -f ref=<branch-or-sha>
+on:
+  push:
+    branches: [ci/e2e]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or SHA to build
+        required: true
+        default: fork/solution-plan
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || 'fork/solution-plan' }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          shared-key: e2e-server
+      - name: Install pnpm deps
+        run: pnpm install --frozen-lockfile
+      - name: Static web export
+        env:
+          NODE_ENV: production
+          CODEG_BUILD_SKIP_TYPECHECK: "1"
+        run: pnpm exec next build
+      - name: codeg-server
+        working-directory: src-tauri
+        run: cargo build --release --bin codeg-server --no-default-features
+      - name: Package
+        run: |
+          mkdir e2e
+          cp src-tauri/target/release/codeg-server e2e/
+          tar -czf e2e/web.tgz -C out .
+          git rev-parse HEAD > e2e/SHA
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e2e
+          path: e2e/
+          retention-days: 2
