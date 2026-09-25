@@ -2704,10 +2704,12 @@ export interface RuntimeActions {
   fetchDetail: (conversationId: number) => void
   /**
    * Re-read the conversation's detail. Callers that only need it to happen
-   * can ignore the result; one that must act on the NEW detail (sending into
-   * a just-forked session, whose baseline has to be captured from the forked
-   * history) awaits it: `true` once this fetch's response is in the store,
-   * `false` when it failed or a later fetch superseded it.
+   * can ignore the result; the ones that must act on it await it: sending
+   * into a just-forked session, whose baseline has to be captured from the
+   * forked history, and the wake resync, which lets the next trigger retry
+   * only when the read did not get through. `true` once this fetch's
+   * response is in the store, `false` when it failed or a later fetch
+   * superseded it.
    */
   refetchDetail: (
     conversationId: number,

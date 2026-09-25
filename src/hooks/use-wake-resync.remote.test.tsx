@@ -48,7 +48,7 @@ async function openRemoteWindow() {
     onUnauthorized: vi.fn(),
   })
   env.transport = transport
-  const refetch = vi.fn()
+  const refetch = vi.fn(async () => true)
   renderHook(() =>
     useWakeResync({
       enabled: true,

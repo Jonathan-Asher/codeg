@@ -38,10 +38,16 @@ function fireReconnect() {
   for (const cb of onReconnectCallbacks) cb()
 }
 
+// Let a settled refetch's result reach the hook.
+async function flush() {
+  await vi.advanceTimersByTimeAsync(0)
+}
+
 type WakeResyncProps = Parameters<typeof useWakeResync>[0]
 
 function setup(initial?: Partial<WakeResyncProps>) {
-  const refetch = vi.fn()
+  // Lands by default, like a refetch over a working link.
+  const refetch = vi.fn(async () => true)
   const base: WakeResyncProps = {
     enabled: true,
     conversationId: 7,
@@ -198,13 +204,41 @@ describe("useWakeResync", () => {
     expect(refetch).not.toHaveBeenCalled()
   })
 
-  it("debounces a wake and the reconnect that follows it to one refetch", () => {
+  it("debounces a wake and the reconnect that follows it to one refetch", async () => {
     const { refetch } = setup()
     fireWake()
+    await flush()
     fireReconnect()
     expect(refetch).toHaveBeenCalledTimes(1)
     // After the debounce window a new trigger fires again.
     vi.advanceTimersByTime(2_100)
+    fireReconnect()
+    expect(refetch).toHaveBeenCalledTimes(2)
+  })
+
+  it("lets the reconnect through when the wake's refetch failed", async () => {
+    // Shown again while the Wi-Fi is still coming back: the wake's refetch
+    // fails, and the store does not retry it. The reconnect a second later is
+    // what recovers the transcript, so it must not be debounced away.
+    const { refetch } = setup()
+    refetch.mockResolvedValueOnce(false)
+    fireWake()
+    await flush()
+    vi.advanceTimersByTime(1_000)
+    fireReconnect()
+    expect(refetch).toHaveBeenCalledTimes(2)
+    await flush()
+    // That one landed, so it debounces as usual.
+    fireReconnect()
+    expect(refetch).toHaveBeenCalledTimes(2)
+  })
+
+  it("issues a fresh refetch for a trigger that arrives while one is still in flight", () => {
+    // The wake's refetch may hang on the link that was down; the reconnect
+    // proves the link is back, and its refetch supersedes the stuck one.
+    const { refetch } = setup()
+    refetch.mockReturnValueOnce(new Promise<boolean>(() => {}))
+    fireWake()
     fireReconnect()
     expect(refetch).toHaveBeenCalledTimes(2)
   })
