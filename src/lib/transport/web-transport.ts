@@ -58,6 +58,14 @@ const WS_HEARTBEAT_TICK_MS = 5_000
 // screen, and a live link answers a ping well within a second even over a
 // WAN. A false positive only costs one reconnect + re-attach.
 const WS_WAKE_PONG_TIMEOUT_MS = 4_000
+// Upper bound on a socket's opening handshake. A 200 from `/api/health` says
+// the server is reachable, not that the upgrade gets through: right after a
+// wake it can black-hole (Wi-Fi half up, a NAT still mapping the old flow),
+// and a socket stuck in CONNECTING has no deadline of its own until the OS
+// abandons the TCP connect, minutes later. The heartbeat only starts in
+// `onopen`, so nothing else would ever replace it. Same bound as the desktop
+// proxy's handshake (`remote_proxy.rs`).
+const WS_OPEN_TIMEOUT_MS = 10_000
 
 // Connection health of the web transport, surfaced to React via
 // `subscribeConnection`/`getConnectionSnapshot` so a single global dialog can
@@ -123,6 +131,10 @@ export class WebTransport implements Transport {
   private wakeProbeTimer: ReturnType<typeof setTimeout> | null = null
   private lastInboundAt = 0
   private pingSentAt: number | null = null
+  // Opening deadline of the socket in CONNECTING (see WS_OPEN_TIMEOUT_MS):
+  // when it was created, and the timer that gives up on it.
+  private openStartedAt = 0
+  private openTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl
@@ -385,8 +397,14 @@ export class WebTransport implements Transport {
 
     const wsUrl = this.baseUrl.replace(/^http/, "ws") + "/ws/events"
     this.ws = new WebSocket(wsUrl, buildCodegWebSocketProtocols(token))
+    this.openStartedAt = Date.now()
+    this.openTimer = setTimeout(() => {
+      this.openTimer = null
+      this.onOpenTimeout()
+    }, WS_OPEN_TIMEOUT_MS)
 
     this.ws.onopen = () => {
+      this.clearOpenTimer()
       this.wsOpen = true
       this.startHeartbeat()
       // NB: connection health is NOT flipped to "connected" here. `onopen`
@@ -466,6 +484,7 @@ export class WebTransport implements Transport {
     this.ws.onclose = () => {
       this.ws = null
       this.wsOpen = false
+      this.clearOpenTimer()
       this.stopHeartbeat()
       // New subscribers (and any concurrent subscribe() calls in flight)
       // must wait for the next connection's `__ready__` before resolving.
@@ -584,7 +603,28 @@ export class WebTransport implements Transport {
       this.ws = null
     }
     this.wsOpen = false
+    this.clearOpenTimer()
     this.stopHeartbeat()
+  }
+
+  private clearOpenTimer() {
+    if (this.openTimer) {
+      clearTimeout(this.openTimer)
+      this.openTimer = null
+    }
+  }
+
+  // The socket did not open within WS_OPEN_TIMEOUT_MS. Fail the attempt as
+  // the browser eventually would — drop it, back off, probe again — only now
+  // rather than when the OS gives up on the connect.
+  private onOpenTimeout() {
+    if (this.destroyed || this.ws?.readyState !== WebSocket.CONNECTING) return
+    console.warn(
+      `[WebTransport] socket did not open within ${WS_OPEN_TIMEOUT_MS}ms; retrying`
+    )
+    this.teardownWs()
+    this.setConnState("reconnecting")
+    this.scheduleReconnect()
   }
 
   // ── Heartbeat ────────────────────────────────────────────────────────────
@@ -663,13 +703,22 @@ export class WebTransport implements Transport {
    * reconnecting → skip the remaining backoff and probe the server now. A
    * socket that looks open → ping it under a short deadline; nothing back in
    * time means it died during sleep, so replace it. A handshake in flight
-   * is left to finish on its own.
+   * is left to finish on its own, unless it is past its opening deadline.
    */
   probeLiveness(): void {
     if (this.destroyed || this.connState === "unauthorized") return
+    if (this.ws?.readyState === WebSocket.CONNECTING) {
+      // Restarting a handshake that may still complete would only repeat the
+      // work. One past WS_OPEN_TIMEOUT_MS is dead, though, and its own timer
+      // can run late: timers are frozen while the machine sleeps and
+      // throttled in a background page.
+      if (Date.now() - this.openStartedAt >= WS_OPEN_TIMEOUT_MS) {
+        this.reconnectNow()
+      }
+      return
+    }
     if (this.connState === "reconnecting") {
-      // Between `connectWs()` and `__ready__` a fresh socket is mid-handshake;
-      // tearing it down would only restart the same work.
+      // Open and waiting for `__ready__`: the heartbeat already watches it.
       if (this.ws) return
       this.reconnectNow()
       return
