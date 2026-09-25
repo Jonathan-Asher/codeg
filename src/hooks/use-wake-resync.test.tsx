@@ -43,6 +43,10 @@ async function flush() {
   await vi.advanceTimersByTimeAsync(0)
 }
 
+// Whether the turn that settles left its live message on the connection.
+// False by default: the sleep case, where the re-attach reports the turn over.
+let turnReachedView = false
+
 type WakeResyncProps = Parameters<typeof useWakeResync>[0]
 
 function setup(initial?: Partial<WakeResyncProps>) {
@@ -52,6 +56,7 @@ function setup(initial?: Partial<WakeResyncProps>) {
     enabled: true,
     conversationId: 7,
     isStreaming: false,
+    turnReachedView: () => turnReachedView,
     refetch,
   }
   const view = renderHook((props: WakeResyncProps) => useWakeResync(props), {
@@ -68,6 +73,7 @@ describe("useWakeResync", () => {
   beforeEach(() => {
     vi.useFakeTimers()
     hasReconnectLifecycle = true
+    turnReachedView = false
     onReconnectCallbacks.clear()
     onTransportReconnect.mockClear()
     Object.defineProperty(document, "visibilityState", {
@@ -144,6 +150,19 @@ describe("useWakeResync", () => {
     expect(refetch).not.toHaveBeenCalled()
     rerender({ isStreaming: false })
     expect(refetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("drops a held reconnect when the turn it arrived in ends in view", () => {
+    // The reconnect came mid-turn and the stream carried on: the turn's end
+    // reached the view, `completeTurn` promotes its complete reply, and the
+    // agent may still be flushing that reply to its transcript — a refetch
+    // now could only replace it with a truncated read.
+    const { refetch, rerender } = setup({ isStreaming: true })
+    fireReconnect()
+    vi.advanceTimersByTime(3_000)
+    turnReachedView = true
+    rerender({ isStreaming: false })
+    expect(refetch).not.toHaveBeenCalled()
   })
 
   it("lets a hold lapse when the turn keeps streaming past it", () => {

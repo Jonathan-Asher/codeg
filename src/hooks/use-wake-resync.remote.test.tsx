@@ -54,6 +54,7 @@ async function openRemoteWindow() {
       enabled: true,
       conversationId: 7,
       isStreaming: false,
+      turnReachedView: () => false,
       refetch,
     })
   )

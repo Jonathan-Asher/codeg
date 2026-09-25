@@ -63,13 +63,18 @@ const RESYNC_AFTER_SETTLE_MS = 10_000
  *   its IPC loses nothing across sleep, and a refetch just after a turn ends
  *   races the agent's transcript flush (see `completeTurn` in the runtime
  *   store) for no benefit;
- * - never refetches under a live stream. A trigger that lands while the
- *   client believes a turn is streaming is HELD until the stream settles:
- *   after sleep that belief is stale by construction (the events that ended
- *   the turn died with the socket), the re-attach snapshot is what flips the
- *   status, and no later trigger is coming to catch up on. A hold lapses
- *   after RESYNC_HOLD_MS — a turn still streaming by then reaches the view
- *   live, and refetching at its natural end would race the transcript flush;
+ * - never refetches under a live stream, nor over a reply the stream
+ *   delivered. A trigger that lands while the client believes a turn is
+ *   streaming is HELD until the stream settles: after sleep that belief is
+ *   stale by construction (the events that ended the turn died with the
+ *   socket), the re-attach snapshot is what flips the status, and no later
+ *   trigger is coming to catch up on. The settle releases the hold only if
+ *   the turn's end never reached the view (`turnReachedView`). A turn that
+ *   ended in view (the stream carried on after the reconnect, or the
+ *   re-attach replayed the gap) is complete as `completeTurn` promotes it,
+ *   and a refetch at its end would race the agent's transcript flush with
+ *   that reply — the reason `completeTurn` itself never refetches. A hold
+ *   also lapses after RESYNC_HOLD_MS;
  * - for the same reason, a trigger within RESYNC_AFTER_SETTLE_MS of a stream
  *   settling (say, the user returning on the turn's completion
  *   notification) is skipped;
@@ -93,12 +98,23 @@ export function useWakeResync(options: {
   /** True while the agent is streaming (connStatus === "prompting"). */
   isStreaming: boolean
   /**
+   * Read when the stream settles with a trigger held: whether the turn that
+   * settled reached this view through its end, i.e. the connection still
+   * holds its live message (streamed, replayed by the re-attach, or carried
+   * by its snapshot) for `completeTurn` to promote. False when the re-attach
+   * reported the turn already over, which a post-turn snapshot does by
+   * carrying no live message: whatever the turn produced after the drop is
+   * then only in the transcript.
+   */
+  turnReachedView: () => boolean
+  /**
    * The store's `refetchDetail`: resolves true once its response is in the
    * store, false when it failed or was superseded.
    */
   refetch: (conversationId: number) => Promise<boolean>
 }): void {
-  const { enabled, conversationId, isStreaming, refetch } = options
+  const { enabled, conversationId, isStreaming, turnReachedView, refetch } =
+    options
 
   // When a resync last landed. Survives listener re-binds: one resync per
   // debounce window.
@@ -137,12 +153,16 @@ export function useWakeResync(options: {
       })
     }
 
-    // The stream settled with a trigger held: release it if the settle came
-    // promptly (the re-attach correcting a stale status), drop it otherwise.
+    // The stream settled with a trigger held. Release it only for a turn
+    // whose end this client never received (the re-attach correcting a stale
+    // status): what that turn produced after the drop is only in the
+    // transcript. Drop it when the turn ended in view — its reply is complete
+    // in memory and the transcript may still be catching up with it — or when
+    // the settle came long after the trigger.
     if (!isStreaming && heldSince.current !== null) {
       const settledPromptly = Date.now() - heldSince.current <= RESYNC_HOLD_MS
       heldSince.current = null
-      if (settledPromptly) runResync()
+      if (settledPromptly && !turnReachedView()) runResync()
     }
 
     const resync = () => {
@@ -176,5 +196,5 @@ export function useWakeResync(options: {
       offReconnect()
       document.removeEventListener("visibilitychange", onVisibility)
     }
-  }, [enabled, conversationId, isStreaming, refetch])
+  }, [enabled, conversationId, isStreaming, turnReachedView, refetch])
 }
