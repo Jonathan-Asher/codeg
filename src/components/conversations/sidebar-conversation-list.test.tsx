@@ -548,6 +548,68 @@ describe("SidebarConversationList — pinned drag gesture", () => {
     expect(document.querySelector("[data-pin-drop-line]")).toBeNull()
   })
 
+  /** Press pinned row `id` and drop it at `toY`: 0 lands above every row, 90
+   *  below every row (the mocked boxes span y 0–96). */
+  const dragPinned = async (id: number, toY: number) => {
+    const rowBody = document.querySelector(
+      `[data-pinned-row-id="${id}"] [data-conversation-id="${id}"]`
+    )
+    if (!rowBody) throw new Error(`pinned row ${id} not found`)
+    act(() => firePointer(rowBody, "pointerdown", { clientY: 48 }))
+    act(() => firePointer(window, "pointermove", { clientY: toY }))
+    await act(async () => {
+      firePointer(window, "pointerup", { clientY: toY })
+    })
+  }
+
+  /** What the server broadcasts after saving `orderedIds`: one upsert per row. */
+  const echoSavedOrder = (orderedIds: number[]) =>
+    act(() => {
+      const { conversations, applyConversationUpsert } =
+        useAppWorkspaceStore.getState()
+      orderedIds.forEach((id, index) => {
+        const row = conversations.find((c) => c.id === id)
+        if (row) applyConversationUpsert({ ...row, pin_order: index })
+      })
+    })
+
+  it("saves one order at a time, and only the newest drop made meanwhile", async () => {
+    const finishSave: (() => void)[] = []
+    const deferredSave = () =>
+      new Promise<void>((resolve) => finishSave.push(resolve))
+    pinReorder
+      .mockImplementationOnce(deferredSave)
+      .mockImplementationOnce(deferredSave)
+    render(tree())
+
+    await dragPinned(11, 90) // 12, 13, 11
+    expect(pinReorder).toHaveBeenCalledTimes(1)
+    expect(pinReorder).toHaveBeenNthCalledWith(1, [12, 13, 11])
+
+    // Two more drops while that save is in flight: both show at once, neither
+    // is sent yet, so the older save can never land after a newer one.
+    await dragPinned(12, 90) // 13, 11, 12
+    await dragPinned(11, 0) // 11, 13, 12
+    expect(pinnedOrder()).toEqual([11, 13, 12])
+    expect(pinReorder).toHaveBeenCalledTimes(1)
+
+    // The first save's upserts arrive ahead of its response and carry its
+    // older order.
+    echoSavedOrder([12, 13, 11])
+    expect(pinnedOrder()).toEqual([12, 13, 11])
+
+    // Once it is done, only the newest order goes out, and it is shown again.
+    await act(async () => finishSave[0]())
+    expect(pinReorder).toHaveBeenCalledTimes(2)
+    expect(pinReorder).toHaveBeenNthCalledWith(2, [11, 13, 12])
+    expect(pinnedOrder()).toEqual([11, 13, 12])
+
+    await act(async () => finishSave[1]())
+    echoSavedOrder([11, 13, 12])
+    expect(pinReorder).toHaveBeenCalledTimes(2)
+    expect(pinnedOrder()).toEqual([11, 13, 12])
+  })
+
   it("leaves the order alone when the press never becomes a drag", async () => {
     render(tree())
     const rowBody = document.querySelector(

@@ -2105,18 +2105,51 @@ export function SidebarConversationList({
     () => new Map(pinnedIds.map((id, index) => [id, index])),
     [pinnedIds]
   )
-  const commitPinOrder = useCallback(
-    (orderedIds: number[]) => {
+  const applyPinOrderLocal = useCallback(
+    (orderedIds: number[]) =>
       orderedIds.forEach((id, index) =>
         updateConversationLocal(id, { pin_order: index })
-      )
-      reorderConversationPins(orderedIds).catch((err: unknown) => {
+      ),
+    [updateConversationLocal]
+  )
+  // Saves go out one at a time. Each one rewrites the whole section, so two in
+  // flight could commit out of order: the older order would win in the
+  // database, and the upserts it echoes would move the rows back. A drop made
+  // while a save is in flight waits for it, and drops that pile up meanwhile
+  // collapse into the newest order.
+  const pinSaveQueueRef = useRef<{ saving: boolean; next: number[] | null }>({
+    saving: false,
+    next: null,
+  })
+  const drainPinSaves = useCallback(async () => {
+    const queue = pinSaveQueueRef.current
+    if (queue.saving) return
+    queue.saving = true
+    let waited = false
+    while (queue.next) {
+      const orderedIds = queue.next
+      queue.next = null
+      // The save that just finished may already have echoed its older order
+      // back through upserts: show this one again before it goes out.
+      if (waited) applyPinOrderLocal(orderedIds)
+      try {
+        await reorderConversationPins(orderedIds)
+      } catch (err) {
         toast.error(
           t("toasts.reorderPinsFailed", { message: toErrorMessage(err) })
         )
-      })
+      }
+      waited = true
+    }
+    queue.saving = false
+  }, [applyPinOrderLocal, t])
+  const commitPinOrder = useCallback(
+    (orderedIds: number[]) => {
+      applyPinOrderLocal(orderedIds)
+      pinSaveQueueRef.current.next = orderedIds
+      void drainPinSaves()
     },
-    [t, updateConversationLocal]
+    [applyPinOrderLocal, drainPinSaves]
   )
   const {
     draggingId: draggingPinId,
