@@ -2189,7 +2189,9 @@
       },
       "stats": {
         "conversations": "{count} conversations",
-        "openUsage": "View session stats & token usage"
+        "openUsage": "View session stats & token usage",
+        "planUsage": "Limits",
+        "openPlanUsage": "View Claude Code and Codex subscription limits"
       },
       "tokens": {
         "contextWindowUsageAria": "Context window usage",
@@ -6026,6 +6028,51 @@
     "emptyAction": "Count my sessions",
     "loadFailed": "Could not load usage",
     "truncatedNotice": "This range is very large — the numbers cover only the most recent slice of it."
+  },
+  "PlanUsage": {
+    "title": "Subscription usage",
+    "subtitle": "How much of your Claude Code and Codex plan limits is used, and how much is left.",
+    "refresh": "Refresh",
+    "loadFailed": "Couldn't load usage",
+    "privacyNote": "Readings come from the agents themselves: Claude Code reports its limits during a turn in codeg, and Codex records them in its session logs. codeg never signs in to either provider or reads your credentials.",
+    "used": "{percent}% used",
+    "left": "{percent}% left",
+    "resetsIn": "Resets in {duration}",
+    "resetUnknown": "Reset time unknown",
+    "resetSince": "Reset {duration} ago — no newer reading yet",
+    "updatedAgo": "Updated {duration} ago",
+    "updatedJustNow": "Updated just now",
+    "windowAsOf": "As of {duration} ago",
+    "stale": "Stale",
+    "staleHint": "This reading is over an hour old. Usage since then, including on other devices, isn't included.",
+    "planTitle": "Plan",
+    "status": {
+      "limited": "Limit reached",
+      "warning": "Nearing limit",
+      "overage": "Using extra usage"
+    },
+    "source": {
+      "claudeLive": "From Claude Code turns in codeg",
+      "claudeSaved": "Last reading saved before codeg restarted",
+      "codexLog": "From the newest Codex session log"
+    },
+    "window": {
+      "session5h": "5-hour session",
+      "sessionSpan": "{span} session",
+      "weekly": "Weekly",
+      "weeklyModel": "Weekly · {model}",
+      "weeklyWithExtra": "Weekly, incl. extra usage",
+      "extraUsage": "Extra usage",
+      "other": "{label} window"
+    },
+    "empty": {
+      "claudeTitle": "No reading yet",
+      "claudeHint": "Claude Code reports its limits while it works. They appear here after your next Claude Code turn in codeg.",
+      "codexNoSessionsTitle": "No Codex sessions found",
+      "codexNoSessionsHint": "Looked in {dir}. Limits appear here after you use Codex.",
+      "codexNoLimitsTitle": "No limits in recent Codex sessions",
+      "codexNoLimitsHint": "Codex records plan limits only when signed in with ChatGPT; sessions that use an API key don't report them."
+    }
   },
   "Forge": {
     "title": "Repository panel",

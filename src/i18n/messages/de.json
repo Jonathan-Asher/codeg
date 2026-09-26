@@ -2189,7 +2189,9 @@
       },
       "stats": {
         "conversations": "{count} Konversationen",
-        "openUsage": "Sitzungsstatistik und Token-Nutzung anzeigen"
+        "openUsage": "Sitzungsstatistik und Token-Nutzung anzeigen",
+        "planUsage": "Limits",
+        "openPlanUsage": "Abo-Limits von Claude Code und Codex anzeigen"
       },
       "tokens": {
         "contextWindowUsageAria": "Kontextfenster-Nutzung",
@@ -6026,6 +6028,51 @@
     "emptyAction": "Meine Sitzungen zählen",
     "loadFailed": "Verbrauch konnte nicht geladen werden",
     "truncatedNotice": "Dieser Zeitraum ist sehr groß — die Zahlen decken nur seinen jüngsten Abschnitt ab."
+  },
+  "PlanUsage": {
+    "title": "Abo-Nutzung",
+    "subtitle": "Wie viel deiner Claude-Code- und Codex-Planlimits verbraucht ist und wie viel übrig bleibt.",
+    "refresh": "Aktualisieren",
+    "loadFailed": "Nutzung konnte nicht geladen werden",
+    "privacyNote": "Die Werte stammen von den Agenten selbst: Claude Code meldet seine Limits während eines Turns in codeg, Codex speichert sie in seinen Sitzungsprotokollen. codeg meldet sich nie bei einem Anbieter an und liest keine Zugangsdaten.",
+    "used": "{percent} % verbraucht",
+    "left": "{percent} % übrig",
+    "resetsIn": "Zurückgesetzt in {duration}",
+    "resetUnknown": "Zeitpunkt der Zurücksetzung unbekannt",
+    "resetSince": "Vor {duration} zurückgesetzt – noch kein neuer Wert",
+    "updatedAgo": "Vor {duration} aktualisiert",
+    "updatedJustNow": "Gerade aktualisiert",
+    "windowAsOf": "Stand vor {duration}",
+    "stale": "Veraltet",
+    "staleHint": "Dieser Wert ist über eine Stunde alt. Nutzung seitdem, auch auf anderen Geräten, ist nicht enthalten.",
+    "planTitle": "Plan",
+    "status": {
+      "limited": "Limit erreicht",
+      "warning": "Limit fast erreicht",
+      "overage": "Nutzt Zusatzkontingent"
+    },
+    "source": {
+      "claudeLive": "Aus Claude-Code-Turns in codeg",
+      "claudeSaved": "Letzter Wert, gespeichert vor dem Neustart von codeg",
+      "codexLog": "Aus dem neuesten Codex-Sitzungsprotokoll"
+    },
+    "window": {
+      "session5h": "5-Stunden-Sitzung",
+      "sessionSpan": "{span}-Sitzung",
+      "weekly": "Wöchentlich",
+      "weeklyModel": "Wöchentlich · {model}",
+      "weeklyWithExtra": "Wöchentlich inkl. Zusatzkontingent",
+      "extraUsage": "Zusatzkontingent",
+      "other": "Zeitfenster {label}"
+    },
+    "empty": {
+      "claudeTitle": "Noch kein Wert",
+      "claudeHint": "Claude Code meldet seine Limits während der Arbeit. Sie erscheinen hier nach deinem nächsten Claude-Code-Turn in codeg.",
+      "codexNoSessionsTitle": "Keine Codex-Sitzungen gefunden",
+      "codexNoSessionsHint": "Gesucht in {dir}. Limits erscheinen hier, sobald du Codex nutzt.",
+      "codexNoLimitsTitle": "Keine Limits in den letzten Codex-Sitzungen",
+      "codexNoLimitsHint": "Codex speichert Planlimits nur bei Anmeldung mit ChatGPT; Sitzungen mit API-Schlüssel melden keine."
+    }
   },
   "Forge": {
     "title": "Repository-Panel",

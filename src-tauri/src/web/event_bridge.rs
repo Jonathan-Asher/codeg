@@ -431,6 +431,13 @@ pub enum WorkTaskChange {
 /// broadcast — clients not showing the dashboard simply ignore it.
 pub const TOKEN_USAGE_SYNC_PROGRESS_EVENT: &str = "token-usage-sync://progress";
 
+/// A live agent reported new subscription-limit numbers (today: Claude Code's
+/// rate-limit info riding an ACP `usage_update`). The limits are account-wide,
+/// so this is broadcast rather than scoped to the connection that saw it.
+/// Payload is the merged [`crate::commands::plan_usage::PlanUsageSnapshot`]
+/// for that agent; clients replace their copy of it in place.
+pub const PLAN_USAGE_CHANGED_EVENT: &str = "plan-usage://changed";
+
 /// Unified event emission: serializes the payload exactly once and dispatches
 /// the shared `Arc<Value>` to both the Tauri webview and the web broadcaster.
 pub fn emit_event(emitter: &EventEmitter, event: &str, payload: impl Serialize) {

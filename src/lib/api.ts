@@ -183,6 +183,8 @@ import type {
   OfficecliInfo,
   OfficecliSkill,
   SkillSyncReport,
+  PlanUsageReport,
+  PlanUsageSnapshot,
   TokenUsageFacets,
   TokenUsageFilter,
   TokenUsageReport,
@@ -3571,6 +3573,28 @@ export async function tokenUsageSync(
   mode: "incremental" | "full" = "incremental"
 ): Promise<TokenUsageSyncResult> {
   return getTransport().call("token_usage_sync", { mode })
+}
+
+// Subscription plan usage
+
+/** Pushed whenever a live agent reports new subscription-limit numbers; the
+ *  payload is that agent's merged snapshot. See `PLAN_USAGE_CHANGED_EVENT` in
+ *  `web/event_bridge.rs`. */
+export const PLAN_USAGE_CHANGED_EVENT = "plan-usage://changed"
+
+/** Every agent's latest subscription-limit reading. `force` re-reads the
+ *  Codex session logs instead of reusing the backend's one-minute cache. */
+export async function getPlanUsage(force = false): Promise<PlanUsageReport> {
+  return getTransport().call("get_plan_usage", { force })
+}
+
+export async function subscribePlanUsageChanged(
+  handler: (snapshot: PlanUsageSnapshot) => void
+): Promise<() => void> {
+  return getTransport().subscribe<PlanUsageSnapshot>(
+    PLAN_USAGE_CHANGED_EVENT,
+    handler
+  )
 }
 
 // Automations

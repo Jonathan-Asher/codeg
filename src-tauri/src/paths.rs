@@ -15,6 +15,7 @@ const LOGS_DIR_NAME: &str = "logs";
 const TURN_TIMINGS_DIR_NAME: &str = "turn-timings";
 const ACP_TRANSCRIPTS_DIR_NAME: &str = "acp-transcripts";
 const BACKGROUNDS_DIR_NAME: &str = "backgrounds";
+const PLAN_USAGE_FILE_NAME: &str = "plan-usage.json";
 
 /// `$CODEG_HOME` if set (and non-empty), else `~/.codeg/`.
 ///
@@ -185,6 +186,27 @@ pub fn codeg_acp_transcripts_root() -> PathBuf {
     dirs::home_dir()
         .map(|h| h.join(CODEG_DIR_NAME).join(ACP_TRANSCRIPTS_DIR_NAME))
         .unwrap_or_else(|| PathBuf::from(CODEG_DIR_NAME).join(ACP_TRANSCRIPTS_DIR_NAME))
+}
+
+/// The last subscription-limit reading pushed by a live Claude Code turn (see
+/// `crate::commands::plan_usage`), kept so the usage screen has something to
+/// show after a restart. Written by the live connection, read on first use.
+///
+/// Resolution mirrors [`codeg_turn_timings_root`]:
+/// 1. `$CODEG_HOME/plan-usage.json`
+/// 2. `$CODEG_DATA_DIR/plan-usage.json` (the effective data directory — both
+///    runtimes write it back to the env at startup)
+/// 3. `~/.codeg/plan-usage.json`
+pub fn codeg_plan_usage_file() -> PathBuf {
+    if let Some(custom) = std::env::var_os("CODEG_HOME").filter(|s| !s.is_empty()) {
+        return PathBuf::from(custom).join(PLAN_USAGE_FILE_NAME);
+    }
+    if let Some(data) = std::env::var_os("CODEG_DATA_DIR").filter(|s| !s.is_empty()) {
+        return PathBuf::from(data).join(PLAN_USAGE_FILE_NAME);
+    }
+    dirs::home_dir()
+        .map(|h| h.join(CODEG_DIR_NAME).join(PLAN_USAGE_FILE_NAME))
+        .unwrap_or_else(|| PathBuf::from(CODEG_DIR_NAME).join(PLAN_USAGE_FILE_NAME))
 }
 
 /// Single source of truth for "where does the database live, and where

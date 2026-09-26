@@ -2189,7 +2189,9 @@
       },
       "stats": {
         "conversations": "{count}개 대화",
-        "openUsage": "세션 통계 및 토큰 사용량 보기"
+        "openUsage": "세션 통계 및 토큰 사용량 보기",
+        "planUsage": "한도",
+        "openPlanUsage": "Claude Code 및 Codex 구독 한도 보기"
       },
       "tokens": {
         "contextWindowUsageAria": "컨텍스트 윈도우 사용량",
@@ -6026,6 +6028,51 @@
     "emptyAction": "내 세션 집계",
     "loadFailed": "사용량을 불러오지 못했습니다",
     "truncatedNotice": "기간이 매우 길어 표시된 수치는 가장 최근 구간만 반영합니다."
+  },
+  "PlanUsage": {
+    "title": "구독 사용량",
+    "subtitle": "Claude Code와 Codex 요금제 한도의 사용량과 잔여량입니다.",
+    "refresh": "새로 고침",
+    "loadFailed": "사용량을 불러오지 못했습니다",
+    "privacyNote": "수치는 에이전트 자체에서 가져옵니다. Claude Code는 codeg에서 턴을 실행하는 동안 한도를 보고하고, Codex는 세션 로그에 기록합니다. codeg는 어느 제공업체에도 로그인하지 않으며 자격 증명을 읽지 않습니다.",
+    "used": "{percent}% 사용",
+    "left": "{percent}% 남음",
+    "resetsIn": "{duration} 후 초기화",
+    "resetUnknown": "초기화 시간 알 수 없음",
+    "resetSince": "{duration} 전에 초기화됨 — 아직 새 수치 없음",
+    "updatedAgo": "{duration} 전 업데이트",
+    "updatedJustNow": "방금 업데이트",
+    "windowAsOf": "{duration} 전 기준",
+    "stale": "오래됨",
+    "staleHint": "이 수치는 1시간 이상 지났습니다. 이후의 사용량(다른 기기에서의 사용 포함)은 반영되지 않았습니다.",
+    "planTitle": "요금제",
+    "status": {
+      "limited": "한도 도달",
+      "warning": "한도에 근접",
+      "overage": "추가 사용량 사용 중"
+    },
+    "source": {
+      "claudeLive": "codeg의 Claude Code 턴에서 가져옴",
+      "claudeSaved": "codeg 재시작 전에 저장된 마지막 수치",
+      "codexLog": "최신 Codex 세션 로그에서 가져옴"
+    },
+    "window": {
+      "session5h": "5시간 세션",
+      "sessionSpan": "{span} 세션",
+      "weekly": "주간",
+      "weeklyModel": "주간 · {model}",
+      "weeklyWithExtra": "주간(추가 사용량 포함)",
+      "extraUsage": "추가 사용량",
+      "other": "{label} 기간"
+    },
+    "empty": {
+      "claudeTitle": "아직 수치가 없습니다",
+      "claudeHint": "Claude Code는 작업 중에 한도를 보고합니다. codeg에서 다음 Claude Code 턴을 실행하면 여기에 표시됩니다.",
+      "codexNoSessionsTitle": "Codex 세션을 찾을 수 없습니다",
+      "codexNoSessionsHint": "{dir}에서 찾았습니다. Codex를 사용하면 여기에 한도가 표시됩니다.",
+      "codexNoLimitsTitle": "최근 Codex 세션에 한도 정보가 없습니다",
+      "codexNoLimitsHint": "Codex는 ChatGPT로 로그인한 경우에만 요금제 한도를 기록합니다. API 키를 사용하는 세션은 보고하지 않습니다."
+    }
   },
   "Forge": {
     "title": "리포지토리 패널",

@@ -2189,7 +2189,9 @@
       },
       "stats": {
         "conversations": "{count} 件の会話",
-        "openUsage": "セッション統計とトークン使用量を表示"
+        "openUsage": "セッション統計とトークン使用量を表示",
+        "planUsage": "上限",
+        "openPlanUsage": "Claude Code と Codex のサブスクリプション上限を表示"
       },
       "tokens": {
         "contextWindowUsageAria": "コンテキストウィンドウ使用率",
@@ -6026,6 +6028,51 @@
     "emptyAction": "セッションを集計",
     "loadFailed": "使用量を読み込めませんでした",
     "truncatedNotice": "期間が非常に長いため、表示中の数値は直近の一部のみを対象としています。"
+  },
+  "PlanUsage": {
+    "title": "サブスクリプション使用量",
+    "subtitle": "Claude Code と Codex のプラン上限の使用量と残量です。",
+    "refresh": "更新",
+    "loadFailed": "使用量を読み込めませんでした",
+    "privacyNote": "数値はエージェント自身から取得しています。Claude Code は codeg でのターン中に上限を報告し、Codex はセッションログに記録します。codeg がプロバイダーにサインインしたり、認証情報を読み取ったりすることはありません。",
+    "used": "{percent}% 使用",
+    "left": "残り {percent}%",
+    "resetsIn": "{duration}後にリセット",
+    "resetUnknown": "リセット時刻不明",
+    "resetSince": "{duration}前にリセット済み — 新しい数値はまだありません",
+    "updatedAgo": "{duration}前に更新",
+    "updatedJustNow": "たった今更新",
+    "windowAsOf": "{duration}前の時点",
+    "stale": "古いデータ",
+    "staleHint": "この数値は 1 時間以上前のものです。それ以降の使用量（他のデバイスでの使用を含む）は含まれていません。",
+    "planTitle": "プラン",
+    "status": {
+      "limited": "上限に到達",
+      "warning": "上限に近づいています",
+      "overage": "追加使用量を利用中"
+    },
+    "source": {
+      "claudeLive": "codeg での Claude Code のターンから",
+      "claudeSaved": "codeg の再起動前に保存された最後の数値",
+      "codexLog": "最新の Codex セッションログから"
+    },
+    "window": {
+      "session5h": "5 時間セッション",
+      "sessionSpan": "{span} セッション",
+      "weekly": "週間",
+      "weeklyModel": "週間 · {model}",
+      "weeklyWithExtra": "週間（追加使用量を含む）",
+      "extraUsage": "追加使用量",
+      "other": "{label} ウィンドウ"
+    },
+    "empty": {
+      "claudeTitle": "まだ数値がありません",
+      "claudeHint": "Claude Code は作業中に上限を報告します。codeg で次に Claude Code のターンを実行すると、ここに表示されます。",
+      "codexNoSessionsTitle": "Codex のセッションが見つかりません",
+      "codexNoSessionsHint": "{dir} を確認しました。Codex を使用すると、ここに上限が表示されます。",
+      "codexNoLimitsTitle": "最近の Codex セッションに上限情報がありません",
+      "codexNoLimitsHint": "Codex がプラン上限を記録するのは ChatGPT でサインインしている場合のみです。API キーを使うセッションでは報告されません。"
+    }
   },
   "Forge": {
     "title": "リポジトリパネル",

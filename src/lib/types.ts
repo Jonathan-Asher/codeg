@@ -2405,6 +2405,58 @@ export interface TokenUsageSyncResult {
   pruned_conversations: number
 }
 
+// ─── Subscription plan usage (mirrors `commands/plan_usage.rs`) ───
+
+export type PlanUsageAgent = "claude_code" | "codex"
+
+/** `session` is the short rolling window (5 hours), `weekly_model` a weekly
+ *  cap scoped to one model family (Opus / Sonnet). */
+export type PlanUsageWindowKind =
+  | "session"
+  | "weekly"
+  | "weekly_model"
+  | "other"
+
+/** `live` — pushed by a running agent; `transcript` — read from the agent's
+ *  own session log; `saved` — a live reading kept across a codeg restart. */
+export type PlanUsageSource = "live" | "transcript" | "saved"
+
+export interface PlanUsageWindow {
+  /** Claude's `rateLimitType` (`five_hour`, `seven_day`, `seven_day_opus`…)
+   *  or Codex's `primary` / `secondary`. */
+  id: string
+  kind: PlanUsageWindowKind
+  /** Short, language-neutral label from the backend: `5h`, `7d`, `Opus`. */
+  label: string
+  /** 0–100. */
+  used_percent: number
+  /** Epoch seconds. */
+  resets_at: number | null
+  window_minutes: number | null
+  /** Epoch seconds this window was last reported at. */
+  observed_at: number | null
+}
+
+export interface PlanUsageSnapshot {
+  agent: PlanUsageAgent
+  windows: PlanUsageWindow[]
+  plan_label: string | null
+  /** `ok` | `warning` | `limited` | `overage`, when the source says. */
+  status: string | null
+  /** Epoch seconds the newest numbers were observed at. */
+  observed_at: number
+  source: PlanUsageSource
+}
+
+export interface PlanUsageReport {
+  /** One entry per agent that has data. */
+  snapshots: PlanUsageSnapshot[]
+  /** Where Codex rollouts were looked for. */
+  codex_sessions_dir: string | null
+  /** Any Codex rollout exists there, with or without limits. */
+  codex_rollouts_found: boolean
+}
+
 /** Payload of the `token-usage-sync://progress` event. */
 export interface TokenUsageSyncProgress {
   done: number

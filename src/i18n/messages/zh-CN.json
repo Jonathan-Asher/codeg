@@ -2189,7 +2189,9 @@
       },
       "stats": {
         "conversations": "{count} 个会话",
-        "openUsage": "查看会话统计与 Token 用量"
+        "openUsage": "查看会话统计与 Token 用量",
+        "planUsage": "额度",
+        "openPlanUsage": "查看 Claude Code 与 Codex 订阅额度"
       },
       "tokens": {
         "contextWindowUsageAria": "上下文窗口使用率",
@@ -6026,6 +6028,51 @@
     "emptyAction": "统计我的会话",
     "loadFailed": "用量加载失败",
     "truncatedNotice": "该范围过大 —— 下面的数字只覆盖了其中最近的一段。"
+  },
+  "PlanUsage": {
+    "title": "订阅用量",
+    "subtitle": "Claude Code 与 Codex 套餐额度的已用和剩余情况。",
+    "refresh": "刷新",
+    "loadFailed": "无法加载用量",
+    "privacyNote": "数据来自智能体本身：Claude Code 在 codeg 中运行对话轮次时上报额度，Codex 将额度记录在其会话日志中。codeg 不会登录任何服务商，也不会读取你的凭据。",
+    "used": "已用 {percent}%",
+    "left": "剩余 {percent}%",
+    "resetsIn": "{duration}后重置",
+    "resetUnknown": "重置时间未知",
+    "resetSince": "已于 {duration}前重置，暂无新数据",
+    "updatedAgo": "{duration}前更新",
+    "updatedJustNow": "刚刚更新",
+    "windowAsOf": "截至 {duration}前",
+    "stale": "已过时",
+    "staleHint": "此数据已超过一小时。之后的用量（包括在其他设备上的用量）未计入。",
+    "planTitle": "套餐",
+    "status": {
+      "limited": "已达上限",
+      "warning": "接近上限",
+      "overage": "正在使用额外用量"
+    },
+    "source": {
+      "claudeLive": "来自 codeg 中的 Claude Code 对话轮次",
+      "claudeSaved": "codeg 重启前保存的最后一次数据",
+      "codexLog": "来自最新的 Codex 会话日志"
+    },
+    "window": {
+      "session5h": "5 小时会话",
+      "sessionSpan": "{span} 会话",
+      "weekly": "每周",
+      "weeklyModel": "每周 · {model}",
+      "weeklyWithExtra": "每周（含额外用量）",
+      "extraUsage": "额外用量",
+      "other": "{label} 窗口"
+    },
+    "empty": {
+      "claudeTitle": "暂无数据",
+      "claudeHint": "Claude Code 在工作时上报额度。在 codeg 中完成下一次 Claude Code 对话轮次后，数据会显示在这里。",
+      "codexNoSessionsTitle": "未找到 Codex 会话",
+      "codexNoSessionsHint": "已在 {dir} 中查找。使用 Codex 后，额度会显示在这里。",
+      "codexNoLimitsTitle": "近期 Codex 会话中没有额度信息",
+      "codexNoLimitsHint": "只有使用 ChatGPT 登录时，Codex 才会记录套餐额度；使用 API 密钥的会话不会上报。"
+    }
   },
   "Forge": {
     "title": "仓库面板",

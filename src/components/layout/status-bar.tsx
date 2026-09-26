@@ -1,5 +1,6 @@
 "use client"
 
+import { StatusBarPlanUsage } from "@/components/layout/status-bar-plan-usage"
 import { StatusBarStats } from "@/components/layout/status-bar-stats"
 import { StatusBarTasks } from "@/components/layout/status-bar-tasks"
 import { StatusBarAlerts } from "@/components/layout/status-bar-alerts"
@@ -22,6 +23,7 @@ export function StatusBar() {
         <div className="flex items-center gap-3">
           <QuickActionsDropdown />
           <StatusBarStats />
+          <StatusBarPlanUsage compact />
         </div>
         <div className="flex items-center gap-3">
           <StatusBarUpdate />
@@ -57,6 +59,7 @@ export function StatusBar() {
       <div className="flex items-center gap-3">
         <QuickActionsDropdown />
         <StatusBarStats />
+        <StatusBarPlanUsage />
       </div>
       <div className="flex items-center gap-4">
         <StatusBarUpdate />

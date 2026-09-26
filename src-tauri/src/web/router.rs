@@ -1501,6 +1501,11 @@ pub fn build_router(
             "/token_usage_sync",
             post(handlers::token_usage::token_usage_sync),
         )
+        // ─── Subscription plan usage ───
+        .route(
+            "/get_plan_usage",
+            post(handlers::plan_usage::get_plan_usage),
+        )
         // ─── Work tasks ───
         .route("/work_task_list", post(handlers::work_task::work_task_list))
         .route("/work_task_get", post(handlers::work_task::work_task_get))

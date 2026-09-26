@@ -2189,7 +2189,9 @@
       },
       "stats": {
         "conversations": "{count} محادثة",
-        "openUsage": "عرض إحصاءات الجلسات واستخدام الرموز"
+        "openUsage": "عرض إحصاءات الجلسات واستخدام الرموز",
+        "planUsage": "الحدود",
+        "openPlanUsage": "عرض حدود اشتراك Claude Code وCodex"
       },
       "tokens": {
         "contextWindowUsageAria": "استخدام نافذة السياق",
@@ -6026,6 +6028,51 @@
     "emptyAction": "احسب جلساتي",
     "loadFailed": "تعذّر تحميل بيانات الاستهلاك",
     "truncatedNotice": "هذا النطاق واسع جدًا — الأرقام تغطي أحدث جزء منه فقط."
+  },
+  "PlanUsage": {
+    "title": "استخدام الاشتراك",
+    "subtitle": "مقدار ما استُخدم وما تبقّى من حدود خطط Claude Code وCodex.",
+    "refresh": "تحديث",
+    "loadFailed": "تعذّر تحميل الاستخدام",
+    "privacyNote": "تأتي القراءات من الوكلاء أنفسهم: يُبلغ Claude Code عن حدوده أثناء الدور في codeg، ويسجّلها Codex في سجلات جلساته. لا يسجّل codeg الدخول إلى أي مزوّد ولا يقرأ بيانات اعتمادك.",
+    "used": "مُستخدم {percent}%",
+    "left": "متبقٍّ {percent}%",
+    "resetsIn": "يُعاد التعيين خلال {duration}",
+    "resetUnknown": "وقت إعادة التعيين غير معروف",
+    "resetSince": "أُعيد التعيين قبل {duration} — لا توجد قراءة أحدث بعد",
+    "updatedAgo": "حُدّث قبل {duration}",
+    "updatedJustNow": "حُدّث الآن",
+    "windowAsOf": "قراءة منذ {duration}",
+    "stale": "قديمة",
+    "staleHint": "مضى على هذه القراءة أكثر من ساعة. لا تشمل الاستخدام اللاحق، بما في ذلك على الأجهزة الأخرى.",
+    "planTitle": "الخطة",
+    "status": {
+      "limited": "تم بلوغ الحد",
+      "warning": "يقترب من الحد",
+      "overage": "يستخدم الاستخدام الإضافي"
+    },
+    "source": {
+      "claudeLive": "من أدوار Claude Code في codeg",
+      "claudeSaved": "آخر قراءة محفوظة قبل إعادة تشغيل codeg",
+      "codexLog": "من أحدث سجل جلسة لـ Codex"
+    },
+    "window": {
+      "session5h": "جلسة 5 ساعات",
+      "sessionSpan": "جلسة {span}",
+      "weekly": "أسبوعي",
+      "weeklyModel": "أسبوعي · {model}",
+      "weeklyWithExtra": "أسبوعي، يشمل الاستخدام الإضافي",
+      "extraUsage": "الاستخدام الإضافي",
+      "other": "نافذة {label}"
+    },
+    "empty": {
+      "claudeTitle": "لا توجد قراءة بعد",
+      "claudeHint": "يُبلغ Claude Code عن حدوده أثناء العمل. ستظهر هنا بعد دورك التالي مع Claude Code في codeg.",
+      "codexNoSessionsTitle": "لم يُعثر على جلسات Codex",
+      "codexNoSessionsHint": "تم البحث في {dir}. تظهر الحدود هنا بعد استخدام Codex.",
+      "codexNoLimitsTitle": "لا توجد حدود في جلسات Codex الأخيرة",
+      "codexNoLimitsHint": "لا يسجّل Codex حدود الخطة إلا عند تسجيل الدخول باستخدام ChatGPT؛ الجلسات التي تستخدم مفتاح API لا تُبلغ عنها."
+    }
   },
   "Forge": {
     "title": "لوحة المستودع",

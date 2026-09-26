@@ -2189,7 +2189,9 @@
       },
       "stats": {
         "conversations": "{count} discussions",
-        "openUsage": "Voir les statistiques de sessions et l'usage de tokens"
+        "openUsage": "Voir les statistiques de sessions et l'usage de tokens",
+        "planUsage": "Limites",
+        "openPlanUsage": "Voir les limites d'abonnement Claude Code et Codex"
       },
       "tokens": {
         "contextWindowUsageAria": "Utilisation de la fenêtre de contexte",
@@ -6026,6 +6028,51 @@
     "emptyAction": "Compter mes sessions",
     "loadFailed": "Impossible de charger la consommation",
     "truncatedNotice": "Cette période est très large — les chiffres ne couvrent que sa portion la plus récente."
+  },
+  "PlanUsage": {
+    "title": "Utilisation de l'abonnement",
+    "subtitle": "Part utilisée et restante des limites de vos forfaits Claude Code et Codex.",
+    "refresh": "Actualiser",
+    "loadFailed": "Impossible de charger l'utilisation",
+    "privacyNote": "Les données viennent des agents eux-mêmes : Claude Code signale ses limites pendant un tour dans codeg, et Codex les consigne dans ses journaux de session. codeg ne se connecte jamais à un fournisseur et ne lit jamais vos identifiants.",
+    "used": "{percent} % utilisé",
+    "left": "{percent} % restant",
+    "resetsIn": "Réinitialisation dans {duration}",
+    "resetUnknown": "Heure de réinitialisation inconnue",
+    "resetSince": "Réinitialisé il y a {duration} — pas encore de nouvelle mesure",
+    "updatedAgo": "Mis à jour il y a {duration}",
+    "updatedJustNow": "Mis à jour à l'instant",
+    "windowAsOf": "Mesure d'il y a {duration}",
+    "stale": "Obsolète",
+    "staleHint": "Cette mesure date de plus d'une heure. L'utilisation depuis, y compris sur d'autres appareils, n'est pas incluse.",
+    "planTitle": "Forfait",
+    "status": {
+      "limited": "Limite atteinte",
+      "warning": "Limite presque atteinte",
+      "overage": "Utilisation supplémentaire en cours"
+    },
+    "source": {
+      "claudeLive": "Issu des tours Claude Code dans codeg",
+      "claudeSaved": "Dernière mesure enregistrée avant le redémarrage de codeg",
+      "codexLog": "Issu du journal de session Codex le plus récent"
+    },
+    "window": {
+      "session5h": "Session de 5 heures",
+      "sessionSpan": "Session de {span}",
+      "weekly": "Hebdomadaire",
+      "weeklyModel": "Hebdomadaire · {model}",
+      "weeklyWithExtra": "Hebdomadaire, utilisation supplémentaire incluse",
+      "extraUsage": "Utilisation supplémentaire",
+      "other": "Fenêtre {label}"
+    },
+    "empty": {
+      "claudeTitle": "Aucune mesure pour l'instant",
+      "claudeHint": "Claude Code signale ses limites pendant qu'il travaille. Elles apparaîtront ici après votre prochain tour Claude Code dans codeg.",
+      "codexNoSessionsTitle": "Aucune session Codex trouvée",
+      "codexNoSessionsHint": "Recherche effectuée dans {dir}. Les limites apparaîtront ici après une utilisation de Codex.",
+      "codexNoLimitsTitle": "Aucune limite dans les sessions Codex récentes",
+      "codexNoLimitsHint": "Codex n'enregistre les limites du forfait qu'avec une connexion ChatGPT ; les sessions qui utilisent une clé API ne les signalent pas."
+    }
   },
   "Forge": {
     "title": "Panneau du dépôt",

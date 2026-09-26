@@ -15814,6 +15814,13 @@ async fn emit_conversation_update(
             emit_with_state(state, emitter, AcpEvent::AvailableCommands { commands }).await;
         }
         SessionUpdate::UsageUpdate(update) => {
+            // claude-agent-acp hangs the account's subscription limits
+            // (`_meta["_claude/rateLimit"]`) on this same frame. They are not
+            // about this session's context, so they go to the process-wide
+            // plan-usage store rather than into the session state.
+            if let Some(meta) = update.meta.as_ref() {
+                crate::commands::plan_usage::observe_claude_usage_meta(emitter, meta);
+            }
             emit_with_state(
                 state,
                 emitter,

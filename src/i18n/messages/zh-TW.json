@@ -2189,7 +2189,9 @@
       },
       "stats": {
         "conversations": "{count} 個會話",
-        "openUsage": "檢視會話統計與 Token 用量"
+        "openUsage": "檢視會話統計與 Token 用量",
+        "planUsage": "額度",
+        "openPlanUsage": "查看 Claude Code 與 Codex 訂閱額度"
       },
       "tokens": {
         "contextWindowUsageAria": "上下文視窗使用率",
@@ -6026,6 +6028,51 @@
     "emptyAction": "統計我的工作階段",
     "loadFailed": "用量載入失敗",
     "truncatedNotice": "此範圍過大 —— 下面的數字只涵蓋其中最近的一段。"
+  },
+  "PlanUsage": {
+    "title": "訂閱用量",
+    "subtitle": "Claude Code 與 Codex 方案額度的已用與剩餘情況。",
+    "refresh": "重新整理",
+    "loadFailed": "無法載入用量",
+    "privacyNote": "資料來自代理本身：Claude Code 在 codeg 中執行對話輪次時回報額度，Codex 則將額度記錄在其工作階段日誌中。codeg 不會登入任何服務供應商，也不會讀取你的憑證。",
+    "used": "已用 {percent}%",
+    "left": "剩餘 {percent}%",
+    "resetsIn": "{duration}後重設",
+    "resetUnknown": "重設時間未知",
+    "resetSince": "已於 {duration}前重設，尚無新資料",
+    "updatedAgo": "{duration}前更新",
+    "updatedJustNow": "剛剛更新",
+    "windowAsOf": "截至 {duration}前",
+    "stale": "已過時",
+    "staleHint": "此資料已超過一小時。之後的用量（包括在其他裝置上的用量）未計入。",
+    "planTitle": "方案",
+    "status": {
+      "limited": "已達上限",
+      "warning": "接近上限",
+      "overage": "正在使用額外用量"
+    },
+    "source": {
+      "claudeLive": "來自 codeg 中的 Claude Code 對話輪次",
+      "claudeSaved": "codeg 重新啟動前儲存的最後一筆資料",
+      "codexLog": "來自最新的 Codex 工作階段日誌"
+    },
+    "window": {
+      "session5h": "5 小時工作階段",
+      "sessionSpan": "{span} 工作階段",
+      "weekly": "每週",
+      "weeklyModel": "每週 · {model}",
+      "weeklyWithExtra": "每週（含額外用量）",
+      "extraUsage": "額外用量",
+      "other": "{label} 區間"
+    },
+    "empty": {
+      "claudeTitle": "尚無資料",
+      "claudeHint": "Claude Code 會在工作時回報額度。在 codeg 中完成下一次 Claude Code 對話輪次後，資料會顯示在這裡。",
+      "codexNoSessionsTitle": "找不到 Codex 工作階段",
+      "codexNoSessionsHint": "已在 {dir} 中尋找。使用 Codex 後，額度會顯示在這裡。",
+      "codexNoLimitsTitle": "近期 Codex 工作階段中沒有額度資訊",
+      "codexNoLimitsHint": "只有以 ChatGPT 登入時，Codex 才會記錄方案額度；使用 API 金鑰的工作階段不會回報。"
+    }
   },
   "Forge": {
     "title": "儲存庫面板",
