@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { AttentionKind, ConversationStatus } from "@/lib/types"
 import {
   arrangeTabs,
+  shownTabs,
   folderAccentColor,
   tabStatusBand,
 } from "./tab-arrangement"
@@ -84,5 +85,42 @@ describe("folderAccentColor", () => {
   it("picks a stable color for an uncolored folder", () => {
     expect(folderAccentColor(1, null)).toBe(folderAccentColor(1, "inherit"))
     expect(folderAccentColor(1, null)).not.toBe(folderAccentColor(2, null))
+  })
+})
+
+describe("shownTabs", () => {
+  const tabs = [
+    { id: "a1", folderId: 1, conversationId: 11 },
+    { id: "b1", folderId: 2, conversationId: 21 },
+    { id: "a2", folderId: 1, conversationId: 12 },
+    { id: "b2", folderId: 2, conversationId: 22 },
+  ]
+  const byFolder = arrangeTabs(tabs, "folder", new Map())
+
+  it("follows the arrangement, not the manual order", () => {
+    expect(shownTabs(byFolder, new Set(), "a1").map((t) => t.id)).toEqual([
+      "a1",
+      "a2",
+      "b1",
+      "b2",
+    ])
+  })
+
+  it("folds a collapsed group away but keeps its active tab", () => {
+    const collapsed = new Set(["folder-1"])
+    expect(shownTabs(byFolder, collapsed, "b1").map((t) => t.id)).toEqual([
+      "b1",
+      "b2",
+    ])
+    expect(shownTabs(byFolder, collapsed, "a2").map((t) => t.id)).toEqual([
+      "a2",
+      "b1",
+      "b2",
+    ])
+  })
+
+  it("never folds the manual order", () => {
+    const manual = arrangeTabs(tabs, "manual", new Map())
+    expect(shownTabs(manual, new Set(["folder-1"]), "a1")).toBe(tabs)
   })
 })

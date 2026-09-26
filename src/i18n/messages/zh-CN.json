@@ -2287,6 +2287,8 @@
       "arrangeByFolderHint": "同一文件夹的标签页放在一起，并使用该文件夹的颜色",
       "arrangeByStatus": "按状态排序",
       "arrangeByStatusHint": "等你处理的会话排在最前",
+      "collapseGroup": "折叠 {name}（{count} 个标签）",
+      "expandGroup": "展开 {name}（{count} 个标签）",
       "bandNeedsYou": "需要你处理",
       "bandAwaitingReply": "等你回复",
       "bandRunning": "进行中",

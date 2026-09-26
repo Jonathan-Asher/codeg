@@ -2287,6 +2287,8 @@
       "arrangeByFolderHint": "As abas de cada pasta juntas, na sua cor",
       "arrangeByStatus": "Ordenar por status",
       "arrangeByStatusHint": "Sessões aguardando você primeiro",
+      "collapseGroup": "Recolher {name} ({count} abas)",
+      "expandGroup": "Expandir {name} ({count} abas)",
       "bandNeedsYou": "Precisa de você",
       "bandAwaitingReply": "Aguardando sua resposta",
       "bandRunning": "Em execução",

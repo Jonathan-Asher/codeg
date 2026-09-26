@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { openSettingsWindow } from "@/lib/api"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useIsActiveChatMode } from "@/hooks/use-is-active-chat-mode"
@@ -21,6 +21,9 @@ import {
   useAppWorkspaceStore,
 } from "@/stores/app-workspace-store"
 import { popClosedTab } from "@/lib/closed-tab-stack"
+import { arrangeTabs, shownTabs } from "@/lib/tab-arrangement"
+import { useTabArrangeStore } from "@/stores/tab-arrangement-store"
+import { useConversationAttentionStore } from "@/stores/conversation-attention-store"
 import { closeCurrentWindow, isDesktop } from "@/lib/platform"
 import {
   matchShortcutEvent,
@@ -48,6 +51,25 @@ export function WorkspaceChromeController() {
     useTabActions()
   const tabs = useTabStore((s) => s.tabs)
   const activeTabId = useTabStore((s) => s.activeTabId)
+  // Tab switching walks the strip as displayed: grouped or sorted, with
+  // collapsed groups folded away (`shownTabs`), not the manual order behind it.
+  const arrangeMode = useTabArrangeStore((s) => s.mode)
+  const collapsedRuns = useTabArrangeStore((s) => s.collapsedRuns)
+  const attentionByConversationId = useConversationAttentionStore(
+    (s) => s.byConversationId
+  )
+  useEffect(() => {
+    useTabArrangeStore.getState().hydrate()
+  }, [])
+  const navTabs = useMemo(
+    () =>
+      shownTabs(
+        arrangeTabs(tabs, arrangeMode, attentionByConversationId),
+        collapsedRuns,
+        activeTabId
+      ),
+    [tabs, arrangeMode, attentionByConversationId, collapsedRuns, activeTabId]
+  )
   // Tab-close/navigation shortcuts used to live in the visible tab strips.
   // Mobile no longer mounts those strips, so this always-mounted controller now
   // owns them too (see the keydown handler below).
@@ -139,13 +161,14 @@ export function WorkspaceChromeController() {
       const isPrevTab = matchShortcutEvent(e, shortcuts.prev_tab)
       if (isNextTab || isPrevTab) {
         if (!conversationPaneActive) return
-        if (tabs.length < 2 || !activeTabId) return
-        const currentIndex = tabs.findIndex((tab) => tab.id === activeTabId)
+        if (navTabs.length < 2 || !activeTabId) return
+        const currentIndex = navTabs.findIndex((tab) => tab.id === activeTabId)
         if (currentIndex === -1) return
         e.preventDefault()
         const offset = isNextTab ? 1 : -1
-        const nextIndex = (currentIndex + offset + tabs.length) % tabs.length
-        switchTab(tabs[nextIndex].id)
+        const nextIndex =
+          (currentIndex + offset + navTabs.length) % navTabs.length
+        switchTab(navTabs[nextIndex].id)
         return
       }
 
@@ -168,7 +191,7 @@ export function WorkspaceChromeController() {
         }
         if (conversationPaneActive) {
           const tabId = pickNumberedTabId(
-            tabs.map((tab) => tab.id),
+            navTabs.map((tab) => tab.id),
             numberedIndex
           )
           if (!tabId) return
@@ -301,6 +324,7 @@ export function WorkspaceChromeController() {
     toggleTerminal,
     isChatMode,
     tabs,
+    navTabs,
     activeTabId,
     switchTab,
     closeTab,

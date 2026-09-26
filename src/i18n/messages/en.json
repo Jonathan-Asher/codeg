@@ -2287,6 +2287,8 @@
       "arrangeByFolderHint": "Each folder's tabs together, in its color",
       "arrangeByStatus": "Sort by status",
       "arrangeByStatusHint": "Sessions waiting for you first",
+      "collapseGroup": "Collapse {name} ({count} tabs)",
+      "expandGroup": "Expand {name} ({count} tabs)",
       "bandNeedsYou": "Needs you",
       "bandAwaitingReply": "Awaiting your reply",
       "bandRunning": "Running",

@@ -2287,6 +2287,8 @@
       "arrangeByFolderHint": "同一資料夾的分頁放在一起，並使用該資料夾的顏色",
       "arrangeByStatus": "依狀態排序",
       "arrangeByStatusHint": "等你處理的對話排在最前",
+      "collapseGroup": "摺疊 {name}（{count} 個分頁）",
+      "expandGroup": "展開 {name}（{count} 個分頁）",
       "bandNeedsYou": "需要你處理",
       "bandAwaitingReply": "等你回覆",
       "bandRunning": "進行中",

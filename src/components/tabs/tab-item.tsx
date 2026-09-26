@@ -274,7 +274,8 @@ export const TabItem = memo(function TabItem({
         // Embedded (browser-style): every tab is EQUAL width (`basis-48` = 12rem,
         // `grow-0` so they don't stretch to fill), so a long title and a short one
         // read uniform instead of one wide / one narrow. They still `shrink`
-        // together (down to `min-w-0`, the label fades) once the row fills; above
+        // together (down to `min-w-28`, the label fading) once the row fills —
+        // past that the strip scrolls instead of squeezing names away; above
         // that the fixed basis keeps them equal. The new-conversation button hugs
         // the last tab and the leftover row stays a window-drag region.
         // `browser-tab-item` draws the left-edge hairline separator (globals.css)
@@ -284,7 +285,7 @@ export const TabItem = memo(function TabItem({
         // seat is never covered by a hovered neighbour's flare. Standalone: rounded
         // pill, intrinsic size + horizontal scroll (mobile).
         embedded
-          ? "browser-tab-item min-w-0 grow-0 shrink basis-48 data-[active=true]:z-10"
+          ? "browser-tab-item min-w-28 grow-0 shrink basis-48 data-[active=true]:z-10"
           : "rounded-full shrink-0",
         !isCoarsePointer &&
           (embedded

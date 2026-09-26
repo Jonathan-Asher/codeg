@@ -2287,6 +2287,8 @@
       "arrangeByFolderHint": "Tabs jedes Ordners zusammen, in seiner Farbe",
       "arrangeByStatus": "Nach Status sortieren",
       "arrangeByStatusHint": "Sitzungen, die auf dich warten, zuerst",
+      "collapseGroup": "{name} einklappen ({count} Tabs)",
+      "expandGroup": "{name} ausklappen ({count} Tabs)",
       "bandNeedsYou": "Braucht dich",
       "bandAwaitingReply": "Wartet auf deine Antwort",
       "bandRunning": "Läuft",

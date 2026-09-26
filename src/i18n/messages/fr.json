@@ -2287,6 +2287,8 @@
       "arrangeByFolderHint": "Les onglets de chaque dossier ensemble, dans sa couleur",
       "arrangeByStatus": "Trier par statut",
       "arrangeByStatusHint": "Les sessions qui vous attendent d'abord",
+      "collapseGroup": "Replier {name} ({count} onglets)",
+      "expandGroup": "Déplier {name} ({count} onglets)",
       "bandNeedsYou": "Vous attend",
       "bandAwaitingReply": "Attend votre réponse",
       "bandRunning": "En cours",

@@ -10,7 +10,12 @@ import {
 } from "react"
 import { Reorder } from "motion/react"
 import type { PanInfo } from "motion/react"
-import { ArrowDownWideNarrow, SquarePen } from "lucide-react"
+import {
+  ArrowDownWideNarrow,
+  ChevronDown,
+  ChevronRight,
+  SquarePen,
+} from "lucide-react"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
@@ -42,6 +47,7 @@ import {
   TAB_ARRANGE_MODES,
   arrangeTabs,
   folderAccentColor,
+  shownTabs,
   type TabArrangeMode,
   type TabRun,
   type TabStatusBand,
@@ -143,7 +149,14 @@ export function TabBar({ groupId }: TabBarProps) {
     () => arrangeTabs(groupTabs, arrangeMode, attentionByConversationId),
     [groupTabs, arrangeMode, attentionByConversationId]
   )
-  const displayTabs = arranged.ordered
+  // A group or band can be folded to its label (click the label). The tab in
+  // use stays visible next to a folded label, so it never vanishes.
+  const collapsedRuns = useTabArrangeStore((s) => s.collapsedRuns)
+  const toggleRunCollapsed = useTabArrangeStore((s) => s.toggleRunCollapsed)
+  const displayTabs = useMemo(
+    () => shownTabs(arranged, collapsedRuns, displayActiveId),
+    [arranged, collapsedRuns, displayActiveId]
+  )
   const isTileMode = !!tileByGroup[stripGroupId]
   const handleToggleTile = useCallback(
     () => toggleGroupTile(stripGroupId),
@@ -361,13 +374,25 @@ export function TabBar({ groupId }: TabBarProps) {
     null
   )
 
+  // Keep the active tab in view: when it changes, and when the arrangement
+  // moves it (switching to grouped / sorted, a status change, a group folding)
+  // while its id stays the same.
+  const shownOrderKey = displayTabs.map((tab) => tab.id).join("|")
   useEffect(() => {
     if (!displayActiveId || !scrollRef.current) return
     const el = scrollRef.current.querySelector(
       `[data-tab-id="${displayActiveId}"]`
     )
     el?.scrollIntoView({ block: "nearest", inline: "nearest" })
-  }, [displayActiveId])
+  }, [displayActiveId, shownOrderKey])
+
+  // The strip scrolls sideways once its tabs reach their minimum width; a
+  // plain (vertical) mouse wheel scrolls it too.
+  const handleStripWheel = useCallback((e: React.WheelEvent) => {
+    const el = scrollRef.current
+    if (!el || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
+    el.scrollLeft += e.deltaY
+  }, [])
 
   const handleReorder = useCallback(
     (nextTabs: TabItemData[]) => {
@@ -401,13 +426,19 @@ export function TabBar({ groupId }: TabBarProps) {
   // sequence, so a label flanking the active tab gets the same baseline inset a
   // neighbouring tab would (`data-adjacent-active`, globals.css).
   type StripEntry =
-    | { kind: "label"; runKey: string; count: number }
+    | { kind: "label"; runKey: string; count: number; collapsed: boolean }
     | { kind: "tab"; tab: TabItemData }
   const entries: StripEntry[] = arranged.runs
-    ? arranged.runs.flatMap((run): StripEntry[] => [
-        { kind: "label", runKey: run.key, count: run.tabs.length },
-        ...run.tabs.map((tab) => ({ kind: "tab" as const, tab })),
-      ])
+    ? arranged.runs.flatMap((run): StripEntry[] => {
+        const collapsed = collapsedRuns.has(run.key)
+        const visible = collapsed
+          ? run.tabs.filter((tab) => tab.id === displayActiveId)
+          : run.tabs
+        return [
+          { kind: "label", runKey: run.key, count: run.tabs.length, collapsed },
+          ...visible.map((tab) => ({ kind: "tab" as const, tab })),
+        ]
+      })
     : displayTabs.map((tab) => ({ kind: "tab" as const, tab }))
   const activePos = entries.findIndex(
     (e) => e.kind === "tab" && e.tab.id === displayActiveId
@@ -437,6 +468,12 @@ export function TabBar({ groupId }: TabBarProps) {
       // Cross-group drop target: group strips advertise their group id for the
       // drag hit-test and tint while a foreign tab hovers.
       data-conv-group-strip={groupId ?? undefined}
+      // Scrolls sideways once the tabs reach their minimum width (TabItem):
+      // `layoutScroll` keeps drag reordering measured against the scrolled
+      // position, and `scroll-pr-32` keeps a tab scrolled into view clear of
+      // the sticky new-conversation / arrange buttons at the right edge.
+      layoutScroll
+      onWheel={handleStripWheel}
       // Fills the title-bar strip and shrinks browser-style to share the row (see
       // TabItem): flush (`gap-0`) so hairline separators read as dividers, no
       // scrollbar (`overflow-hidden` still scrolls programmatically), and no
@@ -450,7 +487,7 @@ export function TabBar({ groupId }: TabBarProps) {
       // `ws-strip-line` reaches the group's right edge and the bottom hairline
       // stays continuous into the right reserve.
       className={cn(
-        "pt-1.5 flex h-full min-w-0 flex-1 items-stretch gap-0 overflow-hidden pl-2",
+        "pt-1.5 flex h-full min-w-0 flex-1 items-stretch gap-0 overflow-x-auto overflow-y-hidden pl-2 scroll-pr-32 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
         isDropTarget && "bg-primary/8"
       )}
     >
@@ -467,9 +504,18 @@ export function TabBar({ groupId }: TabBarProps) {
               // pseudo-element used next to the active tab.
               className="relative flex h-full shrink-0 items-center pl-1.5 pr-1 pb-1.5 ws-strip-line"
             >
-              <span
+              {/* The label folds its group / band away (and back). */}
+              <button
+                type="button"
+                data-tab-group-toggle={entry.runKey}
+                aria-expanded={!entry.collapsed}
+                aria-label={tTabs(
+                  entry.collapsed ? "expandGroup" : "collapseGroup",
+                  { name: visual?.label ?? "", count: entry.count }
+                )}
+                onClick={() => toggleRunCollapsed(entry.runKey)}
                 className={cn(
-                  "flex max-w-[9rem] items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.6875rem] leading-none font-medium",
+                  "flex max-w-[9rem] items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.6875rem] leading-none font-medium transition-opacity hover:opacity-80",
                   visual?.style
                     ? "folder-title-tint bg-current/10"
                     : "bg-muted text-muted-foreground"
@@ -477,13 +523,14 @@ export function TabBar({ groupId }: TabBarProps) {
                 style={visual?.style}
                 title={`${visual?.label ?? ""} · ${entry.count}`}
               >
-                <span
-                  aria-hidden
-                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-current"
-                />
+                {entry.collapsed ? (
+                  <ChevronRight aria-hidden className="h-3 w-3 shrink-0" />
+                ) : (
+                  <ChevronDown aria-hidden className="h-3 w-3 shrink-0" />
+                )}
                 <span className="truncate">{visual?.label}</span>
                 <span className="tabular-nums opacity-60">{entry.count}</span>
-              </span>
+              </button>
             </div>
           )
         }
@@ -560,7 +607,9 @@ export function TabBar({ groupId }: TabBarProps) {
         // add-tab button in the same place but stays divider-free, so its "+"
         // reads as belonging to the empty run of strip rather than to the tabs.
         data-adjacent-active={lastTabActive ? "after" : undefined}
-        className="tab-strip-tail relative flex h-full flex-1 items-stretch ws-strip-line"
+        // Sticky: once the tabs overflow and the strip scrolls, the buttons
+        // stay pinned at its right edge on the strip's own background.
+        className="tab-strip-tail sticky right-0 z-20 flex h-full flex-1 items-stretch bg-muted ws-transparent-bg ws-strip-line"
       >
         <button
           type="button"

@@ -2287,6 +2287,8 @@
       "arrangeByFolderHint": "Las pestañas de cada carpeta juntas, con su color",
       "arrangeByStatus": "Ordenar por estado",
       "arrangeByStatusHint": "Primero las sesiones que te esperan",
+      "collapseGroup": "Contraer {name} ({count} pestañas)",
+      "expandGroup": "Expandir {name} ({count} pestañas)",
       "bandNeedsYou": "Te necesita",
       "bandAwaitingReply": "Espera tu respuesta",
       "bandRunning": "En ejecución",

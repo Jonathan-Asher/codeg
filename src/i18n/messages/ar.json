@@ -2287,6 +2287,8 @@
       "arrangeByFolderHint": "علامات تبويب كل مجلد معًا وبلونه",
       "arrangeByStatus": "الترتيب حسب الحالة",
       "arrangeByStatusHint": "الجلسات التي تنتظرك أولًا",
+      "collapseGroup": "طيّ {name} ({count} علامات تبويب)",
+      "expandGroup": "توسيع {name} ({count} علامات تبويب)",
       "bandNeedsYou": "تحتاج إليك",
       "bandAwaitingReply": "بانتظار ردك",
       "bandRunning": "قيد التشغيل",

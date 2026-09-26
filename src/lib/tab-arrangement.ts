@@ -100,6 +100,27 @@ export function arrangeTabs<T extends ArrangeableTab>(
   return { ordered: runs.flatMap((run) => run.tabs), runs }
 }
 
+/**
+ * The tabs a strip actually shows, in display order: the arrangement with the
+ * collapsed runs folded away. A collapsed run keeps only the active tab, so the
+ * tab being worked in never disappears behind its group's label. In `manual`
+ * mode (no runs) nothing collapses. This is also the order the tab-switching
+ * shortcuts walk: they follow what is on screen, not the manual order behind a
+ * grouped or sorted strip.
+ */
+export function shownTabs<T extends { id: string }>(
+  arranged: { ordered: readonly T[]; runs: TabRun<T>[] | null },
+  collapsedRuns: ReadonlySet<string>,
+  activeTabId: string | null
+): readonly T[] {
+  if (!arranged.runs) return arranged.ordered
+  return arranged.runs.flatMap((run) =>
+    collapsedRuns.has(run.key)
+      ? run.tabs.filter((tab) => tab.id === activeTabId)
+      : run.tabs
+  )
+}
+
 /** Distinct, saturated presets for folders the user never colored — so every
  *  group in `folder` mode is told apart by color, not just by its label. */
 const AUTO_FOLDER_COLORS: readonly ThemeColor[] = [
