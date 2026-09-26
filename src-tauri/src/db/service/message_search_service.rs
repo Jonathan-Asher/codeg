@@ -4,9 +4,9 @@
 //!
 //!   * **write** — [`index_conversation`] swaps one conversation's rows for a
 //!     freshly parsed set inside a transaction and stamps the
-//!     `conversation.updated_at` they reflect; [`mark_indexed`] stamps without
-//!     touching the rows. The indexer driving both lives in
-//!     `commands::message_search`.
+//!     `conversation.updated_at` they reflect; [`mark_indexed`] drops the rows
+//!     and stamps, for a transcript that could not be read. The indexer
+//!     driving both lives in `commands::message_search`.
 //!   * **read** — [`search_messages`] finds every word of a query anywhere in a
 //!     message: words of three or more characters through the trigram index,
 //!     shorter ones (common in Chinese: 登录, 修复) with LIKE.
@@ -166,15 +166,19 @@ pub async fn index_conversation(
     Ok(indexed)
 }
 
-/// Stamp a conversation as indexed at `source_updated_at` without touching its
-/// rows — for one whose transcript could not be read. Retrying on every pass
+/// Stamp a conversation as indexed at `source_updated_at` with no rows — for
+/// one whose transcript could not be read. Rows from an earlier, readable
+/// version go in the same transaction: search still lists the conversation, so
+/// they would keep returning text that can no longer be opened, and the stamp
+/// would keep them until the conversation changed. Retrying on every pass
 /// would not make it readable; its next real change retries by itself.
 pub async fn mark_indexed(
     conn: &DatabaseConnection,
     conversation_id: i32,
     source_updated_at: DateTime<Utc>,
 ) -> Result<(), DbError> {
-    stamp(conn, conversation_id, source_updated_at).await
+    index_conversation(conn, conversation_id, source_updated_at, &[]).await?;
+    Ok(())
 }
 
 /// Up to `limit` conversations that were never indexed or changed since, most
