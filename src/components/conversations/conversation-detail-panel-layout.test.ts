@@ -574,7 +574,11 @@ describe("ConversationDetailPanel session-load failure surface", () => {
       "hideInput={isWelcomeMode || Boolean(acpLoadError)}"
     )
     // …and the banner takes its place, explaining why and offering recovery.
-    expect(source).toContain("composerBanner={acpLoadErrorBanner}")
+    // It outranks the interrupted-turn banner, which shares the slot: a
+    // session that can't be loaded can't be continued either.
+    expect(source).toContain(
+      "composerBanner={acpLoadErrorBanner ?? interruptedBanner}"
+    )
     const bannerStart = source.indexOf("const acpLoadErrorBanner")
     expect(bannerStart).toBeGreaterThan(-1)
     const bannerEnd = source.indexOf("const goalControlValue", bannerStart)
@@ -605,6 +609,23 @@ describe("ConversationDetailPanel session-load failure surface", () => {
     expect(dockIdx).toBeGreaterThan(-1)
     const dock = conversationShellSource.slice(dockIdx, dockIdx + 200)
     expect(dock).toContain("mx-auto w-full max-w-3xl")
+  })
+
+  it("offers Continue for an interrupted turn through the normal send queue", () => {
+    const start = source.indexOf("const handleContinueInterrupted")
+    expect(start).toBeGreaterThan(-1)
+    const end = source.indexOf("const goalControlValue", start)
+    expect(end).toBeGreaterThan(start)
+    const block = source.slice(start, end)
+    // "continue" goes through the message queue — the same path a typed
+    // message takes — so it waits for the resumed session to be ready.
+    expect(block).toContain("mqEnqueue(")
+    expect(block).toContain("CONTINUE_PROMPT")
+    // Shown only for an interrupted turn, never while one streams or while a
+    // message is already queued to start one.
+    expect(block).toContain('persistedTurnState === "interrupted"')
+    expect(block).toContain('connStatus !== "prompting"')
+    expect(block).toContain("msgQueue.length === 0")
   })
 
   it("never clears a resolved session id when the persisted detail is absent", () => {
