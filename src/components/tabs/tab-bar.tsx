@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -67,6 +68,12 @@ const STATUS_BAND_LABEL = {
 } as const satisfies Record<TabStatusBand, string>
 
 const NO_TAB_IDS: readonly string[] = []
+
+/** One slot of the strip as displayed: a tab, or (grouped / sorted) the label
+ *  ahead of a run. */
+type StripEntry =
+  | { kind: "label"; runKey: string; count: number }
+  | { kind: "tab"; tab: TabItemData }
 
 interface TabBarProps {
   /** Split-group strip: render only this group's tabs, highlight the GROUP's
@@ -369,13 +376,38 @@ export function TabBar({ groupId }: TabBarProps) {
     null
   )
 
-  useEffect(() => {
+  // The strip as displayed: tabs, with a group label ahead of each run while
+  // grouped / sorted. Adjacency to the active tab is computed over THIS
+  // sequence, so a label flanking the active tab gets the same baseline inset a
+  // neighbouring tab would (`data-adjacent-active`, globals.css).
+  const entries = useMemo<StripEntry[]>(
+    () =>
+      arranged.runs
+        ? arranged.runs.flatMap((run): StripEntry[] => [
+            { kind: "label", runKey: run.key, count: run.tabs.length },
+            ...run.tabs.map((tab) => ({ kind: "tab" as const, tab })),
+          ])
+        : arranged.ordered.map((tab) => ({ kind: "tab" as const, tab })),
+    [arranged]
+  )
+  const activePos = entries.findIndex(
+    (e) => e.kind === "tab" && e.tab.id === displayActiveId
+  )
+  // Keep the active tab in view. A derived layout can move it without changing
+  // its id (switching the arrangement, or the tab changing status band), so the
+  // reveal also re-runs on the mode and, outside manual order, on the active
+  // tab's displayed slot. In manual order the active tab only moves under the
+  // user's own drag, which must not scroll the strip mid-gesture. A layout
+  // effect, so it measures the new layout before motion's layout animation
+  // (scheduled after this commit) shifts moved tabs back to their old spots.
+  const activeSlot = isManualOrder ? -1 : activePos
+  useLayoutEffect(() => {
     if (!displayActiveId || !scrollRef.current) return
     const el = scrollRef.current.querySelector(
       `[data-tab-id="${displayActiveId}"]`
     )
     el?.scrollIntoView({ block: "nearest", inline: "nearest" })
-  }, [displayActiveId])
+  }, [displayActiveId, arrangeMode, activeSlot])
 
   const handleReorder = useCallback(
     (nextTabs: TabItemData[]) => {
@@ -404,22 +436,6 @@ export function TabBar({ groupId }: TabBarProps) {
 
   if (groupTabs.length === 0) return null
 
-  // The strip as displayed: tabs, with a group label ahead of each run while
-  // grouped / sorted. Adjacency to the active tab is computed over THIS
-  // sequence, so a label flanking the active tab gets the same baseline inset a
-  // neighbouring tab would (`data-adjacent-active`, globals.css).
-  type StripEntry =
-    | { kind: "label"; runKey: string; count: number }
-    | { kind: "tab"; tab: TabItemData }
-  const entries: StripEntry[] = arranged.runs
-    ? arranged.runs.flatMap((run): StripEntry[] => [
-        { kind: "label", runKey: run.key, count: run.tabs.length },
-        ...run.tabs.map((tab) => ({ kind: "tab" as const, tab })),
-      ])
-    : displayTabs.map((tab) => ({ kind: "tab" as const, tab }))
-  const activePos = entries.findIndex(
-    (e) => e.kind === "tab" && e.tab.id === displayActiveId
-  )
   const adjacencyAt = (pos: number): "before" | "after" | undefined =>
     activePos < 0
       ? undefined
