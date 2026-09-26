@@ -2953,6 +2953,13 @@ export function useConnectionStore(): ConnectionStoreApi {
   return ctx
 }
 
+/** Like {@link useConnectionStore}, but `null` outside an
+ *  `AcpConnectionsProvider` instead of throwing — for views that also render
+ *  detached from one. */
+export function useOptionalConnectionStore(): ConnectionStoreApi | null {
+  return useContext(ConnectionStoreContext)
+}
+
 // ── Actions context (unchanged interface) ──
 
 /**

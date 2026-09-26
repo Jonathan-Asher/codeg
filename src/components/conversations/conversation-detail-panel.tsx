@@ -54,6 +54,8 @@ import {
 import { useAdvertisedGoalActions } from "@/hooks/use-goal-actions"
 import { ConversationShell } from "@/components/chat/conversation-shell"
 import { SessionConfigStaleBanner } from "@/components/chat/session-config-stale-banner"
+import { SessionInterruptedBanner } from "@/components/chat/session-interrupted-banner"
+import { CONTINUE_PROMPT } from "@/lib/session-activity"
 import { PiProjectTrustBanner } from "@/components/chat/pi-project-trust-banner"
 import { FeedbackNotesDisplay } from "@/components/chat/feedback-notes-display"
 import { FeedbackDialog } from "@/components/chat/feedback-dialog"
@@ -392,6 +394,13 @@ const ConversationTabView = memo(function ConversationTabView({
     useState<ComposerInjectContent | null>(null)
 
   const hasPersistedConversation = dbConversationId != null
+  // The row's persisted turn state, from the live workspace list (upserts keep
+  // it current). Only `interrupted` is read — it drives the Continue banner.
+  const persistedTurnState = useAppWorkspaceStore((s) =>
+    dbConversationId != null
+      ? s.conversations.find((c) => c.id === dbConversationId)?.turn_state
+      : undefined
+  )
 
   // A folderless chat draft before its first send (chat tab, not yet persisted).
   // Used to trigger the eager scratch-dir prepare below, which gives the draft a
@@ -2278,6 +2287,29 @@ const ConversationTabView = memo(function ConversationTabView({
       </div>
     ) : null
 
+  // The last turn was cut off (codeg exited, or the agent or its connection
+  // died mid-turn): offer to pick it back up. Continue queues "continue" like
+  // any typed message, so it goes out through the normal send path the moment
+  // the resumed session is ready. Hidden while a turn is streaming, and while
+  // anything is queued — a queued message will start a turn (which clears the
+  // mark) on its own, and a click has already been taken.
+  const handleContinueInterrupted = useCallback(() => {
+    mqEnqueue(
+      {
+        blocks: [{ type: "text", text: CONTINUE_PROMPT }],
+        displayText: CONTINUE_PROMPT,
+      },
+      null,
+      { adoptSendTimeMode: true }
+    )
+  }, [mqEnqueue])
+  const interruptedBanner =
+    persistedTurnState === "interrupted" &&
+    connStatus !== "prompting" &&
+    msgQueue.length === 0 ? (
+      <SessionInterruptedBanner onContinue={handleContinueInterrupted} />
+    ) : null
+
   // Goal pause/clear is a live, owner-only action, so decide availability once
   // here (where the connection is owned) rather than in the deep goal card.
   // `null` when the session isn't live or the user is a viewer → the card hides
@@ -2620,7 +2652,7 @@ const ConversationTabView = memo(function ConversationTabView({
       hideInput={isWelcomeMode || Boolean(acpLoadError)}
       injectContent={composerInject}
       onInjectConsumed={handleComposerInjectConsumed}
-      composerBanner={acpLoadErrorBanner}
+      composerBanner={acpLoadErrorBanner ?? interruptedBanner}
       feedbackList={
         feedback.showList ? (
           <FeedbackNotesDisplay

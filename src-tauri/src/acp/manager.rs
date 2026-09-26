@@ -2393,6 +2393,7 @@ impl ConnectionManager {
                         pinned_at: Set(None),
                         pin_order: Set(None),
                         origin_cwd: Set(None),
+                        turn_state: Set(None),
                     };
                     let inserted = sibling.insert(txn).await?;
                     Ok(inserted.id)

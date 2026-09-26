@@ -5,6 +5,7 @@ import { Check, Copy, Loader2 } from "lucide-react"
 import { useLocale, useTranslations } from "next-intl"
 import type {
   AgentType,
+  ConnectionStatus,
   ConversationStatus,
   DbConversationSummary,
   SessionStats,
@@ -21,9 +22,13 @@ import {
 import { getFolderConversation } from "@/lib/api"
 import { useCopiedFlag } from "@/hooks/use-copied-flag"
 import { useModelLabels } from "@/hooks/use-model-labels"
-import { pickModelFromTurns } from "./active-session-details"
+import {
+  pickModelFromTurns,
+  withLiveSummaryFields,
+} from "./active-session-details"
 import { AgentIcon } from "@/components/agent-icon"
 import { ConversationStatusDot } from "./conversation-status-dot"
+import { SessionActivityRow } from "./session-activity"
 
 interface SessionDetailsContentProps {
   summary: DbConversationSummary
@@ -50,6 +55,14 @@ interface SessionDetailsContentProps {
    * the panel + tab are actually surfaced. Defaults to `true`.
    */
   active?: boolean
+  /**
+   * This client's own live connection status for the conversation, when it
+   * holds one (the aux-panel tab, for the focused conversation). Sharpens the
+   * Activity line — see `deriveSessionActivity`. Omitted by the dialog, which
+   * relies on the persisted turn state alone, like the sidebar row it opens
+   * from.
+   */
+  connectionStatus?: ConnectionStatus | null
 }
 
 function isKnownStatus(value: string): value is ConversationStatus {
@@ -251,8 +264,10 @@ export function SessionDetailsContent({
   stats: statsProp,
   model: modelProp,
   active = true,
+  connectionStatus,
 }: SessionDetailsContentProps) {
   const t = useTranslations("Folder.sessionDetails")
+  const tActivity = useTranslations("Folder.sessionActivity")
   const locale = useLocale()
 
   // The only mirrored state is the outcome of the sidebar fetch, held as one
@@ -304,7 +319,11 @@ export function SessionDetailsContent({
 
   const result =
     fetchResult && fetchResult.id === summaryProp.id ? fetchResult : null
-  const summary = result?.ok ? result.summary : summaryProp
+  // The fetched summary is a snapshot; the prop is the live sidebar row, which
+  // keeps receiving the turn state and "Updated" time while this is open.
+  const summary = result?.ok
+    ? withLiveSummaryFields(result.summary, summaryProp)
+    : summaryProp
   const stats =
     statsProp !== undefined ? statsProp : result?.ok ? result.stats : null
   const statsError = statsProp === undefined && result?.ok === false
@@ -388,6 +407,18 @@ export function SessionDetailsContent({
           status={summary.status}
         />
       </div>
+
+      {/* What the session is doing right now. The status chip above is the
+          conversation's review state and says nothing about that. */}
+      <section className="min-w-0 space-y-2 border-t pt-4">
+        <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          {tActivity("label")}
+        </h3>
+        <SessionActivityRow
+          summary={summary}
+          connectionStatus={connectionStatus}
+        />
+      </section>
 
       {/* Identifiers, packed two-up to keep the view short. */}
       <dl className="grid grid-cols-1 gap-x-4 gap-y-3 border-t pt-4 @[20rem]:grid-cols-2">

@@ -121,6 +121,7 @@ async fn create_inner(
         pinned_at: Set(None),
         pin_order: Set(None),
         origin_cwd: Set(None),
+        turn_state: Set(None),
     };
     Ok(model.insert(conn).await?)
 }
@@ -161,6 +162,159 @@ pub async fn update_status_if(
         .exec(conn)
         .await?;
     Ok(result.rows_affected > 0)
+}
+
+/// A typed SQL NULL for the `turn_state` column.
+fn no_turn_state() -> sea_orm::Value {
+    sea_orm::Value::String(None)
+}
+
+/// A turn just started on this conversation: record it as running and stamp
+/// `updated_at` — a turn starting is activity. Overwrites an `interrupted`
+/// mark, which is the rule that any new turn clears it. Soft-deleted rows are
+/// skipped. Returns `true` when a row was written, so the caller can broadcast
+/// a sidebar upsert.
+pub async fn mark_turn_running(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::Expr;
+    let res = conversation::Entity::update_many()
+        .col_expr(
+            conversation::Column::TurnState,
+            Expr::value(conversation::ConversationTurnState::Running),
+        )
+        .col_expr(conversation::Column::UpdatedAt, Expr::value(Utc::now()))
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .filter(conversation::Column::DeletedAt.is_null())
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected > 0)
+}
+
+/// The turn ended, however it ended: it is neither running nor cut off any
+/// more, so `turn_state` goes back to NULL and `updated_at` is stamped.
+///
+/// With `status` this is also the `TurnComplete` review-status transition
+/// (what [`update_status`] used to write there), and it always writes. Without
+/// one — a cancelled turn, whose status the cancel path already settled — only
+/// a row still carrying a turn state is touched, so a repeated `TurnComplete`
+/// on a settled turn writes nothing. Returns `true` when a row was written.
+pub async fn finish_turn(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    status: Option<conversation::ConversationStatus>,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::Expr;
+    let mut update = conversation::Entity::update_many()
+        .col_expr(
+            conversation::Column::TurnState,
+            Expr::value(no_turn_state()),
+        )
+        .col_expr(conversation::Column::UpdatedAt, Expr::value(Utc::now()))
+        .filter(conversation::Column::Id.eq(conversation_id));
+    update = match status {
+        Some(status) => update.col_expr(conversation::Column::Status, Expr::value(status)),
+        None => update.filter(conversation::Column::TurnState.is_not_null()),
+    };
+    let res = update.exec(conn).await?;
+    Ok(res.rows_affected > 0)
+}
+
+/// The connection or the agent process went away while a turn was running:
+/// `running → interrupted`, as a compare-and-set so a turn that already ended
+/// (or never started) is left alone. `updated_at` is not touched — nothing
+/// happened, something stopped. Returns `true` when the row was marked.
+pub async fn mark_turn_interrupted(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::Expr;
+    let res = conversation::Entity::update_many()
+        .col_expr(
+            conversation::Column::TurnState,
+            Expr::value(conversation::ConversationTurnState::Interrupted),
+        )
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .filter(conversation::Column::TurnState.eq(conversation::ConversationTurnState::Running))
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected > 0)
+}
+
+/// Drop an `interrupted` mark without continuing the turn — the user settled
+/// the conversation by hand (marked it completed, cancelled it, reopened it),
+/// which answers the "pick this back up?" question the mark asks. A running
+/// turn is never touched. Returns `true` when a mark was cleared.
+pub async fn clear_interrupted_turn(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::Expr;
+    let res = conversation::Entity::update_many()
+        .col_expr(
+            conversation::Column::TurnState,
+            Expr::value(no_turn_state()),
+        )
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .filter(
+            conversation::Column::TurnState.eq(conversation::ConversationTurnState::Interrupted),
+        )
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected > 0)
+}
+
+/// Startup sweep: no turn outlives the process that ran it, so every row still
+/// marked `running` when the database opens was cut off by that process
+/// exiting — a quit, a crash, an update restart. Marks them all interrupted and
+/// returns how many there were.
+///
+/// This is what makes the mark survive the cases where nothing gets to write
+/// it at the time: the lifecycle subscriber records an interruption when it
+/// sees the connection die, but a process that is exiting (or already gone)
+/// may never get that far.
+pub async fn interrupt_orphaned_turns(conn: &DatabaseConnection) -> Result<u64, DbError> {
+    use sea_orm::sea_query::Expr;
+    let res = conversation::Entity::update_many()
+        .col_expr(
+            conversation::Column::TurnState,
+            Expr::value(conversation::ConversationTurnState::Interrupted),
+        )
+        .filter(conversation::Column::TurnState.eq(conversation::ConversationTurnState::Running))
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected)
+}
+
+/// Heartbeat for a turn that is still streaming: move `updated_at` forward to
+/// `at`, so "Updated" and the sidebar's recency order follow a long turn while
+/// it works instead of freezing at the moment it started. The caller throttles
+/// (see `acp::lifecycle::TurnActivityThrottle`); this only guards the write:
+///
+/// * `turn_state = 'running'` — a late event after the turn ended must not
+///   bump, and neither may one on a row whose turn was never recorded.
+/// * `updated_at < at` — strictly forward, like
+///   [`refresh_external_activity`].
+/// * `deleted_at IS NULL` — a deleted row stays out of the sidebar.
+///
+/// Returns `true` when a row was written, so the caller can broadcast a
+/// sidebar upsert.
+pub async fn touch_running_turn(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    at: chrono::DateTime<Utc>,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::Expr;
+    let res = conversation::Entity::update_many()
+        .col_expr(conversation::Column::UpdatedAt, Expr::value(at))
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .filter(conversation::Column::DeletedAt.is_null())
+        .filter(conversation::Column::TurnState.eq(conversation::ConversationTurnState::Running))
+        .filter(conversation::Column::UpdatedAt.lt(at))
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected > 0)
 }
 
 /// Manual rename: set the title AND lock it. Once locked, the per-turn
@@ -1000,6 +1154,10 @@ impl CarriedOverRow {
             pinned_at: Set(None),
             pin_order: Set(None),
             origin_cwd: Set(self.origin_cwd),
+            // The preserved row holds the OUTGOING session, which no agent is
+            // attached to any more: nothing is running on it, and whatever was
+            // cut off belongs to the conversation that keeps going.
+            turn_state: Set(None),
         }
     }
 }
@@ -1176,6 +1334,7 @@ fn conv_to_summary(r: conversation::Model) -> DbConversationSummary {
         parent_tool_use_id: r.parent_tool_use_id,
         delegation_call_id: r.delegation_call_id,
         origin_cwd: r.origin_cwd,
+        turn_state: r.turn_state,
     }
 }
 
@@ -3463,5 +3622,175 @@ mod tests {
             !rows.iter().any(|r| r.title.as_deref() == Some("hide")),
             "loop row must be excluded"
         );
+    }
+
+    // ── Turn state ────────────────────────────────────────────────────────
+
+    use crate::db::entities::conversation::ConversationTurnState;
+
+    async fn turn_state_of(db: &crate::db::AppDatabase, id: i32) -> Option<ConversationTurnState> {
+        conversation::Entity::find_by_id(id)
+            .one(&db.conn)
+            .await
+            .expect("query")
+            .expect("row present")
+            .turn_state
+    }
+
+    #[tokio::test]
+    async fn startup_sweep_interrupts_running_turns_and_nothing_else() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/turn-sweep").await;
+        let new_row = |title: &'static str| {
+            let conn = db.conn.clone();
+            async move {
+                create(
+                    &conn,
+                    folder,
+                    AgentType::ClaudeCode,
+                    Some(title.into()),
+                    None,
+                )
+                .await
+                .expect("row")
+                .id
+            }
+        };
+        let running = new_row("running").await;
+        let idle = new_row("idle").await;
+        let already = new_row("already interrupted").await;
+        assert!(mark_turn_running(&db.conn, running).await.unwrap());
+        assert!(mark_turn_running(&db.conn, already).await.unwrap());
+        assert!(mark_turn_interrupted(&db.conn, already).await.unwrap());
+        let updated_before = get_by_id(&db.conn, running).await.unwrap().updated_at;
+
+        assert_eq!(interrupt_orphaned_turns(&db.conn).await.unwrap(), 1);
+        assert_eq!(
+            turn_state_of(&db, running).await,
+            Some(ConversationTurnState::Interrupted),
+            "a turn still running at startup was cut off by the last exit"
+        );
+        assert_eq!(turn_state_of(&db, idle).await, None);
+        assert_eq!(
+            turn_state_of(&db, already).await,
+            Some(ConversationTurnState::Interrupted)
+        );
+        assert_eq!(
+            get_by_id(&db.conn, running).await.unwrap().updated_at,
+            updated_before,
+            "the sweep is bookkeeping, not activity"
+        );
+        // Idempotent: a second start finds nothing left running.
+        assert_eq!(interrupt_orphaned_turns(&db.conn).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn interrupted_mark_is_only_set_from_running() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/turn-cas").await;
+        let row = create(&db.conn, folder, AgentType::Codex, None, None)
+            .await
+            .expect("row");
+        assert!(
+            !mark_turn_interrupted(&db.conn, row.id).await.unwrap(),
+            "no turn ran, so none was cut off"
+        );
+        mark_turn_running(&db.conn, row.id).await.unwrap();
+        assert!(finish_turn(&db.conn, row.id, None).await.unwrap());
+        assert!(
+            !mark_turn_interrupted(&db.conn, row.id).await.unwrap(),
+            "a turn that ended cannot be interrupted afterwards"
+        );
+        assert_eq!(turn_state_of(&db, row.id).await, None);
+    }
+
+    #[tokio::test]
+    async fn finish_turn_without_a_status_skips_a_settled_row() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/turn-finish").await;
+        let row = create(&db.conn, folder, AgentType::ClaudeCode, None, None)
+            .await
+            .expect("row");
+        // A repeated `TurnComplete{cancelled}` on a turn that already ended.
+        assert!(!finish_turn(&db.conn, row.id, None).await.unwrap());
+        // With a status it is the TurnComplete transition and always writes.
+        let review = Some(conversation::ConversationStatus::PendingReview);
+        assert!(finish_turn(&db.conn, row.id, review).await.unwrap());
+        assert_eq!(
+            get_by_id(&db.conn, row.id).await.unwrap().status,
+            "pending_review"
+        );
+    }
+
+    #[tokio::test]
+    async fn heartbeat_only_touches_a_running_turn_and_only_forward() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/turn-heartbeat").await;
+        let row = create(&db.conn, folder, AgentType::ClaudeCode, None, None)
+            .await
+            .expect("row");
+        let later = Utc::now() + chrono::Duration::minutes(5);
+        assert!(
+            !touch_running_turn(&db.conn, row.id, later).await.unwrap(),
+            "no turn is running"
+        );
+
+        mark_turn_running(&db.conn, row.id).await.unwrap();
+        assert!(touch_running_turn(&db.conn, row.id, later).await.unwrap());
+        assert_eq!(get_by_id(&db.conn, row.id).await.unwrap().updated_at, later);
+        let earlier = later - chrono::Duration::minutes(1);
+        assert!(
+            !touch_running_turn(&db.conn, row.id, earlier).await.unwrap(),
+            "never backwards"
+        );
+
+        mark_turn_interrupted(&db.conn, row.id).await.unwrap();
+        let even_later = later + chrono::Duration::minutes(1);
+        assert!(
+            !touch_running_turn(&db.conn, row.id, even_later)
+                .await
+                .unwrap(),
+            "a late event after the turn was cut off must not bump"
+        );
+    }
+
+    #[tokio::test]
+    async fn settling_by_hand_clears_an_interrupted_mark_but_not_a_running_turn() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/turn-dismiss").await;
+        let row = create(&db.conn, folder, AgentType::ClaudeCode, None, None)
+            .await
+            .expect("row");
+        mark_turn_running(&db.conn, row.id).await.unwrap();
+        assert!(
+            !clear_interrupted_turn(&db.conn, row.id).await.unwrap(),
+            "a running turn is not the user's to dismiss"
+        );
+        assert_eq!(
+            turn_state_of(&db, row.id).await,
+            Some(ConversationTurnState::Running)
+        );
+        mark_turn_interrupted(&db.conn, row.id).await.unwrap();
+        assert!(clear_interrupted_turn(&db.conn, row.id).await.unwrap());
+        assert_eq!(turn_state_of(&db, row.id).await, None);
+    }
+
+    #[tokio::test]
+    async fn summary_carries_the_turn_state() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/turn-summary").await;
+        let row = create(&db.conn, folder, AgentType::ClaudeCode, None, None)
+            .await
+            .expect("row");
+        let json = serde_json::to_value(get_by_id(&db.conn, row.id).await.unwrap()).unwrap();
+        assert_eq!(
+            json["turn_state"],
+            serde_json::Value::Null,
+            "always present, so a client can tell `none` from an older server"
+        );
+        mark_turn_running(&db.conn, row.id).await.unwrap();
+        mark_turn_interrupted(&db.conn, row.id).await.unwrap();
+        let json = serde_json::to_value(get_by_id(&db.conn, row.id).await.unwrap()).unwrap();
+        assert_eq!(json["turn_state"], "interrupted");
     }
 }

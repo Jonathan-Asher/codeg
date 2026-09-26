@@ -87,6 +87,22 @@ pub async fn init_database(
 
     service::app_metadata_service::update_app_version(&conn, app_version).await?;
 
+    // No agent turn survives a process exit, so a row still marked as running
+    // was cut off when the previous process quit, crashed or restarted for an
+    // update. Record it as interrupted before anything can read the list, so
+    // every client sees it with a way to continue. Both runtimes open the
+    // database here, before any connection exists. A failure must not block
+    // startup — the rows just keep their stale mark.
+    match service::conversation_service::interrupt_orphaned_turns(&conn).await {
+        Ok(0) => {}
+        Ok(count) => {
+            tracing::info!(
+                "[conversation] marked {count} turn(s) cut off by the last exit as interrupted"
+            );
+        }
+        Err(e) => tracing::warn!("[conversation] failed to mark interrupted turns: {e}"),
+    }
+
     // Publish user-registered ACP agents into the process-global launch
     // registry before anything can ask for agent metadata. This is the single
     // chokepoint every runtime (desktop, server) goes through, so custom agents

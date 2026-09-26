@@ -1875,7 +1875,7 @@
       "push": "Enviar..."
     },
     "statusLabels": {
-      "in_progress": "Em andamento",
+      "in_progress": "Aberto",
       "pending_review": "Revisão",
       "completed": "Concluído",
       "cancelled": "Cancelado"
@@ -2106,6 +2106,22 @@
       "none": "—",
       "copyField": "Copiar {field}",
       "copiedField": "{field} copiado"
+    },
+    "sessionActivity": {
+      "label": "Atividade",
+      "working": "Trabalhando",
+      "needsYou": "Precisa de você",
+      "idle": "Ociosa",
+      "interrupted": "Interrompida",
+      "workingHint": "Há um turno em execução agora.",
+      "needsYouHint": "O agente está esperando sua resposta para continuar.",
+      "idleHint": "Nada em execução. Envie uma mensagem para iniciar um turno.",
+      "interruptedHint": "O último turno foi cortado antes de terminar: o codeg fechou ou o agente parou. Continuar retoma de onde parou.",
+      "interruptedBadge": "Interrompida: o último turno foi cortado",
+      "continue": "Continuar",
+      "continueTitle": "Retomar esta sessão e enviar “continue”",
+      "bannerTitle": "O último turno foi interrompido",
+      "bannerDescription": "O codeg fechou ou o agente parou antes de terminar."
     },
     "conversationCard": {
       "untitledConversation": "Conversa sem título",

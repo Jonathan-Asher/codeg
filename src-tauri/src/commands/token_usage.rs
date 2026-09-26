@@ -1359,6 +1359,7 @@ mod tests {
                 parent_tool_use_id: None,
                 delegation_call_id: None,
                 origin_cwd: None,
+                turn_state: None,
             },
             turns,
             session_stats: stats,

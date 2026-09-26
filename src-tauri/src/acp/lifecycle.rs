@@ -35,12 +35,80 @@ use tokio::sync::RwLock;
 /// Per-connection worker queue depth. Sized for the **filtered** event set
 /// only (see `is_lifecycle_relevant`) — high-frequency events (ContentDelta,
 /// ToolCall*, PermissionRequest) are dropped at the dispatcher and never
-/// enter the queue. The remaining 7 event types arrive at most a handful
+/// enter the queue. The remaining 8 event types arrive at most a handful
 /// of times per turn, so 64 slots is comfortable headroom for a sustained
 /// SQLite stall without forcing the dispatcher to block on `send`.
 /// (SessionStarted, TurnComplete, ConversationLinked, NativeSessionTitle,
-/// TranscriptRolledOver, Disconnected, Error.)
+/// TranscriptRolledOver, Prompting, Disconnected, Error — plus at most one
+/// throttled turn-activity heartbeat per [`TURN_ACTIVITY_BUMP_INTERVAL`].)
 const WORKER_QUEUE_CAPACITY: usize = 64;
+
+/// How often a turn that is still streaming moves its conversation's
+/// `updated_at` forward. The turn's start and end already stamp it; this keeps
+/// "Updated" and the sidebar's recency order honest for a turn that runs for
+/// minutes in between, at the cost of one row write + one sidebar upsert per
+/// interval per conversation — the bound the throttle exists to hold.
+const TURN_ACTIVITY_BUMP_INTERVAL: Duration = Duration::from_secs(45);
+
+/// Streaming events that show a turn is actively working. None of them reach a
+/// worker on their own (they are the high-frequency noise
+/// [`is_lifecycle_relevant`] keeps out); the dispatcher's
+/// [`TurnActivityThrottle`] lets one through per interval as a heartbeat.
+fn is_turn_activity(event: &AcpEvent) -> bool {
+    matches!(
+        event,
+        AcpEvent::ContentDelta { .. }
+            | AcpEvent::Thinking { .. }
+            | AcpEvent::ToolCall { .. }
+            | AcpEvent::ToolCallUpdate { .. }
+            | AcpEvent::PlanUpdate { .. }
+    )
+}
+
+/// Per-connection rate limit for the turn-activity heartbeat. A connection
+/// serves one conversation at a time, so keying on the connection id bounds
+/// the writes per conversation. Pure bookkeeping (the caller supplies `now`),
+/// so the policy is testable without a clock.
+#[derive(Debug)]
+pub(crate) struct TurnActivityThrottle {
+    interval: Duration,
+    last: HashMap<String, std::time::Instant>,
+}
+
+impl TurnActivityThrottle {
+    pub(crate) fn new(interval: Duration) -> Self {
+        Self {
+            interval,
+            last: HashMap::new(),
+        }
+    }
+
+    /// `updated_at` was just stamped for this connection's conversation (its
+    /// turn started): the next heartbeat is a full interval away.
+    pub(crate) fn note(&mut self, connection_id: &str, now: std::time::Instant) {
+        self.last.insert(connection_id.to_string(), now);
+    }
+
+    /// Whether an activity event at `now` should bump. A `true` answer counts
+    /// as the bump, so the next one is a full interval later. A connection
+    /// with no history is due at once (its turn start happened before this
+    /// process was listening, or was never seen).
+    pub(crate) fn due(&mut self, connection_id: &str, now: std::time::Instant) -> bool {
+        match self.last.get(connection_id) {
+            Some(last) if now.saturating_duration_since(*last) < self.interval => false,
+            _ => {
+                self.note(connection_id, now);
+                true
+            }
+        }
+    }
+
+    /// The connection is gone; forget it so the map stays bounded by the
+    /// connections that are alive.
+    pub(crate) fn forget(&mut self, connection_id: &str) {
+        self.last.remove(connection_id);
+    }
+}
 
 /// Whether an event needs to reach the per-connection worker. Mirrors the
 /// match arms in `connection_worker_loop` — keep in sync so the dispatcher
@@ -71,6 +139,11 @@ fn is_lifecycle_relevant(event: &AcpEvent) -> bool {
             | AcpEvent::TranscriptRolledOver { .. }
             | AcpEvent::StatusChanged {
                 status: ConnectionStatus::Disconnected
+            }
+            // Once per turn, when it starts: records the turn as running, the
+            // mark an interruption is later detected from.
+            | AcpEvent::StatusChanged {
+                status: ConnectionStatus::Prompting
             }
             | AcpEvent::Error { .. }
     )
@@ -287,11 +360,14 @@ pub(crate) async fn handle_event(
             let Some(cid) = conversation_id else {
                 return Ok(());
             };
+            // The turn is over whatever the reason, so it is no longer running
+            // — `finish_turn` clears that mark in the same write as the status
+            // transition. DB write before emit so any downstream subscriber
+            // that observes the ConversationStatusChanged event can assume the
+            // row is already at the target status.
+            let wrote =
+                conversation_service::finish_turn(db_conn, cid, target_status.clone()).await?;
             if let Some(ts) = target_status.clone() {
-                // DB write before emit so any downstream subscriber that observes
-                // the ConversationStatusChanged event can assume the row is
-                // already at the target status.
-                conversation_service::update_status(db_conn, cid, ts.clone()).await?;
                 emit_with_state(
                     &state_arc,
                     &emitter,
@@ -301,6 +377,13 @@ pub(crate) async fn handle_event(
                     },
                 )
                 .await;
+            }
+            // The status event above carries the status alone; the cleared
+            // turn state and the fresh `updated_at` reach every sidebar as the
+            // full summary.
+            if wrote {
+                crate::commands::conversations::emit_conversation_upsert(&emitter, db_conn, cid)
+                    .await;
             }
 
             // If this conversation was spawned by a delegation, resolve the
@@ -315,6 +398,29 @@ pub(crate) async fn handle_event(
                     last_text,
                 )
                 .await;
+            }
+            Ok(())
+        }
+        AcpEvent::StatusChanged {
+            status: ConnectionStatus::Prompting,
+        } => {
+            // A turn started. Record it as running — the mark
+            // `handle_terminal_event` (and the startup sweep, when the process
+            // itself dies) turns into `interrupted` if the turn never ends — and
+            // broadcast the row so every sidebar shows it working, with the
+            // `updated_at` the start stamped.
+            let Some((state_arc, emitter)) =
+                manager.get_state_and_emitter(&envelope.connection_id).await
+            else {
+                return Ok(());
+            };
+            let conversation_id = { state_arc.read().await.conversation_id };
+            let Some(cid) = conversation_id else {
+                return Ok(());
+            };
+            if conversation_service::mark_turn_running(db_conn, cid).await? {
+                crate::commands::conversations::emit_conversation_upsert(&emitter, db_conn, cid)
+                    .await;
             }
             Ok(())
         }
@@ -529,6 +635,12 @@ async fn handle_terminal_event(
         return Ok(());
     };
     let cid = entry.conversation_id;
+    // A turn still marked running when its connection dies never finished:
+    // the agent process exited, the transport dropped, or the connection was
+    // torn down mid-turn. Record that, so the conversation offers to pick the
+    // turn back up instead of reading as merely idle. CAS on `running`, so a
+    // connection that dies between turns leaves the row alone.
+    let interrupted = conversation_service::mark_turn_interrupted(db_conn, cid).await?;
     let changed = conversation_service::update_status_if(
         db_conn,
         cid,
@@ -536,19 +648,51 @@ async fn handle_terminal_event(
         ConversationStatus::Cancelled,
     )
     .await?;
-    if !changed {
-        return Ok(());
+    if changed {
+        emit_with_state(
+            &entry.state,
+            &entry.emitter,
+            AcpEvent::ConversationStatusChanged {
+                conversation_id: cid,
+                status: ConversationStatus::Cancelled,
+            },
+        )
+        .await;
     }
-    emit_with_state(
-        &entry.state,
-        &entry.emitter,
-        AcpEvent::ConversationStatusChanged {
-            conversation_id: cid,
-            status: ConversationStatus::Cancelled,
-        },
-    )
-    .await;
+    if interrupted {
+        crate::commands::conversations::emit_conversation_upsert(&entry.emitter, db_conn, cid)
+            .await;
+    }
     Ok(())
+}
+
+/// The throttled heartbeat of a streaming turn: move the bound conversation's
+/// `updated_at` to now and broadcast the row, so its "Updated" time and its
+/// place in the recency order follow the turn while it runs. Best-effort — a
+/// missed heartbeat is caught up by the next one or by the turn's end.
+async fn bump_turn_activity(
+    db_conn: &DatabaseConnection,
+    manager: &ConnectionManager,
+    connection_id: &str,
+) {
+    let Some((state_arc, emitter)) = manager.get_state_and_emitter(connection_id).await else {
+        return;
+    };
+    let conversation_id = { state_arc.read().await.conversation_id };
+    let Some(cid) = conversation_id else {
+        return;
+    };
+    match conversation_service::touch_running_turn(db_conn, cid, chrono::Utc::now()).await {
+        Ok(true) => {
+            crate::commands::conversations::emit_conversation_upsert(&emitter, db_conn, cid).await
+        }
+        Ok(false) => {}
+        Err(e) => tracing::warn!(
+            conversation_id = cid,
+            error = %e,
+            "[lifecycle] turn activity heartbeat failed"
+        ),
+    }
 }
 
 /// On a non-TurnComplete terminal event (Disconnected / Error) for a
@@ -1544,6 +1688,29 @@ async fn connection_worker_loop(
                 try_cache_link(&mut cache, &manager, &connection_id, *conversation_id).await;
             }
             AcpEvent::StatusChanged {
+                status: ConnectionStatus::Prompting,
+            } => {
+                // A turn that starts on a bound connection must be able to
+                // report its interruption, and that report reads the cache.
+                // `ConversationLinked` normally fills it; cover a connection
+                // whose link this worker never saw from the live state, which
+                // is authoritative.
+                if !cache.contains_key(&connection_id) {
+                    let bound = match manager.get_state(&connection_id).await {
+                        Some(state) => state.read().await.conversation_id,
+                        None => None,
+                    };
+                    if let Some(cid) = bound {
+                        try_cache_link(&mut cache, &manager, &connection_id, cid).await;
+                    }
+                }
+                handle_event_with_retry(&db, &manager, envelope, broker.as_ref()).await;
+            }
+            payload if is_turn_activity(payload) => {
+                // Only the dispatcher's throttled heartbeat gets here.
+                bump_turn_activity(&db, &manager, &connection_id).await;
+            }
+            AcpEvent::StatusChanged {
                 status: ConnectionStatus::Disconnected,
             } => {
                 if terminal_dispatched {
@@ -1640,6 +1807,7 @@ pub fn lifecycle_subscriber_task(
         // event by dropping the sender (worker drains its queue and exits).
         let mut workers: HashMap<String, mpsc::Sender<Arc<EventEnvelope>>> = HashMap::new();
         let mut lag_throttle = LagLogThrottle::new(LAG_LOG_WINDOW);
+        let mut activity_throttle = TurnActivityThrottle::new(TURN_ACTIVITY_BUMP_INTERVAL);
         loop {
             match rx.recv().await {
                 Ok(envelope_arc) => {
@@ -1663,12 +1831,41 @@ pub fn lifecycle_subscriber_task(
                         }
                     }
 
+                    // Turn-activity heartbeat: at most one streaming event per
+                    // connection per interval reaches its worker, which moves
+                    // the conversation's `updated_at`. Only to a worker that
+                    // already exists (a connection bound to a conversation has
+                    // one — its link and its turn start are relevant events),
+                    // and never blocking: a heartbeat is worth nothing late, so
+                    // a full mailbox simply skips this one.
+                    if is_turn_activity(&envelope_arc.payload) {
+                        let conn_id = &envelope_arc.connection_id;
+                        if let Some(tx) = workers.get(conn_id) {
+                            if activity_throttle.due(conn_id, std::time::Instant::now()) {
+                                let _ = tx.try_send(Arc::clone(&envelope_arc));
+                            }
+                        }
+                        continue;
+                    }
+
                     // Fast-path filter: skip events the worker would no-op.
                     // Avoids spawning a worker for connections that only emit
                     // high-frequency noise and avoids crowding existing
                     // workers' mailboxes.
                     if !is_lifecycle_relevant(&envelope_arc.payload) {
                         continue;
+                    }
+
+                    // A turn start stamps `updated_at` itself, so the first
+                    // heartbeat is a full interval after it.
+                    if matches!(
+                        envelope_arc.payload,
+                        AcpEvent::StatusChanged {
+                            status: ConnectionStatus::Prompting
+                        }
+                    ) {
+                        activity_throttle
+                            .note(&envelope_arc.connection_id, std::time::Instant::now());
                     }
 
                     let conn_id = envelope_arc.connection_id.clone();
@@ -1723,6 +1920,7 @@ pub fn lifecycle_subscriber_task(
                         // exits. Releases the per-connection `CachedConn`
                         // (state Arc + emitter) the worker was holding.
                         workers.remove(&conn_id);
+                        activity_throttle.forget(&conn_id);
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
@@ -2436,6 +2634,328 @@ mod tests {
         );
     }
 
+    // ── Turn state: running → ended, or running → interrupted ───────────
+
+    use crate::db::entities::conversation::ConversationTurnState;
+
+    async fn read_turn_state(
+        db: &crate::db::AppDatabase,
+        conversation_id: i32,
+    ) -> Option<ConversationTurnState> {
+        use crate::db::entities::conversation;
+        use sea_orm::EntityTrait;
+        conversation::Entity::find_by_id(conversation_id)
+            .one(&db.conn)
+            .await
+            .unwrap()
+            .expect("conversation row exists")
+            .turn_state
+    }
+
+    async fn seeded_conversation(db: &crate::db::AppDatabase, path: &str) -> i32 {
+        let folder_id = test_helpers::seed_folder(db, path).await;
+        conversation_service::create(&db.conn, folder_id, AgentType::ClaudeCode, None, None)
+            .await
+            .unwrap()
+            .id
+    }
+
+    /// A manager holding one live connection `c1` bound to `conversation_id`.
+    async fn manager_bound_to(conversation_id: i32) -> ConnectionManager {
+        let mgr = ConnectionManager::new();
+        mgr.connections.lock().await.insert(
+            "c1".to_string(),
+            fake_connection_with_state("c1", Some(conversation_id)),
+        );
+        mgr
+    }
+
+    fn on_c1(seq: u64, payload: AcpEvent) -> EventEnvelope {
+        EventEnvelope {
+            seq,
+            connection_id: "c1".to_string(),
+            payload,
+        }
+    }
+
+    fn turn_started() -> AcpEvent {
+        AcpEvent::StatusChanged {
+            status: ConnectionStatus::Prompting,
+        }
+    }
+
+    fn turn_complete(stop_reason: &str) -> AcpEvent {
+        AcpEvent::TurnComplete {
+            session_id: "s".into(),
+            stop_reason: stop_reason.into(),
+            agent_type: "claude_code".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn turn_start_marks_the_turn_running_and_its_end_clears_it() {
+        let db = test_helpers::fresh_in_memory_db().await;
+        let cid = seeded_conversation(&db, "/tmp/turn-state-normal").await;
+        assert_eq!(
+            read_turn_state(&db, cid).await,
+            None,
+            "a new row has no turn"
+        );
+
+        let mgr = manager_bound_to(cid).await;
+        handle_event(&db.conn, &mgr, &on_c1(1, turn_started()), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            read_turn_state(&db, cid).await,
+            Some(ConversationTurnState::Running)
+        );
+
+        handle_event(&db.conn, &mgr, &on_c1(2, turn_complete("end_turn")), None)
+            .await
+            .unwrap();
+        assert_eq!(read_turn_state(&db, cid).await, None);
+        assert_eq!(
+            read_row_status(&db, cid).await,
+            ConversationStatus::PendingReview,
+            "the status transition rides the same write"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_connection_dying_mid_turn_marks_the_turn_interrupted() {
+        let db = test_helpers::fresh_in_memory_db().await;
+        let cid = seeded_conversation(&db, "/tmp/turn-state-died").await;
+        let mgr = manager_bound_to(cid).await;
+        let mut cache: HashMap<String, CachedConn> = HashMap::new();
+        seed_cache(&mut cache, &mgr, "c1", cid).await;
+
+        handle_event(&db.conn, &mgr, &on_c1(1, turn_started()), None)
+            .await
+            .unwrap();
+        // No TurnComplete: the agent process died, then the connection went.
+        handle_terminal_event(&db.conn, &mut cache, "c1")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            read_turn_state(&db, cid).await,
+            Some(ConversationTurnState::Interrupted)
+        );
+        assert_eq!(
+            read_row_status(&db, cid).await,
+            ConversationStatus::Cancelled,
+            "the existing in_progress → cancelled flip still happens"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_turn_that_ended_is_never_marked_interrupted() {
+        // Every way a turn can END — success, a user cancel, a failure — must
+        // leave nothing to continue when the connection is later torn down
+        // (idle sweep, tab close, app quit between turns).
+        for reason in ["end_turn", "cancelled", "refusal"] {
+            let db = test_helpers::fresh_in_memory_db().await;
+            let cid = seeded_conversation(&db, "/tmp/turn-state-ended").await;
+            let mgr = manager_bound_to(cid).await;
+            let mut cache: HashMap<String, CachedConn> = HashMap::new();
+            seed_cache(&mut cache, &mgr, "c1", cid).await;
+
+            handle_event(&db.conn, &mgr, &on_c1(1, turn_started()), None)
+                .await
+                .unwrap();
+            handle_event(&db.conn, &mgr, &on_c1(2, turn_complete(reason)), None)
+                .await
+                .unwrap();
+            handle_terminal_event(&db.conn, &mut cache, "c1")
+                .await
+                .unwrap();
+
+            assert_eq!(
+                read_turn_state(&db, cid).await,
+                None,
+                "a turn that ended with `{reason}` is not an interruption"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_next_turn_clears_an_interrupted_mark() {
+        let db = test_helpers::fresh_in_memory_db().await;
+        let cid = seeded_conversation(&db, "/tmp/turn-state-resume").await;
+        let mgr = manager_bound_to(cid).await;
+        let mut cache: HashMap<String, CachedConn> = HashMap::new();
+        seed_cache(&mut cache, &mgr, "c1", cid).await;
+        handle_event(&db.conn, &mgr, &on_c1(1, turn_started()), None)
+            .await
+            .unwrap();
+        handle_terminal_event(&db.conn, &mut cache, "c1")
+            .await
+            .unwrap();
+        assert_eq!(
+            read_turn_state(&db, cid).await,
+            Some(ConversationTurnState::Interrupted)
+        );
+
+        // Resumed on a fresh connection; the user sends "continue".
+        let resumed = manager_bound_to(cid).await;
+        handle_event(&db.conn, &resumed, &on_c1(1, turn_started()), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            read_turn_state(&db, cid).await,
+            Some(ConversationTurnState::Running),
+            "a new turn replaces the interrupted mark"
+        );
+        handle_event(
+            &db.conn,
+            &resumed,
+            &on_c1(2, turn_complete("end_turn")),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(read_turn_state(&db, cid).await, None);
+    }
+
+    #[tokio::test]
+    async fn turn_state_changes_are_broadcast_as_sidebar_upserts() {
+        use crate::web::event_bridge::{WebEventBroadcaster, CONVERSATION_CHANGED_EVENT};
+        let db = test_helpers::fresh_in_memory_db().await;
+        let cid = seeded_conversation(&db, "/tmp/turn-state-upsert").await;
+        let broadcaster = Arc::new(WebEventBroadcaster::new());
+        let mut rx = broadcaster.subscribe();
+        let mgr = ConnectionManager::new();
+        {
+            let mut conn = fake_connection_with_state("c1", Some(cid));
+            conn.emitter = EventEmitter::test_web_only(broadcaster.clone());
+            mgr.connections.lock().await.insert("c1".to_string(), conn);
+        }
+        let mut cache: HashMap<String, CachedConn> = HashMap::new();
+        seed_cache(&mut cache, &mgr, "c1", cid).await;
+
+        /// The `turn_state` of the last upsert queued for `cid`, if any.
+        fn upserted_turn_state(
+            rx: &mut tokio::sync::broadcast::Receiver<crate::web::event_bridge::WebEvent>,
+            cid: i32,
+        ) -> Option<serde_json::Value> {
+            let mut last = None;
+            while let Ok(evt) = rx.try_recv() {
+                let p = &*evt.payload;
+                if evt.channel == CONVERSATION_CHANGED_EVENT && p["kind"] == "upsert" {
+                    assert_eq!(p["summary"]["id"], cid);
+                    last = Some(p["summary"]["turn_state"].clone());
+                }
+            }
+            last
+        }
+
+        handle_event(&db.conn, &mgr, &on_c1(1, turn_started()), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            upserted_turn_state(&mut rx, cid),
+            Some(serde_json::json!("running"))
+        );
+        handle_terminal_event(&db.conn, &mut cache, "c1")
+            .await
+            .unwrap();
+        assert_eq!(
+            upserted_turn_state(&mut rx, cid),
+            Some(serde_json::json!("interrupted"))
+        );
+    }
+
+    #[tokio::test]
+    async fn the_activity_heartbeat_moves_updated_at_only_while_a_turn_runs() {
+        let db = test_helpers::fresh_in_memory_db().await;
+        let cid = seeded_conversation(&db, "/tmp/turn-heartbeat").await;
+        let mgr = manager_bound_to(cid).await;
+        let updated_at = |db: &crate::db::AppDatabase| {
+            let conn = db.conn.clone();
+            async move {
+                conversation_service::get_by_id(&conn, cid)
+                    .await
+                    .unwrap()
+                    .updated_at
+            }
+        };
+
+        // No turn running: a stray event after the turn must not bump.
+        let before = updated_at(&db).await;
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        bump_turn_activity(&db.conn, &mgr, "c1").await;
+        assert_eq!(updated_at(&db).await, before);
+
+        handle_event(&db.conn, &mgr, &on_c1(1, turn_started()), None)
+            .await
+            .unwrap();
+        let started = updated_at(&db).await;
+        assert!(started > before, "a turn start is activity");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        bump_turn_activity(&db.conn, &mgr, "c1").await;
+        assert!(
+            updated_at(&db).await > started,
+            "a streaming turn keeps its row's updated_at moving"
+        );
+    }
+
+    #[test]
+    fn turn_activity_throttle_lets_one_heartbeat_through_per_interval() {
+        let mut throttle = TurnActivityThrottle::new(Duration::from_secs(45));
+        let t0 = std::time::Instant::now();
+        // The turn start stamped updated_at, so the first heartbeat waits a
+        // full interval however busy the stream is.
+        throttle.note("c1", t0);
+        assert!(!throttle.due("c1", t0 + Duration::from_secs(1)));
+        assert!(!throttle.due("c1", t0 + Duration::from_secs(44)));
+        assert!(throttle.due("c1", t0 + Duration::from_secs(45)));
+        // That heartbeat restarts the window.
+        assert!(!throttle.due("c1", t0 + Duration::from_secs(46)));
+        assert!(!throttle.due("c1", t0 + Duration::from_secs(89)));
+        assert!(throttle.due("c1", t0 + Duration::from_secs(90)));
+    }
+
+    #[test]
+    fn turn_activity_throttle_is_per_connection_and_forgets_closed_ones() {
+        let mut throttle = TurnActivityThrottle::new(Duration::from_secs(45));
+        let t0 = std::time::Instant::now();
+        assert!(
+            throttle.due("c1", t0),
+            "a connection whose turn start was never seen is due at once"
+        );
+        assert!(throttle.due("c2", t0), "connections don't share a window");
+        assert!(!throttle.due("c1", t0 + Duration::from_secs(10)));
+        assert!(!throttle.due("c2", t0 + Duration::from_secs(10)));
+
+        throttle.forget("c1");
+        assert!(
+            throttle.due("c1", t0 + Duration::from_secs(10)),
+            "a forgotten connection starts over"
+        );
+        assert!(!throttle.due("c2", t0 + Duration::from_secs(11)));
+        // An earlier `now` (clock read out of order) never panics or bumps.
+        assert!(!throttle.due("c2", t0));
+    }
+
+    #[test]
+    fn only_streaming_events_count_as_turn_activity() {
+        assert!(is_turn_activity(&AcpEvent::ContentDelta {
+            text: "x".into(),
+            parent_tool_use_id: None,
+        }));
+        assert!(is_turn_activity(&AcpEvent::Thinking {
+            text: "x".into(),
+            parent_tool_use_id: None,
+        }));
+        assert!(!is_turn_activity(&turn_started()));
+        assert!(!is_turn_activity(&turn_complete("end_turn")));
+        assert!(!is_turn_activity(&AcpEvent::UsageUpdate {
+            used: 1,
+            size: 2
+        }));
+    }
+
     #[test]
     fn format_terminal_error_with_code_prefixes_bracketed_label() {
         // The lifecycle worker stitches `[code] message` together so the
@@ -2610,11 +3130,13 @@ mod tests {
             text: "x".into(),
             parent_tool_use_id: None,
         }));
-        assert!(!is_lifecycle_relevant(&AcpEvent::StatusChanged {
-            status: ConnectionStatus::Connected,
+        // A turn start records the turn as running (the interrupted-turn mark
+        // is derived from it), so it must reach the worker.
+        assert!(is_lifecycle_relevant(&AcpEvent::StatusChanged {
+            status: ConnectionStatus::Prompting,
         }));
         assert!(!is_lifecycle_relevant(&AcpEvent::StatusChanged {
-            status: ConnectionStatus::Prompting,
+            status: ConnectionStatus::Connected,
         }));
         // ToolCall / ToolCallUpdate are NO LONGER worker-relevant: delegation
         // tool_call_id capture moved to the dispatcher loop

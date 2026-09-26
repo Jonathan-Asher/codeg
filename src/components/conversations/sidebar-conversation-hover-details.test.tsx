@@ -117,7 +117,7 @@ describe("SidebarConversationHoverDetails", () => {
     seed()
     renderBubble(conv({ status: "in_progress" }))
 
-    expect(screen.queryByText("In Progress")).toBeNull()
+    expect(screen.queryByText("Open")).toBeNull()
   })
 
   it("names the folder and shows its absolute path", () => {

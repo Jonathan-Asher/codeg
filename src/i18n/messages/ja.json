@@ -1875,7 +1875,7 @@
       "push": "プッシュ..."
     },
     "statusLabels": {
-      "in_progress": "進行中",
+      "in_progress": "未完了",
       "pending_review": "レビュー",
       "completed": "完了",
       "cancelled": "キャンセル済み"
@@ -2106,6 +2106,22 @@
       "none": "—",
       "copyField": "{field}をコピー",
       "copiedField": "{field}をコピーしました"
+    },
+    "sessionActivity": {
+      "label": "アクティビティ",
+      "working": "実行中",
+      "needsYou": "対応待ち",
+      "idle": "待機中",
+      "interrupted": "中断",
+      "workingHint": "いまターンを実行しています。",
+      "needsYouHint": "エージェントはあなたの対応を待っています。",
+      "idleHint": "実行中のものはありません。メッセージを送ると新しいターンが始まります。",
+      "interruptedHint": "前回のターンは完了前に中断されました（codeg が終了したか、エージェントが停止しました）。「続行」で中断したところから再開します。",
+      "interruptedBadge": "中断：前回のターンは完了していません",
+      "continue": "続行",
+      "continueTitle": "このセッションを再開して「continue」を送信",
+      "bannerTitle": "前回のターンは中断されました",
+      "bannerDescription": "完了する前に codeg が終了したか、エージェントが停止しました。"
     },
     "conversationCard": {
       "untitledConversation": "無題の会話",

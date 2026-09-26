@@ -521,7 +521,18 @@ export interface DbConversationSummary {
    *  worktree path it originally ran in. Drives the "source worktree removed"
    *  badge. */
   origin_cwd?: string | null
+  /** Where the latest turn stands, persisted by the backend: `running` while
+   *  one is in flight, `interrupted` when it was cut off (codeg exited, or the
+   *  agent process or its connection died mid-turn), `null` otherwise. Absent
+   *  (`undefined`) only from a server that predates the field. Unlike
+   *  `status` — the review state, which the user can also set by hand — this
+   *  says whether an agent is actually working. See `lib/session-activity.ts`. */
+  turn_state?: ConversationTurnState | null
 }
+
+/** Mirrors Rust `ConversationTurnState`
+ *  (src-tauri/src/db/entities/conversation.rs). */
+export type ConversationTurnState = "running" | "interrupted"
 
 /** Payload for the global `conversation://changed` side-channel that keeps
  *  every client's sidebar list/status in sync across desktop + browsers.
@@ -936,7 +947,7 @@ export const STATUS_ORDER: ConversationStatus[] = [
 ]
 
 export const STATUS_LABELS: Record<ConversationStatus, string> = {
-  in_progress: "In Progress",
+  in_progress: "Open",
   pending_review: "Review",
   completed: "Completed",
   cancelled: "Cancelled",

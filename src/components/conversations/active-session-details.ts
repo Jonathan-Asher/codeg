@@ -50,6 +50,27 @@ export function pickModelFromTurns(turns: MessageTurn[]): string | null {
 }
 
 /**
+ * The summary fields the backend keeps moving while a conversation is open —
+ * its turn edges and streaming heartbeat (`turn_state`, `updated_at`) and a
+ * status set from any client — all broadcast to the workspace list as they
+ * happen. A detail summary is a snapshot from when the detail loaded, so a
+ * view that prefers it for everything else takes these from the live row, or
+ * "Updated" and the activity would freeze at load time.
+ */
+export function withLiveSummaryFields(
+  loaded: DbConversationSummary,
+  live: DbConversationSummary | null | undefined
+): DbConversationSummary {
+  if (!live || live.id !== loaded.id) return loaded
+  return {
+    ...loaded,
+    status: live.status,
+    updated_at: live.updated_at,
+    turn_state: live.turn_state,
+  }
+}
+
+/**
  * Resolve the active conversation tab's summary + live token usage the same way
  * the tab view renders them.
  *
@@ -68,11 +89,14 @@ export function resolveActiveSessionDetails(
 ): ActiveSessionDetails {
   const runtimeId = tab?.runtimeConversationId ?? tab?.conversationId ?? null
   const runtimeSession = runtimeId != null ? getSession(runtimeId) : null
-  const summary =
-    runtimeSession?.detail?.summary ??
-    (tab?.conversationId != null
+  const workspaceSummary =
+    tab?.conversationId != null
       ? (conversations.find((c) => c.id === tab.conversationId) ?? null)
-      : null)
+      : null
+  const loadedSummary = runtimeSession?.detail?.summary ?? null
+  const summary = loadedSummary
+    ? withLiveSummaryFields(loadedSummary, workspaceSummary)
+    : workspaceSummary
   const stats =
     runtimeSession?.sessionStats ??
     runtimeSession?.detail?.session_stats ??

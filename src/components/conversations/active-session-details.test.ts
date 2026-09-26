@@ -130,6 +130,42 @@ describe("resolveActiveSessionDetails", () => {
     expect(result.summary?.title).toBe("from-detail")
   })
 
+  it("keeps the turn state and Updated time live over a loaded detail snapshot", () => {
+    // The detail loaded when the turn started; the workspace row has since
+    // received the streaming heartbeat and the turn's interruption.
+    const getSession = vi.fn(() =>
+      session({
+        detail: detail({
+          summary: summary({
+            id: 5,
+            title: "from-detail",
+            turn_state: "running",
+            updated_at: "2026-06-10T16:31:00.000Z",
+          }),
+        }),
+      })
+    )
+    const result = resolveActiveSessionDetails(
+      { conversationId: 5 },
+      getSession,
+      [
+        summary({
+          id: 5,
+          title: "from-workspace",
+          status: "cancelled",
+          turn_state: "interrupted",
+          updated_at: "2026-06-10T17:06:00.000Z",
+        }),
+      ]
+    )
+    expect(result.summary).toMatchObject({
+      title: "from-detail",
+      status: "cancelled",
+      turn_state: "interrupted",
+      updated_at: "2026-06-10T17:06:00.000Z",
+    })
+  })
+
   it("falls back to detail.session_stats when sessionStats is absent", () => {
     const ds = stats({ total_tokens: 99 })
     const getSession = vi.fn(() =>

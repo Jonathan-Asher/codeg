@@ -2582,7 +2582,14 @@ pub async fn update_conversation_status_core(
         })?;
     conversation_service::update_status(conn, conversation_id, status_enum)
         .await
-        .map_err(AppCommandError::from)
+        .map_err(AppCommandError::from)?;
+    // Settling a conversation by hand answers the question an `interrupted`
+    // mark asks, so the mark goes with it. Both callers broadcast an upsert
+    // right after this, which carries the cleared state to every client.
+    conversation_service::clear_interrupted_turn(conn, conversation_id)
+        .await
+        .map_err(AppCommandError::from)?;
+    Ok(())
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -2881,6 +2888,7 @@ mod tests {
             parent_tool_use_id: Some(parent_tool_use_id.into()),
             delegation_call_id: Some("call-1".into()),
             origin_cwd: None,
+            turn_state: None,
         }
     }
 
@@ -6683,6 +6691,7 @@ mod tests {
                 parent_tool_use_id: None,
                 delegation_call_id: None,
                 origin_cwd: None,
+                turn_state: None,
             },
             turns,
             session_stats: None,

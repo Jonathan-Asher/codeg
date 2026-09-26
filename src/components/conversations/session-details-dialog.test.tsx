@@ -1,7 +1,7 @@
 import { type ReactElement } from "react"
-import { fireEvent, render } from "@testing-library/react"
+import { act, cleanup, fireEvent, render } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
-import { describe, expect, it, vi, beforeEach } from "vitest"
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest"
 
 import { SessionDetailsDialog } from "./session-details-dialog"
 import type { DbConversationSummary, SessionStats } from "@/lib/types"
@@ -24,11 +24,22 @@ vi.mock("@/lib/utils", async (importOriginal) => {
   return { ...actual, copyTextToClipboard: vi.fn().mockResolvedValue(true) }
 })
 
+// Continue opens a tab and queues a prompt; here only the hand-off matters.
+vi.mock("@/lib/session-continue", () => ({
+  continueInterruptedSession: vi.fn(),
+}))
+
 import { getFolderConversation } from "@/lib/api"
 import { rememberModelLabels } from "@/lib/model-label-store"
 import { copyTextToClipboard } from "@/lib/utils"
+import { continueInterruptedSession } from "@/lib/session-continue"
+import {
+  __resetConversationAttentionForTests,
+  useConversationAttentionStore,
+} from "@/stores/conversation-attention-store"
 const mockGet = vi.mocked(getFolderConversation)
 const mockCopy = vi.mocked(copyTextToClipboard)
+const mockContinue = vi.mocked(continueInterruptedSession)
 
 function summary(
   over: Partial<DbConversationSummary> = {}
@@ -166,7 +177,7 @@ describe("SessionDetailsDialog", () => {
     )
     expect(getByText("My session")).toBeTruthy()
     expect(getByText("Claude Code")).toBeTruthy()
-    expect(getByText("In Progress")).toBeTruthy()
+    expect(getByText("Open")).toBeTruthy()
   })
 
   it("shows an em dash for an unknown used token count, never 0 / max", () => {
@@ -387,5 +398,86 @@ describe("SessionDetailsDialog", () => {
     fireEvent.click(getByLabelText("Copy Session ID"))
     expect(mockCopy).toHaveBeenCalledWith("7")
     expect(await findByLabelText("Copied Session ID")).toBeTruthy()
+  })
+})
+
+describe("SessionDetailsDialog activity", () => {
+  beforeEach(() => {
+    mockGet.mockReset()
+    mockContinue.mockClear()
+  })
+  afterEach(() => {
+    cleanup()
+    __resetConversationAttentionForTests()
+  })
+
+  function renderDetails(over: Partial<DbConversationSummary>) {
+    return renderWithIntl(
+      <SessionDetailsDialog
+        open
+        onOpenChange={() => {}}
+        summary={summary(over)}
+        stats={fullStats}
+      />
+    )
+  }
+
+  function activityOf(container: HTMLElement): string | null {
+    return (
+      container.ownerDocument
+        .querySelector("[data-testid='session-activity']")
+        ?.getAttribute("data-activity") ?? null
+    )
+  }
+
+  it("says an open conversation with no turn running is idle, not running", () => {
+    const { container, getByText, queryByText } = renderDetails({
+      status: "in_progress",
+      turn_state: null,
+    })
+    expect(activityOf(container)).toBe("idle")
+    expect(getByText("Idle")).toBeTruthy()
+    expect(queryByText("Working")).toBeNull()
+    // The review status is still shown, under a name that doesn't read as
+    // "running".
+    expect(getByText("Open")).toBeTruthy()
+  })
+
+  it("shows a running turn as working", () => {
+    const { container, getByText } = renderDetails({ turn_state: "running" })
+    expect(activityOf(container)).toBe("working")
+    expect(getByText("Working")).toBeTruthy()
+  })
+
+  it("names what a blocked session is waiting for", () => {
+    act(() => {
+      useConversationAttentionStore.setState({
+        byConversationId: new Map([[7, "permission"]]),
+      })
+    })
+    const { container, getByText } = renderDetails({ turn_state: "running" })
+    expect(activityOf(container)).toBe("needs_you")
+    expect(getByText("Needs you")).toBeTruthy()
+    expect(getByText("Waiting for your permission")).toBeTruthy()
+  })
+
+  it("offers to continue an interrupted turn", () => {
+    const { container, getByRole } = renderDetails({
+      status: "cancelled",
+      turn_state: "interrupted",
+    })
+    expect(activityOf(container)).toBe("interrupted")
+    fireEvent.click(getByRole("button", { name: "Continue" }))
+    expect(mockContinue).toHaveBeenCalledTimes(1)
+    expect(mockContinue.mock.calls[0][0]).toMatchObject({
+      id: 7,
+      folder_id: 1,
+      agent_type: "claude_code",
+    })
+  })
+
+  it("offers Continue for interrupted turns only", () => {
+    const { queryByRole } = renderDetails({ turn_state: null })
+    expect(queryByRole("button", { name: "Continue" })).toBeNull()
   })
 })

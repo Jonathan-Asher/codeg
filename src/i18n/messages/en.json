@@ -1875,7 +1875,7 @@
       "push": "Push..."
     },
     "statusLabels": {
-      "in_progress": "In Progress",
+      "in_progress": "Open",
       "pending_review": "Review",
       "completed": "Completed",
       "cancelled": "Cancelled"
@@ -2106,6 +2106,22 @@
       "none": "—",
       "copyField": "Copy {field}",
       "copiedField": "Copied {field}"
+    },
+    "sessionActivity": {
+      "label": "Activity",
+      "working": "Working",
+      "needsYou": "Needs you",
+      "idle": "Idle",
+      "interrupted": "Interrupted",
+      "workingHint": "A turn is running right now.",
+      "needsYouHint": "The agent is waiting for you before it can go on.",
+      "idleHint": "Nothing is running. Send a message to start a turn.",
+      "interruptedHint": "The last turn was cut off before it finished: codeg closed or the agent stopped. Continue picks it up where it left off.",
+      "interruptedBadge": "Interrupted: the last turn was cut off",
+      "continue": "Continue",
+      "continueTitle": "Resume this session and send “continue”",
+      "bannerTitle": "The last turn was interrupted",
+      "bannerDescription": "codeg closed or the agent stopped before it finished."
     },
     "conversationCard": {
       "untitledConversation": "Untitled conversation",

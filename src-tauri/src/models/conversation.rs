@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::agent::AgentType;
 use super::message::{MessageTurn, TurnUsage};
-use crate::db::entities::conversation::ConversationKind;
+use crate::db::entities::conversation::{ConversationKind, ConversationTurnState};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationSummary {
@@ -72,6 +72,13 @@ pub struct DbConversationSummary {
     /// path (set when a removed task worktree's conversations were re-parented).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub origin_cwd: Option<String>,
+    /// Mirror of `conversation.turn_state`: `running` while a turn is in
+    /// flight, `interrupted` when the last one was cut off, `null` otherwise.
+    /// Always serialized, so a client can tell "no turn" (`null`) apart from a
+    /// server that predates the field (absent). `default` keeps summaries from
+    /// such a server deserializable.
+    #[serde(default)]
+    pub turn_state: Option<ConversationTurnState>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

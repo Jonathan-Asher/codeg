@@ -77,7 +77,7 @@ export const SidebarFolderGroupHeader = memo(function SidebarFolderGroupHeader({
   groupId: number
   name: string
   /**
-   * How many sessions are currently RUNNING (`in_progress`) across every folder
+   * How many sessions are currently RUNNING (a turn in flight) across every folder
    * in the group — the folder header's badge, one level up, and zero renders no
    * badge at all. Deliberately not "how many folders it holds": that number was
    * a different question asked in the same slot as the folder rows' live-activity

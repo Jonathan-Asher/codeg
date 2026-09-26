@@ -705,3 +705,70 @@ describe("SidebarConversationCard waiting-on-you indicator", () => {
     )
   })
 })
+
+// The row's right-hand badge follows the persisted turn state, not the review
+// status: `in_progress` is the default for every conversation and survives a
+// turn that was killed, so it must not spin on its own.
+describe("SidebarConversationCard activity indicator", () => {
+  const onContinue = vi.fn()
+
+  beforeEach(() => {
+    onContinue.mockClear()
+  })
+  afterEach(() => {
+    cleanup()
+  })
+
+  function renderRow(c: DbConversationSummary) {
+    return renderWithIntl(
+      <SidebarConversationCard
+        conversation={c}
+        isSelected={false}
+        timeLabel="5m"
+        onSelect={onSelect}
+        onDoubleClick={onDoubleClick}
+        onRename={onRename}
+        onDelete={onDelete}
+        onStatusChange={onStatusChange}
+        onContinue={onContinue}
+      />
+    )
+  }
+
+  it("spins only while a turn is running", () => {
+    renderRow({ ...conv(1), status: "in_progress", turn_state: "running" })
+    expect(screen.getByTitle("Running")).toBeInTheDocument()
+    expect(screen.queryByText("5m")).not.toBeInTheDocument()
+  })
+
+  it("shows the time, not a spinner, for an open conversation with no turn running", () => {
+    renderRow({ ...conv(1), status: "in_progress", turn_state: null })
+    expect(screen.queryByTitle("Running")).not.toBeInTheDocument()
+    expect(screen.getByText("5m")).toBeInTheDocument()
+  })
+
+  it("flags an interrupted turn and offers to continue it", () => {
+    const interrupted: DbConversationSummary = {
+      ...conv(7),
+      status: "cancelled",
+      turn_state: "interrupted",
+    }
+    renderRow(interrupted)
+    expect(
+      screen.getByTestId("conversation-interrupted-badge")
+    ).toHaveAttribute("title", "Interrupted: the last turn was cut off")
+    // Outranks the cancelled cross the killed turn also left behind.
+    expect(screen.queryByTitle("Cancelled")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("conversation-continue-action"))
+    expect(onContinue).toHaveBeenCalledWith(interrupted)
+    expect(onSelect).not.toHaveBeenCalledWith(7, "claude_code", 1)
+  })
+
+  it("offers Continue on interrupted rows only", () => {
+    renderRow({ ...conv(1), status: "in_progress", turn_state: null })
+    expect(
+      screen.queryByTestId("conversation-continue-action")
+    ).not.toBeInTheDocument()
+  })
+})

@@ -1875,7 +1875,7 @@
       "push": "推送..."
     },
     "statusLabels": {
-      "in_progress": "進行中",
+      "in_progress": "未完成",
       "pending_review": "待複查",
       "completed": "已完成",
       "cancelled": "已取消"
@@ -2106,6 +2106,22 @@
       "none": "—",
       "copyField": "複製{field}",
       "copiedField": "已複製{field}"
+    },
+    "sessionActivity": {
+      "label": "活動",
+      "working": "執行中",
+      "needsYou": "等你處理",
+      "idle": "閒置",
+      "interrupted": "已中斷",
+      "workingHint": "目前有一輪正在執行。",
+      "needsYouHint": "智能體在等你處理，之後才能繼續。",
+      "idleHint": "目前沒有在執行。傳送訊息即可開始新一輪。",
+      "interruptedHint": "上一輪在完成前被中斷：codeg 已關閉，或智能體已停止。點擊「繼續」可從中斷處接著做。",
+      "interruptedBadge": "已中斷：上一輪沒有完成",
+      "continue": "繼續",
+      "continueTitle": "恢復此會話並傳送「continue」",
+      "bannerTitle": "上一輪已中斷",
+      "bannerDescription": "codeg 關閉或智能體停止時，這一輪還沒有完成。"
     },
     "conversationCard": {
       "untitledConversation": "未命名會話",

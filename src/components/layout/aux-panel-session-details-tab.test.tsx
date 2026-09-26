@@ -29,6 +29,11 @@ vi.mock("@/stores/conversation-runtime-store", () => ({
 vi.mock("@/stores/app-workspace-store", () => ({
   useAppWorkspaceStore: vi.fn(),
 }))
+// The live connection status only sharpens the Activity line; stub it so this
+// test doesn't drag in the whole connection provider.
+vi.mock("@/hooks/use-connection-status", () => ({
+  useConnectionStatus: vi.fn(() => null),
+}))
 
 import { SessionDetailsTab } from "./aux-panel-session-details-tab"
 import { useAuxPanelContext } from "@/contexts/aux-panel-context"

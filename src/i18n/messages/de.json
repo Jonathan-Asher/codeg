@@ -1875,7 +1875,7 @@
       "push": "Pushen..."
     },
     "statusLabels": {
-      "in_progress": "In Bearbeitung",
+      "in_progress": "Offen",
       "pending_review": "Prüfung",
       "completed": "Abgeschlossen",
       "cancelled": "Abgebrochen"
@@ -2106,6 +2106,22 @@
       "none": "—",
       "copyField": "{field} kopieren",
       "copiedField": "{field} kopiert"
+    },
+    "sessionActivity": {
+      "label": "Aktivität",
+      "working": "Arbeitet",
+      "needsYou": "Wartet auf dich",
+      "idle": "Leerlauf",
+      "interrupted": "Unterbrochen",
+      "workingHint": "Gerade läuft eine Runde.",
+      "needsYouHint": "Der Agent wartet auf dich, bevor er weitermachen kann.",
+      "idleHint": "Gerade läuft nichts. Schick eine Nachricht, um eine Runde zu starten.",
+      "interruptedHint": "Die letzte Runde wurde abgebrochen, bevor sie fertig war: codeg wurde beendet oder der Agent hat angehalten. „Fortsetzen“ macht dort weiter, wo sie aufgehört hat.",
+      "interruptedBadge": "Unterbrochen: die letzte Runde wurde abgebrochen",
+      "continue": "Fortsetzen",
+      "continueTitle": "Diese Sitzung wieder aufnehmen und „continue“ senden",
+      "bannerTitle": "Die letzte Runde wurde unterbrochen",
+      "bannerDescription": "codeg wurde beendet oder der Agent hat angehalten, bevor sie fertig war."
     },
     "conversationCard": {
       "untitledConversation": "Unbenannte Konversation",

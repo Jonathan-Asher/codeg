@@ -1875,7 +1875,7 @@
       "push": "دفع..."
     },
     "statusLabels": {
-      "in_progress": "قيد التنفيذ",
+      "in_progress": "مفتوح",
       "pending_review": "مراجعة",
       "completed": "مكتمل",
       "cancelled": "ملغى"
@@ -2106,6 +2106,22 @@
       "none": "—",
       "copyField": "نسخ {field}",
       "copiedField": "تم نسخ {field}"
+    },
+    "sessionActivity": {
+      "label": "النشاط",
+      "working": "يعمل",
+      "needsYou": "بانتظارك",
+      "idle": "خامل",
+      "interrupted": "انقطع",
+      "workingHint": "هناك دور قيد التشغيل الآن.",
+      "needsYouHint": "الوكيل ينتظرك ليتمكن من المتابعة.",
+      "idleHint": "لا شيء قيد التشغيل. أرسل رسالة لبدء دور جديد.",
+      "interruptedHint": "انقطع الدور الأخير قبل أن يكتمل: أُغلق codeg أو توقف الوكيل. «متابعة» يستأنفه من حيث توقف.",
+      "interruptedBadge": "انقطع: لم يكتمل الدور الأخير",
+      "continue": "متابعة",
+      "continueTitle": "استئناف هذه الجلسة وإرسال «continue»",
+      "bannerTitle": "انقطع الدور الأخير",
+      "bannerDescription": "أُغلق codeg أو توقف الوكيل قبل أن يكتمل."
     },
     "conversationCard": {
       "untitledConversation": "محادثة بدون عنوان",

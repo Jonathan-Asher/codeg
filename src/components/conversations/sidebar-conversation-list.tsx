@@ -185,6 +185,8 @@ import {
 import { cn } from "@/lib/utils"
 import { FolderAliasLabel } from "./folder-alias-label"
 import { toErrorMessage } from "@/lib/app-error"
+import { isTurnRunning } from "@/lib/session-activity"
+import { continueInterruptedSession } from "@/lib/session-continue"
 
 // Layout effect on the client (so the sticky overlay is positioned before
 // paint) but a no-op-safe passive effect during the static-export prerender.
@@ -246,7 +248,7 @@ const FolderHeader = memo(function FolderHeader({
   folderAlias: string | null
   folderPath: string
   /**
-   * How many of this group's sessions are currently RUNNING (`in_progress`) —
+   * How many of this group's sessions are currently RUNNING (a turn in flight) —
    * not how many it holds. Zero renders no badge at all: the header's job is to
    * flag live activity you'd otherwise have to expand the folder to notice, and
    * a total-count chip on every row was noise (expanding shows the rows).
@@ -1424,7 +1426,7 @@ export function SidebarConversationList({
     return map
   }, [conversations, displayChildToParent])
 
-  // Running (`in_progress`) sessions per display group — what the folder header
+  // Running sessions (a turn in flight) per display group — what the folder header
   // badge shows. Counted off the FULL conversation list rather than `byFolder`
   // on purpose: the badge answers "is there work running in here", so neither
   // the "Show completed" filter nor a session being pinned into the Pinned
@@ -1434,7 +1436,7 @@ export function SidebarConversationList({
   const folderRunningCounts = useMemo(() => {
     const map = new Map<number, number>()
     for (const conv of conversations) {
-      if (conv.status !== "in_progress") continue
+      if (!isTurnRunning(conv)) continue
       const groupId = displayChildToParent.get(conv.folder_id) ?? conv.folder_id
       map.set(groupId, (map.get(groupId) ?? 0) + 1)
     }
@@ -2074,6 +2076,16 @@ export function SidebarConversationList({
       openTab(folderId, id, agentType as Parameters<typeof openTab>[2], true)
     },
     [openTab, openConversations]
+  )
+
+  // An interrupted row's Continue: back to the conversation workspace, then
+  // open the session and send "continue" through its tab's own queue.
+  const handleContinue = useCallback(
+    (conversation: DbConversationSummary) => {
+      openConversations()
+      continueInterruptedSession(conversation)
+    },
+    [openConversations]
   )
 
   const handleRename = useCallback(
@@ -3165,6 +3177,7 @@ export function SidebarConversationList({
         hasChildren={conv.child_count > 0}
         expanded={conversationExpanded.has(conv.id)}
         onToggleExpand={toggleConversation}
+        onContinue={handleContinue}
       />
     )
     if (!row.pinned) return card

@@ -1875,7 +1875,7 @@
       "push": "푸시..."
     },
     "statusLabels": {
-      "in_progress": "진행 중",
+      "in_progress": "미완료",
       "pending_review": "검토",
       "completed": "완료",
       "cancelled": "취소됨"
@@ -2106,6 +2106,22 @@
       "none": "—",
       "copyField": "{field} 복사",
       "copiedField": "{field} 복사됨"
+    },
+    "sessionActivity": {
+      "label": "활동",
+      "working": "작업 중",
+      "needsYou": "응답 필요",
+      "idle": "대기 중",
+      "interrupted": "중단됨",
+      "workingHint": "지금 턴이 실행 중입니다.",
+      "needsYouHint": "에이전트가 계속하려면 응답이 필요합니다.",
+      "idleHint": "실행 중인 작업이 없습니다. 메시지를 보내면 새 턴이 시작됩니다.",
+      "interruptedHint": "마지막 턴이 끝나기 전에 중단되었습니다(codeg 종료 또는 에이전트 중지). 계속을 누르면 중단된 곳부터 이어갑니다.",
+      "interruptedBadge": "중단됨: 마지막 턴이 끝나지 않았습니다",
+      "continue": "계속",
+      "continueTitle": "이 세션을 재개하고 “continue”를 보냅니다",
+      "bannerTitle": "마지막 턴이 중단되었습니다",
+      "bannerDescription": "끝나기 전에 codeg가 종료되었거나 에이전트가 멈췄습니다."
     },
     "conversationCard": {
       "untitledConversation": "제목 없는 대화",

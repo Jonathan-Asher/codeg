@@ -11,6 +11,7 @@ import { resolveActiveSessionDetails } from "@/components/conversations/active-s
 import { SessionDetailsContent } from "@/components/conversations/session-details-content"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useAuxPanelContext } from "@/contexts/aux-panel-context"
+import { useConnectionStatus } from "@/hooks/use-connection-status"
 
 // Stable empty-turns reference so the `useShallow` slice below stays
 // reference-equal when there's no active session — otherwise a fresh `[]` each
@@ -69,6 +70,9 @@ export function SessionDetailsTab() {
     })
   )
   const conversations = useAppWorkspaceStore((s) => s.conversations)
+  // The focused conversation's own connection (keyed by its tab) is the most
+  // direct word on whether a turn is streaming right now.
+  const connectionStatus = useConnectionStatus(activeConversationTab?.id)
   const { summary, stats, model } = resolveActiveSessionDetails(
     activeConversationTab,
     (id) => (id === activeRuntimeId ? runtimeSlice : null),
@@ -85,6 +89,7 @@ export function SessionDetailsTab() {
               stats={stats}
               model={model}
               active={isOpen && activeTab === "session_details"}
+              connectionStatus={connectionStatus}
             />
           </div>
         </ScrollArea>

@@ -15,6 +15,24 @@ pub enum ConversationStatus {
     Cancelled,
 }
 
+/// Where the conversation's latest turn stands. Independent of
+/// [`ConversationStatus`], which is the conversation's review state (and which
+/// the user can set by hand); this one says whether an agent is actually
+/// working on it. `None` on the row means no turn is in flight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::None)")]
+#[serde(rename_all = "snake_case")]
+pub enum ConversationTurnState {
+    /// A turn started and has not ended yet.
+    #[sea_orm(string_value = "running")]
+    Running,
+    /// A turn was cut off before it ended: the connection or the agent
+    /// process died mid-turn, or codeg itself exited while it ran. Cleared as
+    /// soon as the next turn starts.
+    #[sea_orm(string_value = "interrupted")]
+    Interrupted,
+}
+
 /// What kind of row this conversation is — drives sidebar visibility and
 /// grouping. `regular` renders under its folder group; `chat` renders in the
 /// flat "Chat" section; `loop` belongs to the Loop Engineering workbench and is
@@ -78,6 +96,9 @@ pub struct Model {
     /// Gemini/Cline/OpenClaw stale-external-id fallback matches on
     /// `origin_cwd ?? folder.path`. Always NULL for ordinary conversations.
     pub origin_cwd: Option<String>,
+    /// Whether the latest turn is running, was interrupted, or ended (`None`).
+    /// See [`ConversationTurnState`].
+    pub turn_state: Option<ConversationTurnState>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
