@@ -9,6 +9,7 @@
 //! change at turn end bumps `updated_at`) and imports without hooking either
 //! path.
 
+use std::future::Future;
 use std::time::Duration;
 
 use chrono::Utc;
@@ -18,6 +19,7 @@ use crate::app_error::AppCommandError;
 use crate::commands::conversations::get_folder_conversation_core;
 use crate::db::error::DbError;
 use crate::db::service::message_search_service::{self, MessageSearchHit};
+use crate::models::message::MessageTurn;
 // Only the desktop command wrapper takes `tauri::State<AppDatabase>`.
 #[cfg(feature = "tauri-runtime")]
 use crate::db::AppDatabase;
@@ -69,24 +71,45 @@ pub async fn index_stale_conversations(
     conn: &DatabaseConnection,
     batch: usize,
 ) -> Result<usize, DbError> {
+    index_stale_conversations_with(conn, batch, move |id| async move {
+        get_folder_conversation_core(conn, id)
+            .await
+            .map(|(detail, _)| detail.turns)
+    })
+    .await
+}
+
+/// [`index_stale_conversations`] reading each transcript with `read_turns`, so
+/// a test can make a read fail.
+async fn index_stale_conversations_with<F, Fut>(
+    conn: &DatabaseConnection,
+    batch: usize,
+    read_turns: F,
+) -> Result<usize, DbError>
+where
+    F: Fn(i32) -> Fut,
+    Fut: Future<Output = Result<Vec<MessageTurn>, AppCommandError>>,
+{
     let settled_before = Utc::now() - chrono::Duration::seconds(SETTLE_SECS);
     let stale =
         message_search_service::list_stale_conversations(conn, settled_before, batch).await?;
     for conversation in &stale {
-        match get_folder_conversation_core(conn, conversation.id).await {
-            Ok((detail, _)) => {
+        match read_turns(conversation.id).await {
+            Ok(turns) => {
                 message_search_service::index_conversation(
                     conn,
                     conversation.id,
                     conversation.updated_at,
-                    &detail.turns,
+                    &turns,
                 )
                 .await?;
             }
             Err(err) => {
                 // A transcript that cannot be read (moved, agent uninstalled)
                 // is stamped anyway: retrying every minute would not fix it,
-                // and the conversation's next real change retries it.
+                // and the conversation's next real change retries it. Whatever
+                // an earlier read indexed goes with it, so search stops
+                // returning text that can no longer be opened.
                 tracing::debug!(
                     conversation_id = conversation.id,
                     error = %err,
@@ -158,6 +181,61 @@ mod tests {
         // A later change (a finished turn, an import) makes it stale again.
         set_updated_at(&db.conn, id, 60).await;
         assert_eq!(index_stale_conversations(&db.conn, 25).await.unwrap(), 1);
+    }
+
+    fn user_turn(text: &str) -> MessageTurn {
+        serde_json::from_value(serde_json::json!({
+            "id": "t-1",
+            "role": "user",
+            "blocks": [{ "type": "text", "text": text }],
+            "timestamp": "2026-09-24T10:00:00Z",
+        }))
+        .expect("turn fixture")
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_transcript_drops_what_was_indexed_before() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/fts-proj").await;
+        let id = seed_conversation(&db, folder, AgentType::Custom("test-agent")).await;
+        let readable =
+            |_: i32| async { Ok::<_, AppCommandError>(vec![user_turn("the flaky upload retry")]) };
+        let unreadable = |_: i32| async {
+            Err::<Vec<MessageTurn>, _>(AppCommandError::task_execution_failed(
+                "transcript unreadable",
+            ))
+        };
+        let search = |query: &'static str| message_search_core(&db.conn, query, None);
+
+        // Indexed while its transcript could be read.
+        set_updated_at(&db.conn, id, 120).await;
+        assert_eq!(
+            index_stale_conversations_with(&db.conn, 25, readable)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(search("upload").await.unwrap().len(), 1);
+
+        // It changes, and now the transcript cannot be read: the text indexed
+        // before must stop matching, not linger behind the new stamp.
+        set_updated_at(&db.conn, id, 60).await;
+        assert_eq!(
+            index_stale_conversations_with(&db.conn, 25, unreadable)
+                .await
+                .unwrap(),
+            1
+        );
+        assert!(search("upload").await.unwrap().is_empty());
+        assert!(search("up").await.unwrap().is_empty());
+
+        // Stamped all the same, so the next pass leaves it alone.
+        assert_eq!(
+            index_stale_conversations_with(&db.conn, 25, unreadable)
+                .await
+                .unwrap(),
+            0
+        );
     }
 
     #[tokio::test]
