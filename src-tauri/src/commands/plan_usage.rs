@@ -479,9 +479,9 @@ fn codex_plan_label(plan_type: &str) -> String {
 }
 
 fn span_label(minutes: u32) -> String {
-    if minutes > 0 && minutes % 1440 == 0 {
+    if minutes > 0 && minutes.is_multiple_of(1440) {
         format!("{}d", minutes / 1440)
-    } else if minutes > 0 && minutes % 60 == 0 {
+    } else if minutes > 0 && minutes.is_multiple_of(60) {
         format!("{}h", minutes / 60)
     } else {
         format!("{minutes}m")
