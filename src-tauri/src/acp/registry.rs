@@ -393,7 +393,9 @@ const ACP_ADAPTER_DOCS_URL: &str = "https://docs.codeg.app/guide/supported-agent
 /// ships `_session/steering` but not `promptRequired` — re-verified against
 /// the published 1.3.0 tarball (zero hits, same as 1.1.9) — so it stays
 /// `None` until a release implements the opt-in — then this is a one-line
-/// flip plus tests.
+/// flip plus tests. Upstream pi-acp has no `_session/steering` at all (0.0.34
+/// neither advertises nor handles it); the floor below is the fork release that
+/// adds it, and any build without it still fails the advertisement gate.
 ///
 /// Honoring the opt-in is necessary but not sufficient: the ACTIVE path must
 /// also keep the owning `session/prompt` in flight across the steered work
@@ -419,6 +421,20 @@ pub fn steering_prompt_required_min_version(agent_type: AgentType) -> Option<&'s
         // reverted an unrelated ExitPlanMode change — still carries the bug and
         // is held to the pull channel by the runtime version gate.
         AgentType::ClaudeCode => Some("0.65.0"),
+        // pi-acp 0.0.34-steering.1 (github.com/Jonathan-Asher/pi-acp, branch
+        // `feat/session-steering`) is the first build with `_session/steering`.
+        // It honors the opt-in (no running turn → `promptRequired`, nothing
+        // queued in pi), and its ACTIVE path keeps the owning `session/prompt`
+        // in flight: the message goes into pi's own steering queue, delivered
+        // after the current tool calls, and the prompt settles only at pi's
+        // `agent_settled`, which spans the steered work. The turn-end race (the
+        // steer reaches pi after its agent loop made its last queue check) is
+        // closed inside the adapter: it takes the parked message back out of
+        // pi's queue and runs it as a continuation of the SAME turn, so it
+        // never answers `startedNewTurn` to an opted-in host. Upstream 0.0.34
+        // sorts above this prerelease but advertises nothing, so gate 1 keeps
+        // it on the queue.
+        AgentType::Pi => Some("0.0.34-steering.1"),
         _ => None,
     }
 }
@@ -3254,12 +3270,13 @@ mod tests {
     }
 
     #[test]
-    fn steering_prompt_required_min_version_gates_claude_only() {
+    fn steering_prompt_required_min_version_gates_claude_and_pi_only() {
         // The native-steering policy bit: only an adapter that honors the
         // `promptRequired` opt-in AND keeps the owning prompt in flight across
         // a steered turn gets a minimum version. The floor is the release that
         // fixed the latter (claude-agent-acp 0.65.0 / #958), NOT the one that
         // introduced the opt-in — every 0.64.x settles the prompt early (#934).
+        // pi-acp qualifies from the fork build that adds the extension (below).
         // Everyone else stays None and rides the MCP pull channel; codex-acp
         // ships steering without the opt-in at all (re-verified on the 1.3.0
         // tarball). Flipping an agent on here without the runtime
@@ -3267,6 +3284,14 @@ mod tests {
         assert_eq!(
             steering_prompt_required_min_version(AgentType::ClaudeCode),
             Some("0.65.0")
+        );
+        // pi-acp: the fork build that adds `_session/steering` with the opt-in
+        // and a turn-spanning active path. A prerelease floor on purpose, so it
+        // sorts above the 0.0.33 pin and below upstream 0.0.34 (which has no
+        // steering and is held back by the advertisement gate instead).
+        assert_eq!(
+            steering_prompt_required_min_version(AgentType::Pi),
+            Some("0.0.34-steering.1")
         );
         assert_eq!(steering_prompt_required_min_version(AgentType::Codex), None);
         for agent in [

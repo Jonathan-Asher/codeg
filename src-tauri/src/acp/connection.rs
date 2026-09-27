@@ -3860,8 +3860,8 @@ fn build_grok_set_model_params(
 /// has no typed request for. Always opts into the 0.64.0
 /// `promptRequired` idle contract; codeg only enables native steering for
 /// adapters proven to honor it AND to keep the owning prompt in flight across
-/// the steered work (claude-agent-acp 0.65.0 / #958 — see
-/// [`synthesize_native_steering`] and `registry::steering_prompt_required_min_version`),
+/// the steered work (claude-agent-acp 0.65.0 / #958, pi-acp 0.0.34-steering.1 —
+/// see [`synthesize_native_steering`] and `registry::steering_prompt_required_min_version`),
 /// but the caller still handles every outcome in case the proof was wrong.
 async fn send_steer_request(
     cx: &ConnectionTo<Agent>,
@@ -17846,6 +17846,83 @@ mod tests {
             AgentType::ClaudeCode,
             None,
             Some(&proven)
+        ));
+    }
+
+    #[test]
+    fn synthesize_native_steering_gate_matrix_for_claude_and_pi() {
+        // Every combination of the three gates, for both agents that have a
+        // registry floor: native only when the extension is advertised AND the
+        // running adapter reports at least the floor.
+        use agent_client_protocol::schema::v1::Implementation;
+        let advertised = meta_map(serde_json::json!({"steering": {"supported": true}}));
+        let declined = meta_map(serde_json::json!({"steering": {"supported": false}}));
+        // (agent, adapter, a version below the floor, the floor)
+        let cases = [
+            (AgentType::ClaudeCode, "claude-agent-acp", "0.64.2", "0.65.0"),
+            (AgentType::Pi, "pi-acp", "0.0.33", "0.0.34-steering.1"),
+        ];
+        for (agent, adapter, stale, floor) in cases {
+            let stale = Implementation::new(adapter, stale);
+            let floor = Implementation::new(adapter, floor);
+            for (meta, is_advertised) in [
+                (None, false),
+                (Some(&declined), false),
+                (Some(&advertised), true),
+            ] {
+                for (info, is_proven) in [(None, false), (Some(&stale), false), (Some(&floor), true)] {
+                    assert_eq!(
+                        synthesize_native_steering(agent, meta, info),
+                        is_advertised && is_proven,
+                        "{agent:?}: advertised={is_advertised}, version={:?}",
+                        info.map(|i| i.version.as_str())
+                    );
+                }
+            }
+            // The policy gate is keyed on the agent type, not on what the
+            // adapter calls itself: the same proven response from an agent with
+            // no floor never opens the native channel.
+            assert!(!synthesize_native_steering(
+                AgentType::Gemini,
+                Some(&advertised),
+                Some(&floor)
+            ));
+        }
+    }
+
+    #[test]
+    fn synthesize_native_steering_for_pi_needs_the_steering_build() {
+        use agent_client_protocol::schema::v1::Implementation;
+        let advertised = meta_map(serde_json::json!({"steering": {"supported": true}}));
+        let declined = meta_map(serde_json::json!({"steering": {"supported": false}}));
+        let native = |meta: Option<&serde_json::Map<String, serde_json::Value>>, version: &str| {
+            synthesize_native_steering(
+                AgentType::Pi,
+                meta,
+                Some(&Implementation::new("pi-acp", version)),
+            )
+        };
+
+        // The pi-acp build that adds `_session/steering`, and anything after it.
+        assert!(native(Some(&advertised), "0.0.34-steering.1"));
+        assert!(native(Some(&advertised), "0.0.34-steering.2"));
+        assert!(native(Some(&advertised), "0.0.35"));
+        // The 0.0.33 pin (which the fork's pre-steering main also reports) and
+        // earlier prereleases of the floor stay on the queue even if something
+        // claimed the extension.
+        assert!(!native(Some(&advertised), "0.0.33"));
+        assert!(!native(Some(&advertised), "0.0.34-steering.0"));
+        assert!(!native(Some(&advertised), "0.0.34-rc.1"));
+        // Upstream 0.0.34 clears the version floor but has no steering and
+        // advertises none — the advertisement gate is what keeps it off.
+        assert!(!native(None, "0.0.34"));
+        assert!(!native(Some(&declined), "0.0.34"));
+        // Missing or unparseable agent info fails closed.
+        assert!(!native(Some(&advertised), "v0.0.34-steering.1"));
+        assert!(!synthesize_native_steering(
+            AgentType::Pi,
+            Some(&advertised),
+            None
         ));
     }
 
