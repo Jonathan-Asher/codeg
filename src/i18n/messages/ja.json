@@ -2267,6 +2267,27 @@
         "refresh": "更新"
       }
     },
+    "transfers": {
+      "title": "ダウンロード",
+      "downloading": "ダウンロード中",
+      "preparing": "開始しています…",
+      "progress": "{loaded} / {total}",
+      "progressNoTotal": "{loaded} ダウンロード済み",
+      "timeLeft": "残り {time}",
+      "done": "ダウンロード完了",
+      "failed": "ダウンロードに失敗しました",
+      "cancelled": "ダウンロードをキャンセルしました",
+      "cancel": "キャンセル",
+      "cancelling": "キャンセル中…",
+      "dismiss": "閉じる",
+      "open": "開く",
+      "showInFinder": "Finder で表示",
+      "showInExplorer": "エクスプローラーで表示",
+      "showInFileManager": "ファイルマネージャーで表示",
+      "openFailed": "ファイルを開けませんでした",
+      "progressAria": "{name} のダウンロード進行状況",
+      "statusBarRunning": "{count, plural, other {# 件のダウンロードを実行中}}"
+    },
     "auxPanel": {
       "tabs": {
         "files": "ファイル",
@@ -2470,6 +2491,22 @@
       "officeWatchRetry": "再試行",
       "officeServerInstallHint": "OfficeCLI はサーバーホストにインストールする必要があります。サーバーで次のコマンドを実行してから再試行してください：",
       "officeRemoteDesktopUnsupported": "リモートデスクトップウィンドウではライブプレビューを利用できません。Office ファイルをプレビューするには、サーバーの Web UI でこのワークスペースを開いてください。"
+    },
+    "videoPreview": {
+      "loading": "動画を読み込み中…",
+      "unsupportedTitle": "この動画はここでは再生できません",
+      "unsupportedHint": "内蔵プレーヤーは {format} ファイルを再生できません。ファイルをダウンロードするか、別のアプリで開いてください。",
+      "loadFailed": "動画を読み込めませんでした",
+      "retry": "再試行",
+      "download": "ダウンロード",
+      "openExternally": "外部アプリで開く",
+      "openInNewTab": "新しいタブで開く",
+      "showInFinder": "Finder で表示",
+      "showInExplorer": "エクスプローラーで表示",
+      "showInFileManager": "ファイルマネージャーで表示",
+      "downloadSaved": "{name} をダウンロードしました",
+      "downloadFailed": "{name} のダウンロードに失敗しました",
+      "openFailed": "{name} を開けませんでした"
     },
     "fileViewer": {
       "title": "ファイルプレビュー",

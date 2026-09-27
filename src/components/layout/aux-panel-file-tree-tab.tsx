@@ -54,6 +54,7 @@ import {
   WORKSPACE_DOWNLOAD_CANCELLED,
 } from "@/lib/api"
 import { isDesktop, isRemoteDesktopMode } from "@/lib/transport"
+import { isTransferErrorReported } from "@/lib/workspace-transfers"
 import { FileTreeCopySubContent } from "@/components/layout/file-tree-copy-menu"
 import { emitAttachFileToSession } from "@/lib/session-attachment-events"
 import {
@@ -2203,14 +2204,17 @@ export function FileTreeTab() {
         )
         // Remote-desktop downloads flow through a save-dialog; surface
         // the cancel-vs-saved outcome instead of silently doing nothing.
+        // A tracked download ("reported") already showed its progress and
+        // outcome in the transfer toast.
         if (result.status === "started") return
         if (result.status === WORKSPACE_DOWNLOAD_CANCELLED) return
-        if (result.savedPath) {
+        if (result.savedPath && !result.reported) {
           toast.success(t("toasts.downloadSaved", { name: target.name }), {
             description: result.savedPath,
           })
         }
       } catch (error) {
+        if (isTransferErrorReported(error)) return
         const message = toErrorMessage(error)
         toast.error(t("toasts.downloadFailed", { name: target.name }), {
           description: message,
@@ -2229,12 +2233,13 @@ export function FileTreeTab() {
         const result = await downloadWorkspaceDir(folderPath, target.path, name)
         if (result.status === "started") return
         if (result.status === WORKSPACE_DOWNLOAD_CANCELLED) return
-        if (result.savedPath) {
+        if (result.savedPath && !result.reported) {
           toast.success(t("toasts.downloadSaved", { name }), {
             description: result.savedPath,
           })
         }
       } catch (error) {
+        if (isTransferErrorReported(error)) return
         const message = toErrorMessage(error)
         toast.error(t("toasts.downloadFailed", { name }), {
           description: message,

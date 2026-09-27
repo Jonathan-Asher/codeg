@@ -2267,6 +2267,27 @@
         "refresh": "تحديث"
       }
     },
+    "transfers": {
+      "title": "التنزيلات",
+      "downloading": "جارٍ التنزيل",
+      "preparing": "جارٍ البدء…",
+      "progress": "{loaded} من {total}",
+      "progressNoTotal": "تم تنزيل {loaded}",
+      "timeLeft": "متبقٍ {time}",
+      "done": "تم التنزيل",
+      "failed": "فشل التنزيل",
+      "cancelled": "تم إلغاء التنزيل",
+      "cancel": "إلغاء",
+      "cancelling": "جارٍ الإلغاء…",
+      "dismiss": "إغلاق",
+      "open": "فتح",
+      "showInFinder": "إظهار في Finder",
+      "showInExplorer": "إظهار في المستكشف",
+      "showInFileManager": "إظهار في مدير الملفات",
+      "openFailed": "تعذّر فتح الملف",
+      "progressAria": "تقدّم تنزيل {name}",
+      "statusBarRunning": "{count, plural, zero {لا توجد تنزيلات قيد التقدم} one {تنزيل واحد قيد التقدم} two {تنزيلان قيد التقدم} few {# تنزيلات قيد التقدم} many {# تنزيلًا قيد التقدم} other {# تنزيل قيد التقدم}}"
+    },
     "auxPanel": {
       "tabs": {
         "files": "الملفات",
@@ -2470,6 +2491,22 @@
       "officeWatchRetry": "إعادة المحاولة",
       "officeServerInstallHint": "يجب تثبيت OfficeCLI على مضيف الخادم. شغّل هذا الأمر هناك ثم أعد المحاولة:",
       "officeRemoteDesktopUnsupported": "المعاينة المباشرة غير متاحة في نافذة سطح المكتب البعيد. افتح مساحة العمل هذه في واجهة الويب الخاصة بالخادم لمعاينة ملفات Office."
+    },
+    "videoPreview": {
+      "loading": "جارٍ تحميل الفيديو…",
+      "unsupportedTitle": "لا يمكن تشغيل هذا الفيديو هنا",
+      "unsupportedHint": "لا يستطيع المشغّل المدمج تشغيل ملفات {format}. نزّل الملف أو افتحه في تطبيق آخر.",
+      "loadFailed": "تعذّر تحميل الفيديو",
+      "retry": "إعادة المحاولة",
+      "download": "تنزيل",
+      "openExternally": "فتح في تطبيق خارجي",
+      "openInNewTab": "فتح في علامة تبويب جديدة",
+      "showInFinder": "إظهار في Finder",
+      "showInExplorer": "إظهار في المستكشف",
+      "showInFileManager": "إظهار في مدير الملفات",
+      "downloadSaved": "تم تنزيل {name}",
+      "downloadFailed": "تعذّر تنزيل {name}",
+      "openFailed": "تعذّر فتح {name}"
     },
     "fileViewer": {
       "title": "معاينة الملف",

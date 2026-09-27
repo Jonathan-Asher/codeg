@@ -49,6 +49,7 @@ pub mod turn_timings;
 pub mod update;
 pub mod web;
 pub mod work_task;
+pub mod workspace_media;
 pub mod workspace_state;
 pub mod workspace_transfer;
 
@@ -590,6 +591,17 @@ mod tauri_app {
             .manage(std::sync::Arc::new(
                 crate::workspace_transfer::WorkspaceTransferManager::new_from_env(),
             ))
+            // Video preview byte stream for `<video src>` in every window —
+            // local files and, through the remote proxy, remote workspaces.
+            // See `commands::workspace_media`.
+            .register_asynchronous_uri_scheme_protocol(
+                crate::workspace_media::MEDIA_URI_SCHEME,
+                |ctx, request, responder| {
+                    crate::commands::workspace_media::handle_media_request(
+                        ctx, request, responder,
+                    )
+                },
+            )
             .manage(std::sync::Arc::new(
                 web::event_bridge::WebEventBroadcaster::new(),
             ))
@@ -1752,6 +1764,8 @@ mod tauri_app {
                 remote_proxy_commands::remote_ws_unsubscribe,
                 remote_proxy_commands::remote_ws_send_text,
                 remote_proxy_commands::remote_ws_probe,
+                crate::commands::workspace_media::workspace_media_capability,
+                crate::commands::workspace_media::workspace_media_revoke,
                 windows::open_pet_window,
                 windows::close_pet_window,
                 windows::pet_window_record_position,

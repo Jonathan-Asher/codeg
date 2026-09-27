@@ -2267,6 +2267,27 @@
         "refresh": "Refresh"
       }
     },
+    "transfers": {
+      "title": "Downloads",
+      "downloading": "Downloading",
+      "preparing": "Starting…",
+      "progress": "{loaded} of {total}",
+      "progressNoTotal": "{loaded} downloaded",
+      "timeLeft": "{time} left",
+      "done": "Downloaded",
+      "failed": "Download failed",
+      "cancelled": "Download cancelled",
+      "cancel": "Cancel",
+      "cancelling": "Cancelling…",
+      "dismiss": "Dismiss",
+      "open": "Open",
+      "showInFinder": "Show in Finder",
+      "showInExplorer": "Show in Explorer",
+      "showInFileManager": "Show in file manager",
+      "openFailed": "Couldn't open the file",
+      "progressAria": "Download progress for {name}",
+      "statusBarRunning": "{count, plural, one {# download in progress} other {# downloads in progress}}"
+    },
     "auxPanel": {
       "tabs": {
         "files": "Files",
@@ -2470,6 +2491,22 @@
       "officeWatchRetry": "Retry",
       "officeServerInstallHint": "OfficeCLI must be installed on the server host. Run this command there, then retry:",
       "officeRemoteDesktopUnsupported": "Live preview isn't available in a remote-desktop window. Open this workspace in the server's web UI to preview Office files."
+    },
+    "videoPreview": {
+      "loading": "Loading video…",
+      "unsupportedTitle": "This video can't be played here",
+      "unsupportedHint": "The built-in player can't play {format} files. Download the file or open it in another app.",
+      "loadFailed": "Couldn't load the video",
+      "retry": "Retry",
+      "download": "Download",
+      "openExternally": "Open externally",
+      "openInNewTab": "Open in new tab",
+      "showInFinder": "Show in Finder",
+      "showInExplorer": "Show in Explorer",
+      "showInFileManager": "Show in file manager",
+      "downloadSaved": "Downloaded {name}",
+      "downloadFailed": "Failed to download {name}",
+      "openFailed": "Couldn't open {name}"
     },
     "fileViewer": {
       "title": "File preview",

@@ -569,6 +569,16 @@ pub fn build_router(
             "/workspace_download_ticket",
             post(handlers::workspace_files::create_download_ticket),
         )
+        // Video preview: mint / revoke the per-file capability the public
+        // `/workspace_media/{token}` byte endpoint below accepts.
+        .route(
+            "/workspace_media_capability",
+            post(handlers::workspace_files::create_media_capability),
+        )
+        .route(
+            "/workspace_media_revoke",
+            post(handlers::workspace_files::revoke_media_capability),
+        )
         // ─── Backup & restore ───
         //
         // Export builds an archive and returns a download ticket; restore
@@ -1802,6 +1812,17 @@ pub fn build_router(
         .route(
             "/backup_download/{ticket}",
             get(handlers::backup::backup_download),
+        )
+        // Video preview byte stream (HTTP Range). A `<video src>` can't carry
+        // a Bearer header, so the path's per-file capability — minted by the
+        // authenticated `/workspace_media_capability` — is the credential.
+        .route(
+            "/workspace_media/{token}",
+            get(handlers::workspace_files::serve_media),
+        )
+        .route(
+            "/workspace_media/{token}/{name}",
+            get(handlers::workspace_files::serve_named_media),
         )
         // Office watch preview proxy (server mode): the iframe can't carry a
         // Bearer header, so these self-authenticate via a per-watch `?cap=`

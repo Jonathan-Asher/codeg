@@ -289,6 +289,13 @@ impl RemoteProxyState {
         }
     }
 
+    /// The untimed client used for workspace transfers — also the video
+    /// preview's range forwarder (`commands::workspace_media`), which sets a
+    /// per-request timeout of its own.
+    pub(crate) fn workspace_http(&self) -> &reqwest::Client {
+        &self.workspace_http
+    }
+
     /// Register a forced-close cleanup hook for a concrete Tauri webview
     /// instance. This runs from window creation time, before frontend code can
     /// issue `remote_ws_subscribe`, so even a window destroyed while the
@@ -1217,6 +1224,9 @@ pub async fn remote_cancel_workspace_transfer(
     Ok(transfers.cancel(&transfer_id).await)
 }
 
+/// `transfer_id` is optional and client-chosen: the frontend registers its
+/// progress row under it before invoking, so the row (and its Cancel button)
+/// exist from the first moment rather than from the first progress event.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn remote_download_workspace_file(
@@ -1228,6 +1238,7 @@ pub async fn remote_download_workspace_file(
     root_path: String,
     path: String,
     save_path: String,
+    transfer_id: Option<String>,
 ) -> Result<RemoteWorkspaceDownloadResult, AppCommandError> {
     remote_workspace_download_stream(
         app,
@@ -1239,6 +1250,7 @@ pub async fn remote_download_workspace_file(
         root_path,
         path,
         save_path,
+        transfer_id,
     )
     .await
 }
@@ -1254,6 +1266,7 @@ pub async fn remote_download_workspace_dir(
     root_path: String,
     path: String,
     save_path: String,
+    transfer_id: Option<String>,
 ) -> Result<RemoteWorkspaceDownloadResult, AppCommandError> {
     remote_workspace_download_stream(
         app,
@@ -1265,8 +1278,27 @@ pub async fn remote_download_workspace_dir(
         root_path,
         path,
         save_path,
+        transfer_id,
     )
     .await
+}
+
+/// Minimum spacing between two `Running` progress events for one download.
+/// Chunks arrive every few KiB, and a multi-GB file would otherwise cross the
+/// IPC bridge hundreds of thousands of times for a bar that repaints ~5×/s.
+const DOWNLOAD_PROGRESS_INTERVAL: Duration = Duration::from_millis(200);
+
+/// Resolve `fut` unless the transfer is cancelled first. Only for the phases
+/// before bytes hit the disk — the write loop watches the token itself so it
+/// can remove its partial file.
+async fn unless_cancelled<T>(
+    cancel: &CancellationToken,
+    fut: impl std::future::Future<Output = Result<T, AppCommandError>>,
+) -> Result<T, AppCommandError> {
+    tokio::select! {
+        _ = cancel.cancelled() => Err(workspace_transfer_cancelled()),
+        result = fut => result,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1280,6 +1312,7 @@ async fn remote_workspace_download_stream(
     root_path: String,
     path: String,
     save_path: String,
+    requested_transfer_id: Option<String>,
 ) -> Result<RemoteWorkspaceDownloadResult, AppCommandError> {
     let conn = remote_workspace_connection_service::get(&db.conn, connection_id)
         .await
@@ -1289,38 +1322,48 @@ async fn remote_workspace_download_stream(
         })?;
 
     let custom_headers = conn.headers.to_header_map();
-    let (transfer_id, cancel_token) = transfers.register_transfer().await;
+    let (transfer_id, cancel_token) = transfers
+        .register_transfer_with_id(requested_transfer_id)
+        .await;
+    let idle_timeout = transfers.idle_timeout;
     let result = async {
-        let _permit = transfers
-            .remote_download_semaphore
-            .acquire()
-            .await
-            .map_err(|_| {
-                AppCommandError::task_execution_failed(
-                    "Remote workspace download semaphore is closed",
-                )
-            })?;
+        let _permit = unless_cancelled(&cancel_token, async {
+            transfers
+                .remote_download_semaphore
+                .acquire()
+                .await
+                .map_err(|_| {
+                    AppCommandError::task_execution_failed(
+                        "Remote workspace download semaphore is closed",
+                    )
+                })
+        })
+        .await?;
 
         let ticket_url = format!(
             "{}/api/workspace_download_ticket",
             conn.base_url.trim_end_matches('/')
         );
-        let ticket_response = proxy
-            .workspace_http
-            .post(ticket_url)
-            .bearer_auth(conn.token.trim())
-            .headers(custom_headers.clone())
-            .json(&serde_json::json!({
-                "rootPath": root_path,
-                "path": path,
-                "kind": kind,
-            }))
-            .send()
-            .await
-            .map_err(|e| {
-                AppCommandError::network("Remote workspace download ticket failed")
-                    .with_detail(request_error_detail(&e))
-            })?;
+        let ticket_response = unless_cancelled(&cancel_token, async {
+            proxy
+                .workspace_http
+                .post(ticket_url)
+                .bearer_auth(conn.token.trim())
+                .headers(custom_headers.clone())
+                .timeout(HTTP_TIMEOUT)
+                .json(&serde_json::json!({
+                    "rootPath": root_path,
+                    "path": path,
+                    "kind": kind,
+                }))
+                .send()
+                .await
+                .map_err(|e| {
+                    AppCommandError::network("Remote workspace download ticket failed")
+                        .with_detail(request_error_detail(&e))
+                })
+        })
+        .await?;
         let status = ticket_response.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {
             return Err(AppCommandError::authentication_failed(
@@ -1338,16 +1381,19 @@ async fn remote_workspace_download_stream(
                     .with_detail(e.to_string())
             })?;
         let download_url = absolute_remote_ticket_url(&conn.base_url, &ticket.url)?;
-        let response = proxy
-            .workspace_http
-            .get(download_url)
-            .headers(custom_headers.clone())
-            .send()
-            .await
-            .map_err(|e| {
-                AppCommandError::network("Remote workspace download failed")
-                    .with_detail(request_error_detail(&e))
-            })?;
+        let response = unless_cancelled(&cancel_token, async {
+            proxy
+                .workspace_http
+                .get(download_url)
+                .headers(custom_headers.clone())
+                .send()
+                .await
+                .map_err(|e| {
+                    AppCommandError::network("Remote workspace download failed")
+                        .with_detail(request_error_detail(&e))
+                })
+        })
+        .await?;
 
         let status = response.status();
         if !status.is_success() {
@@ -1372,12 +1418,19 @@ async fn remote_workspace_download_stream(
                     .with_detail(e.to_string())
             })
         });
+        let mut last_emit = Instant::now();
         let bytes = write_response_stream_to_partial(
             stream,
             &save_path,
             &transfer_id,
             cancel_token.clone(),
+            idle_timeout,
             |loaded| {
+                let now = Instant::now();
+                if now.duration_since(last_emit) < DOWNLOAD_PROGRESS_INTERVAL {
+                    return;
+                }
+                last_emit = now;
                 emit_workspace_transfer_progress(
                     &app,
                     WorkspaceTransferProgress {
@@ -1495,11 +1548,16 @@ fn partial_download_path(save_path: &str, transfer_id: &str) -> String {
     format!("{save_path}.codeg-download-{transfer_id}.part")
 }
 
+/// Stream a download into a sibling `.part` file and rename it into place once
+/// complete. `idle_timeout` bounds the wait for any single chunk, so a remote
+/// that stops sending mid-file surfaces as an error instead of a progress bar
+/// frozen forever.
 async fn write_response_stream_to_partial<S, F>(
     mut stream: S,
     save_path: &str,
     transfer_id: &str,
     cancel: CancellationToken,
+    idle_timeout: Duration,
     mut on_progress: F,
 ) -> Result<u64, AppCommandError>
 where
@@ -1524,7 +1582,15 @@ where
         loop {
             let next = tokio::select! {
                 _ = cancel.cancelled() => return Err(workspace_transfer_cancelled()),
-                next = stream.next() => next,
+                next = tokio::time::timeout(idle_timeout, stream.next()) => match next {
+                    Ok(next) => next,
+                    Err(_) => {
+                        return Err(AppCommandError::network(format!(
+                            "Remote download stalled: no data received for {}s",
+                            idle_timeout.as_secs()
+                        )))
+                    }
+                },
             };
             let Some(chunk) = next else {
                 break;
@@ -2681,6 +2747,7 @@ mod tests {
             &save_path.to_string_lossy(),
             "test-transfer",
             CancellationToken::new(),
+            Duration::from_secs(30),
             |_| {},
         )
         .await
@@ -2690,6 +2757,88 @@ mod tests {
         let partial = partial_download_path(&save_path.to_string_lossy(), "test-transfer");
         assert!(!Path::new(&partial).exists());
         assert!(!save_path.exists());
+    }
+
+    #[tokio::test]
+    async fn write_response_stream_to_partial_reports_progress_and_finalizes() {
+        let dir = tempfile::tempdir().unwrap();
+        let save_path = dir.path().join("out.bin");
+        let stream = futures::stream::iter([
+            Ok(Bytes::from_static(b"abc")),
+            Ok(Bytes::from_static(b"defg")),
+        ]);
+        let mut seen = Vec::new();
+        let bytes = write_response_stream_to_partial(
+            stream,
+            &save_path.to_string_lossy(),
+            "ok-transfer",
+            CancellationToken::new(),
+            Duration::from_secs(30),
+            |loaded| seen.push(loaded),
+        )
+        .await
+        .unwrap();
+        assert_eq!(bytes, 7);
+        assert_eq!(seen, vec![3, 7]);
+        assert_eq!(std::fs::read(&save_path).unwrap(), b"abcdefg");
+    }
+
+    #[tokio::test]
+    async fn write_response_stream_to_partial_fails_a_stalled_stream() {
+        let dir = tempfile::tempdir().unwrap();
+        let save_path = dir.path().join("out.bin");
+        let stream = futures::stream::iter([Ok(Bytes::from_static(b"head"))])
+            .chain(futures::stream::pending());
+        let err = write_response_stream_to_partial(
+            Box::pin(stream),
+            &save_path.to_string_lossy(),
+            "stalled-transfer",
+            CancellationToken::new(),
+            Duration::from_millis(50),
+            |_| {},
+        )
+        .await
+        .unwrap_err();
+        assert!(err.message.contains("stalled"));
+        let partial = partial_download_path(&save_path.to_string_lossy(), "stalled-transfer");
+        assert!(!Path::new(&partial).exists());
+        assert!(!save_path.exists());
+    }
+
+    #[tokio::test]
+    async fn write_response_stream_to_partial_stops_on_cancel() {
+        let dir = tempfile::tempdir().unwrap();
+        let save_path = dir.path().join("out.bin");
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let stream = futures::stream::pending::<Result<Bytes, AppCommandError>>();
+        let err = write_response_stream_to_partial(
+            Box::pin(stream),
+            &save_path.to_string_lossy(),
+            "cancelled-transfer",
+            cancel,
+            Duration::from_secs(30),
+            |_| {},
+        )
+        .await
+        .unwrap_err();
+        assert!(err.message.contains("cancelled"));
+        assert!(!save_path.exists());
+    }
+
+    #[tokio::test]
+    async fn unless_cancelled_short_circuits_a_pending_phase() {
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let result: Result<(), AppCommandError> =
+            unless_cancelled(&cancel, std::future::pending()).await;
+        assert!(result.unwrap_err().message.contains("cancelled"));
+
+        let live = CancellationToken::new();
+        let value = unless_cancelled(&live, async { Ok::<_, AppCommandError>(5) })
+            .await
+            .unwrap();
+        assert_eq!(value, 5);
     }
 
     #[tokio::test]

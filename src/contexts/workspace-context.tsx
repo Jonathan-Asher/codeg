@@ -44,12 +44,14 @@ import {
   snapshotFileTab,
 } from "@/lib/closed-tab-stack"
 import {
+  filePreviewKind,
   isBinaryImageFile,
   isHiddenPath,
   isHtmlPreviewable,
   isImageFile,
   isOfficeOwnerFile,
   isOfficePreviewable,
+  isVideoFile,
   languageFromPath,
 } from "@/lib/language-detect"
 import {
@@ -1449,6 +1451,9 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       if (!existing || existing.kind !== "file") return
       if (existing.isDirty) return
       if (inFlightLoadsRef.current.has(tabId)) return
+      // A video tab holds no bytes (VideoPreview streams them), so there is
+      // nothing to refresh — and reading it as text would pull the whole file.
+      if (isVideoFile(absPath)) return
 
       const image = isImageFile(absPath)
 
@@ -1755,8 +1760,10 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           }
         }
         const tabId = buildFileTabId({ kind: "file", path: absPath })
-        const image = isImageFile(absPath)
-        const office = !image && isOfficePreviewable(absPath)
+        const previewKind = filePreviewKind(absPath)
+        const image = previewKind === "image"
+        const office = previewKind === "office"
+        const video = previewKind === "video"
         const seed = loadingTab(
           tabId,
           null,
@@ -1764,7 +1771,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           fileName(absPath),
           absPath,
           absPath,
-          image ? "image" : office ? "office" : languageFromPath(absPath)
+          previewKind ?? languageFromPath(absPath)
         )
 
         const decision = decideLoad(
@@ -1780,7 +1787,10 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           // Office files (.docx/.xlsx/.pptx) are binary OpenXML — never read as
           // text. The OfficePreview component renders them via the OfficeCLI
           // backend on its own, so just settle the tab as a ready preview shell.
-          if (office) {
+          // Videos likewise: VideoPreview streams the bytes itself (a capability
+          // URL with HTTP Range), so nothing is read here — a multi-GB file must
+          // never be pulled through the JSON transport.
+          if (office || video) {
             if (!settleFetch(tabId, gen)) return
             setFileTabs((prev) =>
               prev.map((tab) =>
