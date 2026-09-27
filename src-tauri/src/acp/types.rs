@@ -505,6 +505,11 @@ pub enum AcpEvent {
     PlanUpdate { entries: Vec<PlanEntryInfo> },
     /// Connection status changed
     StatusChanged { status: ConnectionStatus },
+    /// The connection moved to a new step on its way to a usable session (see
+    /// [`AttachPhase`]). `elapsed_ms` is measured from the moment the agent
+    /// process was spawned, so a client that learns about the connection late
+    /// still shows the real time spent.
+    AttachProgress { phase: AttachPhase, elapsed_ms: u64 },
     /// Error occurred
     Error {
         message: String,
@@ -1392,6 +1397,60 @@ pub enum ConnectionStatus {
     Prompting,
     Disconnected,
     Error,
+}
+
+/// How far a connection has got towards a usable session.
+///
+/// `ConnectionStatus` flips to `Connected` as soon as the agent answers
+/// `initialize`, which for a resumed session is long before it can take a
+/// prompt: the agent still has to open the session, and Claude Code runs the
+/// user's SessionStart hooks and settings on the way, which can take anywhere
+/// from a second to several minutes. This is the finer-grained answer the UI
+/// shows while that happens ("Resuming session · 14 s"), and what connect-time
+/// dedup keys on while the session id is not confirmed yet.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachPhase {
+    /// Waiting for a free attach slot before the agent process is spawned:
+    /// only a few sessions reopen at once (`CODEG_ACP_MAX_CONCURRENT_ATTACHES`),
+    /// so a burst of reconnects cannot start a dozen agents together on a
+    /// machine short of memory. Nothing is running yet.
+    Queued,
+    /// The agent process is starting and has not answered `initialize` yet.
+    #[default]
+    Starting,
+    /// `session/resume` is in flight.
+    Resuming,
+    /// `session/load` is in flight (resume unsupported or refused).
+    Loading,
+    /// `session/new` is in flight (fresh session, or the load fallback).
+    Creating,
+    /// The session is open; codeg is re-applying the saved mode and options.
+    Configuring,
+    /// The session accepts prompts.
+    Ready,
+    /// The connection ended before the session became usable.
+    Failed,
+}
+
+impl AttachPhase {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Starting => "starting",
+            Self::Resuming => "resuming",
+            Self::Loading => "loading",
+            Self::Creating => "creating",
+            Self::Configuring => "configuring",
+            Self::Ready => "ready",
+            Self::Failed => "failed",
+        }
+    }
+
+    /// Whether the connection is still on its way to a usable session.
+    pub fn is_attaching(self) -> bool {
+        !matches!(self, Self::Ready | Self::Failed)
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

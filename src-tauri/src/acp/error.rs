@@ -54,6 +54,16 @@ pub enum AcpError {
     InitializeTimeout,
     #[error("Agent did not publish its configurable options within 60 seconds. The probe was aborted; the agent may be slow, idle, or not ACP-compliant — try again or check the agent binary.")]
     ProbeTimedOut,
+    /// The agent started but did not finish opening the session within the
+    /// attach ceiling (`CODEG_ACP_ATTACH_TIMEOUT_SECS`). The connection was
+    /// stopped and its process tree with it. `phase` is the step it was stuck
+    /// in (`AttachPhase::as_str`), so the message can say what never answered.
+    #[error("{agent} did not finish opening the session after {secs} seconds (stuck while {}). The agent was stopped. A SessionStart hook or startup setting that never returns is the usual cause; retry, or check your {agent} hooks.", attach_phase_description(.phase))]
+    AttachTimeout {
+        agent: String,
+        phase: String,
+        secs: u64,
+    },
     /// `session/new` failed on a **custom** agent that codeg had just handed
     /// MCP servers on the wire. That is the exact failure
     /// `CustomAgentDef::supports_mcp` exists to let the user avoid: an
@@ -130,6 +140,7 @@ impl AcpError {
             Self::PlatformNotSupported(_) => Some("platform_not_supported"),
             Self::InitializeTimeout => Some("initialize_timeout"),
             Self::ProbeTimedOut => Some("probe_timed_out"),
+            Self::AttachTimeout { .. } => Some("attach_timeout"),
             Self::ProcessExited => Some("process_exited"),
             Self::TurnInProgress => Some("turn_in_progress"),
             Self::NoActiveTurn => Some("no_active_turn"),
@@ -152,6 +163,19 @@ impl Serialize for AcpError {
         S: serde::Serializer,
     {
         serializer.serialize_str(&self.to_string())
+    }
+}
+
+/// Plain-words description of an attach phase for [`AcpError::AttachTimeout`].
+fn attach_phase_description(phase: &str) -> &'static str {
+    match phase {
+        "queued" => "waiting for other sessions to open first",
+        "starting" => "starting up",
+        "resuming" => "resuming the session",
+        "loading" => "loading the session",
+        "creating" => "creating the session",
+        "configuring" => "applying the saved mode and options",
+        _ => "opening the session",
     }
 }
 

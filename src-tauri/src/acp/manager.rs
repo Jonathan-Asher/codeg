@@ -29,8 +29,8 @@ use crate::acp::question::{
 };
 use crate::acp::terminal_runtime::TerminalShellRuntimeConfig;
 use crate::acp::types::{
-    AcpEvent, AgentOptionsSnapshot, ConfigStaleKind, ConnectionInfo, ConnectionStatus,
-    ForkResultInfo, PromptCapabilitiesInfo, PromptInputBlock,
+    AcpEvent, AgentOptionsSnapshot, AttachPhase, ConfigStaleKind, ConnectionInfo,
+    ConnectionStatus, ForkResultInfo, PromptCapabilitiesInfo, PromptInputBlock,
 };
 use crate::db::entities::conversation::{self, ConversationKind, ConversationStatus};
 use crate::db::service::conversation_service;
@@ -291,14 +291,28 @@ struct SpawnDedupKey {
     session_id: String,
 }
 
-/// Default upper bound on how long `spawn_agent` will hold the per-session
-/// dedup lock waiting for `SessionStarted`. Picked to comfortably cover
-/// cold-start agents (claude-code/codex warm: <2s; npx-fetched cold: 10–30s)
-/// and a slow resume (a Claude Code session whose startup waits on MCP servers
-/// and SessionStart hooks measured 30–60 s on a loaded machine) without
-/// deadlocking the next concurrent acp_connect when an agent is genuinely
-/// broken. The frontend's `acp_connect` call timeout sits just above it.
+/// Default upper bound on how long [`ConnectionManager::spawn_agent`] waits
+/// for a resumed session to become usable before handing the connection id
+/// back anyway. Only in-process callers (automations, the task engine,
+/// delegation) wait at all; the UI's connect returns as soon as the process
+/// is spawned and follows the attach through `AttachProgress` events. The
+/// wait never holds a lock, so a slow agent delays only its own caller, and
+/// the connection keeps attaching after the wait gives up. Matches the
+/// attach ceiling in the connection driver, so a waiter normally sees the
+/// attach end one way or the other.
 pub(crate) const SPAWN_HANDSHAKE_TIMEOUT_SECS: u64 = 180;
+
+/// Whether `spawn_agent` returns before a resumed session is usable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AttachWait {
+    /// Return once the session accepts prompts (or failed, or the handshake
+    /// timeout passed). For in-process callers that act on the session next.
+    UntilReady,
+    /// Return as soon as the connection exists. For UI clients, which show
+    /// the attach phase live and must never sit on a request long enough for
+    /// an HTTP timeout to turn a slow attach into a failure.
+    No,
+}
 
 /// Whether the turn a steer was admitted against is no longer the turn now in
 /// flight — the guard `submit_feedback_native` applies across attachment
@@ -333,17 +347,17 @@ fn spawn_handshake_timeout_from_env() -> Duration {
     Duration::from_secs(secs)
 }
 
-/// Outcome of the `spawn_agent` dedup wait. Logged so production can audit
-/// how often the timeout fires vs. the agent handshake completes.
+/// Outcome of the `spawn_agent` attach wait. Logged so production can audit
+/// how often the timeout fires vs. the session opening.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HandshakeWaitOutcome {
-    /// `SessionStarted` applied; `external_id` is now set on the state.
+    /// The session accepts prompts.
     Ready,
-    /// Sender was dropped before SessionStarted fired (typically the
-    /// connection died during init — `run_connection` returned Err).
+    /// The connection ended before the session became usable (the agent
+    /// died, refused the session, or was disconnected mid-attach).
     Aborted,
-    /// Timeout elapsed before either of the above. Releases the dedup lock
-    /// so the next caller can proceed; the slow agent is no worse off.
+    /// Timeout elapsed first. The connection keeps attaching; the caller just
+    /// stops waiting for it.
     TimedOut,
 }
 
@@ -357,17 +371,18 @@ impl HandshakeWaitOutcome {
     }
 }
 
-/// Wait for the spawn-time `SessionStarted` signal, bounded by `timeout`.
-/// Extracted so the outcome enum can be unit-tested without spawning a
+/// Wait until an attach watch reports `Ready` or `Failed`, bounded by
+/// `timeout`. A dropped sender (the connection's state is gone) counts as
+/// aborted. Extracted so the outcome mapping can be unit-tested without a
 /// real agent process.
-async fn wait_for_session_started(
-    rx: tokio::sync::oneshot::Receiver<()>,
+async fn wait_for_attach(
+    mut rx: tokio::sync::watch::Receiver<AttachPhase>,
     timeout: Duration,
 ) -> (HandshakeWaitOutcome, Duration) {
     let start = std::time::Instant::now();
-    let outcome = match tokio::time::timeout(timeout, rx).await {
-        Ok(Ok(())) => HandshakeWaitOutcome::Ready,
-        Ok(Err(_)) => HandshakeWaitOutcome::Aborted,
+    let outcome = match tokio::time::timeout(timeout, rx.wait_for(|p| !p.is_attaching())).await {
+        Ok(Ok(phase)) if *phase == AttachPhase::Ready => HandshakeWaitOutcome::Ready,
+        Ok(Ok(_)) | Ok(Err(_)) => HandshakeWaitOutcome::Aborted,
         Err(_) => HandshakeWaitOutcome::TimedOut,
     };
     (outcome, start.elapsed())
@@ -430,15 +445,15 @@ pub struct ConnectionManager {
     /// the count and the writes.
     external_restore_lock: Arc<tokio::sync::RwLock<()>>,
     /// Per-(agent, working_dir, session_id) async mutex. Held across the
-    /// dedup-lookup + spawn + SessionStarted-wait critical section so two
-    /// concurrent `spawn_agent` calls for the same logical session can't
-    /// both miss dedup during the handshake window. Entries persist for
-    /// process lifetime — bounded by the number of distinct sessions ever
-    /// connected.
+    /// dedup-lookup + spawn critical section — only until the new connection
+    /// is in the map, which carries the session id it was spawned to reopen —
+    /// so two concurrent `spawn_agent` calls for the same logical session
+    /// can't both miss dedup. Entries persist for process lifetime — bounded
+    /// by the number of distinct sessions ever connected.
     spawn_locks: Arc<Mutex<HashMap<SpawnDedupKey, Arc<Mutex<()>>>>>,
-    /// Bound on how long `spawn_agent` waits for the agent's handshake
-    /// before releasing the dedup lock. Configurable per-instance for
-    /// tests; in production initialized from env via
+    /// Bound on how long `spawn_agent` waits for a resumed session to become
+    /// usable before returning the connection id anyway. Configurable
+    /// per-instance for tests; in production initialized from env via
     /// `spawn_handshake_timeout_from_env`.
     spawn_handshake_timeout: Duration,
     /// Shared General Settings shell used by ACP terminal fallbacks. Cloned
@@ -619,6 +634,8 @@ impl ConnectionManager {
             None,
         );
         state.status = ConnectionStatus::Connected;
+        // A synthetic connection stands for one whose session is open.
+        state.attach_phase = AttachPhase::Ready;
         let conn = AgentConnection {
             id: id.to_string(),
             agent_type,
@@ -631,6 +648,7 @@ impl ConnectionManager {
             config_fingerprint: String::new(),
             last_observed_fingerprint: String::new(),
             child_pid: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            attach_lifeline: crate::acp::connection::AttachLifeline::detached(),
         };
         let mut map = self.connections.lock().await;
         map.insert(id.to_string(), conn);
@@ -662,6 +680,8 @@ impl ConnectionManager {
             None,
         );
         state.status = ConnectionStatus::Connected;
+        // A synthetic connection stands for one whose session is open.
+        state.attach_phase = AttachPhase::Ready;
         let conn = AgentConnection {
             id: id.to_string(),
             agent_type,
@@ -674,11 +694,16 @@ impl ConnectionManager {
             config_fingerprint: String::new(),
             last_observed_fingerprint: String::new(),
             child_pid: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            attach_lifeline: crate::acp::connection::AttachLifeline::detached(),
         };
         self.connections.lock().await.insert(id.to_string(), conn);
         rx
     }
 
+    /// Spawn (or share) a connection. When `session_id` is set, the call
+    /// returns once that session accepts prompts — or failed, or
+    /// `spawn_handshake_timeout` passed — so an in-process caller can act on
+    /// it straight away. UI clients use [`Self::spawn_agent_detached`].
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn_agent(
         &self,
@@ -691,29 +716,96 @@ impl ConnectionManager {
         preferred_mode_id: Option<String>,
         preferred_config_values: BTreeMap<String, String>,
     ) -> Result<String, AcpError> {
-        // Held for the whole establishment. A restore writing back to the
-        // agents' own directories takes the write side, so it can never see an
-        // empty connection list and then have one appear underneath it. Not
-        // re-entrant: nothing reachable from here calls `spawn_agent` again.
-        let _restore_guard = self.external_restore_lock.read().await;
+        self.spawn_agent_with(
+            agent_type,
+            working_dir,
+            session_id,
+            runtime_env,
+            owner_window_label,
+            emitter,
+            preferred_mode_id,
+            preferred_config_values,
+            AttachWait::UntilReady,
+        )
+        .await
+    }
+
+    /// As [`Self::spawn_agent`], but returns as soon as the connection exists.
+    /// The session keeps opening in the background; the caller follows it
+    /// through `AttachProgress` events and the snapshot's `attach_phase`.
+    ///
+    /// This is what the UI's connect uses. A resume can take anywhere from a
+    /// second to minutes (Claude Code runs the user's SessionStart hooks
+    /// first), and holding the request open for that long is how a remote
+    /// client's 30 s HTTP timeout turned a slow-but-healthy attach into a
+    /// "connection failed" — and, by dropping the request mid-wait, let the
+    /// next client start a duplicate agent for the same session.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn spawn_agent_detached(
+        &self,
+        agent_type: AgentType,
+        working_dir: Option<String>,
+        session_id: Option<String>,
+        runtime_env: BTreeMap<String, String>,
+        owner_window_label: String,
+        emitter: EventEmitter,
+        preferred_mode_id: Option<String>,
+        preferred_config_values: BTreeMap<String, String>,
+    ) -> Result<String, AcpError> {
+        self.spawn_agent_with(
+            agent_type,
+            working_dir,
+            session_id,
+            runtime_env,
+            owner_window_label,
+            emitter,
+            preferred_mode_id,
+            preferred_config_values,
+            AttachWait::No,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn spawn_agent_with(
+        &self,
+        agent_type: AgentType,
+        working_dir: Option<String>,
+        session_id: Option<String>,
+        runtime_env: BTreeMap<String, String>,
+        owner_window_label: String,
+        emitter: EventEmitter,
+        preferred_mode_id: Option<String>,
+        preferred_config_values: BTreeMap<String, String>,
+        wait: AttachWait,
+    ) -> Result<String, AcpError> {
+        // Held until the new connection is in the map. A restore writing back
+        // to the agents' own directories takes the write side, so it can never
+        // see an empty connection list and then have one appear underneath
+        // it. Not re-entrant: nothing reachable from here calls `spawn_agent`
+        // again.
+        let restore_guard = self.external_restore_lock.read().await;
 
         // Connection dedup: when resuming an agent session (session_id is
         // Some), look for a live AgentConnection that already represents
         // the same external session in the same working_dir for the same
-        // agent_type and is not torn down. If found, reuse it instead of
-        // spawning a fresh process — this is what makes a browser refresh
-        // mid-turn re-attach to the existing live state rather than orphan it.
+        // agent_type and is not torn down — including one that is still
+        // opening it. If found, share it instead of spawning a fresh process:
+        // this is what makes a second window, a remote client or a browser
+        // refresh join the existing attach rather than race it.
         let working_dir_path = working_dir.as_ref().map(PathBuf::from);
 
         // Acquire a per-(agent, working_dir, session_id) async mutex so two
         // concurrent connects for the same logical session can't both miss
-        // dedup during the handshake window. The lookup → spawn → wait-for-
-        // SessionStarted critical section runs under this lock; the second
-        // waiter, on entry, observes the first call's connection with
-        // `state.external_id` already populated and returns its id via
-        // `find_connection_for_reuse`. Skipped entirely when `session_id`
-        // is None (fresh sessions can't dedup — by design — since the
-        // agent assigns the id).
+        // dedup. It covers only lookup → spawn: the new connection enters the
+        // map carrying the session id it is reopening, so from that moment
+        // every later connect finds and shares it, and nobody has to wait for
+        // the agent's handshake under the lock. (It used to be held until the
+        // session was confirmed, bounded by a 60 s timeout — a slow resume then
+        // released the lock with the session still unconfirmed, and the next
+        // caller spawned a duplicate agent for it.) Skipped entirely when
+        // `session_id` is None (fresh sessions can't dedup — by design — since
+        // the agent assigns the id).
         let session_id_for_log = session_id.clone();
         let dedup_lock = if let Some(sid) = session_id.as_deref() {
             let key = SpawnDedupKey {
@@ -733,54 +825,61 @@ impl ConnectionManager {
             None
         };
 
-        if let Some(existing) = self
+        let connection_id = if let Some(existing) = self
             .find_connection_for_reuse(agent_type, working_dir_path.as_ref(), session_id.as_deref())
             .await
         {
+            let phase = self.attach_phase_of(&existing).await;
             tracing::info!(
-                "[ACP] reusing connection id={} for session_id={}",
+                "[ACP] reusing connection id={} for session_id={} owner_window={} attach_phase={}",
                 existing,
-                session_id.as_deref().unwrap_or("")
+                session_id.as_deref().unwrap_or(""),
+                owner_window_label,
+                phase.map(AttachPhase::as_str).unwrap_or("gone"),
             );
-            return Ok(existing);
-        }
-
-        let connection_id = uuid::Uuid::new_v4().to_string();
-        tracing::info!(
-            "[ACP] spawning connection id={} owner_window={} agent={:?}",
-            connection_id, owner_window_label, agent_type
-        );
-
-        // `spawn_agent_connection` inserts the entry into `self.connections`,
-        // installs the SessionStarted dedup signal on the state, registers
-        // a cleanup hook, and returns the rx half of the signal. Any spawn
-        // failure short-circuits before we touch the rx wait.
-        let session_started_rx = spawn_agent_connection(
-            connection_id.clone(),
-            agent_type,
-            working_dir,
-            session_id,
-            runtime_env,
-            owner_window_label,
-            emitter,
-            self.connections.clone(),
-            preferred_mode_id,
-            preferred_config_values,
-            self.delegation_snapshot(),
-            self.terminal_shell_config.clone(),
-        )
-        .await?;
-
-        // When dedup is active, hold the lock until the agent's
-        // SessionStarted has applied (so external_id is populated for the
-        // next waiter), aborted (connection died), or the timeout fires.
-        // Logged on every wait so production can audit real-world handshake
-        // latencies and tune `CODEG_ACP_SPAWN_HANDSHAKE_TIMEOUT_SECS`.
-        if dedup_lock.is_some() {
-            let timeout = self.spawn_handshake_timeout;
-            let (outcome, elapsed) = wait_for_session_started(session_started_rx, timeout).await;
+            existing
+        } else {
+            let connection_id = uuid::Uuid::new_v4().to_string();
             tracing::info!(
-                "[ACP] dedup_wait connection_id={} session_id={} outcome={} \
+                "[ACP] spawning connection id={} owner_window={} agent={:?} session_id={}",
+                connection_id,
+                owner_window_label,
+                agent_type,
+                session_id.as_deref().unwrap_or("<new>")
+            );
+
+            // `spawn_agent_connection` inserts the entry into
+            // `self.connections` (stamped with the session id it is reopening)
+            // and registers a cleanup hook. Any spawn failure short-circuits
+            // here, before the lock is released.
+            spawn_agent_connection(
+                connection_id.clone(),
+                agent_type,
+                working_dir,
+                session_id,
+                runtime_env,
+                owner_window_label,
+                emitter,
+                self.connections.clone(),
+                preferred_mode_id,
+                preferred_config_values,
+                self.delegation_snapshot(),
+                self.terminal_shell_config.clone(),
+            )
+            .await?;
+            connection_id
+        };
+        drop(dedup_lock);
+        drop(restore_guard);
+
+        if wait == AttachWait::UntilReady && session_id_for_log.is_some() {
+            let timeout = self.spawn_handshake_timeout;
+            let (outcome, elapsed) = match self.subscribe_attach(&connection_id).await {
+                Some(rx) => wait_for_attach(rx, timeout).await,
+                None => (HandshakeWaitOutcome::Aborted, Duration::ZERO),
+            };
+            tracing::info!(
+                "[ACP] attach_wait connection_id={} session_id={} outcome={} \
                  elapsed_ms={} timeout_ms={}",
                 connection_id,
                 session_id_for_log.as_deref().unwrap_or(""),
@@ -789,13 +888,31 @@ impl ConnectionManager {
                 timeout.as_millis(),
             );
         }
-        // session_started_rx (in the no-dedup branch) is dropped here. tx
-        // staying inside SessionState gets dropped naturally when the
-        // connection terminates, no leak.
-
-        drop(dedup_lock);
 
         Ok(connection_id)
+    }
+
+    /// The attach phase of a live connection, `None` if it is gone.
+    async fn attach_phase_of(&self, conn_id: &str) -> Option<AttachPhase> {
+        let state = {
+            let connections = self.connections.lock().await;
+            connections.get(conn_id)?.state.clone()
+        };
+        let phase = state.read().await.attach_phase;
+        Some(phase)
+    }
+
+    /// Subscribe to a live connection's attach phase, `None` if it is gone.
+    async fn subscribe_attach(
+        &self,
+        conn_id: &str,
+    ) -> Option<tokio::sync::watch::Receiver<AttachPhase>> {
+        let state = {
+            let connections = self.connections.lock().await;
+            connections.get(conn_id)?.state.clone()
+        };
+        let rx = state.read().await.subscribe_attach();
+        Some(rx)
     }
 
     /// Bump `last_activity_at` for a live connection so the idle sweep
@@ -848,6 +965,14 @@ impl ConnectionManager {
                     continue;
                 };
                 if state.status != ConnectionStatus::Connected {
+                    continue;
+                }
+                // Still opening its session: not idle, busy. `Connected`
+                // arrives with `initialize`, long before a slow resume
+                // finishes, and sweeping it here killed attaches that were
+                // making progress. A hung attach is bounded by the attach
+                // ceiling in the connection driver instead, which says why.
+                if state.attach_phase.is_attaching() {
                     continue;
                 }
                 if state.pending_permission.is_some() {
@@ -925,7 +1050,10 @@ impl ConnectionManager {
     /// Look up an existing live connection that we can reuse instead of
     /// spawning a new process. Reuse criteria, ALL must hold:
     /// - `session_id` is Some (we never dedup speculative / fresh connects)
-    /// - the connection's `state.external_id` equals `session_id`
+    /// - the connection represents `session_id`: its `state.external_id`
+    ///   equals it, or it was spawned to reopen it and is still opening it
+    ///   (`SessionState::represents_session`) — so a client that connects
+    ///   while another client's attach is in flight shares that attach
     /// - the connection's `agent_type` equals the requested one
     /// - the connection's `working_dir` equals the requested one (compared as
     ///   `Option<PathBuf>` so canonicalization is the caller's concern)
@@ -953,7 +1081,7 @@ impl ConnectionManager {
                 continue;
             }
             let state = conn.state.read().await;
-            if state.external_id.as_deref() != Some(session_id) {
+            if !state.represents_session(session_id) {
                 continue;
             }
             if state.working_dir.as_ref() != working_dir {
@@ -3873,7 +4001,11 @@ impl ConnectionManager {
                 continue;
             }
             let state = conn.state.read().await;
-            if state.external_id.as_deref() == Some(external_id) {
+            // Includes a connection still OPENING this session: a second
+            // client that looks while the first one's resume is in flight
+            // must find it and attach as a viewer, not spawn (or be handed by
+            // connect-time dedup) an owner of its own.
+            if state.represents_session(external_id) {
                 return Some(id.clone());
             }
         }
@@ -4460,6 +4592,7 @@ mod tests {
             config_fingerprint: String::new(),
             last_observed_fingerprint: String::new(),
             child_pid: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            attach_lifeline: crate::acp::connection::AttachLifeline::detached(),
         }
     }
 
@@ -4903,6 +5036,8 @@ mod tests {
             None,
         );
         state.status = ConnectionStatus::Connected;
+        // A synthetic connection stands for one whose session is open.
+        state.attach_phase = AttachPhase::Ready;
         let conn = AgentConnection {
             id: conn_id.to_string(),
             agent_type,
@@ -4915,6 +5050,7 @@ mod tests {
             config_fingerprint: String::new(),
             last_observed_fingerprint: String::new(),
             child_pid: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            attach_lifeline: crate::acp::connection::AttachLifeline::detached(),
         };
         mgr.connections
             .lock()
@@ -5800,6 +5936,8 @@ mod tests {
         );
         state.conversation_id = Some(pre.id);
         state.status = ConnectionStatus::Connected;
+        // A synthetic connection stands for one whose session is open.
+        state.attach_phase = AttachPhase::Ready;
         let conn = AgentConnection {
             id: "c-shield".to_string(),
             agent_type: AgentType::ClaudeCode,
@@ -5812,6 +5950,7 @@ mod tests {
             config_fingerprint: String::new(),
             last_observed_fingerprint: String::new(),
             child_pid: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            attach_lifeline: crate::acp::connection::AttachLifeline::detached(),
         };
         let mgr = ConnectionManager::new();
         mgr.connections
@@ -7281,14 +7420,17 @@ mod tests {
     // ---------- Phase: spawn handshake wait helper ----------
 
     #[tokio::test]
-    async fn wait_for_session_started_returns_ready_when_sender_fires() {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        // Fire immediately on a separate task so the wait future actually
-        // gets to register.
+    async fn wait_for_attach_returns_ready_when_the_session_opens() {
+        let (tx, rx) = tokio::sync::watch::channel(AttachPhase::Resuming);
+        // Advance on a separate task so the wait future actually registers.
         tokio::spawn(async move {
-            let _ = tx.send(());
+            tx.send_replace(AttachPhase::Configuring);
+            tx.send_replace(AttachPhase::Ready);
+            // Keep the sender alive past the send so the waiter sees Ready,
+            // not a closed channel.
+            tokio::time::sleep(Duration::from_millis(100)).await;
         });
-        let (outcome, elapsed) = wait_for_session_started(rx, Duration::from_millis(500)).await;
+        let (outcome, elapsed) = wait_for_attach(rx, Duration::from_millis(500)).await;
         assert_eq!(outcome, HandshakeWaitOutcome::Ready);
         assert!(
             elapsed < Duration::from_millis(500),
@@ -7297,29 +7439,144 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wait_for_session_started_returns_aborted_when_sender_drops() {
-        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
-        // Drop the sender — emulates "connection died before SessionStarted",
-        // i.e. SessionState's tx was dropped during cleanup.
-        drop(tx);
-        let (outcome, elapsed) = wait_for_session_started(rx, Duration::from_millis(500)).await;
+    async fn wait_for_attach_returns_aborted_on_failure_or_a_dropped_state() {
+        let (tx, rx) = tokio::sync::watch::channel(AttachPhase::Resuming);
+        tx.send_replace(AttachPhase::Failed);
+        let (outcome, _) = wait_for_attach(rx, Duration::from_millis(500)).await;
         assert_eq!(outcome, HandshakeWaitOutcome::Aborted);
-        assert!(
-            elapsed < Duration::from_millis(500),
-            "Aborted outcome must resolve well before timeout, got {elapsed:?}"
-        );
+
+        // The connection's state went away before the session opened.
+        let (tx, rx) = tokio::sync::watch::channel(AttachPhase::Starting);
+        drop(tx);
+        let (outcome, elapsed) = wait_for_attach(rx, Duration::from_millis(500)).await;
+        assert_eq!(outcome, HandshakeWaitOutcome::Aborted);
+        assert!(elapsed < Duration::from_millis(500));
     }
 
     #[tokio::test]
-    async fn wait_for_session_started_returns_timed_out_when_neither_happens() {
-        let (_tx, rx) = tokio::sync::oneshot::channel::<()>();
-        // Hold the sender alive but never fire and never drop. Tight
-        // timeout so the test stays fast; production timeout is 60s.
-        let (outcome, elapsed) = wait_for_session_started(rx, Duration::from_millis(40)).await;
+    async fn wait_for_attach_returns_timed_out_while_still_attaching() {
+        let (_tx, rx) = tokio::sync::watch::channel(AttachPhase::Resuming);
+        // Hold the sender alive but never advance. Tight timeout so the test
+        // stays fast; production default is 180 s.
+        let (outcome, elapsed) = wait_for_attach(rx, Duration::from_millis(40)).await;
         assert_eq!(outcome, HandshakeWaitOutcome::TimedOut);
         assert!(
             elapsed >= Duration::from_millis(40),
             "TimedOut must wait at least the full timeout, got {elapsed:?}"
+        );
+    }
+
+    /// The incident this guards: client A starts resuming a session, the
+    /// agent is slow, and client B connects to the same session before the
+    /// agent has confirmed it. B must be handed A's connection — the one
+    /// already opening the session — instead of a second agent process.
+    #[tokio::test]
+    async fn a_connect_during_an_in_flight_attach_shares_that_connection() {
+        let mgr = ConnectionManager::new();
+        let wd = PathBuf::from("/tmp/attach-share");
+        insert_fake_connection(
+            &mgr,
+            "first",
+            AgentType::ClaudeCode,
+            Some(wd.clone()),
+            EventEmitter::Noop,
+        )
+        .await;
+        {
+            let state = mgr.get_state("first").await.unwrap();
+            let mut s = state.write().await;
+            // Still resuming: no confirmed id yet, only the one it was
+            // spawned to reopen.
+            s.attach_phase = AttachPhase::Resuming;
+            s.external_id = None;
+            s.requested_session_id = Some("sess-1".into());
+        }
+        assert_eq!(
+            mgr.find_connection_for_reuse(AgentType::ClaudeCode, Some(&wd), Some("sess-1"))
+                .await
+                .as_deref(),
+            Some("first"),
+            "an in-flight attach for the same session must be shared"
+        );
+        assert!(
+            mgr.find_connection_for_reuse(AgentType::ClaudeCode, Some(&wd), Some("sess-2"))
+                .await
+                .is_none(),
+            "a different session is never shared"
+        );
+        let other_wd = PathBuf::from("/tmp/elsewhere");
+        assert!(
+            mgr.find_connection_for_reuse(AgentType::ClaudeCode, Some(&other_wd), Some("sess-1"))
+                .await
+                .is_none(),
+            "same session id in another folder is a different session"
+        );
+    }
+
+    #[tokio::test]
+    async fn sweep_idle_skips_a_connection_that_is_still_attaching() {
+        let mgr = ConnectionManager::new();
+        insert_fake_connection(
+            &mgr,
+            "attaching",
+            AgentType::ClaudeCode,
+            None,
+            EventEmitter::Noop,
+        )
+        .await;
+        backdate_last_activity(&mgr, "attaching", 600).await;
+        {
+            let state = mgr.get_state("attaching").await.unwrap();
+            state.write().await.attach_phase = AttachPhase::Resuming;
+        }
+        let n = mgr.sweep_idle(Duration::from_secs(300)).await;
+        assert_eq!(n, 0, "a slow attach is busy, not idle");
+        assert!(mgr.connections.lock().await.contains_key("attaching"));
+    }
+
+    /// Dropping a connection's map entry resolves its lifeline, which is what
+    /// stops a driver stuck in `session/resume` and kills its agent.
+    #[tokio::test]
+    async fn disconnect_resolves_the_attach_lifeline() {
+        let mgr = ConnectionManager::new();
+        let (lifeline, mut lifeline_rx) = crate::acp::connection::AttachLifeline::new();
+        let (tx, _rx) = tokio::sync::mpsc::channel(4);
+        let state = crate::acp::session_state::SessionState::new(
+            "hung".into(),
+            AgentType::ClaudeCode,
+            None,
+            "test-window".into(),
+            None,
+        );
+        mgr.connections.lock().await.insert(
+            "hung".into(),
+            AgentConnection {
+                id: "hung".into(),
+                agent_type: AgentType::ClaudeCode,
+                status: ConnectionStatus::Connected,
+                owner_window_label: "test-window".into(),
+                cmd_tx: tx,
+                state: Arc::new(tokio::sync::RwLock::new(state)),
+                emitter: EventEmitter::Noop,
+                prompt_lock: Arc::new(tokio::sync::Mutex::new(())),
+                config_fingerprint: String::new(),
+                last_observed_fingerprint: String::new(),
+                child_pid: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+                attach_lifeline: lifeline,
+            },
+        );
+        assert!(
+            matches!(
+                lifeline_rx.try_recv(),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+            ),
+            "the lifeline holds while the entry is in the map"
+        );
+        mgr.disconnect("hung").await.unwrap();
+        let resolved = tokio::time::timeout(Duration::from_millis(200), &mut lifeline_rx).await;
+        assert!(
+            matches!(resolved, Ok(Err(_))),
+            "disconnect must drop the lifeline so the driver stops; got {resolved:?}"
         );
     }
 
@@ -7484,6 +7741,8 @@ mod tests {
         );
         state.conversation_id = Some(conversation_id);
         state.status = ConnectionStatus::Connected;
+        // A synthetic connection stands for one whose session is open.
+        state.attach_phase = AttachPhase::Ready;
         let conn = AgentConnection {
             id: conn_id.to_string(),
             agent_type: crate::models::agent::AgentType::ClaudeCode,
@@ -7496,6 +7755,7 @@ mod tests {
             config_fingerprint: String::new(),
             last_observed_fingerprint: String::new(),
             child_pid: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            attach_lifeline: crate::acp::connection::AttachLifeline::detached(),
         };
         let mgr = Arc::new(ConnectionManager::new());
         {
@@ -8167,6 +8427,8 @@ mod tests {
         );
         state.conversation_id = None;
         state.status = ConnectionStatus::Connected;
+        // A synthetic connection stands for one whose session is open.
+        state.attach_phase = AttachPhase::Ready;
         let conn = AgentConnection {
             id: "c-relink".to_string(),
             agent_type: AgentType::ClaudeCode,
@@ -8179,6 +8441,7 @@ mod tests {
             config_fingerprint: String::new(),
             last_observed_fingerprint: String::new(),
             child_pid: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            attach_lifeline: crate::acp::connection::AttachLifeline::detached(),
         };
         let mgr = ConnectionManager::new();
         {

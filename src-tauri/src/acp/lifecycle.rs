@@ -1998,6 +1998,7 @@ mod tests {
             config_fingerprint: String::new(),
             last_observed_fingerprint: String::new(),
             child_pid: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            attach_lifeline: crate::acp::connection::AttachLifeline::detached(),
         }
     }
 
