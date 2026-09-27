@@ -39,8 +39,10 @@ use tokio::sync::RwLock;
 /// of times per turn, so 64 slots is comfortable headroom for a sustained
 /// SQLite stall without forcing the dispatcher to block on `send`.
 /// (SessionStarted, TurnComplete, ConversationLinked, NativeSessionTitle,
-/// TranscriptRolledOver, Prompting, Disconnected, Error — plus at most one
-/// throttled turn-activity heartbeat per [`TURN_ACTIVITY_BUMP_INTERVAL`].)
+/// TranscriptRolledOver, Prompting, Disconnected, Error, and the selector
+/// events SelectorsReady / ModeChanged / SessionConfigOptions, which only
+/// fire when a selector actually changes — plus at most one throttled
+/// turn-activity heartbeat per [`TURN_ACTIVITY_BUMP_INTERVAL`].)
 const WORKER_QUEUE_CAPACITY: usize = 64;
 
 /// How often a turn that is still streaming moves its conversation's
@@ -146,6 +148,13 @@ fn is_lifecycle_relevant(event: &AcpEvent) -> bool {
                 status: ConnectionStatus::Prompting
             }
             | AcpEvent::Error { .. }
+            // The conversation's selector record (see `record_selector_state`):
+            // once when establishment settles, then on every confirmed change.
+            // A handful per session — a user picking a selector, or the agent
+            // pushing one — never per token.
+            | AcpEvent::SelectorsReady
+            | AcpEvent::ModeChanged { .. }
+            | AcpEvent::SessionConfigOptions { .. }
     )
 }
 
@@ -498,10 +507,100 @@ pub(crate) async fn handle_event(
             }
             Ok(())
         }
+        // The conversation's selector record: when establishment settles (a
+        // session's first attach gets a record, so a later pick elsewhere can
+        // no longer move it), on every change the agent confirmed, and when a
+        // brand-new session is first linked to its row (there was no row to
+        // write to at establishment).
+        AcpEvent::SelectorsReady
+        | AcpEvent::ModeChanged { .. }
+        | AcpEvent::SessionConfigOptions { .. }
+        | AcpEvent::ConversationLinked { .. } => {
+            record_selector_state(db_conn, manager, &envelope.connection_id).await?;
+            Ok(())
+        }
         // Other events don't need cross-connection DB persistence today; extend
         // this dispatcher with new arms as the lifecycle scope grows.
         _ => Ok(()),
     }
+}
+
+/// The selectors a connection's session has in effect right now, as a
+/// selector record, or `None` while establishment is still running (the
+/// values then are the agent's opening defaults, not the session's — the
+/// `SelectorsReady` that ends establishment records the settled ones).
+///
+/// Values pinned through the environment are left out: the agent refuses to
+/// change them, so they are not the conversation's choice to remember.
+fn effective_selector_state(
+    state: &SessionState,
+) -> Option<conversation_service::ConversationSelectorState> {
+    if !state.selectors_ready {
+        return None;
+    }
+    let mut config_values = state
+        .config_options
+        .as_deref()
+        .map(crate::acp::connection::current_config_option_values)
+        .unwrap_or_default();
+    config_values.retain(|id, _| !state.env_pinned_config_option_ids.contains(id));
+    let record = conversation_service::ConversationSelectorState {
+        mode_id: state.current_mode.clone(),
+        config_values,
+    };
+    (!record.is_empty()).then_some(record)
+}
+
+/// Record what the connection's session has in effect onto its conversation
+/// row (see `conversation_service::ConversationSelectorState`).
+///
+/// Reads the LIVE state rather than the event payload, so however the worker
+/// lags behind a burst of changes, the last write carries the final values.
+/// The row is the one the connection is linked to; before the first prompt
+/// links it (a conversation just reopened), the live row bound to the
+/// session's id. A session with no row yet (a new chat before its first
+/// message) records nothing — its `ConversationLinked` will.
+async fn record_selector_state(
+    db_conn: &DatabaseConnection,
+    manager: &ConnectionManager,
+    connection_id: &str,
+) -> Result<(), DbError> {
+    let Some(state_arc) = manager.get_state(connection_id).await else {
+        return Ok(());
+    };
+    let (record, conversation_id, external_id, agent_type) = {
+        let s = state_arc.read().await;
+        (
+            effective_selector_state(&s),
+            s.conversation_id,
+            s.external_id.clone(),
+            s.agent_type,
+        )
+    };
+    let Some(record) = record else {
+        return Ok(());
+    };
+    let conversation_id = match (conversation_id, external_id) {
+        (Some(cid), _) => cid,
+        (None, Some(eid)) => {
+            match conversation_service::find_live_id_for_session(db_conn, &eid, agent_type).await?
+            {
+                Some(cid) => cid,
+                None => return Ok(()),
+            }
+        }
+        (None, None) => return Ok(()),
+    };
+    if conversation_service::save_selector_state(db_conn, conversation_id, record.clone()).await? {
+        tracing::debug!(
+            connection_id,
+            conversation_id,
+            mode = ?record.mode_id,
+            values = ?record.config_values,
+            "[lifecycle] recorded the conversation's selectors"
+        );
+    }
+    Ok(())
 }
 
 /// On TurnComplete for a delegation child, resolve the pending broker call
@@ -1686,6 +1785,9 @@ async fn connection_worker_loop(
                 conversation_id, ..
             } => {
                 try_cache_link(&mut cache, &manager, &connection_id, *conversation_id).await;
+                // A brand-new session had no row to record its selectors on
+                // until now (see `record_selector_state`).
+                handle_event_with_retry(&db, &manager, envelope, broker.as_ref()).await;
             }
             AcpEvent::StatusChanged {
                 status: ConnectionStatus::Prompting,
@@ -3920,5 +4022,261 @@ mod tests {
 
         drop(bus);
         let _ = dispatcher.await;
+    }
+
+    // ── Selector record: each conversation keeps its own selectors ─────
+
+    use crate::acp::types::{SessionConfigKindInfo, SessionConfigOptionInfo, SessionConfigSelectInfo};
+    use crate::commands::acp::resolve_connect_selector_prefs;
+    use crate::db::service::conversation_service::ConversationSelectorState;
+    use std::collections::BTreeMap;
+
+    fn select_option(id: &str, current: &str) -> SessionConfigOptionInfo {
+        SessionConfigOptionInfo {
+            id: id.to_string(),
+            name: id.to_string(),
+            description: None,
+            category: (id == "model").then(|| "model".to_string()),
+            kind: SessionConfigKindInfo::Select(SessionConfigSelectInfo {
+                current_value: current.to_string(),
+                options: Vec::new(),
+                groups: Vec::new(),
+            }),
+            recommended_value: None,
+        }
+    }
+
+    fn prefs(values: &[(&str, &str)]) -> BTreeMap<String, String> {
+        values
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    /// Put connection `conn_id` into the state an agent that confirmed these
+    /// selectors leaves it in, through the same events the connection loop
+    /// emits (`apply_event` is the single writer).
+    async fn agent_confirms(
+        mgr: &ConnectionManager,
+        conn_id: &str,
+        mode: &str,
+        values: &[(&str, &str)],
+    ) {
+        let state = mgr.get_state(conn_id).await.expect("connection");
+        let mut s = state.write().await;
+        s.apply_event(&AcpEvent::ModeChanged {
+            mode_id: mode.to_string(),
+        });
+        s.apply_event(&AcpEvent::SessionConfigOptions {
+            config_options: values
+                .iter()
+                .map(|(id, value)| select_option(id, value))
+                .collect(),
+        });
+    }
+
+    async fn connection_on(
+        mgr: &ConnectionManager,
+        conn_id: &str,
+        conversation_id: Option<i32>,
+        external_id: &str,
+        ready: bool,
+    ) {
+        let conn = fake_connection_with_state(conn_id, conversation_id);
+        {
+            let mut s = conn.state.write().await;
+            s.external_id = Some(external_id.to_string());
+            s.selectors_ready = ready;
+        }
+        mgr.connections
+            .lock()
+            .await
+            .insert(conn_id.to_string(), conn);
+    }
+
+    fn on(conn_id: &str, seq: u64, payload: AcpEvent) -> EventEnvelope {
+        EventEnvelope {
+            seq,
+            connection_id: conn_id.to_string(),
+            payload,
+        }
+    }
+
+    fn options_changed() -> AcpEvent {
+        AcpEvent::SessionConfigOptions {
+            config_options: Vec::new(),
+        }
+    }
+
+    async fn record_of(
+        db: &crate::db::AppDatabase,
+        cid: i32,
+    ) -> Option<ConversationSelectorState> {
+        conversation_service::load_selector_state(&db.conn, cid)
+            .await
+            .unwrap()
+    }
+
+    fn record(mode: &str, values: &[(&str, &str)]) -> ConversationSelectorState {
+        ConversationSelectorState {
+            mode_id: Some(mode.to_string()),
+            config_values: prefs(values),
+        }
+    }
+
+    #[test]
+    fn selector_events_reach_the_worker() {
+        assert!(is_lifecycle_relevant(&AcpEvent::SelectorsReady));
+        assert!(is_lifecycle_relevant(&AcpEvent::ModeChanged {
+            mode_id: "plan".into(),
+        }));
+        assert!(is_lifecycle_relevant(&options_changed()));
+    }
+
+    /// The settled selectors are recorded when establishment ends, and a
+    /// change the agent confirmed later (a `set_config_option` / `set_mode`
+    /// round-trip) is merged into the same row.
+    #[tokio::test]
+    async fn a_confirmed_selector_change_round_trips_through_the_row() {
+        let db = test_helpers::fresh_in_memory_db().await;
+        let cid = seeded_conversation(&db, "/tmp/selector-linked").await;
+        let mgr = ConnectionManager::new();
+        connection_on(&mgr, "c1", Some(cid), "sess-1", true).await;
+
+        agent_confirms(&mgr, "c1", "default", &[("model", "opus"), ("effort", "max")]).await;
+        handle_event(&db.conn, &mgr, &on("c1", 1, AcpEvent::SelectorsReady), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            record_of(&db, cid).await,
+            Some(record("default", &[("model", "opus"), ("effort", "max")]))
+        );
+
+        agent_confirms(&mgr, "c1", "plan", &[("model", "opus"), ("effort", "low")]).await;
+        handle_event(&db.conn, &mgr, &on("c1", 2, options_changed()), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            record_of(&db, cid).await,
+            Some(record("plan", &[("model", "opus"), ("effort", "low")])),
+            "the record follows what the agent confirmed"
+        );
+    }
+
+    /// While establishment is still running the options are the agent's
+    /// opening defaults, not the conversation's choice: nothing is written.
+    #[tokio::test]
+    async fn nothing_is_recorded_before_establishment_settles() {
+        let db = test_helpers::fresh_in_memory_db().await;
+        let cid = seeded_conversation(&db, "/tmp/selector-unready").await;
+        let mgr = ConnectionManager::new();
+        connection_on(&mgr, "c1", Some(cid), "sess-1", false).await;
+        agent_confirms(&mgr, "c1", "default", &[("effort", "xhigh")]).await;
+        handle_event(&db.conn, &mgr, &on("c1", 1, options_changed()), None)
+            .await
+            .unwrap();
+        assert_eq!(record_of(&db, cid).await, None);
+    }
+
+    /// A reopened conversation is not linked to its connection until the
+    /// first prompt, so the first attach records on the row bound to the
+    /// session id instead.
+    #[tokio::test]
+    async fn a_reopened_conversation_is_recorded_before_its_first_prompt() {
+        let db = test_helpers::fresh_in_memory_db().await;
+        let cid = seeded_conversation(&db, "/tmp/selector-unlinked").await;
+        conversation_service::bind_external_id(&db.conn, cid, "sess-b", &[])
+            .await
+            .unwrap();
+        let mgr = ConnectionManager::new();
+        connection_on(&mgr, "c1", None, "sess-b", true).await;
+        agent_confirms(&mgr, "c1", "default", &[("effort", "max")]).await;
+        handle_event(&db.conn, &mgr, &on("c1", 1, AcpEvent::SelectorsReady), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            record_of(&db, cid).await,
+            Some(record("default", &[("effort", "max")]))
+        );
+    }
+
+    /// The reported bug, end to end: two conversations on Max; lowering the
+    /// effort in A must not lower B when B reconnects, even though the client
+    /// now sends A's pick as its saved per-agent preference. A brand-new
+    /// session still starts from that last pick.
+    #[tokio::test]
+    async fn a_resume_uses_its_own_record_not_the_last_pick_elsewhere() {
+        let db = test_helpers::fresh_in_memory_db().await;
+        let a = seeded_conversation(&db, "/tmp/selector-a").await;
+        let b = seeded_conversation(&db, "/tmp/selector-b").await;
+        conversation_service::bind_external_id(&db.conn, a, "sess-a", &[])
+            .await
+            .unwrap();
+        conversation_service::bind_external_id(&db.conn, b, "sess-b", &[])
+            .await
+            .unwrap();
+        let mgr = ConnectionManager::new();
+        connection_on(&mgr, "ca", Some(a), "sess-a", true).await;
+        connection_on(&mgr, "cb", Some(b), "sess-b", true).await;
+        agent_confirms(&mgr, "ca", "default", &[("effort", "max")]).await;
+        agent_confirms(&mgr, "cb", "default", &[("effort", "max")]).await;
+        for (seq, conn) in [(1, "ca"), (2, "cb")] {
+            handle_event(&db.conn, &mgr, &on(conn, seq, AcpEvent::SelectorsReady), None)
+                .await
+                .unwrap();
+        }
+
+        // Lower A's effort; the client's saved per-agent pick follows it.
+        agent_confirms(&mgr, "ca", "default", &[("effort", "low")]).await;
+        handle_event(&db.conn, &mgr, &on("ca", 3, options_changed()), None)
+            .await
+            .unwrap();
+        let client_pick = prefs(&[("effort", "low")]);
+
+        // B reconnects (idle sweep, restart, lazy connect on send).
+        let (mode, values) = resolve_connect_selector_prefs(
+            &db.conn,
+            AgentType::ClaudeCode,
+            Some("sess-b"),
+            Some("acceptEdits".to_string()),
+            client_pick.clone(),
+        )
+        .await;
+        assert_eq!(mode.as_deref(), Some("default"));
+        assert_eq!(values, prefs(&[("effort", "max")]), "B keeps its own effort");
+
+        // A reconnects with its own, lowered, record.
+        let (_, values) = resolve_connect_selector_prefs(
+            &db.conn,
+            AgentType::ClaudeCode,
+            Some("sess-a"),
+            None,
+            prefs(&[("effort", "max")]),
+        )
+        .await;
+        assert_eq!(values, prefs(&[("effort", "low")]));
+
+        // A new chat starts from the last pick.
+        let (mode, values) = resolve_connect_selector_prefs(
+            &db.conn,
+            AgentType::ClaudeCode,
+            None,
+            Some("acceptEdits".to_string()),
+            client_pick.clone(),
+        )
+        .await;
+        assert_eq!(mode.as_deref(), Some("acceptEdits"));
+        assert_eq!(values, client_pick);
+
+        // So does the first reconnect of a conversation with no record yet.
+        let (_, values) = resolve_connect_selector_prefs(
+            &db.conn,
+            AgentType::ClaudeCode,
+            Some("sess-never-recorded"),
+            None,
+            client_pick.clone(),
+        )
+        .await;
+        assert_eq!(values, client_pick);
     }
 }

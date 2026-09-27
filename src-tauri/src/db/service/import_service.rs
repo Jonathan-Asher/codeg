@@ -502,6 +502,7 @@ async fn import_one(
         pin_order: Set(None),
         origin_cwd: Set(None),
         turn_state: Set(None),
+        selector_state: Set(None),
     };
     conv.insert(conn).await?;
     Ok(ImportOutcome::Imported)
@@ -951,6 +952,7 @@ mod tests {
             pin_order: Set(None),
             origin_cwd: Set(None),
             turn_state: Set(None),
+            selector_state: Set(None),
         }
         .insert(&db.conn)
         .await
@@ -1240,6 +1242,7 @@ mod tests {
             pin_order: Set(None),
             origin_cwd: Set(None),
             turn_state: Set(None),
+            selector_state: Set(None),
         }
         .insert(&db.conn)
         .await

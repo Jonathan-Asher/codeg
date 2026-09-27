@@ -14,6 +14,7 @@ import { useAuxPanelContext } from "@/contexts/aux-panel-context"
 import {
   useConnectionAttachInfo,
   useConnectionStatus,
+  useHeldTurnBackground,
 } from "@/hooks/use-connection-status"
 import { useOptionalAcpActions } from "@/contexts/acp-connection-contexts"
 
@@ -80,6 +81,9 @@ export function SessionDetailsTab() {
   // not read as "Idle".
   const connectionStatus = useConnectionStatus(activeConversationTab?.id)
   const connection = useConnectionAttachInfo(activeConversationTab?.id)
+  // A turn held open only for background work reads as idle with that work
+  // running, not as "Working" for as long as the sub-agents take.
+  const heldBackgroundTasks = useHeldTurnBackground(activeConversationTab?.id)
   const acpActions = useOptionalAcpActions()
   const activeTabKey = activeConversationTab?.id ?? null
   const retryConnect = useCallback(() => {
@@ -105,6 +109,7 @@ export function SessionDetailsTab() {
               connectionStatus={connectionStatus}
               connection={connection}
               onRetryConnect={acpActions ? retryConnect : undefined}
+              heldBackgroundTasks={heldBackgroundTasks}
             />
           </div>
         </ScrollArea>

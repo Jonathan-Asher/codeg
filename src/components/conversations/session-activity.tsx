@@ -4,6 +4,7 @@ import { useState } from "react"
 import {
   CircleAlert,
   CircleDot,
+  CircleDotDashed,
   CirclePause,
   Loader2,
   Play,
@@ -59,6 +60,15 @@ export function SessionActivityIcon({
           )}
         />
       )
+    case "background":
+      // Idle, but not finished: the agent waits while its background work
+      // runs. A slow pulse says "alive" without the spinner's "busy".
+      return (
+        <CircleDotDashed
+          aria-hidden
+          className={cn(base, "animate-pulse text-sky-600 dark:text-sky-400")}
+        />
+      )
     case "needs_you":
       return (
         <ShieldAlert
@@ -108,6 +118,10 @@ interface SessionActivityRowProps {
   connection?: ConnectionAttachInfo | null
   /** Retry a failed connect. The Retry button shows only when this is set. */
   onRetry?: () => Promise<unknown> | void
+  /** Background tasks keeping this client's prompting turn open while the
+   *  agent is idle (`0` = running, count unknown); `null` when the turn is
+   *  not held that way. See `useHeldTurnBackground`. */
+  heldBackgroundTasks?: number | null
 }
 
 /**
@@ -121,6 +135,7 @@ export function SessionActivityRow({
   connectionStatus,
   connection,
   onRetry,
+  heldBackgroundTasks = null,
 }: SessionActivityRowProps) {
   const t = useTranslations("Folder.sessionActivity")
   const tSidebar = useTranslations("Folder.sidebar")
@@ -133,7 +148,9 @@ export function SessionActivityRow({
     status: summary.status,
     connectionStatus,
     connection: connection?.state ?? null,
+    awaitingBackground: heldBackgroundTasks != null,
   })
+  const count = heldBackgroundTasks ?? 0
   const agent = getAgentLabel(summary.agent_type)
   const phaseLabel = useAttachPhaseLabel(
     agent,
@@ -145,7 +162,7 @@ export function SessionActivityRow({
       ? tSidebar(ATTENTION_HINT_KEYS[attention])
       : activity === "connect_failed" && connection?.error
         ? connection.error
-        : t(SESSION_ACTIVITY_HINT_KEYS[activity])
+        : t(SESSION_ACTIVITY_HINT_KEYS[activity], { count })
 
   return (
     <div
@@ -157,7 +174,7 @@ export function SessionActivityRow({
         <SessionActivityIcon activity={activity} className="mt-0.5" />
         <div className="min-w-0 space-y-0.5">
           <p className="text-sm font-medium leading-snug">
-            {t(SESSION_ACTIVITY_LABEL_KEYS[activity])}
+            {t(SESSION_ACTIVITY_LABEL_KEYS[activity], { count })}
           </p>
           {phaseLabel && (
             <p

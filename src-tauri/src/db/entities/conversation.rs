@@ -99,6 +99,13 @@ pub struct Model {
     /// Whether the latest turn is running, was interrupted, or ended (`None`).
     /// See [`ConversationTurnState`].
     pub turn_state: Option<ConversationTurnState>,
+    /// The composer selectors (mode + config values) this conversation's agent
+    /// session last had in effect, as JSON. `None` until first recorded. Read
+    /// and written only through
+    /// `conversation_service::{load,save}_selector_state`, which own the
+    /// document shape (`ConversationSelectorState`).
+    #[sea_orm(column_type = "Text", nullable)]
+    pub selector_state: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

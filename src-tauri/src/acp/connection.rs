@@ -2056,7 +2056,7 @@ async fn record_turn_end(
 /// boolean — see `config_option_already_holds`).
 ///
 /// Used to carry a session's selectors across a fork.
-fn current_config_option_values(
+pub(crate) fn current_config_option_values(
     opts: &[SessionConfigOptionInfo],
 ) -> BTreeMap<String, String> {
     opts.iter()
@@ -10988,6 +10988,15 @@ async fn run_conversation_loop(
                     }
                 }
 
+                // Held-turn detection (Claude Code; see
+                // `claude_main_agent_pulse`). `awaiting_background_at` is the
+                // instant a finished cycle becomes "held for background work"
+                // if nothing else happens first; `awaiting_background` mirrors
+                // what was last emitted. Both are turn-scoped, and the turn
+                // boundary clears the published flag in `apply_event`.
+                let mut awaiting_background = false;
+                let mut awaiting_background_at: Option<tokio::time::Instant> = None;
+
                 // Read updates until turn completes.
                 // We must also listen for commands (e.g. RespondPermission)
                 // to avoid deadlocking when the agent awaits a permission response.
@@ -11001,6 +11010,21 @@ async fn run_conversation_loop(
                                 Ok(dispatch) => fix_usage_update_nulls(dispatch),
                                 Err(e) => return Err(defer_to_connection_report(e).await),
                             };
+                            match claude_main_agent_pulse(&dispatch, agent_type) {
+                                Some(MainAgentPulse::CycleEnded) if !awaiting_background => {
+                                    awaiting_background_at = Some(
+                                        tokio::time::Instant::now() + AWAITING_BACKGROUND_GRACE,
+                                    );
+                                }
+                                Some(MainAgentPulse::Working) => {
+                                    awaiting_background_at = None;
+                                    if awaiting_background {
+                                        awaiting_background = false;
+                                        emit_awaiting_background(state, emitter, false).await;
+                                    }
+                                }
+                                _ => {}
+                            }
                             let h = emitter.clone();
                             let st = Arc::clone(state);
                             let runtime = terminal_runtime.clone();
@@ -11400,6 +11424,20 @@ async fn run_conversation_loop(
                             )
                             .await;
                         }
+                        // The main agent's cycle ended and the prompt is still
+                        // pending past the grace: claude-agent-acp is holding it
+                        // open for background sub-agents.
+                        _ = tokio::time::sleep_until(
+                            awaiting_background_at.unwrap_or_else(tokio::time::Instant::now),
+                        ), if awaiting_background_at.is_some() => {
+                            awaiting_background_at = None;
+                            awaiting_background = true;
+                            tracing::info!(
+                                connection_id = %conn_id,
+                                "[ACP] prompt held open for background work; the agent is idle"
+                            );
+                            emit_awaiting_background(state, emitter, true).await;
+                        }
                         cmd = cmd_rx.recv() => {
                             match cmd {
                                 Some(ConnectionCommand::RespondPermission {
@@ -11548,6 +11586,16 @@ async fn run_conversation_loop(
                                     // can surface at all.
                                     if matches!(outcome, Ok(SteerOutcome::Injected)) {
                                         prompt_ledger.record_prompt_blocks(&blocks);
+                                        // A message steered into a held turn
+                                        // wakes the main agent right away; the
+                                        // cycle's own model call would say so a
+                                        // beat later, but the composer should
+                                        // stop reading "idle" now.
+                                        awaiting_background_at = None;
+                                        if awaiting_background {
+                                            awaiting_background = false;
+                                            emit_awaiting_background(state, emitter, false).await;
+                                        }
                                     }
                                     let _ = reply.send(outcome);
                                 }
@@ -15354,6 +15402,91 @@ fn fix_usage_update_nulls(mut dispatch: Dispatch) -> Dispatch {
         }
     }
     dispatch
+}
+
+/// How long a Claude Code prompt must stay pending after its main agent's
+/// processing cycle ended before codeg calls it held open for background work
+/// (`AcpEvent::AwaitingBackground`). An ordinary turn settles within
+/// milliseconds of that point, so this only has to outlast that, and keeps the
+/// status from flickering "idle" at the end of every normal turn.
+const AWAITING_BACKGROUND_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// Publish the held-turn flag (see [`AcpEvent::AwaitingBackground`]) with the
+/// session's current native-steering availability, the channel a message is
+/// delivered into the held turn through.
+async fn emit_awaiting_background(
+    state: &Arc<RwLock<SessionState>>,
+    emitter: &EventEmitter,
+    awaiting: bool,
+) {
+    let native_steering = state.read().await.native_steering_available;
+    emit_with_state(
+        state,
+        emitter,
+        AcpEvent::AwaitingBackground {
+            awaiting,
+            native_steering,
+        },
+    )
+    .await;
+}
+
+/// What one claude-agent-acp frame says about the MAIN agent while a prompt is
+/// in flight. The input to the held-turn detection in the prompt loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MainAgentPulse {
+    /// A processing cycle ended: the adapter sends a `usage_update` carrying
+    /// `cost` exactly once per SDK `result` — the user's own turn, a steered
+    /// message, or a task-notification follow-up alike.
+    CycleEnded,
+    /// The main agent is making a model call. The adapter sends a cost-less
+    /// `usage_update` on every main-thread `message_start`/`message_delta`
+    /// (never for a sub-agent's calls: it filters on `parent_tool_use_id ===
+    /// null`), so this is a precise "the main agent is working again" signal
+    /// that sub-agent traffic cannot trigger.
+    Working,
+}
+
+/// Classify a raw `session/update` for [`MainAgentPulse`], Claude Code only.
+///
+/// claude-agent-acp (0.59+, #870) holds `session/prompt` open while background
+/// sub-agents the turn spawned are still running, so their task-notification
+/// follow-ups land inside it; the main agent answered long ago and is idle, yet
+/// the wire says "turn in flight" for as long as the sub-agents run. Nothing on
+/// the wire names that state, but these two frames bracket it.
+///
+/// Why `usage_update` rather than content chunks: a result can trail text of
+/// its own AFTER its cost frame (a refusal explanation, a forwarded
+/// local-command result), which would read as a new cycle that never ends, and
+/// a sub-agent's forwarded chunks and tool calls stream through the parent
+/// session all the time. A `usage_update` re-sent for a rate-limit event
+/// (`_meta["_claude/rateLimit"]`) repeats the last reading and says nothing
+/// about activity, so it is ignored.
+fn claude_main_agent_pulse(dispatch: &Dispatch, agent_type: AgentType) -> Option<MainAgentPulse> {
+    if agent_type != AgentType::ClaudeCode {
+        return None;
+    }
+    let Dispatch::Notification(msg) = dispatch else {
+        return None;
+    };
+    if msg.method() != "session/update" {
+        return None;
+    }
+    let update = msg.params.get("update")?;
+    if update.get("sessionUpdate").and_then(|v| v.as_str()) != Some("usage_update") {
+        return None;
+    }
+    if update.get("cost").is_some_and(|cost| !cost.is_null()) {
+        return Some(MainAgentPulse::CycleEnded);
+    }
+    let rate_limit_echo = update
+        .get("_meta")
+        .and_then(|meta| meta.get("_claude/rateLimit"))
+        .is_some();
+    if rate_limit_echo {
+        return None;
+    }
+    Some(MainAgentPulse::Working)
 }
 
 /// Read one AIR async-task frame out of a raw `session/update` dispatch.
@@ -21210,6 +21343,109 @@ mod tests {
             )
             .unwrap(),
         )
+    }
+
+    /// The frames claude-agent-acp 0.81.1 sent, verbatim in shape, across a
+    /// turn held open for a background sub-agent (captured off a live stdio
+    /// session): the main result's cost frame ends the cycle, a steered
+    /// message's `message_start` reading starts the next one, and nothing a
+    /// sub-agent sends — or a rate-limit echo — moves the classification.
+    #[test]
+    fn main_agent_pulse_reads_cycle_ends_and_main_thread_calls() {
+        let cost_frame = async_task_notif(serde_json::json!({
+            "sessionUpdate": "usage_update",
+            "used": 41000,
+            "size": 200000,
+            "cost": { "amount": 0.0321, "currency": "USD" },
+            "_meta": { "_claude/origin": { "kind": "human" } },
+        }));
+        assert_eq!(
+            claude_main_agent_pulse(&cost_frame, AgentType::ClaudeCode),
+            Some(MainAgentPulse::CycleEnded)
+        );
+        let followup_cost = async_task_notif(serde_json::json!({
+            "sessionUpdate": "usage_update",
+            "used": 52000,
+            "size": 200000,
+            "cost": { "amount": 0.0604, "currency": "USD" },
+            "_meta": { "_claude/origin": { "kind": "task-notification" } },
+        }));
+        assert_eq!(
+            claude_main_agent_pulse(&followup_cost, AgentType::ClaudeCode),
+            Some(MainAgentPulse::CycleEnded),
+            "a task-notification follow-up is a cycle of the main agent too"
+        );
+        let message_start = async_task_notif(serde_json::json!({
+            "sessionUpdate": "usage_update",
+            "used": 43000,
+            "size": 200000,
+        }));
+        assert_eq!(
+            claude_main_agent_pulse(&message_start, AgentType::ClaudeCode),
+            Some(MainAgentPulse::Working)
+        );
+        let null_cost = async_task_notif(serde_json::json!({
+            "sessionUpdate": "usage_update",
+            "used": 43000,
+            "size": 200000,
+            "cost": null,
+        }));
+        assert_eq!(
+            claude_main_agent_pulse(&null_cost, AgentType::ClaudeCode),
+            Some(MainAgentPulse::Working)
+        );
+        let rate_limit = async_task_notif(serde_json::json!({
+            "sessionUpdate": "usage_update",
+            "used": 43000,
+            "size": 200000,
+            "_meta": { "_claude/rateLimit": { "status": "allowed" } },
+        }));
+        assert_eq!(
+            claude_main_agent_pulse(&rate_limit, AgentType::ClaudeCode),
+            None
+        );
+        let sub_agent_tool = async_task_notif(serde_json::json!({
+            "sessionUpdate": "tool_call",
+            "toolCallId": "toolu_sub",
+            "title": "ping -c 45 127.0.0.1",
+            "status": "pending",
+            "_meta": { "claudeCode": { "parentToolUseId": "toolu_agent", "toolName": "Bash" } },
+        }));
+        assert_eq!(
+            claude_main_agent_pulse(&sub_agent_tool, AgentType::ClaudeCode),
+            None
+        );
+        let chunk = async_task_notif(serde_json::json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": { "type": "text", "text": "LAUNCHED" },
+        }));
+        assert_eq!(claude_main_agent_pulse(&chunk, AgentType::ClaudeCode), None);
+    }
+
+    /// Only claude-agent-acp holds a prompt open for background work, so the
+    /// same frames from any other agent classify as nothing.
+    #[test]
+    fn main_agent_pulse_is_claude_only() {
+        let cost_frame = async_task_notif(serde_json::json!({
+            "sessionUpdate": "usage_update",
+            "used": 1,
+            "size": 2,
+            "cost": { "amount": 0.01, "currency": "USD" },
+        }));
+        for agent in [AgentType::Codex, AgentType::Gemini, AgentType::OpenCode] {
+            assert_eq!(claude_main_agent_pulse(&cost_frame, agent), None, "{agent:?}");
+        }
+        let other_method = Dispatch::Notification(
+            UntypedMessage::new(
+                "_session/other",
+                serde_json::json!({ "update": { "sessionUpdate": "usage_update", "cost": {} } }),
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            claude_main_agent_pulse(&other_method, AgentType::ClaudeCode),
+            None
+        );
     }
 
     /// Every severity the RFD defines has to survive the raw read, and an

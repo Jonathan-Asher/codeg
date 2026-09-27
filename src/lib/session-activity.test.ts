@@ -185,4 +185,48 @@ describe("deriveSessionActivity with this client's connection attempt", () => {
       "idle"
     )
   })
+
+  it("reads a turn held open for background work as idle with work running", () => {
+    expect(
+      deriveSessionActivity({
+        turnState: "running",
+        connectionStatus: "prompting",
+        awaitingBackground: true,
+      })
+    ).toBe("background")
+    // The agent replying is still just working.
+    expect(
+      deriveSessionActivity({
+        turnState: "running",
+        connectionStatus: "prompting",
+        awaitingBackground: false,
+      })
+    ).toBe("working")
+    // A stale flag on a turn that already ended means nothing.
+    expect(
+      deriveSessionActivity({
+        turnState: null,
+        connectionStatus: "connected",
+        awaitingBackground: true,
+      })
+    ).toBe("idle")
+  })
+
+  it("still puts a background sub-agent's permission request first", () => {
+    expect(
+      deriveSessionActivity({
+        attention: "permission",
+        connectionStatus: "prompting",
+        awaitingBackground: true,
+      })
+    ).toBe("needs_you")
+  })
+
+  it("keeps a held turn out of the sidebar's running count only via live state", () => {
+    // The persisted summary alone still says running — only a client holding
+    // the live connection knows the agent is idle.
+    expect(
+      isTurnRunning({ turn_state: "running", status: "in_progress" })
+    ).toBe(true)
+  })
 })

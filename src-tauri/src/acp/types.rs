@@ -637,6 +637,27 @@ pub enum AcpEvent {
     AvailableCommands { commands: Vec<AvailableCommandInfo> },
     /// Session usage/context window updated during conversation
     UsageUpdate { used: u64, size: u64 },
+    /// Whether the in-flight prompt is being held open ONLY for background
+    /// work (Claude Code only). claude-agent-acp keeps `session/prompt`
+    /// pending while background sub-agents the turn spawned are still live,
+    /// so their task-notification follow-ups land inside it — the main agent
+    /// has already answered and is idle, but the wire still reads "turn in
+    /// flight", for as long as the sub-agents run. `true` once the main
+    /// agent's processing cycle has ended and the prompt stayed open past a
+    /// short grace; `false` as soon as the main agent starts another model
+    /// call (a steered message, a task-notification follow-up). Only ever
+    /// emitted while `Prompting`; the turn boundary resets it (see
+    /// `SessionState::awaiting_background`).
+    ///
+    /// `native_steering` repeats `SessionState::native_steering_available` as
+    /// of the emit: a message is delivered into the held turn through
+    /// `_session/steering`, so clients need to know whether that channel
+    /// exists without a snapshot round-trip.
+    AwaitingBackground {
+        awaiting: bool,
+        #[serde(default)]
+        native_steering: bool,
+    },
     /// Out-of-turn activity surfaced from the agent's own session transcript
     /// by the background watcher (`acp::background_watch`; Claude-only today).
     /// Covers everything that happens OUTSIDE a codeg-driven prompt turn:

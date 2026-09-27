@@ -6,6 +6,10 @@ import type { ConnectionStoreApi } from "@/contexts/acp-connections-context"
 // sidebar row, the Session Details tab) that must not load the provider.
 import { useOptionalConnectionStore } from "@/contexts/acp-connection-contexts"
 import { isAttachingPhase } from "@/lib/attach-phase"
+import {
+  backgroundTaskCount,
+  isAwaitingBackground,
+} from "@/lib/background-idle"
 import type { AttachPhase, ConnectionStatus } from "@/lib/types"
 
 const noopUnsubscribe = () => {}
@@ -157,5 +161,45 @@ export function useConnectionAttachInfo(
     if (!sameAttachInfo(cacheRef.current, next)) cacheRef.current = next
     return cacheRef.current
   }, [store, contextKey])
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+}
+
+/**
+ * For a connection whose prompting turn is held open only for background work
+ * (the agent answered and is idle — see `lib/background-idle.ts`), how many
+ * background tasks are keeping it open (`0` = running, count unknown).
+ * `null` when the turn is not held that way, or there is no such connection.
+ * Exported for tests.
+ */
+export function readHeldTurnBackground(
+  store: Pick<ConnectionStoreApi, "getConnection">,
+  contextKey: string
+): number | null {
+  const conn = store.getConnection(contextKey)
+  if (!conn || !isAwaitingBackground(conn)) return null
+  return backgroundTaskCount(conn.backgroundOutstanding, conn.asyncTasks)
+}
+
+/**
+ * {@link readHeldTurnBackground} for the connection keyed `contextKey`. A
+ * primitive snapshot, so a sidebar row or the Session Details line re-renders
+ * when the held state or the count changes, not on every streamed token.
+ */
+export function useHeldTurnBackground(
+  contextKey: string | null | undefined
+): number | null {
+  const store = useOptionalConnectionStore()
+  const subscribe = useCallback(
+    (onChange: () => void) =>
+      store && contextKey
+        ? store.subscribeKey(contextKey, onChange)
+        : noopUnsubscribe,
+    [store, contextKey]
+  )
+  const getSnapshot = useCallback(
+    () =>
+      store && contextKey ? readHeldTurnBackground(store, contextKey) : null,
+    [store, contextKey]
+  )
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }

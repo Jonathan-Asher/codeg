@@ -2811,6 +2811,19 @@ export type AcpEvent =
       size: number
     }
   /**
+   * Whether the prompting turn is held open only for background work (Claude
+   * Code): the agent answered and is idle, but claude-agent-acp keeps the
+   * prompt pending until the background sub-agents it spawned finish. Only
+   * emitted while prompting; the turn boundary clears it.
+   */
+  | {
+      type: "awaiting_background"
+      awaiting: boolean
+      /** Whether the session has the native `_session/steering` channel a
+       *  message is delivered into the held turn through. */
+      native_steering?: boolean
+    }
+  /**
    * Out-of-turn activity surfaced from the agent's own session transcript by
    * the backend watcher (Claude only): async sub-agent / background-shell
    * `<task-notification>` completions, the agent's continued work after them,
@@ -3291,6 +3304,10 @@ export interface LiveSessionSnapshot {
    *  mid-episode recover the pending count the one-shot `background_activity`
    *  events won't replay. Absent / omitted when zero. */
   background_outstanding?: number
+  /** The prompting turn is held open only for background work: the agent
+   *  answered and is idle while background sub-agents run. Absent / omitted
+   *  when false. */
+  awaiting_background?: boolean
   /** Whether this agent has the `check_user_feedback` tool (fixed at launch).
    *  The frontend gates the feedback bar on this — the agent's real capability —
    *  not the (possibly later-toggled) global setting. Absent → `false`. */

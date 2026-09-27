@@ -102,6 +102,11 @@ import {
   shouldRejectDuplicateCreate,
 } from "@/lib/queue-flush"
 import { TurnBusyError, isNoActiveTurnRejection } from "@/lib/turn-busy"
+import {
+  backgroundTaskCount as countBackgroundTasks,
+  canDeliverIntoHeldTurn,
+  shouldDrainIntoHeldTurn,
+} from "@/lib/background-idle"
 import { toErrorMessage } from "@/lib/app-error"
 import { notify } from "@/lib/notify"
 import {
@@ -365,18 +370,24 @@ const ConversationTabView = memo(function ConversationTabView({
   const dbConversationId = conversationId ?? createdConversationId
   const [draftAgentType, setDraftAgentType] = useState<AgentType>(agentType)
   const selectedAgent = conversationId != null ? agentType : draftAgentType
-  // Seed from localStorage so the React state reflects the user's saved
-  // mode for this agent immediately on mount. Without this seed, a reuse-
-  // path connect (idle window after a refresh, before the agent is GC'd)
-  // would silently fall back to whatever `current_mode_id` the backend
+  // A new chat seeds from localStorage so the React state reflects the user's
+  // saved mode for this agent immediately on mount. Without this seed, a
+  // reuse-path connect (idle window after a refresh, before the agent is
+  // GC'd) would silently fall back to whatever `current_mode_id` the backend
   // happens to be on: `handleModeChange` updates only React state and
   // localStorage, not the agent — the agent gets synced inside
   // `handleSend` by diffing `modeId` against `modes.current_mode_id`.
-  // A null seed here means that diff is "agent default vs null", which
+  // A null seed means that diff is "agent default vs null", which
   // resolves the displayed mode through `conn.modes.current_mode_id`
   // and never triggers the catch-up `setMode`.
+  //
+  // An existing conversation takes the null seed on purpose: its session
+  // reopens with its OWN selectors (the backend keeps a record per
+  // conversation), and seeding the per-agent saved mode here would show —
+  // and on the next send apply — the last mode picked in some other
+  // conversation of this agent.
   const [modeId, setModeId] = useState<string | null>(() =>
-    getSavedModeId(agentType)
+    conversationId != null ? null : getSavedModeId(agentType)
   )
   const [sendSignal, setSendSignal] = useState(0)
   const [agentsLoaded, setAgentsLoaded] = useState(false)
@@ -700,6 +711,7 @@ const ConversationTabView = memo(function ConversationTabView({
   const {
     queue: msgQueue,
     enqueue: mqEnqueue,
+    holdUntilTurnEnd: mqHoldUntilTurnEnd,
     requeueFront: mqRequeueFront,
     getQueueLength: mqGetQueueLength,
     dequeue: mqDequeue,
@@ -750,6 +762,26 @@ const ConversationTabView = memo(function ConversationTabView({
     workingDirForConnection,
     conn.agentType,
     selectedAgent
+  )
+  // The turn in flight is held open only for background work: the agent is
+  // idle, so a message is delivered into the turn right away and the queue
+  // drains into it (see `lib/background-idle.ts`). Never for a connection
+  // still bound to another agent — the message would reach the wrong one.
+  const awaitingBackground =
+    !connIsForOtherAgent &&
+    connStatus === "prompting" &&
+    conn.awaitingBackground
+  const heldTurnReady =
+    awaitingBackground &&
+    conn.connectionId != null &&
+    canDeliverIntoHeldTurn({
+      status: connStatus,
+      awaitingBackground: conn.awaitingBackground,
+      nativeSteering: conn.nativeSteering,
+    })
+  const heldBackgroundTasks = countBackgroundTasks(
+    conn.backgroundOutstanding,
+    conn.asyncTasks
   )
   // Read by the queue auto-flush's deferred timer, which must not act on a
   // readiness reading captured a tick ago.
@@ -885,6 +917,11 @@ const ConversationTabView = memo(function ConversationTabView({
   // round-trip is enough, and cannot strand the queue: `handleQueueSteer`
   // always clears this in a `finally`, which re-runs the flush effect.
   const [queueSteerInFlight, setQueueSteerInFlight] = useState(false)
+  // Whether the held-turn drain (below, next to `handleQueueSteer`) is
+  // delivering the queue's head into a turn held open for background work.
+  // The row stays queued until delivery is confirmed, so the turn-end flush
+  // holds for the round-trip for the same reason as `queueSteerInFlight`.
+  const [heldDrainInFlight, setHeldDrainInFlight] = useState(false)
   // Whether an edited message is between its Save and its send (see
   // `handleEditUserMessage`). The fork it waits on holds the backend's prompt
   // lock and then hands it to whoever is waiting, so a message sent in that
@@ -923,6 +960,7 @@ const ConversationTabView = memo(function ConversationTabView({
     // A row being inserted into the (just-ended) turn is still queued; sending
     // it now would deliver it twice. See `queueSteerInFlight`.
     if (queueSteerInFlight) return
+    if (heldDrainInFlight) return
     if (msgQueue.length === 0) return
     // setTimeout (not microtask) so a COMPLETE_TURN commit settles first AND so
     // a just-bounced retry waits out the backoff window before re-sending.
@@ -955,6 +993,7 @@ const ConversationTabView = memo(function ConversationTabView({
     msgQueue.length,
     editInFlight,
     queueSteerInFlight,
+    heldDrainInFlight,
   ])
 
   // Mirror the connection's liveMessage into the runtime session OUTSIDE React.
@@ -2598,6 +2637,65 @@ const ConversationTabView = memo(function ConversationTabView({
     [msgQueue, feedbackSteer, mqRemove, feedback.channel, tabId, tCmp]
   )
 
+  // Drain the queue into a turn held open for background work. The flush
+  // above waits for the turn to END — which, with background sub-agents
+  // running, can be an hour away while the agent itself sits idle. So once the
+  // agent is idle in such a turn, the queue's head is delivered into it the
+  // same way the composer delivers a plain send (native steering). One message
+  // per idle stretch: delivering it wakes the agent, and the next one waits
+  // for its reply to finish. A head queued explicitly for the turn's end
+  // stays, and so does everything behind it. A delivery that fails for a
+  // reason other than the turn ending marks its message for the turn's end,
+  // so it is never retried into the same failure.
+  const queueHead = msgQueue[0]
+  useEffect(() => {
+    if (
+      !shouldDrainIntoHeldTurn({
+        canDeliverNow: heldTurnReady,
+        head: queueHead,
+        busy: heldDrainInFlight || queueSteerInFlight || editInFlight,
+        editingItemId: mqEditingItemId,
+      })
+    ) {
+      return
+    }
+    const item = queueHead
+    if (!item) return
+    const payload = buildSteerPayload(item.draft)
+    if (!payload) {
+      // Nothing deliverable (attachments with no text stand-in): let the
+      // turn-end flush send it as a normal prompt.
+      mqHoldUntilTurnEnd(item.id)
+      return
+    }
+    setHeldDrainInFlight(true)
+    void feedbackSteer(payload.text, payload.blocks)
+      .then(() => mqRemove(item.id))
+      .catch((err: unknown) => {
+        // The turn ended in the meantime: the turn-end flush sends it next.
+        if (isNoActiveTurnRejection(err)) return
+        mqHoldUntilTurnEnd(item.id)
+        notify({
+          level: "error",
+          key: `held-turn-send-failed:${tabId}`,
+          title: tCmp("heldTurnSendFailed"),
+          description: toErrorMessage(err),
+        })
+      })
+      .finally(() => setHeldDrainInFlight(false))
+  }, [
+    heldTurnReady,
+    queueHead,
+    heldDrainInFlight,
+    queueSteerInFlight,
+    editInFlight,
+    mqEditingItemId,
+    feedbackSteer,
+    mqRemove,
+    mqHoldUntilTurnEnd,
+    tabId,
+    tCmp,
+  ])
   return (
     <ConversationShell
       getSentHistory={getSentHistory}
@@ -2672,6 +2770,10 @@ const ConversationTabView = memo(function ConversationTabView({
       showActiveFlow={showActiveFlow}
       queue={msgQueue}
       onEnqueue={mqEnqueue}
+      awaitingBackground={awaitingBackground}
+      backgroundTaskCount={heldBackgroundTasks}
+      heldTurnReady={heldTurnReady}
+      onDeliverNow={heldTurnReady ? handleSteer : undefined}
       onQueueReorder={mqReorder}
       onQueueEdit={handleQueueEdit}
       onQueueDelete={mqRemove}

@@ -271,6 +271,8 @@ function snapshotBase() {
     configStale: false,
     configStaleKind: null,
     backgroundOutstanding: 0,
+    awaitingBackground: false,
+    nativeSteering: false,
     activeDelegations: [],
     lastError: null as string | null,
     lastErrorCode: null as string | null,
@@ -569,6 +571,53 @@ describe("AcpConnectionsProvider preview-tab release (disconnectIfIdle)", () => 
 
     expect(h.acpDisconnect).toHaveBeenCalledWith("spawned-conn")
     expect(h.store!.getConnection(TAB)).toBeUndefined()
+  })
+
+  it("mirrors a turn held open for background work, scoped to that turn", async () => {
+    const handlers = await connectOwner()
+    // Not prompting: nothing to hold, the flag is ignored.
+    emitAcpEvent(handlers, {
+      seq: 1,
+      connection_id: "spawned-conn",
+      type: "awaiting_background",
+      awaiting: true,
+      native_steering: true,
+    })
+    expect(h.store!.getConnection(TAB)?.awaitingBackground).toBe(false)
+
+    emitAcpEvent(handlers, {
+      seq: 2,
+      connection_id: "spawned-conn",
+      type: "status_changed",
+      status: "prompting",
+    })
+    emitAcpEvent(handlers, {
+      seq: 3,
+      connection_id: "spawned-conn",
+      type: "awaiting_background",
+      awaiting: true,
+      native_steering: true,
+    })
+    expect(h.store!.getConnection(TAB)).toMatchObject({
+      status: "prompting",
+      awaitingBackground: true,
+      nativeSteering: true,
+    })
+
+    // Still a live turn: the preview-tab teardown keeps its hands off.
+    await act(async () => {
+      await h.actions!.disconnectIfIdle(TAB)
+    })
+    expect(h.acpDisconnect).not.toHaveBeenCalled()
+
+    // The held turn settles: the flag goes with it.
+    emitAcpEvent(handlers, {
+      seq: 4,
+      connection_id: "spawned-conn",
+      type: "status_changed",
+      status: "connected",
+    })
+    expect(h.store!.getConnection(TAB)?.awaitingBackground).toBe(false)
   })
 
   it("detaches a mid-turn VIEWER without killing the owner's agent", async () => {
@@ -5673,6 +5722,8 @@ describe("AcpConnectionsProvider mid-turn steering messages", () => {
       configStale: false,
       configStaleKind: null,
       backgroundOutstanding: 0,
+      awaitingBackground: false,
+      nativeSteering: false,
       activeDelegations: [],
       lastError: null,
       eventSeq: 9,

@@ -43,7 +43,10 @@ import { STATUS_ORDER } from "@/lib/types"
 import { summaryActivity } from "@/lib/session-activity"
 import { ATTACH_PHASE_LABEL_KEYS, isAttachingPhase } from "@/lib/attach-phase"
 import { getAgentLabel } from "@/lib/custom-agents"
-import { useConnectionAttachInfo } from "@/hooks/use-connection-status"
+import {
+  useConnectionAttachInfo,
+  useHeldTurnBackground,
+} from "@/hooks/use-connection-status"
 import { useOptionalAcpActions } from "@/contexts/acp-connection-contexts"
 import { cn } from "@/lib/utils"
 import { formatConversationTitle } from "@/lib/conversation-title"
@@ -364,6 +367,12 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
       s.tabs.find((tab) => tab.conversationId === conversation.id)?.id ?? null
   )
   const connection = useConnectionAttachInfo(openTabId)
+  // The open tab's turn is held open only for background work: the persisted
+  // state still says "running", but the agent is idle — show that instead of
+  // the spinner. Only this client's own tab knows; other windows keep the
+  // spinner until the turn ends.
+  const heldBackgroundTasks = useHeldTurnBackground(openTabId)
+  const heldForBackground = isRunning && heldBackgroundTasks != null
   const isConnecting = connection.state === "connecting"
   const connectFailed = connection.state === "failed"
   const acpActions = useOptionalAcpActions()
@@ -625,6 +634,21 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                           />
                           <span className="sr-only">
                             {tSidebar(attentionBadge.label)}
+                          </span>
+                        </span>
+                      ) : heldForBackground ? (
+                        <span
+                          className="relative inline-flex shrink-0 items-center justify-center"
+                          title={tActivity("background", {
+                            count: heldBackgroundTasks ?? 0,
+                          })}
+                          data-testid="conversation-background-badge"
+                        >
+                          <SessionActivityIcon activity="background" />
+                          <span className="sr-only">
+                            {tActivity("background", {
+                              count: heldBackgroundTasks ?? 0,
+                            })}
                           </span>
                         </span>
                       ) : isRunning ? (

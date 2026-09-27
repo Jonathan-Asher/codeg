@@ -98,6 +98,18 @@ pub async fn acp_connect(
         .await
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
 
+    // A resume re-establishes the conversation's own selectors, not the
+    // client's per-agent picks (see `resolve_connect_selector_prefs`).
+    let (preferred_mode_id, preferred_config_values) =
+        acp_commands::resolve_connect_selector_prefs(
+            &db.conn,
+            params.agent_type,
+            params.session_id.as_deref(),
+            params.preferred_mode_id,
+            params.preferred_config_values.unwrap_or_default(),
+        )
+        .await;
+
     let emitter = state.emitter.clone();
     // Detached: return as soon as the connection exists and let the client
     // follow the attach over its event stream. A resume can outlast any HTTP
@@ -121,8 +133,8 @@ pub async fn acp_connect(
                 runtime_env,
                 "web".to_string(),
                 emitter,
-                params.preferred_mode_id,
-                params.preferred_config_values.unwrap_or_default(),
+                preferred_mode_id,
+                preferred_config_values,
             )
             .await
     })

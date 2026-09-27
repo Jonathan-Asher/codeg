@@ -122,6 +122,7 @@ async fn create_inner(
         pin_order: Set(None),
         origin_cwd: Set(None),
         turn_state: Set(None),
+        selector_state: Set(None),
     };
     Ok(model.insert(conn).await?)
 }
@@ -312,6 +313,152 @@ pub async fn touch_running_turn(
         .filter(conversation::Column::DeletedAt.is_null())
         .filter(conversation::Column::TurnState.eq(conversation::ConversationTurnState::Running))
         .filter(conversation::Column::UpdatedAt.lt(at))
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected > 0)
+}
+
+/// The composer selectors a conversation's agent session last had in effect —
+/// the document stored in `conversation.selector_state`.
+///
+/// Why it exists: the frontend remembers selector picks per AGENT TYPE (so a
+/// new chat starts from the last pick), and used to send those on every
+/// connect, including a resume. The backend force-applies what a connect
+/// carries, so the last pick made in ANY conversation silently rewrote every
+/// other conversation of that agent the next time it reconnected (idle sweep,
+/// restart, lazy connect on send): lower the effort in one chat and another
+/// chat's next message ran at the lower effort too. Per conversation, on the
+/// server, every client agrees on what a conversation was running, and a
+/// resume re-establishes exactly that (see `acp_connect`'s
+/// `resolve_connect_selector_prefs`).
+///
+/// Same shape as a connect's `preferred_mode_id` / `preferred_config_values`,
+/// so a record can be handed to the establishment code unchanged.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationSelectorState {
+    /// The ACP session mode (permission mode for Claude Code).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode_id: Option<String>,
+    /// Config-option values by option id (`model`, `effort`, `fast`, …), in
+    /// the flattened form `current_config_option_values` produces: a select's
+    /// current value id, or `"true"`/`"false"` for a boolean.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub config_values: std::collections::BTreeMap<String, String>,
+}
+
+impl ConversationSelectorState {
+    pub fn is_empty(&self) -> bool {
+        self.mode_id.is_none() && self.config_values.is_empty()
+    }
+
+    /// Overlay `newer` onto this record. A mode it names replaces the stored
+    /// one; each config value it carries replaces that key. Keys it does not
+    /// carry are kept: an option the agent stops offering for a while (a
+    /// model without an effort selector) keeps its last value for when it
+    /// comes back, and establishment skips values the agent no longer offers.
+    pub fn merge(&mut self, newer: ConversationSelectorState) {
+        if newer.mode_id.is_some() {
+            self.mode_id = newer.mode_id;
+        }
+        self.config_values.extend(newer.config_values);
+    }
+
+    fn parse(raw: Option<&str>) -> Option<Self> {
+        let raw = raw?;
+        match serde_json::from_str::<Self>(raw) {
+            Ok(state) if !state.is_empty() => Some(state),
+            Ok(_) => None,
+            Err(e) => {
+                // Unreadable is treated as "nothing recorded": the connect
+                // falls back to the client's picks and the next write replaces
+                // the document.
+                tracing::warn!(error = %e, "[conversation] unreadable selector_state ignored");
+                None
+            }
+        }
+    }
+}
+
+/// The selector record stored on `conversation_id`, if any (soft-deleted rows
+/// included — the caller already holds the id).
+pub async fn load_selector_state(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+) -> Result<Option<ConversationSelectorState>, DbError> {
+    let row = conversation::Entity::find_by_id(conversation_id)
+        .one(conn)
+        .await?;
+    Ok(row.and_then(|r| ConversationSelectorState::parse(r.selector_state.as_deref())))
+}
+
+/// The live (not soft-deleted) conversation row bound to agent session
+/// `external_id` of `agent_type`, newest first if several match.
+pub async fn find_live_id_for_session(
+    conn: &DatabaseConnection,
+    external_id: &str,
+    agent_type: AgentType,
+) -> Result<Option<i32>, DbError> {
+    let at_str = serde_json::to_value(agent_type)
+        .ok()
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_default();
+    let row = conversation::Entity::find()
+        .filter(conversation::Column::ExternalId.eq(external_id))
+        .filter(conversation::Column::AgentType.eq(at_str))
+        .filter(conversation::Column::DeletedAt.is_null())
+        .order_by_desc(conversation::Column::Id)
+        .one(conn)
+        .await?;
+    Ok(row.map(|r| r.id))
+}
+
+/// The selector record of the live conversation bound to agent session
+/// `external_id` — what a resume of that session re-establishes.
+pub async fn find_selector_state_for_session(
+    conn: &DatabaseConnection,
+    external_id: &str,
+    agent_type: AgentType,
+) -> Result<Option<ConversationSelectorState>, DbError> {
+    match find_live_id_for_session(conn, external_id, agent_type).await? {
+        Some(id) => load_selector_state(conn, id).await,
+        None => Ok(None),
+    }
+}
+
+/// Merge `update` into the selector record on `conversation_id` (see
+/// [`ConversationSelectorState::merge`]). Writes only when the merged record
+/// differs from what is stored, and never to a soft-deleted row; does not
+/// touch `updated_at` (a selector change is not conversation activity).
+/// Returns `true` when a row was written.
+pub async fn save_selector_state(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    update: ConversationSelectorState,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::Expr;
+    if update.is_empty() {
+        return Ok(false);
+    }
+    let Some(row) = conversation::Entity::find_by_id(conversation_id)
+        .filter(conversation::Column::DeletedAt.is_null())
+        .one(conn)
+        .await?
+    else {
+        return Ok(false);
+    };
+    let stored = ConversationSelectorState::parse(row.selector_state.as_deref());
+    let mut merged = stored.clone().unwrap_or_default();
+    merged.merge(update);
+    if stored.as_ref() == Some(&merged) {
+        return Ok(false);
+    }
+    let json = serde_json::to_string(&merged)
+        .map_err(|e| DbError::Validation(format!("selector_state encode: {e}")))?;
+    let res = conversation::Entity::update_many()
+        .col_expr(conversation::Column::SelectorState, Expr::value(json))
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .filter(conversation::Column::DeletedAt.is_null())
         .exec(conn)
         .await?;
     Ok(res.rows_affected > 0)
@@ -1086,6 +1233,7 @@ struct CarriedOverRow {
     created_at: chrono::DateTime<Utc>,
     updated_at: chrono::DateTime<Utc>,
     origin_cwd: Option<String>,
+    selector_state: Option<String>,
 }
 
 impl CarriedOverRow {
@@ -1124,6 +1272,9 @@ impl CarriedOverRow {
             // `origin_cwd ?? folder.path`, so dropping this would break
             // history lookup for a re-parented conversation.
             origin_cwd: row.origin_cwd.clone(),
+            // The selectors recorded for the outgoing session belong to the
+            // history being preserved, which is the session this row keeps.
+            selector_state: row.selector_state.clone(),
         }
     }
 
@@ -1158,6 +1309,7 @@ impl CarriedOverRow {
             // attached to any more: nothing is running on it, and whatever was
             // cut off belongs to the conversation that keeps going.
             turn_state: Set(None),
+            selector_state: Set(self.selector_state),
         }
     }
 }
@@ -3792,5 +3944,128 @@ mod tests {
         mark_turn_interrupted(&db.conn, row.id).await.unwrap();
         let json = serde_json::to_value(get_by_id(&db.conn, row.id).await.unwrap()).unwrap();
         assert_eq!(json["turn_state"], "interrupted");
+    }
+
+    // ── Selector record ───────────────────────────────────────────────
+
+    fn selectors(mode: Option<&str>, values: &[(&str, &str)]) -> ConversationSelectorState {
+        ConversationSelectorState {
+            mode_id: mode.map(String::from),
+            config_values: values
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_selector_write_round_trips_and_merges() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/selector-rt").await;
+        let row = create(&db.conn, folder, AgentType::ClaudeCode, None, None)
+            .await
+            .unwrap();
+        assert_eq!(load_selector_state(&db.conn, row.id).await.unwrap(), None);
+
+        let wrote = save_selector_state(
+            &db.conn,
+            row.id,
+            selectors(Some("default"), &[("model", "opus"), ("effort", "max")]),
+        )
+        .await
+        .unwrap();
+        assert!(wrote);
+        assert_eq!(
+            load_selector_state(&db.conn, row.id).await.unwrap(),
+            Some(selectors(
+                Some("default"),
+                &[("model", "opus"), ("effort", "max")]
+            ))
+        );
+
+        // A later write replaces what it names and keeps what it doesn't.
+        save_selector_state(&db.conn, row.id, selectors(Some("plan"), &[("effort", "low")]))
+            .await
+            .unwrap();
+        assert_eq!(
+            load_selector_state(&db.conn, row.id).await.unwrap(),
+            Some(selectors(Some("plan"), &[("model", "opus"), ("effort", "low")]))
+        );
+
+        // Writing what is already stored is a no-op, and so is an empty update.
+        assert!(!save_selector_state(&db.conn, row.id, selectors(Some("plan"), &[]))
+            .await
+            .unwrap());
+        assert!(!save_selector_state(&db.conn, row.id, selectors(None, &[]))
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_session_finds_only_its_own_live_conversations_record() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/selector-lookup").await;
+        let a = create(&db.conn, folder, AgentType::ClaudeCode, None, None)
+            .await
+            .unwrap();
+        let b = create(&db.conn, folder, AgentType::ClaudeCode, None, None)
+            .await
+            .unwrap();
+        bind_external_id(&db.conn, a.id, "sess-a", &[]).await.unwrap();
+        bind_external_id(&db.conn, b.id, "sess-b", &[]).await.unwrap();
+        save_selector_state(&db.conn, a.id, selectors(None, &[("effort", "low")]))
+            .await
+            .unwrap();
+        save_selector_state(&db.conn, b.id, selectors(None, &[("effort", "max")]))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            find_selector_state_for_session(&db.conn, "sess-b", AgentType::ClaudeCode)
+                .await
+                .unwrap(),
+            Some(selectors(None, &[("effort", "max")]))
+        );
+        assert_eq!(
+            find_selector_state_for_session(&db.conn, "sess-b", AgentType::Codex)
+                .await
+                .unwrap(),
+            None,
+            "another agent's session never matches"
+        );
+        assert_eq!(
+            find_selector_state_for_session(&db.conn, "sess-none", AgentType::ClaudeCode)
+                .await
+                .unwrap(),
+            None
+        );
+
+        soft_delete(&db.conn, b.id).await.unwrap();
+        assert_eq!(
+            find_selector_state_for_session(&db.conn, "sess-b", AgentType::ClaudeCode)
+                .await
+                .unwrap(),
+            None,
+            "a deleted conversation's record is not resumed"
+        );
+    }
+
+    #[test]
+    fn an_unreadable_or_empty_selector_document_reads_as_nothing() {
+        assert_eq!(ConversationSelectorState::parse(None), None);
+        assert_eq!(ConversationSelectorState::parse(Some("not json")), None);
+        assert_eq!(ConversationSelectorState::parse(Some("{}")), None);
+        assert_eq!(
+            ConversationSelectorState::parse(Some(
+                r#"{"modeId":"plan","configValues":{"effort":"max"}}"#
+            )),
+            Some(selectors(Some("plan"), &[("effort", "max")]))
+        );
+        // The document is the connect's preference shape, spelled camelCase.
+        let json = serde_json::to_value(selectors(Some("plan"), &[("model", "opus")])).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "modeId": "plan", "configValues": { "model": "opus" } })
+        );
     }
 }

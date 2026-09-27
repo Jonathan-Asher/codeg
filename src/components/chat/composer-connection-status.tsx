@@ -23,6 +23,10 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { isConnectionBusy } from "@/lib/connection-teardown"
+import {
+  backgroundTaskCount,
+  isAwaitingBackground,
+} from "@/lib/background-idle"
 import { useAttachPhaseLabel } from "@/hooks/use-attach-phase-label"
 import { cn } from "@/lib/utils"
 
@@ -153,6 +157,17 @@ export function ComposerConnectionStatus({ tabId }: { tabId: string | null }) {
 
   const statusKey = toConnStatus(status)
   const statusLabel = t(statusKey)
+  // A turn held open only for background work: the agent is idle, so say so
+  // (with the work still running) rather than "Responding..." for as long as
+  // the sub-agents take.
+  const heldBackgroundTasks =
+    conn && isAwaitingBackground(conn)
+      ? backgroundTaskCount(conn.backgroundOutstanding, conn.asyncTasks)
+      : null
+  const heldLabel =
+    heldBackgroundTasks != null
+      ? t("idleBackground", { count: heldBackgroundTasks })
+      : null
   const agentType =
     conn?.agentType ??
     connectPending?.agentType ??
@@ -173,7 +188,7 @@ export function ComposerConnectionStatus({ tabId }: { tabId: string | null }) {
       ? t("tooltipError", { agent: agentLabel, error: errorText })
       : phaseLabel
         ? t("tooltip", { agent: agentLabel, status: phaseLabel.text })
-        : t("tooltip", { agent: agentLabel, status: statusLabel })
+        : t("tooltip", { agent: agentLabel, status: heldLabel ?? statusLabel })
 
   const { Icon, className } = STATUS_ICON[statusKey]
 
@@ -244,7 +259,9 @@ export function ComposerConnectionStatus({ tabId }: { tabId: string | null }) {
           </span>
           <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
             <Icon className={cn("size-3", className)} />
-            {t(detailStatusKey)}
+            <span data-testid="connection-detail-status">
+              {heldLabel ?? t(detailStatusKey)}
+            </span>
           </span>
         </div>
 

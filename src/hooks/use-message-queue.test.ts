@@ -115,3 +115,43 @@ describe("useMessageQueue bounce FIFO ordering", () => {
     expect(texts(result.current.queue)).toEqual(["B", "A-edited"])
   })
 })
+
+describe("useMessageQueue hold-until-turn-end", () => {
+  it("records the flag at enqueue and keeps it off by default", () => {
+    const { result } = renderHook(() => useMessageQueue())
+    act(() => result.current.enqueue(draft("A"), null))
+    act(() =>
+      result.current.enqueue(draft("B"), null, { holdUntilTurnEnd: true })
+    )
+    expect(result.current.queue.map((m) => m.holdUntilTurnEnd)).toEqual([
+      undefined,
+      true,
+    ])
+  })
+
+  it("marks an existing item in place, keeping its position and draft", () => {
+    const { result } = renderHook(() => useMessageQueue())
+    act(() => result.current.enqueue(draft("A"), "plan"))
+    act(() => result.current.enqueue(draft("B"), null))
+    const [a] = result.current.queue
+    act(() => result.current.holdUntilTurnEnd(a.id))
+    expect(texts(result.current.queue)).toEqual(["A", "B"])
+    expect(result.current.queue[0]).toMatchObject({
+      id: a.id,
+      modeId: "plan",
+      holdUntilTurnEnd: true,
+    })
+    expect(result.current.queue[1].holdUntilTurnEnd).toBeUndefined()
+  })
+
+  it("is a no-op for an unknown or already-held id", () => {
+    const { result } = renderHook(() => useMessageQueue())
+    act(() =>
+      result.current.enqueue(draft("A"), null, { holdUntilTurnEnd: true })
+    )
+    const before = result.current.queue
+    act(() => result.current.holdUntilTurnEnd(before[0].id))
+    act(() => result.current.holdUntilTurnEnd("missing"))
+    expect(result.current.queue).toBe(before)
+  })
+})

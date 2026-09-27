@@ -432,6 +432,24 @@ export interface ConnectionState {
    */
   backgroundOutstanding: number
   /**
+   * The turn in flight is held open ONLY for background work: the agent
+   * already answered and is idle, but claude-agent-acp keeps the prompt
+   * pending until the background sub-agents it spawned finish (backend
+   * `awaiting_background`). Meaningful only while `status === "prompting"`;
+   * every status change clears it. While set, the session reads as idle with
+   * background work running, a message is delivered into the held turn right
+   * away instead of queueing, and the local queue drains (see
+   * `lib/background-idle.ts`).
+   */
+  awaitingBackground: boolean
+  /**
+   * Whether this session delivers messages over the native
+   * `_session/steering` channel — the only way a message reaches a turn held
+   * open for background work right away. Learned from the snapshot and from
+   * every `awaiting_background` event.
+   */
+  nativeSteering: boolean
+  /**
    * Tool-call context observed OUT-OF-TURN (status !== "prompting"), kept
    * ONLY so a background permission request can still render its command/
    * diff details. Out-of-turn wire tool events are barred from `liveMessage`
@@ -560,6 +578,15 @@ type Action =
       type: "SET_BACKGROUND_OUTSTANDING"
       contextKey: string
       outstanding: number
+    }
+  | {
+      // Mirror of an `awaiting_background` event: whether the prompting turn
+      // is held open only for background work. Ignored unless the connection
+      // is prompting; no-op when unchanged.
+      type: "SET_AWAITING_BACKGROUND"
+      contextKey: string
+      awaiting: boolean
+      nativeSteering: boolean
     }
   | StreamingAction
   | { type: "STREAM_BATCH"; actions: StreamingAction[] }
@@ -1658,6 +1685,8 @@ function connectionsReducer(
         configStaleKind: null,
         configStaleDismissed: false,
         backgroundOutstanding: 0,
+        awaitingBackground: false,
+        nativeSteering: false,
         outOfTurnToolCalls: null,
       })
       return next
@@ -1719,6 +1748,8 @@ function connectionsReducer(
         configStaleKind: null,
         configStaleDismissed: false,
         backgroundOutstanding: 0,
+        awaitingBackground: false,
+        nativeSteering: false,
         outOfTurnToolCalls: null,
       })
       return next
@@ -1898,6 +1929,12 @@ function connectionsReducer(
         // recovers the pending-background count the one-shot events won't
         // replay for it, so its teardown gates hold.
         backgroundOutstanding: action.patch.backgroundOutstanding,
+        // Current state too: a client attaching while a turn is held open for
+        // background work must read it as idle, not as responding.
+        awaitingBackground:
+          action.patch.status === "prompting" &&
+          action.patch.awaitingBackground,
+        nativeSteering: action.patch.nativeSteering,
         sessionFailures: mergedSessionFailures,
         asyncTasks: mergedAsyncTasks,
         // Current state, like `status`: the session's error as the backend
@@ -1978,6 +2015,9 @@ function connectionsReducer(
           isAttachingPhase(conn.attachPhase)
             ? ("failed" as const)
             : conn.attachPhase,
+        // Turn-scoped, like the backend flag: a new turn starts with the agent
+        // working, and leaving `prompting` by any route ends the hold.
+        awaitingBackground: false,
       }
       if (action.status === "prompting") {
         updated.liveMessage = {
@@ -2030,6 +2070,25 @@ function connectionsReducer(
       next.set(action.contextKey, {
         ...conn,
         backgroundOutstanding: action.outstanding,
+      })
+      return next
+    }
+
+    case "SET_AWAITING_BACKGROUND": {
+      const conn = state.get(action.contextKey)
+      if (!conn) return state
+      const awaiting = action.awaiting && conn.status === "prompting"
+      if (
+        conn.awaitingBackground === awaiting &&
+        conn.nativeSteering === action.nativeSteering
+      ) {
+        return state
+      }
+      const next = new Map(state)
+      next.set(action.contextKey, {
+        ...conn,
+        awaitingBackground: awaiting,
+        nativeSteering: action.nativeSteering,
       })
       return next
     }
@@ -4794,6 +4853,19 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             type: "CLEAR_PLAN_APPROVAL",
             contextKey,
             approvalId: e.approval_id,
+          })
+          break
+        case "awaiting_background":
+          // The prompting turn is (no longer) held open only for background
+          // work — flips the composer, status and activity between
+          // "responding" and "idle, background running". Flushed first so the
+          // reply's last streamed text lands before the session reads idle.
+          flushStreamingQueue(contextKey)
+          dispatch({
+            type: "SET_AWAITING_BACKGROUND",
+            contextKey,
+            awaiting: e.awaiting,
+            nativeSteering: e.native_steering ?? false,
           })
           break
         case "background_activity": {

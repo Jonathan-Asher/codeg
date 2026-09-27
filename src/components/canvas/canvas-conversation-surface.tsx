@@ -261,8 +261,11 @@ export function CanvasConversationSurface({
     )
   }, [contextKey, conversationId, effectiveConversationId, migrateConversation])
 
+  // A new card starts from the agent's last saved mode; an existing
+  // conversation follows its own session's mode, which the backend restores
+  // per conversation (see conversation-detail-panel's `modeId` seed).
   const [modeId, setModeId] = useState<string | null>(() =>
-    getSavedModeId(agentType)
+    conversationId != null ? null : getSavedModeId(agentType)
   )
   const [sendSignal, setSendSignal] = useState(0)
   const creatingRef = useRef(false)

@@ -110,7 +110,19 @@ interface ConversationShellProps {
    *  active tab only). Threaded straight through to the composer. */
   showActiveFlow?: boolean
   queue?: QueuedMessage[]
-  onEnqueue?: (draft: PromptDraft, modeId: string | null) => void
+  onEnqueue?: (
+    draft: PromptDraft,
+    modeId: string | null,
+    opts?: { holdUntilTurnEnd?: boolean }
+  ) => void
+  /** Pass-through: see `ChatInput.awaitingBackground`. */
+  awaitingBackground?: boolean
+  /** Pass-through: see `ChatInput.backgroundTaskCount`. */
+  backgroundTaskCount?: number
+  /** Pass-through: see `MessageInput.heldTurnReady`. */
+  heldTurnReady?: boolean
+  /** Pass-through: see `MessageInput.onDeliverNow`. */
+  onDeliverNow?: (text: string, blocks?: PromptInputBlock[]) => Promise<void>
   onQueueReorder?: (items: QueuedMessage[]) => void
   onQueueEdit?: (id: string) => void
   onQueueDelete?: (id: string) => void
@@ -192,6 +204,10 @@ export function ConversationShell({
   showActiveFlow,
   queue,
   onEnqueue,
+  awaitingBackground,
+  backgroundTaskCount,
+  heldTurnReady,
+  onDeliverNow,
   onQueueReorder,
   onQueueEdit,
   onQueueDelete,
@@ -294,6 +310,10 @@ export function ConversationShell({
               showActiveFlow={showActiveFlow}
               queue={queue}
               onEnqueue={onEnqueue}
+              awaitingBackground={awaitingBackground}
+              backgroundTaskCount={backgroundTaskCount}
+              heldTurnReady={heldTurnReady}
+              onDeliverNow={onDeliverNow}
               onQueueReorder={onQueueReorder}
               onQueueEdit={onQueueEdit}
               onQueueDelete={onQueueDelete}

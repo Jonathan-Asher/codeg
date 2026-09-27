@@ -363,6 +363,16 @@ pub struct SessionState {
     /// exemption lapses after `background_keepalive_max_age()` instead of
     /// pinning the connection alive forever. Backend-internal; not serialized.
     pub background_activity_at: Option<DateTime<Utc>>,
+    /// The in-flight prompt is held open only for background work: the main
+    /// agent answered and is idle, and claude-agent-acp keeps `session/prompt`
+    /// pending until the background sub-agents it spawned finish (see
+    /// `AcpEvent::AwaitingBackground`). Clients read it as "ready for input"
+    /// — a message is delivered into the held turn right away instead of
+    /// waiting in the local queue — and show the session as idle with
+    /// background work running rather than "responding". Only meaningful
+    /// while `status == Prompting`; every turn boundary clears it. Carried on
+    /// `to_snapshot()` so a client attaching mid-hold gets it too.
+    pub awaiting_background: bool,
 
     // ACP 协商出的能力
     pub modes: Option<SessionModeStateInfo>,
@@ -729,6 +739,7 @@ impl SessionState {
             feedback: Vec::new(),
             background_outstanding: 0,
             background_activity_at: None,
+            awaiting_background: false,
             modes: None,
             current_mode: None,
             config_options: None,
@@ -886,7 +897,17 @@ impl SessionState {
                 {
                     self.set_attach_phase(AttachPhase::Failed);
                 }
+                // Turn-scoped: a new prompt starts with the agent working,
+                // and leaving `Prompting` by any route ends the hold.
+                self.awaiting_background = false;
                 self.status = status.clone();
+            }
+            AcpEvent::AwaitingBackground { awaiting, .. } => {
+                // Only a live turn can be held. A late emit that loses the
+                // race with the turn boundary must not leave an idle
+                // connection marked as holding a turn open.
+                self.awaiting_background =
+                    *awaiting && self.status == ConnectionStatus::Prompting;
             }
             AcpEvent::AttachProgress { phase, .. } => {
                 self.set_attach_phase(*phase);
@@ -1120,6 +1141,8 @@ impl SessionState {
                 // other than a normal end-of-turn means this turn's content
                 // may never have reached the wire.
                 self.last_turn_ended_abnormally = stop_reason != "end_turn";
+                // The held turn (if it was one) is over.
+                self.awaiting_background = false;
                 // AIR retry warnings resolve at the CLEAN turn boundary —
                 // adapters never publish resolution (see
                 // `SessionFailureRecord`), and a warning that ESCALATED
@@ -2128,6 +2151,8 @@ impl SessionState {
             active_delegations: self.active_delegations.values().cloned().collect(),
             feedback: self.feedback.clone(),
             background_outstanding: self.background_outstanding,
+            awaiting_background: self.awaiting_background
+                && self.status == ConnectionStatus::Prompting,
             feedback_tool_available: self.feedback_tool_available,
             native_steering_available: self.native_steering_available,
             modes: self.modes.clone(),
@@ -2226,6 +2251,14 @@ pub struct LiveSessionSnapshot {
     /// common no-background case keeps the wire shape byte-identical.
     #[serde(default, skip_serializing_if = "u32_is_zero")]
     pub background_outstanding: u32,
+    /// The in-flight prompt is held open only for background work (see
+    /// `SessionState.awaiting_background`). Lets a client attaching mid-hold
+    /// show the session as idle and deliver messages right away instead of
+    /// reading it as "responding". Skipped when `false` so the common case
+    /// keeps the wire shape byte-identical; `#[serde(default)]` for older
+    /// payloads.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub awaiting_background: bool,
     /// Whether this agent has the `check_user_feedback` tool (see
     /// `SessionState.feedback_tool_available`). `#[serde(default)]` so older
     /// payloads deserialize to `false`; the frontend gates the feedback bar on
@@ -3082,6 +3115,67 @@ mod tests {
         let zero = fresh_state();
         let json = serde_json::to_value(zero.to_snapshot()).unwrap();
         assert!(json.get("background_outstanding").is_none());
+    }
+
+    /// The held-turn flag lives only inside a prompting turn: set by the
+    /// loop's event, cleared by every way out of `Prompting`, and never
+    /// accepted on a connection that is not prompting (a late emit racing
+    /// the turn boundary).
+    #[test]
+    fn awaiting_background_is_scoped_to_the_prompting_turn() {
+        let mut s = fresh_state();
+        s.apply_event(&AcpEvent::StatusChanged {
+            status: ConnectionStatus::Connected,
+        });
+        s.apply_event(&AcpEvent::AwaitingBackground { awaiting: true, native_steering: true });
+        assert!(!s.awaiting_background, "no turn, nothing to hold");
+
+        s.apply_event(&AcpEvent::StatusChanged {
+            status: ConnectionStatus::Prompting,
+        });
+        s.apply_event(&AcpEvent::AwaitingBackground { awaiting: true, native_steering: true });
+        assert!(s.awaiting_background);
+        s.apply_event(&AcpEvent::AwaitingBackground { awaiting: false, native_steering: true });
+        assert!(!s.awaiting_background, "the main agent woke up");
+
+        s.apply_event(&AcpEvent::AwaitingBackground { awaiting: true, native_steering: true });
+        s.apply_event(&AcpEvent::TurnComplete {
+            session_id: "sid".into(),
+            stop_reason: "end_turn".into(),
+            agent_type: "claude_code".into(),
+        });
+        assert!(!s.awaiting_background, "the held turn settled");
+
+        s.apply_event(&AcpEvent::StatusChanged {
+            status: ConnectionStatus::Prompting,
+        });
+        s.apply_event(&AcpEvent::AwaitingBackground { awaiting: true, native_steering: true });
+        s.apply_event(&AcpEvent::StatusChanged {
+            status: ConnectionStatus::Disconnected,
+        });
+        assert!(!s.awaiting_background, "the connection went away");
+    }
+
+    #[test]
+    fn snapshot_carries_awaiting_background_and_skips_false_on_wire() {
+        let mut s = fresh_state();
+        s.apply_event(&AcpEvent::StatusChanged {
+            status: ConnectionStatus::Prompting,
+        });
+        s.apply_event(&AcpEvent::AwaitingBackground { awaiting: true, native_steering: true });
+        let snapshot = s.to_snapshot();
+        assert!(snapshot.awaiting_background);
+        let json = serde_json::to_value(&snapshot).unwrap();
+        assert_eq!(
+            json.get("awaiting_background").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        let back: LiveSessionSnapshot = serde_json::from_value(json).unwrap();
+        assert!(back.awaiting_background);
+
+        let idle = fresh_state();
+        let json = serde_json::to_value(idle.to_snapshot()).unwrap();
+        assert!(json.get("awaiting_background").is_none());
     }
 
     #[test]

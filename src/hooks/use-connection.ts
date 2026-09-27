@@ -115,6 +115,13 @@ export interface UseConnectionReturn {
    *  teardown (`shouldDisconnectOnUnmount`) spares a connection whose agent CLI
    *  still has background work to finish. */
   backgroundOutstanding: number
+  /** The prompting turn is held open only for background work: the agent
+   *  answered and is idle, so the session is ready for input (see
+   *  `lib/background-idle.ts`). Always `false` when not prompting. */
+  awaitingBackground: boolean
+  /** Whether messages ride the native `_session/steering` channel — the
+   *  path that delivers a message into a held turn right away. */
+  nativeSteering: boolean
   connect: (
     agentType: AgentType,
     workingDir?: string,
@@ -282,6 +289,10 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   const configStaleDismissed = connection?.configStaleDismissed ?? false
   const isDelegationChild = connection?.isDelegationChild ?? false
   const backgroundOutstanding = connection?.backgroundOutstanding ?? 0
+  const awaitingBackground =
+    connection?.status === "prompting" &&
+    (connection?.awaitingBackground ?? false)
+  const nativeSteering = connection?.nativeSteering ?? false
 
   const connect = useCallback(
     (
@@ -391,6 +402,8 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       configStaleDismissed,
       isDelegationChild,
       backgroundOutstanding,
+      awaitingBackground,
+      nativeSteering,
       connect,
       disconnect,
       reapplyConfig,
@@ -435,6 +448,8 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       configStaleDismissed,
       isDelegationChild,
       backgroundOutstanding,
+      awaitingBackground,
+      nativeSteering,
       connect,
       disconnect,
       reapplyConfig,

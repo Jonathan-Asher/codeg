@@ -227,6 +227,8 @@ function makeConnState(overrides: Partial<ConnectionState>): ConnectionState {
     configStaleKind: null,
     configStaleDismissed: false,
     backgroundOutstanding: 0,
+    awaitingBackground: false,
+    nativeSteering: false,
     outOfTurnToolCalls: null,
     ...overrides,
   }

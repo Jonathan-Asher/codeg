@@ -73,6 +73,11 @@ interface SessionDetailsContentProps {
   connection?: ConnectionAttachInfo | null
   /** Retry a failed connect from the Activity line. */
   onRetryConnect?: () => Promise<unknown> | void
+  /** Background tasks holding this client's prompting turn open while the
+   *  agent is idle, or `null` (see `useHeldTurnBackground`). The Activity
+   *  line then reads "Idle — N background tasks running" instead of
+   *  "Working". */
+  heldBackgroundTasks?: number | null
 }
 
 function isKnownStatus(value: string): value is ConversationStatus {
@@ -277,6 +282,7 @@ export function SessionDetailsContent({
   connectionStatus,
   connection,
   onRetryConnect,
+  heldBackgroundTasks = null,
 }: SessionDetailsContentProps) {
   const t = useTranslations("Folder.sessionDetails")
   const tActivity = useTranslations("Folder.sessionActivity")
@@ -431,6 +437,7 @@ export function SessionDetailsContent({
           connectionStatus={connectionStatus}
           connection={connection}
           onRetry={onRetryConnect}
+          heldBackgroundTasks={heldBackgroundTasks}
         />
       </section>
 

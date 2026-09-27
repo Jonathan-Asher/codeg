@@ -27,6 +27,18 @@ export interface QueuedMessage {
    * user's saved mode.
    */
   adoptSendTimeMode?: boolean
+  /**
+   * Wait for the END of the turn, not merely for the agent to go idle.
+   *
+   * While a turn is held open only for background work the agent is idle, and
+   * the queue drains into that turn one message at a time (see
+   * `lib/background-idle.ts`). A message the user queued on purpose during
+   * such a turn — the composer's "Queue" instead of a plain send — asked to
+   * wait until the whole turn, background work included, has finished; so did
+   * one whose delivery into the held turn failed outright. Those stay put (and
+   * hold everything behind them, keeping FIFO) until the turn completes.
+   */
+  holdUntilTurnEnd?: boolean
 }
 
 export interface UseMessageQueueReturn {
@@ -34,8 +46,11 @@ export interface UseMessageQueueReturn {
   enqueue: (
     draft: PromptDraft,
     modeId: string | null,
-    opts?: { adoptSendTimeMode?: boolean }
+    opts?: { adoptSendTimeMode?: boolean; holdUntilTurnEnd?: boolean }
   ) => void
+  /** Mark a queued message to wait for the end of the turn (see
+   *  {@link QueuedMessage.holdUntilTurnEnd}). */
+  holdUntilTurnEnd: (id: string) => void
   /**
    * Put a draft back at the FRONT of the queue. Used when an auto-flushed item
    * was dequeued, sent, and bounced (TurnBusyError): it must return to the head
@@ -83,7 +98,7 @@ export function useMessageQueue(): UseMessageQueueReturn {
     (
       draft: PromptDraft,
       modeId: string | null,
-      opts?: { adoptSendTimeMode?: boolean }
+      opts?: { adoptSendTimeMode?: boolean; holdUntilTurnEnd?: boolean }
     ) => {
       commit([
         ...queueRef.current,
@@ -92,8 +107,24 @@ export function useMessageQueue(): UseMessageQueueReturn {
           draft,
           modeId,
           ...(opts?.adoptSendTimeMode ? { adoptSendTimeMode: true } : {}),
+          ...(opts?.holdUntilTurnEnd ? { holdUntilTurnEnd: true } : {}),
         },
       ])
+    },
+    [commit]
+  )
+
+  const holdUntilTurnEnd = useCallback(
+    (id: string) => {
+      const current = queueRef.current
+      if (!current.some((item) => item.id === id && !item.holdUntilTurnEnd)) {
+        return
+      }
+      commit(
+        current.map((item) =>
+          item.id === id ? { ...item, holdUntilTurnEnd: true } : item
+        )
+      )
     },
     [commit]
   )
@@ -173,6 +204,7 @@ export function useMessageQueue(): UseMessageQueueReturn {
   return {
     queue,
     enqueue,
+    holdUntilTurnEnd,
     requeueFront,
     dequeue,
     remove,

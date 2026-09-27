@@ -147,6 +147,22 @@ describe("ComposerConnectionStatus", () => {
     expect(await screen.findByText(copy.prompting)).toBeInTheDocument()
   })
 
+  it("reads a turn held open for background work as idle, not responding", async () => {
+    fake.state.conn = connected({
+      status: "prompting",
+      awaitingBackground: true,
+      backgroundOutstanding: 2,
+      asyncTasks: [],
+    })
+    renderStatus()
+    await openPopover()
+
+    expect(
+      await screen.findByText("Idle — 2 background tasks running")
+    ).toBeInTheDocument()
+    expect(screen.queryByText(copy.prompting)).not.toBeInTheDocument()
+  })
+
   it("reconnects the live connection when the button is clicked", async () => {
     renderStatus()
     await openPopover()

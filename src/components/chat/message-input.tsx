@@ -48,6 +48,7 @@ import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import { imageFilesFromClipboardApi } from "@/lib/clipboard-images"
 import { toErrorMessage } from "@/lib/app-error"
 import { isNoActiveTurnRejection } from "@/lib/turn-busy"
+import { routeComposerSend } from "@/lib/background-idle"
 import { buildSteerPayload } from "@/lib/prompt-draft"
 import {
   stepComposerHistory,
@@ -224,7 +225,29 @@ interface MessageInputProps {
    *  non-tiled session keeps the plain default border. Independent of
    *  `isActive` (which still drives auto-focus/connect). */
   showActiveFlow?: boolean
-  onEnqueue?: (draft: PromptDraft, modeId: string | null) => void
+  /** Park a draft in the queue above the composer. `holdUntilTurnEnd` marks a
+   *  message queued on purpose while the turn is held open for background
+   *  work: it waits for the turn to finish instead of being delivered the
+   *  moment the agent is idle (see `lib/background-idle.ts`). */
+  onEnqueue?: (
+    draft: PromptDraft,
+    modeId: string | null,
+    opts?: { holdUntilTurnEnd?: boolean }
+  ) => void
+  /**
+   * The turn in flight is held open only for background work and a message
+   * can be delivered into it right now (`canDeliverIntoHeldTurn`): the agent
+   * is idle. Enter then delivers the draft through {@link onDeliverNow}
+   * instead of queueing it, and the primary button reads "Send"; the queue
+   * stays one click away as "Queue until the turn ends".
+   */
+  heldTurnReady?: boolean
+  /** Deliver the draft into the held turn (native `_session/steering`, which
+   *  reaches the idle agent at once). Same contract as {@link onSteer}:
+   *  resolve = delivered (clear the draft); a `NoActiveTurn` rejection means
+   *  the turn ended in the meantime and the draft goes to the queue, which
+   *  sends it right away; any other failure queues it for the turn's end. */
+  onDeliverNow?: (text: string, blocks?: PromptInputBlock[]) => Promise<void>
   /** Id of the queue item being edited — the stable key for (re)hydration, so
    *  switching between two items with identical display text still reloads. */
   editingItemId?: string | null
@@ -396,6 +419,8 @@ export function MessageInput({
   isActive = false,
   showActiveFlow = false,
   onEnqueue,
+  heldTurnReady = false,
+  onDeliverNow,
   editingItemId,
   editingDraftText,
   editingDraftBlocks,
@@ -1538,6 +1563,59 @@ export function MessageInput({
     historyDraftRef.current = null
   }, [clearAttachments, closeSlashMenu])
 
+  // Deliver a draft into a turn held open for background work (see
+  // `lib/background-idle.ts`). Awaited like the mid-turn insert below: the
+  // draft clears only once the backend confirms delivery. If the turn ended
+  // in the meantime (`NoActiveTurn`) the draft joins the queue, which sends it
+  // at once to the now-idle session. Any other failure (a message too long
+  // for the channel, say) parks it for the turn's end rather than losing it
+  // or retrying it into the same failure.
+  const [delivering, setDelivering] = useState(false)
+  const deliverIntoHeldTurn = useCallback(
+    async (draft: PromptDraft) => {
+      if (!onDeliverNow || delivering) return
+      const payload = buildSteerPayload(draft)
+      if (!payload) return
+      const modeId = showModeSelector ? effectiveModeId : null
+      setDelivering(true)
+      try {
+        await onDeliverNow(payload.text, payload.blocks)
+        if (effectiveDraftStorageKey) {
+          clearMessageInputDraftV2(effectiveDraftStorageKey)
+        }
+        resetComposer()
+      } catch (err) {
+        if (!onEnqueue) {
+          toast.error(t("heldTurnSendFailed"), {
+            description: toErrorMessage(err),
+          })
+          return
+        }
+        if (isNoActiveTurnRejection(err)) {
+          onEnqueue(draft, modeId)
+        } else {
+          onEnqueue(draft, modeId, { holdUntilTurnEnd: true })
+          toast.error(t("heldTurnSendFailed"), {
+            description: toErrorMessage(err),
+          })
+        }
+        resetComposer()
+      } finally {
+        setDelivering(false)
+      }
+    },
+    [
+      onDeliverNow,
+      delivering,
+      showModeSelector,
+      effectiveModeId,
+      effectiveDraftStorageKey,
+      resetComposer,
+      onEnqueue,
+      t,
+    ]
+  )
+
   const handleSend = useCallback(() => {
     // The editor stays editable while `disabled` (the agent is busy) so the user
     // can keep typing, but a plain send is blocked — only enqueue / queue-edit
@@ -1562,8 +1640,23 @@ export function MessageInput({
       return
     }
 
+    const route = routeComposerSend({
+      isPrompting,
+      queueSends,
+      canDeliverNow: heldTurnReady,
+      hasEnqueue: Boolean(onEnqueue),
+      hasDeliver: Boolean(onDeliverNow),
+    })
+
+    // The turn is only held open for background work — the agent is idle, so
+    // the message goes in now rather than waiting for the sub-agents to finish.
+    if (route === "deliver") {
+      void deliverIntoHeldTurn(draft)
+      return
+    }
+
     // Prompting (or the session still opening): enqueue instead of sending
-    if ((isPrompting || queueSends) && onEnqueue) {
+    if (route === "enqueue" && onEnqueue) {
       onEnqueue(draft, showModeSelector ? effectiveModeId : null)
       resetComposer()
       return
@@ -1582,12 +1675,40 @@ export function MessageInput({
     isEditingQueueItem,
     isPrompting,
     queueSends,
+    heldTurnReady,
+    onDeliverNow,
+    deliverIntoHeldTurn,
     onSaveQueueEdit,
     onEnqueue,
     onSend,
     effectiveModeId,
     showModeSelector,
     effectiveDraftStorageKey,
+    resetComposer,
+  ])
+
+  // "Queue until the turn ends" — the held turn's explicit alternative to
+  // sending now: the message waits for the whole turn, background work
+  // included, instead of being delivered while the agent is idle.
+  const handleQueueUntilTurnEnd = useCallback(() => {
+    if (!onEnqueue) return
+    if (hasUploadingImage) {
+      toast.error(tAttach("attachUploadInProgress"))
+      return
+    }
+    const draft = buildDraft()
+    if (!draft) return
+    onEnqueue(draft, showModeSelector ? effectiveModeId : null, {
+      holdUntilTurnEnd: true,
+    })
+    resetComposer()
+  }, [
+    onEnqueue,
+    hasUploadingImage,
+    tAttach,
+    buildDraft,
+    showModeSelector,
+    effectiveModeId,
     resetComposer,
   ])
 
@@ -1961,6 +2082,55 @@ export function MessageInput({
       >
         <Check className="size-4" />
       </Button>
+    </div>
+  ) : isPrompting && onCancel && heldTurnReady && onDeliverNow ? (
+    // The turn is only held open for background work and the agent is idle:
+    // the primary action SENDS (delivers into the held turn now), and the
+    // queue stays one click away for a message meant for the turn's end.
+    <div className="flex items-center gap-1" data-testid="held-turn-actions">
+      <Button
+        onClick={onCancel}
+        variant="destructive"
+        size="icon"
+        className="h-8 w-8"
+        title={t("cancel")}
+      >
+        <Square className="size-4" />
+      </Button>
+      <div className="flex items-center">
+        <Button
+          onClick={handleSend}
+          disabled={delivering || !hasSendableContent}
+          size="icon"
+          className={cn("h-8 w-8", onEnqueue && "rounded-r-none")}
+          title={t("heldTurnSend")}
+        >
+          <Send className="size-4" />
+        </Button>
+        {onEnqueue && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                disabled={delivering || !hasSendableContent}
+                size="icon"
+                className="h-8 w-5 rounded-l-none border-l border-primary-foreground/20"
+                aria-label={t("heldTurnQueue")}
+              >
+                <ChevronUp className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" side="top">
+              <DropdownMenuItem
+                onSelect={handleQueueUntilTurnEnd}
+                disabled={delivering}
+              >
+                <Clock className="h-4 w-4" />
+                {t("heldTurnQueue")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
     </div>
   ) : isPrompting && onCancel ? (
     onSteer && onEnqueue && hasSendableContent ? (

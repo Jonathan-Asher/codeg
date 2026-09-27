@@ -1992,6 +1992,134 @@ describe("MessageInput mid-turn send (live-feedback channel)", () => {
       )
     )
   })
+
+  // A turn held open only for background work: the agent already answered
+  // and is idle, so a plain send goes in NOW instead of waiting in the queue
+  // for the sub-agents to finish (see lib/background-idle.ts).
+  describe("while the turn is held open for background work", () => {
+    it("delivers a plain send right away instead of queueing it", async () => {
+      const user = userEvent.setup()
+      const onDeliverNow = vi.fn().mockResolvedValue(undefined)
+      const onEnqueue = vi.fn()
+      const editor = await mountPrompting({
+        heldTurnReady: true,
+        onDeliverNow,
+        onEnqueue,
+      })
+      typeDraft(editor, "what did the tests say?")
+      await waitFor(() =>
+        expect(screen.getByTitle(MI.heldTurnSend)).toBeInTheDocument()
+      )
+      // The mid-turn "queue" chrome is not offered: the agent is not replying.
+      expect(screen.queryByTitle(MI.queueMessage)).toBeNull()
+
+      await user.click(screen.getByTitle(MI.heldTurnSend))
+      await waitFor(() =>
+        expect(onDeliverNow).toHaveBeenCalledWith(
+          "what did the tests say?",
+          undefined
+        )
+      )
+      expect(onEnqueue).not.toHaveBeenCalled()
+      await waitFor(() =>
+        expect(serializeDocToText(editor.state.doc)).not.toContain(
+          "what did the tests say?"
+        )
+      )
+    })
+
+    it("keeps an explicit queue that waits for the turn to end", async () => {
+      const user = userEvent.setup()
+      const onDeliverNow = vi.fn()
+      const onEnqueue = vi.fn()
+      const editor = await mountPrompting({
+        heldTurnReady: true,
+        onDeliverNow,
+        onEnqueue,
+      })
+      typeDraft(editor, "after everything")
+      await waitFor(() =>
+        expect(screen.getByLabelText(MI.heldTurnQueue)).toBeInTheDocument()
+      )
+
+      await user.click(screen.getByLabelText(MI.heldTurnQueue))
+      await user.click(
+        await screen.findByRole("menuitem", { name: MI.heldTurnQueue })
+      )
+      await waitFor(() => expect(onEnqueue).toHaveBeenCalled())
+      const [draft, , opts] = onEnqueue.mock.calls[0]
+      expect(draft.blocks).toEqual([{ type: "text", text: "after everything" }])
+      expect(opts).toEqual({ holdUntilTurnEnd: true })
+      expect(onDeliverNow).not.toHaveBeenCalled()
+    })
+
+    it("queues the draft when the turn ended mid-delivery", async () => {
+      const user = userEvent.setup()
+      const { isNoActiveTurnRejection } = await import("@/lib/turn-busy")
+      vi.mocked(isNoActiveTurnRejection).mockReturnValue(true)
+      const onDeliverNow = vi.fn().mockRejectedValue(new Error("no turn"))
+      const onEnqueue = vi.fn()
+      const editor = await mountPrompting({
+        heldTurnReady: true,
+        onDeliverNow,
+        onEnqueue,
+      })
+      typeDraft(editor, "just in time")
+      await waitFor(() =>
+        expect(screen.getByTitle(MI.heldTurnSend)).toBeInTheDocument()
+      )
+
+      await user.click(screen.getByTitle(MI.heldTurnSend))
+      // An ordinary queue entry: the session is idle now, so it sends next.
+      await waitFor(() => expect(onEnqueue).toHaveBeenCalledTimes(1))
+      expect(onEnqueue.mock.calls[0]).toHaveLength(2)
+      await waitFor(() =>
+        expect(serializeDocToText(editor.state.doc)).not.toContain(
+          "just in time"
+        )
+      )
+    })
+
+    it("parks a failed delivery for the turn's end instead of dropping it", async () => {
+      const user = userEvent.setup()
+      const { isNoActiveTurnRejection } = await import("@/lib/turn-busy")
+      vi.mocked(isNoActiveTurnRejection).mockReturnValue(false)
+      const onDeliverNow = vi.fn().mockRejectedValue(new Error("too long"))
+      const onEnqueue = vi.fn()
+      const editor = await mountPrompting({
+        heldTurnReady: true,
+        onDeliverNow,
+        onEnqueue,
+      })
+      typeDraft(editor, "a very long message")
+      await waitFor(() =>
+        expect(screen.getByTitle(MI.heldTurnSend)).toBeInTheDocument()
+      )
+
+      await user.click(screen.getByTitle(MI.heldTurnSend))
+      await waitFor(() => expect(onEnqueue).toHaveBeenCalledTimes(1))
+      expect(onEnqueue.mock.calls[0][2]).toEqual({ holdUntilTurnEnd: true })
+    })
+
+    it("queues as before when the session cannot deliver now", async () => {
+      const user = userEvent.setup()
+      const onDeliverNow = vi.fn()
+      const onEnqueue = vi.fn()
+      const editor = await mountPrompting({
+        heldTurnReady: false,
+        onDeliverNow,
+        onEnqueue,
+        onSteer: vi.fn(),
+      })
+      typeDraft(editor, "wait for it")
+      await waitFor(() =>
+        expect(screen.getByTitle(MI.queueMessage)).toBeInTheDocument()
+      )
+      await user.click(screen.getByTitle(MI.queueMessage))
+      await waitFor(() => expect(onEnqueue).toHaveBeenCalledTimes(1))
+      expect(onDeliverNow).not.toHaveBeenCalled()
+    })
+  })
 })
 
 describe("MessageInput right-click token selection", () => {

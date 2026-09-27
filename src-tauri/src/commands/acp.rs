@@ -10602,6 +10602,59 @@ pub(crate) async fn acp_update_agent_preferences_and_refresh(
     Ok(refresh_config_staleness(manager, db, data_dir, &[agent_type], ConfigStaleKind::AgentConfig).await)
 }
 
+/// The selectors a UI connect should establish, given what the client sent.
+///
+/// The client sends its saved per-AGENT picks on every connect (they are what
+/// a brand-new chat should start from). For a RESUME of a session whose
+/// conversation has a selector record, those picks are replaced by the record:
+/// the conversation reopens with its own mode/model/effort, not with whatever
+/// was last picked in some other conversation of the same agent (see
+/// `conversation_service::ConversationSelectorState`). A new session
+/// (`session_id` absent), or a resume with no record yet — the first reconnect
+/// of a conversation from before records existed — keeps the client's picks.
+/// A lookup failure also keeps them: a wrong-but-working selector beats a
+/// failed connect.
+///
+/// Only the UI connect path calls this. Delegation, work-task and automation
+/// spawns establish their own explicit configuration and bypass it.
+pub async fn resolve_connect_selector_prefs(
+    conn: &sea_orm::DatabaseConnection,
+    agent_type: AgentType,
+    session_id: Option<&str>,
+    preferred_mode_id: Option<String>,
+    preferred_config_values: BTreeMap<String, String>,
+) -> (Option<String>, BTreeMap<String, String>) {
+    let Some(session_id) = session_id.filter(|s| !s.is_empty()) else {
+        return (preferred_mode_id, preferred_config_values);
+    };
+    match crate::db::service::conversation_service::find_selector_state_for_session(
+        conn, session_id, agent_type,
+    )
+    .await
+    {
+        Ok(Some(record)) => {
+            tracing::info!(
+                agent_type = %agent_type,
+                session_id,
+                mode = ?record.mode_id,
+                values = ?record.config_values,
+                "[ACP] resuming with the conversation's own selectors"
+            );
+            (record.mode_id, record.config_values)
+        }
+        Ok(None) => (preferred_mode_id, preferred_config_values),
+        Err(e) => {
+            tracing::warn!(
+                agent_type = %agent_type,
+                session_id,
+                error = %e,
+                "[ACP] selector record lookup failed; using the client's picks"
+            );
+            (preferred_mode_id, preferred_config_values)
+        }
+    }
+}
+
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 #[allow(clippy::too_many_arguments)]
@@ -10634,6 +10687,15 @@ pub async fn acp_connect(
     // can prompt the user to install it from Agent Settings.
     verify_agent_installed(agent_type).await?;
 
+    let (preferred_mode_id, preferred_config_values) = resolve_connect_selector_prefs(
+        &db.conn,
+        agent_type,
+        session_id.as_deref(),
+        preferred_mode_id,
+        preferred_config_values.unwrap_or_default(),
+    )
+    .await;
+
     let emitter = EventEmitter::Tauri(app_handle);
     // Detached, like the web handler: the window follows the attach through
     // `AttachProgress` events instead of sitting on this call while the
@@ -10647,7 +10709,7 @@ pub async fn acp_connect(
             window.label().to_string(),
             emitter,
             preferred_mode_id,
-            preferred_config_values.unwrap_or_default(),
+            preferred_config_values,
         )
         .await
 }

@@ -96,6 +96,28 @@ describe("denormalizeSnapshot — subagent attribution on live blocks", () => {
   })
 })
 
+describe("denormalizeSnapshot — turn held open for background work", () => {
+  it("carries awaiting_background and native steering into the patch", () => {
+    const patch = denormalizeSnapshot(
+      baseSnapshot({
+        status: "prompting",
+        awaiting_background: true,
+        native_steering_available: true,
+        background_outstanding: 2,
+      })
+    )
+    expect(patch.awaitingBackground).toBe(true)
+    expect(patch.nativeSteering).toBe(true)
+    expect(patch.backgroundOutstanding).toBe(2)
+  })
+
+  it("defaults to not held when the fields are absent (older server payload)", () => {
+    const patch = denormalizeSnapshot(baseSnapshot({ status: "prompting" }))
+    expect(patch.awaitingBackground).toBe(false)
+    expect(patch.nativeSteering).toBe(false)
+  })
+})
+
 describe("denormalizeSnapshot — config staleness", () => {
   it("carries config_stale / config_stale_kind into the patch", () => {
     const patch = denormalizeSnapshot(

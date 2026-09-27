@@ -75,6 +75,13 @@ export interface SnapshotPatch {
    *  `background_activity` events won't replay. `0` when the server omitted
    *  the field. */
   backgroundOutstanding: number
+  /** Whether the prompting turn is held open only for background work (the
+   *  agent is idle), so a client attaching mid-hold reads the session as
+   *  idle rather than responding. `false` when the server omitted it. */
+  awaitingBackground: boolean
+  /** Whether messages ride the native `_session/steering` channel — how a
+   *  message reaches a turn held open for background work. */
+  nativeSteering: boolean
   /** AIR typed session failure table carried by the snapshot — resolved
    *  entries and their revision watermarks included. MERGED into the in-memory
    *  table by the monotonic per-id rule (`mergeSessionFailures`) on BOTH
@@ -163,6 +170,8 @@ export function denormalizeSnapshot(wire: LiveSessionSnapshot): SnapshotPatch {
     configStale: wire.config_stale ?? false,
     configStaleKind: wire.config_stale_kind ?? null,
     backgroundOutstanding: wire.background_outstanding ?? 0,
+    awaitingBackground: wire.awaiting_background ?? false,
+    nativeSteering: wire.native_steering_available ?? false,
     sessionFailures: wire.session_failures ?? [],
     asyncTasks: wire.async_tasks ?? [],
     lastError,

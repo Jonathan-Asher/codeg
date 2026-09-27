@@ -50,7 +50,21 @@ interface ChatInputProps {
    *  tab when tiled across multiple sessions; passed through to MessageInput. */
   showActiveFlow?: boolean
   queue?: QueuedMessage[]
-  onEnqueue?: (draft: PromptDraft, modeId: string | null) => void
+  onEnqueue?: (
+    draft: PromptDraft,
+    modeId: string | null,
+    opts?: { holdUntilTurnEnd?: boolean }
+  ) => void
+  /** The prompting turn is held open only for background work — the agent is
+   *  idle (see `lib/background-idle.ts`). Swaps "responding" for "idle,
+   *  N background tasks running" in the placeholder. */
+  awaitingBackground?: boolean
+  /** How many background tasks keep the turn open (`0` = unknown). */
+  backgroundTaskCount?: number
+  /** Pass-through: see `MessageInput.heldTurnReady`. */
+  heldTurnReady?: boolean
+  /** Pass-through: see `MessageInput.onDeliverNow`. */
+  onDeliverNow?: (text: string, blocks?: PromptInputBlock[]) => Promise<void>
   onQueueReorder?: (items: QueuedMessage[]) => void
   onQueueEdit?: (id: string) => void
   onQueueDelete?: (id: string) => void
@@ -126,6 +140,10 @@ export const ChatInput = memo(function ChatInput({
   showActiveFlow,
   queue,
   onEnqueue,
+  awaitingBackground = false,
+  backgroundTaskCount = 0,
+  heldTurnReady = false,
+  onDeliverNow,
   onQueueReorder,
   onQueueEdit,
   onQueueDelete,
@@ -237,6 +255,8 @@ export const ChatInput = memo(function ChatInput({
         isActive={isActive}
         showActiveFlow={showActiveFlow}
         onEnqueue={onEnqueue}
+        heldTurnReady={isPrompting && heldTurnReady}
+        onDeliverNow={onDeliverNow}
         editingItemId={editingItemId}
         editingDraftText={editingDraftText}
         editingDraftBlocks={editingDraftBlocks}
@@ -254,9 +274,19 @@ export const ChatInput = memo(function ChatInput({
             ? queueWhileConnecting
               ? t("connectingQueued", { agent: agentName ?? "Agent" })
               : t("connecting")
-            : isPrompting
-              ? t("agentResponding", { agent: agentName ?? "Agent" })
-              : t("sendMessage")
+            : isPrompting && awaitingBackground
+              ? t(
+                  heldTurnReady
+                    ? "agentIdleBackground"
+                    : "agentIdleBackgroundQueued",
+                  {
+                    agent: agentName ?? "Agent",
+                    count: backgroundTaskCount,
+                  }
+                )
+              : isPrompting
+                ? t("agentResponding", { agent: agentName ?? "Agent" })
+                : t("sendMessage")
         }
         // The floor goes through `tall`, not through a `min-h-*` here: the box
         // and its editable area carry two halves of the same number, and only

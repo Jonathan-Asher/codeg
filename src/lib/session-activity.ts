@@ -13,6 +13,10 @@ import type {
  * one whose turn was killed.
  *
  * - `working`: a turn is in flight.
+ * - `background`: a turn is in flight only because background work holds it
+ *   open — the agent itself answered and is idle, and a message runs right
+ *   away (see `lib/background-idle.ts`). Known only to a client holding the
+ *   session's live connection.
  * - `needs_you`: the agent is blocked on a permission, a question or a plan
  *   approval.
  * - `idle`: nothing is running.
@@ -25,6 +29,7 @@ import type {
  */
 export type SessionActivity =
   | "working"
+  | "background"
   | "needs_you"
   | "idle"
   | "interrupted"
@@ -33,9 +38,11 @@ export type SessionActivity =
 
 /** The i18n key (under `Folder.sessionActivity`) naming each state. Literal
  *  on purpose: next-intl keys are typed, and a key read out of a variable must
- *  stay a literal type. */
+ *  stay a literal type. `background` takes a `{count}` of running tasks
+ *  (0 = unknown); the others ignore it. */
 export const SESSION_ACTIVITY_LABEL_KEYS = {
   working: "working",
+  background: "background",
   needs_you: "needsYou",
   idle: "idle",
   interrupted: "interrupted",
@@ -47,6 +54,7 @@ export const SESSION_ACTIVITY_LABEL_KEYS = {
  *  of each state. */
 export const SESSION_ACTIVITY_HINT_KEYS = {
   working: "workingHint",
+  background: "backgroundHint",
   needs_you: "needsYouHint",
   idle: "idleHint",
   interrupted: "interruptedHint",
@@ -80,6 +88,10 @@ export interface SessionActivityInputs {
    *  a session that cannot be reached is not "idle", whatever its last turn
    *  did — but below a turn running or blocked on the user. */
   connection?: "connecting" | "failed" | null
+  /** This client's own live connection says its prompting turn is held open
+   *  only for background work (the agent is idle). Only meaningful together
+   *  with `connectionStatus === "prompting"`. */
+  awaitingBackground?: boolean
 }
 
 /**
@@ -94,12 +106,17 @@ export function deriveSessionActivity({
   status,
   connectionStatus,
   connection,
+  awaitingBackground,
 }: SessionActivityInputs): SessionActivity {
   // Blocked on the user outranks everything: the session IS mid-turn, but the
-  // thing to know is that it can't continue without you.
+  // thing to know is that it can't continue without you — that includes a
+  // background sub-agent asking for a permission while the turn is held.
   if (attention) return "needs_you"
-  // Streaming here and now.
-  if (connectionStatus === "prompting") return "working"
+  // Streaming here and now — or, when the turn is only held open for
+  // background work, idle with that work running.
+  if (connectionStatus === "prompting") {
+    return awaitingBackground ? "background" : "working"
+  }
   // This client cannot reach the agent right now — it is opening the session,
   // or failed to. "Idle — send a message" would invite a send that has nowhere
   // to go yet.
