@@ -2121,7 +2121,12 @@
       "continue": "Continuar",
       "continueTitle": "Retomar esta sessão e enviar “continue”",
       "bannerTitle": "O último turno foi interrompido",
-      "bannerDescription": "O codeg fechou ou o agente parou antes de terminar."
+      "bannerDescription": "O codeg fechou ou o agente parou antes de terminar.",
+      "connecting": "Conectando",
+      "connectingHint": "O agente está abrindo esta sessão. As mensagens enviadas agora aguardam até que ela esteja pronta.",
+      "connectFailed": "Não foi possível conectar",
+      "connectFailedHint": "Não foi possível contatar o agente. Tente de novo para abrir a sessão.",
+      "retry": "Tentar de novo"
     },
     "conversationCard": {
       "untitledConversation": "Conversa sem título",
@@ -3105,7 +3110,8 @@
           "sessionLoadFallback": "{agent} não conseguiu restaurar a sessão anterior e iniciou uma nova; o contexto anterior não está mais disponível.",
           "turnFailedEmpty": "{agent} encerrou o turno sem produzir nenhuma resposta.",
           "turnFailedEmptyProtocol": "{agent} produziu uma saída que o codeg não conseguiu analisar — a versão do agente pode não corresponder ao protocolo.",
-          "turnFailedEmptyMetadata": "{agent} enviou apenas atualizações de status neste turno (plano / modo / uso) e nenhuma resposta."
+          "turnFailedEmptyMetadata": "{agent} enviou apenas atualizações de status neste turno (plano / modo / uso) e nenhuma resposta.",
+          "attachTimeout": "O {agent} não terminou de abrir a sessão e foi interrompido."
         },
         "unableReadAgentConfig": "Não foi possível ler a configuração do agente: {message}",
         "connectFailedTitle": "Falha na conexão de {agent}",
@@ -3138,7 +3144,12 @@
           "loadingSelectorsTitle": "Carregando seletores de {agent}",
           "loadingSelectorsDescription": "Buscando opções de modo e configuração de sessão",
           "initSessionTitle": "Initializing {agent} session",
-          "initSessionDescription": "Creating session and loading configuration"
+          "initSessionDescription": "Creating session and loading configuration",
+          "queuedTitle": "Aguardando para iniciar o {agent}",
+          "resumingTitle": "Retomando a sessão do {agent}",
+          "loadingSessionTitle": "Carregando a sessão do {agent}",
+          "creatingSessionTitle": "Criando a sessão do {agent}",
+          "configuringSessionTitle": "Aplicando as configurações da sessão do {agent}"
         },
         "errors": {
           "connectionFailed": "Falha na conexão",
@@ -3156,7 +3167,8 @@
       "chatInput": {
         "connecting": "Conectando...",
         "agentResponding": "{agent} está respondendo...",
-        "sendMessage": "Envie uma mensagem..."
+        "sendMessage": "Envie uma mensagem...",
+        "connectingQueued": "Conectando ao {agent}… você já pode enviar, as mensagens aguardam na fila"
       },
       "messageInput": {
         "askAnything": "Pergunte qualquer coisa...",
@@ -3969,6 +3981,18 @@
       "proposedPlan": {
         "title": "Plano proposto",
         "planning": "A planear…"
+      },
+      "attachPhase": {
+        "queued": "Aguardando para iniciar o {agent} (outras sessões estão abrindo)",
+        "starting": "Iniciando o {agent}",
+        "resuming": "Retomando a sessão do {agent}",
+        "loading": "Carregando a sessão do {agent}",
+        "creating": "Criando uma sessão do {agent}",
+        "configuring": "Aplicando as configurações da sessão do {agent}",
+        "elapsedSeconds": "{seconds} s",
+        "elapsedMinutes": "{minutes} min {seconds} s",
+        "withElapsed": "{step} · {elapsed}",
+        "slowHint": "O {agent} ainda está iniciando. Ele executa seus hooks de SessionStart e suas configurações antes de abrir a sessão, então um hook lento ou inacessível aparece como esta espera."
       }
     },
     "diffPreview": {

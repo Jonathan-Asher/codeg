@@ -2121,7 +2121,12 @@
       "continue": "Fortsetzen",
       "continueTitle": "Diese Sitzung wieder aufnehmen und „continue“ senden",
       "bannerTitle": "Die letzte Runde wurde unterbrochen",
-      "bannerDescription": "codeg wurde beendet oder der Agent hat angehalten, bevor sie fertig war."
+      "bannerDescription": "codeg wurde beendet oder der Agent hat angehalten, bevor sie fertig war.",
+      "connecting": "Verbindet",
+      "connectingHint": "Der Agent öffnet diese Sitzung. Nachrichten, die du jetzt sendest, warten, bis sie bereit ist.",
+      "connectFailed": "Verbindung fehlgeschlagen",
+      "connectFailedHint": "Der Agent war nicht erreichbar. Versuche es erneut, um die Sitzung zu öffnen.",
+      "retry": "Erneut versuchen"
     },
     "conversationCard": {
       "untitledConversation": "Unbenannte Konversation",
@@ -3105,7 +3110,8 @@
           "sessionLoadFallback": "{agent} konnte die vorherige Sitzung nicht wiederherstellen und hat eine neue gestartet – der frühere Kontext ist nicht mehr vorhanden.",
           "turnFailedEmpty": "{agent} hat die Runde ohne jegliche Antwort beendet.",
           "turnFailedEmptyProtocol": "{agent} hat eine Ausgabe erzeugt, die codeg nicht auswerten konnte — die Agent-Version passt möglicherweise nicht zum Protokoll.",
-          "turnFailedEmptyMetadata": "{agent} hat in dieser Runde nur Statusaktualisierungen gesendet (Plan / Modus / Verbrauch) und keine Antwort."
+          "turnFailedEmptyMetadata": "{agent} hat in dieser Runde nur Statusaktualisierungen gesendet (Plan / Modus / Verbrauch) und keine Antwort.",
+          "attachTimeout": "{agent} hat die Sitzung nicht fertig geöffnet und wurde gestoppt."
         },
         "unableReadAgentConfig": "Agenten-Konfiguration kann nicht gelesen werden: {message}",
         "connectFailedTitle": "{agent} Verbindung fehlgeschlagen",
@@ -3138,7 +3144,12 @@
           "loadingSelectorsTitle": "{agent}-Selektoren werden geladen",
           "loadingSelectorsDescription": "Modus- und Sitzungsoptionen werden abgerufen",
           "initSessionTitle": "Initializing {agent} session",
-          "initSessionDescription": "Creating session and loading configuration"
+          "initSessionDescription": "Creating session and loading configuration",
+          "queuedTitle": "Warten auf den Start von {agent}",
+          "resumingTitle": "{agent}-Sitzung wird fortgesetzt",
+          "loadingSessionTitle": "{agent}-Sitzung wird geladen",
+          "creatingSessionTitle": "{agent}-Sitzung wird erstellt",
+          "configuringSessionTitle": "Einstellungen der {agent}-Sitzung werden angewendet"
         },
         "errors": {
           "connectionFailed": "Verbindung fehlgeschlagen",
@@ -3156,7 +3167,8 @@
       "chatInput": {
         "connecting": "Verbinden...",
         "agentResponding": "{agent} antwortet...",
-        "sendMessage": "Nachricht senden..."
+        "sendMessage": "Nachricht senden...",
+        "connectingQueued": "Verbindung zu {agent}… du kannst schon senden, Nachrichten warten in der Warteschlange"
       },
       "messageInput": {
         "askAnything": "Fragen Sie alles...",
@@ -3969,6 +3981,18 @@
       "proposedPlan": {
         "title": "Vorgeschlagener Plan",
         "planning": "Wird geplant…"
+      },
+      "attachPhase": {
+        "queued": "Warten auf den Start von {agent} (andere Sitzungen werden geöffnet)",
+        "starting": "{agent} wird gestartet",
+        "resuming": "Die {agent}-Sitzung wird fortgesetzt",
+        "loading": "Die {agent}-Sitzung wird geladen",
+        "creating": "Eine {agent}-Sitzung wird erstellt",
+        "configuring": "Einstellungen der {agent}-Sitzung werden angewendet",
+        "elapsedSeconds": "{seconds} s",
+        "elapsedMinutes": "{minutes} min {seconds} s",
+        "withElapsed": "{step} · {elapsed}",
+        "slowHint": "{agent} startet noch. Vor dem Öffnen der Sitzung laufen deine SessionStart-Hooks und Einstellungen; ein langsamer oder nicht erreichbarer Hook zeigt sich als diese Wartezeit."
       }
     },
     "diffPreview": {

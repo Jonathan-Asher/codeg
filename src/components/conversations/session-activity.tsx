@@ -1,10 +1,13 @@
 "use client"
 
+import { useState } from "react"
 import {
+  CircleAlert,
   CircleDot,
   CirclePause,
   Loader2,
   Play,
+  RotateCw,
   ShieldAlert,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -20,6 +23,9 @@ import {
   type SessionActivity,
 } from "@/lib/session-activity"
 import { continueInterruptedSession } from "@/lib/session-continue"
+import { getAgentLabel } from "@/lib/custom-agents"
+import type { ConnectionAttachInfo } from "@/hooks/use-connection-status"
+import { useAttachPhaseLabel } from "@/hooks/use-attach-phase-label"
 import { useConversationAttention } from "@/stores/conversation-attention-store"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -74,6 +80,20 @@ export function SessionActivityIcon({
           className={cn(base, "text-muted-foreground/70")}
         />
       )
+    case "connecting":
+      return (
+        <Loader2
+          aria-hidden
+          className={cn(base, "animate-spin text-sky-600 dark:text-sky-400")}
+        />
+      )
+    case "connect_failed":
+      return (
+        <CircleAlert
+          aria-hidden
+          className={cn(base, "text-rose-600 dark:text-rose-400")}
+        />
+      )
   }
 }
 
@@ -82,6 +102,12 @@ interface SessionActivityRowProps {
   /** This client's own live connection status for the conversation, when it
    *  holds one — see `deriveSessionActivity`. */
   connectionStatus?: ConnectionStatus | null
+  /** Where this client's attempt to open the session stands, when it holds
+   *  one: shown instead of "Idle" while the agent opens the session, and as
+   *  "Couldn't connect" with the reason when it failed. */
+  connection?: ConnectionAttachInfo | null
+  /** Retry a failed connect. The Retry button shows only when this is set. */
+  onRetry?: () => Promise<unknown> | void
 }
 
 /**
@@ -93,20 +119,33 @@ interface SessionActivityRowProps {
 export function SessionActivityRow({
   summary,
   connectionStatus,
+  connection,
+  onRetry,
 }: SessionActivityRowProps) {
   const t = useTranslations("Folder.sessionActivity")
   const tSidebar = useTranslations("Folder.sidebar")
+  const tPhase = useTranslations("Folder.chat.attachPhase")
   const attention = useConversationAttention(summary.id)
+  const [retrying, setRetrying] = useState(false)
   const activity = deriveSessionActivity({
     attention,
     turnState: summary.turn_state,
     status: summary.status,
     connectionStatus,
+    connection: connection?.state ?? null,
   })
+  const agent = getAgentLabel(summary.agent_type)
+  const phaseLabel = useAttachPhaseLabel(
+    agent,
+    activity === "connecting" ? connection?.phase : null,
+    connection?.startedAt
+  )
   const hint =
     activity === "needs_you" && attention
       ? tSidebar(ATTENTION_HINT_KEYS[attention])
-      : t(SESSION_ACTIVITY_HINT_KEYS[activity])
+      : activity === "connect_failed" && connection?.error
+        ? connection.error
+        : t(SESSION_ACTIVITY_HINT_KEYS[activity])
 
   return (
     <div
@@ -120,9 +159,43 @@ export function SessionActivityRow({
           <p className="text-sm font-medium leading-snug">
             {t(SESSION_ACTIVITY_LABEL_KEYS[activity])}
           </p>
-          <p className="text-xs leading-snug text-muted-foreground">{hint}</p>
+          {phaseLabel && (
+            <p
+              className="text-xs font-medium leading-snug text-foreground/80"
+              data-testid="session-activity-phase"
+            >
+              {phaseLabel.text}
+            </p>
+          )}
+          <p
+            className="wrap-anywhere text-xs leading-snug text-muted-foreground"
+            data-testid="session-activity-hint"
+          >
+            {hint}
+          </p>
+          {phaseLabel?.slow && (
+            <p className="text-xs leading-snug text-muted-foreground">
+              {tPhase("slowHint", { agent })}
+            </p>
+          )}
         </div>
       </div>
+      {activity === "connect_failed" && onRetry && (
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={retrying}
+          onClick={() => {
+            setRetrying(true)
+            void Promise.resolve(onRetry())
+              .catch(() => {})
+              .finally(() => setRetrying(false))
+          }}
+        >
+          <RotateCw aria-hidden className={cn(retrying && "animate-spin")} />
+          {t("retry")}
+        </Button>
+      )}
       {activity === "interrupted" && (
         <Button
           size="xs"

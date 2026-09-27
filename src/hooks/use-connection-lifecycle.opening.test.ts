@@ -60,6 +60,7 @@ vi.mock("@/contexts/task-context", () => ({
 
 const conn = vi.hoisted(() => ({
   status: null as string | null,
+  attachPhase: null as string | null,
   selectorsReady: false,
   hasCachedSelectors: false,
 }))
@@ -67,6 +68,7 @@ const conn = vi.hoisted(() => ({
 vi.mock("@/hooks/use-connection", () => ({
   useConnection: () => ({
     status: conn.status,
+    attachPhase: conn.attachPhase,
     selectorsReady: conn.selectorsReady,
     hasCachedSelectors: conn.hasCachedSelectors,
     connect: vi.fn().mockResolvedValue(undefined),
@@ -103,6 +105,7 @@ describe("useConnectionLifecycle opening legs", () => {
   beforeEach(() => {
     tasks.reset()
     conn.status = null
+    conn.attachPhase = null
     conn.selectorsReady = false
     conn.hasCachedSelectors = false
   })
@@ -163,5 +166,63 @@ describe("useConnectionLifecycle opening legs", () => {
     // The status-bar row is independent of the cache — the session itself is
     // still not up.
     expect(tasks.live()).toHaveLength(1)
+  })
+})
+
+// The status bar is global and every tab stays mounted, so a tab the user is
+// not looking at must not put rows there: a background Pi tab reconnecting
+// used to show "Initializing Pi session" over a brand-new Claude Code tab.
+describe("useConnectionLifecycle status-bar rows belong to the foreground tab", () => {
+  beforeEach(() => {
+    tasks.reset()
+    conn.status = null
+    conn.attachPhase = null
+    conn.selectorsReady = false
+    conn.hasCachedSelectors = false
+  })
+
+  function renderTab(isActive: boolean) {
+    return renderHook(
+      (props: { isActive: boolean }) =>
+        useConnectionLifecycle({
+          contextKey: "ctx-bg",
+          agentType: "pi",
+          isActive: props.isActive,
+        }),
+      { initialProps: { isActive } }
+    )
+  }
+
+  it("adds no row for a background tab that is connecting or initializing", () => {
+    conn.status = "connecting"
+    conn.attachPhase = "resuming"
+    const { rerender } = renderTab(false)
+    expect(tasks.live()).toEqual([])
+
+    conn.status = "connected"
+    act(() => rerender({ isActive: false }))
+    expect(tasks.live()).toEqual([])
+  })
+
+  it("shows the tab's row once it is in front, and drops it when it goes back", () => {
+    conn.status = "connecting"
+    conn.attachPhase = "resuming"
+    const { rerender } = renderTab(false)
+    act(() => rerender({ isActive: true }))
+    expect(tasks.live().map((t) => t.label)).toEqual([
+      'tasks.resumingTitle:{"agent":"Pi"}',
+    ])
+
+    act(() => rerender({ isActive: false }))
+    expect(tasks.live()).toEqual([])
+  })
+
+  it("names a resume that is waiting for an attach slot", () => {
+    conn.status = "connecting"
+    conn.attachPhase = "queued"
+    renderTab(true)
+    expect(tasks.live().map((t) => t.label)).toEqual([
+      'tasks.queuedTitle:{"agent":"Pi"}',
+    ])
   })
 })

@@ -2121,7 +2121,12 @@
       "continue": "متابعة",
       "continueTitle": "استئناف هذه الجلسة وإرسال «continue»",
       "bannerTitle": "انقطع الدور الأخير",
-      "bannerDescription": "أُغلق codeg أو توقف الوكيل قبل أن يكتمل."
+      "bannerDescription": "أُغلق codeg أو توقف الوكيل قبل أن يكتمل.",
+      "connecting": "جارٍ الاتصال",
+      "connectingHint": "يفتح الوكيل هذه الجلسة. تنتظر الرسائل التي ترسلها الآن حتى تصبح جاهزة.",
+      "connectFailed": "تعذّر الاتصال",
+      "connectFailedHint": "تعذّر الوصول إلى الوكيل. أعد المحاولة لفتح الجلسة مرة أخرى.",
+      "retry": "إعادة المحاولة"
     },
     "conversationCard": {
       "untitledConversation": "محادثة بدون عنوان",
@@ -3105,7 +3110,8 @@
           "sessionLoadFallback": "تعذّر على {agent} استعادة الجلسة السابقة فبدأ جلسة جديدة، ولم يعد السياق السابق متاحًا.",
           "turnFailedEmpty": "أنهى {agent} الجولة دون إنتاج أي رد.",
           "turnFailedEmptyProtocol": "أنتج {agent} مخرجات تعذّر على codeg تحليلها — قد لا يتوافق إصدار الوكيل مع البروتوكول.",
-          "turnFailedEmptyMetadata": "أرسل {agent} تحديثات حالة فقط في هذه الجولة (الخطة / الوضع / الاستخدام) دون أي رد."
+          "turnFailedEmptyMetadata": "أرسل {agent} تحديثات حالة فقط في هذه الجولة (الخطة / الوضع / الاستخدام) دون أي رد.",
+          "attachTimeout": "لم يُكمل {agent} فتح الجلسة وتم إيقافه."
         },
         "unableReadAgentConfig": "تعذر قراءة إعدادات الوكيل: {message}",
         "connectFailedTitle": "فشل اتصال {agent}",
@@ -3138,7 +3144,12 @@
           "loadingSelectorsTitle": "جارٍ تحميل محددات {agent}",
           "loadingSelectorsDescription": "جارٍ جلب خيارات الوضع وإعدادات الجلسة",
           "initSessionTitle": "جارٍ تهيئة جلسة {agent}",
-          "initSessionDescription": "جارٍ إنشاء الجلسة وتحميل الإعدادات"
+          "initSessionDescription": "جارٍ إنشاء الجلسة وتحميل الإعدادات",
+          "queuedTitle": "في انتظار تشغيل {agent}",
+          "resumingTitle": "جارٍ استئناف جلسة {agent}",
+          "loadingSessionTitle": "جارٍ تحميل جلسة {agent}",
+          "creatingSessionTitle": "جارٍ إنشاء جلسة {agent}",
+          "configuringSessionTitle": "جارٍ تطبيق إعدادات جلسة {agent}"
         },
         "errors": {
           "connectionFailed": "فشل الاتصال",
@@ -3156,7 +3167,8 @@
       "chatInput": {
         "connecting": "جارٍ الاتصال...",
         "agentResponding": "{agent} يرد...",
-        "sendMessage": "أرسل رسالة..."
+        "sendMessage": "أرسل رسالة...",
+        "connectingQueued": "جارٍ الاتصال بـ {agent}… يمكنك الإرسال الآن، وتنتظر الرسائل في قائمة الانتظار"
       },
       "messageInput": {
         "askAnything": "اسأل أي شيء...",
@@ -3969,6 +3981,18 @@
       "proposedPlan": {
         "title": "الخطة المقترحة",
         "planning": "جارٍ التخطيط…"
+      },
+      "attachPhase": {
+        "queued": "في انتظار تشغيل {agent} (يجري فتح جلسات أخرى)",
+        "starting": "جارٍ تشغيل {agent}",
+        "resuming": "جارٍ استئناف جلسة {agent}",
+        "loading": "جارٍ تحميل جلسة {agent}",
+        "creating": "جارٍ إنشاء جلسة {agent}",
+        "configuring": "جارٍ تطبيق إعدادات جلسة {agent}",
+        "elapsedSeconds": "{seconds} ث",
+        "elapsedMinutes": "{minutes} د {seconds} ث",
+        "withElapsed": "{step} · {elapsed}",
+        "slowHint": "لا يزال {agent} قيد التشغيل. فهو ينفّذ خطافات SessionStart والإعدادات قبل فتح الجلسة، لذا يظهر أي خطاف بطيء أو يتعذّر الوصول إليه على شكل هذا الانتظار."
       }
     },
     "diffPreview": {

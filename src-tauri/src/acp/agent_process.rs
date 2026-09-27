@@ -10,7 +10,10 @@
 //!
 //! * the whole process TREE is killed on drop (`kill_tree`), on every platform
 //!   and including descendants that left the child's process group, so an
-//!   `npx`/`node` launcher cannot leave the real agent behind;
+//!   `npx`/`node` launcher cannot leave the real agent behind — and on Unix the
+//!   child's own process GROUP too, with a `SIGKILL` after a grace period, so a
+//!   descendant that outlived the agent and was reparented out of the tree is
+//!   not left running either;
 //! * [`AcpAgent::with_current_dir`] sets the child's cwd (Hermes derives its
 //!   working directory from the process cwd, not from `session/new`);
 //! * an EMPTY env value means "remove the inherited variable" rather than "set
@@ -386,6 +389,12 @@ impl AcpAgent {
                 let mut cmd = {
                     let mut command = tokio::process::Command::new(&stdio.command);
                     command.args(&stdio.args);
+                    // Lead a process group of its own, so everything the agent
+                    // starts (the `claude` CLI under claude-agent-acp, its MCP
+                    // servers, hook shells) can be signalled as one unit —
+                    // including a descendant that outlives the agent and is
+                    // reparented out of its process tree. See `ChildGuard`.
+                    command.process_group(0);
                     command
                 };
                 for env_var in &stdio.env {
@@ -449,6 +458,36 @@ impl AcpAgent {
     }
 }
 
+/// How long a dropped agent gets to act on `SIGTERM` before its process tree
+/// is sent `SIGKILL`. Long enough for a healthy adapter to tear its sessions
+/// down; short enough that an abandoned connect cannot leave an agent (and
+/// its MCP servers) running for the rest of the app's life.
+const SIGTERM_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Send `signal` to the process group `pgid`. `true` if it reached at least
+/// one member. Only call with the pid of a child we spawned as a group leader
+/// and either still own unreaped, or whose group still has members — both keep
+/// the id from being handed to anyone else.
+#[cfg(unix)]
+fn signal_process_group(pgid: u32, signal: libc::c_int) -> bool {
+    let Ok(pgid) = libc::pid_t::try_from(pgid) else {
+        return false;
+    };
+    if pgid <= 1 {
+        return false;
+    }
+    // SAFETY: `killpg` has no memory-safety preconditions; a stale or foreign
+    // id just yields ESRCH/EPERM.
+    unsafe { libc::killpg(pgid, signal) == 0 }
+}
+
+/// Whether process group `pgid` still has a member (signal 0 probes without
+/// delivering anything).
+#[cfg(unix)]
+fn process_group_alive(pgid: u32) -> bool {
+    signal_process_group(pgid, 0)
+}
+
 /// A wrapper around Child that kills the process when dropped.
 struct ChildGuard {
     /// `None` once the child has been handed to the detached reaper in `drop`.
@@ -493,6 +532,14 @@ impl Drop for ChildGuard {
         };
 
         let _ = kill_tree::blocking::kill_tree(pid);
+        // And the agent's process group (it leads one; see `spawn_process`),
+        // which reaches descendants the tree walk cannot see. Safe while we
+        // still own the unreaped child: a group with this id can only be the
+        // one our child leads, and if it leads none the call finds nothing.
+        #[cfg(unix)]
+        {
+            signal_process_group(pid, libc::SIGTERM);
+        }
 
         // `kill_tree` only signals (SIGTERM on Unix) and does not wait, so the
         // process may well outlive this call. Keep OWNING the child until it is
@@ -508,11 +555,66 @@ impl Drop for ChildGuard {
         match tokio::runtime::Handle::try_current() {
             Ok(handle) => {
                 handle.spawn(async move {
+                    let signalled_at = tokio::time::Instant::now();
+                    // SIGTERM can be caught and ignored, and an agent can be
+                    // too wedged to act on it — claude-agent-acp's handler
+                    // awaits its own session teardown before exiting. If the
+                    // tree is still here after the grace period, SIGKILL it.
+                    // Safe to aim at the pid: we still own the `Child`, so it
+                    // is at worst an unreaped zombie and cannot have been
+                    // recycled onto another process.
+                    let status = match tokio::time::timeout(SIGTERM_GRACE, child.wait()).await {
+                        Ok(status) => status,
+                        Err(_) => {
+                            tracing::warn!(
+                                "[ACP] agent pid={pid} still running {:?} after SIGTERM; sending SIGKILL",
+                                SIGTERM_GRACE
+                            );
+                            // The group first, while the leader still pins its
+                            // id; then the tree, for descendants that left it.
+                            #[cfg(unix)]
+                            {
+                                signal_process_group(pid, libc::SIGKILL);
+                            }
+                            let config = kill_tree::Config {
+                                signal: "SIGKILL".to_string(),
+                                ..Default::default()
+                            };
+                            let _ = tokio::task::spawn_blocking(move || {
+                                kill_tree::blocking::kill_tree_with_config(pid, &config)
+                            })
+                            .await;
+                            child.wait().await
+                        }
+                    };
+                    // The agent exiting is not its whole tree exiting: the
+                    // `claude` CLI under claude-agent-acp, an MCP server or a
+                    // hook shell can still be finishing (or ignoring) its own
+                    // SIGTERM, and once the agent is gone it is reparented out
+                    // of any tree walk. It is still in the agent's process
+                    // group, though, and a group that still has members keeps
+                    // its id reserved, so it can be found and stopped by that
+                    // id — after the same grace the agent got.
+                    #[cfg(unix)]
+                    {
+                        if process_group_alive(pid) {
+                            tokio::time::sleep_until(signalled_at + SIGTERM_GRACE).await;
+                            if signal_process_group(pid, libc::SIGKILL) {
+                                tracing::warn!(
+                                    "[ACP] agent pid={pid} exited but its process group \
+                                     outlived SIGTERM by {:?}; sent SIGKILL to the group",
+                                    SIGTERM_GRACE
+                                );
+                            }
+                        }
+                    }
+                    #[cfg(not(unix))]
+                    let _ = signalled_at;
                     // Same gate as `ChildGuard::wait`: only a successful `wait`
                     // proves the child was reaped. Reporting an exit we failed
                     // to observe would tell the host to stop tracking a pid
                     // whose process may still be running.
-                    if child.wait().await.is_ok() {
+                    if status.is_ok() {
                         if let Some(callback) = exit_callback {
                             callback();
                         }
@@ -1080,6 +1182,129 @@ mod tests {
             assert!(reported, "the reaper never observed the child's death");
         });
         let _ = std::fs::remove_file(&ready);
+    }
+
+    /// An agent that ignores `SIGTERM` is not left running: once the grace
+    /// period passes, the guard's reaper escalates to `SIGKILL` on its own.
+    #[cfg(unix)]
+    #[test]
+    fn a_child_that_ignores_sigterm_is_killed_after_the_grace_period() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let ready = std::env::temp_dir().join(format!(
+            "codeg-agent-process-escalate-ready-{}-{:p}",
+            std::process::id(),
+            &calls
+        ));
+        let _ = std::fs::remove_file(&ready);
+
+        rt.block_on(async {
+            let child = tokio::process::Command::new("/bin/sh")
+                .args([
+                    "-c",
+                    &format!(
+                        "trap '' TERM; echo ready > '{}'; while true; do sleep 1; done",
+                        ready.display()
+                    ),
+                ])
+                .spawn()
+                .expect("spawn sh");
+            let guard = ChildGuard {
+                child: Some(child),
+                exit_callback: Some(counting_callback(&calls)),
+            };
+            for _ in 0..200 {
+                if ready.exists() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            assert!(ready.exists(), "the shell never installed its SIGTERM trap");
+
+            drop(guard);
+
+            let deadline =
+                std::time::Instant::now() + SIGTERM_GRACE + std::time::Duration::from_secs(5);
+            while calls.load(Ordering::SeqCst) == 0 && std::time::Instant::now() < deadline {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                1,
+                "the SIGTERM-ignoring child must be killed and reaped after the grace period"
+            );
+        });
+        let _ = std::fs::remove_file(&ready);
+    }
+
+    /// The leak this guards: the agent exits on SIGTERM at once, but a child of
+    /// its (the `claude` CLI, an MCP server) ignores SIGTERM and is reparented
+    /// out of the tree the moment the agent is gone. It is still in the agent's
+    /// process group, and must be killed through it after the grace period.
+    #[cfg(unix)]
+    #[test]
+    fn a_descendant_that_outlives_the_agent_is_killed_through_its_process_group() {
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let pid_file = std::env::temp_dir().join(format!(
+            "codeg-agent-process-group-straggler-{}-{:p}",
+            std::process::id(),
+            &rt
+        ));
+        let _ = std::fs::remove_file(&pid_file);
+
+        let straggler = rt.block_on(async {
+            let mut command = tokio::process::Command::new("/bin/sh");
+            command.args([
+                "-c",
+                &format!(
+                    "sh -c 'trap \"\" TERM; echo $$ > \"{}\"; while true; do sleep 1; done' & wait",
+                    pid_file.display()
+                ),
+            ]);
+            // What `spawn_process` does for every agent.
+            command.process_group(0);
+            let child = command.spawn().expect("spawn sh");
+            let guard = ChildGuard {
+                child: Some(child),
+                exit_callback: None,
+            };
+            let mut straggler: Option<libc::pid_t> = None;
+            for _ in 0..200 {
+                if let Some(pid) = std::fs::read_to_string(&pid_file)
+                    .ok()
+                    .and_then(|s| s.trim().parse::<libc::pid_t>().ok())
+                {
+                    straggler = Some(pid);
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            let straggler = straggler.expect("the grandchild never reported its pid");
+
+            drop(guard);
+
+            let deadline =
+                std::time::Instant::now() + SIGTERM_GRACE + std::time::Duration::from_secs(5);
+            // SAFETY: signal 0 only probes for existence.
+            while unsafe { libc::kill(straggler, 0) } == 0 && std::time::Instant::now() < deadline {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            straggler
+        });
+        // SAFETY: signal 0 only probes for existence.
+        let still_alive = unsafe { libc::kill(straggler, 0) } == 0;
+        if still_alive {
+            // Never leave the test's own process behind, even on failure.
+            // SAFETY: this pid is the grandchild this test spawned.
+            unsafe { libc::kill(straggler, libc::SIGKILL) };
+        }
+        let _ = std::fs::remove_file(&pid_file);
+        assert!(
+            !still_alive,
+            "a SIGTERM-ignoring descendant must not outlive the agent's process group"
+        );
     }
 
     #[test]

@@ -51,6 +51,7 @@ import type {
   ActiveDelegationState,
   AsyncTaskDelta,
   AsyncTaskRecord,
+  AttachPhase,
   AvailableCommandInfo,
   ConfigStaleKind,
   ConnectionStatus,
@@ -128,7 +129,13 @@ import {
   saveConfigPreference,
 } from "@/lib/selector-prefs-storage"
 import { rememberModelLabels } from "@/lib/model-label-store"
-import { toErrorMessage } from "@/lib/app-error"
+import { describeError } from "@/lib/app-error"
+import { isAttachingPhase, statusWhileAttaching } from "@/lib/attach-phase"
+import {
+  AcpActionsContext,
+  ConnectionStoreContext,
+  useOptionalConnectionStore,
+} from "@/contexts/acp-connection-contexts"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 
 /**
@@ -443,6 +450,20 @@ export interface ConnectionState {
    * the snapshot — dismissal is per-client UI state.
    */
   configStaleDismissed: boolean
+  /**
+   * Where the connection is on its way to a usable session, from
+   * `attach_progress` events and the snapshot's `attach_phase`. Absent when the
+   * server never said — an older server only handed out connections whose
+   * session was already open — which reads as ready. While this is an
+   * attaching phase, `status` is held at `connecting` even after the backend
+   * reports `connected` (see `statusWhileAttaching`), so nothing treats a
+   * session that is still opening as one that can take a prompt.
+   */
+  attachPhase?: AttachPhase | null
+  /** Client-clock estimate (epoch ms) of when the agent process was spawned,
+   *  from the backend's `elapsed_ms`; drives the "Resuming session · 14 s"
+   *  labels. */
+  attachStartedAt?: number | null
 }
 
 type ConnectRequest = {
@@ -489,6 +510,14 @@ type Action =
       type: "STATUS_CHANGED"
       contextKey: string
       status: ConnectionStatus
+    }
+  | {
+      // The connection moved to a new step on its way to a usable session
+      // (`attach_progress` event).
+      type: "ATTACH_PROGRESS"
+      contextKey: string
+      phase: AttachPhase
+      elapsedMs: number
     }
   | {
       // One AIR typed session-failure upsert (`session_failure` event).
@@ -1817,9 +1846,18 @@ function connectionsReducer(
         hydratedLiveMessage ?? current.liveMessage
       )
       const next = new Map(state)
+      // A server that predates attach phases only returned open sessions:
+      // its snapshot carries no phase, and none is inferred.
+      const hydratedAttachPhase =
+        action.patch.attachPhase ?? current.attachPhase
       next.set(action.contextKey, {
         ...current,
-        status: action.patch.status,
+        status: statusWhileAttaching(action.patch.status, hydratedAttachPhase),
+        attachPhase: hydratedAttachPhase,
+        attachStartedAt:
+          action.patch.attachElapsedMs != null
+            ? Date.now() - action.patch.attachElapsedMs
+            : current.attachStartedAt,
         sessionId: action.patch.sessionId,
         modes: action.patch.modes,
         configOptions: action.patch.configOptions,
@@ -1904,11 +1942,43 @@ function connectionsReducer(
       return next
     }
 
+    case "ATTACH_PROGRESS": {
+      const conn = state.get(action.contextKey)
+      if (!conn) return state
+      // `failed` is sticky, like the backend's: a late event cannot revive a
+      // connection whose attach already ended.
+      if (conn.attachPhase === "failed") return state
+      const next = new Map(state)
+      next.set(action.contextKey, {
+        ...conn,
+        attachPhase: action.phase,
+        attachStartedAt: Date.now() - action.elapsedMs,
+        // The backend reported `connected` back at `initialize`; it was held
+        // at `connecting` while the session opened. Now it is open.
+        status:
+          action.phase === "ready" && conn.status === "connecting"
+            ? "connected"
+            : statusWhileAttaching(conn.status, action.phase),
+      })
+      return next
+    }
+
     case "STATUS_CHANGED": {
       const conn = state.get(action.contextKey)
       if (!conn) return state
       const next = new Map(state)
-      const updated = { ...conn, status: action.status }
+      const updated = {
+        ...conn,
+        status: statusWhileAttaching(action.status, conn.attachPhase),
+        // A connection that errors or drops before its session opened never
+        // will; mirror the backend's `failed` so the UI stops saying
+        // "Resuming session".
+        attachPhase:
+          (action.status === "error" || action.status === "disconnected") &&
+          isAttachingPhase(conn.attachPhase)
+            ? ("failed" as const)
+            : conn.attachPhase,
+      }
       if (action.status === "prompting") {
         updated.liveMessage = {
           id: randomUUID(),
@@ -2942,8 +3012,6 @@ export interface ConnectionStoreApi {
   subscribeActiveKey(cb: () => void): () => void
 }
 
-const ConnectionStoreContext = createContext<ConnectionStoreApi | null>(null)
-
 export function useConnectionStore(): ConnectionStoreApi {
   const ctx = useContext(ConnectionStoreContext)
   if (!ctx) {
@@ -2956,10 +3024,9 @@ export function useConnectionStore(): ConnectionStoreApi {
 
 /** Like {@link useConnectionStore}, but `null` outside an
  *  `AcpConnectionsProvider` instead of throwing — for views that also render
- *  detached from one. */
-export function useOptionalConnectionStore(): ConnectionStoreApi | null {
-  return useContext(ConnectionStoreContext)
-}
+ *  detached from one. (Also importable from `acp-connection-contexts`, which
+ *  a read-only view should prefer: it does not load this module.) */
+export { useOptionalConnectionStore }
 
 // ── Actions context (unchanged interface) ──
 
@@ -3168,8 +3235,6 @@ export interface AcpActionsValue {
   ): () => void
 }
 
-const AcpActionsContext = createContext<AcpActionsValue | null>(null)
-
 export function useAcpActions(): AcpActionsValue {
   const ctx = useContext(AcpActionsContext)
   if (!ctx) {
@@ -3243,9 +3308,10 @@ function getAffectedKey(action: Action): string | null {
 }
 
 function normalizeErrorMessage(error: unknown): string {
-  // Transport errors arrive as plain `{ code, message }` objects, which
-  // `String()` renders as "[object Object]".
-  return toErrorMessage(error)
+  // Transport errors arrive as plain `{ code, message }` objects (and ACP
+  // errors as `{ code: -32603, message, data }`), which `String()` renders as
+  // "[object Object]". `describeError` reads every shape.
+  return describeError(error)
 }
 
 type AlertedError = Error & { alerted: true }
@@ -4455,6 +4521,11 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         // without the context the agent had before.
         case "session_load_fallback":
           return t("backendErrors.sessionLoadFallback", { agent: agentLabel })
+        // The attach ceiling fired: the agent started but never finished
+        // opening the session. The raw message (stuck step, how long, likely
+        // cause) rides as the detail — see `routeAcpError`.
+        case "attach_timeout":
+          return t("backendErrors.attachTimeout", { agent: agentLabel })
         default:
           return message
       }
@@ -4531,6 +4602,14 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             retireTurnFailures(turnConn?.connectionId ?? contextKey)
           }
           dispatch({ type: "STATUS_CHANGED", contextKey, status: e.status })
+          break
+        case "attach_progress":
+          dispatch({
+            type: "ATTACH_PROGRESS",
+            contextKey,
+            phase: e.phase,
+            elapsedMs: e.elapsed_ms,
+          })
           break
         case "content_delta":
           settleRetryIncidentsOnProgress(contextKey)
@@ -5310,11 +5389,14 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           if (route.kind === "session") {
             // The session's state went wrong, so this is also its current
             // error until the next prompt (the connection-status popover) —
-            // always the one localized line.
+            // the one localized line. An attach that timed out keeps the
+            // backend's reason instead (which step hung, for how long, and the
+            // usual cause): it is what "Couldn't connect" shows next to its
+            // Retry, and the localized line would only repeat its first half.
             dispatch({
               type: "ERROR",
               contextKey,
-              message: text,
+              message: e.code === "attach_timeout" && reason ? reason : text,
               level: route.level,
             })
           }
@@ -5708,6 +5790,28 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           // The composer that survives this is exactly the one whose Reconnect
           // button has to resume the session rather than start a new one.
           captureIdentityBeforeRemoval(contextKey)
+          // A connection that went away before its session ever opened is a
+          // connect that failed — the attach timed out, or the agent died on
+          // the way up. `acp_connect` returned long before, so nothing else
+          // records it: keep why, the way a connect that failed outright is
+          // kept, so "Couldn't connect" and its Retry outlive the entry (the
+          // next attempt, or a disconnect, retires it).
+          const gone = storeRef.current.connections.get(contextKey)
+          if (
+            gone &&
+            gone.connectionId === connectionId &&
+            (gone.attachPhase === "failed" ||
+              isAttachingPhase(gone.attachPhase))
+          ) {
+            setConnectError(contextKey, {
+              agentType: gone.agentType,
+              title: t("connectFailedTitle", {
+                agent: getAgentLabel(gone.agentType),
+              }),
+              detail: gone.error ?? gone.loadError ?? null,
+              opensAgentSettings: false,
+            })
+          }
           dispatch({ type: "CONNECTION_REMOVED", contextKey })
         },
       }
@@ -5722,6 +5826,8 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       dispatch,
       flushStreamingQueue,
       seedDelegationsFromSnapshot,
+      setConnectError,
+      t,
     ]
   )
 

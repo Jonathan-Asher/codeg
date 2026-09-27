@@ -141,3 +141,48 @@ describe("summary helpers", () => {
     expect(isTurnRunning({ status: "in_progress" })).toBe(true)
   })
 })
+
+describe("deriveSessionActivity with this client's connection attempt", () => {
+  it("never reads idle while the agent is still opening the session", () => {
+    expect(
+      deriveSessionActivity({ turnState: null, connection: "connecting" })
+    ).toBe("connecting")
+    // An interrupted turn can only be continued once the session is open.
+    expect(
+      deriveSessionActivity({
+        turnState: "interrupted",
+        connection: "connecting",
+      })
+    ).toBe("connecting")
+  })
+
+  it("says the session could not be opened rather than idle", () => {
+    expect(
+      deriveSessionActivity({ turnState: null, connection: "failed" })
+    ).toBe("connect_failed")
+    expect(
+      deriveSessionActivity({ turnState: "running", connection: "failed" })
+    ).toBe("connect_failed")
+  })
+
+  it("ranks a turn in flight and a block on the user above the connection", () => {
+    expect(
+      deriveSessionActivity({
+        attention: "permission",
+        connection: "connecting",
+      })
+    ).toBe("needs_you")
+    expect(
+      deriveSessionActivity({
+        connectionStatus: "prompting",
+        connection: "connecting",
+      })
+    ).toBe("working")
+  })
+
+  it("falls back to the persisted state once the connection is settled", () => {
+    expect(deriveSessionActivity({ turnState: null, connection: null })).toBe(
+      "idle"
+    )
+  })
+})

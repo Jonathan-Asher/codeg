@@ -10635,8 +10635,11 @@ pub async fn acp_connect(
     verify_agent_installed(agent_type).await?;
 
     let emitter = EventEmitter::Tauri(app_handle);
+    // Detached, like the web handler: the window follows the attach through
+    // `AttachProgress` events instead of sitting on this call while the
+    // agent opens the session.
     manager
-        .spawn_agent(
+        .spawn_agent_detached(
             agent_type,
             working_dir,
             session_id,

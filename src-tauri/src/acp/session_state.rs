@@ -17,7 +17,7 @@ use crate::acp::feedback::{FeedbackItem, FeedbackStatus};
 use crate::acp::plan_approval::PendingPlanApprovalState;
 use crate::acp::question::PendingQuestionState;
 use crate::acp::types::{
-    AcpEvent, AsyncTaskRecord, AvailableCommandInfo, ConfigStaleKind, ConnectionStatus,
+    AcpEvent, AsyncTaskRecord, AttachPhase, AvailableCommandInfo, ConfigStaleKind, ConnectionStatus,
     EventEnvelope, GrokModelSpec, PromptCapabilitiesInfo, SessionConfigOptionInfo,
     SessionFailureRecord, SessionModeStateInfo, ToolCallImageInfo,
 };
@@ -447,17 +447,28 @@ pub struct SessionState {
     /// live `AcpEvent::Error` can still surface the latest agent failure.
     pub last_error: Option<SessionLastError>,
 
-    /// Single-fire signal that fires when `SessionStarted` applies (i.e.
-    /// `external_id` transitioned from None → Some). `ConnectionManager::
-    /// spawn_agent` holds the per-(agent, working_dir, session_id) dedup
-    /// lock until this fires (or times out), so a concurrent acp_connect
-    /// for the same logical session sees the populated `external_id` and
-    /// reuses instead of spawning a duplicate. `Some` immediately after
-    /// `install_session_started_signal()`; `take()`'d in `apply_event::
-    /// SessionStarted`; `None` thereafter (the signal is one-shot per
-    /// connection). Lives only on the in-memory `SessionState`; not
-    /// transmitted on the wire (`LiveSessionSnapshot` doesn't include it).
-    pub(crate) session_started_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    /// The agent session this connection was spawned to reopen, if any. Set
+    /// once at spawn and never changed. `external_id` only learns the id when
+    /// the agent confirms it, which for a slow resume can be minutes later; in
+    /// that window this is what lets a second client (another window, a remote
+    /// workspace, a retry) find the connection that is already opening the
+    /// session and share it, instead of starting a duplicate agent process.
+    pub requested_session_id: Option<String>,
+
+    /// Where this connection is on its way to a usable session (see
+    /// [`AttachPhase`]). Driven by `AcpEvent::AttachProgress`, forced to
+    /// `Failed` when the connection errors or disconnects before `Ready`.
+    pub attach_phase: AttachPhase,
+
+    /// When the agent process was spawned. `AttachProgress.elapsed_ms` and the
+    /// snapshot's `attach_elapsed_ms` are measured from here.
+    pub attach_started_at: std::time::Instant,
+
+    /// Broadcasts every `attach_phase` change to in-process waiters
+    /// (`ConnectionManager::spawn_agent` callers that want to return only once
+    /// the session is usable). A watch rather than a one-shot so any number of
+    /// callers that attached to the same in-flight connection can wait on it.
+    pub(crate) attach_tx: tokio::sync::watch::Sender<AttachPhase>,
 
     // 事件锚点
     pub event_seq: u64,
@@ -731,7 +742,10 @@ impl SessionState {
             usage: None,
             selectors_ready: false,
             last_error: None,
-            session_started_tx: None,
+            requested_session_id: None,
+            attach_phase: AttachPhase::Starting,
+            attach_started_at: std::time::Instant::now(),
+            attach_tx: tokio::sync::watch::Sender::new(AttachPhase::Starting),
             event_seq: 0,
             last_activity_at: Utc::now(),
             event_stream: Arc::new(ConnectionEventStream::new()),
@@ -786,16 +800,40 @@ impl SessionState {
         self.recent_events.push(envelope)
     }
 
-    /// Install a one-shot signal that fires when `SessionStarted` applies.
-    /// Returns the receiver; caller (typically `spawn_agent_connection`)
-    /// passes it back to the dedup waiter in `spawn_agent`. Calling this
-    /// more than once on the same state replaces the previous sender,
-    /// silently dropping it — the contract is "exactly one install per
-    /// connection lifetime" and that's what `spawn_agent_connection` does.
-    pub fn install_session_started_signal(&mut self) -> tokio::sync::oneshot::Receiver<()> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.session_started_tx = Some(tx);
-        rx
+    /// Record a new attach phase and wake anyone waiting on it. `Failed` is
+    /// sticky: a connection that died never becomes usable again, whatever a
+    /// late event claims.
+    fn set_attach_phase(&mut self, phase: AttachPhase) {
+        if self.attach_phase == phase || self.attach_phase == AttachPhase::Failed {
+            return;
+        }
+        self.attach_phase = phase;
+        self.attach_tx.send_replace(phase);
+    }
+
+    /// Milliseconds since the agent process was spawned.
+    pub fn attach_elapsed_ms(&self) -> u64 {
+        u64::try_from(self.attach_started_at.elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+
+    /// A receiver that observes every later attach phase change. Take it while
+    /// holding the state lock, then wait on it after releasing the lock.
+    pub fn subscribe_attach(&self) -> tokio::sync::watch::Receiver<AttachPhase> {
+        self.attach_tx.subscribe()
+    }
+
+    /// Whether this connection is (or is on its way to being) the live
+    /// connection for agent session `session_id`: either the agent confirmed
+    /// that id, or the connection was spawned to reopen it and has not
+    /// confirmed anything yet.
+    pub fn represents_session(&self, session_id: &str) -> bool {
+        match self.external_id.as_deref() {
+            Some(confirmed) => confirmed == session_id,
+            None => {
+                self.attach_phase.is_attaching()
+                    && self.requested_session_id.as_deref() == Some(session_id)
+            }
+        }
     }
 
     /// 单一分发器：把一个 AcpEvent 应用到 self。注意此方法**不**自增 event_seq——
@@ -821,15 +859,6 @@ impl SessionState {
                 }
                 self.external_id = Some(session_id.clone());
                 self.status = ConnectionStatus::Connected;
-                // Fire the dedup waiter (if any). Take()-and-send is
-                // single-shot: a duplicate SessionStarted (replay, agent
-                // re-init) finds None here and is a no-op, which is
-                // exactly the desired idempotent behavior. send returns
-                // Err only when the receiver dropped (timeout already
-                // fired in spawn_agent) — also a no-op.
-                if let Some(tx) = self.session_started_tx.take() {
-                    let _ = tx.send(());
-                }
             }
             AcpEvent::StatusChanged { status } => {
                 // Diagnostic only (no behavior change): StatusChanged was
@@ -850,7 +879,17 @@ impl SessionState {
                     // resurrected by a later snapshot attach.
                     self.last_error = None;
                 }
+                if matches!(
+                    status,
+                    ConnectionStatus::Error | ConnectionStatus::Disconnected
+                ) && self.attach_phase.is_attaching()
+                {
+                    self.set_attach_phase(AttachPhase::Failed);
+                }
                 self.status = status.clone();
+            }
+            AcpEvent::AttachProgress { phase, .. } => {
+                self.set_attach_phase(*phase);
             }
             AcpEvent::SessionModes { modes } => {
                 self.current_mode = Some(modes.current_mode_id.clone());
@@ -2105,6 +2144,8 @@ impl SessionState {
             session_failures: self.session_failures.values().cloned().collect(),
             async_tasks: self.async_tasks.values().cloned().collect(),
             goal_actions: self.goal_actions.clone(),
+            attach_phase: self.attach_phase,
+            attach_elapsed_ms: self.attach_elapsed_ms(),
             event_seq: self.event_seq,
         }
     }
@@ -2247,7 +2288,22 @@ pub struct LiveSessionSnapshot {
     ///   maps to the legacy pair.
     #[serde(default)]
     pub goal_actions: Option<Vec<String>>,
+    /// Where the connection is on its way to a usable session (see
+    /// `SessionState.attach_phase`). A client that joins while the session is
+    /// still opening — a second window, a remote workspace, a refresh — shows
+    /// the same phase as the client that started it. Defaults to `ready` for
+    /// snapshots from servers that predate the field, which only ever
+    /// returned a connection once its session was open.
+    #[serde(default = "ready_attach_phase")]
+    pub attach_phase: AttachPhase,
+    /// Milliseconds since the agent process was spawned, at snapshot time.
+    #[serde(default)]
+    pub attach_elapsed_ms: u64,
     pub event_seq: u64,
+}
+
+fn ready_attach_phase() -> AttachPhase {
+    AttachPhase::Ready
 }
 
 /// `skip_serializing_if` helper for `LiveSessionSnapshot.background_outstanding`.
@@ -3391,59 +3447,100 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn session_started_signal_fires_when_session_started_applies() {
+    async fn attach_progress_updates_phase_and_wakes_waiters() {
         let mut s = fresh_state();
-        let rx = s.install_session_started_signal();
-        // Pre-fire: rx not ready.
-        assert!(s.session_started_tx.is_some());
+        let mut rx = s.subscribe_attach();
+        assert_eq!(s.attach_phase, AttachPhase::Starting);
 
-        s.apply_event(&AcpEvent::SessionStarted {
-            session_id: "ext-1".into(),
+        s.apply_event(&AcpEvent::AttachProgress {
+            phase: AttachPhase::Resuming,
+            elapsed_ms: 400,
         });
+        assert_eq!(s.attach_phase, AttachPhase::Resuming);
+        s.apply_event(&AcpEvent::AttachProgress {
+            phase: AttachPhase::Ready,
+            elapsed_ms: 12_000,
+        });
+        assert_eq!(s.attach_phase, AttachPhase::Ready);
 
-        // tx was take()'d.
-        assert!(s.session_started_tx.is_none());
-        // rx resolves with Ok(()) — bounded timeout because the test must
-        // never hang if the signal logic regresses.
-        let result = tokio::time::timeout(std::time::Duration::from_millis(50), rx).await;
-        assert!(
-            matches!(result, Ok(Ok(()))),
-            "rx must fire on SessionStarted; got {result:?}"
-        );
+        let seen = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            rx.wait_for(|p| !p.is_attaching()),
+        )
+        .await
+        .expect("waiter must wake")
+        .map(|p| *p);
+        assert_eq!(seen.ok(), Some(AttachPhase::Ready));
     }
 
-    #[tokio::test]
-    async fn session_started_signal_is_single_shot_safe_against_replay() {
+    #[test]
+    fn disconnect_before_ready_marks_the_attach_failed_and_it_stays_failed() {
         let mut s = fresh_state();
-        let rx = s.install_session_started_signal();
-        s.apply_event(&AcpEvent::SessionStarted {
-            session_id: "ext-1".into(),
+        s.apply_event(&AcpEvent::AttachProgress {
+            phase: AttachPhase::Resuming,
+            elapsed_ms: 1,
         });
-        // Replay (or any second SessionStarted) must not panic / double-fire.
-        s.apply_event(&AcpEvent::SessionStarted {
-            session_id: "ext-2".into(),
+        s.apply_event(&AcpEvent::StatusChanged {
+            status: ConnectionStatus::Disconnected,
         });
-        // The first send delivered; rx is consumed.
-        let result = tokio::time::timeout(std::time::Duration::from_millis(50), rx).await;
-        assert!(matches!(result, Ok(Ok(()))));
+        assert_eq!(s.attach_phase, AttachPhase::Failed);
+        // A stray late progress event cannot resurrect a dead connection.
+        s.apply_event(&AcpEvent::AttachProgress {
+            phase: AttachPhase::Ready,
+            elapsed_ms: 2,
+        });
+        assert_eq!(s.attach_phase, AttachPhase::Failed);
     }
 
-    #[tokio::test]
-    async fn session_started_rx_aborts_when_state_drops_before_session_started() {
-        // Mirrors the production "agent died before SessionStarted" path:
-        // SessionState owns tx, gets dropped → rx receives RecvError. The
-        // dedup waiter in `spawn_agent` treats this as "abort, release
-        // dedup_lock, let next caller proceed".
-        let rx = {
-            let mut s = fresh_state();
-            s.install_session_started_signal()
-            // s drops here, taking tx with it.
-        };
-        let result = tokio::time::timeout(std::time::Duration::from_millis(50), rx).await;
-        assert!(
-            matches!(result, Ok(Err(_))),
-            "rx must receive Err when sender drops without sending; got {result:?}"
-        );
+    #[test]
+    fn disconnect_after_ready_keeps_the_attach_ready() {
+        let mut s = fresh_state();
+        s.apply_event(&AcpEvent::AttachProgress {
+            phase: AttachPhase::Ready,
+            elapsed_ms: 1,
+        });
+        s.apply_event(&AcpEvent::StatusChanged {
+            status: ConnectionStatus::Disconnected,
+        });
+        assert_eq!(s.attach_phase, AttachPhase::Ready);
+    }
+
+    #[test]
+    fn represents_session_matches_the_requested_id_only_while_attaching() {
+        let mut s = fresh_state();
+        s.requested_session_id = Some("ext-1".into());
+        assert!(s.represents_session("ext-1"), "attaching to ext-1");
+        assert!(!s.represents_session("ext-2"));
+
+        // Once the agent confirms an id, only that id counts — a resume that
+        // fell back to a new session no longer represents the old one.
+        s.apply_event(&AcpEvent::SessionStarted {
+            session_id: "ext-new".into(),
+        });
+        assert!(s.represents_session("ext-new"));
+        assert!(!s.represents_session("ext-1"));
+
+        // A failed attach represents nothing.
+        let mut failed = fresh_state();
+        failed.requested_session_id = Some("ext-1".into());
+        failed.apply_event(&AcpEvent::StatusChanged {
+            status: ConnectionStatus::Error,
+        });
+        assert!(!failed.represents_session("ext-1"));
+    }
+
+    #[test]
+    fn snapshot_carries_the_attach_phase() {
+        let mut s = fresh_state();
+        s.apply_event(&AcpEvent::AttachProgress {
+            phase: AttachPhase::Resuming,
+            elapsed_ms: 5,
+        });
+        let snap = s.to_snapshot();
+        assert_eq!(snap.attach_phase, AttachPhase::Resuming);
+        let json = serde_json::to_value(&snap).unwrap();
+        assert_eq!(json["attach_phase"], "resuming");
+        assert!(json["attach_elapsed_ms"].is_u64());
     }
 
     #[test]

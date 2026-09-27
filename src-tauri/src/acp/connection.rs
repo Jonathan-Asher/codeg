@@ -56,7 +56,7 @@ use crate::acp::terminal_runtime::{
     TerminalRuntime, TerminalRuntimeError, TerminalShellRuntimeConfig,
 };
 use crate::acp::types::{
-    AcpEvent, AsyncTaskDelta, AsyncTaskUsage, AvailableCommandInfo, ConnectionInfo,
+    AcpEvent, AsyncTaskDelta, AsyncTaskUsage, AttachPhase, AvailableCommandInfo, ConnectionInfo,
     ConnectionStatus, GrokModelSpec,
     PermissionOptionInfo, PlanEntryInfo, PromptCapabilitiesInfo, PromptInputBlock,
     SessionConfigBooleanInfo, SessionConfigKindInfo, SessionConfigOptionInfo,
@@ -1250,6 +1250,401 @@ pub enum ConnectionCommand {
 /// by the outer `.map_err(...)` in `run_connection`.
 const INIT_TIMEOUT_SENTINEL: &str = "__codeg_init_timeout__";
 
+/// Sentinel for an attach that outlived [`attach_timeout`]; followed by
+/// `:<phase>:<seconds>`. Converted back to `AcpError::AttachTimeout` by the
+/// outer `.map_err(...)` in `run_connection`, same trick as
+/// [`INIT_TIMEOUT_SENTINEL`].
+const ATTACH_TIMEOUT_SENTINEL: &str = "__codeg_attach_timeout__";
+
+/// Default ceiling on opening a session, from process spawn to a session that
+/// takes prompts. A healthy Claude Code resume takes 2–15 s on a loaded
+/// machine, and up to about 30 s when several start at once; the observed
+/// failure this guards against was an attach that never finished at all. So
+/// the bound sits far above anything healthy — the UI shows the phase and the
+/// elapsed time the whole way — and exists to turn "hung forever, process
+/// leaked" into a clear error with a Retry.
+const DEFAULT_ATTACH_TIMEOUT_SECS: u64 = 180;
+
+/// The attach ceiling: `CODEG_ACP_ATTACH_TIMEOUT_SECS`, else
+/// [`DEFAULT_ATTACH_TIMEOUT_SECS`]. `0` disables it. Read once per process.
+fn attach_timeout() -> Option<std::time::Duration> {
+    static SECS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    let secs = *SECS.get_or_init(|| {
+        std::env::var("CODEG_ACP_ATTACH_TIMEOUT_SECS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .unwrap_or(DEFAULT_ATTACH_TIMEOUT_SECS)
+    });
+    (secs > 0).then(|| std::time::Duration::from_secs(secs))
+}
+
+/// Why an attach step did not run to completion.
+enum AttachInterrupt {
+    /// The manager dropped the connection (disconnect, idle sweep, window
+    /// close, quit) while the session was still opening.
+    Abandoned,
+    /// The whole attach outlived [`attach_timeout`].
+    TimedOut,
+}
+
+/// Drives the steps that open a session: logs how long each one took,
+/// publishes the phase to the UI, and races every step against the
+/// connection's [`AttachLifeline`] and the attach deadline — so a connection
+/// nobody holds any more, or one whose agent never answers, stops instead of
+/// waiting on the agent forever.
+struct AttachDriver {
+    lifeline: tokio::sync::oneshot::Receiver<()>,
+    deadline: Option<tokio::time::Instant>,
+    state: Arc<RwLock<SessionState>>,
+    emitter: EventEmitter,
+    conn_id: String,
+    /// The session being reopened, or `<new>`; for the log only.
+    session_label: String,
+    phase: AttachPhase,
+    phase_started: std::time::Instant,
+    /// The attach slot this connection holds (see [`AttachGate`]), handed
+    /// back the moment the session is open — or when the driver drops.
+    permit: Option<AttachPermit>,
+}
+
+impl AttachDriver {
+    /// `phase` is where the attach stands now: `Queued` if it waited for a
+    /// slot (the caller then enters `Starting`), `Starting` otherwise. The
+    /// attach ceiling runs from here, so time spent queued never counts.
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        lifeline: tokio::sync::oneshot::Receiver<()>,
+        state: Arc<RwLock<SessionState>>,
+        emitter: EventEmitter,
+        conn_id: String,
+        session_label: String,
+        phase: AttachPhase,
+        phase_started: std::time::Instant,
+        permit: Option<AttachPermit>,
+    ) -> Self {
+        Self {
+            lifeline,
+            deadline: attach_timeout().map(|t| tokio::time::Instant::now() + t),
+            state,
+            emitter,
+            conn_id,
+            session_label,
+            phase,
+            phase_started,
+            permit,
+        }
+    }
+
+    /// Move to `phase`: log how long the previous step took, then tell the UI.
+    /// Reaching `Ready` gives the attach slot back.
+    async fn enter(&mut self, phase: AttachPhase) {
+        let total_ms = self.state.read().await.attach_elapsed_ms();
+        tracing::info!(
+            "[ACP][attach] conn={} session={} {} done in {} ms; {} (total {} ms)",
+            self.conn_id,
+            self.session_label,
+            attach_step_label(self.phase),
+            self.phase_started.elapsed().as_millis(),
+            attach_next_label(phase),
+            total_ms,
+        );
+        self.phase = phase;
+        self.phase_started = std::time::Instant::now();
+        if phase == AttachPhase::Ready {
+            drop(self.permit.take());
+        }
+        emit_with_state(
+            &self.state,
+            &self.emitter,
+            AcpEvent::AttachProgress {
+                phase,
+                elapsed_ms: total_ms,
+            },
+        )
+        .await;
+    }
+
+    /// Run one attach step, unless the connection is dropped or the attach
+    /// deadline passes first.
+    async fn run<F: std::future::Future>(&mut self, step: F) -> Result<F::Output, AttachInterrupt> {
+        let at = self.deadline;
+        let deadline = async move {
+            match at {
+                Some(at) => tokio::time::sleep_until(at).await,
+                None => std::future::pending::<()>().await,
+            }
+        };
+        tokio::select! {
+            biased;
+            _ = &mut self.lifeline => Err(AttachInterrupt::Abandoned),
+            _ = deadline => Err(AttachInterrupt::TimedOut),
+            out = step => Ok(out),
+        }
+    }
+
+    /// Turn an interrupted step into what the connection driver returns:
+    /// `Ok(())` for a connection nobody holds (it just ends, and its process
+    /// with it), a sentinel-tagged error for a timeout (surfaced to the user
+    /// as `attach_timeout`).
+    async fn stop(&self, why: AttachInterrupt) -> Result<(), agent_client_protocol::Error> {
+        let elapsed_ms = self.state.read().await.attach_elapsed_ms();
+        match why {
+            AttachInterrupt::Abandoned => {
+                tracing::info!(
+                    "[ACP][attach] conn={} session={} abandoned while waiting on {} after {} ms; \
+                     stopping the agent",
+                    self.conn_id,
+                    self.session_label,
+                    attach_step_label(self.phase),
+                    elapsed_ms
+                );
+                Ok(())
+            }
+            AttachInterrupt::TimedOut => {
+                tracing::warn!(
+                    "[ACP][attach] conn={} session={} TIMED OUT waiting on {} after {} ms; \
+                     stopping the agent",
+                    self.conn_id,
+                    self.session_label,
+                    attach_step_label(self.phase),
+                    elapsed_ms
+                );
+                Err(agent_client_protocol::util::internal_error(format!(
+                    "{ATTACH_TIMEOUT_SENTINEL}:{}:{}",
+                    self.phase.as_str(),
+                    elapsed_ms / 1000
+                )))
+            }
+        }
+    }
+}
+
+/// Parse the `:<phase>:<seconds>` tail an [`ATTACH_TIMEOUT_SENTINEL`] carries.
+fn parse_attach_timeout(raw: &str) -> Option<(String, u64)> {
+    let tail = raw.split(ATTACH_TIMEOUT_SENTINEL).nth(1)?;
+    let mut parts = tail.trim_start_matches(':').splitn(2, ':');
+    let phase = parts.next()?.to_string();
+    let secs = parts
+        .next()?
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .ok()?;
+    Some((phase, secs))
+}
+
+/// The step an attach phase waits on, as the timing log names it.
+fn attach_step_label(phase: AttachPhase) -> &'static str {
+    match phase {
+        AttachPhase::Queued => "queued for an attach slot",
+        AttachPhase::Starting => "spawn + initialize",
+        AttachPhase::Resuming => "session/resume",
+        AttachPhase::Loading => "session/load",
+        AttachPhase::Creating => "session/new",
+        AttachPhase::Configuring => "configure (mode + options)",
+        AttachPhase::Ready => "ready",
+        AttachPhase::Failed => "failed",
+    }
+}
+
+/// What entering `phase` starts, as the timing log names it.
+fn attach_next_label(phase: AttachPhase) -> &'static str {
+    match phase {
+        AttachPhase::Queued => "queued",
+        AttachPhase::Starting => "spawning the agent",
+        AttachPhase::Resuming => "session/resume sent",
+        AttachPhase::Loading => "session/load sent",
+        AttachPhase::Creating => "session/new sent",
+        AttachPhase::Configuring => "applying mode + options",
+        AttachPhase::Ready => "session ready",
+        AttachPhase::Failed => "attach failed",
+    }
+}
+
+/// How many sessions may be reopening at once, by default. A Claude Code
+/// resume spends 10–30 s starting a node adapter, the `claude` CLI and the
+/// user's MCP servers — several hundred MB each — and a burst of them (every
+/// tab of a client that just reconnected, a user clicking through tabs) on a
+/// machine short of memory made each one slower until none attached at all.
+const DEFAULT_MAX_CONCURRENT_ATTACHES: usize = 2;
+
+/// The attach limit: `CODEG_ACP_MAX_CONCURRENT_ATTACHES`, else
+/// [`DEFAULT_MAX_CONCURRENT_ATTACHES`]. `0` means unlimited. Read once.
+fn max_concurrent_attaches() -> usize {
+    static N: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *N.get_or_init(|| {
+        std::env::var("CODEG_ACP_MAX_CONCURRENT_ATTACHES")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(DEFAULT_MAX_CONCURRENT_ATTACHES)
+    })
+}
+
+/// The process-wide gate every resumed session passes before its agent is
+/// spawned, or `None` when the limit is off.
+fn attach_gate() -> Option<&'static Arc<AttachGate>> {
+    static GATE: std::sync::OnceLock<Option<Arc<AttachGate>>> = std::sync::OnceLock::new();
+    GATE.get_or_init(|| {
+        let slots = max_concurrent_attaches();
+        (slots > 0).then(|| AttachGate::new(slots))
+    })
+    .as_ref()
+}
+
+/// A fixed number of attach slots, handed out newest request first.
+///
+/// Newest first because the most recent connect is the tab the user is
+/// looking at now: after clicking through five tabs, the fifth should not wait
+/// behind the four they already left. Only resumes (a connect with a session
+/// id) are gated. A brand-new session is always a foreground action — someone
+/// about to send its first message — and never waits behind background
+/// reconnects.
+struct AttachGate {
+    inner: std::sync::Mutex<AttachGateInner>,
+}
+
+struct AttachGateInner {
+    free: usize,
+    waiters: Vec<tokio::sync::oneshot::Sender<AttachPermit>>,
+}
+
+/// One held attach slot; dropping it hands the slot to the newest waiter.
+struct AttachPermit {
+    /// `None` once disarmed (see `AttachGate::release`).
+    gate: Option<Arc<AttachGate>>,
+}
+
+impl AttachPermit {
+    fn new(gate: &Arc<AttachGate>) -> Self {
+        Self {
+            gate: Some(Arc::clone(gate)),
+        }
+    }
+}
+
+impl Drop for AttachPermit {
+    fn drop(&mut self) {
+        if let Some(gate) = self.gate.take() {
+            AttachGate::release(&gate);
+        }
+    }
+}
+
+impl AttachGate {
+    fn new(slots: usize) -> Arc<Self> {
+        Arc::new(Self {
+            inner: std::sync::Mutex::new(AttachGateInner {
+                free: slots,
+                waiters: Vec::new(),
+            }),
+        })
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, AttachGateInner> {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// A slot now, if one is free.
+    fn try_acquire(gate: &Arc<Self>) -> Option<AttachPermit> {
+        let mut inner = gate.lock();
+        if inner.free == 0 {
+            return None;
+        }
+        inner.free -= 1;
+        Some(AttachPermit::new(gate))
+    }
+
+    /// Wait for a slot. Cancel-safe: dropping the future gives up its place,
+    /// and a slot handed over just as it was dropped travels inside the
+    /// permit, whose own drop passes it on.
+    async fn acquire(gate: &Arc<Self>) -> AttachPermit {
+        loop {
+            let rx = {
+                let mut inner = gate.lock();
+                if inner.free > 0 {
+                    inner.free -= 1;
+                    return AttachPermit::new(gate);
+                }
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                inner.waiters.push(tx);
+                rx
+            };
+            // A closed channel is unreachable while the gate lives (senders
+            // only leave the queue by being sent on); queue again rather
+            // than hang if that ever changes.
+            if let Ok(permit) = rx.await {
+                return permit;
+            }
+        }
+    }
+
+    fn release(gate: &Arc<Self>) {
+        let mut inner = gate.lock();
+        while let Some(tx) = inner.waiters.pop() {
+            match tx.send(AttachPermit::new(gate)) {
+                Ok(()) => return,
+                // That waiter gave up. Disarm the returned permit so its drop
+                // does not re-enter `release` under this lock; try the next.
+                Err(mut permit) => {
+                    permit.gate = None;
+                }
+            }
+        }
+        inner.free += 1;
+    }
+
+    #[cfg(test)]
+    fn free_slots(&self) -> usize {
+        self.lock().free
+    }
+}
+
+/// Take an attach slot for a connection about to spawn its agent. `Ok(None)`
+/// when the connection is not gated (a new session, or the limit is off),
+/// `Ok(Some)` with the slot, `Err(())` if the connection was dropped while it
+/// waited — nothing was spawned, and the caller just ends. While it waits the
+/// UI shows `Queued`.
+async fn acquire_attach_slot(
+    state: &Arc<RwLock<SessionState>>,
+    emitter: &EventEmitter,
+    conn_id: &str,
+    session_id: Option<&str>,
+    lifeline: &mut tokio::sync::oneshot::Receiver<()>,
+) -> Result<Option<AttachPermit>, ()> {
+    let (Some(session_id), Some(gate)) = (session_id, attach_gate()) else {
+        return Ok(None);
+    };
+    if let Some(permit) = AttachGate::try_acquire(gate) {
+        return Ok(Some(permit));
+    }
+    let total_ms = state.read().await.attach_elapsed_ms();
+    tracing::info!(
+        "[ACP][attach] conn={conn_id} session={session_id} queued: {} attach slot(s) busy",
+        max_concurrent_attaches()
+    );
+    emit_with_state(
+        state,
+        emitter,
+        AcpEvent::AttachProgress {
+            phase: AttachPhase::Queued,
+            elapsed_ms: total_ms,
+        },
+    )
+    .await;
+    tokio::select! {
+        biased;
+        _ = &mut *lifeline => {
+            tracing::info!(
+                "[ACP][attach] conn={conn_id} session={session_id} dropped while queued; \
+                 no agent was started"
+            );
+            Err(())
+        }
+        permit = AttachGate::acquire(gate) => Ok(Some(permit)),
+    }
+}
+
 /// Sentinel appended to a `session/new` failure when codeg had just forwarded
 /// MCP servers to a *custom* agent, so the outer `.map_err(...)` can raise
 /// `AcpError::McpRejectedByAgent` and point the user at the `supports_mcp`
@@ -1330,9 +1725,17 @@ fn tag_mcp_suspect(
 ///   and remove the entry asynchronously. The guard must hold owned
 ///   `Arc<Mutex<_>>` and `String` so the spawned task has `'static`
 ///   captures.
+///
+/// The task goes through the captured `runtime` handle, never the ambient
+/// `tokio::spawn`: the guard normally drops on the connection's driver thread
+/// AFTER `Handle::block_on` has returned, where no runtime is entered, and a
+/// bare `tokio::spawn` there panicked with "there is no reactor running"
+/// whenever the map lock happened to be contended — leaving the dead entry in
+/// the map for good.
 struct ConnectionCleanupGuard {
     connections: Arc<tokio::sync::Mutex<HashMap<String, AgentConnection>>>,
     connection_id: String,
+    runtime: tokio::runtime::Handle,
 }
 
 impl Drop for ConnectionCleanupGuard {
@@ -1343,7 +1746,10 @@ impl Drop for ConnectionCleanupGuard {
         }
         let connections = self.connections.clone();
         let connection_id = std::mem::take(&mut self.connection_id);
-        tokio::spawn(async move {
+        // Spawning through a handle works from any thread. On a runtime that
+        // is already shutting down (app quit) the task is simply never run,
+        // and the map goes away with the process.
+        self.runtime.spawn(async move {
             connections.lock().await.remove(&connection_id);
         });
     }
@@ -1399,6 +1805,38 @@ pub struct AgentConnection {
     /// the tree without waiting, so the agent may still be alive and still
     /// needs the backstop.
     pub child_pid: Arc<std::sync::atomic::AtomicU32>,
+    /// Dropped with this entry — see [`AttachLifeline`].
+    pub attach_lifeline: AttachLifeline,
+}
+
+/// Held by an [`AgentConnection`] and dropped with it, i.e. the moment the
+/// connection leaves the manager's map for any reason: disconnect, idle sweep,
+/// window close, sign-out, app quit.
+///
+/// The connection driver races every step of opening the session against it.
+/// Until the session is open the driver is parked in a request to the agent
+/// (`initialize`, `session/resume`, …) and does not read its command channel,
+/// so a `Disconnect` sent then used to sit unread until the agent answered —
+/// and an agent stuck in a hook may never answer. The process stayed alive
+/// with nothing left that would ever stop it. With the lifeline, the driver
+/// gives up the moment the entry is gone and its agent process tree goes with
+/// it.
+pub struct AttachLifeline {
+    _tx: tokio::sync::oneshot::Sender<()>,
+}
+
+impl AttachLifeline {
+    /// A lifeline and the receiver that resolves once it is dropped.
+    pub fn new() -> (Self, tokio::sync::oneshot::Receiver<()>) {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        (Self { _tx: tx }, rx)
+    }
+
+    /// A lifeline nobody listens to, for entries that own no driver.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn detached() -> Self {
+        Self::new().0
+    }
 }
 
 impl AgentConnection {
@@ -1740,6 +2178,16 @@ async fn record_hydrated_update(
 /// level. The buffer is what a silent-`EndTurn` diagnosis reads from — see
 /// [`crate::acp::stderr_tail`]. stdin/stdout are NEVER buffered: they carry
 /// JSON-RPC traffic including prompt text and file contents.
+/// Whether an agent stderr line is one of claude-agent-acp's session timing
+/// lines (`SessionTiming` in the adapter): `[session/<op>] sessionId=… phase=…`.
+/// Bounded in length so a pathological line can never flood the INFO log.
+fn is_agent_session_timing_line(line: &str) -> bool {
+    let line = line.trim_start();
+    line.len() <= 400
+        && line.starts_with("[session/")
+        && (line.contains(" phase=") || line.starts_with("[session/query]"))
+}
+
 fn agent_debug_callback(
     agent_name: String,
     stderr_tail: Arc<StderrTail>,
@@ -1749,6 +2197,16 @@ fn agent_debug_callback(
         let (tag, enabled) = match dir {
             agent_client_protocol::LineDirection::Stderr => {
                 stderr_tail.push(line);
+                // claude-agent-acp times each step of opening a session and
+                // logs it as `[session/create] … phase=sdk-initialize
+                // durationMs=…` (also `load`/`models`/`query`). One line per
+                // step, only while a session opens, and no user content — so
+                // they go to the INFO log, where a slow attach can be read
+                // after the fact instead of reproduced under CODEG_ACP_DEBUG.
+                if is_agent_session_timing_line(line) {
+                    tracing::info!("[ACP][{agent_name}][stderr] {}", line.trim());
+                    return;
+                }
                 ("stderr", true)
             }
             agent_client_protocol::LineDirection::Stdout => ("stdout", stdio_debug_enabled),
@@ -2227,7 +2685,7 @@ pub async fn spawn_agent_connection(
     preferred_config_values: BTreeMap<String, String>,
     delegation_injection: Option<DelegationInjection>,
     terminal_shell_config: TerminalShellRuntimeConfig,
-) -> Result<tokio::sync::oneshot::Receiver<()>, AcpError> {
+) -> Result<(), AcpError> {
     // Create the authoritative session state up front. Subsequent emit_with_state
     // calls write through this state and increment its seq counter so the first
     // event the frontend sees has seq=1, not the placeholder 0 from Phase 0.
@@ -2239,11 +2697,10 @@ pub async fn spawn_agent_connection(
         None, // folder_id 由后续 prompt handler 在首次 send 时绑定 (Phase 2)
     );
 
-    // Install the SessionStarted dedup signal BEFORE wrapping into Arc so the
-    // first event (StatusChanged{Connecting} below) doesn't race with the
-    // installer. The receiver is returned to `spawn_agent`, which holds the
-    // per-session dedup lock until this rx fires (or times out / aborts).
-    let session_started_rx = initial_state.install_session_started_signal();
+    // Stamp the session this connection is reopening BEFORE it enters the
+    // map, so connect-time dedup can find and share it while the agent is
+    // still opening the session (see `SessionState::represents_session`).
+    initial_state.requested_session_id = session_id.clone();
     // Record what this launch's environment freezes before the state is shared:
     // the emit path and the preference replay both read it, and both run after
     // this point.
@@ -2314,7 +2771,14 @@ pub async fn spawn_agent_connection(
     let agent = agent
         .on_spawn({
             let child_pid = Arc::clone(&child_pid);
-            move |pid| child_pid.store(pid, std::sync::atomic::Ordering::SeqCst)
+            let conn_label = connection_id.clone();
+            let session_label = session_id.clone().unwrap_or_else(|| "<new>".to_string());
+            move |pid| {
+                child_pid.store(pid, std::sync::atomic::Ordering::SeqCst);
+                tracing::info!(
+                    "[ACP][attach] conn={conn_label} session={session_label} agent process pid={pid}"
+                );
+            }
         })
         // Paired with `on_spawn`: publish 0 again once the process has been
         // reaped, so the shutdown backstop can never `kill_tree` a pid the OS
@@ -2392,6 +2856,8 @@ pub async fn spawn_agent_connection(
     let config_fingerprint =
         crate::commands::acp::fingerprint_config(agent_type, &runtime_env);
 
+    let (attach_lifeline, lifeline_rx) = AttachLifeline::new();
+
     // Insert the entry BEFORE spawning the background task so that a
     // fast-failing `run_connection` can never remove it before it was
     // inserted (would otherwise leak the entry).
@@ -2409,6 +2875,7 @@ pub async fn spawn_agent_connection(
             last_observed_fingerprint: config_fingerprint.clone(),
             config_fingerprint,
             child_pid,
+            attach_lifeline,
         },
     );
 
@@ -2429,6 +2896,7 @@ pub async fn spawn_agent_connection(
     let cleanup_guard = ConnectionCleanupGuard {
         connections: cleanup_connections,
         connection_id: cleanup_connection_id,
+        runtime: connection_rt.clone(),
     };
     let connection_thread = std::thread::Builder::new()
         .name(format!("acp-conn-{conn_id}"))
@@ -2454,6 +2922,7 @@ pub async fn spawn_agent_connection(
             fs_policy,
             host_tools,
             stderr_tail,
+            lifeline_rx,
         )
         .await;
 
@@ -2537,7 +3006,7 @@ pub async fn spawn_agent_connection(
         )));
     }
 
-    Ok(session_started_rx)
+    Ok(())
 }
 
 /// The agent request a permission card answers. `Acp` is a real ACP
@@ -5500,6 +5969,9 @@ async fn run_connection(
     // callback installed by `build_agent`. Read only when a turn ends without
     // agent output, to attach evidence to the synthesized error.
     stderr_tail: Arc<StderrTail>,
+    // Resolves when the manager drops this connection's entry; see
+    // `AttachLifeline`.
+    lifeline: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<(), AcpError> {
     let pending_perms: PendingPermissions =
         Arc::new(tokio::sync::Mutex::new(PermissionQueue::default()));
@@ -5593,6 +6065,26 @@ async fn run_connection(
     // this connection ends. Its spawn epoch (captured before the session
     // exists) is what lets the first arm process records written before the
     // transcript file is discovered.
+    //
+    // Before any of that: a resume waits for an attach slot (see
+    // `AttachGate`), so the agent process is not even spawned while other
+    // sessions are still opening. A connection dropped while it waits just
+    // ends here, having started nothing.
+    let mut lifeline = lifeline;
+    let queued_at = std::time::Instant::now();
+    let attach_permit = match acquire_attach_slot(
+        &state,
+        &emitter,
+        &connection_id,
+        session_id.as_deref(),
+        &mut lifeline,
+    )
+    .await
+    {
+        Ok(permit) => permit,
+        Err(()) => return Ok(()),
+    };
+    let was_queued = state.read().await.attach_phase == AttachPhase::Queued;
     let prompt_ledger = background_watch::PromptLedger::shared();
     let _bg_watch = background_watch::spawn_if_claude(
         &connection_id,
@@ -5941,6 +6433,25 @@ async fn run_connection(
         .connect_with(agent, async move |cx| -> Result<(), agent_client_protocol::Error> {
             let state = state_outer;
             let agent_name_for_log = registry::get_agent_meta(agent_type).name;
+            let session_label = session_id.clone().unwrap_or_else(|| "<new>".to_string());
+            let mut attach = AttachDriver::new(
+                lifeline,
+                Arc::clone(&state),
+                emitter_clone.clone(),
+                conn_id.clone(),
+                session_label.clone(),
+                if was_queued {
+                    AttachPhase::Queued
+                } else {
+                    AttachPhase::Starting
+                },
+                queued_at,
+                attach_permit,
+            );
+            if was_queued {
+                // Out of the queue: the agent process was spawned just now.
+                attach.enter(AttachPhase::Starting).await;
+            }
 
             let init_request = InitializeRequest::new(ProtocolVersion::V1)
                 .client_capabilities(build_client_capabilities(agent_type, host_tools));
@@ -5958,17 +6469,29 @@ async fn run_connection(
                 "[ACP][{agent_name_for_log}] Sending Initialize (protocol={}, timeout=60s)",
                 ProtocolVersion::V1
             );
+            tracing::info!(
+                "[ACP][attach] conn={conn_id} session={session_label} agent spawned; initialize sent"
+            );
             let init_started = std::time::Instant::now();
-            let init_resp = match tokio::time::timeout(
-                std::time::Duration::from_secs(60),
-                cx.send_request_to(Agent, init_request).block_task(),
-            )
-            .await
+            let init_outcome = match attach
+                .run(tokio::time::timeout(
+                    std::time::Duration::from_secs(60),
+                    cx.send_request_to(Agent, init_request).block_task(),
+                ))
+                .await
             {
+                Ok(outcome) => outcome,
+                Err(why) => return attach.stop(why).await,
+            };
+            let init_resp = match init_outcome {
                 Ok(Ok(resp)) => {
                     tracing::info!(
                         "[ACP][{agent_name_for_log}] Initialize responded in {:?}",
                         init_started.elapsed()
+                    );
+                    tracing::info!(
+                        "[ACP][attach] conn={conn_id} session={session_label} initialize responded in {} ms",
+                        init_started.elapsed().as_millis()
                     );
                     resp
                 }
@@ -6223,7 +6746,12 @@ async fn run_connection(
                         &cwd,
                         mcp_servers.clone(),
                     );
-                    match send_resume_session(&cx, resume_req).await {
+                    attach.enter(AttachPhase::Resuming).await;
+                    let resume_result = match attach.run(send_resume_session(&cx, resume_req)).await {
+                        Ok(result) => result,
+                        Err(why) => return attach.stop(why).await,
+                    };
+                    match resume_result {
                         Ok((resume_resp, grok_models_raw)) => {
                             let initial_config_options = resume_resp.config_options.clone();
                             let new_resp = NewSessionResponse::new(SessionId::new(sid.clone()))
@@ -6255,21 +6783,27 @@ async fn run_connection(
                                 },
                             )
                             .await;
+                            attach.enter(AttachPhase::Configuring).await;
                             emit_session_modes(&state, &emitter_clone, session.modes()).await;
-                            apply_and_emit_session_config_options(
-                                &cx,
-                                &mut session,
-                                &state,
-                                &emitter_clone,
-                                agent_type,
-                                grok_meta.as_ref(),
-                                grok_model_specs.as_ref(),
-                                preferred_mode_id.as_deref(),
-                                &preferred_config_values,
-                                initial_config_options.unwrap_or_default(),
-                            )
-                            .await;
+                            if let Err(why) = attach
+                                .run(apply_and_emit_session_config_options(
+                                    &cx,
+                                    &mut session,
+                                    &state,
+                                    &emitter_clone,
+                                    agent_type,
+                                    grok_meta.as_ref(),
+                                    grok_model_specs.as_ref(),
+                                    preferred_mode_id.as_deref(),
+                                    &preferred_config_values,
+                                    initial_config_options.unwrap_or_default(),
+                                ))
+                                .await
+                            {
+                                return attach.stop(why).await;
+                            }
                             emit_selectors_ready(&state, &emitter_clone).await;
+                            attach.enter(AttachPhase::Ready).await;
 
                             let loop_result = run_conversation_loop(
                                 &mut session,
@@ -6356,7 +6890,14 @@ async fn run_connection(
                         &cwd,
                         mcp_servers.clone(),
                     );
-                    cx.send_request_to(Agent, load_req).block_task().await
+                    attach.enter(AttachPhase::Loading).await;
+                    match attach
+                        .run(cx.send_request_to(Agent, load_req).block_task())
+                        .await
+                    {
+                        Ok(result) => result,
+                        Err(why) => return attach.stop(why).await,
+                    }
                 } else {
                     Err(agent_client_protocol::Error::method_not_found()
                         .data("agent does not advertise the loadSession capability"))
@@ -6512,23 +7053,29 @@ async fn run_connection(
                             },
                         )
                         .await;
+                        attach.enter(AttachPhase::Configuring).await;
                         emit_session_modes(&state, &emitter_clone, session.modes()).await;
-                        apply_and_emit_session_config_options(
-                            &cx,
-                            &mut session,
-                            &state,
-                            &emitter_clone,
-                            agent_type,
-                            grok_meta.as_ref(),
-                            // `session/load` is a typed send with no raw `models`
-                            // capture, so effort stays on the flat fallback.
-                            None,
-                            preferred_mode_id.as_deref(),
-                            &preferred_config_values,
-                            initial_config_options.unwrap_or_default(),
-                        )
-                        .await;
+                        if let Err(why) = attach
+                            .run(apply_and_emit_session_config_options(
+                                &cx,
+                                &mut session,
+                                &state,
+                                &emitter_clone,
+                                agent_type,
+                                grok_meta.as_ref(),
+                                // `session/load` is a typed send with no raw `models`
+                                // capture, so effort stays on the flat fallback.
+                                None,
+                                preferred_mode_id.as_deref(),
+                                &preferred_config_values,
+                                initial_config_options.unwrap_or_default(),
+                            ))
+                            .await
+                        {
+                            return attach.stop(why).await;
+                        }
                         emit_selectors_ready(&state, &emitter_clone).await;
+                        attach.enter(AttachPhase::Ready).await;
 
                         let loop_result = run_conversation_loop(
                             &mut session,
@@ -6660,11 +7207,17 @@ async fn run_connection(
                             )
                             .await;
                         }
-                        let (new_resp, grok_models_raw) = send_new_session_capturing_models(
-                            &cx,
-                            build_new_session_request(agent_type, &cwd, mcp_servers.clone()),
-                        )
-                        .await
+                        attach.enter(AttachPhase::Creating).await;
+                        let (new_resp, grok_models_raw) = match attach
+                            .run(send_new_session_capturing_models(
+                                &cx,
+                                build_new_session_request(agent_type, &cwd, mcp_servers.clone()),
+                            ))
+                            .await
+                        {
+                            Ok(result) => result,
+                            Err(why) => return attach.stop(why).await,
+                        }
                         .map_err(|e| tag_new_session_failure(e, agent_type, &mcp_servers))?;
                         let fallback_sid = new_resp.session_id.0.to_string();
                         let initial_config_options = new_resp.config_options.clone();
@@ -6701,21 +7254,27 @@ async fn run_connection(
                             },
                         )
                         .await;
+                        attach.enter(AttachPhase::Configuring).await;
                         emit_session_modes(&state, &emitter_clone, session.modes()).await;
-                        apply_and_emit_session_config_options(
-                            &cx,
-                            &mut session,
-                            &state,
-                            &emitter_clone,
-                            agent_type,
-                            grok_meta.as_ref(),
-                            grok_model_specs.as_ref(),
-                            preferred_mode_id.as_deref(),
-                            &preferred_config_values,
-                            initial_config_options.unwrap_or_default(),
-                        )
-                        .await;
+                        if let Err(why) = attach
+                            .run(apply_and_emit_session_config_options(
+                                &cx,
+                                &mut session,
+                                &state,
+                                &emitter_clone,
+                                agent_type,
+                                grok_meta.as_ref(),
+                                grok_model_specs.as_ref(),
+                                preferred_mode_id.as_deref(),
+                                &preferred_config_values,
+                                initial_config_options.unwrap_or_default(),
+                            ))
+                            .await
+                        {
+                            return attach.stop(why).await;
+                        }
                         emit_selectors_ready(&state, &emitter_clone).await;
+                        attach.enter(AttachPhase::Ready).await;
 
                         let loop_result = run_conversation_loop(
                             &mut session,
@@ -6759,11 +7318,17 @@ async fn run_connection(
                 }
             } else {
                 // Create new session
-                let (new_resp, grok_models_raw) = send_new_session_capturing_models(
-                    &cx,
-                    build_new_session_request(agent_type, &cwd, mcp_servers.clone()),
-                )
-                .await
+                attach.enter(AttachPhase::Creating).await;
+                let (new_resp, grok_models_raw) = match attach
+                    .run(send_new_session_capturing_models(
+                        &cx,
+                        build_new_session_request(agent_type, &cwd, mcp_servers.clone()),
+                    ))
+                    .await
+                {
+                    Ok(result) => result,
+                    Err(why) => return attach.stop(why).await,
+                }
                 .map_err(|e| tag_new_session_failure(e, agent_type, &mcp_servers))?;
                 let sid = new_resp.session_id.0.to_string();
                 let initial_config_options = new_resp.config_options.clone();
@@ -6787,21 +7352,27 @@ async fn run_connection(
                     },
                 )
                 .await;
+                attach.enter(AttachPhase::Configuring).await;
                 emit_session_modes(&state, &emitter_clone, session.modes()).await;
-                apply_and_emit_session_config_options(
-                    &cx,
-                    &mut session,
-                    &state,
-                    &emitter_clone,
-                    agent_type,
-                    grok_meta.as_ref(),
-                    grok_model_specs.as_ref(),
-                    preferred_mode_id.as_deref(),
-                    &preferred_config_values,
-                    initial_config_options.unwrap_or_default(),
-                )
-                .await;
+                if let Err(why) = attach
+                    .run(apply_and_emit_session_config_options(
+                        &cx,
+                        &mut session,
+                        &state,
+                        &emitter_clone,
+                        agent_type,
+                        grok_meta.as_ref(),
+                        grok_model_specs.as_ref(),
+                        preferred_mode_id.as_deref(),
+                        &preferred_config_values,
+                        initial_config_options.unwrap_or_default(),
+                    ))
+                    .await
+                {
+                    return attach.stop(why).await;
+                }
                 emit_selectors_ready(&state, &emitter_clone).await;
+                attach.enter(AttachPhase::Ready).await;
 
                 let loop_result = run_conversation_loop(
                     &mut session,
@@ -6846,6 +7417,14 @@ async fn run_connection(
             let raw = e.to_string();
             if raw.contains(INIT_TIMEOUT_SENTINEL) {
                 AcpError::InitializeTimeout
+            } else if raw.contains(ATTACH_TIMEOUT_SENTINEL) {
+                let (phase, secs) = parse_attach_timeout(&raw)
+                    .unwrap_or_else(|| (AttachPhase::Starting.as_str().to_string(), 0));
+                AcpError::AttachTimeout {
+                    agent: registry::get_agent_meta(agent_type).name.to_string(),
+                    phase,
+                    secs,
+                }
             } else if raw.contains(AUTH_REQUIRED_SENTINEL) {
                 AcpError::agent_auth_required(raw.replace(AUTH_REQUIRED_SENTINEL, ""))
             } else if raw.contains(MCP_SUSPECT_SENTINEL) {
@@ -10128,6 +10707,9 @@ async fn run_conversation_loop(
     // drained immediately after the select, still inside the idle loop (the
     // OUTER loop only advances on a command, which may never come).
     let mut config_drift_to_reassert: Vec<(String, String)> = Vec::new();
+    // The last attach timing line: when the agent's first `session/update`
+    // (usually its slash-command list) arrived after the session opened.
+    let mut first_update_logged = false;
     loop {
         // Wait for either a user command or a session update (e.g. available_commands_update)
         let cmd = loop {
@@ -10142,6 +10724,16 @@ async fn run_conversation_loop(
                         Ok(dispatch) => fix_usage_update_nulls(dispatch),
                         Err(e) => return Err(defer_to_connection_report(e).await),
                     };
+                    if !first_update_logged {
+                        first_update_logged = true;
+                        let total_ms = state.read().await.attach_elapsed_ms();
+                        tracing::info!(
+                            "[ACP][attach] conn={} session={} first session update total_ms={}",
+                            conn_id,
+                            session.session_id().0,
+                            total_ms
+                        );
+                    }
                     let h = emitter.clone();
                     let st = Arc::clone(state);
                     let cwd_opt = Some(cwd);
@@ -15983,6 +16575,129 @@ mod tests {
             SessionConfigKindInfo::Select(sel) => sel,
             other => panic!("expected a select config option, got {other:?}"),
         }
+    }
+
+    // ── AttachGate ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn attach_gate_hands_slots_to_the_newest_waiter_first() {
+        let gate = AttachGate::new(1);
+        let held = AttachGate::try_acquire(&gate).expect("one free slot");
+        assert!(
+            AttachGate::try_acquire(&gate).is_none(),
+            "the only slot is taken"
+        );
+
+        let order = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut waiters = Vec::new();
+        for name in ["older", "newer"] {
+            let gate = Arc::clone(&gate);
+            let order = Arc::clone(&order);
+            waiters.push(tokio::spawn(async move {
+                let permit = AttachGate::acquire(&gate).await;
+                order.lock().unwrap().push(name);
+                // Hold briefly so the next hand-over is observable in order.
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                drop(permit);
+            }));
+            // Let each waiter queue before the next one does.
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        drop(held);
+        for w in waiters {
+            w.await.unwrap();
+        }
+        assert_eq!(*order.lock().unwrap(), vec!["newer", "older"]);
+        assert_eq!(gate.free_slots(), 1, "every slot comes back");
+    }
+
+    #[tokio::test]
+    async fn attach_gate_skips_a_waiter_that_gave_up_without_losing_the_slot() {
+        let gate = AttachGate::new(1);
+        let held = AttachGate::try_acquire(&gate).expect("one free slot");
+        let quitter = {
+            let gate = Arc::clone(&gate);
+            tokio::spawn(async move {
+                let _ = AttachGate::acquire(&gate).await;
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        // The connection was dropped while queued.
+        quitter.abort();
+        let _ = quitter.await;
+        drop(held);
+        assert_eq!(
+            gate.free_slots(),
+            1,
+            "the abandoned place must not eat the slot"
+        );
+        assert!(AttachGate::try_acquire(&gate).is_some());
+    }
+
+    // ── ConnectionCleanupGuard ──────────────────────────────────────────────
+
+    /// The production shape of the panic this guards: the guard drops on a
+    /// plain OS thread (the driver thread after `block_on` returned) while the
+    /// map lock is held elsewhere. It must hand the removal to the runtime
+    /// through its captured handle — not panic for want of an ambient one —
+    /// and the entry must be gone once the lock is released.
+    #[test]
+    fn cleanup_guard_dropped_off_runtime_under_contention_removes_the_entry() {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let connections: Arc<tokio::sync::Mutex<HashMap<String, AgentConnection>>> =
+            Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+        let state = SessionState::new(
+            "gone".into(),
+            AgentType::ClaudeCode,
+            None,
+            "test-window".into(),
+            None,
+        );
+        let (cmd_tx, _cmd_rx) = mpsc::channel(1);
+        rt.block_on(async {
+            connections.lock().await.insert(
+                "gone".into(),
+                AgentConnection {
+                    id: "gone".into(),
+                    agent_type: AgentType::ClaudeCode,
+                    status: ConnectionStatus::Disconnected,
+                    owner_window_label: "test-window".into(),
+                    cmd_tx,
+                    state: Arc::new(RwLock::new(state)),
+                    emitter: EventEmitter::Noop,
+                    prompt_lock: Arc::new(tokio::sync::Mutex::new(())),
+                    config_fingerprint: String::new(),
+                    last_observed_fingerprint: String::new(),
+                    child_pid: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+                    attach_lifeline: AttachLifeline::detached(),
+                },
+            );
+        });
+        // Contend the lock so the guard cannot take the synchronous path.
+        let held = rt.block_on(connections.clone().lock_owned());
+        let guard = ConnectionCleanupGuard {
+            connections: connections.clone(),
+            connection_id: "gone".into(),
+            runtime: rt.handle().clone(),
+        };
+        std::thread::spawn(move || drop(guard))
+            .join()
+            .expect("dropping the guard off-runtime must not panic");
+        drop(held);
+        let removed = rt.block_on(async {
+            for _ in 0..100 {
+                if !connections.lock().await.contains_key("gone") {
+                    return true;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            false
+        });
+        assert!(removed, "the deferred removal must run once the lock frees");
     }
 
     // ── PermissionQueue (#442) ──────────────────────────────────────────────

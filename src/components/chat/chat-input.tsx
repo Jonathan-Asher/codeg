@@ -162,6 +162,13 @@ export const ChatInput = memo(function ChatInput({
   // and is bounded: `selectors_ready` fires on every establishment path whether
   // or not the agent has any commands, so this can never hang on a spinner.
   const commandsLoading = isConnecting || selectorsLoading
+  // While the session opens (a Claude Code resume runs the user's SessionStart
+  // hooks first and can take a while), keep the composer usable: a send goes
+  // to the message queue above the input, and the queue's own flush delivers
+  // it once the session is ready. Only where there IS a queue — a brand-new
+  // conversation's first send is what creates it, and has to wait.
+  const queueWhileConnecting =
+    !allowOfflineCompose && isConnecting && onEnqueue != null
 
   // Active/historical conversations dock the composer at the very bottom of the
   // message list. The attached folder/branch selector row now sits at the
@@ -206,11 +213,12 @@ export const ChatInput = memo(function ChatInput({
         onFocus={onFocus}
         defaultPath={defaultPath}
         disabled={
-          allowOfflineCompose
+          allowOfflineCompose || queueWhileConnecting
             ? false
             : (!isConnected && !isPrompting) || selectorsLoading
         }
         isPrompting={isPrompting}
+        queueSends={queueWhileConnecting}
         onCancel={onCancel}
         modes={modes}
         configOptions={configOptions}
@@ -243,7 +251,9 @@ export const ChatInput = memo(function ChatInput({
         onInjectConsumed={onInjectConsumed}
         placeholder={
           isConnecting
-            ? t("connecting")
+            ? queueWhileConnecting
+              ? t("connectingQueued", { agent: agentName ?? "Agent" })
+              : t("connecting")
             : isPrompting
               ? t("agentResponding", { agent: agentName ?? "Agent" })
               : t("sendMessage")

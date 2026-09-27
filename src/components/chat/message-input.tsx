@@ -187,6 +187,13 @@ interface MessageInputProps {
   onFocus?: () => void
   className?: string
   isPrompting?: boolean
+  /**
+   * Route a plain send to `onEnqueue`, as while prompting: the session is
+   * still opening, so the message waits in the queue above the composer and
+   * the queue sends it once the session is ready. Lets the user type and send
+   * during a slow attach instead of watching a disabled composer.
+   */
+  queueSends?: boolean
   onCancel?: () => void
   modes?: SessionModeInfo[]
   configOptions?: SessionConfigOptionInfo[]
@@ -370,6 +377,7 @@ export function MessageInput({
   onFocus,
   className,
   isPrompting = false,
+  queueSends = false,
   onCancel,
   modes,
   configOptions,
@@ -1534,7 +1542,7 @@ export function MessageInput({
     // The editor stays editable while `disabled` (the agent is busy) so the user
     // can keep typing, but a plain send is blocked — only enqueue / queue-edit
     // save go through. Mirrors the legacy textarea's keydown guard.
-    if (disabled && !isPrompting && !isEditingQueueItem) return
+    if (disabled && !isPrompting && !isEditingQueueItem && !queueSends) return
     // An image whose web/remote upload hasn't settled has no server-side uri
     // yet — the transport would strip its base64 and the backend would have
     // nothing to hydrate. Block ALL three branches below (send / enqueue /
@@ -1554,8 +1562,8 @@ export function MessageInput({
       return
     }
 
-    // Prompting mode: enqueue instead of sending
-    if (isPrompting && onEnqueue) {
+    // Prompting (or the session still opening): enqueue instead of sending
+    if ((isPrompting || queueSends) && onEnqueue) {
       onEnqueue(draft, showModeSelector ? effectiveModeId : null)
       resetComposer()
       return
@@ -1573,6 +1581,7 @@ export function MessageInput({
     buildDraft,
     isEditingQueueItem,
     isPrompting,
+    queueSends,
     onSaveQueueEdit,
     onEnqueue,
     onSend,
@@ -2032,7 +2041,7 @@ export function MessageInput({
       disabled={disabled || !hasSendableContent}
       size="icon"
       className="h-8 w-8"
-      title={t("send")}
+      title={queueSends && onEnqueue ? t("queueMessage") : t("send")}
     >
       <Send className="size-4" />
     </Button>

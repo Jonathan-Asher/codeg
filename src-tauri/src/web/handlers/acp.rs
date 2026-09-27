@@ -81,7 +81,6 @@ pub async fn acp_connect(
     Json(params): Json<AcpConnectParams>,
 ) -> Result<Json<String>, AppCommandError> {
     let db = &state.db;
-    let manager = &state.connection_manager;
 
     let runtime_env = acp_commands::build_session_runtime_env(
         db,
@@ -100,19 +99,36 @@ pub async fn acp_connect(
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
 
     let emitter = state.emitter.clone();
-    let connection_id = manager
-        .spawn_agent(
-            params.agent_type,
-            params.working_dir,
-            params.session_id,
-            runtime_env,
-            "web".to_string(),
-            emitter,
-            params.preferred_mode_id,
-            params.preferred_config_values.unwrap_or_default(),
-        )
-        .await
-        .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    // Detached: return as soon as the connection exists and let the client
+    // follow the attach over its event stream. A resume can outlast any HTTP
+    // timeout between here and the client (a remote workspace caps requests
+    // at 30 s), and a dropped request used to surface a healthy-but-slow
+    // attach as a failed connect.
+    //
+    // Run in a task of its own, so a client that goes away mid-request (the
+    // HTTP future is dropped with it) cannot cut the establishment short
+    // between the dedup lookup and the spawn: whatever this request started
+    // finishes and lands in the connection map, where the client's retry finds
+    // and shares it.
+    let spawn_state = Arc::clone(&state);
+    let connection_id = tokio::spawn(async move {
+        spawn_state
+            .connection_manager
+            .spawn_agent_detached(
+                params.agent_type,
+                params.working_dir,
+                params.session_id,
+                runtime_env,
+                "web".to_string(),
+                emitter,
+                params.preferred_mode_id,
+                params.preferred_config_values.unwrap_or_default(),
+            )
+            .await
+    })
+    .await
+    .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?
+    .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
 
     Ok(Json(connection_id))
 }
