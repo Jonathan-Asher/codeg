@@ -126,6 +126,17 @@ export function TransferCard({
             {transfer.name}
           </div>
         </div>
+        {transfer.status === "running" && (
+          <Button
+            variant="ghost"
+            size="xs"
+            className="h-5 px-1.5"
+            disabled={transfer.cancelRequested}
+            onClick={() => void cancelTrackedDownload(transfer.id)}
+          >
+            {transfer.cancelRequested ? t("cancelling") : t("cancel")}
+          </Button>
+        )}
         {onClose && (
           <button
             type="button"
@@ -152,35 +163,26 @@ export function TransferCard({
               <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
             </div>
           )}
-          <div className="flex items-center gap-2 text-2xs text-muted-foreground tabular-nums">
-            <span className="min-w-0 flex-1 truncate">
-              {percent != null && (
-                <span className="font-medium text-foreground">{percent}%</span>
-              )}
-              {percent != null && " · "}
-              {transfer.loaded === 0 && transfer.total == null
-                ? t("preparing")
-                : transfer.total != null
-                  ? t("progress", {
-                      loaded: formatBytes(transfer.loaded),
-                      total: formatBytes(transfer.total),
-                    })
-                  : t("progressNoTotal", {
-                      loaded: formatBytes(transfer.loaded),
-                    })}
-              {rate && ` · ${rate}`}
-              {eta != null &&
-                ` · ${t("timeLeft", { time: formatDuration(eta, locale) })}`}
-            </span>
-            <Button
-              variant="ghost"
-              size="xs"
-              className="h-5 px-1.5"
-              disabled={transfer.cancelRequested}
-              onClick={() => void cancelTrackedDownload(transfer.id)}
-            >
-              {transfer.cancelRequested ? t("cancelling") : t("cancel")}
-            </Button>
+          {/* Wraps rather than truncates: the time left is the part most
+              worth reading, and it comes last. */}
+          <div className="text-2xs text-muted-foreground tabular-nums">
+            {percent != null && (
+              <span className="font-medium text-foreground">{percent}%</span>
+            )}
+            {percent != null && " · "}
+            {transfer.loaded === 0 && transfer.total == null
+              ? t("preparing")
+              : transfer.total != null
+                ? t("progress", {
+                    loaded: formatBytes(transfer.loaded),
+                    total: formatBytes(transfer.total),
+                  })
+                : t("progressNoTotal", {
+                    loaded: formatBytes(transfer.loaded),
+                  })}
+            {rate && ` · ${rate}`}
+            {eta != null &&
+              ` · ${t("timeLeft", { time: formatDuration(eta, locale) })}`}
           </div>
         </>
       )}

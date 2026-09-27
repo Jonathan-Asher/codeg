@@ -236,7 +236,7 @@ export function VideoPreview({
   // browser downloads it, or plays it in a tab of its own. Remote desktop:
   // download (with progress) — the done toast then offers Open / Show.
   const actions = (
-    <div className="flex flex-wrap items-center justify-center gap-1">
+    <div className="flex shrink-0 items-center gap-1">
       {localDesktop ? (
         <>
           <Button variant="ghost" size="xs" onClick={handleOpenExternally}>
@@ -272,16 +272,17 @@ export function VideoPreview({
 
   return (
     <div className="h-full flex flex-col min-h-0">
-      <div className="flex-none flex items-center gap-3 border-b border-border bg-muted/30 px-3 py-1 text-2xs text-muted-foreground">
-        {dimensions && (
-          <span className="tabular-nums">
-            {dimensions.width} x {dimensions.height}
-          </span>
-        )}
-        {stream && stream.size > 0 && (
-          <span className="tabular-nums">{formatBytes(stream.size)}</span>
-        )}
-        <div className="ml-auto">{actions}</div>
+      <div className="flex-none flex min-w-0 items-center gap-3 border-b border-border bg-muted/30 px-3 py-1 text-2xs text-muted-foreground">
+        {/* Stats give way first in a narrow column; the actions never wrap. */}
+        <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden whitespace-nowrap tabular-nums">
+          {dimensions && (
+            <span>
+              {dimensions.width} x {dimensions.height}
+            </span>
+          )}
+          {stream && stream.size > 0 && <span>{formatBytes(stream.size)}</span>}
+        </div>
+        {actions}
       </div>
 
       <div className="relative flex-1 min-h-0 flex items-center justify-center bg-black/90">
