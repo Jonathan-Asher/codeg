@@ -30,6 +30,7 @@ import {
 } from "@/lib/file-path-display"
 import { isLocalDesktop, revealItemInDir } from "@/lib/platform"
 import { copyTextFromMenu } from "@/lib/utils"
+import { isTransferErrorReported } from "@/lib/workspace-transfers"
 
 /** The two path forms offered by the badge's action menu. */
 export interface FileReferencePaths {
@@ -155,14 +156,17 @@ function FileReferenceActionsMenu({ target }: { target: string }) {
         // Web hands off to the browser's download manager ("started"), which
         // shows its own progress — a toast there would just be noise. Only the
         // remote-desktop save-dialog path has an outcome worth reporting.
+        // A tracked download ("reported") already announced its outcome in
+        // the transfer toast.
         if (result.status === "started") return
         if (result.status === WORKSPACE_DOWNLOAD_CANCELLED) return
-        if (result.savedPath) {
+        if (result.savedPath && !result.reported) {
           toast.success(t("downloadSaved", { name }), {
             description: result.savedPath,
           })
         }
       } catch (error) {
+        if (isTransferErrorReported(error)) return
         toast.error(t("downloadFailed", { name }), {
           description: toErrorMessage(error),
         })

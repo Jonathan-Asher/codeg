@@ -14,6 +14,16 @@ const DEFAULT_REMOTE_WORKSPACE_UPLOAD_CONCURRENCY: usize = 2;
 const DEFAULT_WORKSPACE_ZIP_CONCURRENCY: usize = 2;
 const DEFAULT_REMOTE_WORKSPACE_DOWNLOAD_CONCURRENCY: usize = 2;
 const DEFAULT_TRANSFER_IDLE_TIMEOUT_SECS: u64 = 300;
+/// A media capability dies after this long without a request. Players fetch
+/// continuously while playing, so this only runs out on a preview left paused
+/// (the viewer mints a fresh one when that happens).
+const MEDIA_CAPABILITY_IDLE_TTL_SECS: u64 = 15 * 60;
+/// Hard ceiling on a media capability, however busy it is.
+const MEDIA_CAPABILITY_MAX_LIFETIME_SECS: u64 = 8 * 60 * 60;
+/// Live media capabilities kept at once; the oldest is dropped past this.
+const MEDIA_CAPABILITY_MAX_LIVE: usize = 256;
+/// Client-chosen transfer ids are accepted only in this shape.
+const MAX_CLIENT_TRANSFER_ID_LEN: usize = 64;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,6 +60,17 @@ pub struct DownloadTicket {
     pub expires_at: Instant,
 }
 
+/// One file a `<video>` element may stream, and how long it may do so.
+#[derive(Clone, Debug)]
+pub struct MediaCapability {
+    pub root_path: PathBuf,
+    pub relative_path: String,
+    pub filename: String,
+    issued_at: Instant,
+    idle_deadline: Instant,
+    hard_deadline: Instant,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceTransferProgress {
@@ -81,7 +102,10 @@ pub enum TransferState {
 pub struct WorkspaceTransferManager {
     tickets: Mutex<HashMap<String, DownloadTicket>>,
     cancels: Mutex<HashMap<String, CancellationToken>>,
+    media_caps: Mutex<HashMap<String, MediaCapability>>,
     ticket_ttl: Duration,
+    media_idle_ttl: Duration,
+    media_max_lifetime: Duration,
     pub workspace_upload_semaphore: Semaphore,
     pub remote_upload_semaphore: Semaphore,
     pub zip_semaphore: Semaphore,
@@ -94,7 +118,10 @@ impl WorkspaceTransferManager {
         Self {
             tickets: Mutex::new(HashMap::new()),
             cancels: Mutex::new(HashMap::new()),
+            media_caps: Mutex::new(HashMap::new()),
             ticket_ttl: Duration::from_secs(DOWNLOAD_TICKET_TTL_SECS),
+            media_idle_ttl: Duration::from_secs(MEDIA_CAPABILITY_IDLE_TTL_SECS),
+            media_max_lifetime: Duration::from_secs(MEDIA_CAPABILITY_MAX_LIFETIME_SECS),
             workspace_upload_semaphore: Semaphore::new(env_usize(
                 "CODEG_WORKSPACE_UPLOAD_MAX_CONCURRENCY",
                 DEFAULT_WORKSPACE_UPLOAD_CONCURRENCY,
@@ -122,7 +149,10 @@ impl WorkspaceTransferManager {
         Self {
             tickets: Mutex::new(HashMap::new()),
             cancels: Mutex::new(HashMap::new()),
+            media_caps: Mutex::new(HashMap::new()),
             ticket_ttl,
+            media_idle_ttl: Duration::from_secs(MEDIA_CAPABILITY_IDLE_TTL_SECS),
+            media_max_lifetime: Duration::from_secs(MEDIA_CAPABILITY_MAX_LIFETIME_SECS),
             workspace_upload_semaphore: Semaphore::new(DEFAULT_WORKSPACE_UPLOAD_CONCURRENCY),
             remote_upload_semaphore: Semaphore::new(DEFAULT_REMOTE_WORKSPACE_UPLOAD_CONCURRENCY),
             zip_semaphore: Semaphore::new(DEFAULT_WORKSPACE_ZIP_CONCURRENCY),
@@ -133,13 +163,31 @@ impl WorkspaceTransferManager {
         }
     }
 
+    /// Test hook: shorten the media capability lifetimes.
+    #[cfg(test)]
+    pub fn with_media_ttl(mut self, idle: Duration, max_lifetime: Duration) -> Self {
+        self.media_idle_ttl = idle;
+        self.media_max_lifetime = max_lifetime;
+        self
+    }
+
     pub async fn register_transfer(&self) -> (String, CancellationToken) {
-        let transfer_id = uuid::Uuid::new_v4().simple().to_string();
+        self.register_transfer_with_id(None).await
+    }
+
+    /// Register a transfer under the id the client picked, so the UI can show
+    /// (and cancel) it before the first progress event arrives. A missing,
+    /// malformed or already-live id falls back to a fresh server-side one.
+    pub async fn register_transfer_with_id(
+        &self,
+        requested: Option<String>,
+    ) -> (String, CancellationToken) {
         let token = CancellationToken::new();
-        self.cancels
-            .lock()
-            .await
-            .insert(transfer_id.clone(), token.clone());
+        let mut cancels = self.cancels.lock().await;
+        let transfer_id = requested
+            .filter(|id| is_valid_client_transfer_id(id) && !cancels.contains_key(id))
+            .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
+        cancels.insert(transfer_id.clone(), token.clone());
         (transfer_id, token)
     }
 
@@ -195,6 +243,69 @@ impl WorkspaceTransferManager {
         found.filter(|ticket| Instant::now() <= ticket.expires_at)
     }
 
+    /// Mint a capability for streaming one file. The caller has already
+    /// validated `root_path`/`relative_path` with the download path rules;
+    /// the byte endpoint re-validates them on every request anyway.
+    pub async fn issue_media_capability(
+        &self,
+        root_path: PathBuf,
+        relative_path: String,
+        filename: String,
+    ) -> String {
+        let now = Instant::now();
+        let token = uuid::Uuid::new_v4().simple().to_string();
+        let mut caps = self.media_caps.lock().await;
+        caps.retain(|_, cap| cap.is_live(now));
+        if caps.len() >= MEDIA_CAPABILITY_MAX_LIVE {
+            let oldest = caps
+                .iter()
+                .min_by_key(|(_, cap)| cap.issued_at)
+                .map(|(key, _)| key.clone());
+            if let Some(oldest) = oldest {
+                caps.remove(&oldest);
+            }
+        }
+        caps.insert(
+            token.clone(),
+            MediaCapability {
+                root_path,
+                relative_path,
+                filename,
+                issued_at: now,
+                idle_deadline: now + self.media_idle_ttl,
+                hard_deadline: now + self.media_max_lifetime,
+            },
+        );
+        token
+    }
+
+    /// Look up a live capability and push its idle deadline out. Unlike a
+    /// download ticket it is not consumed: a player issues many range
+    /// requests over the life of one preview.
+    pub async fn resolve_media_capability(&self, token: &str) -> Option<MediaCapability> {
+        let now = Instant::now();
+        let idle_ttl = self.media_idle_ttl;
+        let mut caps = self.media_caps.lock().await;
+        let live = caps.get(token).is_some_and(|cap| cap.is_live(now));
+        if !live {
+            caps.remove(token);
+            return None;
+        }
+        caps.get_mut(token).map(|cap| {
+            cap.idle_deadline = (now + idle_ttl).min(cap.hard_deadline);
+            cap.clone()
+        })
+    }
+
+    pub async fn revoke_media_capability(&self, token: &str) -> bool {
+        self.media_caps.lock().await.remove(token).is_some()
+    }
+
+    /// Seconds a freshly minted capability stays valid without being used.
+    pub fn media_idle_ttl_secs(&self) -> u64 {
+        self.media_idle_ttl.as_secs()
+    }
+
     pub async fn cleanup_expired_tickets(&self) {
         let now = Instant::now();
         self.tickets
@@ -202,6 +313,20 @@ impl WorkspaceTransferManager {
             .await
             .retain(|_, ticket| ticket.expires_at > now);
     }
+}
+
+impl MediaCapability {
+    fn is_live(&self, now: Instant) -> bool {
+        now <= self.idle_deadline && now <= self.hard_deadline
+    }
+}
+
+fn is_valid_client_transfer_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= MAX_CLIENT_TRANSFER_ID_LEN
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 pub fn env_usize(name: &str, default: usize) -> usize {
@@ -280,6 +405,83 @@ mod tests {
             .consume_download_ticket(&expired.ticket)
             .await
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn client_transfer_id_is_used_when_well_formed_and_free() {
+        let manager = WorkspaceTransferManager::new_for_tests(Duration::from_secs(60));
+        let (id, _) = manager
+            .register_transfer_with_id(Some("dl-abc_123".to_string()))
+            .await;
+        assert_eq!(id, "dl-abc_123");
+        // Already live: a second registration gets its own id.
+        let (dup, _) = manager
+            .register_transfer_with_id(Some("dl-abc_123".to_string()))
+            .await;
+        assert_ne!(dup, "dl-abc_123");
+        // Malformed ids never become map keys.
+        let (bad, _) = manager
+            .register_transfer_with_id(Some("../x".to_string()))
+            .await;
+        assert_ne!(bad, "../x");
+        let (long, _) = manager
+            .register_transfer_with_id(Some("a".repeat(65)))
+            .await;
+        assert_eq!(long.len(), 32);
+        assert!(manager.cancel("dl-abc_123").await);
+    }
+
+    #[tokio::test]
+    async fn media_capability_is_reusable_until_idle_or_revoked() {
+        let manager = WorkspaceTransferManager::new_for_tests(Duration::from_secs(60))
+            .with_media_ttl(Duration::from_millis(400), Duration::from_secs(60));
+        let token = manager
+            .issue_media_capability(
+                PathBuf::from("/tmp/root"),
+                "clip.mp4".to_string(),
+                "clip.mp4".to_string(),
+            )
+            .await;
+        // Many range requests share one capability.
+        for _ in 0..3 {
+            let cap = manager.resolve_media_capability(&token).await.unwrap();
+            assert_eq!(cap.relative_path, "clip.mp4");
+        }
+        // Use keeps it alive past the idle window.
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        assert!(manager.resolve_media_capability(&token).await.is_some());
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        assert!(manager.resolve_media_capability(&token).await.is_some());
+        // Left idle, it expires.
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        assert!(manager.resolve_media_capability(&token).await.is_none());
+
+        let revoked = manager
+            .issue_media_capability(
+                PathBuf::from("/tmp/root"),
+                "b.mp4".to_string(),
+                "b.mp4".to_string(),
+            )
+            .await;
+        assert!(manager.revoke_media_capability(&revoked).await);
+        assert!(manager.resolve_media_capability(&revoked).await.is_none());
+        assert!(manager.resolve_media_capability("unknown").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn media_capability_has_a_hard_lifetime() {
+        let manager = WorkspaceTransferManager::new_for_tests(Duration::from_secs(60))
+            .with_media_ttl(Duration::from_secs(60), Duration::from_millis(30));
+        let token = manager
+            .issue_media_capability(
+                PathBuf::from("/tmp/root"),
+                "clip.mp4".to_string(),
+                "clip.mp4".to_string(),
+            )
+            .await;
+        assert!(manager.resolve_media_capability(&token).await.is_some());
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        assert!(manager.resolve_media_capability(&token).await.is_none());
     }
 
     #[tokio::test]

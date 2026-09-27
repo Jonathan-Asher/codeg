@@ -1,11 +1,26 @@
 import {
   getActiveRemoteConnectionId,
+  getServerBaseUrl,
   getShellTransport,
   getTransport,
   isDesktop,
   isRemoteDesktopMode,
   notifyRemoteDesktopUnauthorized,
 } from "./transport"
+import { toErrorMessage } from "./app-error"
+import {
+  resolveMediaSrc,
+  type WorkspaceMediaCapability,
+} from "./workspace-media"
+import {
+  beginTrackedDownload,
+  completeTrackedDownload,
+  failTrackedDownload,
+  markTrackedDownloadCancelled,
+  markTransferErrorReported,
+  newTransferId,
+  wasCancelRequested,
+} from "./workspace-transfers"
 import { getCodegToken } from "./transport/web-auth"
 import { notifyWebUnauthorized } from "./transport/web-connection-store"
 import { getCurrentEffectiveAppLocale } from "./i18n"
@@ -4469,8 +4484,28 @@ export const WORKSPACE_DOWNLOAD_CANCELLED = "cancelled" as const
 
 export type WorkspaceDownloadResult =
   | { status: "started" }
-  | { status: "done"; savedPath?: string; bytes?: number; transferId?: string }
+  | {
+      status: "done"
+      savedPath?: string
+      bytes?: number
+      transferId?: string
+      /** The transfer UI already announced the outcome (progress toast →
+       *  "Downloaded"), so the caller shouldn't toast it again. */
+      reported?: boolean
+    }
   | { status: typeof WORKSPACE_DOWNLOAD_CANCELLED }
+
+function isTransferCancelledError(err: unknown): boolean {
+  return (
+    err !== null &&
+    typeof err === "object" &&
+    (err as { message?: unknown }).message === "Workspace transfer cancelled"
+  )
+}
+
+function fileNameFromPath(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? ""
+}
 
 export async function downloadWorkspaceFile(
   rootPath: string,
@@ -4539,6 +4574,14 @@ async function downloadWorkspaceViaRemoteProxy(opts: {
   if (!savePath) {
     return { status: WORKSPACE_DOWNLOAD_CANCELLED }
   }
+  // Register the progress row BEFORE invoking, under an id Rust adopts, so
+  // the toast (and its Cancel) is up while the ticket is still being issued.
+  const transferId = newTransferId()
+  beginTrackedDownload({
+    id: transferId,
+    name: fileNameFromPath(savePath) || opts.suggestedName,
+    savePath,
+  })
   const { invoke } = await import("@tauri-apps/api/core")
   let result: { transferId: string; bytes: number }
   try {
@@ -4549,20 +4592,63 @@ async function downloadWorkspaceViaRemoteProxy(opts: {
         rootPath: opts.rootPath,
         path: opts.path,
         savePath,
+        transferId,
       }
     )
   } catch (err) {
+    if (wasCancelRequested(transferId) || isTransferCancelledError(err)) {
+      markTrackedDownloadCancelled(transferId)
+      return { status: WORKSPACE_DOWNLOAD_CANCELLED }
+    }
+    failTrackedDownload(transferId, toErrorMessage(err))
     if (isRemoteAuthenticationFailed(err)) {
       notifyRemoteDesktopUnauthorized()
     }
-    throw err
+    throw markTransferErrorReported(err)
   }
+  completeTrackedDownload(transferId, result.bytes)
   return {
     status: "done",
     savedPath: savePath,
     bytes: result.bytes,
     transferId: result.transferId,
+    reported: true,
   }
+}
+
+// Video preview streaming
+
+/**
+ * Mint a streaming capability for one video file and resolve the `src` a
+ * `<video>` element loads it from in this window (see `lib/workspace-media`).
+ * `path` is relative to `rootPath`, with the same rules as a download.
+ */
+export async function openWorkspaceMediaStream(
+  rootPath: string,
+  path: string
+): Promise<WorkspaceMediaCapability & { src: string }> {
+  const capability = await getTransport().call<WorkspaceMediaCapability>(
+    "workspace_media_capability",
+    { rootPath, path }
+  )
+  const desktop = isDesktop()
+  const convertFileSrc = desktop
+    ? (await import("@tauri-apps/api/core")).convertFileSrc
+    : undefined
+  return {
+    ...capability,
+    src: resolveMediaSrc(capability, {
+      desktop,
+      remoteConnectionId: getActiveRemoteConnectionId(),
+      serverBaseUrl: getServerBaseUrl(),
+      convertFileSrc,
+    }),
+  }
+}
+
+/** Drop a capability early (the viewer closed). Best-effort. */
+export async function revokeWorkspaceMediaStream(token: string): Promise<void> {
+  await getTransport().call<boolean>("workspace_media_revoke", { token })
 }
 
 // File tree and git log commands

@@ -2262,6 +2262,27 @@
         "refresh": "Atualizar"
       }
     },
+    "transfers": {
+      "title": "Downloads",
+      "downloading": "Baixando",
+      "preparing": "Iniciando…",
+      "progress": "{loaded} de {total}",
+      "progressNoTotal": "{loaded} baixados",
+      "timeLeft": "Faltam {time}",
+      "done": "Baixado",
+      "failed": "Falha no download",
+      "cancelled": "Download cancelado",
+      "cancel": "Cancelar",
+      "cancelling": "Cancelando…",
+      "dismiss": "Fechar",
+      "open": "Abrir",
+      "showInFinder": "Mostrar no Finder",
+      "showInExplorer": "Mostrar no Explorador",
+      "showInFileManager": "Mostrar no gerenciador de arquivos",
+      "openFailed": "Não foi possível abrir o arquivo",
+      "progressAria": "Progresso do download de {name}",
+      "statusBarRunning": "{count, plural, one {# download em andamento} other {# downloads em andamento}}"
+    },
     "auxPanel": {
       "tabs": {
         "files": "Arquivos",
@@ -2465,6 +2486,22 @@
       "officeWatchRetry": "Tentar novamente",
       "officeServerInstallHint": "O OfficeCLI precisa estar instalado no host do servidor. Execute este comando lá e tente novamente:",
       "officeRemoteDesktopUnsupported": "A pré-visualização ao vivo não está disponível em uma janela de área de trabalho remota. Abra este espaço de trabalho na interface web do servidor para visualizar arquivos do Office."
+    },
+    "videoPreview": {
+      "loading": "Carregando vídeo…",
+      "unsupportedTitle": "Este vídeo não pode ser reproduzido aqui",
+      "unsupportedHint": "O player integrado não reproduz arquivos {format}. Baixe o arquivo ou abra-o em outro aplicativo.",
+      "loadFailed": "Não foi possível carregar o vídeo",
+      "retry": "Tentar novamente",
+      "download": "Baixar",
+      "openExternally": "Abrir externamente",
+      "openInNewTab": "Abrir em nova aba",
+      "showInFinder": "Mostrar no Finder",
+      "showInExplorer": "Mostrar no Explorador",
+      "showInFileManager": "Mostrar no gerenciador de arquivos",
+      "downloadSaved": "{name} baixado",
+      "downloadFailed": "Falha ao baixar {name}",
+      "openFailed": "Não foi possível abrir {name}"
     },
     "fileViewer": {
       "title": "Pré-visualização do ficheiro",

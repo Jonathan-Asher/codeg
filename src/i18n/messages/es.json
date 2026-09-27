@@ -2262,6 +2262,27 @@
         "refresh": "Actualizar"
       }
     },
+    "transfers": {
+      "title": "Descargas",
+      "downloading": "Descargando",
+      "preparing": "Iniciando…",
+      "progress": "{loaded} de {total}",
+      "progressNoTotal": "{loaded} descargados",
+      "timeLeft": "Quedan {time}",
+      "done": "Descargado",
+      "failed": "Error en la descarga",
+      "cancelled": "Descarga cancelada",
+      "cancel": "Cancelar",
+      "cancelling": "Cancelando…",
+      "dismiss": "Cerrar",
+      "open": "Abrir",
+      "showInFinder": "Mostrar en Finder",
+      "showInExplorer": "Mostrar en el Explorador",
+      "showInFileManager": "Mostrar en el gestor de archivos",
+      "openFailed": "No se pudo abrir el archivo",
+      "progressAria": "Progreso de la descarga de {name}",
+      "statusBarRunning": "{count, plural, one {# descarga en curso} other {# descargas en curso}}"
+    },
     "auxPanel": {
       "tabs": {
         "files": "Archivos",
@@ -2465,6 +2486,22 @@
       "officeWatchRetry": "Reintentar",
       "officeServerInstallHint": "OfficeCLI debe instalarse en el host del servidor. Ejecuta este comando allí y vuelve a intentarlo:",
       "officeRemoteDesktopUnsupported": "La vista previa en vivo no está disponible en una ventana de escritorio remoto. Abre este espacio de trabajo en la interfaz web del servidor para previsualizar archivos de Office."
+    },
+    "videoPreview": {
+      "loading": "Cargando vídeo…",
+      "unsupportedTitle": "Este vídeo no se puede reproducir aquí",
+      "unsupportedHint": "El reproductor integrado no puede reproducir archivos {format}. Descarga el archivo o ábrelo en otra aplicación.",
+      "loadFailed": "No se pudo cargar el vídeo",
+      "retry": "Reintentar",
+      "download": "Descargar",
+      "openExternally": "Abrir externamente",
+      "openInNewTab": "Abrir en una pestaña nueva",
+      "showInFinder": "Mostrar en Finder",
+      "showInExplorer": "Mostrar en el Explorador",
+      "showInFileManager": "Mostrar en el gestor de archivos",
+      "downloadSaved": "{name} descargado",
+      "downloadFailed": "No se pudo descargar {name}",
+      "openFailed": "No se pudo abrir {name}"
     },
     "fileViewer": {
       "title": "Vista previa del archivo",

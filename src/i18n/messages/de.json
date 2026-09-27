@@ -2262,6 +2262,27 @@
         "refresh": "Aktualisieren"
       }
     },
+    "transfers": {
+      "title": "Downloads",
+      "downloading": "Wird heruntergeladen",
+      "preparing": "Wird gestartet…",
+      "progress": "{loaded} von {total}",
+      "progressNoTotal": "{loaded} heruntergeladen",
+      "timeLeft": "Noch {time}",
+      "done": "Heruntergeladen",
+      "failed": "Download fehlgeschlagen",
+      "cancelled": "Download abgebrochen",
+      "cancel": "Abbrechen",
+      "cancelling": "Wird abgebrochen…",
+      "dismiss": "Schließen",
+      "open": "Öffnen",
+      "showInFinder": "Im Finder anzeigen",
+      "showInExplorer": "Im Explorer anzeigen",
+      "showInFileManager": "Im Dateimanager anzeigen",
+      "openFailed": "Datei konnte nicht geöffnet werden",
+      "progressAria": "Download-Fortschritt für {name}",
+      "statusBarRunning": "{count, plural, one {# Download läuft} other {# Downloads laufen}}"
+    },
     "auxPanel": {
       "tabs": {
         "files": "Dateien",
@@ -2465,6 +2486,22 @@
       "officeWatchRetry": "Erneut versuchen",
       "officeServerInstallHint": "OfficeCLI muss auf dem Server-Host installiert sein. Führe diesen Befehl dort aus und versuche es erneut:",
       "officeRemoteDesktopUnsupported": "Die Live-Vorschau ist in einem Remote-Desktop-Fenster nicht verfügbar. Öffne diesen Arbeitsbereich in der Web-Oberfläche des Servers, um Office-Dateien anzusehen."
+    },
+    "videoPreview": {
+      "loading": "Video wird geladen…",
+      "unsupportedTitle": "Dieses Video kann hier nicht abgespielt werden",
+      "unsupportedHint": "Der integrierte Player kann keine {format}-Dateien abspielen. Lade die Datei herunter oder öffne sie in einer anderen App.",
+      "loadFailed": "Video konnte nicht geladen werden",
+      "retry": "Erneut versuchen",
+      "download": "Herunterladen",
+      "openExternally": "Extern öffnen",
+      "openInNewTab": "In neuem Tab öffnen",
+      "showInFinder": "Im Finder anzeigen",
+      "showInExplorer": "Im Explorer anzeigen",
+      "showInFileManager": "Im Dateimanager anzeigen",
+      "downloadSaved": "{name} heruntergeladen",
+      "downloadFailed": "{name} konnte nicht heruntergeladen werden",
+      "openFailed": "{name} konnte nicht geöffnet werden"
     },
     "fileViewer": {
       "title": "Dateivorschau",

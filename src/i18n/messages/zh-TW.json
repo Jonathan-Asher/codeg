@@ -2262,6 +2262,27 @@
         "refresh": "重新整理"
       }
     },
+    "transfers": {
+      "title": "下載",
+      "downloading": "正在下載",
+      "preparing": "正在開始…",
+      "progress": "{loaded} / {total}",
+      "progressNoTotal": "已下載 {loaded}",
+      "timeLeft": "剩餘 {time}",
+      "done": "已下載",
+      "failed": "下載失敗",
+      "cancelled": "下載已取消",
+      "cancel": "取消",
+      "cancelling": "正在取消…",
+      "dismiss": "關閉",
+      "open": "開啟",
+      "showInFinder": "在 Finder 中顯示",
+      "showInExplorer": "在檔案總管中顯示",
+      "showInFileManager": "在檔案管理員中顯示",
+      "openFailed": "無法開啟檔案",
+      "progressAria": "{name} 的下載進度",
+      "statusBarRunning": "{count, plural, other {# 個下載進行中}}"
+    },
     "auxPanel": {
       "tabs": {
         "files": "檔案",
@@ -2465,6 +2486,22 @@
       "officeWatchRetry": "重試",
       "officeServerInstallHint": "OfficeCLI 需安裝在伺服器主機上。請在伺服器上執行以下指令後重試：",
       "officeRemoteDesktopUnsupported": "遠端桌面視窗暫不支援即時預覽。請在伺服器的 Web 介面中開啟此工作區以預覽 Office 檔案。"
+    },
+    "videoPreview": {
+      "loading": "正在載入影片…",
+      "unsupportedTitle": "無法在此播放此影片",
+      "unsupportedHint": "內建播放器無法播放 {format} 檔案。請下載檔案或以其他應用程式開啟。",
+      "loadFailed": "無法載入影片",
+      "retry": "重試",
+      "download": "下載",
+      "openExternally": "以外部應用程式開啟",
+      "openInNewTab": "在新分頁中開啟",
+      "showInFinder": "在 Finder 中顯示",
+      "showInExplorer": "在檔案總管中顯示",
+      "showInFileManager": "在檔案管理員中顯示",
+      "downloadSaved": "已下載 {name}",
+      "downloadFailed": "下載 {name} 失敗",
+      "openFailed": "無法開啟 {name}"
     },
     "fileViewer": {
       "title": "檔案預覽",

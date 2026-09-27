@@ -188,6 +188,71 @@ export function isImageFile(path: string): boolean {
   return IMAGE_EXTENSIONS.has(ext)
 }
 
+/**
+ * How likely the in-app `<video>` element is to play a container:
+ *
+ * - `native`: every engine codeg runs in (WebKit desktop webview, Chromium,
+ *   Firefox) plays the common codecs in it.
+ * - `maybe`: some engines do, some don't (Matroska plays in Chromium but not
+ *   WebKit, Ogg in Chromium/Firefox but not WebKit). Worth trying; the viewer
+ *   falls back to its "can't play" notice when the element reports an error.
+ * - `unsupported`: no browser engine plays it. Not worth a request — the
+ *   viewer goes straight to the notice with Download / Open externally.
+ *
+ * Deliberately excludes `.ts` (MPEG transport stream): it is a TypeScript file
+ * far more often than a video in a code workspace.
+ */
+export type VideoPlaybackSupport = "native" | "maybe" | "unsupported"
+
+const VIDEO_EXTENSIONS = new Map<string, VideoPlaybackSupport>([
+  ["mp4", "native"],
+  ["m4v", "native"],
+  ["mov", "native"],
+  ["webm", "native"],
+  ["mkv", "maybe"],
+  ["ogv", "maybe"],
+  ["3gp", "maybe"],
+  ["avi", "unsupported"],
+  ["wmv", "unsupported"],
+  ["flv", "unsupported"],
+  ["mpg", "unsupported"],
+  ["mpeg", "unsupported"],
+])
+
+function lowerExtension(path: string): string {
+  const basename = path.toLowerCase().split(/[\\/]/).pop() ?? ""
+  const dot = basename.lastIndexOf(".")
+  return dot <= 0 ? "" : basename.slice(dot + 1)
+}
+
+/** Video files open in the streaming video viewer instead of the editor. */
+export function isVideoFile(path: string | null | undefined): boolean {
+  return videoPlaybackSupport(path) !== null
+}
+
+/** Playback expectation for a video path; null for anything that isn't one. */
+export function videoPlaybackSupport(
+  path: string | null | undefined
+): VideoPlaybackSupport | null {
+  if (!path) return null
+  return VIDEO_EXTENSIONS.get(lowerExtension(path)) ?? null
+}
+
+/**
+ * The synthetic `language` a file tab is seeded with when it opens in a
+ * dedicated viewer rather than the text editor; null means "text — use
+ * `languageFromPath`". Image wins over the rest because `.svg` is both an
+ * image and text; office and video extensions never overlap.
+ */
+export type FilePreviewKind = "image" | "office" | "video"
+
+export function filePreviewKind(path: string): FilePreviewKind | null {
+  if (isImageFile(path)) return "image"
+  if (isOfficePreviewable(path)) return "office"
+  if (isVideoFile(path)) return "video"
+  return null
+}
+
 // Images git can only diff as binary — the ones a text diff has nothing to say
 // about, so the diff surfaces render them as pictures instead. `.svg` is
 // deliberately excluded: it is text, `git diff` produces a real line diff for

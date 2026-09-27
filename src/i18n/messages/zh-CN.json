@@ -2262,6 +2262,27 @@
         "refresh": "刷新"
       }
     },
+    "transfers": {
+      "title": "下载",
+      "downloading": "正在下载",
+      "preparing": "正在开始…",
+      "progress": "{loaded} / {total}",
+      "progressNoTotal": "已下载 {loaded}",
+      "timeLeft": "剩余 {time}",
+      "done": "已下载",
+      "failed": "下载失败",
+      "cancelled": "下载已取消",
+      "cancel": "取消",
+      "cancelling": "正在取消…",
+      "dismiss": "关闭",
+      "open": "打开",
+      "showInFinder": "在访达中显示",
+      "showInExplorer": "在资源管理器中显示",
+      "showInFileManager": "在文件管理器中显示",
+      "openFailed": "无法打开文件",
+      "progressAria": "{name} 的下载进度",
+      "statusBarRunning": "{count, plural, other {# 个下载进行中}}"
+    },
     "auxPanel": {
       "tabs": {
         "files": "文件",
@@ -2465,6 +2486,22 @@
       "officeWatchRetry": "重试",
       "officeServerInstallHint": "OfficeCLI 需安装在服务器主机上。请在服务器上运行以下命令后重试：",
       "officeRemoteDesktopUnsupported": "远程桌面窗口暂不支持实时预览。请在服务器的 Web 界面中打开此工作区来预览 Office 文件。"
+    },
+    "videoPreview": {
+      "loading": "正在加载视频…",
+      "unsupportedTitle": "无法在此播放该视频",
+      "unsupportedHint": "内置播放器无法播放 {format} 文件。请下载该文件或用其他应用打开。",
+      "loadFailed": "无法加载视频",
+      "retry": "重试",
+      "download": "下载",
+      "openExternally": "用外部应用打开",
+      "openInNewTab": "在新标签页中打开",
+      "showInFinder": "在访达中显示",
+      "showInExplorer": "在资源管理器中显示",
+      "showInFileManager": "在文件管理器中显示",
+      "downloadSaved": "已下载 {name}",
+      "downloadFailed": "下载 {name} 失败",
+      "openFailed": "无法打开 {name}"
     },
     "fileViewer": {
       "title": "文件预览",

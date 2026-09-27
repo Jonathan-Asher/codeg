@@ -6,6 +6,7 @@ import { StatusBarTasks } from "@/components/layout/status-bar-tasks"
 import { StatusBarAlerts } from "@/components/layout/status-bar-alerts"
 import { StatusBarMcp } from "@/components/layout/status-bar-mcp"
 import { StatusBarUpdate } from "@/components/layout/status-bar-update"
+import { StatusBarTransfers } from "@/components/layout/workspace-transfers"
 import { CommandDropdown } from "@/components/layout/command-dropdown"
 import { QuickActionsDropdown } from "@/components/layout/quick-actions-dropdown"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -26,6 +27,7 @@ export function StatusBar() {
           <StatusBarPlanUsage compact />
         </div>
         <div className="flex items-center gap-3">
+          <StatusBarTransfers />
           <StatusBarUpdate />
           <CommandDropdown />
           <StatusBarMcp />
@@ -62,6 +64,9 @@ export function StatusBar() {
         <StatusBarPlanUsage />
       </div>
       <div className="flex items-center gap-4">
+        {/* Remote-workspace downloads: live progress, and the way back to a
+            download whose toast was closed. Renders nothing when idle. */}
+        <StatusBarTransfers />
         <StatusBarUpdate />
         <StatusBarTasks />
         {/* Command launcher (moved from the aux "session details" tab), taking

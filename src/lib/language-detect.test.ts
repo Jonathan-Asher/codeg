@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  filePreviewKind,
   isHiddenPath,
   isOfficeOwnerFile,
+  isVideoFile,
   languageFromPath,
+  videoPlaybackSupport,
 } from "./language-detect"
 
 describe("languageFromPath", () => {
@@ -285,5 +288,52 @@ describe("isOfficeOwnerFile", () => {
     expect(isOfficeOwnerFile("")).toBe(false)
     expect(isOfficeOwnerFile(null)).toBe(false)
     expect(isOfficeOwnerFile(undefined)).toBe(false)
+  })
+})
+
+describe("video viewer choice", () => {
+  it.each([
+    ["clip.mp4", "native"],
+    ["/Users/me/Movies/Clip.MOV", "native"],
+    ["C:\\media\\talk.webm", "native"],
+    ["demo.m4v", "native"],
+    ["recording.mkv", "maybe"],
+    ["intro.ogv", "maybe"],
+    ["phone.3gp", "maybe"],
+    ["old.avi", "unsupported"],
+    ["legacy.wmv", "unsupported"],
+    ["flash.flv", "unsupported"],
+    ["dvd.mpeg", "unsupported"],
+  ] as const)("%s is a video (%s)", (path, support) => {
+    expect(isVideoFile(path)).toBe(true)
+    expect(videoPlaybackSupport(path)).toBe(support)
+    expect(filePreviewKind(path)).toBe("video")
+  })
+
+  it.each([
+    // `.ts` is TypeScript in a code workspace, never an MPEG transport stream.
+    ["src/app.ts"],
+    ["notes.txt"],
+    ["mp4"],
+    [".mp4"],
+    ["movies.mp4/readme.md"],
+    [""],
+  ])("%s is not a video", (path) => {
+    expect(isVideoFile(path)).toBe(false)
+    expect(videoPlaybackSupport(path)).toBeNull()
+  })
+
+  it("treats nullish input as not a video", () => {
+    expect(isVideoFile(null)).toBe(false)
+    expect(videoPlaybackSupport(undefined)).toBeNull()
+  })
+
+  it("routes every file to exactly one viewer", () => {
+    expect(filePreviewKind("logo.png")).toBe("image")
+    expect(filePreviewKind("icon.svg")).toBe("image")
+    expect(filePreviewKind("report.docx")).toBe("office")
+    expect(filePreviewKind("talk.mp4")).toBe("video")
+    expect(filePreviewKind("main.rs")).toBeNull()
+    expect(filePreviewKind("README.md")).toBeNull()
   })
 })

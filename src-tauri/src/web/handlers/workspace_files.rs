@@ -37,6 +37,10 @@ use tokio_util::io::ReaderStream;
 
 use crate::app_error::AppCommandError;
 use crate::app_state::AppState;
+use crate::workspace_media::{
+    cap_plan, content_range, is_valid_media_token, media_content_type, plan_range, read_span,
+    unsatisfied_content_range, RangePlan, MEDIA_ROUTE_PREFIX,
+};
 use crate::workspace_transfer::{DownloadKind, DownloadTicketIssued, DownloadTicketSpec};
 
 // ---------------------------------------------------------------------------
@@ -64,6 +68,32 @@ pub struct DownloadTicketRequest {
     pub root_path: String,
     pub path: String,
     pub kind: DownloadKind,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaCapabilityRequest {
+    pub root_path: String,
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaRevokeRequest {
+    pub token: String,
+}
+
+/// A minted streaming capability. `url` is the server-relative byte endpoint
+/// (web mode loads it directly; the desktop URI scheme forwards to it).
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaCapabilityIssued {
+    pub token: String,
+    pub url: String,
+    pub filename: String,
+    pub size: u64,
+    pub content_type: String,
+    pub expires_in_secs: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -638,7 +668,7 @@ fn ensure_workspace_root(root: &Path) -> Result<(), AppCommandError> {
     Ok(())
 }
 
-fn resolve_download_file_target(
+pub(crate) fn resolve_download_file_target(
     root_path: &str,
     rel_path: &str,
 ) -> Result<PathBuf, AppCommandError> {
@@ -744,6 +774,291 @@ pub(crate) async fn stream_file_response(
     }
 
     Ok((StatusCode::OK, headers, body).into_response())
+}
+
+// ---------------------------------------------------------------------------
+// Media streaming (video preview)
+// ---------------------------------------------------------------------------
+
+const MEDIA_LINK_EXPIRED: &str = "Media link is invalid or expired";
+
+fn inline_header(name: &str) -> Option<HeaderValue> {
+    HeaderValue::from_str(&format!(
+        "inline; filename=\"{}\"; filename*=UTF-8''{}",
+        header_safe_filename(name),
+        urlencoding::encode(name)
+    ))
+    .ok()
+}
+
+/// Mint a streaming capability for one media file. Same path rules as a
+/// single-file download (relative, no `..`, lexically inside the root), and
+/// only for a video extension — the byte endpoint answers with the type the
+/// extension implies, so it must never be handed an HTML file.
+pub(crate) async fn issue_media_capability_core(
+    manager: &crate::workspace_transfer::WorkspaceTransferManager,
+    params: MediaCapabilityRequest,
+) -> Result<MediaCapabilityIssued, AppCommandError> {
+    let target = resolve_download_file_target(&params.root_path, &params.path)?;
+    let filename = target
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("media")
+        .to_string();
+    let content_type = media_content_type(&filename).ok_or_else(|| {
+        AppCommandError::invalid_input("Only video files can be streamed for preview")
+    })?;
+    let size = tokio::fs::metadata(&target)
+        .await
+        .map_err(AppCommandError::io)?
+        .len();
+    let token = manager
+        .issue_media_capability(
+            PathBuf::from(&params.root_path),
+            params.path,
+            filename.clone(),
+        )
+        .await;
+    Ok(MediaCapabilityIssued {
+        url: format!(
+            "{MEDIA_ROUTE_PREFIX}/{token}/{}",
+            urlencoding::encode(&filename)
+        ),
+        token,
+        filename,
+        size,
+        content_type: content_type.to_string(),
+        expires_in_secs: manager.media_idle_ttl_secs(),
+    })
+}
+
+pub async fn create_media_capability(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<MediaCapabilityRequest>,
+) -> Result<Json<MediaCapabilityIssued>, AppCommandError> {
+    Ok(Json(
+        issue_media_capability_core(&state.workspace_transfer, params).await?,
+    ))
+}
+
+pub async fn revoke_media_capability(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<MediaRevokeRequest>,
+) -> Json<bool> {
+    Json(
+        state
+            .workspace_transfer
+            .revoke_media_capability(&params.token)
+            .await,
+    )
+}
+
+/// `GET /api/workspace_media/{token}` — public: the capability in the path is
+/// the credential (a `<video src>` cannot send a Bearer header).
+pub async fn serve_media(
+    Extension(state): Extension<Arc<AppState>>,
+    AxumPath(token): AxumPath<String>,
+    headers: HeaderMap,
+) -> Response {
+    serve_media_with_headers(&state.workspace_transfer, &token, &headers).await
+}
+
+/// `GET /api/workspace_media/{token}/{name}` — same as [`serve_media`]; the
+/// trailing file name only gives players (and "open in new tab") a URL that
+/// ends in the real extension.
+pub async fn serve_named_media(
+    Extension(state): Extension<Arc<AppState>>,
+    AxumPath((token, _name)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    serve_media_with_headers(&state.workspace_transfer, &token, &headers).await
+}
+
+async fn serve_media_with_headers(
+    manager: &crate::workspace_transfer::WorkspaceTransferManager,
+    token: &str,
+    headers: &HeaderMap,
+) -> Response {
+    let range = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
+    match stream_media_response(manager, token, range).await {
+        Ok(response) => response,
+        Err(err) => err.into_response(),
+    }
+}
+
+/// Resolve a capability to the file it names, re-applying the download path
+/// rules — the file may have been moved or replaced since the mint.
+pub(crate) async fn resolve_media_target(
+    manager: &crate::workspace_transfer::WorkspaceTransferManager,
+    token: &str,
+) -> Result<(PathBuf, String), AppCommandError> {
+    let invalid = || AppCommandError::not_found(MEDIA_LINK_EXPIRED);
+    if !is_valid_media_token(token) {
+        return Err(invalid());
+    }
+    let cap = manager
+        .resolve_media_capability(token)
+        .await
+        .ok_or_else(invalid)?;
+    let target =
+        resolve_download_file_target(&cap.root_path.to_string_lossy(), &cap.relative_path)?;
+    Ok((target, cap.filename))
+}
+
+/// Headers every media answer carries, whatever its status.
+pub(crate) fn media_response_headers(filename: &str) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static(
+            media_content_type(filename).unwrap_or("application/octet-stream"),
+        ),
+    );
+    headers.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, no-store"),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    if let Some(v) = inline_header(filename) {
+        headers.insert(header::CONTENT_DISPOSITION, v);
+    }
+    headers
+}
+
+fn header_value(value: impl ToString) -> HeaderValue {
+    HeaderValue::from_str(&value.to_string()).unwrap_or_else(|_| HeaderValue::from_static("0"))
+}
+
+/// Serve a capability's file straight from disk, honouring `Range`. The body
+/// streams in 64 KiB reads, so a multi-GB file costs no more memory than a
+/// small one, and a seek is just a new request at a new offset.
+async fn stream_media_response(
+    manager: &crate::workspace_transfer::WorkspaceTransferManager,
+    token: &str,
+    range: Option<&str>,
+) -> Result<Response, AppCommandError> {
+    use tokio::io::AsyncSeekExt;
+
+    let (target, filename) = resolve_media_target(manager, token).await?;
+    let len = tokio::fs::metadata(&target)
+        .await
+        .map_err(AppCommandError::io)?
+        .len();
+    let mut headers = media_response_headers(&filename);
+
+    let (status, start, count) = match plan_range(range, len) {
+        RangePlan::Unsatisfiable => {
+            headers.insert(
+                header::CONTENT_RANGE,
+                header_value(unsatisfied_content_range(len)),
+            );
+            return Ok((StatusCode::RANGE_NOT_SATISFIABLE, headers).into_response());
+        }
+        RangePlan::Full => (StatusCode::OK, 0, len),
+        RangePlan::Partial { start, end } => {
+            headers.insert(
+                header::CONTENT_RANGE,
+                header_value(content_range(start, end, len)),
+            );
+            (StatusCode::PARTIAL_CONTENT, start, end - start + 1)
+        }
+    };
+    headers.insert(header::CONTENT_LENGTH, header_value(count));
+
+    let mut file = tokio::fs::File::open(&target)
+        .await
+        .map_err(AppCommandError::io)?;
+    if start > 0 {
+        file.seek(std::io::SeekFrom::Start(start))
+            .await
+            .map_err(AppCommandError::io)?;
+    }
+    let body = Body::from_stream(ReaderStream::with_capacity(file.take(count), 64 * 1024));
+    Ok((status, headers, body).into_response())
+}
+
+/// Render an error as a whole-body HTTP response, for the URI-scheme
+/// transports (same status and JSON body the axum handlers would send).
+#[cfg_attr(not(feature = "tauri-runtime"), allow(dead_code))]
+pub(crate) fn buffered_error_response(err: AppCommandError) -> axum::http::Response<Vec<u8>> {
+    let body = serde_json::to_vec(&err).unwrap_or_default();
+    let status = err.into_response().status();
+    let mut response = axum::http::Response::new(body);
+    *response.status_mut() = status;
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    response
+}
+
+/// The same answer as [`stream_media_response`], but held in memory and
+/// capped at `max_chunk` bytes — the desktop `codeg-media://` scheme hands its
+/// responder a whole body, so each Range request gets one bounded slice.
+#[cfg_attr(not(feature = "tauri-runtime"), allow(dead_code))]
+pub(crate) async fn buffered_media_response(
+    manager: &crate::workspace_transfer::WorkspaceTransferManager,
+    token: &str,
+    range: Option<&str>,
+    max_chunk: u64,
+) -> axum::http::Response<Vec<u8>> {
+    match buffered_media_inner(manager, token, range, max_chunk).await {
+        Ok(response) => response,
+        Err(err) => buffered_error_response(err),
+    }
+}
+
+async fn buffered_media_inner(
+    manager: &crate::workspace_transfer::WorkspaceTransferManager,
+    token: &str,
+    range: Option<&str>,
+    max_chunk: u64,
+) -> Result<axum::http::Response<Vec<u8>>, AppCommandError> {
+    let (target, filename) = resolve_media_target(manager, token).await?;
+    let len = tokio::fs::metadata(&target)
+        .await
+        .map_err(AppCommandError::io)?
+        .len();
+    let mut headers = media_response_headers(&filename);
+
+    let (status, body) = match cap_plan(plan_range(range, len), len, max_chunk) {
+        RangePlan::Unsatisfiable => {
+            headers.insert(
+                header::CONTENT_RANGE,
+                header_value(unsatisfied_content_range(len)),
+            );
+            (StatusCode::RANGE_NOT_SATISFIABLE, Vec::new())
+        }
+        RangePlan::Full if len == 0 => (StatusCode::OK, Vec::new()),
+        RangePlan::Full => (
+            StatusCode::OK,
+            read_span(&target, 0, len - 1)
+                .await
+                .map_err(AppCommandError::io)?,
+        ),
+        RangePlan::Partial { start, end } => {
+            let body = read_span(&target, start, end)
+                .await
+                .map_err(AppCommandError::io)?;
+            // The file may have shrunk since the metadata read; describe the
+            // bytes actually sent.
+            let sent_end = start + (body.len() as u64).saturating_sub(1);
+            headers.insert(
+                header::CONTENT_RANGE,
+                header_value(content_range(start, sent_end.max(start), len)),
+            );
+            (StatusCode::PARTIAL_CONTENT, body)
+        }
+    };
+    headers.insert(header::CONTENT_LENGTH, header_value(body.len()));
+    let mut response = axum::http::Response::new(body);
+    *response.status_mut() = status;
+    *response.headers_mut() = headers;
+    Ok(response)
 }
 
 // ---------------------------------------------------------------------------
@@ -1117,5 +1432,227 @@ mod tests {
             resolve_upload_chain(root.path(), &root.path().join("api").join("sub")).is_err(),
             "unlinking must revoke upload access too"
         );
+    }
+
+    // ── Media streaming ────────────────────────────────────────────────
+
+    fn media_manager() -> crate::workspace_transfer::WorkspaceTransferManager {
+        crate::workspace_transfer::WorkspaceTransferManager::new_for_tests(
+            std::time::Duration::from_secs(60),
+        )
+    }
+
+    async fn mint_clip(
+        manager: &crate::workspace_transfer::WorkspaceTransferManager,
+    ) -> (tempfile::TempDir, MediaCapabilityIssued) {
+        let root = tempfile::tempdir().unwrap();
+        tokio::fs::create_dir(root.path().join("media"))
+            .await
+            .unwrap();
+        tokio::fs::write(root.path().join("media/clip.mp4"), b"0123456789")
+            .await
+            .unwrap();
+        let issued = issue_media_capability_core(
+            manager,
+            MediaCapabilityRequest {
+                root_path: root.path().to_string_lossy().to_string(),
+                path: "media/clip.mp4".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        (root, issued)
+    }
+
+    async fn fetch(
+        manager: &crate::workspace_transfer::WorkspaceTransferManager,
+        token: &str,
+        range: Option<&str>,
+    ) -> (StatusCode, HeaderMap, Vec<u8>) {
+        let response = match stream_media_response(manager, token, range).await {
+            Ok(response) => response,
+            Err(err) => err.into_response(),
+        };
+        let status = response.status();
+        let headers = response.headers().clone();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec();
+        (status, headers, body)
+    }
+
+    fn header_str<'a>(headers: &'a HeaderMap, name: header::HeaderName) -> &'a str {
+        headers.get(name).and_then(|v| v.to_str().ok()).unwrap_or("")
+    }
+
+    #[tokio::test]
+    async fn media_capability_describes_the_stream() {
+        let manager = media_manager();
+        let (_root, issued) = mint_clip(&manager).await;
+        assert_eq!(issued.filename, "clip.mp4");
+        assert_eq!(issued.size, 10);
+        assert_eq!(issued.content_type, "video/mp4");
+        assert_eq!(
+            issued.url,
+            format!("/api/workspace_media/{}/clip.mp4", issued.token)
+        );
+        assert!(is_valid_media_token(&issued.token));
+    }
+
+    #[tokio::test]
+    async fn media_without_range_streams_the_whole_file() {
+        let manager = media_manager();
+        let (_root, issued) = mint_clip(&manager).await;
+        let (status, headers, body) = fetch(&manager, &issued.token, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, b"0123456789");
+        assert_eq!(header_str(&headers, header::CONTENT_LENGTH), "10");
+        assert_eq!(header_str(&headers, header::CONTENT_TYPE), "video/mp4");
+        assert_eq!(header_str(&headers, header::ACCEPT_RANGES), "bytes");
+        assert!(headers.get(header::CONTENT_RANGE).is_none());
+    }
+
+    #[tokio::test]
+    async fn media_closed_range_is_partial_content() {
+        let manager = media_manager();
+        let (_root, issued) = mint_clip(&manager).await;
+        let (status, headers, body) = fetch(&manager, &issued.token, Some("bytes=2-5")).await;
+        assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+        assert_eq!(body, b"2345");
+        assert_eq!(header_str(&headers, header::CONTENT_RANGE), "bytes 2-5/10");
+        assert_eq!(header_str(&headers, header::CONTENT_LENGTH), "4");
+        assert_eq!(header_str(&headers, header::ACCEPT_RANGES), "bytes");
+    }
+
+    #[tokio::test]
+    async fn media_open_ended_range_runs_to_eof() {
+        let manager = media_manager();
+        let (_root, issued) = mint_clip(&manager).await;
+        let (status, headers, body) = fetch(&manager, &issued.token, Some("bytes=7-")).await;
+        assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+        assert_eq!(body, b"789");
+        assert_eq!(header_str(&headers, header::CONTENT_RANGE), "bytes 7-9/10");
+    }
+
+    #[tokio::test]
+    async fn media_suffix_range_serves_the_tail() {
+        let manager = media_manager();
+        let (_root, issued) = mint_clip(&manager).await;
+        let (status, headers, body) = fetch(&manager, &issued.token, Some("bytes=-3")).await;
+        assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+        assert_eq!(body, b"789");
+        assert_eq!(header_str(&headers, header::CONTENT_RANGE), "bytes 7-9/10");
+    }
+
+    #[tokio::test]
+    async fn media_unsatisfiable_range_is_416() {
+        let manager = media_manager();
+        let (_root, issued) = mint_clip(&manager).await;
+        for range in ["bytes=10-", "bytes=50-60", "bytes=6-2", "bytes=x-"] {
+            let (status, headers, body) = fetch(&manager, &issued.token, Some(range)).await;
+            assert_eq!(status, StatusCode::RANGE_NOT_SATISFIABLE, "{range}");
+            assert_eq!(header_str(&headers, header::CONTENT_RANGE), "bytes */10");
+            assert!(body.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn media_link_is_refused_when_unknown_malformed_or_revoked() {
+        let manager = media_manager();
+        let (_root, issued) = mint_clip(&manager).await;
+        let (status, _, _) = fetch(&manager, "0123456789abcdef0123456789abcdef", None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, _, _) = fetch(&manager, "../../etc/passwd", None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(manager.revoke_media_capability(&issued.token).await);
+        let (status, _, _) = fetch(&manager, &issued.token, Some("bytes=0-1")).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn media_capability_applies_the_download_path_rules() {
+        let manager = media_manager();
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        tokio::fs::write(outside.path().join("secret.mp4"), b"x")
+            .await
+            .unwrap();
+        tokio::fs::write(root.path().join("page.html"), b"<script>")
+            .await
+            .unwrap();
+        let root_path = root.path().to_string_lossy().to_string();
+        let mint = |path: String| {
+            let root_path = root_path.clone();
+            let manager = &manager;
+            async move {
+                issue_media_capability_core(
+                    manager,
+                    MediaCapabilityRequest {
+                        root_path,
+                        path,
+                    },
+                )
+                .await
+            }
+        };
+
+        // Parent traversal and absolute paths never resolve.
+        let escape = format!(
+            "../{}/secret.mp4",
+            outside.path().file_name().unwrap().to_string_lossy()
+        );
+        assert!(mint(escape).await.unwrap_err().message.contains(".."));
+        let absolute = outside.path().join("secret.mp4").to_string_lossy().to_string();
+        assert!(mint(absolute).await.is_err());
+        // Missing files and directories are refused.
+        assert!(mint("missing.mp4".to_string()).await.is_err());
+        // Non-media files are refused, so the endpoint can't serve HTML.
+        assert!(mint("page.html".to_string()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn buffered_media_caps_each_answer_at_the_chunk_size() {
+        let manager = media_manager();
+        let (_root, issued) = mint_clip(&manager).await;
+
+        // Open-ended: one 4-byte slice, announced against the real length.
+        let response = buffered_media_response(&manager, &issued.token, Some("bytes=3-"), 4).await;
+        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(response.body(), b"3456");
+        assert_eq!(
+            header_str(response.headers(), header::CONTENT_RANGE),
+            "bytes 3-6/10"
+        );
+        assert_eq!(header_str(response.headers(), header::CONTENT_LENGTH), "4");
+
+        // No Range on a file bigger than the cap: the first slice, as a 206.
+        let response = buffered_media_response(&manager, &issued.token, None, 4).await;
+        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(response.body(), b"0123");
+
+        // Small enough: the whole file, as a 200.
+        let response = buffered_media_response(&manager, &issued.token, None, 64).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.body(), b"0123456789");
+
+        let response =
+            buffered_media_response(&manager, &issued.token, Some("bytes=10-"), 4).await;
+        assert_eq!(response.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+
+        let response =
+            buffered_media_response(&manager, "0123456789abcdef0123456789abcdef", None, 4).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn media_link_stops_working_once_the_file_is_gone() {
+        let manager = media_manager();
+        let (root, issued) = mint_clip(&manager).await;
+        tokio::fs::remove_file(root.path().join("media/clip.mp4"))
+            .await
+            .unwrap();
+        let (status, _, _) = fetch(&manager, &issued.token, Some("bytes=0-")).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 }

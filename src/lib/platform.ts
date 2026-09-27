@@ -178,6 +178,31 @@ export async function revealItemInDir(path: string): Promise<void> {
 }
 
 /**
+ * Reveal a file that lives on THIS machine — a download a remote-workspace
+ * window just saved, say. `revealItemInDir` refuses in a remote-workspace
+ * window because its workspace paths name the remote host; a local save path
+ * is the one exception. Desktop only; no-op in web mode.
+ */
+export async function revealLocalItemInDir(path: string): Promise<void> {
+  if (!isDesktop()) return
+  const opener = await import("@tauri-apps/plugin-opener")
+  try {
+    await opener.revealItemInDir(path)
+  } catch (error) {
+    const dir = containingDirectory(path)
+    if (!dir) throw error
+    await opener.openPath(dir)
+  }
+}
+
+/** Open a file on THIS machine in its default app (see `revealLocalItemInDir`). */
+export async function openLocalPath(path: string): Promise<void> {
+  if (!isDesktop()) return
+  const { openPath: tauriOpenPath } = await import("@tauri-apps/plugin-opener")
+  await tauriOpenPath(path)
+}
+
+/**
  * Open a native file/directory dialog (desktop) or fallback (web).
  */
 export async function openFileDialog(options?: {

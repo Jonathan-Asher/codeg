@@ -2262,6 +2262,27 @@
         "refresh": "새로 고침"
       }
     },
+    "transfers": {
+      "title": "다운로드",
+      "downloading": "다운로드 중",
+      "preparing": "시작하는 중…",
+      "progress": "{loaded} / {total}",
+      "progressNoTotal": "{loaded} 다운로드됨",
+      "timeLeft": "{time} 남음",
+      "done": "다운로드 완료",
+      "failed": "다운로드 실패",
+      "cancelled": "다운로드 취소됨",
+      "cancel": "취소",
+      "cancelling": "취소하는 중…",
+      "dismiss": "닫기",
+      "open": "열기",
+      "showInFinder": "Finder에서 보기",
+      "showInExplorer": "탐색기에서 보기",
+      "showInFileManager": "파일 관리자에서 보기",
+      "openFailed": "파일을 열 수 없습니다",
+      "progressAria": "{name} 다운로드 진행률",
+      "statusBarRunning": "{count, plural, other {다운로드 #개 진행 중}}"
+    },
     "auxPanel": {
       "tabs": {
         "files": "파일",
@@ -2465,6 +2486,22 @@
       "officeWatchRetry": "다시 시도",
       "officeServerInstallHint": "OfficeCLI는 서버 호스트에 설치해야 합니다. 서버에서 다음 명령을 실행한 후 다시 시도하세요:",
       "officeRemoteDesktopUnsupported": "원격 데스크톱 창에서는 실시간 미리보기를 사용할 수 없습니다. Office 파일을 미리 보려면 서버의 웹 UI에서 이 작업 공간을 여세요."
+    },
+    "videoPreview": {
+      "loading": "동영상 불러오는 중…",
+      "unsupportedTitle": "이 동영상은 여기에서 재생할 수 없습니다",
+      "unsupportedHint": "내장 플레이어는 {format} 파일을 재생할 수 없습니다. 파일을 다운로드하거나 다른 앱에서 여세요.",
+      "loadFailed": "동영상을 불러오지 못했습니다",
+      "retry": "다시 시도",
+      "download": "다운로드",
+      "openExternally": "외부 앱으로 열기",
+      "openInNewTab": "새 탭에서 열기",
+      "showInFinder": "Finder에서 보기",
+      "showInExplorer": "탐색기에서 보기",
+      "showInFileManager": "파일 관리자에서 보기",
+      "downloadSaved": "{name} 다운로드 완료",
+      "downloadFailed": "{name} 다운로드 실패",
+      "openFailed": "{name}을(를) 열 수 없습니다"
     },
     "fileViewer": {
       "title": "파일 미리보기",

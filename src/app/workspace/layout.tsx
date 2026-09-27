@@ -76,6 +76,7 @@ import { FileWorkspaceHeader } from "@/components/files/file-workspace-header"
 import { FileWorkspacePanel } from "@/components/files/file-workspace-panel"
 import { ExternalConflictDialog } from "@/components/files/external-conflict-dialog"
 import { AppToaster } from "@/components/ui/app-toaster"
+import { WorkspaceTransfersToasts } from "@/components/layout/workspace-transfers"
 import {
   DeepLinkBootstrap,
   PetFocusBridge,
@@ -1253,6 +1254,8 @@ function FolderLayoutShell({ children }: { children: React.ReactNode }) {
         duration={TOAST_DURATION_MS}
         closeButton
       />
+      {/* Live progress toasts for remote-workspace downloads. */}
+      <WorkspaceTransfersToasts />
     </div>
   )
 }

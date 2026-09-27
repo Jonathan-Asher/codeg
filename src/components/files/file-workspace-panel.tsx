@@ -31,6 +31,7 @@ import { ImagePreview } from "@/components/files/image-preview"
 import { HtmlPreview } from "@/components/files/html-preview"
 import { MarkdownDocumentPreview } from "@/components/files/markdown-document-preview"
 import { OfficePreview } from "@/components/files/office-preview"
+import { VideoPreview } from "@/components/files/video-preview"
 import { isHtmlPreviewable, isOfficePreviewable } from "@/lib/language-detect"
 import { DiffViewer } from "@/components/diff/diff-viewer"
 import { ImageDiffView } from "@/components/diff/image-diff-view"
@@ -1901,6 +1902,19 @@ export function FileWorkspacePanel() {
   // Image preview
   if (isFileTab && activeFileTab && activeFileTab.language === "image") {
     return <ImagePreview key={activeFileTab.id} tab={activeFileTab} />
+  }
+
+  // Video preview: streamed through a per-file capability URL (HTTP Range),
+  // never read into the tab. Preview-only, like office documents.
+  if (isFileTab && activeFileTab && activeFileTab.language === "video") {
+    return (
+      <VideoPreview
+        key={activeFileTab.id}
+        tab={activeFileTab}
+        rootPath={activeIo?.rootPath ?? null}
+        relPath={activeIo?.ioPath ?? null}
+      />
+    )
   }
 
   // Office preview (.docx/.xlsx/.pptx → OfficeCLI HTML → sandboxed iframe).

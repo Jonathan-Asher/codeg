@@ -9,6 +9,7 @@ import { HtmlPreview } from "@/components/files/html-preview"
 import { ImagePreview } from "@/components/files/image-preview"
 import { MarkdownDocumentPreview } from "@/components/files/markdown-document-preview"
 import { OfficePreview } from "@/components/files/office-preview"
+import { VideoPreview } from "@/components/files/video-preview"
 import type { FileWorkspaceTab } from "@/contexts/workspace-context"
 import { isHtmlPreviewable } from "@/lib/language-detect"
 
@@ -22,6 +23,7 @@ import { isHtmlPreviewable } from "@/lib/language-detect"
  *
  *   language "image"  → ImagePreview      (content is a data: URL)
  *   language "office" → OfficePreview     (an officecli watch, no bytes here)
+ *   language "video"  → VideoPreview      (streamed by URL, no bytes here)
  *   HTML + preview on → HtmlPreview
  *   markdown + preview on → MarkdownDocumentPreview
  *   everything else   → shiki-highlighted source
@@ -129,6 +131,16 @@ export function FileDocumentView({
     return (
       <OfficePreview
         key={tab.id}
+        rootPath={io?.rootPath ?? null}
+        relPath={io?.ioPath ?? null}
+      />
+    )
+  }
+  if (tab.language === "video") {
+    return (
+      <VideoPreview
+        key={tab.id}
+        tab={tab}
         rootPath={io?.rootPath ?? null}
         relPath={io?.ioPath ?? null}
       />

@@ -2262,6 +2262,27 @@
         "refresh": "Actualiser"
       }
     },
+    "transfers": {
+      "title": "Téléchargements",
+      "downloading": "Téléchargement",
+      "preparing": "Démarrage…",
+      "progress": "{loaded} sur {total}",
+      "progressNoTotal": "{loaded} téléchargés",
+      "timeLeft": "{time} restantes",
+      "done": "Téléchargé",
+      "failed": "Échec du téléchargement",
+      "cancelled": "Téléchargement annulé",
+      "cancel": "Annuler",
+      "cancelling": "Annulation…",
+      "dismiss": "Fermer",
+      "open": "Ouvrir",
+      "showInFinder": "Afficher dans le Finder",
+      "showInExplorer": "Afficher dans l'Explorateur",
+      "showInFileManager": "Afficher dans le gestionnaire de fichiers",
+      "openFailed": "Impossible d'ouvrir le fichier",
+      "progressAria": "Progression du téléchargement de {name}",
+      "statusBarRunning": "{count, plural, one {# téléchargement en cours} other {# téléchargements en cours}}"
+    },
     "auxPanel": {
       "tabs": {
         "files": "Fichiers",
@@ -2465,6 +2486,22 @@
       "officeWatchRetry": "Réessayer",
       "officeServerInstallHint": "OfficeCLI doit être installé sur l'hôte du serveur. Exécutez cette commande là-bas, puis réessayez :",
       "officeRemoteDesktopUnsupported": "L'aperçu en direct n'est pas disponible dans une fenêtre de bureau à distance. Ouvrez cet espace de travail dans l'interface web du serveur pour prévisualiser les fichiers Office."
+    },
+    "videoPreview": {
+      "loading": "Chargement de la vidéo…",
+      "unsupportedTitle": "Cette vidéo ne peut pas être lue ici",
+      "unsupportedHint": "Le lecteur intégré ne peut pas lire les fichiers {format}. Téléchargez le fichier ou ouvrez-le dans une autre application.",
+      "loadFailed": "Impossible de charger la vidéo",
+      "retry": "Réessayer",
+      "download": "Télécharger",
+      "openExternally": "Ouvrir dans une autre application",
+      "openInNewTab": "Ouvrir dans un nouvel onglet",
+      "showInFinder": "Afficher dans le Finder",
+      "showInExplorer": "Afficher dans l'Explorateur",
+      "showInFileManager": "Afficher dans le gestionnaire de fichiers",
+      "downloadSaved": "{name} téléchargé",
+      "downloadFailed": "Échec du téléchargement de {name}",
+      "openFailed": "Impossible d'ouvrir {name}"
     },
     "fileViewer": {
       "title": "Aperçu du fichier",
