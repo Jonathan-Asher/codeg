@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl"
 import { useAcpActions } from "@/contexts/acp-connections-context"
 import { useTaskContext } from "@/contexts/task-context"
 import { useConnection, type UseConnectionReturn } from "@/hooks/use-connection"
-import { extractAppCommandError, toErrorMessage } from "@/lib/app-error"
+import { describeError, extractAppCommandError } from "@/lib/app-error"
 import { notify } from "@/lib/notify"
 import { isConnectionBusy } from "@/lib/connection-teardown"
 import { TurnBusyError } from "@/lib/turn-busy"
@@ -116,10 +116,30 @@ export function shouldDisconnectOnUnmount(args: {
   return !isConnectionBusy(args)
 }
 
+/** Status-bar row title (under `Folder.chat.connectionLifecycle`) for each
+ *  step of opening a session the backend reports. */
+const ATTACH_TASK_TITLE_KEYS = {
+  queued: "tasks.queuedTitle",
+  resuming: "tasks.resumingTitle",
+  loading: "tasks.loadingSessionTitle",
+  creating: "tasks.creatingSessionTitle",
+  configuring: "tasks.configuringSessionTitle",
+} as const
+
+// Status-bar row ids must be unique across every mounted view: two tabs that
+// minted `acp-connecting-<same millisecond>` shared a row, and removing one
+// removed both.
+let taskSeq = 0
+function nextTaskId(prefix: string): string {
+  taskSeq += 1
+  return `${prefix}-${taskSeq}-${Date.now()}`
+}
+
 function normalizeErrorMessage(error: unknown): string {
-  // Transport errors arrive as plain `{ code, message }` objects, which
-  // `String()` renders as "[object Object]".
-  return toErrorMessage(error)
+  // Transport errors arrive as plain `{ code, message }` objects (and ACP
+  // errors as `{ code: -32603, message, data }`), which `String()` renders as
+  // "[object Object]". `describeError` reads every shape.
+  return describeError(error)
 }
 
 function isExpectedConnectError(error: unknown): boolean {
@@ -139,6 +159,11 @@ export function useConnectionLifecycle({
 }: UseConnectionLifecycleOptions): UseConnectionLifecycleReturn {
   const t = useTranslations("Folder.chat.connectionLifecycle")
   const { setActiveKey, touchActivity } = useAcpActions()
+  // Only the view the user is looking at puts rows in the status bar. The bar
+  // is global, and every tab stays mounted: a background tab reconnecting
+  // used to fill it with its own "Initializing Pi session", right above a
+  // brand-new Claude Code conversation that had nothing to do with it.
+  const foreground = isActive || preparing
   const { addTask, updateTask, removeTask } = useTaskContext()
   const conn = useConnection(contextKey)
 
@@ -276,11 +301,31 @@ export function useConnectionLifecycle({
   // (The third leg, session init after `connected`, has its own task below.)
   // A task's label is fixed when it is added, so a leg change retires the old
   // row and mints a new one rather than leaving stale wording on screen.
+  //
+  // While connecting, the row also names the step the backend reports
+  // (`attachPhase`): "Resuming Claude Code session" says what the wait is,
+  // where a bare "Connecting" for 15 s read as stuck.
   const taskIdRef = useRef<string | null>(null)
-  const taskPhaseRef = useRef<"preparing" | "connecting" | null>(null)
+  const taskPhaseRef = useRef<string | null>(null)
+  const attachPhase = conn.attachPhase
   useEffect(() => {
-    const phase =
-      status === "connecting" ? "connecting" : preparing ? "preparing" : null
+    const attachStep =
+      attachPhase === "queued" ||
+      attachPhase === "resuming" ||
+      attachPhase === "loading" ||
+      attachPhase === "creating" ||
+      attachPhase === "configuring"
+        ? attachPhase
+        : null
+    const phase = !foreground
+      ? null
+      : status === "connecting"
+        ? attachStep
+          ? `connecting:${attachStep}`
+          : "connecting"
+        : preparing
+          ? "preparing"
+          : null
     if (phase !== null && phase === taskPhaseRef.current) return
     taskPhaseRef.current = phase
     if (taskIdRef.current) {
@@ -301,20 +346,34 @@ export function useConnectionLifecycle({
       }
     }
     if (phase === null) return
-    const id = `acp-${phase}-${Date.now()}`
+    const id = nextTaskId(`acp-${phase}`)
     taskIdRef.current = id
     const agent = getAgentLabel(agentType)
+    const title =
+      attachStep && status === "connecting"
+        ? t(ATTACH_TASK_TITLE_KEYS[attachStep], { agent })
+        : phase === "preparing"
+          ? t("tasks.preparingTitle", { agent })
+          : t("tasks.connectingTitle", { agent })
     addTask(
       id,
-      phase === "connecting"
-        ? t("tasks.connectingTitle", { agent })
-        : t("tasks.preparingTitle", { agent }),
-      phase === "connecting"
-        ? t("tasks.connectingDescription")
-        : t("tasks.preparingDescription")
+      title,
+      phase === "preparing"
+        ? t("tasks.preparingDescription")
+        : t("tasks.connectingDescription")
     )
     updateTask(id, { status: "running" })
-  }, [status, preparing, addTask, updateTask, removeTask, agentType, t])
+  }, [
+    foreground,
+    status,
+    attachPhase,
+    preparing,
+    addTask,
+    updateTask,
+    removeTask,
+    agentType,
+    t,
+  ])
 
   const clearSelectorTask = useCallback(() => {
     if (selectorTaskIdRef.current) {
@@ -325,7 +384,7 @@ export function useConnectionLifecycle({
 
   useEffect(() => {
     const isInteractive = status === "connected" || status === "prompting"
-    if (!isInteractive) {
+    if (!isInteractive || !foreground) {
       clearSelectorTask()
       return
     }
@@ -336,7 +395,7 @@ export function useConnectionLifecycle({
     }
 
     if (!selectorTaskIdRef.current) {
-      const id = `acp-session-init-${Date.now()}`
+      const id = nextTaskId("acp-session-init")
       selectorTaskIdRef.current = id
       const agent = getAgentLabel(agentType)
       addTask(
@@ -347,6 +406,7 @@ export function useConnectionLifecycle({
       updateTask(id, { status: "running" })
     }
   }, [
+    foreground,
     status,
     selectorsReady,
     agentType,
@@ -483,9 +543,7 @@ export function useConnectionLifecycle({
         // simply vanished. Surface the failure; prefer the structured backend
         // message over a bare stringification.
         const appError = extractAppCommandError(e)
-        const message =
-          appError?.message ??
-          (e instanceof Error ? e.message : String(e ?? "unknown error"))
+        const message = appError?.message ?? describeError(e)
         notify({
           level: "error",
           key: `send-failed:${contextKey}`,
