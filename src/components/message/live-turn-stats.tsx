@@ -21,6 +21,11 @@ interface LiveTurnStatsProps {
   message: LiveMessage
   agentType: AgentType
   isStreaming?: boolean
+  /** The turn is held open only for background work: the agent answered and
+   *  is idle (`0` = task count unknown). Replaces "Streaming" with
+   *  "Idle — N background tasks running", and the pulse and output speed
+   *  go, since nothing is streaming. `null` otherwise. */
+  heldBackgroundTasks?: number | null
 }
 
 interface LineChangeStats {
@@ -311,9 +316,12 @@ export function LiveTurnStats({
   message,
   agentType,
   isStreaming = true,
+  heldBackgroundTasks = null,
 }: LiveTurnStatsProps) {
   const locale = useLocale()
   const t = useTranslations("Folder.chat.liveTurnStats")
+  const tConn = useTranslations("Folder.statusBar.connection")
+  const held = heldBackgroundTasks != null
   const [elapsed, setElapsed] = useState(() => Date.now() - message.startedAt)
   const editStats = useMemo(() => extractLiveEditStats(message), [message])
   const tps = useTokenOutputSpeed(message)
@@ -350,9 +358,13 @@ export function LiveTurnStats({
       <div className="flex min-h-8 flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4 py-1 text-xs leading-none text-muted-foreground">
         <AgentIcon
           agentType={agentType}
-          className="h-3.5 w-3.5 animate-pulse"
+          className={held ? "h-3.5 w-3.5" : "h-3.5 w-3.5 animate-pulse"}
         />
-        {isThinking ? (
+        {held ? (
+          <span data-testid="live-turn-held">
+            {tConn("idleBackground", { count: heldBackgroundTasks })}
+          </span>
+        ) : isThinking ? (
           <span>{t("thinking")}</span>
         ) : (
           <span>{t("streaming")}</span>
@@ -375,7 +387,7 @@ export function LiveTurnStats({
             </span>
           </>
         )}
-        {tps != null && (
+        {tps != null && !held && (
           <>
             <span className="hidden text-border leading-none @[30rem]/turnstats:inline">
               |

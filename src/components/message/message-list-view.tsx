@@ -124,6 +124,11 @@ interface MessageListViewProps {
   imageRoot?: string | null
   agentType: AgentType
   connStatus?: ConnectionStatus | null
+  /** Background tasks holding the prompting turn open while the agent is
+   *  idle (`0` = count unknown), or `null` when the turn is not held that
+   *  way (see `lib/background-idle.ts`). The live stats row then says so
+   *  instead of "Streaming". */
+  heldBackgroundTasks?: number | null
   isActive?: boolean
   sendSignal?: number
   detailLoading?: boolean
@@ -1224,6 +1229,7 @@ export function MessageListView({
   imageRoot,
   agentType,
   connStatus,
+  heldBackgroundTasks = null,
   isActive = true,
   sendSignal = 0,
   detailLoading = false,
@@ -2216,6 +2222,7 @@ export function MessageListView({
             message={liveMessage}
             agentType={agentType}
             isStreaming={connStatus === "prompting"}
+            heldBackgroundTasks={heldBackgroundTasks}
           />
         )}
         {/* Shared overlay stack pinned to the inline-start edge (top-left in LTR,

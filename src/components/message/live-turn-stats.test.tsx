@@ -1,6 +1,9 @@
+import { render, screen } from "@testing-library/react"
+import { NextIntlClientProvider } from "next-intl"
 import { describe, expect, it } from "vitest"
 
-import { extractLiveEditStats } from "./live-turn-stats"
+import enMessages from "@/i18n/messages/en.json"
+import { extractLiveEditStats, LiveTurnStats } from "./live-turn-stats"
 import type {
   LiveContentBlock,
   LiveMessage,
@@ -101,5 +104,33 @@ describe("extractLiveEditStats", () => {
     const added = toolBlock(writeInput("p\nq", "z.ts"))
     const after = extractLiveEditStats(msg([shared, added]))
     expect(after).toEqual({ files: 2, additions: 5, deletions: 0 })
+  })
+})
+
+describe("LiveTurnStats while the turn is held open for background work", () => {
+  function renderStats(heldBackgroundTasks: number | null) {
+    return render(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <LiveTurnStats
+          message={msg([textBlock("LAUNCHED")])}
+          agentType="claude_code"
+          heldBackgroundTasks={heldBackgroundTasks}
+        />
+      </NextIntlClientProvider>
+    )
+  }
+
+  it("says the agent is idle with the work running, not streaming", () => {
+    renderStats(2)
+    expect(
+      screen.getByText("Idle — 2 background tasks running")
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Streaming")).not.toBeInTheDocument()
+  })
+
+  it("keeps reading streaming for an ordinary turn", () => {
+    renderStats(null)
+    expect(screen.getByText("Streaming")).toBeInTheDocument()
+    expect(screen.queryByTestId("live-turn-held")).not.toBeInTheDocument()
   })
 })

@@ -991,9 +991,9 @@ const ConversationTabView = memo(function ConversationTabView({
     connectionReady,
     runtimeSyncState,
     msgQueue.length,
+    heldDrainInFlight,
     editInFlight,
     queueSteerInFlight,
-    heldDrainInFlight,
   ])
 
   // Mirror the connection's liveMessage into the runtime session OUTSIDE React.
@@ -2487,6 +2487,7 @@ const ConversationTabView = memo(function ConversationTabView({
         imageRoot={workingDirForConnection ?? null}
         agentType={selectedAgent}
         connStatus={connStatus}
+        heldBackgroundTasks={awaitingBackground ? heldBackgroundTasks : null}
         isActive={isActive}
         sendSignal={sendSignal}
         detailLoading={detailLoading}
