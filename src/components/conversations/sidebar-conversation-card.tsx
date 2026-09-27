@@ -26,6 +26,7 @@ import {
   MessageCircleQuestion,
   ClipboardCheck,
   Play,
+  RotateCw,
   type LucideIcon,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -40,6 +41,10 @@ import type {
 import { useConversationAttention } from "@/stores/conversation-attention-store"
 import { STATUS_ORDER } from "@/lib/types"
 import { summaryActivity } from "@/lib/session-activity"
+import { ATTACH_PHASE_LABEL_KEYS, isAttachingPhase } from "@/lib/attach-phase"
+import { getAgentLabel } from "@/lib/custom-agents"
+import { useConnectionAttachInfo } from "@/hooks/use-connection-status"
+import { useOptionalAcpActions } from "@/contexts/acp-connection-contexts"
 import { cn } from "@/lib/utils"
 import { formatConversationTitle } from "@/lib/conversation-title"
 import {
@@ -248,6 +253,7 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   const ime = useImeGuard()
   const tSidebar = useTranslations("Folder.sidebar")
   const tActivity = useTranslations("Folder.sessionActivity")
+  const tPhase = useTranslations("Folder.chat.attachPhase")
   const tStatus = useTranslations("Folder.statusLabels")
   const tDetails = useTranslations("Folder.sessionDetails")
   const [renameOpen, setRenameOpen] = useState(false)
@@ -349,6 +355,32 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   const activity = summaryActivity(conversation, attention)
   const isRunning = activity === "working"
   const isInterrupted = activity === "interrupted"
+  // When this conversation is open in a tab here, that tab's connection says
+  // whether the agent can be reached right now: still opening the session, or
+  // failed to. The selector yields a primitive, so the row re-renders only
+  // when THIS conversation's tab appears or goes, not on every tab switch.
+  const openTabId = useTabStore(
+    (s) =>
+      s.tabs.find((tab) => tab.conversationId === conversation.id)?.id ?? null
+  )
+  const connection = useConnectionAttachInfo(openTabId)
+  const isConnecting = connection.state === "connecting"
+  const connectFailed = connection.state === "failed"
+  const acpActions = useOptionalAcpActions()
+  const retryConnect =
+    connectFailed && openTabId && acpActions
+      ? () => {
+          void Promise.resolve(acpActions.reconnect(openTabId)).catch(() => {})
+        }
+      : null
+  const connectingTitle = isConnecting
+    ? tPhase(
+        ATTACH_PHASE_LABEL_KEYS[
+          isAttachingPhase(connection.phase) ? connection.phase : "starting"
+        ],
+        { agent: getAgentLabel(conversation.agent_type) }
+      )
+    : null
   const isCancelled = status === "cancelled"
   const isPinned = conversation.pinned_at != null
   const isCompleted = status === "completed"
@@ -608,6 +640,32 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                             {tSidebar("statusRunningBadge")}
                           </span>
                         </span>
+                      ) : isConnecting ? (
+                        <span
+                          className="relative inline-flex shrink-0 items-center justify-center"
+                          title={connectingTitle ?? tActivity("connecting")}
+                          data-testid="conversation-connecting-badge"
+                        >
+                          <SessionActivityIcon activity="connecting" />
+                          <span className="sr-only">
+                            {connectingTitle ?? tActivity("connecting")}
+                          </span>
+                        </span>
+                      ) : connectFailed ? (
+                        <span
+                          className="relative inline-flex shrink-0 items-center justify-center"
+                          title={
+                            connection.error
+                              ? `${tActivity("connectFailed")}: ${connection.error}`
+                              : tActivity("connectFailed")
+                          }
+                          data-testid="conversation-connect-failed-badge"
+                        >
+                          <SessionActivityIcon activity="connect_failed" />
+                          <span className="sr-only">
+                            {tActivity("connectFailed")}
+                          </span>
+                        </span>
                       ) : isInterrupted ? (
                         <span
                           className="relative inline-flex shrink-0 items-center justify-center"
@@ -657,6 +715,30 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                     centred icon in a transparent box would. */}
                     {!isSubsession && (
                       <div className="hidden items-center gap-px group-hover:flex">
+                        {retryConnect && (
+                          <button
+                            type="button"
+                            tabIndex={-1}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              retryConnect()
+                            }}
+                            title={
+                              connection.error
+                                ? `${tActivity("retry")}: ${connection.error}`
+                                : tActivity("retry")
+                            }
+                            aria-label={tActivity("retry")}
+                            data-testid="conversation-retry-connect-action"
+                            className={cn(
+                              "flex h-6 w-6 shrink-0 items-center justify-end rounded-[0.375rem]",
+                              "cursor-pointer outline-none transition-colors duration-150",
+                              "text-rose-600 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300"
+                            )}
+                          >
+                            <RotateCw className="h-[0.875rem] w-[0.875rem]" />
+                          </button>
+                        )}
                         {isInterrupted && onContinue && (
                           <button
                             type="button"

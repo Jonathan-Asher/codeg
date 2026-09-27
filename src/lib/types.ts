@@ -1349,6 +1349,23 @@ export type ConnectionStatus =
   | "disconnected"
   | "error"
 
+/**
+ * How far a connection has got towards a usable session (matches Rust
+ * `AttachPhase`). `status` turns `connected` as soon as the agent answers
+ * `initialize`; for a resumed session the agent then still has to open it,
+ * which runs the user's SessionStart hooks and can take a while. The UI shows
+ * this phase ("Resuming session · 14 s") until it reaches `ready`.
+ */
+export type AttachPhase =
+  | "queued"
+  | "starting"
+  | "resuming"
+  | "loading"
+  | "creating"
+  | "configuring"
+  | "ready"
+  | "failed"
+
 export interface PromptCapabilitiesInfo {
   image: boolean
   audio: boolean
@@ -2691,6 +2708,12 @@ export type AcpEvent =
       status: ConnectionStatus
     }
   | {
+      type: "attach_progress"
+      phase: AttachPhase
+      /** Milliseconds since the agent process was spawned. */
+      elapsed_ms: number
+    }
+  | {
       type: "error"
       message: string
       agent_type: string
@@ -3307,6 +3330,11 @@ export interface LiveSessionSnapshot {
    *  connection is still initializing (nothing known yet — stay fail-closed
    *  and re-read); absent only on a server too old to carry the field. */
   goal_actions?: string[] | null
+  /** Where the connection is on its way to a usable session. Absent on
+   *  servers that predate it, which only returned an open session. */
+  attach_phase?: AttachPhase
+  /** Milliseconds since the agent process was spawned, at snapshot time. */
+  attach_elapsed_ms?: number
   event_seq: number
 }
 

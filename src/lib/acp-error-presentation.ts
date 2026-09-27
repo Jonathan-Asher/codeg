@@ -71,6 +71,11 @@ const ROUTES: Readonly<Record<string, AcpErrorRoute>> = {
   // Grok dropped an attached image before sending the prompt. The turn still
   // runs; the user needs to know the model never saw that image.
   image_dropped: { kind: "action", level: "warning", rawAsDetail: true },
+  // The agent started but never finished opening the session, and codeg
+  // stopped it. The localized line says that much; the backend's message
+  // (which step it was stuck in, for how long, and the likely cause) rides as
+  // the detail.
+  attach_timeout: { kind: "session", level: "error", rawAsDetail: true },
   // A grok compaction that failed: the transcript's compaction card shows it
   // in its failed state, with the reason.
   compaction_failed: {

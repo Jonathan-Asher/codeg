@@ -1,6 +1,7 @@
 import type {
   ActiveDelegationState,
   AsyncTaskRecord,
+  AttachPhase,
   AvailableCommandInfo,
   ConfigStaleKind,
   ConnectionStatus,
@@ -99,6 +100,11 @@ export interface SnapshotPatch {
    *  `seedDelegationsFromSnapshot`); the reducer does not store this on
    *  ConnectionState. `[]` when the server omitted the field. */
   activeDelegations: ActiveDelegationState[]
+  /** Where the connection is on its way to a usable session. `undefined` on
+   *  servers that predate the field (they only handed out open sessions). */
+  attachPhase?: AttachPhase
+  /** Milliseconds since the agent process was spawned, at snapshot time. */
+  attachElapsedMs?: number
 }
 
 const DEFAULT_PROMPT_CAPS: PromptCapabilitiesInfo = {
@@ -164,6 +170,8 @@ export function denormalizeSnapshot(wire: LiveSessionSnapshot): SnapshotPatch {
     lastErrorLevel: routeAcpError(lastErrorCode).level,
     eventSeq: wire.event_seq,
     activeDelegations: wire.active_delegations ?? [],
+    attachPhase: wire.attach_phase,
+    attachElapsedMs: wire.attach_elapsed_ms,
   }
 }
 

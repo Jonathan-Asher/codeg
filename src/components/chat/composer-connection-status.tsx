@@ -23,6 +23,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { isConnectionBusy } from "@/lib/connection-teardown"
+import { useAttachPhaseLabel } from "@/hooks/use-attach-phase-label"
 import { cn } from "@/lib/utils"
 
 // Connection-only states. The session "prompting" state is intentionally
@@ -158,11 +159,21 @@ export function ComposerConnectionStatus({ tabId }: { tabId: string | null }) {
     failedConnect?.agentType ??
     null
   const agentLabel = agentType ? getAgentLabel(agentType) : null
+  // While the session opens, name the step and how long it has taken
+  // ("Resuming the Claude Code session · 14s") rather than a bare
+  // "Connecting...": a slow attach should read as progress, not as stuck.
+  const phaseLabel = useAttachPhaseLabel(
+    agentLabel ?? "",
+    statusKey === "connecting" ? (conn?.attachPhase ?? null) : null,
+    conn?.attachStartedAt
+  )
   const titleText = !agentLabel
     ? statusLabel
     : statusKey === "error" && errorText
       ? t("tooltipError", { agent: agentLabel, error: errorText })
-      : t("tooltip", { agent: agentLabel, status: statusLabel })
+      : phaseLabel
+        ? t("tooltip", { agent: agentLabel, status: phaseLabel.text })
+        : t("tooltip", { agent: agentLabel, status: statusLabel })
 
   const { Icon, className } = STATUS_ICON[statusKey]
 
@@ -236,6 +247,15 @@ export function ComposerConnectionStatus({ tabId }: { tabId: string | null }) {
             {t(detailStatusKey)}
           </span>
         </div>
+
+        {phaseLabel ? (
+          <p
+            className="text-2xs leading-snug text-muted-foreground"
+            data-testid="connection-attach-phase"
+          >
+            {phaseLabel.text}
+          </p>
+        ) : null}
 
         {errorText ? (
           <p

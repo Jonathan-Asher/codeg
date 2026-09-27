@@ -13,6 +13,7 @@ import {
 } from "@/contexts/acp-connections-context"
 import type {
   AgentType,
+  AttachPhase,
   AvailableCommandInfo,
   ConfigStaleKind,
   ConnectionStatus,
@@ -56,6 +57,13 @@ export interface UseConnectionReturn {
    */
   isViewer: boolean
   status: ConnectionStatus | null
+  /** Where the connection is on its way to a usable session ("resuming",
+   *  "configuring", …), or null when the server did not say. While this is an
+   *  attaching phase `status` reads `connecting`. */
+  attachPhase: AttachPhase | null
+  /** Client-clock estimate (epoch ms) of when the agent was spawned, for the
+   *  elapsed-time label next to the phase. */
+  attachStartedAt: number | null
   promptCapabilities: PromptCapabilitiesInfo
   supportsFork: boolean
   selectorsReady: boolean
@@ -240,6 +248,8 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   // placeholder, no loading cue and no status-bar task. A real entry always
   // wins: once it exists, its own status is the more specific truth.
   const status = connection?.status ?? (connectPending ? "connecting" : null)
+  const attachPhase = connection?.attachPhase ?? null
+  const attachStartedAt = connection?.attachStartedAt ?? null
   const promptCapabilities =
     connection?.promptCapabilities ?? DEFAULT_PROMPT_CAPABILITIES
   const supportsFork = connection?.supportsFork ?? false
@@ -353,6 +363,8 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       agentType,
       isViewer,
       status,
+      attachPhase,
+      attachStartedAt,
       promptCapabilities,
       supportsFork,
       selectorsReady,
@@ -395,6 +407,8 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       agentType,
       isViewer,
       status,
+      attachPhase,
+      attachStartedAt,
       promptCapabilities,
       supportsFork,
       selectorsReady,

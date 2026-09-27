@@ -103,6 +103,95 @@ export function toErrorMessage(error: unknown): string {
   }
 }
 
+const MAX_DESCRIBED_ERROR_CHARS = 500
+
+function clip(text: string): string {
+  return text.length > MAX_DESCRIBED_ERROR_CHARS
+    ? `${text.slice(0, MAX_DESCRIBED_ERROR_CHARS)}…`
+    : text
+}
+
+/** A short, human line out of a JSON-RPC style `data` payload, if it has one. */
+function describeErrorData(data: unknown): string | null {
+  if (typeof data === "string") return normalizeString(data)
+  const obj = asObject(data)
+  if (!obj) return null
+  return (
+    normalizeString(obj.message) ??
+    normalizeString(obj.details) ??
+    normalizeString(obj.detail) ??
+    normalizeString(obj.reason)
+  )
+}
+
+/**
+ * One readable line for any thrown value, for places that show a connect or
+ * transport failure to the user. Never returns "[object Object]":
+ *
+ * - codeg's own `{ code, message, detail }` (web and remote-workspace
+ *   transports reject with it as a plain object) → the message, plus the
+ *   detail when it adds something;
+ * - a JSON-RPC / ACP error `{ code: -32603, message, data }` → the message,
+ *   the data's own message, and the numeric code;
+ * - an `Error` → its message (and its cause's, when there is one);
+ * - any other object with a `message` or nested `error` → that;
+ * - anything else → a bounded JSON rendering.
+ */
+export function describeError(error: unknown, depth = 0): string {
+  if (error == null) return "Unknown error"
+  if (typeof error === "string") return clip(error.trim() || "Unknown error")
+
+  const appError = extractAppCommandError(error)
+  if (appError) {
+    const detail = appError.detail?.trim()
+    if (detail && !appError.message.includes(detail)) {
+      return clip(
+        detail.includes(appError.message)
+          ? detail
+          : `${appError.message}: ${detail}`
+      )
+    }
+    return clip(appError.message)
+  }
+
+  if (error instanceof Error) {
+    const message = error.message.trim() || error.name
+    const cause = (error as { cause?: unknown }).cause
+    if (cause != null && depth < 2) {
+      const causeText = describeError(cause, depth + 1)
+      if (causeText && !message.includes(causeText)) {
+        return clip(`${message} (${causeText})`)
+      }
+    }
+    return clip(message)
+  }
+
+  const obj = asObject(error)
+  if (obj) {
+    const message = normalizeString(obj.message)
+    const numericCode = typeof obj.code === "number" ? obj.code : null
+    if (message) {
+      const data = describeErrorData(obj.data)
+      const withData =
+        data && !message.includes(data) ? `${message}: ${data}` : message
+      return clip(
+        numericCode != null ? `${withData} (code ${numericCode})` : withData
+      )
+    }
+    if (obj.error != null && depth < 2) {
+      return describeError(obj.error, depth + 1)
+    }
+  }
+
+  try {
+    const serialized = JSON.stringify(error)
+    if (serialized && serialized !== "{}") return clip(serialized)
+  } catch {
+    // fall through
+  }
+  return "Unknown error"
+}
+
 /** Translator callable shape compatible with next-intl's scoped translator. */
 export type AppErrorTranslator = (
   key: string,

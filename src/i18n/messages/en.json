@@ -2121,7 +2121,12 @@
       "continue": "Continue",
       "continueTitle": "Resume this session and send “continue”",
       "bannerTitle": "The last turn was interrupted",
-      "bannerDescription": "codeg closed or the agent stopped before it finished."
+      "bannerDescription": "codeg closed or the agent stopped before it finished.",
+      "connecting": "Connecting",
+      "connectingHint": "The agent is opening this session. Messages you send now wait until it is ready.",
+      "connectFailed": "Couldn't connect",
+      "connectFailedHint": "The agent could not be reached. Retry to open the session again.",
+      "retry": "Retry"
     },
     "conversationCard": {
       "untitledConversation": "Untitled conversation",
@@ -3105,7 +3110,8 @@
           "sessionLoadFallback": "{agent} couldn't restore the previous session and started a new one — it no longer has the earlier context.",
           "turnFailedEmpty": "{agent} ended the turn without producing any response.",
           "turnFailedEmptyProtocol": "{agent} produced output that codeg could not parse — the agent version may not match the protocol.",
-          "turnFailedEmptyMetadata": "{agent} sent only status updates this turn (plan / mode / usage) and no reply."
+          "turnFailedEmptyMetadata": "{agent} sent only status updates this turn (plan / mode / usage) and no reply.",
+          "attachTimeout": "{agent} did not finish opening the session and was stopped."
         },
         "unableReadAgentConfig": "Unable to read Agent config: {message}",
         "connectFailedTitle": "{agent} connection failed",
@@ -3138,7 +3144,12 @@
           "loadingSelectorsTitle": "Loading {agent} selectors",
           "loadingSelectorsDescription": "Fetching mode and session config options",
           "initSessionTitle": "Initializing {agent} session",
-          "initSessionDescription": "Creating session and loading configuration"
+          "initSessionDescription": "Creating session and loading configuration",
+          "queuedTitle": "Waiting to start {agent}",
+          "resumingTitle": "Resuming {agent} session",
+          "loadingSessionTitle": "Loading {agent} session",
+          "creatingSessionTitle": "Creating {agent} session",
+          "configuringSessionTitle": "Applying {agent} session settings"
         },
         "errors": {
           "connectionFailed": "Connection failed",
@@ -3156,7 +3167,8 @@
       "chatInput": {
         "connecting": "Connecting...",
         "agentResponding": "{agent} is responding...",
-        "sendMessage": "Send a message..."
+        "sendMessage": "Send a message...",
+        "connectingQueued": "Connecting to {agent}… you can send now, messages wait in the queue"
       },
       "messageInput": {
         "askAnything": "Ask anything...",
@@ -3969,6 +3981,18 @@
       "proposedPlan": {
         "title": "Proposed plan",
         "planning": "Planning…"
+      },
+      "attachPhase": {
+        "queued": "Waiting to start {agent} (other sessions are opening)",
+        "starting": "Starting {agent}",
+        "resuming": "Resuming the {agent} session",
+        "loading": "Loading the {agent} session",
+        "creating": "Creating a {agent} session",
+        "configuring": "Applying {agent} session settings",
+        "elapsedSeconds": "{seconds}s",
+        "elapsedMinutes": "{minutes}m {seconds}s",
+        "withElapsed": "{step} · {elapsed}",
+        "slowHint": "{agent} is still starting up. It runs your SessionStart hooks and settings before it opens the session, so a slow or unreachable hook shows up as this wait."
       }
     },
     "diffPreview": {

@@ -6378,3 +6378,177 @@ describe("AIR session failures are told as notifications", () => {
     expect(h.recordAlert).not.toHaveBeenCalled()
   })
 })
+
+// A resumed session reports `connected` as soon as the agent answers
+// `initialize` — long before it can take a prompt. The store must keep such a
+// connection at `connecting` (and say which step it is on) until the backend
+// reports the session ready, so nothing sends into a session that is still
+// opening and the UI can show "Resuming the session · 14s" instead of "Idle".
+describe("AcpConnectionsProvider attach phases", () => {
+  async function connectAndHydrate(
+    attach: Record<string, unknown>
+  ): Promise<AttachHandlers> {
+    h.acpFindConnectionForConversation.mockResolvedValue(null)
+    h.denormalizeSnapshot.mockReturnValue({
+      ...snapshotBase(),
+      eventSeq: 3,
+      ...attach,
+    })
+    await mountProvider()
+    await act(async () => {
+      await h.actions!.connect(TAB, "claude_code", "/tmp/x", "sess-1", 42)
+    })
+    const handlers = latestAttachHandlers()
+    hydrateSnapshot(handlers, {
+      event_seq: 3,
+    } as unknown as LiveSessionSnapshot)
+    return handlers
+  }
+
+  it("holds a connected-but-still-resuming session at connecting until it is ready", async () => {
+    const handlers = await connectAndHydrate({
+      status: "connected",
+      attachPhase: "resuming",
+      attachElapsedMs: 4_000,
+    })
+    let conn = h.store!.getConnection(TAB)!
+    expect(conn.status).toBe("connecting")
+    expect(conn.attachPhase).toBe("resuming")
+    expect(conn.attachStartedAt).toBeLessThanOrEqual(Date.now() - 3_900)
+
+    // The `connected` the backend emits at `initialize` does not open it.
+    emitAcpEvent(handlers, {
+      seq: 4,
+      connection_id: "spawned-conn",
+      type: "status_changed",
+      status: "connected",
+    })
+    expect(h.store!.getConnection(TAB)!.status).toBe("connecting")
+
+    emitAcpEvent(handlers, {
+      seq: 5,
+      connection_id: "spawned-conn",
+      type: "attach_progress",
+      phase: "configuring",
+      elapsed_ms: 11_000,
+    })
+    expect(h.store!.getConnection(TAB)!.attachPhase).toBe("configuring")
+    expect(h.store!.getConnection(TAB)!.status).toBe("connecting")
+
+    emitAcpEvent(handlers, {
+      seq: 6,
+      connection_id: "spawned-conn",
+      type: "attach_progress",
+      phase: "ready",
+      elapsed_ms: 12_000,
+    })
+    conn = h.store!.getConnection(TAB)!
+    expect(conn.status).toBe("connected")
+    expect(conn.attachPhase).toBe("ready")
+  })
+
+  it("marks the attach failed when the connection errors before the session opened", async () => {
+    const handlers = await connectAndHydrate({
+      status: "connected",
+      attachPhase: "resuming",
+      attachElapsedMs: 1_000,
+    })
+    emitAcpEvent(handlers, {
+      seq: 4,
+      connection_id: "spawned-conn",
+      type: "status_changed",
+      status: "error",
+    })
+    const conn = h.store!.getConnection(TAB)!
+    expect(conn.status).toBe("error")
+    expect(conn.attachPhase).toBe("failed")
+
+    // A stray late event cannot revive it.
+    emitAcpEvent(handlers, {
+      seq: 5,
+      connection_id: "spawned-conn",
+      type: "attach_progress",
+      phase: "ready",
+      elapsed_ms: 2_000,
+    })
+    expect(h.store!.getConnection(TAB)!.attachPhase).toBe("failed")
+    expect(h.store!.getConnection(TAB)!.status).toBe("error")
+  })
+
+  it("treats a snapshot without an attach phase (an older server) as open", async () => {
+    await connectAndHydrate({ status: "connected" })
+    const conn = h.store!.getConnection(TAB)!
+    expect(conn.status).toBe("connected")
+    expect(conn.attachPhase ?? null).toBeNull()
+  })
+
+  it("keeps the attach-timeout reason on the session error", async () => {
+    const handlers = await connectAndHydrate({
+      status: "connected",
+      attachPhase: "resuming",
+      attachElapsedMs: 1_000,
+    })
+    emitAcpEvent(handlers, {
+      seq: 4,
+      connection_id: "spawned-conn",
+      type: "error",
+      message:
+        "Claude Code did not finish opening the session after 180 seconds (stuck while resuming the session).",
+      agent_type: "claude_code",
+      code: "attach_timeout",
+    })
+    const conn = h.store!.getConnection(TAB)!
+    expect(conn.error).toBe(
+      "Claude Code did not finish opening the session after 180 seconds (stuck while resuming the session)."
+    )
+  })
+
+  // On the web transport the dead connection's attach stream detaches with
+  // `connection_gone`, which drops the entry. A connect whose session never
+  // opened must still read as a failed connect afterwards, reason included —
+  // not fall back to whatever the conversation's last turn did.
+  it("keeps a failed attach as the key's connect error once its entry is gone", async () => {
+    const handlers = await connectAndHydrate({
+      status: "connected",
+      attachPhase: "starting",
+      attachElapsedMs: 1_000,
+    })
+    emitAcpEvent(handlers, {
+      seq: 4,
+      connection_id: "spawned-conn",
+      type: "error",
+      message:
+        "Claude Code did not finish opening the session after 10 seconds (stuck while starting up).",
+      agent_type: "claude_code",
+      code: "attach_timeout",
+    })
+    emitAcpEvent(handlers, {
+      seq: 5,
+      connection_id: "spawned-conn",
+      type: "status_changed",
+      status: "error",
+    })
+    act(() => {
+      handlers.onDetached("connection_gone")
+    })
+    expect(h.store!.getConnection(TAB)).toBeUndefined()
+    expect(h.store!.getConnectError(TAB)).toMatchObject({
+      agentType: "claude_code",
+      detail:
+        "Claude Code did not finish opening the session after 10 seconds (stuck while starting up).",
+    })
+  })
+
+  it("does not report a connection that ends after its session opened as a failed connect", async () => {
+    const handlers = await connectAndHydrate({
+      status: "connected",
+      attachPhase: "ready",
+      attachElapsedMs: 1_000,
+    })
+    act(() => {
+      handlers.onDetached("connection_gone")
+    })
+    expect(h.store!.getConnection(TAB)).toBeUndefined()
+    expect(h.store!.getConnectError(TAB)).toBeUndefined()
+  })
+})

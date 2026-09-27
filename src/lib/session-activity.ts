@@ -18,8 +18,18 @@ import type {
  * - `idle`: nothing is running.
  * - `interrupted`: the last turn was cut off before it finished — codeg quit
  *   or crashed, or the agent process or its connection died mid-turn.
+ * - `connecting`: this client is opening the session (the agent is starting
+ *   or resuming it) and it cannot take a prompt yet.
+ * - `connect_failed`: this client's attempt to open the session failed; the
+ *   agent cannot be reached until it is retried.
  */
-export type SessionActivity = "working" | "needs_you" | "idle" | "interrupted"
+export type SessionActivity =
+  | "working"
+  | "needs_you"
+  | "idle"
+  | "interrupted"
+  | "connecting"
+  | "connect_failed"
 
 /** The i18n key (under `Folder.sessionActivity`) naming each state. Literal
  *  on purpose: next-intl keys are typed, and a key read out of a variable must
@@ -29,6 +39,8 @@ export const SESSION_ACTIVITY_LABEL_KEYS = {
   needs_you: "needsYou",
   idle: "idle",
   interrupted: "interrupted",
+  connecting: "connecting",
+  connect_failed: "connectFailed",
 } as const satisfies Record<SessionActivity, string>
 
 /** The i18n key (under `Folder.sessionActivity`) with a one-line explanation
@@ -38,6 +50,8 @@ export const SESSION_ACTIVITY_HINT_KEYS = {
   needs_you: "needsYouHint",
   idle: "idleHint",
   interrupted: "interruptedHint",
+  connecting: "connectingHint",
+  connect_failed: "connectFailedHint",
 } as const satisfies Record<SessionActivity, string>
 
 /** The prompt the Continue action sends to pick an interrupted turn back up.
@@ -60,6 +74,12 @@ export interface SessionActivityInputs {
    *  wins over the persisted state, which reaches this client an event later.
    *  Leave it out for rows this client has no connection for. */
   connectionStatus?: ConnectionStatus | null
+  /** Where this client's own attempt to open the session stands, when it is
+   *  making one: `connecting` while the agent starts or resumes the session,
+   *  `failed` when that attempt failed. Ranks above the persisted turn state —
+   *  a session that cannot be reached is not "idle", whatever its last turn
+   *  did — but below a turn running or blocked on the user. */
+  connection?: "connecting" | "failed" | null
 }
 
 /**
@@ -73,12 +93,18 @@ export function deriveSessionActivity({
   turnState,
   status,
   connectionStatus,
+  connection,
 }: SessionActivityInputs): SessionActivity {
   // Blocked on the user outranks everything: the session IS mid-turn, but the
   // thing to know is that it can't continue without you.
   if (attention) return "needs_you"
   // Streaming here and now.
   if (connectionStatus === "prompting") return "working"
+  // This client cannot reach the agent right now — it is opening the session,
+  // or failed to. "Idle — send a message" would invite a send that has nowhere
+  // to go yet.
+  if (connection === "failed") return "connect_failed"
+  if (connection === "connecting") return "connecting"
   // A live connection sitting idle is first-hand proof that no turn is running,
   // so a persisted `running` that hasn't caught up yet doesn't count. It says
   // nothing about an interruption, though: a session resumed after one stays

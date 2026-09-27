@@ -2121,7 +2121,12 @@
       "continue": "続行",
       "continueTitle": "このセッションを再開して「continue」を送信",
       "bannerTitle": "前回のターンは中断されました",
-      "bannerDescription": "完了する前に codeg が終了したか、エージェントが停止しました。"
+      "bannerDescription": "完了する前に codeg が終了したか、エージェントが停止しました。",
+      "connecting": "接続中",
+      "connectingHint": "エージェントがこのセッションを開いています。今送ったメッセージは準備ができるまで待機します。",
+      "connectFailed": "接続できませんでした",
+      "connectFailedHint": "エージェントに接続できませんでした。再試行してセッションをもう一度開いてください。",
+      "retry": "再試行"
     },
     "conversationCard": {
       "untitledConversation": "無題の会話",
@@ -3105,7 +3110,8 @@
           "sessionLoadFallback": "{agent} は以前のセッションを復元できなかったため、新しいセッションを開始しました。以前のコンテキストは引き継がれていません。",
           "turnFailedEmpty": "{agent} は応答を生成せずにターンを終了しました。",
           "turnFailedEmptyProtocol": "{agent} の出力を codeg が解析できませんでした。エージェントのバージョンがプロトコルと一致していない可能性があります。",
-          "turnFailedEmptyMetadata": "{agent} はこのターンでステータス更新（計画 / モード / 使用量）のみを送信し、応答はありませんでした。"
+          "turnFailedEmptyMetadata": "{agent} はこのターンでステータス更新（計画 / モード / 使用量）のみを送信し、応答はありませんでした。",
+          "attachTimeout": "{agent} がセッションを開き終えなかったため、停止しました。"
         },
         "unableReadAgentConfig": "エージェント設定を読み取れません: {message}",
         "connectFailedTitle": "{agent} の接続に失敗しました",
@@ -3138,7 +3144,12 @@
           "loadingSelectorsTitle": "{agent} のセレクターを読み込み中",
           "loadingSelectorsDescription": "モードとセッション設定オプションを取得しています",
           "initSessionTitle": "{agent} セッションを初期化中",
-          "initSessionDescription": "セッションを作成し設定を読み込んでいます"
+          "initSessionDescription": "セッションを作成し設定を読み込んでいます",
+          "queuedTitle": "{agent} の起動待ち",
+          "resumingTitle": "{agent} セッションを再開中",
+          "loadingSessionTitle": "{agent} セッションを読み込み中",
+          "creatingSessionTitle": "{agent} セッションを作成中",
+          "configuringSessionTitle": "{agent} セッションの設定を適用中"
         },
         "errors": {
           "connectionFailed": "接続に失敗しました",
@@ -3156,7 +3167,8 @@
       "chatInput": {
         "connecting": "接続中...",
         "agentResponding": "{agent} が応答中...",
-        "sendMessage": "メッセージを送信..."
+        "sendMessage": "メッセージを送信...",
+        "connectingQueued": "{agent} に接続中… 今すぐ送信できます。メッセージはキューで待機します"
       },
       "messageInput": {
         "askAnything": "何でも質問してください...",
@@ -3969,6 +3981,18 @@
       "proposedPlan": {
         "title": "提案された計画",
         "planning": "計画中…"
+      },
+      "attachPhase": {
+        "queued": "{agent} の起動待ち（他のセッションを開いています）",
+        "starting": "{agent} を起動中",
+        "resuming": "{agent} セッションを再開中",
+        "loading": "{agent} セッションを読み込み中",
+        "creating": "{agent} セッションを作成中",
+        "configuring": "{agent} セッションの設定を適用中",
+        "elapsedSeconds": "{seconds} 秒",
+        "elapsedMinutes": "{minutes} 分 {seconds} 秒",
+        "withElapsed": "{step} · {elapsed}",
+        "slowHint": "{agent} はまだ起動中です。セッションを開く前に SessionStart フックと設定を実行するため、遅いフックや到達できないフックがあるとこの待ち時間になります。"
       }
     },
     "diffPreview": {

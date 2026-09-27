@@ -33,6 +33,12 @@ vi.mock("@/stores/app-workspace-store", () => ({
 // test doesn't drag in the whole connection provider.
 vi.mock("@/hooks/use-connection-status", () => ({
   useConnectionStatus: vi.fn(() => null),
+  useConnectionAttachInfo: vi.fn(() => ({
+    state: null,
+    phase: null,
+    startedAt: null,
+    error: null,
+  })),
 }))
 
 import { SessionDetailsTab } from "./aux-panel-session-details-tab"

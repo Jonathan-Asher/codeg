@@ -21,6 +21,7 @@ import {
 } from "@/lib/context-window"
 import { getFolderConversation } from "@/lib/api"
 import { useCopiedFlag } from "@/hooks/use-copied-flag"
+import type { ConnectionAttachInfo } from "@/hooks/use-connection-status"
 import { useModelLabels } from "@/hooks/use-model-labels"
 import {
   pickModelFromTurns,
@@ -63,6 +64,15 @@ interface SessionDetailsContentProps {
    * from.
    */
   connectionStatus?: ConnectionStatus | null
+  /**
+   * Where this client's attempt to open the session stands (the aux-panel
+   * tab, for the focused conversation), so the Activity line reads
+   * "Connecting — Resuming the session · 14s" or "Couldn't connect" instead of
+   * "Idle" while the agent cannot actually be reached.
+   */
+  connection?: ConnectionAttachInfo | null
+  /** Retry a failed connect from the Activity line. */
+  onRetryConnect?: () => Promise<unknown> | void
 }
 
 function isKnownStatus(value: string): value is ConversationStatus {
@@ -265,6 +275,8 @@ export function SessionDetailsContent({
   model: modelProp,
   active = true,
   connectionStatus,
+  connection,
+  onRetryConnect,
 }: SessionDetailsContentProps) {
   const t = useTranslations("Folder.sessionDetails")
   const tActivity = useTranslations("Folder.sessionActivity")
@@ -417,6 +429,8 @@ export function SessionDetailsContent({
         <SessionActivityRow
           summary={summary}
           connectionStatus={connectionStatus}
+          connection={connection}
+          onRetry={onRetryConnect}
         />
       </section>
 

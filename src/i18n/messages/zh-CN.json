@@ -2121,7 +2121,12 @@
       "continue": "继续",
       "continueTitle": "恢复此会话并发送 “continue”",
       "bannerTitle": "上一轮已中断",
-      "bannerDescription": "codeg 关闭或智能体停止时，这一轮还没有完成。"
+      "bannerDescription": "codeg 关闭或智能体停止时，这一轮还没有完成。",
+      "connecting": "连接中",
+      "connectingHint": "智能体正在打开此会话。现在发送的消息会等到会话就绪后再发出。",
+      "connectFailed": "无法连接",
+      "connectFailedHint": "无法连接到智能体。重试以再次打开会话。",
+      "retry": "重试"
     },
     "conversationCard": {
       "untitledConversation": "未命名会话",
@@ -3105,7 +3110,8 @@
           "sessionLoadFallback": "{agent} 无法恢复之前的会话，已改为开始新会话，之前的上下文不再可用。",
           "turnFailedEmpty": "{agent} 本轮没有产生任何回复就结束了。",
           "turnFailedEmptyProtocol": "{agent} 本轮的输出 codeg 无法解析，可能是代理版本与协议不匹配。",
-          "turnFailedEmptyMetadata": "{agent} 本轮只收到状态更新（计划 / 模式 / 用量），没有收到任何回复。"
+          "turnFailedEmptyMetadata": "{agent} 本轮只收到状态更新（计划 / 模式 / 用量），没有收到任何回复。",
+          "attachTimeout": "{agent} 未能完成打开会话，已被停止。"
         },
         "unableReadAgentConfig": "无法读取 Agent 配置：{message}",
         "connectFailedTitle": "{agent} 连接失败",
@@ -3138,7 +3144,12 @@
           "loadingSelectorsTitle": "正在加载 {agent} 选择项",
           "loadingSelectorsDescription": "正在获取模式和会话配置选项",
           "initSessionTitle": "正在初始化 {agent} 会话",
-          "initSessionDescription": "正在创建会话并加载配置"
+          "initSessionDescription": "正在创建会话并加载配置",
+          "queuedTitle": "等待启动 {agent}",
+          "resumingTitle": "正在恢复 {agent} 会话",
+          "loadingSessionTitle": "正在加载 {agent} 会话",
+          "creatingSessionTitle": "正在创建 {agent} 会话",
+          "configuringSessionTitle": "正在应用 {agent} 会话设置"
         },
         "errors": {
           "connectionFailed": "连接失败",
@@ -3156,7 +3167,8 @@
       "chatInput": {
         "connecting": "连接中...",
         "agentResponding": "{agent} 正在响应...",
-        "sendMessage": "发送消息..."
+        "sendMessage": "发送消息...",
+        "connectingQueued": "正在连接 {agent}… 现在即可发送，消息会在队列中等待"
       },
       "messageInput": {
         "askAnything": "请开始输入...",
@@ -3969,6 +3981,18 @@
       "proposedPlan": {
         "title": "计划提案",
         "planning": "规划中…"
+      },
+      "attachPhase": {
+        "queued": "等待启动 {agent}（其他会话正在打开）",
+        "starting": "正在启动 {agent}",
+        "resuming": "正在恢复 {agent} 会话",
+        "loading": "正在加载 {agent} 会话",
+        "creating": "正在创建 {agent} 会话",
+        "configuring": "正在应用 {agent} 会话设置",
+        "elapsedSeconds": "{seconds} 秒",
+        "elapsedMinutes": "{minutes} 分 {seconds} 秒",
+        "withElapsed": "{step} · {elapsed}",
+        "slowHint": "{agent} 仍在启动。它会在打开会话前运行你的 SessionStart 钩子和设置，钩子缓慢或无法访问时就会出现这段等待。"
       }
     },
     "diffPreview": {

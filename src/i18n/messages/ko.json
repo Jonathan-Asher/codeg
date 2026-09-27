@@ -2121,7 +2121,12 @@
       "continue": "계속",
       "continueTitle": "이 세션을 재개하고 “continue”를 보냅니다",
       "bannerTitle": "마지막 턴이 중단되었습니다",
-      "bannerDescription": "끝나기 전에 codeg가 종료되었거나 에이전트가 멈췄습니다."
+      "bannerDescription": "끝나기 전에 codeg가 종료되었거나 에이전트가 멈췄습니다.",
+      "connecting": "연결 중",
+      "connectingHint": "에이전트가 이 세션을 여는 중입니다. 지금 보내는 메시지는 준비될 때까지 기다립니다.",
+      "connectFailed": "연결할 수 없음",
+      "connectFailedHint": "에이전트에 연결할 수 없습니다. 다시 시도해 세션을 여세요.",
+      "retry": "다시 시도"
     },
     "conversationCard": {
       "untitledConversation": "제목 없는 대화",
@@ -3105,7 +3110,8 @@
           "sessionLoadFallback": "{agent}에서 이전 세션을 복원하지 못해 새 세션을 시작했습니다. 이전 컨텍스트는 이어지지 않습니다.",
           "turnFailedEmpty": "{agent}이(가) 어떤 응답도 생성하지 않고 턴을 종료했습니다.",
           "turnFailedEmptyProtocol": "{agent}의 출력을 codeg가 구문 분석할 수 없습니다. 에이전트 버전이 프로토콜과 맞지 않을 수 있습니다.",
-          "turnFailedEmptyMetadata": "{agent}이(가) 이번 턴에 상태 업데이트(계획 / 모드 / 사용량)만 보내고 응답은 없었습니다."
+          "turnFailedEmptyMetadata": "{agent}이(가) 이번 턴에 상태 업데이트(계획 / 모드 / 사용량)만 보내고 응답은 없었습니다.",
+          "attachTimeout": "{agent}이(가) 세션 열기를 끝내지 못해 중지되었습니다."
         },
         "unableReadAgentConfig": "에이전트 구성을 읽을 수 없습니다: {message}",
         "connectFailedTitle": "{agent} 연결 실패",
@@ -3138,7 +3144,12 @@
           "loadingSelectorsTitle": "{agent} 선택자 불러오는 중",
           "loadingSelectorsDescription": "모드 및 세션 구성 옵션을 가져오는 중",
           "initSessionTitle": "{agent} 세션 초기화 중",
-          "initSessionDescription": "세션 생성 및 설정 불러오는 중"
+          "initSessionDescription": "세션 생성 및 설정 불러오는 중",
+          "queuedTitle": "{agent} 시작 대기 중",
+          "resumingTitle": "{agent} 세션 재개 중",
+          "loadingSessionTitle": "{agent} 세션 불러오는 중",
+          "creatingSessionTitle": "{agent} 세션 만드는 중",
+          "configuringSessionTitle": "{agent} 세션 설정 적용 중"
         },
         "errors": {
           "connectionFailed": "연결 실패",
@@ -3156,7 +3167,8 @@
       "chatInput": {
         "connecting": "연결 중...",
         "agentResponding": "{agent} 응답 중...",
-        "sendMessage": "메시지 보내기..."
+        "sendMessage": "메시지 보내기...",
+        "connectingQueued": "{agent}에 연결 중… 지금 보내면 메시지가 대기열에서 기다립니다"
       },
       "messageInput": {
         "askAnything": "무엇이든 물어보세요...",
@@ -3969,6 +3981,18 @@
       "proposedPlan": {
         "title": "제안된 계획",
         "planning": "계획 중…"
+      },
+      "attachPhase": {
+        "queued": "{agent} 시작 대기 중 (다른 세션을 여는 중)",
+        "starting": "{agent} 시작 중",
+        "resuming": "{agent} 세션 재개 중",
+        "loading": "{agent} 세션 불러오는 중",
+        "creating": "{agent} 세션 만드는 중",
+        "configuring": "{agent} 세션 설정 적용 중",
+        "elapsedSeconds": "{seconds}초",
+        "elapsedMinutes": "{minutes}분 {seconds}초",
+        "withElapsed": "{step} · {elapsed}",
+        "slowHint": "{agent}이(가) 아직 시작 중입니다. 세션을 열기 전에 SessionStart 훅과 설정을 실행하므로, 느리거나 연결할 수 없는 훅이 있으면 이렇게 기다리게 됩니다."
       }
     },
     "diffPreview": {

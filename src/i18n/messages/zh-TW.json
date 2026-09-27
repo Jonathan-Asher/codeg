@@ -2121,7 +2121,12 @@
       "continue": "繼續",
       "continueTitle": "恢復此會話並傳送「continue」",
       "bannerTitle": "上一輪已中斷",
-      "bannerDescription": "codeg 關閉或智能體停止時，這一輪還沒有完成。"
+      "bannerDescription": "codeg 關閉或智能體停止時，這一輪還沒有完成。",
+      "connecting": "連線中",
+      "connectingHint": "代理正在開啟此工作階段。現在傳送的訊息會等到就緒後再送出。",
+      "connectFailed": "無法連線",
+      "connectFailedHint": "無法連線到代理。重試以再次開啟工作階段。",
+      "retry": "重試"
     },
     "conversationCard": {
       "untitledConversation": "未命名會話",
@@ -3105,7 +3110,8 @@
           "sessionLoadFallback": "{agent} 無法還原先前的會話，已改為開始新會話，先前的上下文不再可用。",
           "turnFailedEmpty": "{agent} 此輪沒有產生任何回覆就結束了。",
           "turnFailedEmptyProtocol": "{agent} 此輪的輸出 codeg 無法解析，可能是代理版本與協定不相符。",
-          "turnFailedEmptyMetadata": "{agent} 此輪只收到狀態更新（計畫 / 模式 / 用量），沒有收到任何回覆。"
+          "turnFailedEmptyMetadata": "{agent} 此輪只收到狀態更新（計畫 / 模式 / 用量），沒有收到任何回覆。",
+          "attachTimeout": "{agent} 未能完成開啟工作階段，已被停止。"
         },
         "unableReadAgentConfig": "無法讀取 Agent 設定：{message}",
         "connectFailedTitle": "{agent} 連線失敗",
@@ -3138,7 +3144,12 @@
           "loadingSelectorsTitle": "正在載入 {agent} 選擇項",
           "loadingSelectorsDescription": "正在取得模式與會話設定選項",
           "initSessionTitle": "正在初始化 {agent} 會話",
-          "initSessionDescription": "正在建立會話並載入設定"
+          "initSessionDescription": "正在建立會話並載入設定",
+          "queuedTitle": "等待啟動 {agent}",
+          "resumingTitle": "正在恢復 {agent} 工作階段",
+          "loadingSessionTitle": "正在載入 {agent} 工作階段",
+          "creatingSessionTitle": "正在建立 {agent} 工作階段",
+          "configuringSessionTitle": "正在套用 {agent} 工作階段設定"
         },
         "errors": {
           "connectionFailed": "連線失敗",
@@ -3156,7 +3167,8 @@
       "chatInput": {
         "connecting": "連線中...",
         "agentResponding": "{agent} 正在回應...",
-        "sendMessage": "傳送訊息..."
+        "sendMessage": "傳送訊息...",
+        "connectingQueued": "正在連線 {agent}… 現在即可傳送，訊息會在佇列中等待"
       },
       "messageInput": {
         "askAnything": "請開始輸入...",
@@ -3969,6 +3981,18 @@
       "proposedPlan": {
         "title": "計劃提案",
         "planning": "規劃中…"
+      },
+      "attachPhase": {
+        "queued": "等待啟動 {agent}（其他工作階段正在開啟）",
+        "starting": "正在啟動 {agent}",
+        "resuming": "正在恢復 {agent} 工作階段",
+        "loading": "正在載入 {agent} 工作階段",
+        "creating": "正在建立 {agent} 工作階段",
+        "configuring": "正在套用 {agent} 工作階段設定",
+        "elapsedSeconds": "{seconds} 秒",
+        "elapsedMinutes": "{minutes} 分 {seconds} 秒",
+        "withElapsed": "{step} · {elapsed}",
+        "slowHint": "{agent} 仍在啟動。它會在開啟工作階段前執行你的 SessionStart 鉤子與設定，鉤子緩慢或無法連線時就會出現這段等待。"
       }
     },
     "diffPreview": {
