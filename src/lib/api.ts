@@ -7,7 +7,7 @@ import {
   isRemoteDesktopMode,
   notifyRemoteDesktopUnauthorized,
 } from "./transport"
-import { toErrorMessage } from "./app-error"
+import { extractAppCommandError, toErrorMessage } from "./app-error"
 import {
   resolveMediaSrc,
   type WorkspaceMediaCapability,
@@ -4507,6 +4507,18 @@ function fileNameFromPath(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? ""
 }
 
+/** The failure text a transfer row keeps on screen: the error's own message
+ *  plus its detail (`toErrorMessage` alone would show only the detail, which
+ *  for "Remote returned HTTP 502" is just the raw body). */
+function transferErrorMessage(err: unknown): string {
+  const appError = extractAppCommandError(err)
+  const detail = appError?.detail?.trim()
+  if (appError?.message && detail && detail !== appError.message) {
+    return `${appError.message}: ${detail}`
+  }
+  return toErrorMessage(err)
+}
+
 export async function downloadWorkspaceFile(
   rootPath: string,
   path: string,
@@ -4600,7 +4612,7 @@ async function downloadWorkspaceViaRemoteProxy(opts: {
       markTrackedDownloadCancelled(transferId)
       return { status: WORKSPACE_DOWNLOAD_CANCELLED }
     }
-    failTrackedDownload(transferId, toErrorMessage(err))
+    failTrackedDownload(transferId, transferErrorMessage(err))
     if (isRemoteAuthenticationFailed(err)) {
       notifyRemoteDesktopUnauthorized()
     }

@@ -174,7 +174,7 @@ export function VideoPreview({
     )
   }, [])
 
-  const absPath = tab.path
+  const absPath = tab.path ?? ""
   const name = tab.title || relPath || ""
   const localDesktop = isLocalDesktop()
   const web = !isDesktop()

@@ -1585,10 +1585,10 @@ where
                 next = tokio::time::timeout(idle_timeout, stream.next()) => match next {
                     Ok(next) => next,
                     Err(_) => {
-                        return Err(AppCommandError::network(
-                            "Remote download stalled: no data received",
-                        )
-                        .with_detail(format!("idle for {}s", idle_timeout.as_secs())))
+                        return Err(AppCommandError::network(format!(
+                            "Remote download stalled: no data received for {}s",
+                            idle_timeout.as_secs()
+                        )))
                     }
                 },
             };

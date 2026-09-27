@@ -1482,7 +1482,7 @@ mod tests {
         (status, headers, body)
     }
 
-    fn header_str<'a>(headers: &'a HeaderMap, name: header::HeaderName) -> &'a str {
+    fn header_str(headers: &HeaderMap, name: header::HeaderName) -> &str {
         headers.get(name).and_then(|v| v.to_str().ok()).unwrap_or("")
     }
 
