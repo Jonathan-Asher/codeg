@@ -294,9 +294,11 @@ struct SpawnDedupKey {
 /// Default upper bound on how long `spawn_agent` will hold the per-session
 /// dedup lock waiting for `SessionStarted`. Picked to comfortably cover
 /// cold-start agents (claude-code/codex warm: <2s; npx-fetched cold: 10–30s)
-/// without deadlocking the next concurrent acp_connect when an agent is
-/// genuinely broken.
-pub(crate) const SPAWN_HANDSHAKE_TIMEOUT_SECS: u64 = 60;
+/// and a slow resume (a Claude Code session whose startup waits on MCP servers
+/// and SessionStart hooks measured 30–60 s on a loaded machine) without
+/// deadlocking the next concurrent acp_connect when an agent is genuinely
+/// broken. The frontend's `acp_connect` call timeout sits just above it.
+pub(crate) const SPAWN_HANDSHAKE_TIMEOUT_SECS: u64 = 180;
 
 /// Whether the turn a steer was admitted against is no longer the turn now in
 /// flight — the guard `submit_feedback_native` applies across attachment

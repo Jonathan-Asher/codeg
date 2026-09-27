@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl"
 import { useAcpActions } from "@/contexts/acp-connections-context"
 import { useTaskContext } from "@/contexts/task-context"
 import { useConnection, type UseConnectionReturn } from "@/hooks/use-connection"
-import { extractAppCommandError } from "@/lib/app-error"
+import { extractAppCommandError, toErrorMessage } from "@/lib/app-error"
 import { notify } from "@/lib/notify"
 import { isConnectionBusy } from "@/lib/connection-teardown"
 import { TurnBusyError } from "@/lib/turn-busy"
@@ -117,8 +117,9 @@ export function shouldDisconnectOnUnmount(args: {
 }
 
 function normalizeErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return String(error)
+  // Transport errors arrive as plain `{ code, message }` objects, which
+  // `String()` renders as "[object Object]".
+  return toErrorMessage(error)
 }
 
 function isExpectedConnectError(error: unknown): boolean {

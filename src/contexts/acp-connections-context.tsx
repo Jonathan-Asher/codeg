@@ -128,6 +128,7 @@ import {
   saveConfigPreference,
 } from "@/lib/selector-prefs-storage"
 import { rememberModelLabels } from "@/lib/model-label-store"
+import { toErrorMessage } from "@/lib/app-error"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 
 /**
@@ -3242,8 +3243,9 @@ function getAffectedKey(action: Action): string | null {
 }
 
 function normalizeErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return String(error)
+  // Transport errors arrive as plain `{ code, message }` objects, which
+  // `String()` renders as "[object Object]".
+  return toErrorMessage(error)
 }
 
 type AlertedError = Error & { alerted: true }

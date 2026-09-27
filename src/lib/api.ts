@@ -234,6 +234,14 @@ export async function getSidebarData(): Promise<SidebarData> {
 
 // ACP commands
 
+// Resuming a session holds `acp_connect` open until the agent has attached it
+// (up to the server's spawn-handshake timeout, 180 s). A slow machine plus the
+// agent's own startup (MCP servers, SessionStart hooks) can take well over the
+// 30 s default call timeout — and a remote call dropped at 30 s released the
+// server's per-session lock, so the retry spawned a duplicate agent that
+// slowed the first one further. Outlive the server-side wait instead.
+const ACP_CONNECT_TIMEOUT_MS = 200_000
+
 export async function acpConnect(
   agentType: AgentType,
   workingDir?: string,
@@ -241,13 +249,17 @@ export async function acpConnect(
   preferredModeId?: string | null,
   preferredConfigValues?: Record<string, string> | null
 ): Promise<string> {
-  return getTransport().call("acp_connect", {
-    agentType,
-    workingDir: workingDir ?? null,
-    sessionId: sessionId ?? null,
-    preferredModeId: preferredModeId ?? null,
-    preferredConfigValues: preferredConfigValues ?? null,
-  })
+  return getTransport().call(
+    "acp_connect",
+    {
+      agentType,
+      workingDir: workingDir ?? null,
+      sessionId: sessionId ?? null,
+      preferredModeId: preferredModeId ?? null,
+      preferredConfigValues: preferredConfigValues ?? null,
+    },
+    { timeoutMs: ACP_CONNECT_TIMEOUT_MS }
+  )
 }
 
 /**
