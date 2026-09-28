@@ -1705,6 +1705,28 @@
     "behaviorExit": "Sair do codeg",
     "saveFailed": "Falha ao salvar o comportamento de fechamento: {message}"
   },
+  "AutoResumeSettings": {
+    "title": "Retomar sessões interrompidas após reiniciar",
+    "description": "Se o codeg fechar, travar ou reiniciar para uma atualização no meio de um turno, essas sessões são retomadas na próxima inicialização. Cada interrupção é retomada no máximo uma vez.",
+    "saveFailed": "Não foi possível salvar a configuração: {message}"
+  },
+  "AutoResume": {
+    "title": "Retomando {count, plural, one {# sessão interrompida} other {# sessões interrompidas}} pelo reinício",
+    "settledTitle": "Sessões interrompidas pelo reinício",
+    "stoppedTitle": "A retomada das sessões interrompidas pelo reinício foi parada",
+    "stop": "Parar",
+    "stopHint": "Cancela as sessões que ainda estão aguardando. Uma que já está sendo retomada continua; pare-a pela aba dela.",
+    "stopFailed": "Não foi possível parar a retomada: {message}",
+    "untitled": "Sessão sem título",
+    "statePending": "Aguardando",
+    "stateResuming": "Retomando…",
+    "stateResumed": "Retomada",
+    "stateFailed": "Não foi possível retomar",
+    "stateStopped": "Parada",
+    "stateSkipped": "Já continuada",
+    "failedHint": "Ela continua interrompida; use Continuar para retomá-la manualmente.",
+    "dismiss": "Fechar"
+  },
   "StartupWorkspaceSettings": {
     "title": "Ao iniciar o codeg, abrir",
     "description": "Um espaço de trabalho remoto abre em sua própria janela, e o local continua a um clique em Ações rápidas.",
@@ -3589,7 +3611,9 @@
         "retry": "Retry",
         "retried": "Tentado novamente",
         "continued": "Continuado",
-        "continuedHint": "Você pediu ao agente para prosseguir"
+        "continuedHint": "Você pediu ao agente para prosseguir",
+        "resumedAfterRestart": "Retomada após reinício",
+        "resumedAfterRestartHint": "O codeg reiniciou no meio deste turno e retomou a sessão por conta própria"
       },
       "liveTurnStats": {
         "thinking": "Pensando...",

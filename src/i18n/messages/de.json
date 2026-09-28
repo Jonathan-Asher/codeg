@@ -1705,6 +1705,28 @@
     "behaviorExit": "codeg beenden",
     "saveFailed": "Schließverhalten konnte nicht gespeichert werden: {message}"
   },
+  "AutoResumeSettings": {
+    "title": "Unterbrochene Sitzungen nach einem Neustart fortsetzen",
+    "description": "Wird codeg mitten in einer Runde beendet, stürzt ab oder startet für ein Update neu, werden diese Sitzungen beim nächsten Start fortgesetzt. Jede Unterbrechung wird höchstens einmal fortgesetzt.",
+    "saveFailed": "Die Einstellung konnte nicht gespeichert werden: {message}"
+  },
+  "AutoResume": {
+    "title": "{count, plural, one {# durch den Neustart unterbrochene Sitzung wird} other {# durch den Neustart unterbrochene Sitzungen werden}} fortgesetzt",
+    "settledTitle": "Durch den Neustart unterbrochene Sitzungen",
+    "stoppedTitle": "Fortsetzen der durch den Neustart unterbrochenen Sitzungen gestoppt",
+    "stop": "Stoppen",
+    "stopHint": "Bricht die noch wartenden Sitzungen ab. Eine Sitzung, die bereits fortgesetzt wird, läuft weiter; stoppe sie in ihrem Tab.",
+    "stopFailed": "Das Fortsetzen konnte nicht gestoppt werden: {message}",
+    "untitled": "Unbenannte Sitzung",
+    "statePending": "Wartet",
+    "stateResuming": "Wird fortgesetzt…",
+    "stateResumed": "Fortgesetzt",
+    "stateFailed": "Fortsetzen fehlgeschlagen",
+    "stateStopped": "Gestoppt",
+    "stateSkipped": "Bereits fortgesetzt",
+    "failedHint": "Sie bleibt unterbrochen; mit „Fortsetzen“ machst du von Hand weiter.",
+    "dismiss": "Schließen"
+  },
   "StartupWorkspaceSettings": {
     "title": "Beim Start von codeg öffnen",
     "description": "Ein Remote-Arbeitsbereich öffnet sich in einem eigenen Fenster; der lokale Arbeitsbereich bleibt unter Schnellaktionen nur einen Klick entfernt.",
@@ -3589,7 +3611,9 @@
         "retry": "Retry",
         "retried": "Erneut versucht",
         "continued": "Fortgesetzt",
-        "continuedHint": "Du hast den Agenten gebeten weiterzumachen"
+        "continuedHint": "Du hast den Agenten gebeten weiterzumachen",
+        "resumedAfterRestart": "Nach Neustart fortgesetzt",
+        "resumedAfterRestartHint": "codeg wurde mitten in dieser Runde neu gestartet und hat die Sitzung von selbst fortgesetzt"
       },
       "liveTurnStats": {
         "thinking": "Denkt nach...",

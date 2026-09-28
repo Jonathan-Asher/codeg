@@ -1,3 +1,4 @@
+import { isResumeAfterRestartPrompt } from "@/lib/auto-resume"
 import { isContinuePrompt } from "@/lib/continue-turn"
 import type { ContentBlock, MessageTurn } from "@/lib/types"
 
@@ -22,7 +23,8 @@ function textOf(turn: MessageTurn): string {
  * (image-only) turns are skipped, and consecutive duplicates collapse — sending
  * the same text twice is one entry to step through, not two. Continue turns
  * are skipped too: they came from a button (see `lib/continue-turn`), so Up
- * after a Continue recalls the last thing the user actually wrote.
+ * after a Continue recalls the last thing the user actually wrote. So is the
+ * prompt codeg itself sent to resume a turn after a restart (`lib/auto-resume`).
  */
 export function userPromptHistory(
   turns: readonly MessageTurn[] | undefined
@@ -32,7 +34,9 @@ export function userPromptHistory(
   for (const turn of turns) {
     if (turn.role !== "user") continue
     const text = textOf(turn)
-    if (!text || isContinuePrompt(text)) continue
+    if (!text || isContinuePrompt(text) || isResumeAfterRestartPrompt(text)) {
+      continue
+    }
     if (out[out.length - 1] === text) continue
     out.push(text)
   }

@@ -33,6 +33,32 @@ pub enum ConversationTurnState {
     Interrupted,
 }
 
+/// Where a cut-off turn stands with respect to the automatic resume after a
+/// restart (`acp::auto_resume`). Only meaningful next to
+/// [`ConversationTurnState`]; `None` on the row means there is nothing to
+/// resume automatically.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::None)")]
+#[serde(rename_all = "snake_case")]
+pub enum ConversationAutoResume {
+    /// The turn was cut off by codeg itself exiting (a quit, a crash, an
+    /// update restart) and is due to be resumed on the next start.
+    #[sea_orm(string_value = "pending")]
+    Pending,
+    /// This start claimed the turn and is resuming it; the next turn to start
+    /// on the conversation is the automatic resume.
+    #[sea_orm(string_value = "claimed")]
+    Claimed,
+    /// The turn running (or cut off) now is the automatic resume. Resumed at
+    /// most once: an exit during it leaves a plain interruption.
+    #[sea_orm(string_value = "attempted")]
+    Attempted,
+    /// The user stopped the running turn. An exit before the stop landed must
+    /// not bring the turn back.
+    #[sea_orm(string_value = "cancelled")]
+    Cancelled,
+}
+
 /// What kind of row this conversation is — drives sidebar visibility and
 /// grouping. `regular` renders under its folder group; `chat` renders in the
 /// flat "Chat" section; `loop` belongs to the Loop Engineering workbench and is
@@ -106,6 +132,10 @@ pub struct Model {
     /// document shape (`ConversationSelectorState`).
     #[sea_orm(column_type = "Text", nullable)]
     pub selector_state: Option<String>,
+    /// The automatic-resume mark of the latest cut-off turn, if any. See
+    /// [`ConversationAutoResume`]; written only through the
+    /// `conversation_service` turn-state functions.
+    pub auto_resume: Option<ConversationAutoResume>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

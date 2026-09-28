@@ -77,6 +77,7 @@ import { FileWorkspacePanel } from "@/components/files/file-workspace-panel"
 import { ExternalConflictDialog } from "@/components/files/external-conflict-dialog"
 import { AppToaster } from "@/components/ui/app-toaster"
 import { WorkspaceTransfersToasts } from "@/components/layout/workspace-transfers"
+import { AutoResumeToasts } from "@/components/layout/auto-resume-toasts"
 import {
   DeepLinkBootstrap,
   PetFocusBridge,
@@ -1256,6 +1257,8 @@ function FolderLayoutShell({ children }: { children: React.ReactNode }) {
       />
       {/* Live progress toasts for remote-workspace downloads. */}
       <WorkspaceTransfersToasts />
+      {/* The sessions a restart cut off, as the backend resumes them. */}
+      <AutoResumeToasts />
     </div>
   )
 }

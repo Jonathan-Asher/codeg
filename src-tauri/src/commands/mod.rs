@@ -1,6 +1,8 @@
 pub mod acp;
 #[cfg(feature = "tauri-runtime")]
 pub mod app_update;
+#[cfg(feature = "tauri-runtime")]
+pub mod auto_resume;
 pub mod automation;
 pub mod background;
 pub mod backup;

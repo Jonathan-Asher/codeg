@@ -3986,6 +3986,40 @@ export interface CloseRequestPayload {
   running_terminals: number
 }
 
+// --- Resume after restart ---
+
+/** "Resume interrupted sessions after restart" (Rust `AutoResumeSettings`). */
+export interface AutoResumeSettings {
+  enabled: boolean
+}
+
+/** Where one conversation of a resume batch stands (Rust
+ *  `AutoResumeItemState`). */
+export type AutoResumeItemState =
+  | "pending"
+  | "resuming"
+  | "resumed"
+  | "failed"
+  | "stopped"
+  | "skipped"
+
+export interface AutoResumeItem {
+  conversation_id: number
+  folder_id: number
+  agent_type: AgentType
+  title: string | null
+  state: AutoResumeItemState
+  error: string | null
+}
+
+/** The backend's resume batch for this start (Rust `AutoResumeStatus`).
+ *  `started_at` is null when there was nothing to resume. */
+export interface AutoResumeStatus {
+  started_at: string | null
+  items: AutoResumeItem[]
+  stopped: boolean
+}
+
 // --- Logging ---
 
 export type LogLevel = "off" | "error" | "warn" | "info" | "debug" | "trace"

@@ -45,6 +45,7 @@ import { toErrorMessage } from "@/lib/app-error"
 import { CloseBehaviorSettingsSection } from "@/components/settings/close-behavior-settings"
 import { DesktopNotificationSettingsSection } from "@/components/settings/desktop-notification-settings"
 import { NotificationSoundSettingsSection } from "@/components/settings/notification-sound-settings"
+import { ResumeAfterRestartSettingsSection } from "@/components/settings/resume-after-restart-settings"
 
 const TERMINAL_SHELL_OPTION_SYSTEM = "system"
 const TERMINAL_SHELL_OPTION_CUSTOM = "custom"
@@ -514,6 +515,9 @@ export function GeneralSettings() {
         )}
 
         <CloseBehaviorSettingsSection />
+
+        {/* What a restart does to the turns it cuts off. */}
+        <ResumeAfterRestartSettingsSection />
 
         {/* The two halves of "how Codeg gets my attention", adjacent on
             purpose: one leaves the window, one does not. */}

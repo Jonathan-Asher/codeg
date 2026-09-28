@@ -540,6 +540,18 @@ async fn async_main() -> ExitCode {
         tokio::spawn(codeg_lib::work_task::run_task_engine(engine));
     }
 
+    // Pick the turns the last exit cut off back up (mirrors lib.rs setup) —
+    // after the lifecycle subscriber above, which records the resumed turn as
+    // running.
+    tokio::spawn(codeg_lib::acp::auto_resume::run_auto_resume(
+        codeg_lib::db::AppDatabase {
+            conn: state.db.conn.clone(),
+        },
+        state.connection_manager.clone_ref(),
+        state.emitter.clone(),
+        state.data_dir.clone(),
+    ));
+
     // Config-sync uploader (mirrors lib.rs setup): sleeps a minute, then
     // compares the configuration's hash every interval and uploads only when
     // it changed. Does nothing at all until a WebDAV endpoint is configured.

@@ -134,6 +134,22 @@ pub fn build_router(
             post(handlers::attention::list_conversation_attention),
         )
         .route(
+            "/get_auto_resume_settings",
+            post(handlers::auto_resume::get_auto_resume_settings),
+        )
+        .route(
+            "/update_auto_resume_settings",
+            post(handlers::auto_resume::update_auto_resume_settings),
+        )
+        .route(
+            "/get_auto_resume_status",
+            post(handlers::auto_resume::get_auto_resume_status),
+        )
+        .route(
+            "/stop_auto_resume",
+            post(handlers::auto_resume::stop_auto_resume),
+        )
+        .route(
             "/message_search",
             post(handlers::message_search::message_search),
         )

@@ -1705,6 +1705,28 @@
     "behaviorExit": "codeg を終了",
     "saveFailed": "閉じる動作の保存に失敗しました: {message}"
   },
+  "AutoResumeSettings": {
+    "title": "再起動後に中断されたセッションを再開",
+    "description": "ターンの途中で codeg が終了、クラッシュ、またはアップデートのために再起動した場合、次回の起動時にそのセッションを再開します。各中断の再開は最大 1 回です。",
+    "saveFailed": "設定を保存できませんでした: {message}"
+  },
+  "AutoResume": {
+    "title": "再起動で中断された {count} 件のセッションを再開しています",
+    "settledTitle": "再起動で中断されたセッション",
+    "stoppedTitle": "再起動で中断されたセッションの再開を停止しました",
+    "stop": "停止",
+    "stopHint": "待機中のセッションをキャンセルします。すでに再開中のセッションは続行されるので、そのタブから停止してください。",
+    "stopFailed": "再開を停止できませんでした: {message}",
+    "untitled": "無題のセッション",
+    "statePending": "待機中",
+    "stateResuming": "再開中…",
+    "stateResumed": "再開済み",
+    "stateFailed": "再開できませんでした",
+    "stateStopped": "停止済み",
+    "stateSkipped": "すでに続行済み",
+    "failedHint": "中断されたままです。「続行」で手動で再開できます。",
+    "dismiss": "閉じる"
+  },
   "StartupWorkspaceSettings": {
     "title": "codeg の起動時に開く",
     "description": "リモートワークスペースは専用のウィンドウで開きます。ローカルワークスペースはいつでも「クイック操作」から開けます。",
@@ -3589,7 +3611,9 @@
         "retry": "Retry",
         "retried": "再試行済み",
         "continued": "続行済み",
-        "continuedHint": "エージェントに続けるよう求めました"
+        "continuedHint": "エージェントに続けるよう求めました",
+        "resumedAfterRestart": "再起動後に再開",
+        "resumedAfterRestartHint": "このターンの途中で codeg が再起動したため、セッションを自動的に再開しました"
       },
       "liveTurnStats": {
         "thinking": "考え中...",

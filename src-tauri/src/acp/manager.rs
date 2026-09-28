@@ -892,6 +892,26 @@ impl ConnectionManager {
         Ok(connection_id)
     }
 
+    /// Wait until `conn_id` has finished opening its session: `Some(Ready)` or
+    /// `Some(Failed)`, the phase it is still in once `timeout` passes, or
+    /// `None` when the connection is gone. For in-process callers that spawned
+    /// detached and follow the attach themselves (the automatic resume).
+    pub(crate) async fn wait_until_attached(
+        &self,
+        conn_id: &str,
+        timeout: Duration,
+    ) -> Option<AttachPhase> {
+        let mut rx = self.subscribe_attach(conn_id).await?;
+        let outcome = tokio::time::timeout(timeout, rx.wait_for(|p| !p.is_attaching()))
+            .await
+            .map(|settled| settled.map(|phase| *phase));
+        match outcome {
+            Ok(Ok(phase)) => Some(phase),
+            Ok(Err(_)) => None,
+            Err(_) => Some(*rx.borrow()),
+        }
+    }
+
     /// The attach phase of a live connection, `None` if it is gone.
     async fn attach_phase_of(&self, conn_id: &str) -> Option<AttachPhase> {
         let state = {
@@ -1623,6 +1643,18 @@ impl ConnectionManager {
             conversation_service::update_status(&db.conn, cid, ConversationStatus::InProgress)
                 .await
                 .map_err(|e| AcpError::protocol(e.to_string()))?;
+            // A new turn asked for by anyone but the automatic resume (whose
+            // own prompt goes out while its claim is still `claimed`) spends
+            // the single resume an earlier interruption got, so an exit during
+            // this turn is due its own. Best-effort: a missed clear only costs
+            // that one automatic resume.
+            if let Err(e) = conversation_service::clear_spent_auto_resume(&db.conn, cid).await {
+                tracing::warn!(
+                    conversation_id = cid,
+                    error = %e,
+                    "[manager] failed to clear a spent auto-resume mark"
+                );
+            }
             emit_with_state(
                 &state_arc,
                 &emitter,
@@ -1968,6 +2000,15 @@ impl ConnectionManager {
         // status if the turn happened to end just before the user clicked.
         let conversation_id = state_arc.read().await.conversation_id;
         if let Some(cid) = conversation_id {
+            // The user stopped this turn: if codeg exits before the agent
+            // confirms, the next start must not resume it.
+            if let Err(e) = conversation_service::mark_turn_cancelled_by_user(db, cid).await {
+                tracing::warn!(
+                    conversation_id = cid,
+                    error = %e,
+                    "[ACP] failed to record the user's stop for the auto-resume"
+                );
+            }
             match conversation_service::update_status_if(
                 db,
                 cid,
@@ -2525,6 +2566,7 @@ impl ConnectionManager {
                         origin_cwd: Set(None),
                         turn_state: Set(None),
                         selector_state: Set(None),
+                        auto_resume: Set(None),
                     };
                     let inserted = sibling.insert(txn).await?;
                     Ok(inserted.id)
