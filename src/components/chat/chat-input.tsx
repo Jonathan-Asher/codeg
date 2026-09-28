@@ -65,6 +65,8 @@ interface ChatInputProps {
   heldTurnReady?: boolean
   /** Pass-through: see `MessageInput.onDeliverNow`. */
   onDeliverNow?: (text: string, blocks?: PromptInputBlock[]) => Promise<void>
+  /** Pass-through: see `MessageInput.canContinue`. */
+  canContinue?: boolean
   onQueueReorder?: (items: QueuedMessage[]) => void
   onQueueEdit?: (id: string) => void
   onQueueDelete?: (id: string) => void
@@ -144,6 +146,7 @@ export const ChatInput = memo(function ChatInput({
   backgroundTaskCount = 0,
   heldTurnReady = false,
   onDeliverNow,
+  canContinue = false,
   onQueueReorder,
   onQueueEdit,
   onQueueDelete,
@@ -257,6 +260,7 @@ export const ChatInput = memo(function ChatInput({
         onEnqueue={onEnqueue}
         heldTurnReady={isPrompting && heldTurnReady}
         onDeliverNow={onDeliverNow}
+        canContinue={canContinue}
         editingItemId={editingItemId}
         editingDraftText={editingDraftText}
         editingDraftBlocks={editingDraftBlocks}

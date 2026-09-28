@@ -3255,6 +3255,9 @@
         "heldTurnSend": "지금 보내기 (에이전트 대기 중)",
         "heldTurnQueue": "백그라운드 작업이 끝날 때까지 대기열에 추가",
         "heldTurnSendFailed": "실행 중인 세션으로 보내지 못했습니다. 백그라운드 작업이 끝날 때까지 대기열에 추가했습니다",
+        "continue": "계속",
+        "continueHint": "메시지를 쓰지 않고 에이전트가 이어서 진행하게 합니다",
+        "continueHintShortcut": "메시지를 쓰지 않고 에이전트가 이어서 진행하게 합니다 ({shortcut})",
         "slashCommands": "슬래시 명령",
         "slashSearchPlaceholder": "명령 검색...",
         "slashSearchEmpty": "일치하는 명령이 없습니다",
@@ -3584,7 +3587,9 @@
         "findNext": "Next match",
         "findClose": "Close find",
         "retry": "Retry",
-        "retried": "재시도함"
+        "retried": "재시도함",
+        "continued": "계속함",
+        "continuedHint": "에이전트에게 계속 진행하도록 요청했습니다"
       },
       "liveTurnStats": {
         "thinking": "생각 중...",

@@ -621,14 +621,33 @@ describe("ConversationDetailPanel session-load failure surface", () => {
     expect(end).toBeGreaterThan(start)
     const block = source.slice(start, end)
     // "continue" goes through the message queue — the same path a typed
-    // message takes — so it waits for the resumed session to be ready.
-    expect(block).toContain("mqEnqueue(")
-    expect(block).toContain("CONTINUE_PROMPT")
+    // message takes — so it waits for the resumed session to be ready. It is
+    // the composer Continue's own draft, so both render as one divider.
+    expect(block).toContain("mqEnqueue(continuePromptDraft()")
     // Shown only for an interrupted turn, never while one streams or while a
     // message is already queued to start one.
     expect(block).toContain('persistedTurnState === "interrupted"')
     expect(block).toContain('connStatus !== "prompting"')
     expect(block).toContain("msgQueue.length === 0")
+  })
+
+  it("gates the composer's Continue on this tab's own session activity", () => {
+    const start = source.indexOf("const canContinue = canOfferContinue(")
+    expect(start).toBeGreaterThan(-1)
+    const block = source.slice(start, source.indexOf("})\n", start))
+    // The activity comes from this tab's live connection, never from a
+    // connection still bound to another agent.
+    expect(block).toContain("deriveSessionActivity(")
+    expect(block).toContain("connIsForOtherAgent ? null : connStatus")
+    expect(block).toContain("awaitingBackground")
+    // Anything owed to the user, or already queued, keeps it away.
+    expect(block).toContain("conn.pendingPermission")
+    expect(block).toContain("conn.pendingQuestion")
+    expect(block).toContain("conn.pendingAskQuestion")
+    expect(block).toContain("conn.pendingPlanApproval")
+    expect(block).toContain("queuedCount: msgQueue.length")
+    expect(block).toContain('composerConnStatus === "connected"')
+    expect(source).toContain("canContinue={canContinue}")
   })
 
   it("never clears a resolved session id when the persisted detail is absent", () => {

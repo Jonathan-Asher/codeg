@@ -3255,6 +3255,9 @@
         "heldTurnSend": "Jetzt senden (der Agent ist im Leerlauf)",
         "heldTurnQueue": "In die Warteschlange, bis die Hintergrundarbeit fertig ist",
         "heldTurnSendFailed": "Konnte nicht in die laufende Sitzung senden – in der Warteschlange, bis ihre Hintergrundarbeit fertig ist",
+        "continue": "Fortsetzen",
+        "continueHint": "Den Agenten weitermachen lassen, ohne eine Nachricht zu schreiben",
+        "continueHintShortcut": "Den Agenten weitermachen lassen, ohne eine Nachricht zu schreiben ({shortcut})",
         "slashCommands": "Slash-Befehle",
         "slashSearchPlaceholder": "Befehle suchen...",
         "slashSearchEmpty": "Keine passenden Befehle",
@@ -3584,7 +3587,9 @@
         "findNext": "Next match",
         "findClose": "Close find",
         "retry": "Retry",
-        "retried": "Erneut versucht"
+        "retried": "Erneut versucht",
+        "continued": "Fortgesetzt",
+        "continuedHint": "Du hast den Agenten gebeten weiterzumachen"
       },
       "liveTurnStats": {
         "thinking": "Denkt nach...",

@@ -14,6 +14,7 @@ import {
   Cog,
   Copy,
   MessageSquareText,
+  Play,
   Scissors,
   Send,
   Square,
@@ -45,10 +46,16 @@ import {
 import { AgentIcon } from "@/components/agent-icon"
 import { cn, copyTextFromMenu } from "@/lib/utils"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
+import { useIsMac } from "@/hooks/use-is-mac"
+import {
+  formatShortcutLabel,
+  shortcutsConflict,
+} from "@/lib/keyboard-shortcuts"
 import { imageFilesFromClipboardApi } from "@/lib/clipboard-images"
 import { toErrorMessage } from "@/lib/app-error"
 import { isNoActiveTurnRejection } from "@/lib/turn-busy"
 import { routeComposerSend } from "@/lib/background-idle"
+import { CONTINUE_SHORTCUT, continuePromptDraft } from "@/lib/continue-turn"
 import { buildSteerPayload } from "@/lib/prompt-draft"
 import {
   stepComposerHistory,
@@ -248,6 +255,15 @@ interface MessageInputProps {
    *  the turn ended in the meantime and the draft goes to the queue, which
    *  sends it right away; any other failure queues it for the turn's end. */
   onDeliverNow?: (text: string, blocks?: PromptInputBlock[]) => Promise<void>
+  /**
+   * The conversation can take a Continue (`canOfferContinue`): the agent has
+   * replied and the session is idle, or idle with background work holding its
+   * turn open. The composer then shows a Continue button beside its send
+   * action — while its box is empty — and binds ⌘/Ctrl+Enter to it. Continue
+   * sends `CONTINUE_PROMPT` through exactly the route Enter would take in
+   * this state: a normal send, a delivery into the held turn, or the queue.
+   */
+  canContinue?: boolean
   /** Id of the queue item being edited — the stable key for (re)hydration, so
    *  switching between two items with identical display text still reloads. */
   editingItemId?: string | null
@@ -421,6 +437,7 @@ export function MessageInput({
   onEnqueue,
   heldTurnReady = false,
   onDeliverNow,
+  canContinue = false,
   editingItemId,
   editingDraftText,
   editingDraftBlocks,
@@ -1570,20 +1587,28 @@ export function MessageInput({
   // at once to the now-idle session. Any other failure (a message too long
   // for the channel, say) parks it for the turn's end rather than losing it
   // or retrying it into the same failure.
+  //
+  // `fromComposer: false` is Continue: its draft never was in the editor, so
+  // nothing there is cleared — the user may have started typing while the
+  // delivery was in flight.
   const [delivering, setDelivering] = useState(false)
   const deliverIntoHeldTurn = useCallback(
-    async (draft: PromptDraft) => {
+    async (draft: PromptDraft, { fromComposer = true } = {}) => {
       if (!onDeliverNow || delivering) return
       const payload = buildSteerPayload(draft)
       if (!payload) return
       const modeId = showModeSelector ? effectiveModeId : null
-      setDelivering(true)
-      try {
-        await onDeliverNow(payload.text, payload.blocks)
+      const clearComposer = () => {
+        if (!fromComposer) return
         if (effectiveDraftStorageKey) {
           clearMessageInputDraftV2(effectiveDraftStorageKey)
         }
         resetComposer()
+      }
+      setDelivering(true)
+      try {
+        await onDeliverNow(payload.text, payload.blocks)
+        clearComposer()
       } catch (err) {
         if (!onEnqueue) {
           toast.error(t("heldTurnSendFailed"), {
@@ -1599,7 +1624,7 @@ export function MessageInput({
             description: toErrorMessage(err),
           })
         }
-        resetComposer()
+        if (fromComposer) resetComposer()
       } finally {
         setDelivering(false)
       }
@@ -1774,6 +1799,68 @@ export function MessageInput({
     steerChannel,
     t,
   ])
+
+  // Continue: let the agent keep going without writing a message (see
+  // `lib/continue-turn`). The host decides whether the conversation can take
+  // one; this adds the composer's half — an empty box (no text, no
+  // attachment), no queue item open for editing, no delivery in flight, and a
+  // composer that can send at all. The prompt takes exactly the route Enter
+  // takes right now, so an idle session gets a normal turn and a turn held
+  // for background work gets it delivered (or queued) the way a typed message
+  // would be. The editor is left alone: the draft never was in it.
+  const showContinue =
+    canContinue &&
+    !hasSendableContent &&
+    !isEditingQueueItem &&
+    !delivering &&
+    !(disabled && !isPrompting)
+  const handleContinue = useCallback(() => {
+    const draft = continuePromptDraft()
+    const modeId = showModeSelector ? effectiveModeId : null
+    const route = routeComposerSend({
+      isPrompting,
+      queueSends,
+      canDeliverNow: heldTurnReady,
+      hasEnqueue: Boolean(onEnqueue),
+      hasDeliver: Boolean(onDeliverNow),
+    })
+    if (route === "deliver") {
+      void deliverIntoHeldTurn(draft, { fromComposer: false })
+      return
+    }
+    if (route === "enqueue" && onEnqueue) {
+      onEnqueue(draft, modeId)
+      return
+    }
+    onSend(draft, modeId)
+  }, [
+    showModeSelector,
+    effectiveModeId,
+    isPrompting,
+    queueSends,
+    heldTurnReady,
+    onEnqueue,
+    onDeliverNow,
+    deliverIntoHeldTurn,
+    onSend,
+  ])
+  // ⌘/Ctrl+Enter on the empty composer. RichComposer only asks when neither
+  // the send nor the newline binding claims the chord; declining (no Continue
+  // on offer) keeps the editor's default for it.
+  const handleContinueShortcut = useCallback((): boolean => {
+    if (!showContinue) return false
+    handleContinue()
+    return true
+  }, [showContinue, handleContinue])
+  const isMac = useIsMac()
+  const continueShortcutBound =
+    !shortcutsConflict(shortcuts.send_message, CONTINUE_SHORTCUT) &&
+    !shortcutsConflict(shortcuts.newline_in_message, CONTINUE_SHORTCUT)
+  const continueTitle = continueShortcutBound
+    ? t("continueHintShortcut", {
+        shortcut: formatShortcutLabel(CONTINUE_SHORTCUT, isMac),
+      })
+    : t("continueHint")
 
   // Navigation/confirm/escape keys for the `/` (commands) and `$` (Codex skills)
   // runtime menu, routed from inside the editor (RichComposer.onExternalMenuKeyDown)
@@ -2406,6 +2493,7 @@ export function MessageInput({
                 isExternalMenuOpen={slashMenuVisible}
                 onExternalMenuKeyDown={handleExternalMenuKeyDown}
                 onHistoryKeyDown={handleHistoryKeyDown}
+                onContinueShortcut={handleContinueShortcut}
                 // `grow`, not `flex-1`: a content flex basis, so the editable
                 // area is always at least as tall as the text it holds even
                 // where no free space is handed out. A zero basis (`flex-1`)
@@ -2499,7 +2587,28 @@ export function MessageInput({
                     </div>
                   )}
                 </div>
-                <div className="shrink-0">{actionButtons}</div>
+                <div className="flex shrink-0 items-center gap-1">
+                  {showContinue && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleContinue}
+                      title={continueTitle}
+                      aria-label={t("continue")}
+                      data-testid="composer-continue"
+                      className="h-8 px-2.5"
+                    >
+                      <Play aria-hidden className="size-3.5" />
+                      {/* Icon-only in a narrow composer, where the selector
+                          chips need the row more than the word does. */}
+                      <span className="hidden @[20rem]:inline">
+                        {t("continue")}
+                      </span>
+                    </Button>
+                  )}
+                  {actionButtons}
+                </div>
               </div>
               {showDragActive && (
                 <div className="pointer-events-none absolute inset-1 z-20 flex items-center justify-center rounded-md border border-dashed border-primary/50 bg-background/80 text-xs text-muted-foreground">

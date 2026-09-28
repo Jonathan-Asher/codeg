@@ -3255,6 +3255,9 @@
         "heldTurnSend": "إرسال الآن (الوكيل خامل)",
         "heldTurnQueue": "إضافة إلى قائمة الانتظار حتى ينتهي العمل في الخلفية",
         "heldTurnSendFailed": "تعذّر الإرسال إلى الجلسة الجارية — أُضيفت إلى قائمة الانتظار حتى ينتهي عملها في الخلفية",
+        "continue": "متابعة",
+        "continueHint": "دع الوكيل يتابع دون كتابة رسالة",
+        "continueHintShortcut": "دع الوكيل يتابع دون كتابة رسالة ({shortcut})",
         "slashCommands": "أوامر الشرطة المائلة",
         "slashSearchPlaceholder": "البحث عن الأوامر...",
         "slashSearchEmpty": "لا توجد أوامر مطابقة",
@@ -3584,7 +3587,9 @@
         "findNext": "Next match",
         "findClose": "Close find",
         "retry": "Retry",
-        "retried": "تمت إعادة المحاولة"
+        "retried": "تمت إعادة المحاولة",
+        "continued": "تمت المتابعة",
+        "continuedHint": "طلبت من الوكيل المتابعة"
       },
       "liveTurnStats": {
         "thinking": "جارٍ التفكير...",

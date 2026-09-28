@@ -3255,6 +3255,9 @@
         "heldTurnSend": "今すぐ送信（エージェントは待機中）",
         "heldTurnQueue": "バックグラウンド処理の完了までキューに追加",
         "heldTurnSendFailed": "実行中のセッションに送信できませんでした。バックグラウンド処理の完了までキューに追加しました",
+        "continue": "続行",
+        "continueHint": "メッセージを書かずにエージェントに続けてもらう",
+        "continueHintShortcut": "メッセージを書かずにエージェントに続けてもらう（{shortcut}）",
         "slashCommands": "スラッシュコマンド",
         "slashSearchPlaceholder": "コマンドを検索...",
         "slashSearchEmpty": "一致するコマンドがありません",
@@ -3584,7 +3587,9 @@
         "findNext": "Next match",
         "findClose": "Close find",
         "retry": "Retry",
-        "retried": "再試行済み"
+        "retried": "再試行済み",
+        "continued": "続行済み",
+        "continuedHint": "エージェントに続けるよう求めました"
       },
       "liveTurnStats": {
         "thinking": "考え中...",

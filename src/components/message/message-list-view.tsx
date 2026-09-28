@@ -69,6 +69,7 @@ import {
   CopyIcon,
   Loader2,
   Pencil,
+  Play,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -85,6 +86,7 @@ import {
   type UserMessageEditRequest,
 } from "@/lib/edit-message"
 import { isRetryNudge } from "@/lib/retry-nudge"
+import { isContinuationGroup } from "@/lib/continue-turn"
 import { Button } from "@/components/ui/button"
 import { useTranslations } from "next-intl"
 import {
@@ -1768,6 +1770,13 @@ export function MessageListView({
           const isRetryMarker =
             item.group.role === "user" &&
             isRetryNudge(extractFindableText(item))
+          // A Continue turn (the composer's Continue, the interrupted banner's,
+          // or a bare "continue" typed by hand — see `lib/continue-turn`): the
+          // user asked the agent to keep going rather than said something, so
+          // it reads as a divider in the reply, not as a user bubble. Matched
+          // on the exact text, which is all a reload keeps.
+          const isContinueMarker =
+            !isRetryMarker && isContinuationGroup(item.group)
           // Retry affordance: a trailing user turn that got NO assistant
           // response (agent died, turn cut off, connection dropped) — offered
           // again once the connection is not mid-stream.
@@ -1781,12 +1790,14 @@ export function MessageListView({
           // for, with a reply right before it or nothing at all (see
           // `computeUserEditTargets`). Not on a message still on its way
           // (optimistic / streaming), nor on a Retry marker — codeg wrote
-          // that one, not the user.
+          // that one, not the user — nor on a Continue divider, which has no
+          // text worth editing.
           const editTarget =
             onEditUserMessage &&
             item.group.role === "user" &&
             item.phase === "persisted" &&
-            !isRetryMarker
+            !isRetryMarker &&
+            !isContinueMarker
               ? editTargets.get(item.key)
               : undefined
           const editBlocked: UserEditBlock | null = !editTarget
@@ -1828,6 +1839,21 @@ export function MessageListView({
                   <span className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[0.625rem] font-medium leading-none text-muted-foreground">
                     <RotateCcw className="h-2.5 w-2.5" aria-hidden />
                     {t("retried")}
+                  </span>
+                  <span aria-hidden="true" className="h-px flex-1 bg-border" />
+                </div>
+              ) : isContinueMarker ? (
+                <div
+                  data-continue-marker
+                  className="flex items-center gap-2 px-1 py-1"
+                >
+                  <span aria-hidden="true" className="h-px flex-1 bg-border" />
+                  <span
+                    title={t("continuedHint")}
+                    className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[0.625rem] font-medium leading-none text-muted-foreground"
+                  >
+                    <Play className="h-2.5 w-2.5" aria-hidden />
+                    {t("continued")}
                   </span>
                   <span aria-hidden="true" className="h-px flex-1 bg-border" />
                 </div>

@@ -3257,6 +3257,9 @@
         "heldTurnSend": "Send now (the agent is idle)",
         "heldTurnQueue": "Queue until background work finishes",
         "heldTurnSendFailed": "Couldn't send into the running session — queued until its background work finishes",
+        "continue": "Continue",
+        "continueHint": "Let the agent keep going without writing a message",
+        "continueHintShortcut": "Let the agent keep going without writing a message ({shortcut})",
         "slashCommands": "Slash commands",
         "slashSearchPlaceholder": "Search commands...",
         "slashSearchEmpty": "No matching commands",
@@ -3584,7 +3587,9 @@
         "findNext": "Next match",
         "findClose": "Close find",
         "retry": "Retry",
-        "retried": "Retried"
+        "retried": "Retried",
+        "continued": "Continued",
+        "continuedHint": "You asked the agent to keep going"
       },
       "liveTurnStats": {
         "thinking": "Thinking...",

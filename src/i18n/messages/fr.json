@@ -3255,6 +3255,9 @@
         "heldTurnSend": "Envoyer maintenant (l'agent est inactif)",
         "heldTurnQueue": "Mettre en file d'attente jusqu'à la fin du travail en arrière-plan",
         "heldTurnSendFailed": "Impossible d'envoyer dans la session en cours — mis en file d'attente jusqu'à la fin de son travail en arrière-plan",
+        "continue": "Continuer",
+        "continueHint": "Laisser l'agent poursuivre sans écrire de message",
+        "continueHintShortcut": "Laisser l'agent poursuivre sans écrire de message ({shortcut})",
         "slashCommands": "Commandes slash",
         "slashSearchPlaceholder": "Rechercher des commandes...",
         "slashSearchEmpty": "Aucune commande correspondante",
@@ -3584,7 +3587,9 @@
         "findNext": "Next match",
         "findClose": "Close find",
         "retry": "Retry",
-        "retried": "Relancé"
+        "retried": "Relancé",
+        "continued": "Poursuivi",
+        "continuedHint": "Vous avez demandé à l'agent de poursuivre"
       },
       "liveTurnStats": {
         "thinking": "Réflexion...",

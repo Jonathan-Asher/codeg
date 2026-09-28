@@ -55,7 +55,13 @@ import { useAdvertisedGoalActions } from "@/hooks/use-goal-actions"
 import { ConversationShell } from "@/components/chat/conversation-shell"
 import { SessionConfigStaleBanner } from "@/components/chat/session-config-stale-banner"
 import { SessionInterruptedBanner } from "@/components/chat/session-interrupted-banner"
-import { CONTINUE_PROMPT } from "@/lib/session-activity"
+import { deriveSessionActivity } from "@/lib/session-activity"
+import {
+  canOfferContinue,
+  continuePromptDraft,
+  threadEndsWithAgentReply,
+} from "@/lib/continue-turn"
+import { useConversationAttention } from "@/stores/conversation-attention-store"
 import { PiProjectTrustBanner } from "@/components/chat/pi-project-trust-banner"
 import { FeedbackNotesDisplay } from "@/components/chat/feedback-notes-display"
 import { FeedbackDialog } from "@/components/chat/feedback-dialog"
@@ -115,6 +121,7 @@ import {
   getRuntimeSession,
   getTimelineTurns,
   releaseRuntimeSession,
+  selectTimelineTurns,
   useConversationRuntimeActions,
   useConversationRuntimeStore,
 } from "@/stores/conversation-runtime-store"
@@ -2331,16 +2338,11 @@ const ConversationTabView = memo(function ConversationTabView({
   // any typed message, so it goes out through the normal send path the moment
   // the resumed session is ready. Hidden while a turn is streaming, and while
   // anything is queued — a queued message will start a turn (which clears the
-  // mark) on its own, and a click has already been taken.
+  // mark) on its own, and a click has already been taken. It sends the same
+  // CONTINUE_PROMPT draft as the composer's Continue below, so both land in
+  // the transcript as the same "Continued" divider.
   const handleContinueInterrupted = useCallback(() => {
-    mqEnqueue(
-      {
-        blocks: [{ type: "text", text: CONTINUE_PROMPT }],
-        displayText: CONTINUE_PROMPT,
-      },
-      null,
-      { adoptSendTimeMode: true }
-    )
+    mqEnqueue(continuePromptDraft(), null, { adoptSendTimeMode: true })
   }, [mqEnqueue])
   const interruptedBanner =
     persistedTurnState === "interrupted" &&
@@ -2348,6 +2350,37 @@ const ConversationTabView = memo(function ConversationTabView({
     msgQueue.length === 0 ? (
       <SessionInterruptedBanner onContinue={handleContinueInterrupted} />
     ) : null
+
+  // The composer's one-click Continue (see `lib/continue-turn`): the agent has
+  // replied and the session sits idle — or idle while background work holds
+  // its turn open — so "keep going" is a click, not a typed message. The
+  // activity is derived the way the Session Details line derives it, fed with
+  // this tab's own live connection, so a running turn, a session waiting on
+  // the user and an interrupted turn (the banner above has its own Continue)
+  // all keep the button away. The composer adds its half: an empty box, and
+  // the same route Enter takes in that state.
+  const attentionKind = useConversationAttention(dbConversationId ?? -1)
+  const endsWithAgentReply = useConversationRuntimeStore((s) =>
+    threadEndsWithAgentReply(selectTimelineTurns(s, effectiveConversationId))
+  )
+  const canContinue = canOfferContinue({
+    activity: deriveSessionActivity({
+      attention: attentionKind,
+      turnState: persistedTurnState,
+      connectionStatus: connIsForOtherAgent ? null : connStatus,
+      awaitingBackground,
+    }),
+    endsWithAgentReply,
+    pendingInteraction: Boolean(
+      conn.pendingPermission ||
+      conn.pendingQuestion ||
+      conn.pendingAskQuestion ||
+      conn.pendingPlanApproval
+    ),
+    queuedCount: msgQueue.length,
+    connectionReady: composerConnStatus === "connected" && !selectorsLoading,
+    composerAvailable: !isWelcomeMode && !acpLoadError,
+  })
 
   // Goal pause/clear is a live, owner-only action, so decide availability once
   // here (where the connection is owned) rather than in the deep goal card.
@@ -2775,6 +2808,7 @@ const ConversationTabView = memo(function ConversationTabView({
       backgroundTaskCount={heldBackgroundTasks}
       heldTurnReady={heldTurnReady}
       onDeliverNow={heldTurnReady ? handleSteer : undefined}
+      canContinue={canContinue}
       onQueueReorder={mqReorder}
       onQueueEdit={handleQueueEdit}
       onQueueDelete={mqRemove}

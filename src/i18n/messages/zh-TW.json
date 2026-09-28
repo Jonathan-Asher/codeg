@@ -3255,6 +3255,9 @@
         "heldTurnSend": "立即傳送（代理閒置中）",
         "heldTurnQueue": "加入佇列，待背景工作完成後傳送",
         "heldTurnSendFailed": "無法傳送到執行中的工作階段——已加入佇列，待背景工作完成後傳送",
+        "continue": "繼續",
+        "continueHint": "讓智能體繼續，無需再傳訊息",
+        "continueHintShortcut": "讓智能體繼續，無需再傳訊息（{shortcut}）",
         "slashCommands": "斜線命令",
         "slashSearchPlaceholder": "搜尋命令...",
         "slashSearchEmpty": "沒有符合的指令",
@@ -3584,7 +3587,9 @@
         "findNext": "下一個匹配",
         "findClose": "關閉查找",
         "retry": "重試",
-        "retried": "已重試"
+        "retried": "已重試",
+        "continued": "已繼續",
+        "continuedHint": "你讓智能體繼續了"
       },
       "liveTurnStats": {
         "thinking": "思考中...",

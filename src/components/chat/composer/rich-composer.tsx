@@ -17,6 +17,7 @@ import { EditorContent, useEditor } from "@tiptap/react"
 import { exitSuggestion } from "@tiptap/suggestion"
 
 import type { HistoryDirection } from "@/lib/composer-history"
+import { CONTINUE_SHORTCUT } from "@/lib/continue-turn"
 import { isImeCompositionKey } from "@/lib/ime-composition"
 import {
   NO_KNOWN_INVOCATIONS,
@@ -232,6 +233,14 @@ export interface RichComposerProps {
    * clipboard read is unavailable).
    */
   onPlainPaste?: () => boolean
+  /**
+   * The chat composer's Continue chord (`CONTINUE_SHORTCUT`, ⌘/Ctrl+Enter).
+   * Asked only when neither the submit nor the newline binding claims the
+   * chord, so a user who moved either binding onto it keeps it. Return true
+   * when Continue ran (the key is consumed); false keeps the editor default —
+   * a line break.
+   */
+  onContinueShortcut?: () => boolean
 }
 
 /**
@@ -268,6 +277,7 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(
       onPasteFiles,
       onDropFiles,
       onPlainPaste,
+      onContinueShortcut,
     },
     ref
   ) {
@@ -294,6 +304,7 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(
     const onPasteFilesRef = useRef(onPasteFiles)
     const onDropFilesRef = useRef(onDropFiles)
     const onPlainPasteRef = useRef(onPlainPaste)
+    const onContinueShortcutRef = useRef(onContinueShortcut)
     // The live editor, captured for command access inside editorProps handlers
     // (which are created before `editor` is assigned in this closure).
     const editorInstanceRef = useRef<Editor | null>(null)
@@ -315,6 +326,7 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(
       onPasteFilesRef.current = onPasteFiles
       onDropFilesRef.current = onDropFiles
       onPlainPasteRef.current = onPlainPaste
+      onContinueShortcutRef.current = onContinueShortcut
     })
 
     // ── Unified `@` mention panel state bridge ──
@@ -488,6 +500,14 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(
             if (!ed) return false
             ed.commands.setHardBreak()
             return true
+          }
+          // Neither binding claimed the key: the Continue chord, if the host
+          // offers Continue right now.
+          if (
+            onContinueShortcutRef.current &&
+            matchShortcutEvent(event, CONTINUE_SHORTCUT)
+          ) {
+            return onContinueShortcutRef.current() === true
           }
           return false
         },

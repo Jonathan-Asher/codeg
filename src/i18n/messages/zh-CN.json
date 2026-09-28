@@ -3257,6 +3257,9 @@
         "heldTurnSend": "立即发送（智能体空闲）",
         "heldTurnQueue": "排队，待后台任务完成后发送",
         "heldTurnSendFailed": "无法发送到运行中的会话——已排队，待后台任务完成后发送",
+        "continue": "继续",
+        "continueHint": "让智能体继续，无需再发消息",
+        "continueHintShortcut": "让智能体继续，无需再发消息（{shortcut}）",
         "slashCommands": "斜杠命令",
         "slashSearchPlaceholder": "搜索命令...",
         "slashSearchEmpty": "没有匹配的命令",
@@ -3584,7 +3587,9 @@
         "findNext": "下一个匹配",
         "findClose": "关闭查找",
         "retry": "重试",
-        "retried": "已重试"
+        "retried": "已重试",
+        "continued": "已继续",
+        "continuedHint": "你让智能体继续了"
       },
       "liveTurnStats": {
         "thinking": "思考中...",

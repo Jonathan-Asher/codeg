@@ -1,3 +1,4 @@
+import { isContinuePrompt } from "@/lib/continue-turn"
 import type { ContentBlock, MessageTurn } from "@/lib/types"
 
 /** Text of one turn's text blocks — empty (image-only) turns read as `""`. */
@@ -19,7 +20,9 @@ function textOf(turn: MessageTurn): string {
  * is exactly the behaviour the issue asks for: a new session has no turns and
  * therefore no history, while a resumed one gets its real prompts back. Empty
  * (image-only) turns are skipped, and consecutive duplicates collapse — sending
- * the same text twice is one entry to step through, not two.
+ * the same text twice is one entry to step through, not two. Continue turns
+ * are skipped too: they came from a button (see `lib/continue-turn`), so Up
+ * after a Continue recalls the last thing the user actually wrote.
  */
 export function userPromptHistory(
   turns: readonly MessageTurn[] | undefined
@@ -29,7 +32,7 @@ export function userPromptHistory(
   for (const turn of turns) {
     if (turn.role !== "user") continue
     const text = textOf(turn)
-    if (!text) continue
+    if (!text || isContinuePrompt(text)) continue
     if (out[out.length - 1] === text) continue
     out.push(text)
   }

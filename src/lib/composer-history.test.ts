@@ -5,6 +5,7 @@ import {
   userPromptHistory,
   type HistoryStep,
 } from "./composer-history"
+import { CONTINUE_PROMPT } from "./session-activity"
 import type { ContentBlock, MessageTurn, TurnRole } from "./types"
 
 function turn(role: TurnRole, blocks: ContentBlock[]): MessageTurn {
@@ -63,6 +64,20 @@ describe("userPromptHistory", () => {
   it("has no history without turns — a new session recalls nothing", () => {
     expect(userPromptHistory(undefined)).toEqual([])
     expect(userPromptHistory([])).toEqual([])
+  })
+
+  it("skips Continue turns, so Up recalls what the user last wrote", () => {
+    const turns = [
+      turn("user", [text("fix the build")]),
+      turn("assistant", [text("working on it")]),
+      turn("user", [text(CONTINUE_PROMPT)]),
+      turn("assistant", [text("done")]),
+    ]
+    expect(userPromptHistory(turns)).toEqual(["fix the build"])
+    // A real message that starts with the word stays.
+    expect(
+      userPromptHistory([turn("user", [text("continue with the tests")])])
+    ).toEqual(["continue with the tests"])
   })
 })
 

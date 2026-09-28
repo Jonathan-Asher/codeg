@@ -123,6 +123,8 @@ interface ConversationShellProps {
   heldTurnReady?: boolean
   /** Pass-through: see `MessageInput.onDeliverNow`. */
   onDeliverNow?: (text: string, blocks?: PromptInputBlock[]) => Promise<void>
+  /** Pass-through: see `MessageInput.canContinue`. */
+  canContinue?: boolean
   onQueueReorder?: (items: QueuedMessage[]) => void
   onQueueEdit?: (id: string) => void
   onQueueDelete?: (id: string) => void
@@ -208,6 +210,7 @@ export function ConversationShell({
   backgroundTaskCount,
   heldTurnReady,
   onDeliverNow,
+  canContinue,
   onQueueReorder,
   onQueueEdit,
   onQueueDelete,
@@ -314,6 +317,7 @@ export function ConversationShell({
               backgroundTaskCount={backgroundTaskCount}
               heldTurnReady={heldTurnReady}
               onDeliverNow={onDeliverNow}
+              canContinue={canContinue}
               onQueueReorder={onQueueReorder}
               onQueueEdit={onQueueEdit}
               onQueueDelete={onQueueDelete}

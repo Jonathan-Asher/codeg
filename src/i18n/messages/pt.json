@@ -3255,6 +3255,9 @@
         "heldTurnSend": "Enviar agora (o agente está ocioso)",
         "heldTurnQueue": "Adicionar à fila até o trabalho em segundo plano terminar",
         "heldTurnSendFailed": "Não foi possível enviar para a sessão em andamento — adicionado à fila até o trabalho em segundo plano terminar",
+        "continue": "Continuar",
+        "continueHint": "Deixe o agente prosseguir sem escrever uma mensagem",
+        "continueHintShortcut": "Deixe o agente prosseguir sem escrever uma mensagem ({shortcut})",
         "slashCommands": "Comandos de barra",
         "slashSearchPlaceholder": "Buscar comandos...",
         "slashSearchEmpty": "Nenhum comando correspondente",
@@ -3584,7 +3587,9 @@
         "findNext": "Next match",
         "findClose": "Close find",
         "retry": "Retry",
-        "retried": "Tentado novamente"
+        "retried": "Tentado novamente",
+        "continued": "Continuado",
+        "continuedHint": "Você pediu ao agente para prosseguir"
       },
       "liveTurnStats": {
         "thinking": "Pensando...",
