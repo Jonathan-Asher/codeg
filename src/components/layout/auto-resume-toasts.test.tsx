@@ -49,6 +49,12 @@ vi.mock("sonner", () => ({
 vi.mock("@/contexts/tab-context", () => ({
   useTabStore: { getState: () => ({ openTab }) },
 }))
+let sidebarConversations: { id: number; title: string | null }[] = []
+vi.mock("@/stores/app-workspace-store", () => ({
+  useAppWorkspaceStore: <T,>(
+    select: (s: { conversations: typeof sidebarConversations }) => T
+  ) => select({ conversations: sidebarConversations }),
+}))
 
 import { AUTO_RESUME_TOAST_ID, AutoResumeToasts } from "./auto-resume-toasts"
 
@@ -118,6 +124,7 @@ beforeEach(() => {
   toastError.mockReset()
   openTab.mockReset()
   emit = null
+  sidebarConversations = []
 })
 afterEach(() => cleanup())
 
@@ -223,6 +230,18 @@ describe("AutoResumeToasts", () => {
       emit?.(batch([item(1, "a", "resuming")]))
     })
     expect(custom).toHaveBeenCalledTimes(1)
+  })
+
+  it("names a session as the sidebar does now", async () => {
+    sidebarConversations = [{ id: 1, title: "Parser refactor" }]
+    getStatus.mockResolvedValue(
+      batch([item(1, "[B-STEPS] Use the Bash tool", "pending")])
+    )
+    await mount()
+    renderLatestToast()
+
+    expect(screen.getByText("Parser refactor")).toBeInTheDocument()
+    expect(screen.queryByText("[B-STEPS] Use the Bash tool")).toBeNull()
   })
 
   it("opens a session from its row", async () => {

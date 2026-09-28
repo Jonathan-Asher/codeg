@@ -32,6 +32,7 @@ import {
 import { getTransport } from "@/lib/transport"
 import type { AutoResumeItem, AutoResumeStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 
 export const AUTO_RESUME_TOAST_ID = "auto-resume"
 
@@ -42,6 +43,45 @@ function openConversation(item: AutoResumeItem) {
   useTabStore
     .getState()
     .openTab(item.folder_id, item.conversation_id, item.agent_type, true)
+}
+
+/** One session of the batch. Named as the sidebar names it now — the batch
+ *  carries the title from when the resume was planned, which a fresh session
+ *  may since have replaced with the agent's own. */
+function AutoResumeRow({ item }: { item: AutoResumeItem }) {
+  const t = useTranslations("AutoResume")
+  const liveTitle = useAppWorkspaceStore(
+    (s) => s.conversations.find((c) => c.id === item.conversation_id)?.title
+  )
+  const title = liveTitle?.trim() || item.title?.trim() || t("untitled")
+  return (
+    <li
+      data-auto-resume-item={item.state}
+      className="flex items-center justify-between gap-3 text-xs"
+    >
+      <button
+        type="button"
+        onClick={() => openConversation(item)}
+        className="min-w-0 truncate text-left hover:underline"
+      >
+        {title}
+      </button>
+      <span
+        className={cn(
+          "shrink-0 text-muted-foreground",
+          item.state === "resumed" && "text-foreground",
+          item.state === "failed" && "text-destructive"
+        )}
+        title={
+          item.state === "failed"
+            ? [item.error, t("failedHint")].filter(Boolean).join(" — ")
+            : undefined
+        }
+      >
+        {t(AUTO_RESUME_STATE_LABEL_KEYS[item.state])}
+      </span>
+    </li>
+  )
 }
 
 function AutoResumeToast({
@@ -97,33 +137,7 @@ function AutoResumeToast({
       </div>
       <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto">
         {status.items.map((item) => (
-          <li
-            key={item.conversation_id}
-            data-auto-resume-item={item.state}
-            className="flex items-center justify-between gap-3 text-xs"
-          >
-            <button
-              type="button"
-              onClick={() => openConversation(item)}
-              className="min-w-0 truncate text-left hover:underline"
-            >
-              {item.title?.trim() || t("untitled")}
-            </button>
-            <span
-              className={cn(
-                "shrink-0 text-muted-foreground",
-                item.state === "resumed" && "text-foreground",
-                item.state === "failed" && "text-destructive"
-              )}
-              title={
-                item.state === "failed"
-                  ? [item.error, t("failedHint")].filter(Boolean).join(" — ")
-                  : undefined
-              }
-            >
-              {t(AUTO_RESUME_STATE_LABEL_KEYS[item.state])}
-            </span>
-          </li>
+          <AutoResumeRow key={item.conversation_id} item={item} />
         ))}
       </ul>
       {unsettled > 0 && !status.stopped && (
