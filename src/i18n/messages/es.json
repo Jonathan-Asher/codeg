@@ -1705,6 +1705,28 @@
     "behaviorExit": "Salir de codeg",
     "saveFailed": "No se pudo guardar el comportamiento de cierre: {message}"
   },
+  "AutoResumeSettings": {
+    "title": "Reanudar las sesiones interrumpidas tras un reinicio",
+    "description": "Si codeg se cierra, falla o se reinicia para actualizarse a mitad de un turno, esas sesiones se retoman en el siguiente inicio. Cada interrupción se reanuda como máximo una vez.",
+    "saveFailed": "No se pudo guardar el ajuste: {message}"
+  },
+  "AutoResume": {
+    "title": "Reanudando {count, plural, one {# sesión interrumpida} other {# sesiones interrumpidas}} por el reinicio",
+    "settledTitle": "Sesiones interrumpidas por el reinicio",
+    "stoppedTitle": "Se detuvo la reanudación de las sesiones interrumpidas por el reinicio",
+    "stop": "Detener",
+    "stopHint": "Cancela las sesiones que aún no se han reanudado. Una ya reanudada sigue en marcha; detenla desde su pestaña.",
+    "stopFailed": "No se pudo detener la reanudación: {message}",
+    "untitled": "Sesión sin título",
+    "statePending": "En espera",
+    "stateResuming": "Reanudando…",
+    "stateResumed": "Reanudada",
+    "stateFailed": "No se pudo reanudar",
+    "stateStopped": "Detenida",
+    "stateSkipped": "Ya continuada",
+    "failedHint": "Sigue interrumpida; usa Continuar para retomarla a mano.",
+    "dismiss": "Cerrar"
+  },
   "StartupWorkspaceSettings": {
     "title": "Al iniciar codeg, abrir",
     "description": "Un espacio de trabajo remoto se abre en su propia ventana, y el local sigue a un clic en Acciones rápidas.",
@@ -3596,7 +3618,9 @@
         "retry": "Retry",
         "retried": "Reintentado",
         "continued": "Continuado",
-        "continuedHint": "Le pediste al agente que siguiera"
+        "continuedHint": "Le pediste al agente que siguiera",
+        "resumedAfterRestart": "Reanudada tras el reinicio",
+        "resumedAfterRestartHint": "codeg se reinició a mitad de este turno y retomó la sesión por su cuenta"
       },
       "liveTurnStats": {
         "thinking": "Pensando...",

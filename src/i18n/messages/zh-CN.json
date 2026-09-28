@@ -1705,6 +1705,28 @@
     "behaviorExit": "退出 codeg",
     "saveFailed": "保存关闭行为失败：{message}"
   },
+  "AutoResumeSettings": {
+    "title": "重启后恢复被中断的会话",
+    "description": "当 codeg 在一轮进行中退出、崩溃或因更新而重启时，下次启动会恢复这些会话。每次中断最多恢复一次。",
+    "saveFailed": "保存设置失败：{message}"
+  },
+  "AutoResume": {
+    "title": "正在恢复 {count} 个因重启而中断的会话",
+    "settledTitle": "因重启而中断的会话",
+    "stoppedTitle": "已停止恢复因重启而中断的会话",
+    "stop": "停止",
+    "stopHint": "取消尚未恢复的会话。已恢复的会话会继续运行，请在其标签页中停止。",
+    "stopFailed": "无法停止恢复：{message}",
+    "untitled": "未命名会话",
+    "statePending": "等待中",
+    "stateResuming": "正在恢复…",
+    "stateResumed": "已恢复",
+    "stateFailed": "无法恢复",
+    "stateStopped": "已停止",
+    "stateSkipped": "已继续",
+    "failedHint": "它仍处于中断状态；点击“继续”可手动恢复。",
+    "dismiss": "关闭"
+  },
   "StartupWorkspaceSettings": {
     "title": "启动 codeg 时打开",
     "description": "远端工作区会在独立窗口中打开，本地工作区随时可从“快捷操作”中打开。",
@@ -3596,7 +3618,9 @@
         "retry": "重试",
         "retried": "已重试",
         "continued": "已继续",
-        "continuedHint": "你让智能体继续了"
+        "continuedHint": "你让智能体继续了",
+        "resumedAfterRestart": "重启后已恢复",
+        "resumedAfterRestartHint": "codeg 在这一轮进行中重启，已自动恢复此会话"
       },
       "liveTurnStats": {
         "thinking": "思考中...",

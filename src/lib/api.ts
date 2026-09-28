@@ -163,6 +163,8 @@ import type {
   AvailableTerminalShells,
   SystemLanguageSettings,
   SystemProxySettings,
+  AutoResumeSettings,
+  AutoResumeStatus,
   CloseRequestPayload,
   CloseWindowBehavior,
   SystemCloseBehaviorSettingsView,
@@ -1899,6 +1901,29 @@ export async function updateSystemAutostartSettings(
   settings: SystemAutostartSettings
 ): Promise<SystemAutostartSettings> {
   return getTransport().call("update_system_autostart_settings", { settings })
+}
+
+// --- Resume after restart ---
+
+export async function getAutoResumeSettings(): Promise<AutoResumeSettings> {
+  return getTransport().call("get_auto_resume_settings")
+}
+
+export async function updateAutoResumeSettings(
+  settings: AutoResumeSettings
+): Promise<AutoResumeSettings> {
+  return getTransport().call("update_auto_resume_settings", { settings })
+}
+
+/** The backend's resume batch for this start, for a client that just
+ *  connected (the live updates arrive as `AUTO_RESUME_STATUS_EVENT`). */
+export async function getAutoResumeStatus(): Promise<AutoResumeStatus> {
+  return getTransport().call("get_auto_resume_status")
+}
+
+/** Cancel the resumes that have not started yet. */
+export async function stopAutoResume(): Promise<AutoResumeStatus> {
+  return getTransport().call("stop_auto_resume")
 }
 
 // --- Close window behavior ---

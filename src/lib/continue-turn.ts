@@ -1,4 +1,5 @@
 import type { AdaptedContentPart } from "@/lib/adapters/ai-elements-adapter"
+import { isResumeAfterRestartPrompt } from "@/lib/auto-resume"
 import { CONTINUE_PROMPT, type SessionActivity } from "@/lib/session-activity"
 import type { PromptDraft, TurnRole } from "@/lib/types"
 
@@ -47,21 +48,39 @@ export interface ContinuationGroupLike {
 }
 
 /**
- * Whether a transcript message group is a Continue turn: a user message made
- * of text only, whose text is exactly {@link CONTINUE_PROMPT}. Anything
- * attached to it (an image, a file, a non-text part) makes it a message the
- * user wrote, which stays a bubble.
+ * The two kinds of "keep going" turn the transcript draws as a divider:
+ * `continued` — the Continue prompt ({@link CONTINUE_PROMPT}), sent by the
+ * user; `resumed` — the prompt codeg sent itself to pick a turn back up after
+ * a restart cut it off (`lib/auto-resume`).
  */
-export function isContinuationGroup(group: ContinuationGroupLike): boolean {
-  if (group.role !== "user") return false
-  if (group.images.length > 0 || group.resources.length > 0) return false
-  if (group.parts.length === 0) return false
+export type ContinuationVariant = "continued" | "resumed"
+
+/**
+ * Which divider a transcript message group reads as, if any: a user message
+ * made of text only, whose text is exactly {@link CONTINUE_PROMPT} or exactly
+ * the resume-after-restart prompt. Anything attached to it (an image, a file,
+ * a non-text part) makes it a message the user wrote, which stays a bubble.
+ */
+export function continuationVariant(
+  group: ContinuationGroupLike
+): ContinuationVariant | null {
+  if (group.role !== "user") return null
+  if (group.images.length > 0 || group.resources.length > 0) return null
+  if (group.parts.length === 0) return null
   let text = ""
   for (const part of group.parts) {
-    if (part.type !== "text") return false
+    if (part.type !== "text") return null
     text += part.text
   }
-  return isContinuePrompt(text)
+  if (isContinuePrompt(text)) return "continued"
+  if (isResumeAfterRestartPrompt(text)) return "resumed"
+  return null
+}
+
+/** Whether a transcript message group is drawn as a divider (a Continue turn
+ *  or a resume after restart) rather than as a user bubble. */
+export function isContinuationGroup(group: ContinuationGroupLike): boolean {
+  return continuationVariant(group) !== null
 }
 
 /**

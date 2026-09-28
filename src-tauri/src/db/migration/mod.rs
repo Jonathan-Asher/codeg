@@ -51,6 +51,7 @@ mod m20260924_000001_message_fts_state;
 mod m20260925_000001_message_fts_trigram;
 mod m20260926_000001_conversation_turn_state;
 mod m20260928_000001_conversation_selector_state;
+mod m20260928_000002_conversation_auto_resume;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -108,6 +109,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260925_000001_message_fts_trigram::Migration),
             Box::new(m20260926_000001_conversation_turn_state::Migration),
             Box::new(m20260928_000001_conversation_selector_state::Migration),
+            Box::new(m20260928_000002_conversation_auto_resume::Migration),
         ]
     }
 }

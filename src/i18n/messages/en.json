@@ -1705,6 +1705,28 @@
     "behaviorExit": "Exit codeg",
     "saveFailed": "Failed to save close behavior: {message}"
   },
+  "AutoResumeSettings": {
+    "title": "Resume interrupted sessions after restart",
+    "description": "When codeg quits, crashes or restarts for an update in the middle of a turn, pick those sessions back up on the next start. Each interruption is resumed at most once.",
+    "saveFailed": "Failed to save the setting: {message}"
+  },
+  "AutoResume": {
+    "title": "Resuming {count, plural, one {# session} other {# sessions}} interrupted by the restart",
+    "settledTitle": "Sessions interrupted by the restart",
+    "stoppedTitle": "Stopped resuming the sessions interrupted by the restart",
+    "stop": "Stop",
+    "stopHint": "Cancels the sessions not resumed yet. One already resumed keeps running; stop it from its tab.",
+    "stopFailed": "Could not stop resuming: {message}",
+    "untitled": "Untitled session",
+    "statePending": "Waiting",
+    "stateResuming": "Resuming…",
+    "stateResumed": "Resumed",
+    "stateFailed": "Couldn't resume",
+    "stateStopped": "Stopped",
+    "stateSkipped": "Already continued",
+    "failedHint": "It stays interrupted; use Continue to pick it up by hand.",
+    "dismiss": "Dismiss"
+  },
   "StartupWorkspaceSettings": {
     "title": "When codeg starts, open",
     "description": "A remote workspace opens in its own window, and the local workspace stays one click away under Quick actions.",
@@ -3596,7 +3618,9 @@
         "retry": "Retry",
         "retried": "Retried",
         "continued": "Continued",
-        "continuedHint": "You asked the agent to keep going"
+        "continuedHint": "You asked the agent to keep going",
+        "resumedAfterRestart": "Resumed after restart",
+        "resumedAfterRestartHint": "codeg restarted in the middle of this turn and picked the session back up on its own"
       },
       "liveTurnStats": {
         "thinking": "Thinking...",

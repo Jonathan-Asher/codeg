@@ -1705,6 +1705,28 @@
     "behaviorExit": "codeg 종료",
     "saveFailed": "닫기 동작 저장 실패: {message}"
   },
+  "AutoResumeSettings": {
+    "title": "재시작 후 중단된 세션 재개",
+    "description": "턴 도중 codeg가 종료되거나, 충돌하거나, 업데이트를 위해 재시작되면 다음 시작 시 해당 세션을 재개합니다. 각 중단은 최대 한 번만 재개됩니다.",
+    "saveFailed": "설정을 저장하지 못했습니다: {message}"
+  },
+  "AutoResume": {
+    "title": "재시작으로 중단된 세션 {count}개를 재개하는 중",
+    "settledTitle": "재시작으로 중단된 세션",
+    "stoppedTitle": "재시작으로 중단된 세션의 재개를 중지했습니다",
+    "stop": "중지",
+    "stopHint": "아직 재개되지 않은 세션을 취소합니다. 이미 재개된 세션은 계속 실행되므로 해당 탭에서 중지하세요.",
+    "stopFailed": "재개를 중지하지 못했습니다: {message}",
+    "untitled": "제목 없는 세션",
+    "statePending": "대기 중",
+    "stateResuming": "재개 중…",
+    "stateResumed": "재개됨",
+    "stateFailed": "재개하지 못함",
+    "stateStopped": "중지됨",
+    "stateSkipped": "이미 계속함",
+    "failedHint": "중단된 상태로 남습니다. 계속을 눌러 직접 재개할 수 있습니다.",
+    "dismiss": "닫기"
+  },
   "StartupWorkspaceSettings": {
     "title": "codeg 시작 시 열기",
     "description": "원격 워크스페이스는 별도 창에서 열리며, 로컬 워크스페이스는 언제든 빠른 작업에서 열 수 있습니다.",
@@ -3596,7 +3618,9 @@
         "retry": "Retry",
         "retried": "재시도함",
         "continued": "계속함",
-        "continuedHint": "에이전트에게 계속 진행하도록 요청했습니다"
+        "continuedHint": "에이전트에게 계속 진행하도록 요청했습니다",
+        "resumedAfterRestart": "재시작 후 재개됨",
+        "resumedAfterRestartHint": "이 턴 도중 codeg가 재시작되어 세션을 자동으로 재개했습니다"
       },
       "liveTurnStats": {
         "thinking": "생각 중...",

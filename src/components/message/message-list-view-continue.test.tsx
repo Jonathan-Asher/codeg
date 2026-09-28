@@ -80,6 +80,7 @@ import {
   resetConversationRuntimeStore,
   useConversationRuntimeStore,
 } from "@/stores/conversation-runtime-store"
+import { RESUME_AFTER_RESTART_PROMPT } from "@/lib/auto-resume"
 import { CONTINUE_PROMPT } from "@/lib/session-activity"
 import type {
   ContentBlock,
@@ -256,6 +257,77 @@ describe("MessageListView: Continue turns", () => {
     ).toHaveTextContent("continue, but skip the seed data")
     expect(
       within(rowFor(container, "persisted-user-turn-4")).getByTestId(
+        "user-bubble"
+      )
+    ).toBeInTheDocument()
+  })
+})
+
+describe("MessageListView: resumed after restart", () => {
+  it("renders the resume prompt read back from the session file as its own divider", async () => {
+    await seed([
+      userTurn("turn-0", "run the migration in three steps"),
+      replyTurn("turn-1", "step one done"),
+      userTurn("turn-2", RESUME_AFTER_RESTART_PROMPT),
+      replyTurn("turn-3", "steps two and three done"),
+    ])
+    const { container } = renderList({ onEditUserMessage: vi.fn() })
+
+    const row = rowFor(container, "persisted-user-turn-2")
+    expect(row.querySelector("[data-resume-marker]")).toBeInTheDocument()
+    expect(within(row).getByText(L.resumedAfterRestart)).toBeInTheDocument()
+    expect(
+      within(row).getByTitle(L.resumedAfterRestartHint)
+    ).toBeInTheDocument()
+    // Neither a bubble nor the Continue label, and nothing to edit on it.
+    expect(within(row).queryByTestId("user-bubble")).toBeNull()
+    expect(within(row).queryByText(L.continued)).toBeNull()
+    expect(
+      within(row).queryByRole("button", { name: L.editMessage })
+    ).toBeNull()
+    expect(container.querySelectorAll("[data-resume-marker]")).toHaveLength(1)
+  })
+
+  it("renders the prompt as a divider live, as a watching client receives it", async () => {
+    await seed([
+      userTurn("turn-0", "run the migration in three steps"),
+      replyTurn("turn-1", "step one done"),
+    ])
+    // The backend sent the prompt; a client watching the session gets it as
+    // the cross-client user-message echo, not as an optimistic turn of its own.
+    useConversationRuntimeStore
+      .getState()
+      .actions.appendViewerUserTurn(
+        CONVERSATION,
+        userTurn("auto-resume-1", RESUME_AFTER_RESTART_PROMPT)
+      )
+    const { container } = renderList({ connStatus: "prompting" })
+
+    const markers = container.querySelectorAll<HTMLElement>(
+      "[data-resume-marker]"
+    )
+    expect(markers).toHaveLength(1)
+    expect(
+      markers[0].closest("[data-find-key]")?.getAttribute("data-find-key")
+    ).not.toMatch(/^persisted-/)
+    expect(
+      within(markers[0]).getByText(L.resumedAfterRestart)
+    ).toBeInTheDocument()
+    expect(
+      container.querySelectorAll('[data-testid="user-bubble"]')
+    ).toHaveLength(1)
+  })
+
+  it("keeps a message that merely contains the prompt as a bubble", async () => {
+    await seed([
+      userTurn("turn-0", `${RESUME_AFTER_RESTART_PROMPT} Also run the tests.`),
+      replyTurn("turn-1", "ok"),
+    ])
+    const { container } = renderList()
+
+    expect(container.querySelector("[data-resume-marker]")).toBeNull()
+    expect(
+      within(rowFor(container, "persisted-user-turn-0")).getByTestId(
         "user-bubble"
       )
     ).toBeInTheDocument()

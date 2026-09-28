@@ -1705,6 +1705,28 @@
     "behaviorExit": "Quitter codeg",
     "saveFailed": "Échec de l'enregistrement du comportement de fermeture : {message}"
   },
+  "AutoResumeSettings": {
+    "title": "Reprendre les sessions interrompues après un redémarrage",
+    "description": "Si codeg se ferme, plante ou redémarre pour une mise à jour au milieu d'un tour, ces sessions reprennent au démarrage suivant. Chaque interruption est reprise une fois au plus.",
+    "saveFailed": "Impossible d'enregistrer le réglage : {message}"
+  },
+  "AutoResume": {
+    "title": "Reprise de {count, plural, one {# session interrompue} other {# sessions interrompues}} par le redémarrage",
+    "settledTitle": "Sessions interrompues par le redémarrage",
+    "stoppedTitle": "Reprise des sessions interrompues par le redémarrage arrêtée",
+    "stop": "Arrêter",
+    "stopHint": "Annule les sessions pas encore reprises. Une session déjà reprise continue ; arrêtez-la depuis son onglet.",
+    "stopFailed": "Impossible d'arrêter la reprise : {message}",
+    "untitled": "Session sans titre",
+    "statePending": "En attente",
+    "stateResuming": "Reprise en cours…",
+    "stateResumed": "Reprise",
+    "stateFailed": "Reprise impossible",
+    "stateStopped": "Arrêtée",
+    "stateSkipped": "Déjà poursuivie",
+    "failedHint": "Elle reste interrompue ; utilisez Continuer pour la reprendre à la main.",
+    "dismiss": "Fermer"
+  },
   "StartupWorkspaceSettings": {
     "title": "Au démarrage de codeg, ouvrir",
     "description": "Un espace de travail distant s'ouvre dans sa propre fenêtre ; l'espace de travail local reste à un clic dans les Actions rapides.",
@@ -3596,7 +3618,9 @@
         "retry": "Retry",
         "retried": "Relancé",
         "continued": "Poursuivi",
-        "continuedHint": "Vous avez demandé à l'agent de poursuivre"
+        "continuedHint": "Vous avez demandé à l'agent de poursuivre",
+        "resumedAfterRestart": "Reprise après redémarrage",
+        "resumedAfterRestartHint": "codeg a redémarré au milieu de ce tour et a repris la session de lui-même"
       },
       "liveTurnStats": {
         "thinking": "Réflexion...",

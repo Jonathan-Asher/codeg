@@ -1471,7 +1471,7 @@ const DEFAULT_MAX_CONCURRENT_ATTACHES: usize = 2;
 
 /// The attach limit: `CODEG_ACP_MAX_CONCURRENT_ATTACHES`, else
 /// [`DEFAULT_MAX_CONCURRENT_ATTACHES`]. `0` means unlimited. Read once.
-fn max_concurrent_attaches() -> usize {
+pub(crate) fn max_concurrent_attaches() -> usize {
     static N: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
     *N.get_or_init(|| {
         std::env::var("CODEG_ACP_MAX_CONCURRENT_ATTACHES")

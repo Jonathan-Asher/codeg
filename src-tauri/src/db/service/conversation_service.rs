@@ -123,6 +123,7 @@ async fn create_inner(
         origin_cwd: Set(None),
         turn_state: Set(None),
         selector_state: Set(None),
+        auto_resume: Set(None),
     };
     Ok(model.insert(conn).await?)
 }
@@ -170,6 +171,24 @@ fn no_turn_state() -> sea_orm::Value {
     sea_orm::Value::String(None)
 }
 
+/// A typed SQL NULL for the `auto_resume` column.
+fn no_auto_resume() -> sea_orm::Value {
+    sea_orm::Value::String(None)
+}
+
+/// `auto_resume` for a turn that just started. The turn an automatic resume
+/// claimed becomes `attempted` (and stays so through the repeated `Prompting`
+/// transitions one turn can go through); any other mark is spent — a new turn
+/// is running, and it is not the resume.
+const AUTO_RESUME_ON_TURN_START: &str =
+    "CASE WHEN auto_resume IN ('claimed', 'attempted') THEN 'attempted' ELSE NULL END";
+
+/// `auto_resume` for a running turn that codeg's exit cut off: due to be
+/// resumed, unless it is the automatic resume itself (`attempted`), the user
+/// had already stopped it (`cancelled`), or a resume had claimed it.
+const AUTO_RESUME_ON_EXIT: &str =
+    "CASE WHEN auto_resume IS NULL OR auto_resume = 'pending' THEN 'pending' ELSE auto_resume END";
+
 /// A turn just started on this conversation: record it as running and stamp
 /// `updated_at` — a turn starting is activity. Overwrites an `interrupted`
 /// mark, which is the rule that any new turn clears it. Soft-deleted rows are
@@ -184,6 +203,10 @@ pub async fn mark_turn_running(
         .col_expr(
             conversation::Column::TurnState,
             Expr::value(conversation::ConversationTurnState::Running),
+        )
+        .col_expr(
+            conversation::Column::AutoResume,
+            Expr::cust(AUTO_RESUME_ON_TURN_START),
         )
         .col_expr(conversation::Column::UpdatedAt, Expr::value(Utc::now()))
         .filter(conversation::Column::Id.eq(conversation_id))
@@ -211,6 +234,12 @@ pub async fn finish_turn(
         .col_expr(
             conversation::Column::TurnState,
             Expr::value(no_turn_state()),
+        )
+        // The turn ended while codeg was alive to see it: whatever it meant
+        // for the automatic resume is settled.
+        .col_expr(
+            conversation::Column::AutoResume,
+            Expr::value(no_auto_resume()),
         )
         .col_expr(conversation::Column::UpdatedAt, Expr::value(Utc::now()))
         .filter(conversation::Column::Id.eq(conversation_id));
@@ -257,6 +286,10 @@ pub async fn clear_interrupted_turn(
             conversation::Column::TurnState,
             Expr::value(no_turn_state()),
         )
+        .col_expr(
+            conversation::Column::AutoResume,
+            Expr::value(no_auto_resume()),
+        )
         .filter(conversation::Column::Id.eq(conversation_id))
         .filter(
             conversation::Column::TurnState.eq(conversation::ConversationTurnState::Interrupted),
@@ -275,6 +308,14 @@ pub async fn clear_interrupted_turn(
 /// it at the time: the lifecycle subscriber records an interruption when it
 /// sees the connection die, but a process that is exiting (or already gone)
 /// may never get that far.
+///
+/// Because codeg's own exit is what cut these turns off, each is also marked
+/// for the automatic resume (`auto_resume = pending`) — unless it is itself an
+/// automatic resume, or the user had already stopped it (see
+/// [`AUTO_RESUME_ON_EXIT`]). A graceful quit runs the same sweep before it
+/// tears the connections down, so the lifecycle subscriber's connection-died
+/// mark (which leaves `auto_resume` alone) finds nothing left running and the
+/// exit is recorded as the cause.
 pub async fn interrupt_orphaned_turns(conn: &DatabaseConnection) -> Result<u64, DbError> {
     use sea_orm::sea_query::Expr;
     let res = conversation::Entity::update_many()
@@ -282,10 +323,194 @@ pub async fn interrupt_orphaned_turns(conn: &DatabaseConnection) -> Result<u64, 
             conversation::Column::TurnState,
             Expr::value(conversation::ConversationTurnState::Interrupted),
         )
+        .col_expr(
+            conversation::Column::AutoResume,
+            Expr::cust(AUTO_RESUME_ON_EXIT),
+        )
         .filter(conversation::Column::TurnState.eq(conversation::ConversationTurnState::Running))
         .exec(conn)
         .await?;
     Ok(res.rows_affected)
+}
+
+/// The conversations whose turn codeg's last exit cut off and that the
+/// automatic resume should pick back up, most recently active first.
+///
+/// A candidate is a row that is:
+/// * interrupted and marked `auto_resume = pending` — cut off by the exit
+///   itself (not by an agent dying while codeg ran), not stopped by the user,
+///   and not an automatic resume already;
+/// * active within `max_age` of `now` (`updated_at`, which a running turn's
+///   heartbeat keeps current): a turn cut off long ago is stale work;
+/// * not deleted, and a top-level session — a delegation child is resumed
+///   through its parent, if at all;
+/// * bound to an agent session (`external_id`), which is what gets resumed;
+/// * not driven by a work task or an automation run: those engines settle
+///   their own interrupted runs at boot, and a resume behind their back would
+///   run work their state says has failed.
+pub async fn list_auto_resume_candidates(
+    conn: &DatabaseConnection,
+    now: chrono::DateTime<Utc>,
+    max_age: chrono::Duration,
+) -> Result<Vec<DbConversationSummary>, DbError> {
+    use crate::db::entities::{automation_run, work_task};
+    use sea_orm::sea_query::Query;
+    let rows = conversation::Entity::find()
+        .filter(
+            conversation::Column::TurnState.eq(conversation::ConversationTurnState::Interrupted),
+        )
+        .filter(
+            conversation::Column::AutoResume.eq(conversation::ConversationAutoResume::Pending),
+        )
+        .filter(conversation::Column::DeletedAt.is_null())
+        .filter(conversation::Column::ParentId.is_null())
+        .filter(
+            conversation::Column::Kind.is_in([ConversationKind::Regular, ConversationKind::Chat]),
+        )
+        .filter(conversation::Column::ExternalId.is_not_null())
+        .filter(conversation::Column::UpdatedAt.gte(now - max_age))
+        .filter(
+            conversation::Column::Id.not_in_subquery(
+                Query::select()
+                    .column(work_task::Column::ConversationId)
+                    .from(work_task::Entity)
+                    .and_where(work_task::Column::ConversationId.is_not_null())
+                    .to_owned(),
+            ),
+        )
+        .filter(
+            conversation::Column::Id.not_in_subquery(
+                Query::select()
+                    .column(automation_run::Column::ConversationId)
+                    .from(automation_run::Entity)
+                    .and_where(automation_run::Column::ConversationId.is_not_null())
+                    .to_owned(),
+            ),
+        )
+        .order_by_desc(conversation::Column::UpdatedAt)
+        .all(conn)
+        .await?;
+    Ok(rows.into_iter().map(conv_to_summary).collect())
+}
+
+/// Drop every `pending` automatic-resume mark except those on `keep`: the rows
+/// this start will not resume (too old, deleted, a delegation child, owned by
+/// an engine, the setting is off, the user said stop) go back to being plain
+/// interruptions with a manual Continue, so no later start resumes them out of
+/// the blue. Returns how many marks were dropped.
+pub async fn discard_pending_auto_resumes(
+    conn: &DatabaseConnection,
+    keep: &[i32],
+) -> Result<u64, DbError> {
+    use sea_orm::sea_query::Expr;
+    let mut update = conversation::Entity::update_many()
+        .col_expr(
+            conversation::Column::AutoResume,
+            Expr::value(no_auto_resume()),
+        )
+        .filter(
+            conversation::Column::AutoResume.eq(conversation::ConversationAutoResume::Pending),
+        );
+    if !keep.is_empty() {
+        update = update.filter(conversation::Column::Id.is_not_in(keep.iter().copied()));
+    }
+    let res = update.exec(conn).await?;
+    Ok(res.rows_affected)
+}
+
+/// Claim a candidate for this start's automatic resume: `pending → claimed`,
+/// as a compare-and-set on a row that is still interrupted and not deleted.
+/// `false` means someone got there first — the user continued it by hand (the
+/// new turn spent the mark), settled it, or deleted it — and it must be left
+/// alone. The claim is what makes a resume happen at most once: the turn the
+/// resume starts turns it into `attempted`, which no later exit re-arms.
+pub async fn claim_auto_resume(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::Expr;
+    let res = conversation::Entity::update_many()
+        .col_expr(
+            conversation::Column::AutoResume,
+            Expr::value(conversation::ConversationAutoResume::Claimed),
+        )
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .filter(
+            conversation::Column::AutoResume.eq(conversation::ConversationAutoResume::Pending),
+        )
+        .filter(
+            conversation::Column::TurnState.eq(conversation::ConversationTurnState::Interrupted),
+        )
+        .filter(conversation::Column::DeletedAt.is_null())
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected > 0)
+}
+
+/// Give up a claim before the resumed turn started (the user said stop, the
+/// session could not be reopened, the prompt was refused): the row stays a
+/// plain interruption with a manual Continue, and is not resumed again.
+pub async fn release_auto_resume(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::Expr;
+    let res = conversation::Entity::update_many()
+        .col_expr(
+            conversation::Column::AutoResume,
+            Expr::value(no_auto_resume()),
+        )
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .filter(
+            conversation::Column::AutoResume.eq(conversation::ConversationAutoResume::Claimed),
+        )
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected > 0)
+}
+
+/// The user stopped this conversation's running turn. Until the agent confirms
+/// (and the turn's end clears every mark), an exit must not bring the turn
+/// back, so the running row is marked `cancelled`. A row with no running turn
+/// is left alone.
+pub async fn mark_turn_cancelled_by_user(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::Expr;
+    let res = conversation::Entity::update_many()
+        .col_expr(
+            conversation::Column::AutoResume,
+            Expr::value(conversation::ConversationAutoResume::Cancelled),
+        )
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .filter(conversation::Column::TurnState.eq(conversation::ConversationTurnState::Running))
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected > 0)
+}
+
+/// A new turn was asked for on this conversation by anyone but the automatic
+/// resume (whose own prompt goes out while the row is `claimed`): an
+/// `attempted` mark left by an earlier resume is spent, so an exit during the
+/// new turn is a new interruption, due its own single resume.
+pub async fn clear_spent_auto_resume(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::Expr;
+    let res = conversation::Entity::update_many()
+        .col_expr(
+            conversation::Column::AutoResume,
+            Expr::value(no_auto_resume()),
+        )
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .filter(
+            conversation::Column::AutoResume.eq(conversation::ConversationAutoResume::Attempted),
+        )
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected > 0)
 }
 
 /// Heartbeat for a turn that is still streaming: move `updated_at` forward to
@@ -1310,6 +1535,7 @@ impl CarriedOverRow {
             // cut off belongs to the conversation that keeps going.
             turn_state: Set(None),
             selector_state: Set(self.selector_state),
+            auto_resume: Set(None),
         }
     }
 }

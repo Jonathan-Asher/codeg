@@ -52,6 +52,8 @@ vi.mock("@/lib/api", () => ({
     behavior,
     tray_available: true,
   })),
+  getAutoResumeSettings: vi.fn(async () => ({ enabled: true })),
+  updateAutoResumeSettings: vi.fn(async (v: unknown) => v),
 }))
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))

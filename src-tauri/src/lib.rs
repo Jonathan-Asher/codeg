@@ -90,6 +90,7 @@ mod tauri_app {
         clipboard as clipboard_commands,
         config_sync,
         attention as attention_commands,
+        auto_resume as auto_resume_commands,
         conversation_export as conversation_export_commands,
         message_search as message_search_commands,
         conversations,
@@ -1242,6 +1243,18 @@ mod tauri_app {
                     tauri::async_runtime::spawn(crate::work_task::run_task_engine(engine));
                 }
 
+                // Pick the turns the last exit cut off back up — after the
+                // lifecycle subscriber above, which records the resumed turn as
+                // running. Mirrored in `bin/codeg_server.rs`.
+                tauri::async_runtime::spawn(crate::acp::auto_resume::run_auto_resume(
+                    crate::db::AppDatabase {
+                        conn: app.state::<crate::db::AppDatabase>().conn.clone(),
+                    },
+                    app.state::<ConnectionManager>().clone_ref(),
+                    crate::web::event_bridge::EventEmitter::Tauri(app.handle().clone()),
+                    effective_data_dir.clone(),
+                ));
+
                 // OS `codeg://` URLs. Register the listener after the DB is
                 // live so a warm-start click can look the conversation up.
                 // Cold-start URLs are also read here and baked into the main
@@ -1614,6 +1627,10 @@ mod tauri_app {
                 conversations::get_folder_conversation,
                 conversation_export_commands::conversation_export_markdown,
                 attention_commands::list_conversation_attention,
+                auto_resume_commands::get_auto_resume_settings,
+                auto_resume_commands::update_auto_resume_settings,
+                auto_resume_commands::get_auto_resume_status,
+                auto_resume_commands::stop_auto_resume,
                 message_search_commands::message_search,
                 conversations::get_folder_conversation_turns,
                 conversations::list_folders,
@@ -2134,6 +2151,24 @@ mod tauri_app {
             .run(|app, event| match event {
                 tauri::RunEvent::ExitRequested { .. } => {
                     APP_QUITTING.store(true, Ordering::Relaxed);
+                    // Record the turns this exit is about to cut off BEFORE the
+                    // connections are torn down: as interrupted by codeg's exit
+                    // (due an automatic resume on the next start), not as
+                    // agents that died while codeg ran — which is how the
+                    // lifecycle subscriber would read the disconnects below.
+                    if let Some(db) = app.try_state::<crate::db::AppDatabase>() {
+                        match tauri::async_runtime::block_on(
+                            crate::db::service::conversation_service::interrupt_orphaned_turns(&db.conn),
+                        ) {
+                            Ok(0) => {}
+                            Ok(n) => tracing::info!(
+                                "[conversation] quitting with {n} turn(s) running; marked for resume"
+                            ),
+                            Err(e) => tracing::warn!(
+                                "[conversation] failed to mark running turns on quit: {e}"
+                            ),
+                        }
+                    }
                     // Drop the desktop pet alongside the workspace so it
                     // never outlives a real quit. Tauri also tears down all
                     // windows on shutdown, but doing it explicitly here lets
