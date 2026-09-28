@@ -10,8 +10,40 @@ const SORT_MODE_KEY = "workspace:sidebar-sort-mode"
 const SECTION_ORDER_KEY = "workspace:sidebar-section-order"
 const SECTION_COLLAPSED_KEY = "workspace:sidebar-section-collapsed"
 const CONVERSATION_EXPANDED_KEY = "workspace:sidebar-conversation-expanded"
+const FOLDER_SHOW_ALL_KEY = "workspace:sidebar-folder-show-all"
+const FOLDER_SESSION_LIMIT_KEY = "workspace:sidebar-folder-session-limit"
 
 export type SidebarSortMode = "created" | "updated"
+
+/**
+ * How many sessions each folder lists before the rest fold behind a
+ * "Show N more" row. "all" lists every session, which is how the sidebar
+ * behaved before the limit existed. The menu offers exactly these, in order.
+ */
+export const FOLDER_SESSION_LIMIT_OPTIONS = [3, 5, 10, "all"] as const
+
+export type FolderSessionLimit = (typeof FOLDER_SESSION_LIMIT_OPTIONS)[number]
+
+/** A folder shows its three most recent sessions until you open it up. */
+export const DEFAULT_FOLDER_SESSION_LIMIT: FolderSessionLimit = 3
+
+/** The row cap a limit stands for: a count, or null for no cap at all. */
+export function folderSessionLimitValue(
+  limit: FolderSessionLimit
+): number | null {
+  return limit === "all" ? null : limit
+}
+
+/** Read a stored (or menu) value back into a known option. Anything else,
+ *  including a number the menu never offered, falls back to the default. */
+export function parseFolderSessionLimit(value: unknown): FolderSessionLimit {
+  if (value === "all") return "all"
+  const n = typeof value === "string" ? Number(value) : value
+  for (const option of FOLDER_SESSION_LIMIT_OPTIONS) {
+    if (option === n) return option
+  }
+  return DEFAULT_FOLDER_SESSION_LIMIT
+}
 
 /** The reorderable top-level sidebar sections. "Pinned" is deliberately absent:
  *  it is a transient override bucket and always stays on top. */
@@ -197,6 +229,62 @@ export function saveFolderGroupExpanded(state: Record<number, boolean>): void {
   if (typeof window === "undefined") return
   try {
     localStorage.setItem(FOLDER_GROUP_EXPANDED_KEY, JSON.stringify(state))
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Folders opened up to list every session instead of the most recent few,
+ *  keyed by folder id. Only `true` is ever stored: absent means the folder
+ *  shows its limited list, so a folder you never opened costs nothing here. */
+export function loadFolderShowAll(): Record<number, boolean> {
+  if (typeof window === "undefined") return {}
+  try {
+    const raw = localStorage.getItem(FOLDER_SHOW_ALL_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {}
+    }
+    const result: Record<number, boolean> = {}
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      const id = Number(k)
+      if (!Number.isNaN(id) && v === true) result[id] = true
+    }
+    return result
+  } catch {
+    return {}
+  }
+}
+
+export function saveFolderShowAll(state: Record<number, boolean>): void {
+  if (typeof window === "undefined") return
+  try {
+    const compact: Record<number, true> = {}
+    for (const [k, v] of Object.entries(state)) {
+      if (v === true) compact[Number(k)] = true
+    }
+    localStorage.setItem(FOLDER_SHOW_ALL_KEY, JSON.stringify(compact))
+  } catch {
+    /* ignore */
+  }
+}
+
+export function loadFolderSessionLimit(): FolderSessionLimit {
+  if (typeof window === "undefined") return DEFAULT_FOLDER_SESSION_LIMIT
+  try {
+    return parseFolderSessionLimit(
+      localStorage.getItem(FOLDER_SESSION_LIMIT_KEY)
+    )
+  } catch {
+    return DEFAULT_FOLDER_SESSION_LIMIT
+  }
+}
+
+export function saveFolderSessionLimit(value: FolderSessionLimit): void {
+  if (typeof window === "undefined") return
+  try {
+    localStorage.setItem(FOLDER_SESSION_LIMIT_KEY, String(value))
   } catch {
     /* ignore */
   }

@@ -1,13 +1,21 @@
 import { beforeEach, describe, expect, it } from "vitest"
 
 import {
+  DEFAULT_FOLDER_SESSION_LIMIT,
   DEFAULT_SECTION_ORDER,
+  FOLDER_SESSION_LIMIT_OPTIONS,
+  folderSessionLimitValue,
+  loadFolderSessionLimit,
+  loadFolderShowAll,
   loadSectionCollapsed,
   loadSectionOrder,
   loadShowRecent,
   loadSortMode,
   moveSectionInOrder,
   normalizeSectionOrder,
+  parseFolderSessionLimit,
+  saveFolderSessionLimit,
+  saveFolderShowAll,
   saveSectionOrder,
   saveShowRecent,
   saveSortMode,
@@ -156,5 +164,69 @@ describe("loadSortMode", () => {
   it("keeps a sort order the user picked", () => {
     saveSortMode("created")
     expect(loadSortMode()).toBe("created")
+  })
+})
+
+describe("folder session limit", () => {
+  const LIMIT_KEY = "workspace:sidebar-folder-session-limit"
+  beforeEach(() => localStorage.clear())
+
+  it("shows three sessions per folder by default", () => {
+    expect(DEFAULT_FOLDER_SESSION_LIMIT).toBe(3)
+    expect(loadFolderSessionLimit()).toBe(3)
+  })
+
+  it("round-trips every option the menu offers", () => {
+    for (const option of FOLDER_SESSION_LIMIT_OPTIONS) {
+      saveFolderSessionLimit(option)
+      expect(loadFolderSessionLimit()).toBe(option)
+    }
+    expect(localStorage.getItem(LIMIT_KEY)).toBe("all")
+  })
+
+  it("falls back to the default for anything the menu never offered", () => {
+    for (const bad of ["7", "", "ALL", "{", "3.5", "-3"]) {
+      localStorage.setItem(LIMIT_KEY, bad)
+      expect(loadFolderSessionLimit()).toBe(DEFAULT_FOLDER_SESSION_LIMIT)
+    }
+    expect(parseFolderSessionLimit(null)).toBe(DEFAULT_FOLDER_SESSION_LIMIT)
+    expect(parseFolderSessionLimit(10)).toBe(10)
+    expect(parseFolderSessionLimit("5")).toBe(5)
+  })
+
+  it("maps All to no cap and a count to itself", () => {
+    expect(folderSessionLimitValue("all")).toBeNull()
+    expect(folderSessionLimitValue(3)).toBe(3)
+    expect(folderSessionLimitValue(10)).toBe(10)
+  })
+})
+
+describe("folder show-all persistence", () => {
+  const SHOW_ALL_KEY = "workspace:sidebar-folder-show-all"
+  beforeEach(() => localStorage.clear())
+
+  it("is empty with nothing stored", () => {
+    expect(loadFolderShowAll()).toEqual({})
+  })
+
+  it("round-trips the folders opened up, storing only true entries", () => {
+    saveFolderShowAll({ 1: true, 2: false, 7: true })
+    expect(JSON.parse(localStorage.getItem(SHOW_ALL_KEY) ?? "null")).toEqual({
+      1: true,
+      7: true,
+    })
+    expect(loadFolderShowAll()).toEqual({ 1: true, 7: true })
+  })
+
+  it("drops junk entries and survives corrupt storage", () => {
+    localStorage.setItem(
+      SHOW_ALL_KEY,
+      JSON.stringify({ 3: true, x: true, 4: "yes", 5: false })
+    )
+    expect(loadFolderShowAll()).toEqual({ 3: true })
+    localStorage.setItem(SHOW_ALL_KEY, "[1,2]")
+    expect(loadFolderShowAll()).toEqual({})
+    localStorage.setItem(SHOW_ALL_KEY, "{oops")
+    expect(loadFolderShowAll()).toEqual({})
   })
 })
