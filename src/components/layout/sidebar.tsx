@@ -49,7 +49,9 @@ import { formatShortcutLabel } from "@/lib/keyboard-shortcuts"
 import { isDesktop } from "@/lib/platform"
 import { leftChromeReserve } from "@/lib/window-chrome"
 import {
+  folderSessionLimitValue,
   isNavItemVisible,
+  loadFolderSessionLimit,
   loadNavItemVisibility,
   loadShowCompleted,
   loadShowRecent,
@@ -57,14 +59,19 @@ import {
   loadSortMode,
   loadSectionOrder,
   moveSectionInOrder,
+  parseFolderSessionLimit,
+  saveFolderSessionLimit,
   saveNavItemVisibility,
   saveShowCompleted,
   saveShowRecent,
   saveShowWorktrees,
   saveSortMode,
   saveSectionOrder,
+  DEFAULT_FOLDER_SESSION_LIMIT,
   DEFAULT_SECTION_ORDER,
+  FOLDER_SESSION_LIMIT_OPTIONS,
   SIDEBAR_NAV_ITEM_IDS,
+  type FolderSessionLimit,
   type SidebarNavItemId,
   type SidebarNavItemVisibility,
   type SidebarSectionId,
@@ -179,6 +186,8 @@ export function Sidebar() {
   // pre-hydration render matches for a user who never hid one.
   const [navItems, setNavItems] = useState<SidebarNavItemVisibility>({})
   const [sortMode, setSortMode] = useState<SidebarSortMode>(DEFAULT_SORT_MODE)
+  const [folderSessionLimit, setFolderSessionLimit] =
+    useState<FolderSessionLimit>(DEFAULT_FOLDER_SESSION_LIMIT)
   const [sectionOrder, setSectionOrder] = useState<SidebarSectionOrder>(
     DEFAULT_SECTION_ORDER
   )
@@ -204,6 +213,7 @@ export function Sidebar() {
     setShowRecent(loadShowRecent())
     setNavItems(loadNavItemVisibility())
     setSortMode(loadSortMode())
+    setFolderSessionLimit(loadFolderSessionLimit())
     setSectionOrder(loadSectionOrder())
   }, [])
 
@@ -237,6 +247,12 @@ export function Sidebar() {
     const mode: SidebarSortMode = value === "updated" ? "updated" : "created"
     setSortMode(mode)
     saveSortMode(mode)
+  }, [])
+
+  const handleSetFolderSessionLimit = useCallback((value: string) => {
+    const limit = parseFolderSessionLimit(value)
+    setFolderSessionLimit(limit)
+    saveFolderSessionLimit(limit)
   }, [])
 
   // Nudge one section up/down a slot. `moveSectionInOrder` returns the SAME
@@ -427,6 +443,29 @@ export function Sidebar() {
                   >
                     {t("showRecent")}
                   </DropdownMenuCheckboxItem>
+                  {/* How long each folder's list runs before "Show N more".
+                      Lives with the other what-the-list-shows options; "All"
+                      is the sidebar as it was before the limit existed. */}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>
+                    {t("sessionsPerFolder")}
+                  </DropdownMenuLabel>
+                  <DropdownMenuRadioGroup
+                    value={String(folderSessionLimit)}
+                    onValueChange={handleSetFolderSessionLimit}
+                  >
+                    {FOLDER_SESSION_LIMIT_OPTIONS.map((option) => (
+                      <DropdownMenuRadioItem
+                        key={option}
+                        value={String(option)}
+                        onSelect={(event) => event.preventDefault()}
+                      >
+                        {option === "all"
+                          ? t("sessionsPerFolderAll")
+                          : t("sessionsPerFolderCount", { count: option })}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
               <DropdownMenuSub>
@@ -600,6 +639,7 @@ export function Sidebar() {
           showCompleted={showCompleted}
           showWorktrees={showWorktrees}
           showRecent={showRecent}
+          folderSessionLimit={folderSessionLimitValue(folderSessionLimit)}
           sortMode={sortMode}
           sectionOrder={sectionOrder}
         />

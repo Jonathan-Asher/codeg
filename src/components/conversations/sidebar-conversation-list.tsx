@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type Ref,
 } from "react"
 import { useTranslations } from "next-intl"
@@ -77,6 +78,8 @@ import { getAgentLabel } from "@/lib/custom-agents"
 import {
   loadFolderExpanded,
   saveFolderExpanded,
+  loadFolderShowAll,
+  saveFolderShowAll,
   loadFolderGroupExpanded,
   saveFolderGroupExpanded,
   loadSectionCollapsed,
@@ -110,7 +113,9 @@ import {
   buildOwnerHeaderIndex,
   buildRows,
   buildSidebarLayout,
+  collectAlwaysVisibleIds,
   EMPTY_SIDEBAR_LAYOUT,
+  folderIdsWithMoreRow,
   layoutFolderIds,
   layoutToEntries,
   locateEntry,
@@ -219,6 +224,8 @@ const FolderHeader = memo(function FolderHeader({
   availableAgents,
   availableAgentsFresh,
   onToggle,
+  onNameClick,
+  nameExpanded,
   onRemoveFromWorkspace,
   onNewConversation,
   onImport,
@@ -271,7 +278,18 @@ const FolderHeader = memo(function FolderHeader({
    * usable since clearing a default doesn't depend on the live list.
    */
   availableAgentsFresh: boolean
+  /** The chevron: show or hide the folder's sessions entirely. */
   onToggle: (folderId: number) => void
+  /**
+   * The folder row itself (glyph + name). For a folder the session limit is
+   * trimming, this switches between its most recent sessions and all of them;
+   * otherwise it shows / hides the folder like the chevron. Omitted = the
+   * chevron's handler, for headers that have no limited list of their own.
+   */
+  onNameClick?: (folderId: number) => void
+  /** What the row's `aria-expanded` reports: whether the name click has
+   *  already done its thing. Defaults to `expanded`. */
+  nameExpanded?: boolean
   onRemoveFromWorkspace: (folderId: number) => void
   onNewConversation: (folderId: number) => void
   onImport: (folderId: number) => void
@@ -393,6 +411,9 @@ const FolderHeader = memo(function FolderHeader({
   const bracketClassName = titleTint
     ? "text-current"
     : "text-sidebar-foreground"
+  const chevronLabel = expanded
+    ? t("hideFolderSessions")
+    : t("showFolderSessions")
 
   return (
     <>
@@ -416,9 +437,9 @@ const FolderHeader = memo(function FolderHeader({
             >
               <button
                 data-folder-id={folderId}
-                onClick={() => onToggle(folderId)}
+                onClick={() => (onNameClick ?? onToggle)(folderId)}
                 title={folderPath}
-                aria-expanded={expanded}
+                aria-expanded={nameExpanded ?? expanded}
                 className={cn(
                   "relative flex h-full min-w-0 flex-1 items-center pr-[0.5rem] outline-none",
                   "rounded-full focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
@@ -532,29 +553,41 @@ const FolderHeader = memo(function FolderHeader({
                       </span>
                     </span>
                   )}
-                  {/* Disclosure chevron mirrors the section headers: hover-revealed,
-                    rotates on expand. The persistent open/closed state still reads
-                    from the folder icon on the left, which is why the chevron can
-                    stay hidden at rest in BOTH states (collapsed included) — it is
-                    a redundant affordance, not the only one. Touch keeps it pinned
-                    on, since there is no hover to reveal it there.
-                    NOTE: `group-focus-within` (not `group-focus-visible` like the
-                    section header) is intentional — here the `group` is the outer
-                    row wrapper and focus lands on a child (the toggle button or the
-                    sibling ⋯ menu button), so the reveal must react to focus
-                    anywhere inside the row. The section header's `group` IS its
-                    button, so it uses `group-focus-visible`. Don't "normalize". */}
-                  <ChevronRight
-                    aria-hidden
-                    className={cn(
-                      "h-3 w-3 shrink-0 text-muted-foreground/60",
-                      "transition-[transform,opacity] duration-200 ease-out",
-                      "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
-                      "[@media(hover:none)]:opacity-100",
-                      expanded && "rotate-90"
-                    )}
-                  />
                 </div>
+              </button>
+              {/* Disclosure chevron: shows or hides the folder's sessions
+                  entirely. Its own button (not part of the row) because on a
+                  folder the session limit trims, the row click does something
+                  else — it switches between the recent few and all of them.
+                  Hover-revealed like its ⋯ / ✎ neighbours and rotating on
+                  expand; the persistent open/closed state still reads from the
+                  folder glyph on the left, which is why it can stay hidden at
+                  rest in both states. Touch keeps it pinned on, since there is
+                  no hover to reveal it there. */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggle(folderId)
+                }}
+                title={chevronLabel}
+                aria-label={chevronLabel}
+                aria-expanded={expanded}
+                data-folder-chevron={folderId}
+                className={cn(
+                  "flex h-6 w-6 shrink-0 items-center justify-end",
+                  "rounded-[0.375rem] cursor-pointer outline-none text-muted-foreground/90",
+                  "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
+                  "transition-[opacity,color] duration-150 hover:text-sidebar-foreground"
+                )}
+              >
+                <ChevronRight
+                  aria-hidden
+                  className={cn(
+                    "h-3 w-3 transition-transform duration-200 ease-out",
+                    expanded && "rotate-90"
+                  )}
+                />
               </button>
               <button
                 type="button"
@@ -890,6 +923,11 @@ export interface SidebarConversationListProps {
    *  `sectionOrder`. Defaults to off here; the Sidebar passes the user's
    *  preference, whose product default is ON. */
   showRecent?: boolean
+  /** How many sessions each folder lists before the rest fold behind a "Show
+   *  N more" row; null lists them all. Defaults to null (every session) here;
+   *  the Sidebar passes the user's "Sessions shown per folder" choice, whose
+   *  product default is 3. */
+  folderSessionLimit?: number | null
 }
 
 export function SidebarConversationList({
@@ -899,6 +937,7 @@ export function SidebarConversationList({
   sectionOrder = DEFAULT_SECTION_ORDER,
   showWorktrees = false,
   showRecent = false,
+  folderSessionLimit = null,
 }: SidebarConversationListProps & {
   ref?: Ref<SidebarConversationListHandle>
 }) {
@@ -1024,6 +1063,13 @@ export function SidebarConversationList({
   // lightweight. Default (absent) = expanded.
   const [rootGroupCollapsed, setRootGroupCollapsed] = useState<Set<number>>(
     () => new Set()
+  )
+  // Display buckets opened up to every session instead of the most recent few
+  // (`folderSessionLimit`), keyed like `byFolder`. Absent = limited. Persisted
+  // like `folderExpanded` and hydrated on mount; independent of it, so hiding
+  // a folder and showing it again keeps whichever list it had.
+  const [folderShowAll, setFolderShowAll] = useState<Record<number, boolean>>(
+    {}
   )
   // Collapsed state of the two top-level sections ("Pinned", "Folders"). Absent
   // key = expanded (default). Hydrated from localStorage after mount.
@@ -1160,6 +1206,7 @@ export function SidebarConversationList({
     // Hydrate from localStorage after mount to keep SSR/CSR markup consistent.
 
     setFolderExpanded(loadFolderExpanded())
+    setFolderShowAll(loadFolderShowAll())
     setFolderGroupExpanded(loadFolderGroupExpanded())
     setSectionCollapsed(loadSectionCollapsed())
     setConversationExpanded(new Set(loadConversationExpanded()))
@@ -1533,6 +1580,33 @@ export function SidebarConversationList({
     }
   }, [containerRepoIds, folderIndex, ensureGitHead])
 
+  // Sessions a limited folder lists no matter how far down they sort: the one
+  // open in the active tab (or the session a sub-session in it hangs under),
+  // and every one running, blocked on the user, or interrupted. Only built
+  // while a limit is in force ("All" needs none), and reused by content so a
+  // status event that changes nobody's membership keeps the same Set.
+  const alwaysVisibleRef = useRef<ReadonlySet<number>>(new Set<number>())
+  const alwaysVisibleIds = useMemo(() => {
+    const next: ReadonlySet<number> =
+      folderSessionLimit == null
+        ? new Set<number>()
+        : collectAlwaysVisibleIds(
+            folderConversations,
+            selectedConversation?.id ?? null,
+            attentionByConversationId,
+            childrenByParent
+          )
+    const reused = reuseSet(alwaysVisibleRef.current, next)
+    alwaysVisibleRef.current = reused
+    return reused
+  }, [
+    folderSessionLimit,
+    folderConversations,
+    selectedConversation,
+    attentionByConversationId,
+    childrenByParent,
+  ])
+
   // Flat row model for windowing — the pinned section, the folders section, and
   // every conversation live in this ONE array fed to the single Virtualizer (no
   // separate, un-virtualized pinned list). Deliberately excludes `now` (see
@@ -1564,6 +1638,9 @@ export function SidebarConversationList({
         rootGroupCollapsed,
         layout,
         groupExpanded: folderGroupExpanded,
+        folderSessionLimit,
+        folderShowAll,
+        alwaysVisibleIds,
       }),
     [
       pinned,
@@ -1587,8 +1664,22 @@ export function SidebarConversationList({
       rootGroupCollapsed,
       layout,
       folderGroupExpanded,
+      folderSessionLimit,
+      folderShowAll,
+      alwaysVisibleIds,
     ]
   )
+
+  // Which folders the limit is trimming right now — their name click switches
+  // between the short list and every session. Read through a ref by the stable
+  // click handlers below, so the memoized headers never see it change.
+  const foldersWithMore = useMemo(() => folderIdsWithMoreRow(rows), [rows])
+  const foldersWithMoreRef = useRef(foldersWithMore)
+  foldersWithMoreRef.current = foldersWithMore
+  const folderExpandedRef = useRef(folderExpanded)
+  folderExpandedRef.current = folderExpanded
+  const rootGroupCollapsedRef = useRef(rootGroupCollapsed)
+  rootGroupCollapsedRef.current = rootGroupCollapsed
 
   // Latest snapshots for the imperative scroll/drag code paths, refreshed every
   // render so the window listeners and scrollToActive read current values
@@ -1812,6 +1903,49 @@ export function SidebarConversationList({
     })
   }, [])
 
+  // Switch one display bucket between its most recent sessions and all of
+  // them — the "Show N more" / "Show less" footer, and the folder name.
+  const toggleFolderShowAll = useCallback((folderId: number) => {
+    setFolderShowAll((prev) => {
+      const next = { ...prev }
+      if (next[folderId]) delete next[folderId]
+      else next[folderId] = true
+      saveFolderShowAll(next)
+      return next
+    })
+  }, [])
+
+  // The folder name's click. On a folder the limit is trimming it switches
+  // between the short list and every session; anywhere else — a hidden folder,
+  // one that already fits, or every folder under the "All" setting — it shows
+  // or hides the folder exactly as it always has, so the click is never dead
+  // and "All" behaves like the sidebar did before the limit existed.
+  const handleFolderNameClick = useCallback(
+    (folderId: number) => {
+      const shown = folderExpandedRef.current[folderId] ?? true
+      if (shown && foldersWithMoreRef.current.has(folderId)) {
+        toggleFolderShowAll(folderId)
+      } else {
+        toggleFolder(folderId)
+      }
+    },
+    [toggleFolder, toggleFolderShowAll]
+  )
+
+  // The same for a container repo's "root" sub-group, whose own collapse is
+  // the session-only `rootGroupCollapsed` rather than `folderExpanded`.
+  const handleRootGroupNameClick = useCallback(
+    (repoId: number) => {
+      const shown = !rootGroupCollapsedRef.current.has(repoId)
+      if (shown && foldersWithMoreRef.current.has(repoId)) {
+        toggleFolderShowAll(repoId)
+      } else {
+        toggleRootGroup(repoId)
+      }
+    },
+    [toggleRootGroup, toggleFolderShowAll]
+  )
+
   // Lazily fetch a conversation's direct delegation children into the cache.
   // Deduped against both the cache and in-flight requests so a re-toggle or the
   // restore-time guard below can call it freely (idempotent, StrictMode-safe).
@@ -1981,20 +2115,56 @@ export function SidebarConversationList({
   // next folder otherwise). Deferred so virtua re-measures the shorter list
   // before scrolling. Header index is unchanged by its own collapse, but we
   // re-resolve it to stay correct regardless.
+  const scrollFolderHeaderToTop = useCallback((folderId: number) => {
+    requestAnimationFrame(() => {
+      const idx = headerIndexForFolder(rowsRef.current, folderId)
+      if (idx >= 0) {
+        virtualizerRef.current?.scrollToIndex(idx, {
+          align: "start",
+          smooth: false,
+        })
+      }
+    })
+  }, [])
   const handleOverlayToggle = useCallback(
     (folderId: number) => {
       toggleFolder(folderId)
+      scrollFolderHeaderToTop(folderId)
+    },
+    [toggleFolder, scrollFolderHeaderToTop]
+  )
+  // The "Show N more" / "Show less" footer. Folding a long list back from its
+  // bottom would leave the footer — the thing just clicked — far above the
+  // viewport, with the next folder's sessions under the pointer, so "Show
+  // less" scrolls just enough to keep the footer on screen. Deferred like the
+  // overlay toggle so virtua has measured the shorter list first.
+  const handleFolderMoreClick = useCallback(
+    (folderId: number, expanded: boolean) => {
+      toggleFolderShowAll(folderId)
+      if (!expanded) return
       requestAnimationFrame(() => {
-        const idx = headerIndexForFolder(rowsRef.current, folderId)
+        const idx = rowsRef.current.findIndex(
+          (r) => r.kind === "folder-more" && r.folderId === folderId
+        )
         if (idx >= 0) {
           virtualizerRef.current?.scrollToIndex(idx, {
-            align: "start",
+            align: "nearest",
             smooth: false,
           })
         }
       })
     },
-    [toggleFolder]
+    [toggleFolderShowAll]
+  )
+  // The overlay's name click: same decision as the in-list row, then the same
+  // bring-the-header-back as its chevron — folding a long list back to its
+  // recent few would otherwise leave you in the middle of the next folder.
+  const handleOverlayNameClick = useCallback(
+    (folderId: number) => {
+      handleFolderNameClick(folderId)
+      scrollFolderHeaderToTop(folderId)
+    },
+    [handleFolderNameClick, scrollFolderHeaderToTop]
   )
 
   // Recompute on anything that shifts geometry without firing a scroll event:
@@ -2780,6 +2950,8 @@ export function SidebarConversationList({
       collapsed?: boolean
       grip: boolean
       onToggle?: (folderId: number) => void
+      /** Overrides the name click (the sticky overlay scrolls afterwards). */
+      onNameClick?: (folderId: number) => void
       suppressed?: boolean
       /** Render as the container repo's own-sessions "root" sub-group (FolderRoot
        *  glyph, indented, session-only collapse) rather than the repo header. */
@@ -2821,6 +2993,18 @@ export function SidebarConversationList({
       : opts.collapsed
         ? false
         : (folderExpanded[folderId] ?? true)
+    // A container header owns no sessions of its own (they sit in its root
+    // sub-group), so its name keeps showing / hiding the whole subtree. Every
+    // other header's name can also switch its bucket between the recent few
+    // and all of them, and reports that as its expanded state while it can.
+    const nameClick = isContainer
+      ? undefined
+      : (opts.onNameClick ??
+        (isRootGroup ? handleRootGroupNameClick : handleFolderNameClick))
+    const nameExpanded =
+      !isContainer && expanded && foldersWithMore.has(folderId)
+        ? folderShowAll[folderId] === true
+        : expanded
     return (
       <FolderHeader
         folderId={folderId}
@@ -2838,6 +3022,8 @@ export function SidebarConversationList({
         onToggle={
           opts.onToggle ?? (isRootGroup ? toggleRootGroup : toggleFolder)
         }
+        onNameClick={nameClick}
+        nameExpanded={nameExpanded}
         onRemoveFromWorkspace={handleRemoveFolder}
         onNewConversation={handleNewConversationForFolder}
         onImport={handleImportForFolder}
@@ -3128,6 +3314,60 @@ export function SidebarConversationList({
         </div>
       )
     }
+    if (row.kind === "folder-more") {
+      // Footer of a folder the session limit trims: "Show N more" opens the
+      // folder up to every session, "Show less" folds it back. Same geometry
+      // as the Recent footer above — chevron on the rail axis where a card's
+      // agent icon sits, label at the card's title inset — shifted to the
+      // depth of the cards it follows, with their ancestor rails so a nested
+      // folder's connector spine runs straight through it.
+      const expanded = row.expanded === true
+      const label = expanded
+        ? t("showLessFolderSessions")
+        : t("showMoreFolderSessions", { count: row.remaining })
+      return (
+        <div
+          className="group/folder-more relative h-[2rem]"
+          style={
+            row.depth > 0
+              ? ({
+                  "--conv-rail-axis": `calc(0.875rem + ${row.depth} * ${CONV_RAIL_DEPTH_STEP})`,
+                } as CSSProperties)
+              : undefined
+          }
+        >
+          <button
+            type="button"
+            data-folder-more={row.folderId}
+            onClick={() => handleFolderMoreClick(row.folderId, expanded)}
+            aria-expanded={expanded}
+            className="relative flex h-[1.9375rem] w-full items-center rounded-full pr-[0.25rem] text-left text-[0.75rem] text-muted-foreground/80 outline-none transition-colors duration-[120ms] group-hover/folder-more:bg-[color-mix(in_oklab,var(--sidebar-accent),var(--sidebar-foreground)_2%)] group-hover/folder-more:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+            style={{
+              paddingLeft: "calc(var(--conv-rail-axis, 0.875rem) + 0.875rem)",
+            }}
+          >
+            <SubsessionAncestorRails depth={row.depth} />
+            <span
+              aria-hidden
+              className="pointer-events-none absolute top-1/2 flex items-center justify-center"
+              style={{
+                left: "var(--conv-rail-axis, 0.875rem)",
+                width: "0.875rem",
+                height: "0.875rem",
+                transform: "translate(-50%, -50%)",
+              }}
+            >
+              {expanded ? (
+                <ChevronsUp className="h-[0.75rem] w-[0.75rem]" />
+              ) : (
+                <ChevronDown className="h-[0.75rem] w-[0.75rem]" />
+              )}
+            </span>
+            <span className="relative truncate">{label}</span>
+          </button>
+        </div>
+      )
+    }
     if (row.kind === "subsession-loading") {
       // Transient spinner at the child indent while children are fetched. The
       // left inset matches a depth-`row.depth` card's text start: rail axis
@@ -3231,6 +3471,7 @@ export function SidebarConversationList({
     if (row.kind === "folders-empty") return "folders-empty"
     if (row.kind === "recent-empty") return "recent-empty"
     if (row.kind === "recent-more") return "recent-more"
+    if (row.kind === "folder-more") return `foldermore-${row.folderId}`
     const prefix = row.recent ? "recent-" : ""
     if (row.kind === "subsession-loading") {
       return `${prefix}subloading-${row.parentId}`
@@ -3449,6 +3690,7 @@ export function SidebarConversationList({
                       dragging: false,
                       grip: false,
                       onToggle: handleOverlayToggle,
+                      onNameClick: handleOverlayNameClick,
                     })}
                   </div>
                 </div>

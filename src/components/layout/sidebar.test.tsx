@@ -27,6 +27,7 @@ const spies = vi.hoisted(() => ({
     showWorktrees?: boolean
     showCompleted?: boolean
     showRecent?: boolean
+    folderSessionLimit?: number | null
     sectionOrder?: readonly string[]
   } | null,
 }))
@@ -50,6 +51,7 @@ vi.mock("@/components/conversations/sidebar-conversation-list", async () => {
       showWorktrees?: boolean
       showCompleted?: boolean
       showRecent?: boolean
+      folderSessionLimit?: number | null
       sectionOrder?: readonly string[]
     }) => {
       spies.listProps = props
@@ -338,6 +340,49 @@ describe("Sidebar — Show Recent group toggle", () => {
     expect(
       screen.getByRole("menuitemcheckbox", { name: "Show Recent group" })
     ).toBeTruthy()
+  })
+})
+
+describe("Sidebar — Sessions shown per folder", () => {
+  beforeEach(() => {
+    localStorage.clear()
+    spies.listProps = null
+    mockState.activeFolder = { id: 7, path: "/x" }
+  })
+
+  it("defaults to three and threads it to the conversation list", () => {
+    renderSidebar()
+    expect(spies.listProps?.folderSessionLimit).toBe(3)
+  })
+
+  it("respects a stored choice, with All meaning no limit", () => {
+    localStorage.setItem("workspace:sidebar-folder-session-limit", "all")
+    renderSidebar()
+    expect(spies.listProps?.folderSessionLimit).toBeNull()
+  })
+
+  it("picks a limit from the Conversation list group, persists it and keeps the menu open", async () => {
+    renderSidebar()
+    await openViewOptionsGroup("Conversation list")
+    expect(
+      screen
+        .getByRole("menuitemradio", { name: "3 most recent" })
+        .getAttribute("aria-checked")
+    ).toBe("true")
+
+    await userEvent.click(screen.getByRole("menuitemradio", { name: "All" }))
+    expect(localStorage.getItem("workspace:sidebar-folder-session-limit")).toBe(
+      "all"
+    )
+    expect(spies.listProps?.folderSessionLimit).toBeNull()
+
+    await userEvent.click(
+      screen.getByRole("menuitemradio", { name: "10 most recent" })
+    )
+    expect(localStorage.getItem("workspace:sidebar-folder-session-limit")).toBe(
+      "10"
+    )
+    expect(spies.listProps?.folderSessionLimit).toBe(10)
   })
 })
 

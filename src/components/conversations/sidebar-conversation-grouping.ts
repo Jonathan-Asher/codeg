@@ -1,9 +1,11 @@
 import type {
+  AttentionKind,
   DbConversationSummary,
   FolderDetail,
   FolderGroupDetail,
   SidebarLayoutEntry,
 } from "@/lib/types"
+import { summaryActivity, type SessionActivity } from "@/lib/session-activity"
 import {
   DEFAULT_SECTION_ORDER,
   normalizeSectionOrder,
@@ -138,7 +140,7 @@ function arraysShallowEqual<T>(a: readonly T[], b: readonly T[]): boolean {
 }
 
 /**
- * Return `prev` when `next` has identical string membership, else `next`.
+ * Return `prev` when `next` has identical membership, else `next`.
  *
  * `tabs` is rebuilt (new array) on every `conversations` change (tab-context
  * re-derives titles/status), so `openTabKeys` recomputes every status event.
@@ -147,13 +149,132 @@ function arraysShallowEqual<T>(a: readonly T[], b: readonly T[]): boolean {
  * equality keeps the reference stable when the open-tab set is actually
  * unchanged.
  */
-export function reuseSet(prev: Set<string>, next: Set<string>): Set<string> {
+export function reuseSet<T>(prev: Set<T>, next: Set<T>): Set<T>
+export function reuseSet<T>(
+  prev: ReadonlySet<T>,
+  next: ReadonlySet<T>
+): ReadonlySet<T>
+export function reuseSet<T>(
+  prev: ReadonlySet<T>,
+  next: ReadonlySet<T>
+): ReadonlySet<T> {
   if (prev === next) return prev
   if (prev.size !== next.size) return next
   for (const key of next) {
     if (!prev.has(key)) return next
   }
   return prev
+}
+
+// ── Per-folder session limit ─────────────────────────────────────────────────
+
+/**
+ * The activity states that keep a session on screen even when it is past its
+ * folder's limit: something is running, blocked on you, or was cut off and
+ * wants picking back up. Folding any of those behind "Show N more" would hide
+ * exactly the rows the sidebar exists to surface.
+ */
+export function isAlwaysVisibleActivity(activity: SessionActivity): boolean {
+  return (
+    activity === "working" ||
+    activity === "needs_you" ||
+    activity === "interrupted"
+  )
+}
+
+/**
+ * The top-level session a delegation sub-session hangs under, found by walking
+ * up the lazily-fetched children cache. A sub-session is never a folder row of
+ * its own — it renders beneath its parent — so when one is open in the active
+ * tab, the row a limited folder has to keep is its root. Returns `id` itself
+ * for a top-level session, or for a sub-session whose parents were never
+ * fetched (nothing of it is on screen to keep, then).
+ */
+export function delegationRootId(
+  id: number,
+  childrenByParent: ReadonlyMap<number, readonly DbConversationSummary[]>
+): number {
+  let current = id
+  // Bounded like the renderer's recursion, so a malformed cache cannot spin.
+  for (let hops = 0; hops < MAX_RENDER_DEPTH; hops++) {
+    let parent: number | null = null
+    for (const [parentId, kids] of childrenByParent) {
+      if (kids.some((kid) => kid.id === current)) {
+        parent = parentId
+        break
+      }
+    }
+    if (parent == null) break
+    current = parent
+  }
+  return current
+}
+
+/**
+ * Ids of the folder sessions a limited folder must still list: the one open in
+ * the active tab (or, for a delegation sub-session, the top-level session it
+ * sits under — see {@link delegationRootId}), plus every session in an
+ * {@link isAlwaysVisibleActivity} state. `attention` is the attention store's
+ * map (what the session is blocked on), the same input the cards read their
+ * state from.
+ */
+export function collectAlwaysVisibleIds(
+  conversations: readonly DbConversationSummary[],
+  selectedId: number | null,
+  attention: ReadonlyMap<number, AttentionKind>,
+  childrenByParent: ReadonlyMap<
+    number,
+    readonly DbConversationSummary[]
+  > = EMPTY_CHILDREN
+): Set<number> {
+  const ids = new Set<number>()
+  if (selectedId != null) {
+    ids.add(selectedId)
+    ids.add(delegationRootId(selectedId, childrenByParent))
+  }
+  for (const conv of conversations) {
+    if (isAlwaysVisibleActivity(summaryActivity(conv, attention.get(conv.id))))
+      ids.add(conv.id)
+  }
+  return ids
+}
+
+/**
+ * The rows a folder lists while it is limited to `limit` sessions.
+ *
+ * `conversations` is the folder's bucket, already in the sidebar's sort order;
+ * the result keeps that order. Sessions in `alwaysVisible` are listed wherever
+ * they sit, and they take up slots rather than adding to them: a folder whose
+ * third-newest session is quiet but whose sixth is running lists the two
+ * newest and the running one. When more sessions must stay visible than the
+ * limit allows, all of them are listed anyway and nothing else is.
+ *
+ * `limit` null (the "All" setting) — or a bucket that already fits — lists
+ * everything and hides nothing.
+ */
+export function limitFolderConversations(
+  conversations: readonly DbConversationSummary[],
+  limit: number | null | undefined,
+  alwaysVisible: ReadonlySet<number>
+): { shown: readonly DbConversationSummary[]; hiddenCount: number } {
+  if (limit == null || conversations.length <= limit) {
+    return { shown: conversations, hiddenCount: 0 }
+  }
+  let forced = 0
+  for (const conv of conversations) {
+    if (alwaysVisible.has(conv.id)) forced++
+  }
+  let freeSlots = Math.max(0, limit - forced)
+  const shown: DbConversationSummary[] = []
+  for (const conv of conversations) {
+    if (alwaysVisible.has(conv.id)) {
+      shown.push(conv)
+    } else if (freeSlots > 0) {
+      shown.push(conv)
+      freeSlots--
+    }
+  }
+  return { shown, hiddenCount: conversations.length - shown.length }
 }
 
 export interface SelectedConversationRef {
@@ -992,6 +1113,28 @@ export interface RecentMoreRow {
 }
 
 /**
+ * The footer under a folder that lists only its most recent sessions (the
+ * "Sessions shown per folder" setting). While the folder is limited it reads
+ * "Show N more" and opens the folder up; once opened (`expanded`) it reads
+ * "Show less" and folds it back. It exists only while the limit actually hides
+ * something — a folder that fits gets no footer in either state.
+ *
+ * `folderId` is the display bucket the row belongs to, which is also the key
+ * of its show-all state: a plain folder, a worktree sub-group, or — for a
+ * container's own sessions under "Show worktrees" — the repo id. `depth` is the
+ * depth of the conversation rows above it, so it indents with them.
+ */
+export interface FolderMoreRow {
+  kind: "folder-more"
+  folderId: number
+  depth: number
+  /** Sessions the limit is hiding (0 while the folder is opened up). */
+  remaining: number
+  /** Set only while the folder is opened up to every session. */
+  expanded?: true
+}
+
+/**
  * A collapsible section heading. Four exist: "pinned" (always on top, shown only
  * when there are pinned conversations) plus the three user-reorderable ones —
  * "folders" (wraps the whole folder list), "chats" (a flat list of folderless
@@ -1065,6 +1208,7 @@ export type SidebarRow =
   | FoldersEmptyRow
   | RecentEmptyRow
   | RecentMoreRow
+  | FolderMoreRow
   | SubsessionLoadingRow
 
 const MAX_RENDER_DEPTH = 32
@@ -1086,6 +1230,9 @@ const EMPTY_CONVERSATIONS: readonly DbConversationSummary[] = []
 // No group is collapsed by default (absent key = expanded), matching
 // `folderExpanded`. Shared so the group-free path allocates nothing.
 const EMPTY_GROUP_EXPANDED: Record<number, boolean> = {}
+// No folder opened up past its limit by default. Shared so callers that don't
+// limit folders allocate nothing.
+const EMPTY_FOLDER_SHOW_ALL: Record<number, boolean> = {}
 
 /**
  * Merge a freshly-fetched children snapshot with child summaries already applied
@@ -1202,6 +1349,9 @@ function pushConversationRow(
  *   section), so a folder whose only conversations are pinned reads as empty. The
  *   fully-empty initial workspace (no folders AND no conversations) never reaches
  *   buildRows — the list renders its dedicated open-folder call-to-action there.
+ *   With `folderSessionLimit` set, a bucket longer than the limit lists only its
+ *   newest sessions (plus `alwaysVisibleIds`) and ends in a `folder-more` row;
+ *   `folderShowAll` opens a bucket back up to every session.
  * - The "Chat" section header ALWAYS appears (even with zero chat
  *   conversations), so the section is a permanent entry point — its New-chat
  *   affordance and an empty hint stay reachable. When expanded and empty it
@@ -1285,6 +1435,16 @@ export function buildRows(args: {
   /** Collapsed state of each folder group, keyed by group id. Absent key =
    *  expanded (the default), mirroring `folderExpanded`. Optional. */
   groupExpanded?: Record<number, boolean>
+  /** How many sessions each folder body lists before a {@link FolderMoreRow}
+   *  folds the rest away (see {@link limitFolderConversations}). Omitted or
+   *  null lists every session — the "All" setting, and the historical model. */
+  folderSessionLimit?: number | null
+  /** Display buckets opened up to every session, keyed like `byFolder`.
+   *  Absent = limited. Only consulted when `folderSessionLimit` is set. */
+  folderShowAll?: Record<number, boolean>
+  /** Session ids a limited folder must list regardless of the limit (the
+   *  active tab's session, and running / blocked / interrupted ones). */
+  alwaysVisibleIds?: ReadonlySet<number>
 }): SidebarRow[] {
   const {
     pinned,
@@ -1308,6 +1468,9 @@ export function buildRows(args: {
     rootGroupCollapsed = EMPTY_EXPANDED,
     layout,
     groupExpanded = EMPTY_GROUP_EXPANDED,
+    folderSessionLimit = null,
+    folderShowAll = EMPTY_FOLDER_SHOW_ALL,
+    alwaysVisibleIds = EMPTY_EXPANDED,
   } = args
   const rows: SidebarRow[] = []
 
@@ -1343,6 +1506,12 @@ export function buildRows(args: {
   // `baseDepth` — 0 for a plain top-level folder, 1 for a container's root
   // sub-group or a worktree sub-group. The empty hint carries no depth; the
   // renderer derives its indent from the folder id (worktree/container → 1).
+  //
+  // With a session limit the body lists only the newest few (plus whatever
+  // must stay visible) and ends in a footer that opens the rest; opened up, it
+  // lists everything and the footer folds it back. The footer is computed off
+  // the LIMITED view in both states, so it appears exactly when folding would
+  // hide something.
   const pushFolderBody = (folderId: number, baseDepth: number) => {
     const convs = byFolder.get(folderId)
     if (!convs || convs.length === 0) {
@@ -1353,7 +1522,13 @@ export function buildRows(args: {
       })
       return
     }
-    for (const conv of convs) {
+    const { shown, hiddenCount } = limitFolderConversations(
+      convs,
+      folderSessionLimit,
+      alwaysVisibleIds
+    )
+    const showAll = hiddenCount > 0 && folderShowAll[folderId] === true
+    for (const conv of showAll ? convs : shown) {
       pushConversationRow(
         rows,
         conv,
@@ -1363,6 +1538,15 @@ export function buildRows(args: {
         childrenLoading
       )
     }
+    if (hiddenCount === 0) return
+    const more: FolderMoreRow = {
+      kind: "folder-more",
+      folderId,
+      depth: baseDepth,
+      remaining: showAll ? 0 : hiddenCount,
+    }
+    if (showAll) more.expanded = true
+    rows.push(more)
   }
 
   // Emit one folder's header + (when expanded) its body, at `baseDepth`.
@@ -1526,6 +1710,21 @@ export function buildRows(args: {
   }
 
   return rows
+}
+
+/**
+ * The display buckets whose body currently ends in a {@link FolderMoreRow},
+ * i.e. the folders the session limit is actually trimming (or would trim, once
+ * folded back). Their header's name click switches between the short list and
+ * every session; every other header's name click shows / hides the folder as it
+ * always has. Keyed like the row: a container's own sessions use the repo id.
+ */
+export function folderIdsWithMoreRow(rows: readonly SidebarRow[]): Set<number> {
+  const ids = new Set<number>()
+  for (const row of rows) {
+    if (row.kind === "folder-more") ids.add(row.folderId)
+  }
+  return ids
 }
 
 /**

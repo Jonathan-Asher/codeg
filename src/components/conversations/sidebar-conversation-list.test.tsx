@@ -14,11 +14,19 @@ import {
   SidebarConversationList,
   type SidebarConversationListHandle,
 } from "./sidebar-conversation-list"
-import type { DbConversationSummary, FolderDetail } from "@/lib/types"
+import type {
+  AttentionKind,
+  DbConversationSummary,
+  FolderDetail,
+} from "@/lib/types"
 import {
   resetAppWorkspaceStore,
   useAppWorkspaceStore,
 } from "@/stores/app-workspace-store"
+import {
+  __resetConversationAttentionForTests,
+  useConversationAttentionStore,
+} from "@/stores/conversation-attention-store"
 import enMessages from "@/i18n/messages/en.json"
 
 // ── Probes ────────────────────────────────────────────────────────────────
@@ -1752,5 +1760,180 @@ describe("SidebarConversationList — folder groups", () => {
     expect(title.className).toContain("text-sidebar-foreground/75")
     expect(title.className).not.toContain("folder-title-tint")
     expect(title.getAttribute("style")).toBeNull()
+  })
+})
+
+describe("SidebarConversationList — sessions shown per folder", () => {
+  const SHOW_ALL_KEY = "workspace:sidebar-folder-show-all"
+  const FOLDER_EXPANDED_KEY = "workspace:sidebar-folder-expanded"
+  const { showMoreFolderSessions, showLessFolderSessions } =
+    enMessages.Folder.sidebar
+  const showMore = (count: number) =>
+    showMoreFolderSessions.replace("{count}", String(count))
+
+  function limitTree(limit: number | null) {
+    return (
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <SidebarConversationList
+          showCompleted
+          sortMode="created"
+          folderSessionLimit={limit}
+        />
+      </NextIntlClientProvider>
+    )
+  }
+
+  // Same created_at for every `conv`, so the sort falls to the id tie-break:
+  // newest first means 8, 7, 6, …
+  const visibleIds = () =>
+    Array.from(document.querySelectorAll("[data-conversation-id]")).map((el) =>
+      Number(el.getAttribute("data-conversation-id"))
+    )
+  const buttonWithText = (text: string) =>
+    Array.from(document.querySelectorAll("button")).find(
+      (b) => b.textContent === text
+    )
+  const nameButton = () =>
+    document.querySelector('[data-folder-id="1"]') as HTMLElement
+  const chevron = () =>
+    document.querySelector('[data-folder-chevron="1"]') as HTMLElement
+  const stored = (key: string) =>
+    JSON.parse(localStorage.getItem(key) ?? "null") as unknown
+
+  function seed(
+    count: number,
+    overrides: Record<number, Partial<DbConversationSummary>> = {}
+  ) {
+    const folders = [folder(1, "Repo")]
+    useAppWorkspaceStore.setState({
+      folders,
+      allFolders: folders,
+      conversations: Array.from({ length: count }, (_, i) =>
+        conv(i + 1, 1, overrides[i + 1] ?? {})
+      ),
+    })
+  }
+
+  beforeEach(() => {
+    localStorage.clear()
+    store.activeTabId = null
+    store.tabSpec = []
+    seed(8)
+  })
+
+  it("lists the three most recent sessions over a Show 5 more row", () => {
+    render(limitTree(3))
+    expect(visibleIds()).toEqual([8, 7, 6])
+    expect(buttonWithText(showMore(5))).toBeDefined()
+  })
+
+  it("adds no row to a folder that fits", () => {
+    seed(3)
+    render(limitTree(3))
+    expect(visibleIds()).toEqual([3, 2, 1])
+    expect(document.querySelector("[data-folder-more]")).toBeNull()
+  })
+
+  it("opens up from Show N more, folds back from Show less, and persists both", () => {
+    render(limitTree(3))
+    act(() => {
+      fireEvent.click(buttonWithText(showMore(5))!)
+    })
+    expect(visibleIds()).toEqual([8, 7, 6, 5, 4, 3, 2, 1])
+    expect(stored(SHOW_ALL_KEY)).toEqual({ 1: true })
+
+    act(() => {
+      fireEvent.click(buttonWithText(showLessFolderSessions)!)
+    })
+    expect(visibleIds()).toEqual([8, 7, 6])
+    expect(stored(SHOW_ALL_KEY)).toEqual({})
+  })
+
+  it("switches between the top three and all of them from the folder name", () => {
+    render(limitTree(3))
+    expect(nameButton().getAttribute("aria-expanded")).toBe("false")
+    act(() => {
+      fireEvent.click(nameButton())
+    })
+    expect(visibleIds()).toHaveLength(8)
+    expect(nameButton().getAttribute("aria-expanded")).toBe("true")
+    act(() => {
+      fireEvent.click(nameButton())
+    })
+    expect(visibleIds()).toEqual([8, 7, 6])
+    // The name never hid the folder: that is the chevron's job.
+    expect(stored(FOLDER_EXPANDED_KEY)).toBeNull()
+  })
+
+  it("hides the folder from the chevron, and the name brings it back", () => {
+    render(limitTree(3))
+    act(() => {
+      fireEvent.click(chevron())
+    })
+    expect(visibleIds()).toEqual([])
+    expect(chevron().getAttribute("aria-expanded")).toBe("false")
+    expect(stored(FOLDER_EXPANDED_KEY)).toEqual({ 1: false })
+
+    act(() => {
+      fireEvent.click(nameButton())
+    })
+    // Back to where it was — the short list, not everything.
+    expect(visibleIds()).toEqual([8, 7, 6])
+    expect(stored(FOLDER_EXPANDED_KEY)).toEqual({ 1: true })
+  })
+
+  it("keeps an opened-up folder open across a remount", () => {
+    localStorage.setItem(SHOW_ALL_KEY, JSON.stringify({ 1: true }))
+    render(limitTree(3))
+    expect(visibleIds()).toHaveLength(8)
+    expect(buttonWithText(showLessFolderSessions)).toBeDefined()
+  })
+
+  it("keeps the active tab's session and a running one inside the three", () => {
+    seed(8, { 4: { turn_state: "running" } })
+    store.activeTabId = "tab-2"
+    store.tabSpec = [
+      {
+        id: "tab-2",
+        conversationId: 2,
+        agentType: "claude_code",
+        folderId: 1,
+        title: "conv-2",
+        isPinned: false,
+      },
+    ]
+    render(limitTree(3))
+    expect(visibleIds()).toEqual([8, 4, 2])
+    expect(buttonWithText(showMore(5))).toBeDefined()
+  })
+
+  it("keeps a session that needs you and an interrupted one inside the three", () => {
+    seed(8, { 1: { turn_state: "interrupted" } })
+    useConversationAttentionStore.setState({
+      byConversationId: new Map<number, AttentionKind>([[3, "permission"]]),
+    })
+    try {
+      render(limitTree(3))
+      expect(visibleIds()).toEqual([8, 3, 1])
+      expect(buttonWithText(showMore(5))).toBeDefined()
+    } finally {
+      __resetConversationAttentionForTests()
+    }
+  })
+
+  it("follows a larger limit", () => {
+    render(limitTree(5))
+    expect(visibleIds()).toEqual([8, 7, 6, 5, 4])
+    expect(buttonWithText(showMore(3))).toBeDefined()
+  })
+
+  it("lists everything under All, where the name hides the folder as before", () => {
+    render(limitTree(null))
+    expect(visibleIds()).toHaveLength(8)
+    expect(document.querySelector("[data-folder-more]")).toBeNull()
+    act(() => {
+      fireEvent.click(nameButton())
+    })
+    expect(visibleIds()).toEqual([])
   })
 })

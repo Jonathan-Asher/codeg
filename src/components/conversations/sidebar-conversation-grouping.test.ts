@@ -4,12 +4,17 @@ import {
   applyReorder,
   buildOwnerHeaderIndex,
   buildRows,
+  collectAlwaysVisibleIds,
   computeStickyState,
+  delegationRootId,
   flatIndexOfConversation,
   folderHeaderFlatIndices,
+  folderIdsWithMoreRow,
   formatRelative,
   groupByFolderWithReuse,
   headerIndexForFolder,
+  isAlwaysVisibleActivity,
+  limitFolderConversations,
   mergeChildrenById,
   nextHeaderAfter,
   pointerYToTargetIndex,
@@ -1732,5 +1737,296 @@ describe("applyReorder", () => {
   it("clamps the destination and ignores an out-of-range source", () => {
     expect(applyReorder([1, 2, 3], 0, 99)).toEqual([2, 3, 1])
     expect(applyReorder([1, 2, 3], 5, 0)).toEqual([1, 2, 3])
+  })
+})
+
+// ── Per-folder session limit ────────────────────────────────────────────────
+
+// A folder bucket as `groupByFolderWithReuse` hands it over: newest first.
+// `conv(id)` gets newer as the id grows, so ids count down.
+function bucket(folderId: number, ids: number[]): DbConversationSummary[] {
+  return ids.map((id) => conv(id, folderId))
+}
+const ids = (list: readonly DbConversationSummary[]) => list.map((c) => c.id)
+const NONE: ReadonlySet<number> = new Set()
+
+describe("limitFolderConversations", () => {
+  const eight = bucket(10, [8, 7, 6, 5, 4, 3, 2, 1])
+
+  it("lists the newest `limit` sessions and counts the rest", () => {
+    const { shown, hiddenCount } = limitFolderConversations(eight, 3, NONE)
+    expect(ids(shown)).toEqual([8, 7, 6])
+    expect(hiddenCount).toBe(5)
+  })
+
+  it("follows the limit it is given", () => {
+    expect(ids(limitFolderConversations(eight, 5, NONE).shown)).toEqual([
+      8, 7, 6, 5, 4,
+    ])
+    expect(limitFolderConversations(eight, 10, NONE).hiddenCount).toBe(0)
+  })
+
+  it("lists everything, same array, when there is no limit or it fits", () => {
+    expect(limitFolderConversations(eight, null, NONE)).toEqual({
+      shown: eight,
+      hiddenCount: 0,
+    })
+    expect(limitFolderConversations(eight, null, NONE).shown).toBe(eight)
+    const three = bucket(10, [3, 2, 1])
+    expect(limitFolderConversations(three, 3, NONE).shown).toBe(three)
+    expect(limitFolderConversations(three, 3, NONE).hiddenCount).toBe(0)
+  })
+
+  it("keeps an always-visible session in place, inside the limit", () => {
+    // 2 is past the top three: it takes the third slot rather than a fourth.
+    const { shown, hiddenCount } = limitFolderConversations(
+      eight,
+      3,
+      new Set([2])
+    )
+    expect(ids(shown)).toEqual([8, 7, 2])
+    expect(hiddenCount).toBe(5)
+  })
+
+  it("changes nothing when the always-visible session is already on top", () => {
+    const { shown } = limitFolderConversations(eight, 3, new Set([7]))
+    expect(ids(shown)).toEqual([8, 7, 6])
+  })
+
+  it("lists every always-visible session even past the limit, and no more", () => {
+    const { shown, hiddenCount } = limitFolderConversations(
+      eight,
+      3,
+      new Set([1, 3, 5, 7])
+    )
+    expect(ids(shown)).toEqual([7, 5, 3, 1])
+    expect(hiddenCount).toBe(4)
+  })
+
+  it("ignores always-visible ids from other folders", () => {
+    const { shown } = limitFolderConversations(eight, 3, new Set([999]))
+    expect(ids(shown)).toEqual([8, 7, 6])
+  })
+})
+
+describe("delegationRootId", () => {
+  const children = new Map([
+    [1, [conv(50, 10, { parent_id: 1 }), conv(52, 10, { parent_id: 1 })]],
+    [50, [conv(51, 10, { parent_id: 50 })]],
+  ])
+
+  it("walks a sub-session up to its top-level session", () => {
+    expect(delegationRootId(51, children)).toBe(1)
+    expect(delegationRootId(52, children)).toBe(1)
+  })
+
+  it("returns a top-level or unknown session unchanged", () => {
+    expect(delegationRootId(1, children)).toBe(1)
+    expect(delegationRootId(99, children)).toBe(99)
+    expect(delegationRootId(51, new Map())).toBe(51)
+  })
+
+  it("stops on a cycle instead of spinning", () => {
+    const loop = new Map([
+      [60, [conv(61, 10)]],
+      [61, [conv(60, 10)]],
+    ])
+    expect([60, 61]).toContain(delegationRootId(60, loop))
+  })
+})
+
+describe("collectAlwaysVisibleIds", () => {
+  const quiet = conv(1, 10, { turn_state: null })
+  const running = conv(2, 10, { turn_state: "running" })
+  const interrupted = conv(3, 10, { turn_state: "interrupted" })
+  const blocked = conv(4, 10, { turn_state: "running" })
+  const waiting = conv(5, 10, { turn_state: null })
+  const all = [quiet, running, interrupted, blocked, waiting]
+
+  it("collects working, needs-you and interrupted sessions", () => {
+    const attention = new Map([[5, "permission" as const]])
+    expect(collectAlwaysVisibleIds(all, null, attention)).toEqual(
+      new Set([2, 3, 4, 5])
+    )
+  })
+
+  it("adds the active tab's session even when it is idle", () => {
+    expect(collectAlwaysVisibleIds([quiet], 1, new Map())).toEqual(new Set([1]))
+  })
+
+  it("is empty for a quiet folder with no active tab", () => {
+    expect(collectAlwaysVisibleIds([quiet], null, new Map()).size).toBe(0)
+  })
+
+  it("keeps the top-level session an active sub-session hangs under", () => {
+    // 1 → 50 → 51: the tab is on the grandchild, which is no folder row.
+    const children = new Map([
+      [1, [conv(50, 10, { parent_id: 1 })]],
+      [50, [conv(51, 10, { parent_id: 50 })]],
+    ])
+    expect(collectAlwaysVisibleIds([quiet], 51, new Map(), children)).toEqual(
+      new Set([51, 1])
+    )
+  })
+
+  it("keys the states off the same activity the cards show", () => {
+    expect(isAlwaysVisibleActivity("working")).toBe(true)
+    expect(isAlwaysVisibleActivity("needs_you")).toBe(true)
+    expect(isAlwaysVisibleActivity("interrupted")).toBe(true)
+    expect(isAlwaysVisibleActivity("idle")).toBe(false)
+    expect(isAlwaysVisibleActivity("background")).toBe(false)
+  })
+})
+
+describe("buildRows — sessions shown per folder", () => {
+  const trimChats = (rows: SidebarRow[]): SidebarRow[] => {
+    const i = rows.findIndex(
+      (r) => r.kind === "section" && r.section === "chats"
+    )
+    return i === -1 ? rows : rows.slice(0, i)
+  }
+  const eight = bucket(10, [8, 7, 6, 5, 4, 3, 2, 1])
+  const base = {
+    pinned: [],
+    pinnedExpanded: true,
+    orderedFolderIds: [10],
+    byFolder: new Map([[10, eight]]),
+    folderExpanded: {},
+    folderTotalCounts: new Map([[10, 8]]),
+    foldersExpanded: true,
+    chatConversations: [],
+    chatsExpanded: true,
+  }
+  const convIds = (rows: SidebarRow[]) =>
+    rows.flatMap((r) => (r.kind === "conversation" ? [r.conversation.id] : []))
+
+  it("lists every session with no limit, exactly as before", () => {
+    const rows = trimChats(buildRows(base))
+    expect(convIds(rows)).toEqual([8, 7, 6, 5, 4, 3, 2, 1])
+    expect(rows.some((r) => r.kind === "folder-more")).toBe(false)
+  })
+
+  it("lists the top N, then a Show-N-more row at the cards' depth", () => {
+    const rows = trimChats(buildRows({ ...base, folderSessionLimit: 3 }))
+    expect(convIds(rows)).toEqual([8, 7, 6])
+    expect(rows[rows.length - 1]).toEqual({
+      kind: "folder-more",
+      folderId: 10,
+      depth: 0,
+      remaining: 5,
+    })
+  })
+
+  it("adds no footer to a folder that fits", () => {
+    const rows = trimChats(
+      buildRows({
+        ...base,
+        byFolder: new Map([[10, bucket(10, [3, 2, 1])]]),
+        folderSessionLimit: 3,
+      })
+    )
+    expect(convIds(rows)).toEqual([3, 2, 1])
+    expect(rows.some((r) => r.kind === "folder-more")).toBe(false)
+  })
+
+  it("lists everything under a Show-less row once opened up", () => {
+    const rows = trimChats(
+      buildRows({ ...base, folderSessionLimit: 3, folderShowAll: { 10: true } })
+    )
+    expect(convIds(rows)).toEqual([8, 7, 6, 5, 4, 3, 2, 1])
+    expect(rows[rows.length - 1]).toEqual({
+      kind: "folder-more",
+      folderId: 10,
+      depth: 0,
+      remaining: 0,
+      expanded: true,
+    })
+  })
+
+  it("ignores a stale show-all on a folder that now fits", () => {
+    const rows = trimChats(
+      buildRows({
+        ...base,
+        byFolder: new Map([[10, bucket(10, [2, 1])]]),
+        folderSessionLimit: 3,
+        folderShowAll: { 10: true },
+      })
+    )
+    expect(rows.some((r) => r.kind === "folder-more")).toBe(false)
+  })
+
+  it("keeps an always-visible session in the short list", () => {
+    const rows = trimChats(
+      buildRows({
+        ...base,
+        folderSessionLimit: 3,
+        alwaysVisibleIds: new Set([1]),
+      })
+    )
+    expect(convIds(rows)).toEqual([8, 7, 1])
+    expect(rows[rows.length - 1]).toMatchObject({
+      kind: "folder-more",
+      remaining: 5,
+    })
+  })
+
+  it("still hides a collapsed folder entirely", () => {
+    const rows = trimChats(
+      buildRows({
+        ...base,
+        folderSessionLimit: 3,
+        folderExpanded: { 10: false },
+      })
+    )
+    expect(rows).toEqual([
+      { kind: "section", section: "folders", expanded: true, count: 1 },
+      { kind: "folder", folderId: 10 },
+    ])
+  })
+
+  it("limits each worktree sub-group and the root sub-group on its own", () => {
+    const rows = trimChats(
+      buildRows({
+        ...base,
+        byFolder: new Map([
+          [10, bucket(10, [8, 7, 6, 5])],
+          [11, bucket(11, [24, 23, 22, 21, 20])],
+        ]),
+        containerChildren: new Map([[10, [11]]]),
+        folderSessionLimit: 3,
+        folderShowAll: { 11: true },
+      })
+    )
+    expect(rows.filter((r) => r.kind === "folder-more")).toEqual([
+      { kind: "folder-more", folderId: 10, depth: 1, remaining: 1 },
+      {
+        kind: "folder-more",
+        folderId: 11,
+        depth: 1,
+        remaining: 0,
+        expanded: true,
+      },
+    ])
+    expect(convIds(rows)).toEqual([8, 7, 6, 24, 23, 22, 21, 20])
+    expect(folderIdsWithMoreRow(rows)).toEqual(new Set([10, 11]))
+  })
+
+  it("indents a grouped folder's footer with its cards", () => {
+    const rows = trimChats(
+      buildRows({
+        ...base,
+        layout: {
+          top: [{ kind: "group", id: 1 }],
+          membersByGroup: new Map([[1, [10]]]),
+        },
+        folderSessionLimit: 5,
+      })
+    )
+    expect(rows[rows.length - 1]).toEqual({
+      kind: "folder-more",
+      folderId: 10,
+      depth: 1,
+      remaining: 3,
+    })
   })
 })
