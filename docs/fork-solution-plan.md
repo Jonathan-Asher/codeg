@@ -215,6 +215,77 @@ WKWebView repaints even occluded windows unless `occlusion` is respected.
 
 ---
 
+## Fork builds: Developer ID signing (2026-09-28)
+
+**Why.** macOS ties privacy grants (Accessibility, Screen Recording, keychain "Always Allow") to the app's
+designated requirement. Fork builds used to be ad-hoc signed, and an ad-hoc requirement is the build's
+cdhash, which is new on every build. So every update silently dropped the grants of the agents running in
+codeg. A Developer ID signature makes the requirement `identifier "app.codeg"` + Apple Developer ID + team
+`3L92BZK46V`, which stays the same from build to build.
+
+**What signs.** The build job on the Mac runner (`m4-build`) runs `scripts/ci-devid-sign.sh` after
+`pnpm tauri build --bundles app`. The script:
+- re-signs every Mach-O in the bundle, deepest first (`Contents/MacOS/codeg-mcp` and `codeg-server`, any
+  dylibs or nested bundles, then the app itself), with "Developer ID Application: Jonathan Ashurov
+  (3L92BZK46V)", SHA-1 `A4DFC81686CC4636EB1CCCF1E7829EF7346C21E8`;
+- verifies the result (`codesign --verify --deep --strict`), and fails the build unless the designated
+  requirement names `app.codeg` and the team and every Mach-O carries the team;
+- rebuilds `codeg.app.tar.gz` from the signed bundle, with the same layout tauri uses.
+
+The workflow then signs the archive again with the updater key (`pnpm tauri signer sign`), so `latest.json`
+and the release carry the signed app. There's no hardened runtime (it changes what the app may spawn and
+load, and only notarization needs it), no secure timestamp (that needs Apple's server) and no notarization.
+`tauri.conf.json` has no signing config on purpose: tauri builds ad-hoc and never touches a keychain. The
+certificate is valid until 2031-09-11.
+
+**Where the key is.** Only on the Mac, never in GitHub:
+- keychain: `~/actions-runner/_signing/codeg-signing.keychain-db`
+- its password: `~/actions-runner/_signing/pw` (file mode 600, folder mode 700)
+
+The keychain has no idle lock. The script unlocks it by path and locks it again when it's done. The
+keychain is on no search list, neither Jonathan's nor the runners'. codesign builds the certificate chain
+only from a search list, so during signing the script sets a throwaway `HOME` whose search list holds just
+this keychain. Jonathan's search list, default keychain and login keychain are never read or changed.
+
+Any job on the self-hosted runners could use this keychain, because they run as the same macOS user. So
+keep the rule that fork PRs from outside contributors need approval before they run
+(`all_external_contributors`).
+
+**Rotate or re-create** (new certificate, or the keychain was lost). On the Mac, export the new identity as
+a `.p12`, then:
+
+```bash
+S=~/actions-runner/_signing; KC=$S/codeg-signing.keychain-db
+rm -rf "$S"; mkdir -p "$S/.h"; chmod 700 "$S"; (umask 077; openssl rand -hex 32 > "$S/pw")
+# Every `security` call runs with a scratch HOME, so nothing lands in your own keychain search list.
+HOME=$S/.h security create-keychain -p "$(cat "$S/pw")" "$KC"
+HOME=$S/.h security set-keychain-settings "$KC"
+HOME=$S/.h security unlock-keychain -p "$(cat "$S/pw")" "$KC"
+HOME=$S/.h security import /path/to/new.p12 -k "$KC" -f pkcs12 -P "$(cat /path/to/p12-password.txt)" -T /usr/bin/codesign
+HOME=$S/.h security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$(cat "$S/pw")" "$KC" >/dev/null
+rm -rf "$S/.h"; security lock-keychain "$KC"
+security find-identity -v -p codesigning "$KC"   # prints the new SHA-1
+```
+
+If the SHA-1 changed, update `CODEG_SIGN_IDENTITY` in `scripts/ci-devid-sign.sh`. A new certificate from the
+same team keeps the designated requirement, so the grants survive. A different team resets them once (also
+update `CODEG_SIGN_TEAM`). Never add the keychain to a search list (`security list-keychains -s`), and never
+make it the default keychain.
+
+**Hosted builds don't publish.** CI falls back to GitHub's `macos-14` when the Mac is unreachable or on
+battery, or when `codeg-runners off` is set. A hosted build can only be ad-hoc signed. It still runs and
+uploads its `release` artifact, but `publish` requires the build job's `devid_signed == true` output, so
+`fork-latest` stays on the last signed build. The run summary then says "Not published to fork-latest". An
+ad-hoc build in the feed would reset the grants of every installed app. Updates therefore wait until the Mac
+builds again. Only `fork/solution-plan` publishes at all: a `workflow_dispatch` from any other branch builds
+and uploads, and that's it.
+
+**First signed install.** Once, after the first Developer ID build is installed, open System Settings ›
+Privacy & Security. In both Accessibility and Screen Recording, remove the old codeg entries and add
+`/Applications/codeg.app` again. From then on, updates keep the grants.
+
+---
+
 ## Working agreements for the fork
 
 - Branch per pain: `fork/search-index`, `fork/tree-ui`, `fork/resume-fix`, `fork/battery`.

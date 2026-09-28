@@ -33,6 +33,13 @@ permissions:
 # Self-hosted runs keep their workspace between builds (`clean: false`), so
 # node_modules and src-tauri/target survive and a build only recompiles what
 # changed; GitHub-hosted runs start clean and use rust-cache instead.
+#
+# SIGNING. Only the Mac signs the app with the Developer ID (its key never
+# leaves the Mac; scripts/ci-devid-sign.sh). A build on a GitHub-hosted
+# machine is ad-hoc signed: it still runs and uploads its artifact, but it
+# is never published — an ad-hoc update would reset every installed app's
+# macOS privacy grants. So while CI is on hosted machines, fork-latest does
+# not move.
 
 jobs:
   checks-frontend:
@@ -101,6 +108,10 @@ jobs:
     if: github.ref == 'refs/heads/fork/solution-plan' || github.event_name == 'workflow_dispatch'
     runs-on: ${{ fromJSON(vars.BUILD_RUNS_ON || '"macos-14"') }}
     timeout-minutes: 90
+    outputs:
+      # "true" only when the app was re-signed with the Developer ID and
+      # verified; publish requires it.
+      devid_signed: ${{ steps.devid.outputs.signed }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -159,6 +170,36 @@ jobs:
           # The checks job type-checks the frontend; the build need not do it
           # a second time inside `next build`.
           CODEG_BUILD_SKIP_TYPECHECK: "1"
+      # tauri builds ad-hoc (no signing config, so it never touches a
+      # keychain). On the Mac, re-sign the bundle with the Developer ID from
+      # the runner's own keychain, rebuild the updater archive from it and
+      # sign that with the updater key, replacing tauri's archive and .sig.
+      # A stable designated requirement (app.codeg + team) is what keeps
+      # Accessibility / Screen Recording grants across updates.
+      - name: Sign with Developer ID (Mac only)
+        id: devid
+        if: runner.environment == 'self-hosted'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          MACOS_DIR=src-tauri/target/release/bundle/macos
+          scripts/ci-devid-sign.sh "$MACOS_DIR"
+          pnpm tauri signer sign "$MACOS_DIR/codeg.app.tar.gz"
+          test -s "$MACOS_DIR/codeg.app.tar.gz.sig" || { echo "updater signature missing"; exit 1; }
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Developer ID signed"
+            echo '```'
+            codesign -d -r- "$MACOS_DIR/codeg.app" 2>&1 | tail -1
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Not publishable (ad-hoc build)
+        if: runner.environment != 'self-hosted'
+        run: |
+          msg="Built on a GitHub-hosted runner, so the app is only ad-hoc signed (the Developer ID key stays on the Mac). The artifact is uploaded, but fork-latest is NOT updated: an ad-hoc update would reset the macOS privacy grants of every installed app."
+          echo "::warning title=Not published::$msg"
+          { echo "### Not published to fork-latest"; echo "$msg"; } >> "$GITHUB_STEP_SUMMARY"
       - name: Assemble release files
         run: |
           VERSION=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
@@ -190,9 +231,11 @@ jobs:
 
   # Publishing waits for BOTH: nothing reaches the update feed unless the
   # checks passed. Runs on a GitHub-hosted Linux box — it only moves files.
+  # Only fork/solution-plan publishes (a dispatch from any other branch just
+  # builds), and only a Developer-ID-signed build (see SIGNING above).
   publish:
     needs: [checks-frontend, checks-rust, build]
-    if: github.ref == 'refs/heads/fork/solution-plan'
+    if: github.ref == 'refs/heads/fork/solution-plan' && needs.build.outputs.devid_signed == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -213,4 +256,4 @@ jobs:
             release/latest.json \
             release/install.sh \
             --title "codeg fork $VERSION" \
-            --notes "Latest fork build ($VERSION, ${GITHUB_SHA::7}) — signed for the fork update feed; installed apps update from here. Fresh install: curl -sL https://github.com/Jonathan-Asher/codeg/releases/download/fork-latest/install.sh | bash"
+            --notes "Latest fork build ($VERSION, ${GITHUB_SHA::7}) — Developer ID signed; installed apps update from here. Fresh install: curl -sL https://github.com/Jonathan-Asher/codeg/releases/download/fork-latest/install.sh | bash"
