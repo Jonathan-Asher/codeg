@@ -241,6 +241,13 @@ describe("MessageInput Continue: what it sends", () => {
     expect(onEnqueue).not.toHaveBeenCalled()
   })
 
+  it("sends once for a double click", async () => {
+    const user = userEvent.setup()
+    const { onSend } = await mount(IDLE)
+    await user.dblClick(continueButton()!)
+    expect(onSend).toHaveBeenCalledTimes(1)
+  })
+
   it("delivers it into a held turn, exactly where Enter would", async () => {
     const user = userEvent.setup()
     const props = heldTurn()

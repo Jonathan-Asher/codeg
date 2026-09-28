@@ -359,6 +359,9 @@ function stripEmbeddedReferences(doc: JSONContent): JSONContent {
   return { ...doc, content }
 }
 
+/** How long after a Continue a second press is ignored (see `handleContinue`). */
+const CONTINUE_REPEAT_GUARD_MS = 1500
+
 function SelectorLoadingChip({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
@@ -1814,7 +1817,14 @@ export function MessageInput({
     !isEditingQueueItem &&
     !delivering &&
     !(disabled && !isPrompting)
+  // A double click, or ⌘/Ctrl+Enter held down, lands a second press before
+  // the first send has re-rendered the button away; the backend would bounce
+  // that one into the queue and the agent would get "continue" twice.
+  const lastContinueAtRef = useRef(0)
   const handleContinue = useCallback(() => {
+    const now = Date.now()
+    if (now - lastContinueAtRef.current < CONTINUE_REPEAT_GUARD_MS) return
+    lastContinueAtRef.current = now
     const draft = continuePromptDraft()
     const modeId = showModeSelector ? effectiveModeId : null
     const route = routeComposerSend({
