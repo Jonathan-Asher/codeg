@@ -100,7 +100,7 @@ async function mount() {
 
 /** Render the body of the latest raised toast, as sonner would. */
 function renderLatestToast() {
-  const call = custom.mock.calls.at(-1)
+  const call = custom.mock.calls[custom.mock.calls.length - 1]
   if (!call) throw new Error("no toast raised")
   const [body, options] = call as [
     (id: string) => ReactElement,

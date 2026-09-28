@@ -1715,7 +1715,7 @@
     "settledTitle": "Sessões interrompidas pelo reinício",
     "stoppedTitle": "A retomada das sessões interrompidas pelo reinício foi parada",
     "stop": "Parar",
-    "stopHint": "Cancela as sessões que ainda estão aguardando. Uma que já está sendo retomada continua; pare-a pela aba dela.",
+    "stopHint": "Cancela as sessões ainda não retomadas. Uma já retomada continua em execução; pare-a pela aba dela.",
     "stopFailed": "Não foi possível parar a retomada: {message}",
     "untitled": "Sessão sem título",
     "statePending": "Aguardando",

@@ -1715,7 +1715,7 @@
     "settledTitle": "Durch den Neustart unterbrochene Sitzungen",
     "stoppedTitle": "Fortsetzen der durch den Neustart unterbrochenen Sitzungen gestoppt",
     "stop": "Stoppen",
-    "stopHint": "Bricht die noch wartenden Sitzungen ab. Eine Sitzung, die bereits fortgesetzt wird, läuft weiter; stoppe sie in ihrem Tab.",
+    "stopHint": "Bricht die noch nicht fortgesetzten Sitzungen ab. Eine bereits fortgesetzte Sitzung läuft weiter; stoppe sie in ihrem Tab.",
     "stopFailed": "Das Fortsetzen konnte nicht gestoppt werden: {message}",
     "untitled": "Unbenannte Sitzung",
     "statePending": "Wartet",

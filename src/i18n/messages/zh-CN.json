@@ -1715,7 +1715,7 @@
     "settledTitle": "因重启而中断的会话",
     "stoppedTitle": "已停止恢复因重启而中断的会话",
     "stop": "停止",
-    "stopHint": "取消仍在等待的会话。已在恢复中的会话会继续运行，请在其标签页中停止。",
+    "stopHint": "取消尚未恢复的会话。已恢复的会话会继续运行，请在其标签页中停止。",
     "stopFailed": "无法停止恢复：{message}",
     "untitled": "未命名会话",
     "statePending": "等待中",

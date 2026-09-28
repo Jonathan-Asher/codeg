@@ -1715,7 +1715,7 @@
     "settledTitle": "Sesiones interrumpidas por el reinicio",
     "stoppedTitle": "Se detuvo la reanudación de las sesiones interrumpidas por el reinicio",
     "stop": "Detener",
-    "stopHint": "Cancela las sesiones que aún esperan. Una que ya se está reanudando sigue adelante; detenla desde su pestaña.",
+    "stopHint": "Cancela las sesiones que aún no se han reanudado. Una ya reanudada sigue en marcha; detenla desde su pestaña.",
     "stopFailed": "No se pudo detener la reanudación: {message}",
     "untitled": "Sesión sin título",
     "statePending": "En espera",

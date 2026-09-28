@@ -1715,7 +1715,7 @@
     "settledTitle": "Sessions interrompues par le redémarrage",
     "stoppedTitle": "Reprise des sessions interrompues par le redémarrage arrêtée",
     "stop": "Arrêter",
-    "stopHint": "Annule les sessions encore en attente. Une session déjà en cours de reprise continue ; arrêtez-la depuis son onglet.",
+    "stopHint": "Annule les sessions pas encore reprises. Une session déjà reprise continue ; arrêtez-la depuis son onglet.",
     "stopFailed": "Impossible d'arrêter la reprise : {message}",
     "untitled": "Session sans titre",
     "statePending": "En attente",

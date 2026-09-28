@@ -35,14 +35,10 @@ export const AUTO_RESUME_STATE_LABEL_KEYS = {
   skipped: "stateSkipped",
 } as const satisfies Record<AutoResumeItemState, string>
 
-/** Items that have not reached their outcome yet. */
+/** Items that have not reached their outcome yet — the ones Stop still
+ *  cancels (a session being reopened is abandoned before its prompt). */
 export function unsettledAutoResumes(status: AutoResumeStatus): number {
   return status.items.filter(
     (item) => item.state === "pending" || item.state === "resuming"
   ).length
-}
-
-/** Items Stop would still cancel. */
-export function pendingAutoResumes(status: AutoResumeStatus): number {
-  return status.items.filter((item) => item.state === "pending").length
 }

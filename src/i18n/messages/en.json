@@ -1715,7 +1715,7 @@
     "settledTitle": "Sessions interrupted by the restart",
     "stoppedTitle": "Stopped resuming the sessions interrupted by the restart",
     "stop": "Stop",
-    "stopHint": "Cancels the sessions still waiting. One already resuming keeps going; stop it from its tab.",
+    "stopHint": "Cancels the sessions not resumed yet. One already resumed keeps running; stop it from its tab.",
     "stopFailed": "Could not stop resuming: {message}",
     "untitled": "Untitled session",
     "statePending": "Waiting",

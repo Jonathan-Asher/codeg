@@ -4,8 +4,8 @@
  * The toast for the automatic resume after a restart
  * (`src-tauri/src/acp/auto_resume.rs`): "Resuming 3 sessions interrupted by
  * the restart", the sessions and where each stands, and a Stop that cancels
- * the resumes not started yet. Resumes already running are ordinary turns,
- * stopped from their tab.
+ * the resumes whose prompt has not gone out yet. Resumes already running are
+ * ordinary turns, stopped from their tab.
  *
  * The backend runs the resume whether or not anyone is watching, so the toast
  * only reports: every connected client shows it, from the live status event,
@@ -27,7 +27,6 @@ import { toErrorMessage } from "@/lib/app-error"
 import {
   AUTO_RESUME_STATE_LABEL_KEYS,
   AUTO_RESUME_STATUS_EVENT,
-  pendingAutoResumes,
   unsettledAutoResumes,
 } from "@/lib/auto-resume"
 import { getTransport } from "@/lib/transport"
@@ -56,7 +55,6 @@ function AutoResumeToast({
 }) {
   const t = useTranslations("AutoResume")
   const [stopping, setStopping] = useState(false)
-  const pending = pendingAutoResumes(status)
   const unsettled = unsettledAutoResumes(status)
   const title = status.stopped
     ? t("stoppedTitle")
@@ -128,7 +126,7 @@ function AutoResumeToast({
           </li>
         ))}
       </ul>
-      {pending > 0 && !status.stopped && (
+      {unsettled > 0 && !status.stopped && (
         <div className="mt-3 flex items-center justify-between gap-3">
           <p className="min-w-0 text-2xs text-muted-foreground">
             {t("stopHint")}
