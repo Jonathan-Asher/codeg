@@ -4998,6 +4998,11 @@ mod tests {
                 obj.remove("started_at");
             }
         }
+        // Wall-clock time since the attach began: two snapshots taken a moment
+        // apart legitimately differ here on a slow machine.
+        if let Some(obj) = v.as_object_mut() {
+            obj.remove("attach_elapsed_ms");
+        }
         v
     }
 
