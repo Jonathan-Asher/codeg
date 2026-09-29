@@ -183,6 +183,21 @@ function textBlocks(text: string): PromptInputBlock[] {
   return [{ type: "text", text }]
 }
 
+/**
+ * Place a finished reply in the thread. Questions queued while it was being
+ * written were asked AFTER it, so the reply goes in front of them.
+ */
+export function insertReplyBeforeQueued(
+  thread: QuickAskTurn[],
+  reply: QuickAskTurn
+): QuickAskTurn[] {
+  const at = thread.findIndex(
+    (turn) => turn.role === "user" && turn.state === "queued"
+  )
+  if (at < 0) return [...thread, reply]
+  return [...thread.slice(0, at), reply, ...thread.slice(at)]
+}
+
 /** A one-line title for the conversation a first question creates. */
 export function titleFromQuestion(text: string): string {
   return text.replace(/\s+/g, " ").trim().slice(0, 80)
@@ -566,15 +581,14 @@ export function useQuickAskSession({
       !committedLiveIdsRef.current.has(finished.id)
     ) {
       committedLiveIdsRef.current.add(finished.id)
-      setThread((prev) => [
-        ...prev,
-        {
+      setThread((prev) =>
+        insertReplyBeforeQueued(prev, {
           id: `reply-${finished.id}`,
           role: "assistant",
           message: finished,
           durationMs: Math.max(0, Date.now() - finished.startedAt),
-        },
-      ])
+        })
+      )
     }
     const bound = bindingRef.current
     const nextQueued = queueRef.current.shift()

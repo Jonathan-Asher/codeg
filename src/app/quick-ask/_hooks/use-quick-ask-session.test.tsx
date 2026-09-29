@@ -109,8 +109,10 @@ vi.mock("@/hooks/use-connection", () => ({
 vi.mock("@/lib/api", () => h.api)
 
 import {
+  insertReplyBeforeQueued,
   quickAskContextKey,
   useQuickAskSession,
+  type QuickAskTurn,
   type UseQuickAskSessionArgs,
 } from "./use-quick-ask-session"
 
@@ -162,6 +164,35 @@ const reply = (text: string) => ({
   role: "assistant",
   content: [{ type: "text", text }],
   startedAt: 1,
+})
+
+describe("insertReplyBeforeQueued", () => {
+  const q = (id: string, state: "sent" | "queued"): QuickAskTurn => ({
+    id,
+    role: "user",
+    text: id,
+    state,
+  })
+  const r = (id: string) =>
+    ({
+      id,
+      role: "assistant",
+      message: { id, role: "assistant", content: [], startedAt: 0 },
+      durationMs: 1,
+    }) as QuickAskTurn
+
+  it("puts a reply ahead of the questions queued while it was written", () => {
+    const out = insertReplyBeforeQueued(
+      [q("q1", "sent"), q("q2", "queued"), q("q3", "queued")],
+      r("r1")
+    )
+    expect(out.map((t) => t.id)).toEqual(["q1", "r1", "q2", "q3"])
+  })
+
+  it("appends when nothing is queued", () => {
+    const out = insertReplyBeforeQueued([q("q1", "sent")], r("r1"))
+    expect(out.map((t) => t.id)).toEqual(["q1", "r1"])
+  })
 })
 
 describe("useQuickAskSession", () => {

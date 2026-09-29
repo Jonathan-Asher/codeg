@@ -174,6 +174,11 @@ export function QuickAskThread({
   streaming: boolean
   footer?: React.ReactNode
 }) {
+  const isQueued = (turn: QuickAskTurn) =>
+    turn.role === "user" && turn.state === "queued"
+  const settled = thread.filter((turn) => !isQueued(turn))
+  const queued = thread.filter(isQueued)
+
   // A new question always brings the bottom back into view.
   let lastUserId: string | undefined
   for (const turn of thread) if (turn.role === "user") lastUserId = turn.id
@@ -184,7 +189,7 @@ export function QuickAskThread({
     <MessageThread className="min-h-0 flex-1" data-testid="qa-thread">
       <ScrollToBottomOn signal={lastUserId} />
       <MessageThreadContent className="gap-3 px-4 py-3">
-        {thread.map((turn) =>
+        {settled.map((turn) =>
           turn.role === "user" ? (
             <UserBubble key={turn.id} text={turn.text} state={turn.state} />
           ) : (
@@ -197,6 +202,12 @@ export function QuickAskThread({
           )
         )}
         {streaming && <LiveReply contextKey={contextKey} />}
+        {/* Waiting for the reply above to end, so shown after it. */}
+        {queued.map((turn) =>
+          turn.role === "user" ? (
+            <UserBubble key={turn.id} text={turn.text} state={turn.state} />
+          ) : null
+        )}
         {footer}
       </MessageThreadContent>
       <MessageThreadScrollButton className="bottom-2 size-7" />
