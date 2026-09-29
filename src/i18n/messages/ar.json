@@ -6777,5 +6777,89 @@
         "probeFailed": "تعذّر على المتصفح المدمج التأكد من أنه يصل إلى المضيف البعيد عبر النفق. حاول مرة أخرى بعد قليل."
       }
     }
+  },
+  "QuickAsk": {
+    "targetLabel": "وجهة السؤال",
+    "targets": {
+      "new": "جلسة جديدة",
+      "existing": "جلسة موجودة",
+      "private": "خاص"
+    },
+    "targetHints": {
+      "new": "ينشئ محادثة جديدة في المجلد وتظهر في الشريط الجانبي.",
+      "existing": "يضيف سؤالك إلى هذه الجلسة.",
+      "private": "لا يُحفظ شيء: لا في الشريط الجانبي ولا في البحث ولا في السجل."
+    },
+    "folder": {
+      "placeholder": "اختر مجلدًا"
+    },
+    "session": {
+      "placeholder": "اختر جلسة",
+      "search": "ابحث في الجلسات…",
+      "empty": "لم يُعثر على جلسات",
+      "untitled": "جلسة بلا عنوان"
+    },
+    "picker": {
+      "agent": "الوكيل",
+      "model": "النموذج",
+      "effort": "مستوى الجهد",
+      "loadingOptions": "جارٍ تشغيل الوكيل لعرض نماذجه…",
+      "sessionOwnsModel": "تحتفظ الجلسة الموجودة بنموذجها ومستوى جهدها.",
+      "noOptions": "لا يتيح هذا الوكيل اختيار نموذج."
+    },
+    "input": {
+      "placeholder": "اطرح سؤالًا سريعًا…",
+      "followUp": "اطرح سؤال متابعة…",
+      "send": "إرسال",
+      "stop": "إيقاف"
+    },
+    "hint": "Enter للإرسال · Shift+Enter لسطر جديد · Esc للإخفاء",
+    "actions": {
+      "newQuestion": "سؤال جديد",
+      "openInCodeg": "فتح في codeg",
+      "hide": "إخفاء"
+    },
+    "status": {
+      "connecting": "جارٍ تشغيل {agent}…",
+      "queued": "في قائمة الانتظار، يُرسل عند انتهاء الرد الحالي",
+      "steered": "أُرسل إلى الرد الجاري",
+      "failed": "لم يُرسل"
+    },
+    "private": {
+      "active": "خاص: يُحذف عند المسح أو إغلاق هذه النافذة.",
+      "deleted": "حُذف السؤال الخاص.",
+      "agentKeepsLog": "يحتفظ {agent} بسجل جلسة خاص به، ولا يستطيع Quick Ask إيقافه."
+    },
+    "backend": {
+      "remote": "على {name}",
+      "switchPending": "انتقلت إلى مساحة عمل أخرى. سينقل «سؤال جديد» Quick Ask إليها."
+    },
+    "errors": {
+      "noFolder": "اختر مجلدًا أولًا.",
+      "noSession": "اختر جلسة أولًا.",
+      "connectFailed": "تعذّر تشغيل الوكيل: {error}",
+      "sendFailed": "تعذّر الإرسال: {error}",
+      "noAgents": "لا يوجد وكيل مثبّت. أضف وكيلًا من الإعدادات."
+    },
+    "empty": {
+      "title": "اسأل ما تشاء"
+    }
+  },
+  "QuickAskSettings": {
+    "title": "Quick Ask",
+    "description": "اطرح سؤالًا سريعًا على وكيل من أي تطبيق باختصار لوحة مفاتيح.",
+    "enable": "اختصار عام",
+    "enableDescription": "يفتح Quick Ask من أي مكان، حتى عندما يعمل codeg في الخلفية.",
+    "shortcut": "الاختصار",
+    "shortcutDescription": "انقر ثم اضغط المفاتيح التي تريدها. استخدم مفتاح تعديل واحدًا على الأقل.",
+    "recording": "اضغط المفاتيح…",
+    "reset": "إعادة التعيين",
+    "hideOnBlur": "الإخفاء عند النقر خارج النافذة",
+    "hideOnBlurDescription": "وإلا تبقى النافذة حتى تضغط Esc أو الاختصار مرة أخرى.",
+    "notRegistered": "تعذّر تسجيل {shortcut}. ربما يستخدمه تطبيق آخر؛ اختر اختصارًا مختلفًا.",
+    "registrationDetail": "رسالة النظام: {error}",
+    "saveFailed": "تعذّر حفظ إعدادات Quick Ask: {error}",
+    "open": "جرّبه",
+    "openButton": "فتح Quick Ask"
   }
 }

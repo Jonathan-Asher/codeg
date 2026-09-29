@@ -21,6 +21,10 @@ vi.mock("@/contexts/tab-context", () => ({
   useTabStore: (selector: (s: typeof tabs) => unknown) => selector(tabs),
   useTabActions: () => tabs,
 }))
+let desktop = false
+let takePendingQuickAskFocus: ReturnType<typeof vi.fn>
+const QUICK_ASK_PENDING = "quick-ask://focus-pending"
+
 vi.mock("@/lib/transport", () => ({
   getTransport: () => ({
     subscribe: async (event: string, cb: (p: unknown) => void) => {
@@ -28,6 +32,14 @@ vi.mock("@/lib/transport", () => ({
       return () => handlers.delete(event)
     },
   }),
+  isDesktop: () => desktop,
+}))
+vi.mock("@/lib/quick-ask/desktop", () => ({
+  takePendingQuickAskFocus: () => takePendingQuickAskFocus(),
+  onQuickAskFocusPending: async (cb: () => void) => {
+    handlers.set(QUICK_ASK_PENDING, () => cb())
+    return () => handlers.delete(QUICK_ASK_PENDING)
+  },
 }))
 vi.mock("@/lib/deep-link", () => ({
   takePendingDeepLink: () => takePendingDeepLink(),
@@ -48,6 +60,8 @@ function parkOne(target: unknown) {
 describe("PetFocusBridge", () => {
   beforeEach(() => {
     handlers = new Map()
+    desktop = false
+    takePendingQuickAskFocus = vi.fn(async () => [])
     takePendingDeepLink = vi.fn(async () => null)
     addFolderToWorkspaceById = vi.fn()
     resetAppWorkspaceStore()
@@ -288,6 +302,44 @@ describe("PetFocusBridge", () => {
     expect(tabs.openTab.mock.calls[0][1]).toBe(1)
     expect(tabs.openTab.mock.calls[1][1]).toBe(2)
     expect(addFolderToWorkspaceById).toHaveBeenCalledTimes(1)
+  })
+
+  it("opens what Quick Ask parked for this window, on mount and on each poke", async () => {
+    desktop = true
+    useAppWorkspaceStore.setState({ foldersHydrated: true })
+    tabs = { ...tabs, tabsHydrated: true }
+    // Parked before the window finished loading: the mount drain takes it.
+    takePendingQuickAskFocus = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { folderId: 7, conversationId: 11, agent: "claude_code" },
+      ])
+      .mockResolvedValue([])
+    render(<PetFocusBridge />)
+    await waitFor(() =>
+      expect(tabs.openTab).toHaveBeenCalledWith(7, 11, "claude_code", true)
+    )
+
+    // A later "Open in codeg" while the window is up arrives as a poke.
+    takePendingQuickAskFocus.mockResolvedValueOnce([
+      { folderId: 7, conversationId: 12, agent: "claude_code" },
+    ])
+    await waitFor(() => expect(handlers.has(QUICK_ASK_PENDING)).toBe(true))
+    act(() => handlers.get(QUICK_ASK_PENDING)!(undefined))
+    await waitFor(() =>
+      expect(tabs.openTab).toHaveBeenCalledWith(7, 12, "claude_code", true)
+    )
+    expect(tabs.openTab).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not ask for Quick Ask handoffs outside the desktop app", async () => {
+    useAppWorkspaceStore.setState({ foldersHydrated: true })
+    tabs = { ...tabs, tabsHydrated: true }
+    render(<PetFocusBridge />)
+    await waitFor(() => expect(handlers.has(FOCUS)).toBe(true))
+    await act(async () => {})
+    expect(handlers.has(QUICK_ASK_PENDING)).toBe(false)
+    expect(takePendingQuickAskFocus).not.toHaveBeenCalled()
   })
 
   it("ignores malformed payloads", async () => {

@@ -280,6 +280,84 @@ function snapshotBase() {
   }
 }
 
+describe("AcpConnectionsProvider connect options (Quick Ask)", () => {
+  it("opens the session with the caller's selectors instead of the saved per-agent picks", async () => {
+    await mountProvider()
+    await act(async () => {
+      await h.actions!.connect(
+        "quick-ask",
+        "claude_code",
+        "/work/project",
+        undefined,
+        undefined,
+        {
+          selectorPrefs: {
+            modeId: null,
+            configValues: { model: "haiku", effort: "low" },
+          },
+        }
+      )
+    })
+    // Five arguments: an ordinary (non-private) connect.
+    expect(h.acpConnect).toHaveBeenCalledWith(
+      "claude_code",
+      "/work/project",
+      undefined,
+      null,
+      { model: "haiku", effort: "low" }
+    )
+  })
+
+  it("asks for an unrecorded session on a private connect", async () => {
+    await mountProvider()
+    await act(async () => {
+      await h.actions!.connect(
+        "quick-ask",
+        "claude_code",
+        "/data/chat-sessions/2026-09-29/abc",
+        undefined,
+        undefined,
+        {
+          selectorPrefs: { modeId: null, configValues: { model: "haiku" } },
+          ephemeral: true,
+        }
+      )
+    })
+    expect(h.acpConnect).toHaveBeenCalledWith(
+      "claude_code",
+      "/data/chat-sessions/2026-09-29/abc",
+      undefined,
+      null,
+      { model: "haiku" },
+      true
+    )
+  })
+
+  it("changes a live model without saving it as the per-agent pick", async () => {
+    await mountProvider()
+    await act(async () => {
+      await h.actions!.connect("quick-ask", "claude_code", "/work/project")
+    })
+    vi.mocked(saveConfigPreference).mockClear()
+    await act(async () => {
+      await h.actions!.setConfigOption("quick-ask", "model", "sonnet", {
+        remember: false,
+      })
+    })
+    expect(saveConfigPreference).not.toHaveBeenCalled()
+
+    // The composer's path still remembers.
+    await act(async () => {
+      await h.actions!.setConfigOption("quick-ask", "model", "opus")
+    })
+    expect(saveConfigPreference).toHaveBeenCalledWith(
+      "claude_code",
+      "model",
+      "opus"
+    )
+  })
+})
+
 describe("AcpConnectionsProvider cross-client viewer lifecycle", () => {
   it("attaches as a viewer (no spawn) when a live connection is discovered", async () => {
     h.acpFindConnectionForConversation.mockResolvedValue({

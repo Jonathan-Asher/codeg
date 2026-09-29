@@ -6777,5 +6777,89 @@
         "probeFailed": "The built-in browser couldn't confirm that it reaches the remote host through the tunnel. Try again in a moment."
       }
     }
+  },
+  "QuickAsk": {
+    "targetLabel": "Where the question goes",
+    "targets": {
+      "new": "New session",
+      "existing": "Existing session",
+      "private": "Private"
+    },
+    "targetHints": {
+      "new": "Starts a new conversation in the folder, listed in the sidebar.",
+      "existing": "Adds your question to this session.",
+      "private": "Nothing is saved: no sidebar entry, no search, no history."
+    },
+    "folder": {
+      "placeholder": "Choose a folder"
+    },
+    "session": {
+      "placeholder": "Choose a session",
+      "search": "Search sessions…",
+      "empty": "No sessions found",
+      "untitled": "Untitled session"
+    },
+    "picker": {
+      "agent": "Agent",
+      "model": "Model",
+      "effort": "Effort",
+      "loadingOptions": "Starting the agent to list its models…",
+      "sessionOwnsModel": "An existing session keeps its own model and effort.",
+      "noOptions": "This agent offers no model choice."
+    },
+    "input": {
+      "placeholder": "Ask a quick question…",
+      "followUp": "Ask a follow-up…",
+      "send": "Send",
+      "stop": "Stop"
+    },
+    "hint": "Enter to send · Shift+Enter for a new line · Esc to hide",
+    "actions": {
+      "newQuestion": "New question",
+      "openInCodeg": "Open in codeg",
+      "hide": "Hide"
+    },
+    "status": {
+      "connecting": "Starting {agent}…",
+      "queued": "Queued, sends when the current reply ends",
+      "steered": "Sent into the running reply",
+      "failed": "Not sent"
+    },
+    "private": {
+      "active": "Private: deleted when you clear or close this window.",
+      "deleted": "Private question deleted.",
+      "agentKeepsLog": "{agent} keeps its own session log, which Quick Ask cannot turn off."
+    },
+    "backend": {
+      "remote": "On {name}",
+      "switchPending": "You switched workspaces. New question moves Quick Ask there."
+    },
+    "errors": {
+      "noFolder": "Choose a folder first.",
+      "noSession": "Choose a session first.",
+      "connectFailed": "Couldn't start the agent: {error}",
+      "sendFailed": "Couldn't send: {error}",
+      "noAgents": "No agent is installed. Add one in Settings."
+    },
+    "empty": {
+      "title": "Ask anything"
+    }
+  },
+  "QuickAskSettings": {
+    "title": "Quick Ask",
+    "description": "Ask an agent a quick question from any app with a keyboard shortcut.",
+    "enable": "Global shortcut",
+    "enableDescription": "Opens Quick Ask from anywhere, even when codeg is in the background.",
+    "shortcut": "Shortcut",
+    "shortcutDescription": "Click, then press the keys you want. Use at least one modifier key.",
+    "recording": "Press keys…",
+    "reset": "Reset",
+    "hideOnBlur": "Hide when clicking outside",
+    "hideOnBlurDescription": "Otherwise the window stays until you press Esc or the shortcut again.",
+    "notRegistered": "{shortcut} could not be registered. Another app may already use it; choose a different shortcut.",
+    "registrationDetail": "System message: {error}",
+    "saveFailed": "Couldn't save the Quick Ask settings: {error}",
+    "open": "Try it",
+    "openButton": "Open Quick Ask"
   }
 }

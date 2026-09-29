@@ -46,6 +46,7 @@ import { CloseBehaviorSettingsSection } from "@/components/settings/close-behavi
 import { DesktopNotificationSettingsSection } from "@/components/settings/desktop-notification-settings"
 import { NotificationSoundSettingsSection } from "@/components/settings/notification-sound-settings"
 import { ResumeAfterRestartSettingsSection } from "@/components/settings/resume-after-restart-settings"
+import { QuickAskSettingsSection } from "@/components/settings/quick-ask-settings"
 
 const TERMINAL_SHELL_OPTION_SYSTEM = "system"
 const TERMINAL_SHELL_OPTION_CUSTOM = "custom"
@@ -515,6 +516,9 @@ export function GeneralSettings() {
         )}
 
         <CloseBehaviorSettingsSection />
+
+        {/* The global shortcut that opens the floating question window. */}
+        <QuickAskSettingsSection />
 
         {/* What a restart does to the turns it cuts off. */}
         <ResumeAfterRestartSettingsSection />

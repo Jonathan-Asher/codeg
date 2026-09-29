@@ -6777,5 +6777,89 @@
         "probeFailed": "Le navigateur intégré n'a pas pu confirmer qu'il atteint l'hôte distant par le tunnel. Réessayez dans un instant."
       }
     }
+  },
+  "QuickAsk": {
+    "targetLabel": "Où va la question",
+    "targets": {
+      "new": "Nouvelle session",
+      "existing": "Session existante",
+      "private": "Privée"
+    },
+    "targetHints": {
+      "new": "Crée une nouvelle conversation dans le dossier, affichée dans la barre latérale.",
+      "existing": "Ajoute ta question à cette session.",
+      "private": "Rien n’est enregistré : ni barre latérale, ni recherche, ni historique."
+    },
+    "folder": {
+      "placeholder": "Choisir un dossier"
+    },
+    "session": {
+      "placeholder": "Choisir une session",
+      "search": "Rechercher des sessions…",
+      "empty": "Aucune session trouvée",
+      "untitled": "Session sans titre"
+    },
+    "picker": {
+      "agent": "Agent",
+      "model": "Modèle",
+      "effort": "Effort",
+      "loadingOptions": "Démarrage de l’agent pour lister ses modèles…",
+      "sessionOwnsModel": "Une session existante garde son propre modèle et son effort.",
+      "noOptions": "Cet agent ne propose pas de choix de modèle."
+    },
+    "input": {
+      "placeholder": "Pose une question rapide…",
+      "followUp": "Pose une question de suivi…",
+      "send": "Envoyer",
+      "stop": "Arrêter"
+    },
+    "hint": "Entrée pour envoyer · Maj+Entrée pour une nouvelle ligne · Échap pour masquer",
+    "actions": {
+      "newQuestion": "Nouvelle question",
+      "openInCodeg": "Ouvrir dans codeg",
+      "hide": "Masquer"
+    },
+    "status": {
+      "connecting": "Démarrage de {agent}…",
+      "queued": "En file d’attente, envoyée à la fin de la réponse en cours",
+      "steered": "Envoyée dans la réponse en cours",
+      "failed": "Non envoyée"
+    },
+    "private": {
+      "active": "Privée : supprimée quand tu vides ou fermes cette fenêtre.",
+      "deleted": "Question privée supprimée.",
+      "agentKeepsLog": "{agent} tient son propre journal de session, que Quick Ask ne peut pas désactiver."
+    },
+    "backend": {
+      "remote": "Sur {name}",
+      "switchPending": "Tu as changé d’espace de travail. Nouvelle question y déplace Quick Ask."
+    },
+    "errors": {
+      "noFolder": "Choisis d’abord un dossier.",
+      "noSession": "Choisis d’abord une session.",
+      "connectFailed": "Impossible de démarrer l’agent : {error}",
+      "sendFailed": "Envoi impossible : {error}",
+      "noAgents": "Aucun agent installé. Ajoutes-en un dans les réglages."
+    },
+    "empty": {
+      "title": "Demande ce que tu veux"
+    }
+  },
+  "QuickAskSettings": {
+    "title": "Quick Ask",
+    "description": "Pose une question rapide à un agent depuis n’importe quelle app avec un raccourci clavier.",
+    "enable": "Raccourci global",
+    "enableDescription": "Ouvre Quick Ask de partout, même quand codeg est en arrière-plan.",
+    "shortcut": "Raccourci",
+    "shortcutDescription": "Clique puis appuie sur les touches voulues. Utilise au moins une touche de modification.",
+    "recording": "Appuie sur les touches…",
+    "reset": "Réinitialiser",
+    "hideOnBlur": "Masquer au clic à l’extérieur",
+    "hideOnBlurDescription": "Sinon, la fenêtre reste jusqu’à Échap ou au raccourci.",
+    "notRegistered": "Impossible d’enregistrer {shortcut}. Une autre app l’utilise peut-être ; choisis un autre raccourci.",
+    "registrationDetail": "Message système : {error}",
+    "saveFailed": "Impossible d’enregistrer les réglages de Quick Ask : {error}",
+    "open": "L’essayer",
+    "openButton": "Ouvrir Quick Ask"
   }
 }

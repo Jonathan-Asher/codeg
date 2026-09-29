@@ -6777,5 +6777,89 @@
         "probeFailed": "內建瀏覽器無法確認它能透過通道連到遠端主機。請稍後再試。"
       }
     }
+  },
+  "QuickAsk": {
+    "targetLabel": "問題傳送到哪裡",
+    "targets": {
+      "new": "新對話",
+      "existing": "現有對話",
+      "private": "私密"
+    },
+    "targetHints": {
+      "new": "在所選資料夾中建立新對話，並顯示在側邊欄。",
+      "existing": "把你的問題加到這個對話。",
+      "private": "不儲存任何內容：不進側邊欄、不進搜尋、不留紀錄。"
+    },
+    "folder": {
+      "placeholder": "選擇資料夾"
+    },
+    "session": {
+      "placeholder": "選擇對話",
+      "search": "搜尋對話…",
+      "empty": "找不到對話",
+      "untitled": "未命名對話"
+    },
+    "picker": {
+      "agent": "代理",
+      "model": "模型",
+      "effort": "推理強度",
+      "loadingOptions": "正在啟動代理以取得模型清單…",
+      "sessionOwnsModel": "現有對話沿用它自己的模型與推理強度。",
+      "noOptions": "此代理不提供模型選擇。"
+    },
+    "input": {
+      "placeholder": "快速問個問題…",
+      "followUp": "繼續追問…",
+      "send": "傳送",
+      "stop": "停止"
+    },
+    "hint": "Enter 傳送 · Shift+Enter 換行 · Esc 隱藏",
+    "actions": {
+      "newQuestion": "新問題",
+      "openInCodeg": "在 codeg 中開啟",
+      "hide": "隱藏"
+    },
+    "status": {
+      "connecting": "正在啟動 {agent}…",
+      "queued": "已排入佇列，目前回覆結束後傳送",
+      "steered": "已插入進行中的回覆",
+      "failed": "未傳送"
+    },
+    "private": {
+      "active": "私密：清除或關閉此視窗時刪除。",
+      "deleted": "私密問題已刪除。",
+      "agentKeepsLog": "{agent} 會保留自己的對話紀錄，Quick Ask 無法關閉它。"
+    },
+    "backend": {
+      "remote": "位於 {name}",
+      "switchPending": "你已切換到其他工作區。按「新問題」後 Quick Ask 會跟過去。"
+    },
+    "errors": {
+      "noFolder": "請先選擇資料夾。",
+      "noSession": "請先選擇對話。",
+      "connectFailed": "無法啟動代理：{error}",
+      "sendFailed": "傳送失敗：{error}",
+      "noAgents": "尚未安裝任何代理，請先在設定中新增。"
+    },
+    "empty": {
+      "title": "儘管問"
+    }
+  },
+  "QuickAskSettings": {
+    "title": "Quick Ask",
+    "description": "用快捷鍵在任何應用程式中向代理快速提問。",
+    "enable": "全域快捷鍵",
+    "enableDescription": "隨時隨地開啟 Quick Ask，即使 codeg 在背景執行。",
+    "shortcut": "快捷鍵",
+    "shortcutDescription": "點一下後按下想要的組合鍵，至少包含一個輔助鍵。",
+    "recording": "請按鍵…",
+    "reset": "恢復預設",
+    "hideOnBlur": "點擊視窗外部時隱藏",
+    "hideOnBlurDescription": "關閉後，視窗會一直顯示，直到按 Esc 或再次按快捷鍵。",
+    "notRegistered": "無法註冊 {shortcut}，可能已被其他應用程式使用，請換一個快捷鍵。",
+    "registrationDetail": "系統訊息：{error}",
+    "saveFailed": "無法儲存 Quick Ask 設定：{error}",
+    "open": "試試看",
+    "openButton": "開啟 Quick Ask"
   }
 }

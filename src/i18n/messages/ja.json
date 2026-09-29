@@ -6777,5 +6777,89 @@
         "probeFailed": "内蔵ブラウザーがトンネル経由でリモートホストに届くことを確認できませんでした。しばらくしてからもう一度お試しください。"
       }
     }
+  },
+  "QuickAsk": {
+    "targetLabel": "質問の送り先",
+    "targets": {
+      "new": "新しいセッション",
+      "existing": "既存のセッション",
+      "private": "プライベート"
+    },
+    "targetHints": {
+      "new": "フォルダーに新しい会話を作成し、サイドバーに表示します。",
+      "existing": "このセッションに質問を追加します。",
+      "private": "何も保存しません。サイドバー、検索、履歴のどれにも残りません。"
+    },
+    "folder": {
+      "placeholder": "フォルダーを選択"
+    },
+    "session": {
+      "placeholder": "セッションを選択",
+      "search": "セッションを検索…",
+      "empty": "セッションが見つかりません",
+      "untitled": "無題のセッション"
+    },
+    "picker": {
+      "agent": "エージェント",
+      "model": "モデル",
+      "effort": "思考レベル",
+      "loadingOptions": "モデル一覧を取得するためにエージェントを起動しています…",
+      "sessionOwnsModel": "既存のセッションは独自のモデルと思考レベルを使います。",
+      "noOptions": "このエージェントにはモデルの選択肢がありません。"
+    },
+    "input": {
+      "placeholder": "ちょっと質問…",
+      "followUp": "続けて質問…",
+      "send": "送信",
+      "stop": "停止"
+    },
+    "hint": "Enter で送信 · Shift+Enter で改行 · Esc で隠す",
+    "actions": {
+      "newQuestion": "新しい質問",
+      "openInCodeg": "codeg で開く",
+      "hide": "隠す"
+    },
+    "status": {
+      "connecting": "{agent} を起動中…",
+      "queued": "キュー待ち。現在の返信が終わると送信します",
+      "steered": "実行中の返信に送りました",
+      "failed": "未送信"
+    },
+    "private": {
+      "active": "プライベート：クリアするかウィンドウを閉じると削除されます。",
+      "deleted": "プライベートな質問を削除しました。",
+      "agentKeepsLog": "{agent} は独自のセッションログを残します。Quick Ask ではオフにできません。"
+    },
+    "backend": {
+      "remote": "{name} 上",
+      "switchPending": "別のワークスペースに移動しました。「新しい質問」で Quick Ask もそちらに移ります。"
+    },
+    "errors": {
+      "noFolder": "先にフォルダーを選択してください。",
+      "noSession": "先にセッションを選択してください。",
+      "connectFailed": "エージェントを起動できませんでした：{error}",
+      "sendFailed": "送信できませんでした：{error}",
+      "noAgents": "エージェントがインストールされていません。設定で追加してください。"
+    },
+    "empty": {
+      "title": "何でも聞いてください"
+    }
+  },
+  "QuickAskSettings": {
+    "title": "Quick Ask",
+    "description": "キーボードショートカットで、どのアプリからでもエージェントにすばやく質問できます。",
+    "enable": "グローバルショートカット",
+    "enableDescription": "codeg がバックグラウンドにあっても、どこからでも Quick Ask を開きます。",
+    "shortcut": "ショートカット",
+    "shortcutDescription": "クリックしてから使いたいキーを押してください。修飾キーを 1 つ以上含めてください。",
+    "recording": "キーを押してください…",
+    "reset": "リセット",
+    "hideOnBlur": "外側をクリックしたら隠す",
+    "hideOnBlurDescription": "オフにすると、Esc かショートカットを押すまでウィンドウが残ります。",
+    "notRegistered": "{shortcut} を登録できませんでした。ほかのアプリが使っている可能性があります。別のショートカットを選んでください。",
+    "registrationDetail": "システムメッセージ：{error}",
+    "saveFailed": "Quick Ask の設定を保存できませんでした：{error}",
+    "open": "試してみる",
+    "openButton": "Quick Ask を開く"
   }
 }
