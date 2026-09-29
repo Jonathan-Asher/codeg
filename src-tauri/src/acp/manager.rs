@@ -9040,7 +9040,7 @@ mod tests {
 
         let mut listed = sidebar_ids(&db).await;
         listed.sort_unstable();
-        let mut expected = vec![pre_id, sibling_id];
+        let mut expected = [pre_id, sibling_id];
         expected.sort_unstable();
         assert_eq!(listed, expected, "the original stays a visible conversation");
         let sibling = conversation_service::get_by_id(&db.conn, sibling_id)
