@@ -1255,7 +1255,7 @@ mod tests {
         touch(&root.join("cursor").join(format!("{sid}.jsonl")));
         touch(&root.join("cursor").join("keep.jsonl"));
         let mut report = PrivateSessionCleanup::default();
-        remove_codeg_session_records(&[root.clone()], sid, &mut report);
+        remove_codeg_session_records(std::slice::from_ref(&root), sid, &mut report);
         assert!(!root.join("cursor").join(format!("{sid}.jsonl")).exists());
         assert!(root.join("cursor/keep.jsonl").exists());
         assert_eq!(report.removed.len(), 1);
