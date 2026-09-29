@@ -1705,6 +1705,10 @@
     "behaviorExit": "codeg を終了",
     "saveFailed": "閉じる動作の保存に失敗しました: {message}"
   },
+  "EditMessageSettings": {
+    "title": "編集時に元の内容を別の会話として残す",
+    "description": "過去のメッセージを編集すると、同じ会話がその時点から続きます。オンにすると、編集前のバージョンも「… (before edit)」という名前でサイドバーに残ります。"
+  },
   "StartupWorkspaceSettings": {
     "title": "codeg の起動時に開く",
     "description": "リモートワークスペースは専用のウィンドウで開きます。ローカルワークスペースはいつでも「クイック操作」から開けます。",
@@ -2042,6 +2046,7 @@
       "editMessageBusy": "ターンの実行中はメッセージを編集できません",
       "editMessageQueued": "キューにメッセージが待機している間はメッセージを編集できません",
       "editMessageHistoryFailed": "新しい分岐は作成されましたが、履歴を読み込めなかったため、編集したメッセージは送信されていません。もう一度「保存して送信」をお試しください",
+      "editMessageHistoryFailedInPlace": "会話はこの時点まで巻き戻されましたが、履歴を読み込めなかったため、編集したメッセージは送信されていません。もう一度「保存して送信」をお試しください",
       "editMessageNewConversationFailed": "編集したメッセージ用の新規会話を開けませんでした",
       "editMessageReplyNotFound": "このメッセージの直前の返信が保存済みの会話に見つかりませんでした",
       "exportConversation": "会話をエクスポート",
@@ -3541,10 +3546,12 @@
         "editQueued": "キューにメッセージが待機している間は編集できません",
         "editNotReady": "このメッセージはまだ編集できません。少し待ってからお試しください",
         "editHint": "保存すると、ここから新しい分岐が始まります。元の会話はサイドバーに残り、ファイルの変更は元に戻りません",
+        "editHintInPlace": "保存すると、元のメッセージの代わりに編集したメッセージで、この会話をここから続けます。ファイルの変更は元に戻りません",
         "editHintNewConversation": "最初のメッセージのため、保存するとこのメッセージで新規会話が始まります。この会話はそのまま残り、ファイルの変更は元に戻りません",
         "editCancel": "キャンセル",
         "editSave": "保存して送信",
         "editSaving": "新しい分岐を作成中…",
+        "editSavingInPlace": "ここから続行中…",
         "editSavingNewConversation": "新規会話を開いています…",
         "editImagesKept": "添付画像は編集したメッセージと一緒に再送信されます",
         "copied": "コピー済み",

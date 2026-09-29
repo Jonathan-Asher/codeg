@@ -1705,6 +1705,10 @@
     "behaviorExit": "Exit codeg",
     "saveFailed": "Failed to save close behavior: {message}"
   },
+  "EditMessageSettings": {
+    "title": "Keep the original as a separate conversation when editing",
+    "description": "Editing a past message continues the same conversation from that point. Turn this on to also keep the version before the edit in the sidebar, named \"… (before edit)\"."
+  },
   "StartupWorkspaceSettings": {
     "title": "When codeg starts, open",
     "description": "A remote workspace opens in its own window, and the local workspace stays one click away under Quick actions.",
@@ -2042,6 +2046,7 @@
       "editMessageBusy": "Can't edit the message while a turn is running",
       "editMessageQueued": "Can't edit the message while messages are waiting in the queue",
       "editMessageHistoryFailed": "The new branch was created, but its history didn't load, so the edited message wasn't sent. Try Save & send again.",
+      "editMessageHistoryFailedInPlace": "The conversation was rewound to this point, but its history didn't load, so the edited message wasn't sent. Try Save & send again.",
       "editMessageNewConversationFailed": "Couldn't open a new conversation for the edited message",
       "editMessageReplyNotFound": "the reply before this message couldn't be found in the saved conversation",
       "exportConversation": "Export Conversation",
@@ -3541,10 +3546,12 @@
         "editQueued": "Can't edit while messages are waiting in the queue",
         "editNotReady": "Can't edit this message just yet — try again in a moment",
         "editHint": "Saving starts a new branch from here. The original conversation stays in the sidebar, and file changes are not undone.",
+        "editHintInPlace": "Saving continues this conversation from here with the edited message, in place of the original. File changes are not undone.",
         "editHintNewConversation": "This is the first message, so saving starts a new conversation with it. This one stays as it is, and file changes are not undone.",
         "editCancel": "Cancel",
         "editSave": "Save & send",
         "editSaving": "Starting a new branch…",
+        "editSavingInPlace": "Continuing from here…",
         "editSavingNewConversation": "Opening a new conversation…",
         "editImagesKept": "Attached images are sent again with the edited message",
         "copied": "Copied",

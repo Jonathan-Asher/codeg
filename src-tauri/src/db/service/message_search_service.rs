@@ -181,6 +181,35 @@ pub async fn mark_indexed(
     Ok(())
 }
 
+/// Drop one conversation's rows AND its stamp, leaving it as if never indexed.
+///
+/// For a row that was re-pointed at another agent session (a fork or an edit
+/// of a past message): what it indexed was read from the session it left, so
+/// search would keep returning text — the replaced message included — that the
+/// conversation no longer shows. Without the stamp the next pass indexes it
+/// again from the session it holds now, once it has settled.
+///
+/// Takes any connection so it can join the caller's transaction, and returns
+/// the raw `DbErr` for the same reason.
+pub async fn forget_conversation<C: ConnectionTrait>(
+    conn: &C,
+    conversation_id: i32,
+) -> Result<(), sea_orm::DbErr> {
+    let backend = conn.get_database_backend();
+    for sql in [
+        "DELETE FROM message_fts WHERE conversation_id = ?",
+        "DELETE FROM message_fts_state WHERE conversation_id = ?",
+    ] {
+        conn.execute(Statement::from_sql_and_values(
+            backend,
+            sql,
+            [conversation_id.into()],
+        ))
+        .await?;
+    }
+    Ok(())
+}
+
 /// Up to `limit` conversations that were never indexed or changed since, most
 /// recently active first. Only conversations a search can return are listed
 /// (top-level, not a loop run, not deleted), and one touched at or after
@@ -687,6 +716,44 @@ mod tests {
 
         assert!(search(&db.conn, "first").await.is_empty());
         assert_eq!(search(&db.conn, "draft").await.len(), 1);
+    }
+
+    /// A row re-pointed at another session stops returning what it indexed at
+    /// once, and — its stamp gone — is back on the indexer's list, while the
+    /// other conversations keep theirs.
+    #[tokio::test]
+    async fn forgetting_a_conversation_drops_its_rows_and_its_stamp() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/fts-proj").await;
+        let mut seeded = Vec::new();
+        for text in ["replaced message", "kept message"] {
+            let id = seed_conversation(&db, folder, AgentType::ClaudeCode).await;
+            // Stamped at the row's own version, so it reads as up to date.
+            let row = conversation::Entity::find_by_id(id)
+                .one(&db.conn)
+                .await
+                .unwrap()
+                .unwrap();
+            index_conversation(&db.conn, id, row.updated_at, &[turn("user", text)])
+                .await
+                .unwrap();
+            seeded.push(id);
+        }
+        let (forgotten, kept) = (seeded[0], seeded[1]);
+
+        forget_conversation(&db.conn, forgotten).await.unwrap();
+
+        assert!(search(&db.conn, "replaced").await.is_empty());
+        assert_eq!(ids(&search(&db.conn, "kept").await), [kept]);
+        let settled = Utc::now() + chrono::Duration::seconds(60);
+        let stale: Vec<i32> = list_stale_conversations(&db.conn, settled, 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        assert!(stale.contains(&forgotten), "the forgotten row is indexed again");
+        assert!(!stale.contains(&kept), "nothing else is");
     }
 
     #[tokio::test]

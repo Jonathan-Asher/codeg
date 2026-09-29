@@ -477,9 +477,8 @@ describe("ConversationDetailPanel send-path hardening", () => {
     )
     // Held from before the fork until after the send, released in a finally.
     expect(editHandler.indexOf("editInFlightRef.current = true")).toBeLessThan(
-      editHandler.indexOf("await acpFork(")
+      editHandler.indexOf("await forkConversationForEdit(")
     )
-    expect(editHandler).toContain('"edit"')
     expect(editHandler).toContain("fromQueueFlush: true")
     expect(editHandler).toContain("finally {")
     expect(editHandler).toContain("setEditInFlight(false)")
@@ -498,7 +497,7 @@ describe("ConversationDetailPanel send-path hardening", () => {
       source.indexOf("// Receiving end of the hand-off above", editStart)
     )
     const resolveAt = editHandler.indexOf("await resolveEditForkTurnId(")
-    const forkAt = editHandler.indexOf("await acpFork(")
+    const forkAt = editHandler.indexOf("await forkConversationForEdit(")
     expect(resolveAt).toBeGreaterThan(-1)
     expect(resolveAt).toBeLessThan(forkAt)
     const unresolved = editHandler.slice(
@@ -508,7 +507,7 @@ describe("ConversationDetailPanel send-path hardening", () => {
     expect(unresolved).toContain('t("editMessageReplyNotFound")')
     expect(unresolved).toContain("return false")
     expect(editHandler.slice(forkAt)).toMatch(
-      /acpFork\(\s*connectionId,\s*dbConvIdRef\.current,\s*folderId,\s*forkPointId,/
+      /forkConversationForEdit\(\{\s*connectionId,\s*conversationId: dbConvIdRef\.current,\s*folderId,\s*forkPointId,/
     )
 
     // The read goes to the backend directly: loading it through the store
@@ -521,6 +520,32 @@ describe("ConversationDetailPanel send-path hardening", () => {
     const read = source.slice(readStart, editStart)
     expect(read).toContain("getFolderConversation(")
     expect(read).not.toContain("refetchDetail(")
+  })
+
+  it("continues an edited conversation in its own tab, as the setting says", () => {
+    // The fork re-points THIS conversation's row, so the edit hands the new
+    // session to the runtime session the tab already shows and opens nothing:
+    // no new tab, no switch. Whether the original is kept is read when the
+    // edit is saved, and the failure message says which it was.
+    const editStart = source.indexOf(
+      "const handleEditUserMessage = useCallback("
+    )
+    const editHandler = source.slice(
+      editStart,
+      source.indexOf("// Receiving end of the hand-off above", editStart)
+    )
+    const forkAt = editHandler.indexOf("await forkConversationForEdit(")
+    const afterFork = editHandler.slice(forkAt)
+    expect(editHandler.slice(0, forkAt)).toContain(
+      "const keptOriginal = loadKeepOriginalOnEdit()"
+    )
+    expect(afterFork).toContain("keepOriginal: keptOriginal")
+    expect(afterFork).toContain(
+      "setExternalId(effectiveConversationId, sessionId)"
+    )
+    expect(afterFork).not.toContain("openNewConversationTab(")
+    expect(afterFork).not.toContain("openTab(")
+    expect(afterFork).toContain('t("editMessageHistoryFailedInPlace")')
   })
 
   it("disables the welcome composer while connected-but-not-ready", () => {

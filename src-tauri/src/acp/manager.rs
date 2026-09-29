@@ -32,7 +32,9 @@ use crate::acp::types::{
     AcpEvent, AgentOptionsSnapshot, AttachPhase, ConfigStaleKind, ConnectionInfo,
     ConnectionStatus, ForkResultInfo, PromptCapabilitiesInfo, PromptInputBlock,
 };
-use crate::db::entities::conversation::{self, ConversationKind, ConversationStatus};
+use crate::db::entities::conversation::{
+    self, ConversationKind, ConversationStatus, ConversationTurnState,
+};
 use crate::db::service::conversation_service;
 use crate::db::AppDatabase;
 use crate::models::agent::AgentType;
@@ -2030,9 +2032,11 @@ impl ConnectionManager {
     /// the wire `ForkResultInfo` carries `sibling_conversation_id` for tab/UI
     /// reconciliation.
     ///
-    /// `mode` is what the fork is for: [`ForkMode::Edit`] (editing a past
-    /// message) refuses a fork point it cannot name instead of forking at the
-    /// tail, and titles the two rows differently — see [`ForkMode`].
+    /// `mode` is what the fork is for: an edit of a past message
+    /// ([`ForkMode::Edit`] / [`ForkMode::EditInPlace`]) refuses a fork point it
+    /// cannot name instead of forking at the tail, and titles the two rows
+    /// differently; [`ForkMode::EditInPlace`] also hides the sibling, so the
+    /// user is left with the one conversation they edited — see [`ForkMode`].
     pub async fn fork_session(
         &self,
         db: &AppDatabase,
@@ -2120,7 +2124,7 @@ impl ConnectionManager {
         // edit refuses instead (see `ForkMode::Edit`), and doing it here means
         // the agent was never asked to fork at all.
         let fork_point = match fork_from_turn_id {
-            None if mode == ForkMode::Edit => {
+            None if mode.is_edit() => {
                 return Err(AcpError::ForkPointUnresolved(
                     "no reply to fork at was named".to_string(),
                 ));
@@ -2224,23 +2228,8 @@ impl ConnectionManager {
                 )
                 .await?;
 
-                // Fork mutates the sidebar in two ways the rest of the system
-                // never sees otherwise: the current row's title (`[Fork] …`) and
-                // external_id (→ S2) changed, and a brand-new sibling row now
-                // exists (external_id S1, PendingReview). Broadcast both on
-                // `conversation://changed` so every other client converges in
-                // real time instead of waiting for a manual refresh. Both rows
-                // are roots; the helper still guards `parent_id` internally.
-                crate::commands::conversations::emit_conversation_upsert(
-                    &emitter,
-                    &db_conn,
-                    conversation_id,
-                )
-                .await;
-                crate::commands::conversations::emit_conversation_upsert(
-                    &emitter, &db_conn, sibling_id,
-                )
-                .await;
+                Self::broadcast_fork_rows(&emitter, &db_conn, conversation_id, sibling_id, mode)
+                    .await;
 
                 Ok(ForkResultInfo {
                     forked_session_id,
@@ -2271,6 +2260,40 @@ impl ConnectionManager {
         }
     }
 
+    /// Tell every client what a persisted fork did to the sidebar.
+    ///
+    /// A fork changes it in ways the rest of the system never sees otherwise:
+    /// the current row's title (`[Fork] …`) and external_id (→ S2) changed, and
+    /// a sibling row now holds S1. Both go out on `conversation://changed` so
+    /// every other client converges in real time instead of waiting for a
+    /// manual refresh. Both rows are roots; the upsert helper still guards
+    /// `parent_id` internally.
+    ///
+    /// Under [`ForkMode::EditInPlace`] the sibling is announced as DELETED
+    /// instead. It was born soft-deleted — or, when the lifecycle subscriber
+    /// made it first, has just been turned so — and an upsert for it would be
+    /// dropped silently, which is not enough: in that race the lifecycle side
+    /// may already have broadcast it as a live row. The race is rare to begin
+    /// with (the fork's reply reaches the persistence task before the
+    /// connection even starts resuming the fork, and `SessionStarted` only
+    /// follows the resume), and once the persistence has committed any later
+    /// lifecycle upsert re-reads the row, finds it deleted and stays silent.
+    async fn broadcast_fork_rows(
+        emitter: &EventEmitter,
+        db_conn: &DatabaseConnection,
+        conversation_id: i32,
+        sibling_id: i32,
+        mode: ForkMode,
+    ) {
+        use crate::commands::conversations::{emit_conversation_deleted, emit_conversation_upsert};
+        emit_conversation_upsert(emitter, db_conn, conversation_id).await;
+        if mode == ForkMode::EditInPlace {
+            emit_conversation_deleted(emitter, sibling_id);
+        } else {
+            emit_conversation_upsert(emitter, db_conn, sibling_id).await;
+        }
+    }
+
     /// Persist the two-row fork layout: re-point the current row at S2 under a
     /// locked `[Fork]` title prefix, and INSERT a sibling row preserving the
     /// pre-fork (S1) history at `PendingReview`, which inherits the original's
@@ -2279,7 +2302,16 @@ impl ConnectionManager {
     /// An edit fork ([`ForkMode::Edit`]) names the rows the other way round:
     /// the current row — still the conversation the user is editing — keeps
     /// its title, now locked, and the sibling holding the original branch is
-    /// titled `<title> (before edit)` under a lock.
+    /// titled `<title> (before edit)` under a lock. [`ForkMode::EditInPlace`]
+    /// lays the rows out exactly the same way, then soft-deletes the sibling
+    /// in the same transaction — whether it inserted it or adopted the one the
+    /// lifecycle subscriber made — so the only conversation left visible is
+    /// the one being edited.
+    ///
+    /// Whatever the mode, the current row's message-search rows go too: they
+    /// were read from the session it just left, so search would keep finding
+    /// text — the very message an edit replaces — that the row no longer
+    /// shows. Its next indexer pass reads the forked session instead.
     ///
     /// Both titles outlive the per-turn auto-title backfill by design: neither
     /// the user's own name nor codeg's `[Fork] ` marker exists in the session
@@ -2402,7 +2434,7 @@ impl ConnectionManager {
                             // auto-titled sibling eligible for later backfills.
                             current.title_locked,
                         ),
-                        ForkMode::Edit => {
+                        ForkMode::Edit | ForkMode::EditInPlace => {
                             let marked = current
                                 .title
                                 .as_deref()
@@ -2426,6 +2458,29 @@ impl ConnectionManager {
                         ConversationKind::Delegate => ConversationKind::Regular,
                         ref kind => kind.clone(),
                     };
+                    // The sibling keeps the history this row SHOWED, which is
+                    // the session the row held until now. That is normally the
+                    // one the agent forked — but after a Claude `/clear` the
+                    // row follows the new transcript while the ACP session id
+                    // stays put (see `TranscriptRolledOver` in the lifecycle
+                    // subscriber), and it is that transcript, not the
+                    // pre-`/clear` one the ACP id names, that holds the history
+                    // the fork leaves behind. Handing the sibling the ACP id
+                    // there would preserve the wrong conversation and leave the
+                    // right one held by no row at all. When the lifecycle side
+                    // has already moved this row to the fork, the row no
+                    // longer says, and the agent's answer is all there is.
+                    let preserved_session_id = match current.external_id.as_deref() {
+                        Some(held) if held != forked_session_id => held.to_string(),
+                        _ => original_session_id,
+                    };
+                    // An interruption the row still carries belonged to a turn
+                    // at the tail — past the point an edit forks at, so on the
+                    // branch the edit leaves behind. Left in place it would
+                    // offer to "continue" a turn the edited conversation never
+                    // had. (A branch may fork at the tail, and keep that turn.)
+                    let clear_interruption = mode.is_edit()
+                        && current.turn_state == Some(ConversationTurnState::Interrupted);
 
                     // UPDATE current row → S2. Writing external_id explicitly
                     // here closes the race against `refreshConversations()`
@@ -2459,7 +2514,25 @@ impl ConnectionManager {
                     }
                     active.external_id = Set(Some(forked_session_id));
                     active.updated_at = Set(now);
+                    if clear_interruption {
+                        active.turn_state = Set(None);
+                    }
                     active.update(txn).await?;
+
+                    // The row now reads a different session — see the fn doc.
+                    // Its `updated_at` just moved, so the indexer re-reads it
+                    // once it settles; this only keeps search from finding the
+                    // departed session's text under it until then.
+                    crate::db::service::message_search_service::forget_conversation(
+                        txn,
+                        conversation_id,
+                    )
+                    .await?;
+
+                    // An in-place edit leaves the original branch on a row the
+                    // user never sees: soft-deleted like a conversation they
+                    // deleted themselves, and restorable the same way.
+                    let hidden = mode == ForkMode::EditInPlace;
 
                     // The lifecycle subscriber may have got here first. Its
                     // `SessionStarted{S2}` handler now runs the guarded
@@ -2478,7 +2551,7 @@ impl ConnectionManager {
                     // into `ForkResultInfo.sibling_conversation_id` and the
                     // sidebar upsert, both of which must name a real row.
                     if let Some(existing) = conversation::Entity::find()
-                        .filter(conversation::Column::ExternalId.eq(original_session_id.clone()))
+                        .filter(conversation::Column::ExternalId.eq(preserved_session_id.clone()))
                         .filter(conversation::Column::AgentType.eq(agent_type_str.clone()))
                         .filter(conversation::Column::Id.ne(conversation_id))
                         .filter(conversation::Column::DeletedAt.is_null())
@@ -2488,16 +2561,23 @@ impl ConnectionManager {
                         // An edit still marks the branch it preserved, whoever
                         // inserted the row: the lifecycle side copies the
                         // original's title, which is the edited conversation's
-                        // own name, so left alone both rows would wear it.
-                        if mode == ForkMode::Edit && sibling_title.is_some() {
-                            let adopted_id = existing.id;
+                        // own name, so left alone both rows would wear it. An
+                        // in-place edit hides it as well — the lifecycle side
+                        // made it visible, not knowing what the fork was for.
+                        let adopted_id = existing.id;
+                        let retitle = mode.is_edit() && sibling_title.is_some();
+                        if retitle || hidden {
                             let mut adopted: conversation::ActiveModel = existing.into();
-                            adopted.title = Set(sibling_title);
-                            adopted.title_locked = Set(sibling_title_locked);
+                            if retitle {
+                                adopted.title = Set(sibling_title);
+                                adopted.title_locked = Set(sibling_title_locked);
+                            }
+                            if hidden {
+                                adopted.deleted_at = Set(Some(now));
+                            }
                             adopted.update(txn).await?;
-                            return Ok(adopted_id);
                         }
-                        return Ok(existing.id);
+                        return Ok(adopted_id);
                     }
 
                     // INSERT sibling row preserving pre-fork (S1) history.
@@ -2512,14 +2592,14 @@ impl ConnectionManager {
                         kind: Set(sibling_kind),
                         model: Set(None),
                         git_branch: Set(git_branch),
-                        external_id: Set(Some(original_session_id)),
+                        external_id: Set(Some(preserved_session_id)),
                         parent_id: Set(None),
                         parent_tool_use_id: Set(None),
                         delegation_call_id: Set(None),
                         message_count: Set(0),
                         created_at: Set(now),
                         updated_at: Set(now),
-                        deleted_at: Set(None),
+                        deleted_at: Set(hidden.then_some(now)),
                         pinned_at: Set(None),
                         pin_order: Set(None),
                         origin_cwd: Set(None),
@@ -8531,16 +8611,19 @@ mod tests {
             .await
             .conversation_id = Some(pre.id);
 
-        // An unknown reply, and no reply named at all.
-        for turn_id in [Some("turn-1".to_string()), None] {
-            let err = mgr
-                .fork_session(&db, conn_id, None, None, turn_id.clone(), ForkMode::Edit)
-                .await
-                .expect_err("an edit must never fall back to a tail fork");
-            assert!(
-                matches!(err, AcpError::ForkPointUnresolved(_)),
-                "{turn_id:?}: expected ForkPointUnresolved, got {err:?}"
-            );
+        // An unknown reply, and no reply named at all — under both kinds of
+        // edit.
+        for mode in [ForkMode::Edit, ForkMode::EditInPlace] {
+            for turn_id in [Some("turn-1".to_string()), None] {
+                let err = mgr
+                    .fork_session(&db, conn_id, None, None, turn_id.clone(), mode)
+                    .await
+                    .expect_err("an edit must never fall back to a tail fork");
+                assert!(
+                    matches!(err, AcpError::ForkPointUnresolved(_)),
+                    "{mode:?} {turn_id:?}: expected ForkPointUnresolved, got {err:?}"
+                );
+            }
         }
 
         assert!(
@@ -8795,6 +8878,456 @@ mod tests {
             2,
             "exactly two rows regardless of who won the race"
         );
+    }
+
+    // ---------- fork_session in edit-in-place mode (`ForkMode::EditInPlace`) ----------
+    //
+    // The default edit: the same layout as `ForkMode::Edit`, with the row that
+    // keeps the original branch born soft-deleted, so the user is left with the
+    // one conversation they edited.
+
+    /// Every conversation the sidebar would list, by id.
+    async fn sidebar_ids(db: &AppDatabase) -> Vec<i32> {
+        conversation_service::list_all(&db.conn, None, None, None, None, None, false)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|summary| summary.id)
+            .collect()
+    }
+
+    /// A titled conversation on S1, pinned and with selectors recorded — the
+    /// state an edit in place has to leave on the row untouched.
+    async fn seed_edited_conversation(db: &AppDatabase, folder_id: i32) -> i32 {
+        let pre = conversation_service::create(
+            &db.conn,
+            folder_id,
+            AgentType::ClaudeCode,
+            Some("Topic".into()),
+            Some("feature/x".into()),
+        )
+        .await
+        .unwrap();
+        conversation_service::bind_external_id(&db.conn, pre.id, "session-S1", &[])
+            .await
+            .unwrap();
+        conversation_service::update_pin(&db.conn, pre.id, true)
+            .await
+            .unwrap();
+        let selectors = conversation_service::ConversationSelectorState {
+            mode_id: Some("plan".into()),
+            config_values: [("model".to_string(), "haiku".to_string())]
+                .into_iter()
+                .collect(),
+        };
+        conversation_service::save_selector_state(&db.conn, pre.id, selectors)
+            .await
+            .unwrap();
+        pre.id
+    }
+
+    #[tokio::test]
+    async fn fork_session_edit_in_place_continues_the_same_row_and_hides_the_original() {
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-edit-in-place").await;
+        let pre_id = seed_edited_conversation(&db, folder_id).await;
+        let before = conversation_service::get_by_id(&db.conn, pre_id)
+            .await
+            .unwrap();
+
+        let sibling_id = ConnectionManager::persist_fork_outcome(
+            &db.conn,
+            pre_id,
+            "session-S2".into(),
+            "session-S1".into(),
+            ForkMode::EditInPlace,
+        )
+        .await
+        .expect("the in-place layout persists");
+        assert_ne!(sibling_id, pre_id);
+
+        // ONE conversation in the sidebar: the row being edited, same id.
+        assert_eq!(sidebar_ids(&db).await, [pre_id]);
+
+        // The same row, now on the forked session, with everything that hangs
+        // off the row as it was: title, folder, branch, pin, selectors.
+        let current = conversation_service::get_by_id(&db.conn, pre_id)
+            .await
+            .unwrap();
+        assert_eq!(current.external_id.as_deref(), Some("session-S2"));
+        assert_eq!(current.title.as_deref(), Some("Topic"));
+        assert!(current.title_locked);
+        assert_eq!(current.folder_id, folder_id);
+        assert_eq!(current.git_branch.as_deref(), Some("feature/x"));
+        assert_eq!(current.pinned_at, before.pinned_at, "the pin stays");
+        let selectors = conversation_service::load_selector_state(&db.conn, pre_id)
+            .await
+            .unwrap()
+            .expect("selectors kept");
+        assert_eq!(selectors.mode_id.as_deref(), Some("plan"));
+        assert_eq!(
+            selectors.config_values.get("model").map(String::as_str),
+            Some("haiku")
+        );
+
+        // A resume of the forked session finds this row; nothing live claims
+        // the original any more.
+        assert_eq!(
+            conversation_service::find_live_id_for_session(
+                &db.conn,
+                "session-S2",
+                AgentType::ClaudeCode
+            )
+            .await
+            .unwrap(),
+            Some(pre_id)
+        );
+        assert_eq!(
+            conversation_service::find_live_id_for_session(
+                &db.conn,
+                "session-S1",
+                AgentType::ClaudeCode
+            )
+            .await
+            .unwrap(),
+            None
+        );
+
+        // The original is kept, not destroyed: a soft-deleted row still holds
+        // S1 under the `(before edit)` marker, unpinned.
+        let hidden = conversation::Entity::find_by_id(sibling_id)
+            .one(&db.conn)
+            .await
+            .unwrap()
+            .expect("the original branch keeps its row");
+        assert_eq!(hidden.external_id.as_deref(), Some("session-S1"));
+        assert_eq!(hidden.title.as_deref(), Some("Topic (before edit)"));
+        assert!(hidden.deleted_at.is_some(), "hidden from every live read");
+        assert!(hidden.pinned_at.is_none());
+        assert!(conversation_service::get_by_id(&db.conn, sibling_id)
+            .await
+            .is_err());
+
+        // ...and restorable the way any deleted conversation is.
+        assert!(
+            conversation_service::restore_soft_deleted(&db.conn, sibling_id, folder_id)
+                .await
+                .unwrap()
+        );
+        let mut listed = sidebar_ids(&db).await;
+        listed.sort_unstable();
+        assert_eq!(listed, [pre_id, sibling_id]);
+    }
+
+    #[tokio::test]
+    async fn fork_session_edit_keeping_the_original_leaves_it_in_the_sidebar() {
+        // The setting that keeps the original: today's two-conversation layout.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-edit-keep").await;
+        let pre_id = seed_edited_conversation(&db, folder_id).await;
+
+        let sibling_id = ConnectionManager::persist_fork_outcome(
+            &db.conn,
+            pre_id,
+            "session-S2".into(),
+            "session-S1".into(),
+            ForkMode::Edit,
+        )
+        .await
+        .unwrap();
+
+        let mut listed = sidebar_ids(&db).await;
+        listed.sort_unstable();
+        let mut expected = vec![pre_id, sibling_id];
+        expected.sort_unstable();
+        assert_eq!(listed, expected, "the original stays a visible conversation");
+        let sibling = conversation_service::get_by_id(&db.conn, sibling_id)
+            .await
+            .unwrap();
+        assert_eq!(sibling.title.as_deref(), Some("Topic (before edit)"));
+        assert_eq!(sibling.external_id.as_deref(), Some("session-S1"));
+    }
+
+    #[tokio::test]
+    async fn fork_session_edit_in_place_hides_a_sibling_the_lifecycle_subscriber_already_made() {
+        // The lifecycle side preserved S1 first, as a LIVE row wearing the
+        // edited conversation's own name. An in-place edit still ends with one
+        // visible conversation: it marks that row and hides it.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-edit-in-place-raced").await;
+        let pre = conversation_service::create(
+            &db.conn,
+            folder_id,
+            AgentType::ClaudeCode,
+            Some("Topic".into()),
+            None,
+        )
+        .await
+        .unwrap();
+        conversation_service::bind_external_id(&db.conn, pre.id, "session-S1", &[])
+            .await
+            .unwrap();
+        let preserved_id =
+            conversation_service::bind_external_id(&db.conn, pre.id, "session-S2", &[])
+                .await
+                .unwrap()
+                .expect("the lifecycle bind preserves S1");
+        assert_eq!(sidebar_ids(&db).await.len(), 2, "briefly two, before the edit lands");
+
+        let sibling_id = ConnectionManager::persist_fork_outcome(
+            &db.conn,
+            pre.id,
+            "session-S2".into(),
+            "session-S1".into(),
+            ForkMode::EditInPlace,
+        )
+        .await
+        .expect("an in-place edit survives the lifecycle subscriber winning the race");
+
+        assert_eq!(sibling_id, preserved_id, "it adopts the row holding S1");
+        assert_eq!(sidebar_ids(&db).await, [pre.id]);
+        let hidden = conversation::Entity::find_by_id(preserved_id)
+            .one(&db.conn)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(hidden.deleted_at.is_some());
+        assert_eq!(hidden.title.as_deref(), Some("Topic (before edit)"));
+        assert_eq!(hidden.external_id.as_deref(), Some("session-S1"));
+    }
+
+    #[tokio::test]
+    async fn fork_session_edit_in_place_moves_search_and_token_usage_to_the_forked_session() {
+        // Both keep per-row copies of what the transcript said. After the swap
+        // the row reads S2, so what it indexed from S1 — the replaced message
+        // included — has to stop matching at once, and both have to read the
+        // row again, from S2. The hidden original is read by neither.
+        use crate::db::service::{message_search_service, token_usage_service};
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-edit-in-place-index").await;
+        let pre_id = seed_edited_conversation(&db, folder_id).await;
+        let before = conversation::Entity::find_by_id(pre_id)
+            .one(&db.conn)
+            .await
+            .unwrap()
+            .unwrap();
+        let replaced: crate::models::message::MessageTurn =
+            serde_json::from_value(serde_json::json!({
+                "id": "turn-2",
+                "role": "user",
+                "blocks": [{ "type": "text", "text": "the replaced wording" }],
+                "timestamp": "2026-09-29T10:00:00Z",
+            }))
+            .unwrap();
+        message_search_service::index_conversation(&db.conn, pre_id, before.updated_at, &[replaced])
+            .await
+            .unwrap();
+        token_usage_service::replace_conversation_facts(&db.conn, pre_id, before.updated_at, &[])
+            .await
+            .unwrap();
+        assert_eq!(
+            message_search_service::search_messages(&db.conn, "replaced wording", 10)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+
+        let sibling_id = ConnectionManager::persist_fork_outcome(
+            &db.conn,
+            pre_id,
+            "session-S2".into(),
+            "session-S1".into(),
+            ForkMode::EditInPlace,
+        )
+        .await
+        .unwrap();
+
+        // Search: the replaced text is gone straight away, and the row is due
+        // to be indexed again — from the session it now holds.
+        assert!(
+            message_search_service::search_messages(&db.conn, "replaced wording", 10)
+                .await
+                .unwrap()
+                .is_empty(),
+            "the replaced message must not be found under the edited conversation"
+        );
+        let due: Vec<i32> = message_search_service::list_stale_conversations(
+            &db.conn,
+            chrono::Utc::now() + chrono::Duration::seconds(60),
+            10,
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|c| c.id)
+        .collect();
+        assert_eq!(due, [pre_id], "re-indexed from S2; the hidden original never");
+
+        // Token usage: the row's recorded usage is stale, so the next sync
+        // re-reads it through its current external_id (S2); the hidden
+        // original is not a candidate at all.
+        let candidates = token_usage_service::list_sync_candidates(&db.conn)
+            .await
+            .unwrap();
+        assert_eq!(
+            candidates.iter().map(|c| c.id).collect::<Vec<_>>(),
+            [pre_id]
+        );
+        let row = &candidates[0];
+        assert_ne!(
+            row.synced_source_updated_at,
+            Some(row.updated_at),
+            "the swap must leave the row's usage due for a re-read"
+        );
+        assert!(!candidates.iter().any(|c| c.id == sibling_id));
+    }
+
+    #[tokio::test]
+    async fn fork_session_keeps_the_transcript_the_row_showed_after_a_clear() {
+        // After a Claude `/clear` the row follows the new transcript T while
+        // the ACP session — the id the fork reports as the original — stays
+        // S1. The history the edit leaves behind is T's, so T is what the
+        // (hidden) original must hold; S1 would be the pre-`/clear` history,
+        // and T would end up held by no row at all.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-edit-after-clear").await;
+        let pre = conversation_service::create(
+            &db.conn,
+            folder_id,
+            AgentType::ClaudeCode,
+            Some("Topic".into()),
+            None,
+        )
+        .await
+        .unwrap();
+        conversation_service::bind_external_id(&db.conn, pre.id, "session-S1", &[])
+            .await
+            .unwrap();
+        // The rollover: same conversation, carried forward in place.
+        conversation_service::bind_external_id(
+            &db.conn,
+            pre.id,
+            "transcript-T",
+            &["session-S1".to_string()],
+        )
+        .await
+        .unwrap();
+
+        let sibling_id = ConnectionManager::persist_fork_outcome(
+            &db.conn,
+            pre.id,
+            "session-S2".into(),
+            "session-S1".into(),
+            ForkMode::EditInPlace,
+        )
+        .await
+        .unwrap();
+
+        let hidden = conversation::Entity::find_by_id(sibling_id)
+            .one(&db.conn)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(hidden.external_id.as_deref(), Some("transcript-T"));
+        let current = conversation_service::get_by_id(&db.conn, pre.id)
+            .await
+            .unwrap();
+        assert_eq!(current.external_id.as_deref(), Some("session-S2"));
+    }
+
+    #[tokio::test]
+    async fn fork_session_edit_drops_the_interruption_of_the_branch_it_leaves() {
+        // A turn cut off at the tail sits past every point an edit forks at:
+        // the edited conversation never had it, so it must not be offered a
+        // "Continue". A branch keeps the mark — it may fork at the tail.
+        use crate::db::test_helpers;
+        for (mode, kept) in [
+            (ForkMode::EditInPlace, None),
+            (ForkMode::Edit, None),
+            (ForkMode::Branch, Some(ConversationTurnState::Interrupted)),
+        ] {
+            let db = test_helpers::fresh_in_memory_db().await;
+            let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-interrupted").await;
+            let pre_id = seed_edited_conversation(&db, folder_id).await;
+            assert!(conversation_service::mark_turn_running(&db.conn, pre_id)
+                .await
+                .unwrap());
+            assert!(conversation_service::mark_turn_interrupted(&db.conn, pre_id)
+                .await
+                .unwrap());
+
+            ConnectionManager::persist_fork_outcome(
+                &db.conn,
+                pre_id,
+                "session-S2".into(),
+                "session-S1".into(),
+                mode,
+            )
+            .await
+            .unwrap();
+
+            let row = conversation::Entity::find_by_id(pre_id)
+                .one(&db.conn)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(row.turn_state, kept, "{mode:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn fork_broadcast_drops_the_hidden_original_from_every_sidebar() {
+        // An in-place edit tells clients to DROP the original's row (the
+        // lifecycle side may have announced it already); keeping it announces
+        // it, as every fork always has.
+        use crate::db::test_helpers;
+        for (mode, sibling_kind) in [
+            (ForkMode::EditInPlace, "deleted"),
+            (ForkMode::Edit, "upsert"),
+            (ForkMode::Branch, "upsert"),
+        ] {
+            let db = test_helpers::fresh_in_memory_db().await;
+            let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-broadcast").await;
+            let pre_id = seed_edited_conversation(&db, folder_id).await;
+            let sibling_id = ConnectionManager::persist_fork_outcome(
+                &db.conn,
+                pre_id,
+                "session-S2".into(),
+                "session-S1".into(),
+                mode,
+            )
+            .await
+            .unwrap();
+
+            let broadcaster = Arc::new(WebEventBroadcaster::new());
+            let emitter = EventEmitter::test_web_only(broadcaster.clone());
+            let mut rx = broadcaster.subscribe();
+            ConnectionManager::broadcast_fork_rows(&emitter, &db.conn, pre_id, sibling_id, mode)
+                .await;
+
+            let first = rx.try_recv().expect("the edited row is announced");
+            assert_eq!(first.payload["kind"], "upsert", "{mode:?}");
+            assert_eq!(first.payload["summary"]["id"], pre_id, "{mode:?}");
+            assert_eq!(
+                first.payload["summary"]["external_id"], "session-S2",
+                "{mode:?}"
+            );
+            let second = rx.try_recv().expect("the sibling is announced");
+            assert_eq!(second.payload["kind"], sibling_kind, "{mode:?}");
+            let sibling_ref = if sibling_kind == "deleted" {
+                &second.payload["id"]
+            } else {
+                &second.payload["summary"]["id"]
+            };
+            assert_eq!(sibling_ref, sibling_id, "{mode:?}");
+            assert!(rx.try_recv().is_err(), "{mode:?}: nothing else");
+        }
     }
 
     // --- wait_for_session_options polling ----------------------------------

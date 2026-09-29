@@ -199,15 +199,42 @@ pub enum ForkMode {
     /// the forked row is marked `[Fork]`.
     #[default]
     Branch,
-    /// "Edit message": fork at the reply just BEFORE a message the user is
-    /// rewriting, then send the edited text there. The fork has to end exactly
-    /// at that reply — a tail fork still holds the message being replaced, so
-    /// the edit would continue the wrong conversation — which makes a point
-    /// that cannot be named an error, never a fallback. The forked row keeps
-    /// its title (it IS the conversation being edited), locked so a title the
-    /// forked transcript carries can't replace it, and the sibling that
-    /// preserves the original branch is named `<title> (before edit)`.
+    /// "Edit message", keeping the original as a separate conversation: fork
+    /// at the reply just BEFORE a message the user is rewriting, then send the
+    /// edited text there. The fork has to end exactly at that reply — a tail
+    /// fork still holds the message being replaced, so the edit would continue
+    /// the wrong conversation — which makes a point that cannot be named an
+    /// error, never a fallback. The forked row keeps its title (it IS the
+    /// conversation being edited), locked so a title the forked transcript
+    /// carries can't replace it, and the sibling that preserves the original
+    /// branch is named `<title> (before edit)`.
     Edit,
+    /// "Edit message", continuing in place — the default. Everything
+    /// [`ForkMode::Edit`] does, except that the sibling holding the original
+    /// branch is born soft-deleted: the user sees ONE conversation, the same
+    /// row (same id, tab, pin, folder, selectors and title) now running on
+    /// the forked session.
+    ///
+    /// The agent session id still changes — no adapter can rewind a session
+    /// in place over ACP (claude-agent-acp keeps the SDK's `resumeSessionAt`
+    /// to itself, and every edit-capable adapter's fork writes a NEW session)
+    /// — so what this hides is the id change, not the fork.
+    ///
+    /// The hidden row is what keeps the original recoverable rather than
+    /// destroyed. It still holds the old session id, so the unique
+    /// `(external_id, agent_type)` index stops anything from re-binding or
+    /// re-importing it as a new conversation, and the import picker lists it
+    /// as a deleted conversation it can restore. The agent's own transcript
+    /// is never touched.
+    EditInPlace,
+}
+
+impl ForkMode {
+    /// Either kind of edit: both fork strictly and title the rows the same
+    /// way; they differ only in whether the original stays visible.
+    pub fn is_edit(self) -> bool {
+        matches!(self, ForkMode::Edit | ForkMode::EditInPlace)
+    }
 }
 
 /// Whether this agent's adapter forks EXACTLY at a named message or refuses —
@@ -225,15 +252,16 @@ pub fn honours_fork_point_strictly(agent_type: AgentType) -> bool {
 /// parsed turns — or why they could not be read.
 ///
 /// `Ok(None)` is a tail fork. [`ForkMode::Branch`] degrades to it whenever the
-/// point cannot be named, as "fork from here" always has; [`ForkMode::Edit`]
-/// refuses instead, for the reason given on the variant.
+/// point cannot be named, as "fork from here" always has; an edit (either
+/// kind, see [`ForkMode::is_edit`]) refuses instead, for the reason given on
+/// [`ForkMode::Edit`].
 pub fn settle_fork_point(
     turns: Result<&[MessageTurn], &str>,
     turn_id: &str,
     agent_type: AgentType,
     mode: ForkMode,
 ) -> Result<Option<ForkPoint>, AcpError> {
-    let strict = mode == ForkMode::Edit;
+    let strict = mode.is_edit();
     if strict && !honours_fork_point_strictly(agent_type) {
         return Err(AcpError::ForkPointUnresolved(format!(
             "{agent_type} cannot fork a session at a chosen message"
@@ -673,7 +701,7 @@ mod tests {
     /// where "fork from here" would.
     #[test]
     fn a_resolvable_point_forks_there_in_both_modes() {
-        for mode in [ForkMode::Branch, ForkMode::Edit] {
+        for mode in [ForkMode::Branch, ForkMode::Edit, ForkMode::EditInPlace] {
             let point = settle("turn-1", AgentType::ClaudeCode, mode)
                 .expect("a nameable reply settles")
                 .expect("and is a real fork point, not the tail");
@@ -701,14 +729,17 @@ mod tests {
     /// name its point must fail instead of quietly continuing the original.
     #[test]
     fn edit_refuses_a_point_it_cannot_name() {
-        let err = settle("turn-9", AgentType::ClaudeCode, ForkMode::Edit)
-            .expect_err("an unknown turn must not become a tail fork");
-        assert!(matches!(err, AcpError::ForkPointUnresolved(_)), "got {err:?}");
-        assert_eq!(err.code(), Some("fork_point_unresolved"));
+        // Both kinds of edit: they differ only in what happens to the original.
+        for mode in [ForkMode::Edit, ForkMode::EditInPlace] {
+            let err = settle("turn-9", AgentType::ClaudeCode, mode)
+                .expect_err("an unknown turn must not become a tail fork");
+            assert!(matches!(err, AcpError::ForkPointUnresolved(_)), "got {err:?}");
+            assert_eq!(err.code(), Some("fork_point_unresolved"));
 
-        // A user turn is never a fork point, so aiming an edit at one is the
-        // same miss — never "fork up to and including the message".
-        assert!(settle("turn-2", AgentType::ClaudeCode, ForkMode::Edit).is_err());
+            // A user turn is never a fork point, so aiming an edit at one is
+            // the same miss — never "fork up to and including the message".
+            assert!(settle("turn-2", AgentType::ClaudeCode, mode).is_err());
+        }
     }
 
     /// Not being able to read the conversation is no excuse to guess either.
@@ -738,10 +769,12 @@ mod tests {
             assert!(!honours_fork_point_strictly(agent), "{agent}");
         }
         // Refused up front — even a turn pi COULD fingerprint…
-        assert!(matches!(
-            settle("turn-1", AgentType::Pi, ForkMode::Edit),
-            Err(AcpError::ForkPointUnresolved(_))
-        ));
+        for mode in [ForkMode::Edit, ForkMode::EditInPlace] {
+            assert!(matches!(
+                settle("turn-1", AgentType::Pi, mode),
+                Err(AcpError::ForkPointUnresolved(_))
+            ));
+        }
         // …while "fork from here" on pi is unchanged.
         assert!(settle("turn-1", AgentType::Pi, ForkMode::Branch)
             .unwrap()
@@ -756,11 +789,17 @@ mod tests {
             ForkMode::Edit
         );
         assert_eq!(
+            serde_json::from_value::<ForkMode>(serde_json::json!("edit_in_place")).unwrap(),
+            ForkMode::EditInPlace
+        );
+        assert_eq!(
             serde_json::from_value::<ForkMode>(serde_json::json!("branch")).unwrap(),
             ForkMode::Branch
         );
         // An absent mode is a plain branch — every caller that predates edit.
         assert_eq!(ForkMode::default(), ForkMode::Branch);
+        assert!(ForkMode::Edit.is_edit() && ForkMode::EditInPlace.is_edit());
+        assert!(!ForkMode::Branch.is_edit());
     }
 
     #[test]

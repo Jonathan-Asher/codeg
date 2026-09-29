@@ -1705,6 +1705,10 @@
     "behaviorExit": "codeg beenden",
     "saveFailed": "Schließverhalten konnte nicht gespeichert werden: {message}"
   },
+  "EditMessageSettings": {
+    "title": "Beim Bearbeiten das Original als eigene Konversation behalten",
+    "description": "Das Bearbeiten einer früheren Nachricht setzt dieselbe Konversation ab dieser Stelle fort. Schalte dies ein, um die Version vor der Bearbeitung zusätzlich in der Seitenleiste zu behalten, benannt als „… (before edit)“."
+  },
   "StartupWorkspaceSettings": {
     "title": "Beim Start von codeg öffnen",
     "description": "Ein Remote-Arbeitsbereich öffnet sich in einem eigenen Fenster; der lokale Arbeitsbereich bleibt unter Schnellaktionen nur einen Klick entfernt.",
@@ -2042,6 +2046,7 @@
       "editMessageBusy": "Nachricht kann nicht bearbeitet werden, während ein Zug läuft",
       "editMessageQueued": "Nachricht kann nicht bearbeitet werden, solange Nachrichten in der Warteschlange warten",
       "editMessageHistoryFailed": "Der neue Zweig wurde erstellt, sein Verlauf ließ sich aber nicht laden – die bearbeitete Nachricht wurde nicht gesendet. Versuche es mit „Speichern & senden“ erneut.",
+      "editMessageHistoryFailedInPlace": "Die Konversation wurde bis hierhin zurückgesetzt, ihr Verlauf ließ sich aber nicht laden – die bearbeitete Nachricht wurde nicht gesendet. Versuche es mit „Speichern & senden“ erneut.",
       "editMessageNewConversationFailed": "Für die bearbeitete Nachricht konnte keine neue Konversation geöffnet werden",
       "editMessageReplyNotFound": "die Antwort vor dieser Nachricht wurde in der gespeicherten Konversation nicht gefunden",
       "exportConversation": "Konversation exportieren",
@@ -3541,10 +3546,12 @@
         "editQueued": "Bearbeiten nicht möglich, solange Nachrichten in der Warteschlange warten",
         "editNotReady": "Diese Nachricht kann noch nicht bearbeitet werden – bitte gleich erneut versuchen",
         "editHint": "Speichern startet ab hier einen neuen Zweig. Die ursprüngliche Konversation bleibt in der Seitenleiste, Dateiänderungen werden nicht rückgängig gemacht.",
+        "editHintInPlace": "Speichern setzt diese Konversation ab hier mit der bearbeiteten Nachricht anstelle der ursprünglichen fort. Dateiänderungen werden nicht rückgängig gemacht.",
         "editHintNewConversation": "Dies ist die erste Nachricht, daher startet Speichern damit eine neue Konversation. Diese hier bleibt unverändert, Dateiänderungen werden nicht rückgängig gemacht.",
         "editCancel": "Abbrechen",
         "editSave": "Speichern & senden",
         "editSaving": "Neuer Zweig wird gestartet…",
+        "editSavingInPlace": "Wird ab hier fortgesetzt…",
         "editSavingNewConversation": "Neue Konversation wird geöffnet…",
         "editImagesKept": "Angehängte Bilder werden mit der bearbeiteten Nachricht erneut gesendet",
         "copied": "Kopiert",

@@ -1,13 +1,14 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   UserMessageEditor,
   type UserMessageEditorProps,
 } from "./user-message-editor"
 import enMessages from "@/i18n/messages/en.json"
+import { saveKeepOriginalOnEdit } from "@/lib/edit-message-prefs"
 
 const L = enMessages.Folder.chat.messageList
 
@@ -135,5 +136,34 @@ describe("UserMessageEditor", () => {
     expect(
       screen.getByRole("button", { name: L.editSavingNewConversation })
     ).toBeDisabled()
+  })
+
+  describe("what saving does to the original", () => {
+    afterEach(() => {
+      localStorage.clear()
+    })
+
+    it("says the edit continues this conversation in place, by default", () => {
+      renderEditor({ saving: true })
+      expect(screen.getByText(L.editHintInPlace)).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: L.editSavingInPlace })
+      ).toBeDisabled()
+      expect(screen.queryByText(L.editHint)).toBeNull()
+    })
+
+    it("says the original stays in the sidebar when that is kept", () => {
+      saveKeepOriginalOnEdit(true)
+      renderEditor({ saving: true })
+      expect(screen.getByText(L.editHint)).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: L.editSaving })).toBeDisabled()
+    })
+
+    it("rewords an open editor when the setting changes elsewhere", () => {
+      renderEditor()
+      expect(screen.getByText(L.editHintInPlace)).toBeInTheDocument()
+      act(() => saveKeepOriginalOnEdit(true))
+      expect(screen.getByText(L.editHint)).toBeInTheDocument()
+    })
   })
 })

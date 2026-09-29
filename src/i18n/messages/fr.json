@@ -1705,6 +1705,10 @@
     "behaviorExit": "Quitter codeg",
     "saveFailed": "Échec de l'enregistrement du comportement de fermeture : {message}"
   },
+  "EditMessageSettings": {
+    "title": "Conserver l'original comme conversation distincte lors d'une modification",
+    "description": "Modifier un message précédent poursuit la même conversation à partir de ce point. Activez cette option pour conserver aussi la version d'avant la modification dans la barre latérale, sous le nom « … (before edit) »."
+  },
   "StartupWorkspaceSettings": {
     "title": "Au démarrage de codeg, ouvrir",
     "description": "Un espace de travail distant s'ouvre dans sa propre fenêtre ; l'espace de travail local reste à un clic dans les Actions rapides.",
@@ -2042,6 +2046,7 @@
       "editMessageBusy": "Impossible de modifier le message pendant qu'un tour est en cours",
       "editMessageQueued": "Impossible de modifier le message tant que des messages attendent dans la file",
       "editMessageHistoryFailed": "La nouvelle branche a été créée, mais son historique ne s'est pas chargé : le message modifié n'a pas été envoyé. Réessayez avec Enregistrer et envoyer.",
+      "editMessageHistoryFailedInPlace": "La conversation a été ramenée à ce point, mais son historique ne s'est pas chargé : le message modifié n'a pas été envoyé. Réessayez avec Enregistrer et envoyer.",
       "editMessageNewConversationFailed": "Impossible d'ouvrir une nouvelle conversation pour le message modifié",
       "editMessageReplyNotFound": "la réponse précédant ce message est introuvable dans la conversation enregistrée",
       "exportConversation": "Exporter la conversation",
@@ -3541,10 +3546,12 @@
         "editQueued": "Impossible de modifier tant que des messages attendent dans la file",
         "editNotReady": "Impossible de modifier ce message pour le moment, réessayez dans un instant",
         "editHint": "Enregistrer démarre une nouvelle branche à partir d'ici. La conversation d'origine reste dans la barre latérale, et les modifications de fichiers ne sont pas annulées.",
+        "editHintInPlace": "Enregistrer poursuit cette conversation à partir d'ici avec le message modifié, à la place de l'original. Les modifications de fichiers ne sont pas annulées.",
         "editHintNewConversation": "C'est le premier message : enregistrer démarre une nouvelle conversation avec lui. Celle-ci reste telle quelle, et les modifications de fichiers ne sont pas annulées.",
         "editCancel": "Annuler",
         "editSave": "Enregistrer et envoyer",
         "editSaving": "Création d'une nouvelle branche…",
+        "editSavingInPlace": "Poursuite à partir d'ici…",
         "editSavingNewConversation": "Ouverture d'une nouvelle conversation…",
         "editImagesKept": "Les images jointes sont renvoyées avec le message modifié",
         "copied": "Copié",

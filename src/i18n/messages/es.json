@@ -1705,6 +1705,10 @@
     "behaviorExit": "Salir de codeg",
     "saveFailed": "No se pudo guardar el comportamiento de cierre: {message}"
   },
+  "EditMessageSettings": {
+    "title": "Conservar el original como conversación aparte al editar",
+    "description": "Editar un mensaje anterior continúa la misma conversación desde ese punto. Actívalo para conservar también la versión previa a la edición en la barra lateral, con el nombre «… (before edit)»."
+  },
   "StartupWorkspaceSettings": {
     "title": "Al iniciar codeg, abrir",
     "description": "Un espacio de trabajo remoto se abre en su propia ventana, y el local sigue a un clic en Acciones rápidas.",
@@ -2042,6 +2046,7 @@
       "editMessageBusy": "No se puede editar el mensaje mientras hay un turno en curso",
       "editMessageQueued": "No se puede editar el mensaje mientras hay mensajes esperando en la cola",
       "editMessageHistoryFailed": "Se creó la nueva rama, pero su historial no se cargó, así que el mensaje editado no se envió. Vuelve a intentarlo con Guardar y enviar.",
+      "editMessageHistoryFailedInPlace": "La conversación retrocedió hasta este punto, pero su historial no se cargó, así que el mensaje editado no se envió. Vuelve a intentarlo con Guardar y enviar.",
       "editMessageNewConversationFailed": "No se pudo abrir una nueva conversación para el mensaje editado",
       "editMessageReplyNotFound": "no se encontró la respuesta anterior a este mensaje en la conversación guardada",
       "exportConversation": "Exportar conversación",
@@ -3541,10 +3546,12 @@
         "editQueued": "No se puede editar mientras hay mensajes esperando en la cola",
         "editNotReady": "Todavía no se puede editar este mensaje; inténtalo en un momento",
         "editHint": "Al guardar se inicia una nueva rama desde aquí. La conversación original se queda en la barra lateral y los cambios en archivos no se deshacen.",
+        "editHintInPlace": "Al guardar, esta conversación continúa desde aquí con el mensaje editado en lugar del original. Los cambios en archivos no se deshacen.",
         "editHintNewConversation": "Es el primer mensaje, así que al guardar se inicia una nueva conversación con él. Esta se queda como está y los cambios en archivos no se deshacen.",
         "editCancel": "Cancelar",
         "editSave": "Guardar y enviar",
         "editSaving": "Iniciando una nueva rama…",
+        "editSavingInPlace": "Continuando desde aquí…",
         "editSavingNewConversation": "Abriendo una nueva conversación…",
         "editImagesKept": "Las imágenes adjuntas se vuelven a enviar con el mensaje editado",
         "copied": "Copiado",

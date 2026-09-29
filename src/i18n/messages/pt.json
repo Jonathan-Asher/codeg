@@ -1705,6 +1705,10 @@
     "behaviorExit": "Sair do codeg",
     "saveFailed": "Falha ao salvar o comportamento de fechamento: {message}"
   },
+  "EditMessageSettings": {
+    "title": "Manter o original como uma conversa separada ao editar",
+    "description": "Editar uma mensagem anterior continua a mesma conversa a partir desse ponto. Ative para também manter a versão de antes da edição na barra lateral, com o nome “… (before edit)”."
+  },
   "StartupWorkspaceSettings": {
     "title": "Ao iniciar o codeg, abrir",
     "description": "Um espaço de trabalho remoto abre em sua própria janela, e o local continua a um clique em Ações rápidas.",
@@ -2042,6 +2046,7 @@
       "editMessageBusy": "Não é possível editar a mensagem enquanto há um turno em andamento",
       "editMessageQueued": "Não é possível editar a mensagem enquanto há mensagens esperando na fila",
       "editMessageHistoryFailed": "O novo ramo foi criado, mas o histórico dele não carregou, então a mensagem editada não foi enviada. Tente Salvar e enviar de novo.",
+      "editMessageHistoryFailedInPlace": "A conversa voltou até este ponto, mas o histórico dela não carregou, então a mensagem editada não foi enviada. Tente Salvar e enviar de novo.",
       "editMessageNewConversationFailed": "Não foi possível abrir uma nova conversa para a mensagem editada",
       "editMessageReplyNotFound": "a resposta anterior a esta mensagem não foi encontrada na conversa salva",
       "exportConversation": "Exportar conversa",
@@ -3541,10 +3546,12 @@
         "editQueued": "Não é possível editar enquanto há mensagens esperando na fila",
         "editNotReady": "Ainda não é possível editar esta mensagem; tente novamente em instantes",
         "editHint": "Salvar inicia um novo ramo a partir daqui. A conversa original fica na barra lateral, e as alterações em arquivos não são desfeitas.",
+        "editHintInPlace": "Salvar continua esta conversa a partir daqui com a mensagem editada, no lugar da original. As alterações em arquivos não são desfeitas.",
         "editHintNewConversation": "Esta é a primeira mensagem, então salvar inicia uma nova conversa com ela. Esta continua como está, e as alterações em arquivos não são desfeitas.",
         "editCancel": "Cancelar",
         "editSave": "Salvar e enviar",
         "editSaving": "Iniciando um novo ramo…",
+        "editSavingInPlace": "Continuando a partir daqui…",
         "editSavingNewConversation": "Abrindo uma nova conversa…",
         "editImagesKept": "As imagens anexadas são enviadas de novo com a mensagem editada",
         "copied": "Copiado",
