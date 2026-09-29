@@ -1216,6 +1216,39 @@ impl ConnectionManager {
         self.send_prompt_inner(conn_id, blocks, None).await
     }
 
+    /// Send a prompt that is deliberately NOT linked to a conversation row.
+    ///
+    /// For a Quick Ask private question: it must not appear in the sidebar,
+    /// the message search index or the history, so no row is created for it
+    /// at all. Refused on a connection that already belongs to a conversation,
+    /// so it can never be used to slip a prompt into a recorded conversation
+    /// without the recording — those go through
+    /// [`Self::send_prompt_linked_with_message_id`].
+    pub async fn send_prompt_unlinked(
+        &self,
+        conn_id: &str,
+        blocks: Vec<PromptInputBlock>,
+    ) -> Result<(), AcpError> {
+        let prompt_lock = self.clone_prompt_lock(conn_id).await?;
+        let _guard = prompt_lock.lock_owned().await;
+        let state_arc = {
+            let connections = self.connections.lock().await;
+            connections
+                .get(conn_id)
+                .ok_or_else(|| AcpError::ConnectionNotFound(conn_id.into()))?
+                .state
+                .clone()
+        };
+        let linked = state_arc.read().await.conversation_id.is_some();
+        if linked {
+            return Err(AcpError::protocol(
+                "connection belongs to a conversation; unlinked prompts are only for private sessions"
+                    .to_string(),
+            ));
+        }
+        self.send_prompt_inner(conn_id, blocks, None).await
+    }
+
     /// Send a prompt while ensuring a `Conversation` DB row is bound to this
     /// connection. On the first call (when `state.conversation_id` is None),
     /// either:
@@ -5856,6 +5889,48 @@ mod tests {
             matches!(res, Err(AcpError::TurnInProgress)),
             "send_prompt must return TurnInProgress when a turn is in flight, got {res:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn unlinked_prompt_goes_out_without_a_conversation() {
+        // A Quick Ask private question: the prompt reaches the agent, and the
+        // connection stays unlinked (no conversation row is ever created).
+        let mgr = ConnectionManager::new();
+        let conn_id = "conn-private";
+        let mut rx = insert_live_connection(&mgr, conn_id, AgentType::ClaudeCode, None).await;
+        mgr.send_prompt_unlinked(
+            conn_id,
+            vec![PromptInputBlock::Text {
+                text: "quick question".into(),
+            }],
+        )
+        .await
+        .expect("unlinked prompt is accepted");
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(crate::acp::connection::ConnectionCommand::Prompt { .. })
+        ));
+        let state = mgr.get_state(conn_id).await.unwrap();
+        assert!(state.read().await.conversation_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn unlinked_prompt_is_refused_on_a_linked_connection() {
+        // Never a way to slip an unrecorded prompt into a saved conversation.
+        let mgr = ConnectionManager::new();
+        let conn_id = "conn-linked";
+        let mut rx = insert_live_connection(&mgr, conn_id, AgentType::ClaudeCode, None).await;
+        mgr.get_state(conn_id)
+            .await
+            .unwrap()
+            .write()
+            .await
+            .conversation_id = Some(42);
+        let res = mgr
+            .send_prompt_unlinked(conn_id, vec![PromptInputBlock::Text { text: "hi".into() }])
+            .await;
+        assert!(res.is_err(), "linked connection must refuse, got {res:?}");
+        assert!(rx.try_recv().is_err(), "nothing was sent to the agent");
     }
 
     #[tokio::test]

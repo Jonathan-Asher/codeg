@@ -50,6 +50,7 @@ use crate::acp::file_system_runtime::{
 };
 use crate::acp::host_tools_policy::{HostToolsPolicy, HOST_TOOLS_ENV};
 use crate::acp::registry::{self, AgentDistribution};
+use crate::acp::session_persistence::SessionPersistence;
 use crate::acp::session_state::SessionState;
 use crate::acp::stderr_tail::{summarize_parser_error, StderrTail, TailScope};
 use crate::acp::terminal_runtime::{
@@ -2825,6 +2826,11 @@ pub async fn spawn_agent_connection(
     // per-agent `runtime_env`, which does not survive into `run_connection`.
     let host_tools = HostToolsPolicy::from_env(&runtime_env);
 
+    // Whether the agent may keep its own transcript of this session (a Quick
+    // Ask private question asks it not to). Resolved here for the same reason
+    // as `host_tools`: it is a per-launch `runtime_env` key.
+    let session_persistence = SessionPersistence::from_env(&runtime_env);
+
     // Forward only the codeg git credential helper keys into the terminal
     // runtime — not the agent's API tokens or model provider credentials.
     // This makes `git fetch`/`git push` issued through the ACP
@@ -2921,6 +2927,7 @@ pub async fn spawn_agent_connection(
             delegation_injection,
             fs_policy,
             host_tools,
+            session_persistence,
             stderr_tail,
             lifeline_rx,
         )
@@ -5218,9 +5225,17 @@ fn build_new_session_request(
     agent_type: AgentType,
     cwd: &Path,
     mcp_servers: Vec<McpServer>,
+    session_persistence: SessionPersistence,
 ) -> NewSessionRequest {
     let mut req = NewSessionRequest::new(cwd.to_path_buf());
-    if let Some(meta) = claude_raw_sdk_session_meta(agent_type) {
+    if let Some(mut meta) = claude_raw_sdk_session_meta(agent_type) {
+        // Only `session/new` carries SDK options: a private session is never
+        // loaded or resumed (it leaves no transcript to reopen).
+        if let Some(options) = session_persistence.claude_session_options() {
+            if let Some(serde_json::Value::Object(claude_code)) = meta.get_mut("claudeCode") {
+                claude_code.insert("options".to_string(), serde_json::Value::Object(options));
+            }
+        }
         req = req.meta(meta);
     }
     if !mcp_servers.is_empty() {
@@ -5965,6 +5980,7 @@ async fn run_connection(
     delegation_injection: Option<DelegationInjection>,
     fs_policy: FsAccessPolicy,
     host_tools: HostToolsPolicy,
+    session_persistence: SessionPersistence,
     // Connection-scoped agent stderr buffer, shared with the `with_debug`
     // callback installed by `build_agent`. Read only when a turn ends without
     // agent output, to attach evidence to the synthesized error.
@@ -6001,9 +6017,10 @@ async fn run_connection(
     // The connection's security posture in one place, so what a live session
     // actually enforces is readable from the log rather than inferred.
     tracing::info!(
-        "[ACP] fs policy {} | host tools {}",
+        "[ACP] fs policy {} | host tools {} | transcript {}",
         fs_policy.describe(),
-        host_tools.describe()
+        host_tools.describe(),
+        session_persistence.describe()
     );
     // `strict` reads as a containment boundary and is not one while codeg also
     // advertises `terminal`: an agent refused a read just `cat`s the file
@@ -7211,7 +7228,12 @@ async fn run_connection(
                         let (new_resp, grok_models_raw) = match attach
                             .run(send_new_session_capturing_models(
                                 &cx,
-                                build_new_session_request(agent_type, &cwd, mcp_servers.clone()),
+                                build_new_session_request(
+                                    agent_type,
+                                    &cwd,
+                                    mcp_servers.clone(),
+                                    session_persistence,
+                                ),
                             ))
                             .await
                         {
@@ -7322,7 +7344,12 @@ async fn run_connection(
                 let (new_resp, grok_models_raw) = match attach
                     .run(send_new_session_capturing_models(
                         &cx,
-                        build_new_session_request(agent_type, &cwd, mcp_servers.clone()),
+                        build_new_session_request(
+                            agent_type,
+                            &cwd,
+                            mcp_servers.clone(),
+                            session_persistence,
+                        ),
                     ))
                     .await
                 {
@@ -22530,9 +22557,61 @@ mod tests {
     }
 
     #[test]
+    fn private_claude_session_turns_the_transcript_off() {
+        let cwd = std::path::PathBuf::from("/tmp/codeg");
+        let req = build_new_session_request(
+            AgentType::ClaudeCode,
+            &cwd,
+            Vec::new(),
+            SessionPersistence::Off,
+        );
+        let claude_code = req
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("claudeCode"))
+            .expect("claudeCode meta");
+        assert_eq!(
+            claude_code
+                .get("options")
+                .and_then(|o| o.get("persistSession"))
+                .and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        // The raw-message switch the rest of codeg depends on survives.
+        assert_eq!(
+            claude_code
+                .get("emitRawSDKMessages")
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn default_claude_session_sends_no_sdk_options() {
+        let cwd = std::path::PathBuf::from("/tmp/codeg");
+        let req = build_new_session_request(
+            AgentType::ClaudeCode,
+            &cwd,
+            Vec::new(),
+            SessionPersistence::Default,
+        );
+        assert!(req
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("claudeCode"))
+            .and_then(|v| v.get("options"))
+            .is_none());
+    }
+
+    #[test]
     fn build_new_session_request_sets_claude_raw_meta() {
         let cwd = std::path::PathBuf::from("/tmp/codeg");
-        let req = build_new_session_request(AgentType::ClaudeCode, &cwd, Vec::new());
+        let req = build_new_session_request(
+            AgentType::ClaudeCode,
+            &cwd,
+            Vec::new(),
+            SessionPersistence::Default,
+        );
 
         assert_eq!(
             req.meta
@@ -22951,7 +23030,12 @@ mod tests {
     fn openclaw_session_requests_carry_no_mcp_servers() {
         let cwd = std::path::PathBuf::from("/tmp/codeg");
 
-        let new_req = build_new_session_request(AgentType::OpenClaw, &cwd, Vec::new());
+        let new_req = build_new_session_request(
+            AgentType::OpenClaw,
+            &cwd,
+            Vec::new(),
+            SessionPersistence::Default,
+        );
         assert!(
             new_req.mcp_servers.is_empty(),
             "OpenClaw session/new must carry no MCP servers"
@@ -27894,7 +27978,12 @@ mod tests {
     #[test]
     fn untyped_new_session_carries_the_typed_request_payload() {
         let cwd = std::path::PathBuf::from("/tmp/codeg");
-        let req = build_new_session_request(AgentType::Cline, &cwd, Vec::new());
+        let req = build_new_session_request(
+            AgentType::Cline,
+            &cwd,
+            Vec::new(),
+            SessionPersistence::Default,
+        );
         let expected = serde_json::to_value(&req).unwrap();
 
         let untyped = UntypedMessage::new(AGENT_METHOD_NAMES.session_new, req).expect("builds");

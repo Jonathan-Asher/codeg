@@ -47,6 +47,9 @@ pub mod pet;
 pub mod plan_usage;
 pub mod project_boot;
 pub mod question;
+/// Quick Ask: the global-shortcut question window (desktop) and the cleanup
+/// of its private questions (every runtime).
+pub mod quick_ask;
 pub mod quick_messages;
 #[cfg(feature = "tauri-runtime")]
 pub mod remote_proxy;

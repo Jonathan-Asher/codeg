@@ -74,6 +74,9 @@ pub struct AcpConnectParams {
     pub preferred_mode_id: Option<String>,
     #[serde(default)]
     pub preferred_config_values: Option<BTreeMap<String, String>>,
+    /// A Quick Ask private question: ask the agent not to keep a transcript.
+    #[serde(default)]
+    pub ephemeral: Option<bool>,
 }
 
 pub async fn acp_connect(
@@ -82,7 +85,7 @@ pub async fn acp_connect(
 ) -> Result<Json<String>, AppCommandError> {
     let db = &state.db;
 
-    let runtime_env = acp_commands::build_session_runtime_env(
+    let mut runtime_env = acp_commands::build_session_runtime_env(
         db,
         params.agent_type,
         params.session_id.as_deref(),
@@ -90,6 +93,9 @@ pub async fn acp_connect(
     )
     .await
     .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    if params.ephemeral.unwrap_or(false) {
+        crate::acp::session_persistence::SessionPersistence::mark_off(&mut runtime_env);
+    }
 
     // Guard: the session page must never trigger a download or install.
     // If the agent isn't ready, return SdkNotInstalled here so the frontend
@@ -209,6 +215,35 @@ pub async fn acp_prompt(
             // A concurrent send while a turn is in flight is an expected,
             // recoverable condition (409), not a server fault (500). The
             // frontend re-queues the draft. Other errors stay 500.
+            match e {
+                AcpError::TurnInProgress => {
+                    AppCommandError::new(AppErrorCode::TurnInProgress, message)
+                }
+                _ => AppCommandError::task_execution_failed(message),
+            }
+        })?;
+    Ok(Json(()))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpPromptUnlinkedParams {
+    pub connection_id: String,
+    pub blocks: Vec<crate::acp::types::PromptInputBlock>,
+}
+
+/// Web twin of the `acp_prompt_unlinked` Tauri command: a Quick Ask private
+/// question, sent without creating a conversation row.
+pub async fn acp_prompt_unlinked(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpPromptUnlinkedParams>,
+) -> Result<Json<()>, AppCommandError> {
+    state
+        .connection_manager
+        .send_prompt_unlinked(&params.connection_id, params.blocks)
+        .await
+        .map_err(|e| {
+            let message = e.to_string();
             match e {
                 AcpError::TurnInProgress => {
                     AppCommandError::new(AppErrorCode::TurnInProgress, message)

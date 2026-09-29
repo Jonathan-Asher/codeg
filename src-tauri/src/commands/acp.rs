@@ -10452,6 +10452,7 @@ pub(crate) async fn build_session_runtime_env(
 /// OpenClaw's reset flag (set iff `session_id` is None at spawn).
 fn is_volatile_fingerprint_key(key: &str) -> bool {
     key == "OPENCLAW_RESET_SESSION"
+        || key == crate::acp::session_persistence::SESSION_PERSISTENCE_ENV
 }
 
 /// Fingerprint the effective config a spawned agent process is locked to: the
@@ -10664,6 +10665,7 @@ pub async fn acp_connect(
     session_id: Option<String>,
     preferred_mode_id: Option<String>,
     preferred_config_values: Option<BTreeMap<String, String>>,
+    ephemeral: Option<bool>,
     manager: State<'_, ConnectionManager>,
     db: State<'_, AppDatabase>,
     app_handle: tauri::AppHandle,
@@ -10679,8 +10681,12 @@ pub async fn acp_connect(
         .app_data_dir()
         .map(|p| crate::paths::resolve_effective_data_dir(&p))
         .unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let runtime_env =
+    let mut runtime_env =
         build_session_runtime_env(&db, agent_type, session_id.as_deref(), &app_data_dir).await?;
+    // A Quick Ask private question: ask the agent not to keep a transcript.
+    if ephemeral.unwrap_or(false) {
+        crate::acp::session_persistence::SessionPersistence::mark_off(&mut runtime_env);
+    }
 
     // Guard: the session page must never trigger a download or install.
     // If the agent isn't ready, return SdkNotInstalled here so the frontend
@@ -10737,6 +10743,18 @@ pub async fn acp_prompt(
         )
         .await
         .map(|_| ())
+}
+
+/// Send a prompt on a private (unrecorded) session — see
+/// [`ConnectionManager::send_prompt_unlinked`].
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_prompt_unlinked(
+    connection_id: String,
+    blocks: Vec<PromptInputBlock>,
+    manager: State<'_, ConnectionManager>,
+) -> Result<(), AcpError> {
+    manager.send_prompt_unlinked(&connection_id, blocks).await
 }
 
 #[cfg(feature = "tauri-runtime")]
