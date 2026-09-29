@@ -426,7 +426,8 @@ describe("useQuickAskSession", () => {
         await result.current.send("two")
       })
       expect(h.api.submitSessionFeedback).not.toHaveBeenCalled()
-      expect(result.current.thread.at(-1)).toMatchObject({ state: "queued" })
+      const thread = result.current.thread
+      expect(thread[thread.length - 1]).toMatchObject({ state: "queued" })
     })
 
     it("discards a prepared scratch dir when the user switches target first", async () => {
