@@ -154,10 +154,12 @@ import {
 import { userPromptHistory } from "@/lib/composer-history"
 import {
   buildEditedMessageDraft,
+  forkConversationForEdit,
   resolveEditForkTurnId,
   supportsMessageEdit,
   type UserMessageEditRequest,
 } from "@/lib/edit-message"
+import { loadKeepOriginalOnEdit } from "@/lib/edit-message-prefs"
 import { contentBlocksFromUserMessage } from "@/lib/user-message-blocks"
 import { getAgentLabel } from "@/lib/custom-agents"
 import {
@@ -265,6 +267,9 @@ interface ForkedEdit {
   /** Live turns of the pre-fork history, to drop once the fork's history is
    *  loaded. */
   staleLiveTurnIds: string[]
+  /** Whether the original was kept as a separate conversation — only what
+   *  the edit's messages say about it depends on this. */
+  keptOriginal: boolean
 }
 
 /** How many times an edit re-reads the just-forked history, and how far apart
@@ -1917,7 +1922,8 @@ const ConversationTabView = memo(function ConversationTabView({
 
   // An edit whose fork went through but whose forked history then failed to
   // load. Saving the same edit again resumes from it: forking once more would
-  // fork the forked session and leave a stray "(before edit)" copy behind.
+  // fork the forked session and leave a stray copy of it behind — a hidden
+  // one, or a "(before edit)" conversation with the original kept.
   const pendingEditForkRef = useRef<ForkedEdit | null>(null)
 
   // Wait until the forked history has replaced the one on screen. The send
@@ -2084,19 +2090,32 @@ const ConversationTabView = memo(function ConversationTabView({
             })
             return false
           }
-          const { forkedSessionId } = await acpFork(
+          // Read at save time, not captured: the setting lives in another
+          // window and can change while the editor is open.
+          const keptOriginal = loadKeepOriginalOnEdit()
+          // The edit continues THIS conversation: same row, same runtime
+          // session, same tab. Only the agent session under it moves.
+          const forkedSessionId = await forkConversationForEdit({
             connectionId,
-            dbConvIdRef.current,
+            conversationId: dbConvIdRef.current,
             folderId,
             forkPointId,
-            "edit"
-          )
-          sessionIdRef.current = forkedSessionId
-          setExternalId(effectiveConversationId, forkedSessionId)
-          // This row now holds the forked session; a new sibling row holds the
-          // original branch.
+            keepOriginal: keptOriginal,
+            adoptForkedSession: (sessionId) => {
+              sessionIdRef.current = sessionId
+              setExternalId(effectiveConversationId, sessionId)
+            },
+          })
+          // This row now holds the forked session. The original branch is on
+          // a sibling row: hidden, or — with the original kept — a new
+          // "(before edit)" conversation the list has to pick up.
           refreshConversations()
-          fork = { forkFromTurnId, forkedSessionId, staleLiveTurnIds }
+          fork = {
+            forkFromTurnId,
+            forkedSessionId,
+            staleLiveTurnIds,
+            keptOriginal,
+          }
           pendingEditForkRef.current = fork
         }
 
@@ -2106,7 +2125,9 @@ const ConversationTabView = memo(function ConversationTabView({
             notify({
               level: "error",
               key: failKey,
-              title: t("editMessageHistoryFailed"),
+              title: fork.keptOriginal
+                ? t("editMessageHistoryFailed")
+                : t("editMessageHistoryFailedInPlace"),
             })
           }
           return false

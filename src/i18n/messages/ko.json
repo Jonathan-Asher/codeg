@@ -1727,6 +1727,10 @@
     "failedHint": "중단된 상태로 남습니다. 계속을 눌러 직접 재개할 수 있습니다.",
     "dismiss": "닫기"
   },
+  "EditMessageSettings": {
+    "title": "편집할 때 원본을 별도 대화로 유지",
+    "description": "이전 메시지를 편집하면 같은 대화가 그 지점부터 이어집니다. 이 옵션을 켜면 편집 전 버전도 “… (before edit)”라는 이름으로 사이드바에 남습니다."
+  },
   "StartupWorkspaceSettings": {
     "title": "codeg 시작 시 열기",
     "description": "원격 워크스페이스는 별도 창에서 열리며, 로컬 워크스페이스는 언제든 빠른 작업에서 열 수 있습니다.",
@@ -2071,6 +2075,7 @@
       "editMessageBusy": "턴이 실행 중일 때는 메시지를 편집할 수 없습니다",
       "editMessageQueued": "대기열에 메시지가 남아 있는 동안에는 메시지를 편집할 수 없습니다",
       "editMessageHistoryFailed": "새 분기는 만들어졌지만 기록을 불러오지 못해 편집한 메시지를 보내지 않았습니다. '저장 후 보내기'를 다시 시도하세요",
+      "editMessageHistoryFailedInPlace": "대화를 이 지점으로 되돌렸지만 기록을 불러오지 못해 편집한 메시지를 보내지 않았습니다. '저장 후 보내기'를 다시 시도하세요",
       "editMessageNewConversationFailed": "편집한 메시지로 새 대화를 열지 못했습니다",
       "editMessageReplyNotFound": "저장된 대화에서 이 메시지 바로 앞의 답변을 찾을 수 없습니다",
       "exportConversation": "대화 내보내기",
@@ -3570,10 +3575,12 @@
         "editQueued": "대기열에 메시지가 남아 있는 동안에는 편집할 수 없습니다",
         "editNotReady": "아직 이 메시지를 편집할 수 없습니다. 잠시 후 다시 시도하세요",
         "editHint": "저장하면 여기서부터 새 분기가 시작됩니다. 원래 대화는 사이드바에 남으며, 파일 변경 사항은 되돌려지지 않습니다",
+        "editHintInPlace": "저장하면 원래 메시지 대신 편집한 메시지로 이 대화를 여기서부터 이어갑니다. 파일 변경 사항은 되돌려지지 않습니다",
         "editHintNewConversation": "첫 메시지이므로 저장하면 이 메시지로 새 대화가 시작됩니다. 이 대화는 그대로 남으며, 파일 변경 사항은 되돌려지지 않습니다",
         "editCancel": "취소",
         "editSave": "저장 후 보내기",
         "editSaving": "새 분기를 만드는 중…",
+        "editSavingInPlace": "여기서부터 이어가는 중…",
         "editSavingNewConversation": "새 대화를 여는 중…",
         "editImagesKept": "첨부한 이미지는 편집한 메시지와 함께 다시 전송됩니다",
         "copied": "복사됨",

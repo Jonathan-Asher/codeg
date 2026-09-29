@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useImeGuard } from "@/hooks/use-ime-guard"
 import { detectPlatform } from "@/hooks/use-platform"
 import type { UserImageDisplay } from "@/lib/adapters/ai-elements-adapter"
+import { useKeepOriginalOnEdit } from "@/lib/edit-message-prefs"
 
 /** Why a save can't run right now (the Save button greys out and says so). */
 export type UserEditBlock = "busy" | "queued" | "notReady"
@@ -71,6 +72,9 @@ export function UserMessageEditor({
   onSave,
 }: UserMessageEditorProps) {
   const t = useTranslations("Folder.chat.messageList")
+  // Only the wording depends on it: the host reads the setting itself when
+  // the edit is saved.
+  const [keepOriginal] = useKeepOriginalOnEdit()
   const [text, setText] = useState(() => recallDraft(draftKey) ?? initialText)
   const [shortcut] = useState(() =>
     detectPlatform() === "macos" ? "⌘↵" : "Ctrl+↵"
@@ -156,7 +160,11 @@ export function UserMessageEditor({
         }}
       />
       <p className="text-xs text-muted-foreground">
-        {startsNewConversation ? t("editHintNewConversation") : t("editHint")}
+        {startsNewConversation
+          ? t("editHintNewConversation")
+          : keepOriginal
+            ? t("editHint")
+            : t("editHintInPlace")}
       </p>
       <div className="flex flex-wrap items-center justify-end gap-2">
         {blocked !== null && !saving && (
@@ -185,7 +193,9 @@ export function UserMessageEditor({
           {saving
             ? startsNewConversation
               ? t("editSavingNewConversation")
-              : t("editSaving")
+              : keepOriginal
+                ? t("editSaving")
+                : t("editSavingInPlace")
             : t("editSave")}
           {!saving && (
             <kbd

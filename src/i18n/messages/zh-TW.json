@@ -1727,6 +1727,10 @@
     "failedHint": "它仍處於中斷狀態；點擊「繼續」可手動恢復。",
     "dismiss": "關閉"
   },
+  "EditMessageSettings": {
+    "title": "編輯訊息時將原版本保留為獨立的會話",
+    "description": "編輯先前的訊息時，會從該處繼續同一個會話。開啟後，編輯前的版本也會保留在側邊欄中，名為「… (before edit)」。"
+  },
   "StartupWorkspaceSettings": {
     "title": "啟動 codeg 時開啟",
     "description": "遠端工作區會在獨立視窗中開啟，本機工作區隨時可從「快捷操作」中開啟。",
@@ -2071,6 +2075,7 @@
       "editMessageBusy": "目前有回合正在進行，暫不可編輯訊息",
       "editMessageQueued": "佇列中還有待發送的訊息，暫不可編輯訊息",
       "editMessageHistoryFailed": "新分支已建立，但其歷史未能載入，編輯後的訊息沒有送出。請再次點擊「儲存並送出」",
+      "editMessageHistoryFailedInPlace": "會話已回退到此處，但其歷史未能載入，編輯後的訊息沒有送出。請再次點擊「儲存並送出」",
       "editMessageNewConversationFailed": "無法為編輯後的訊息新建會話",
       "editMessageReplyNotFound": "在已儲存的會話中找不到這則訊息之前的回覆",
       "exportConversation": "匯出對話",
@@ -3570,10 +3575,12 @@
         "editQueued": "佇列中還有待發送的訊息，暫不可編輯",
         "editNotReady": "這則訊息暫時還不能編輯，請稍後再試",
         "editHint": "儲存後將從此處開一條新分支。原會話保留在側邊欄中，檔案變更不會被復原。",
+        "editHintInPlace": "儲存後將以編輯後的訊息從此處繼續目前會話，取代原訊息。檔案變更不會被復原。",
         "editHintNewConversation": "這是第一則訊息，儲存後將用它新建一個會話。目前會話維持不變，檔案變更不會被復原。",
         "editCancel": "取消",
         "editSave": "儲存並送出",
         "editSaving": "正在建立新分支…",
+        "editSavingInPlace": "正在從此處繼續…",
         "editSavingNewConversation": "正在新建會話…",
         "editImagesKept": "附帶的圖片會隨編輯後的訊息一起重新送出",
         "copied": "已複製",

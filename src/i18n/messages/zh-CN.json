@@ -1727,6 +1727,10 @@
     "failedHint": "它仍处于中断状态；点击“继续”可手动恢复。",
     "dismiss": "关闭"
   },
+  "EditMessageSettings": {
+    "title": "编辑消息时将原版本保留为单独的会话",
+    "description": "编辑之前的消息时，会从该处继续同一个会话。开启后，编辑前的版本也会保留在侧边栏中，名为“… (before edit)”。"
+  },
   "StartupWorkspaceSettings": {
     "title": "启动 codeg 时打开",
     "description": "远端工作区会在独立窗口中打开，本地工作区随时可从“快捷操作”中打开。",
@@ -2071,6 +2075,7 @@
       "editMessageBusy": "当前有回合正在进行，暂不可编辑消息",
       "editMessageQueued": "队列中还有待发送的消息，暂不可编辑消息",
       "editMessageHistoryFailed": "新分支已创建，但其历史未能加载，编辑后的消息没有发送。请再次点击「保存并发送」",
+      "editMessageHistoryFailedInPlace": "会话已回退到此处，但其历史未能加载，编辑后的消息没有发送。请再次点击「保存并发送」",
       "editMessageNewConversationFailed": "无法为编辑后的消息新建会话",
       "editMessageReplyNotFound": "在已保存的会话中找不到这条消息之前的回复",
       "exportConversation": "导出会话",
@@ -3570,10 +3575,12 @@
         "editQueued": "队列中还有待发送的消息，暂不可编辑",
         "editNotReady": "这条消息暂时还不能编辑，请稍后再试",
         "editHint": "保存后将从此处开一条新分支。原会话保留在侧边栏中，文件改动不会被撤销。",
+        "editHintInPlace": "保存后将以编辑后的消息从此处继续当前会话，替换原消息。文件改动不会被撤销。",
         "editHintNewConversation": "这是第一条消息，保存后将用它新建一个会话。当前会话保持不变，文件改动不会被撤销。",
         "editCancel": "取消",
         "editSave": "保存并发送",
         "editSaving": "正在创建新分支…",
+        "editSavingInPlace": "正在从此处继续…",
         "editSavingNewConversation": "正在新建会话…",
         "editImagesKept": "附带的图片会随编辑后的消息一起重新发送",
         "copied": "已复制",

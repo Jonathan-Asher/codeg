@@ -332,7 +332,7 @@ describe("MessageListView: the in-place editor", () => {
     expect((field as HTMLTextAreaElement).selectionStart).toBe(
       "second question".length
     )
-    expect(screen.getByText(L.editHint)).toBeInTheDocument()
+    expect(screen.getByText(L.editHintInPlace)).toBeInTheDocument()
   })
 
   it("saves with the reply before the message as the fork point", async () => {
@@ -408,7 +408,9 @@ describe("MessageListView: the in-place editor", () => {
     await userEvent.click(screen.getByRole("button", { name: L.editSave }))
 
     // While it runs: locked, and saying what it's doing.
-    const saving = await screen.findByRole("button", { name: L.editSaving })
+    const saving = await screen.findByRole("button", {
+      name: L.editSavingInPlace,
+    })
     expect(saving).toBeDisabled()
     expect(field).toHaveAttribute("readonly")
     // A second save can't start a second edit.

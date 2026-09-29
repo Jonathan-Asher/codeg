@@ -382,8 +382,9 @@ pub struct AcpForkParams {
     /// tail, the composer's fork-send behaviour.
     #[serde(default)]
     pub fork_from_turn_id: Option<String>,
-    /// What the fork is for. Absent (or null) = a plain branch; `edit` refuses
-    /// a fork point it cannot name — see `ForkMode`.
+    /// What the fork is for. Absent (or null) = a plain branch; an edit
+    /// (`edit_in_place`, or `edit` to keep the original as a separate
+    /// conversation) refuses a fork point it cannot name — see `ForkMode`.
     #[serde(default)]
     pub mode: Option<crate::acp::fork::ForkMode>,
 }

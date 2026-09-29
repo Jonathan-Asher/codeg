@@ -396,13 +396,17 @@ export interface ForkResult {
  * - `"branch"` — "Fork from here". A turn the agent cannot name forks at the
  *   tail rather than failing, and the forked conversation is titled
  *   `[Fork] …`.
- * - `"edit"` — editing a past message: the fork is the history the edited
- *   message continues from, so it must end EXACTLY at the named reply. The
- *   backend refuses (instead of forking at the tail) when it cannot, the
- *   conversation keeps its title, and the row holding the original branch is
+ * - `"edit_in_place"` — editing a past message, the default: the fork is the
+ *   history the edited message continues from, so it must end EXACTLY at the
+ *   named reply. The backend refuses (instead of forking at the tail) when it
+ *   cannot. The conversation keeps its row, id and title, and the row holding
+ *   the original branch is hidden (soft-deleted, restorable from Import
+ *   sessions), so the sidebar still shows one conversation.
+ * - `"edit"` — the same edit with "keep the original as a separate
+ *   conversation" on: the row holding the original branch stays visible,
  *   named `… (before edit)`.
  */
-export type ForkMode = "branch" | "edit"
+export type ForkMode = "branch" | "edit" | "edit_in_place"
 
 export async function acpFork(
   connectionId: string,
@@ -416,8 +420,8 @@ export async function acpFork(
   folderId?: number | null,
   // "Fork from here": the rendered turn to fork at. The UI always passes one;
   // omitting it forks at the tail, which the backend also falls back to for a
-  // turn the agent cannot name — its call, see `resolve_fork_point`. An
-  // `"edit"` fork never falls back: see `ForkMode`.
+  // turn the agent cannot name — its call, see `resolve_fork_point`. An edit
+  // fork never falls back: see `ForkMode`.
   forkFromTurnId?: string | null,
   mode?: ForkMode | null
 ): Promise<ForkResult> {

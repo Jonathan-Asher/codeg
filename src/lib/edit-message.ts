@@ -1,3 +1,4 @@
+import { acpFork, type ForkMode } from "@/lib/api"
 import { isLiveTurnId } from "@/stores/conversation-runtime-store"
 import type {
   AgentType,
@@ -15,9 +16,12 @@ import type {
  * Built on "Fork from here". The reply right BEFORE the message is the fork
  * point, so the forked session ends exactly where the message was, and the
  * edited text is then sent there as an ordinary prompt. The conversation's row
- * moves to the forked session; the original branch stays in the sidebar as a
- * row of its own. Only the conversation branches — files the agent changed
- * after that point stay changed.
+ * moves to the forked session — same row, id, tab and title — and the edit
+ * continues it in place: the original branch is kept on a hidden row (see
+ * {@link editForkMode}), or, with "keep the original as a separate
+ * conversation" on, stays in the sidebar as a row of its own. Only the
+ * conversation rewinds — files the agent changed after that point stay
+ * changed.
  *
  * A conversation's first message has no reply before it, so editing it starts
  * a new conversation on the same agent instead.
@@ -214,4 +218,55 @@ export function buildEditedMessageDraft(
     )
   })
   return { blocks, displayText: trimmed }
+}
+
+/**
+ * The fork an edit asks the backend for (Rust `ForkMode`).
+ *
+ * No agent can rewind a session in place over ACP, so an edit always forks
+ * and the agent session id always changes. What the user sees is up to this:
+ * `"edit_in_place"` (the default) keeps showing ONE conversation — the one
+ * being edited — and hides the row that holds the original branch; `"edit"`
+ * leaves that row in the sidebar as "… (before edit)".
+ */
+export function editForkMode(keepOriginal: boolean): ForkMode {
+  return keepOriginal ? "edit" : "edit_in_place"
+}
+
+/**
+ * Fork the conversation for an edit and move it onto the forked session.
+ *
+ * The backend re-points the conversation's OWN row at the fork, so nothing
+ * about where the conversation lives changes: `adoptForkedSession` hands the
+ * new session id to the runtime session this conversation already has — the
+ * one its tab shows — rather than to a new one. Resolves the forked session
+ * id; rejects as `acpFork` does.
+ */
+export async function forkConversationForEdit({
+  connectionId,
+  conversationId,
+  folderId,
+  forkPointId,
+  keepOriginal,
+  adoptForkedSession,
+}: {
+  connectionId: string
+  /** The conversation's row — the one the edit continues. */
+  conversationId: number | null
+  folderId: number | null
+  /** The reply right before the edited message (the parser's id). */
+  forkPointId: string
+  /** "Keep the original as a separate conversation when editing". */
+  keepOriginal: boolean
+  adoptForkedSession: (forkedSessionId: string) => void
+}): Promise<string> {
+  const { forkedSessionId } = await acpFork(
+    connectionId,
+    conversationId,
+    folderId,
+    forkPointId,
+    editForkMode(keepOriginal)
+  )
+  adoptForkedSession(forkedSessionId)
+  return forkedSessionId
 }
