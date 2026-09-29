@@ -5,6 +5,11 @@ import { toast } from "sonner"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { useTabStore, useTabActions } from "@/contexts/tab-context"
 import { takePendingDeepLink } from "@/lib/deep-link"
+import {
+  onQuickAskFocusPending,
+  takePendingQuickAskFocus,
+} from "@/lib/quick-ask/desktop"
+import { isDesktop } from "@/lib/transport"
 import type { AgentType } from "@/lib/types"
 
 /**
@@ -210,6 +215,28 @@ export function PetFocusBridge() {
     const disposers: Array<() => void> = []
     let cancelled = false
 
+    // Conversations Quick Ask's "Open in codeg" parked for THIS window (the
+    // backend keys them by window label). Same park-and-poke shape as the deep
+    // link: the event only says "something is waiting", so a window that was
+    // still loading picks it up on this mount-time drain instead.
+    const drainQuickAsk = async () => {
+      try {
+        if (!isDesktop()) return
+        const parked: FocusRequest[] = (await takePendingQuickAskFocus()).map(
+          (req) => ({
+            folderId: req.folderId,
+            conversationId: req.conversationId,
+            agent: req.agent as AgentType,
+          })
+        )
+        if (cancelled || parked.length === 0) return
+        pendingRef.current.push(...parked)
+        attempt()
+      } catch (err) {
+        console.warn("[PetFocusBridge] quick ask handoff failed:", err)
+      }
+    }
+
     // Claim the parked deep link, if this call is the one that gets it.
     const drainDeepLink = async () => {
       const parked = await takePendingDeepLink()
@@ -254,6 +281,16 @@ export function PetFocusBridge() {
         )
         if (cancelled) offPending()
         else disposers.push(offPending)
+
+        // Local desktop events, whichever server this window is bound to:
+        // Quick Ask lives in the local app.
+        if (isDesktop()) {
+          const offQuickAsk = await onQuickAskFocusPending(() => {
+            void drainQuickAsk()
+          })
+          if (cancelled) offQuickAsk()
+          else disposers.push(offQuickAsk)
+        }
       } catch (err) {
         console.warn("[PetFocusBridge] subscription failed:", err)
       }
@@ -262,6 +299,7 @@ export function PetFocusBridge() {
       // up cannot fall between the two: whatever the dropped nudge parked is
       // still sitting in the slot for this call to claim.
       await drainDeepLink()
+      await drainQuickAsk()
     })()
 
     return () => {

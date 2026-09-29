@@ -14,6 +14,7 @@
     "remote-import-sessions-*",
     "pet",
     "pet-panel",
+    "quick-ask",
     "remote-workspace-*",
     "remote-settings-*",
     "remote-commit-*",

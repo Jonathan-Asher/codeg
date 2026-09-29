@@ -35,6 +35,7 @@ pub mod registry;
 pub mod remote_registry;
 pub mod scratch_dir;
 pub mod session_info;
+pub mod session_persistence;
 pub mod session_title;
 pub mod session_state;
 pub mod stderr_tail;

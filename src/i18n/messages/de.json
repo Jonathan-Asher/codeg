@@ -6784,5 +6784,89 @@
         "probeFailed": "Der integrierte Browser konnte nicht bestätigen, dass er den entfernten Host über den Tunnel erreicht. Versuche es gleich noch einmal."
       }
     }
+  },
+  "QuickAsk": {
+    "targetLabel": "Wohin die Frage geht",
+    "targets": {
+      "new": "Neue Sitzung",
+      "existing": "Bestehende Sitzung",
+      "private": "Privat"
+    },
+    "targetHints": {
+      "new": "Startet eine neue Unterhaltung im Ordner, die in der Seitenleiste erscheint.",
+      "existing": "Fügt deine Frage zu dieser Sitzung hinzu.",
+      "private": "Nichts wird gespeichert: kein Eintrag in der Seitenleiste, keine Suche, kein Verlauf."
+    },
+    "folder": {
+      "placeholder": "Ordner wählen"
+    },
+    "session": {
+      "placeholder": "Sitzung wählen",
+      "search": "Sitzungen durchsuchen…",
+      "empty": "Keine Sitzungen gefunden",
+      "untitled": "Unbenannte Sitzung"
+    },
+    "picker": {
+      "agent": "Agent",
+      "model": "Modell",
+      "effort": "Aufwand",
+      "loadingOptions": "Agent wird gestartet, um seine Modelle anzuzeigen…",
+      "sessionOwnsModel": "Eine bestehende Sitzung behält ihr eigenes Modell und ihren Aufwand.",
+      "noOptions": "Dieser Agent bietet keine Modellauswahl."
+    },
+    "input": {
+      "placeholder": "Stell eine kurze Frage…",
+      "followUp": "Stell eine Folgefrage…",
+      "send": "Senden",
+      "stop": "Stoppen"
+    },
+    "hint": "Enter zum Senden · Shift+Enter für neue Zeile · Esc zum Ausblenden",
+    "actions": {
+      "newQuestion": "Neue Frage",
+      "openInCodeg": "In codeg öffnen",
+      "hide": "Ausblenden"
+    },
+    "status": {
+      "connecting": "{agent} wird gestartet…",
+      "queued": "In der Warteschlange, wird nach der aktuellen Antwort gesendet",
+      "steered": "In die laufende Antwort gesendet",
+      "failed": "Nicht gesendet"
+    },
+    "private": {
+      "active": "Privat: wird gelöscht, wenn du leerst oder dieses Fenster schließt.",
+      "deleted": "Private Frage gelöscht.",
+      "agentKeepsLog": "{agent} führt ein eigenes Sitzungsprotokoll, das Quick Ask nicht abschalten kann."
+    },
+    "backend": {
+      "remote": "Auf {name}",
+      "switchPending": "Du hast den Arbeitsbereich gewechselt. Neue Frage bringt Quick Ask dorthin."
+    },
+    "errors": {
+      "noFolder": "Wähle zuerst einen Ordner.",
+      "noSession": "Wähle zuerst eine Sitzung.",
+      "connectFailed": "Der Agent konnte nicht gestartet werden: {error}",
+      "sendFailed": "Senden fehlgeschlagen: {error}",
+      "noAgents": "Kein Agent installiert. Füge einen in den Einstellungen hinzu."
+    },
+    "empty": {
+      "title": "Frag einfach"
+    }
+  },
+  "QuickAskSettings": {
+    "title": "Quick Ask",
+    "description": "Stell einem Agenten per Tastenkürzel aus jeder App eine kurze Frage.",
+    "enable": "Globales Tastenkürzel",
+    "enableDescription": "Öffnet Quick Ask von überall, auch wenn codeg im Hintergrund ist.",
+    "shortcut": "Tastenkürzel",
+    "shortcutDescription": "Klicke und drücke dann die gewünschten Tasten. Mindestens eine Sondertaste verwenden.",
+    "recording": "Tasten drücken…",
+    "reset": "Zurücksetzen",
+    "hideOnBlur": "Beim Klick außerhalb ausblenden",
+    "hideOnBlurDescription": "Sonst bleibt das Fenster, bis du Esc oder das Tastenkürzel drückst.",
+    "notRegistered": "{shortcut} konnte nicht registriert werden. Vielleicht nutzt eine andere App es bereits; wähle ein anderes Tastenkürzel.",
+    "registrationDetail": "Systemmeldung: {error}",
+    "saveFailed": "Quick-Ask-Einstellungen konnten nicht gespeichert werden: {error}",
+    "open": "Ausprobieren",
+    "openButton": "Quick Ask öffnen"
   }
 }

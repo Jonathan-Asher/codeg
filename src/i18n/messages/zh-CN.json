@@ -6784,5 +6784,89 @@
         "probeFailed": "内置浏览器无法确认它能通过隧道访问远端主机。请稍后重试。"
       }
     }
+  },
+  "QuickAsk": {
+    "targetLabel": "问题发送到哪里",
+    "targets": {
+      "new": "新会话",
+      "existing": "已有会话",
+      "private": "私密"
+    },
+    "targetHints": {
+      "new": "在所选文件夹中新建一个会话，并显示在侧边栏中。",
+      "existing": "把你的问题追加到这个会话。",
+      "private": "不保存任何内容：不进侧边栏、不进搜索、不留历史。"
+    },
+    "folder": {
+      "placeholder": "选择文件夹"
+    },
+    "session": {
+      "placeholder": "选择会话",
+      "search": "搜索会话…",
+      "empty": "没有找到会话",
+      "untitled": "未命名会话"
+    },
+    "picker": {
+      "agent": "智能体",
+      "model": "模型",
+      "effort": "推理强度",
+      "loadingOptions": "正在启动智能体以获取模型列表…",
+      "sessionOwnsModel": "已有会话沿用它自己的模型和推理强度。",
+      "noOptions": "该智能体不提供模型选择。"
+    },
+    "input": {
+      "placeholder": "快速提个问题…",
+      "followUp": "继续追问…",
+      "send": "发送",
+      "stop": "停止"
+    },
+    "hint": "Enter 发送 · Shift+Enter 换行 · Esc 隐藏",
+    "actions": {
+      "newQuestion": "新问题",
+      "openInCodeg": "在 codeg 中打开",
+      "hide": "隐藏"
+    },
+    "status": {
+      "connecting": "正在启动 {agent}…",
+      "queued": "已排队，当前回复结束后发送",
+      "steered": "已插入正在进行的回复",
+      "failed": "未发送"
+    },
+    "private": {
+      "active": "私密：清空或关闭此窗口时删除。",
+      "deleted": "私密问题已删除。",
+      "agentKeepsLog": "{agent} 会保留自己的会话日志，Quick Ask 无法关闭它。"
+    },
+    "backend": {
+      "remote": "位于 {name}",
+      "switchPending": "你已切换到其他工作区。点击“新问题”后 Quick Ask 会跟过去。"
+    },
+    "errors": {
+      "noFolder": "请先选择文件夹。",
+      "noSession": "请先选择会话。",
+      "connectFailed": "无法启动智能体：{error}",
+      "sendFailed": "发送失败：{error}",
+      "noAgents": "尚未安装任何智能体，请先在设置中添加。"
+    },
+    "empty": {
+      "title": "随便问"
+    }
+  },
+  "QuickAskSettings": {
+    "title": "Quick Ask",
+    "description": "用快捷键在任何应用中向智能体快速提问。",
+    "enable": "全局快捷键",
+    "enableDescription": "随时随地打开 Quick Ask，即使 codeg 在后台。",
+    "shortcut": "快捷键",
+    "shortcutDescription": "点击后按下想要的组合键，至少包含一个修饰键。",
+    "recording": "请按键…",
+    "reset": "恢复默认",
+    "hideOnBlur": "点击窗口外部时隐藏",
+    "hideOnBlurDescription": "关闭后，窗口会一直显示，直到按 Esc 或再次按快捷键。",
+    "notRegistered": "无法注册 {shortcut}，可能已被其他应用占用，请换一个快捷键。",
+    "registrationDetail": "系统信息：{error}",
+    "saveFailed": "无法保存 Quick Ask 设置：{error}",
+    "open": "试一试",
+    "openButton": "打开 Quick Ask"
   }
 }

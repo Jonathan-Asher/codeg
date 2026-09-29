@@ -83,6 +83,7 @@ import {
   PetFocusBridge,
 } from "@/components/workspace/deep-link-bootstrap"
 import { WorkspaceOpenFolderListener } from "@/components/workspace/workspace-open-folder-listener"
+import { QuickAskActiveFolderPublisher } from "@/components/workspace/quick-ask-active-folder"
 import { HeavyPluginsWarmup } from "@/components/ai-elements/heavy-plugins-warmup"
 import {
   ResizableHandle,
@@ -1322,6 +1323,7 @@ function WorkspaceLayoutInner({ children }: { children: React.ReactNode }) {
                       <HeavyPluginsWarmup />
                       <DeepLinkBootstrap />
                       <PetFocusBridge />
+                      <QuickAskActiveFolderPublisher />
                       {/* Always mounted: external-change conflicts must be
                             resolvable even with the aux file tree closed. */}
                       <ExternalConflictDialog />

@@ -6,6 +6,7 @@ import {
   useConnectionStore,
   getCachedSelectors,
   type ClaudeApiRetryState,
+  type ConnectOptions,
   type ConnectionState,
   type PendingPermission,
   type PendingUserMessage,
@@ -126,7 +127,8 @@ export interface UseConnectionReturn {
     agentType: AgentType,
     workingDir?: string,
     sessionId?: string,
-    conversationId?: number
+    conversationId?: number,
+    options?: ConnectOptions
   ) => Promise<void>
   disconnect: () => Promise<void>
   /** Restart the session (disconnect + resume same sessionId) so it picks up
@@ -141,10 +143,15 @@ export interface UseConnectionReturn {
       folderId?: number | null
       conversationId?: number | null
       clientMessageId?: string | null
+      unlinked?: boolean
     }
   ) => Promise<void>
   setMode: (modeId: string) => Promise<void>
-  setConfigOption: (configId: string, valueId: string) => Promise<void>
+  setConfigOption: (
+    configId: string,
+    valueId: string,
+    opts?: { remember?: boolean }
+  ) => Promise<void>
   cancel: () => Promise<void>
   respondPermission: (requestId: string, optionId: string) => Promise<void>
   answerQuestion: (questionId: string, answer: QuestionAnswer) => Promise<void>
@@ -299,15 +306,25 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       agentType: AgentType,
       workingDir?: string,
       sessionId?: string,
-      conversationId?: number
+      conversationId?: number,
+      options?: ConnectOptions
     ) =>
-      actions.connect(
-        contextKey,
-        agentType,
-        workingDir,
-        sessionId,
-        conversationId
-      ),
+      options === undefined
+        ? actions.connect(
+            contextKey,
+            agentType,
+            workingDir,
+            sessionId,
+            conversationId
+          )
+        : actions.connect(
+            contextKey,
+            agentType,
+            workingDir,
+            sessionId,
+            conversationId,
+            options
+          ),
     [actions, contextKey]
   )
 
@@ -325,6 +342,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
         folderId?: number | null
         conversationId?: number | null
         clientMessageId?: string | null
+        unlinked?: boolean
       }
     ) => actions.sendPrompt(contextKey, blocks, opts),
     [actions, contextKey]
@@ -336,8 +354,10 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   )
 
   const setConfigOption = useCallback(
-    (configId: string, valueId: string) =>
-      actions.setConfigOption(contextKey, configId, valueId),
+    (configId: string, valueId: string, opts?: { remember?: boolean }) =>
+      opts === undefined
+        ? actions.setConfigOption(contextKey, configId, valueId)
+        : actions.setConfigOption(contextKey, configId, valueId, opts),
     [actions, contextKey]
   )
 

@@ -264,7 +264,9 @@ export async function acpConnect(
   workingDir?: string,
   sessionId?: string,
   preferredModeId?: string | null,
-  preferredConfigValues?: Record<string, string> | null
+  preferredConfigValues?: Record<string, string> | null,
+  /** A Quick Ask private question: ask the agent not to keep a transcript. */
+  ephemeral?: boolean
 ): Promise<string> {
   return getTransport().call(
     "acp_connect",
@@ -274,6 +276,7 @@ export async function acpConnect(
       sessionId: sessionId ?? null,
       preferredModeId: preferredModeId ?? null,
       preferredConfigValues: preferredConfigValues ?? null,
+      ...(ephemeral ? { ephemeral: true } : {}),
     },
     { timeoutMs: ACP_CONNECT_TIMEOUT_MS }
   )
@@ -349,6 +352,53 @@ export async function acpPrompt(
     if (isTurnInProgressRejection(e)) throw new TurnBusyError()
     throw e
   }
+}
+
+/**
+ * Send a prompt on a private Quick Ask session: no conversation row is
+ * created or linked, so the question never reaches the sidebar, the search
+ * index or the history. The backend refuses it on a connection that already
+ * belongs to a conversation.
+ */
+export async function acpPromptUnlinked(
+  connectionId: string,
+  blocks: PromptInputBlock[]
+): Promise<void> {
+  try {
+    await getTransport().call("acp_prompt_unlinked", {
+      connectionId,
+      blocks: stripUploadedImagePayloads(
+        blocks,
+        !isDesktop() || getActiveRemoteConnectionId() !== null
+      ),
+    })
+  } catch (e) {
+    if (isTurnInProgressRejection(e)) throw new TurnBusyError()
+    throw e
+  }
+}
+
+/** What discarding a private Quick Ask question removed (absolute paths). */
+export interface PrivateQuickAskCleanup {
+  removed: string[]
+  failed: string[]
+}
+
+/**
+ * Discard a private Quick Ask question on the backend that hosted it: its
+ * scratch directory, and whatever the agent or codeg recorded about the
+ * session. The caller disconnects the agent first.
+ */
+export async function discardPrivateQuickAsk(
+  workingDir: string,
+  agentType: AgentType | null,
+  sessionId: string | null
+): Promise<PrivateQuickAskCleanup> {
+  return getTransport().call("discard_private_quick_ask", {
+    workingDir,
+    agentType,
+    sessionId,
+  })
 }
 
 export async function acpSetMode(

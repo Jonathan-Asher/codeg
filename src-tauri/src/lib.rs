@@ -101,7 +101,8 @@ mod tauri_app {
         folders, logging as logging_commands, mcp as mcp_commands,
         model_provider as model_provider_commands, notification, pet as pet_commands,
         plan_usage as plan_usage_commands, project_boot,
-        question as question_commands, quick_messages as quick_messages_commands,
+        question as question_commands, quick_ask as quick_ask_commands,
+        quick_messages as quick_messages_commands,
         remote_proxy as remote_proxy_commands,
         remote_workspace as remote_workspace_commands, science as science_commands,
         session_info as session_info_commands,
@@ -567,6 +568,10 @@ mod tauri_app {
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
                 None,
             ))
+            // Quick Ask's system-wide shortcut. Registered from Rust only
+            // (`commands::quick_ask`), so no window is granted the plugin's
+            // JS API.
+            .plugin(tauri_plugin_global_shortcut::Builder::new().build())
             .manage(ConnectionManager::new())
             .manage(crate::browser::BrowserRegistry::default())
             .manage(crate::browser::egress::EgressRegistry::default())
@@ -1357,6 +1362,20 @@ mod tauri_app {
                     }
                 }
 
+                // Quick Ask: register the saved global shortcut now, and build
+                // its window (hidden) shortly after the workspace is up.
+                {
+                    let db_for_quick_ask = app.state::<db::AppDatabase>().conn.clone();
+                    let quick_ask_settings = tauri::async_runtime::block_on(async move {
+                        quick_ask_commands::desktop::load_quick_ask_settings(&db_for_quick_ask)
+                            .await
+                    });
+                    quick_ask_commands::desktop::init_quick_ask(
+                        app.handle(),
+                        &quick_ask_settings,
+                    );
+                }
+
                 #[cfg(all(
                     feature = "browser-child",
                     any(target_os = "macos", target_os = "windows")
@@ -1530,6 +1549,31 @@ mod tauri_app {
                 {
                     // Click-away dismiss for the session panel.
                     windows::close_pet_panel_on_blur(window.app_handle());
+                }
+
+                // Quick Ask follows the workspace the user last worked in.
+                if matches!(event, tauri::WindowEvent::Focused(true)) {
+                    quick_ask_commands::desktop::note_window_focused(&label);
+                }
+                if label == quick_ask_commands::desktop::QUICK_ASK_WINDOW_LABEL {
+                    match event {
+                        // Click-outside dismissal (a setting).
+                        tauri::WindowEvent::Focused(false) => {
+                            quick_ask_commands::desktop::hide_quick_ask_on_blur(
+                                window.app_handle(),
+                            );
+                        }
+                        // The window is pre-built and kept: closing it only
+                        // hides it, so the next shortcut press is instant and
+                        // the question in it survives. Quitting still closes.
+                        tauri::WindowEvent::CloseRequested { api, .. }
+                            if !APP_QUITTING.load(Ordering::Relaxed) =>
+                        {
+                            api.prevent_close();
+                            let _ = window.hide();
+                        }
+                        _ => {}
+                    }
                 }
 
                 if label == "main" {
@@ -1788,6 +1832,14 @@ mod tauri_app {
                 windows::pet_window_record_position,
                 windows::pet_show_context_menu,
                 windows::toggle_pet_panel,
+                quick_ask_commands::desktop::get_quick_ask_settings,
+                quick_ask_commands::desktop::update_quick_ask_settings,
+                quick_ask_commands::desktop::toggle_quick_ask_window,
+                quick_ask_commands::desktop::hide_quick_ask_window,
+                quick_ask_commands::desktop::quick_ask_context,
+                quick_ask_commands::desktop::quick_ask_open_conversation,
+                quick_ask_commands::desktop::quick_ask_take_pending_focus,
+                quick_ask_commands::discard_private_quick_ask,
                 windows::close_pet_panel,
                 windows::resize_pet_panel,
                 windows::focus_conversation,
@@ -1886,6 +1938,7 @@ mod tauri_app {
                 acp_commands::acp_prompt,
                 acp_commands::acp_set_mode,
                 acp_commands::acp_set_config_option,
+                acp_commands::acp_prompt_unlinked,
                 acp_commands::acp_goal_control,
                 acp_commands::acp_describe_agent_options,
                 acp_commands::acp_cancel,

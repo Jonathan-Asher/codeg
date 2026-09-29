@@ -6784,5 +6784,89 @@
         "probeFailed": "El navegador integrado no pudo confirmar que llega al host remoto a través del túnel. Vuelve a intentarlo en un momento."
       }
     }
+  },
+  "QuickAsk": {
+    "targetLabel": "Adónde va la pregunta",
+    "targets": {
+      "new": "Sesión nueva",
+      "existing": "Sesión existente",
+      "private": "Privada"
+    },
+    "targetHints": {
+      "new": "Crea una conversación nueva en la carpeta y la muestra en la barra lateral.",
+      "existing": "Añade tu pregunta a esta sesión.",
+      "private": "No se guarda nada: ni en la barra lateral, ni en la búsqueda, ni en el historial."
+    },
+    "folder": {
+      "placeholder": "Elige una carpeta"
+    },
+    "session": {
+      "placeholder": "Elige una sesión",
+      "search": "Buscar sesiones…",
+      "empty": "No se encontraron sesiones",
+      "untitled": "Sesión sin título"
+    },
+    "picker": {
+      "agent": "Agente",
+      "model": "Modelo",
+      "effort": "Esfuerzo",
+      "loadingOptions": "Iniciando el agente para ver sus modelos…",
+      "sessionOwnsModel": "Una sesión existente conserva su propio modelo y esfuerzo.",
+      "noOptions": "Este agente no ofrece elegir modelo."
+    },
+    "input": {
+      "placeholder": "Haz una pregunta rápida…",
+      "followUp": "Haz otra pregunta…",
+      "send": "Enviar",
+      "stop": "Detener"
+    },
+    "hint": "Enter para enviar · Shift+Enter para nueva línea · Esc para ocultar",
+    "actions": {
+      "newQuestion": "Nueva pregunta",
+      "openInCodeg": "Abrir en codeg",
+      "hide": "Ocultar"
+    },
+    "status": {
+      "connecting": "Iniciando {agent}…",
+      "queued": "En cola; se envía cuando termine la respuesta actual",
+      "steered": "Enviada a la respuesta en curso",
+      "failed": "No enviada"
+    },
+    "private": {
+      "active": "Privada: se borra al limpiar o cerrar esta ventana.",
+      "deleted": "Pregunta privada borrada.",
+      "agentKeepsLog": "{agent} guarda su propio registro de sesión y Quick Ask no puede desactivarlo."
+    },
+    "backend": {
+      "remote": "En {name}",
+      "switchPending": "Cambiaste de espacio de trabajo. Nueva pregunta lleva Quick Ask allí."
+    },
+    "errors": {
+      "noFolder": "Primero elige una carpeta.",
+      "noSession": "Primero elige una sesión.",
+      "connectFailed": "No se pudo iniciar el agente: {error}",
+      "sendFailed": "No se pudo enviar: {error}",
+      "noAgents": "No hay ningún agente instalado. Añade uno en Ajustes."
+    },
+    "empty": {
+      "title": "Pregunta lo que quieras"
+    }
+  },
+  "QuickAskSettings": {
+    "title": "Quick Ask",
+    "description": "Hazle una pregunta rápida a un agente desde cualquier app con un atajo de teclado.",
+    "enable": "Atajo global",
+    "enableDescription": "Abre Quick Ask desde cualquier lugar, aunque codeg esté en segundo plano.",
+    "shortcut": "Atajo",
+    "shortcutDescription": "Haz clic y pulsa las teclas que quieras. Usa al menos una tecla modificadora.",
+    "recording": "Pulsa las teclas…",
+    "reset": "Restablecer",
+    "hideOnBlur": "Ocultar al hacer clic fuera",
+    "hideOnBlurDescription": "Si no, la ventana se queda hasta que pulses Esc o el atajo otra vez.",
+    "notRegistered": "No se pudo registrar {shortcut}. Puede que otra app ya lo use; elige otro atajo.",
+    "registrationDetail": "Mensaje del sistema: {error}",
+    "saveFailed": "No se pudieron guardar los ajustes de Quick Ask: {error}",
+    "open": "Probarlo",
+    "openButton": "Abrir Quick Ask"
   }
 }

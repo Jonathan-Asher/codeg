@@ -21,6 +21,7 @@ import {
   acpConnect,
   acpGetAgentStatus,
   acpPrompt,
+  acpPromptUnlinked,
   acpSetMode,
   acpSetConfigOption,
   acpGoalControl,
@@ -493,6 +494,37 @@ type ConnectRequest = {
   // (sessionId already distinguishes), but carried so a re-fired pending
   // request still runs discovery.
   conversationId?: number
+  /** Selectors to open the session with instead of the saved per-agent
+   *  picks (see {@link ConnectOptions}). */
+  selectorPrefs?: ConnectSelectorPrefs
+  /** Ask the agent not to keep a transcript (see {@link ConnectOptions}). */
+  ephemeral?: boolean
+}
+
+/** Mode + config values shipped with `acp_connect`. */
+export interface ConnectSelectorPrefs {
+  modeId: string | null
+  configValues: Record<string, string> | null
+}
+
+/**
+ * Per-connect options for surfaces that are not a conversation tab. The Quick
+ * Ask window opens its sessions with its OWN model/effort picks — never the
+ * per-agent picks the composer saves — and its private questions ask the
+ * agent not to keep a transcript at all.
+ */
+export interface ConnectOptions {
+  /** Replaces `getSavedPrefsForConnect(agentType)` for this connect. A resume
+   *  still reopens with the conversation's own recorded selectors. */
+  selectorPrefs?: ConnectSelectorPrefs
+  /** A private (unrecorded) session: the agent is asked not to persist it. */
+  ephemeral?: boolean
+}
+
+function connectOptionsOf(request: ConnectRequest): ConnectOptions | undefined {
+  if (request.selectorPrefs === undefined && !request.ephemeral)
+    return undefined
+  return { selectorPrefs: request.selectorPrefs, ephemeral: request.ephemeral }
 }
 
 function sameConnectRequest(a: ConnectRequest, b: ConnectRequest) {
@@ -3110,7 +3142,8 @@ export interface AcpActionsValue {
     agentType: AgentType,
     workingDir?: string,
     sessionId?: string,
-    conversationId?: number
+    conversationId?: number,
+    options?: ConnectOptions
   ): Promise<void>
   /**
    * Release the connection for `contextKey`. The LOCAL entry always goes away
@@ -3141,13 +3174,19 @@ export interface AcpActionsValue {
       folderId?: number | null
       conversationId?: number | null
       clientMessageId?: string | null
+      /** A private (Quick Ask) question: sent without creating or linking a
+       *  conversation row. The backend refuses it on a linked connection. */
+      unlinked?: boolean
     }
   ): Promise<void>
   setMode(contextKey: string, modeId: string): Promise<void>
   setConfigOption(
     contextKey: string,
     configId: string,
-    valueId: string
+    valueId: string,
+    /** `remember: false` changes the live session only, leaving the saved
+     *  per-agent picks that seed new conversations alone (Quick Ask). */
+    opts?: { remember?: boolean }
   ): Promise<void>
   cancel(contextKey: string): Promise<void>
   respondPermission(
@@ -6428,13 +6467,18 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       agentType: AgentType,
       workingDir?: string,
       sessionId?: string,
-      conversationId?: number
+      conversationId?: number,
+      options?: ConnectOptions
     ) => {
       const request: ConnectRequest = {
         agentType,
         workingDir,
         sessionId,
         conversationId,
+        ...(options?.selectorPrefs !== undefined
+          ? { selectorPrefs: options.selectorPrefs }
+          : {}),
+        ...(options?.ephemeral ? { ephemeral: true } : {}),
       }
       // Remember BEFORE the in-flight early return and before the preflight can
       // throw: a connect that never produced a store entry is precisely when
@@ -6774,14 +6818,24 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         // regressed when the snapshot path replaced the event path on tab
         // re-open (the snapshot frame doesn't carry a `session_modes` event,
         // so the apply-on-event hook never fired).
-        const savedPrefs = getSavedPrefsForConnect(agentType)
-        const connectionId = await acpConnect(
-          agentType,
-          workingDir,
-          sessionId,
-          savedPrefs.modeId,
-          savedPrefs.configValues
-        )
+        const savedPrefs =
+          request.selectorPrefs ?? getSavedPrefsForConnect(agentType)
+        const connectionId = request.ephemeral
+          ? await acpConnect(
+              agentType,
+              workingDir,
+              sessionId,
+              savedPrefs.modeId,
+              savedPrefs.configValues,
+              true
+            )
+          : await acpConnect(
+              agentType,
+              workingDir,
+              sessionId,
+              savedPrefs.modeId,
+              savedPrefs.configValues
+            )
 
         // If disconnect was requested while connect was in flight, tear down
         // immediately instead of registering the connection — but tear down
@@ -6963,7 +7017,8 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
                   pendingRequest.agentType,
                   pendingRequest.workingDir,
                   pendingRequest.sessionId,
-                  pendingRequest.conversationId
+                  pendingRequest.conversationId,
+                  connectOptionsOf(pendingRequest)
                 )
                 .catch(() => {})
             })
@@ -7151,6 +7206,10 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         workingDir: conn?.workingDir ?? remembered?.workingDir ?? undefined,
         sessionId: conn?.sessionId ?? remembered?.sessionId ?? undefined,
         conversationId: remembered?.conversationId,
+        ...(remembered?.selectorPrefs !== undefined
+          ? { selectorPrefs: remembered.selectorPrefs }
+          : {}),
+        ...(remembered?.ephemeral ? { ephemeral: true } : {}),
       }
     },
     []
@@ -7246,7 +7305,8 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         request.agentType,
         request.workingDir,
         request.sessionId,
-        request.conversationId
+        request.conversationId,
+        connectOptionsOf(request)
       )
       return true
     },
@@ -7323,19 +7383,24 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         folderId?: number | null
         conversationId?: number | null
         clientMessageId?: string | null
+        unlinked?: boolean
       }
     ) => {
       const conn = storeRef.current.connections.get(contextKey)
       if (!conn) return
       lastActivityRef.current.set(contextKey, Date.now())
       try {
-        await acpPrompt(
-          conn.connectionId,
-          blocks,
-          opts?.folderId ?? null,
-          opts?.conversationId ?? null,
-          opts?.clientMessageId ?? null
-        )
+        if (opts?.unlinked) {
+          await acpPromptUnlinked(conn.connectionId, blocks)
+        } else {
+          await acpPrompt(
+            conn.connectionId,
+            blocks,
+            opts?.folderId ?? null,
+            opts?.conversationId ?? null,
+            opts?.clientMessageId ?? null
+          )
+        }
       } catch (e) {
         // Same reasoning as `cancel`: the backend disowning this id proves the
         // local state is stale. Settle it (the caller still gets the error and
@@ -7367,7 +7432,12 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const setConfigOption = useCallback(
-    async (contextKey: string, configId: string, valueId: string) => {
+    async (
+      contextKey: string,
+      configId: string,
+      valueId: string,
+      opts?: { remember?: boolean }
+    ) => {
       const conn = storeRef.current.connections.get(contextKey)
       if (!conn) return
       dispatch({
@@ -7377,8 +7447,11 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         valueId,
       })
       // Persist user selection to localStorage so the next `acp_connect`
-      // can ship it back to the backend as a preferred config value.
-      saveConfigPreference(conn.agentType, configId, valueId)
+      // can ship it back to the backend as a preferred config value — unless
+      // the surface keeps its own picks (Quick Ask).
+      if (opts?.remember !== false) {
+        saveConfigPreference(conn.agentType, configId, valueId)
+      }
       lastActivityRef.current.set(contextKey, Date.now())
       await acpSetConfigOption(conn.connectionId, configId, valueId)
     },
