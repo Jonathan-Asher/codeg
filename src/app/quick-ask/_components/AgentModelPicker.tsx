@@ -180,7 +180,7 @@ export const AgentModelPicker = memo(function AgentModelPicker({
           type="button"
           variant="ghost"
           size="sm"
-          className="h-7 min-w-0 max-w-[15rem] gap-1.5 rounded-full px-2.5 text-xs font-medium text-muted-foreground"
+          className="h-6 min-w-0 max-w-[16rem] shrink gap-1.5 rounded-full px-2 text-[11px] font-medium text-muted-foreground"
           data-testid="qa-model-picker"
         >
           <Bot className="size-3.5 shrink-0" aria-hidden="true" />
@@ -189,31 +189,10 @@ export const AgentModelPicker = memo(function AgentModelPicker({
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        align="end"
+        side="top"
+        align="start"
         className="flex max-h-[18rem] w-72 flex-col gap-3 overflow-y-auto p-2"
       >
-        <div className="flex flex-col gap-0.5" data-testid="qa-agent-list">
-          <div className="px-2 pb-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            {t("picker.agent")}
-          </div>
-          {agents.map((agent) => (
-            <button
-              key={agent.agentType}
-              type="button"
-              disabled={agentLocked}
-              onClick={() => onAgentChange(agent.agentType)}
-              className={cn(
-                "flex items-center gap-2 rounded-md px-2 py-1 text-start text-sm hover:bg-muted disabled:pointer-events-none disabled:opacity-60",
-                agent.agentType === agentType && "font-medium"
-              )}
-            >
-              <span className="min-w-0 flex-1 truncate">{agent.name}</span>
-              {agent.agentType === agentType ? (
-                <Check className="size-3.5" />
-              ) : null}
-            </button>
-          ))}
-        </div>
         {readOnly ? (
           <p className="px-2 text-xs text-muted-foreground">
             {t("picker.sessionOwnsModel")}
@@ -251,6 +230,28 @@ export const AgentModelPicker = memo(function AgentModelPicker({
             {t("picker.noOptions")}
           </p>
         )}
+        <div className="flex flex-col gap-0.5" data-testid="qa-agent-list">
+          <div className="px-2 pb-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            {t("picker.agent")}
+          </div>
+          {agents.map((agent) => (
+            <button
+              key={agent.agentType}
+              type="button"
+              disabled={agentLocked}
+              onClick={() => onAgentChange(agent.agentType)}
+              className={cn(
+                "flex items-center gap-2 rounded-md px-2 py-1 text-start text-sm hover:bg-muted disabled:pointer-events-none disabled:opacity-60",
+                agent.agentType === agentType && "font-medium"
+              )}
+            >
+              <span className="min-w-0 flex-1 truncate">{agent.name}</span>
+              {agent.agentType === agentType ? (
+                <Check className="size-3.5" />
+              ) : null}
+            </button>
+          ))}
+        </div>
       </PopoverContent>
     </Popover>
   )

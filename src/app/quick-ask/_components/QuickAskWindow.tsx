@@ -48,7 +48,12 @@ import {
   type QuickAskFolderTarget,
   type QuickAskSessionTarget,
 } from "../_hooks/use-quick-ask-session"
-import { AgentModelPicker } from "./AgentModelPicker"
+import {
+  AgentModelPicker,
+  findEffortOption,
+  findModelOption,
+  selectChoices,
+} from "./AgentModelPicker"
 import { QuickAskThread } from "./QuickAskThread"
 import { TargetPicker } from "./TargetPicker"
 
@@ -88,6 +93,7 @@ export function QuickAskWindow() {
   )
 
   const data = useQuickAskData()
+  const reloadData = data.reload
   const { agents: allAgents } = useAcpAgents()
   const installedAgents = useMemo(
     () =>
@@ -184,6 +190,40 @@ export function QuickAskWindow() {
   const liveAgent = qa.effectiveAgent
   const connOptions = conn.agentType === liveAgent ? conn.configOptions : null
 
+  // A model switch resets effort to that model's own default (Claude Code
+  // does). Quick Ask keeps its saved effort instead, once per model, and only
+  // when the new model offers it.
+  const setLiveConfig = qa.setConfigOption
+  const effortOption = findEffortOption(connOptions)
+  const modelOption = findModelOption(connOptions)
+  const liveEffort =
+    effortOption?.kind.type === "select"
+      ? effortOption.kind.current_value
+      : null
+  const liveModel =
+    modelOption?.kind.type === "select" ? modelOption.kind.current_value : null
+  const wantedEffort = target === "existing" ? undefined : configValues.effort
+  const effortOffered =
+    wantedEffort != null &&
+    selectChoices(effortOption).some((c) => c.value === wantedEffort)
+  const effortOptionId = effortOption?.id ?? null
+  const enforcedEffortRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!effortOptionId || !wantedEffort || !effortOffered) return
+    if (liveEffort === wantedEffort) return
+    const stamp = `${liveModel ?? ""}:${wantedEffort}`
+    if (enforcedEffortRef.current === stamp) return
+    enforcedEffortRef.current = stamp
+    void setLiveConfig(effortOptionId, wantedEffort).catch(() => {})
+  }, [
+    effortOffered,
+    effortOptionId,
+    liveEffort,
+    liveModel,
+    setLiveConfig,
+    wantedEffort,
+  ])
+
   // ── Window state shared with the shell ──────────────────────────────────
   const setHasContent = useQuickAskWindowState((s) => s.setHasContent)
   const pendingRoute = useQuickAskWindowState((s) => s.pendingRoute)
@@ -206,7 +246,6 @@ export function QuickAskWindow() {
 
   // Each time the window is shown: focus the question box and refresh what
   // the pickers offer.
-  const reloadData = data.reload
   useEffect(() => {
     const onShown = () => {
       inputRef.current?.focus()
@@ -251,6 +290,7 @@ export function QuickAskWindow() {
   const newQuestion = async () => {
     const report = await qa.clear()
     setInput("")
+    reloadData()
     if (report) setNotice(t("private.deleted"))
     if (pendingRoute) {
       window.location.replace(`/${pendingRoute}`)
@@ -283,6 +323,7 @@ export function QuickAskWindow() {
   const onTargetChange = (next: QuickAskTargetKind) => {
     if (locked) return
     savePrefs((p) => ({ ...p, target: next }))
+    reloadData()
   }
   const onFolderChange = (id: number) => {
     setChosenFolderId(id)
@@ -356,6 +397,7 @@ export function QuickAskWindow() {
           sessions={data.sessions}
           sessionId={sessionId}
           onSessionChange={onSessionChange}
+          onSessionsOpen={reloadData}
           locked={locked}
         />
         <div className="h-full min-w-2 flex-1" data-tauri-drag-region />
@@ -368,23 +410,6 @@ export function QuickAskWindow() {
             {t("backend.remote", { name: remote.connection.name })}
           </span>
         )}
-        <AgentModelPicker
-          agentType={liveAgent}
-          agents={installedAgents}
-          onAgentChange={onAgentChange}
-          agentLocked={locked || target === "existing"}
-          configOptions={connOptions}
-          savedValues={target === "existing" ? {} : configValues}
-          onValueChange={onValueChange}
-          readOnly={target === "existing"}
-          loading={
-            conn.status === "connecting" ||
-            (!bound && connOptions == null && installedAgents.length > 0)
-          }
-          onOpen={() => {
-            if (!bound) void prepare().catch(() => {})
-          }}
-        />
         {isDesktop() && (
           <Button
             type="button"
@@ -511,8 +536,27 @@ export function QuickAskWindow() {
             </Button>
           )}
         </div>
-        <div className="flex h-7 items-center gap-1 px-1 pt-1 text-[11px] text-muted-foreground">
-          <span className="min-w-0 flex-1 truncate">{t("hint")}</span>
+        <div className="flex h-7 items-center gap-1 pt-1 text-[11px] text-muted-foreground">
+          <AgentModelPicker
+            agentType={liveAgent}
+            agents={installedAgents}
+            onAgentChange={onAgentChange}
+            agentLocked={locked || target === "existing"}
+            configOptions={connOptions}
+            savedValues={target === "existing" ? {} : configValues}
+            onValueChange={onValueChange}
+            readOnly={target === "existing"}
+            loading={
+              conn.status === "connecting" ||
+              (!bound && connOptions == null && installedAgents.length > 0)
+            }
+            onOpen={() => {
+              if (!bound) void prepare().catch(() => {})
+            }}
+          />
+          <span className="min-w-0 flex-1 truncate px-1">
+            {hasContent ? null : t("hint")}
+          </span>
           {canOpenInCodeg && (
             <Button
               type="button"

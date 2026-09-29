@@ -49,18 +49,28 @@ function SessionSelect({
   sessions,
   value,
   onChange,
+  onOpen,
   disabled,
 }: {
   sessions: QuickAskSessionOption[]
   value: number | null
   onChange: (id: number) => void
+  /** The list is re-read each time it opens: sessions come and go. */
+  onOpen?: () => void
   disabled: boolean
 }) {
   const t = useTranslations("QuickAsk")
   const [open, setOpen] = useState(false)
   const current = sessions.find((s) => s.id === value)
   return (
-    <Popover open={open} onOpenChange={(o) => !disabled && setOpen(o)}>
+    <Popover
+      open={open}
+      onOpenChange={(o) => {
+        if (disabled) return
+        setOpen(o)
+        if (o) onOpen?.()
+      }}
+    >
       <PopoverTrigger asChild>
         <Button
           type="button"
@@ -128,6 +138,7 @@ export const TargetPicker = memo(function TargetPicker({
   sessions,
   sessionId,
   onSessionChange,
+  onSessionsOpen,
   locked,
 }: {
   target: QuickAskTargetKind
@@ -138,6 +149,7 @@ export const TargetPicker = memo(function TargetPicker({
   sessions: QuickAskSessionOption[]
   sessionId: number | null
   onSessionChange: (id: number) => void
+  onSessionsOpen?: () => void
   /** A question is open: the target can't change until "New question". */
   locked: boolean
 }) {
@@ -189,6 +201,7 @@ export const TargetPicker = memo(function TargetPicker({
           sessions={sessions}
           value={sessionId}
           onChange={onSessionChange}
+          onOpen={onSessionsOpen}
           disabled={locked}
         />
       )}

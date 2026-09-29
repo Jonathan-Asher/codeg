@@ -74,9 +74,11 @@ export function useReplyParts(
 const AssistantReply = memo(function AssistantReply({
   message,
   streaming,
+  durationMs = null,
 }: {
   message: LiveMessage
   streaming: boolean
+  durationMs?: number | null
 }) {
   const parts = useReplyParts(message, streaming)
   // Folded by default: a quick answer is about the answer, not the work.
@@ -86,6 +88,7 @@ const AssistantReply = memo(function AssistantReply({
     <div className="quick-ask-reply min-w-0 text-sm" data-testid="qa-reply">
       <CompletedTurnContent
         parts={parts}
+        durationMs={durationMs}
         completed={!streaming}
         currentRound
         roundOpen={workOpen}
@@ -210,6 +213,7 @@ export function QuickAskThread({
             <AssistantReply
               key={turn.id}
               message={turn.message}
+              durationMs={turn.durationMs}
               streaming={false}
             />
           )

@@ -91,7 +91,13 @@ export type QuickAskTurn =
       text: string
       state: QuickAskUserTurnState
     }
-  | { id: string; role: "assistant"; message: LiveMessage }
+  | {
+      id: string
+      role: "assistant"
+      message: LiveMessage
+      /** Wall-clock time the reply took, for its "Worked for" header. */
+      durationMs: number | null
+    }
 
 /** What the window is talking to once the first question went out. */
 export interface QuickAskBinding {
@@ -509,7 +515,12 @@ export function useQuickAskSession({
       committedLiveIdsRef.current.add(finished.id)
       setThread((prev) => [
         ...prev,
-        { id: `reply-${finished.id}`, role: "assistant", message: finished },
+        {
+          id: `reply-${finished.id}`,
+          role: "assistant",
+          message: finished,
+          durationMs: Math.max(0, Date.now() - finished.startedAt),
+        },
       ])
     }
     const bound = bindingRef.current

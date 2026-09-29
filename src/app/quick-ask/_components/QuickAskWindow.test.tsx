@@ -9,7 +9,7 @@ const h = vi.hoisted(() => {
     conn: {
       status: null as string | null,
       agentType: null as string | null,
-      configOptions: null,
+      configOptions: null as unknown,
       pendingPermission: null,
       pendingAskQuestion: null,
       respondPermission: () => Promise.resolve(),
@@ -127,6 +127,9 @@ describe("QuickAskWindow", () => {
       clear: vi.fn(async () => null),
     })
     h.session.conn.status = null
+    h.session.conn.agentType = null
+    h.session.conn.configOptions = null
+    h.session.setConfigOption = vi.fn(async () => {})
   })
 
   it("opens on a new session in the remembered folder with a fast model", () => {
@@ -300,6 +303,68 @@ describe("QuickAskWindow", () => {
         "Private question deleted."
       )
     )
+  })
+
+  it("keeps Quick Ask's effort when a model switch resets it", () => {
+    const select = (
+      id: string,
+      category: string,
+      current: string,
+      values: string[]
+    ) => ({
+      id,
+      name: id,
+      category,
+      kind: {
+        type: "select",
+        current_value: current,
+        options: values.map((v) => ({ value: v, name: v })),
+        groups: [],
+      },
+    })
+    h.session.conn.status = "connected"
+    h.session.conn.agentType = "claude_code"
+    // The adapter moved effort to Sonnet's own default after the switch.
+    h.session.conn.configOptions = [
+      select("model", "model", "sonnet", ["haiku", "sonnet"]),
+      select("effort", "thought_level", "xhigh", ["low", "medium", "xhigh"]),
+    ]
+    const { rerender } = renderWindow()
+    expect(h.session.setConfigOption).toHaveBeenCalledWith("effort", "low")
+    // Once per model: a re-render (or a refusal) does not loop.
+    rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <QuickAskWindow />
+      </NextIntlClientProvider>
+    )
+    expect(h.session.setConfigOption).toHaveBeenCalledTimes(1)
+  })
+
+  it("leaves an existing session's effort alone", () => {
+    window.localStorage.setItem(
+      "codeg:quick-ask:v1",
+      JSON.stringify({ target: "existing" })
+    )
+    h.session.conn.status = "connected"
+    h.session.conn.agentType = "claude_code"
+    h.session.conn.configOptions = [
+      {
+        id: "effort",
+        name: "effort",
+        category: "thought_level",
+        kind: {
+          type: "select",
+          current_value: "xhigh",
+          options: [
+            { value: "low", name: "low" },
+            { value: "xhigh", name: "xhigh" },
+          ],
+          groups: [],
+        },
+      },
+    ]
+    renderWindow()
+    expect(h.session.setConfigOption).not.toHaveBeenCalled()
   })
 
   it("shows why a question could not start", () => {
