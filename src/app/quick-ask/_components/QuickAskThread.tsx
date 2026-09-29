@@ -12,10 +12,10 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   useSyncExternalStore,
 } from "react"
+import { useStickToBottomContext } from "use-stick-to-bottom"
 import { useTranslations } from "next-intl"
 import { AlertCircle, Clock, CornerDownRight } from "lucide-react"
 
@@ -23,6 +23,11 @@ import {
   useConnectionStore,
   type LiveMessage,
 } from "@/contexts/acp-connections-context"
+import {
+  MessageThread,
+  MessageThreadContent,
+  MessageThreadScrollButton,
+} from "@/components/ai-elements/message-thread"
 import { CompletedTurnContent } from "@/components/message/completed-turn-content"
 import {
   adaptMessageTurn,
@@ -169,43 +174,16 @@ export function QuickAskThread({
   streaming: boolean
   footer?: React.ReactNode
 }) {
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const stickRef = useRef(true)
-
-  // Follow the reply as it grows, unless the reader scrolled up.
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    const onScroll = () => {
-      stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
-    }
-    el.addEventListener("scroll", onScroll, { passive: true })
-    const observer = new ResizeObserver(() => {
-      if (stickRef.current) el.scrollTop = el.scrollHeight
-    })
-    if (el.firstElementChild) observer.observe(el.firstElementChild)
-    return () => {
-      el.removeEventListener("scroll", onScroll)
-      observer.disconnect()
-    }
-  }, [])
-
   // A new question always brings the bottom back into view.
-  const lastUserId = [...thread].reverse().find((t) => t.role === "user")?.id
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el || !lastUserId) return
-    stickRef.current = true
-    el.scrollTop = el.scrollHeight
-  }, [lastUserId])
+  let lastUserId: string | undefined
+  for (const turn of thread) if (turn.role === "user") lastUserId = turn.id
 
+  // The app's own stick-to-bottom thread: follows a reply as it grows unless
+  // the reader scrolled up, and offers the jump-to-bottom button then.
   return (
-    <div
-      ref={scrollRef}
-      className="min-h-0 flex-1 overflow-y-auto px-4 py-3"
-      data-testid="qa-thread"
-    >
-      <div className="flex flex-col gap-3">
+    <MessageThread className="min-h-0 flex-1" data-testid="qa-thread">
+      <ScrollToBottomOn signal={lastUserId} />
+      <MessageThreadContent className="gap-3 px-4 py-3">
         {thread.map((turn) =>
           turn.role === "user" ? (
             <UserBubble key={turn.id} text={turn.text} state={turn.state} />
@@ -220,7 +198,17 @@ export function QuickAskThread({
         )}
         {streaming && <LiveReply contextKey={contextKey} />}
         {footer}
-      </div>
-    </div>
+      </MessageThreadContent>
+      <MessageThreadScrollButton className="bottom-2 size-7" />
+    </MessageThread>
   )
+}
+
+/** Scroll to the bottom whenever `signal` changes (a new question). */
+function ScrollToBottomOn({ signal }: { signal: string | undefined }) {
+  const { scrollToBottom } = useStickToBottomContext()
+  useEffect(() => {
+    if (signal) void scrollToBottom("instant")
+  }, [signal, scrollToBottom])
+  return null
 }

@@ -298,10 +298,26 @@ fn to_base36(mut value: u64) -> String {
     String::from_utf8(out).expect("ascii")
 }
 
-/// Remove what Claude Code keeps about one session under its config dir. All
-/// of these are keyed by the (unique) session id, so nothing else is touched;
-/// the project directory itself is removed only when it is the scratch dir's
-/// own and nothing is left in it.
+/// Remove Claude Code's project directory for the scratch dir
+/// (`projects/<encoded cwd>`). Claude creates it for every session it runs
+/// there — with transcripts off it still holds an (empty) `memory/` — and it
+/// is named after the scratch path, whose last component is a fresh UUID, so
+/// it can only hold what this one question left. It goes entirely.
+pub fn remove_claude_project_dir(
+    claude_config_dir: &Path,
+    cwd: &str,
+    report: &mut PrivateSessionCleanup,
+) {
+    report.remove_path(
+        &claude_config_dir
+            .join("projects")
+            .join(claude_project_dir_name(cwd)),
+    );
+}
+
+/// Remove what Claude Code keeps about one session elsewhere under its config
+/// dir. All of these are keyed by the (unique) session id, so nothing else is
+/// touched.
 pub fn remove_claude_session_leftovers(
     claude_config_dir: &Path,
     cwd: &str,
@@ -328,13 +344,6 @@ pub fn remove_claude_session_leftovers(
         report.remove_path(&dir.join(format!("{session_id}.jsonl")));
         // Sub-agent transcripts and tool results live next to the transcript.
         report.remove_path(&dir.join(session_id));
-    }
-    if own_project.is_dir()
-        && std::fs::read_dir(&own_project)
-            .map(|mut entries| entries.next().is_none())
-            .unwrap_or(false)
-    {
-        report.remove_path(&own_project);
     }
     for dir_name in ["session-env", "file-history"] {
         report.remove_path(&claude_config_dir.join(dir_name).join(session_id));
@@ -423,6 +432,11 @@ pub async fn discard_private_session_core(
             report.remove_path(date_dir);
         }
     }
+
+    // Whatever the agent: a Claude project dir named after this scratch path
+    // can only belong to this question (the discard of a question that never
+    // got a session id passes no agent).
+    remove_claude_project_dir(claude_config_dir, working_dir, &mut report);
 
     if let Some(session_id) = session_id.filter(|id| is_safe_session_id(id)) {
         if agent_type == Some(AgentType::ClaudeCode) {
@@ -1158,7 +1172,8 @@ mod tests {
         let mut report = PrivateSessionCleanup::default();
         remove_claude_session_leftovers(config, cwd, sid, &mut report);
 
-        assert!(!project.exists(), "empty scratch project dir is removed");
+        assert!(!project.join(format!("{sid}.jsonl")).exists());
+        assert!(!project.join(sid).exists());
         assert!(!config
             .join("todos")
             .join(format!("{sid}-agent-{sid}.json"))
@@ -1183,6 +1198,7 @@ mod tests {
             .join("projects")
             .join(claude_project_dir_name(&dir));
         touch(&project.join(format!("{sid}.jsonl")));
+        std::fs::create_dir_all(project.join("memory")).unwrap();
 
         let report = discard_private_session_core(
             &db.conn,
@@ -1245,6 +1261,25 @@ mod tests {
         .await;
         assert!(refused.is_err());
         assert!(project.path().exists());
+    }
+
+    #[test]
+    fn the_scratch_dirs_own_claude_project_goes_entirely() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path();
+        let cwd = "/data/app.codeg/chat-sessions/2026-09-29/0123456789abcdef0123456789abcdef";
+        let project = config.join("projects").join(claude_project_dir_name(cwd));
+        // Claude's auto-memory lives here even with transcripts off.
+        touch(&project.join("memory").join("notes.md"));
+        let real = config.join("projects/-Users-me-project/other.jsonl");
+        touch(&real);
+
+        let mut report = PrivateSessionCleanup::default();
+        remove_claude_project_dir(config, cwd, &mut report);
+
+        assert!(!project.exists());
+        assert!(real.exists());
+        assert_eq!(report.removed, vec![project.to_string_lossy().to_string()]);
     }
 
     #[test]
