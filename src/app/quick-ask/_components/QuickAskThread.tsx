@@ -12,6 +12,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react"
@@ -179,15 +180,20 @@ export function QuickAskThread({
   const settled = thread.filter((turn) => !isQueued(turn))
   const queued = thread.filter(isQueued)
 
-  // A new question always brings the bottom back into view.
-  let lastUserId: string | undefined
-  for (const turn of thread) if (turn.role === "user") lastUserId = turn.id
+  // A new question always brings the bottom back into view (a queued one
+  // too, when it finally goes out).
+  let questionSignal: string | undefined
+  let replyCount = 0
+  for (const turn of thread) {
+    if (turn.role === "user") questionSignal = `${turn.id}:${turn.state}`
+    else replyCount += 1
+  }
 
   // The app's own stick-to-bottom thread: follows a reply as it grows unless
   // the reader scrolled up, and offers the jump-to-bottom button then.
   return (
     <MessageThread className="min-h-0 flex-1" data-testid="qa-thread">
-      <ScrollToBottomOn signal={lastUserId} />
+      <FollowThread questionSignal={questionSignal} replyCount={replyCount} />
       <MessageThreadContent className="gap-3 px-4 py-3">
         {settled.map((turn) =>
           turn.role === "user" ? (
@@ -215,11 +221,36 @@ export function QuickAskThread({
   )
 }
 
-/** Scroll to the bottom whenever `signal` changes (a new question). */
-function ScrollToBottomOn({ signal }: { signal: string | undefined }) {
-  const { scrollToBottom } = useStickToBottomContext()
+/**
+ * Keep the thread's end in view: always when a question goes out, and when a
+ * reply settles if the reader was following it. Settling swaps the live reply
+ * for the kept one, a brief layout change the stick-to-bottom tracker reads
+ * as the reader scrolling away; `wasAtBottom` is read before that happens.
+ */
+function FollowThread({
+  questionSignal,
+  replyCount,
+}: {
+  questionSignal: string | undefined
+  replyCount: number
+}) {
+  const { scrollToBottom, isAtBottom } = useStickToBottomContext()
+  const wasAtBottom = useRef(true)
+  const lastReplyCount = useRef(replyCount)
+
   useEffect(() => {
-    if (signal) void scrollToBottom("instant")
-  }, [signal, scrollToBottom])
+    if (questionSignal) void scrollToBottom("instant")
+  }, [questionSignal, scrollToBottom])
+
+  useEffect(() => {
+    if (replyCount === lastReplyCount.current) return
+    lastReplyCount.current = replyCount
+    if (wasAtBottom.current) void scrollToBottom("instant")
+  }, [replyCount, scrollToBottom])
+
+  // Declared last: records the position the NEXT change is judged against.
+  useEffect(() => {
+    wasAtBottom.current = isAtBottom
+  })
   return null
 }
