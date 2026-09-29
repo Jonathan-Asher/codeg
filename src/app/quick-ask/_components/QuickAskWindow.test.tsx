@@ -83,6 +83,9 @@ vi.mock("@/hooks/use-acp-agents", () => ({
     refresh: async () => {},
   }),
 }))
+vi.mock("@/hooks/use-feedback-enabled", () => ({
+  useFeedbackEnabled: () => false,
+}))
 vi.mock("@/contexts/remote-connection-context", () => ({
   useRemoteConnection: () => null,
 }))

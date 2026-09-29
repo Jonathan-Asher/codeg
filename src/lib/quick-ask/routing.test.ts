@@ -6,10 +6,10 @@ describe("routeQuickAskSend", () => {
   it("sends when the agent is idle, for every target", () => {
     for (const target of ["new", "existing", "private"] as const) {
       expect(
-        routeQuickAskSend({ target, status: "connected", nativeSteering: true })
+        routeQuickAskSend({ target, status: "connected", steerable: true })
       ).toBe("send")
       expect(
-        routeQuickAskSend({ target, status: null, nativeSteering: false })
+        routeQuickAskSend({ target, status: null, steerable: false })
       ).toBe("send")
     }
   })
@@ -19,14 +19,14 @@ describe("routeQuickAskSend", () => {
       routeQuickAskSend({
         target: "existing",
         status: "prompting",
-        nativeSteering: true,
+        steerable: true,
       })
     ).toBe("steer")
     expect(
       routeQuickAskSend({
         target: "new",
         status: "prompting",
-        nativeSteering: true,
+        steerable: true,
       })
     ).toBe("steer")
   })
@@ -36,7 +36,7 @@ describe("routeQuickAskSend", () => {
       routeQuickAskSend({
         target: "existing",
         status: "prompting",
-        nativeSteering: false,
+        steerable: false,
       })
     ).toBe("queue")
   })
@@ -46,7 +46,7 @@ describe("routeQuickAskSend", () => {
       routeQuickAskSend({
         target: "private",
         status: "prompting",
-        nativeSteering: true,
+        steerable: true,
       })
     ).toBe("queue")
   })

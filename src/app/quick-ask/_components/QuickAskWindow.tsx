@@ -18,6 +18,7 @@ import { PermissionDialog } from "@/components/chat/permission-dialog"
 import { Button } from "@/components/ui/button"
 import { useRemoteConnection } from "@/contexts/remote-connection-context"
 import { useAcpAgents } from "@/hooks/use-acp-agents"
+import { useFeedbackEnabled } from "@/hooks/use-feedback-enabled"
 import { getAgentLabel } from "@/lib/custom-agents"
 import {
   hideQuickAskWindow,
@@ -174,12 +175,14 @@ export function QuickAskWindow() {
     [backend, savePrefs]
   )
 
+  const steeringEnabled = useFeedbackEnabled()
   const qa = useQuickAskSession({
     target,
     agentType,
     folder,
     session,
     configValues,
+    steeringEnabled,
     onFolderUsed,
     onSessionUsed,
   })

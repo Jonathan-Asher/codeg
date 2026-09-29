@@ -33,6 +33,7 @@ import {
 } from "@/contexts/acp-connections-context"
 import { useConnection } from "@/hooks/use-connection"
 import {
+  acpGetSessionSnapshot,
   createChatDir,
   createConversation,
   discardPrivateQuickAsk,
@@ -117,6 +118,10 @@ export interface UseQuickAskSessionArgs {
   session: QuickAskSessionTarget | null
   /** Quick Ask's own model/effort picks for `agentType`. */
   configValues: Record<string, string>
+  /** Live feedback (steering) is switched on — the composer's own gate for
+   *  sending into a running reply. Off: a question for a busy session is
+   *  queued, as the composer does. */
+  steeringEnabled?: boolean
   /** Called with the folder a new session was created in, to remember it. */
   onFolderUsed?: (folderId: number) => void
   onSessionUsed?: (conversationId: number) => void
@@ -189,6 +194,7 @@ export function useQuickAskSession({
   folder,
   session,
   configValues,
+  steeringEnabled = false,
   onFolderUsed,
   onSessionUsed,
 }: UseQuickAskSessionArgs) {
@@ -216,10 +222,48 @@ export function useQuickAskSession({
   const privateDirPromiseRef = useRef<Promise<string> | null>(null)
   const queueRef = useRef<{ turnId: string; text: string }[]>([])
   const committedLiveIdsRef = useRef(new Set<string>())
-  const argsRef = useRef({ target, agentType, folder, session, configValues })
+  const argsRef = useRef({
+    target,
+    agentType,
+    folder,
+    session,
+    configValues,
+    steeringEnabled,
+  })
   useEffect(() => {
-    argsRef.current = { target, agentType, folder, session, configValues }
-  }, [target, agentType, folder, session, configValues])
+    argsRef.current = {
+      target,
+      agentType,
+      folder,
+      session,
+      configValues,
+      steeringEnabled,
+    }
+  }, [target, agentType, folder, session, configValues, steeringEnabled])
+
+  /**
+   * Can a question go into the reply being written right now? Only with live
+   * feedback switched on and a working channel on this session. The channel
+   * is read from the backend snapshot, as the composer does: the connection
+   * state learns it late (a freshly spawned agent reports it after connect).
+   */
+  const canSteer = useCallback(
+    async (b: QuickAskBinding): Promise<boolean> => {
+      const live = store.getConnection(keyRef.current)
+      if (b.target === "private" || live?.status !== "prompting") return false
+      if (!argsRef.current.steeringEnabled) return false
+      if (live.nativeSteering) return true
+      try {
+        const snap = await acpGetSessionSnapshot(live.connectionId)
+        return Boolean(
+          snap?.native_steering_available || snap?.feedback_tool_available
+        )
+      } catch {
+        return false
+      }
+    },
+    [store]
+  )
 
   const effectiveAgent: AgentType =
     target === "existing" && session ? session.agentType : agentType
@@ -407,7 +451,7 @@ export function useQuickAskSession({
         const route = routeQuickAskSend({
           target: bound.target,
           status: live?.status ?? null,
-          nativeSteering: live?.nativeSteering ?? false,
+          steerable: await canSteer(bound),
         })
         try {
           await deliver(route, turnId, text, bound)
@@ -485,7 +529,7 @@ export function useQuickAskSession({
         const route = routeQuickAskSend({
           target: next.target,
           status: live?.status ?? null,
-          nativeSteering: live?.nativeSteering ?? false,
+          steerable: await canSteer(next),
         })
         await deliver(route, turnId, text, next)
       } catch (e) {
@@ -496,7 +540,16 @@ export function useQuickAskSession({
       }
       return true
     },
-    [actions, deliver, onFolderUsed, onSessionUsed, prepare, store, updateTurn]
+    [
+      actions,
+      canSteer,
+      deliver,
+      onFolderUsed,
+      onSessionUsed,
+      prepare,
+      store,
+      updateTurn,
+    ]
   )
 
   // Settle each reply: when the agent leaves `prompting`, keep its final

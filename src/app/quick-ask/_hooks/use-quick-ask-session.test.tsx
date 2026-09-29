@@ -87,6 +87,10 @@ const h = vi.hoisted(() => {
       failed: [],
     })),
     submitSessionFeedback: vi.fn(async () => ({ id: "note-1" })),
+    acpGetSessionSnapshot: vi.fn(async () => ({
+      native_steering_available: false,
+      feedback_tool_available: false,
+    })),
   }
   return { state, emit, store, actions, api }
 })
@@ -334,8 +338,17 @@ describe("useQuickAskSession", () => {
 
     it("steers into a busy session that takes mid-turn messages", async () => {
       h.state.connectedStatus = "prompting"
-      h.state.nativeSteering = true
-      const { result } = setup({ target: "existing", session })
+      // Learned from the backend snapshot, as the composer does: a fresh
+      // connection's own state reports the channel late.
+      h.api.acpGetSessionSnapshot.mockResolvedValueOnce({
+        native_steering_available: true,
+        feedback_tool_available: false,
+      })
+      const { result } = setup({
+        target: "existing",
+        session,
+        steeringEnabled: true,
+      })
       await act(async () => {
         await result.current.send("also check tests")
       })
@@ -345,6 +358,21 @@ describe("useQuickAskSession", () => {
       )
       expect(h.actions.sendPrompt).not.toHaveBeenCalled()
       expect(result.current.thread[0]).toMatchObject({ state: "steered" })
+    })
+
+    it("queues with live feedback switched off, like the composer", async () => {
+      h.state.connectedStatus = "prompting"
+      h.state.nativeSteering = true
+      const { result } = setup({
+        target: "existing",
+        session,
+        steeringEnabled: false,
+      })
+      await act(async () => {
+        await result.current.send("wait for it")
+      })
+      expect(h.api.submitSessionFeedback).not.toHaveBeenCalled()
+      expect(result.current.thread[0]).toMatchObject({ state: "queued" })
     })
 
     it("queues behind a busy reply and sends when it ends", async () => {
@@ -452,6 +480,7 @@ describe("useQuickAskSession", () => {
       const { result, rerender, args } = setup({
         target: "private",
         folder: null,
+        steeringEnabled: true,
       })
       await act(async () => {
         await result.current.send("one")
