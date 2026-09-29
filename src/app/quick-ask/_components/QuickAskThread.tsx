@@ -31,10 +31,9 @@ import {
 import { usePageHandoffName } from "@/lib/browser/use-page-handoff-name"
 import { buildStreamingTurnsFromLiveMessage } from "@/stores/conversation-runtime-store"
 import { cn } from "@/lib/utils"
-import {
-  QUICK_ASK_CONTEXT_KEY,
-  type QuickAskTurn,
-  type QuickAskUserTurnState,
+import type {
+  QuickAskTurn,
+  QuickAskUserTurnState,
 } from "../_hooks/use-quick-ask-session"
 
 /** The reply's content parts, every assistant round merged into one. */
@@ -97,15 +96,15 @@ const AssistantReply = memo(function AssistantReply({
 })
 
 /** The reply being written right now, read straight from the connection. */
-function LiveReply() {
+function LiveReply({ contextKey }: { contextKey: string }) {
   const store = useConnectionStore()
   const subscribe = useCallback(
-    (cb: () => void) => store.subscribeKey(QUICK_ASK_CONTEXT_KEY, cb),
-    [store]
+    (cb: () => void) => store.subscribeKey(contextKey, cb),
+    [store, contextKey]
   )
   const getSnapshot = useCallback(
-    () => store.getConnection(QUICK_ASK_CONTEXT_KEY)?.liveMessage ?? null,
-    [store]
+    () => store.getConnection(contextKey)?.liveMessage ?? null,
+    [store, contextKey]
   )
   const message = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
   if (!message) return null
@@ -155,10 +154,13 @@ function UserBubble({
 }
 
 export function QuickAskThread({
+  contextKey,
   thread,
   streaming,
   footer,
 }: {
+  /** The connection the live reply streams from. */
+  contextKey: string
   thread: QuickAskTurn[]
   /** A reply is being written (render it live under the thread). */
   streaming: boolean
@@ -212,7 +214,7 @@ export function QuickAskThread({
             />
           )
         )}
-        {streaming && <LiveReply />}
+        {streaming && <LiveReply contextKey={contextKey} />}
         {footer}
       </div>
     </div>

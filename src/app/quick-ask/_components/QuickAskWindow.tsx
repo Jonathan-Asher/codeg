@@ -440,6 +440,7 @@ export function QuickAskWindow() {
         </div>
       ) : (
         <QuickAskThread
+          contextKey={qa.contextKey}
           thread={qa.thread}
           streaming={streaming}
           footer={footer}

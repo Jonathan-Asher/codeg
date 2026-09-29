@@ -105,10 +105,13 @@ vi.mock("@/hooks/use-connection", () => ({
 vi.mock("@/lib/api", () => h.api)
 
 import {
-  QUICK_ASK_CONTEXT_KEY,
+  quickAskContextKey,
   useQuickAskSession,
   type UseQuickAskSessionArgs,
 } from "./use-quick-ask-session"
+
+/** The key of the window's first question. */
+const QUICK_ASK_CONTEXT_KEY = quickAskContextKey(0)
 
 const PRIVATE_DIR =
   "/data/chat-sessions/2026-09-29/0123456789abcdef0123456789abcdef"
@@ -233,6 +236,38 @@ describe("useQuickAskSession", () => {
         "assistant",
         "user",
       ])
+    })
+
+    it("starts the next question on a fresh connection, leaving a busy one to finish", async () => {
+      const { result, rerender, args } = setup({ target: "new" })
+      await act(async () => {
+        await result.current.send("long question")
+      })
+      moveTo(rerender, args, "prompting", reply("still writing"))
+      await act(async () => {
+        await result.current.clear()
+      })
+      // Released only if idle: a reply still being written lands in its
+      // conversation in the background.
+      expect(h.actions.disconnectIfIdle).toHaveBeenCalledWith(
+        quickAskContextKey(0)
+      )
+      expect(h.actions.disconnect).not.toHaveBeenCalled()
+      expect(result.current.contextKey).toBe(quickAskContextKey(1))
+
+      h.state.conn = undefined
+      await act(async () => {
+        await result.current.send("next question")
+      })
+      expect(h.actions.connect).toHaveBeenLastCalledWith(
+        quickAskContextKey(1),
+        "claude_code",
+        "/work/project",
+        undefined,
+        undefined,
+        expect.anything()
+      )
+      expect(h.actions.disconnect).not.toHaveBeenCalled()
     })
 
     it("refuses to start without a folder", async () => {

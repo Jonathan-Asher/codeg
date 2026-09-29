@@ -51,8 +51,18 @@ import { isNoActiveTurnRejection, TurnBusyError } from "@/lib/turn-busy"
 import type { AgentType, PromptInputBlock } from "@/lib/types"
 import { randomUUID } from "@/lib/utils"
 
-/** The Quick Ask window runs one connection, always under this key. */
+/**
+ * Prefix of the key the window's connection lives under. Each question gets a
+ * fresh key (`quick-ask-0`, `quick-ask-1`, …): "New question" can then leave a
+ * saved conversation that is still answering to finish in the background,
+ * while the next question starts its own connection instead of tearing that
+ * one down.
+ */
 export const QUICK_ASK_CONTEXT_KEY = "quick-ask"
+
+export function quickAskContextKey(generation: number): string {
+  return `${QUICK_ASK_CONTEXT_KEY}-${generation}`
+}
 const LIVE_SURFACE_SOURCE = "quick-ask"
 /** Long enough for a cold agent start plus a resume. */
 const CONNECT_READY_TIMEOUT_MS = 180_000
@@ -178,7 +188,13 @@ export function useQuickAskSession({
 }: UseQuickAskSessionArgs) {
   const actions = useAcpActions()
   const store = useConnectionStore()
-  const conn = useConnection(QUICK_ASK_CONTEXT_KEY)
+  const [generation, setGeneration] = useState(0)
+  const contextKey = quickAskContextKey(generation)
+  // Read by async paths, which must act on the key of the question they
+  // belong to even after "New question" moved on.
+  const keyRef = useRef(contextKey)
+  const generationRef = useRef(0)
+  const conn = useConnection(contextKey)
 
   const [thread, setThread] = useState<QuickAskTurn[]>([])
   const [binding, setBinding] = useState<QuickAskBinding | null>(null)
@@ -285,8 +301,8 @@ export function useQuickAskSession({
     if (bindingRef.current) return
     const desired = await desiredConnection()
     if (!desired) return
-    const live = store.getConnection(QUICK_ASK_CONTEXT_KEY)
-    const pending = store.getConnectPending(QUICK_ASK_CONTEXT_KEY)
+    const live = store.getConnection(keyRef.current)
+    const pending = store.getConnectPending(keyRef.current)
     const matches =
       live != null &&
       live.agentType === desired.agentType &&
@@ -302,7 +318,7 @@ export function useQuickAskSession({
       return
     }
     await actions.connect(
-      QUICK_ASK_CONTEXT_KEY,
+      keyRef.current,
       desired.agentType,
       desired.workingDir,
       desired.sessionId,
@@ -324,7 +340,7 @@ export function useQuickAskSession({
         updateTurn(turnId, "queued")
         return
       }
-      const live = store.getConnection(QUICK_ASK_CONTEXT_KEY)
+      const live = store.getConnection(keyRef.current)
       if (route === "steer" && live) {
         try {
           await submitSessionFeedback(live.connectionId, text)
@@ -337,7 +353,7 @@ export function useQuickAskSession({
       }
       try {
         await actions.sendPrompt(
-          QUICK_ASK_CONTEXT_KEY,
+          keyRef.current,
           textBlocks(text),
           promptOptionsFor(promptTargetOf(b))
         )
@@ -381,7 +397,7 @@ export function useQuickAskSession({
       // Follow-up on the session the window already talks to.
       const bound = bindingRef.current
       if (bound) {
-        const live = store.getConnection(QUICK_ASK_CONTEXT_KEY)
+        const live = store.getConnection(keyRef.current)
         const route = routeQuickAskSend({
           target: bound.target,
           status: live?.status ?? null,
@@ -403,7 +419,7 @@ export function useQuickAskSession({
           await prepare()
           await waitForConnectionReady(
             store,
-            QUICK_ASK_CONTEXT_KEY,
+            keyRef.current,
             CONNECT_READY_TIMEOUT_MS
           )
         } catch (e) {
@@ -411,7 +427,7 @@ export function useQuickAskSession({
           setError({ code: "connect_failed", detail: describeError(e) })
           return true
         }
-        const live = store.getConnection(QUICK_ASK_CONTEXT_KEY)
+        const live = store.getConnection(keyRef.current)
         const workingDir = live?.workingDir ?? ""
         let next: QuickAskBinding
         if (args.target === "existing" && args.session) {
@@ -452,7 +468,7 @@ export function useQuickAskSession({
         setBinding(next)
         actions.registerLiveSurfaceKeys(
           LIVE_SURFACE_SOURCE,
-          new Set([QUICK_ASK_CONTEXT_KEY])
+          new Set([keyRef.current])
         )
         if (next.target === "new" && next.folderId != null) {
           onFolderUsed?.(next.folderId)
@@ -484,7 +500,7 @@ export function useQuickAskSession({
     const previous = lastStatusRef.current
     lastStatusRef.current = conn.status
     if (previous !== "prompting" || conn.status === "prompting") return
-    const finished = store.getConnection(QUICK_ASK_CONTEXT_KEY)?.liveMessage
+    const finished = store.getConnection(keyRef.current)?.liveMessage
     if (
       bindingRef.current &&
       finished &&
@@ -510,7 +526,7 @@ export function useQuickAskSession({
 
   const cancel = useCallback(async () => {
     queueRef.current = []
-    await actions.cancel(QUICK_ASK_CONTEXT_KEY)
+    await actions.cancel(keyRef.current)
   }, [actions])
 
   /**
@@ -523,7 +539,12 @@ export function useQuickAskSession({
     useCallback(async (): Promise<PrivateQuickAskCleanup | null> => {
       const bound = bindingRef.current
       const privateDir = privateDirRef.current
-      const live = store.getConnection(QUICK_ASK_CONTEXT_KEY)
+      const live = store.getConnection(keyRef.current)
+      const oldKey = keyRef.current
+      const nextGeneration = generationRef.current + 1
+      generationRef.current = nextGeneration
+      keyRef.current = quickAskContextKey(nextGeneration)
+      setGeneration(nextGeneration)
       bindingRef.current = null
       privateDirRef.current = null
       queueRef.current = []
@@ -537,7 +558,7 @@ export function useQuickAskSession({
       if (privateDir) {
         const sessionId = live?.sessionId ?? null
         const agent = live?.agentType ?? bound?.agentType ?? null
-        await actions.disconnect(QUICK_ASK_CONTEXT_KEY)
+        await actions.disconnect(oldKey)
         try {
           report = await discardPrivateQuickAsk(privateDir, agent, sessionId)
         } catch (e) {
@@ -546,7 +567,10 @@ export function useQuickAskSession({
         }
         setLastCleanup(report)
       } else if (live) {
-        await actions.disconnectIfIdle(QUICK_ASK_CONTEXT_KEY)
+        // Idle: released now. Still answering: left running under its old
+        // key until the reply lands in the conversation; the sweeps reclaim
+        // it after that.
+        await actions.disconnectIfIdle(oldKey)
       }
       return report
     }, [actions, store])
@@ -560,10 +584,10 @@ export function useQuickAskSession({
     privateDirRef.current = null
     // Only the private connection itself: one for the new target may already
     // be starting under the same key.
-    const live = store.getConnection(QUICK_ASK_CONTEXT_KEY)
+    const live = store.getConnection(keyRef.current)
     const stop =
       live?.workingDir === dir
-        ? actions.disconnect(QUICK_ASK_CONTEXT_KEY)
+        ? actions.disconnect(keyRef.current)
         : Promise.resolve(true)
     void stop
       .then(() => discardPrivateQuickAsk(dir, null, null))
@@ -577,8 +601,8 @@ export function useQuickAskSession({
     const onPageHide = () => {
       const dir = privateDirRef.current
       if (!dir) return
-      const live = store.getConnection(QUICK_ASK_CONTEXT_KEY)
-      void actions.disconnect(QUICK_ASK_CONTEXT_KEY).catch(() => false)
+      const live = store.getConnection(keyRef.current)
+      void actions.disconnect(keyRef.current).catch(() => false)
       void discardPrivateQuickAsk(
         dir,
         live?.agentType ?? null,
@@ -593,10 +617,10 @@ export function useQuickAskSession({
    *  the workspace's per-agent pick. */
   const setConfigOption = useCallback(
     async (configId: string, valueId: string) => {
-      const live = store.getConnection(QUICK_ASK_CONTEXT_KEY)
+      const live = store.getConnection(keyRef.current)
       if (!live || live.isViewer) return
       if (live.status !== "connected" && live.status !== "prompting") return
-      await actions.setConfigOption(QUICK_ASK_CONTEXT_KEY, configId, valueId, {
+      await actions.setConfigOption(keyRef.current, configId, valueId, {
         remember: false,
       })
     },
@@ -615,6 +639,7 @@ export function useQuickAskSession({
       error,
       lastCleanup,
       isPrivate,
+      contextKey,
       prepare,
       send,
       cancel,
@@ -631,6 +656,7 @@ export function useQuickAskSession({
       error,
       lastCleanup,
       isPrivate,
+      contextKey,
       prepare,
       send,
       cancel,
