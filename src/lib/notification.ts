@@ -15,7 +15,14 @@
  *     and only requestable from inside a user gesture.
  */
 
+import {
+  notificationGroupKey,
+  openNotificationTargetFromClick,
+  parseNotificationTarget,
+  type NotificationTarget,
+} from "./notification-target"
 import { getShellTransport, isDesktop } from "./transport"
+import type { UnsubscribeFn } from "./transport/types"
 
 /**
  * What the platform can tell us about permission to post notifications.
@@ -92,12 +99,19 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
 /**
  * Post one notification, now. Throws if the platform reported a failure.
  *
+ * `target` names the session the notification is about. A click on it then
+ * opens that session: on desktop the backend brings the owning window forward
+ * and hands it the session (see `notification.rs`); in a browser the click
+ * lands in this very page. It also groups: a newer notification about the
+ * same session replaces the older one.
+ *
  * Callers that are on an event path should go through `notifyDesktop` instead —
  * this bypasses every preference and gate.
  */
 export async function deliverSystemNotification(
   title: string,
-  body: string
+  body: string,
+  target?: NotificationTarget | null
 ): Promise<void> {
   if (isDesktop()) {
     // Deliberately the SHELL transport, not `getTransport()`. In a
@@ -107,7 +121,10 @@ export async function deliverSystemNotification(
     // windows was being posted to a machine the user isn't sitting at, failed,
     // and got swallowed by the caller's `.catch()`. A notification belongs to
     // the screen in front of the user, which is always the local shell.
-    await getShellTransport().call("send_notification", { title, body })
+    await getShellTransport().call(
+      "send_notification",
+      target ? { title, body, target } : { title, body }
+    )
     return
   }
 
@@ -119,7 +136,59 @@ export async function deliverSystemNotification(
   if (ctor.permission !== "granted") {
     throw new Error("Notification permission has not been granted")
   }
-  new ctor(title, { body })
+  const tag = target ? notificationGroupKey(target) : null
+  if (!target || !tag) {
+    new ctor(title, { body })
+    return
+  }
+  // `renotify` so a replacement still alerts; not in every DOM typing, and
+  // ignored by the browsers that lack it.
+  const options: NotificationOptions & { renotify?: boolean } = {
+    body,
+    tag,
+    renotify: true,
+  }
+  const notification = new ctor(title, options)
+  notification.onclick = () => {
+    try {
+      window.focus()
+    } catch {
+      // A browser may refuse; the tab still opens behind it.
+    }
+    notification.close?.()
+    openNotificationTargetFromClick(target)
+  }
+}
+
+/** Poke from the desktop backend: a notification click left a session for
+ *  this window in {@link takePendingNotificationOpens}. */
+export const NOTIFICATION_OPEN_PENDING_EVENT = "notification://open-pending"
+
+/**
+ * Take the sessions notification clicks handed to this window. Desktop only,
+ * and over the shell transport: the clicks, and the window they target,
+ * belong to this machine even when the window drives a remote workspace.
+ */
+export async function takePendingNotificationOpens(): Promise<
+  NotificationTarget[]
+> {
+  if (!isDesktop()) return []
+  const raw = await getShellTransport().call<unknown>(
+    "notification_take_pending_open"
+  )
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map(parseNotificationTarget)
+    .filter((target): target is NotificationTarget => target !== null)
+}
+
+/** Subscribe to {@link NOTIFICATION_OPEN_PENDING_EVENT} (desktop only). */
+export function onNotificationOpenPending(
+  handler: () => void
+): Promise<UnsubscribeFn> {
+  return getShellTransport().subscribe(NOTIFICATION_OPEN_PENDING_EVENT, () =>
+    handler()
+  )
 }
 
 /**

@@ -3208,7 +3208,9 @@
           "httpStatus": " (HTTP {status})"
         },
         "configOptionAdjusted": "{agent} estableció {option} en {actual} en lugar de {requested}",
-        "noticeTitle": "{agent}: {title}"
+        "noticeTitle": "{agent}: {title}",
+        "openSession": "Abrir esta sesión",
+        "sessionUnavailable": "Esa sesión ya no está disponible"
       },
       "connectionLifecycle": {
         "tasks": {

@@ -3208,7 +3208,9 @@
           "httpStatus": "（HTTP {status}）"
         },
         "configOptionAdjusted": "{agent} 把{option}設成了 {actual}，而不是 {requested}",
-        "noticeTitle": "{agent}：{title}"
+        "noticeTitle": "{agent}：{title}",
+        "openSession": "開啟此工作階段",
+        "sessionUnavailable": "該工作階段已不存在"
       },
       "connectionLifecycle": {
         "tasks": {

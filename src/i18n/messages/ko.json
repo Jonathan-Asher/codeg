@@ -3208,7 +3208,9 @@
           "httpStatus": " (HTTP {status})"
         },
         "configOptionAdjusted": "{agent}이(가) {option}을(를) {requested} 대신 {actual}(으)로 설정했습니다",
-        "noticeTitle": "{agent}: {title}"
+        "noticeTitle": "{agent}: {title}",
+        "openSession": "이 세션 열기",
+        "sessionUnavailable": "이 세션은 더 이상 존재하지 않습니다"
       },
       "connectionLifecycle": {
         "tasks": {

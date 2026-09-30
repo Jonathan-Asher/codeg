@@ -1,3 +1,5 @@
+import type { ReactElement } from "react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const h = vi.hoisted(() => ({
@@ -13,6 +15,7 @@ vi.mock("sonner", () => ({
 vi.mock("@/contexts/alert-context", () => ({ recordAlert: h.recordAlert }))
 
 import { notify } from "./notify"
+import { setNotificationClickHandler } from "./notification-target"
 
 beforeEach(() => {
   h.error.mockClear()
@@ -169,5 +172,40 @@ describe("notify", () => {
     expect(alert).not.toHaveProperty("detail")
     expect(alert).not.toHaveProperty("evidence")
     expect(alert).not.toHaveProperty("actions")
+  })
+
+  it("titles a session's toast with a button that opens the session", () => {
+    const target = {
+      contextKey: "conv-4-codex-17",
+      folderId: 4,
+      conversationId: 17,
+      agentType: "codex",
+    }
+    const clicked = vi.fn()
+    const off = setNotificationClickHandler(clicked)
+    notify({
+      level: "error",
+      key: "acp-error:c1:boom",
+      title: "Codex: boom",
+      session: { target, openLabel: "Open this session" },
+    })
+
+    const title = h.error.mock.calls[0][0] as ReactElement
+    render(title)
+    const button = screen.getByRole("button", { name: "Codex: boom" })
+    expect(button.getAttribute("title")).toBe("Open this session")
+    fireEvent.click(button)
+    expect(clicked).toHaveBeenCalledWith(target)
+    // The list keeps the words, not the button.
+    expect(h.recordAlert).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Codex: boom" })
+    )
+    off()
+    cleanup()
+  })
+
+  it("keeps a plain title when the toast names no session", () => {
+    notify({ level: "warning", key: "k", title: "Heads up", session: null })
+    expect(h.warning.mock.calls[0][0]).toBe("Heads up")
   })
 })

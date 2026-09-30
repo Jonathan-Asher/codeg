@@ -3208,7 +3208,9 @@
           "httpStatus": "（HTTP {status}）"
         },
         "configOptionAdjusted": "{agent} 把{option}设成了 {actual}，而不是 {requested}",
-        "noticeTitle": "{agent}：{title}"
+        "noticeTitle": "{agent}：{title}",
+        "openSession": "打开此会话",
+        "sessionUnavailable": "该会话已不存在"
       },
       "connectionLifecycle": {
         "tasks": {

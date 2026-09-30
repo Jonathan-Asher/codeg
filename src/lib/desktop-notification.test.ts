@@ -4,10 +4,19 @@ const deliver = vi.fn<(title: string, body: string) => Promise<undefined>>(
   async () => undefined
 )
 const permission = vi.fn<() => string>(() => "managed_by_os")
+/** The session each delivery was about — kept apart from `deliver`'s own
+ *  arguments so the title/body assertions stay two-argument. */
+const deliveredTargets: unknown[] = []
 
 vi.mock("./notification", () => ({
-  deliverSystemNotification: (title: string, body: string) =>
-    deliver(title, body),
+  deliverSystemNotification: (
+    title: string,
+    body: string,
+    target?: unknown
+  ) => {
+    deliveredTargets.push(target)
+    return deliver(title, body)
+  },
   getNotificationPermission: () => permission(),
 }))
 
@@ -54,6 +63,7 @@ beforeEach(() => {
   resetDesktopNotificationPrefsCacheForTests()
   resetDesktopNotificationStateForTests()
   deliver.mockClear()
+  deliveredTargets.length = 0
   deliver.mockResolvedValue(undefined)
   permission.mockReturnValue("managed_by_os")
   // The default gate is `hidden`, so every test that doesn't care about the
@@ -173,6 +183,21 @@ describe("hidden contents", () => {
     await notifyDesktop("turn_complete", PAYLOAD)
 
     expect(deliver).toHaveBeenCalledWith("proj - Codeg", "Claude has finished")
+  })
+
+  it("routes a click to the session, with contents hidden too", async () => {
+    // Ids only — nothing the user wrote — so hiding contents keeps the route.
+    withPrefs({ hideBody: true })
+    const target = {
+      contextKey: "conv-1-codex-9",
+      folderId: 1,
+      conversationId: 9,
+      agentType: "codex",
+    }
+
+    await notifyDesktop("permission_request", { ...SESSION_PAYLOAD, target })
+
+    expect(deliveredTargets).toEqual([target])
   })
 })
 

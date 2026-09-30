@@ -21,7 +21,12 @@ import {
   getNotificationPermission,
   openSystemNotificationSettings,
   requestNotificationPermission,
+  takePendingNotificationOpens,
 } from "./notification"
+import {
+  setNotificationClickHandler,
+  type NotificationTarget,
+} from "./notification-target"
 
 interface FakeNotificationCtor {
   (title: string, options?: { body?: string }): void
@@ -174,6 +179,104 @@ describe("deliverSystemNotification", () => {
     await expect(deliverSystemNotification("t", "b")).rejects.toThrow(
       /not available/i
     )
+  })
+})
+
+describe("a notification about a session", () => {
+  const TARGET: NotificationTarget = {
+    contextKey: "conv-4-claude_code-17",
+    folderId: 4,
+    conversationId: 17,
+    agentType: "claude_code",
+  }
+
+  it("hands the session to the LOCAL backend, from a remote workspace window too", async () => {
+    // The Mac app raises the notification for a session on a remote box: the
+    // local shell stamps the window and its backend onto it, so the click
+    // comes back to the remote workspace window, not to `main`.
+    await deliverSystemNotification("t", "b", TARGET)
+
+    expect(shellCall).toHaveBeenCalledWith("send_notification", {
+      title: "t",
+      body: "b",
+      target: TARGET,
+    })
+    expect(remoteCall).not.toHaveBeenCalled()
+  })
+
+  it("tags a browser notification per session and opens it on a click", async () => {
+    desktop.mockReturnValue(false)
+    const instances: Array<{
+      options: NotificationOptions & { renotify?: boolean }
+      onclick: (() => void) | null
+      close: ReturnType<typeof vi.fn>
+    }> = []
+    const ctor = function (
+      this: (typeof instances)[number],
+      _title: string,
+      options: NotificationOptions
+    ) {
+      this.options = options
+      this.onclick = null
+      this.close = vi.fn()
+      instances.push(this)
+    } as unknown as FakeNotificationCtor
+    ctor.permission = "granted"
+    Object.defineProperty(window, "Notification", {
+      value: ctor,
+      configurable: true,
+      writable: true,
+    })
+    const focus = vi.spyOn(window, "focus").mockImplementation(() => {})
+    const clicked = vi.fn()
+    const off = setNotificationClickHandler(clicked)
+
+    await deliverSystemNotification("t", "b", TARGET)
+
+    // A newer notification about the same session replaces this one.
+    expect(instances[0].options).toEqual({
+      body: "b",
+      tag: "codeg-session-c17",
+      renotify: true,
+    })
+    instances[0].onclick!()
+    expect(focus).toHaveBeenCalled()
+    expect(instances[0].close).toHaveBeenCalled()
+    expect(clicked).toHaveBeenCalledWith(TARGET)
+    off()
+  })
+})
+
+describe("takePendingNotificationOpens", () => {
+  it("takes the clicks parked for this window over the LOCAL shell transport", async () => {
+    // In a remote workspace window `getTransport()` is the remote server,
+    // which knows nothing of clicks on this machine's notifications.
+    shellCall.mockResolvedValueOnce([
+      {
+        contextKey: "t1",
+        folderId: 4,
+        conversationId: 17,
+        agentType: "codex",
+      },
+      { folderId: 4 },
+    ])
+
+    await expect(takePendingNotificationOpens()).resolves.toEqual([
+      {
+        contextKey: "t1",
+        folderId: 4,
+        conversationId: 17,
+        agentType: "codex",
+      },
+    ])
+    expect(shellCall).toHaveBeenCalledWith("notification_take_pending_open")
+    expect(remoteCall).not.toHaveBeenCalled()
+  })
+
+  it("has nothing to take in a browser", async () => {
+    desktop.mockReturnValue(false)
+    await expect(takePendingNotificationOpens()).resolves.toEqual([])
+    expect(shellCall).not.toHaveBeenCalled()
   })
 })
 

@@ -1,5 +1,6 @@
 import { formatConversationTitle } from "@/lib/conversation-title"
 import type { NotifyPayload } from "@/lib/desktop-notification"
+import type { NotificationTarget } from "@/lib/notification-target"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { useConversationRuntimeStore } from "@/stores/conversation-runtime-store"
 import { useTabStore } from "@/stores/tab-store"
@@ -18,12 +19,9 @@ import { useTabStore } from "@/stores/tab-store"
  * card, a delegated sub-agent's own connection — keeps the old active-folder
  * title.
  */
-function describeNotificationSession(
-  contextKey: string,
-  activeFolderName: string | null | undefined
-): { sessionTitle: string | null; folderName: string | null } {
+function resolveNotificationSession(contextKey: string) {
   const tab = useTabStore.getState().tabs.find((t) => t.id === contextKey)
-  if (!tab) return { sessionTitle: null, folderName: activeFolderName || null }
+  if (!tab) return null
 
   const workspace = useAppWorkspaceStore.getState()
   // The runtime session learns the row id on the first send, which can be
@@ -40,6 +38,18 @@ function describeNotificationSession(
     conversationId != null
       ? workspace.conversations.find((c) => c.id === conversationId)
       : undefined
+  return { tab, conversationId, conversation, workspace }
+}
+
+function describeNotificationSession(
+  contextKey: string,
+  activeFolderName: string | null | undefined
+): { sessionTitle: string | null; folderName: string | null } {
+  const session = resolveNotificationSession(contextKey)
+  if (!session) {
+    return { sessionTitle: null, folderName: activeFolderName || null }
+  }
+  const { tab, conversation, workspace } = session
 
   // `allFolders`, not `folders`: a chat-mode conversation lives in a hidden
   // folder the sidebar's list leaves out. A chat draft has no folder at all,
@@ -53,6 +63,25 @@ function describeNotificationSession(
       tab.title.trim() ||
       null,
     folderName: folder?.alias || folder?.name || null,
+  }
+}
+
+/**
+ * The session behind a connection's context key, for a click to come back
+ * to — or `null` when no tab owns the key (a canvas card, a delegated
+ * sub-agent's own connection), which a click then only brings forward.
+ */
+export function notificationTargetFor(
+  contextKey: string
+): NotificationTarget | null {
+  const session = resolveNotificationSession(contextKey)
+  if (!session) return null
+  const { tab, conversationId, conversation } = session
+  return {
+    contextKey,
+    folderId: conversation?.folder_id ?? tab.folderId,
+    conversationId,
+    agentType: conversation?.agent_type ?? tab.agentType,
   }
 }
 
@@ -75,8 +104,10 @@ export function sessionNotificationPayload(
     contextKey,
     activeFolderName
   )
+  const target = notificationTargetFor(contextKey)
+  const routed = target ? { target } : {}
   const folderTitle = folderName ? `${folderName} - Codeg` : "Codeg"
-  if (!sessionTitle) return { title: folderTitle, ...content }
+  if (!sessionTitle) return { title: folderTitle, ...content, ...routed }
   return {
     title: sessionTitle,
     redactedTitle: folderTitle,
@@ -84,5 +115,6 @@ export function sessionNotificationPayload(
     // redacted form, whose title names it again.
     body: folderName ? `${folderName} · ${content.body}` : content.body,
     redactedBody: content.redactedBody ?? content.body,
+    ...routed,
   }
 }

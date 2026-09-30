@@ -3208,7 +3208,9 @@
           "httpStatus": " (HTTP {status})"
         },
         "configOptionAdjusted": "{agent} は{option}を {requested} ではなく {actual} にしました",
-        "noticeTitle": "{agent}：{title}"
+        "noticeTitle": "{agent}：{title}",
+        "openSession": "このセッションを開く",
+        "sessionUnavailable": "このセッションはもう存在しません"
       },
       "connectionLifecycle": {
         "tasks": {
