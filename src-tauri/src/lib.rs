@@ -291,7 +291,8 @@ mod tauri_app {
         );
         tauri::async_runtime::spawn(async move {
             let _ =
-                notification::send_notification(app, "Codeg Web service".to_string(), body).await;
+                notification::send_app_notification(&app, "Codeg Web service".to_string(), body)
+                    .await;
         });
     }
 
@@ -1376,6 +1377,10 @@ mod tauri_app {
                     );
                 }
 
+                // Clicks on notifications posted before this launch (an update
+                // or restart since) still open their session.
+                notification::install_click_handler(app.handle());
+
                 #[cfg(all(
                     feature = "browser-child",
                     any(target_os = "macos", target_os = "windows")
@@ -2136,6 +2141,7 @@ mod tauri_app {
                 mcp_commands::mcp_set_server_apps,
                 mcp_commands::mcp_remove_server,
                 notification::send_notification,
+                notification::notification_take_pending_open,
                 notification::notification_identity,
                 notification::open_system_notification_settings,
                 file_io::save_binary_file,
