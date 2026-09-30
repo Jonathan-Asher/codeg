@@ -38,6 +38,9 @@ APP="$MACOS_DIR/codeg.app"
 IDENTITY=${CODEG_SIGN_IDENTITY:-A4DFC81686CC4636EB1CCCF1E7829EF7346C21E8}
 TEAM=${CODEG_SIGN_TEAM:-3L92BZK46V}
 BUNDLE_ID=app.codeg
+# Entitlements for the app itself (Apple Events for agents that script other
+# apps). Nested helpers keep none.
+ENTITLEMENTS=${CODEG_SIGN_ENTITLEMENTS:-$(cd "$(dirname "$0")/.." && pwd)/src-tauri/codeg.entitlements}
 
 # The runner runs with an isolated HOME, so resolve the account's real home.
 REAL_HOME=$(python3 -c 'import os, pwd; print(pwd.getpwuid(os.getuid()).pw_dir)')
@@ -48,6 +51,7 @@ PASSWORD_FILE="$SIGNING_DIR/pw"
 die() { echo "::error title=Developer ID signing::$*" >&2; exit 1; }
 
 [ -d "$APP/Contents" ] || die "no app bundle at $APP"
+[ -f "$ENTITLEMENTS" ] || die "entitlements file missing: $ENTITLEMENTS"
 [ -f "$KEYCHAIN" ] && [ -f "$PASSWORD_FILE" ] ||
   die "signing keychain missing ($KEYCHAIN); see docs/fork-solution-plan.md"
 
@@ -91,8 +95,9 @@ while IFS= read -r b; do
 done < <(find "$APP/Contents" -depth -type d \
   \( -name '*.framework' -o -name '*.app' -o -name '*.xpc' -o -name '*.appex' -o -name '*.bundle' \) | by_depth)
 
-echo "signing $APP"
-sign "$APP"
+echo "signing $APP (entitlements: ${ENTITLEMENTS##*/})"
+HOME="$SIGN_HOME" codesign --force --sign "$IDENTITY" --keychain "$KEYCHAIN" \
+  --timestamp=none --entitlements "$ENTITLEMENTS" "$APP"
 
 codesign --verify --deep --strict --verbose=2 "$APP"
 requirement=$(codesign -d -r- "$APP" 2>&1 | sed -n 's/^designated => //p')
@@ -102,6 +107,11 @@ case "$requirement" in
 esac
 [[ "$requirement" == *"identifier \"$BUNDLE_ID\""* && "$requirement" == *"\"$TEAM\""* ]] ||
   die "designated requirement lacks $BUNDLE_ID / team $TEAM: $requirement"
+
+codesign -d --entitlements - "$APP" 2>/dev/null | grep -q 'com.apple.security.automation.apple-events' ||
+  die "the app lost its Apple Events entitlement"
+/usr/libexec/PlistBuddy -c 'Print :NSAppleEventsUsageDescription' "$APP/Contents/Info.plist" >/dev/null 2>&1 ||
+  die "Info.plist has no NSAppleEventsUsageDescription (src-tauri/Info.plist not merged?)"
 
 # Every Mach-O in the bundle carries the team.
 while IFS= read -r f; do
