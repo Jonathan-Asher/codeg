@@ -16,11 +16,23 @@
  * or need attention ("Alerts"), and an FYI has nothing to come back to.
  */
 
+import { createElement, type ReactNode } from "react"
 import { toast } from "sonner"
 
 import { recordAlert, type AlertAction } from "@/contexts/alert-context"
+import {
+  openNotificationTargetFromClick,
+  type NotificationTarget,
+} from "@/lib/notification-target"
 
 export type NotifyLevel = "error" | "warning" | "info"
+
+/** The session a toast is about: its title then opens it on a click. */
+export interface NotifySession {
+  target: NotificationTarget
+  /** Localized "open this session", the title's tooltip. */
+  openLabel: string
+}
 
 export interface NotifyAction {
   label: string
@@ -48,11 +60,32 @@ export interface NotifyInput {
    *  that adds nothing worth interrupting for (the evidence behind a failure
    *  that is already on screen). */
   bellOnly?: boolean
+  /** The session this is about. A toast from a session in another tab says
+   *  which one in its title; clicking the title goes there. */
+  session?: NotifySession | null
 }
 
 /** Upstream text can be a multi-line error body; keep its line breaks, but
  *  only as many lines as a toast can hold. */
 const DESCRIPTION_CLASS = "line-clamp-6 whitespace-pre-line break-words"
+
+/** A toast title that opens its session. A button inside the title rather
+ *  than a click on the whole toast: sonner has no toast-level click, and the
+ *  toast's own buttons (Retry, sign in) must keep doing only what they say. */
+function sessionTitle(title: string, session: NotifySession): ReactNode {
+  return createElement(
+    "button",
+    {
+      type: "button",
+      title: session.openLabel,
+      "data-notify-session-title": "",
+      className:
+        "cursor-pointer text-left underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none",
+      onClick: () => openNotificationTargetFromClick(session.target),
+    },
+    title
+  )
+}
 
 export function notify(input: NotifyInput): void {
   const description = input.description?.trim() || undefined
@@ -76,17 +109,22 @@ export function notify(input: NotifyInput): void {
     // Every field is set, present or not: raising a toast whose key is still
     // on screen UPDATES it, and sonner merges the update into the old props —
     // an omitted button or line would survive from the previous message.
-    show(input.title, {
-      id: input.key,
-      description,
-      classNames: description ? { description: DESCRIPTION_CLASS } : undefined,
-      action: primary
-        ? { label: primary.label, onClick: primary.onClick }
-        : undefined,
-      cancel: secondary
-        ? { label: secondary.label, onClick: secondary.onClick }
-        : undefined,
-    })
+    show(
+      input.session ? sessionTitle(input.title, input.session) : input.title,
+      {
+        id: input.key,
+        description,
+        classNames: description
+          ? { description: DESCRIPTION_CLASS }
+          : undefined,
+        action: primary
+          ? { label: primary.label, onClick: primary.onClick }
+          : undefined,
+        cancel: secondary
+          ? { label: secondary.label, onClick: secondary.onClick }
+          : undefined,
+      }
+    )
   }
 
   if (input.level === "info") return

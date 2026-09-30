@@ -23,6 +23,7 @@ import {
   getDesktopNotificationPrefs,
   type NotifyEventId,
 } from "./desktop-notification-prefs"
+import type { NotificationTarget } from "./notification-target"
 
 /**
  * Per-event cooldown. Collapses a burst of the same event — several agents
@@ -63,6 +64,12 @@ export interface NotifyPayload {
    * only when `body` is a fixed localized string that names nothing.
    */
   redactedBody?: string
+  /**
+   * The session this is about: a click opens it, and a newer notification
+   * about it replaces this one. Ids only — nothing the user wrote — so it is
+   * the same with contents hidden.
+   */
+  target?: NotificationTarget | null
 }
 
 // ── Gating ──
@@ -156,7 +163,7 @@ export async function notifyDesktop(
   lastAnyNotifiedAt = now
 
   try {
-    await deliverSystemNotification(title, body)
+    await deliverSystemNotification(title, body, payload.target)
     return true
   } catch {
     return false

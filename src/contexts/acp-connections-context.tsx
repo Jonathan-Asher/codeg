@@ -102,7 +102,12 @@ import {
   routeAcpError,
   type AcpErrorLevel,
 } from "@/lib/acp-error-presentation"
-import { dismissNotification, notify, type NotifyAction } from "@/lib/notify"
+import {
+  dismissNotification,
+  notify,
+  type NotifyAction,
+  type NotifySession,
+} from "@/lib/notify"
 import type { SnapshotPatch } from "@/lib/snapshot-denormalize"
 import { getAgentLabel } from "@/lib/custom-agents"
 import {
@@ -118,7 +123,10 @@ import {
   notifyDesktop,
   withDesktopNotificationsSuppressed,
 } from "@/lib/desktop-notification"
-import { sessionNotificationPayload } from "@/lib/notification-session"
+import {
+  notificationTargetFor,
+  sessionNotificationPayload,
+} from "@/lib/notification-session"
 import {
   playEventSound,
   primeNotificationSoundOutput,
@@ -3437,8 +3445,14 @@ type TurnFailurePart =
       title: string
       description?: string
       actions: NotifyAction[]
+      session?: NotifySession | null
     }
-  | { kind: "verdict"; title: string; evidence?: string }
+  | {
+      kind: "verdict"
+      title: string
+      evidence?: string
+      session?: NotifySession | null
+    }
 
 /** A connect failure's notification key: one per surface. */
 function connectErrorNotificationKey(contextKey: string): string {
@@ -3457,6 +3471,7 @@ interface TurnFailureState {
     title: string
     description?: string
     actions: NotifyAction[]
+    session?: NotifySession | null
   }
   /** codeg's verdict; `paired` once a typed account carries it. */
   verdict?: { key: string; evidence?: string; paired: boolean }
@@ -3473,6 +3488,15 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
   const tFailure = useTranslations("Folder.chat.sessionFailure")
   const { activeFolder: folder } = useActiveFolder()
   const folderNameRef = useRef(folder?.name)
+  /** The session a toast raised for `contextKey` is about — its title then
+   *  opens it — or `null` when no tab owns the key. */
+  const toastSession = useCallback(
+    (contextKey: string): NotifySession | null => {
+      const target = notificationTargetFor(contextKey)
+      return target ? { target, openLabel: t("openSession") } : null
+    },
+    [t]
+  )
   useEffect(() => {
     folderNameRef.current = folder?.name
   }, [folder?.name])
@@ -3833,9 +3857,10 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         title: info.title,
         description: info.detail,
         actions,
+        session: toastSession(contextKey),
       })
     },
-    [t]
+    [t, toastSession]
   )
 
   // ── Dispatch (replaces useReducer dispatch) ──
@@ -4293,6 +4318,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           key,
           title: part.title,
           evidence: part.evidence,
+          session: part.session,
         })
         return
       }
@@ -4328,6 +4354,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         title: part.title,
         description: part.description,
         actions,
+        session: part.session,
       }
       notify({
         level: "error",
@@ -4337,6 +4364,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         evidence:
           state.verdict?.key === key ? state.verdict.evidence : undefined,
         actions,
+        session: part.session,
       })
     },
     []
@@ -5273,6 +5301,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
               key: `acp-failure:${connKey}:${e.record.id}`,
               title,
               description,
+              session: toastSession(contextKey),
             })
             break
           }
@@ -5281,6 +5310,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             recordId: e.record.id,
             title,
             description,
+            session: toastSession(contextKey),
             // A viewer watches the session; recovering it is the owner's call.
             actions: failureConn.isViewer
               ? []
@@ -5323,6 +5353,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
                 })
               : notice.title,
             description: notice.description,
+            session: toastSession(contextKey),
           })
           break
         }
@@ -5539,6 +5570,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
               kind: "verdict",
               title: text,
               evidence,
+              session: toastSession(contextKey),
             })
             break
           }
@@ -5550,6 +5582,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             title: text,
             description: reason,
             evidence,
+            session: toastSession(contextKey),
           })
           break
         }
@@ -5664,6 +5697,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       t,
       tChat,
       tFailure,
+      toastSession,
     ]
   )
 

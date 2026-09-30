@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { sessionNotificationPayload } from "./notification-session"
+import {
+  notificationTargetFor,
+  sessionNotificationPayload,
+} from "./notification-session"
 import {
   resetAppWorkspaceStore,
   useAppWorkspaceStore,
@@ -134,6 +137,48 @@ describe("sessionNotificationPayload", () => {
     const p = sessionNotificationPayload("unknown-key", "codeg", {
       body: "done",
     })
+    // …and names no session: a click only brings the window forward.
     expect(p).toEqual({ title: "codeg - Codeg", body: "done" })
+  })
+})
+
+describe("the session a notification routes a click to", () => {
+  it("is the tab, and the conversation behind it", () => {
+    seed({ id: "t1", folderId: 1, conversationId: 10, title: "tab label" })
+    const p = sessionNotificationPayload("t1", null, { body: "done" })
+    expect(p.target).toEqual({
+      contextKey: "t1",
+      folderId: 1,
+      conversationId: 10,
+      agentType: "codex",
+    })
+    expect(notificationTargetFor("t1")).toEqual(p.target)
+  })
+
+  it("reaches the conversation of a draft whose first send made its row", () => {
+    useConversationRuntimeStore.getState().actions.setDbConversationId(-7, 20)
+    seed({
+      id: "t4",
+      folderId: 2,
+      conversationId: null,
+      runtimeConversationId: -7,
+      title: "New chat",
+    })
+    expect(notificationTargetFor("t4")).toMatchObject({
+      contextKey: "t4",
+      conversationId: 20,
+    })
+  })
+
+  it("is only the tab for a draft with no row yet", () => {
+    seed({ id: "t3", folderId: 1, conversationId: null, title: "New chat" })
+    expect(notificationTargetFor("t3")).toMatchObject({
+      contextKey: "t3",
+      conversationId: null,
+    })
+  })
+
+  it("is nothing when no tab owns the key", () => {
+    expect(notificationTargetFor("canvas-card-1")).toBeNull()
   })
 })

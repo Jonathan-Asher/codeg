@@ -3207,7 +3207,9 @@
           "httpStatus": " (HTTP {status})"
         },
         "configOptionAdjusted": "ضبط {agent} {option} على {actual} بدلاً من {requested}",
-        "noticeTitle": "{agent}: {title}"
+        "noticeTitle": "{agent}: {title}",
+        "openSession": "فتح هذه الجلسة",
+        "sessionUnavailable": "لم تعد هذه الجلسة متاحة"
       },
       "connectionLifecycle": {
         "tasks": {

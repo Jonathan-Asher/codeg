@@ -83,6 +83,7 @@ import {
   PetFocusBridge,
 } from "@/components/workspace/deep-link-bootstrap"
 import { WorkspaceOpenFolderListener } from "@/components/workspace/workspace-open-folder-listener"
+import { NotificationClickBridge } from "@/components/workspace/notification-click-bridge"
 import { QuickAskActiveFolderPublisher } from "@/components/workspace/quick-ask-active-folder"
 import { HeavyPluginsWarmup } from "@/components/ai-elements/heavy-plugins-warmup"
 import {
@@ -1339,6 +1340,10 @@ function WorkspaceLayoutInner({ children }: { children: React.ReactNode }) {
                                           listener calls openConversations() to
                                           surface a launcher-opened folder. */}
                                     <WorkspaceOpenFolderListener />
+                                    {/* Same reason: a click on a session's
+                                          notification leaves any workbench
+                                          page for the session's tab. */}
+                                    <NotificationClickBridge />
                                     <FolderLayoutShell>
                                       {children}
                                     </FolderLayoutShell>
