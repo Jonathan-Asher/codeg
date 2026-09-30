@@ -2249,7 +2249,8 @@
         "conversations": "{count} محادثة",
         "openUsage": "عرض إحصاءات الجلسات واستخدام الرموز",
         "planUsage": "الحدود",
-        "openPlanUsage": "عرض حدود اشتراك Claude Code وCodex"
+        "openPlanUsage": "عرض حدود اشتراك Claude Code وCodex",
+        "planUsageSummary": "الحدود: {summary}"
       },
       "tokens": {
         "contextWindowUsageAria": "استخدام نافذة السياق",
@@ -6200,6 +6201,11 @@
       "codexNoSessionsHint": "تم البحث في {dir}. تظهر الحدود هنا بعد استخدام Codex.",
       "codexNoLimitsTitle": "لا توجد حدود في جلسات Codex الأخيرة",
       "codexNoLimitsHint": "لا يسجّل Codex حدود الخطة إلا عند تسجيل الدخول باستخدام ChatGPT؛ الجلسات التي تستخدم مفتاح API لا تُبلغ عنها."
+    },
+    "preview": {
+      "percent": "{percent}%",
+      "staleEntry": "{entry} (قديمة)",
+      "openFullView": "فتح العرض الكامل"
     }
   },
   "Forge": {

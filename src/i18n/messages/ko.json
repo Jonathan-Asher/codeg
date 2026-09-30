@@ -2249,7 +2249,8 @@
         "conversations": "{count}개 대화",
         "openUsage": "세션 통계 및 토큰 사용량 보기",
         "planUsage": "한도",
-        "openPlanUsage": "Claude Code 및 Codex 구독 한도 보기"
+        "openPlanUsage": "Claude Code 및 Codex 구독 한도 보기",
+        "planUsageSummary": "한도: {summary}"
       },
       "tokens": {
         "contextWindowUsageAria": "컨텍스트 윈도우 사용량",
@@ -6200,6 +6201,11 @@
       "codexNoSessionsHint": "{dir}에서 찾았습니다. Codex를 사용하면 여기에 한도가 표시됩니다.",
       "codexNoLimitsTitle": "최근 Codex 세션에 한도 정보가 없습니다",
       "codexNoLimitsHint": "Codex는 ChatGPT로 로그인한 경우에만 요금제 한도를 기록합니다. API 키를 사용하는 세션은 보고하지 않습니다."
+    },
+    "preview": {
+      "percent": "{percent}%",
+      "staleEntry": "{entry} (오래됨)",
+      "openFullView": "전체 보기 열기"
     }
   },
   "Forge": {

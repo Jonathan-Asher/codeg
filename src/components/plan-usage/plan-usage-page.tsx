@@ -1,33 +1,23 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useLocale, useTranslations } from "next-intl"
 import { Gauge, RefreshCw, ShieldCheck } from "lucide-react"
 import { AgentIcon } from "@/components/agent-icon"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { WorkbenchPageTitle } from "@/components/workbench/workbench-page-title"
-import { getPlanUsage, subscribePlanUsageChanged } from "@/lib/api"
-import { toErrorMessage } from "@/lib/app-error"
+import { usePlanUsageReport } from "@/hooks/use-plan-usage-report"
 import { getAgentLabel } from "@/lib/custom-agents"
-import { onTransportReconnect } from "@/lib/platform"
 import {
   findSnapshot,
   formatAbsoluteTime,
   formatCompactDuration,
   hasWindowReset,
   isSnapshotStale,
-  mergeFetchedReport,
-  nowSeconds,
   PLAN_USAGE_AGENTS,
-  replaceSnapshot,
   splitPercent,
-  usageLevel,
   windowLagSince,
-  windowName,
-  type PlanUsageLevel,
 } from "@/lib/plan-usage"
 import type {
   PlanUsageAgent,
@@ -36,6 +26,14 @@ import type {
   PlanUsageWindow,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import {
+  useEmptyCopy,
+  useNowSeconds,
+  useUpdatedLabel,
+  useWindowTitle,
+  WindowResetText,
+  WindowUsageBar,
+} from "./plan-usage-parts"
 
 /** How often relative times ("resets in 2h 14m") re-render. */
 const TICK_MS = 30_000
@@ -53,27 +51,10 @@ const STATUS_VARIANT = {
   overage: "outline",
 } as const
 
-/** Bar tint per level: the default primary until a window gets tight. */
-const LEVEL_BAR: Record<PlanUsageLevel, string> = {
-  normal: "",
-  high: "bg-amber-500/20 [&_[data-slot=progress-indicator]]:bg-amber-500",
-  critical:
-    "bg-destructive/20 [&_[data-slot=progress-indicator]]:bg-destructive",
-}
-
 /** Page title in the window-chrome strip — the shared breadcrumb header. */
 export function PlanUsagePageTitle() {
   const t = useTranslations("PlanUsage")
   return <WorkbenchPageTitle title={t("title")} />
-}
-
-function useNowSeconds(intervalMs: number): number {
-  const [now, setNow] = useState(nowSeconds)
-  useEffect(() => {
-    const id = setInterval(() => setNow(nowSeconds()), intervalMs)
-    return () => clearInterval(id)
-  }, [intervalMs])
-  return now
 }
 
 /**
@@ -84,60 +65,8 @@ function useNowSeconds(intervalMs: number): number {
  */
 export function PlanUsagePage() {
   const t = useTranslations("PlanUsage")
-  const [report, setReport] = useState<PlanUsageReport | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { report, loading, refreshing, error, load } = usePlanUsageReport()
   const now = useNowSeconds(TICK_MS)
-
-  // Only the newest request may land: a slow mount fetch must not overwrite
-  // the answer to a Refresh clicked after it.
-  const requestRef = useRef(0)
-  const load = useCallback(async (force: boolean) => {
-    const id = ++requestRef.current
-    if (force) setRefreshing(true)
-    try {
-      const next = await getPlanUsage(force)
-      if (id !== requestRef.current) return
-      setReport((prev) => mergeFetchedReport(prev, next))
-      setError(null)
-    } catch (e) {
-      if (id !== requestRef.current) return
-      setError(toErrorMessage(e))
-    } finally {
-      if (id === requestRef.current) {
-        setLoading(false)
-        setRefreshing(false)
-      }
-    }
-  }, [])
-
-  useEffect(() => {
-    void load(false)
-  }, [load])
-
-  // Live Claude readings, pushed as a turn reports them.
-  useEffect(() => {
-    let unsub: (() => void) | undefined
-    let cancelled = false
-    void subscribePlanUsageChanged((snapshot) => {
-      setReport((prev) => replaceSnapshot(prev, snapshot))
-    }).then((u) => {
-      if (cancelled) u()
-      else unsub = u
-    })
-    return () => {
-      cancelled = true
-      unsub?.()
-    }
-  }, [])
-
-  // A push sent while the web socket was down is gone; refetch once it is
-  // back rather than showing the older reading until the next turn.
-  useEffect(() => {
-    const off = onTransportReconnect(() => void load(false))
-    return () => off?.()
-  }, [load])
 
   const showCards = report != null || (!loading && error == null)
 
@@ -301,22 +230,17 @@ function ObservedLine({
       : snapshot.source === "saved"
         ? t("source.claudeSaved")
         : t("source.claudeLive")
-  const known = snapshot.observed_at > 0
-  const age = Math.max(0, now - snapshot.observed_at)
+  const updated = useUpdatedLabel(snapshot, now)
 
   return (
     <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-      {known && (
+      {updated != null && (
         <>
           <time
             dateTime={new Date(snapshot.observed_at * 1000).toISOString()}
             title={formatAbsoluteTime(snapshot.observed_at, locale, now)}
           >
-            {age < 60
-              ? t("updatedJustNow")
-              : t("updatedAgo", {
-                  duration: formatCompactDuration(age, locale),
-                })}
+            {updated}
             {" · "}
             {formatAbsoluteTime(snapshot.observed_at, locale, now)}
           </time>
@@ -326,27 +250,6 @@ function ObservedLine({
       {source}
     </p>
   )
-}
-
-function useWindowTitle(limit: PlanUsageWindow): string {
-  const t = useTranslations("PlanUsage")
-  const name = windowName(limit)
-  switch (name.key) {
-    case "session5h":
-      return t("window.session5h")
-    case "sessionSpan":
-      return t("window.sessionSpan", name.values)
-    case "weekly":
-      return t("window.weekly")
-    case "weeklyModel":
-      return t("window.weeklyModel", name.values)
-    case "weeklyWithExtra":
-      return t("window.weeklyWithExtra")
-    case "extraUsage":
-      return t("window.extraUsage")
-    case "other":
-      return t("window.other", name.values)
-  }
 }
 
 function WindowRow({
@@ -363,27 +266,7 @@ function WindowRow({
   const title = useWindowTitle(limit)
   const { used, left } = splitPercent(limit.used_percent)
   const reset = hasWindowReset(limit, now)
-  const level = usageLevel(limit.used_percent)
   const lagSince = windowLagSince(limit, snapshot)
-
-  let resetText: ReactNode
-  if (limit.resets_at == null) {
-    resetText = t("resetUnknown")
-  } else if (reset) {
-    resetText = t("resetSince", {
-      duration: formatCompactDuration(now - limit.resets_at, locale),
-    })
-  } else {
-    resetText = (
-      <time dateTime={new Date(limit.resets_at * 1000).toISOString()}>
-        {t("resetsIn", {
-          duration: formatCompactDuration(limit.resets_at - now, locale),
-        })}
-        {" · "}
-        {formatAbsoluteTime(limit.resets_at, locale, now)}
-      </time>
-    )
-  }
 
   return (
     <li data-window={limit.id}>
@@ -398,18 +281,17 @@ function WindowRow({
           {t("used", { percent: used })}
         </span>
       </div>
-      {/* The shared Progress draws `value` but doesn't hand it to Radix, so
-          the bar would read as indeterminate; state the number explicitly. */}
-      <Progress
-        value={used}
-        aria-label={title}
-        aria-valuenow={used}
-        aria-valuetext={t("used", { percent: used })}
-        className={cn("mt-1.5 h-2", LEVEL_BAR[level], reset && "opacity-40")}
+      <WindowUsageBar
+        limit={limit}
+        title={title}
+        now={now}
+        className="mt-1.5"
       />
       <div className="mt-1.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
         <span className="tabular-nums">{t("left", { percent: left })}</span>
-        <span className="text-end">{resetText}</span>
+        <span className="text-end">
+          <WindowResetText limit={limit} now={now} withAbsolute />
+        </span>
       </div>
       {lagSince != null && (
         <p className="mt-0.5 text-[0.6875rem] text-muted-foreground/80">
@@ -432,21 +314,7 @@ function EmptyState({
   agent: PlanUsageAgent
   report: PlanUsageReport | null
 }) {
-  const t = useTranslations("PlanUsage")
-  let title: string
-  let hint: string
-  if (agent === "claude_code") {
-    title = t("empty.claudeTitle")
-    hint = t("empty.claudeHint")
-  } else if (!report?.codex_rollouts_found) {
-    title = t("empty.codexNoSessionsTitle")
-    hint = t("empty.codexNoSessionsHint", {
-      dir: report?.codex_sessions_dir ?? "~/.codex/sessions",
-    })
-  } else {
-    title = t("empty.codexNoLimitsTitle")
-    hint = t("empty.codexNoLimitsHint")
-  }
+  const { title, hint } = useEmptyCopy(agent, report)
   return (
     <div className="mt-3 flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border px-4 py-8 text-center">
       <Gauge className="size-8 text-muted-foreground/40" aria-hidden="true" />

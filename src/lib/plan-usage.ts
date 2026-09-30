@@ -117,6 +117,91 @@ export function usageLevel(usedPercent: number): PlanUsageLevel {
   return "normal"
 }
 
+/**
+ * The window closest to its limit — the one that stops the agent first.
+ * Windows that rolled over since their reading are skipped: their number no
+ * longer describes them. `null` when no window is left.
+ */
+export function tightestWindow(
+  snapshot: PlanUsageSnapshot,
+  now: number
+): PlanUsageWindow | null {
+  let tightest: PlanUsageWindow | null = null
+  for (const window of snapshot.windows) {
+    if (hasWindowReset(window, now)) continue
+    if (tightest == null || window.used_percent > tightest.used_percent) {
+      tightest = window
+    }
+  }
+  return tightest
+}
+
+/** One provider's entry in the status-bar preview. */
+export interface PlanUsagePreviewEntry {
+  agent: PlanUsageAgent
+  /** Its tightest window. */
+  window: PlanUsageWindow
+  /** Whole-number percent used, as `splitPercent` shows it. */
+  percent: number
+  level: PlanUsageLevel
+  stale: boolean
+}
+
+const LEVEL_RANK: Record<PlanUsageLevel, number> = {
+  normal: 0,
+  high: 1,
+  critical: 2,
+}
+
+/**
+ * One entry per provider with a current reading, in card order: its tightest
+ * window, tinted by how close it is. A fresh reading that says the limit was
+ * reached is critical whatever its percentage; a stale one keeps only its
+ * numbers, the same way the page drops its status badge. Providers with no
+ * reading, or whose every window has rolled over since, are left out.
+ */
+export function planUsagePreview(
+  report: PlanUsageReport | null,
+  now: number
+): PlanUsagePreviewEntry[] {
+  const entries: PlanUsagePreviewEntry[] = []
+  for (const agent of PLAN_USAGE_AGENTS) {
+    const snapshot = findSnapshot(report, agent)
+    if (!snapshot) continue
+    const window = tightestWindow(snapshot, now)
+    if (!window) continue
+    const stale = isSnapshotStale(snapshot, now)
+    const limited = !stale && snapshot.status === "limited"
+    entries.push({
+      agent,
+      window,
+      percent: splitPercent(window.used_percent).used,
+      level: limited ? "critical" : usageLevel(window.used_percent),
+      stale,
+    })
+  }
+  return entries
+}
+
+/** The single tightest entry, for the compact bar: highest percentage first,
+ *  then the more severe level; ties keep card order. */
+export function tightestPreviewEntry(
+  entries: readonly PlanUsagePreviewEntry[]
+): PlanUsagePreviewEntry | null {
+  let tightest: PlanUsagePreviewEntry | null = null
+  for (const entry of entries) {
+    if (
+      tightest == null ||
+      entry.window.used_percent > tightest.window.used_percent ||
+      (entry.window.used_percent === tightest.window.used_percent &&
+        LEVEL_RANK[entry.level] > LEVEL_RANK[tightest.level])
+    ) {
+      tightest = entry
+    }
+  }
+  return tightest
+}
+
 /** A window's display name as a message key (under `PlanUsage.window`) plus
  *  its values. Keys are literal so next-intl can type-check them. */
 export type PlanUsageWindowName =
