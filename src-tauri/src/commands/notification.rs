@@ -433,9 +433,10 @@ pub async fn notification_take_pending_open(
 }
 
 /// Carry out a click: bring the owning workspace window forward and hand it
-/// the session.
+/// the session. Only macOS reports clicks today; public so the other
+/// platforms, which have no caller yet, do not flag it as dead code.
 #[cfg(feature = "tauri-runtime")]
-pub(crate) async fn open_notification_route(app: &AppHandle, route: NotificationRoute) {
+pub async fn open_notification_route(app: &AppHandle, route: NotificationRoute) {
     let plan = plan_click(&route, |label| app.get_webview_window(label).is_some());
     if let Some(target) = plan.open.clone() {
         park_open(&plan.label, target);
