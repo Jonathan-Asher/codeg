@@ -2249,7 +2249,8 @@
         "conversations": "{count} 件の会話",
         "openUsage": "セッション統計とトークン使用量を表示",
         "planUsage": "上限",
-        "openPlanUsage": "Claude Code と Codex のサブスクリプション上限を表示"
+        "openPlanUsage": "Claude Code と Codex のサブスクリプション上限を表示",
+        "planUsageSummary": "上限: {summary}"
       },
       "tokens": {
         "contextWindowUsageAria": "コンテキストウィンドウ使用率",
@@ -6200,6 +6201,11 @@
       "codexNoSessionsHint": "{dir} を確認しました。Codex を使用すると、ここに上限が表示されます。",
       "codexNoLimitsTitle": "最近の Codex セッションに上限情報がありません",
       "codexNoLimitsHint": "Codex がプラン上限を記録するのは ChatGPT でサインインしている場合のみです。API キーを使うセッションでは報告されません。"
+    },
+    "preview": {
+      "percent": "{percent}%",
+      "staleEntry": "{entry}（古いデータ）",
+      "openFullView": "詳細画面を開く"
     }
   },
   "Forge": {

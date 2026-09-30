@@ -2249,7 +2249,8 @@
         "conversations": "{count} 个会话",
         "openUsage": "查看会话统计与 Token 用量",
         "planUsage": "额度",
-        "openPlanUsage": "查看 Claude Code 与 Codex 订阅额度"
+        "openPlanUsage": "查看 Claude Code 与 Codex 订阅额度",
+        "planUsageSummary": "额度：{summary}"
       },
       "tokens": {
         "contextWindowUsageAria": "上下文窗口使用率",
@@ -6200,6 +6201,11 @@
       "codexNoSessionsHint": "已在 {dir} 中查找。使用 Codex 后，额度会显示在这里。",
       "codexNoLimitsTitle": "近期 Codex 会话中没有额度信息",
       "codexNoLimitsHint": "只有使用 ChatGPT 登录时，Codex 才会记录套餐额度；使用 API 密钥的会话不会上报。"
+    },
+    "preview": {
+      "percent": "{percent}%",
+      "staleEntry": "{entry}（已过时）",
+      "openFullView": "打开完整视图"
     }
   },
   "Forge": {

@@ -2249,7 +2249,8 @@
         "conversations": "{count} conversas",
         "openUsage": "Ver estatísticas de sessões e uso de tokens",
         "planUsage": "Limites",
-        "openPlanUsage": "Ver os limites de assinatura do Claude Code e do Codex"
+        "openPlanUsage": "Ver os limites de assinatura do Claude Code e do Codex",
+        "planUsageSummary": "Limites: {summary}"
       },
       "tokens": {
         "contextWindowUsageAria": "Uso da janela de contexto",
@@ -6200,6 +6201,11 @@
       "codexNoSessionsHint": "Procuramos em {dir}. Os limites aparecem aqui depois que você usar o Codex.",
       "codexNoLimitsTitle": "Nenhum limite nas sessões recentes do Codex",
       "codexNoLimitsHint": "O Codex só registra os limites do plano quando você entra com o ChatGPT; sessões com chave de API não os informam."
+    },
+    "preview": {
+      "percent": "{percent}%",
+      "staleEntry": "{entry} (desatualizado)",
+      "openFullView": "Abrir visualização completa"
     }
   },
   "Forge": {

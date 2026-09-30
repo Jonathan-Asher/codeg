@@ -7,8 +7,11 @@ import {
   isSnapshotStale,
   mergeFetchedReport,
   PLAN_USAGE_STALE_AFTER_SECONDS,
+  planUsagePreview,
   replaceSnapshot,
   splitPercent,
+  tightestPreviewEntry,
+  tightestWindow,
   usageLevel,
   windowLagSince,
   windowName,
@@ -237,5 +240,146 @@ describe("report merging", () => {
       makeReport([])
     )
     expect(findSnapshot(fromSaved, "claude_code")).toBeNull()
+  })
+})
+
+describe("status-bar preview", () => {
+  const now = 10_000
+  const fresh = now - 5 * 60
+  const stale = now - PLAN_USAGE_STALE_AFTER_SECONDS - 60
+
+  function claude(
+    windows: Partial<PlanUsageWindow>[],
+    overrides: Partial<PlanUsageSnapshot> = {}
+  ): PlanUsageSnapshot {
+    return makeSnapshot({
+      windows: windows.map((w) => makeWindow(w)),
+      observed_at: fresh,
+      ...overrides,
+    })
+  }
+
+  function codex(
+    windows: Partial<PlanUsageWindow>[],
+    overrides: Partial<PlanUsageSnapshot> = {}
+  ): PlanUsageSnapshot {
+    return claude(windows, {
+      agent: "codex",
+      source: "transcript",
+      ...overrides,
+    })
+  }
+
+  it("picks the window with the highest used percentage", () => {
+    const snapshot = claude([
+      { id: "five_hour", used_percent: 35 },
+      { id: "seven_day", kind: "weekly", used_percent: 61.5 },
+      { id: "seven_day_opus", kind: "weekly_model", used_percent: 12 },
+    ])
+    expect(tightestWindow(snapshot, now)?.id).toBe("seven_day")
+  })
+
+  it("skips windows that rolled over since their reading", () => {
+    const snapshot = claude([
+      { id: "five_hour", used_percent: 98, resets_at: now - 60 },
+      { id: "seven_day", kind: "weekly", used_percent: 40, resets_at: null },
+    ])
+    expect(tightestWindow(snapshot, now)?.id).toBe("seven_day")
+    expect(
+      tightestWindow(claude([{ used_percent: 98, resets_at: now - 60 }]), now)
+    ).toBeNull()
+  })
+
+  it("gives one entry per provider with a reading, in card order", () => {
+    const entries = planUsagePreview(
+      makeReport([
+        codex([{ id: "primary", used_percent: 99.4 }]),
+        claude([{ used_percent: 34.6 }]),
+      ]),
+      now
+    )
+    expect(entries.map((e) => [e.agent, e.percent])).toEqual([
+      ["claude_code", 35],
+      ["codex", 99],
+    ])
+  })
+
+  it("tints by level: normal below 75, amber from 75, red from 90", () => {
+    const level = (used_percent: number) =>
+      planUsagePreview(makeReport([claude([{ used_percent }])]), now)[0].level
+    expect(level(74.9)).toBe("normal")
+    expect(level(75)).toBe("high")
+    expect(level(89.9)).toBe("high")
+    expect(level(90)).toBe("critical")
+    expect(level(100)).toBe("critical")
+  })
+
+  it("reads a fresh limit-reached status as red whatever the percentage", () => {
+    const [entry] = planUsagePreview(
+      makeReport([codex([{ used_percent: 40 }], { status: "limited" })]),
+      now
+    )
+    expect(entry.level).toBe("critical")
+    expect(entry.stale).toBe(false)
+  })
+
+  it("marks an old reading stale and keeps only its numbers", () => {
+    const [entry] = planUsagePreview(
+      makeReport([
+        codex([{ used_percent: 40 }], {
+          status: "limited",
+          observed_at: stale,
+        }),
+      ]),
+      now
+    )
+    expect(entry.stale).toBe(true)
+    expect(entry.level).toBe("normal")
+  })
+
+  it("leaves out providers with no reading, or only rolled-over windows", () => {
+    expect(planUsagePreview(null, now)).toEqual([])
+    expect(planUsagePreview(makeReport([]), now)).toEqual([])
+    expect(planUsagePreview(makeReport([claude([]), codex([])]), now)).toEqual(
+      []
+    )
+    const entries = planUsagePreview(
+      makeReport([
+        claude([{ used_percent: 80, resets_at: now - 1 }]),
+        codex([{ used_percent: 20 }]),
+      ]),
+      now
+    )
+    expect(entries.map((e) => e.agent)).toEqual(["codex"])
+  })
+
+  it("picks the single tightest entry for the compact bar", () => {
+    const entries = planUsagePreview(
+      makeReport([
+        claude([{ used_percent: 35 }]),
+        codex([{ used_percent: 99 }]),
+      ]),
+      now
+    )
+    expect(tightestPreviewEntry(entries)?.agent).toBe("codex")
+    expect(tightestPreviewEntry([])).toBeNull()
+
+    // Same percentage: the one that says it is blocked wins; else card order.
+    const tied = planUsagePreview(
+      makeReport([
+        claude([{ used_percent: 50 }]),
+        codex([{ used_percent: 50 }], { status: "limited" }),
+      ]),
+      now
+    )
+    expect(tightestPreviewEntry(tied)?.agent).toBe("codex")
+    const even = planUsagePreview(
+      makeReport([
+        claude([{ used_percent: 50 }]),
+        codex([{ used_percent: 50 }]),
+      ]),
+      now
+    )
+    expect(tightestPreviewEntry(even)?.agent).toBe("claude_code")
   })
 })
