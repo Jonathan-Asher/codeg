@@ -136,8 +136,11 @@ export function overlaySelectorValues(
 }
 
 /**
- * What a tab's composer shows: its own connection's selectors when the agent
+ * What a tab's composer shows: its own connection's selectors where the agent
  * has reported them, else its own stored values over the agent's template.
+ * Modes and config options resolve separately — an agent reports its modes a
+ * moment before it has applied and reported its config options, and in that
+ * gap the chips keep showing the stored values rather than dropping them.
  *
  * `live` must be the tab's OWN connection (null when there is none, or when it
  * is still bound to a different agent than the one the tab shows).
@@ -151,6 +154,11 @@ export function resolveDisplayedSelectors({
   stored: SelectorValues | null
   template: DisplayedSelectors | null
 }): DisplayedSelectors {
-  if (live && (live.modes != null || live.configOptions != null)) return live
-  return overlaySelectorValues(template, stored)
+  if (live && live.modes != null && live.configOptions != null) return live
+  const fallback = overlaySelectorValues(template, stored)
+  if (!live) return fallback
+  const modes = live.modes ?? fallback.modes
+  const configOptions = live.configOptions ?? fallback.configOptions
+  if (modes === null && configOptions === null) return NO_SELECTORS
+  return { modes, configOptions }
 }

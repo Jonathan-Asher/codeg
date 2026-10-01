@@ -119,6 +119,18 @@ describe("resolveDisplayedSelectors — no session shows another's values", () =
     expect(shown).toBe(own)
   })
 
+  it("keeps the stored config values while the agent has reported only its modes", () => {
+    // The agent reports its modes before it has applied and reported the
+    // config options: the chips keep the conversation's own values meanwhile.
+    const shown = resolveDisplayedSelectors({
+      live: { modes: MODES, configOptions: null },
+      stored: B_RECORD,
+      template: LAST_SEEN_FROM_A,
+    })
+    expect(shown.modes).toBe(MODES)
+    expect(currentValues(shown)).toEqual({ model: "opus", effort: "max" })
+  })
+
   it("a brand-new chat shows the per-agent picks it will be started with", () => {
     const shown = resolveDisplayedSelectors({
       live: null,
