@@ -7,6 +7,8 @@
 //! Skipped on non-unix targets (named-pipe windows path tested separately).
 
 #![cfg(unix)]
+// Clippy 1.99 flags `#[async_trait]` expansions with `double_must_use`.
+#![allow(clippy::double_must_use)]
 
 use std::collections::HashMap;
 use std::path::PathBuf;

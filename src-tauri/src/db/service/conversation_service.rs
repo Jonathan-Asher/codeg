@@ -1713,6 +1713,7 @@ fn conv_to_summary(r: conversation::Model) -> DbConversationSummary {
         delegation_call_id: r.delegation_call_id,
         origin_cwd: r.origin_cwd,
         turn_state: r.turn_state,
+        selector_state: ConversationSelectorState::parse(r.selector_state.as_deref()),
     }
 }
 

@@ -10606,15 +10606,15 @@ pub(crate) async fn acp_update_agent_preferences_and_refresh(
 /// The selectors a UI connect should establish, given what the client sent.
 ///
 /// The client sends its saved per-AGENT picks on every connect (they are what
-/// a brand-new chat should start from). For a RESUME of a session whose
-/// conversation has a selector record, those picks are replaced by the record:
-/// the conversation reopens with its own mode/model/effort, not with whatever
-/// was last picked in some other conversation of the same agent (see
-/// `conversation_service::ConversationSelectorState`). A new session
-/// (`session_id` absent), or a resume with no record yet — the first reconnect
-/// of a conversation from before records existed — keeps the client's picks.
-/// A lookup failure also keeps them: a wrong-but-working selector beats a
-/// failed connect.
+/// a brand-new chat should start from). They seed ONLY a new session
+/// (`session_id` absent). A RESUME re-establishes its conversation's selector
+/// record — its own mode/model/effort, not whatever was last picked in some
+/// other conversation of the same agent (see
+/// `conversation_service::ConversationSelectorState`). A resume with nothing
+/// recorded (a conversation not reopened since records exist, a session with
+/// no row) or whose lookup fails applies nothing: the agent reopens the
+/// session with its own state, which the first attach then records. The last
+/// pick made elsewhere is never a resumed conversation's state.
 ///
 /// Only the UI connect path calls this. Delegation, work-task and automation
 /// spawns establish their own explicit configuration and bypass it.
@@ -10643,15 +10643,22 @@ pub async fn resolve_connect_selector_prefs(
             );
             (record.mode_id, record.config_values)
         }
-        Ok(None) => (preferred_mode_id, preferred_config_values),
+        Ok(None) => {
+            tracing::info!(
+                agent_type = %agent_type,
+                session_id,
+                "[ACP] resuming with the session's own selectors: nothing recorded yet"
+            );
+            (None, BTreeMap::new())
+        }
         Err(e) => {
             tracing::warn!(
                 agent_type = %agent_type,
                 session_id,
                 error = %e,
-                "[ACP] selector record lookup failed; using the client's picks"
+                "[ACP] selector record lookup failed; resuming with the session's own selectors"
             );
-            (preferred_mode_id, preferred_config_values)
+            (None, BTreeMap::new())
         }
     }
 }

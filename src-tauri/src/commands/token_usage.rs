@@ -1360,6 +1360,7 @@ mod tests {
                 delegation_call_id: None,
                 origin_cwd: None,
                 turn_state: None,
+                selector_state: None,
             },
             turns,
             session_stats: stats,

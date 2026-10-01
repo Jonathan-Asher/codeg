@@ -565,7 +565,7 @@ async fn record_selector_state(
     manager: &ConnectionManager,
     connection_id: &str,
 ) -> Result<(), DbError> {
-    let Some(state_arc) = manager.get_state(connection_id).await else {
+    let Some((state_arc, emitter)) = manager.get_state_and_emitter(connection_id).await else {
         return Ok(());
     };
     let (record, conversation_id, external_id, agent_type) = {
@@ -599,6 +599,16 @@ async fn record_selector_state(
             values = ?record.config_values,
             "[lifecycle] recorded the conversation's selectors"
         );
+        // Every client keeps the row's summary, and a tab whose session is not
+        // attached shows the record from it — so a change has to reach them
+        // too, or another window would show what this conversation ran before.
+        // Only on an actual write: a handful per session, never per token.
+        crate::commands::conversations::emit_conversation_upsert(
+            &emitter,
+            db_conn,
+            conversation_id,
+        )
+        .await;
     }
     Ok(())
 }
@@ -4268,15 +4278,61 @@ mod tests {
         assert_eq!(mode.as_deref(), Some("acceptEdits"));
         assert_eq!(values, client_pick);
 
-        // So does the first reconnect of a conversation with no record yet.
-        let (_, values) = resolve_connect_selector_prefs(
+        // A resume with nothing recorded does NOT: the last pick was made in
+        // another conversation. The agent reopens the session with its own
+        // state, and the first attach records that.
+        let (mode, values) = resolve_connect_selector_prefs(
             &db.conn,
             AgentType::ClaudeCode,
             Some("sess-never-recorded"),
-            None,
+            Some("acceptEdits".to_string()),
             client_pick.clone(),
         )
         .await;
-        assert_eq!(values, client_pick);
+        assert_eq!(mode, None);
+        assert!(values.is_empty(), "no other conversation's pick: {values:?}");
+    }
+
+    /// The row a selector change lands on is broadcast, so every client's copy
+    /// of the conversation's record — what a tab shows while its session is
+    /// not attached — follows the change.
+    #[tokio::test]
+    async fn a_recorded_change_is_broadcast_with_the_row() {
+        use crate::web::event_bridge::{WebEventBroadcaster, CONVERSATION_CHANGED_EVENT};
+        let db = test_helpers::fresh_in_memory_db().await;
+        let cid = seeded_conversation(&db, "/tmp/selector-broadcast").await;
+        let mgr = ConnectionManager::new();
+        let broadcaster = Arc::new(WebEventBroadcaster::new());
+        let mut rx = broadcaster.subscribe();
+        let mut conn = fake_connection_with_state("c1", Some(cid));
+        conn.emitter = EventEmitter::test_web_only(broadcaster.clone());
+        {
+            let mut s = conn.state.write().await;
+            s.external_id = Some("sess-1".to_string());
+            s.selectors_ready = true;
+        }
+        mgr.connections.lock().await.insert("c1".to_string(), conn);
+
+        agent_confirms(&mgr, "c1", "default", &[("model", "opus"), ("effort", "max")]).await;
+        handle_event(&db.conn, &mgr, &on("c1", 1, AcpEvent::SelectorsReady), None)
+            .await
+            .unwrap();
+
+        let mut upserted = None;
+        while let Ok(event) = rx.try_recv() {
+            if event.channel == CONVERSATION_CHANGED_EVENT {
+                upserted = Some((*event.payload).clone());
+            }
+        }
+        let payload = upserted.expect("the recorded row is broadcast");
+        assert_eq!(payload["kind"], "upsert");
+        assert_eq!(payload["summary"]["id"], cid);
+        assert_eq!(
+            payload["summary"]["selector_state"],
+            serde_json::json!({
+                "modeId": "default",
+                "configValues": { "effort": "max", "model": "opus" }
+            })
+        );
     }
 }

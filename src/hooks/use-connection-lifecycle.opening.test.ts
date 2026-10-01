@@ -23,8 +23,18 @@ vi.mock("next-intl", () => ({
     params ? `${key}:${JSON.stringify(params)}` : key,
 }))
 
+// The per-agent option template: what the LAST session of the agent reported,
+// current values included. Null until a test puts one there.
+const template = vi.hoisted(() => ({
+  value: null as {
+    modes: unknown
+    configOptions: unknown
+  } | null,
+}))
+
 vi.mock("@/contexts/acp-connections-context", () => ({
   useAcpActions: () => ({ setActiveKey: vi.fn(), touchActivity: vi.fn() }),
+  getCachedSelectors: () => template.value,
 }))
 
 const tasks = vi.hoisted(() => ({
@@ -86,8 +96,13 @@ vi.mock("@/hooks/use-connection", () => ({
 }))
 
 import { useConnectionLifecycle } from "@/hooks/use-connection-lifecycle"
+import type { SelectorValues } from "@/lib/selector-display"
+import type { SessionConfigOptionInfo } from "@/lib/types"
 
-function renderLifecycle(preparing: boolean) {
+function renderLifecycle(
+  preparing: boolean,
+  storedSelectors: SelectorValues | null = null
+) {
   return renderHook(
     (props: { preparing: boolean }) =>
       useConnectionLifecycle({
@@ -96,9 +111,48 @@ function renderLifecycle(preparing: boolean) {
         // Mirrors the panel: the auto-connect gate is CLOSED while preparing.
         isActive: !props.preparing,
         preparing: props.preparing,
+        storedSelectors,
       }),
     { initialProps: { preparing } }
   )
+}
+
+/** A Claude Code option list as some session last reported it. */
+function claudeOptions(
+  model: string,
+  effort: string
+): SessionConfigOptionInfo[] {
+  return [
+    {
+      id: "model",
+      name: "Model",
+      category: "model",
+      kind: {
+        type: "select",
+        current_value: model,
+        options: [
+          { value: "opus", name: "Opus 5.5" },
+          { value: "sonnet", name: "Sonnet 5.5" },
+        ],
+        groups: [],
+      },
+    },
+    {
+      id: "effort",
+      name: "Effort",
+      category: "thought_level",
+      kind: {
+        type: "select",
+        current_value: effort,
+        options: [
+          { value: "low", name: "Low" },
+          { value: "high", name: "High" },
+          { value: "max", name: "Max" },
+        ],
+        groups: [],
+      },
+    },
+  ]
 }
 
 describe("useConnectionLifecycle opening legs", () => {
@@ -108,6 +162,7 @@ describe("useConnectionLifecycle opening legs", () => {
     conn.attachPhase = null
     conn.selectorsReady = false
     conn.hasCachedSelectors = false
+    template.value = null
   })
 
   it("reports the historical-session wait as a status-bar task and as loading selectors", () => {
@@ -156,16 +211,49 @@ describe("useConnectionLifecycle opening legs", () => {
     expect(result.current.configOptionsLoading).toBe(false)
   })
 
-  it("skips the loading state when the agent's selectors are already cached", () => {
-    // Nothing to wait for: the cache already says what the chips should read,
-    // so a placeholder there would flicker over values we can render.
+  it("shows the conversation's own stored selectors while it opens, not the last session's", () => {
+    // Another session of the agent was last seen on Sonnet / Low. This one runs
+    // Opus / Max: that is what its chips read until its own session reports.
+    template.value = {
+      modes: null,
+      configOptions: claudeOptions("sonnet", "low"),
+    }
+    const { result } = renderLifecycle(true, {
+      modeId: null,
+      configValues: { model: "opus", effort: "max" },
+    })
+    const shown = Object.fromEntries(
+      (result.current.displayConfigOptions ?? []).map((o) => [
+        o.id,
+        o.kind.current_value,
+      ])
+    )
+    expect(shown).toEqual({ model: "opus", effort: "max" })
+    // Something of its own to show: no placeholder over it.
+    expect(result.current.modeLoading).toBe(false)
+    expect(result.current.configOptionsLoading).toBe(false)
+    // The status-bar row is independent of the chips — the session itself is
+    // still not up.
+    expect(tasks.live()).toHaveLength(1)
+  })
+
+  it("shows a placeholder rather than another session's values when nothing is stored", () => {
+    template.value = {
+      modes: null,
+      configOptions: claudeOptions("sonnet", "low"),
+    }
     conn.hasCachedSelectors = true
+    const { result } = renderLifecycle(true)
+    expect(result.current.displayConfigOptions).toBeNull()
+    expect(result.current.displayModes).toBeNull()
+    expect(result.current.configOptionsLoading).toBe(true)
+  })
+
+  it("skips the placeholder for an agent known to have no selectors at all", () => {
+    template.value = { modes: null, configOptions: null }
     const { result } = renderLifecycle(true)
     expect(result.current.modeLoading).toBe(false)
     expect(result.current.configOptionsLoading).toBe(false)
-    // The status-bar row is independent of the cache — the session itself is
-    // still not up.
-    expect(tasks.live()).toHaveLength(1)
   })
 })
 

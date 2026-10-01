@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use super::agent::AgentType;
 use super::message::{MessageTurn, TurnUsage};
 use crate::db::entities::conversation::{ConversationKind, ConversationTurnState};
+use crate::db::service::conversation_service::ConversationSelectorState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationSummary {
@@ -79,6 +80,14 @@ pub struct DbConversationSummary {
     /// such a server deserializable.
     #[serde(default)]
     pub turn_state: Option<ConversationTurnState>,
+    /// Mirror of `conversation.selector_state`: the mode/model/effort this
+    /// conversation's session last had in effect. A tab whose session is not
+    /// attached yet (idle-swept, reopened after a restart, another window)
+    /// shows these until the agent reports its own, instead of whatever some
+    /// other conversation of the same agent was last seen running. Absent
+    /// when nothing is recorded yet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selector_state: Option<ConversationSelectorState>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

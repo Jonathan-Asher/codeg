@@ -8910,6 +8910,11 @@ async fn apply_preferred_session_options(
     // the INITIAL list: every later list is the same agent's answer to a set,
     // so the model selector cannot move between ids mid-replay.
     let ordered = order_preferred_config_values(&options, preferred_config_values);
+    // What establishment actually asked the agent for, per id: the preferred
+    // value, or the current spelling a legacy one maps to (see
+    // `legacy_config_value_equivalent`). The re-assertion ledger is built off
+    // this, so a mapped value is defended like any other.
+    let mut requested: BTreeMap<String, String> = BTreeMap::new();
     for (config_id, value_id) in ordered {
         if never_replayed(config_id) {
             tracing::info!(
@@ -8927,6 +8932,18 @@ async fn apply_preferred_session_options(
         // with no advertised-list check (verified in the 1.7.0 bundle). So let
         // the agent decide.
         let advertised = options.iter().find(|o| o.id.to_string() == *config_id);
+        let offered_here = advertised.is_some();
+        // A value stored under a spelling the agent has since retired for the
+        // SAME choice is applied under the current one rather than dropped.
+        let mapped = advertised.and_then(|o| legacy_config_value_equivalent(o, value_id));
+        if let Some(current) = &mapped {
+            tracing::info!(
+                "[ACP] preferred config '{config_id}'='{value_id}' is offered as \
+                 '{current}' now; applying that"
+            );
+        }
+        let value_id: &String = mapped.as_ref().unwrap_or(value_id);
+        requested.insert(config_id.clone(), value_id.clone());
         let already_matches =
             advertised.is_some_and(|o| config_option_already_holds(o, value_id.as_str()));
         if already_matches {
@@ -8952,6 +8969,15 @@ async fn apply_preferred_session_options(
         let value = encode_config_option_value(is_boolean, value_id);
         match set_session_config_option_inner(cx, &session_id, config_id.clone(), value).await {
             Ok(updated) => options = updated,
+            // An id the agent does not offer in this session was only ever a
+            // try (see above). The usual case is an option that hangs off the
+            // model: claude-agent-acp drops `fast` for a model without fast
+            // mode, and a conversation's record keeps the value for when a
+            // model that has it comes back. Expected, so not an error.
+            Err(e) if !offered_here => tracing::debug!(
+                "[ACP] preferred config '{config_id}'='{value_id}' not applied on \
+                 connect: the agent does not offer '{config_id}' in this session ({e})"
+            ),
             Err(e) => tracing::error!(
                 "[ACP] failed to apply preferred config '{config_id}'='{value_id}' \
                  on connect: {e}"
@@ -8970,13 +8996,69 @@ async fn apply_preferred_session_options(
     // the previous session left behind would defend values this session never
     // asserted — and, when the agent rejected them here, values it has already
     // refused once.
-    state.write().await.asserted_config_values = preferred_config_values
-        .iter()
-        .filter(|(config_id, value_id)| settled.get(*config_id) == Some(*value_id))
-        .map(|(config_id, value_id)| (config_id.clone(), value_id.clone()))
-        .collect();
+    //
+    // The values come from THIS connection's establishment only — on a resume,
+    // its own conversation's record (`resolve_connect_selector_prefs`) — so a
+    // later pick in another session can never be re-asserted here.
+    state.write().await.asserted_config_values = establishment_ledger(requested, &settled);
 
     options
+}
+
+/// The values establishment may defend against a later agent re-pin: each one
+/// it requested (after legacy mapping) that the agent then confirmed.
+fn establishment_ledger(
+    requested: BTreeMap<String, String>,
+    settled: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    requested
+        .into_iter()
+        .filter(|(config_id, value_id)| settled.get(config_id) == Some(value_id))
+        .collect()
+}
+
+/// The value `option` offers today for a preference stored under a spelling
+/// the agent has retired for the same choice, or `None` when there is none
+/// (the value is still offered, or nothing equivalent is).
+///
+/// claude-agent-acp 0.84.0 is the case: it stopped listing `opus[1m]` (Opus 5.5
+/// with the 1M context window) because its plain `opus` row now IS that model
+/// with that window — a turn on it reports `contextWindow: 1000000`, measured
+/// live. Conversation records and per-agent picks saved under 0.81 still say
+/// `opus[1m]`; skipping them as withdrawn left the session on whatever the
+/// adapter's own settings resolve to, a different model for anyone whose
+/// default is not Opus. So a model id carrying a context hint (`[1m]`) maps to
+/// the same id without it, when the agent offers that and not the hinted one.
+///
+/// Narrow on purpose: only the model selector, only a `[<n>m]`/`[<n>k]` suffix,
+/// and only when the bare id is advertised verbatim — cursor's bracketed
+/// parameter variants (`[thinking=true,…]`) and any other id are left alone.
+fn legacy_config_value_equivalent(option: &SessionConfigOption, value: &str) -> Option<String> {
+    if !is_model_config_option(option) || !config_option_rejects_value(option, value) {
+        return None;
+    }
+    let base = strip_context_window_hint(value)?;
+    if config_option_rejects_value(option, base) {
+        None
+    } else {
+        Some(base.to_string())
+    }
+}
+
+/// `opus[1m]` → `opus`: the id without a trailing context-window hint, or
+/// `None` when it carries none.
+fn strip_context_window_hint(value: &str) -> Option<&str> {
+    let open = value.rfind('[')?;
+    let hint = value[open..].strip_prefix('[')?.strip_suffix(']')?;
+    let digits = hint.trim_end_matches(['m', 'M', 'k', 'K']);
+    let is_hint = !digits.is_empty()
+        && digits.len() + 1 == hint.len()
+        && digits.bytes().all(|b| b.is_ascii_digit());
+    if is_hint && open > 0 {
+        Some(&value[..open])
+    } else {
+        None
+    }
 }
 
 /// Compare an agent-pushed config-option list against the values codeg asserted
@@ -23679,6 +23761,77 @@ mod tests {
         assert!(config_option_rejects_value(&grouped, "openai/gpt-5-mini"));
     }
 
+    /// claude-agent-acp 0.84.0's model selector, as it answered `session/new`
+    /// live on 2026-10-01 (trimmed): the `opus[1m]` row is gone, because `opus`
+    /// itself now runs Opus 5.5 with the 1M window (a turn on it reports
+    /// `contextWindow: 1000000`).
+    fn claude_084_model_option() -> SessionConfigOption {
+        serde_json::from_value(serde_json::json!({
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": "opus",
+            "options": [
+                {"value": "opus", "name": "Opus 5.5"},
+                {"value": "claude-fable-5-1", "name": "Fable 5.1"},
+                {"value": "sonnet", "name": "Sonnet 5.5"},
+                {"value": "haiku", "name": "Haiku 4.5"},
+                {"value": "claude-opus-5", "name": "Opus 5"},
+            ],
+        }))
+        .expect("parses")
+    }
+
+    #[test]
+    fn a_retired_1m_model_id_maps_onto_the_row_that_runs_it_now() {
+        let model = claude_084_model_option();
+        for (stored, current) in [
+            ("opus[1m]", "opus"),
+            ("sonnet[1M]", "sonnet"),
+            ("claude-opus-5[1m]", "claude-opus-5"),
+        ] {
+            assert_eq!(
+                legacy_config_value_equivalent(&model, stored).as_deref(),
+                Some(current),
+                "{stored}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_a_retired_context_hint_on_the_model_selector_is_mapped() {
+        let model = claude_084_model_option();
+        // Still offered as stored: nothing to map.
+        assert_eq!(legacy_config_value_equivalent(&model, "opus"), None);
+        // Not a context hint, or nothing equivalent on offer.
+        for stored in [
+            "opusplan",
+            "mythos[1m]",
+            "opus[thinking=true]",
+            "opus[1mm]",
+            "opus[m]",
+            "[1m]",
+        ] {
+            assert_eq!(legacy_config_value_equivalent(&model, stored), None, "{stored}");
+        }
+        // An adapter that still lists the 1M row keeps it as is.
+        assert_eq!(
+            legacy_config_value_equivalent(&claude_model_option(false), "opus[1m]"),
+            None
+        );
+        // Only the model selector: an effort value is never rewritten.
+        let effort: SessionConfigOption = serde_json::from_value(serde_json::json!({
+            "id": "effort",
+            "name": "Effort",
+            "type": "select",
+            "currentValue": "high",
+            "options": [{"value": "high", "name": "High"}],
+        }))
+        .expect("parses");
+        assert_eq!(legacy_config_value_equivalent(&effort, "high[1m]"), None);
+    }
+
     #[test]
     fn synthesize_grok_config_options_none_without_sessionconfig() {
         let empty: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
@@ -28160,6 +28313,52 @@ mod tests {
             "a second identical push must not start a set_config_option loop"
         );
         assert!(state.read().await.asserted_config_values.is_empty());
+    }
+
+    /// What a revert is answered with is the value THIS session was
+    /// established with — on a resume, its own conversation's record — not a
+    /// pick made in another session since: each connection holds its own
+    /// ledger, and nothing but its establishment writes it.
+    #[tokio::test]
+    async fn a_revert_is_answered_from_the_sessions_own_ledger() {
+        // B was established from its record (High), A from its own (Medium).
+        let b = asserted_drift_state(&[("effort", "high")]);
+        let a = asserted_drift_state(&[("effort", "medium")]);
+
+        // B's agent pushes Medium (its own settings default, say).
+        let drift =
+            take_asserted_config_drift(&b, &asserted_drift_options("sonnet[1m]", "medium")).await;
+        assert_eq!(drift, vec![("effort".to_string(), "high".to_string())]);
+        assert_eq!(
+            a.read().await.asserted_config_values.get("effort").map(String::as_str),
+            Some("medium"),
+            "A's ledger is untouched by B's revert"
+        );
+    }
+
+    /// A value establishment applied under its current spelling (`opus` for a
+    /// stored `opus[1m]`) is defended like any other: the ledger is built from
+    /// what was requested, not from the stored spelling the agent no longer
+    /// lists — which would never match what the agent confirmed.
+    #[test]
+    fn the_ledger_defends_a_legacy_value_under_its_current_spelling() {
+        let requested = BTreeMap::from([
+            ("effort".to_string(), "max".to_string()),
+            ("model".to_string(), "opus".to_string()),
+        ]);
+        let settled = BTreeMap::from([
+            ("effort".to_string(), "max".to_string()),
+            ("model".to_string(), "opus".to_string()),
+        ]);
+        assert_eq!(establishment_ledger(requested, &settled), settled);
+
+        // A value the agent did not confirm is never defended.
+        let requested = BTreeMap::from([
+            ("effort".to_string(), "max".to_string()),
+            ("fast".to_string(), "off".to_string()),
+        ]);
+        let settled = BTreeMap::from([("effort".to_string(), "xhigh".to_string())]);
+        assert!(establishment_ledger(requested, &settled).is_empty());
     }
 
     /// Silence in the two cases that must stay silent: a push that agrees, and

@@ -1,3 +1,4 @@
+import { act, renderHook } from "@testing-library/react"
 import { beforeEach, describe, expect, it } from "vitest"
 
 import {
@@ -5,6 +6,7 @@ import {
   getSavedPrefsForConnect,
   saveConfigPreference,
   saveModePreference,
+  useSavedSelectorPrefs,
 } from "./selector-prefs-storage"
 
 const STORAGE_KEY = "codeg:selector-prefs"
@@ -148,5 +150,38 @@ describe("selector-prefs-storage", () => {
     expect(getSavedPrefsForConnect("other-cursor").configValues).toEqual({
       model: "claude-opus-5",
     })
+  })
+})
+
+describe("useSavedSelectorPrefs", () => {
+  beforeEach(() => localStorage.clear())
+
+  it("follows a pick made after it mounted", () => {
+    // A brand-new chat tab mounts, then a pick lands in another tab: the new
+    // chat's chips must show the pick it will now be started with.
+    saveConfigPreference("claude_code", "effort", "high")
+    const { result } = renderHook(() =>
+      useSavedSelectorPrefs("claude_code", true)
+    )
+    expect(result.current?.configValues).toEqual({ effort: "high" })
+    const before = result.current
+
+    act(() => saveConfigPreference("claude_code", "effort", "medium"))
+    expect(result.current?.configValues).toEqual({ effort: "medium" })
+    expect(result.current).not.toBe(before)
+  })
+
+  it("keeps its identity while nothing changes, and is off for an existing conversation", () => {
+    saveConfigPreference("claude_code", "model", "opus")
+    const { result, rerender } = renderHook(
+      (props: { enabled: boolean }) =>
+        useSavedSelectorPrefs("claude_code", props.enabled),
+      { initialProps: { enabled: true } }
+    )
+    const first = result.current
+    rerender({ enabled: true })
+    expect(result.current).toBe(first)
+    rerender({ enabled: false })
+    expect(result.current).toBeNull()
   })
 })

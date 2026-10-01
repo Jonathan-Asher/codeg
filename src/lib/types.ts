@@ -528,6 +528,18 @@ export interface DbConversationSummary {
    *  `status` — the review state, which the user can also set by hand — this
    *  says whether an agent is actually working. See `lib/session-activity.ts`. */
   turn_state?: ConversationTurnState | null
+  /** The mode / model / effort this conversation's session last had in
+   *  effect, as the backend records it per conversation. A tab whose session
+   *  is not attached yet shows these until the agent reports its own (see
+   *  `lib/selector-display.ts`). Absent when nothing is recorded yet. */
+  selector_state?: ConversationSelectorState | null
+}
+
+/** Mirrors Rust `conversation_service::ConversationSelectorState` (camelCase on
+ *  the wire): the selector values one conversation's session runs with. */
+export interface ConversationSelectorState {
+  modeId?: string | null
+  configValues?: Record<string, string> | null
 }
 
 /** Mirrors Rust `ConversationTurnState`

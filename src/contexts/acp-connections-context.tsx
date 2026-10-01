@@ -1017,9 +1017,12 @@ const MAX_RECONNECT_SETTLE_WAITS = 3
  */
 const CONNECT_SETTLE_WAIT_TIMEOUT_MS = 15_000
 
-// Per-agentType cache for selectors (modes / configOptions).
-// Populated when real data arrives from the backend.
-// Used as UI-layer fallback when the connection hasn't received real data yet.
+// Per-agentType cache of the last selectors (modes / configOptions) any session
+// of that agent reported. Its value LISTS describe the agent (which selectors
+// it has, how their values read); its CURRENT values belong to whichever
+// session reported last, so it is a template only — never shown or applied as
+// another session's state. A tab that has nothing of its own yet lays its own
+// stored values over it (see `lib/selector-display.ts`).
 const selectorsCache = new Map<
   string,
   {
@@ -2803,10 +2806,11 @@ function connectionsReducer(
     case "CONFIG_OPTION_CHANGED": {
       const conn = state.get(action.contextKey)
       if (!conn) return state
-      const options =
-        conn.configOptions ??
-        selectorsCache.get(conn.agentType)?.configOptions ??
-        null
+      // Only this connection's own list. Building the optimistic one off the
+      // per-agent cache (another session's values) stamped that session's model
+      // and effort onto this one; with no list yet, the agent's confirmation
+      // fills it in.
+      const options = conn.configOptions
       if (!options) return state
       const idx = options.findIndex((o) => o.id === action.configId)
       if (idx === -1) return state

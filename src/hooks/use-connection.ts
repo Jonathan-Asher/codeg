@@ -274,9 +274,14 @@ export function useConnection(contextKey: string): UseConnectionReturn {
     : null
   const hasCachedSelectors = cached !== null
   const connectedWorkingDir = connection?.workingDir ?? null
-  const modes = connection?.modes ?? cached?.modes ?? null
-  const configOptions =
-    connection?.configOptions ?? cached?.configOptions ?? null
+  // This connection's OWN selectors only. The per-agent cache holds whatever
+  // some other session of the agent reported last, so falling back to it made
+  // a tab that was still attaching show (and a queued send carry) another
+  // conversation's mode, model and effort. Surfaces that want something on
+  // screen before the agent reports lay the conversation's own stored values
+  // over that cache instead (see `lib/selector-display.ts`).
+  const modes = connection?.modes ?? null
+  const configOptions = connection?.configOptions ?? null
   const availableCommands = connection?.availableCommands ?? null
   const pendingPermission = connection?.pendingPermission ?? null
   const pendingUserMessage = connection?.pendingUserMessage ?? null
