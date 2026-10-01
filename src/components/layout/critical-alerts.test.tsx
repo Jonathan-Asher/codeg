@@ -143,7 +143,8 @@ describe("CriticalAlerts", () => {
     h.getCriticalAlerts.mockResolvedValue(snapshot([alert()]))
     renderAlerts()
     expect(
-      await screen.findByText("⚑ Critical session waiting: Deploy fix")
+      // The banner's flag icon stands for the notification title's ⚑.
+      await screen.findByText("Critical session waiting: Deploy fix")
     ).toBeTruthy()
     expect(
       screen.getByText(
@@ -156,7 +157,7 @@ describe("CriticalAlerts", () => {
     renderAlerts()
     await emit(CRITICAL_ALERTS_EVENT, snapshot([alert({ kind: "stalled" })]))
     expect(
-      screen.getByText("⚑ Critical session may be stuck: Deploy fix")
+      screen.getByText("Critical session may be stuck: Deploy fix")
     ).toBeTruthy()
     await emit(CRITICAL_ALERTS_EVENT, snapshot([]))
     expect(screen.queryByRole("alert")).toBeNull()

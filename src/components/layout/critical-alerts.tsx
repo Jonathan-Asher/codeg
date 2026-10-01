@@ -121,7 +121,8 @@ function CriticalAlertBanner({
             className="block max-w-full truncate text-left text-sm font-medium leading-snug hover:underline"
             title={t("open")}
           >
-            {text.title}
+            {/* The flag icon beside it stands for the title's leading ⚑. */}
+            {text.title.replace(/^⚑\s*/, "")}
           </button>
           <p className="mt-0.5 text-xs text-muted-foreground">
             {text.body}
@@ -321,7 +322,9 @@ export function CriticalAlerts() {
     <div
       data-critical-alerts
       aria-live="assertive"
-      className="pointer-events-none fixed inset-x-0 top-2 z-[60] flex flex-col items-center gap-2 px-4"
+      // Below the window's 40px tab bar, never over it: the session's tab
+      // (opening it acknowledges the alert) has to stay reachable.
+      className="pointer-events-none fixed inset-x-0 top-12 z-[60] flex flex-col items-center gap-2 px-4"
     >
       {alerts.map((alert) => (
         <CriticalAlertBanner
