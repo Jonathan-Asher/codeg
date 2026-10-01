@@ -546,12 +546,12 @@ impl Release for TauriRelease {
 
     async fn download(
         &self,
-        mut on_chunk: Box<dyn FnMut(usize, Option<u64>) + Send>,
+        on_chunk: Box<dyn FnMut(usize, Option<u64>) + Send>,
     ) -> Result<Vec<u8>, String> {
         // `download` verifies the minisign signature against the app's
         // built-in public key before returning the bytes.
         self.0
-            .download(move |len, total| on_chunk(len, total), || {})
+            .download(on_chunk, || {})
             .await
             .map_err(|e| e.to_string())
     }
