@@ -163,8 +163,8 @@ import { contentBlocksFromUserMessage } from "@/lib/user-message-blocks"
 import { getAgentLabel } from "@/lib/custom-agents"
 import {
   getSavedModeId,
-  getSavedPrefsForConnect,
   saveModePreference,
+  useSavedSelectorPrefs,
 } from "@/lib/selector-prefs-storage"
 import {
   selectorValuesFromRecord,
@@ -679,20 +679,22 @@ const ConversationTabView = memo(function ConversationTabView({
       : undefined
   )
   const detailSelectorState = detail?.summary.selector_state
-  const storedSelectors = useMemo<SelectorValues | null>(() => {
-    if (dbConversationId != null) {
-      return selectorValuesFromRecord(
-        recordedSelectorState ?? detailSelectorState
-      )
-    }
-    const saved = getSavedPrefsForConnect(selectedAgent)
-    return saved.modeId || saved.configValues ? saved : null
-  }, [
-    dbConversationId,
-    recordedSelectorState,
-    detailSelectorState,
+  const savedSelectorPrefs = useSavedSelectorPrefs(
     selectedAgent,
-  ])
+    dbConversationId == null
+  )
+  const storedSelectors = useMemo<SelectorValues | null>(
+    () =>
+      dbConversationId != null
+        ? selectorValuesFromRecord(recordedSelectorState ?? detailSelectorState)
+        : savedSelectorPrefs,
+    [
+      dbConversationId,
+      recordedSelectorState,
+      detailSelectorState,
+      savedSelectorPrefs,
+    ]
+  )
 
   const {
     conn,

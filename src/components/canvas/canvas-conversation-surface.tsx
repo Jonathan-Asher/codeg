@@ -32,8 +32,8 @@ import {
 } from "@/lib/prompt-draft"
 import {
   getSavedModeId,
-  getSavedPrefsForConnect,
   saveModePreference,
+  useSavedSelectorPrefs,
 } from "@/lib/selector-prefs-storage"
 import {
   selectorValuesFromRecord,
@@ -369,13 +369,17 @@ export function CanvasConversationSurface({
   // `lib/selector-display.ts`.
   const recordedSelectorState =
     summary?.selector_state ?? detail?.summary.selector_state
-  const storedSelectors = useMemo<SelectorValues | null>(() => {
-    if (dbConversationId != null) {
-      return selectorValuesFromRecord(recordedSelectorState)
-    }
-    const saved = getSavedPrefsForConnect(agentType)
-    return saved.modeId || saved.configValues ? saved : null
-  }, [dbConversationId, recordedSelectorState, agentType])
+  const savedSelectorPrefs = useSavedSelectorPrefs(
+    agentType,
+    dbConversationId == null
+  )
+  const storedSelectors = useMemo<SelectorValues | null>(
+    () =>
+      dbConversationId != null
+        ? selectorValuesFromRecord(recordedSelectorState)
+        : savedSelectorPrefs,
+    [dbConversationId, recordedSelectorState, savedSelectorPrefs]
+  )
 
   const {
     conn,

@@ -17,9 +17,35 @@
  * incoming event and overwrite locally" path.
  */
 
+import { useMemo, useSyncExternalStore } from "react"
 import type { SessionModeStateInfo } from "@/lib/types"
 
 const STORAGE_KEY = "codeg:selector-prefs"
+
+// Same-window writers notify here; other windows arrive as `storage` events.
+const listeners = new Set<() => void>()
+
+function notifyListeners() {
+  for (const listener of listeners) listener()
+}
+
+/** Called whenever the saved picks may have changed — in this window or, for
+ *  the same storage, in another one. */
+export function subscribeSelectorPrefs(listener: () => void): () => void {
+  listeners.add(listener)
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === null || event.key === STORAGE_KEY) listener()
+  }
+  if (typeof window !== "undefined") {
+    window.addEventListener("storage", onStorage)
+  }
+  return () => {
+    listeners.delete(listener)
+    if (typeof window !== "undefined") {
+      window.removeEventListener("storage", onStorage)
+    }
+  }
+}
 
 interface SelectorPrefs {
   modeId?: string
@@ -45,6 +71,7 @@ function writeAll(all: AllPrefs) {
   } catch {
     /* ignore */
   }
+  notifyListeners()
 }
 
 function updatePrefs(
@@ -156,6 +183,30 @@ export function getSavedPrefsForConnect(agentType: string): {
     modeId: prefs.modeId ?? null,
     configValues,
   }
+}
+
+/**
+ * The per-agent picks a brand-new chat of `agentType` starts from, kept
+ * current as they change (a pick in another tab moves them), or `null` when
+ * nothing is saved or `enabled` is false. Stable identity while unchanged.
+ */
+export function useSavedSelectorPrefs(
+  agentType: string,
+  enabled: boolean
+): {
+  modeId: string | null
+  configValues: Record<string, string> | null
+} | null {
+  const raw = useSyncExternalStore(
+    subscribeSelectorPrefs,
+    () => (enabled ? JSON.stringify(getSavedPrefsForConnect(agentType)) : null),
+    () => null
+  )
+  return useMemo(() => {
+    if (raw === null) return null
+    const prefs = JSON.parse(raw) as ReturnType<typeof getSavedPrefsForConnect>
+    return prefs.modeId || prefs.configValues ? prefs : null
+  }, [raw])
 }
 
 // ── Save (user actions only) ──
