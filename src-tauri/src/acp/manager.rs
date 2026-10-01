@@ -1231,6 +1231,18 @@ impl ConnectionManager {
         conn_id: &str,
         blocks: Vec<PromptInputBlock>,
     ) -> Result<(), AcpError> {
+        self.send_prompt_unlinked_from(conn_id, blocks, &crate::paths::codeg_uploads_root())
+            .await
+    }
+
+    /// [`Self::send_prompt_unlinked`] with the uploads root images are
+    /// re-hydrated from injected (tests).
+    pub(crate) async fn send_prompt_unlinked_from(
+        &self,
+        conn_id: &str,
+        mut blocks: Vec<PromptInputBlock>,
+        uploads_root: &std::path::Path,
+    ) -> Result<(), AcpError> {
         let prompt_lock = self.clone_prompt_lock(conn_id).await?;
         let _guard = prompt_lock.lock_owned().await;
         let state_arc = {
@@ -1241,13 +1253,25 @@ impl ConnectionManager {
                 .state
                 .clone()
         };
-        let linked = state_arc.read().await.conversation_id.is_some();
+        let (linked, turn_in_flight) = {
+            let s = state_arc.read().await;
+            (s.conversation_id.is_some(), s.turn_in_flight)
+        };
         if linked {
             return Err(AcpError::protocol(
                 "connection belongs to a conversation; unlinked prompts are only for private sessions"
                     .to_string(),
             ));
         }
+        // Busy: rejected before any upload is read, as on the linked path
+        // (`send_prompt_inner` re-checks and sets the gate authoritatively).
+        if turn_in_flight {
+            return Err(AcpError::TurnInProgress);
+        }
+        // Images a private question uploaded (web / remote-workspace mode)
+        // arrive as empty-payload markers, exactly like a linked prompt's;
+        // without this the agent would get image blocks with no bytes.
+        crate::acp::prompt_hydration::hydrate_prompt_blocks(&mut blocks, uploads_root).await?;
         self.send_prompt_inner(conn_id, blocks, None).await
     }
 
@@ -6010,6 +6034,71 @@ mod tests {
             .send_prompt_unlinked(conn_id, vec![PromptInputBlock::Text { text: "hi".into() }])
             .await;
         assert!(res.is_err(), "linked connection must refuse, got {res:?}");
+        assert!(rx.try_recv().is_err(), "nothing was sent to the agent");
+    }
+
+    #[tokio::test]
+    async fn unlinked_prompt_rehydrates_uploaded_images() {
+        // A private Quick Ask question from a web / remote window: its image
+        // was uploaded and arrives as an empty-payload marker. The agent must
+        // get the bytes, as on the linked path.
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        let uploads = tempfile::tempdir().unwrap();
+        let bucket = uploads
+            .path()
+            .join("quick-ask-0123456789abcdef0123456789abcdef");
+        std::fs::create_dir_all(&bucket).unwrap();
+        let image = bucket.join("square.png");
+        std::fs::write(&image, b"png-bytes").unwrap();
+
+        let mgr = ConnectionManager::new();
+        let conn_id = "conn-private-image";
+        let mut rx = insert_live_connection(&mgr, conn_id, AgentType::ClaudeCode, None).await;
+        mgr.send_prompt_unlinked_from(
+            conn_id,
+            vec![
+                PromptInputBlock::Text {
+                    text: "what color is this square?".into(),
+                },
+                PromptInputBlock::Image {
+                    data: String::new(),
+                    mime_type: "image/png".into(),
+                    uri: Some(format!("file://{}", image.display())),
+                },
+            ],
+            uploads.path(),
+        )
+        .await
+        .expect("unlinked prompt with an uploaded image is accepted");
+
+        match rx.try_recv() {
+            Ok(crate::acp::connection::ConnectionCommand::Prompt { blocks, .. }) => {
+                match &blocks[1] {
+                    PromptInputBlock::Image { data, .. } => {
+                        assert_eq!(data, &STANDARD.encode(b"png-bytes"));
+                    }
+                    other => panic!("unexpected block: {other:?}"),
+                }
+            }
+            _ => panic!("the prompt did not reach the agent"),
+        }
+    }
+
+    #[tokio::test]
+    async fn unlinked_prompt_is_refused_while_a_turn_runs() {
+        let mgr = ConnectionManager::new();
+        let conn_id = "conn-private-busy";
+        let mut rx = insert_live_connection(&mgr, conn_id, AgentType::ClaudeCode, None).await;
+        mgr.get_state(conn_id)
+            .await
+            .unwrap()
+            .write()
+            .await
+            .turn_in_flight = true;
+        let res = mgr
+            .send_prompt_unlinked(conn_id, vec![PromptInputBlock::Text { text: "hi".into() }])
+            .await;
+        assert!(matches!(res, Err(AcpError::TurnInProgress)), "got {res:?}");
         assert!(rx.try_recv().is_err(), "nothing was sent to the agent");
     }
 

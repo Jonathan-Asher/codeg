@@ -67,7 +67,7 @@ export function ComposerImageThumbnails({
           <button
             type="button"
             onClick={() => setPreviewId(attachment.id)}
-            className="cursor-pointer transition-opacity hover:opacity-80"
+            className="block cursor-pointer transition-opacity hover:opacity-80"
           >
             <Image
               src={`data:${attachment.mimeType};base64,${attachment.data}`}

@@ -307,6 +307,33 @@ fn to_base36(mut value: u64) -> String {
     String::from_utf8(out).expect("ascii")
 }
 
+/// Claude Code's own temp root: `$CLAUDE_CODE_TMPDIR`, else `/tmp`, then
+/// `claude-<uid>`. It ignores `TMPDIR` (so codeg's per-launch temp isolation
+/// does not cover it) and keeps per-session files under
+/// `<encoded cwd>/<session id>/` there — the copy of every image a prompt
+/// carried (`images/1.png`, …), background task output.
+#[cfg(unix)]
+pub fn claude_temp_root() -> PathBuf {
+    let base = std::env::var_os("CLAUDE_CODE_TMPDIR")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp"));
+    // Always succeeds; `getuid` has no failure mode.
+    base.join(format!("claude-{}", unsafe { libc::getuid() }))
+}
+
+/// Remove Claude Code's temp directory for the scratch dir
+/// (`<temp root>/<encoded cwd>`), where it saved copies of the question's
+/// images. Named after the scratch path like the project dir, so it can only
+/// hold what this one question left.
+pub fn remove_claude_temp_dir(
+    claude_temp_root: &Path,
+    cwd: &str,
+    report: &mut PrivateSessionCleanup,
+) {
+    report.remove_path(&claude_temp_root.join(claude_project_dir_name(cwd)));
+}
+
 /// Remove Claude Code's project directory for the scratch dir
 /// (`projects/<encoded cwd>`). Claude creates it for every session it runs
 /// there — with transcripts off it still holds an (empty) `memory/` — and it
@@ -421,6 +448,8 @@ pub fn remove_quick_ask_uploads(
 pub struct PrivateCleanupRoots<'a> {
     pub data_dir: &'a Path,
     pub claude_config_dir: &'a Path,
+    /// [`claude_temp_root`]; `None` where it is not known (Windows).
+    pub claude_temp_root: Option<&'a Path>,
     pub codeg_record_roots: &'a [PathBuf],
     pub uploads_root: &'a Path,
 }
@@ -489,6 +518,9 @@ pub async fn discard_private_session_core(
     // can only belong to this question (the discard of a question that never
     // got a session id passes no agent).
     remove_claude_project_dir(claude_config_dir, working_dir, &mut report);
+    if let Some(temp_root) = roots.claude_temp_root {
+        remove_claude_temp_dir(temp_root, working_dir, &mut report);
+    }
 
     if let Some(session_id) = session_id.filter(|id| is_safe_session_id(id)) {
         if agent_type == Some(AgentType::ClaudeCode) {
@@ -524,12 +556,17 @@ pub async fn discard_private_session_default(
         crate::paths::codeg_acp_transcripts_root(),
     ];
     let claude_config_dir = crate::parsers::claude::resolve_claude_config_dir();
+    #[cfg(unix)]
+    let claude_temp_root = Some(claude_temp_root());
+    #[cfg(not(unix))]
+    let claude_temp_root: Option<PathBuf> = None;
     let uploads_root = crate::paths::codeg_uploads_root();
     discard_private_session_core(
         conn,
         &PrivateCleanupRoots {
             data_dir,
             claude_config_dir: &claude_config_dir,
+            claude_temp_root: claude_temp_root.as_deref(),
             codeg_record_roots: &record_roots,
             uploads_root: &uploads_root,
         },
@@ -1289,6 +1326,7 @@ mod tests {
         PrivateCleanupRoots {
             data_dir: data,
             claude_config_dir: config,
+            claude_temp_root: None,
             codeg_record_roots: &[],
             uploads_root: uploads,
         }
@@ -1378,9 +1416,27 @@ mod tests {
         let kept = uploads.path().join("tab-7").join("diagram.png");
         touch(&kept);
 
+        // Claude Code's temp copy of the question's image, and another
+        // project's that stays.
+        let claude_tmp = tempfile::tempdir().unwrap();
+        let tmp_copy = claude_tmp
+            .path()
+            .join(claude_project_dir_name(&dir))
+            .join(sid)
+            .join("images/1.png");
+        touch(&tmp_copy);
+        let other_tmp = claude_tmp
+            .path()
+            .join("-Users-me-project")
+            .join("other/images/1.png");
+        touch(&other_tmp);
+
         let report = discard_private_session_core(
             &db.conn,
-            &roots(data.path(), config.path(), uploads.path()),
+            &PrivateCleanupRoots {
+                claude_temp_root: Some(claude_tmp.path()),
+                ..roots(data.path(), config.path(), uploads.path())
+            },
             &dir,
             Some(AgentType::ClaudeCode),
             Some(sid),
@@ -1388,6 +1444,12 @@ mod tests {
         )
         .await
         .expect("discard succeeds");
+
+        assert!(!claude_tmp
+            .path()
+            .join(claude_project_dir_name(&dir))
+            .exists());
+        assert!(other_tmp.exists());
 
         assert!(!uploads.path().join(BUCKET).exists());
         assert!(kept.exists());
