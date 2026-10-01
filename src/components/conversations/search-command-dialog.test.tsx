@@ -39,13 +39,24 @@ vi.mock("@/contexts/aux-panel-context", () => ({
   useAuxPanelContext: () => ({ revealInFileTree: vi.fn() }),
 }))
 
+const folders = vi.hoisted(() => ({
+  active: null as { id: number; name: string; path: string } | null,
+  all: [
+    { id: 3, name: "codeg", path: "/work/codeg" },
+    { id: 5, name: "legalix", path: "/work/legalix" },
+  ],
+}))
+
 vi.mock("@/contexts/active-folder-context", () => ({
-  useActiveFolder: () => ({ activeFolder: null, activeFolderId: null }),
+  useActiveFolder: () => ({
+    activeFolder: folders.active,
+    activeFolderId: folders.active?.id ?? null,
+  }),
 }))
 
 vi.mock("@/stores/app-workspace-store", () => ({
   useAppWorkspaceStore: (selector: (s: unknown) => unknown) =>
-    selector({ conversations: [] }),
+    selector({ conversations: [], allFolders: folders.all }),
 }))
 
 vi.mock("@/hooks/use-file-tree", () => ({
@@ -90,6 +101,7 @@ async function openMessagesTab(onOpenChange = vi.fn()) {
 describe("SearchCommandDialog messages tab", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    folders.active = null
     h.listAllConversations.mockResolvedValue([])
   })
 
@@ -150,5 +162,70 @@ describe("SearchCommandDialog messages tab", () => {
 
     expect(screen.queryByText("Older answer")).toBeNull()
     expect(screen.getByText("Newer answer")).toBeTruthy()
+  })
+})
+
+function conv(id: number, folderId: number, title: string) {
+  return {
+    id,
+    folder_id: folderId,
+    title,
+    title_locked: false,
+    agent_type: "claude_code",
+    status: "in_progress",
+    created_at: "2026-09-30T10:00:00Z",
+    updated_at: "2026-09-30T10:00:00Z",
+  }
+}
+
+describe("SearchCommandDialog conversations tab", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    folders.active = folders.all[0]
+  })
+
+  function renderDialog() {
+    render(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <SearchCommandDialog open onOpenChange={vi.fn()} />
+      </NextIntlClientProvider>
+    )
+    return userEvent.setup()
+  }
+
+  it("searches every folder by default and names each result's folder", async () => {
+    h.listAllConversations.mockResolvedValue([
+      conv(1, 3, "Upload fixes"),
+      conv(2, 5, "Upload the brief"),
+    ])
+    const user = renderDialog()
+
+    await user.type(
+      screen.getByPlaceholderText("Search conversations..."),
+      "upload"
+    )
+
+    expect(await screen.findByText("Upload the brief")).toBeTruthy()
+    expect(h.listAllConversations).toHaveBeenLastCalledWith(
+      expect.objectContaining({ folder_ids: null, search: "upload" })
+    )
+    expect(screen.getByText("legalix")).toBeTruthy()
+  })
+
+  it("narrows to the open folder on request", async () => {
+    h.listAllConversations.mockResolvedValue([conv(1, 3, "Upload fixes")])
+    const user = renderDialog()
+
+    await user.click(screen.getByRole("button", { name: "Only codeg" }))
+    await user.type(
+      screen.getByPlaceholderText("Search conversations..."),
+      "upload"
+    )
+
+    await waitFor(() =>
+      expect(h.listAllConversations).toHaveBeenLastCalledWith(
+        expect.objectContaining({ folder_ids: [3], search: "upload" })
+      )
+    )
   })
 })

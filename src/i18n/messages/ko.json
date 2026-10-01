@@ -2195,6 +2195,8 @@
       "filePlaceholder": "파일 또는 디렉토리 검색...",
       "messagePlaceholder": "메시지 내용 검색...",
       "allAgents": "전체",
+      "scopeAllFolders": "모든 폴더",
+      "scopeThisFolder": "{name}만",
       "searching": "검색 중...",
       "typeToSearch": "입력하여 대화를 검색하세요",
       "typeToSearchFiles": "입력하여 파일 또는 디렉토리를 검색하세요",

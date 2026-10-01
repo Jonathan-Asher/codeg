@@ -66,13 +66,23 @@ export function SearchCommandDialog({
     locale === "zh-CN" ? zhCN : locale === "zh-TW" ? zhTW : enUS
   const { activeFolder: folder, activeFolderId } = useActiveFolder()
   const allConversations = useAppWorkspaceStore((s) => s.conversations)
-  const folderId = activeFolderId ?? 0
+  const allFolders = useAppWorkspaceStore((s) => s.allFolders)
+  // Conversations are searched across every folder by default — a title is
+  // often all that is remembered, not where it ran. "This folder only" narrows
+  // it; files stay folder-scoped (they live in the folder).
+  const [thisFolderOnly, setThisFolderOnly] = useState(false)
+  const scopedFolderId =
+    thisFolderOnly && activeFolderId != null ? activeFolderId : null
   const conversations = useMemo(
     () =>
-      activeFolderId == null
-        ? []
-        : allConversations.filter((c) => c.folder_id === activeFolderId),
-    [allConversations, activeFolderId]
+      scopedFolderId == null
+        ? allConversations
+        : allConversations.filter((c) => c.folder_id === scopedFolderId),
+    [allConversations, scopedFolderId]
+  )
+  const folderNames = useMemo(
+    () => new Map(allFolders.map((f) => [f.id, f.name])),
+    [allFolders]
   )
   const { openTab } = useTabActions()
   const { openConversations } = useWorkbenchRoute()
@@ -129,7 +139,7 @@ export function SearchCommandDialog({
       setSearching(true)
       try {
         const data = await listAllConversations({
-          folder_ids: folderId > 0 ? [folderId] : null,
+          folder_ids: scopedFolderId != null ? [scopedFolderId] : null,
           search: q.trim() || null,
           agent_type: agent,
         })
@@ -140,7 +150,7 @@ export function SearchCommandDialog({
         setSearching(false)
       }
     },
-    [folderId]
+    [scopedFolderId]
   )
 
   // Debounced search on query change (conversations tab only)
@@ -193,6 +203,7 @@ export function SearchCommandDialog({
     if (!open) {
       setQuery("")
       setAgentFilter(null)
+      setThisFolderOnly(false)
       setResults([])
       setMessageHits([])
       setMessageSearching(false)
@@ -334,6 +345,36 @@ export function SearchCommandDialog({
           `overflow-hidden`, so the tail chips were clipped away and simply
           could not be clicked. Wrapping keeps every filter reachable and lets
           the block grow by a row instead of hiding options. */}
+      {activeTab === "conversations" && folder && (
+        <div className="flex items-center gap-1 px-3 pt-2">
+          <button
+            onClick={() => setThisFolderOnly(false)}
+            className={cn(
+              "h-6 shrink-0 text-xs px-2 rounded-md transition-colors",
+              !thisFolderOnly
+                ? "bg-secondary text-secondary-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            {t("scopeAllFolders")}
+          </button>
+          <button
+            onClick={() => setThisFolderOnly(true)}
+            className={cn(
+              "flex min-w-0 items-center gap-1.5 h-6 text-xs px-2 rounded-md transition-colors",
+              thisFolderOnly
+                ? "bg-secondary text-secondary-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Folder className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">
+              {t("scopeThisFolder", { name: folder.name })}
+            </span>
+          </button>
+        </div>
+      )}
+
       {activeTab === "conversations" && availableAgents.length > 1 && (
         <div className="flex flex-wrap items-center gap-1 px-3 py-2 border-b">
           <button
@@ -391,6 +432,15 @@ export function SearchCommandDialog({
                       {formatConversationTitle(conv.title) ||
                         t("untitledConversation")}
                     </span>
+                    {scopedFolderId == null &&
+                      folderNames.get(conv.folder_id) && (
+                        <span className="flex max-w-40 items-center gap-1 text-xs text-muted-foreground shrink-0">
+                          <Folder className="w-3 h-3 shrink-0" />
+                          <span className="truncate">
+                            {folderNames.get(conv.folder_id)}
+                          </span>
+                        </span>
+                      )}
                     <span className="text-xs text-muted-foreground shrink-0">
                       {getAgentLabel(conv.agent_type)}
                     </span>

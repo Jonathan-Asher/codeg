@@ -2195,6 +2195,8 @@
       "filePlaceholder": "搜尋檔案或目錄...",
       "messagePlaceholder": "搜尋訊息內容...",
       "allAgents": "全部",
+      "scopeAllFolders": "所有資料夾",
+      "scopeThisFolder": "僅 {name}",
       "searching": "搜尋中...",
       "typeToSearch": "輸入關鍵字搜尋會話",
       "typeToSearchFiles": "輸入關鍵字搜尋檔案或目錄",

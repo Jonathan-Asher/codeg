@@ -2195,6 +2195,8 @@
       "filePlaceholder": "Buscar archivos o directorios...",
       "messagePlaceholder": "Buscar en el contenido de los mensajes...",
       "allAgents": "Todo",
+      "scopeAllFolders": "Todas las carpetas",
+      "scopeThisFolder": "Solo {name}",
       "searching": "Buscando...",
       "typeToSearch": "Escribe para buscar conversaciones",
       "typeToSearchFiles": "Escribe para buscar archivos o directorios",

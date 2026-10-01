@@ -2195,6 +2195,8 @@
       "filePlaceholder": "搜索文件或目录...",
       "messagePlaceholder": "搜索消息内容...",
       "allAgents": "全部",
+      "scopeAllFolders": "所有文件夹",
+      "scopeThisFolder": "仅 {name}",
       "searching": "搜索中...",
       "typeToSearch": "输入关键词搜索会话",
       "typeToSearchFiles": "输入关键词搜索文件或目录",
