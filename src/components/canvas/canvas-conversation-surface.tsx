@@ -32,8 +32,13 @@ import {
 } from "@/lib/prompt-draft"
 import {
   getSavedModeId,
+  getSavedPrefsForConnect,
   saveModePreference,
 } from "@/lib/selector-prefs-storage"
+import {
+  selectorValuesFromRecord,
+  type SelectorValues,
+} from "@/lib/selector-display"
 import type {
   AgentType,
   ContentBlock,
@@ -358,8 +363,24 @@ export function CanvasConversationSurface({
     }
   }, [draftTarget?.kind, isActive])
 
+  // What this card's session runs with, shown until its connection reports:
+  // the conversation's own record (never another conversation's last-seen
+  // values), or for a draft the per-agent picks it will start from. See
+  // `lib/selector-display.ts`.
+  const recordedSelectorState =
+    summary?.selector_state ?? detail?.summary.selector_state
+  const storedSelectors = useMemo<SelectorValues | null>(() => {
+    if (dbConversationId != null) {
+      return selectorValuesFromRecord(recordedSelectorState)
+    }
+    const saved = getSavedPrefsForConnect(agentType)
+    return saved.modeId || saved.configValues ? saved : null
+  }, [dbConversationId, recordedSelectorState, agentType])
+
   const {
     conn,
+    displayModes,
+    displayConfigOptions,
     modeLoading,
     configOptionsLoading,
     selectorsLoading,
@@ -387,6 +408,7 @@ export function CanvasConversationSurface({
     // another surface (a workspace tab, another window), join that connection
     // instead of spawning a second agent for the same session.
     conversationId: dbConversationId ?? undefined,
+    storedSelectors,
   })
   const connStatus = conn.status
   const connSessionId = conn.sessionId
@@ -510,14 +532,14 @@ export function CanvasConversationSurface({
       setModeId(nextModeId)
       // The preference stores the whole mode SHAPE, not just the id, so it can
       // be shipped to the backend at connect time.
-      if (conn.modes) {
+      if (displayModes) {
         saveModePreference(agentType, {
-          ...conn.modes,
+          ...displayModes,
           current_mode_id: nextModeId,
         })
       }
     },
-    [agentType, conn.modes]
+    [agentType, displayModes]
   )
 
   const handleSend = useCallback(
@@ -720,20 +742,20 @@ export function CanvasConversationSurface({
   )
 
   const connectionModes = useMemo(
-    () => conn.modes?.available_modes ?? [],
-    [conn.modes]
+    () => displayModes?.available_modes ?? [],
+    [displayModes]
   )
   const connectionConfigOptions = useMemo(
-    () => conn.configOptions ?? [],
-    [conn.configOptions]
+    () => displayConfigOptions ?? [],
+    [displayConfigOptions]
   )
   const selectedModeId = useMemo(() => {
     if (connectionModes.length === 0) return null
     if (modeId && connectionModes.some((mode) => mode.id === modeId)) {
       return modeId
     }
-    return conn.modes?.current_mode_id ?? connectionModes[0]?.id ?? null
-  }, [conn.modes, connectionModes, modeId])
+    return displayModes?.current_mode_id ?? connectionModes[0]?.id ?? null
+  }, [displayModes, connectionModes, modeId])
 
   // Arrow-key history source, read lazily on the first Up/Down (see
   // `MessageInput.getSentHistory`) so streaming tokens cost nothing here.

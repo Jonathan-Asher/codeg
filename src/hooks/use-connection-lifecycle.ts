@@ -1,15 +1,27 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { useAcpActions } from "@/contexts/acp-connections-context"
+import {
+  getCachedSelectors,
+  useAcpActions,
+} from "@/contexts/acp-connections-context"
 import { useTaskContext } from "@/contexts/task-context"
 import { useConnection, type UseConnectionReturn } from "@/hooks/use-connection"
 import { describeError, extractAppCommandError } from "@/lib/app-error"
 import { notify } from "@/lib/notify"
 import { isConnectionBusy } from "@/lib/connection-teardown"
+import {
+  resolveDisplayedSelectors,
+  type SelectorValues,
+} from "@/lib/selector-display"
 import { TurnBusyError } from "@/lib/turn-busy"
-import { type AgentType, type PromptDraft } from "@/lib/types"
+import {
+  type AgentType,
+  type PromptDraft,
+  type SessionConfigOptionInfo,
+  type SessionModeStateInfo,
+} from "@/lib/types"
 import { getAgentLabel } from "@/lib/custom-agents"
 
 interface UseConnectionLifecycleOptions {
@@ -50,10 +62,22 @@ interface UseConnectionLifecycleOptions {
    * connection under the same contextKey.
    */
   isTransientUnmount?: () => boolean
+  /**
+   * The values THIS tab's session runs with, shown until its connection
+   * reports its own: an existing conversation's stored record, or — for a
+   * brand-new chat — the per-agent picks it will start from. Never another
+   * conversation's (see `lib/selector-display.ts`).
+   */
+  storedSelectors?: SelectorValues | null
 }
 
 export interface UseConnectionLifecycleReturn {
   conn: UseConnectionReturn
+  /** The mode / config selectors to show for this tab: the connection's own
+   *  once the agent reported them (and only while it is bound to `agentType`),
+   *  else `storedSelectors` laid over the agent's option template. */
+  displayModes: SessionModeStateInfo | null
+  displayConfigOptions: SessionConfigOptionInfo[] | null
   modeLoading: boolean
   configOptionsLoading: boolean
   selectorsLoading: boolean
@@ -156,6 +180,7 @@ export function useConnectionLifecycle({
   conversationId,
   preparing = false,
   isTransientUnmount,
+  storedSelectors = null,
 }: UseConnectionLifecycleOptions): UseConnectionLifecycleReturn {
   const t = useTranslations("Folder.chat.connectionLifecycle")
   const { setActiveKey, touchActivity } = useAcpActions()
@@ -181,16 +206,43 @@ export function useConnectionLifecycle({
     respondPermission: connRespondPermission,
     modes,
     configOptions,
-    hasCachedSelectors,
   } = conn
   const isInteractiveStatus = status === "connected" || status === "prompting"
   const hasSelectorsData = modes !== null || configOptions !== null
   const effectiveSelectorsReady = selectorsReady || hasSelectorsData
   const selectorTaskIdRef = useRef<string | null>(null)
-  // Visual-only loading indicators for selector chips.
-  // Skip loading indicators when we have cached selectors — even if the
-  // cache contains no modes/configOptions (the agent simply doesn't have
-  // them), we already know what to show and don't need a loading state.
+  // What the chips show. The per-agent cache is only the agent's option SHAPE:
+  // its current values are whichever session reported last, so they are never
+  // shown as this tab's — the tab's own stored values are laid over it until
+  // its connection reports (see `lib/selector-display.ts`). A connection still
+  // bound to a previous agent (a draft mid-switch) is not this tab's either.
+  const template = getCachedSelectors(agentType)
+  const hasTemplate = template !== null
+  const templateModes = template?.modes ?? null
+  const templateConfigOptions = template?.configOptions ?? null
+  const liveIsOwn = conn.agentType == null || conn.agentType === agentType
+  const displayed = useMemo(
+    () =>
+      resolveDisplayedSelectors({
+        live: liveIsOwn ? { modes, configOptions } : null,
+        stored: storedSelectors,
+        template: hasTemplate
+          ? { modes: templateModes, configOptions: templateConfigOptions }
+          : null,
+      }),
+    [
+      liveIsOwn,
+      modes,
+      configOptions,
+      storedSelectors,
+      hasTemplate,
+      templateModes,
+      templateConfigOptions,
+    ]
+  )
+  // Visual-only loading indicators for selector chips: while the session's
+  // selectors are pending and there is nothing of this tab's own to show. An
+  // agent known to have no selectors at all has nothing to wait for.
   // `preparing` is the leg BEFORE `connecting`, when the caller is still
   // resolving what to connect to; the selectors are just as unknown there, and
   // leaving it out is what made an opening conversation show a bare composer.
@@ -198,8 +250,14 @@ export function useConnectionLifecycle({
     preparing ||
     status === "connecting" ||
     (isInteractiveStatus && !effectiveSelectorsReady)
-  const modeLoading = !hasCachedSelectors && selectorsPending
-  const configOptionsLoading = !hasCachedSelectors && selectorsPending
+  const agentHasNoSelectors =
+    hasTemplate &&
+    templateModes === null &&
+    (templateConfigOptions?.length ?? 0) === 0
+  const nothingToShow =
+    displayed.modes === null && displayed.configOptions === null
+  const modeLoading = selectorsPending && nothingToShow && !agentHasNoSelectors
+  const configOptionsLoading = modeLoading
   // Gate for send button: block until the backend session is fully
   // initialized (selectorsReady from the real backend event, not cache).
   const selectorsLoading = isInteractiveStatus && !selectorsReady
@@ -587,6 +645,8 @@ export function useConnectionLifecycle({
 
   return {
     conn,
+    displayModes: displayed.modes,
+    displayConfigOptions: displayed.configOptions,
     modeLoading,
     configOptionsLoading,
     selectorsLoading,

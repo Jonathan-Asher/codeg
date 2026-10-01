@@ -6,9 +6,11 @@ import {
   AcpConnectionsProvider,
   STREAM_FLUSH_FRAME_MS,
   STREAM_FLUSH_MAX_MS,
+  getCachedSelectors,
   useAcpActions,
   useConnectionStore,
 } from "@/contexts/acp-connections-context"
+import { acpSetConfigOption } from "@/lib/api"
 import {
   CONNECTION_IDLE_TIMEOUT_MS,
   IDLE_SWEEP_INTERVAL_MS,
@@ -355,6 +357,86 @@ describe("AcpConnectionsProvider connect options (Quick Ask)", () => {
       "model",
       "opus"
     )
+  })
+})
+
+describe("AcpConnectionsProvider selectors stay with their own session", () => {
+  function claudeOptions(
+    model: string,
+    effort: string
+  ): SessionConfigOptionInfo[] {
+    return [
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        kind: {
+          type: "select",
+          current_value: model,
+          options: [
+            { value: "opus", name: "Opus 5.5" },
+            { value: "sonnet", name: "Sonnet 5.5" },
+          ],
+          groups: [],
+        },
+      },
+      {
+        id: "effort",
+        name: "Effort",
+        category: "thought_level",
+        kind: {
+          type: "select",
+          current_value: effort,
+          options: [
+            { value: "low", name: "Low" },
+            { value: "max", name: "Max" },
+          ],
+          groups: [],
+        },
+      },
+    ]
+  }
+
+  it("a pick on a session that has no options yet never borrows another session's", async () => {
+    await mountProvider()
+    // Session A is live and reported Sonnet / Low — the agent's last-seen list.
+    h.acpConnect.mockResolvedValueOnce("conn-a")
+    await act(async () => {
+      await h.actions!.connect("tab-a", "claude_code", "/work/p", "sess-a")
+    })
+    emitAcpEvent(latestAttachHandlers(), {
+      seq: 1,
+      connection_id: "conn-a",
+      type: "session_config_options",
+      config_options: claudeOptions("sonnet", "low"),
+    })
+    expect(
+      getCachedSelectors("claude_code")?.configOptions?.[0]?.kind.current_value
+    ).toBe("sonnet")
+
+    // Session B is still attaching: nothing of its own yet.
+    h.acpConnect.mockResolvedValueOnce("conn-b")
+    await act(async () => {
+      await h.actions!.connect("tab-b", "claude_code", "/work/p", "sess-b")
+    })
+    expect(h.store!.getConnection("tab-b")!.configOptions).toBeNull()
+
+    await act(async () => {
+      await h.actions!.setConfigOption("tab-b", "effort", "max")
+    })
+    // The pick goes to B's own agent, and B shows no list until that agent
+    // answers — not A's list with A's Sonnet in it.
+    expect(acpSetConfigOption).toHaveBeenLastCalledWith(
+      "conn-b",
+      "effort",
+      "max"
+    )
+    expect(h.store!.getConnection("tab-b")!.configOptions).toBeNull()
+    expect(
+      h
+        .store!.getConnection("tab-a")!
+        .configOptions?.map((o) => o.kind.current_value)
+    ).toEqual(["sonnet", "low"])
   })
 })
 
