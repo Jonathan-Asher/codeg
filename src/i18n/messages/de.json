@@ -6828,6 +6828,13 @@
       "send": "Senden",
       "stop": "Stoppen"
     },
+    "attach": {
+      "button": "Bilder anhängen",
+      "dropOverlay": "Bilder zum Anhängen hier ablegen",
+      "notImage": "Hier lassen sich nur Bilder anhängen. Übersprungen: {names}",
+      "imagesUnsupported": "{agent} kann keine Bilder lesen, daher wurden sie nicht angehängt.",
+      "noFiles": "Das Abgelegte enthielt keine Bilddatei. Kopiere das Bild und füge es stattdessen ein."
+    },
     "hint": "Enter zum Senden · Shift+Enter für neue Zeile · Esc zum Ausblenden",
     "actions": {
       "newQuestion": "Neue Frage",
@@ -6854,7 +6861,8 @@
       "noSession": "Wähle zuerst eine Sitzung.",
       "connectFailed": "Der Agent konnte nicht gestartet werden: {error}",
       "sendFailed": "Senden fehlgeschlagen: {error}",
-      "noAgents": "Kein Agent installiert. Füge einen in den Einstellungen hinzu."
+      "noAgents": "Kein Agent installiert. Füge einen in den Einstellungen hinzu.",
+      "imagesUnsupported": "{agent} kann keine Bilder lesen. Entferne sie, um die Frage zu senden."
     },
     "empty": {
       "title": "Frag einfach"

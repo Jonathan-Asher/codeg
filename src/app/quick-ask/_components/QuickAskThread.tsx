@@ -16,6 +16,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react"
+import Image from "next/image"
 import { useStickToBottomContext } from "use-stick-to-bottom"
 import { useTranslations } from "next-intl"
 import { AlertCircle, Clock, CornerDownRight } from "lucide-react"
@@ -37,6 +38,7 @@ import {
 import { usePageHandoffName } from "@/lib/browser/use-page-handoff-name"
 import { buildStreamingTurnsFromLiveMessage } from "@/stores/conversation-runtime-store"
 import { cn } from "@/lib/utils"
+import type { ImageInputAttachment } from "@/components/chat/message-input-attachments"
 import type {
   QuickAskTurn,
   QuickAskUserTurnState,
@@ -128,23 +130,49 @@ const STATE_LABEL_KEYS = {
 
 function UserBubble({
   text,
+  images,
   state,
 }: {
   text: string
+  images?: ImageInputAttachment[]
   state: QuickAskUserTurnState
 }) {
   const t = useTranslations("QuickAsk")
   return (
     <div className="flex flex-col items-end gap-1" data-testid="qa-question">
-      <div
-        className={cn(
-          "max-w-[85%] whitespace-pre-wrap break-words rounded-xl bg-muted px-3 py-1.5 text-sm",
-          state === "queued" && "opacity-60",
-          state === "failed" && "ring-1 ring-destructive/50"
-        )}
-      >
-        {text}
-      </div>
+      {images && images.length > 0 && (
+        <div
+          className={cn(
+            "flex max-w-[85%] flex-wrap justify-end gap-1",
+            state === "queued" && "opacity-60"
+          )}
+          data-testid="qa-question-images"
+        >
+          {images.map((image) => (
+            <Image
+              key={image.id}
+              src={`data:${image.mimeType};base64,${image.data}`}
+              alt={image.name}
+              title={image.name}
+              width={48}
+              height={48}
+              unoptimized
+              className="size-12 rounded-md border border-border/70 object-cover"
+            />
+          ))}
+        </div>
+      )}
+      {text && (
+        <div
+          className={cn(
+            "max-w-[85%] whitespace-pre-wrap break-words rounded-xl bg-muted px-3 py-1.5 text-sm",
+            state === "queued" && "opacity-60",
+            state === "failed" && "ring-1 ring-destructive/50"
+          )}
+        >
+          {text}
+        </div>
+      )}
       {state !== "sent" && (
         <div
           className={cn(
@@ -197,7 +225,12 @@ export function QuickAskThread({
       <MessageThreadContent className="gap-3 px-4 py-3">
         {settled.map((turn) =>
           turn.role === "user" ? (
-            <UserBubble key={turn.id} text={turn.text} state={turn.state} />
+            <UserBubble
+              key={turn.id}
+              text={turn.text}
+              images={turn.images}
+              state={turn.state}
+            />
           ) : (
             <AssistantReply
               key={turn.id}
@@ -211,7 +244,12 @@ export function QuickAskThread({
         {/* Waiting for the reply above to end, so shown after it. */}
         {queued.map((turn) =>
           turn.role === "user" ? (
-            <UserBubble key={turn.id} text={turn.text} state={turn.state} />
+            <UserBubble
+              key={turn.id}
+              text={turn.text}
+              images={turn.images}
+              state={turn.state}
+            />
           ) : null
         )}
         {footer}

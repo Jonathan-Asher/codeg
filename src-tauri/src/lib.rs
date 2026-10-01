@@ -1568,6 +1568,11 @@ mod tauri_app {
                                 window.app_handle(),
                             );
                         }
+                        // Files dropped on the window: the click that started
+                        // the drag in another app must not hide it.
+                        tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { .. }) => {
+                            quick_ask_commands::desktop::note_files_dropped();
+                        }
                         // The window is pre-built and kept: closing it only
                         // hides it, so the next shortcut press is instant and
                         // the question in it survives. Quitting still closes.

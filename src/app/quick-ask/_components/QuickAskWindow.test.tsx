@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -22,8 +22,12 @@ const h = vi.hoisted(() => {
     error: null as null | { code: string; detail: string | null },
     lastCleanup: null,
     isPrivate: false,
+    uploadBucket: "quick-ask-0123456789abcdef0123456789abcdef",
     prepare: () => Promise.resolve(),
-    send: (() => Promise.resolve(true)) as (text: string) => Promise<boolean>,
+    send: (() => Promise.resolve(true)) as (
+      text: string,
+      images?: unknown[]
+    ) => Promise<boolean>,
     cancel: () => Promise.resolve(),
     clear: () => Promise.resolve(null as unknown),
     setConfigOption: () => Promise.resolve(),
@@ -33,6 +37,7 @@ const h = vi.hoisted(() => {
     session,
     lastArgs: null as null | Record<string, unknown>,
     openConversation: null as unknown as ReturnType<typeof vi.fn>,
+    uploadAttachment: vi.fn(),
   }
 })
 
@@ -99,8 +104,32 @@ vi.mock("@/lib/quick-ask/desktop", () => ({
   hideQuickAskWindow: vi.fn(async () => {}),
   openQuickAskConversation: (...args: unknown[]) => h.openConversation(...args),
 }))
+// Web mode (jsdom is no Tauri window): images go through the upload endpoint.
+vi.mock("@/lib/api", async (orig) => ({
+  ...(await orig<typeof import("@/lib/api")>()),
+  uploadAttachment: (...args: unknown[]) => h.uploadAttachment(...args),
+}))
 
 import { QuickAskWindow } from "./QuickAskWindow"
+
+const PNG_BASE64 = "iVBORw0KGgo="
+
+function png(name = "square.png"): File {
+  return new File(
+    [Uint8Array.from(atob(PNG_BASE64), (c) => c.charCodeAt(0))],
+    name,
+    { type: "image/png" }
+  )
+}
+
+/** Drop `files` on `target` the way a browser reports it. */
+function dropFiles(target: Element, files: File[]) {
+  fireEvent.dragOver(target, { dataTransfer: { types: ["Files"], files } })
+  fireEvent.drop(target, { dataTransfer: { types: ["Files"], files } })
+}
+
+const uploadedUri = (name: string) =>
+  `file:///srv/uploads/quick-ask-0123456789abcdef0123456789abcdef/${name}`
 
 function renderWindow() {
   return render(
@@ -133,6 +162,14 @@ describe("QuickAskWindow", () => {
     h.session.conn.agentType = null
     h.session.conn.configOptions = null
     h.session.setConfigOption = vi.fn(async () => {})
+    h.uploadAttachment
+      .mockReset()
+      .mockImplementation(async (file: File, bucket: string) => ({
+        path: `/srv/uploads/${bucket}/${file.name}`,
+        name: file.name,
+        size: file.size,
+        mimeType: file.type,
+      }))
   })
 
   it("opens on a new session in the remembered folder with a fast model", () => {
@@ -187,7 +224,9 @@ describe("QuickAskWindow", () => {
     expect(h.session.send).not.toHaveBeenCalled()
 
     fireEvent.keyDown(input, { key: "Enter" })
-    await waitFor(() => expect(h.session.send).toHaveBeenCalledWith("line one"))
+    await waitFor(() =>
+      expect(h.session.send).toHaveBeenCalledWith("line one", [])
+    )
     expect(input).toHaveValue("")
   })
 
@@ -368,6 +407,161 @@ describe("QuickAskWindow", () => {
     ]
     renderWindow()
     expect(h.session.setConfigOption).not.toHaveBeenCalled()
+  })
+
+  describe("images", () => {
+    it("attaches an image dropped anywhere on the window", async () => {
+      renderWindow()
+      const root = screen.getByTestId("quick-ask")
+      const header = root.querySelector("header")!
+      fireEvent.dragOver(header, {
+        dataTransfer: { types: ["Files"], files: [] },
+      })
+      expect(screen.getByTestId("qa-drop-overlay")).toHaveTextContent(
+        "Drop images to attach"
+      )
+      const file = png()
+      fireEvent.drop(header, {
+        dataTransfer: { types: ["Files"], files: [file] },
+      })
+      expect(screen.queryByTestId("qa-drop-overlay")).toBeNull()
+
+      expect(await screen.findByAltText("square.png")).toBeInTheDocument()
+      // Uploaded into this question's own bucket (web / remote mode).
+      expect(h.uploadAttachment).toHaveBeenCalledWith(
+        file,
+        "quick-ask-0123456789abcdef0123456789abcdef"
+      )
+    })
+
+    it("takes a pasted screenshot", async () => {
+      renderWindow()
+      fireEvent.paste(screen.getByTestId("qa-input"), {
+        clipboardData: {
+          files: [png("Screenshot.png")],
+          items: [],
+          getData: () => "",
+        },
+      })
+      expect(await screen.findByAltText("Screenshot.png")).toBeInTheDocument()
+    })
+
+    it("removes an image with its ×", async () => {
+      renderWindow()
+      dropFiles(screen.getByTestId("quick-ask"), [png("a.png"), png("b.png")])
+      await screen.findByAltText("b.png")
+      fireEvent.click(screen.getByRole("button", { name: "Remove a.png" }))
+      expect(screen.queryByAltText("a.png")).toBeNull()
+      expect(screen.getByAltText("b.png")).toBeInTheDocument()
+    })
+
+    it("ignores anything else with a short hint", async () => {
+      renderWindow()
+      dropFiles(screen.getByTestId("quick-ask"), [
+        new File(["x"], "notes.txt", { type: "text/plain" }),
+      ])
+      expect(await screen.findByTestId("qa-attach-hint")).toHaveTextContent(
+        "Only images can be attached here. Skipped: notes.txt"
+      )
+      expect(screen.queryByTestId("qa-attachments")).toBeNull()
+      expect(h.uploadAttachment).not.toHaveBeenCalled()
+    })
+
+    it("opens an image-only picker from the attach button", async () => {
+      const click = vi
+        .spyOn(HTMLInputElement.prototype, "click")
+        .mockImplementation(() => {})
+      try {
+        renderWindow()
+        fireEvent.click(screen.getByTestId("qa-attach"))
+        expect(click).toHaveBeenCalledTimes(1)
+        // The hidden picker the hook opened.
+        const input = click.mock.contexts[0] as HTMLInputElement
+        expect(input.type).toBe("file")
+        expect(input.accept).toBe("image/*")
+        Object.defineProperty(input, "files", { value: [png("picked.png")] })
+        await act(async () => {
+          await (input.onchange as () => Promise<void>)()
+        })
+        expect(await screen.findByAltText("picked.png")).toBeInTheDocument()
+      } finally {
+        click.mockRestore()
+      }
+    })
+
+    it("sends the images with the question, then clears them", async () => {
+      renderWindow()
+      const input = screen.getByTestId("qa-input")
+      fireEvent.change(input, {
+        target: { value: "what color is this square?" },
+      })
+      dropFiles(screen.getByTestId("quick-ask"), [png()])
+      await screen.findByAltText("square.png")
+      await waitFor(() => expect(screen.getByTestId("qa-send")).toBeEnabled())
+
+      fireEvent.keyDown(input, { key: "Enter" })
+      await waitFor(() =>
+        expect(h.session.send).toHaveBeenCalledWith(
+          "what color is this square?",
+          [
+            expect.objectContaining({
+              type: "image",
+              name: "square.png",
+              mimeType: "image/png",
+              data: PNG_BASE64,
+              uri: uploadedUri("square.png"),
+            }),
+          ]
+        )
+      )
+      expect(screen.queryByTestId("qa-attachments")).toBeNull()
+      expect(input).toHaveValue("")
+    })
+
+    it("can send images without words", async () => {
+      renderWindow()
+      expect(screen.getByTestId("qa-send")).toBeDisabled()
+      dropFiles(screen.getByTestId("quick-ask"), [png()])
+      await screen.findByAltText("square.png")
+      await waitFor(() => expect(screen.getByTestId("qa-send")).toBeEnabled())
+      fireEvent.click(screen.getByTestId("qa-send"))
+      await waitFor(() =>
+        expect(h.session.send).toHaveBeenCalledWith("", [
+          expect.objectContaining({ name: "square.png" }),
+        ])
+      )
+    })
+
+    it("puts question and images back when they could not go out", async () => {
+      h.session.send = vi.fn(async () => false)
+      h.session.error = { code: "images_unsupported", detail: null }
+      renderWindow()
+      const input = screen.getByTestId("qa-input")
+      fireEvent.change(input, { target: { value: "what color?" } })
+      dropFiles(screen.getByTestId("quick-ask"), [png()])
+      await screen.findByAltText("square.png")
+      await waitFor(() => expect(screen.getByTestId("qa-send")).toBeEnabled())
+      fireEvent.keyDown(input, { key: "Enter" })
+      await waitFor(() => expect(h.session.send).toHaveBeenCalled())
+      await waitFor(() => expect(input).toHaveValue("what color?"))
+      expect(screen.getByAltText("square.png")).toBeInTheDocument()
+      expect(screen.getByTestId("qa-error")).toHaveTextContent(
+        "Claude Code can't read images. Remove them to send the question."
+      )
+    })
+
+    it("clears staged images on New question", async () => {
+      h.session.thread = [{ id: "q1", role: "user", text: "hi", state: "sent" }]
+      h.session.binding = { target: "new", conversationId: 7, folderId: 1 }
+      renderWindow()
+      dropFiles(screen.getByTestId("quick-ask"), [png()])
+      await screen.findByAltText("square.png")
+      fireEvent.click(screen.getByTestId("qa-new"))
+      await waitFor(() => expect(h.session.clear).toHaveBeenCalled())
+      await waitFor(() =>
+        expect(screen.queryByTestId("qa-attachments")).toBeNull()
+      )
+    })
   })
 
   it("shows why a question could not start", () => {

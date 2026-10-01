@@ -6828,6 +6828,13 @@
       "send": "发送",
       "stop": "停止"
     },
+    "attach": {
+      "button": "附加图片",
+      "dropOverlay": "拖放图片以附加",
+      "notImage": "此处只能附加图片。已跳过：{names}",
+      "imagesUnsupported": "{agent} 无法读取图片，因此未附加。",
+      "noFiles": "拖入的内容不含图片文件。请复制图片后粘贴。"
+    },
     "hint": "Enter 发送 · Shift+Enter 换行 · Esc 隐藏",
     "actions": {
       "newQuestion": "新问题",
@@ -6854,7 +6861,8 @@
       "noSession": "请先选择会话。",
       "connectFailed": "无法启动智能体：{error}",
       "sendFailed": "发送失败：{error}",
-      "noAgents": "尚未安装任何智能体，请先在设置中添加。"
+      "noAgents": "尚未安装任何智能体，请先在设置中添加。",
+      "imagesUnsupported": "{agent} 无法读取图片。移除图片后即可发送问题。"
     },
     "empty": {
       "title": "随便问"

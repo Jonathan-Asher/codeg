@@ -16,6 +16,9 @@ pub struct DiscardPrivateQuickAskParams {
     pub agent_type: Option<AgentType>,
     #[serde(default)]
     pub session_id: Option<String>,
+    /// The `quick-ask-…` bucket the question's images were uploaded to.
+    #[serde(default)]
+    pub upload_bucket: Option<String>,
 }
 
 /// Web twin of the `discard_private_quick_ask` Tauri command. A desktop Quick
@@ -31,6 +34,7 @@ pub async fn discard_private_quick_ask(
         &params.working_dir,
         params.agent_type,
         params.session_id.as_deref(),
+        params.upload_bucket.as_deref(),
     )
     .await?;
     Ok(Json(report))

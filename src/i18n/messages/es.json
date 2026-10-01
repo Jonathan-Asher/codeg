@@ -6828,6 +6828,13 @@
       "send": "Enviar",
       "stop": "Detener"
     },
+    "attach": {
+      "button": "Adjuntar imágenes",
+      "dropOverlay": "Suelta las imágenes para adjuntarlas",
+      "notImage": "Aquí solo se pueden adjuntar imágenes. Omitido: {names}",
+      "imagesUnsupported": "{agent} no puede leer imágenes, así que no se adjuntaron.",
+      "noFiles": "Lo que soltaste no incluye ningún archivo de imagen. Copia la imagen y pégala."
+    },
     "hint": "Enter para enviar · Shift+Enter para nueva línea · Esc para ocultar",
     "actions": {
       "newQuestion": "Nueva pregunta",
@@ -6854,7 +6861,8 @@
       "noSession": "Primero elige una sesión.",
       "connectFailed": "No se pudo iniciar el agente: {error}",
       "sendFailed": "No se pudo enviar: {error}",
-      "noAgents": "No hay ningún agente instalado. Añade uno en Ajustes."
+      "noAgents": "No hay ningún agente instalado. Añade uno en Ajustes.",
+      "imagesUnsupported": "{agent} no puede leer imágenes. Quítalas para enviar la pregunta."
     },
     "empty": {
       "title": "Pregunta lo que quieras"

@@ -6828,6 +6828,13 @@
       "send": "送信",
       "stop": "停止"
     },
+    "attach": {
+      "button": "画像を添付",
+      "dropOverlay": "ドロップして画像を添付",
+      "notImage": "ここで添付できるのは画像のみです。スキップ：{names}",
+      "imagesUnsupported": "{agent} は画像を読み取れないため、添付しませんでした。",
+      "noFiles": "ドロップした内容に画像ファイルがありません。画像をコピーして貼り付けてください。"
+    },
     "hint": "Enter で送信 · Shift+Enter で改行 · Esc で隠す",
     "actions": {
       "newQuestion": "新しい質問",
@@ -6854,7 +6861,8 @@
       "noSession": "先にセッションを選択してください。",
       "connectFailed": "エージェントを起動できませんでした：{error}",
       "sendFailed": "送信できませんでした：{error}",
-      "noAgents": "エージェントがインストールされていません。設定で追加してください。"
+      "noAgents": "エージェントがインストールされていません。設定で追加してください。",
+      "imagesUnsupported": "{agent} は画像を読み取れません。画像を削除すると質問を送信できます。"
     },
     "empty": {
       "title": "何でも聞いてください"

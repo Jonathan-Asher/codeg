@@ -99,6 +99,23 @@ import {
 /** Console prefix, so a log line still names the surface it came from. */
 type LogLabel = string
 
+/**
+ * Why an images-only host turned something away:
+ *
+ * - `not_image` — a file that is not an image (it would have become an inline
+ *   file badge in an editor-backed composer).
+ * - `images_unsupported` — an image, but the agent takes images in no form.
+ * - `no_files` — an OS drop that carried no readable file at all (an image
+ *   dragged out of a browser often arrives as a bare URL).
+ */
+export type UnattachableReason = "not_image" | "images_unsupported" | "no_files"
+
+export interface UnattachableFiles {
+  reason: UnattachableReason
+  /** Display names of what was turned away (empty for `no_files`). */
+  names: string[]
+}
+
 export interface ComposerAttachmentsOptions {
   /** The editor the inline badges are inserted into. */
   editorRef: RefObject<RichComposerHandle | null>
@@ -114,6 +131,11 @@ export interface ComposerAttachmentsOptions {
   /** Start directory for the native picker and the server file browser. */
   defaultPath?: string | null
   logLabel?: LogLabel
+  /** Hosts with no editor to hold inline file badges (Quick Ask's plain text
+   *  box) take images only. Setting this switches the hook to that mode:
+   *  whatever would otherwise become a badge is reported here instead of
+   *  being attached (or uploaded), and the upload picker offers images only. */
+  onUnattachable?: (event: UnattachableFiles) => void
 }
 
 export interface ComposerAttachments {
@@ -197,6 +219,7 @@ export function useComposerAttachments({
   attachmentTabId = null,
   defaultPath = null,
   logLabel = "Composer",
+  onUnattachable,
 }: ComposerAttachmentsOptions): ComposerAttachments {
   // Same namespace the conversation composer has always used for these toasts,
   // so no message moves and every surface reports uploads identically.
@@ -241,6 +264,22 @@ export function useComposerAttachments({
   useEffect(() => {
     pageHandoffNameRef.current = pageHandoffName
   }, [pageHandoffName])
+
+  // Images-only mode is decided by whether the host listens for rejections;
+  // the listener itself is read through a ref so a fresh closure each render
+  // doesn't re-create every callback below.
+  const imagesOnly = onUnattachable != null
+  const onUnattachableRef = useRef(onUnattachable)
+  useEffect(() => {
+    onUnattachableRef.current = onUnattachable
+  }, [onUnattachable])
+  const reportUnattachable = useCallback(
+    (reason: UnattachableReason, names: string[]) => {
+      if (names.length === 0 && reason !== "no_files") return
+      onUnattachableRef.current?.({ reason, names })
+    },
+    []
+  )
 
   const setDragActiveIfChanged = useCallback((next: boolean) => {
     if (dragActiveRef.current === next) return
@@ -773,14 +812,23 @@ export function useComposerAttachments({
 
       const imagePaths: string[] = []
       const resourcePaths: string[] = []
+      const notImage: string[] = []
+      const unsupported: string[] = []
       for (const path of normalized) {
         const mimeType = mimeTypeFromPath(path) ?? ""
-        if (canAttachImages && mimeType.startsWith("image/")) {
+        const isImage = mimeType.startsWith("image/")
+        if (canAttachImages && isImage) {
           imagePaths.push(path)
-        } else {
+        } else if (!imagesOnly) {
           resourcePaths.push(path)
+        } else if (isImage) {
+          unsupported.push(fileNameFromPath(path))
+        } else {
+          notImage.push(fileNameFromPath(path))
         }
       }
+      reportUnattachable("not_image", notImage)
+      reportUnattachable("images_unsupported", unsupported)
 
       if (imagePaths.length > 0) {
         await appendImagePathAttachments(imagePaths)
@@ -789,7 +837,13 @@ export function useComposerAttachments({
         appendResourceAttachments(resourcePaths)
       }
     },
-    [appendImagePathAttachments, appendResourceAttachments, canAttachImages]
+    [
+      appendImagePathAttachments,
+      appendResourceAttachments,
+      canAttachImages,
+      imagesOnly,
+      reportUnattachable,
+    ]
   )
 
   const appendPathsFromDropRef = useRef(appendPathsFromDrop)
@@ -804,9 +858,24 @@ export function useComposerAttachments({
   // matching `uploadAndAppendFiles`.
   const uploadPathsToRemote = useCallback(
     async (paths: string[]) => {
-      const normalized = paths.filter(
+      let normalized = paths.filter(
         (p): p is string => typeof p === "string" && p.length > 0
       )
+      if (imagesOnly) {
+        // Nothing but images can be attached here, so don't ship the bytes of
+        // anything else to the remote host only to drop the result.
+        const notImage: string[] = []
+        const unsupported: string[] = []
+        normalized = normalized.filter((path) => {
+          const isImage = (mimeTypeFromPath(path) ?? "").startsWith("image/")
+          if (isImage && canAttachImages) return true
+          if (isImage) unsupported.push(fileNameFromPath(path))
+          else notImage.push(fileNameFromPath(path))
+          return false
+        })
+        reportUnattachable("not_image", notImage)
+        reportUnattachable("images_unsupported", unsupported)
+      }
       if (normalized.length === 0) return
 
       const limitMb = Math.round(UPLOAD_MAX_BYTES / (1024 * 1024))
@@ -927,14 +996,21 @@ export function useComposerAttachments({
         setAttachments((prev) => [...prev, ...imageAttachmentsToAdd])
       }
       if (succeeded.length > 0) {
-        appendResourceAttachments(succeeded)
+        if (imagesOnly) {
+          // Named like an image, but the server sniffed something else.
+          reportUnattachable("not_image", succeeded.map(fileNameFromPath))
+        } else {
+          appendResourceAttachments(succeeded)
+        }
       }
     },
     [
       appendResourceAttachments,
       attachmentTabId,
       canAttachImages,
+      imagesOnly,
       logLabel,
+      reportUnattachable,
       tAttach,
     ]
   )
@@ -949,14 +1025,23 @@ export function useComposerAttachments({
       if (files.length === 0) return
       const imageFiles: File[] = []
       const resourceFiles: File[] = []
+      const notImage: string[] = []
+      const unsupported: string[] = []
       for (const file of files) {
         const mimeType = file.type || mimeTypeFromPath(file.name) || ""
-        if (canAttachImages && mimeType.startsWith("image/")) {
+        const isImage = mimeType.startsWith("image/")
+        if (canAttachImages && isImage) {
           imageFiles.push(file)
-        } else {
+        } else if (!imagesOnly) {
           resourceFiles.push(file)
+        } else if (isImage) {
+          unsupported.push(file.name)
+        } else {
+          notImage.push(file.name)
         }
       }
+      reportUnattachable("not_image", notImage)
+      reportUnattachable("images_unsupported", unsupported)
 
       if (imageFiles.length > 0) {
         await appendImageAttachments(imageFiles)
@@ -965,7 +1050,13 @@ export function useComposerAttachments({
         await appendFilesAsResources(resourceFiles)
       }
     },
-    [appendFilesAsResources, appendImageAttachments, canAttachImages]
+    [
+      appendFilesAsResources,
+      appendImageAttachments,
+      canAttachImages,
+      imagesOnly,
+      reportUnattachable,
+    ]
   )
 
   // Routed from RichComposer's `onPasteFiles`. Returns true when the paste was
@@ -1097,13 +1188,17 @@ export function useComposerAttachments({
         void appendFilesFromInput(files).catch((error) => {
           console.error(`[${logLabel}] drop files failed:`, error)
         })
+      } else if (imagesOnly) {
+        reportUnattachable("no_files", [])
       }
     },
     [
       appendFilesFromInput,
       disabled,
+      imagesOnly,
       insertTreeDropAtPoint,
       logLabel,
+      reportUnattachable,
       setDragActiveIfChanged,
     ]
   )
@@ -1146,6 +1241,14 @@ export function useComposerAttachments({
         setDragActiveIfChanged(false)
         if (Date.now() - lastDomDropAtRef.current < 250) return
         if (!inside || disabledRef.current) return
+        if (payload.paths.length === 0) {
+          // The OS gave no file paths: typically an image dragged out of a
+          // browser, which arrives as a URL or a file promise.
+          if (onUnattachableRef.current) {
+            onUnattachableRef.current({ reason: "no_files", names: [] })
+          }
+          return
+        }
         if (getActiveRemoteConnectionId() !== null) {
           // Remote workspace: local OS paths are unreachable from the
           // remote agent, so stream the bytes through the upload proxy and
@@ -1262,6 +1365,7 @@ export function useComposerAttachments({
     const input = document.createElement("input")
     input.type = "file"
     input.multiple = true
+    if (imagesOnly) input.accept = "image/*"
     input.onchange = async () => {
       const all = input.files ? Array.from(input.files) : []
       // Route through the shared classifier so images become thumbnail
@@ -1271,7 +1375,7 @@ export function useComposerAttachments({
       await appendFilesFromInput(all)
     }
     input.click()
-  }, [disabled, appendFilesFromInput])
+  }, [disabled, appendFilesFromInput, imagesOnly])
 
   const handleServerFilesSelected = useCallback(
     (paths: string[]) => {

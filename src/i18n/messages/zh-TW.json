@@ -6828,6 +6828,13 @@
       "send": "傳送",
       "stop": "停止"
     },
+    "attach": {
+      "button": "附加圖片",
+      "dropOverlay": "拖放圖片以附加",
+      "notImage": "此處只能附加圖片。已略過：{names}",
+      "imagesUnsupported": "{agent} 無法讀取圖片，因此未附加。",
+      "noFiles": "拖入的內容不含圖片檔案。請複製圖片後貼上。"
+    },
     "hint": "Enter 傳送 · Shift+Enter 換行 · Esc 隱藏",
     "actions": {
       "newQuestion": "新問題",
@@ -6854,7 +6861,8 @@
       "noSession": "請先選擇對話。",
       "connectFailed": "無法啟動代理：{error}",
       "sendFailed": "傳送失敗：{error}",
-      "noAgents": "尚未安裝任何代理，請先在設定中新增。"
+      "noAgents": "尚未安裝任何代理，請先在設定中新增。",
+      "imagesUnsupported": "{agent} 無法讀取圖片。移除圖片後即可傳送問題。"
     },
     "empty": {
       "title": "儘管問"

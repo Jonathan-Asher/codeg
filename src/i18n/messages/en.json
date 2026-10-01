@@ -6828,6 +6828,13 @@
       "send": "Send",
       "stop": "Stop"
     },
+    "attach": {
+      "button": "Attach images",
+      "dropOverlay": "Drop images to attach",
+      "notImage": "Only images can be attached here. Skipped: {names}",
+      "imagesUnsupported": "{agent} can't read images, so they weren't attached.",
+      "noFiles": "That drop had no image file in it. Copy the image and paste it instead."
+    },
     "hint": "Enter to send · Shift+Enter for a new line · Esc to hide",
     "actions": {
       "newQuestion": "New question",
@@ -6854,7 +6861,8 @@
       "noSession": "Choose a session first.",
       "connectFailed": "Couldn't start the agent: {error}",
       "sendFailed": "Couldn't send: {error}",
-      "noAgents": "No agent is installed. Add one in Settings."
+      "noAgents": "No agent is installed. Add one in Settings.",
+      "imagesUnsupported": "{agent} can't read images. Remove them to send the question."
     },
     "empty": {
       "title": "Ask anything"

@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl"
 import {
   ArrowUp,
   EyeOff,
+  ImagePlus,
   Loader2,
   MonitorCloud,
   Square,
@@ -14,6 +15,13 @@ import {
 } from "lucide-react"
 
 import { AskQuestionCard } from "@/components/chat/ask-question-card"
+import { ComposerImageThumbnails } from "@/components/chat/composer/composer-image-thumbnails"
+import type { RichComposerHandle } from "@/components/chat/composer/rich-composer"
+import {
+  useComposerAttachments,
+  type UnattachableFiles,
+} from "@/components/chat/composer/use-composer-attachments"
+import type { ImageInputAttachment } from "@/components/chat/message-input-attachments"
 import { PermissionDialog } from "@/components/chat/permission-dialog"
 import { Button } from "@/components/ui/button"
 import { useRemoteConnection } from "@/contexts/remote-connection-context"
@@ -40,7 +48,7 @@ import {
   useQuickAskWindowState,
 } from "@/lib/quick-ask/window-state"
 import { getActiveRemoteConnectionId, isDesktop } from "@/lib/transport"
-import type { AgentType } from "@/lib/types"
+import type { AgentType, PromptCapabilitiesInfo } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useQuickAskData } from "../_hooks/use-quick-ask-data"
 import {
@@ -63,7 +71,21 @@ const ERROR_KEYS = {
   no_session: "errors.noSession",
   connect_failed: "errors.connectFailed",
   send_failed: "errors.sendFailed",
-} as const satisfies Record<QuickAskErrorCode, string>
+} as const satisfies Record<
+  Exclude<QuickAskErrorCode, "images_unsupported">,
+  string
+>
+
+/** Until the agent is up and has said what it takes, images are accepted:
+ *  the send checks again against what the connection reports. */
+const ASSUMED_PROMPT_CAPABILITIES: PromptCapabilitiesInfo = {
+  image: true,
+  audio: false,
+  embedded_context: true,
+}
+
+/** How long a "couldn't attach that" hint stays up. */
+const ATTACH_HINT_MS = 5000
 
 const TARGET_HINT_KEYS = {
   new: "targetHints.new",
@@ -240,6 +262,60 @@ export function QuickAskWindow() {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
+  // ── Images ──────────────────────────────────────────────────────────────
+  // The composer's own attachment engine, in its images-only mode: Quick Ask
+  // has a plain text box, no editor to hold file badges. Drops land anywhere
+  // on the window (the root is the drop target, for browser drops and the
+  // desktop's OS drops alike); pastes come from the text box.
+  const rootRef = useRef<HTMLDivElement>(null)
+  const noEditorRef = useRef<RichComposerHandle | null>(null)
+  const capsKnown =
+    conn.agentType === liveAgent &&
+    (conn.status === "connected" || conn.status === "prompting")
+  const liveCaps = conn.promptCapabilities
+  const promptCapabilities = useMemo(
+    () =>
+      capsKnown && liveCaps
+        ? { image: liveCaps.image, embedded_context: liveCaps.embedded_context }
+        : ASSUMED_PROMPT_CAPABILITIES,
+    [capsKnown, liveCaps]
+  )
+  const [attachHint, setAttachHint] = useState<string | null>(null)
+  const onUnattachable = useCallback(
+    ({ reason, names }: UnattachableFiles) => {
+      const list = names.join(", ")
+      setAttachHint(
+        reason === "not_image"
+          ? t("attach.notImage", { names: list })
+          : reason === "images_unsupported"
+            ? t("attach.imagesUnsupported", {
+                agent: getAgentLabel(liveAgent),
+              })
+            : t("attach.noFiles")
+      )
+    },
+    [liveAgent, t]
+  )
+  useEffect(() => {
+    if (!attachHint) return
+    const timer = setTimeout(() => setAttachHint(null), ATTACH_HINT_MS)
+    return () => clearTimeout(timer)
+  }, [attachHint])
+  const attach = useComposerAttachments({
+    editorRef: noEditorRef,
+    containerRef: rootRef,
+    promptCapabilities,
+    attachmentTabId: qa.uploadBucket,
+    logLabel: "QuickAsk",
+    onUnattachable,
+  })
+  const images = attach.imageAttachments
+  const hasImages = images.length > 0
+  const canSend =
+    (input.trim().length > 0 || hasImages) &&
+    !qa.starting &&
+    !attach.hasUploadingImage
+
   useEffect(() => {
     const el = inputRef.current
     if (!el) return
@@ -272,6 +348,12 @@ export function QuickAskWindow() {
   }, [])
 
   const prepare = qa.prepare
+  // An attached image starts the agent too, like typing does (and gives a
+  // private question its scratch space before anything is sent).
+  useEffect(() => {
+    if (hasImages && !bound) void prepare().catch(() => {})
+  }, [bound, hasImages, prepare])
+
   const onInputChange = (value: string) => {
     const startedTyping = input.trim().length === 0 && value.trim().length > 0
     setInput(value)
@@ -282,17 +364,25 @@ export function QuickAskWindow() {
   }
 
   const submit = async () => {
+    if (!canSend) return
     const text = input
-    if (!text.trim() || qa.starting) return
+    const sent: ImageInputAttachment[] = images
     setNotice(null)
+    setAttachHint(null)
     setInput("")
-    const accepted = await qa.send(text)
-    if (!accepted) setInput(text)
+    attach.clearAttachments()
+    const accepted = await qa.send(text, sent)
+    if (!accepted) {
+      setInput(text)
+      attach.setAttachments((prev) => [...sent, ...prev])
+    }
   }
 
   const newQuestion = async () => {
     const report = await qa.clear()
     setInput("")
+    attach.clearAttachments()
+    setAttachHint(null)
     reloadData()
     if (report) setNotice(t("private.deleted"))
     if (pendingRoute) {
@@ -386,7 +476,21 @@ export function QuickAskWindow() {
   )
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="quick-ask">
+    <div
+      ref={rootRef}
+      className="relative flex h-full min-h-0 flex-col"
+      data-testid="quick-ask"
+      {...attach.containerDragProps}
+    >
+      {attach.isDragActive && (
+        <div
+          className="pointer-events-none absolute inset-1.5 z-50 flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-primary/60 bg-background/90 text-sm font-medium"
+          data-testid="qa-drop-overlay"
+        >
+          <ImagePlus className="size-6 text-primary" aria-hidden="true" />
+          {t("attach.dropOverlay")}
+        </div>
+      )}
       <header
         data-tauri-drag-region
         className="flex h-11 shrink-0 items-center gap-2 border-b border-border/60 px-2.5"
@@ -481,63 +585,104 @@ export function QuickAskWindow() {
           role="alert"
           data-testid="qa-error"
         >
-          {t(ERROR_KEYS[qa.error.code], { error: qa.error.detail ?? "" })}
+          {qa.error.code === "images_unsupported"
+            ? t("errors.imagesUnsupported", {
+                agent: getAgentLabel(liveAgent),
+              })
+            : t(ERROR_KEYS[qa.error.code], { error: qa.error.detail ?? "" })}
         </div>
       )}
 
       <footer className="shrink-0 border-t border-border/60 p-2">
-        <div className="flex items-end gap-2 rounded-xl border border-border bg-background/80 px-3 py-1.5 focus-within:ring-1 focus-within:ring-ring">
-          <textarea
-            ref={inputRef}
-            autoFocus
-            rows={1}
-            value={input}
-            placeholder={
-              hasContent ? t("input.followUp") : t("input.placeholder")
-            }
-            onChange={(e) => onInputChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (
-                e.key === "Enter" &&
-                !e.shiftKey &&
-                !e.nativeEvent.isComposing
-              ) {
-                e.preventDefault()
-                void submit()
-              }
-            }}
-            className="min-h-6 flex-1 resize-none bg-transparent py-0.5 text-sm leading-6 outline-none placeholder:text-muted-foreground"
-            data-testid="qa-input"
-          />
-          {streaming ? (
-            <Button
-              type="button"
-              size="icon"
-              variant="secondary"
-              className="size-7 shrink-0 rounded-full"
-              aria-label={t("input.stop")}
-              onClick={() => void qa.cancel().catch(() => {})}
-              data-testid="qa-stop"
+        {attachHint && (
+          <div
+            className="px-1 pb-1 text-[11px] text-muted-foreground"
+            role="status"
+            data-testid="qa-attach-hint"
+          >
+            {attachHint}
+          </div>
+        )}
+        <div className="flex flex-col gap-1.5 rounded-xl border border-border bg-background/80 px-3 py-1.5 focus-within:ring-1 focus-within:ring-ring">
+          {hasImages && (
+            <div
+              className="flex gap-1.5 overflow-x-auto pt-0.5"
+              data-testid="qa-attachments"
             >
-              <Square className="size-3 fill-current" />
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              size="icon"
-              className="size-7 shrink-0 rounded-full"
-              aria-label={t("input.send")}
-              disabled={!input.trim() || qa.starting}
-              onClick={() => void submit()}
-              data-testid="qa-send"
-            >
-              {qa.starting ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <ArrowUp className="size-4" />
-              )}
-            </Button>
+              <ComposerImageThumbnails
+                attachments={images}
+                onRemove={attach.removeAttachment}
+              />
+            </div>
           )}
+          <div className="flex items-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="-ml-1.5 size-7 shrink-0 text-muted-foreground"
+              aria-label={t("attach.button")}
+              title={t("attach.button")}
+              onClick={() => void attach.handleUploadLocalFiles()}
+              data-testid="qa-attach"
+            >
+              <ImagePlus className="size-4" />
+            </Button>
+            <textarea
+              ref={inputRef}
+              autoFocus
+              rows={1}
+              value={input}
+              placeholder={
+                hasContent ? t("input.followUp") : t("input.placeholder")
+              }
+              onChange={(e) => onInputChange(e.target.value)}
+              onPaste={(e) => {
+                if (attach.handlePasteFiles(e.nativeEvent)) e.preventDefault()
+              }}
+              onKeyDown={(e) => {
+                if (
+                  e.key === "Enter" &&
+                  !e.shiftKey &&
+                  !e.nativeEvent.isComposing
+                ) {
+                  e.preventDefault()
+                  void submit()
+                }
+              }}
+              className="min-h-6 flex-1 resize-none bg-transparent py-0.5 text-sm leading-6 outline-none placeholder:text-muted-foreground"
+              data-testid="qa-input"
+            />
+            {streaming ? (
+              <Button
+                type="button"
+                size="icon"
+                variant="secondary"
+                className="size-7 shrink-0 rounded-full"
+                aria-label={t("input.stop")}
+                onClick={() => void qa.cancel().catch(() => {})}
+                data-testid="qa-stop"
+              >
+                <Square className="size-3 fill-current" />
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="icon"
+                className="size-7 shrink-0 rounded-full"
+                aria-label={t("input.send")}
+                disabled={!canSend}
+                onClick={() => void submit()}
+                data-testid="qa-send"
+              >
+                {qa.starting ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <ArrowUp className="size-4" />
+                )}
+              </Button>
+            )}
+          </div>
         </div>
         <div className="flex h-7 items-center gap-1 pt-1 text-[11px] text-muted-foreground">
           <AgentModelPicker

@@ -386,18 +386,22 @@ export interface PrivateQuickAskCleanup {
 
 /**
  * Discard a private Quick Ask question on the backend that hosted it: its
- * scratch directory, and whatever the agent or codeg recorded about the
- * session. The caller disconnects the agent first.
+ * scratch directory, the images uploaded for it (`uploadBucket`, the
+ * `quick-ask-…` bucket they went to through `/upload_attachment`), and
+ * whatever the agent or codeg recorded about the session. The caller
+ * disconnects the agent first.
  */
 export async function discardPrivateQuickAsk(
   workingDir: string,
   agentType: AgentType | null,
-  sessionId: string | null
+  sessionId: string | null,
+  uploadBucket: string | null = null
 ): Promise<PrivateQuickAskCleanup> {
   return getTransport().call("discard_private_quick_ask", {
     workingDir,
     agentType,
     sessionId,
+    uploadBucket,
   })
 }
 

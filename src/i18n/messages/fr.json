@@ -6828,6 +6828,13 @@
       "send": "Envoyer",
       "stop": "Arrêter"
     },
+    "attach": {
+      "button": "Joindre des images",
+      "dropOverlay": "Déposez des images pour les joindre",
+      "notImage": "Seules les images peuvent être jointes ici. Ignoré : {names}",
+      "imagesUnsupported": "{agent} ne peut pas lire les images, elles n'ont donc pas été jointes.",
+      "noFiles": "Le dépôt ne contenait aucun fichier image. Copiez l'image et collez-la plutôt."
+    },
     "hint": "Entrée pour envoyer · Maj+Entrée pour une nouvelle ligne · Échap pour masquer",
     "actions": {
       "newQuestion": "Nouvelle question",
@@ -6854,7 +6861,8 @@
       "noSession": "Choisis d’abord une session.",
       "connectFailed": "Impossible de démarrer l’agent : {error}",
       "sendFailed": "Envoi impossible : {error}",
-      "noAgents": "Aucun agent installé. Ajoutes-en un dans les réglages."
+      "noAgents": "Aucun agent installé. Ajoutes-en un dans les réglages.",
+      "imagesUnsupported": "{agent} ne peut pas lire les images. Retirez-les pour envoyer la question."
     },
     "empty": {
       "title": "Demande ce que tu veux"

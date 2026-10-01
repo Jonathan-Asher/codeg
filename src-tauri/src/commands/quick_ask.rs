@@ -11,8 +11,9 @@
 //! * **Every runtime**: the cleanup of a *private* question. A private question
 //!   runs in a throwaway scratch directory with no conversation row, and its
 //!   agent is asked not to keep a transcript; discarding it removes the scratch
-//!   directory and anything the agent wrote about the session anyway. It runs
-//!   on whichever backend hosted the session, so the server has it too.
+//!   directory, the images uploaded for it, and anything the agent wrote
+//!   about the session anyway. It runs on whichever backend hosted the
+//!   session, so the server has it too.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -131,6 +132,14 @@ pub fn toggle_action(visible: bool, focused: bool) -> ToggleAction {
     } else {
         ToggleAction::Show
     }
+}
+
+/// Click-outside hiding for a blur that came with the mouse button held: the
+/// click may be the start of a drag towards the window (a file in Finder, an
+/// image in a browser), so the blur is settled once the button is up. The
+/// window stays if the user came back to it or the drag ended on it.
+pub fn hide_after_held_blur(focused: bool, dropped_on_window: bool) -> bool {
+    !focused && !dropped_on_window
 }
 
 /// Top-left origin that centres a `width`×`height` window in a work area,
@@ -383,19 +392,56 @@ pub fn remove_codeg_session_records(
     }
 }
 
+/// Is `bucket` an upload bucket minted by a Quick Ask window
+/// (`quick-ask-<32 hex>`, see `newQuickAskUploadBucket`)? Only those are ever
+/// deleted by a discard: every other surface's uploads (a conversation tab's
+/// bucket, `anon`) are out of its reach, whatever the caller sends.
+pub fn is_quick_ask_upload_bucket(bucket: &str) -> bool {
+    bucket
+        .strip_prefix("quick-ask-")
+        .is_some_and(|id| id.len() == 32 && id.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')))
+}
+
+/// Remove the images a private question uploaded (web / remote mode): the
+/// whole `<uploads_root>/<bucket>` directory, which held nothing else.
+pub fn remove_quick_ask_uploads(
+    uploads_root: &Path,
+    bucket: &str,
+    report: &mut PrivateSessionCleanup,
+) {
+    if !is_quick_ask_upload_bucket(bucket) {
+        tracing::warn!("[quick-ask] refusing to remove upload bucket {bucket:?}");
+        return;
+    }
+    report.remove_path(&uploads_root.join(bucket));
+}
+
+/// Where a private question can leave things behind. Injected so tests can
+/// point every root at a temporary directory.
+pub struct PrivateCleanupRoots<'a> {
+    pub data_dir: &'a Path,
+    pub claude_config_dir: &'a Path,
+    pub codeg_record_roots: &'a [PathBuf],
+    pub uploads_root: &'a Path,
+}
+
 /// Discard a private Quick Ask question. The caller has already disconnected
 /// its agent. Removes the scratch directory (and its date directory when that
-/// is left empty), then whatever the agent and codeg recorded about the
-/// session. Refuses any directory that is not an unbound chat scratch dir.
+/// is left empty), the question's upload bucket, then whatever the agent and
+/// codeg recorded about the session. Refuses any directory that is not an
+/// unbound chat scratch dir.
 pub async fn discard_private_session_core(
     conn: &sea_orm::DatabaseConnection,
-    data_dir: &Path,
-    claude_config_dir: &Path,
-    codeg_record_roots: &[PathBuf],
+    roots: &PrivateCleanupRoots<'_>,
     working_dir: &str,
     agent_type: Option<AgentType>,
     session_id: Option<&str>,
+    upload_bucket: Option<&str>,
 ) -> Result<PrivateSessionCleanup, AppCommandError> {
+    let data_dir = roots.data_dir;
+    let claude_config_dir = roots.claude_config_dir;
+    let codeg_record_roots = roots.codeg_record_roots;
+    let uploads_root = roots.uploads_root;
     let dir = PathBuf::from(working_dir);
     let tail = private_scratch_tail(data_dir, &dir).ok_or_else(|| {
         AppCommandError::invalid_input("Not a private Quick Ask scratch directory")
@@ -433,6 +479,12 @@ pub async fn discard_private_session_core(
         }
     }
 
+    // Images uploaded for the question (web / remote mode; a local desktop
+    // sends them inline and uploads nothing).
+    if let Some(bucket) = upload_bucket {
+        remove_quick_ask_uploads(uploads_root, bucket, &mut report);
+    }
+
     // Whatever the agent: a Claude project dir named after this scratch path
     // can only belong to this question (the discard of a question that never
     // got a session id passes no agent).
@@ -457,27 +509,34 @@ pub async fn discard_private_session_core(
     Ok(report)
 }
 
-/// [`discard_private_session_core`] against the real Claude config dir and
-/// codeg record roots.
+/// [`discard_private_session_core`] against the real Claude config dir,
+/// codeg record roots and uploads root.
 pub async fn discard_private_session_default(
     conn: &sea_orm::DatabaseConnection,
     data_dir: &Path,
     working_dir: &str,
     agent_type: Option<AgentType>,
     session_id: Option<&str>,
+    upload_bucket: Option<&str>,
 ) -> Result<PrivateSessionCleanup, AppCommandError> {
-    let roots = [
+    let record_roots = [
         crate::paths::codeg_turn_timings_root(),
         crate::paths::codeg_acp_transcripts_root(),
     ];
+    let claude_config_dir = crate::parsers::claude::resolve_claude_config_dir();
+    let uploads_root = crate::paths::codeg_uploads_root();
     discard_private_session_core(
         conn,
-        data_dir,
-        &crate::parsers::claude::resolve_claude_config_dir(),
-        &roots,
+        &PrivateCleanupRoots {
+            data_dir,
+            claude_config_dir: &claude_config_dir,
+            codeg_record_roots: &record_roots,
+            uploads_root: &uploads_root,
+        },
         working_dir,
         agent_type,
         session_id,
+        upload_bucket,
     )
     .await
 }
@@ -490,6 +549,7 @@ pub async fn discard_private_quick_ask(
     working_dir: String,
     agent_type: Option<AgentType>,
     session_id: Option<String>,
+    upload_bucket: Option<String>,
 ) -> Result<PrivateSessionCleanup, AppCommandError> {
     use tauri::Manager;
     let data_dir = app
@@ -503,6 +563,7 @@ pub async fn discard_private_quick_ask(
         &working_dir,
         agent_type,
         session_id.as_deref(),
+        upload_bucket.as_deref(),
     )
     .await
 }
@@ -547,6 +608,12 @@ pub mod desktop {
 
     /// Read by the window-event handler on every blur, which is synchronous.
     static HIDE_ON_BLUR: AtomicBool = AtomicBool::new(true);
+    /// Files were dropped on the window since the last held-button blur (see
+    /// [`hide_quick_ask_on_blur`]).
+    static DROPPED_ON_WINDOW: AtomicBool = AtomicBool::new(false);
+    /// Longest a held-button blur waits for the button to come up.
+    #[cfg(target_os = "macos")]
+    const HELD_BLUR_LIMIT: std::time::Duration = std::time::Duration::from_secs(120);
     /// The most recently focused workspace window (`main` /
     /// `remote-workspace-{id}`): the backend the next question goes to.
     static LAST_WORKSPACE: Mutex<Option<String>> = Mutex::new(None);
@@ -846,10 +913,44 @@ pub mod desktop {
         }
     }
 
+    /// From the window-event handler: files were dropped on the window.
+    pub fn note_files_dropped() {
+        DROPPED_ON_WINDOW.store(true, Ordering::Relaxed);
+    }
+
     /// Click-outside dismissal, from the window-event handler.
     pub fn hide_quick_ask_on_blur(app: &AppHandle) {
         if !hide_on_blur() {
             return;
+        }
+        // Focus went away with the mouse button down: the click may be the
+        // start of a drag towards this window (a file in Finder, an image in
+        // a browser), and hiding now would pull the drop target away. Settle
+        // it once the button is up instead.
+        #[cfg(target_os = "macos")]
+        {
+            if mouse::left_button_down() {
+                DROPPED_ON_WINDOW.store(false, Ordering::Relaxed);
+                let app = app.clone();
+                std::thread::spawn(move || {
+                    let started = std::time::Instant::now();
+                    while mouse::left_button_down() && started.elapsed() < HELD_BLUR_LIMIT {
+                        std::thread::sleep(std::time::Duration::from_millis(40));
+                    }
+                    // The drop is reported just after the button comes up.
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                    let Some(window) = app.get_webview_window(QUICK_ASK_WINDOW_LABEL) else {
+                        return;
+                    };
+                    let focused = window.is_focused().unwrap_or(false);
+                    let dropped = DROPPED_ON_WINDOW.swap(false, Ordering::Relaxed);
+                    if super::hide_after_held_blur(focused, dropped) {
+                        let _ = window.hide();
+                        frontmost::forget();
+                    }
+                });
+                return;
+            }
         }
         if let Some(window) = app.get_webview_window(QUICK_ASK_WINDOW_LABEL) {
             // Focus already went where the user clicked: nothing to hand back.
@@ -982,6 +1083,27 @@ pub mod desktop {
             .unwrap_or_default())
     }
 
+    /// The mouse button state, read from the window server.
+    #[cfg(target_os = "macos")]
+    mod mouse {
+        #[link(name = "CoreGraphics", kind = "framework")]
+        extern "C" {
+            fn CGEventSourceButtonState(state_id: i32, button: u32) -> bool;
+        }
+
+        /// `kCGEventSourceStateCombinedSessionState`.
+        const COMBINED_SESSION_STATE: i32 = 0;
+        /// `kCGMouseButtonLeft`.
+        const LEFT_BUTTON: u32 = 0;
+
+        /// Is the left mouse button held down right now (in any app)?
+        pub fn left_button_down() -> bool {
+            // SAFETY: a read-only query of the input state, taking two plain
+            // integers and returning a C bool.
+            unsafe { CGEventSourceButtonState(COMBINED_SESSION_STATE, LEFT_BUTTON) }
+        }
+    }
+
     /// Hand focus back to the app that was frontmost before the window opened.
     #[cfg(target_os = "macos")]
     mod frontmost {
@@ -1101,6 +1223,16 @@ mod tests {
     }
 
     #[test]
+    fn a_drag_that_ends_on_the_window_keeps_it() {
+        // Clicked elsewhere, nothing dropped: hidden, as before.
+        assert!(hide_after_held_blur(false, false));
+        // An image dragged in from another app.
+        assert!(!hide_after_held_blur(false, true));
+        // The user came back to the window before letting go.
+        assert!(!hide_after_held_blur(true, false));
+    }
+
+    #[test]
     fn session_ids_are_file_name_safe() {
         assert!(is_safe_session_id("0b7c4e52-9a1f-4d7e-8c3b-2f6a1d9e0c11"));
         assert!(!is_safe_session_id(""));
@@ -1153,6 +1285,45 @@ mod tests {
         std::fs::write(path, b"x").unwrap();
     }
 
+    fn roots<'a>(data: &'a Path, config: &'a Path, uploads: &'a Path) -> PrivateCleanupRoots<'a> {
+        PrivateCleanupRoots {
+            data_dir: data,
+            claude_config_dir: config,
+            codeg_record_roots: &[],
+            uploads_root: uploads,
+        }
+    }
+
+    const BUCKET: &str = "quick-ask-0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn only_quick_ask_buckets_can_be_removed() {
+        assert!(is_quick_ask_upload_bucket(BUCKET));
+        for bad in [
+            "",
+            "anon",
+            "quick-ask-",
+            "tab-0123456789abcdef0123456789abcdef",
+            "quick-ask-0123456789ABCDEF0123456789ABCDEF",
+            "quick-ask-0123456789abcdef0123456789abcde",
+            "quick-ask-0123456789abcdef0123456789abcdef0",
+            "quick-ask-../../0123456789abcdef0123456789",
+            "quick-ask-0123456789abcdef/123456789abcdef",
+        ] {
+            assert!(!is_quick_ask_upload_bucket(bad), "{bad}");
+        }
+
+        let uploads = tempfile::tempdir().unwrap();
+        let other = uploads.path().join("tab-1").join("shot.png");
+        touch(&other);
+        let mut report = PrivateSessionCleanup::default();
+        remove_quick_ask_uploads(uploads.path(), "tab-1", &mut report);
+        remove_quick_ask_uploads(uploads.path(), "..", &mut report);
+        assert!(other.exists());
+        assert!(uploads.path().exists());
+        assert!(report.removed.is_empty());
+    }
+
     #[test]
     fn claude_leftovers_are_removed_by_session_id_only() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1200,18 +1371,28 @@ mod tests {
         touch(&project.join(format!("{sid}.jsonl")));
         std::fs::create_dir_all(project.join("memory")).unwrap();
 
+        let uploads = tempfile::tempdir().unwrap();
+        let image = uploads.path().join(BUCKET).join("square.png");
+        touch(&image);
+        // Another question's (or a conversation tab's) uploads stay.
+        let kept = uploads.path().join("tab-7").join("diagram.png");
+        touch(&kept);
+
         let report = discard_private_session_core(
             &db.conn,
-            data.path(),
-            config.path(),
-            &[],
+            &roots(data.path(), config.path(), uploads.path()),
             &dir,
             Some(AgentType::ClaudeCode),
             Some(sid),
+            Some(BUCKET),
         )
         .await
         .expect("discard succeeds");
 
+        assert!(!uploads.path().join(BUCKET).exists());
+        assert!(kept.exists());
+        let bucket_dir = uploads.path().join(BUCKET).to_string_lossy().to_string();
+        assert!(report.removed.contains(&bucket_dir));
         assert!(!Path::new(&dir).exists());
         // The date directory held only this question, so it goes too.
         assert!(!Path::new(&dir).parent().unwrap().exists());
@@ -1235,26 +1416,29 @@ mod tests {
         .await
         .unwrap();
         let saved_dir = saved.folder.path.clone();
+        let uploads = tempfile::tempdir().unwrap();
+        let image = uploads.path().join(BUCKET).join("square.png");
+        touch(&image);
         let refused = discard_private_session_core(
             &db.conn,
-            data.path(),
-            config.path(),
-            &[],
+            &roots(data.path(), config.path(), uploads.path()),
             &saved_dir,
             Some(AgentType::ClaudeCode),
             None,
+            Some(BUCKET),
         )
         .await;
         assert!(refused.is_err());
         assert!(Path::new(&saved_dir).exists());
+        // A refused discard deletes nothing at all, uploads included.
+        assert!(image.exists());
 
         let project = tempfile::tempdir().unwrap();
         let refused = discard_private_session_core(
             &db.conn,
-            data.path(),
-            config.path(),
-            &[],
+            &roots(data.path(), config.path(), uploads.path()),
             &project.path().to_string_lossy(),
+            None,
             None,
             None,
         )

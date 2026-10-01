@@ -21,6 +21,12 @@
  *
  * Follow-ups continue the same session. Nothing here writes the per-agent
  * selector picks the workspace composer uses.
+ *
+ * A question may carry images. They are encoded for the agent at delivery
+ * time, from the capabilities the live connection reports; an agent that
+ * takes images in no form gets the question refused, not silently stripped.
+ * In web / remote mode the images were uploaded into this question's own
+ * upload bucket (`uploadBucket`), which a private question's discard deletes.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -49,8 +55,16 @@ import {
 } from "@/lib/quick-ask/routing"
 import type { QuickAskTargetKind } from "@/lib/quick-ask/prefs"
 import { isNoActiveTurnRejection, TurnBusyError } from "@/lib/turn-busy"
-import type { AgentType, PromptInputBlock } from "@/lib/types"
+import type {
+  AgentType,
+  PromptCapabilitiesInfo,
+  PromptInputBlock,
+} from "@/lib/types"
 import { randomUUID } from "@/lib/utils"
+import {
+  imageAttachmentToPromptBlock,
+  type ImageInputAttachment,
+} from "@/components/chat/message-input-attachments"
 
 /**
  * Prefix of the key the window's connection lives under. Each question gets a
@@ -67,6 +81,10 @@ export function quickAskContextKey(generation: number): string {
 const LIVE_SURFACE_SOURCE = "quick-ask"
 /** Long enough for a cold agent start plus a resume. */
 const CONNECT_READY_TIMEOUT_MS = 180_000
+/** How long a "no images" reading may wait to be corrected: capabilities come
+ *  in their own event (or with an attached viewer's snapshot), which can trail
+ *  the connection becoming ready. */
+const IMAGE_SUPPORT_SETTLE_MS = 1500
 
 export interface QuickAskFolderTarget {
   id: number
@@ -90,6 +108,8 @@ export type QuickAskTurn =
       id: string
       role: "user"
       text: string
+      /** Images sent with the question (kept for its thumbnails). */
+      images?: ImageInputAttachment[]
       state: QuickAskUserTurnState
     }
   | {
@@ -132,10 +152,39 @@ export type QuickAskErrorCode =
   | "no_session"
   | "connect_failed"
   | "send_failed"
+  | "images_unsupported"
 
 export interface QuickAskError {
   code: QuickAskErrorCode
   detail: string | null
+}
+
+/**
+ * Does the agent under `key` take images? Answered at once when it says yes;
+ * a "no" is given `timeoutMs` to turn into a yes before it stands, since the
+ * capabilities can reach the connection a moment after it is ready.
+ */
+export function waitForImageSupport(
+  store: ConnectionStoreApi,
+  key: string,
+  timeoutMs: number
+): Promise<boolean> {
+  const takes = () =>
+    agentTakesImages(store.getConnection(key)?.promptCapabilities)
+  if (takes()) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    let unsubscribe: () => void = () => {}
+    const timer = setTimeout(() => {
+      unsubscribe()
+      resolve(takes())
+    }, timeoutMs)
+    unsubscribe = store.subscribeKey(key, () => {
+      if (!takes()) return
+      clearTimeout(timer)
+      unsubscribe()
+      resolve(true)
+    })
+  })
 }
 
 /** Resolve once the connection under `key` can take a prompt. */
@@ -179,8 +228,37 @@ export function waitForConnectionReady(
   })
 }
 
-function textBlocks(text: string): PromptInputBlock[] {
-  return [{ type: "text", text }]
+/**
+ * Upload bucket for one question's images (`/upload_attachment`'s session
+ * field). The backend deletes only buckets of exactly this shape when a
+ * private question is discarded, so it never touches another surface's
+ * uploads.
+ */
+export function newQuickAskUploadBucket(): string {
+  return `quick-ask-${randomUUID().replace(/-/g, "").toLowerCase()}`
+}
+
+/** Whether an agent takes images in any form (native block or embedded
+ *  resource), as the composer decides it. Unknown capabilities count as yes:
+ *  the connection is the one to say no. */
+export function agentTakesImages(
+  caps: Pick<PromptCapabilitiesInfo, "image" | "embedded_context"> | undefined
+): boolean {
+  return !caps || caps.image || caps.embedded_context
+}
+
+/** The prompt for one question: its text, then its images in the encoding
+ *  the agent accepts. */
+export function questionBlocks(
+  text: string,
+  images: ImageInputAttachment[],
+  caps: Pick<PromptCapabilitiesInfo, "image" | "embedded_context"> | undefined
+): PromptInputBlock[] {
+  const encoding = caps ?? { image: true, embedded_context: true }
+  return [
+    ...(text ? [{ type: "text" as const, text }] : []),
+    ...images.map((image) => imageAttachmentToPromptBlock(image, encoding)),
+  ]
 }
 
 /**
@@ -198,9 +276,14 @@ export function insertReplyBeforeQueued(
   return [...thread.slice(0, at), reply, ...thread.slice(at)]
 }
 
-/** A one-line title for the conversation a first question creates. */
-export function titleFromQuestion(text: string): string {
-  return text.replace(/\s+/g, " ").trim().slice(0, 80)
+/** A one-line title for the conversation a first question creates. An
+ *  image-only question is named after its first image. */
+export function titleFromQuestion(
+  text: string,
+  images: ImageInputAttachment[] = []
+): string {
+  const title = text.replace(/\s+/g, " ").trim().slice(0, 80)
+  return title || (images[0]?.name ?? "").slice(0, 80)
 }
 
 export function useQuickAskSession({
@@ -230,12 +313,17 @@ export function useQuickAskSession({
   const [lastCleanup, setLastCleanup] = useState<PrivateQuickAskCleanup | null>(
     null
   )
+  // One bucket per question: a private one's uploads go with its discard.
+  const [uploadBucket, setUploadBucket] = useState(newQuickAskUploadBucket)
+  const uploadBucketRef = useRef(uploadBucket)
 
   // Refs mirror what async paths need to read at the moment they run.
   const bindingRef = useRef<QuickAskBinding | null>(null)
   const privateDirRef = useRef<string | null>(null)
   const privateDirPromiseRef = useRef<Promise<string> | null>(null)
-  const queueRef = useRef<{ turnId: string; text: string }[]>([])
+  const queueRef = useRef<
+    { turnId: string; text: string; images: ImageInputAttachment[] }[]
+  >([])
   const committedLiveIdsRef = useRef(new Set<string>())
   const argsRef = useRef({
     target,
@@ -398,17 +486,25 @@ export function useQuickAskSession({
       route: QuickAskSendRoute,
       turnId: string,
       text: string,
+      images: ImageInputAttachment[],
       b: QuickAskBinding
     ): Promise<void> => {
       if (route === "queue") {
-        queueRef.current.push({ turnId, text })
+        queueRef.current.push({ turnId, text, images })
         updateTurn(turnId, "queued")
         return
       }
       const live = store.getConnection(keyRef.current)
+      const blocks = questionBlocks(text, images, live?.promptCapabilities)
       if (route === "steer" && live) {
         try {
-          await submitSessionFeedback(live.connectionId, text)
+          // Images ride along as the steer's blocks, as the composer's
+          // mid-turn send does; plain text stays a plain note.
+          if (images.length > 0) {
+            await submitSessionFeedback(live.connectionId, text, blocks)
+          } else {
+            await submitSessionFeedback(live.connectionId, text)
+          }
           updateTurn(turnId, "steered")
           return
         } catch (e) {
@@ -419,7 +515,7 @@ export function useQuickAskSession({
       try {
         await actions.sendPrompt(
           keyRef.current,
-          textBlocks(text),
+          blocks,
           promptOptionsFor(promptTargetOf(b))
         )
         updateTurn(turnId, "sent")
@@ -427,7 +523,7 @@ export function useQuickAskSession({
         if (e instanceof TurnBusyError) {
           // Another client started a turn first: wait for it, like the
           // composer's queue does.
-          queueRef.current.push({ turnId, text })
+          queueRef.current.push({ turnId, text, images })
           updateTurn(turnId, "queued")
           return
         }
@@ -437,10 +533,19 @@ export function useQuickAskSession({
     [actions, promptTargetOf, store, updateTurn]
   )
 
+  /** Take back a question that could not go out as asked: the window puts
+   *  it back in the input. */
+  const withdraw = useCallback((turnId: string) => {
+    setThread((prev) => prev.filter((turn) => turn.id !== turnId))
+  }, [])
+
   const send = useCallback(
-    async (rawText: string): Promise<boolean> => {
+    async (
+      rawText: string,
+      images: ImageInputAttachment[] = []
+    ): Promise<boolean> => {
       const text = rawText.trim()
-      if (!text) return false
+      if (!text && images.length === 0) return false
       const args = argsRef.current
       if (!bindingRef.current) {
         if (args.target === "new" && !args.folder) {
@@ -456,20 +561,41 @@ export function useQuickAskSession({
       const turnId = randomUUID()
       setThread((prev) => [
         ...prev,
-        { id: turnId, role: "user", text, state: "sent" },
+        {
+          id: turnId,
+          role: "user",
+          text,
+          ...(images.length > 0 ? { images } : {}),
+          state: "sent",
+        },
       ])
+      // An agent that takes no images: refuse the question rather than drop
+      // its images on the floor.
+      const refusesImages = async () =>
+        images.length > 0 &&
+        !(await waitForImageSupport(
+          store,
+          keyRef.current,
+          IMAGE_SUPPORT_SETTLE_MS
+        ))
 
       // Follow-up on the session the window already talks to.
       const bound = bindingRef.current
       if (bound) {
+        if (await refusesImages()) {
+          withdraw(turnId)
+          setError({ code: "images_unsupported", detail: null })
+          return false
+        }
         const live = store.getConnection(keyRef.current)
         const route = routeQuickAskSend({
           target: bound.target,
           status: live?.status ?? null,
-          steerable: await canSteer(bound),
+          // A steer is a note: it needs words (images may ride along).
+          steerable: text.length > 0 && (await canSteer(bound)),
         })
         try {
-          await deliver(route, turnId, text, bound)
+          await deliver(route, turnId, text, images, bound)
         } catch (e) {
           updateTurn(turnId, "failed")
           setError({ code: "send_failed", detail: describeError(e) })
@@ -492,6 +618,11 @@ export function useQuickAskSession({
           setError({ code: "connect_failed", detail: describeError(e) })
           return true
         }
+        if (await refusesImages()) {
+          withdraw(turnId)
+          setError({ code: "images_unsupported", detail: null })
+          return false
+        }
         const live = store.getConnection(keyRef.current)
         const workingDir = live?.workingDir ?? ""
         let next: QuickAskBinding
@@ -505,7 +636,7 @@ export function useQuickAskSession({
             title: args.session.title,
           }
         } else if (args.target === "new" && args.folder) {
-          const title = titleFromQuestion(text)
+          const title = titleFromQuestion(text, images)
           const conversationId = await createConversation(
             args.folder.id,
             args.agentType,
@@ -544,9 +675,9 @@ export function useQuickAskSession({
         const route = routeQuickAskSend({
           target: next.target,
           status: live?.status ?? null,
-          steerable: await canSteer(next),
+          steerable: text.length > 0 && (await canSteer(next)),
         })
-        await deliver(route, turnId, text, next)
+        await deliver(route, turnId, text, images, next)
       } catch (e) {
         updateTurn(turnId, "failed")
         setError({ code: "send_failed", detail: describeError(e) })
@@ -564,6 +695,7 @@ export function useQuickAskSession({
       prepare,
       store,
       updateTurn,
+      withdraw,
     ]
   )
 
@@ -593,12 +725,16 @@ export function useQuickAskSession({
     const bound = bindingRef.current
     const nextQueued = queueRef.current.shift()
     if (bound && nextQueued && conn.status === "connected") {
-      void deliver("send", nextQueued.turnId, nextQueued.text, bound).catch(
-        (e: unknown) => {
-          updateTurn(nextQueued.turnId, "failed")
-          setError({ code: "send_failed", detail: describeError(e) })
-        }
-      )
+      void deliver(
+        "send",
+        nextQueued.turnId,
+        nextQueued.text,
+        nextQueued.images,
+        bound
+      ).catch((e: unknown) => {
+        updateTurn(nextQueued.turnId, "failed")
+        setError({ code: "send_failed", detail: describeError(e) })
+      })
     }
   }, [conn.status, deliver, store, updateTurn])
 
@@ -609,9 +745,10 @@ export function useQuickAskSession({
 
   /**
    * "New question": drop the thread and let go of the session. A private
-   * question is deleted outright — agent disconnected, scratch directory and
-   * any leftover transcript removed. A saved conversation keeps running in
-   * the background if it is mid-reply (its answer lands in the conversation).
+   * question is deleted outright — agent disconnected, scratch directory,
+   * uploaded images and any leftover transcript removed. A saved
+   * conversation keeps running in the background if it is mid-reply (its
+   * answer lands in the conversation).
    */
   const clear =
     useCallback(async (): Promise<PrivateQuickAskCleanup | null> => {
@@ -619,10 +756,14 @@ export function useQuickAskSession({
       const privateDir = privateDirRef.current
       const live = store.getConnection(keyRef.current)
       const oldKey = keyRef.current
+      const oldBucket = uploadBucketRef.current
       const nextGeneration = generationRef.current + 1
       generationRef.current = nextGeneration
       keyRef.current = quickAskContextKey(nextGeneration)
       setGeneration(nextGeneration)
+      const nextBucket = newQuickAskUploadBucket()
+      uploadBucketRef.current = nextBucket
+      setUploadBucket(nextBucket)
       bindingRef.current = null
       privateDirRef.current = null
       queueRef.current = []
@@ -638,7 +779,12 @@ export function useQuickAskSession({
         const agent = live?.agentType ?? bound?.agentType ?? null
         await actions.disconnect(oldKey)
         try {
-          report = await discardPrivateQuickAsk(privateDir, agent, sessionId)
+          report = await discardPrivateQuickAsk(
+            privateDir,
+            agent,
+            sessionId,
+            oldBucket
+          )
         } catch (e) {
           report = { removed: [], failed: [privateDir] }
           setError({ code: "send_failed", detail: describeError(e) })
@@ -654,7 +800,9 @@ export function useQuickAskSession({
     }, [actions, store])
 
   // A private scratch dir prepared for a question that was never asked (the
-  // user switched to another target) is discarded right away.
+  // user switched to another target) is discarded right away. Its upload
+  // bucket stays: images already attached go with the question to the new
+  // target.
   useEffect(() => {
     if (target === "private" || bindingRef.current) return
     const dir = privateDirRef.current
@@ -684,7 +832,8 @@ export function useQuickAskSession({
       void discardPrivateQuickAsk(
         dir,
         live?.agentType ?? null,
-        live?.sessionId ?? null
+        live?.sessionId ?? null,
+        uploadBucketRef.current
       ).catch(() => {})
     }
     window.addEventListener("pagehide", onPageHide)
@@ -718,6 +867,7 @@ export function useQuickAskSession({
       lastCleanup,
       isPrivate,
       contextKey,
+      uploadBucket,
       prepare,
       send,
       cancel,
@@ -735,6 +885,7 @@ export function useQuickAskSession({
       lastCleanup,
       isPrivate,
       contextKey,
+      uploadBucket,
       prepare,
       send,
       cancel,
