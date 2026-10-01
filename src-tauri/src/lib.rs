@@ -6,6 +6,10 @@
 // so the giant future's layout resolves. See the big-stack thread in
 // `acp/connection.rs` for the sibling *runtime* mitigation of the same frame.
 #![recursion_limit = "256"]
+// Clippy 1.99 reports `double_must_use` inside `#[async_trait]` expansions: the
+// macro marks the boxed future it returns `#[must_use]`, which the future
+// already is. Nothing here to change; the code is the macro's, not ours.
+#![allow(clippy::double_must_use)]
 
 pub mod acp;
 pub mod acp_transcript;

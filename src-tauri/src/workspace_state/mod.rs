@@ -1507,6 +1507,9 @@ pub async fn stop_workspace_state_stream_core(
         // between start and stop bookkeeping) must not underflow and wedge
         // the stream in permanent full-scan mode.
         if wants_tree_git {
+            // `fetch_update` is `try_update` from Rust 1.99 on; kept for older
+            // toolchains.
+            #[allow(deprecated)]
             let _ = entry.full_subscribers.fetch_update(
                 Ordering::AcqRel,
                 Ordering::Acquire,

@@ -61,6 +61,8 @@ static IN_FLIGHT_PROBES: AtomicUsize = AtomicUsize::new(0);
 struct ProbeSlot;
 
 impl ProbeSlot {
+    // `fetch_update` is `try_update` from Rust 1.99 on; kept for older toolchains.
+    #[allow(deprecated)]
     fn take() -> Option<Self> {
         IN_FLIGHT_PROBES
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |held| {

@@ -5,6 +5,8 @@
 //! between accepts.
 
 #![cfg(windows)]
+// Clippy 1.99 flags `#[async_trait]` expansions with `double_must_use`.
+#![allow(clippy::double_must_use)]
 
 use std::path::PathBuf;
 use std::sync::Arc;
