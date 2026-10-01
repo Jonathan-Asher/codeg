@@ -24,6 +24,11 @@
 //! progress for the stall threshold raises a "may be stuck" alert the same
 //! way, if the session has stall detection on.
 //!
+//! Marking a session critical starts a fresh stretch, so one marked while
+//! idle alerts once it has sat the idle threshold. Acknowledgements are
+//! stored: after a restart, an idle session nobody acknowledged picks up its
+//! alerts where they were, and an acknowledged one stays quiet.
+//!
 //! The decisions live in [`SessionWatch`], a pure state machine fed with
 //! observations and instants, so they are tested without a clock; the runtime
 //! around it ([`critical_watch_task`]) only gathers observations and delivers
@@ -79,6 +84,15 @@ const MESSAGE_LANGUAGE_KEY: &str = "chat_message_language";
 
 /// Longest snooze the API accepts, in minutes (a day).
 const MAX_SNOOZE_MINUTES: u32 = 24 * 60;
+
+/// `app_metadata` key of the acknowledgements: conversation id -> when its
+/// alert was last acknowledged. Read once at start-up, so a restart neither
+/// swallows an alert nobody saw nor raises again one that was.
+pub const CRITICAL_ACKS_KEY: &str = "critical_session_acks";
+
+/// The earliest a session found idle at start-up alerts: time for the
+/// windows to connect and hear it.
+const STARTUP_GRACE: Duration = Duration::from_secs(15);
 
 /// "Critical sessions" (Settings › Notifications).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -306,10 +320,9 @@ pub struct SessionWatch {
 }
 
 impl SessionWatch {
-    /// Start watching. `acknowledged` treats what the session is doing right
-    /// now as already seen: marking a session critical is itself an action,
-    /// and a watchdog starting up cannot tell how long an idle session has
-    /// been idle.
+    /// Start watching, with a new stretch from `now`. `acknowledged` treats
+    /// what the session is doing right now as already seen (a session whose
+    /// alert was acknowledged before a restart).
     pub fn new(obs: Observation, now: Instant, acknowledged: bool) -> Self {
         let mut watch = Self {
             phase: obs.phase,
@@ -322,6 +335,20 @@ impl SessionWatch {
         watch.episode = Episode::new(key, 0, kind, since);
         watch.episode.acked = acknowledged;
         watch
+    }
+
+    /// Start-up: the session has sat idle since `since`, before this process
+    /// started, and nobody acknowledged it. Its first alert is due at
+    /// `first_due`. Only an idle session has such a past; others keep the
+    /// stretch [`SessionWatch::new`] began.
+    pub fn backdate(&mut self, since: Instant, first_due: Instant) {
+        if !matches!(self.phase, Phase::Idle(_)) {
+            return;
+        }
+        self.stretch_started = since;
+        self.episode.since = since;
+        self.episode.acked = false;
+        self.episode.next_due = Some(first_due);
     }
 
     /// Feed the latest observation; returns the alert to raise now, if any.
@@ -507,6 +534,8 @@ pub struct WatchedRow {
     pub agent_type: AgentType,
     pub title: Option<String>,
     pub stall_detection: bool,
+    /// The row's last activity: roughly when an idle session went idle.
+    pub updated_at: DateTime<Utc>,
 }
 
 impl From<&conversation::Model> for WatchedRow {
@@ -517,6 +546,7 @@ impl From<&conversation::Model> for WatchedRow {
             agent_type: conversation_service::parse_agent_type(&row.agent_type),
             title: row.title.clone(),
             stall_detection: row.critical_stall,
+            updated_at: row.updated_at,
         }
     }
 }
@@ -570,12 +600,15 @@ struct Entry {
 #[derive(Debug)]
 pub struct CriticalRegistry {
     instance: String,
-    /// The first evaluation ran. Sessions found on it are judged by the
-    /// startup rule (an interruption alerts, a plain idle does not); later
-    /// ones were just marked, which acknowledges whatever they are doing.
+    /// The first evaluation ran. Sessions found on it were critical before
+    /// the start (see [`first_watch`]); later ones were just marked.
     started: bool,
     pub settings: CriticalSessionSettings,
     sessions: HashMap<i32, Entry>,
+    /// When each watched session's alert was last acknowledged.
+    acks: HashMap<i32, DateTime<Utc>>,
+    /// `acks` changed since it was last stored.
+    acks_dirty: bool,
 }
 
 impl CriticalRegistry {
@@ -585,7 +618,24 @@ impl CriticalRegistry {
             started: false,
             settings: CriticalSessionSettings::default(),
             sessions: HashMap::new(),
+            acks: HashMap::new(),
+            acks_dirty: false,
         }
+    }
+
+    /// The acknowledgements stored by the previous run (before the first
+    /// pass).
+    pub fn load_acks(&mut self, acks: HashMap<i32, DateTime<Utc>>) {
+        self.acks = acks;
+    }
+
+    /// The acknowledgements, if they changed since the last call: to store.
+    pub fn take_dirty_acks(&mut self) -> Option<HashMap<i32, DateTime<Utc>>> {
+        if !self.acks_dirty {
+            return None;
+        }
+        self.acks_dirty = false;
+        Some(self.acks.clone())
     }
 
     /// Record a bus signal for a watched session; others are ignored.
@@ -630,11 +680,19 @@ impl CriticalRegistry {
             }
         }
         self.sessions.retain(|id, _| seen.contains(id));
+        let before = self.acks.len();
+        self.acks.retain(|id, _| seen.contains(id));
+        if self.acks.len() != before {
+            self.acks_dirty = true;
+        }
     }
 
     /// Stop watching one session at once (it was unmarked).
     pub fn remove(&mut self, conversation_id: i32) {
         self.sessions.remove(&conversation_id);
+        if self.acks.remove(&conversation_id).is_some() {
+            self.acks_dirty = true;
+        }
     }
 
     /// Feed one session's phase; returns the alert to deliver, if one fired.
@@ -648,19 +706,20 @@ impl CriticalRegistry {
         let started = self.started;
         let settings = self.settings;
         let instance = self.instance.clone();
+        let acked_at = self.acks.get(&conversation_id).copied();
         let entry = self.sessions.get_mut(&conversation_id)?;
         let obs = Observation {
             phase,
             epoch: entry.epoch,
             progress_at: entry.progress_at,
         };
+        let th = settings.thresholds(entry.row.stall_detection);
         if entry.watch.is_none() {
-            let acknowledged = started || phase != Phase::Idle(IdleKind::Interrupted);
-            entry.watch = Some(SessionWatch::new(obs, now, acknowledged));
+            let watch = first_watch(&entry.row, obs, started, acked_at, &th, now, wall_now);
+            entry.watch = Some(watch);
             return None;
         }
         let watch = entry.watch.as_mut()?;
-        let th = settings.thresholds(entry.row.stall_detection);
         let Some(fired) = watch.step(obs, &th, now) else {
             if !watch.active() {
                 entry.last = None;
@@ -694,10 +753,12 @@ impl CriticalRegistry {
         self.started = true;
     }
 
-    pub fn ack(&mut self, conversation_id: i32) {
+    pub fn ack(&mut self, conversation_id: i32, wall_now: DateTime<Utc>) {
         if let Some(entry) = self.sessions.get_mut(&conversation_id) {
             if entry.watch.as_mut().is_some_and(SessionWatch::ack) {
                 entry.last = None;
+                self.acks.insert(conversation_id, wall_now);
+                self.acks_dirty = true;
             }
         }
     }
@@ -739,6 +800,38 @@ impl CriticalRegistry {
     fn watch(&self, conversation_id: i32) -> Option<&SessionWatch> {
         self.sessions.get(&conversation_id)?.watch.as_ref()
     }
+}
+
+/// The watch a session starts with when the watchdog first sees it.
+///
+/// Marked while this process runs (`started`): a fresh stretch from now, so
+/// a session marked while idle alerts once it has sat the idle threshold.
+///
+/// Critical before the start: an idle session whose alert was acknowledged
+/// after its last activity stays quiet until something new happens. One that
+/// nobody acknowledged picks up where it was, timed from when it went idle
+/// (a restart neither swallows its alerts nor resets their clock), but
+/// alerts no sooner than [`STARTUP_GRACE`] after the start.
+fn first_watch(
+    row: &WatchedRow,
+    obs: Observation,
+    started: bool,
+    acked_at: Option<DateTime<Utc>>,
+    th: &Thresholds,
+    now: Instant,
+    wall_now: DateTime<Utc>,
+) -> SessionWatch {
+    if started || !matches!(obs.phase, Phase::Idle(_)) {
+        return SessionWatch::new(obs, now, false);
+    }
+    if acked_at.is_some_and(|at| at >= row.updated_at) {
+        return SessionWatch::new(obs, now, true);
+    }
+    let mut watch = SessionWatch::new(obs, now, false);
+    let idle_for = (wall_now - row.updated_at).to_std().unwrap_or_default();
+    let since = now.checked_sub(idle_for).unwrap_or(now);
+    watch.backdate(since, (since + th.idle).max(now + STARTUP_GRACE));
+    watch
 }
 
 static REGISTRY: LazyLock<StdMutex<CriticalRegistry>> = LazyLock::new(|| {
@@ -795,7 +888,7 @@ pub fn ack_critical_session_core(
     conversation_id: i32,
 ) -> CriticalAlertsSnapshot {
     CriticalAlertsSnapshot {
-        alerts: mutate_and_publish(emitter, |r| r.ack(conversation_id)),
+        alerts: mutate_and_publish(emitter, |r| r.ack(conversation_id, Utc::now())),
     }
 }
 
@@ -815,7 +908,8 @@ pub fn snooze_critical_session_core(
 
 /// Mark or unmark a conversation critical (and set its stall detection).
 /// Unmarking clears its alert at once; marking starts watching on the next
-/// pass, with what the session is doing now counted as seen.
+/// pass, with a fresh stretch: a session marked while idle alerts once it has
+/// sat the idle threshold with nothing happening.
 pub async fn set_conversation_critical_core(
     conn: &DatabaseConnection,
     emitter: &EventEmitter,
@@ -951,7 +1045,7 @@ async fn evaluate(manager: &ConnectionManager, db: &DatabaseConnection, emitter:
 
     let now = Instant::now();
     let wall_now = Utc::now();
-    let (fired, changed, active, settings) = with_registry(|r| {
+    let (fired, changed, active, settings, acks) = with_registry(|r| {
         let before = r.active_key();
         r.sync_rows(rows.iter().map(WatchedRow::from));
         let fired: Vec<CriticalAlert> = observed
@@ -964,8 +1058,12 @@ async fn evaluate(manager: &ConnectionManager, db: &DatabaseConnection, emitter:
             before != r.active_key(),
             r.active_alerts(),
             r.settings,
+            r.take_dirty_acks(),
         )
     });
+    if let Some(acks) = acks {
+        store_acks(db, &acks).await;
+    }
 
     for alert in &fired {
         tracing::info!(
@@ -982,6 +1080,36 @@ async fn evaluate(manager: &ConnectionManager, db: &DatabaseConnection, emitter:
     }
     if !fired.is_empty() {
         deliver_to_channels(manager, db, emitter, &fired, settings).await;
+    }
+}
+
+/// The acknowledgements the previous run stored. Missing or unreadable reads
+/// as none: every idle critical session then alerts again after a restart,
+/// which beats swallowing one nobody saw.
+async fn load_acks(db: &DatabaseConnection) -> HashMap<i32, DateTime<Utc>> {
+    match app_metadata_service::get_value(db, CRITICAL_ACKS_KEY).await {
+        Ok(Some(raw)) => serde_json::from_str(&raw).unwrap_or_else(|e| {
+            tracing::warn!("[critical] unreadable acknowledgements ({e}); starting without");
+            HashMap::new()
+        }),
+        Ok(None) => HashMap::new(),
+        Err(e) => {
+            tracing::warn!("[critical] failed to load acknowledgements ({e})");
+            HashMap::new()
+        }
+    }
+}
+
+async fn store_acks(db: &DatabaseConnection, acks: &HashMap<i32, DateTime<Utc>>) {
+    let raw = match serde_json::to_string(acks) {
+        Ok(raw) => raw,
+        Err(e) => {
+            tracing::warn!("[critical] failed to serialize acknowledgements: {e}");
+            return;
+        }
+    };
+    if let Err(e) = app_metadata_service::upsert_value(db, CRITICAL_ACKS_KEY, &raw).await {
+        tracing::warn!("[critical] failed to store acknowledgements: {e}");
     }
 }
 
@@ -1036,7 +1164,11 @@ pub fn critical_watch_task(
     let mut rx = bus.subscribe();
     async move {
         let settings = load_critical_settings(&db).await;
-        with_registry(|r| r.settings = settings);
+        let acks = load_acks(&db).await;
+        with_registry(|r| {
+            r.settings = settings;
+            r.load_acks(acks);
+        });
         let mut links: HashMap<String, i32> = HashMap::new();
         let mut tick = tokio::time::interval(TICK);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -1391,13 +1523,14 @@ mod tests {
         );
     }
 
-    fn row(id: i32) -> WatchedRow {
+    fn row_at(id: i32, updated_at: DateTime<Utc>) -> WatchedRow {
         WatchedRow {
             conversation_id: id,
             folder_id: 7,
             agent_type: AgentType::ClaudeCode,
             title: Some(format!("session {id}")),
             stall_detection: true,
+            updated_at,
         }
     }
 
@@ -1406,8 +1539,10 @@ mod tests {
         let mut r = CriticalRegistry::new("test");
         let t0 = Instant::now();
         let wall = Utc::now();
-        // Startup pass: an interrupted session alerts, an idle one does not.
-        r.sync_rows([row(1), row(2)]);
+        // Before this start, session 2's alert was acknowledged after its
+        // last activity; session 1 was cut off and nobody saw it.
+        r.load_acks(HashMap::from([(2, wall)]));
+        r.sync_rows([row_at(1, wall), row_at(2, wall)]);
         assert!(r.step(1, INTERRUPTED, t0, wall).is_none());
         assert!(r.step(2, ENDED, t0, wall).is_none());
         r.finish_pass();
@@ -1420,21 +1555,87 @@ mod tests {
         assert_eq!(alert.id, "test-c1-e0-n1");
         assert_eq!(alert.folder_id, 7);
         assert!(alert.sound);
-        assert!(r.step(2, ENDED, t0 + IDLE, wall).is_none());
+        assert!(
+            r.step(2, ENDED, t0 + IDLE, wall).is_none(),
+            "acknowledged before the start"
+        );
         assert_eq!(r.active_key(), vec![(1, "test-c1-e0-n1".to_string())]);
 
-        // Ack clears the banner.
-        r.ack(1);
+        // Ack clears the banner, and is kept for the next start.
+        r.ack(1, wall);
         assert!(r.active_alerts().is_empty());
+        assert_eq!(r.take_dirty_acks().map(|a| a.len()), Some(2));
+        assert_eq!(r.take_dirty_acks(), None, "stored once");
 
-        // A session marked later is acknowledged as it stands.
-        r.sync_rows([row(1), row(2), row(3)]);
-        assert!(r.step(3, INTERRUPTED, t0, wall).is_none());
-        assert!(r.step(3, INTERRUPTED, t0 + secs(3600), wall).is_none());
+        // A session marked later starts a fresh stretch: marked while idle,
+        // it alerts once it has sat the idle threshold.
+        r.sync_rows([row_at(1, wall), row_at(2, wall), row_at(3, wall)]);
+        let marked = t0 + secs(100);
+        assert!(r.step(3, ENDED, marked, wall).is_none());
+        assert!(r.step(3, ENDED, marked + secs(59), wall).is_none());
+        let alert = r
+            .step(3, ENDED, marked + IDLE, wall)
+            .expect("marked while idle");
+        assert_eq!(alert.kind, CriticalAlertKind::Idle);
 
-        // Unmarked rows drop out.
-        r.sync_rows([row(2)]);
+        // Unmarked rows drop out, and so do their acknowledgements.
+        r.sync_rows([row_at(2, wall)]);
         assert!(r.watch(1).is_none() && r.watch(3).is_none());
+        assert_eq!(
+            r.take_dirty_acks()
+                .map(|a| a.into_keys().collect::<Vec<_>>()),
+            Some(vec![2])
+        );
+    }
+
+    #[test]
+    fn a_restart_picks_up_unacknowledged_idle_sessions_where_they_were() {
+        let mut r = CriticalRegistry::new("test");
+        let t0 = Instant::now();
+        let wall = Utc::now();
+        let went_idle = wall - chrono::Duration::seconds(120);
+        // 1: idle for 2 min, never acknowledged. 2: acknowledged after it
+        // went idle. 3: acknowledged, then a turn ran (newer activity).
+        r.load_acks(HashMap::from([
+            (2, went_idle + chrono::Duration::seconds(70)),
+            (3, went_idle - chrono::Duration::seconds(60)),
+        ]));
+        r.sync_rows([
+            row_at(1, went_idle),
+            row_at(2, went_idle),
+            row_at(3, went_idle),
+        ]);
+        for id in 1..=3 {
+            assert!(r.step(id, ENDED, t0, wall).is_none());
+        }
+        r.finish_pass();
+
+        // Past the idle threshold already, but not before the grace.
+        assert!(r.step(1, ENDED, t0 + secs(5), wall).is_none());
+        let alert = r
+            .step(1, ENDED, t0 + STARTUP_GRACE, wall)
+            .expect("picked up after the restart");
+        assert_eq!(alert.count, 1);
+        assert!(
+            alert.since <= went_idle + chrono::Duration::seconds(1),
+            "timed from when it went idle: {} vs {went_idle}",
+            alert.since
+        );
+        assert!(
+            r.step(2, ENDED, t0 + secs(3600), wall).is_none(),
+            "acknowledged before the restart"
+        );
+        assert!(
+            r.step(3, ENDED, t0 + STARTUP_GRACE, wall).is_some(),
+            "a turn ran after the acknowledgement"
+        );
+        // The repeat keeps its interval.
+        assert!(r
+            .step(1, ENDED, t0 + STARTUP_GRACE + secs(299), wall)
+            .is_none());
+        assert!(r
+            .step(1, ENDED, t0 + STARTUP_GRACE + REPEAT, wall)
+            .is_some());
     }
 
     #[test]
@@ -1442,7 +1643,7 @@ mod tests {
         let mut r = CriticalRegistry::new("test");
         let t0 = Instant::now();
         let wall = Utc::now();
-        r.sync_rows([row(1)]);
+        r.sync_rows([row_at(1, wall)]);
         r.step(1, Phase::Working, t0, wall);
         r.finish_pass();
         r.record(99, Signal::Boundary, t0);
