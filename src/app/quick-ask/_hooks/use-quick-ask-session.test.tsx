@@ -539,7 +539,8 @@ describe("useQuickAskSession", () => {
       await act(async () => {
         await result.current.send("now this", [SQUARE])
       })
-      expect(result.current.thread.at(-1)).toMatchObject({ state: "queued" })
+      const thread = result.current.thread
+      expect(thread[thread.length - 1]).toMatchObject({ state: "queued" })
       moveTo(rerender, args, "connected")
       await act(async () => {})
       expect(h.actions.sendPrompt).toHaveBeenLastCalledWith(
