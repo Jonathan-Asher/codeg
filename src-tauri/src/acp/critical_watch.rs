@@ -1708,6 +1708,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn acknowledgements_round_trip_through_app_metadata() {
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
+        assert!(load_acks(&db.conn).await.is_empty(), "none stored yet");
+        let at = Utc::now();
+        store_acks(&db.conn, &HashMap::from([(7, at), (9, at)])).await;
+        let loaded = load_acks(&db.conn).await;
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(
+            loaded.get(&7).map(DateTime::timestamp_millis),
+            Some(at.timestamp_millis())
+        );
+        // An unmark drops the entry; storing again replaces the whole set.
+        store_acks(&db.conn, &HashMap::from([(9, at)])).await;
+        assert_eq!(
+            load_acks(&db.conn).await.into_keys().collect::<Vec<_>>(),
+            vec![9]
+        );
+    }
+
+    #[tokio::test]
     async fn mark_and_unmark_persist_and_broadcast_the_row() {
         use crate::db::test_helpers::{fresh_in_memory_db, seed_conversation, seed_folder};
         use crate::web::event_bridge::{WebEventBroadcaster, CONVERSATION_CHANGED_EVENT};
