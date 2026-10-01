@@ -97,7 +97,12 @@ export interface AppWorkspaceStoreState {
     patch: Partial<
       Pick<
         DbConversationSummary,
-        "status" | "title" | "pinned_at" | "pin_order"
+        | "status"
+        | "title"
+        | "pinned_at"
+        | "pin_order"
+        | "critical"
+        | "critical_stall"
       >
     >
   ) => void
@@ -425,7 +430,12 @@ export const useAppWorkspaceStore = create<AppWorkspaceStoreState>()(
       // mirror the backend (`update_pin` / `reorder_pins`) and leave
       // `updated_at` untouched so an updated-sorted folder doesn't briefly
       // float the row. Status/title patches still bump.
-      const bumpUpdatedAt = !("pinned_at" in patch) && !("pin_order" in patch)
+      // Marking a session critical is the same kind of preference.
+      const bumpUpdatedAt =
+        !("pinned_at" in patch) &&
+        !("pin_order" in patch) &&
+        !("critical" in patch) &&
+        !("critical_stall" in patch)
       next[idx] = {
         ...next[idx],
         ...patch,

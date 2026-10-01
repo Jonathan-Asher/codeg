@@ -17,6 +17,8 @@ import {
   XCircle,
   Pin,
   PinOff,
+  Flag,
+  FlagOff,
   FileDown,
   CheckCircle2,
   FolderX,
@@ -50,6 +52,7 @@ import {
 import { useOptionalAcpActions } from "@/contexts/acp-connection-contexts"
 import { cn } from "@/lib/utils"
 import { formatConversationTitle } from "@/lib/conversation-title"
+import { CriticalFlag } from "@/components/conversations/critical-flag"
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -173,6 +176,9 @@ interface SidebarConversationCardProps {
   onStatusChange: (id: number, status: ConversationStatus) => Promise<void>
   onNewConversation?: (folderId: number) => void
   onTogglePin?: (id: number, nextPinned: boolean) => void
+  /** Mark or unmark the conversation critical (alerts when it sits idle).
+   *  Absent keeps the menu without the item. */
+  onToggleCritical?: (id: number, nextCritical: boolean) => void
   /** Export the conversation to a Markdown file (server-side serializer).
    *  Offered on pinned rows; absent keeps the menu without the item. */
   onExportMarkdown?: (id: number) => void
@@ -216,6 +222,7 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   onStatusChange,
   onNewConversation,
   onTogglePin,
+  onToggleCritical,
   onExportMarkdown,
   depth = 0,
   hasChildren = false,
@@ -363,6 +370,7 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
     : null
   const isCancelled = status === "cancelled"
   const isPinned = conversation.pinned_at != null
+  const isCritical = conversation.critical === true
   const isCompleted = status === "completed"
   // Delegation sub-sessions (a child of another conversation) don't get the
   // hover quick actions: pinning a sub-agent run to the root Pinned section or
@@ -515,6 +523,7 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                         </span>
                       </span>
                     ) : null}
+                    {isCritical ? <CriticalFlag /> : null}
                   </button>
 
                   {/* Expand/collapse affordance for delegation children. It overlays
@@ -832,6 +841,18 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                   <Pin className="h-4 w-4" />
                 )}
                 {isPinned ? t("unpin") : t("pin")}
+              </ContextMenuItem>
+            )}
+            {onToggleCritical && (
+              <ContextMenuItem
+                onSelect={() => onToggleCritical(conversation.id, !isCritical)}
+              >
+                {isCritical ? (
+                  <FlagOff className="h-4 w-4" />
+                ) : (
+                  <Flag className="h-4 w-4" />
+                )}
+                {isCritical ? t("unmarkCritical") : t("markCritical")}
               </ContextMenuItem>
             )}
             {onExportMarkdown && (

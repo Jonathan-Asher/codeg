@@ -1973,6 +1973,8 @@
       "attentionCountBadge": "{count} 個會話在等你處理",
       "statusCancelledBadge": "已取消",
       "worktreeRemovedBadge": "來源 worktree 已刪除",
+      "criticalBadge": "關鍵對話",
+      "criticalToggleFailed": "無法更新關鍵標記：{message}",
       "conversationCountUnit": "{count} 條",
       "emptyFolderHint": "暫無對話",
       "noMatchingConversations": "找不到符合的對話",
@@ -2180,6 +2182,8 @@
       "save": "儲存",
       "pin": "置頂",
       "unpin": "取消置頂",
+      "markCritical": "標記為關鍵",
+      "unmarkCritical": "取消關鍵標記",
       "markCompleted": "標記為已完成",
       "reopen": "重新開啟",
       "expandSubsessions": "展開子會話",
@@ -2349,6 +2353,9 @@
       "closeConversationTab": "關閉會話分頁",
       "close": "關閉",
       "closeOthers": "關閉其它",
+      "markCritical": "標記為關鍵",
+      "unmarkCritical": "取消關鍵標記",
+      "criticalToggleFailed": "無法更新關鍵標記：{message}",
       "splitRight": "向右拆分",
       "splitDown": "向下拆分",
       "splitAndMoveRight": "拆分並右移",
@@ -5259,6 +5266,57 @@
     "tonePop": "輕點",
     "toneAlert": "警示",
     "toneDescend": "下行音"
+  },
+  "CriticalSessions": {
+    "headline": {
+      "idle": "關鍵對話等待中",
+      "needsYou": "關鍵對話需要你處理",
+      "interrupted": "關鍵對話已中斷",
+      "stalled": "關鍵對話可能卡住了"
+    },
+    "body": {
+      "idle": "智能體在 {elapsed} 前完成了本輪，之後沒有任何動作。",
+      "needsYou": "智能體已等待你的回答 {elapsed}。",
+      "interrupted": "上一輪在 {elapsed} 前被中斷，之後沒有任何動作。",
+      "stalled": "本輪仍在執行，但已有 {elapsed} 沒有任何輸出。",
+      "backgroundStalled": "背景工作仍在執行，但已有 {elapsed} 沒有任何進展。"
+    },
+    "duration": {
+      "seconds": "{count} 秒",
+      "minutes": "{count} 分鐘",
+      "hours": "{count} 小時"
+    },
+    "notificationTitle": "⚑ {headline}：{session}",
+    "notificationTitleRedacted": "⚑ {headline}",
+    "untitled": "未命名對話",
+    "open": "開啟對話",
+    "dismiss": "略過",
+    "snooze": "稍後提醒（{minutes} 分鐘）",
+    "reminder": "（第 {count} 次提醒）",
+    "details": {
+      "heading": "關鍵對話",
+      "mark": "標記為關鍵",
+      "markHint": "當此對話閒置時提醒我，並持續提醒直到我處理。",
+      "stall": "本輪可能卡住時提醒",
+      "stallHint": "執行中的一輪在卡住門檻內沒有任何輸出時也提醒。",
+      "saveFailed": "無法更新關鍵標記：{message}"
+    },
+    "settings": {
+      "title": "關鍵對話",
+      "description": "被你標記為關鍵的對話（在對話選單中標記）閒置時會提醒你——本輪結束、智能體在等你、或被中斷——並持續提醒，直到你開啟對話、作答或略過提醒。計時在後端執行，即使沒有開啟任何視窗也有效。",
+      "idleTitle": "閒置多久後提醒",
+      "idleHint": "關鍵對話閒置多久後發出第一次提醒。",
+      "repeatTitle": "重複間隔",
+      "repeatHint": "對話保持閒置且未確認時，提醒再次出現的頻率。",
+      "repeatOff": "不重複",
+      "stallTitle": "卡住門檻",
+      "stallHint": "執行中的一輪在這麼長時間內沒有任何輸出（無文字、無工具活動）時，視為可能卡住。可在對話詳情中逐一關閉。",
+      "soundTitle": "播放聲音",
+      "soundHint": "每次關鍵提醒時播放提示音。",
+      "channelTitle": "同時傳送到聊天頻道",
+      "channelHint": "把每則關鍵提醒也傳送到你的聊天頻道。沒有視窗連線時，提醒總會傳送到那裡。",
+      "saveFailed": "無法儲存：{message}"
+    }
   },
   "BrowserSettings": {
     "title": "內建瀏覽器",

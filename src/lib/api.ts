@@ -165,6 +165,8 @@ import type {
   SystemProxySettings,
   AutoResumeSettings,
   AutoResumeStatus,
+  CriticalAlertsSnapshot,
+  CriticalSessionSettings,
   CloseRequestPayload,
   CloseWindowBehavior,
   SystemCloseBehaviorSettingsView,
@@ -1982,6 +1984,60 @@ export async function getAutoResumeStatus(): Promise<AutoResumeStatus> {
 /** Cancel the resumes that have not started yet. */
 export async function stopAutoResume(): Promise<AutoResumeStatus> {
   return getTransport().call("stop_auto_resume")
+}
+
+// --- Critical sessions ---
+
+/** Mark or unmark a conversation critical. `stall` sets its stall detection
+ *  (left as it is when omitted). Every client gets the row back through
+ *  `conversation://changed`. */
+export async function updateConversationCritical(
+  conversationId: number,
+  critical: boolean,
+  stall?: boolean
+): Promise<void> {
+  return getTransport().call(
+    "update_conversation_critical",
+    stall === undefined
+      ? { conversationId, critical }
+      : { conversationId, critical, stall }
+  )
+}
+
+/** The critical alerts waiting for an acknowledgement, for a client that just
+ *  connected (live changes arrive as `CRITICAL_ALERTS_EVENT`). */
+export async function getCriticalAlerts(): Promise<CriticalAlertsSnapshot> {
+  return getTransport().call("get_critical_alerts")
+}
+
+/** The user saw the session (opened it, dismissed its alert): its current
+ *  idle stretch alerts no more. */
+export async function ackCriticalSession(
+  conversationId: number
+): Promise<CriticalAlertsSnapshot> {
+  return getTransport().call("ack_critical_session", { conversationId })
+}
+
+/** Hold the session's alert for `minutes`, then alert again if nothing
+ *  happened. */
+export async function snoozeCriticalSession(
+  conversationId: number,
+  minutes: number
+): Promise<CriticalAlertsSnapshot> {
+  return getTransport().call("snooze_critical_session", {
+    conversationId,
+    minutes,
+  })
+}
+
+export async function getCriticalSessionSettings(): Promise<CriticalSessionSettings> {
+  return getTransport().call("get_critical_session_settings")
+}
+
+export async function updateCriticalSessionSettings(
+  settings: CriticalSessionSettings
+): Promise<CriticalSessionSettings> {
+  return getTransport().call("update_critical_session_settings", { settings })
 }
 
 // --- Close window behavior ---

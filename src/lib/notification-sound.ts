@@ -420,6 +420,23 @@ export function playEventSound(envelope: EventEnvelope): boolean {
   return true
 }
 
+/**
+ * Play the critical session alert's tone (the triple-beep `alert`) at the
+ * user's volume. Gated by the critical sessions' own sound switch, which the
+ * caller checks — not by the event-sound master switch, which is off by
+ * default and is about ordinary events.
+ */
+export function playCriticalAlertSound(): boolean {
+  if (suppressDepth > 0) return false
+  const prepared = prepareTone("alert", getNotificationSoundPrefs().volume)
+  if (!prepared) return false
+  if (prepared.ctx.state !== "running") {
+    armUnlockOnGesture()
+    return false
+  }
+  return scheduleTone(prepared)
+}
+
 /** Test seam: drop the cached preferences and the cooldown history. */
 export function resetNotificationSoundStateForTests(): void {
   resetNotificationSoundPrefsCacheForTests()

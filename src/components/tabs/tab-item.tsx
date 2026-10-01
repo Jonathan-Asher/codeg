@@ -12,7 +12,12 @@ import { Reorder } from "motion/react"
 import type { PanInfo } from "motion/react"
 import { X } from "lucide-react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import { cn, handleMiddleClickClose } from "@/lib/utils"
+import { toErrorMessage } from "@/lib/app-error"
+import { setConversationCritical } from "@/lib/critical-sessions"
+import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
+import { CriticalFlag } from "@/components/conversations/critical-flag"
 import {
   acquireDragSelectionGuard,
   releaseDragSelectionGuard,
@@ -138,6 +143,20 @@ export const TabItem = memo(function TabItem({
 }: TabItemProps) {
   const t = useTranslations("Folder.tabs")
   const itemRef = useRef<HTMLDivElement>(null)
+  // A primitive per tab, so a change to any other conversation's row does not
+  // re-render this tab.
+  const conversationId = tab.conversationId
+  const isCritical = useAppWorkspaceStore(
+    (s) =>
+      conversationId != null &&
+      s.conversations.find((c) => c.id === conversationId)?.critical === true
+  )
+  const handleToggleCritical = useCallback(() => {
+    if (conversationId == null) return
+    setConversationCritical(conversationId, !isCritical).catch((err) => {
+      toast.error(t("criticalToggleFailed", { message: toErrorMessage(err) }))
+    })
+  }, [conversationId, isCritical, t])
 
   const resolvedFolderName = folderName ?? String(tab.folderId)
   const tooltip = folderBranch
@@ -358,6 +377,7 @@ export const TabItem = memo(function TabItem({
             <ConversationStatusDot
               status={tab.status as ConversationStatus | undefined}
             />
+            {isCritical ? <CriticalFlag /> : null}
             <span
               className={cn(
                 // Embedded: grow + shrink as the tab tightens, but instead of an
@@ -410,6 +430,14 @@ export const TabItem = memo(function TabItem({
             {t("closeOthers")}
           </ContextMenuItem>
           <ContextMenuSeparator />
+          {conversationId != null && (
+            <>
+              <ContextMenuItem onSelect={handleToggleCritical}>
+                {isCritical ? t("unmarkCritical") : t("markCritical")}
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+            </>
+          )}
           {/* IDEA-style split-group vocabulary. Plain "Split" seeds the new
               group with a fresh draft (a conversation can't be open in two
               groups at once), "Split and Move" relocates this tab. */}

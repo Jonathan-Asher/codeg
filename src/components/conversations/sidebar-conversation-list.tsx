@@ -190,6 +190,7 @@ import {
 import { cn } from "@/lib/utils"
 import { FolderAliasLabel } from "./folder-alias-label"
 import { toErrorMessage } from "@/lib/app-error"
+import { setConversationCritical } from "@/lib/critical-sessions"
 import { isTurnRunning } from "@/lib/session-activity"
 import { continueInterruptedSession } from "@/lib/session-continue"
 
@@ -2305,6 +2306,19 @@ export function SidebarConversationList({
     [updateConversationLocal]
   )
 
+  // Optimistic like the pin (the row's flag flips at once, and flips back if
+  // the backend refuses). Stable: `t` only changes with the locale.
+  const handleToggleCritical = useCallback(
+    async (id: number, nextCritical: boolean) => {
+      try {
+        await setConversationCritical(id, nextCritical)
+      } catch (err) {
+        toast.error(t("criticalToggleFailed", { message: toErrorMessage(err) }))
+      }
+    },
+    [t]
+  )
+
   // ── Pinned-section drag reorder ──────────────────────────────────────────
   // Pointer-driven (see `usePinnedPointerReorder` for why not HTML5 drag):
   // press a pinned row, move it, release. The new order applies locally at once
@@ -3412,6 +3426,7 @@ export function SidebarConversationList({
         onStatusChange={handleStatusChange}
         onNewConversation={handleNewConversationForFolder}
         onTogglePin={handleTogglePin}
+        onToggleCritical={handleToggleCritical}
         onExportMarkdown={row.pinned ? handleExportMarkdown : undefined}
         depth={row.depth}
         hasChildren={conv.child_count > 0}

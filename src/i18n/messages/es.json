@@ -1973,6 +1973,8 @@
       "attentionCountBadge": "{count, plural, one {# sesión te espera} other {# sesiones te esperan}}",
       "statusCancelledBadge": "Cancelado",
       "worktreeRemovedBadge": "Worktree de origen eliminado",
+      "criticalBadge": "Sesión crítica",
+      "criticalToggleFailed": "No se pudo actualizar la marca crítica: {message}",
       "conversationCountUnit": "{count, plural, one {# conversación} other {# conversaciones}}",
       "emptyFolderHint": "Sin conversaciones",
       "noMatchingConversations": "No hay conversaciones coincidentes",
@@ -2180,6 +2182,8 @@
       "save": "Guardar",
       "pin": "Fijar",
       "unpin": "Dejar de fijar",
+      "markCritical": "Marcar como crítica",
+      "unmarkCritical": "Quitar marca crítica",
       "markCompleted": "Marcar como completada",
       "reopen": "Reabrir",
       "expandSubsessions": "Expandir subconversaciones",
@@ -2349,6 +2353,9 @@
       "closeConversationTab": "Cerrar pestaña de conversación",
       "close": "Cerrar",
       "closeOthers": "Cerrar otros",
+      "markCritical": "Marcar como crítica",
+      "unmarkCritical": "Quitar marca crítica",
+      "criticalToggleFailed": "No se pudo actualizar la marca crítica: {message}",
       "splitRight": "Dividir a la derecha",
       "splitDown": "Dividir abajo",
       "splitAndMoveRight": "Dividir y mover a la derecha",
@@ -5259,6 +5266,57 @@
     "tonePop": "Pop",
     "toneAlert": "Alerta",
     "toneDescend": "Descendente"
+  },
+  "CriticalSessions": {
+    "headline": {
+      "idle": "Sesión crítica en espera",
+      "needsYou": "Una sesión crítica te necesita",
+      "interrupted": "Sesión crítica interrumpida",
+      "stalled": "Una sesión crítica podría estar atascada"
+    },
+    "body": {
+      "idle": "El agente terminó su turno hace {elapsed} y no ha pasado nada desde entonces.",
+      "needsYou": "El agente lleva {elapsed} esperando tu respuesta.",
+      "interrupted": "El último turno se cortó hace {elapsed} y no ha pasado nada desde entonces.",
+      "stalled": "Hay un turno en curso, pero no transmite nada desde hace {elapsed}.",
+      "backgroundStalled": "Hay tareas en segundo plano en curso, pero ninguna avanza desde hace {elapsed}."
+    },
+    "duration": {
+      "seconds": "{count} s",
+      "minutes": "{count} min",
+      "hours": "{count} h"
+    },
+    "notificationTitle": "⚑ {headline}: {session}",
+    "notificationTitleRedacted": "⚑ {headline}",
+    "untitled": "Sesión sin título",
+    "open": "Abrir sesión",
+    "dismiss": "Descartar",
+    "snooze": "Posponer {minutes} min",
+    "reminder": "(recordatorio {count})",
+    "details": {
+      "heading": "Sesión crítica",
+      "mark": "Marcar como crítica",
+      "markHint": "Avísame cuando esta sesión quede inactiva, y de nuevo hasta que actúe.",
+      "stall": "Avisar si un turno podría estar atascado",
+      "stallHint": "Avisa también cuando un turno en curso no transmite nada durante el umbral de bloqueo.",
+      "saveFailed": "No se pudo actualizar la marca crítica: {message}"
+    },
+    "settings": {
+      "title": "Sesiones críticas",
+      "description": "Las sesiones que marcas como críticas (desde el menú de una sesión) te avisan cuando quedan inactivas —el turno terminó, el agente te espera o se interrumpió— y siguen avisando hasta que abras la sesión, respondas o descartes el aviso. Los temporizadores corren en el backend, así que funcionan sin ninguna ventana abierta.",
+      "idleTitle": "Avisar tras inactividad de",
+      "idleHint": "Cuánto tiempo puede estar inactiva una sesión crítica antes del primer aviso.",
+      "repeatTitle": "Repetir cada",
+      "repeatHint": "Con qué frecuencia vuelve el aviso mientras la sesión siga inactiva y sin confirmar.",
+      "repeatOff": "Nunca",
+      "stallTitle": "Umbral de bloqueo",
+      "stallHint": "Un turno en curso que no transmite nada (ni texto ni actividad de herramientas) durante este tiempo se marca como posiblemente atascado. Se puede desactivar por sesión en Detalles de la sesión.",
+      "soundTitle": "Reproducir un sonido",
+      "soundHint": "Reproduce el tono de alerta con cada aviso crítico.",
+      "channelTitle": "Enviar también a los canales de chat",
+      "channelHint": "Envía cada aviso crítico también a tus canales de chat. Sin ninguna ventana conectada, los avisos van allí de todos modos.",
+      "saveFailed": "No se pudo guardar: {message}"
+    }
   },
   "BrowserSettings": {
     "title": "Navegador integrado",

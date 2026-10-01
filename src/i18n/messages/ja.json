@@ -1973,6 +1973,8 @@
       "attentionCountBadge": "{count} 件の会話が対応待ち",
       "statusCancelledBadge": "キャンセル済み",
       "worktreeRemovedBadge": "元の worktree は削除済み",
+      "criticalBadge": "重要セッション",
+      "criticalToggleFailed": "重要マークを更新できませんでした: {message}",
       "conversationCountUnit": "{count} 件",
       "emptyFolderHint": "会話がありません",
       "noMatchingConversations": "一致する会話がありません",
@@ -2180,6 +2182,8 @@
       "save": "保存",
       "pin": "ピン留め",
       "unpin": "ピン留めを解除",
+      "markCritical": "重要としてマーク",
+      "unmarkCritical": "重要マークを解除",
       "markCompleted": "完了にする",
       "reopen": "再開する",
       "expandSubsessions": "サブ会話を展開",
@@ -2349,6 +2353,9 @@
       "closeConversationTab": "会話タブを閉じる",
       "close": "閉じる",
       "closeOthers": "他を閉じる",
+      "markCritical": "重要としてマーク",
+      "unmarkCritical": "重要マークを解除",
+      "criticalToggleFailed": "重要マークを更新できませんでした: {message}",
       "splitRight": "右に分割",
       "splitDown": "下に分割",
       "splitAndMoveRight": "分割して右へ移動",
@@ -5259,6 +5266,57 @@
     "tonePop": "ポップ",
     "toneAlert": "アラート",
     "toneDescend": "下降音"
+  },
+  "CriticalSessions": {
+    "headline": {
+      "idle": "重要セッションが待機中",
+      "needsYou": "重要セッションが対応を待っています",
+      "interrupted": "重要セッションが中断されました",
+      "stalled": "重要セッションが止まっている可能性があります"
+    },
+    "body": {
+      "idle": "エージェントは {elapsed} 前にターンを終え、その後動きがありません。",
+      "needsYou": "エージェントが {elapsed} 間あなたの回答を待っています。",
+      "interrupted": "前回のターンは {elapsed} 前に中断され、その後動きがありません。",
+      "stalled": "ターンは実行中ですが、{elapsed} 間何も出力されていません。",
+      "backgroundStalled": "バックグラウンドタスクは実行中ですが、{elapsed} 間進捗がありません。"
+    },
+    "duration": {
+      "seconds": "{count} 秒",
+      "minutes": "{count} 分",
+      "hours": "{count} 時間"
+    },
+    "notificationTitle": "⚑ {headline}: {session}",
+    "notificationTitleRedacted": "⚑ {headline}",
+    "untitled": "無題のセッション",
+    "open": "セッションを開く",
+    "dismiss": "閉じる",
+    "snooze": "{minutes} 分後に再通知",
+    "reminder": "（{count} 回目の通知）",
+    "details": {
+      "heading": "重要セッション",
+      "mark": "重要としてマーク",
+      "markHint": "このセッションが待機状態になったら通知し、対応するまで繰り返します。",
+      "stall": "ターンが止まっていそうなときに通知",
+      "stallHint": "実行中のターンが停止しきい値の間何も出力しない場合にも通知します。",
+      "saveFailed": "重要マークを更新できませんでした: {message}"
+    },
+    "settings": {
+      "title": "重要セッション",
+      "description": "重要としてマークしたセッション（セッションのメニューから）は、待機状態になると通知します。ターンの終了、エージェントがあなたを待っている、または中断された場合です。セッションを開く、回答する、通知を閉じるまで通知し続けます。タイマーはバックエンドで動くため、ウィンドウを開いていなくても機能します。",
+      "idleTitle": "待機時間がこれを超えたら通知",
+      "idleHint": "重要セッションが最初の通知までに待機できる時間です。",
+      "repeatTitle": "繰り返し間隔",
+      "repeatHint": "セッションが待機中で未確認の間、通知を繰り返す間隔です。",
+      "repeatOff": "繰り返さない",
+      "stallTitle": "停止しきい値",
+      "stallHint": "実行中のターンがこの時間何も出力しない（テキストもツールの動きもない）場合、止まっている可能性があると通知します。セッション詳細でセッションごとにオフにできます。",
+      "soundTitle": "サウンドを再生",
+      "soundHint": "重要な通知のたびにアラート音を鳴らします。",
+      "channelTitle": "チャットチャネルにも送信",
+      "channelHint": "重要な通知をすべてチャットチャネルにも送信します。接続中のウィンドウがない場合は常にそちらに送られます。",
+      "saveFailed": "保存できませんでした: {message}"
+    }
   },
   "BrowserSettings": {
     "title": "内蔵ブラウザ",

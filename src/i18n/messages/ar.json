@@ -1973,6 +1973,8 @@
       "attentionCountBadge": "{count} جلسة بانتظارك",
       "statusCancelledBadge": "ملغى",
       "worktreeRemovedBadge": "تمت إزالة شجرة العمل الأصلية",
+      "criticalBadge": "جلسة حرجة",
+      "criticalToggleFailed": "تعذّر تحديث العلامة الحرجة: {message}",
       "conversationCountUnit": "{count} محادثة",
       "emptyFolderHint": "لا توجد محادثات",
       "noMatchingConversations": "لا توجد محادثات مطابقة",
@@ -2180,6 +2182,8 @@
       "save": "حفظ",
       "pin": "تثبيت",
       "unpin": "إلغاء التثبيت",
+      "markCritical": "وضع علامة حرجة",
+      "unmarkCritical": "إزالة العلامة الحرجة",
       "markCompleted": "وضع علامة كمكتمل",
       "reopen": "إعادة فتح",
       "expandSubsessions": "توسيع المحادثات الفرعية",
@@ -2349,6 +2353,9 @@
       "closeConversationTab": "إغلاق تبويب المحادثة",
       "close": "إغلاق",
       "closeOthers": "إغلاق البقية",
+      "markCritical": "وضع علامة حرجة",
+      "unmarkCritical": "إزالة العلامة الحرجة",
+      "criticalToggleFailed": "تعذّر تحديث العلامة الحرجة: {message}",
       "splitRight": "تقسيم لليمين",
       "splitDown": "تقسيم للأسفل",
       "splitAndMoveRight": "تقسيم ونقل لليمين",
@@ -5259,6 +5266,57 @@
     "tonePop": "طقّة",
     "toneAlert": "تنبيه",
     "toneDescend": "نغمة هابطة"
+  },
+  "CriticalSessions": {
+    "headline": {
+      "idle": "جلسة حرجة في الانتظار",
+      "needsYou": "جلسة حرجة تحتاج إليك",
+      "interrupted": "تمت مقاطعة جلسة حرجة",
+      "stalled": "قد تكون جلسة حرجة عالقة"
+    },
+    "body": {
+      "idle": "أنهى الوكيل دوره منذ {elapsed} ولم يحدث شيء منذ ذلك الحين.",
+      "needsYou": "ينتظر الوكيل إجابتك منذ {elapsed}.",
+      "interrupted": "تمت مقاطعة الدور الأخير منذ {elapsed} ولم يحدث شيء منذ ذلك الحين.",
+      "stalled": "هناك دور قيد التشغيل، لكن لم يُبث أي شيء منذ {elapsed}.",
+      "backgroundStalled": "مهام الخلفية قيد التشغيل، لكن لم يحرز أي منها تقدمًا منذ {elapsed}."
+    },
+    "duration": {
+      "seconds": "{count} ث",
+      "minutes": "{count} د",
+      "hours": "{count} س"
+    },
+    "notificationTitle": "⚑ {headline}: {session}",
+    "notificationTitleRedacted": "⚑ {headline}",
+    "untitled": "جلسة بلا عنوان",
+    "open": "فتح الجلسة",
+    "dismiss": "تجاهل",
+    "snooze": "تأجيل {minutes} د",
+    "reminder": "(تذكير {count})",
+    "details": {
+      "heading": "جلسة حرجة",
+      "mark": "وضع علامة حرجة",
+      "markHint": "نبّهني عندما تصبح هذه الجلسة خاملة، ومرة أخرى حتى أتصرف.",
+      "stall": "التنبيه عندما قد يكون الدور عالقًا",
+      "stallHint": "ينبّه أيضًا عندما لا يبث دور قيد التشغيل أي شيء طوال حد التعليق.",
+      "saveFailed": "تعذّر تحديث العلامة الحرجة: {message}"
+    },
+    "settings": {
+      "title": "الجلسات الحرجة",
+      "description": "الجلسات التي تضع عليها علامة حرجة (من قائمة الجلسة) تنبّهك عندما تصبح خاملة — انتهى الدور، أو ينتظرك الوكيل، أو تمت مقاطعتها — وتواصل التنبيه حتى تفتح الجلسة أو تجيب أو تتجاهل التنبيه. تعمل المؤقتات في الخلفية، لذا تعمل دون أي نافذة مفتوحة.",
+      "idleTitle": "التنبيه بعد خمول لمدة",
+      "idleHint": "المدة التي يمكن أن تبقى فيها جلسة حرجة خاملة قبل التنبيه الأول.",
+      "repeatTitle": "التكرار كل",
+      "repeatHint": "عدد مرات عودة التنبيه ما دامت الجلسة خاملة ودون تأكيد.",
+      "repeatOff": "أبدًا",
+      "stallTitle": "حد التعليق",
+      "stallHint": "الدور قيد التشغيل الذي لا يبث شيئًا (لا نص ولا نشاط أدوات) طوال هذه المدة يُبلَّغ عنه كعالق محتمل. يمكن إيقافه لكل جلسة في تفاصيل الجلسة.",
+      "soundTitle": "تشغيل صوت",
+      "soundHint": "تشغيل نغمة التنبيه مع كل تنبيه حرج.",
+      "channelTitle": "الإرسال أيضًا إلى قنوات الدردشة",
+      "channelHint": "إرسال كل تنبيه حرج إلى قنوات الدردشة أيضًا. عند عدم اتصال أي نافذة، تذهب التنبيهات إلى هناك على أي حال.",
+      "saveFailed": "تعذّر الحفظ: {message}"
+    }
   },
   "BrowserSettings": {
     "title": "المتصفح المدمج",

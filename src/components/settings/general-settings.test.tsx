@@ -54,6 +54,15 @@ vi.mock("@/lib/api", () => ({
   })),
   getAutoResumeSettings: vi.fn(async () => ({ enabled: true })),
   updateAutoResumeSettings: vi.fn(async (v: unknown) => v),
+  getCriticalSessionSettings: vi.fn(async () => ({
+    idle_secs: 60,
+    repeat_secs: 300,
+    stall_secs: 300,
+    sound: true,
+    send_to_channel: false,
+  })),
+  updateCriticalSessionSettings: vi.fn(async (v: unknown) => v),
+  listChatChannels: vi.fn(async () => []),
 }))
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
