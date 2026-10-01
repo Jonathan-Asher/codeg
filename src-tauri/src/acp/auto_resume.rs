@@ -877,6 +877,8 @@ mod tests {
             delegation_call_id: None,
             origin_cwd: None,
             turn_state: Some(ConversationTurnState::Interrupted),
+            critical: false,
+            critical_stall: true,
         }
     }
 }

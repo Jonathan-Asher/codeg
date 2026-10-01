@@ -2889,6 +2889,8 @@ mod tests {
             delegation_call_id: Some("call-1".into()),
             origin_cwd: None,
             turn_state: None,
+            critical: false,
+            critical_stall: true,
         }
     }
 
@@ -6692,6 +6694,8 @@ mod tests {
                 delegation_call_id: None,
                 origin_cwd: None,
                 turn_state: None,
+                critical: false,
+                critical_stall: true,
             },
             turns,
             session_stats: None,

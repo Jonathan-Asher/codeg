@@ -2704,6 +2704,8 @@ impl ConnectionManager {
                         turn_state: Set(None),
                         selector_state: Set(None),
                         auto_resume: Set(None),
+                        critical: Set(false),
+                        critical_stall: Set(true),
                     };
                     let inserted = sibling.insert(txn).await?;
                     Ok(inserted.id)

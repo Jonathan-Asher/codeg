@@ -136,6 +136,15 @@ pub struct Model {
     /// [`ConversationAutoResume`]; written only through the
     /// `conversation_service` turn-state functions.
     pub auto_resume: Option<ConversationAutoResume>,
+    /// The user marked this conversation critical: the critical session
+    /// watchdog (`acp::critical_watch`) alerts when it sits idle with nothing
+    /// happening. A view-and-alerting preference, so setting it never bumps
+    /// `updated_at`.
+    pub critical: bool,
+    /// Stall detection for a critical conversation: alert when a working turn
+    /// has streamed nothing for the stall threshold. Defaults on; ignored
+    /// while `critical` is false.
+    pub critical_stall: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

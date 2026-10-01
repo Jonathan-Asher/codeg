@@ -3,6 +3,7 @@ pub mod agent_process;
 pub mod agent_session;
 pub mod antigravity_login;
 pub mod auto_resume;
+pub mod critical_watch;
 pub mod background_watch;
 pub mod binary_cache;
 pub mod browser_tools;

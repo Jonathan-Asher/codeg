@@ -150,6 +150,30 @@ pub fn build_router(
             post(handlers::auto_resume::stop_auto_resume),
         )
         .route(
+            "/update_conversation_critical",
+            post(handlers::critical_sessions::update_conversation_critical),
+        )
+        .route(
+            "/get_critical_alerts",
+            post(handlers::critical_sessions::get_critical_alerts),
+        )
+        .route(
+            "/ack_critical_session",
+            post(handlers::critical_sessions::ack_critical_session),
+        )
+        .route(
+            "/snooze_critical_session",
+            post(handlers::critical_sessions::snooze_critical_session),
+        )
+        .route(
+            "/get_critical_session_settings",
+            post(handlers::critical_sessions::get_critical_session_settings),
+        )
+        .route(
+            "/update_critical_session_settings",
+            post(handlers::critical_sessions::update_critical_session_settings),
+        )
+        .route(
             "/message_search",
             post(handlers::message_search::message_search),
         )

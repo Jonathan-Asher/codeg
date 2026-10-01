@@ -124,6 +124,8 @@ async fn create_inner(
         turn_state: Set(None),
         selector_state: Set(None),
         auto_resume: Set(None),
+        critical: Set(false),
+        critical_stall: Set(true),
     };
     Ok(model.insert(conn).await?)
 }
@@ -1092,6 +1094,39 @@ pub async fn update_pin(
     Ok(())
 }
 
+/// Mark or unmark a conversation critical, and optionally set its stall
+/// detection switch (`None` leaves it as it is). Like [`update_pin`] this is a
+/// preference, not activity: only the two columns are written and
+/// `updated_at` stays put. Errors when the row does not exist or is deleted.
+pub async fn update_critical(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    critical: bool,
+    stall: Option<bool>,
+) -> Result<conversation::Model, DbError> {
+    let conv = conversation::Entity::find_by_id(conversation_id)
+        .filter(conversation::Column::DeletedAt.is_null())
+        .one(conn)
+        .await?
+        .ok_or_else(|| DbError::Migration(format!("Conversation not found: {conversation_id}")))?;
+    let mut active: conversation::ActiveModel = conv.into();
+    active.critical = Set(critical);
+    if let Some(stall) = stall {
+        active.critical_stall = Set(stall);
+    }
+    Ok(active.update(conn).await?)
+}
+
+/// Every live conversation marked critical — what the critical session
+/// watchdog watches. A partial scan in practice: few rows are ever critical.
+pub async fn list_critical(conn: &DatabaseConnection) -> Result<Vec<conversation::Model>, DbError> {
+    Ok(conversation::Entity::find()
+        .filter(conversation::Column::Critical.eq(true))
+        .filter(conversation::Column::DeletedAt.is_null())
+        .all(conn)
+        .await?)
+}
+
 /// Persist a manual order for the sidebar's "Pinned" section: `pin_order =
 /// index` for each id in `ordered_ids` (top to bottom, 0-based). The frontend
 /// sends the section's full order, so every pinned row it shows is written.
@@ -1536,6 +1571,8 @@ impl CarriedOverRow {
             turn_state: Set(None),
             selector_state: Set(self.selector_state),
             auto_resume: Set(None),
+            critical: Set(false),
+            critical_stall: Set(true),
         }
     }
 }
@@ -1669,7 +1706,7 @@ pub async fn restore_soft_deleted(
     Ok(res.rows_affected > 0)
 }
 
-fn parse_agent_type(s: &str) -> AgentType {
+pub(crate) fn parse_agent_type(s: &str) -> AgentType {
     match serde_json::from_value(serde_json::Value::String(s.to_string())) {
         Ok(at) => at,
         Err(_) => {
@@ -1713,6 +1750,8 @@ fn conv_to_summary(r: conversation::Model) -> DbConversationSummary {
         delegation_call_id: r.delegation_call_id,
         origin_cwd: r.origin_cwd,
         turn_state: r.turn_state,
+        critical: r.critical,
+        critical_stall: r.critical_stall,
     }
 }
 
@@ -2294,6 +2333,63 @@ mod tests {
             "a deleted conversation is not something an open can resurrect a \
              column on"
         );
+    }
+
+    #[tokio::test]
+    async fn update_critical_marks_unmarks_and_lists_without_bumping_updated_at() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/codeg-update-critical").await;
+        let conv = create(&db.conn, folder, AgentType::ClaudeCode, Some("c".into()), None)
+            .await
+            .expect("create");
+        let other = create(&db.conn, folder, AgentType::Codex, Some("o".into()), None)
+            .await
+            .expect("create other");
+
+        let before = get_by_id(&db.conn, conv.id).await.expect("get before");
+        assert!(!before.critical, "a new conversation is not critical");
+        assert!(before.critical_stall, "stall detection defaults on");
+        assert!(list_critical(&db.conn).await.expect("list").is_empty());
+
+        // Mark: the flag reaches the summary, `updated_at` stays, the stall
+        // switch is left alone when not given.
+        update_critical(&db.conn, conv.id, true, None)
+            .await
+            .expect("mark");
+        let marked = get_by_id(&db.conn, conv.id).await.expect("get marked");
+        assert!(marked.critical);
+        assert!(marked.critical_stall);
+        assert_eq!(marked.updated_at, before.updated_at, "no activity bump");
+        let listed: Vec<i32> = list_critical(&db.conn)
+            .await
+            .expect("list")
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(listed, vec![conv.id], "only the marked row is watched");
+
+        // The stall switch is per session.
+        update_critical(&db.conn, conv.id, true, Some(false))
+            .await
+            .expect("stall off");
+        let no_stall = get_by_id(&db.conn, conv.id).await.expect("get");
+        assert!(no_stall.critical && !no_stall.critical_stall);
+
+        // Unmark.
+        update_critical(&db.conn, conv.id, false, None)
+            .await
+            .expect("unmark");
+        assert!(!get_by_id(&db.conn, conv.id).await.expect("get").critical);
+        assert!(list_critical(&db.conn).await.expect("list").is_empty());
+
+        // A deleted conversation is never watched, and cannot be marked.
+        update_critical(&db.conn, other.id, true, None)
+            .await
+            .expect("mark other");
+        soft_delete(&db.conn, other.id).await.expect("delete");
+        assert!(list_critical(&db.conn).await.expect("list").is_empty());
+        assert!(update_critical(&db.conn, other.id, true, None).await.is_err());
+        assert!(update_critical(&db.conn, 999_999, true, None).await.is_err());
     }
 
     #[tokio::test]

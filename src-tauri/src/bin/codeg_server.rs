@@ -552,6 +552,15 @@ async fn async_main() -> ExitCode {
         state.data_dir.clone(),
     ));
 
+    // Alert on critical sessions that sit idle or go silent (mirrors lib.rs
+    // setup).
+    tokio::spawn(codeg_lib::acp::critical_watch::critical_watch_task(
+        state.acp_event_bus.clone(),
+        state.connection_manager.clone_ref(),
+        state.db.conn.clone(),
+        state.emitter.clone(),
+    ));
+
     // Config-sync uploader (mirrors lib.rs setup): sleeps a minute, then
     // compares the configuration's hash every interval and uploads only when
     // it changed. Does nothing at all until a WebDAV endpoint is configured.
