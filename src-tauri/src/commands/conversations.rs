@@ -2891,6 +2891,7 @@ mod tests {
             turn_state: None,
             critical: false,
             critical_stall: true,
+            selector_state: None,
         }
     }
 
@@ -6696,6 +6697,7 @@ mod tests {
                 turn_state: None,
                 critical: false,
                 critical_stall: true,
+                selector_state: None,
             },
             turns,
             session_stats: None,

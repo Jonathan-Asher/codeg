@@ -19,7 +19,6 @@ import {
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import {
-  getCachedSelectors,
   useAcpActions,
   useAcpEvent,
   useConnectionStore,
@@ -165,7 +164,12 @@ import { getAgentLabel } from "@/lib/custom-agents"
 import {
   getSavedModeId,
   saveModePreference,
+  useSavedSelectorPrefs,
 } from "@/lib/selector-prefs-storage"
+import {
+  selectorValuesFromRecord,
+  type SelectorValues,
+} from "@/lib/selector-display"
 import {
   adoptLegacyNewConversationDraft,
   buildConversationDraftStorageKey,
@@ -664,8 +668,38 @@ const ConversationTabView = memo(function ConversationTabView({
   // effect, and the connection sticks with the wrong cwd.
   const workingDirForConnection = workingDir ?? folder?.path
 
+  // What THIS tab's session runs with, for the composer to show while its own
+  // connection has not reported yet (idle-swept, reopened after a restart,
+  // opened in another window): the conversation's own record, kept current by
+  // the row upserts — never the values another conversation was last seen
+  // with. A brand-new chat shows the per-agent picks it will be started with.
+  const recordedSelectorState = useAppWorkspaceStore((s) =>
+    dbConversationId != null
+      ? s.conversations.find((c) => c.id === dbConversationId)?.selector_state
+      : undefined
+  )
+  const detailSelectorState = detail?.summary.selector_state
+  const savedSelectorPrefs = useSavedSelectorPrefs(
+    selectedAgent,
+    dbConversationId == null
+  )
+  const storedSelectors = useMemo<SelectorValues | null>(
+    () =>
+      dbConversationId != null
+        ? selectorValuesFromRecord(recordedSelectorState ?? detailSelectorState)
+        : savedSelectorPrefs,
+    [
+      dbConversationId,
+      recordedSelectorState,
+      detailSelectorState,
+      savedSelectorPrefs,
+    ]
+  )
+
   const {
     conn,
+    displayModes,
+    displayConfigOptions,
     modeLoading,
     configOptionsLoading,
     selectorsLoading,
@@ -699,6 +733,7 @@ const ConversationTabView = memo(function ConversationTabView({
       () => isReparentUnmount(useTabStore.getState(), tabId, groupId),
       [tabId, groupId]
     ),
+    storedSelectors,
   })
   const { status: connStatus, sessionId: connSessionId } = conn
 
@@ -750,16 +785,14 @@ const ConversationTabView = memo(function ConversationTabView({
   // must NOT surface the previous agent's selectors / ready-state as the
   // selected one's: doing so showed the old agent's model + config list and
   // (worse) let a send reach the wrong agent. Reconcile everything the composer
-  // reads against `selectedAgent`, falling back to that agent's own cached
-  // selectors (empty until it connects).
+  // reads against `selectedAgent`. The selectors come reconciled from the
+  // lifecycle hook: the connection's own only while it is bound to
+  // `selectedAgent`, otherwise this tab's stored values over that agent's
+  // option list — never another session's current values.
   const connIsForOtherAgent =
     conn.agentType != null && conn.agentType !== selectedAgent
-  const effectiveModes = connIsForOtherAgent
-    ? (getCachedSelectors(selectedAgent)?.modes ?? null)
-    : conn.modes
-  const effectiveConfigOptions = connIsForOtherAgent
-    ? (getCachedSelectors(selectedAgent)?.configOptions ?? null)
-    : conn.configOptions
+  const effectiveModes = displayModes
+  const effectiveConfigOptions = displayConfigOptions
   // The live connection is ready for THIS tab only when it's connected AND its
   // cwd matches the tab's intended working dir. A just-retargeted chat draft (or
   // any mid-reconnect) can briefly read a stale "connected" for the PREVIOUS cwd;

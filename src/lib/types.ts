@@ -535,6 +535,18 @@ export interface DbConversationSummary {
   /** Whether a critical conversation also alerts when a working turn goes
    *  silent ("may be stuck"). On unless turned off for this session. */
   critical_stall?: boolean
+  /** The mode / model / effort this conversation's session last had in
+   *  effect, as the backend records it per conversation. A tab whose session
+   *  is not attached yet shows these until the agent reports its own (see
+   *  `lib/selector-display.ts`). Absent when nothing is recorded yet. */
+  selector_state?: ConversationSelectorState | null
+}
+
+/** Mirrors Rust `conversation_service::ConversationSelectorState` (camelCase on
+ *  the wire): the selector values one conversation's session runs with. */
+export interface ConversationSelectorState {
+  modeId?: string | null
+  configValues?: Record<string, string> | null
 }
 
 /** Mirrors Rust `ConversationTurnState`

@@ -2199,6 +2199,8 @@
       "filePlaceholder": "البحث في الملفات أو المجلدات...",
       "messagePlaceholder": "البحث في محتوى الرسائل...",
       "allAgents": "الكل",
+      "scopeAllFolders": "كل المجلدات",
+      "scopeThisFolder": "{name} فقط",
       "searching": "جارٍ البحث...",
       "typeToSearch": "اكتب للبحث في المحادثات",
       "typeToSearchFiles": "اكتب للبحث في الملفات أو المجلدات",

@@ -1752,6 +1752,7 @@ fn conv_to_summary(r: conversation::Model) -> DbConversationSummary {
         turn_state: r.turn_state,
         critical: r.critical,
         critical_stall: r.critical_stall,
+        selector_state: ConversationSelectorState::parse(r.selector_state.as_deref()),
     }
 }
 

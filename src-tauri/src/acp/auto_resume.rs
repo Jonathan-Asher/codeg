@@ -879,6 +879,7 @@ mod tests {
             turn_state: Some(ConversationTurnState::Interrupted),
             critical: false,
             critical_stall: true,
+            selector_state: None,
         }
     }
 }

@@ -2199,6 +2199,8 @@
       "filePlaceholder": "Search files or directories...",
       "messagePlaceholder": "Search message content...",
       "allAgents": "All",
+      "scopeAllFolders": "All folders",
+      "scopeThisFolder": "Only {name}",
       "searching": "Searching...",
       "typeToSearch": "Type to search conversations",
       "typeToSearchFiles": "Type to search files or directories",
