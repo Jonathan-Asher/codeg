@@ -80,6 +80,13 @@ pub struct DbConversationSummary {
     /// such a server deserializable.
     #[serde(default)]
     pub turn_state: Option<ConversationTurnState>,
+    /// Mirror of `conversation.critical`: the user marked this conversation
+    /// critical, so the backend alerts when it sits idle (see
+    /// `acp::critical_watch`). Drives the red flag on its sidebar row and tab.
+    pub critical: bool,
+    /// Mirror of `conversation.critical_stall`: whether a critical
+    /// conversation also alerts when a working turn goes silent.
+    pub critical_stall: bool,
     /// Mirror of `conversation.selector_state`: the mode/model/effort this
     /// conversation's session last had in effect. A tab whose session is not
     /// attached yet (idle-swept, reopened after a restart, another window)

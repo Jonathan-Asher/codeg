@@ -67,6 +67,9 @@ export function withLiveSummaryFields(
     status: live.status,
     updated_at: live.updated_at,
     turn_state: live.turn_state,
+    // Marked or unmarked critical from any client (or this one, optimistically).
+    critical: live.critical,
+    critical_stall: live.critical_stall,
   }
 }
 

@@ -2013,6 +2013,8 @@
       "attentionCountBadge": "{count} 个会话在等你处理",
       "statusCancelledBadge": "已取消",
       "worktreeRemovedBadge": "源 worktree 已删除",
+      "criticalBadge": "关键会话",
+      "criticalToggleFailed": "无法更新关键标记：{message}",
       "conversationCountUnit": "{count} 条",
       "emptyFolderHint": "暂无会话",
       "noMatchingConversations": "未找到匹配的会话",
@@ -2220,6 +2222,8 @@
       "save": "保存",
       "pin": "置顶",
       "unpin": "取消置顶",
+      "markCritical": "标记为关键",
+      "unmarkCritical": "取消关键标记",
       "markCompleted": "标记为已完成",
       "reopen": "重新打开",
       "expandSubsessions": "展开子会话",
@@ -2391,6 +2395,9 @@
       "closeConversationTab": "关闭会话标签",
       "close": "关闭",
       "closeOthers": "关闭其它",
+      "markCritical": "标记为关键",
+      "unmarkCritical": "取消关键标记",
+      "criticalToggleFailed": "无法更新关键标记：{message}",
       "splitRight": "向右拆分",
       "splitDown": "向下拆分",
       "splitAndMoveRight": "拆分并右移",
@@ -5301,6 +5308,57 @@
     "tonePop": "轻点",
     "toneAlert": "警示",
     "toneDescend": "下行音"
+  },
+  "CriticalSessions": {
+    "headline": {
+      "idle": "关键会话等待中",
+      "needsYou": "关键会话需要你处理",
+      "interrupted": "关键会话已中断",
+      "stalled": "关键会话可能卡住了"
+    },
+    "body": {
+      "idle": "智能体在 {elapsed} 前完成了本轮，之后没有任何动作。",
+      "needsYou": "智能体已等待你的回答 {elapsed}。",
+      "interrupted": "上一轮在 {elapsed} 前被中断，之后没有任何动作。",
+      "stalled": "本轮仍在运行，但已有 {elapsed} 没有任何输出。",
+      "backgroundStalled": "后台任务仍在运行，但已有 {elapsed} 没有任何进展。"
+    },
+    "duration": {
+      "seconds": "{count} 秒",
+      "minutes": "{count} 分钟",
+      "hours": "{count} 小时"
+    },
+    "notificationTitle": "⚑ {headline}：{session}",
+    "notificationTitleRedacted": "⚑ {headline}",
+    "untitled": "未命名会话",
+    "open": "打开会话",
+    "dismiss": "忽略",
+    "snooze": "稍后提醒（{minutes} 分钟）",
+    "reminder": "（第 {count} 次提醒）",
+    "details": {
+      "heading": "关键会话",
+      "mark": "标记为关键",
+      "markHint": "当此会话空闲时提醒我，并持续提醒直到我处理。",
+      "stall": "本轮可能卡住时提醒",
+      "stallHint": "运行中的一轮在卡住阈值内没有任何输出时也提醒。",
+      "saveFailed": "无法更新关键标记：{message}"
+    },
+    "settings": {
+      "title": "关键会话",
+      "description": "被你标记为关键的会话（在会话菜单中标记）空闲时会提醒你——本轮结束、智能体在等你、或被中断——并持续提醒，直到你打开会话、作答或忽略提醒。计时在后端运行，即使没有打开任何窗口也有效。",
+      "idleTitle": "空闲多久后提醒",
+      "idleHint": "关键会话空闲多久后发出第一次提醒。",
+      "repeatTitle": "重复间隔",
+      "repeatHint": "会话保持空闲且未确认时，提醒再次出现的频率。",
+      "repeatOff": "不重复",
+      "stallTitle": "卡住阈值",
+      "stallHint": "运行中的一轮在这么长时间内没有任何输出（无文本、无工具活动）时，视为可能卡住。可在会话详情中按会话关闭。",
+      "soundTitle": "播放声音",
+      "soundHint": "每次关键提醒时播放提示音。",
+      "channelTitle": "同时发送到聊天渠道",
+      "channelHint": "把每条关键提醒也发送到你的聊天渠道。没有窗口连接时，提醒总会发送到那里。",
+      "saveFailed": "无法保存：{message}"
+    }
   },
   "BrowserSettings": {
     "title": "内置浏览器",

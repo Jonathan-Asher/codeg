@@ -2013,6 +2013,8 @@
       "attentionCountBadge": "{count, plural, one {# session vous attend} other {# sessions vous attendent}}",
       "statusCancelledBadge": "Annulé",
       "worktreeRemovedBadge": "Worktree d'origine supprimé",
+      "criticalBadge": "Session critique",
+      "criticalToggleFailed": "Impossible de mettre à jour la marque critique : {message}",
       "conversationCountUnit": "{count, plural, one {# conversation} other {# conversations}}",
       "emptyFolderHint": "Aucune conversation",
       "noMatchingConversations": "Aucune conversation correspondante",
@@ -2220,6 +2222,8 @@
       "save": "Enregistrer",
       "pin": "Épingler",
       "unpin": "Désépingler",
+      "markCritical": "Marquer comme critique",
+      "unmarkCritical": "Retirer la marque critique",
       "markCompleted": "Marquer comme terminé",
       "reopen": "Rouvrir",
       "expandSubsessions": "Développer les sous-conversations",
@@ -2391,6 +2395,9 @@
       "closeConversationTab": "Fermer l’onglet de conversation",
       "close": "Fermer",
       "closeOthers": "Fermer les autres",
+      "markCritical": "Marquer comme critique",
+      "unmarkCritical": "Retirer la marque critique",
+      "criticalToggleFailed": "Impossible de mettre à jour la marque critique : {message}",
       "splitRight": "Diviser à droite",
       "splitDown": "Diviser en bas",
       "splitAndMoveRight": "Diviser et déplacer à droite",
@@ -5301,6 +5308,57 @@
     "tonePop": "Pop",
     "toneAlert": "Alerte",
     "toneDescend": "Descendant"
+  },
+  "CriticalSessions": {
+    "headline": {
+      "idle": "Session critique en attente",
+      "needsYou": "Une session critique a besoin de vous",
+      "interrupted": "Session critique interrompue",
+      "stalled": "Une session critique est peut-être bloquée"
+    },
+    "body": {
+      "idle": "L'agent a terminé son tour il y a {elapsed}, et rien ne s'est passé depuis.",
+      "needsYou": "L'agent attend votre réponse depuis {elapsed}.",
+      "interrupted": "Le dernier tour a été interrompu il y a {elapsed}, et rien ne s'est passé depuis.",
+      "stalled": "Un tour est en cours, mais rien n'a été diffusé depuis {elapsed}.",
+      "backgroundStalled": "Des tâches d'arrière-plan tournent, mais aucune n'a progressé depuis {elapsed}."
+    },
+    "duration": {
+      "seconds": "{count} s",
+      "minutes": "{count} min",
+      "hours": "{count} h"
+    },
+    "notificationTitle": "⚑ {headline} : {session}",
+    "notificationTitleRedacted": "⚑ {headline}",
+    "untitled": "Session sans titre",
+    "open": "Ouvrir la session",
+    "dismiss": "Ignorer",
+    "snooze": "Rappeler dans {minutes} min",
+    "reminder": "(rappel {count})",
+    "details": {
+      "heading": "Session critique",
+      "mark": "Marquer comme critique",
+      "markHint": "M'alerter quand cette session reste inactive, et de nouveau jusqu'à ce que j'agisse.",
+      "stall": "Alerter quand un tour est peut-être bloqué",
+      "stallHint": "Alerte aussi quand un tour en cours ne diffuse rien pendant le seuil de blocage.",
+      "saveFailed": "Impossible de mettre à jour la marque critique : {message}"
+    },
+    "settings": {
+      "title": "Sessions critiques",
+      "description": "Les sessions que vous marquez comme critiques (depuis le menu d'une session) vous alertent quand elles restent inactives — le tour est terminé, l'agent vous attend ou il a été interrompu — et continuent jusqu'à ce que vous ouvriez la session, répondiez ou ignoriez l'alerte. Les minuteurs tournent dans le backend, ils fonctionnent donc sans fenêtre ouverte.",
+      "idleTitle": "Alerter après une inactivité de",
+      "idleHint": "Combien de temps une session critique peut rester inactive avant la première alerte.",
+      "repeatTitle": "Répéter toutes les",
+      "repeatHint": "La fréquence à laquelle l'alerte revient tant que la session reste inactive et non confirmée.",
+      "repeatOff": "Jamais",
+      "stallTitle": "Seuil de blocage",
+      "stallHint": "Un tour en cours qui ne diffuse rien (ni texte, ni activité d'outil) pendant cette durée est signalé comme peut-être bloqué. Désactivable par session dans les détails de la session.",
+      "soundTitle": "Jouer un son",
+      "soundHint": "Joue la tonalité d'alerte avec chaque alerte critique.",
+      "channelTitle": "Envoyer aussi aux canaux de chat",
+      "channelHint": "Envoie chaque alerte critique à vos canaux de chat aussi. Sans fenêtre connectée, les alertes y vont de toute façon.",
+      "saveFailed": "Impossible d'enregistrer : {message}"
+    }
   },
   "BrowserSettings": {
     "title": "Navigateur intégré",

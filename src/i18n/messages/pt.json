@@ -2013,6 +2013,8 @@
       "attentionCountBadge": "{count, plural, one {# sessão aguardando você} other {# sessões aguardando você}}",
       "statusCancelledBadge": "Cancelado",
       "worktreeRemovedBadge": "Worktree de origem removida",
+      "criticalBadge": "Sessão crítica",
+      "criticalToggleFailed": "Não foi possível atualizar a marca crítica: {message}",
       "conversationCountUnit": "{count, plural, one {# conversa} other {# conversas}}",
       "emptyFolderHint": "Sem conversas",
       "noMatchingConversations": "Nenhuma conversa correspondente",
@@ -2220,6 +2222,8 @@
       "save": "Salvar",
       "pin": "Fixar",
       "unpin": "Desafixar",
+      "markCritical": "Marcar como crítica",
+      "unmarkCritical": "Desmarcar crítica",
       "markCompleted": "Marcar como concluída",
       "reopen": "Reabrir",
       "expandSubsessions": "Expandir subconversas",
@@ -2391,6 +2395,9 @@
       "closeConversationTab": "Fechar aba de conversa",
       "close": "Fechar",
       "closeOthers": "Fechar outros",
+      "markCritical": "Marcar como crítica",
+      "unmarkCritical": "Desmarcar crítica",
+      "criticalToggleFailed": "Não foi possível atualizar a marca crítica: {message}",
       "splitRight": "Dividir à direita",
       "splitDown": "Dividir abaixo",
       "splitAndMoveRight": "Dividir e mover para a direita",
@@ -5301,6 +5308,57 @@
     "tonePop": "Pop",
     "toneAlert": "Alerta",
     "toneDescend": "Descendente"
+  },
+  "CriticalSessions": {
+    "headline": {
+      "idle": "Sessão crítica aguardando",
+      "needsYou": "Uma sessão crítica precisa de você",
+      "interrupted": "Sessão crítica interrompida",
+      "stalled": "Uma sessão crítica pode estar travada"
+    },
+    "body": {
+      "idle": "O agente terminou o turno há {elapsed} e nada aconteceu desde então.",
+      "needsYou": "O agente está aguardando sua resposta há {elapsed}.",
+      "interrupted": "O último turno foi interrompido há {elapsed} e nada aconteceu desde então.",
+      "stalled": "Um turno está em andamento, mas nada foi transmitido há {elapsed}.",
+      "backgroundStalled": "Tarefas em segundo plano estão em execução, mas nenhuma progrediu há {elapsed}."
+    },
+    "duration": {
+      "seconds": "{count} s",
+      "minutes": "{count} min",
+      "hours": "{count} h"
+    },
+    "notificationTitle": "⚑ {headline}: {session}",
+    "notificationTitleRedacted": "⚑ {headline}",
+    "untitled": "Sessão sem título",
+    "open": "Abrir sessão",
+    "dismiss": "Dispensar",
+    "snooze": "Adiar {minutes} min",
+    "reminder": "(lembrete {count})",
+    "details": {
+      "heading": "Sessão crítica",
+      "mark": "Marcar como crítica",
+      "markHint": "Avise-me quando esta sessão ficar ociosa, e de novo até eu agir.",
+      "stall": "Avisar quando um turno pode estar travado",
+      "stallHint": "Avisa também quando um turno em andamento não transmite nada durante o limite de travamento.",
+      "saveFailed": "Não foi possível atualizar a marca crítica: {message}"
+    },
+    "settings": {
+      "title": "Sessões críticas",
+      "description": "Sessões que você marca como críticas (no menu de uma sessão) avisam quando ficam ociosas — o turno terminou, o agente espera por você ou foi interrompido — e continuam avisando até você abrir a sessão, responder ou dispensar o aviso. Os temporizadores rodam no backend, então funcionam sem nenhuma janela aberta.",
+      "idleTitle": "Avisar após ociosidade de",
+      "idleHint": "Quanto tempo uma sessão crítica pode ficar ociosa antes do primeiro aviso.",
+      "repeatTitle": "Repetir a cada",
+      "repeatHint": "Com que frequência o aviso volta enquanto a sessão continuar ociosa e sem confirmação.",
+      "repeatOff": "Nunca",
+      "stallTitle": "Limite de travamento",
+      "stallHint": "Um turno em andamento que não transmite nada (sem texto, sem atividade de ferramentas) por este tempo é sinalizado como possivelmente travado. Desative por sessão em Detalhes da sessão.",
+      "soundTitle": "Tocar um som",
+      "soundHint": "Toca o tom de alerta a cada aviso crítico.",
+      "channelTitle": "Enviar também aos canais de chat",
+      "channelHint": "Envia cada aviso crítico também aos seus canais de chat. Sem nenhuma janela conectada, os avisos vão para lá de qualquer forma.",
+      "saveFailed": "Não foi possível salvar: {message}"
+    }
   },
   "BrowserSettings": {
     "title": "Navegador integrado",

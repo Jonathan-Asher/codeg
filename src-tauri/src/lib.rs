@@ -95,6 +95,7 @@ mod tauri_app {
         config_sync,
         attention as attention_commands,
         auto_resume as auto_resume_commands,
+        critical_sessions as critical_sessions_commands,
         conversation_export as conversation_export_commands,
         message_search as message_search_commands,
         conversations,
@@ -1265,6 +1266,17 @@ mod tauri_app {
                     effective_data_dir.clone(),
                 ));
 
+                // Alert on critical sessions that sit idle or go silent, with
+                // or without a window open. Mirrored in `bin/codeg_server.rs`.
+                tauri::async_runtime::spawn(crate::acp::critical_watch::critical_watch_task(
+                    app.state::<std::sync::Arc<crate::acp::InternalEventBus>>()
+                        .inner()
+                        .clone(),
+                    app.state::<ConnectionManager>().clone_ref(),
+                    app.state::<crate::db::AppDatabase>().conn.clone(),
+                    crate::web::event_bridge::EventEmitter::Tauri(app.handle().clone()),
+                ));
+
                 // OS `codeg://` URLs. Register the listener after the DB is
                 // live so a warm-start click can look the conversation up.
                 // Cold-start URLs are also read here and baked into the main
@@ -1689,6 +1701,12 @@ mod tauri_app {
                 auto_resume_commands::update_auto_resume_settings,
                 auto_resume_commands::get_auto_resume_status,
                 auto_resume_commands::stop_auto_resume,
+                critical_sessions_commands::update_conversation_critical,
+                critical_sessions_commands::get_critical_alerts,
+                critical_sessions_commands::ack_critical_session,
+                critical_sessions_commands::snooze_critical_session,
+                critical_sessions_commands::get_critical_session_settings,
+                critical_sessions_commands::update_critical_session_settings,
                 message_search_commands::message_search,
                 conversations::get_folder_conversation_turns,
                 conversations::list_folders,

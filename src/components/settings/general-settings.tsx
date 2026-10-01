@@ -46,6 +46,7 @@ import { CloseBehaviorSettingsSection } from "@/components/settings/close-behavi
 import { EditMessageSettingsSection } from "@/components/settings/edit-message-settings"
 import { DesktopNotificationSettingsSection } from "@/components/settings/desktop-notification-settings"
 import { NotificationSoundSettingsSection } from "@/components/settings/notification-sound-settings"
+import { CriticalSessionSettingsSection } from "@/components/settings/critical-session-settings"
 import { ResumeAfterRestartSettingsSection } from "@/components/settings/resume-after-restart-settings"
 import { QuickAskSettingsSection } from "@/components/settings/quick-ask-settings"
 
@@ -531,6 +532,9 @@ export function GeneralSettings() {
         <DesktopNotificationSettingsSection />
 
         <NotificationSoundSettingsSection />
+
+        {/* The alerts for sessions marked critical (the backend's watchdog). */}
+        <CriticalSessionSettingsSection />
       </div>
     </ScrollArea>
   )

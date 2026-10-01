@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
@@ -13,6 +14,32 @@ use super::shutdown::ShutdownSignal;
 use super::ws_attach::{self, ClientMsg, DetachReason, ServerMsg, OUTBOUND_CAPACITY};
 use crate::app_state::AppState;
 use crate::logging::throttle::{LagLogThrottle, LAG_LOG_WINDOW};
+
+/// Live event WebSockets: browsers, remote desktop windows. Read by the
+/// critical session watchdog to tell "nobody is connected" (send the alert to
+/// a chat channel instead).
+static CONNECTED_CLIENTS: AtomicUsize = AtomicUsize::new(0);
+
+/// Counts one live event WebSocket for as long as it is held.
+struct ConnectedClient;
+
+impl ConnectedClient {
+    fn new() -> Self {
+        CONNECTED_CLIENTS.fetch_add(1, Ordering::Relaxed);
+        Self
+    }
+}
+
+impl Drop for ConnectedClient {
+    fn drop(&mut self) {
+        CONNECTED_CLIENTS.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+/// How many event WebSockets are connected right now.
+pub fn connected_client_count() -> usize {
+    CONNECTED_CLIENTS.load(Ordering::Relaxed)
+}
 
 /// One entry per live attach subscription. The `epoch` is the per-WS-session
 /// monotonic counter assigned at spawn time; it threads through the cleanup
@@ -68,6 +95,7 @@ async fn handle_ws_connection(
         let _ = socket.send(Message::Close(None)).await;
         return;
     }
+    let _connected = ConnectedClient::new();
 
     // Legacy global firehose subscriber. Removed in Phase 4 once all
     // transports use the attach protocol.

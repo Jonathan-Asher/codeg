@@ -81,6 +81,7 @@ import { ExternalConflictDialog } from "@/components/files/external-conflict-dia
 import { AppToaster } from "@/components/ui/app-toaster"
 import { WorkspaceTransfersToasts } from "@/components/layout/workspace-transfers"
 import { AutoResumeToasts } from "@/components/layout/auto-resume-toasts"
+import { CriticalAlerts } from "@/components/layout/critical-alerts"
 import {
   DeepLinkBootstrap,
   PetFocusBridge,
@@ -1264,6 +1265,9 @@ function FolderLayoutShell({ children }: { children: React.ReactNode }) {
       <WorkspaceTransfersToasts />
       {/* The sessions a restart cut off, as the backend resumes them. */}
       <AutoResumeToasts />
+      {/* Critical sessions that sat idle or went silent: banner, system
+          notification and tone (the backend decides when). */}
+      <CriticalAlerts />
     </div>
   )
 }

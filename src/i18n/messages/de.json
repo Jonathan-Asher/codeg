@@ -2013,6 +2013,8 @@
       "attentionCountBadge": "{count, plural, one {# Sitzung wartet auf dich} other {# Sitzungen warten auf dich}}",
       "statusCancelledBadge": "Abgebrochen",
       "worktreeRemovedBadge": "Quell-Worktree entfernt",
+      "criticalBadge": "Kritische Sitzung",
+      "criticalToggleFailed": "Die Kritisch-Markierung konnte nicht aktualisiert werden: {message}",
       "conversationCountUnit": "{count, plural, one {# Konversation} other {# Konversationen}}",
       "emptyFolderHint": "Keine Konversationen",
       "noMatchingConversations": "Keine passenden Konversationen",
@@ -2220,6 +2222,8 @@
       "save": "Speichern",
       "pin": "Anheften",
       "unpin": "Loslösen",
+      "markCritical": "Als kritisch markieren",
+      "unmarkCritical": "Kritisch-Markierung entfernen",
       "markCompleted": "Als abgeschlossen markieren",
       "reopen": "Erneut öffnen",
       "expandSubsessions": "Unterkonversationen einblenden",
@@ -2391,6 +2395,9 @@
       "closeConversationTab": "Konversationstab schließen",
       "close": "Schließen",
       "closeOthers": "Andere schließen",
+      "markCritical": "Als kritisch markieren",
+      "unmarkCritical": "Kritisch-Markierung entfernen",
+      "criticalToggleFailed": "Die Kritisch-Markierung konnte nicht aktualisiert werden: {message}",
       "splitRight": "Nach rechts teilen",
       "splitDown": "Nach unten teilen",
       "splitAndMoveRight": "Teilen und nach rechts verschieben",
@@ -5301,6 +5308,57 @@
     "tonePop": "Pop",
     "toneAlert": "Alarm",
     "toneDescend": "Absteigend"
+  },
+  "CriticalSessions": {
+    "headline": {
+      "idle": "Kritische Sitzung wartet",
+      "needsYou": "Kritische Sitzung wartet auf dich",
+      "interrupted": "Kritische Sitzung unterbrochen",
+      "stalled": "Kritische Sitzung hängt möglicherweise"
+    },
+    "body": {
+      "idle": "Der Agent hat seine Runde vor {elapsed} beendet, seitdem ist nichts passiert.",
+      "needsYou": "Der Agent wartet seit {elapsed} auf deine Antwort.",
+      "interrupted": "Die letzte Runde wurde vor {elapsed} abgebrochen, seitdem ist nichts passiert.",
+      "stalled": "Eine Runde läuft, aber seit {elapsed} kommt keine Ausgabe.",
+      "backgroundStalled": "Hintergrundaufgaben laufen, aber seit {elapsed} ohne Fortschritt."
+    },
+    "duration": {
+      "seconds": "{count} s",
+      "minutes": "{count} Min.",
+      "hours": "{count} Std."
+    },
+    "notificationTitle": "⚑ {headline}: {session}",
+    "notificationTitleRedacted": "⚑ {headline}",
+    "untitled": "Unbenannte Sitzung",
+    "open": "Sitzung öffnen",
+    "dismiss": "Verwerfen",
+    "snooze": "{minutes} Min. später erinnern",
+    "reminder": "({count}. Erinnerung)",
+    "details": {
+      "heading": "Kritische Sitzung",
+      "mark": "Als kritisch markieren",
+      "markHint": "Benachrichtige mich, wenn diese Sitzung untätig ist, und immer wieder, bis ich handle.",
+      "stall": "Benachrichtigen, wenn eine Runde hängen könnte",
+      "stallHint": "Benachrichtigt auch, wenn eine laufende Runde für die Hänge-Schwelle nichts ausgibt.",
+      "saveFailed": "Die Kritisch-Markierung konnte nicht aktualisiert werden: {message}"
+    },
+    "settings": {
+      "title": "Kritische Sitzungen",
+      "description": "Sitzungen, die du als kritisch markierst (im Menü einer Sitzung), melden sich, wenn sie untätig sind – die Runde ist zu Ende, der Agent wartet auf dich oder sie wurde unterbrochen – und melden sich weiter, bis du die Sitzung öffnest, antwortest oder die Meldung verwirfst. Die Timer laufen im Backend, also auch ohne offenes Fenster.",
+      "idleTitle": "Benachrichtigen nach Leerlauf von",
+      "idleHint": "Wie lange eine kritische Sitzung untätig sein darf, bevor die erste Meldung kommt.",
+      "repeatTitle": "Wiederholen alle",
+      "repeatHint": "Wie oft die Meldung wiederkommt, solange die Sitzung untätig und unbestätigt bleibt.",
+      "repeatOff": "Nie",
+      "stallTitle": "Hänge-Schwelle",
+      "stallHint": "Eine laufende Runde, die so lange nichts ausgibt (kein Text, keine Werkzeugaktivität), wird als möglicherweise hängend gemeldet. Pro Sitzung in den Sitzungsdetails abschaltbar.",
+      "soundTitle": "Ton abspielen",
+      "soundHint": "Spielt bei jeder kritischen Meldung den Alarmton.",
+      "channelTitle": "Auch an Chat-Kanäle senden",
+      "channelHint": "Sendet jede kritische Meldung auch an deine Chat-Kanäle. Ohne verbundenes Fenster gehen Meldungen ohnehin dorthin.",
+      "saveFailed": "Speichern fehlgeschlagen: {message}"
+    }
   },
   "BrowserSettings": {
     "title": "Integrierter Browser",

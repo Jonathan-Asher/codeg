@@ -2013,6 +2013,8 @@
       "attentionCountBadge": "{count, plural, one {# session waiting for you} other {# sessions waiting for you}}",
       "statusCancelledBadge": "Cancelled",
       "worktreeRemovedBadge": "Source worktree removed",
+      "criticalBadge": "Critical session",
+      "criticalToggleFailed": "Could not update the critical mark: {message}",
       "conversationCountUnit": "{count, plural, one {# conversation} other {# conversations}}",
       "emptyFolderHint": "No conversations",
       "noMatchingConversations": "No matching conversations",
@@ -2220,6 +2222,8 @@
       "save": "Save",
       "pin": "Pin",
       "unpin": "Unpin",
+      "markCritical": "Mark as critical",
+      "unmarkCritical": "Unmark critical",
       "markCompleted": "Mark as completed",
       "reopen": "Reopen",
       "expandSubsessions": "Expand sub-conversations",
@@ -2391,6 +2395,9 @@
       "closeConversationTab": "Close conversation tab",
       "close": "Close",
       "closeOthers": "Close Others",
+      "markCritical": "Mark as critical",
+      "unmarkCritical": "Unmark critical",
+      "criticalToggleFailed": "Could not update the critical mark: {message}",
       "splitRight": "Split Right",
       "splitDown": "Split Down",
       "splitAndMoveRight": "Split and Move Right",
@@ -5301,6 +5308,57 @@
     "tonePop": "Pop",
     "toneAlert": "Alert",
     "toneDescend": "Descending"
+  },
+  "CriticalSessions": {
+    "headline": {
+      "idle": "Critical session waiting",
+      "needsYou": "Critical session needs you",
+      "interrupted": "Critical session interrupted",
+      "stalled": "Critical session may be stuck"
+    },
+    "body": {
+      "idle": "The agent finished its turn {elapsed} ago, and nothing has happened since.",
+      "needsYou": "The agent has been waiting for your answer for {elapsed}.",
+      "interrupted": "The last turn was cut off {elapsed} ago, and nothing has happened since.",
+      "stalled": "A turn is running, but nothing has streamed for {elapsed}.",
+      "backgroundStalled": "Background tasks are running, but none has made progress for {elapsed}."
+    },
+    "duration": {
+      "seconds": "{count} s",
+      "minutes": "{count} min",
+      "hours": "{count} h"
+    },
+    "notificationTitle": "⚑ {headline}: {session}",
+    "notificationTitleRedacted": "⚑ {headline}",
+    "untitled": "Untitled session",
+    "open": "Open session",
+    "dismiss": "Dismiss",
+    "snooze": "Snooze {minutes} min",
+    "reminder": "(reminder {count})",
+    "details": {
+      "heading": "Critical session",
+      "mark": "Mark as critical",
+      "markHint": "Alert me when this session sits idle, and again until I act.",
+      "stall": "Alert when a turn may be stuck",
+      "stallHint": "Also alert when a running turn streams nothing for the stall threshold.",
+      "saveFailed": "Could not update the critical mark: {message}"
+    },
+    "settings": {
+      "title": "Critical sessions",
+      "description": "Sessions you mark critical (from a session's menu) alert you when they sit idle — the turn ended, the agent waits on you, or it was interrupted — and keep alerting until you open the session, answer, or dismiss the alert. The timers run in the backend, so they work with no window open.",
+      "idleTitle": "Alert after idle for",
+      "idleHint": "How long a critical session may sit idle before the first alert.",
+      "repeatTitle": "Repeat every",
+      "repeatHint": "How often the alert comes back while the session stays idle and unacknowledged.",
+      "repeatOff": "Never",
+      "stallTitle": "Stall threshold",
+      "stallHint": "A running turn that streams nothing (no text, no tool activity) for this long is reported as possibly stuck. Turn it off per session in Session Details.",
+      "soundTitle": "Play a sound",
+      "soundHint": "Play the alert tone with each critical alert.",
+      "channelTitle": "Also send to chat channels",
+      "channelHint": "Send every critical alert to your chat channels too. With no window connected, alerts go there anyway.",
+      "saveFailed": "Could not save: {message}"
+    }
   },
   "BrowserSettings": {
     "title": "Built-in browser",

@@ -528,6 +528,13 @@ export interface DbConversationSummary {
    *  `status` — the review state, which the user can also set by hand — this
    *  says whether an agent is actually working. See `lib/session-activity.ts`. */
   turn_state?: ConversationTurnState | null
+  /** The user marked this conversation critical: the backend alerts when it
+   *  sits idle (see `lib/critical-sessions.ts`). Absent from a server that
+   *  predates the field, which reads as not critical. */
+  critical?: boolean
+  /** Whether a critical conversation also alerts when a working turn goes
+   *  silent ("may be stuck"). On unless turned off for this session. */
+  critical_stall?: boolean
   /** The mode / model / effort this conversation's session last had in
    *  effect, as the backend records it per conversation. A tab whose session
    *  is not attached yet shows these until the agent reports its own (see
@@ -4030,6 +4037,51 @@ export interface AutoResumeStatus {
   started_at: string | null
   items: AutoResumeItem[]
   stopped: boolean
+}
+
+// --- Critical sessions ---
+
+/** "Critical sessions" (Rust `CriticalSessionSettings`). Stored by the
+ *  backend that runs the watchdog. */
+export interface CriticalSessionSettings {
+  /** Idle time before the first alert, in seconds. */
+  idle_secs: number
+  /** How often an unacknowledged alert repeats, in seconds; 0 = never. */
+  repeat_secs: number
+  /** Silence in a working turn before "may be stuck", in seconds. */
+  stall_secs: number
+  sound: boolean
+  send_to_channel: boolean
+}
+
+/** What a critical alert is about (Rust `CriticalAlertKind`). */
+export type CriticalAlertKind =
+  | "idle"
+  | "needs_you"
+  | "interrupted"
+  | "stalled"
+  | "background_stalled"
+
+/** One critical alert (Rust `CriticalAlert`). `id` is unique per firing. */
+export interface CriticalAlert {
+  id: string
+  conversation_id: number
+  folder_id: number
+  agent_type: AgentType
+  title: string | null
+  kind: CriticalAlertKind
+  /** When the idle stretch or the silence began. */
+  since: string
+  /** 1 for the first alert, 2+ for repeats. */
+  count: number
+  fired_at: string
+  sound: boolean
+}
+
+/** The alerts waiting for an acknowledgement (Rust
+ *  `CriticalAlertsSnapshot`). */
+export interface CriticalAlertsSnapshot {
+  alerts: CriticalAlert[]
 }
 
 // --- Logging ---

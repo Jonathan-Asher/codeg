@@ -214,6 +214,75 @@ describe("SidebarConversationCard pin action", () => {
   })
 })
 
+describe("SidebarConversationCard critical mark", () => {
+  const onToggleCritical = vi.fn()
+
+  beforeEach(() => {
+    onToggleCritical.mockClear()
+  })
+
+  function renderCard(c: DbConversationSummary) {
+    return renderWithIntl(
+      <SidebarConversationCard
+        conversation={c}
+        isSelected={false}
+        timeLabel=""
+        onSelect={onSelect}
+        onDoubleClick={onDoubleClick}
+        onRename={onRename}
+        onDelete={onDelete}
+        onStatusChange={onStatusChange}
+        onTogglePin={onTogglePin}
+        onToggleCritical={onToggleCritical}
+      />
+    )
+  }
+
+  it("offers Mark as critical and shows no flag on an ordinary row", () => {
+    const { getByText, container } = renderCard(conv(1))
+    expect(container.querySelector("[data-critical-flag]")).toBeNull()
+    fireEvent.contextMenu(getByText("conv-1"))
+    fireEvent.click(getByText("Mark as critical"))
+    expect(onToggleCritical).toHaveBeenCalledWith(1, true)
+  })
+
+  it("flags a critical row and offers Unmark critical", () => {
+    const { getByText, getAllByTitle } = renderCard({
+      ...conv(2),
+      critical: true,
+    })
+    expect(getAllByTitle("Critical session").length).toBeGreaterThan(0)
+    fireEvent.contextMenu(getByText("conv-2"))
+    fireEvent.click(getByText("Unmark critical"))
+    expect(onToggleCritical).toHaveBeenCalledWith(2, false)
+  })
+
+  it("leaves the item out when the list offers no toggle", () => {
+    const { getByText, queryByText } = renderWithIntl(
+      <SidebarConversationCard
+        conversation={conv(3)}
+        isSelected={false}
+        timeLabel=""
+        onSelect={onSelect}
+        onRename={onRename}
+        onDelete={onDelete}
+        onStatusChange={onStatusChange}
+      />
+    )
+    fireEvent.contextMenu(getByText("conv-3"))
+    expect(queryByText("Mark as critical")).toBeNull()
+  })
+
+  it("offers no mark on a delegation sub-session", () => {
+    const { getByText, queryByText } = renderCard({
+      ...conv(4),
+      parent_id: 1,
+    })
+    fireEvent.contextMenu(getByText("conv-4"))
+    expect(queryByText("Mark as critical")).toBeNull()
+  })
+})
+
 // The hover-reveal icon buttons live in the row's right slot as siblings of the
 // clickable row button (never nested). They carry only an aria-label (icon, no
 // text), so getByLabelText addresses them unambiguously — distinct from the

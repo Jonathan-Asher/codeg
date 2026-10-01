@@ -1622,3 +1622,198 @@ pub fn agent_responding(lang: Lang, agent_label: &str) -> String {
         Lang::En => format!("{agent_label} is responding..."),
     }
 }
+
+// ── Critical session alerts (`acp::critical_watch`) ──
+
+/// Index of an alert kind in the per-language tables below: idle, needs you,
+/// interrupted, stalled, background stalled.
+fn critical_index(kind: crate::acp::critical_watch::CriticalAlertKind) -> usize {
+    use crate::acp::critical_watch::CriticalAlertKind as K;
+    match kind {
+        K::Idle => 0,
+        K::NeedsYou => 1,
+        K::Interrupted => 2,
+        K::Stalled => 3,
+        K::BackgroundStalled => 4,
+    }
+}
+
+/// Headline of a critical session alert; the channel message prefixes it with
+/// "⚑ " and follows it with the session's title.
+pub fn critical_alert_title(
+    lang: Lang,
+    kind: crate::acp::critical_watch::CriticalAlertKind,
+) -> &'static str {
+    let titles: [&'static str; 4] = match lang {
+        Lang::ZhCn => [
+            "关键会话等待中",
+            "关键会话需要你处理",
+            "关键会话已中断",
+            "关键会话可能卡住了",
+        ],
+        Lang::ZhTw => [
+            "關鍵對話等待中",
+            "關鍵對話需要你處理",
+            "關鍵對話已中斷",
+            "關鍵對話可能卡住了",
+        ],
+        Lang::Ja => [
+            "重要セッションが待機中",
+            "重要セッションが対応を待っています",
+            "重要セッションが中断されました",
+            "重要セッションが止まっている可能性があります",
+        ],
+        Lang::Ko => [
+            "중요 세션 대기 중",
+            "중요 세션이 응답을 기다립니다",
+            "중요 세션이 중단됨",
+            "중요 세션이 멈춘 것 같습니다",
+        ],
+        Lang::Es => [
+            "Sesión crítica en espera",
+            "Una sesión crítica te necesita",
+            "Sesión crítica interrumpida",
+            "Una sesión crítica podría estar atascada",
+        ],
+        Lang::De => [
+            "Kritische Sitzung wartet",
+            "Kritische Sitzung wartet auf dich",
+            "Kritische Sitzung unterbrochen",
+            "Kritische Sitzung hängt möglicherweise",
+        ],
+        Lang::Fr => [
+            "Session critique en attente",
+            "Une session critique a besoin de vous",
+            "Session critique interrompue",
+            "Une session critique est peut-être bloquée",
+        ],
+        Lang::Pt => [
+            "Sessão crítica aguardando",
+            "Uma sessão crítica precisa de você",
+            "Sessão crítica interrompida",
+            "Uma sessão crítica pode estar travada",
+        ],
+        Lang::Ar => [
+            "جلسة حرجة في الانتظار",
+            "جلسة حرجة تحتاج إليك",
+            "تمت مقاطعة جلسة حرجة",
+            "قد تكون جلسة حرجة عالقة",
+        ],
+        Lang::En => [
+            "Critical session waiting",
+            "Critical session needs you",
+            "Critical session interrupted",
+            "Critical session may be stuck",
+        ],
+    };
+    titles[critical_index(kind).min(3)]
+}
+
+/// One line on what the alert is about.
+pub fn critical_alert_body(
+    lang: Lang,
+    kind: crate::acp::critical_watch::CriticalAlertKind,
+) -> &'static str {
+    let bodies: [&'static str; 5] = match lang {
+        Lang::ZhCn => [
+            "智能体已完成本轮，之后没有任何动作。",
+            "智能体正在等待你的回答。",
+            "上一轮被中断，之后没有任何动作。",
+            "本轮仍在运行，但已有一段时间没有输出。",
+            "后台任务仍在运行，但已有一段时间没有进展。",
+        ],
+        Lang::ZhTw => [
+            "智能體已完成本輪，之後沒有任何動作。",
+            "智能體正在等待你的回答。",
+            "上一輪被中斷，之後沒有任何動作。",
+            "本輪仍在執行，但已有一段時間沒有輸出。",
+            "背景工作仍在執行，但已有一段時間沒有進展。",
+        ],
+        Lang::Ja => [
+            "エージェントのターンが終わり、その後動きがありません。",
+            "エージェントがあなたの回答を待っています。",
+            "前回のターンが中断され、その後動きがありません。",
+            "ターンは実行中ですが、しばらく出力がありません。",
+            "バックグラウンドタスクは実行中ですが、しばらく進捗がありません。",
+        ],
+        Lang::Ko => [
+            "에이전트가 턴을 마쳤고 그 이후 아무 일도 없었습니다.",
+            "에이전트가 답변을 기다리고 있습니다.",
+            "마지막 턴이 중단되었고 그 이후 아무 일도 없었습니다.",
+            "턴이 실행 중이지만 한동안 출력이 없습니다.",
+            "백그라운드 작업이 실행 중이지만 한동안 진행이 없습니다.",
+        ],
+        Lang::Es => [
+            "El agente terminó su turno y no ha pasado nada desde entonces.",
+            "El agente espera tu respuesta.",
+            "El último turno se cortó y no ha pasado nada desde entonces.",
+            "Hay un turno en curso, pero no transmite nada desde hace un rato.",
+            "Hay tareas en segundo plano en curso, pero ninguna avanza desde hace un rato.",
+        ],
+        Lang::De => [
+            "Der Agent hat seine Runde beendet, seitdem ist nichts passiert.",
+            "Der Agent wartet auf deine Antwort.",
+            "Die letzte Runde wurde abgebrochen, seitdem ist nichts passiert.",
+            "Eine Runde läuft, aber seit einer Weile kommt keine Ausgabe.",
+            "Hintergrundaufgaben laufen, aber seit einer Weile ohne Fortschritt.",
+        ],
+        Lang::Fr => [
+            "L'agent a terminé son tour et rien ne s'est passé depuis.",
+            "L'agent attend votre réponse.",
+            "Le dernier tour a été interrompu et rien ne s'est passé depuis.",
+            "Un tour est en cours, mais rien n'a été diffusé depuis un moment.",
+            "Des tâches d'arrière-plan tournent, mais aucune n'a progressé depuis un moment.",
+        ],
+        Lang::Pt => [
+            "O agente terminou o turno e nada aconteceu desde então.",
+            "O agente está aguardando sua resposta.",
+            "O último turno foi interrompido e nada aconteceu desde então.",
+            "Um turno está em andamento, mas nada foi transmitido há algum tempo.",
+            "Tarefas em segundo plano estão em execução, mas nenhuma progrediu há algum tempo.",
+        ],
+        Lang::Ar => [
+            "أنهى الوكيل دوره ولم يحدث شيء منذ ذلك الحين.",
+            "الوكيل ينتظر إجابتك.",
+            "تمت مقاطعة الدور الأخير ولم يحدث شيء منذ ذلك الحين.",
+            "هناك دور قيد التشغيل لكن لم يُبث أي شيء منذ فترة.",
+            "مهام الخلفية قيد التشغيل لكن لم يحرز أي منها تقدمًا منذ فترة.",
+        ],
+        Lang::En => [
+            "The agent finished its turn and nothing has happened since.",
+            "The agent is waiting for your answer.",
+            "The last turn was cut off and nothing has happened since.",
+            "A turn is running, but nothing has streamed for a while.",
+            "Background tasks are running, but none has made progress for a while.",
+        ],
+    };
+    bodies[critical_index(kind)]
+}
+
+/// Stand-in for a session that has no title yet.
+pub fn critical_untitled(lang: Lang) -> &'static str {
+    match lang {
+        Lang::ZhCn => "未命名会话",
+        Lang::ZhTw => "未命名對話",
+        Lang::Ja => "無題のセッション",
+        Lang::Ko => "제목 없는 세션",
+        Lang::Es => "Sesión sin título",
+        Lang::De => "Unbenannte Sitzung",
+        Lang::Fr => "Session sans titre",
+        Lang::Pt => "Sessão sem título",
+        Lang::Ar => "جلسة بلا عنوان",
+        Lang::En => "Untitled session",
+    }
+}
+
+/// Label of the agent field.
+pub fn critical_agent_label(lang: Lang) -> &'static str {
+    match lang {
+        Lang::ZhCn => "智能体",
+        Lang::ZhTw => "智能體",
+        Lang::Ja => "エージェント",
+        Lang::Ko => "에이전트",
+        Lang::Es | Lang::Pt => "Agente",
+        Lang::De | Lang::Fr | Lang::En => "Agent",
+        Lang::Ar => "الوكيل",
+    }
+}
