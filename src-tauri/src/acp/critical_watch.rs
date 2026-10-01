@@ -337,10 +337,10 @@ impl SessionWatch {
         watch
     }
 
-    /// Start-up: the session has sat idle since `since`, before this process
-    /// started, and nobody acknowledged it. Its first alert is due at
-    /// `first_due`. Only an idle session has such a past; others keep the
-    /// stretch [`SessionWatch::new`] began.
+    /// The session has sat idle since `since`, before the watchdog first saw
+    /// it (it was just marked, or this process just started). Its first
+    /// alert is due at `first_due`. Only an idle session has such a past;
+    /// others keep the stretch [`SessionWatch::new`] began.
     pub fn backdate(&mut self, since: Instant, first_due: Instant) {
         if !matches!(self.phase, Phase::Idle(_)) {
             return;
@@ -804,14 +804,18 @@ impl CriticalRegistry {
 
 /// The watch a session starts with when the watchdog first sees it.
 ///
-/// Marked while this process runs (`started`): a fresh stretch from now, so
-/// a session marked while idle alerts once it has sat the idle threshold.
+/// A session that is not idle starts a fresh stretch from now. An idle one
+/// has been idle since its last activity (`updated_at`), which the alert
+/// reports as such:
 ///
-/// Critical before the start: an idle session whose alert was acknowledged
-/// after its last activity stays quiet until something new happens. One that
-/// nobody acknowledged picks up where it was, timed from when it went idle
-/// (a restart neither swallows its alerts nor resets their clock), but
-/// alerts no sooner than [`STARTUP_GRACE`] after the start.
+/// * marked while this process runs (`started`): it alerts once it has sat
+///   the idle threshold since the mark;
+/// * critical before the start, its alert acknowledged after its last
+///   activity: quiet until something new happens;
+/// * critical before the start, nobody acknowledged it: it picks up where it
+///   was, timed from when it went idle (a restart neither swallows its
+///   alerts nor resets their clock), but no sooner than [`STARTUP_GRACE`]
+///   after the start.
 fn first_watch(
     row: &WatchedRow,
     obs: Observation,
@@ -821,16 +825,21 @@ fn first_watch(
     now: Instant,
     wall_now: DateTime<Utc>,
 ) -> SessionWatch {
-    if started || !matches!(obs.phase, Phase::Idle(_)) {
+    if !matches!(obs.phase, Phase::Idle(_)) {
         return SessionWatch::new(obs, now, false);
     }
-    if acked_at.is_some_and(|at| at >= row.updated_at) {
+    if !started && acked_at.is_some_and(|at| at >= row.updated_at) {
         return SessionWatch::new(obs, now, true);
     }
-    let mut watch = SessionWatch::new(obs, now, false);
     let idle_for = (wall_now - row.updated_at).to_std().unwrap_or_default();
-    let since = now.checked_sub(idle_for).unwrap_or(now);
-    watch.backdate(since, (since + th.idle).max(now + STARTUP_GRACE));
+    let went_idle = now.checked_sub(idle_for).unwrap_or(now);
+    let first_due = if started {
+        now + th.idle
+    } else {
+        (went_idle + th.idle).max(now + STARTUP_GRACE)
+    };
+    let mut watch = SessionWatch::new(obs, now, false);
+    watch.backdate(went_idle, first_due);
     watch
 }
 
@@ -1567,9 +1576,11 @@ mod tests {
         assert_eq!(r.take_dirty_acks().map(|a| a.len()), Some(2));
         assert_eq!(r.take_dirty_acks(), None, "stored once");
 
-        // A session marked later starts a fresh stretch: marked while idle,
-        // it alerts once it has sat the idle threshold.
-        r.sync_rows([row_at(1, wall), row_at(2, wall), row_at(3, wall)]);
+        // A session marked later, two minutes after its turn ended: it
+        // alerts once it has sat the idle threshold since the mark, and says
+        // how long it has really been idle.
+        let went_idle = wall - chrono::Duration::seconds(120);
+        r.sync_rows([row_at(1, wall), row_at(2, wall), row_at(3, went_idle)]);
         let marked = t0 + secs(100);
         assert!(r.step(3, ENDED, marked, wall).is_none());
         assert!(r.step(3, ENDED, marked + secs(59), wall).is_none());
@@ -1577,6 +1588,11 @@ mod tests {
             .step(3, ENDED, marked + IDLE, wall)
             .expect("marked while idle");
         assert_eq!(alert.kind, CriticalAlertKind::Idle);
+        assert!(
+            alert.since <= went_idle + chrono::Duration::seconds(1),
+            "idle since the turn ended, not since the mark: {} vs {went_idle}",
+            alert.since
+        );
 
         // Unmarked rows drop out, and so do their acknowledgements.
         r.sync_rows([row_at(2, wall)]);
