@@ -5,6 +5,7 @@ import dynamic from "next/dynamic"
 import { ArrowUpCircle, Check, Sparkles } from "lucide-react"
 import { useLocale, useTranslations } from "next-intl"
 import { useAppUpdate } from "@/components/providers/update-provider"
+import { BusySessionList } from "@/components/layout/remote-update-confirm-dialog"
 import { Button } from "@/components/ui/button"
 import {
   Popover,
@@ -12,7 +13,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { openUrl } from "@/lib/platform"
-import { describeAppUpdateError } from "@/lib/updater"
+import { describeAppUpdateError, type UpdateTarget } from "@/lib/updater"
 import { cn } from "@/lib/utils"
 
 // The markdown stack is a settings-side dependency; keep it out of the
@@ -42,6 +43,10 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function isMacPlatform(): boolean {
+  return typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent)
 }
 
 /** Which stage of the install the lifecycle is in, for the step rail. */
@@ -114,12 +119,22 @@ function StepRail({ current }: { current: Step }) {
  * Every state is a popover trigger: the compact pill says what is happening,
  * and clicking it reveals the release details plus the one action that makes
  * sense right now. Renders nothing when idle with no update on offer.
+ *
+ * A remote-desktop window shows two: the remote's (`target="active"`,
+ * labelled "Remote: <name>") and this machine's own app (`target="local"`,
+ * labelled "This Mac"), so neither update is mistaken for the other. A remote
+ * desktop app asks before updating (the sessions its restart would cut off),
+ * can wait until it is idle, and restarts by itself; this follows it through.
  */
-export function StatusBarUpdate() {
+export function StatusBarUpdate({
+  target = "active",
+}: {
+  target?: UpdateTarget
+}) {
   const t = useTranslations("SystemSettings")
   const locale = useLocale()
   const [open, setOpen] = useState(false)
-  const update = useAppUpdate()
+  const update = useAppUpdate(target)
 
   if (!update) return null
 
@@ -136,10 +151,27 @@ export function StatusBarUpdate() {
     runtime,
     selfUpdateSupported,
     selfUpdateBlocker,
+    remoteName,
+    capability,
+    updatedTo,
     dismissAvailable,
     startUpdate,
+    cancelUpdate,
     restart,
   } = update
+
+  // What this indicator is about, when that needs saying — as the controller
+  // itself reports it.
+  const local = update.target === "local"
+  const targetLabel = local
+    ? isMacPlatform()
+      ? t("updateTargetThisMac")
+      : t("updateTargetThisComputer")
+    : remoteName
+      ? t("updateTargetRemote", { name: remoteName })
+      : null
+  // A remote desktop app: it asks first, may wait for idle, restarts itself.
+  const remoteDesktop = !local && capability === "desktop"
 
   // A relaunch is in progress: the countdown, the backend `restarting` event,
   // or the brief desktop window right after the click.
@@ -147,6 +179,7 @@ export function StatusBarUpdate() {
     restartCountdown !== null || state.status === "restarting" || isRestarting
   const ready = state.status === "ready_to_restart"
   const failed = state.status === "error"
+  const waiting = state.status === "waiting_for_idle"
   // A release the user could act on right now. An update they already started
   // outranks it, so this only holds while the lifecycle is settled.
   const offering = !!available && !restarting && !ready && !isUpdating
@@ -156,9 +189,14 @@ export function StatusBarUpdate() {
   // only way back to a release the user waved away by mistake).
   const muted = offering && available!.version === dismissedVersion
   const showAvailable = offering && !muted
+  // A remote desktop update just landed: confirm the version it came back on.
+  const justUpdated =
+    !!updatedTo && !restarting && !ready && !isUpdating && !offering
   // A failure with nothing on offer has no actionable follow-up here; the
   // settings page reports it in full.
-  if (!restarting && !ready && !isUpdating && !offering) return null
+  if (!restarting && !ready && !isUpdating && !offering && !justUpdated) {
+    return null
+  }
 
   // ─── Trigger ─────────────────────────────────────────────────────────────
 
@@ -166,6 +204,7 @@ export function StatusBarUpdate() {
     state.status === "downloading" && state.total && state.total > 0
       ? Math.min(100, Math.round(((state.downloaded ?? 0) / state.total) * 100))
       : null
+  const busySessions = state.busySessions ?? []
 
   let triggerIcon: ReactNode
   let triggerLabel: string
@@ -176,31 +215,56 @@ export function StatusBarUpdate() {
     triggerLabel =
       restartCountdown !== null && restartCountdown > 0
         ? t("restartingIn", { seconds: restartCountdown })
-        : t("restarting")
+        : remoteDesktop
+          ? t("remoteRestarting")
+          : t("restarting")
   } else if (ready) {
     triggerIcon = <ArrowUpCircle className="h-3.5 w-3.5" />
     triggerLabel = t("restartToUpdate")
     accented = true
-  } else if (isUpdating) {
+  } else if (waiting) {
     triggerIcon = <Spinner className="h-3 w-3" />
     triggerLabel =
-      state.status === "downloading"
-        ? downloadPercent !== null
-          ? `${t("downloading")} ${downloadPercent}%`
-          : t("downloading")
-        : t("updating")
+      busySessions.length > 0
+        ? t("remoteWaitingBusy", { count: busySessions.length })
+        : state.quietSecsLeft != null
+          ? t("remoteWaitingQuiet", { seconds: state.quietSecsLeft })
+          : t("remoteWaiting")
+  } else if (isUpdating) {
+    triggerIcon = <Spinner className="h-3 w-3" />
+    if (remoteDesktop) {
+      triggerLabel =
+        state.status === "downloading"
+          ? downloadPercent !== null
+            ? t("updatingRemoteDownloading", { percent: downloadPercent })
+            : t("updatingRemote")
+          : t("updatingRemoteInstalling")
+    } else {
+      triggerLabel =
+        state.status === "downloading"
+          ? downloadPercent !== null
+            ? `${t("downloading")} ${downloadPercent}%`
+            : t("downloading")
+          : t("updating")
+    }
+  } else if (justUpdated) {
+    triggerIcon = <Check className="h-3.5 w-3.5 text-primary" />
+    triggerLabel = t("remoteUpdated", { version: updatedTo! })
   } else {
     // `offering` is true here, so `available` is non-null.
     const badge = t("newVersionBadge", { version: available!.version })
+    const labelled = targetLabel
+      ? t("targetedStatus", { target: targetLabel, status: badge })
+      : badge
     triggerIcon = muted ? (
       <ArrowUpCircle className="h-3.5 w-3.5" />
     ) : (
       <Sparkles className="h-3.5 w-3.5" />
     )
-    triggerLabel = muted ? "" : badge
+    triggerLabel = muted ? "" : labelled
     // Icon-only still needs a name for screen readers and a hover hint for
     // everyone else.
-    triggerTitle = muted ? badge : undefined
+    triggerTitle = muted ? labelled : undefined
     accented = !muted
   }
 
@@ -241,6 +305,9 @@ export function StatusBarUpdate() {
       : null
   const blockerMessage = blocker ? t(blocker.key, blocker.values) : null
   const blockerHint = blockerMessage !== errorMessage ? blockerMessage : null
+  // A remote desktop update can be called off until its install starts.
+  const cancellable =
+    remoteDesktop && (waiting || state.status === "downloading")
 
   const handleLater = () => {
     dismissAvailable()
@@ -254,31 +321,40 @@ export function StatusBarUpdate() {
           aria-label={triggerLabel ? undefined : triggerTitle}
           title={triggerTitle}
           className={cn(
-            "flex items-center gap-1.5 transition-colors",
+            "flex min-w-0 items-center gap-1.5 transition-colors",
             accented
               ? "text-primary hover:text-primary/80"
               : "hover:text-foreground"
           )}
         >
           {triggerIcon}
-          {triggerLabel && <span>{triggerLabel}</span>}
+          {triggerLabel && (
+            <span className="max-w-[18rem] truncate">{triggerLabel}</span>
+          )}
         </button>
       </PopoverTrigger>
       <PopoverContent side="top" align="end" className="w-80 gap-3 p-3">
         <div className="space-y-1">
+          {targetLabel && (
+            <div className="text-2xs font-medium uppercase tracking-wide text-muted-foreground">
+              {targetLabel}
+            </div>
+          )}
           <div className="text-xs font-medium">
             {/* A relaunch can also be a rollback, which has no release on
                 offer — don't announce one. */}
             {ready
               ? t("updateReadyHint")
-              : offering
-                ? t("updateAvailableTitle")
-                : t("updateTitle")}
+              : justUpdated
+                ? t("remoteUpdated", { version: updatedTo! })
+                : offering
+                  ? t("updateAvailableTitle")
+                  : t("updateTitle")}
           </div>
           <div className="flex items-center justify-between gap-2 text-2xs text-muted-foreground">
             <span className="font-mono">
               {currentVersion ? `v${currentVersion}` : "—"}
-              {targetVersion ? ` → v${targetVersion}` : ""}
+              {targetVersion && !justUpdated ? ` → v${targetVersion}` : ""}
             </span>
             {formattedDate && <span>{formattedDate}</span>}
           </div>
@@ -305,6 +381,31 @@ export function StatusBarUpdate() {
                 </div>
               </>
             )}
+            {waiting && (
+              <div className="space-y-1.5 text-2xs text-muted-foreground">
+                {busySessions.length > 0 ? (
+                  <>
+                    <div className="font-medium text-foreground">
+                      {t("remoteUpdateBusyHeading", {
+                        count: busySessions.length,
+                      })}
+                    </div>
+                    <BusySessionList sessions={busySessions} />
+                  </>
+                ) : state.quietSecsLeft != null ? (
+                  <div>
+                    {t("remoteWaitingQuietLong", {
+                      seconds: state.quietSecsLeft,
+                    })}
+                  </div>
+                ) : null}
+                <div className="leading-5">
+                  {t("remoteWaitingHint", {
+                    seconds: state.quietSecs ?? 60,
+                  })}
+                </div>
+              </div>
+            )}
             {state.status === "installing" && (
               <div className="h-1.5 rounded-full bg-muted overflow-hidden">
                 <div className="h-full w-1/3 rounded-full bg-primary animate-pulse" />
@@ -315,7 +416,9 @@ export function StatusBarUpdate() {
                 <Spinner className="h-3 w-3" />
                 {restartCountdown !== null && restartCountdown > 0
                   ? t("restartingIn", { seconds: restartCountdown })
-                  : t("waitingForServer")}
+                  : remoteDesktop
+                    ? t("remoteWaitingForReconnect")
+                    : t("waitingForServer")}
               </div>
             )}
             {ready && (
@@ -333,7 +436,7 @@ export function StatusBarUpdate() {
           </div>
         )}
 
-        {available && (
+        {available && !justUpdated && (
           <div className="space-y-1.5">
             <div className="text-2xs font-medium text-muted-foreground">
               {t("releaseNotesTitle")}
@@ -366,7 +469,20 @@ export function StatusBarUpdate() {
               {t("remindLater")}
             </Button>
           )}
-          {ready ? (
+          {cancellable && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void cancelUpdate()}
+            >
+              {t("cancelUpdate")}
+            </Button>
+          )}
+          {waiting && remoteDesktop ? (
+            <Button size="sm" onClick={() => void startUpdate({ mode: "now" })}>
+              {t("remoteUpdateNow")}
+            </Button>
+          ) : ready ? (
             <Button size="sm" onClick={() => void restart()} disabled={isBusy}>
               <ArrowUpCircle className="h-3.5 w-3.5" />
               {t("restartToUpdate")}
@@ -393,7 +509,9 @@ export function StatusBarUpdate() {
                 disabled={isBusy}
               >
                 <ArrowUpCircle className="h-3.5 w-3.5" />
-                {t("upgradeTo", { version: available!.version })}
+                {remoteDesktop
+                  ? t("updateRemote")
+                  : t("upgradeTo", { version: available!.version })}
               </Button>
             ) : (
               <Button size="sm" onClick={() => void openUrl(RELEASES_URL)}>

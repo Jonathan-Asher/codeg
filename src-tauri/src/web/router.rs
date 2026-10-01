@@ -1349,6 +1349,14 @@ pub fn build_router(
         )
         .route("/restart_app", post(handlers::app_update::restart_app))
         .route("/rollback_app", post(handlers::app_update::rollback_app))
+        .route(
+            "/cancel_app_update",
+            post(handlers::app_update::cancel_app_update),
+        )
+        .route(
+            "/app_update_busy_sessions",
+            post(handlers::app_update::app_update_busy_sessions),
+        )
         // ─── Chat Channels ───
         .route(
             "/list_chat_channels",

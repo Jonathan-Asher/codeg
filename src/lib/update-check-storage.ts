@@ -1,7 +1,7 @@
 "use client"
 
 import { getActiveRemoteConnectionId } from "@/lib/transport"
-import type { AppUpdateInfo } from "@/lib/updater"
+import type { AppUpdateInfo, UpdateTarget } from "@/lib/updater"
 
 /**
  * Persistence for the *availability* half of the update flow (is a newer
@@ -19,7 +19,9 @@ import type { AppUpdateInfo } from "@/lib/updater"
  *
  * Keys are scoped per backend: a remote-desktop window is the same browser
  * origin as the local app but reports a *different* server's version, so an
- * unscoped cache would show one backend's answer in the other's window.
+ * unscoped cache would show one backend's answer in the other's window. The
+ * `"local"` target (this machine's own app, shown in a remote window next to
+ * the remote's) uses the unscoped keys a local window uses.
  *
  * Every accessor is SSR- and private-mode-safe: a throwing/absent
  * `localStorage` degrades to "nothing remembered", never an exception.
@@ -36,21 +38,24 @@ export interface CachedUpdateCheck {
   info: AppUpdateInfo | null
 }
 
-function scoped(key: string): string {
+function scoped(key: string, target: UpdateTarget): string {
+  if (target === "local") return key
   const remoteId = getActiveRemoteConnectionId()
   return remoteId ? `${key}:remote-${remoteId}` : key
 }
 
 /** The key `writeLastCheck` writes to, for `storage`-event listeners. Scoped for
  * the same reason as {@link dismissedVersionStorageKey}. */
-export function lastCheckStorageKey(): string {
-  return scoped(LAST_CHECK_KEY)
+export function lastCheckStorageKey(target: UpdateTarget = "active"): string {
+  return scoped(LAST_CHECK_KEY, target)
 }
 
-export function readLastCheck(): CachedUpdateCheck | null {
+export function readLastCheck(
+  target: UpdateTarget = "active"
+): CachedUpdateCheck | null {
   if (typeof window === "undefined") return null
   try {
-    const raw = localStorage.getItem(scoped(LAST_CHECK_KEY))
+    const raw = localStorage.getItem(scoped(LAST_CHECK_KEY, target))
     if (!raw) return null
     const parsed = JSON.parse(raw) as unknown
     if (!parsed || typeof parsed !== "object") return null
@@ -82,10 +87,13 @@ export function readLastCheck(): CachedUpdateCheck | null {
   }
 }
 
-export function writeLastCheck(value: CachedUpdateCheck): void {
+export function writeLastCheck(
+  value: CachedUpdateCheck,
+  target: UpdateTarget = "active"
+): void {
   if (typeof window === "undefined") return
   try {
-    localStorage.setItem(scoped(LAST_CHECK_KEY), JSON.stringify(value))
+    localStorage.setItem(scoped(LAST_CHECK_KEY, target), JSON.stringify(value))
   } catch {
     /* ignore */
   }
@@ -95,10 +103,10 @@ export function writeLastCheck(value: CachedUpdateCheck): void {
  * one the answer was computed against — most importantly the relaunch right
  * after an update lands, where the cache would otherwise advertise the very
  * release that was just installed. */
-export function clearLastCheck(): void {
+export function clearLastCheck(target: UpdateTarget = "active"): void {
   if (typeof window === "undefined") return
   try {
-    localStorage.removeItem(scoped(LAST_CHECK_KEY))
+    localStorage.removeItem(scoped(LAST_CHECK_KEY, target))
   } catch {
     /* ignore */
   }
@@ -111,25 +119,32 @@ export function clearLastCheck(): void {
  * on its own. Scoping matters here: a remote-desktop window is the same origin
  * as the local app, and must not react to the other backend's dismissals.
  */
-export function dismissedVersionStorageKey(): string {
-  return scoped(DISMISSED_VERSION_KEY)
+export function dismissedVersionStorageKey(
+  target: UpdateTarget = "active"
+): string {
+  return scoped(DISMISSED_VERSION_KEY, target)
 }
 
 /** The version the user dismissed the badge for, if any. */
-export function readDismissedVersion(): string | null {
+export function readDismissedVersion(
+  target: UpdateTarget = "active"
+): string | null {
   if (typeof window === "undefined") return null
   try {
-    return localStorage.getItem(scoped(DISMISSED_VERSION_KEY)) || null
+    return localStorage.getItem(scoped(DISMISSED_VERSION_KEY, target)) || null
   } catch {
     return null
   }
 }
 
 /** Pass null to clear (the dismissed release is no longer the newest one). */
-export function writeDismissedVersion(version: string | null): void {
+export function writeDismissedVersion(
+  version: string | null,
+  target: UpdateTarget = "active"
+): void {
   if (typeof window === "undefined") return
   try {
-    const key = scoped(DISMISSED_VERSION_KEY)
+    const key = scoped(DISMISSED_VERSION_KEY, target)
     if (version) localStorage.setItem(key, version)
     else localStorage.removeItem(key)
   } catch {

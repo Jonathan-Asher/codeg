@@ -48,6 +48,10 @@ pub enum UpdateCapability {
     Supervised,
     /// Standalone, no supervisor. Upgrade = swap files, then re-exec self.
     Reexec,
+    /// The desktop app (its embedded web server answering a remote window).
+    /// Upgrade = `tauri-plugin-updater` install, then the app relaunches
+    /// itself. Never returned by [`capability`], which describes the server.
+    Desktop,
 }
 
 /// True when this process was spawned by our `--supervise` parent.

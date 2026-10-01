@@ -29,15 +29,23 @@ vi.mock("@/components/settings/release-notes", () => ({
 import { StatusBarUpdate } from "./status-bar-update"
 import enMessages from "@/i18n/messages/en.json"
 
-const startUpdate = vi.fn(async () => {})
+const startUpdate = vi.fn(async (_opts?: { mode?: "now" | "when_idle" }) => {})
+const cancelUpdate = vi.fn(async () => {})
 const restart = vi.fn(async () => {})
 const dismissAvailable = vi.fn()
 
 function makeCtx(overrides: Partial<UpdateContextValue>): UpdateContextValue {
   const state: AppUpdateState = overrides.state ?? { seq: 1, status: "idle" }
   return {
+    target: "active",
+    remoteName: null,
+    capability: undefined,
+    updatedTo: null,
     state,
-    isUpdating: state.status === "downloading" || state.status === "installing",
+    isUpdating:
+      state.status === "downloading" ||
+      state.status === "waiting_for_idle" ||
+      state.status === "installing",
     restartCountdown: null,
     isRollingBack: false,
     isRestarting: false,
@@ -59,6 +67,7 @@ function makeCtx(overrides: Partial<UpdateContextValue>): UpdateContextValue {
     dismissAvailable,
     refreshLocalStatus: vi.fn(async () => {}),
     startUpdate,
+    cancelUpdate,
     restart,
     rollback: vi.fn(async () => {}),
     ...overrides,
@@ -87,6 +96,7 @@ const UNWRITABLE_BIN = {
 
 beforeEach(() => {
   startUpdate.mockClear()
+  cancelUpdate.mockClear()
   restart.mockClear()
   dismissAvailable.mockClear()
   openUrl.mockClear()
@@ -314,5 +324,151 @@ describe("StatusBarUpdate — popover", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: /25%/ }))
     expect(await screen.findByText("1.0 MB / 4.0 MB")).toBeVisible()
+  })
+})
+
+// A remote-desktop window bound to a machine running the desktop app: its
+// update asks first, can wait for idle, and restarts by itself.
+describe("StatusBarUpdate — remote desktop app", () => {
+  const remote = (overrides: Partial<UpdateContextValue>) =>
+    renderWith({
+      remoteName: "studio",
+      capability: "desktop",
+      ...overrides,
+    })
+
+  it("labels the remote's release and offers to update the remote", async () => {
+    remote({ available: RELEASE })
+    const trigger = screen.getByRole("button", {
+      name: /Remote: studio · New v0\.21\.9/,
+    })
+    fireEvent.click(trigger)
+
+    expect(await screen.findByText("Remote: studio")).toBeVisible()
+    expect(screen.getByText("v0.21.7 → v0.21.9")).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: /Update remote/ }))
+    // No mode: the provider asks first (the confirm dialog).
+    expect(startUpdate).toHaveBeenCalledWith()
+  })
+
+  it("shows download progress as updating the remote, and can cancel it", async () => {
+    remote({
+      state: {
+        seq: 3,
+        status: "downloading",
+        downloaded: 42,
+        total: 100,
+        version: "0.21.9",
+        mode: "when_idle",
+      },
+    })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Updating remote… downloading 42%" })
+    )
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Cancel update" })
+    )
+    expect(cancelUpdate).toHaveBeenCalledTimes(1)
+  })
+
+  it("lists the sessions a waiting update holds for, with update-now and cancel", async () => {
+    remote({
+      state: {
+        seq: 5,
+        status: "waiting_for_idle",
+        version: "0.21.9",
+        mode: "when_idle",
+        quietSecs: 60,
+        busySessions: [
+          {
+            conversationId: 1,
+            title: "Fix the parser",
+            agentType: "claude_code",
+            reason: "working",
+          },
+          { conversationId: 2, title: "Review", reason: "needs_you" },
+        ],
+      },
+    })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remote update waits for 2 sessions" })
+    )
+
+    expect(await screen.findByText("2 sessions are mid-turn")).toBeVisible()
+    expect(screen.getByText("Fix the parser")).toBeVisible()
+    expect(screen.getByText("Needs you")).toBeVisible()
+    expect(screen.getByText("Working")).toBeVisible()
+
+    fireEvent.click(screen.getByRole("button", { name: "Update now" }))
+    expect(startUpdate).toHaveBeenCalledWith({ mode: "now" })
+    fireEvent.click(screen.getByRole("button", { name: "Cancel update" }))
+    expect(cancelUpdate).toHaveBeenCalledTimes(1)
+  })
+
+  it("counts down the quiet window once nothing is mid-turn", () => {
+    remote({
+      state: {
+        seq: 6,
+        status: "waiting_for_idle",
+        busySessions: [],
+        quietSecsLeft: 42,
+        quietSecs: 60,
+      },
+    })
+    expect(
+      screen.getByRole("button", { name: "Remote update in 42s" })
+    ).toBeVisible()
+  })
+
+  it("says the remote is restarting, then confirms the version it came back on", () => {
+    const { unmount } = remote({
+      state: { seq: 8, status: "restarting", version: "0.21.9" },
+      isRestarting: true,
+    })
+    expect(
+      screen.getByRole("button", { name: "Restarting remote…" })
+    ).toBeVisible()
+    unmount()
+
+    remote({ currentVersion: "0.21.9", updatedTo: "0.21.9" })
+    expect(
+      screen.getByRole("button", { name: "Remote on v0.21.9" })
+    ).toBeVisible()
+  })
+
+  it("explains why a remote that could not reconnect is offered as a link", async () => {
+    remote({
+      available: RELEASE,
+      canInstallInPlace: false,
+      selfUpdateBlocker: {
+        code: "invalid_input",
+        message: "A remote window can't update this app",
+        i18n_key: "SystemSettings.updateErrors.remoteWontReconnect",
+        i18n_params: {},
+      },
+    })
+    fireEvent.click(
+      screen.getByRole("button", { name: /Remote: studio · New v0\.21\.9/ })
+    )
+    expect(
+      await screen.findByText(/couldn't reconnect after the restart/)
+    ).toBeVisible()
+    expect(screen.queryByRole("button", { name: /Update remote/ })).toBeNull()
+  })
+})
+
+describe("StatusBarUpdate — this machine in a remote window", () => {
+  it("labels the local app's release apart from the remote's", () => {
+    const ua = vi
+      .spyOn(navigator, "userAgent", "get")
+      .mockReturnValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)")
+    try {
+      renderWith({ target: "local", available: RELEASE })
+      expect(
+        screen.getByRole("button", { name: /This Mac · New v0\.21\.9/ })
+      ).toBeVisible()
+    } finally {
+      ua.mockRestore()
+    }
   })
 })

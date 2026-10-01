@@ -14,6 +14,10 @@ import { toast } from "sonner"
 import {
   type AppUpdateInfo,
   type AppUpdateState,
+  type ServerUpdateCapability,
+  type UpdateMode,
+  type UpdateTarget,
+  cancelAppUpdate,
   checkAppUpdateInfo,
   confirmRollbackVersion,
   describeAppUpdateError,
@@ -27,7 +31,9 @@ import {
   rollbackServer,
   startAppUpdate,
   subscribeAppUpdateState,
+  updateTransport,
   usesTauriUpdater,
+  waitForRelaunchedVersion,
   waitForServerHealthy,
 } from "@/lib/updater"
 import {
@@ -40,9 +46,11 @@ import {
   writeDismissedVersion,
   writeLastCheck,
 } from "@/lib/update-check-storage"
-import { getTransport } from "@/lib/transport"
+import { isDesktop, isRemoteDesktopMode } from "@/lib/transport"
 import { extractAppCommandError } from "@/lib/app-error"
 import type { AppCommandError } from "@/lib/types"
+import { useRemoteConnection } from "@/contexts/remote-connection-value"
+import { RemoteUpdateConfirmDialog } from "@/components/layout/remote-update-confirm-dialog"
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
@@ -65,9 +73,19 @@ const FIRST_CHECK_DELAY_MS = 8000
  * would re-fetch on every tab focus. */
 const AUTO_RETRY_FLOOR_MS = 10 * 60 * 1000
 
+/** How often a window re-reads a remote desktop update's state while it runs
+ * — belt and braces next to the live events, which a sleeping or reconnecting
+ * client can miss. */
+const REMOTE_POLL_MS = 2000
+/** How long to wait for a restarted remote desktop app to answer again. */
+const REMOTE_RELAUNCH_TIMEOUT_MS = 3 * 60 * 1000
+/** How long the status bar confirms the version a remote update landed on. */
+const UPDATED_NOTICE_MS = 60 * 1000
+
 const LIFECYCLES = new Set([
   "idle",
   "downloading",
+  "waiting_for_idle",
   "installing",
   "ready_to_restart",
   "restarting",
@@ -85,6 +103,20 @@ function isAppUpdateState(x: unknown): x is AppUpdateState {
 }
 
 export interface UpdateContextValue {
+  /** Which app this controller is about: the window's backend, or this
+   * machine's own app (shown next to a remote's in a remote window). */
+  target: UpdateTarget
+  /** The remote this controller updates, for labels ("Remote: <name>"), or
+   * null when there is nothing to tell apart (a local window, the local
+   * target, a browser on a server). */
+  remoteName: string | null
+  /** How the target applies an update, once known. `desktop` means a remote
+   * desktop app: the update asks first (busy sessions), then installs and
+   * restarts by itself. */
+  capability: ServerUpdateCapability | undefined
+  /** The version a remote desktop update just landed on, for a short while
+   * after it came back. */
+  updatedTo: string | null
   /** Backend-owned lifecycle. The single source of truth, re-synced on mount
    * so it survives navigation and reloads. */
   state: AppUpdateState
@@ -151,8 +183,14 @@ export interface UpdateContextValue {
   refreshLocalStatus: () => Promise<void>
 
   /** Begin (or attach to) a background download+install of the available
-   * update. Progress arrives via {@link state}. */
-  startUpdate: () => Promise<void>
+   * update. Progress arrives via {@link state}. For a remote desktop app,
+   * without a `mode` this first asks — the confirm dialog lists the sessions a
+   * restart would cut off and offers "when idle" / "now"; with `now` on an
+   * update waiting for idle it goes ahead right away. */
+  startUpdate: (opts?: { mode?: UpdateMode }) => Promise<void>
+  /** Call off a remote desktop update still downloading or waiting for
+   * idle. */
+  cancelUpdate: () => Promise<void>
   /** Relaunch into the staged update. Call when `state.status` is
    * `ready_to_restart`. Desktop relaunches the app; server drives the
    * countdown + health-poll + reload. */
@@ -162,6 +200,7 @@ export interface UpdateContextValue {
 }
 
 const UpdateContext = createContext<UpdateContextValue | null>(null)
+const LocalUpdateContext = createContext<UpdateContextValue | null>(null)
 
 /** Drive the visible "restarting in N…" countdown over the relaunch delay, then
  * resolve so the caller can start polling /health. */
@@ -182,8 +221,15 @@ function countdown(
   })
 }
 
-export function UpdateProvider({ children }: { children: React.ReactNode }) {
+export function UpdateProvider({
+  children,
+  target = "active",
+}: {
+  children: React.ReactNode
+  target?: UpdateTarget
+}) {
   const t = useTranslations("SystemSettings")
+  const remoteConnection = useRemoteConnection()
   const [state, setState] = useState<AppUpdateState>(IDLE_STATE)
   const [restartCountdown, setRestartCountdown] = useState<number | null>(null)
   const [isRollingBack, setIsRollingBack] = useState(false)
@@ -210,6 +256,12 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
   const [selfUpdateBlocker, setSelfUpdateBlocker] =
     useState<AppCommandError | null>(null)
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(null)
+  const [capability, setCapability] = useState<
+    ServerUpdateCapability | undefined
+  >(undefined)
+  const [updatedTo, setUpdatedTo] = useState<string | null>(null)
+  // The "update remote" confirm dialog (remote desktop apps only).
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
   // Completion time of the answer currently applied to state, as a watermark so
   // a cached result is never adopted over a fresher one we already hold.
@@ -229,8 +281,8 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
    * dismiss a release we ALREADY hold, which writes the dismissal key and
    * nothing else. */
   const syncDismissed = useCallback(() => {
-    setDismissedVersion(readDismissedVersion())
-  }, [])
+    setDismissedVersion(readDismissedVersion(target))
+  }, [target])
 
   /** Apply a stored result — ours from a previous run, or one a sibling window
    * recorded while we sat idle. */
@@ -278,9 +330,9 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
   // during render would break the static-export pass, so it happens here.
   useEffect(() => {
     syncDismissed()
-    const last = readLastCheck()
+    const last = readLastCheck(target)
     if (last) adoptCached(last)
-  }, [adoptCached, syncDismissed])
+  }, [adoptCached, syncDismissed, target])
 
   // `storage` fires in the OTHER windows of this origin, so what one workspace
   // window learns reaches its siblings right away instead of at whatever point
@@ -293,8 +345,8 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
       // A null key means storage was cleared wholesale — that touches both.
       if (
         key !== null &&
-        key !== dismissedVersionStorageKey() &&
-        key !== lastCheckStorageKey()
+        key !== dismissedVersionStorageKey(target) &&
+        key !== lastCheckStorageKey(target)
       ) {
         return
       }
@@ -305,13 +357,13 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
       // offer — a loud badge showing the old version number and old release
       // notes until its next check. Re-reading both keeps them in step
       // whichever event arrives first.
-      const last = readLastCheck()
+      const last = readLastCheck(target)
       if (last) adoptCached(last)
       else syncDismissed()
     }
     window.addEventListener("storage", onStorage)
     return () => window.removeEventListener("storage", onStorage)
-  }, [adoptCached, syncDismissed])
+  }, [adoptCached, syncDismissed, target])
 
   // Mirror state into a ref so the action callbacks read the latest snapshot
   // without being re-created on every transition.
@@ -358,7 +410,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
       }
       const epoch = resyncEpochRef.current
       try {
-        const snap = await getAppUpdateState()
+        const snap = await getAppUpdateState(target)
         // Discard if we unmounted, or a newer reset superseded this fetch while
         // it was in flight.
         if (cancelled || epoch !== resyncEpochRef.current) return
@@ -372,7 +424,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
       try {
         const u = await subscribeAppUpdateState((s) => {
           if (!cancelled) applyState(s)
-        })
+        }, target)
         // If we unmounted while subscribing, the cleanup below already ran with
         // a null `unsub` — tear the subscription down here so it doesn't leak.
         if (cancelled) {
@@ -389,7 +441,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
     }
 
     void arm()
-    const offReconnect = getTransport().onReconnect?.(() => {
+    const offReconnect = updateTransport(target).onReconnect?.(() => {
       void resync(true)
     })
 
@@ -398,7 +450,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
       unsub?.()
       offReconnect?.()
     }
-  }, [applyState])
+  }, [applyState, target])
 
   // ─── Availability check ─────────────────────────────────────────────────
 
@@ -437,9 +489,10 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
         // stays the verdict's only writer.
         await refreshLocalStatusRef.current().catch(() => {})
         if (!mountedRef.current) return
-        const result = await checkAppUpdateInfo()
+        const result = await checkAppUpdateInfo(target)
         if (!mountedRef.current) return
         setCurrentVersion(result.currentVersion)
+        if (result.capability) setCapability(result.capability)
         setAvailable(result.update)
         setSelfUpdateSupported(result.selfUpdateSupported ?? false)
         setLiveProgress(result.liveProgress ?? false)
@@ -448,11 +501,14 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
         setCheckError(null)
 
         const now = Date.now()
-        writeLastCheck({
-          at: now,
-          currentVersion: result.currentVersion,
-          info: result.update,
-        })
+        writeLastCheck(
+          {
+            at: now,
+            currentVersion: result.currentVersion,
+            info: result.update,
+          },
+          target
+        )
         appliedAtRef.current = now
         appliedOfferRef.current = result.update?.version ?? null
         appliedBaselineRef.current = result.currentVersion || null
@@ -462,7 +518,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
         // longer the newest thing on offer, drop it so the next one surfaces.
         setDismissedVersion((prev) => {
           if (!prev || prev === result.update?.version) return prev
-          writeDismissedVersion(null)
+          writeDismissedVersion(null, target)
           return null
         })
       } catch (err) {
@@ -481,7 +537,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
         if (mountedRef.current) setChecking(false)
       }
     },
-    [t]
+    [t, target]
   )
 
   const checkNow = useCallback(
@@ -521,23 +577,26 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
    * Comparing baselines rather than release versions also covers rollbacks and
    * sideways installs, with no need for a semver comparator.
    */
-  const discardStaleAvailability = useCallback((running: string) => {
-    const cached = readLastCheck()
-    const cacheStale =
-      !!cached?.currentVersion && cached.currentVersion !== running
-    const memoryStale =
-      !!appliedBaselineRef.current && appliedBaselineRef.current !== running
-    if (cacheStale) clearLastCheck()
-    if (!cacheStale && !memoryStale) return
-    appliedAtRef.current = 0
-    appliedOfferRef.current = null
-    appliedBaselineRef.current = null
-    setAvailable(null)
-    setLastCheckedAt(null)
-    // Ask again now: waiting for the next scheduled tick could leave the UI
-    // blank for 6h if this landed after the startup timer had already run.
-    void checkNowRef.current({ silent: true })
-  }, [])
+  const discardStaleAvailability = useCallback(
+    (running: string) => {
+      const cached = readLastCheck(target)
+      const cacheStale =
+        !!cached?.currentVersion && cached.currentVersion !== running
+      const memoryStale =
+        !!appliedBaselineRef.current && appliedBaselineRef.current !== running
+      if (cacheStale) clearLastCheck(target)
+      if (!cacheStale && !memoryStale) return
+      appliedAtRef.current = 0
+      appliedOfferRef.current = null
+      appliedBaselineRef.current = null
+      setAvailable(null)
+      setLastCheckedAt(null)
+      // Ask again now: waiting for the next scheduled tick could leave the UI
+      // blank for 6h if this landed after the startup timer had already run.
+      void checkNowRef.current({ silent: true })
+    },
+    [target]
+  )
 
   /**
    * Refresh the LOCAL facts (running version, self-update capability, rollback
@@ -548,15 +607,16 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
   const runRefresh = useCallback(async () => {
     let running: string | null = null
     try {
-      if (usesTauriUpdater()) {
-        const version = await getCurrentAppVersion()
+      if (usesTauriUpdater(target)) {
+        const version = await getCurrentAppVersion(target)
         running = version === "unknown" ? null : version
       } else {
         try {
-          const status = await getServerUpdateStatus()
+          const status = await getServerUpdateStatus(target)
           if (status) {
             running = status.currentVersion
             if (mountedRef.current) {
+              setCapability(status.capability)
               setSelfUpdateSupported(status.selfUpdateSupported)
               setLiveProgress(status.liveProgress ?? false)
               setRuntime(status.runtime)
@@ -582,7 +642,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
     if (!running || !mountedRef.current) return
     setCurrentVersion(running)
     discardStaleAvailability(running)
-  }, [discardStaleAvailability])
+  }, [discardStaleAvailability, target])
 
   const startRefresh = useCallback((): Promise<void> => {
     const p = runRefresh().finally(() => {
@@ -642,11 +702,11 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
   // separately from the lifecycle subscription (both transports keep a Set of
   // reconnect callbacks) so the seq/epoch effect stays untouched.
   useEffect(() => {
-    const off = getTransport().onReconnect?.(() => {
+    const off = updateTransport(target).onReconnect?.(() => {
       void refreshLocalStatus()
     })
     return () => off?.()
-  }, [refreshLocalStatus])
+  }, [refreshLocalStatus, target])
 
   // A failed attempt may have left a fresh `.bak` — re-read what can be rolled
   // back. A success relaunches the app/server, so only the failure path needs
@@ -678,9 +738,9 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
 
   const dismissAvailable = useCallback(() => {
     if (!available) return
-    writeDismissedVersion(available.version)
+    writeDismissedVersion(available.version, target)
     setDismissedVersion(available.version)
-  }, [available])
+  }, [available, target])
 
   useEffect(() => {
     let cancelled = false
@@ -691,7 +751,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
       // newer answer BEFORE deciding whether to fetch: it is what suppresses
       // our own request, so skipping without taking it would leave this window
       // badge-less for the rest of the interval even though an update is out.
-      const last = readLastCheck()
+      const last = readLastCheck(target)
       if (last) adoptCached(last)
       // Background tab: skip. `visibilitychange` re-runs this when it returns.
       if (typeof document !== "undefined" && document.hidden) return
@@ -717,21 +777,62 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
       document.removeEventListener("visibilitychange", onVisibility)
     }
     // `adoptCached` is stable, so this still arms exactly once.
-  }, [adoptCached])
+  }, [adoptCached, target])
 
   // ─── Actions ────────────────────────────────────────────────────────────
 
-  const startUpdate = useCallback(async () => {
+  // A remote desktop app: the update asks first and restarts by itself.
+  const remoteDesktop =
+    target === "active" && capability === "desktop" && !usesTauriUpdater()
+
+  // What to call the remote in labels: the saved connection's name in a
+  // remote-desktop window; for a browser on a desktop app, the host.
+  const remoteName =
+    target !== "active"
+      ? null
+      : isRemoteDesktopMode()
+        ? (remoteConnection?.connection?.name ?? null)
+        : !isDesktop() && capability === "desktop"
+          ? typeof window !== "undefined"
+            ? window.location.host
+            : null
+          : null
+
+  const startUpdate = useCallback(
+    async (opts?: { mode?: UpdateMode }) => {
+      if (remoteDesktop && !opts?.mode) {
+        setConfirmOpen(true)
+        return
+      }
+      try {
+        const snap = await startAppUpdate(target, opts?.mode)
+        applyState(snap)
+      } catch (err) {
+        // The detached backend task reports its own failures via the state
+        // event; this only fires if the kickoff call itself failed (e.g. the
+        // server is unreachable, or a remote that could not be reconnected
+        // to after its restart refused).
+        const structured = extractAppCommandError(err)
+        if (structured?.i18n_key) {
+          const reason = describeAppUpdateError(err, "install", structured)
+          toast.error(t(reason.key, reason.values))
+        } else {
+          const { rawMessage } = normalizeAppUpdateError(err)
+          toast.error(t("installFailed", { message: rawMessage }))
+        }
+        console.error("[Update] start failed:", err)
+      }
+    },
+    [applyState, remoteDesktop, t, target]
+  )
+
+  const cancelUpdate = useCallback(async () => {
     try {
-      const snap = await startAppUpdate()
-      applyState(snap)
+      applyState(await cancelAppUpdate())
     } catch (err) {
-      // The detached backend task reports its own failures via the state
-      // event; this only fires if the kickoff call itself failed (e.g. the
-      // server is unreachable).
       const { rawMessage } = normalizeAppUpdateError(err)
-      toast.error(t("installFailed", { message: rawMessage }))
-      console.error("[Update] start failed:", err)
+      toast.error(t("cancelUpdateFailed", { message: rawMessage }))
+      console.error("[Update] cancel failed:", err)
     }
   }, [applyState, t])
 
@@ -739,15 +840,33 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
     setIsRestarting(true)
     // Desktop relaunches the whole app — nothing to verify, the new process
     // boots into the updated build.
-    if (usesTauriUpdater()) {
+    if (usesTauriUpdater(target)) {
       try {
-        await restartApp()
+        await restartApp(target)
         // Success: the app is relaunching; stay busy until it does.
       } catch (err) {
         setIsRestarting(false)
         const { rawMessage } = normalizeAppUpdateError(err)
         toast.error(t("installFailed", { message: rawMessage }))
         console.error("[Update] restart failed:", err)
+      }
+      return
+    }
+
+    // A remote desktop app with an update staged (an older client started
+    // it, or someone on that machine did): ask it to relaunch. The restart
+    // watcher below follows it down and back up once the state says
+    // `restarting` — read it right away in case the live event is lost.
+    if (remoteDesktop) {
+      try {
+        await restartApp(target)
+        applyState(await getAppUpdateState(target))
+      } catch (err) {
+        const { rawMessage } = normalizeAppUpdateError(err)
+        toast.error(t("installFailed", { message: rawMessage }))
+        console.error("[Update] remote restart failed:", err)
+      } finally {
+        setIsRestarting(false)
       }
       return
     }
@@ -851,7 +970,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
       setRestartCountdown(null)
       setIsRestarting(false)
     }
-  }, [t])
+  }, [applyState, remoteDesktop, t, target])
 
   const rollback = useCallback(async () => {
     setIsRollingBack(true)
@@ -913,8 +1032,91 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
     }
   }, [t])
 
+  // ─── Remote desktop app: polling, and the restart it does by itself ─────
+
+  const currentVersionRef = useRef(currentVersion)
+  useEffect(() => {
+    currentVersionRef.current = currentVersion
+  }, [currentVersion])
+  // The version the update in flight installs. The restart claim clears it
+  // from the snapshot, so remember the last one seen.
+  const targetVersionRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (state.version) targetVersionRef.current = state.version
+  }, [state.version])
+
+  const remoteInFlight =
+    remoteDesktop &&
+    (state.status === "downloading" ||
+      state.status === "waiting_for_idle" ||
+      state.status === "installing")
+  useEffect(() => {
+    if (!remoteInFlight) return
+    const id = setInterval(() => {
+      getAppUpdateState(target)
+        .then(applyState)
+        .catch(() => {
+          // Briefly unreachable; the next tick or the reconnect resync heals.
+        })
+    }, REMOTE_POLL_MS)
+    return () => clearInterval(id)
+  }, [remoteInFlight, applyState, target])
+
+  // A remote desktop app restarts by itself once installed. Follow it down
+  // and back up, then confirm which version it came back on. The transport
+  // reconnects on its own; the reconnect resync above re-reads the state.
+  const watchingRelaunchRef = useRef(false)
+  useEffect(() => {
+    if (!remoteDesktop || state.status !== "restarting") return
+    if (watchingRelaunchRef.current) return
+    watchingRelaunchRef.current = true
+    const baseline = currentVersionRef.current || null
+    setIsRestarting(true)
+    setUpdatedTo(null)
+    void (async () => {
+      try {
+        const outcome = await waitForRelaunchedVersion(baseline, {
+          timeoutMs: REMOTE_RELAUNCH_TIMEOUT_MS,
+        })
+        if (!mountedRef.current) return
+        if (outcome.kind === "updated") {
+          setCurrentVersion(outcome.version)
+          discardStaleAvailability(outcome.version)
+          setUpdatedTo(outcome.version)
+          toast.success(t("remoteUpdateSuccess", { version: outcome.version }))
+          // A browser runs the frontend the remote serves: load the new one.
+          if (!isDesktop()) {
+            setTimeout(() => window.location.reload(), 2500)
+          }
+        } else if (outcome.kind === "unchanged") {
+          toast.error(t("remoteUpdateUnchanged", { version: baseline ?? "" }))
+        } else {
+          toast.error(t("remoteRestartTimeout"))
+        }
+        void refreshLocalStatus()
+      } finally {
+        watchingRelaunchRef.current = false
+        if (mountedRef.current) setIsRestarting(false)
+      }
+    })()
+  }, [
+    remoteDesktop,
+    state.status,
+    discardStaleAvailability,
+    refreshLocalStatus,
+    t,
+  ])
+
+  useEffect(() => {
+    if (!updatedTo) return
+    const id = setTimeout(() => setUpdatedTo(null), UPDATED_NOTICE_MS)
+    return () => clearTimeout(id)
+  }, [updatedTo])
+
   const isUpdating =
-    state.status === "downloading" || state.status === "installing"
+    state.status === "downloading" ||
+    state.status === "waiting_for_idle" ||
+    state.status === "installing"
   const isBusy =
     isUpdating ||
     isRollingBack ||
@@ -927,11 +1129,15 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
   // endpoint) and reports nothing in the way (an in-place update it already
   // knows would fail), so anything else falls back to a "view release" link.
   const canInstallInPlace =
-    usesTauriUpdater() ||
+    usesTauriUpdater(target) ||
     (selfUpdateSupported && liveProgress && !selfUpdateBlocker)
 
   const value = useMemo<UpdateContextValue>(
     () => ({
+      target,
+      remoteName,
+      capability,
+      updatedTo,
       state,
       isUpdating,
       restartCountdown,
@@ -955,10 +1161,15 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
       dismissAvailable,
       refreshLocalStatus,
       startUpdate,
+      cancelUpdate,
       restart,
       rollback,
     }),
     [
+      target,
+      remoteName,
+      capability,
+      updatedTo,
       state,
       isUpdating,
       restartCountdown,
@@ -982,19 +1193,55 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
       dismissAvailable,
       refreshLocalStatus,
       startUpdate,
+      cancelUpdate,
       restart,
       rollback,
     ]
   )
 
+  const Context = target === "local" ? LocalUpdateContext : UpdateContext
   return (
-    <UpdateContext.Provider value={value}>{children}</UpdateContext.Provider>
+    <Context.Provider value={value}>
+      {children}
+      {remoteDesktop && (
+        <RemoteUpdateConfirmDialog
+          open={confirmOpen}
+          onOpenChange={setConfirmOpen}
+          remoteName={remoteName}
+          version={available?.version ?? null}
+          onConfirm={(mode) => {
+            setConfirmOpen(false)
+            void startUpdate({ mode })
+          }}
+        />
+      )}
+    </Context.Provider>
   )
+}
+
+/**
+ * In a remote-desktop window, add a controller for this machine's own app
+ * next to the remote's, so the status bar can offer both — labelled apart.
+ * Anywhere else the window's own controller already is the local app (or
+ * there is no local app, in a browser), so this renders its children as-is.
+ */
+export function LocalAppUpdateProvider({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  if (!isDesktop() || !isRemoteDesktopMode()) return <>{children}</>
+  return <UpdateProvider target="local">{children}</UpdateProvider>
 }
 
 /** Access the app-update controller. Returns null outside a provider, so the
  * global indicator can render nothing rather than throw on surfaces (login,
- * aux windows) that don't mount it. */
-export function useAppUpdate(): UpdateContextValue | null {
-  return useContext(UpdateContext)
+ * aux windows) that don't mount it. `"local"` reads the controller for this
+ * machine's own app, mounted only in remote-desktop windows. */
+export function useAppUpdate(
+  target: UpdateTarget = "active"
+): UpdateContextValue | null {
+  const active = useContext(UpdateContext)
+  const local = useContext(LocalUpdateContext)
+  return target === "local" ? local : active
 }

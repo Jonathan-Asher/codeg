@@ -1,14 +1,6 @@
 "use client"
 
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Loader2 } from "lucide-react"
 import { useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
@@ -21,12 +13,9 @@ import { resetBackendScopedStores } from "@/stores/backend-scoped-store-reset"
 import { getRemoteWorkspaceConnection } from "@/lib/remote-workspace"
 import { toErrorMessage } from "@/lib/app-error"
 import type { RemoteWorkspaceConnection } from "@/lib/types"
+import { RemoteConnectionContext } from "@/contexts/remote-connection-value"
 
-interface RemoteConnectionContextValue {
-  connection: RemoteWorkspaceConnection | null
-  expired: boolean
-  markExpired: () => void
-}
+export { useRemoteConnection } from "@/contexts/remote-connection-value"
 
 interface RemoteConnectionState {
   connection: RemoteWorkspaceConnection | null
@@ -36,18 +25,11 @@ interface RemoteConnectionState {
   expired: boolean
 }
 
-const RemoteConnectionContext =
-  createContext<RemoteConnectionContextValue | null>(null)
-
 function createFallbackRemoteWindowId() {
   if (typeof globalThis.crypto?.randomUUID === "function") {
     return `rw-${globalThis.crypto.randomUUID()}`
   }
   return `rw-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-}
-
-export function useRemoteConnection() {
-  return useContext(RemoteConnectionContext)
 }
 
 /**

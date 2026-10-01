@@ -1,21 +1,70 @@
 import { extractAppCommandError, toErrorMessage } from "./app-error"
-import { getTransport, isDesktop, isRemoteDesktopMode } from "./transport"
+import {
+  getShellTransport,
+  getTransport,
+  isDesktop,
+  isRemoteDesktopMode,
+  type Transport,
+} from "./transport"
 import type { AppCommandError } from "./types"
 
-// Drive the LOCAL Tauri app updater only for a genuine local desktop window.
-// A remote-desktop window IS a Tauri app (`isDesktop()` is true) but its
-// backend is a remote codeg-server, so update checks/actions must target that
-// server through the transport — otherwise the operator would check and update
-// their own local app instead of the server they are managing.
-export function usesTauriUpdater(): boolean {
+/**
+ * Which app an update surface is about.
+ *
+ *   * `"active"` — the backend this window talks to: the local app in a local
+ *     window, the remote codeg (server or desktop app) in a remote-desktop or
+ *     browser window.
+ *   * `"local"` — always this machine's own desktop app, even in a window
+ *     bound to a remote. A remote-desktop window shows both, labelled apart.
+ */
+export type UpdateTarget = "active" | "local"
+
+// Drive the LOCAL Tauri app updater only for a genuine local desktop window
+// (or the explicitly local target). A remote-desktop window IS a Tauri app
+// (`isDesktop()` is true) but its backend is a remote codeg, so update
+// checks/actions for the active target must go to that backend through the
+// transport — otherwise the operator would check and update their own local
+// app instead of the machine they are managing.
+export function usesTauriUpdater(target: UpdateTarget = "active"): boolean {
+  if (target === "local") return isDesktop()
   return isDesktop() && !isRemoteDesktopMode()
+}
+
+/** The transport that reaches the target's backend. */
+export function updateTransport(target: UpdateTarget = "active"): Transport {
+  return target === "local" ? getShellTransport() : getTransport()
 }
 
 // All updater imports are dynamic to avoid crashing in non-Tauri browsers.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Update = any
 
-export type ServerUpdateCapability = "supervised" | "reexec"
+/** How the target applies an update: a supervised or re-exec'd server swaps
+ * its files, a `desktop` app (answering a remote window) installs through its
+ * own updater and relaunches itself. */
+export type ServerUpdateCapability = "supervised" | "reexec" | "desktop"
+
+/** How a remote window wants a desktop app's update applied: right away, or
+ * once no session has been mid-turn for a while. */
+export type UpdateMode = "now" | "when_idle"
+
+export type BusyReason = "working" | "needs_you" | "background"
+
+/** A session an update's restart would cut off mid-turn. Mirrors
+ * `src-tauri/src/update/busy.rs`. */
+export interface BusySession {
+  conversationId?: number
+  folderId?: number
+  title?: string
+  agentType?: string
+  reason: BusyReason
+}
+
+export interface BusySessionsReport {
+  sessions: BusySession[]
+  /** Turns cut off by a restart resume by themselves afterwards. */
+  autoResume: boolean
+}
 
 /** The three release fields the UI actually renders. Deliberately plain data:
  * the download is driven by the BACKEND (`perform_app_update` re-checks on its
@@ -79,6 +128,7 @@ export interface ServerUpdateStatus {
 export type AppUpdateLifecycle =
   | "idle"
   | "downloading"
+  | "waiting_for_idle"
   | "installing"
   | "ready_to_restart"
   | "restarting"
@@ -100,6 +150,16 @@ export interface AppUpdateState {
   trialSeconds?: number
   /** Server-only: how the restart is carried out. */
   capability?: ServerUpdateCapability
+  /** Remote desktop updates: how it is applied. With a mode the backend
+   * installs and restarts by itself. */
+  mode?: UpdateMode
+  /** `waiting_for_idle` only: the sessions the install waits on. */
+  busySessions?: BusySession[]
+  /** `waiting_for_idle` only: quiet seconds still needed; absent while a
+   * session is mid-turn. */
+  quietSecsLeft?: number
+  /** `waiting_for_idle` only: the whole quiet window, in seconds. */
+  quietSecs?: number
   /** Raw error message (error only); classify via {@link normalizeAppUpdateError}. */
   error?: string
   /** The structured error behind `error`, when the backend had one — code,
@@ -111,32 +171,56 @@ export interface AppUpdateState {
 /** Snapshot of the current update state. Works in every mode: desktop reads a
  * Tauri command, server/remote reads the HTTP handler. Call on mount to
  * recover an in-flight download the UI would otherwise have lost. */
-export function getAppUpdateState(): Promise<AppUpdateState> {
-  return getTransport().call<AppUpdateState>("app_update_state")
+export function getAppUpdateState(
+  target: UpdateTarget = "active"
+): Promise<AppUpdateState> {
+  return updateTransport(target).call<AppUpdateState>("app_update_state")
 }
 
 /** Subscribe to live update-state transitions (download progress, ready,
  * error, restarting). Arm this BEFORE the snapshot fetch so no event is
  * missed. */
 export function subscribeAppUpdateState(
-  handler: (state: AppUpdateState) => void
+  handler: (state: AppUpdateState) => void,
+  target: UpdateTarget = "active"
 ): Promise<() => void> {
-  return getTransport().subscribe<AppUpdateState>("app_update_state", handler)
+  return updateTransport(target).subscribe<AppUpdateState>(
+    "app_update_state",
+    handler
+  )
 }
 
 /** Begin (or attach to) the download+install. Returns immediately with the
  * current snapshot; progress arrives via {@link subscribeAppUpdateState}. The
  * download runs detached in the backend, so it is not bound to this call's
  * lifetime. */
-export function startAppUpdate(): Promise<AppUpdateState> {
-  return getTransport().call<AppUpdateState>("perform_app_update")
+export function startAppUpdate(
+  target: UpdateTarget = "active",
+  mode?: UpdateMode
+): Promise<AppUpdateState> {
+  const transport = updateTransport(target)
+  return mode
+    ? transport.call<AppUpdateState>("perform_app_update", { mode })
+    : transport.call<AppUpdateState>("perform_app_update")
+}
+
+/** Call off a remote desktop update that is still downloading or waiting for
+ * idle. Resolves with the current snapshot; the state turns `idle` once the
+ * backend has stopped. */
+export function cancelAppUpdate(): Promise<AppUpdateState> {
+  return getTransport().call<AppUpdateState>("cancel_app_update")
+}
+
+/** The sessions on the active backend that its restart would cut off. */
+export function getBusySessions(): Promise<BusySessionsReport> {
+  return getTransport().call<BusySessionsReport>("app_update_busy_sessions")
 }
 
 /** Relaunch into the freshly-installed bytes. Desktop relaunches the app;
  * server triggers the supervised/re-exec restart (the caller then drives the
  * countdown + health poll using the `ReadyToRestart` snapshot's metadata). */
-export function restartApp(): Promise<void> {
-  return getTransport().call("restart_app")
+export function restartApp(target: UpdateTarget = "active"): Promise<void> {
+  return updateTransport(target).call("restart_app")
 }
 
 export interface ServerUpdateActionResult {
@@ -178,6 +262,7 @@ export type AppUpdateErrorMessageKey =
   | "updateErrors.downloadFailed"
   | "updateErrors.permissionDenied"
   | "updateErrors.targetWriteFailed"
+  | "updateErrors.remoteWontReconnect"
   | "updateErrors.installFailed"
   | "updateErrors.unknown"
 
@@ -229,6 +314,12 @@ const SERVER_UPDATE_ERROR_MESSAGES = new Map<
     "SystemSettings.updateErrors.targetWriteFailed",
     { key: "updateErrors.targetWriteFailed", params: ["path", "reason"] },
   ],
+  // A desktop app whose web service would not come back after its restart
+  // (`desktop_remote::reconnect_blocker`).
+  [
+    "SystemSettings.updateErrors.remoteWontReconnect",
+    { key: "updateErrors.remoteWontReconnect", params: [] },
+  ],
 ])
 
 /**
@@ -271,8 +362,10 @@ export function describeAppUpdateError(
   }
 }
 
-export async function getCurrentAppVersion(): Promise<string> {
-  if (!usesTauriUpdater()) {
+export async function getCurrentAppVersion(
+  target: UpdateTarget = "active"
+): Promise<string> {
+  if (!usesTauriUpdater(target)) {
     // Read the running version from a LOCAL source, never the
     // manifest-dependent update check: the settings page loads this alongside
     // unrelated local state (proxy settings). This must fail OPEN — neither a
@@ -321,8 +414,10 @@ const MANIFEST_TIMEOUT_MS = 15_000
  *
  * Server/remote hits `check_app_update`, which already answers in this shape.
  */
-export async function checkAppUpdateInfo(): Promise<AppUpdateCheckResult> {
-  if (!usesTauriUpdater()) {
+export async function checkAppUpdateInfo(
+  target: UpdateTarget = "active"
+): Promise<AppUpdateCheckResult> {
+  if (!usesTauriUpdater(target)) {
     return getTransport().call<AppUpdateCheckResult>("check_app_update")
   }
   const { getVersion } = await import("@tauri-apps/api/app")
@@ -364,8 +459,10 @@ async function closeUpdateHandle(update: NonNullable<Update>): Promise<void> {
  * — `rollback_app` is entirely local. Returns null for a genuine local desktop
  * window (no server to query; it updates via the Tauri plugin).
  */
-export async function getServerUpdateStatus(): Promise<ServerUpdateStatus | null> {
-  if (usesTauriUpdater()) return null
+export async function getServerUpdateStatus(
+  target: UpdateTarget = "active"
+): Promise<ServerUpdateStatus | null> {
+  if (usesTauriUpdater(target)) return null
   return getTransport().call<ServerUpdateStatus>("app_update_status")
 }
 
@@ -435,6 +532,40 @@ export async function readServerVersionStrict(): Promise<string | null> {
     { timeoutMs: 4000 }
   )
   return res?.version ?? null
+}
+
+export type RelaunchOutcome =
+  | { kind: "updated"; version: string }
+  | { kind: "unchanged" }
+  | { kind: "timeout" }
+
+/**
+ * Follow a backend that restarts by itself (a remote desktop app installing an
+ * update) down and back up, by its `/health` version. `"updated"` as soon as it
+ * answers on a version other than `baseline`; `"unchanged"` when it went away
+ * and came back on the same one (the install didn't take); `"timeout"` when it
+ * never answered differently within `timeoutMs`. The old process can keep
+ * answering for a moment after it announced the restart, so its own replies
+ * are waited out rather than read as a failure.
+ */
+export async function waitForRelaunchedVersion(
+  baseline: string | null,
+  opts: { timeoutMs: number; intervalMs?: number }
+): Promise<RelaunchOutcome> {
+  const interval = opts.intervalMs ?? 2000
+  const deadline = Date.now() + opts.timeoutMs
+  let wentAway = false
+  while (Date.now() < deadline) {
+    try {
+      const version = await readServerVersionStrict()
+      if (version && version !== baseline) return { kind: "updated", version }
+      if (wentAway && version) return { kind: "unchanged" }
+    } catch {
+      wentAway = true
+    }
+    await sleep(interval)
+  }
+  return { kind: "timeout" }
 }
 
 export type RollbackOutcome = "rolled-back" | "unchanged" | "unreachable"

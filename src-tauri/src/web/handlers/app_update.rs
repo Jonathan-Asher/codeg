@@ -1,19 +1,26 @@
-//! In-place self-update endpoints for the standalone server / Docker
-//! runtime: download+verify+swap (`perform_app_update`), relaunch
-//! (`restart_app`), and revert (`rollback_app`).
+//! Self-update endpoints: download+verify+install (`perform_app_update`),
+//! relaunch (`restart_app`), revert (`rollback_app`), call off
+//! (`cancel_app_update`), and the sessions a restart would cut off
+//! (`app_update_busy_sessions`).
 //!
-//! All three are gated behind the process-wide `system_op_lock` so a second
-//! click can't race a download already in flight. On desktop (Tauri) builds
-//! they hard-error — desktop updates through `tauri-plugin-updater`.
+//! The standalone server / Docker runtime swaps its own files in place; those
+//! paths are gated behind the process-wide `system_op_lock` so a second click
+//! can't race a download already in flight. The desktop app's embedded server
+//! answers a remote window through `update::desktop_remote`, which drives the
+//! same `tauri-plugin-updater` install the local Update button uses, can wait
+//! for the machine to go idle, and restarts the app by itself.
 
 use std::sync::Arc;
 
+use axum::body::Bytes;
 use axum::{extract::Extension, Json};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::app_error::AppCommandError;
 use crate::app_state::AppState;
+use crate::update::busy::BusySession;
 use crate::update::runtime::UpdateCapability;
+use crate::update::state::UpdateMode;
 use crate::update::AppUpdateState;
 
 /// Current update snapshot (in-flight download progress, ready-to-restart, or
@@ -41,7 +48,26 @@ pub struct UpdateActionResult {
     pub capability: UpdateCapability,
 }
 
-/// Kick off the download/verify/swap and return **immediately** with the
+/// Body of `perform_app_update`. Older clients send `{}`.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformAppUpdateParams {
+    /// How a remote window wants the update applied (desktop app only): with
+    /// a mode the backend installs and restarts by itself; without one it
+    /// stops at `ReadyToRestart` for a `restart_app`.
+    #[serde(default)]
+    pub mode: Option<UpdateMode>,
+}
+
+fn parse_perform_params(body: &[u8]) -> Result<PerformAppUpdateParams, AppCommandError> {
+    if body.iter().all(u8::is_ascii_whitespace) {
+        return Ok(PerformAppUpdateParams::default());
+    }
+    serde_json::from_slice(body)
+        .map_err(|e| AppCommandError::invalid_input(format!("Invalid update request: {e}")))
+}
+
+/// Kick off the download/verify/install and return **immediately** with the
 /// current snapshot (`Downloading`). The actual work runs in a detached task so
 /// it survives the client navigating away, reloading, or dropping the
 /// connection — progress is observed via the `app_update_state` event/snapshot,
@@ -49,8 +75,10 @@ pub struct UpdateActionResult {
 /// flight just returns the live snapshot.
 pub async fn perform_app_update(
     Extension(state): Extension<Arc<AppState>>,
+    body: Bytes,
 ) -> Result<Json<AppUpdateState>, AppCommandError> {
-    perform_impl(state).await.map(Json)
+    let params = parse_perform_params(&body)?;
+    perform_impl(state, params.mode).await.map(Json)
 }
 
 pub async fn restart_app(
@@ -65,29 +93,122 @@ pub async fn rollback_app(
     rollback_impl(state).await.map(Json)
 }
 
-// ─── desktop build: not supported ────────────────────────────────────────
+/// Call off a remote-requested update while it is still downloading or
+/// waiting for idle (desktop app only). Returns the current snapshot; it
+/// moves to `idle` once the update has stopped.
+pub async fn cancel_app_update(
+    Extension(state): Extension<Arc<AppState>>,
+) -> Result<Json<AppUpdateState>, AppCommandError> {
+    cancel_impl(&state).map(Json)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BusySessionsReport {
+    /// Sessions a restart right now would cut off mid-turn.
+    pub sessions: Vec<BusySession>,
+    /// Whether turns cut off by a restart resume by themselves afterwards
+    /// ("Resume interrupted sessions after restart").
+    pub auto_resume: bool,
+}
+
+/// The sessions an update's restart would interrupt, for the confirm dialog.
+pub async fn app_update_busy_sessions(
+    Extension(state): Extension<Arc<AppState>>,
+) -> Result<Json<BusySessionsReport>, AppCommandError> {
+    let sessions =
+        crate::update::busy::list_busy_sessions(&state.connection_manager, &state.db.conn).await?;
+    let auto_resume = crate::acp::auto_resume::load_auto_resume_settings(&state.db.conn)
+        .await
+        .enabled;
+    Ok(Json(BusySessionsReport {
+        sessions,
+        auto_resume,
+    }))
+}
+
+// ─── desktop build: the app's own updater, for a remote window ───────────
 
 #[cfg(feature = "tauri-runtime")]
-async fn perform_impl(_state: Arc<AppState>) -> Result<AppUpdateState, AppCommandError> {
-    // The embedded server in a desktop build must never swap the desktop
-    // binary with a server tarball; the desktop app updates through its own
-    // `app_update` Tauri commands (tauri-plugin-updater).
-    Err(not_supported())
+fn desktop_app(state: &AppState) -> Result<tauri::AppHandle, AppCommandError> {
+    match &state.emitter {
+        crate::web::event_bridge::EventEmitter::Tauri(app) => Ok(app.clone()),
+        _ => Err(AppCommandError::invalid_input(
+            "In-place update needs the running desktop app",
+        )),
+    }
 }
 
 #[cfg(feature = "tauri-runtime")]
-fn restart_impl(_state: Arc<AppState>) -> Result<UpdateActionResult, AppCommandError> {
-    Err(not_supported())
+async fn perform_impl(
+    state: Arc<AppState>,
+    mode: Option<UpdateMode>,
+) -> Result<AppUpdateState, AppCommandError> {
+    use crate::update::desktop_remote;
+    use crate::update::state::{self as update_state, AppUpdateLifecycle};
+
+    let app = desktop_app(&state)?;
+    // An update already in flight is joined whatever the configuration says;
+    // a new one starts only if the asking window can get back in after the
+    // restart.
+    let snap = update_state::snapshot(&state.update_state);
+    let settled = matches!(
+        snap.status,
+        AppUpdateLifecycle::Idle | AppUpdateLifecycle::Error
+    );
+    if settled {
+        if let Some(blocker) = desktop_remote::update_blocker(&app, &state).await {
+            tracing::warn!("[update] remote update refused: {}", blocker.message);
+            return Err(blocker);
+        }
+        tracing::info!("[update] remote client asked for an update ({mode:?})");
+    }
+    Ok(desktop_remote::begin(
+        desktop_remote::live_deps(&app, &state),
+        mode,
+    ))
+}
+
+#[cfg(feature = "tauri-runtime")]
+fn restart_impl(state: Arc<AppState>) -> Result<UpdateActionResult, AppCommandError> {
+    let app = desktop_app(&state)?;
+    // Same authority check as every restart: only a staged update relaunches.
+    if !crate::update::state::try_claim_restart(&state.update_state, &state.emitter) {
+        return Err(AppCommandError::invalid_input(
+            "No staged update to restart into",
+        ));
+    }
+    tracing::info!("[update] remote client asked to restart into the staged update");
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(750)).await;
+        app.request_restart();
+    });
+    Ok(UpdateActionResult {
+        version: None,
+        need_restart: false,
+        restart_delay_ms: crate::update::desktop_remote::DESKTOP_RESTART_DELAY_MS,
+        trial_seconds: 0,
+        capability: UpdateCapability::Desktop,
+    })
 }
 
 #[cfg(feature = "tauri-runtime")]
 async fn rollback_impl(_state: Arc<AppState>) -> Result<UpdateActionResult, AppCommandError> {
-    Err(not_supported())
+    Err(AppCommandError::invalid_input(
+        "Rolling back is not available for the desktop app; install the previous release instead",
+    ))
 }
 
 #[cfg(feature = "tauri-runtime")]
-fn not_supported() -> AppCommandError {
-    AppCommandError::invalid_input("In-place update is only available in server mode")
+fn cancel_impl(state: &AppState) -> Result<AppUpdateState, AppCommandError> {
+    crate::update::desktop_remote::cancel(&state.update_state)
+}
+
+#[cfg(not(feature = "tauri-runtime"))]
+fn cancel_impl(_state: &AppState) -> Result<AppUpdateState, AppCommandError> {
+    Err(AppCommandError::invalid_input(
+        "Only a desktop app's update can be cancelled",
+    ))
 }
 
 // ─── server build: the real thing ────────────────────────────────────────
@@ -122,11 +243,19 @@ fn ensure_supported() -> Result<(), AppCommandError> {
 }
 
 #[cfg(not(feature = "tauri-runtime"))]
-async fn perform_impl(state: Arc<AppState>) -> Result<AppUpdateState, AppCommandError> {
+async fn perform_impl(
+    state: Arc<AppState>,
+    mode: Option<UpdateMode>,
+) -> Result<AppUpdateState, AppCommandError> {
     use crate::update::install::UpdatePhase;
     use crate::update::state as update_state;
 
     ensure_supported()?;
+    // The server always stages and waits for `restart_app`; a mode is a
+    // desktop-app request (clients send one only to a desktop remote).
+    if mode.is_some() {
+        tracing::info!("[update] ignoring update mode {mode:?}: the server restarts on request");
+    }
 
     // Perform-vs-perform mutual exclusion is the atomic `update_state` claim:
     // a second click or another client that finds a download already in flight
@@ -322,7 +451,7 @@ mod tests {
         // A second concurrent perform must return the live snapshot and attach —
         // never a `busy` error, and without driving a second download. `try_begin`
         // short-circuits before the op-lock or any network is touched.
-        let result = perform_impl(state.clone())
+        let result = perform_impl(state.clone(), None)
             .await
             .expect("second perform attaches instead of erroring");
         assert_eq!(result.status, update_state::AppUpdateLifecycle::Downloading);
@@ -394,5 +523,40 @@ mod tests {
             update_state::AppUpdateLifecycle::ReadyToRestart
         );
         assert!(state.system_op_lock.try_lock().is_ok());
+    }
+}
+
+#[cfg(test)]
+mod params_tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_or_legacy_body_has_no_mode() {
+        assert!(parse_perform_params(b"").unwrap().mode.is_none());
+        assert!(parse_perform_params(b"{}").unwrap().mode.is_none());
+        assert!(parse_perform_params(br#"{"other":1}"#).unwrap().mode.is_none());
+    }
+
+    #[test]
+    fn a_mode_is_read_in_snake_case() {
+        assert_eq!(
+            parse_perform_params(br#"{"mode":"when_idle"}"#).unwrap().mode,
+            Some(UpdateMode::WhenIdle)
+        );
+        assert_eq!(
+            parse_perform_params(br#"{"mode":"now"}"#).unwrap().mode,
+            Some(UpdateMode::Now)
+        );
+        assert!(parse_perform_params(br#"{"mode":"later"}"#).is_err());
+    }
+
+    #[test]
+    fn the_busy_report_is_camel_case() {
+        let wire = serde_json::to_value(BusySessionsReport {
+            sessions: Vec::new(),
+            auto_resume: true,
+        })
+        .unwrap();
+        assert_eq!(wire, serde_json::json!({ "sessions": [], "autoResume": true }));
     }
 }

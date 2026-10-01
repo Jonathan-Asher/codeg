@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use crate::app_error::AppCommandError;
+use crate::update::busy::BusySession;
 use crate::update::runtime::UpdateCapability;
 use crate::web::event_bridge::{emit_event, EventEmitter};
 
@@ -44,10 +45,26 @@ const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 pub enum AppUpdateLifecycle {
     Idle,
     Downloading,
+    /// Downloaded and verified; the install waits until no session has been
+    /// mid-turn for the quiet window (a remote "update when idle").
+    WaitingForIdle,
     Installing,
     ReadyToRestart,
     Restarting,
     Error,
+}
+
+/// How a remote client asked for the update to be applied. Absent for the
+/// local Update button and for older clients, which stop at `ReadyToRestart`
+/// and relaunch with their own `restart_app`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateMode {
+    /// Install and restart as soon as the download is verified.
+    Now,
+    /// Download now; install and restart once no session has been mid-turn
+    /// for the quiet window.
+    WhenIdle,
 }
 
 /// Full update snapshot, emitted on every transition and returned by the
@@ -86,6 +103,20 @@ pub struct AppUpdateState {
     /// How a server restart is carried out (`supervised` / `reexec`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capability: Option<UpdateCapability>,
+    /// How the update will be applied (remote-requested updates only): with
+    /// a mode, the backend installs and restarts by itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<UpdateMode>,
+    /// The sessions the install is waiting on (`WaitingForIdle` only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub busy_sessions: Option<Vec<BusySession>>,
+    /// Seconds of quiet still needed before the install starts
+    /// (`WaitingForIdle` only); absent while a session is mid-turn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quiet_secs_left: Option<u64>,
+    /// The whole quiet window, in seconds (`WaitingForIdle` only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quiet_secs: Option<u64>,
     /// Raw error message (`Error` only). The frontend classifies it for
     /// display via `normalizeAppUpdateError` when there is no `error_info` to
     /// go by.
@@ -111,6 +142,10 @@ impl AppUpdateState {
             restart_delay_ms: None,
             trial_seconds: None,
             capability: None,
+            mode: None,
+            busy_sessions: None,
+            quiet_secs_left: None,
+            quiet_secs: None,
             error: None,
             error_info: None,
         }
@@ -126,8 +161,16 @@ impl AppUpdateState {
         self.restart_delay_ms = None;
         self.trial_seconds = None;
         self.capability = None;
+        self.mode = None;
+        self.clear_wait_fields();
         self.error = None;
         self.error_info = None;
+    }
+
+    fn clear_wait_fields(&mut self) {
+        self.busy_sessions = None;
+        self.quiet_secs_left = None;
+        self.quiet_secs = None;
     }
 }
 
@@ -262,7 +305,72 @@ pub fn set_installing(handle: &AppUpdateStateHandle, emitter: &EventEmitter) -> 
         s.status = AppUpdateLifecycle::Installing;
         s.downloaded = None;
         s.total = None;
+        s.clear_wait_fields();
     })
+}
+
+/// Record which release an in-flight download is for, and how it will be
+/// applied, so every client can show it before the bytes land.
+pub fn set_target(
+    handle: &AppUpdateStateHandle,
+    emitter: &EventEmitter,
+    version: String,
+    mode: Option<UpdateMode>,
+) -> AppUpdateState {
+    mutate(handle, emitter, |s| {
+        s.version = Some(version);
+        s.mode = mode;
+    })
+}
+
+/// The download is verified and the install waits for the machine to go
+/// quiet: `busy` are the sessions mid-turn right now, `quiet_secs_left` the
+/// quiet time still needed (absent while something is busy).
+pub fn set_waiting_for_idle(
+    handle: &AppUpdateStateHandle,
+    emitter: &EventEmitter,
+    busy: Vec<BusySession>,
+    quiet_secs_left: Option<u64>,
+    quiet_secs: u64,
+) -> AppUpdateState {
+    mutate(handle, emitter, |s| {
+        s.status = AppUpdateLifecycle::WaitingForIdle;
+        s.downloaded = None;
+        s.total = None;
+        s.busy_sessions = Some(busy);
+        s.quiet_secs_left = quiet_secs_left;
+        s.quiet_secs = Some(quiet_secs);
+    })
+}
+
+/// The update was called off before anything was installed: back to `Idle`.
+pub fn set_idle(handle: &AppUpdateStateHandle, emitter: &EventEmitter) -> AppUpdateState {
+    mutate(handle, emitter, |s| {
+        s.clear_operation_fields();
+        s.status = AppUpdateLifecycle::Idle;
+    })
+}
+
+/// Put the target version (and mode) back on a `Restarting` snapshot, which
+/// the restart claim clears, so a client attaching mid-restart still knows
+/// which version to expect. A no-op in any other state.
+pub fn annotate_restarting(
+    handle: &AppUpdateStateHandle,
+    emitter: &EventEmitter,
+    version: Option<String>,
+    mode: Option<UpdateMode>,
+) {
+    let snap = {
+        let mut g = handle.write().unwrap_or_else(|p| p.into_inner());
+        if g.status != AppUpdateLifecycle::Restarting {
+            return;
+        }
+        g.seq += 1;
+        g.version = version;
+        g.mode = mode;
+        g.clone()
+    };
+    emit_event(emitter, APP_UPDATE_STATE_CHANNEL, &snap);
 }
 
 /// The new bytes are staged and the app is ready to relaunch into them.
@@ -585,5 +693,63 @@ mod tests {
         // a mount-time query is never stale.
         pe.downloading(95, Some(100));
         assert_eq!(snapshot(&h).downloaded, Some(95));
+    }
+
+    #[test]
+    fn a_remote_update_waits_then_installs_with_clean_fields() {
+        let h = new_handle();
+        let e = EventEmitter::Noop;
+
+        assert!(try_begin(&h, &e).0);
+        set_target(&h, &e, "1.2.3".into(), Some(UpdateMode::WhenIdle));
+        let waiting = set_waiting_for_idle(&h, &e, Vec::new(), Some(42), 60);
+        assert_eq!(waiting.status, AppUpdateLifecycle::WaitingForIdle);
+        assert_eq!(waiting.version.as_deref(), Some("1.2.3"));
+        let wire = serde_json::to_value(&waiting).unwrap();
+        assert_eq!(wire["status"], "waiting_for_idle");
+        assert_eq!(wire["mode"], "when_idle");
+        assert_eq!(wire["quietSecsLeft"], 42);
+        assert_eq!(wire["quietSecs"], 60);
+        assert_eq!(wire["busySessions"], serde_json::json!([]));
+
+        // A waiting update is still in flight: a second perform attaches.
+        assert!(!try_begin(&h, &e).0);
+
+        // Installing keeps the target but drops the wait details.
+        let installing = set_installing(&h, &e);
+        assert_eq!(installing.version.as_deref(), Some("1.2.3"));
+        assert_eq!(installing.mode, Some(UpdateMode::WhenIdle));
+        assert!(installing.busy_sessions.is_none());
+        assert!(installing.quiet_secs_left.is_none());
+    }
+
+    #[test]
+    fn a_cancelled_update_returns_to_idle_and_can_start_again() {
+        let h = new_handle();
+        let e = EventEmitter::Noop;
+        assert!(try_begin(&h, &e).0);
+        set_target(&h, &e, "1.2.3".into(), Some(UpdateMode::WhenIdle));
+        set_waiting_for_idle(&h, &e, Vec::new(), None, 60);
+        let idle = set_idle(&h, &e);
+        assert_eq!(idle.status, AppUpdateLifecycle::Idle);
+        assert!(idle.version.is_none() && idle.mode.is_none() && idle.quiet_secs.is_none());
+        assert!(try_begin(&h, &e).0);
+    }
+
+    #[test]
+    fn annotate_restarting_only_touches_a_restarting_snapshot() {
+        let h = new_handle();
+        let e = EventEmitter::Noop;
+        annotate_restarting(&h, &e, Some("9.9.9".into()), Some(UpdateMode::Now));
+        assert!(snapshot(&h).version.is_none(), "idle stays untouched");
+
+        try_begin(&h, &e);
+        set_ready(&h, &e, Some("1.2.3".into()), None, None, None);
+        assert!(try_claim_restart(&h, &e));
+        annotate_restarting(&h, &e, Some("1.2.3".into()), Some(UpdateMode::Now));
+        let snap = snapshot(&h);
+        assert_eq!(snap.status, AppUpdateLifecycle::Restarting);
+        assert_eq!(snap.version.as_deref(), Some("1.2.3"));
+        assert_eq!(snap.mode, Some(UpdateMode::Now));
     }
 }

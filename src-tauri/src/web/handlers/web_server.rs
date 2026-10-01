@@ -110,9 +110,10 @@ pub struct AppUpdateCheckResult {
     pub current_version: String,
     pub update: Option<AppUpdateInfo>,
     /// Whether *this* process can apply the update in place. True for the
-    /// standalone server build on a supported platform; false on desktop
-    /// (which updates via Tauri's own updater) and on unknown platforms.
-    /// When false the frontend falls back to a "view release" link.
+    /// standalone server build on a supported platform and for the desktop
+    /// app (which a remote window updates through Tauri's own updater, see
+    /// `update::desktop_remote`); false on unknown platforms. When false the
+    /// frontend falls back to a "view release" link.
     pub self_update_supported: bool,
     /// How a self-update would restart: `"supervised"` (our `--supervise`
     /// parent relaunches) or `"reexec"` (the process re-execs itself).
@@ -134,9 +135,42 @@ pub struct AppUpdateCheckResult {
 
 #[cfg(feature = "tauri-runtime")]
 fn server_self_update_supported() -> bool {
-    // Desktop builds self-update through `tauri-plugin-updater`; the embedded
-    // web server must never swap the desktop binary with a server tarball.
-    false
+    // The desktop app updates through `tauri-plugin-updater` — for a remote
+    // window too (`update::desktop_remote`); the embedded web server never
+    // swaps the desktop binary with a server tarball.
+    true
+}
+
+/// How an update restarts this process.
+#[cfg(feature = "tauri-runtime")]
+fn update_capability() -> crate::update::runtime::UpdateCapability {
+    crate::update::runtime::UpdateCapability::Desktop
+}
+
+#[cfg(not(feature = "tauri-runtime"))]
+fn update_capability() -> crate::update::runtime::UpdateCapability {
+    crate::update::runtime::capability()
+}
+
+/// `"desktop"`, `"docker"` or `"standalone"` — drives frontend messaging.
+#[cfg(feature = "tauri-runtime")]
+fn runtime_label() -> &'static str {
+    "desktop"
+}
+
+#[cfg(not(feature = "tauri-runtime"))]
+fn runtime_label() -> &'static str {
+    crate::update::runtime::runtime_label()
+}
+
+#[cfg(feature = "tauri-runtime")]
+fn update_restart_delay_ms() -> u64 {
+    crate::update::desktop_remote::DESKTOP_RESTART_DELAY_MS
+}
+
+#[cfg(not(feature = "tauri-runtime"))]
+fn update_restart_delay_ms() -> u64 {
+    crate::update::runtime::restart_delay_ms()
 }
 
 #[cfg(not(feature = "tauri-runtime"))]
@@ -159,12 +193,19 @@ fn server_rollback_available() -> bool {
 }
 
 #[cfg(feature = "tauri-runtime")]
-fn server_self_update_blocker() -> Option<AppCommandError> {
-    None
+async fn server_self_update_blocker(state: &AppState) -> Option<AppCommandError> {
+    // A remote window can update this app only if it can get back in after
+    // the restart.
+    match &state.emitter {
+        crate::web::event_bridge::EventEmitter::Tauri(app) => {
+            crate::update::desktop_remote::update_blocker(app, state).await
+        }
+        _ => None,
+    }
 }
 
 #[cfg(not(feature = "tauri-runtime"))]
-fn server_self_update_blocker() -> Option<AppCommandError> {
+async fn server_self_update_blocker(_state: &AppState) -> Option<AppCommandError> {
     // Only meaningful where an in-place update could run at all; elsewhere
     // `self_update_supported` is already false and says it all.
     if !server_self_update_supported() {
@@ -174,7 +215,7 @@ fn server_self_update_blocker() -> Option<AppCommandError> {
 }
 
 pub async fn check_app_update() -> Result<Json<AppUpdateCheckResult>, AppCommandError> {
-    use crate::update::{runtime, version};
+    use crate::update::version;
 
     let current_version = version::running_app_version().to_string();
     let manifest = version::fetch_latest_manifest().await?;
@@ -193,9 +234,9 @@ pub async fn check_app_update() -> Result<Json<AppUpdateCheckResult>, AppCommand
         current_version,
         update,
         self_update_supported: server_self_update_supported(),
-        capability: runtime::capability(),
-        runtime: runtime::runtime_label().to_string(),
-        restart_delay_ms: runtime::restart_delay_ms(),
+        capability: update_capability(),
+        runtime: runtime_label().to_string(),
+        restart_delay_ms: update_restart_delay_ms(),
         rollback_available: server_rollback_available(),
         live_progress: true,
     }))
@@ -240,17 +281,18 @@ pub struct ServerUpdateStatus {
 /// unreachable (proxy, outage, air-gap), since `rollback_app` is an entirely
 /// local operation — gating it behind the network-dependent update check would
 /// hide it exactly when recovery is most needed.
-pub async fn app_update_status() -> Json<ServerUpdateStatus> {
-    use crate::update::runtime;
+pub async fn app_update_status(
+    Extension(state): Extension<Arc<AppState>>,
+) -> Json<ServerUpdateStatus> {
     Json(ServerUpdateStatus {
         current_version: crate::update::version::running_app_version().to_string(),
         self_update_supported: server_self_update_supported(),
-        capability: runtime::capability(),
-        runtime: runtime::runtime_label().to_string(),
-        restart_delay_ms: runtime::restart_delay_ms(),
+        capability: update_capability(),
+        runtime: runtime_label().to_string(),
+        restart_delay_ms: update_restart_delay_ms(),
         rollback_available: server_rollback_available(),
         live_progress: true,
-        self_update_blocker: server_self_update_blocker(),
+        self_update_blocker: server_self_update_blocker(&state).await,
     })
 }
 

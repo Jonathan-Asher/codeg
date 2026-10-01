@@ -1,8 +1,9 @@
 //! In-place self-update for the standalone server / Docker runtime.
 //!
-//! Desktop (Tauri) builds never drive this — they update through
-//! `tauri-plugin-updater`. Here the running worker downloads the signed
-//! release bundle for its platform, verifies it, swaps `codeg-server` +
+//! Desktop (Tauri) builds never drive the swap below — they update through
+//! `tauri-plugin-updater`, locally from `commands::app_update` and for a
+//! remote window from `desktop_remote`. Here the running worker downloads the
+//! signed release bundle for its platform, verifies it, swaps `codeg-server` +
 //! `codeg-mcp` + `web/` on disk (keeping `.bak`), and then restarts:
 //!
 //! - **Supervised** (our `--supervise` parent, PID 1 in Docker): the worker
@@ -10,6 +11,9 @@
 //!   after `CODEG_RESTART_DELAY_MS`.
 //! - **Standalone** (no supervisor): the worker re-execs itself.
 
+pub mod busy;
+#[cfg(feature = "tauri-runtime")]
+pub mod desktop_remote;
 pub mod install;
 pub mod runtime;
 pub mod state;
@@ -46,7 +50,8 @@ fn restart_now() -> ! {
             tracing::info!("[update] exiting for supervisor relaunch");
             std::process::exit(runtime::EXIT_RESTART);
         }
-        UpdateCapability::Reexec => reexec(),
+        // `capability()` never reports `Desktop`; a server process re-execs.
+        UpdateCapability::Reexec | UpdateCapability::Desktop => reexec(),
     }
 }
 

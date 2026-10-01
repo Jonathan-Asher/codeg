@@ -29,6 +29,7 @@ export function StatusBar() {
         <div className="flex items-center gap-3">
           <StatusBarTransfers />
           <StatusBarUpdate />
+          <StatusBarUpdate target="local" />
           <CommandDropdown />
           <StatusBarMcp />
           <StatusBarAlerts />
@@ -67,7 +68,11 @@ export function StatusBar() {
         {/* Remote-workspace downloads: live progress, and the way back to a
             download whose toast was closed. Renders nothing when idle. */}
         <StatusBarTransfers />
+        {/* The window's backend — in a remote window, the remote ("Remote:
+            <name>") — and, only in a remote window, this machine's own app
+            ("This Mac"). Each renders nothing while it has nothing to say. */}
         <StatusBarUpdate />
+        <StatusBarUpdate target="local" />
         <StatusBarTasks />
         {/* Command launcher (moved from the aux "session details" tab), taking
             the slot the old static branch label (StatusBarSessionInfo) held. */}

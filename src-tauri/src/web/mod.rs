@@ -95,6 +95,20 @@ impl WebServerState {
     pub fn is_externally_managed(&self) -> bool {
         self.handle.lock().unwrap().is_none() && self.running.load(Ordering::Acquire)
     }
+
+    /// Port and access token of the running server, or `None` when it is
+    /// stopped. A remote-requested desktop update compares them with what the
+    /// app would start with after its restart, so the remote window is sure
+    /// to get back in.
+    pub fn running_endpoint(&self) -> Option<(u16, String)> {
+        if !self.running.load(Ordering::Acquire) {
+            return None;
+        }
+        Some((
+            self.port.load(Ordering::Relaxed),
+            self.token.lock().unwrap().clone(),
+        ))
+    }
 }
 
 #[derive(Clone, Serialize)]
