@@ -272,6 +272,15 @@ describe("SidebarConversationCard critical mark", () => {
     fireEvent.contextMenu(getByText("conv-3"))
     expect(queryByText("Mark as critical")).toBeNull()
   })
+
+  it("offers no mark on a delegation sub-session", () => {
+    const { getByText, queryByText } = renderCard({
+      ...conv(4),
+      parent_id: 1,
+    })
+    fireEvent.contextMenu(getByText("conv-4"))
+    expect(queryByText("Mark as critical")).toBeNull()
+  })
 })
 
 // The hover-reveal icon buttons live in the row's right slot as siblings of the

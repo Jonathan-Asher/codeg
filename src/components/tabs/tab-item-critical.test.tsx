@@ -138,4 +138,11 @@ describe("TabItem critical mark", () => {
     fireEvent.contextMenu(screen.getByText("Deploy fix"))
     expect(screen.queryByText("Mark as critical")).toBeNull()
   })
+
+  it("has no mark on a delegation sub-session's tab", () => {
+    useAppWorkspaceStore.setState({ conversations: [row({ parent_id: 2 })] })
+    renderTab(conversationTab)
+    fireEvent.contextMenu(screen.getByText("Deploy fix"))
+    expect(screen.queryByText("Mark as critical")).toBeNull()
+  })
 })

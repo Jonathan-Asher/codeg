@@ -15,7 +15,9 @@
  * Acknowledging: Open, Dismiss and Snooze on the banner; switching to the
  * session's tab; and bringing the window back to the front while that tab is
  * the active one and has an alert up. Sending a message or answering counts
- * too, but the backend sees that on its own.
+ * too, but the backend sees that on its own. Only an alert that fired can be
+ * acknowledged: opening a session before its first alert does not hold that
+ * alert back (the backend ignores the early acknowledgement).
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -237,9 +239,11 @@ export function CriticalAlerts() {
     }
   }, [applySnapshot])
 
-  // Switching to a critical session's tab acknowledges its idle stretch,
-  // alert or not yet. Only switches after mount count: a window restoring its
-  // last tab on start-up is not the user looking at it.
+  // Switching to a critical session's tab acknowledges its alert — a shown
+  // one or a snoozed one, which only the backend knows of, so every switch to
+  // a critical session is reported and the backend ignores it when no alert
+  // fired yet. Only switches after mount count: a window restoring its last
+  // tab on start-up is not the user looking at it.
   useEffect(() => {
     let prev = useTabStore.getState().activeTabId
     return useTabStore.subscribe((state) => {

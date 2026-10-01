@@ -843,7 +843,10 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                 {isPinned ? t("unpin") : t("pin")}
               </ContextMenuItem>
             )}
-            {onToggleCritical && (
+            {/* A sub-session is driven by its parent, so it is not watched
+                on its own (as in Session Details); one marked anyway can
+                still be unmarked. */}
+            {onToggleCritical && (!isSubsession || isCritical) && (
               <ContextMenuItem
                 onSelect={() => onToggleCritical(conversation.id, !isCritical)}
               >

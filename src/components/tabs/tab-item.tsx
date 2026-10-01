@@ -151,6 +151,13 @@ export const TabItem = memo(function TabItem({
       conversationId != null &&
       s.conversations.find((c) => c.id === conversationId)?.critical === true
   )
+  // A delegation sub-session is driven by its parent and not watched on its
+  // own, so its tab offers no mark (only an unmark, should one be marked).
+  const isSubsession = useAppWorkspaceStore(
+    (s) =>
+      conversationId != null &&
+      s.conversations.find((c) => c.id === conversationId)?.parent_id != null
+  )
   const handleToggleCritical = useCallback(() => {
     if (conversationId == null) return
     setConversationCritical(conversationId, !isCritical).catch((err) => {
@@ -430,7 +437,7 @@ export const TabItem = memo(function TabItem({
             {t("closeOthers")}
           </ContextMenuItem>
           <ContextMenuSeparator />
-          {conversationId != null && (
+          {conversationId != null && (!isSubsession || isCritical) && (
             <>
               <ContextMenuItem onSelect={handleToggleCritical}>
                 {isCritical ? t("unmarkCritical") : t("markCritical")}

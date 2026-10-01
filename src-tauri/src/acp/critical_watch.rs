@@ -343,10 +343,20 @@ impl SessionWatch {
         })
     }
 
-    /// The user saw it: no more alerts until something new happens.
-    pub fn ack(&mut self) {
+    /// The user saw the alert (opened the session, dismissed it): no more
+    /// alerts until something new happens. Returns whether it took effect.
+    ///
+    /// Only an alert that fired can be acknowledged. Opening a session before
+    /// its first alert is not one of the actions that end an idle stretch (a
+    /// new turn, a message, an answer), so the first alert still comes; a
+    /// snoozed alert counts as fired.
+    pub fn ack(&mut self) -> bool {
+        if self.episode.alerts == 0 {
+            return false;
+        }
         self.episode.acked = true;
         self.episode.snoozed = false;
+        true
     }
 
     /// Hold the alerts until `until`; then alert again if still unanswered.
@@ -686,10 +696,9 @@ impl CriticalRegistry {
 
     pub fn ack(&mut self, conversation_id: i32) {
         if let Some(entry) = self.sessions.get_mut(&conversation_id) {
-            if let Some(watch) = entry.watch.as_mut() {
-                watch.ack();
+            if entry.watch.as_mut().is_some_and(SessionWatch::ack) {
+                entry.last = None;
             }
-            entry.last = None;
         }
     }
 
@@ -778,8 +787,9 @@ pub fn critical_alerts() -> CriticalAlertsSnapshot {
     }
 }
 
-/// The user opened the session or dismissed its alert: the current idle
-/// stretch (or silence) is acknowledged, so it alerts no more.
+/// The user opened the session or dismissed its alert: once an alert fired
+/// for the current idle stretch (or silence), it alerts no more. Before the
+/// first alert this does nothing (see [`SessionWatch::ack`]).
 pub fn ack_critical_session_core(
     emitter: &EventEmitter,
     conversation_id: i32,
@@ -1139,12 +1149,27 @@ mod tests {
     }
 
     #[test]
-    fn acknowledging_before_the_threshold_skips_the_alert() {
+    fn opening_the_session_before_the_first_alert_does_not_skip_it() {
+        // Looking is not acting: only a turn, a message or an answer ends an
+        // idle stretch. An acknowledgement needs an alert to acknowledge.
         let t0 = Instant::now();
         let mut w = idle_since(t0, ENDED);
         w.step(obs(ENDED, 1), &th(), t0 + secs(20));
-        w.ack(); // the user opened the tab
-        assert_eq!(w.step(obs(ENDED, 1), &th(), t0 + secs(60)), None);
+        assert!(!w.ack(), "the user opened the tab; nothing to acknowledge");
+        assert!(w.step(obs(ENDED, 1), &th(), t0 + secs(60)).is_some());
+        assert!(w.ack(), "opening it now acknowledges the alert");
+        assert_eq!(w.step(obs(ENDED, 1), &th(), t0 + secs(400)), None);
+    }
+
+    #[test]
+    fn a_snoozed_alert_is_acknowledged_by_opening_the_session() {
+        let t0 = Instant::now();
+        let mut w = idle_since(t0, ENDED);
+        assert!(w.step(obs(ENDED, 1), &th(), t0 + secs(60)).is_some());
+        w.snooze(t0 + secs(960));
+        assert!(w.ack());
+        assert_eq!(w.step(obs(ENDED, 1), &th(), t0 + secs(2000)), None);
+        assert!(!w.active());
     }
 
     #[test]
