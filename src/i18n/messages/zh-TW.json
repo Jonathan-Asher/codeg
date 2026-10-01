@@ -1771,6 +1771,10 @@
     "title": "編輯訊息時將原版本保留為獨立的會話",
     "description": "編輯先前的訊息時，會從該處繼續同一個會話。開啟後，編輯前的版本也會保留在側邊欄中，名為「… (before edit)」。"
   },
+  "SearchSettings": {
+    "title": "開啟搜尋時顯示最近的會話",
+    "description": "未輸入內容時，搜尋會先選取目前的會話，並在下方列出最近活躍的會話，可直接用方向鍵和 Enter 切換。關閉後，搜尋會等待你輸入。"
+  },
   "StartupWorkspaceSettings": {
     "title": "啟動 codeg 時開啟",
     "description": "遠端工作區會在獨立視窗中開啟，本機工作區隨時可從「快捷操作」中開啟。",
@@ -2251,7 +2255,9 @@
       "messagesHeading": "符合的訊息",
       "roleUser": "使用者",
       "roleAssistant": "助手",
-      "roleSystem": "系統"
+      "roleSystem": "系統",
+      "currentSession": "目前",
+      "recentHeading": "最近"
     },
     "folderTitleBar": {
       "showSidebar": "顯示側邊欄",

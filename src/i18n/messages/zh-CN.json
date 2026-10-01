@@ -1771,6 +1771,10 @@
     "title": "编辑消息时将原版本保留为单独的会话",
     "description": "编辑之前的消息时，会从该处继续同一个会话。开启后，编辑前的版本也会保留在侧边栏中，名为“… (before edit)”。"
   },
+  "SearchSettings": {
+    "title": "打开搜索时显示最近的会话",
+    "description": "未输入内容时，搜索会先选中当前会话，并在下方列出最近活跃的会话，可直接用方向键和回车切换。关闭后，搜索会等待你输入。"
+  },
   "StartupWorkspaceSettings": {
     "title": "启动 codeg 时打开",
     "description": "远端工作区会在独立窗口中打开，本地工作区随时可从“快捷操作”中打开。",
@@ -2251,7 +2255,9 @@
       "messagesHeading": "匹配的消息",
       "roleUser": "用户",
       "roleAssistant": "助手",
-      "roleSystem": "系统"
+      "roleSystem": "系统",
+      "currentSession": "当前",
+      "recentHeading": "最近"
     },
     "folderTitleBar": {
       "showSidebar": "显示侧边栏",

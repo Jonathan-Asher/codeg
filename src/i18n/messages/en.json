@@ -1771,6 +1771,10 @@
     "title": "Keep the original as a separate conversation when editing",
     "description": "Editing a past message continues the same conversation from that point. Turn this on to also keep the version before the edit in the sidebar, named \"… (before edit)\"."
   },
+  "SearchSettings": {
+    "title": "Show recent sessions when search opens",
+    "description": "With nothing typed, search starts on the current session with your most recently active sessions below it, ready to pick with the arrow keys and Enter. Off, it waits until you type."
+  },
   "StartupWorkspaceSettings": {
     "title": "When codeg starts, open",
     "description": "A remote workspace opens in its own window, and the local workspace stays one click away under Quick actions.",
@@ -2251,7 +2255,9 @@
       "messagesHeading": "Matching messages",
       "roleUser": "User",
       "roleAssistant": "Assistant",
-      "roleSystem": "System"
+      "roleSystem": "System",
+      "currentSession": "Current",
+      "recentHeading": "Recent"
     },
     "folderTitleBar": {
       "showSidebar": "Show Sidebar",

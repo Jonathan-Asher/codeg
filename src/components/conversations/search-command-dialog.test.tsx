@@ -23,8 +23,22 @@ vi.mock("@/lib/api", () => ({
   searchMessages: h.searchMessages,
 }))
 
+const tabState = vi.hoisted(() => ({
+  tabs: [] as Array<{
+    id: string
+    kind: "conversation"
+    folderId: number
+    conversationId: number | null
+    agentType: string
+    title: string
+    isPinned: boolean
+  }>,
+  activeTabId: null as string | null,
+}))
+
 vi.mock("@/contexts/tab-context", () => ({
   useTabActions: () => ({ openTab: h.openTab }),
+  useTabStore: (selector: (s: unknown) => unknown) => selector(tabState),
 }))
 
 vi.mock("@/contexts/workbench-route-context", () => ({
@@ -54,9 +68,11 @@ vi.mock("@/contexts/active-folder-context", () => ({
   }),
 }))
 
+const store = vi.hoisted(() => ({ conversations: [] as unknown[] }))
+
 vi.mock("@/stores/app-workspace-store", () => ({
   useAppWorkspaceStore: (selector: (s: unknown) => unknown) =>
-    selector({ conversations: [], allFolders: folders.all }),
+    selector({ conversations: store.conversations, allFolders: folders.all }),
 }))
 
 vi.mock("@/hooks/use-file-tree", () => ({
@@ -165,7 +181,12 @@ describe("SearchCommandDialog messages tab", () => {
   })
 })
 
-function conv(id: number, folderId: number, title: string) {
+function conv(
+  id: number,
+  folderId: number,
+  title: string,
+  over: Record<string, unknown> = {}
+) {
   return {
     id,
     folder_id: folderId,
@@ -173,8 +194,11 @@ function conv(id: number, folderId: number, title: string) {
     title_locked: false,
     agent_type: "claude_code",
     status: "in_progress",
+    kind: "regular",
+    parent_id: null,
     created_at: "2026-09-30T10:00:00Z",
     updated_at: "2026-09-30T10:00:00Z",
+    ...over,
   }
 }
 
@@ -182,6 +206,9 @@ describe("SearchCommandDialog conversations tab", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     folders.active = folders.all[0]
+    store.conversations = []
+    tabState.tabs = []
+    tabState.activeTabId = null
   })
 
   function renderDialog() {
@@ -227,5 +254,146 @@ describe("SearchCommandDialog conversations tab", () => {
         expect.objectContaining({ folder_ids: [3], search: "upload" })
       )
     )
+  })
+})
+
+describe("SearchCommandDialog recent sessions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    folders.active = folders.all[0]
+    h.listAllConversations.mockResolvedValue([])
+    store.conversations = [
+      conv(1, 3, "Release prep", { updated_at: "2026-09-30T10:00:00Z" }),
+      conv(2, 5, "Legal brief", {
+        agent_type: "codex",
+        updated_at: "2026-09-30T11:00:00Z",
+      }),
+      conv(3, 3, "Older codeg work", { updated_at: "2026-09-30T09:00:00Z" }),
+      conv(4, 3, "Delegated subtask", {
+        parent_id: 1,
+        kind: "delegate",
+        updated_at: "2026-09-30T12:00:00Z",
+      }),
+    ]
+    tabState.tabs = [
+      {
+        id: "tab-1",
+        kind: "conversation",
+        folderId: 3,
+        conversationId: 1,
+        agentType: "claude_code",
+        title: "Release prep",
+        isPinned: true,
+      },
+    ]
+    tabState.activeTabId = "tab-1"
+  })
+
+  function renderDialog(onOpenChange = vi.fn()) {
+    render(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <SearchCommandDialog open onOpenChange={onOpenChange} />
+      </NextIntlClientProvider>
+    )
+    return { user: userEvent.setup(), onOpenChange }
+  }
+
+  /** Each listed row's title, top to bottom, and which one is selected. */
+  function rows() {
+    const options = screen.queryAllByRole("option")
+    return {
+      titles: options.map(
+        (o) => o.querySelector("span.flex-1")?.textContent ?? ""
+      ),
+      selected: options.findIndex(
+        (o) => o.getAttribute("aria-selected") === "true"
+      ),
+    }
+  }
+
+  it("opens on the current session, selected, with recent sessions below", async () => {
+    renderDialog()
+
+    await waitFor(() => expect(rows().selected).toBe(0))
+    expect(rows().titles).toEqual([
+      "Release prep",
+      "Legal brief",
+      "Older codeg work",
+    ])
+    expect(screen.getByText("Current")).toBeTruthy()
+    expect(screen.getByText("Recent")).toBeTruthy()
+    expect(screen.getByText("legalix")).toBeTruthy()
+    expect(screen.queryByText("Delegated subtask")).toBeNull()
+  })
+
+  it("switches to the next session with one arrow down and Enter", async () => {
+    const { user, onOpenChange } = renderDialog()
+    await waitFor(() => expect(rows().selected).toBe(0))
+
+    await user.keyboard("{ArrowDown}")
+    await waitFor(() => expect(rows().selected).toBe(1))
+    await user.keyboard("{Enter}")
+
+    expect(h.openTab).toHaveBeenCalledWith(5, 2, "codex", true)
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("only closes the dialog when the current session is picked", async () => {
+    const { user, onOpenChange } = renderDialog()
+    await waitFor(() => expect(rows().selected).toBe(0))
+
+    await user.keyboard("{Enter}")
+
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+    expect(h.openTab).not.toHaveBeenCalled()
+  })
+
+  it("shows search results while typing and the recent list once cleared", async () => {
+    h.listAllConversations.mockResolvedValue([conv(7, 3, "Upload fixes")])
+    const { user } = renderDialog()
+    const input = screen.getByPlaceholderText("Search conversations...")
+
+    await user.type(input, "upload")
+    expect(await screen.findByText("Upload fixes")).toBeTruthy()
+    expect(screen.queryByText("Legal brief")).toBeNull()
+    expect(screen.queryByText("Recent")).toBeNull()
+
+    await user.clear(input)
+    expect(await screen.findByText("Legal brief")).toBeTruthy()
+    expect(screen.queryByText("Upload fixes")).toBeNull()
+    await waitFor(() => expect(rows().selected).toBe(0))
+    expect(rows().titles[0]).toBe("Release prep")
+  })
+
+  it("lists only the open folder's recent sessions when scoped", async () => {
+    const { user } = renderDialog()
+    await waitFor(() => expect(rows().titles).toContain("Legal brief"))
+
+    await user.click(screen.getByRole("button", { name: "Only codeg" }))
+
+    expect(rows().titles).toEqual(["Release prep", "Older codeg work"])
+  })
+
+  it("waits for a query as before when the setting is off", async () => {
+    localStorage.setItem("settings:search:show-recent", "false")
+    renderDialog()
+
+    expect(screen.getByText("Type to search conversations")).toBeTruthy()
+    expect(screen.queryAllByRole("option")).toHaveLength(0)
+    expect(screen.queryByText("Release prep")).toBeNull()
+  })
+
+  it("lists recent sessions alone, first selected, with no conversation tab active", async () => {
+    tabState.activeTabId = null
+    renderDialog()
+
+    await waitFor(() => expect(rows().selected).toBe(0))
+    expect(rows().titles).toEqual([
+      "Legal brief",
+      "Release prep",
+      "Older codeg work",
+    ])
+    expect(screen.queryByText("Current")).toBeNull()
   })
 })

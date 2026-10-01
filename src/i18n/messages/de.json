@@ -1771,6 +1771,10 @@
     "title": "Beim Bearbeiten das Original als eigene Konversation behalten",
     "description": "Das Bearbeiten einer früheren Nachricht setzt dieselbe Konversation ab dieser Stelle fort. Schalte dies ein, um die Version vor der Bearbeitung zusätzlich in der Seitenleiste zu behalten, benannt als „… (before edit)“."
   },
+  "SearchSettings": {
+    "title": "Beim Öffnen der Suche letzte Konversationen anzeigen",
+    "description": "Ohne Eingabe startet die Suche bei der aktuellen Konversation, darunter die zuletzt aktiven – auswählbar mit den Pfeiltasten und der Eingabetaste. Aus, wartet sie, bis du tippst."
+  },
   "StartupWorkspaceSettings": {
     "title": "Beim Start von codeg öffnen",
     "description": "Ein Remote-Arbeitsbereich öffnet sich in einem eigenen Fenster; der lokale Arbeitsbereich bleibt unter Schnellaktionen nur einen Klick entfernt.",
@@ -2251,7 +2255,9 @@
       "messagesHeading": "Passende Nachrichten",
       "roleUser": "Benutzer",
       "roleAssistant": "Assistent",
-      "roleSystem": "System"
+      "roleSystem": "System",
+      "currentSession": "Aktuell",
+      "recentHeading": "Zuletzt"
     },
     "folderTitleBar": {
       "showSidebar": "Seitenleiste anzeigen",

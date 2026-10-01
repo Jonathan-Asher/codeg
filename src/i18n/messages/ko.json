@@ -1771,6 +1771,10 @@
     "title": "편집할 때 원본을 별도 대화로 유지",
     "description": "이전 메시지를 편집하면 같은 대화가 그 지점부터 이어집니다. 이 옵션을 켜면 편집 전 버전도 “… (before edit)”라는 이름으로 사이드바에 남습니다."
   },
+  "SearchSettings": {
+    "title": "검색을 열 때 최근 대화 표시",
+    "description": "아무것도 입력하지 않으면 검색이 현재 대화를 선택한 채로 열리고, 그 아래에 최근 활동한 대화가 나열되어 화살표 키와 Enter로 바로 전환할 수 있습니다. 끄면 입력할 때까지 기다립니다."
+  },
   "StartupWorkspaceSettings": {
     "title": "codeg 시작 시 열기",
     "description": "원격 워크스페이스는 별도 창에서 열리며, 로컬 워크스페이스는 언제든 빠른 작업에서 열 수 있습니다.",
@@ -2251,7 +2255,9 @@
       "messagesHeading": "일치하는 메시지",
       "roleUser": "사용자",
       "roleAssistant": "어시스턴트",
-      "roleSystem": "시스템"
+      "roleSystem": "시스템",
+      "currentSession": "현재",
+      "recentHeading": "최근"
     },
     "folderTitleBar": {
       "showSidebar": "사이드바 표시",

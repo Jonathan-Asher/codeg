@@ -1771,6 +1771,10 @@
     "title": "Manter o original como uma conversa separada ao editar",
     "description": "Editar uma mensagem anterior continua a mesma conversa a partir desse ponto. Ative para também manter a versão de antes da edição na barra lateral, com o nome “… (before edit)”."
   },
+  "SearchSettings": {
+    "title": "Mostrar conversas recentes ao abrir a busca",
+    "description": "Sem nada digitado, a busca começa na conversa atual, com as de atividade mais recente logo abaixo, prontas para escolher com as setas e Enter. Desativado, ela espera você digitar."
+  },
   "StartupWorkspaceSettings": {
     "title": "Ao iniciar o codeg, abrir",
     "description": "Um espaço de trabalho remoto abre em sua própria janela, e o local continua a um clique em Ações rápidas.",
@@ -2251,7 +2255,9 @@
       "messagesHeading": "Mensagens correspondentes",
       "roleUser": "Usuário",
       "roleAssistant": "Assistente",
-      "roleSystem": "Sistema"
+      "roleSystem": "Sistema",
+      "currentSession": "Atual",
+      "recentHeading": "Recentes"
     },
     "folderTitleBar": {
       "showSidebar": "Mostrar barra lateral",

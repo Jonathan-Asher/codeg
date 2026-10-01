@@ -1771,6 +1771,10 @@
     "title": "編集時に元の内容を別の会話として残す",
     "description": "過去のメッセージを編集すると、同じ会話がその時点から続きます。オンにすると、編集前のバージョンも「… (before edit)」という名前でサイドバーに残ります。"
   },
+  "SearchSettings": {
+    "title": "検索を開いたときに最近の会話を表示",
+    "description": "何も入力していないとき、検索は現在の会話を選択した状態で開き、その下に最近アクティブだった会話を一覧表示します。矢印キーと Enter ですぐに切り替えられます。オフにすると、入力するまで何も表示しません。"
+  },
   "StartupWorkspaceSettings": {
     "title": "codeg の起動時に開く",
     "description": "リモートワークスペースは専用のウィンドウで開きます。ローカルワークスペースはいつでも「クイック操作」から開けます。",
@@ -2251,7 +2255,9 @@
       "messagesHeading": "一致するメッセージ",
       "roleUser": "ユーザー",
       "roleAssistant": "アシスタント",
-      "roleSystem": "システム"
+      "roleSystem": "システム",
+      "currentSession": "現在",
+      "recentHeading": "最近"
     },
     "folderTitleBar": {
       "showSidebar": "サイドバーを表示",

@@ -49,6 +49,7 @@ import { NotificationSoundSettingsSection } from "@/components/settings/notifica
 import { CriticalSessionSettingsSection } from "@/components/settings/critical-session-settings"
 import { ResumeAfterRestartSettingsSection } from "@/components/settings/resume-after-restart-settings"
 import { QuickAskSettingsSection } from "@/components/settings/quick-ask-settings"
+import { SearchSettingsSection } from "@/components/settings/search-settings"
 
 const TERMINAL_SHELL_OPTION_SYSTEM = "system"
 const TERMINAL_SHELL_OPTION_CUSTOM = "custom"
@@ -518,6 +519,9 @@ export function GeneralSettings() {
         )}
 
         <EditMessageSettingsSection />
+
+        {/* What the search dialog shows before anything is typed. */}
+        <SearchSettingsSection />
 
         <CloseBehaviorSettingsSection />
 

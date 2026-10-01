@@ -8,7 +8,7 @@ import { useLocale, useTranslations } from "next-intl"
 import { useAuxPanelContext } from "@/contexts/aux-panel-context"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
-import { useTabActions } from "@/contexts/tab-context"
+import { useTabActions, useTabStore } from "@/contexts/tab-context"
 import { useWorkbenchRoute } from "@/contexts/workbench-route-context"
 import { useWorkspaceActions } from "@/contexts/workspace-context"
 import {
@@ -17,6 +17,8 @@ import {
   type MessageSearchHit,
 } from "@/lib/api"
 import { setPendingFind } from "@/lib/pending-find"
+import { recentSessions } from "@/lib/recent-sessions"
+import { useShowRecentOnSearch } from "@/lib/search-recent-prefs"
 import type {
   AgentType,
   ConversationStatus,
@@ -45,6 +47,9 @@ type SearchTab = "conversations" | "messages" | "files"
 /** Most message hits one search shows. */
 const MESSAGE_SEARCH_LIMIT = 40
 
+/** Most sessions the recent list shows with nothing typed. */
+const RECENT_SESSION_LIMIT = 30
+
 const MESSAGE_ROLE_KEYS = {
   user: "roleUser",
   assistant: "roleAssistant",
@@ -54,6 +59,56 @@ const MESSAGE_ROLE_KEYS = {
 interface SearchCommandDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+}
+
+interface ConversationRowProps {
+  value: string
+  onSelect: () => void
+  title: string
+  status: string | undefined
+  /** Shown when the list spans folders; null hides it. */
+  folderName: string | null
+  agentType: AgentType
+  /** Relative time already formatted, or null when unknown. */
+  time: string | null
+  /** A short label after the title (the current session's "Current"). */
+  badge?: string
+}
+
+/** One conversation in the Conversations tab — a result or a recent one. */
+function ConversationRow({
+  value,
+  onSelect,
+  title,
+  status,
+  folderName,
+  agentType,
+  time,
+  badge,
+}: ConversationRowProps) {
+  return (
+    <CommandItem value={value} onSelect={onSelect}>
+      <ConversationStatusDot status={status as ConversationStatus} />
+      <span className="flex-1 truncate">{title}</span>
+      {badge && (
+        <span className="shrink-0 rounded-sm bg-muted px-1.5 text-xs text-muted-foreground">
+          {badge}
+        </span>
+      )}
+      {folderName && (
+        <span className="flex max-w-40 items-center gap-1 text-xs text-muted-foreground shrink-0">
+          <Folder className="w-3 h-3 shrink-0" />
+          <span className="truncate">{folderName}</span>
+        </span>
+      )}
+      <span className="text-xs text-muted-foreground shrink-0">
+        {getAgentLabel(agentType)}
+      </span>
+      {time && (
+        <span className="text-xs text-muted-foreground shrink-0">{time}</span>
+      )}
+    </CommandItem>
+  )
 }
 
 export function SearchCommandDialog({
@@ -84,6 +139,16 @@ export function SearchCommandDialog({
     () => new Map(allFolders.map((f) => [f.id, f.name])),
     [allFolders]
   )
+  // With nothing typed, the Conversations tab is a session switcher: the
+  // current session first (selected), the most recently active ones below,
+  // so ↓ Enter goes back to the last session you were in.
+  const [showRecent] = useShowRecentOnSearch()
+  const activeConversationTab = useTabStore(
+    (s) =>
+      s.tabs.find(
+        (tab) => tab.id === s.activeTabId && tab.conversationId != null
+      ) ?? null
+  )
   const { openTab } = useTabActions()
   const { openConversations } = useWorkbenchRoute()
   const { openFilePreview } = useWorkspaceActions()
@@ -106,6 +171,80 @@ export function SearchCommandDialog({
   const [messageSearching, setMessageSearching] = useState(false)
 
   const folderPath = folder?.path ?? ""
+
+  const recentMode =
+    activeTab === "conversations" && showRecent && !query.trim()
+
+  // The workspace store holds every sidebar row; only when it has none yet
+  // (not loaded) does the recent list ask the backend itself.
+  const storeEmpty = allConversations.length === 0
+  const [fetchedConversations, setFetchedConversations] = useState<
+    DbConversationSummary[]
+  >([])
+  useEffect(() => {
+    if (!open || !showRecent || !storeEmpty) return
+    let stale = false
+    void (async () => {
+      try {
+        const list = await listAllConversations()
+        if (!stale && Array.isArray(list)) setFetchedConversations(list)
+      } catch {
+        /* the list stays empty; typing still searches */
+      }
+    })()
+    return () => {
+      stale = true
+    }
+  }, [open, showRecent, storeEmpty])
+  const recentSource = storeEmpty ? fetchedConversations : allConversations
+
+  const currentConversation = useMemo(() => {
+    const id = activeConversationTab?.conversationId
+    if (!open || !activeConversationTab || id == null) return null
+    // A tab carries enough to show the row even when the list lacks it.
+    const known = recentSource.find((c) => c.id === id)
+    return {
+      id,
+      folderId: known?.folder_id ?? activeConversationTab.folderId,
+      agentType: known?.agent_type ?? activeConversationTab.agentType,
+      title: known ? known.title : activeConversationTab.title,
+      status: known?.status ?? activeConversationTab.status,
+      updatedAt: known?.updated_at ?? null,
+    }
+  }, [open, activeConversationTab, recentSource])
+
+  const recent = useMemo(
+    () =>
+      open && recentMode
+        ? recentSessions(recentSource, {
+            knownFolderIds: new Set(folderNames.keys()),
+            excludeId: currentConversation?.id ?? null,
+            folderId: scopedFolderId,
+            agentType: agentFilter,
+            limit: RECENT_SESSION_LIMIT,
+          })
+        : [],
+    [
+      open,
+      recentMode,
+      recentSource,
+      folderNames,
+      currentConversation,
+      scopedFolderId,
+      agentFilter,
+    ]
+  )
+
+  const relativeTime = useCallback(
+    (iso: string) =>
+      formatDistanceToNow(new Date(iso), {
+        addSuffix: true,
+        locale: dateFnsLocale,
+      }),
+    [dateFnsLocale]
+  )
+  const folderLabel = (folderId: number) =>
+    scopedFolderId == null ? (folderNames.get(folderId) ?? null) : null
 
   // File search via shared hook (lazy-loaded when files tab is active)
   const {
@@ -131,7 +270,9 @@ export function SearchCommandDialog({
 
   const doSearch = useCallback(
     async (q: string, agent: AgentType | null) => {
-      if (!q.trim() && !agent) {
+      // With nothing typed, the recent list (narrowed by the agent filter)
+      // stands in for results — unless it is turned off.
+      if (!q.trim() && (!agent || showRecent)) {
         setResults([])
         setSearching(false)
         return
@@ -150,7 +291,7 @@ export function SearchCommandDialog({
         setSearching(false)
       }
     },
-    [scopedFolderId]
+    [scopedFolderId, showRecent]
   )
 
   // Debounced search on query change (conversations tab only)
@@ -223,6 +364,13 @@ export function SearchCommandDialog({
     },
     [openTab, onOpenChange, openConversations]
   )
+
+  // The current session is already in front: picking it only closes the
+  // dialog (and leaves a workbench route covering it, as picking any does).
+  const handleSelectCurrent = useCallback(() => {
+    openConversations()
+    onOpenChange(false)
+  }, [onOpenChange, openConversations])
 
   const handleSelectMessageHit = useCallback(
     (hit: MessageSearchHit) => {
@@ -413,44 +561,66 @@ export function SearchCommandDialog({
             <CommandEmpty>
               {searching
                 ? t("searching")
-                : !query.trim() && !agentFilter
+                : !query.trim() && (!agentFilter || showRecent)
                   ? t("typeToSearch")
                   : t("noResults")}
             </CommandEmpty>
-            {results.length > 0 && (
+            {recentMode && currentConversation && (
+              <CommandGroup>
+                <ConversationRow
+                  value={`current-${currentConversation.id}`}
+                  onSelect={handleSelectCurrent}
+                  title={
+                    formatConversationTitle(currentConversation.title) ||
+                    t("untitledConversation")
+                  }
+                  status={currentConversation.status}
+                  folderName={folderLabel(currentConversation.folderId)}
+                  agentType={currentConversation.agentType}
+                  time={
+                    currentConversation.updatedAt
+                      ? relativeTime(currentConversation.updatedAt)
+                      : null
+                  }
+                  badge={t("currentSession")}
+                />
+              </CommandGroup>
+            )}
+            {recentMode && recent.length > 0 && (
+              <CommandGroup heading={t("recentHeading")}>
+                {recent.map((conv) => (
+                  <ConversationRow
+                    key={conv.id}
+                    value={`recent-${conv.id}`}
+                    onSelect={() => handleSelectConversation(conv)}
+                    title={
+                      formatConversationTitle(conv.title) ||
+                      t("untitledConversation")
+                    }
+                    status={conv.status}
+                    folderName={folderLabel(conv.folder_id)}
+                    agentType={conv.agent_type}
+                    time={relativeTime(conv.updated_at)}
+                  />
+                ))}
+              </CommandGroup>
+            )}
+            {!recentMode && results.length > 0 && (
               <CommandGroup>
                 {results.map((conv) => (
-                  <CommandItem
+                  <ConversationRow
                     key={conv.id}
                     value={`${conv.id}-${formatConversationTitle(conv.title)}`}
                     onSelect={() => handleSelectConversation(conv)}
-                  >
-                    <ConversationStatusDot
-                      status={conv.status as ConversationStatus}
-                    />
-                    <span className="flex-1 truncate">
-                      {formatConversationTitle(conv.title) ||
-                        t("untitledConversation")}
-                    </span>
-                    {scopedFolderId == null &&
-                      folderNames.get(conv.folder_id) && (
-                        <span className="flex max-w-40 items-center gap-1 text-xs text-muted-foreground shrink-0">
-                          <Folder className="w-3 h-3 shrink-0" />
-                          <span className="truncate">
-                            {folderNames.get(conv.folder_id)}
-                          </span>
-                        </span>
-                      )}
-                    <span className="text-xs text-muted-foreground shrink-0">
-                      {getAgentLabel(conv.agent_type)}
-                    </span>
-                    <span className="text-xs text-muted-foreground shrink-0">
-                      {formatDistanceToNow(new Date(conv.created_at), {
-                        addSuffix: true,
-                        locale: dateFnsLocale,
-                      })}
-                    </span>
-                  </CommandItem>
+                    title={
+                      formatConversationTitle(conv.title) ||
+                      t("untitledConversation")
+                    }
+                    status={conv.status}
+                    folderName={folderLabel(conv.folder_id)}
+                    agentType={conv.agent_type}
+                    time={relativeTime(conv.created_at)}
+                  />
                 ))}
               </CommandGroup>
             )}
