@@ -3,6 +3,9 @@ use sea_orm_migration::prelude::*;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
+/// The watchdog lists the critical rows once a second; few rows ever are.
+const IDX_CRITICAL: &str = "idx_conversation_critical";
+
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
@@ -44,10 +47,31 @@ impl MigrationTrait for Migration {
                     )
                     .to_owned(),
             )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .if_not_exists()
+                    .name(IDX_CRITICAL)
+                    .table(Conversation::Table)
+                    .col(Conversation::Critical)
+                    .to_owned(),
+            )
             .await
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // SQLite refuses to drop a column an index still covers.
+        manager
+            .drop_index(
+                Index::drop()
+                    .if_exists()
+                    .name(IDX_CRITICAL)
+                    .table(Conversation::Table)
+                    .to_owned(),
+            )
+            .await?;
         manager
             .alter_table(
                 Table::alter()
@@ -149,5 +173,14 @@ mod tests {
             .await
             .expect("pragma query");
         assert_eq!(rows.len(), 2, "both critical columns exist");
+        let indexes = conn
+            .query_all(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_conversation_critical'"
+                    .to_owned(),
+            ))
+            .await
+            .expect("index query");
+        assert_eq!(indexes.len(), 1, "the watchdog's lookup is indexed");
     }
 }
