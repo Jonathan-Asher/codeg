@@ -9050,7 +9050,7 @@ fn legacy_config_value_equivalent(option: &SessionConfigOption, value: &str) -> 
 fn strip_context_window_hint(value: &str) -> Option<&str> {
     let open = value.rfind('[')?;
     let hint = value[open..].strip_prefix('[')?.strip_suffix(']')?;
-    let digits = hint.trim_end_matches(|c: char| matches!(c, 'm' | 'M' | 'k' | 'K'));
+    let digits = hint.trim_end_matches(['m', 'M', 'k', 'K']);
     let is_hint = !digits.is_empty()
         && digits.len() + 1 == hint.len()
         && digits.bytes().all(|b| b.is_ascii_digit());
