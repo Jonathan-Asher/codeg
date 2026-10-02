@@ -113,6 +113,7 @@ import {
   subscribePendingFind,
   takePendingFind,
 } from "@/lib/pending-find"
+import { ScrollToLatestOnRequest } from "@/components/message/scroll-to-latest-on-request"
 import { extractSessionFilesGrouped } from "@/lib/session-files"
 import { useModelLabels } from "@/hooks/use-model-labels"
 import { usePageHandoffName } from "@/lib/browser/use-page-handoff-name"
@@ -2204,6 +2205,15 @@ export function MessageListView({
           resize={shouldUseSmoothResize ? "smooth" : undefined}
         >
           <AutoScrollOnSend signal={sendSignal} />
+          {/* A notification click asked for this session's latest message
+          (see lib/scroll-to-latest-intent): answered once the transcript is
+          active and its history is in, never on a plain tab switch. */}
+          <ScrollToLatestOnRequest
+            conversationId={conversationId}
+            dbConversationId={session?.dbConversationId ?? null}
+            active={isActive}
+            ready={!detailLoading && threadItems.length > 0}
+          />
           <VirtualizedMessageThread
             items={threadItems}
             getItemKey={getThreadItemKey}

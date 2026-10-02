@@ -6,6 +6,10 @@ import {
   type NotificationTarget,
 } from "@/lib/notification-target"
 import {
+  resetScrollToLatestIntents,
+  takeScrollToLatest,
+} from "@/lib/scroll-to-latest-intent"
+import {
   resetAppWorkspaceStore,
   useAppWorkspaceStore,
 } from "@/stores/app-workspace-store"
@@ -77,6 +81,7 @@ beforeEach(() => {
   h.pendingHandler = null
   h.toastInfo.mockClear()
   h.openConversations.mockClear()
+  resetScrollToLatestIntents()
   resetAppWorkspaceStore()
   resetTabStore()
   openTab = vi.fn()
@@ -183,6 +188,60 @@ describe("NotificationClickBridge", () => {
     )
     // No desktop backend to take parked clicks from.
     expect(h.takePending).not.toHaveBeenCalled()
+  })
+
+  // The session's own tab is open, maybe scrolled far up: its transcript is
+  // asked for the latest message before the switch makes it the active one,
+  // under its virtual runtime id too (a tab that began as a draft).
+  it("asks an open tab's transcript for its latest message", async () => {
+    h.desktop = false
+    hydrate()
+    useTabStore.setState({
+      tabs: [
+        {
+          id: TARGET.contextKey,
+          conversationId: 17,
+          runtimeConversationId: -4,
+        },
+      ],
+    } as never)
+    let askedBeforeSwitch = false
+    switchTab.mockImplementation(() => {
+      askedBeforeSwitch = takeScrollToLatest([-4])
+    })
+    render(<NotificationClickBridge />)
+
+    act(() => openNotificationTargetFromClick(TARGET))
+
+    await waitFor(() => expect(switchTab).toHaveBeenCalled())
+    expect(askedBeforeSwitch).toBe(true)
+  })
+
+  it("asks a reopened tab's transcript for its latest message", async () => {
+    h.desktop = false
+    hydrate()
+    let askedBeforeOpen = false
+    openTab.mockImplementation(() => {
+      askedBeforeOpen = takeScrollToLatest([17])
+    })
+    render(<NotificationClickBridge />)
+
+    act(() => openNotificationTargetFromClick(TARGET))
+
+    await waitFor(() =>
+      expect(openTab).toHaveBeenCalledWith(4, 17, "claude_code", true)
+    )
+    expect(askedBeforeOpen).toBe(true)
+  })
+
+  it("asks nothing of a session that is gone", async () => {
+    hydrate()
+    useAppWorkspaceStore.setState({ conversations: [] })
+    h.takePending.mockResolvedValueOnce([TARGET])
+    render(<NotificationClickBridge />)
+
+    await waitFor(() => expect(h.toastInfo).toHaveBeenCalled())
+    expect(takeScrollToLatest([17])).toBe(false)
   })
 
   it("stops answering clicks once unmounted", async () => {

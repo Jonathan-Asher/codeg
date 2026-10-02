@@ -14,6 +14,7 @@ import {
   setNotificationClickHandler,
   type NotificationTarget,
 } from "@/lib/notification-target"
+import { requestScrollToLatest } from "@/lib/scroll-to-latest-intent"
 import { isDesktop } from "@/lib/transport"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { useTabStore } from "@/stores/tab-store"
@@ -68,7 +69,9 @@ async function conversationExists(conversationId: number): Promise<boolean> {
  * notification (desktop: the backend brought this window forward and parked
  * the session for it; browser: the click happened in this page) or an in-app
  * toast's title. Opens the session's tab once the workspace has loaded, or
- * says the session is gone.
+ * says the session is gone. The opened transcript lands on its latest message
+ * (see `lib/scroll-to-latest-intent`): the notification is about what the
+ * session just did.
  *
  * Inside `WorkbenchRouteProvider`: opening a session leaves whatever workbench
  * page (Automations, Tasks…) is on screen, as picking one from search does.
@@ -94,11 +97,23 @@ export function NotificationClickBridge() {
           findTab: (tabId) =>
             useTabStore.getState().tabs.find((tab) => tab.id === tabId) ?? null,
           switchTab: (tabId) => {
+            const tab = useTabStore
+              .getState()
+              .tabs.find((candidate) => candidate.id === tabId)
+            // Posted before the switch, so the transcript hears it as it
+            // becomes the active one. Under every id it may go by: a draft's
+            // tab keeps its virtual runtime id once its conversation is saved.
+            requestScrollToLatest([
+              target.conversationId,
+              tab?.conversationId,
+              tab?.runtimeConversationId,
+            ])
             latest.current.openConversations?.()
             useTabStore.getState().switchTab(tabId)
           },
           conversationExists,
           openConversation: (folderId, conversationId, agentType) => {
+            requestScrollToLatest([conversationId])
             latest.current.openConversations?.()
             useTabStore
               .getState()
