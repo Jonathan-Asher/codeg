@@ -553,10 +553,18 @@ pub async fn deliver_with(
         looking,
     );
     if chosen.is_empty() {
-        tracing::debug!(
-            "[push] {} {}: no device wants it (away: {}, devices: {})",
+        let why = if !devices.is_empty()
+            && message.kind != PushKind::Test
+            && !prefs::session_unseen(message.conversation_id, looking)
+        {
+            "someone is looking at this session"
+        } else {
+            "no device wants it"
+        };
+        tracing::info!(
+            "[push] {} for conversation {:?} not sent: {why} (away: {}, devices: {})",
             message.kind.as_str(),
-            message.alert_id,
+            message.conversation_id,
             looking.away(),
             devices.len()
         );

@@ -18,6 +18,9 @@ import { presenceFrame } from "./transport/types"
 
 let focused = true
 
+const last = (sent: ClientPresence[]): ClientPresence | undefined =>
+  sent[sent.length - 1]
+
 beforeEach(() => {
   vi.useFakeTimers()
   focused = true
@@ -39,11 +42,11 @@ describe("presence reporting", () => {
     ])
 
     setShownConversations([42])
-    expect(sent.at(-1)?.conversation_ids).toEqual([42])
+    expect(last(sent)?.conversation_ids).toEqual([42])
 
     focused = false
     window.dispatchEvent(new Event("blur"))
-    expect(sent.at(-1)?.focused).toBe(false)
+    expect(last(sent)?.focused).toBe(false)
 
     // Nothing changed: no extra report until the heartbeat.
     const count = sent.length
@@ -51,7 +54,7 @@ describe("presence reporting", () => {
     expect(sent.length).toBe(count)
     vi.advanceTimersByTime(HEARTBEAT_MS)
     expect(sent.length).toBe(count + 1)
-    expect(sent.at(-1)?.idle_secs).toBe(HEARTBEAT_MS / 1000)
+    expect(last(sent)?.idle_secs).toBe(HEARTBEAT_MS / 1000)
 
     stop()
     vi.advanceTimersByTime(HEARTBEAT_MS * 3)
@@ -65,7 +68,7 @@ describe("presence reporting", () => {
     const before = sent.length
     window.dispatchEvent(new Event("keydown"))
     expect(sent.length).toBe(before + 1)
-    expect(sent.at(-1)?.idle_secs).toBe(0)
+    expect(last(sent)?.idle_secs).toBe(0)
     // A second touch right after is only a timestamp.
     window.dispatchEvent(new Event("keydown"))
     expect(sent.length).toBe(before + 1)
