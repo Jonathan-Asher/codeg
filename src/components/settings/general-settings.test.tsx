@@ -63,6 +63,9 @@ vi.mock("@/lib/api", () => ({
   })),
   updateCriticalSessionSettings: vi.fn(async (v: unknown) => v),
   listChatChannels: vi.fn(async () => []),
+  // The iPhone push section stays hidden (its own test covers it).
+  getPushSettings: vi.fn(() => new Promise(() => {})),
+  listPushDevices: vi.fn(async () => []),
 }))
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))

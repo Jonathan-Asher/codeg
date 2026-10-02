@@ -114,6 +114,21 @@ export interface CallOptions {
   timeoutMs?: number
 }
 
+/** One presence report (Rust `presence::PresenceReport`). */
+export interface ClientPresence {
+  visible: boolean
+  focused: boolean
+  /** Seconds since the user last touched this window. */
+  idle_secs: number
+  /** The sessions this window shows. */
+  conversation_ids: number[]
+}
+
+/** The event-socket frame for a presence report (`ClientMsg::Presence`). */
+export function presenceFrame(presence: ClientPresence): object {
+  return { action: "presence", ...presence }
+}
+
 export interface Transport {
   /**
    * Invoke a backend command (replaces Tauri's invoke()).
@@ -164,6 +179,14 @@ export interface Transport {
    * transports leave this undefined.
    */
   probeLiveness?(): void
+
+  /**
+   * Tell the server whether the user is looking at this window (see
+   * `src/lib/presence.ts`). Sent over the event WebSocket and re-sent on
+   * every reconnect. Optional — the desktop shell reports through the
+   * `report_client_presence` command instead.
+   */
+  reportPresence?(presence: ClientPresence): void
 
   /**
    * Resolves when the server-side broadcaster receiver is currently

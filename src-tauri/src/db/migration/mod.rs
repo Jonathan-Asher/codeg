@@ -53,6 +53,7 @@ mod m20260926_000001_conversation_turn_state;
 mod m20260928_000001_conversation_selector_state;
 mod m20260928_000002_conversation_auto_resume;
 mod m20261001_000001_conversation_critical;
+mod m20261002_000001_push_devices;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -112,6 +113,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260928_000001_conversation_selector_state::Migration),
             Box::new(m20260928_000002_conversation_auto_resume::Migration),
             Box::new(m20261001_000001_conversation_critical::Migration),
+            Box::new(m20261002_000001_push_devices::Migration),
         ]
     }
 }

@@ -167,6 +167,11 @@ import type {
   AutoResumeStatus,
   CriticalAlertsSnapshot,
   CriticalSessionSettings,
+  PushDevice,
+  PushDevicePrefs,
+  PushSettings,
+  PushSettingsView,
+  TestPushResult,
   CloseRequestPayload,
   CloseWindowBehavior,
   SystemCloseBehaviorSettingsView,
@@ -2038,6 +2043,49 @@ export async function updateCriticalSessionSettings(
   settings: CriticalSessionSettings
 ): Promise<CriticalSessionSettings> {
   return getTransport().call("update_critical_session_settings", { settings })
+}
+
+// --- iPhone push ---
+
+export async function getPushSettings(): Promise<PushSettingsView> {
+  return getTransport().call("get_push_settings")
+}
+
+/** `authKey`: omit to keep the stored `.p8`, `""` to remove it, or the key's
+ *  contents to replace it. */
+export async function updatePushSettings(
+  settings: PushSettings,
+  authKey?: string
+): Promise<PushSettingsView> {
+  return getTransport().call(
+    "update_push_settings",
+    authKey === undefined ? { settings } : { settings, authKey }
+  )
+}
+
+export async function listPushDevices(): Promise<PushDevice[]> {
+  return getTransport().call("list_push_devices")
+}
+
+export async function unregisterPushDevice(id: number): Promise<boolean> {
+  return getTransport().call("unregister_push_device", { id })
+}
+
+export async function updatePushDevicePrefs(
+  id: number,
+  prefs: PushDevicePrefs
+): Promise<PushDevice> {
+  return getTransport().call("update_push_device_prefs", { id, prefs })
+}
+
+/** One device, or every registered one when `deviceId` is omitted. */
+export async function sendTestPush(
+  deviceId?: number
+): Promise<TestPushResult[]> {
+  return getTransport().call(
+    "send_test_push",
+    deviceId === undefined ? {} : { deviceId }
+  )
 }
 
 // --- Close window behavior ---

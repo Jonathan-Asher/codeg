@@ -128,7 +128,11 @@ futures = "0.3"
 futures-lite = "2"
 # gzip/brotli: send Accept-Encoding and transparently decompress on the
 # remote-workspace proxy path, matching the server's CompressionLayer.
-reqwest = { version = "0.12", features = ["stream", "json", "multipart", "gzip", "brotli"] }
+# rustls-tls: the APNs client (`push::apns`) must speak HTTP/2, negotiated
+# through ALPN, which the default native-tls backend does not offer. Only that
+# client opts in (`use_rustls_tls`); native-tls stays every other client's
+# default.
+reqwest ={ version = "0.12", features = ["stream", "json", "multipart", "gzip", "brotli", "rustls-tls"] }
 flate2 = "1"
 bzip2 = "0.5"
 # DeepSeek Harness session logs (`~/.dsh/sessions/**/session.jsonl.zstd`) are a
@@ -184,6 +188,9 @@ qrcode = "0.14"
 image = { version = "0.25", default-features = false, features = ["png", "webp", "jpeg", "gif"] }
 include_dir = "0.7"
 sha2 = "0.10"
+# ES256 provider tokens for APNs (the `.p8` key is a P-256 PKCS#8 key).
+# Already in the tree through rustls.
+ring = "0.17"
 aes-gcm = { version = "0.10", features = ["stream"] }
 argon2 = "0.5"
 tempfile = "3"

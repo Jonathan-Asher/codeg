@@ -561,6 +561,14 @@ async fn async_main() -> ExitCode {
         state.emitter.clone(),
     ));
 
+    // iPhone push for turn finished / needs you / errors (mirrors lib.rs
+    // setup); critical alerts push from the watchdog above.
+    tokio::spawn(codeg_lib::push::fanout::push_event_task(
+        state.acp_event_bus.clone(),
+        state.connection_manager.clone_ref(),
+        state.db.conn.clone(),
+    ));
+
     // Config-sync uploader (mirrors lib.rs setup): sleeps a minute, then
     // compares the configuration's hash every interval and uploads only when
     // it changed. Does nothing at all until a WebDAV endpoint is configured.

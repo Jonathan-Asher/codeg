@@ -37,6 +37,7 @@ pub mod pet;
 pub mod plan_usage;
 pub mod project_boot;
 pub mod question;
+pub mod push;
 pub mod quick_ask;
 pub mod quick_messages;
 pub mod science;

@@ -82,6 +82,7 @@ import { AppToaster } from "@/components/ui/app-toaster"
 import { WorkspaceTransfersToasts } from "@/components/layout/workspace-transfers"
 import { AutoResumeToasts } from "@/components/layout/auto-resume-toasts"
 import { CriticalAlerts } from "@/components/layout/critical-alerts"
+import { ShownSessionPresence } from "@/components/workspace/shown-session-presence"
 import {
   DeepLinkBootstrap,
   PetFocusBridge,
@@ -1268,6 +1269,8 @@ function FolderLayoutShell({ children }: { children: React.ReactNode }) {
       {/* Critical sessions that sat idle or went silent: banner, system
           notification and tone (the backend decides when). */}
       <CriticalAlerts />
+      {/* The active tab's session, for the presence reports. */}
+      <ShownSessionPresence />
     </div>
   )
 }

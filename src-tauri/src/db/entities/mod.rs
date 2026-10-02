@@ -16,6 +16,7 @@ pub mod folder_link;
 pub mod model_provider;
 pub mod opened_tab;
 pub mod prelude;
+pub mod push_device;
 pub mod quick_message;
 pub mod remote_workspace_connection;
 pub mod token_usage_sync;

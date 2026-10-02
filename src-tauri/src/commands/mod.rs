@@ -5,6 +5,8 @@ pub mod app_update;
 pub mod auto_resume;
 #[cfg(feature = "tauri-runtime")]
 pub mod critical_sessions;
+#[cfg(feature = "tauri-runtime")]
+pub mod push;
 pub mod automation;
 pub mod background;
 pub mod backup;

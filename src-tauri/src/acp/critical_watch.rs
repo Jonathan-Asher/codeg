@@ -38,9 +38,14 @@
 //! notification now) and [`CRITICAL_ALERTS_EVENT`] (the set of alerts waiting
 //! for an acknowledgement changed — the in-app banner), and reads the set on
 //! connect through [`critical_alerts`]. The alert id is unique per firing, so
-//! the windows of one machine can agree on a single system notification. With
-//! no client connected — or with "also send to chat channel" on — the alert
-//! goes to the configured chat channels too.
+//! the windows of one machine can agree on a single system notification.
+//!
+//! Each alert is also pushed to the registered iPhones (`crate::push`). It
+//! goes to the configured chat channels too when nobody is looking and no
+//! iPhone took it — or always, with "also send to chat channel" on. "Looking"
+//! is `crate::presence`'s: a desktop or web window that reports itself
+//! visible, focused and in use. A connection alone is not someone looking: a
+//! phone, a sleeping laptop or a background tab holds one too.
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -938,27 +943,12 @@ pub async fn set_conversation_critical_core(
 
 // ── Runtime ──
 
-/// Whether anyone is looking: a WebSocket client (a browser, a remote desktop
-/// window) or, in the desktop app, a visible window.
-fn clients_connected(emitter: &EventEmitter) -> bool {
-    crate::web::ws::connected_client_count() > 0 || window_visible(emitter)
-}
-
-#[cfg(feature = "tauri-runtime")]
-fn window_visible(emitter: &EventEmitter) -> bool {
-    use tauri::Manager;
-    match emitter {
-        EventEmitter::Tauri(app) => app
-            .webview_windows()
-            .values()
-            .any(|w| w.is_visible().unwrap_or(false)),
-        _ => false,
-    }
-}
-
-#[cfg(not(feature = "tauri-runtime"))]
-fn window_visible(_emitter: &EventEmitter) -> bool {
-    false
+/// Whether a fired alert also goes to the chat channels: always with "also
+/// send to chat channel" on; otherwise only when nobody is looking (see
+/// `crate::presence` — an open connection alone does not count) and no
+/// iPhone received it.
+pub fn channel_wants(send_to_channel: bool, anyone_looking: bool, pushed: bool) -> bool {
+    send_to_channel || !(anyone_looking || pushed)
 }
 
 async fn live_state(manager: &ConnectionManager, conversation_id: i32) -> Option<LiveState> {
@@ -1007,11 +997,22 @@ pub fn channel_message(lang: Lang, alert: &CriticalAlert) -> RichMessage {
 async fn deliver_to_channels(
     manager: &ConnectionManager,
     db: &DatabaseConnection,
-    emitter: &EventEmitter,
     fired: &[CriticalAlert],
     settings: CriticalSessionSettings,
+    anyone_looking: bool,
+    pushed: &HashSet<String>,
 ) {
-    if !settings.send_to_channel && clients_connected(emitter) {
+    let wanted: Vec<&CriticalAlert> = fired
+        .iter()
+        .filter(|a| {
+            channel_wants(
+                settings.send_to_channel,
+                anyone_looking,
+                pushed.contains(&a.id),
+            )
+        })
+        .collect();
+    if wanted.is_empty() {
         return;
     }
     let Some(channels) = manager.chat_channel() else {
@@ -1021,9 +1022,24 @@ async fn deliver_to_channels(
         return;
     }
     let lang = channel_lang(db).await;
-    for alert in fired {
+    for alert in wanted {
         channels.send_to_all(&channel_message(lang, alert)).await;
     }
+}
+
+/// Push the alerts that fired, then hand the chat channels what nobody saw.
+async fn deliver_fired(
+    manager: ConnectionManager,
+    db: DatabaseConnection,
+    fired: Vec<CriticalAlert>,
+    settings: CriticalSessionSettings,
+) {
+    let looking = crate::presence::snapshot();
+    let pushed = crate::push::fanout::deliver_critical(&db, &fired, &looking).await;
+    if !pushed.is_empty() {
+        tracing::info!("[critical] pushed {} alert(s) to iPhone", pushed.len());
+    }
+    deliver_to_channels(&manager, &db, &fired, settings, looking.anyone, &pushed).await;
 }
 
 /// One evaluation pass over every critical session.
@@ -1088,7 +1104,13 @@ async fn evaluate(manager: &ConnectionManager, db: &DatabaseConnection, emitter:
         publish(emitter, active);
     }
     if !fired.is_empty() {
-        deliver_to_channels(manager, db, emitter, &fired, settings).await;
+        // Off the watchdog's tick: an APNs retry must not hold the next pass.
+        tokio::spawn(deliver_fired(
+            manager.clone_ref(),
+            db.clone(),
+            fired,
+            settings,
+        ));
     }
 }
 
@@ -1810,5 +1832,45 @@ mod tests {
         assert!(title.starts_with('⚑'), "{title}");
         assert!(title.contains("Deploy fix"), "{title}");
         assert_eq!(msg.level, MessageLevel::Warning);
+    }
+
+    /// The fix for "any open socket counts as someone looking": a phone and
+    /// an idle remote window used to keep every alert off the chat channel.
+    #[test]
+    fn an_open_connection_alone_does_not_hold_the_chat_channel_back() {
+        use crate::presence::{ClientKind, PresenceRegistry, PresenceReport};
+        let now = Instant::now();
+        let in_use = PresenceReport {
+            visible: true,
+            focused: true,
+            ..PresenceReport::default()
+        };
+        let mut presence = PresenceRegistry::default();
+        let phone = presence.connect_socket(ClientKind::Ios);
+        presence.report_socket(phone, in_use.clone(), now);
+        // A remote window that never said it is looking (or went to sleep).
+        presence.connect_socket(ClientKind::Window);
+        let looking = presence.looking(now);
+        assert!(!looking.anyone);
+        assert!(
+            channel_wants(false, looking.anyone, false),
+            "nobody at a desk and no iPhone took it: the channel gets it"
+        );
+        assert!(
+            !channel_wants(false, looking.anyone, true),
+            "an iPhone took it: no second copy on the channel"
+        );
+        assert!(
+            channel_wants(true, looking.anyone, true),
+            "\"also send to chat channel\" sends every alert"
+        );
+
+        // A window in front of the user holds it back, as before.
+        let desk = presence.connect_socket(ClientKind::Window);
+        presence.report_socket(desk, in_use, now);
+        assert!(!channel_wants(false, presence.looking(now).anyone, false));
+        // ...until it goes stale (the laptop slept with its socket open).
+        let later = now + crate::presence::STALE_AFTER + Duration::from_secs(1);
+        assert!(channel_wants(false, presence.looking(later).anyone, false));
     }
 }
