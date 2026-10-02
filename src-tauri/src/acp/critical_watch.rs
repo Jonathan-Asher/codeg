@@ -1085,7 +1085,12 @@ pub async fn announce_limit_event(
         row.id
     );
     emit_event(emitter, CRITICAL_ALERT_EVENT, &alert);
-    deliver_to_channels(manager, db, emitter, &[alert], settings).await;
+    // Same delivery as a fired alert: the phone first, then the chat
+    // channels for what nobody at a desk or on a phone saw.
+    let looking = crate::presence::snapshot();
+    let fired = [alert];
+    let pushed = crate::push::fanout::deliver_critical(db, &fired, &looking).await;
+    deliver_to_channels(manager, db, &fired, settings, looking.anyone, &pushed).await;
 }
 
 async fn deliver_to_channels(

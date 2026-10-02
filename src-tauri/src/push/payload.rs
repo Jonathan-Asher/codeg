@@ -137,6 +137,8 @@ fn critical_kind_str(kind: CriticalAlertKind) -> &'static str {
         CriticalAlertKind::Interrupted => "interrupted",
         CriticalAlertKind::Stalled => "stalled",
         CriticalAlertKind::BackgroundStalled => "background_stalled",
+        CriticalAlertKind::LimitPaused => "limit_paused",
+        CriticalAlertKind::LimitContinued => "limit_continued",
     }
 }
 

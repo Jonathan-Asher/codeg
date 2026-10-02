@@ -392,6 +392,7 @@ fn a_critical_alert_pushes_with_its_own_id() {
         count: 2,
         fired_at: chrono::Utc::now(),
         sound: true,
+        resets_at: None,
     };
     let msg = fanout::critical_message(Lang::En, &alert, Some("claude_code".into()));
     let body = msg.body_json("srv");
