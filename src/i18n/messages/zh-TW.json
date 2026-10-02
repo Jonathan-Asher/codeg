@@ -3670,6 +3670,7 @@
         "worked": "工作已結束",
         "workedFor": "工作了 {duration}",
         "working": "正在工作中...",
+        "hookFeedback": "{event} 鉤子",
         "completedAt": "完成時間",
         "jumpToPreviousUserMessage": "跳轉到上一條使用者訊息",
         "showMore": "展開",

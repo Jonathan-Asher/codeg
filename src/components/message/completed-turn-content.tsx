@@ -6,7 +6,9 @@ import { useTranslations } from "next-intl"
 
 import {
   splitTrailingAnswerParts,
+  isTurnAnswerPart,
   type AdaptedContentPart,
+  type AdaptedHookFeedbackPart,
 } from "@/lib/adapters/ai-elements-adapter"
 import { formatElapsedLabel } from "@/lib/format-elapsed"
 import { cn } from "@/lib/utils"
@@ -17,28 +19,138 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/instant-collapsible"
 import { ContentPartsRenderer } from "./content-parts-renderer"
+import { HookFeedbackMarker } from "./hook-feedback-marker"
 
-export interface SplitAssistantTurnParts {
+/**
+ * One stretch of a reply between boundaries: the work the chip folds, then the
+ * answer that stays visible under it. `hook` is the Stop-hook feedback that
+ * opened the stretch; `null` for the first one and for a stretch cut off by a
+ * kept-visible note (see `LONG_NOTE_CHARS`).
+ */
+export interface AssistantTurnSegment {
+  hook: AdaptedHookFeedbackPart | null
   progress: AdaptedContentPart[]
   answer: AdaptedContentPart[]
 }
 
+export interface SplitAssistantTurnParts {
+  /** Every progress part of the reply, in order: what the chip folds. */
+  progress: AdaptedContentPart[]
+  /** Every part that stays visible with the chip folded, in order. */
+  answer: AdaptedContentPart[]
+  /** The same parts in render order, cut at each boundary. */
+  segments: AssistantTurnSegment[]
+}
+
 /**
- * Split a completed assistant reply at its last progress item. Text before or
- * between tool/reasoning work is intermediate commentary; trailing response
- * content is the final answer and must remain visible. A text-only response is
- * left untouched because there is no reliable signal that any of it is
- * progress rather than the answer.
+ * A note before the reply's last work is kept visible when it is at least this
+ * long and the reply's closing answer is shorter. Long prose in the middle of
+ * a turn is a report, not a status line ("Now running the tests."), and when
+ * the turn then closes on a line or two, that report is very likely what the
+ * reader needed: an agent that wraps up, hits one more check, and signs off
+ * briefly would otherwise have its whole report, question included, folded
+ * away behind "Worked for …". Showing a mid-turn report the reader did not
+ * need costs a scroll; hiding a question costs a turn that sits idle.
+ */
+export const LONG_NOTE_CHARS = 600
+
+function visibleTextLength(parts: AdaptedContentPart[]): number {
+  let length = 0
+  for (const part of parts) {
+    if (part.type === "text") length += part.text.trim().length
+  }
+  return length
+}
+
+/**
+ * Cut one stretch at its last progress item, and keep a long note before that
+ * work visible when the closing answer is short (`LONG_NOTE_CHARS`). The
+ * guard only applies to a closing answer made of prose: an image or a plan
+ * card is an answer of its own, and a reply that ends on its work has nothing
+ * folded to begin with.
+ */
+function splitStretch(
+  parts: AdaptedContentPart[],
+  keepLongNotes: boolean
+): Array<{ progress: AdaptedContentPart[]; answer: AdaptedContentPart[] }> {
+  const { body, trailing } = splitTrailingAnswerParts(parts)
+  const whole = [{ progress: body, answer: trailing }]
+  if (!keepLongNotes || body.length === 0) return whole
+  const closingIsShortProse =
+    trailing.length > 0 &&
+    trailing.every((part) => part.type === "text") &&
+    visibleTextLength(trailing) > 0 &&
+    visibleTextLength(trailing) < LONG_NOTE_CHARS
+  if (!closingIsShortProse) return whole
+
+  let note = -1
+  for (let i = body.length - 1; i >= 0; i--) {
+    const part = body[i]!
+    if (part.type === "text" && part.text.trim().length >= LONG_NOTE_CHARS) {
+      note = i
+      break
+    }
+  }
+  if (note < 0) return whole
+  // Keep the note together with answer parts written right alongside it.
+  let start = note
+  while (start > 0 && isTurnAnswerPart(body[start - 1]!)) start -= 1
+  let end = note + 1
+  while (end < body.length && isTurnAnswerPart(body[end]!)) end += 1
+  return [
+    { progress: body.slice(0, start), answer: body.slice(start, end) },
+    { progress: body.slice(end), answer: trailing },
+  ]
+}
+
+/**
+ * Split a completed assistant reply into what the "Worked for …" chip folds
+ * and what stays visible.
  *
- * The progress/answer taxonomy is the adapter's (`isTurnAnswerPart`), shared
- * with the Goal capsule's trailing-answer lift — the same question ("what may
- * a collapsed chip swallow?") must not get two answers.
+ * Within a stretch, everything up to the last progress item (tool, reasoning)
+ * is progress and what follows is the answer. Text before or between work is
+ * commentary; a text-only response is left untouched because there is no
+ * reliable signal that any of it is progress rather than the answer. The
+ * progress/answer taxonomy is the adapter's (`isTurnAnswerPart`), shared with
+ * the Goal capsule's trailing-answer lift.
+ *
+ * A Stop-hook marker cuts the reply into stretches first. The agent had
+ * finished when the hook fired, so the answer it wrote then is a final answer;
+ * the work it does in reply to the hook must not turn that answer into
+ * progress. Each stretch is split on its own, and the hook's feedback renders
+ * between them.
+ *
+ * `keepLongNotes` adds the long-note guard (`LONG_NOTE_CHARS`). It is for a
+ * settled reply: while the turn streams, its fold is open anyway, and moving
+ * parts between stretches as the closing answer grows would remount them.
  */
 export function splitAssistantTurnParts(
-  parts: AdaptedContentPart[]
+  parts: AdaptedContentPart[],
+  { keepLongNotes = false }: { keepLongNotes?: boolean } = {}
 ): SplitAssistantTurnParts {
-  const { body, trailing } = splitTrailingAnswerParts(parts)
-  return { progress: body, answer: trailing }
+  const stretches: Array<{
+    hook: AdaptedHookFeedbackPart | null
+    parts: AdaptedContentPart[]
+  }> = [{ hook: null, parts: [] }]
+  for (const part of parts) {
+    if (part.type === "hook-feedback") {
+      stretches.push({ hook: part, parts: [] })
+    } else {
+      stretches[stretches.length - 1]!.parts.push(part)
+    }
+  }
+
+  const segments: AssistantTurnSegment[] = []
+  for (const stretch of stretches) {
+    splitStretch(stretch.parts, keepLongNotes).forEach((piece, i) => {
+      segments.push({ hook: i === 0 ? stretch.hook : null, ...piece })
+    })
+  }
+  return {
+    progress: segments.flatMap((segment) => segment.progress),
+    answer: segments.flatMap((segment) => segment.answer),
+    segments,
+  }
 }
 
 /**
@@ -131,7 +243,10 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
 }) {
   const t = useTranslations("Folder.chat.messageList")
   const tElapsed = useTranslations("Folder.chat.liveTurnStats")
-  const split = useMemo(() => splitAssistantTurnParts(parts), [parts])
+  const split = useMemo(
+    () => splitAssistantTurnParts(parts, { keepLongNotes: completed }),
+    [parts, completed]
+  )
 
   const [localOpen, setLocalOpen] = useState(() => {
     const entry = manualFold.get(parts)
@@ -275,6 +390,12 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
     )
   }
 
+  const [first, ...rest] = split.segments
+  const foldBodyClass = cn(
+    "reply-fold-body w-full outline-none",
+    animateEnter && "reply-fold-enter"
+  )
+
   return (
     <div className="space-y-4">
       <Collapsible
@@ -302,30 +423,66 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
             grid track. The inner div is the clipped grid item — it must stay a
             single child, and the spacing has to live INSIDE it or the closed
             track never reaches zero. */}
-        <CollapsibleContent
-          className={cn(
-            "reply-fold-body w-full outline-none",
-            animateEnter && "reply-fold-enter"
-          )}
-        >
-          <div>
-            <div className="pt-3">
-              <ContentPartsRenderer
-                parts={split.progress}
-                role="assistant"
-                isStreaming={isStreaming}
-              />
+        {first && first.progress.length > 0 && (
+          <CollapsibleContent className={foldBodyClass}>
+            <div>
+              <div className="pt-3">
+                <ContentPartsRenderer
+                  parts={first.progress}
+                  role="assistant"
+                  isStreaming={isStreaming}
+                />
+              </div>
             </div>
-          </div>
-        </CollapsibleContent>
+          </CollapsibleContent>
+        )}
       </Collapsible>
-      {split.answer.length > 0 && (
+      {first && first.answer.length > 0 && (
         <ContentPartsRenderer
-          parts={split.answer}
+          parts={first.answer}
           role="assistant"
           isStreaming={isStreaming}
         />
       )}
+      {/* Later stretches: the hook that reopened the turn, then that
+          stretch's own work under the same fold, then its answer. One wrapper
+          per stretch keeps the closed folds from leaving gaps: the fold's root
+          stays mounted when shut, so its spacing lives inside it. */}
+      {rest.map((segment, i) => (
+        <div key={i}>
+          {segment.hook && <HookFeedbackMarker part={segment.hook} />}
+          {segment.progress.length > 0 && (
+            <Collapsible className="w-full" open={open}>
+              <CollapsibleContent className={foldBodyClass}>
+                <div>
+                  <div className={segment.hook ? "pt-4" : undefined}>
+                    <ContentPartsRenderer
+                      parts={segment.progress}
+                      role="assistant"
+                      isStreaming={isStreaming}
+                    />
+                  </div>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+          {segment.answer.length > 0 && (
+            <div
+              className={
+                segment.hook || (open && segment.progress.length > 0)
+                  ? "pt-4"
+                  : undefined
+              }
+            >
+              <ContentPartsRenderer
+                parts={segment.answer}
+                role="assistant"
+                isStreaming={isStreaming}
+              />
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   )
 })

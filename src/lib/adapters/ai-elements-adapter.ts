@@ -158,6 +158,40 @@ export type AdaptedProposedPlanPart = {
   isStreaming: boolean
 }
 
+/**
+ * A hook that kept the agent from stopping and handed it feedback, so the turn
+ * carried on: Claude Code's Stop hook. Whatever the agent wrote before it was
+ * a finished answer, so the completed-turn fold treats this part as a
+ * boundary (see `splitAssistantTurnParts`) rather than as progress or answer.
+ *
+ * Both paths carry it as a settled tool call tagged
+ * `_meta["codeg.hookFeedback"]`: `parsers::claude` synthesizes it from the
+ * transcript's `isMeta` record, and the live mapper from the raw SDK stream.
+ */
+export type AdaptedHookFeedbackPart = {
+  type: "hook-feedback"
+  /** The hook event that fired ("Stop"). */
+  event: string
+  /** The reason the hook gave, verbatim. */
+  feedback: string
+}
+
+/** `_meta` key of the hook marker (`HOOK_FEEDBACK_META_KEY` in Rust). */
+export const HOOK_FEEDBACK_META_KEY = "codeg.hookFeedback"
+
+/** The hook marker a tool call's `_meta` carries, or `null`. */
+export function hookFeedbackFromMeta(
+  meta: Record<string, unknown> | null | undefined
+): { event: string; feedback: string } | null {
+  const raw = meta?.[HOOK_FEEDBACK_META_KEY]
+  if (!raw || typeof raw !== "object") return null
+  const { event, feedback } = raw as Record<string, unknown>
+  return {
+    event: typeof event === "string" && event.length > 0 ? event : "Stop",
+    feedback: typeof feedback === "string" ? feedback : "",
+  }
+}
+
 export type AdaptedContentPart =
   | { type: "text"; text: string }
   | AdaptedToolCallPart
@@ -201,6 +235,7 @@ export type AdaptedContentPart =
   | AdaptedGeneratedImagePart
   | AdaptedPlanPart
   | AdaptedProposedPlanPart
+  | AdaptedHookFeedbackPart
 
 export interface UserResourceDisplay {
   name: string
@@ -2102,6 +2137,10 @@ export function isTurnAnswerPart(part: AdaptedContentPart): boolean {
     case "goal-run":
     case "plan":
       return false
+    // Neither: a boundary. The completed-turn fold cuts the reply at it before
+    // asking this question; anywhere else (inside a goal capsule) it is process.
+    case "hook-feedback":
+      return false
   }
 }
 
@@ -2424,6 +2463,17 @@ export function adaptMessageTurn(
     }
 
     if (block.type === "tool_use") {
+      // A hook marker is not a tool card: it becomes the boundary part, and
+      // its (empty) paired result is consumed so it renders no orphan row.
+      const hookFeedback = hookFeedbackFromMeta(block.meta)
+      if (hookFeedback) {
+        if (block.tool_use_id && resultMap.get(block.tool_use_id)) {
+          matchedResultIds.add(block.tool_use_id)
+        }
+        adaptedContent.push({ type: "hook-feedback", ...hookFeedback })
+        continue
+      }
+
       // Persisted plan-like tool calls (TodoWrite, *plan*) render as the same
       // dedicated <PlanCard> the live stream produces, so live and historical
       // look identical. Gated on `!isStreaming`: while streaming, the plan's

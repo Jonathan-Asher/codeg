@@ -3670,6 +3670,7 @@
         "worked": "انتهى العمل",
         "workedFor": "عمل لمدة {duration}",
         "working": "جارٍ العمل...",
+        "hookFeedback": "خطاف {event}",
         "completedAt": "وقت الإنجاز",
         "jumpToPreviousUserMessage": "الانتقال إلى رسالة المستخدم",
         "showMore": "عرض المزيد",

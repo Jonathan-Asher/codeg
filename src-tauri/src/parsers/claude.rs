@@ -587,6 +587,83 @@ pub(crate) fn is_meta_message(value: &serde_json::Value) -> bool {
         .unwrap_or(false)
 }
 
+/// What Claude Code writes in front of a Stop hook's reason when the hook
+/// blocks the stop and the reason goes back to the model.
+const STOP_HOOK_FEEDBACK_PREFIX: &str = "Stop hook feedback:";
+
+/// `_meta` key on the synthesized hook marker: `{event, feedback}`. The
+/// frontend reads it (`hookFeedbackFromMeta`) to split a finished turn there,
+/// so the answer written before the hook fired is not folded away as progress.
+pub(crate) const HOOK_FEEDBACK_META_KEY: &str = "codeg.hookFeedback";
+
+/// The reason a blocking Stop hook handed back to the model, read off the
+/// `message.content` of the user record that carries it. `None` for every
+/// other record.
+///
+/// A Stop hook that blocks does not end the turn: the CLI sends its reason to
+/// the model as a user message, and the model answers it in the same turn. The
+/// transcript stores that message as an `isMeta` user record with STRING
+/// content; the SDK stream carries the same message (`isSynthetic`, same
+/// uuid) as a single text block. Both shapes are read here, so the history
+/// parse and the live mapper (`acp::connection`) agree on what a marker is.
+pub(crate) fn stop_hook_feedback(content: &serde_json::Value) -> Option<String> {
+    let text = match content {
+        serde_json::Value::String(text) => text.as_str(),
+        serde_json::Value::Array(items) => match items.as_slice() {
+            [only] if only.get("type").and_then(|t| t.as_str()) == Some("text") => {
+                only.get("text")?.as_str()?
+            }
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let feedback = text.trim_start().strip_prefix(STOP_HOOK_FEEDBACK_PREFIX)?;
+    Some(feedback.trim().to_string())
+}
+
+/// The tool-call id of the marker for the Stop-hook record `record_uuid`. The
+/// SDK stamps the live message with the record's own uuid, so the live card and
+/// the one parsed from the transcript share an id.
+pub(crate) fn stop_hook_tool_call_id(record_uuid: &str) -> String {
+    format!("stop-hook-{record_uuid}")
+}
+
+/// `_meta` for a hook marker (see [`HOOK_FEEDBACK_META_KEY`]).
+pub(crate) fn hook_feedback_meta(event: &str, feedback: &str) -> serde_json::Value {
+    let mut payload = serde_json::Map::new();
+    payload.insert("event".to_string(), serde_json::Value::from(event));
+    payload.insert("feedback".to_string(), serde_json::Value::from(feedback));
+    let mut meta = serde_json::Map::new();
+    meta.insert(
+        HOOK_FEEDBACK_META_KEY.to_string(),
+        serde_json::Value::Object(payload),
+    );
+    serde_json::Value::Object(meta)
+}
+
+/// The blocks of a Stop-hook marker: a settled tool call carrying
+/// [`hook_feedback_meta`], paired with an empty result so nothing reads it as
+/// a call still running. The same shape the live mapper emits.
+fn stop_hook_feedback_blocks(record_uuid: &str, feedback: &str) -> Vec<ContentBlock> {
+    let tool_use_id = stop_hook_tool_call_id(record_uuid);
+    vec![
+        ContentBlock::ToolUse {
+            tool_use_id: Some(tool_use_id.clone()),
+            tool_name: "stop_hook".to_string(),
+            input_preview: None,
+            status: None,
+            meta: Some(hook_feedback_meta("Stop", feedback)),
+        },
+        ContentBlock::ToolResult {
+            tool_use_id: Some(tool_use_id),
+            output_preview: None,
+            is_error: false,
+            agent_stats: None,
+            images: Vec::new(),
+        },
+    ]
+}
+
 /// The bookkeeping records Claude Code appends when a turn is interrupted:
 /// a `user` record whose entire content is `[Request interrupted by user]`
 /// (or `… for tool use` when the interrupt caught a running tool call).
@@ -1660,6 +1737,40 @@ impl ClaudeRecordAccumulator {
             }
             Some(PendingCommandVerdict::Drop) => *pending_command = None,
             Some(PendingCommandVerdict::Wait) | None => {}
+        }
+
+        // A Stop hook that blocked: its reason went back to the model and the
+        // turn carried on. The record itself is addressed to the model, so it
+        // is not a user bubble, but the point where it sits matters: what the
+        // assistant wrote before it was a finished answer, not progress. Mark
+        // it in the reply so the completed turn can split there.
+        if msg_type == "user" && is_meta_message(&value) {
+            if let Some(feedback) = value
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(stop_hook_feedback)
+            {
+                let timestamp = parse_timestamp(&value).unwrap_or_else(Utc::now);
+                let record_uuid = value
+                    .get("uuid")
+                    .and_then(|u| u.as_str())
+                    .filter(|u| !u.is_empty())
+                    .map_or_else(|| messages.len().to_string(), str::to_string);
+                messages.push(UnifiedMessage {
+                    id: format!("synth-stop-hook-{record_uuid}"),
+                    role: MessageRole::Assistant,
+                    content: stop_hook_feedback_blocks(&record_uuid, &feedback),
+                    timestamp,
+                    usage: None,
+                    duration_ms: None,
+                    model: None,
+                    completed_at: Some(timestamp),
+                    // Transcript bookkeeping, not a model message: nothing to
+                    // fork at (same as the compaction divider).
+                    agent_message_id: None,
+                });
+                return;
+            }
         }
 
         // Skip system meta messages and interrupt bookkeeping (see the
@@ -6918,5 +7029,191 @@ mod tests {
             }
             other => panic!("expected ToolResult, got {other:?}"),
         }
+    }
+
+    /// The hook marker's `(tool_use_id, event, feedback)` if `block` is one.
+    fn stop_hook_marker(block: &ContentBlock) -> Option<(String, String, String)> {
+        let ContentBlock::ToolUse {
+            tool_use_id: Some(id),
+            meta: Some(meta),
+            ..
+        } = block
+        else {
+            return None;
+        };
+        let payload = meta.get(HOOK_FEEDBACK_META_KEY)?;
+        Some((
+            id.clone(),
+            payload.get("event")?.as_str()?.to_string(),
+            payload.get("feedback")?.as_str()?.to_string(),
+        ))
+    }
+
+    /// A Stop hook that blocks once, as Claude Code 2.1.284 writes it: the
+    /// assistant's final answer, then an `isMeta` user record carrying the
+    /// hook's reason, a `hook_blocking_error` attachment, a
+    /// `stop_hook_summary`, and the model's reply to the hook in the same turn.
+    /// The answer before the hook must stay an answer, so the parse marks the
+    /// point where the hook fired.
+    #[test]
+    fn a_blocking_stop_hook_leaves_a_marker_between_the_answer_and_the_reply() {
+        let reason = "Browser check outstanding. Open the page in Chrome.\n\nIf a browser check does not apply, say which and stop again.";
+        let records = [
+            json!({
+                "type": "user", "timestamp": "2026-10-02T10:10:00.000Z", "uuid": "u1",
+                "promptId": "p1",
+                "message": { "role": "user", "content": "Roll out the OCR change?" }
+            }),
+            json!({
+                "type": "assistant", "timestamp": "2026-10-02T10:10:05.000Z", "uuid": "a1",
+                "message": { "id": "msg_1", "role": "assistant", "model": "claude-opus-5-5",
+                    "content": [{"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "pytest"}}] }
+            }),
+            json!({
+                "type": "user", "timestamp": "2026-10-02T10:10:30.000Z", "uuid": "u2",
+                "message": { "role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "160 passed"}] }
+            }),
+            json!({
+                "type": "assistant", "timestamp": "2026-10-02T10:18:16.859Z", "uuid": "a2",
+                "message": { "id": "msg_2", "role": "assistant", "model": "claude-opus-5-5",
+                    "content": [{"type": "text", "text": "All 160 tests pass.\n\n**Decision for you:** go ahead with the dev rollout?"}] }
+            }),
+            json!({
+                "type": "user", "timestamp": "2026-10-02T10:18:17.673Z", "uuid": "u-hook",
+                "promptId": "p1", "isMeta": true,
+                "message": { "role": "user", "content": format!("Stop hook feedback:\n{reason}") }
+            }),
+            json!({
+                "type": "attachment", "timestamp": "2026-10-02T10:18:17.673Z", "uuid": "att-1",
+                "attachment": { "type": "hook_blocking_error", "hookName": "Stop", "hookEvent": "Stop",
+                    "blockingError": { "blockingError": reason, "command": "check.sh" } }
+            }),
+            json!({
+                "type": "system", "subtype": "stop_hook_summary", "timestamp": "2026-10-02T10:18:22.045Z",
+                "uuid": "s1", "hookCount": 1, "hookErrors": [reason], "preventedContinuation": false
+            }),
+            json!({
+                "type": "assistant", "timestamp": "2026-10-02T10:18:23.868Z", "uuid": "a3",
+                "message": { "id": "msg_3", "role": "assistant", "model": "claude-opus-5-5",
+                    "content": [{"type": "thinking", "thinking": "Neither file changed.", "signature": "sig"}] }
+            }),
+            json!({
+                "type": "assistant", "timestamp": "2026-10-02T10:18:25.834Z", "uuid": "a4",
+                "message": { "id": "msg_3", "role": "assistant", "model": "claude-opus-5-5",
+                    "content": [{"type": "text", "text": "Neither of those files changed this turn, so no browser check is needed."}] }
+            }),
+            json!({
+                "type": "system", "subtype": "stop_hook_summary", "timestamp": "2026-10-02T10:18:26.120Z",
+                "uuid": "s2", "hookCount": 1, "hookErrors": [], "preventedContinuation": false
+            }),
+            json!({
+                "type": "system", "subtype": "turn_duration", "timestamp": "2026-10-02T10:18:26.200Z",
+                "uuid": "s3", "durationMs": 506_000
+            }),
+        ];
+
+        let mut acc = ClaudeRecordAccumulator::new(PathBuf::from("/nonexistent.jsonl"));
+        for record in &records {
+            acc.feed_line(&record.to_string());
+        }
+        acc.finalize_background_lifecycle();
+        let turns = group_into_turns(acc.messages);
+
+        let position = |pred: &dyn Fn(&ContentBlock) -> bool| {
+            turns
+                .iter()
+                .position(|t| t.blocks.iter().any(pred))
+                .expect("block present")
+        };
+        let answer_at = position(&|b| {
+            matches!(b, ContentBlock::Text { text } if text.contains("Decision for you"))
+        });
+        let marker_at = position(&|b| stop_hook_marker(b).is_some());
+        let reply_at = position(&|b| {
+            matches!(b, ContentBlock::Text { text } if text.starts_with("Neither of those files"))
+        });
+        assert!(answer_at < marker_at && marker_at < reply_at);
+
+        // The marker is an assistant turn of its own, so it merges into the
+        // reply around it rather than opening a new round.
+        let marker = &turns[marker_at];
+        assert!(matches!(marker.role, TurnRole::Assistant));
+        assert!(marker.agent_message_id.is_none());
+        let (id, event, feedback) = stop_hook_marker(&marker.blocks[0]).unwrap();
+        assert_eq!(id, "stop-hook-u-hook");
+        assert_eq!(event, "Stop");
+        assert_eq!(feedback, reason);
+        // Paired, so it never reads as a call still running.
+        assert!(matches!(
+            &marker.blocks[1],
+            ContentBlock::ToolResult { tool_use_id: Some(rid), .. } if *rid == id
+        ));
+        assert_eq!(turns.iter().filter(|t| t.blocks.iter().any(|b| stop_hook_marker(b).is_some())).count(), 1);
+
+        // The hook's message is still not a user bubble.
+        assert!(!turns.iter().any(|t| matches!(t.role, TurnRole::User)
+            && t.blocks.iter().any(|b| matches!(b, ContentBlock::Text { text } if text.contains("Stop hook")))));
+        // The turn's duration still lands on its last real reply.
+        assert_eq!(turns[reply_at].duration_ms, Some(506_000));
+        assert_eq!(turns[marker_at].duration_ms, None);
+    }
+
+    #[test]
+    fn stop_hook_feedback_reads_the_transcript_and_the_sdk_shapes() {
+        // Transcript: `isMeta` string content.
+        assert_eq!(
+            stop_hook_feedback(&json!("Stop hook feedback:\nRun the browser check.")).as_deref(),
+            Some("Run the browser check.")
+        );
+        // SDK stream: one text block.
+        assert_eq!(
+            stop_hook_feedback(&json!([{"type": "text", "text": "Stop hook feedback:\nRun it.\nThen stop."}]))
+                .as_deref(),
+            Some("Run it.\nThen stop.")
+        );
+        // Other model-addressed records are not hook feedback: the `/goal`
+        // arming notice, a caveat, a real prompt, or a richer array.
+        for content in [
+            json!("A session-scoped Stop hook is now active with condition: ship it."),
+            json!("<local-command-caveat>Caveat</local-command-caveat>"),
+            json!("please mention Stop hook feedback: in the docs"),
+            json!([
+                {"type": "text", "text": "Stop hook feedback:\nx"},
+                {"type": "text", "text": "more"}
+            ]),
+            json!({"text": "Stop hook feedback:\nx"}),
+        ] {
+            assert_eq!(stop_hook_feedback(&content), None, "{content}");
+        }
+    }
+
+    /// Any other `isMeta` user record is still dropped without a trace.
+    #[test]
+    fn other_meta_records_leave_no_marker() {
+        let records = [
+            json!({
+                "type": "user", "timestamp": "2026-10-02T10:00:00.000Z", "uuid": "u1",
+                "message": { "role": "user", "content": "hi" }
+            }),
+            json!({
+                "type": "user", "timestamp": "2026-10-02T10:00:00.100Z", "uuid": "u-meta",
+                "isMeta": true,
+                "message": { "role": "user", "content": "<local-command-caveat>Caveat: ignore</local-command-caveat>" }
+            }),
+            json!({
+                "type": "assistant", "timestamp": "2026-10-02T10:00:01.000Z", "uuid": "a1",
+                "message": { "id": "msg_1", "role": "assistant", "model": "claude-opus-5-5",
+                    "content": [{"type": "text", "text": "hello"}] }
+            }),
+        ];
+        let mut acc = ClaudeRecordAccumulator::new(PathBuf::from("/nonexistent.jsonl"));
+        for record in &records {
+            acc.feed_line(&record.to_string());
+        }
+        let turns = group_into_turns(acc.messages);
+        assert_eq!(turns.len(), 2);
+        assert!(!turns
+            .iter()
+            .any(|t| t.blocks.iter().any(|b| stop_hook_marker(b).is_some())));
     }
 }

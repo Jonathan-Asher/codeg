@@ -85,6 +85,7 @@ import { DelegationStatusGroupCard } from "./delegation-status-group-card"
 import { BackgroundTaskCard } from "./background-task-card"
 import { GeneratedImagesBlock } from "./generated-images-block"
 import { GoalRunPart, GoalToolCallPart } from "./goal-tool-call"
+import { HookFeedbackMarker } from "./hook-feedback-marker"
 import { PlanCard, PlanEntriesList } from "./plan-card"
 import { PlanMarkdownCard, PlanModeCard } from "./plan-mode-card"
 import { PlainTextWithBadges } from "./plain-text-with-badges"
@@ -3183,6 +3184,10 @@ export const ContentPartsRenderer = memo(function ContentPartsRenderer({
 
     if (part.type === "proposed-plan") {
       return <ProposedPlanPart key={`proposed-plan-${keyId}`} part={part} />
+    }
+
+    if (part.type === "hook-feedback") {
+      return <HookFeedbackMarker key={`hook-${keyId}`} part={part} />
     }
 
     if (part.type === "generated-image") {

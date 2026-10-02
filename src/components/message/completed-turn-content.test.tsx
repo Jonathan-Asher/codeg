@@ -55,10 +55,227 @@ describe("splitAssistantTurnParts", () => {
       { type: "text", text: "Second paragraph" },
     ]
 
-    expect(splitAssistantTurnParts(parts)).toEqual({
-      progress: [],
-      answer: parts,
+    const split = splitAssistantTurnParts(parts)
+    expect(split.progress).toEqual([])
+    expect(split.answer).toEqual(parts)
+  })
+})
+
+// The turn from the bug report (2026-10-02, 10:18 UTC): a long final report
+// ending on a question, then the user's global Stop hook blocked once, and the
+// agent thought briefly and replied to the hook in one line. Folding at the
+// last progress item put the whole report, question included, behind the chip.
+const REPORT =
+  "I built changes 1–3 and tested them. Nothing is merged or deployed yet.\n\n" +
+  "**What's built.** It's on the OCR-service branch `feat/ocr-fast-profile`, in 2 commits, and all 160 tests pass.\n\n" +
+  "**Decision for you:** go ahead with the dev rollout?"
+const HOOK_FEEDBACK =
+  "Browser check outstanding. This session changed 2 file(s) that a person sees in a browser, and no browser tool was used on any of them:\n" +
+  "  - case-ledger-process.html\n\n" +
+  "If a browser check genuinely does not apply, say which in your final message and stop again. This will not fire twice."
+const HOOK_REPLY =
+  "Neither of those files changed this turn, so no browser check is needed."
+
+const stopHookTurn = (): AdaptedContentPart[] => [
+  {
+    type: "reasoning",
+    content: "Planning the rollout test",
+    isStreaming: false,
+  },
+  {
+    type: "tool-call",
+    toolCallId: "call-tests",
+    toolName: "Bash",
+    input: '{"command":"pytest"}',
+    state: "output-available",
+    output: "160 passed",
+  },
+  { type: "text", text: REPORT },
+  { type: "hook-feedback", event: "Stop", feedback: HOOK_FEEDBACK },
+  { type: "reasoning", content: "Neither file changed", isStreaming: false },
+  { type: "text", text: HOOK_REPLY },
+]
+
+describe("a reply a Stop hook reopened", () => {
+  it("splits at the hook, so the answer before it stays an answer", () => {
+    const parts = stopHookTurn()
+    const split = splitAssistantTurnParts(parts)
+
+    expect(split.segments).toEqual([
+      { hook: null, progress: parts.slice(0, 2), answer: [parts[2]] },
+      { hook: parts[3], progress: [parts[4]], answer: [parts[5]] },
+    ])
+    expect(split.answer).toEqual([parts[2], parts[5]])
+    expect(split.progress).toEqual([parts[0], parts[1], parts[4]])
+  })
+
+  it("keeps the report, the hook marker and the reply visible when folded", () => {
+    renderWithIntl(
+      <CompletedTurnContent
+        parts={stopHookTurn()}
+        durationMs={506_000}
+        completed
+      />
+    )
+
+    const trigger = screen.getByRole("button", { name: "Worked for 8m 26s" })
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByText(/Decision for you:/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/go ahead with the dev rollout\?/)
+    ).toBeInTheDocument()
+    expect(screen.getByText(HOOK_REPLY)).toBeInTheDocument()
+
+    // The marker names the hook and the first line of its feedback.
+    const marker = screen.getByRole("button", {
+      name: /Stop hook: Browser check outstanding\./,
     })
+    expect(marker).toHaveAttribute("aria-expanded", "false")
+    expect(
+      screen.queryByText(/This will not fire twice/)
+    ).not.toBeInTheDocument()
+
+    // Both stretches' work is folded: the tool card before the hook and the
+    // reasoning after it.
+    expect(screen.queryByRole("button", { name: /pytest/ })).toBeNull()
+    expect(screen.queryByText("Neither file changed")).not.toBeInTheDocument()
+
+    // The marker opens on the whole feedback.
+    fireEvent.click(marker)
+    expect(marker).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByText(/This will not fire twice/)).toBeInTheDocument()
+  })
+
+  it("reads in order when the work is unfolded", () => {
+    const { container } = renderWithIntl(
+      <CompletedTurnContent
+        parts={stopHookTurn()}
+        durationMs={506_000}
+        completed
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Worked for 8m 26s" }))
+
+    const text = container.textContent ?? ""
+    const at = (needle: string) => {
+      const index = text.indexOf(needle)
+      expect(index, needle).toBeGreaterThanOrEqual(0)
+      return index
+    }
+    expect(at("pytest")).toBeLessThan(at("Decision for you"))
+    expect(at("Decision for you")).toBeLessThan(at("Stop hook"))
+    expect(at("Stop hook")).toBeLessThan(at(HOOK_REPLY))
+  })
+
+  it("still shows the report when nothing before the hook was work", () => {
+    // Text-only answer, hook, then work: the hook's work must not drag the
+    // answer into the fold either.
+    const parts = stopHookTurn().slice(2)
+    renderWithIntl(
+      <CompletedTurnContent parts={parts} durationMs={9_000} completed />
+    )
+
+    expect(
+      screen.getByRole("button", { name: "Worked for 9s" })
+    ).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByText(/Decision for you:/)).toBeInTheDocument()
+    expect(screen.getByText(HOOK_REPLY)).toBeInTheDocument()
+    expect(screen.queryByText("Neither file changed")).not.toBeInTheDocument()
+  })
+
+  it("shows the marker inline while the turn is still running", () => {
+    renderWithIntl(
+      <CompletedTurnContent
+        parts={stopHookTurn().slice(0, 5)}
+        durationMs={null}
+        completed={false}
+      />
+    )
+
+    expect(screen.getByText(/Decision for you:/)).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: /Stop hook: Browser check/ })
+    ).toBeInTheDocument()
+    // Both stretches' work is out in the open while it runs: the reasoning
+    // capsules before and after the hook.
+    expect(screen.getAllByText("Thought")).toHaveLength(2)
+    expect(
+      screen.getByRole("button", { name: /Read|pytest|Bash/ })
+    ).toBeInTheDocument()
+  })
+})
+
+describe("a long note before the reply's last work", () => {
+  const NOTE =
+    "Here is where things stand. " +
+    "The OCR path now runs on the fast profile and every check passes. ".repeat(
+      10
+    ) +
+    "Should I roll it out to dev?"
+  const noteTurn = (closing: string): AdaptedContentPart[] => [
+    { type: "reasoning", content: "Checking", isStreaming: false },
+    { type: "text", text: NOTE },
+    {
+      type: "tool-call",
+      toolCallId: "call-lint",
+      toolName: "Bash",
+      input: '{"command":"pnpm lint"}',
+      state: "output-available",
+      output: "ok",
+    },
+    { type: "text", text: closing },
+  ]
+
+  it("stays visible when the reply then closes on a short line", () => {
+    expect(NOTE.length).toBeGreaterThanOrEqual(600)
+    const parts = noteTurn("Lint is clean too.")
+    expect(
+      splitAssistantTurnParts(parts, { keepLongNotes: true }).segments
+    ).toEqual([
+      { hook: null, progress: [parts[0]], answer: [parts[1]] },
+      { hook: null, progress: [parts[2]], answer: [parts[3]] },
+    ])
+
+    renderWithIntl(
+      <CompletedTurnContent parts={parts} durationMs={30_000} completed />
+    )
+    expect(
+      screen.getByText(/Should I roll it out to dev\?/)
+    ).toBeInTheDocument()
+    expect(screen.getByText("Lint is clean too.")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /pnpm lint/ })).toBeNull()
+    expect(screen.queryByText("Checking")).not.toBeInTheDocument()
+  })
+
+  it("folds as before when the closing answer is itself long", () => {
+    const parts = noteTurn("Final summary. ".repeat(45))
+    expect(
+      splitAssistantTurnParts(parts, { keepLongNotes: true }).segments
+    ).toHaveLength(1)
+
+    renderWithIntl(
+      <CompletedTurnContent parts={parts} durationMs={30_000} completed />
+    )
+    expect(
+      screen.queryByText(/Should I roll it out to dev\?/)
+    ).not.toBeInTheDocument()
+  })
+
+  it("is left alone while the reply is still streaming", () => {
+    const parts = noteTurn("Lint is clean too.")
+    expect(splitAssistantTurnParts(parts).segments).toHaveLength(1)
+  })
+
+  it("does not make a reply that ends on its work foldable", () => {
+    // No closing answer: the reply stays fully expanded, exactly as before.
+    const parts = noteTurn("").slice(0, 3)
+    renderWithIntl(
+      <CompletedTurnContent parts={parts} durationMs={30_000} completed />
+    )
+    expect(screen.queryByRole("button", { name: /Worked for/ })).toBeNull()
+    expect(
+      screen.getByText(/Should I roll it out to dev\?/)
+    ).toBeInTheDocument()
   })
 })
 

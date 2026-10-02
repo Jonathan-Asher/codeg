@@ -3670,6 +3670,7 @@
         "worked": "Finished working",
         "workedFor": "Worked for {duration}",
         "working": "Working...",
+        "hookFeedback": "{event} hook",
         "completedAt": "Completed at",
         "jumpToPreviousUserMessage": "Jump to user message",
         "showMore": "Show more",

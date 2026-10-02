@@ -3670,6 +3670,7 @@
         "worked": "作業完了",
         "workedFor": "{duration} 作業しました",
         "working": "作業中...",
+        "hookFeedback": "{event} フック",
         "completedAt": "完了時刻",
         "jumpToPreviousUserMessage": "前のユーザーメッセージへ",
         "showMore": "もっと見る",

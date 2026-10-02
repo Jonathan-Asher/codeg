@@ -14706,6 +14706,59 @@ fn map_claude_sdk_ext_notification(notification: &UntypedMessage) -> Option<AcpE
     })
 }
 
+/// A Claude Code Stop hook that blocked mid-turn, read off the raw SDK stream,
+/// as the same marker `parsers::claude` synthesizes from the transcript: a
+/// settled tool call carrying `_meta["codeg.hookFeedback"]`.
+///
+/// A blocking Stop hook does not end the turn. The CLI hands its reason to the
+/// model as a user message and the model answers it, so whatever the assistant
+/// wrote just before is a finished answer, not progress — and the frontend
+/// needs to know where the hook fired to keep that answer visible when the turn
+/// folds. claude-agent-acp drops that user message from the ACP feed (a lone
+/// text block, "messages we don't want in the feed") and skips the
+/// `hook_response` frames, so the raw SDK mirror is the only live signal.
+///
+/// Reads the payload by reference: `_claude/sdkMessage` arrives for every SDK
+/// message, and only a top-level user message can be this one.
+fn map_claude_stop_hook_feedback(notification: &UntypedMessage) -> Option<AcpEvent> {
+    if notification.method() != CLAUDE_SDK_EXT_METHOD {
+        return None;
+    }
+    let message = notification.params().get("message")?;
+    if message.get("type").and_then(|v| v.as_str()) != Some("user") {
+        return None;
+    }
+    // A subagent's own stop, or the echo of an earlier message, is not a
+    // boundary in this turn.
+    if message
+        .get("parent_tool_use_id")
+        .is_some_and(|v| !v.is_null())
+        || message.get("isReplay").and_then(|v| v.as_bool()) == Some(true)
+    {
+        return None;
+    }
+    let feedback = crate::parsers::claude::stop_hook_feedback(
+        message.get("message")?.get("content")?,
+    )?;
+    let record_uuid = message
+        .get("uuid")
+        .and_then(|v| v.as_str())
+        .filter(|u| !u.is_empty())
+        .map_or_else(|| uuid::Uuid::new_v4().to_string(), str::to_string);
+    Some(AcpEvent::ToolCall {
+        tool_call_id: crate::parsers::claude::stop_hook_tool_call_id(&record_uuid),
+        title: "Stop hook".to_string(),
+        kind: "other".to_string(),
+        status: "completed".to_string(),
+        content: None,
+        raw_input: None,
+        raw_output: None,
+        locations: None,
+        meta: Some(crate::parsers::claude::hook_feedback_meta("Stop", &feedback)),
+        images: None,
+    })
+}
+
 /// The JSON-RPC methods grok uses for its private, namespaced session updates.
 /// Both share the standard `session/update` envelope (`params.update.
 /// sessionUpdate` + fields, verified live against grok 0.2.111) but carry
@@ -15404,7 +15457,8 @@ fn handle_auth_status_update(agent_type: AgentType, notif: AuthStatusUpdateNotif
 /// Used ONLY to keep the unrecognized-method log quiet about methods we do know
 /// and merely declined to map this time. That distinction is the whole point:
 /// `_claude/sdkMessage` arrives for every SDK message and only maps when the
-/// payload is an API retry, so logging every unmapped one would put a line on a
+/// payload is an API retry or a Stop hook's feedback, so logging every unmapped
+/// one would put a line on a
 /// per-message hot path — the shape that once grew a server's log file to 217GB.
 ///
 /// Forgetting to list a newly-mapped method here fails in the SAFE direction —
@@ -15473,6 +15527,10 @@ async fn maybe_emit_ext_notification(
             emit_with_state(state, emitter, event).await;
         }
     } else if let Some(event) = map_claude_sdk_ext_notification(&notification)
+        // Only inside a running turn: the marker anchors into the live reply,
+        // and out of a turn there is no reply for it to split (the transcript
+        // parse still places it on the next refetch).
+        .or_else(|| map_claude_stop_hook_feedback(&notification).filter(|_| turn_active))
         .or_else(|| map_grok_ext_notification(&notification, agent_type))
     {
         let companion = compaction_failure_error(&event, agent_type);
@@ -20543,7 +20601,8 @@ mod tests {
     #[test]
     fn is_known_ext_method_covers_every_mapped_method() {
         // The anti-log-storm invariant: `_claude/sdkMessage` arrives for EVERY
-        // SDK message but only maps when it is an API retry, so it must be
+        // SDK message but only maps when it is an API retry or a Stop hook's
+        // feedback, so it must be
         // recognized here — otherwise each unmapped one logs a line on a
         // per-message hot path.
         assert!(is_known_ext_method(CLAUDE_SDK_EXT_METHOD));
@@ -20580,6 +20639,87 @@ mod tests {
         let missing_fields =
             UntypedMessage::new("_claude/sdkMessage", serde_json::json!({"sessionId": 1})).unwrap();
         assert!(map_claude_sdk_ext_notification(&missing_fields).is_none());
+    }
+
+    /// The raw SDK message a blocking Stop hook produces, captured from the
+    /// Claude Code 2.1.284 stream (`--output-format stream-json`).
+    fn stop_hook_sdk_message(extra: serde_json::Value) -> UntypedMessage {
+        let mut message = serde_json::json!({
+            "type": "user",
+            "message": {"role": "user", "content": [{"type": "text", "text": "Stop hook feedback:\nRelease check outstanding: confirm the notes.\nIf they already do, say so and stop."}]},
+            "parent_tool_use_id": null,
+            "session_id": "6cdc6624-cc8c-4ac7-bdb1-1120f8b4e364",
+            "uuid": "54ea87b2-f4e1-4f4b-86f8-2303d29adf79",
+            "timestamp": "2026-10-02T12:39:48.393Z",
+            "isSynthetic": true
+        });
+        if let (Some(target), serde_json::Value::Object(extra)) = (message.as_object_mut(), extra) {
+            target.extend(extra);
+        }
+        UntypedMessage::new(
+            "_claude/sdkMessage",
+            serde_json::json!({"sessionId": "session-123", "message": message}),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_stop_hook_feedback_message_maps_to_the_transcript_marker() {
+        let event = map_claude_stop_hook_feedback(&stop_hook_sdk_message(serde_json::json!({})))
+            .expect("stop hook feedback should map");
+        let AcpEvent::ToolCall {
+            tool_call_id,
+            status,
+            meta,
+            ..
+        } = event
+        else {
+            panic!("expected a ToolCall");
+        };
+        // Same id the transcript parse gives the record (its uuid), so the live
+        // card and the refetched one are the same marker.
+        assert_eq!(tool_call_id, "stop-hook-54ea87b2-f4e1-4f4b-86f8-2303d29adf79");
+        assert_eq!(status, "completed");
+        assert_eq!(
+            meta,
+            Some(crate::parsers::claude::hook_feedback_meta(
+                "Stop",
+                "Release check outstanding: confirm the notes.\nIf they already do, say so and stop."
+            ))
+        );
+        // The api-retry mapper stays out of it.
+        assert!(map_claude_sdk_ext_notification(&stop_hook_sdk_message(serde_json::json!({}))).is_none());
+    }
+
+    #[test]
+    fn only_a_top_level_live_stop_hook_message_maps() {
+        // A subagent's message, or the echo of an earlier one, is no boundary
+        // in this turn.
+        for extra in [
+            serde_json::json!({"parent_tool_use_id": "toolu_agent"}),
+            serde_json::json!({"isReplay": true}),
+        ] {
+            assert!(map_claude_stop_hook_feedback(&stop_hook_sdk_message(extra)).is_none());
+        }
+        // Any other user message, a tool result included, is not one either.
+        for message in [
+            serde_json::json!({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "hello"}]}}),
+            serde_json::json!({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "Stop hook feedback:\nx"}]}}),
+            serde_json::json!({"type": "system", "subtype": "hook_response", "hook_event": "Stop", "output": "{\"decision\":\"block\"}"}),
+        ] {
+            let raw = UntypedMessage::new(
+                "_claude/sdkMessage",
+                serde_json::json!({"sessionId": "s", "message": message}),
+            )
+            .unwrap();
+            assert!(map_claude_stop_hook_feedback(&raw).is_none());
+        }
+        let other_method = UntypedMessage::new(
+            "_other/method",
+            serde_json::json!({"sessionId": "s", "message": {"type": "user", "message": {"content": "Stop hook feedback:\nx"}}}),
+        )
+        .unwrap();
+        assert!(map_claude_stop_hook_feedback(&other_method).is_none());
     }
 
     /// The five `_x.ai/session/setup` frames grok 1.0.40 emits BEFORE the
