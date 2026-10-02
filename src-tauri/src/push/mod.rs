@@ -279,10 +279,14 @@ pub async fn load_send_setup(conn: &DatabaseConnection) -> Result<SendSetup, App
     if key.is_none() {
         missing.push(".p8 key");
     }
-    if !missing.is_empty() {
+    if let Some((last, rest)) = missing.split_last() {
+        let list = if rest.is_empty() {
+            (*last).to_string()
+        } else {
+            format!("{} and {last}", rest.join(", "))
+        };
         return Err(AppCommandError::configuration_missing(format!(
-            "iPhone push is not set up: add the {} in Settings › General › iPhone push.",
-            missing.join(", ")
+            "iPhone push is not set up: add the {list} in Settings › General › iPhone push."
         )));
     }
     let credentials = Credentials {
