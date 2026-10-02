@@ -205,6 +205,11 @@ pub enum Phase {
     Background,
     /// Nothing is running, for the given reason.
     Idle(IdleKind),
+    /// The last turn ended on the account's usage limit, and the session
+    /// continues by itself once the limit resets (`acp::limit_continue`).
+    /// Waiting is the plan, so it never alerts; the pause and the
+    /// continuation are announced once each instead.
+    Paused,
 }
 
 /// What an alert is about.
@@ -222,6 +227,11 @@ pub enum CriticalAlertKind {
     /// A turn held for background work has seen no background progress for
     /// the stall threshold.
     BackgroundStalled,
+    /// One-off: the session paused on the account's usage limit, until
+    /// `resets_at`. Never waits for an acknowledgement.
+    LimitPaused,
+    /// One-off: the limit reset and the session continued by itself.
+    LimitContinued,
 }
 
 impl IdleKind {
@@ -425,6 +435,13 @@ impl SessionWatch {
                 kind.alert_kind(),
                 self.stretch_started,
             ),
+            // Never due (see `due_at`); keyed like an idle stretch so the
+            // pause ending starts a fresh one.
+            Phase::Paused => (
+                EpisodeKey::Idle(self.stretch),
+                CriticalAlertKind::Idle,
+                self.stretch_started,
+            ),
             Phase::Working | Phase::Background => {
                 // Silence counts from the later of the stretch start and the
                 // last progress: progress from before the stretch says nothing
@@ -443,7 +460,7 @@ impl SessionWatch {
 
     fn due_at(&self, th: &Thresholds) -> Option<Instant> {
         let ep = &self.episode;
-        if ep.acked {
+        if ep.acked || self.phase == Phase::Paused {
             return None;
         }
         let threshold = match ep.key {
@@ -491,6 +508,18 @@ pub fn derive_phase(
     }
 }
 
+/// A session paused on the usage limit reads [`Phase::Paused`] instead of
+/// idle — unless it is working after all (a continuation, or a message the
+/// user sent) or waiting on the user, which outrank the pause.
+pub fn with_limit_pause(phase: Phase, limit_paused: bool) -> Phase {
+    match phase {
+        Phase::Idle(IdleKind::TurnEnded) | Phase::Idle(IdleKind::Interrupted) if limit_paused => {
+            Phase::Paused
+        }
+        other => other,
+    }
+}
+
 /// The live connection's side of [`derive_phase`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct LiveState {
@@ -518,6 +547,9 @@ pub struct CriticalAlert {
     pub fired_at: DateTime<Utc>,
     /// Play the alert tone (the setting at firing time).
     pub sound: bool,
+    /// For [`CriticalAlertKind::LimitPaused`]: when the usage limit resets.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resets_at: Option<DateTime<Utc>>,
 }
 
 /// Payload of [`CRITICAL_ALERTS_EVENT`] and of `get_critical_alerts`.
@@ -743,6 +775,7 @@ impl CriticalRegistry {
             count: fired.count,
             fired_at: wall_now,
             sound: settings.sound,
+            resets_at: None,
         };
         entry.last = Some(alert.clone());
         Some(alert)
@@ -1000,8 +1033,69 @@ pub fn channel_message(lang: Lang, alert: &CriticalAlert) -> RichMessage {
             channel_i18n::critical_agent_label(lang),
             alert.agent_type.to_string(),
         );
-    message.level = MessageLevel::Warning;
+    if let Some(resets_at) = alert.resets_at {
+        message = message.with_field(
+            channel_i18n::critical_resets_label(lang),
+            resets_at
+                .with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string(),
+        );
+    }
+    message.level = match alert.kind {
+        // Announcements, not something going wrong.
+        CriticalAlertKind::LimitPaused | CriticalAlertKind::LimitContinued => MessageLevel::Info,
+        _ => MessageLevel::Warning,
+    };
     message
+}
+
+/// Announce a critical session's usage-limit pause, or its continuation, once
+/// (`acp::limit_continue`): a notification on every client and, like the
+/// alerts, on the chat channels when nobody is looking. Unlike the alerts it
+/// waits for no acknowledgement. Does nothing for a session not marked
+/// critical.
+pub async fn announce_limit_event(
+    manager: &ConnectionManager,
+    db: &DatabaseConnection,
+    emitter: &EventEmitter,
+    row: &conversation::Model,
+    kind: CriticalAlertKind,
+    resets_at: Option<DateTime<Utc>>,
+) {
+    if !row.critical || row.deleted_at.is_some() {
+        return;
+    }
+    let now = Utc::now();
+    let (instance, settings) = with_registry(|r| (r.instance.clone(), r.settings));
+    let tag = match kind {
+        CriticalAlertKind::LimitPaused => "paused",
+        _ => "continued",
+    };
+    let alert = CriticalAlert {
+        id: format!(
+            "{instance}-c{}-limit-{tag}-{}",
+            row.id,
+            now.timestamp_millis()
+        ),
+        conversation_id: row.id,
+        folder_id: row.folder_id,
+        agent_type: conversation_service::parse_agent_type(&row.agent_type),
+        title: row.title.clone(),
+        kind,
+        since: now,
+        count: 1,
+        fired_at: now,
+        sound: settings.sound,
+        resets_at,
+    };
+    tracing::info!(
+        "[critical] limit announcement {} for conversation {} ({kind:?})",
+        alert.id,
+        row.id
+    );
+    emit_event(emitter, CRITICAL_ALERT_EVENT, &alert);
+    deliver_to_channels(manager, db, emitter, &[alert], settings).await;
 }
 
 async fn deliver_to_channels(
@@ -1048,7 +1142,10 @@ async fn evaluate(manager: &ConnectionManager, db: &DatabaseConnection, emitter:
     let mut observed = Vec::with_capacity(rows.len());
     for row in &rows {
         let live = live_state(manager, row.id).await;
-        let phase = derive_phase(needs_you.contains(&row.id), live.as_ref(), row.turn_state);
+        let phase = with_limit_pause(
+            derive_phase(needs_you.contains(&row.id), live.as_ref(), row.turn_state),
+            crate::acp::limit_continue::is_limit_paused(row),
+        );
         observed.push((row.id, phase));
     }
 
@@ -1804,6 +1901,7 @@ mod tests {
             count: 1,
             fired_at: Utc::now(),
             sound: true,
+            resets_at: None,
         };
         let msg = channel_message(Lang::En, &alert);
         let title = msg.title.expect("title");

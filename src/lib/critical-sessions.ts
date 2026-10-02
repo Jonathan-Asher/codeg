@@ -35,16 +35,20 @@ export const CRITICAL_ALERT_HEADLINE_KEYS = {
   interrupted: "interrupted",
   stalled: "stalled",
   background_stalled: "stalled",
+  limit_paused: "limitPaused",
+  limit_continued: "limitContinued",
 } as const satisfies Record<CriticalAlertKind, string>
 
 /** One line on what happened, under `CriticalSessions.body`; takes
- *  `{elapsed}`. */
+ *  `{elapsed}` (and, for `limit_paused`, `{time}`). */
 export const CRITICAL_ALERT_BODY_KEYS = {
   idle: "idle",
   needs_you: "needsYou",
   interrupted: "interrupted",
   stalled: "stalled",
   background_stalled: "backgroundStalled",
+  limit_paused: "limitPaused",
+  limit_continued: "limitContinued",
 } as const satisfies Record<CriticalAlertKind, string>
 
 /** Choices offered in Settings, in seconds. A stored value outside them (set

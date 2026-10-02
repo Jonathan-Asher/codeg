@@ -1775,7 +1775,8 @@ export function MessageListView({
           // A Continue turn (the composer's Continue, the interrupted banner's,
           // or a bare "continue" typed by hand — see `lib/continue-turn`), or
           // the prompt codeg sent itself to resume a turn a restart cut off
-          // (`lib/auto-resume`): nobody said anything, the agent was asked to
+          // (`lib/auto-resume`) or to continue once the usage limit reset
+          // (`lib/limit-continue`): nobody said anything, the agent was asked to
           // keep going, so it reads as a divider in the reply, not as a user
           // bubble. Matched on the exact text, which is all a reload keeps.
           const continuation = isRetryMarker
@@ -1860,6 +1861,22 @@ export function MessageListView({
                   >
                     <RotateCw className="h-2.5 w-2.5" aria-hidden />
                     {t("resumedAfterRestart")}
+                  </span>
+                  <span aria-hidden="true" className="h-px flex-1 bg-border" />
+                </div>
+              ) : continuation === "limit" ? (
+                <div
+                  data-continue-marker
+                  data-limit-continue-marker
+                  className="flex items-center gap-2 px-1 py-1"
+                >
+                  <span aria-hidden="true" className="h-px flex-1 bg-border" />
+                  <span
+                    title={t("continuedAfterLimitHint")}
+                    className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[0.625rem] font-medium leading-none text-muted-foreground"
+                  >
+                    <Play className="h-2.5 w-2.5" aria-hidden />
+                    {t("continuedAfterLimit")}
                   </span>
                   <span aria-hidden="true" className="h-px flex-1 bg-border" />
                 </div>

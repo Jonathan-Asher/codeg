@@ -1,5 +1,6 @@
 import type { AdaptedContentPart } from "@/lib/adapters/ai-elements-adapter"
 import { isResumeAfterRestartPrompt } from "@/lib/auto-resume"
+import { isLimitContinuePrompt } from "@/lib/limit-continue"
 import { CONTINUE_PROMPT, type SessionActivity } from "@/lib/session-activity"
 import type { PromptDraft, TurnRole } from "@/lib/types"
 
@@ -48,17 +49,18 @@ export interface ContinuationGroupLike {
 }
 
 /**
- * The two kinds of "keep going" turn the transcript draws as a divider:
+ * The kinds of "keep going" turn the transcript draws as a divider:
  * `continued` — the Continue prompt ({@link CONTINUE_PROMPT}), sent by the
  * user; `resumed` — the prompt codeg sent itself to pick a turn back up after
- * a restart cut it off (`lib/auto-resume`).
+ * a restart cut it off (`lib/auto-resume`); `limit` — the prompt codeg sent
+ * itself once the account's usage limit reset (`lib/limit-continue`).
  */
-export type ContinuationVariant = "continued" | "resumed"
+export type ContinuationVariant = "continued" | "resumed" | "limit"
 
 /**
  * Which divider a transcript message group reads as, if any: a user message
- * made of text only, whose text is exactly {@link CONTINUE_PROMPT} or exactly
- * the resume-after-restart prompt. Anything attached to it (an image, a file,
+ * made of text only, whose text is exactly {@link CONTINUE_PROMPT}, the
+ * resume-after-restart prompt or the continue-after-limit-reset prompt. Anything attached to it (an image, a file,
  * a non-text part) makes it a message the user wrote, which stays a bubble.
  */
 export function continuationVariant(
@@ -74,6 +76,7 @@ export function continuationVariant(
   }
   if (isContinuePrompt(text)) return "continued"
   if (isResumeAfterRestartPrompt(text)) return "resumed"
+  if (isLimitContinuePrompt(text)) return "limit"
   return null
 }
 

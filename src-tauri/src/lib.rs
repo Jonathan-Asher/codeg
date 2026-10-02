@@ -96,6 +96,7 @@ mod tauri_app {
         attention as attention_commands,
         auto_resume as auto_resume_commands,
         critical_sessions as critical_sessions_commands,
+        limit_continue as limit_continue_commands,
         conversation_export as conversation_export_commands,
         message_search as message_search_commands,
         conversations,
@@ -1266,6 +1267,18 @@ mod tauri_app {
                     effective_data_dir.clone(),
                 ));
 
+                // Continue the sessions the account's usage limit paused once
+                // it resets, with or without a window open. Mirrored in
+                // `bin/codeg_server.rs`.
+                tauri::async_runtime::spawn(crate::acp::limit_continue::run_limit_continue(
+                    crate::db::AppDatabase {
+                        conn: app.state::<crate::db::AppDatabase>().conn.clone(),
+                    },
+                    app.state::<ConnectionManager>().clone_ref(),
+                    crate::web::event_bridge::EventEmitter::Tauri(app.handle().clone()),
+                    effective_data_dir.clone(),
+                ));
+
                 // Alert on critical sessions that sit idle or go silent, with
                 // or without a window open. Mirrored in `bin/codeg_server.rs`.
                 tauri::async_runtime::spawn(crate::acp::critical_watch::critical_watch_task(
@@ -1707,6 +1720,11 @@ mod tauri_app {
                 critical_sessions_commands::snooze_critical_session,
                 critical_sessions_commands::get_critical_session_settings,
                 critical_sessions_commands::update_critical_session_settings,
+                limit_continue_commands::get_limit_continue_settings,
+                limit_continue_commands::update_limit_continue_settings,
+                limit_continue_commands::cancel_limit_continue,
+                limit_continue_commands::continue_limit_now,
+                limit_continue_commands::update_conversation_limit_auto_continue,
                 message_search_commands::message_search,
                 conversations::get_folder_conversation_turns,
                 conversations::list_folders,

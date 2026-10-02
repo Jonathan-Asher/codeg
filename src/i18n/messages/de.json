@@ -1750,6 +1750,17 @@
     "description": "Wird codeg mitten in einer Runde beendet, stürzt ab oder startet für ein Update neu, werden diese Sitzungen beim nächsten Start fortgesetzt. Jede Unterbrechung wird höchstens einmal fortgesetzt.",
     "saveFailed": "Die Einstellung konnte nicht gespeichert werden: {message}"
   },
+  "LimitContinueSettings": {
+    "title": "Automatisch fortsetzen, wenn das Nutzungslimit zurückgesetzt wird",
+    "description": "Wenn eine Runde stoppt, weil dein Konto sein Nutzungslimit erreicht hat, wird die Sitzung kurz nach dem Zurücksetzen von selbst fortgesetzt – ohne offenes Fenster und auch nach einem Neustart. Höchstens 3 Versuche pro Pause.",
+    "saveFailed": "Die Einstellung konnte nicht gespeichert werden: {message}"
+  },
+  "LimitContinueSession": {
+    "heading": "Nutzungslimit",
+    "toggle": "Fortsetzen, wenn das Nutzungslimit zurückgesetzt wird",
+    "toggleHint": "Diese Sitzung von selbst wieder aufnehmen, sobald das Nutzungslimit des Kontos zurückgesetzt ist. Die Einstellung unter Allgemein muss ebenfalls an sein.",
+    "saveFailed": "Speichern fehlgeschlagen: {message}"
+  },
   "AutoResume": {
     "title": "{count, plural, one {# durch den Neustart unterbrochene Sitzung wird} other {# durch den Neustart unterbrochene Sitzungen werden}} fortgesetzt",
     "settledTitle": "Durch den Neustart unterbrochene Sitzungen",
@@ -2208,7 +2219,19 @@
       "connectingHint": "Der Agent öffnet diese Sitzung. Nachrichten, die du jetzt sendest, warten, bis sie bereit ist.",
       "connectFailed": "Verbindung fehlgeschlagen",
       "connectFailedHint": "Der Agent war nicht erreichbar. Versuche es erneut, um die Sitzung zu öffnen.",
-      "retry": "Erneut versuchen"
+      "retry": "Erneut versuchen",
+      "limitPaused": "Pausiert — Limit wird um {time} zurückgesetzt (in {remaining})",
+      "limitPausedHint": "Das Konto hat sein Nutzungslimit erreicht. Diese Sitzung macht kurz nach dem Zurücksetzen des Limits von selbst weiter.",
+      "limitClaimed": "Wird fortgesetzt — das Nutzungslimit wurde zurückgesetzt",
+      "limitBannerTitle": "Pausiert wegen des Nutzungslimits",
+      "limitBannerDescription": "Macht automatisch weiter, wenn es um {time} zurückgesetzt wird (in {remaining}).",
+      "limitBannerClaimed": "Das Limit wurde zurückgesetzt — es geht jetzt weiter.",
+      "cancelAutoContinue": "Automatisches Fortsetzen abbrechen",
+      "cancelAutoContinueTitle": "Nicht von selbst weitermachen: die Runde bleibt unterbrochen, mit Fortsetzen",
+      "continueNow": "Jetzt fortsetzen",
+      "continueNowTitle": "Die Fortsetzung jetzt senden — das Limit kann erneut greifen",
+      "limitActionFailed": "Die pausierte Sitzung konnte nicht aktualisiert werden: {message}",
+      "limitPausedBadge": "Pausiert, bis das Nutzungslimit um {time} zurückgesetzt wird"
     },
     "conversationCard": {
       "untitledConversation": "Unbenannte Konversation",
@@ -3686,7 +3709,9 @@
         "continued": "Fortgesetzt",
         "continuedHint": "Du hast den Agenten gebeten weiterzumachen",
         "resumedAfterRestart": "Nach Neustart fortgesetzt",
-        "resumedAfterRestartHint": "codeg wurde mitten in dieser Runde neu gestartet und hat die Sitzung von selbst fortgesetzt"
+        "resumedAfterRestartHint": "codeg wurde mitten in dieser Runde neu gestartet und hat die Sitzung von selbst fortgesetzt",
+        "continuedAfterLimit": "Nach Zurücksetzen des Limits fortgesetzt",
+        "continuedAfterLimitHint": "Das Nutzungslimit des Kontos wurde zurückgesetzt und codeg hat die Sitzung von selbst fortgesetzt"
       },
       "liveTurnStats": {
         "thinking": "Denkt nach...",
@@ -5321,14 +5346,18 @@
       "idle": "Kritische Sitzung wartet",
       "needsYou": "Kritische Sitzung wartet auf dich",
       "interrupted": "Kritische Sitzung unterbrochen",
-      "stalled": "Kritische Sitzung hängt möglicherweise"
+      "stalled": "Kritische Sitzung hängt möglicherweise",
+      "limitPaused": "Kritische Sitzung pausiert",
+      "limitContinued": "Kritische Sitzung fortgesetzt"
     },
     "body": {
       "idle": "Der Agent hat seine Runde vor {elapsed} beendet, seitdem ist nichts passiert.",
       "needsYou": "Der Agent wartet seit {elapsed} auf deine Antwort.",
       "interrupted": "Die letzte Runde wurde vor {elapsed} abgebrochen, seitdem ist nichts passiert.",
       "stalled": "Eine Runde läuft, aber seit {elapsed} kommt keine Ausgabe.",
-      "backgroundStalled": "Hintergrundaufgaben laufen, aber seit {elapsed} ohne Fortschritt."
+      "backgroundStalled": "Hintergrundaufgaben laufen, aber seit {elapsed} ohne Fortschritt.",
+      "limitPaused": "Pausiert bis {time} — Nutzungslimit",
+      "limitContinued": "Das Nutzungslimit wurde zurückgesetzt und die Sitzung hat von selbst weitergemacht."
     },
     "duration": {
       "seconds": "{count} s",

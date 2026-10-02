@@ -2706,6 +2706,10 @@ impl ConnectionManager {
                         auto_resume: Set(None),
                         critical: Set(false),
                         critical_stall: Set(true),
+                        limit_resume_at: Set(None),
+                        limit_resume_state: Set(None),
+                        limit_resume_attempts: Set(0),
+                        limit_auto_continue: Set(true),
                     };
                     let inserted = sibling.insert(txn).await?;
                     Ok(inserted.id)

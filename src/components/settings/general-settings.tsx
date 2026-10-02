@@ -48,6 +48,7 @@ import { DesktopNotificationSettingsSection } from "@/components/settings/deskto
 import { NotificationSoundSettingsSection } from "@/components/settings/notification-sound-settings"
 import { CriticalSessionSettingsSection } from "@/components/settings/critical-session-settings"
 import { ResumeAfterRestartSettingsSection } from "@/components/settings/resume-after-restart-settings"
+import { LimitContinueSettingsSection } from "@/components/settings/limit-continue-settings"
 import { QuickAskSettingsSection } from "@/components/settings/quick-ask-settings"
 import { SearchSettingsSection } from "@/components/settings/search-settings"
 
@@ -530,6 +531,9 @@ export function GeneralSettings() {
 
         {/* What a restart does to the turns it cuts off. */}
         <ResumeAfterRestartSettingsSection />
+
+        {/* What the account's usage limit does to the turns it stops. */}
+        <LimitContinueSettingsSection />
 
         {/* The two halves of "how Codeg gets my attention", adjacent on
             purpose: one leaves the window, one does not. */}

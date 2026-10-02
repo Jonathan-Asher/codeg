@@ -1750,6 +1750,17 @@
     "description": "ターンの途中で codeg が終了、クラッシュ、またはアップデートのために再起動した場合、次回の起動時にそのセッションを再開します。各中断の再開は最大 1 回です。",
     "saveFailed": "設定を保存できませんでした: {message}"
   },
+  "LimitContinueSettings": {
+    "title": "使用量の上限がリセットされたら自動で再開",
+    "description": "アカウントが使用量の上限に達してターンが止まったとき、上限がリセットされた少し後にセッションを自動で再開します。ウィンドウを開いていなくても、再起動をまたいでも動作します。一時停止ごとに最大 3 回まで試行します。",
+    "saveFailed": "設定を保存できませんでした: {message}"
+  },
+  "LimitContinueSession": {
+    "heading": "使用量の上限",
+    "toggle": "使用量の上限がリセットされたら再開",
+    "toggleHint": "アカウントの使用量の上限がリセットされたら、このセッションを自動で再開します。「一般」の設定もオンにする必要があります。",
+    "saveFailed": "保存できませんでした: {message}"
+  },
   "AutoResume": {
     "title": "再起動で中断された {count} 件のセッションを再開しています",
     "settledTitle": "再起動で中断されたセッション",
@@ -2208,7 +2219,19 @@
       "connectingHint": "エージェントがこのセッションを開いています。今送ったメッセージは準備ができるまで待機します。",
       "connectFailed": "接続できませんでした",
       "connectFailedHint": "エージェントに接続できませんでした。再試行してセッションをもう一度開いてください。",
-      "retry": "再試行"
+      "retry": "再試行",
+      "limitPaused": "一時停止中 — 上限は {time} にリセット（あと {remaining}）",
+      "limitPausedHint": "アカウントが使用量の上限に達しました。上限がリセットされた少し後に、このセッションは自動で再開します。",
+      "limitClaimed": "再開中 — 使用量の上限がリセットされました",
+      "limitBannerTitle": "使用量の上限で一時停止中",
+      "limitBannerDescription": "{time} にリセットされると自動で再開します（あと {remaining}）。",
+      "limitBannerClaimed": "上限がリセットされました — 再開しています。",
+      "cancelAutoContinue": "自動再開をキャンセル",
+      "cancelAutoContinueTitle": "自動で再開せず、ターンを中断のままにします（手動で再開できます）",
+      "continueNow": "今すぐ再開",
+      "continueNowTitle": "今すぐ再開を送信します — 再び上限に達する可能性があります",
+      "limitActionFailed": "一時停止中のセッションを更新できませんでした: {message}",
+      "limitPausedBadge": "使用量の上限が {time} にリセットされるまで一時停止中"
     },
     "conversationCard": {
       "untitledConversation": "無題の会話",
@@ -3686,7 +3709,9 @@
         "continued": "続行済み",
         "continuedHint": "エージェントに続けるよう求めました",
         "resumedAfterRestart": "再起動後に再開",
-        "resumedAfterRestartHint": "このターンの途中で codeg が再起動したため、セッションを自動的に再開しました"
+        "resumedAfterRestartHint": "このターンの途中で codeg が再起動したため、セッションを自動的に再開しました",
+        "continuedAfterLimit": "上限リセット後に再開",
+        "continuedAfterLimitHint": "アカウントの使用量の上限がリセットされ、codeg がセッションを自動で再開しました"
       },
       "liveTurnStats": {
         "thinking": "考え中...",
@@ -5321,14 +5346,18 @@
       "idle": "重要セッションが待機中",
       "needsYou": "重要セッションが対応を待っています",
       "interrupted": "重要セッションが中断されました",
-      "stalled": "重要セッションが止まっている可能性があります"
+      "stalled": "重要セッションが止まっている可能性があります",
+      "limitPaused": "重要セッションを一時停止",
+      "limitContinued": "重要セッションを再開"
     },
     "body": {
       "idle": "エージェントは {elapsed} 前にターンを終え、その後動きがありません。",
       "needsYou": "エージェントが {elapsed} 間あなたの回答を待っています。",
       "interrupted": "前回のターンは {elapsed} 前に中断され、その後動きがありません。",
       "stalled": "ターンは実行中ですが、{elapsed} 間何も出力されていません。",
-      "backgroundStalled": "バックグラウンドタスクは実行中ですが、{elapsed} 間進捗がありません。"
+      "backgroundStalled": "バックグラウンドタスクは実行中ですが、{elapsed} 間進捗がありません。",
+      "limitPaused": "{time} まで一時停止 — 使用量の上限",
+      "limitContinued": "使用量の上限がリセットされ、セッションが自動で再開しました。"
     },
     "duration": {
       "seconds": "{count} 秒",

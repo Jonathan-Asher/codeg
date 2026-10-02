@@ -1750,6 +1750,17 @@
     "description": "當 codeg 在一輪進行中結束、當機或因更新而重新啟動時，下次啟動會恢復這些會話。每次中斷最多恢復一次。",
     "saveFailed": "儲存設定失敗：{message}"
   },
+  "LimitContinueSettings": {
+    "title": "用量額度重置後自動繼續",
+    "description": "當某一輪因帳戶達到用量上限而停止時，在額度重置後不久自動繼續該對話 — 無需開啟視窗，重新啟動後依然有效。每次暫停最多嘗試 3 次。",
+    "saveFailed": "儲存設定失敗：{message}"
+  },
+  "LimitContinueSession": {
+    "heading": "用量上限",
+    "toggle": "用量額度重置後繼續",
+    "toggleHint": "帳戶用量額度重置後自動接續此對話。還需要在「一般」中開啟該設定。",
+    "saveFailed": "儲存失敗：{message}"
+  },
   "AutoResume": {
     "title": "正在恢復 {count} 個因重新啟動而中斷的會話",
     "settledTitle": "因重新啟動而中斷的會話",
@@ -2208,7 +2219,19 @@
       "connectingHint": "代理正在開啟此工作階段。現在傳送的訊息會等到就緒後再送出。",
       "connectFailed": "無法連線",
       "connectFailedHint": "無法連線到代理。重試以再次開啟工作階段。",
-      "retry": "重試"
+      "retry": "重試",
+      "limitPaused": "已暫停 — 額度將於 {time} 重置（還有 {remaining}）",
+      "limitPausedHint": "帳戶已達用量上限。額度重置後不久，此對話會自動繼續。",
+      "limitClaimed": "正在繼續 — 用量額度已重置",
+      "limitBannerTitle": "因用量上限而暫停",
+      "limitBannerDescription": "將在 {time} 重置後自動繼續（還有 {remaining}）。",
+      "limitBannerClaimed": "額度已重置 — 正在繼續。",
+      "cancelAutoContinue": "取消自動繼續",
+      "cancelAutoContinueTitle": "不自動繼續：將本輪保留為已中斷，可手動繼續",
+      "continueNow": "立即繼續",
+      "continueNowTitle": "立即送出繼續指令 — 可能再次觸及上限",
+      "limitActionFailed": "無法更新已暫停的對話：{message}",
+      "limitPausedBadge": "已暫停，直到用量額度於 {time} 重置"
     },
     "conversationCard": {
       "untitledConversation": "未命名會話",
@@ -3686,7 +3709,9 @@
         "continued": "已繼續",
         "continuedHint": "你讓智能體繼續了",
         "resumedAfterRestart": "重新啟動後已恢復",
-        "resumedAfterRestartHint": "codeg 在這一輪進行中重新啟動，已自動恢復此會話"
+        "resumedAfterRestartHint": "codeg 在這一輪進行中重新啟動，已自動恢復此會話",
+        "continuedAfterLimit": "額度重置後已繼續",
+        "continuedAfterLimitHint": "帳戶的用量額度已重置，codeg 自動繼續了此對話"
       },
       "liveTurnStats": {
         "thinking": "思考中...",
@@ -5321,14 +5346,18 @@
       "idle": "關鍵對話等待中",
       "needsYou": "關鍵對話需要你處理",
       "interrupted": "關鍵對話已中斷",
-      "stalled": "關鍵對話可能卡住了"
+      "stalled": "關鍵對話可能卡住了",
+      "limitPaused": "關鍵對話已暫停",
+      "limitContinued": "關鍵對話已繼續"
     },
     "body": {
       "idle": "智能體在 {elapsed} 前完成了本輪，之後沒有任何動作。",
       "needsYou": "智能體已等待你的回答 {elapsed}。",
       "interrupted": "上一輪在 {elapsed} 前被中斷，之後沒有任何動作。",
       "stalled": "本輪仍在執行，但已有 {elapsed} 沒有任何輸出。",
-      "backgroundStalled": "背景工作仍在執行，但已有 {elapsed} 沒有任何進展。"
+      "backgroundStalled": "背景工作仍在執行，但已有 {elapsed} 沒有任何進展。",
+      "limitPaused": "暫停至 {time} — 用量上限",
+      "limitContinued": "用量額度已重置，對話已自動繼續。"
     },
     "duration": {
       "seconds": "{count} 秒",

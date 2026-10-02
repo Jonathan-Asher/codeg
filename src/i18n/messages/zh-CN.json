@@ -1750,6 +1750,17 @@
     "description": "当 codeg 在一轮进行中退出、崩溃或因更新而重启时，下次启动会恢复这些会话。每次中断最多恢复一次。",
     "saveFailed": "保存设置失败：{message}"
   },
+  "LimitContinueSettings": {
+    "title": "用量额度重置后自动继续",
+    "description": "当某一轮因账户达到用量上限而停止时，在额度重置后不久自动继续该会话 — 无需打开窗口，重启后依然有效。每次暂停最多尝试 3 次。",
+    "saveFailed": "保存设置失败：{message}"
+  },
+  "LimitContinueSession": {
+    "heading": "用量上限",
+    "toggle": "用量额度重置后继续",
+    "toggleHint": "账户用量额度重置后自动接续此会话。还需要在“通用”中开启该设置。",
+    "saveFailed": "保存失败：{message}"
+  },
   "AutoResume": {
     "title": "正在恢复 {count} 个因重启而中断的会话",
     "settledTitle": "因重启而中断的会话",
@@ -2208,7 +2219,19 @@
       "connectingHint": "智能体正在打开此会话。现在发送的消息会等到会话就绪后再发出。",
       "connectFailed": "无法连接",
       "connectFailedHint": "无法连接到智能体。重试以再次打开会话。",
-      "retry": "重试"
+      "retry": "重试",
+      "limitPaused": "已暂停 — 额度将于 {time} 重置（还有 {remaining}）",
+      "limitPausedHint": "账户已达到用量上限。额度重置后不久，此会话会自动继续。",
+      "limitClaimed": "正在继续 — 用量额度已重置",
+      "limitBannerTitle": "因用量上限而暂停",
+      "limitBannerDescription": "将在 {time} 重置后自动继续（还有 {remaining}）。",
+      "limitBannerClaimed": "额度已重置 — 正在继续。",
+      "cancelAutoContinue": "取消自动继续",
+      "cancelAutoContinueTitle": "不自动继续：将本轮保留为已中断，可手动继续",
+      "continueNow": "立即继续",
+      "continueNowTitle": "立即发送继续指令 — 可能再次触及上限",
+      "limitActionFailed": "无法更新已暂停的会话：{message}",
+      "limitPausedBadge": "已暂停，直到用量额度于 {time} 重置"
     },
     "conversationCard": {
       "untitledConversation": "未命名会话",
@@ -3686,7 +3709,9 @@
         "continued": "已继续",
         "continuedHint": "你让智能体继续了",
         "resumedAfterRestart": "重启后已恢复",
-        "resumedAfterRestartHint": "codeg 在这一轮进行中重启，已自动恢复此会话"
+        "resumedAfterRestartHint": "codeg 在这一轮进行中重启，已自动恢复此会话",
+        "continuedAfterLimit": "额度重置后已继续",
+        "continuedAfterLimitHint": "账户的用量额度已重置，codeg 自动继续了此会话"
       },
       "liveTurnStats": {
         "thinking": "思考中...",
@@ -5321,14 +5346,18 @@
       "idle": "关键会话等待中",
       "needsYou": "关键会话需要你处理",
       "interrupted": "关键会话已中断",
-      "stalled": "关键会话可能卡住了"
+      "stalled": "关键会话可能卡住了",
+      "limitPaused": "关键会话已暂停",
+      "limitContinued": "关键会话已继续"
     },
     "body": {
       "idle": "智能体在 {elapsed} 前完成了本轮，之后没有任何动作。",
       "needsYou": "智能体已等待你的回答 {elapsed}。",
       "interrupted": "上一轮在 {elapsed} 前被中断，之后没有任何动作。",
       "stalled": "本轮仍在运行，但已有 {elapsed} 没有任何输出。",
-      "backgroundStalled": "后台任务仍在运行，但已有 {elapsed} 没有任何进展。"
+      "backgroundStalled": "后台任务仍在运行，但已有 {elapsed} 没有任何进展。",
+      "limitPaused": "暂停至 {time} — 用量上限",
+      "limitContinued": "用量额度已重置，会话已自动继续。"
     },
     "duration": {
       "seconds": "{count} 秒",

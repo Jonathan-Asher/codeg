@@ -170,15 +170,17 @@ export function reuseSet<T>(
 
 /**
  * The activity states that keep a session on screen even when it is past its
- * folder's limit: something is running, blocked on you, or was cut off and
- * wants picking back up. Folding any of those behind "Show N more" would hide
- * exactly the rows the sidebar exists to surface.
+ * folder's limit: something is running, blocked on you, was cut off and
+ * wants picking back up, or waits for the usage limit to reset. Folding any
+ * of those behind "Show N more" would hide exactly the rows the sidebar
+ * exists to surface.
  */
 export function isAlwaysVisibleActivity(activity: SessionActivity): boolean {
   return (
     activity === "working" ||
     activity === "needs_you" ||
-    activity === "interrupted"
+    activity === "interrupted" ||
+    activity === "limit_paused"
   )
 }
 

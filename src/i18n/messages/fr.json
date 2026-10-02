@@ -1750,6 +1750,17 @@
     "description": "Si codeg se ferme, plante ou redémarre pour une mise à jour au milieu d'un tour, ces sessions reprennent au démarrage suivant. Chaque interruption est reprise une fois au plus.",
     "saveFailed": "Impossible d'enregistrer le réglage : {message}"
   },
+  "LimitContinueSettings": {
+    "title": "Reprendre automatiquement à la réinitialisation de la limite d'utilisation",
+    "description": "Quand un tour s'arrête parce que votre compte a atteint sa limite d'utilisation, la session reprend d'elle-même peu après la réinitialisation, sans fenêtre ouverte et même après un redémarrage. Au plus 3 tentatives par pause.",
+    "saveFailed": "Impossible d'enregistrer le réglage : {message}"
+  },
+  "LimitContinueSession": {
+    "heading": "Limite d'utilisation",
+    "toggle": "Reprendre à la réinitialisation de la limite d'utilisation",
+    "toggleHint": "Reprendre cette session d'elle-même une fois la limite d'utilisation du compte réinitialisée. Le réglage dans Général doit aussi être activé.",
+    "saveFailed": "Échec de l'enregistrement : {message}"
+  },
   "AutoResume": {
     "title": "Reprise de {count, plural, one {# session interrompue} other {# sessions interrompues}} par le redémarrage",
     "settledTitle": "Sessions interrompues par le redémarrage",
@@ -2208,7 +2219,19 @@
       "connectingHint": "L’agent ouvre cette session. Les messages envoyés maintenant attendent qu’elle soit prête.",
       "connectFailed": "Connexion impossible",
       "connectFailedHint": "L’agent est injoignable. Réessayez pour rouvrir la session.",
-      "retry": "Réessayer"
+      "retry": "Réessayer",
+      "limitPaused": "En pause — la limite se réinitialise à {time} (dans {remaining})",
+      "limitPausedHint": "Le compte a atteint sa limite d'utilisation. Cette session reprendra d'elle-même peu après la réinitialisation de la limite.",
+      "limitClaimed": "Reprise en cours — la limite d'utilisation est réinitialisée",
+      "limitBannerTitle": "En pause : limite d'utilisation atteinte",
+      "limitBannerDescription": "Reprendra automatiquement à la réinitialisation, à {time} (dans {remaining}).",
+      "limitBannerClaimed": "La limite est réinitialisée — reprise en cours.",
+      "cancelAutoContinue": "Annuler la reprise automatique",
+      "cancelAutoContinueTitle": "Ne pas reprendre automatiquement : laisser le tour interrompu, avec Continuer",
+      "continueNow": "Continuer maintenant",
+      "continueNowTitle": "Envoyer la reprise maintenant — la limite peut être atteinte à nouveau",
+      "limitActionFailed": "Impossible de mettre à jour la session en pause : {message}",
+      "limitPausedBadge": "En pause jusqu'à la réinitialisation de la limite d'utilisation à {time}"
     },
     "conversationCard": {
       "untitledConversation": "Conversation sans titre",
@@ -3686,7 +3709,9 @@
         "continued": "Poursuivi",
         "continuedHint": "Vous avez demandé à l'agent de poursuivre",
         "resumedAfterRestart": "Reprise après redémarrage",
-        "resumedAfterRestartHint": "codeg a redémarré au milieu de ce tour et a repris la session de lui-même"
+        "resumedAfterRestartHint": "codeg a redémarré au milieu de ce tour et a repris la session de lui-même",
+        "continuedAfterLimit": "Repris après réinitialisation de la limite",
+        "continuedAfterLimitHint": "La limite d'utilisation du compte a été réinitialisée et codeg a repris la session de lui-même"
       },
       "liveTurnStats": {
         "thinking": "Réflexion...",
@@ -5321,14 +5346,18 @@
       "idle": "Session critique en attente",
       "needsYou": "Une session critique a besoin de vous",
       "interrupted": "Session critique interrompue",
-      "stalled": "Une session critique est peut-être bloquée"
+      "stalled": "Une session critique est peut-être bloquée",
+      "limitPaused": "Session critique en pause",
+      "limitContinued": "Session critique reprise"
     },
     "body": {
       "idle": "L'agent a terminé son tour il y a {elapsed}, et rien ne s'est passé depuis.",
       "needsYou": "L'agent attend votre réponse depuis {elapsed}.",
       "interrupted": "Le dernier tour a été interrompu il y a {elapsed}, et rien ne s'est passé depuis.",
       "stalled": "Un tour est en cours, mais rien n'a été diffusé depuis {elapsed}.",
-      "backgroundStalled": "Des tâches d'arrière-plan tournent, mais aucune n'a progressé depuis {elapsed}."
+      "backgroundStalled": "Des tâches d'arrière-plan tournent, mais aucune n'a progressé depuis {elapsed}.",
+      "limitPaused": "En pause jusqu'à {time} — limite d'utilisation",
+      "limitContinued": "La limite d'utilisation a été réinitialisée et la session a repris d'elle-même."
     },
     "duration": {
       "seconds": "{count} s",

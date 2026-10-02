@@ -103,6 +103,7 @@ export interface AppWorkspaceStoreState {
         | "pin_order"
         | "critical"
         | "critical_stall"
+        | "limit_auto_continue"
       >
     >
   ) => void
@@ -430,12 +431,14 @@ export const useAppWorkspaceStore = create<AppWorkspaceStoreState>()(
       // mirror the backend (`update_pin` / `reorder_pins`) and leave
       // `updated_at` untouched so an updated-sorted folder doesn't briefly
       // float the row. Status/title patches still bump.
-      // Marking a session critical is the same kind of preference.
+      // Marking a session critical is the same kind of preference, and so is
+      // its continue-after-the-usage-limit switch.
       const bumpUpdatedAt =
         !("pinned_at" in patch) &&
         !("pin_order" in patch) &&
         !("critical" in patch) &&
-        !("critical_stall" in patch)
+        !("critical_stall" in patch) &&
+        !("limit_auto_continue" in patch)
       next[idx] = {
         ...next[idx],
         ...patch,

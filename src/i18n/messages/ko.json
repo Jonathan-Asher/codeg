@@ -1750,6 +1750,17 @@
     "description": "턴 도중 codeg가 종료되거나, 충돌하거나, 업데이트를 위해 재시작되면 다음 시작 시 해당 세션을 재개합니다. 각 중단은 최대 한 번만 재개됩니다.",
     "saveFailed": "설정을 저장하지 못했습니다: {message}"
   },
+  "LimitContinueSettings": {
+    "title": "사용량 한도가 초기화되면 자동으로 계속",
+    "description": "계정이 사용량 한도에 도달해 턴이 멈추면, 한도가 초기화되고 잠시 후 세션을 자동으로 계속합니다. 창이 열려 있지 않아도, 재시작 후에도 동작합니다. 일시 중지마다 최대 3번 시도합니다.",
+    "saveFailed": "설정을 저장하지 못했습니다: {message}"
+  },
+  "LimitContinueSession": {
+    "heading": "사용량 한도",
+    "toggle": "사용량 한도가 초기화되면 계속",
+    "toggleHint": "계정의 사용량 한도가 초기화되면 이 세션을 자동으로 이어갑니다. '일반' 설정도 켜져 있어야 합니다.",
+    "saveFailed": "저장하지 못했습니다: {message}"
+  },
   "AutoResume": {
     "title": "재시작으로 중단된 세션 {count}개를 재개하는 중",
     "settledTitle": "재시작으로 중단된 세션",
@@ -2208,7 +2219,19 @@
       "connectingHint": "에이전트가 이 세션을 여는 중입니다. 지금 보내는 메시지는 준비될 때까지 기다립니다.",
       "connectFailed": "연결할 수 없음",
       "connectFailedHint": "에이전트에 연결할 수 없습니다. 다시 시도해 세션을 여세요.",
-      "retry": "다시 시도"
+      "retry": "다시 시도",
+      "limitPaused": "일시 중지됨 — 한도가 {time}에 초기화됨 ({remaining} 남음)",
+      "limitPausedHint": "계정이 사용량 한도에 도달했습니다. 한도가 초기화되고 잠시 후 이 세션이 자동으로 계속됩니다.",
+      "limitClaimed": "계속하는 중 — 사용량 한도가 초기화되었습니다",
+      "limitBannerTitle": "사용량 한도로 일시 중지됨",
+      "limitBannerDescription": "{time}에 초기화되면 자동으로 계속합니다 ({remaining} 남음).",
+      "limitBannerClaimed": "한도가 초기화되었습니다 — 지금 계속합니다.",
+      "cancelAutoContinue": "자동 계속 취소",
+      "cancelAutoContinueTitle": "자동으로 계속하지 않고 턴을 중단된 상태로 둡니다 (수동으로 계속할 수 있음)",
+      "continueNow": "지금 계속",
+      "continueNowTitle": "지금 계속 요청을 보냅니다 — 다시 한도에 걸릴 수 있습니다",
+      "limitActionFailed": "일시 중지된 세션을 업데이트하지 못했습니다: {message}",
+      "limitPausedBadge": "사용량 한도가 {time}에 초기화될 때까지 일시 중지됨"
     },
     "conversationCard": {
       "untitledConversation": "제목 없는 대화",
@@ -3686,7 +3709,9 @@
         "continued": "계속함",
         "continuedHint": "에이전트에게 계속 진행하도록 요청했습니다",
         "resumedAfterRestart": "재시작 후 재개됨",
-        "resumedAfterRestartHint": "이 턴 도중 codeg가 재시작되어 세션을 자동으로 재개했습니다"
+        "resumedAfterRestartHint": "이 턴 도중 codeg가 재시작되어 세션을 자동으로 재개했습니다",
+        "continuedAfterLimit": "한도 초기화 후 계속함",
+        "continuedAfterLimitHint": "계정의 사용량 한도가 초기화되어 codeg가 세션을 자동으로 계속했습니다"
       },
       "liveTurnStats": {
         "thinking": "생각 중...",
@@ -5321,14 +5346,18 @@
       "idle": "중요 세션 대기 중",
       "needsYou": "중요 세션이 응답을 기다립니다",
       "interrupted": "중요 세션이 중단됨",
-      "stalled": "중요 세션이 멈춘 것 같습니다"
+      "stalled": "중요 세션이 멈춘 것 같습니다",
+      "limitPaused": "중요 세션 일시 중지",
+      "limitContinued": "중요 세션 계속됨"
     },
     "body": {
       "idle": "에이전트가 {elapsed} 전에 턴을 마쳤고 그 이후 아무 일도 없었습니다.",
       "needsYou": "에이전트가 {elapsed} 동안 답변을 기다리고 있습니다.",
       "interrupted": "마지막 턴이 {elapsed} 전에 중단되었고 그 이후 아무 일도 없었습니다.",
       "stalled": "턴이 실행 중이지만 {elapsed} 동안 출력이 없습니다.",
-      "backgroundStalled": "백그라운드 작업이 실행 중이지만 {elapsed} 동안 진행이 없습니다."
+      "backgroundStalled": "백그라운드 작업이 실행 중이지만 {elapsed} 동안 진행이 없습니다.",
+      "limitPaused": "{time}까지 일시 중지 — 사용량 한도",
+      "limitContinued": "사용량 한도가 초기화되어 세션이 자동으로 계속되었습니다."
     },
     "duration": {
       "seconds": "{count}초",

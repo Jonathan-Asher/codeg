@@ -165,6 +165,7 @@ import type {
   SystemProxySettings,
   AutoResumeSettings,
   AutoResumeStatus,
+  LimitContinueSettings,
   CriticalAlertsSnapshot,
   CriticalSessionSettings,
   CloseRequestPayload,
@@ -1984,6 +1985,50 @@ export async function getAutoResumeStatus(): Promise<AutoResumeStatus> {
 /** Cancel the resumes that have not started yet. */
 export async function stopAutoResume(): Promise<AutoResumeStatus> {
   return getTransport().call("stop_auto_resume")
+}
+
+// --- Continue after the usage limit resets ---
+
+/** "Continue automatically when the usage limit resets" (General settings). */
+export async function getLimitContinueSettings(): Promise<LimitContinueSettings> {
+  return getTransport().call("get_limit_continue_settings")
+}
+
+/** Store the setting. Turning it off ends every pause waiting for its reset
+ *  (those turns become plain interruptions, with the manual Continue). */
+export async function updateLimitContinueSettings(
+  settings: LimitContinueSettings
+): Promise<LimitContinueSettings> {
+  return getTransport().call("update_limit_continue_settings", { settings })
+}
+
+/** Cancel a paused session's automatic continuation: its turn is left as a
+ *  plain interruption. Resolves `false` when nothing was paused any more. */
+export async function cancelLimitContinue(
+  conversationId: number
+): Promise<boolean> {
+  return getTransport().call("cancel_limit_continue", { conversationId })
+}
+
+/** Send a paused session's continuation now, ahead of the reset (it may hit
+ *  the limit again, which reschedules it). Resolves `false` when the session
+ *  is not paused. */
+export async function continueLimitNow(
+  conversationId: number
+): Promise<boolean> {
+  return getTransport().call("continue_limit_now", { conversationId })
+}
+
+/** The per-session switch for the continuation after the usage limit resets.
+ *  Turning it off ends the session's pause. */
+export async function updateConversationLimitAutoContinue(
+  conversationId: number,
+  enabled: boolean
+): Promise<void> {
+  return getTransport().call("update_conversation_limit_auto_continue", {
+    conversationId,
+    enabled,
+  })
 }
 
 // --- Critical sessions ---

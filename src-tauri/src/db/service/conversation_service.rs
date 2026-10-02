@@ -126,6 +126,10 @@ async fn create_inner(
         auto_resume: Set(None),
         critical: Set(false),
         critical_stall: Set(true),
+        limit_resume_at: Set(None),
+        limit_resume_state: Set(None),
+        limit_resume_attempts: Set(0),
+        limit_auto_continue: Set(true),
     };
     Ok(model.insert(conn).await?)
 }
@@ -191,6 +195,54 @@ const AUTO_RESUME_ON_TURN_START: &str =
 const AUTO_RESUME_ON_EXIT: &str =
     "CASE WHEN auto_resume IS NULL OR auto_resume = 'pending' THEN 'pending' ELSE auto_resume END";
 
+/// The usage-limit pause columns for a turn that just started. The turn the
+/// continuation claimed becomes `continuing` (and stays so through the
+/// repeated `Prompting` transitions of one turn), keeping its reset time and
+/// attempt count; any other turn settles the pause — the user sent something
+/// themselves, which is the answer to the pause.
+const LIMIT_STATE_ON_TURN_START: &str = "CASE WHEN limit_resume_state IN ('claimed', 'continuing') \
+     THEN 'continuing' ELSE NULL END";
+const LIMIT_AT_ON_TURN_START: &str = "CASE WHEN limit_resume_state IN ('claimed', 'continuing') \
+     THEN limit_resume_at ELSE NULL END";
+const LIMIT_ATTEMPTS_ON_TURN_START: &str =
+    "CASE WHEN limit_resume_state IN ('claimed', 'continuing') \
+     THEN limit_resume_attempts ELSE 0 END";
+
+/// The pause columns for a turn that ended for any reason but the usage
+/// limit: the continuation (if this was one) did its job. A `scheduled`
+/// pause is kept — only the usage-limit end writes one, for the turn that
+/// just ended.
+const LIMIT_STATE_ON_TURN_END: &str =
+    "CASE WHEN limit_resume_state = 'scheduled' THEN 'scheduled' ELSE NULL END";
+const LIMIT_AT_ON_TURN_END: &str =
+    "CASE WHEN limit_resume_state = 'scheduled' THEN limit_resume_at ELSE NULL END";
+const LIMIT_ATTEMPTS_ON_TURN_END: &str =
+    "CASE WHEN limit_resume_state = 'scheduled' THEN limit_resume_attempts ELSE 0 END";
+
+/// A typed SQL NULL for the `limit_resume_state` column.
+fn no_limit_state() -> sea_orm::Value {
+    sea_orm::Value::String(None)
+}
+
+/// A typed SQL NULL for the `limit_resume_at` column.
+fn no_limit_at() -> sea_orm::Value {
+    sea_orm::Value::ChronoDateTimeUtc(None)
+}
+
+/// The summary's view of a row's usage-limit pause: present while a pause is
+/// recorded (`state` and `at` both set).
+pub(crate) fn limit_pause_of(
+    at: Option<chrono::DateTime<Utc>>,
+    state: Option<conversation::ConversationLimitResume>,
+    attempts: i32,
+) -> Option<crate::models::LimitPause> {
+    Some(crate::models::LimitPause {
+        resets_at: at?,
+        state: state?,
+        attempts,
+    })
+}
+
 /// A turn just started on this conversation: record it as running and stamp
 /// `updated_at` — a turn starting is activity. Overwrites an `interrupted`
 /// mark, which is the rule that any new turn clears it. Soft-deleted rows are
@@ -209,6 +261,18 @@ pub async fn mark_turn_running(
         .col_expr(
             conversation::Column::AutoResume,
             Expr::cust(AUTO_RESUME_ON_TURN_START),
+        )
+        .col_expr(
+            conversation::Column::LimitResumeState,
+            Expr::cust(LIMIT_STATE_ON_TURN_START),
+        )
+        .col_expr(
+            conversation::Column::LimitResumeAt,
+            Expr::cust(LIMIT_AT_ON_TURN_START),
+        )
+        .col_expr(
+            conversation::Column::LimitResumeAttempts,
+            Expr::cust(LIMIT_ATTEMPTS_ON_TURN_START),
         )
         .col_expr(conversation::Column::UpdatedAt, Expr::value(Utc::now()))
         .filter(conversation::Column::Id.eq(conversation_id))
@@ -243,6 +307,18 @@ pub async fn finish_turn(
             conversation::Column::AutoResume,
             Expr::value(no_auto_resume()),
         )
+        .col_expr(
+            conversation::Column::LimitResumeState,
+            Expr::cust(LIMIT_STATE_ON_TURN_END),
+        )
+        .col_expr(
+            conversation::Column::LimitResumeAt,
+            Expr::cust(LIMIT_AT_ON_TURN_END),
+        )
+        .col_expr(
+            conversation::Column::LimitResumeAttempts,
+            Expr::cust(LIMIT_ATTEMPTS_ON_TURN_END),
+        )
         .col_expr(conversation::Column::UpdatedAt, Expr::value(Utc::now()))
         .filter(conversation::Column::Id.eq(conversation_id));
     update = match status {
@@ -267,6 +343,14 @@ pub async fn mark_turn_interrupted(
             conversation::Column::TurnState,
             Expr::value(conversation::ConversationTurnState::Interrupted),
         )
+        // A continuation after the usage limit that dies mid-turn is a plain
+        // interruption now; its pause is over.
+        .col_expr(
+            conversation::Column::LimitResumeState,
+            Expr::value(no_limit_state()),
+        )
+        .col_expr(conversation::Column::LimitResumeAt, Expr::value(no_limit_at()))
+        .col_expr(conversation::Column::LimitResumeAttempts, Expr::value(0))
         .filter(conversation::Column::Id.eq(conversation_id))
         .filter(conversation::Column::TurnState.eq(conversation::ConversationTurnState::Running))
         .exec(conn)
@@ -329,6 +413,14 @@ pub async fn interrupt_orphaned_turns(conn: &DatabaseConnection) -> Result<u64, 
             conversation::Column::AutoResume,
             Expr::cust(AUTO_RESUME_ON_EXIT),
         )
+        // A continuation after the usage limit cut off by the exit is picked
+        // up by the automatic resume like any other turn; its pause is over.
+        .col_expr(
+            conversation::Column::LimitResumeState,
+            Expr::value(no_limit_state()),
+        )
+        .col_expr(conversation::Column::LimitResumeAt, Expr::value(no_limit_at()))
+        .col_expr(conversation::Column::LimitResumeAttempts, Expr::value(0))
         .filter(conversation::Column::TurnState.eq(conversation::ConversationTurnState::Running))
         .exec(conn)
         .await?;
@@ -513,6 +605,274 @@ pub async fn clear_spent_auto_resume(
         .exec(conn)
         .await?;
     Ok(res.rows_affected > 0)
+}
+
+// ─── Usage-limit pause (`acp::limit_continue`) ─────────────────────────
+
+/// How a turn that ended on the account's usage limit was recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UsageLimitTurnEnd {
+    /// Paused until the limit resets; `attempts` continuations were already
+    /// sent for this pause (0 for a fresh one).
+    Paused { attempts: i32 },
+    /// The continuations kept hitting the limit: the turn is left as a plain
+    /// interruption, with the manual Continue.
+    GaveUp,
+    /// Not paused (the feature is off for it, or it is not a session the
+    /// backend continues on its own): finished like any other turn.
+    NotPaused,
+}
+
+/// Whether a work task or an automation run drives this conversation. Those
+/// engines settle their own runs; a continuation behind their back would run
+/// work their state says has ended.
+async fn is_engine_driven(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+) -> Result<bool, DbError> {
+    use crate::db::entities::{automation_run, work_task};
+    use sea_orm::PaginatorTrait;
+    let tasks = work_task::Entity::find()
+        .filter(work_task::Column::ConversationId.eq(conversation_id))
+        .count(conn)
+        .await?;
+    if tasks > 0 {
+        return Ok(true);
+    }
+    let runs = automation_run::Entity::find()
+        .filter(automation_run::Column::ConversationId.eq(conversation_id))
+        .count(conn)
+        .await?;
+    Ok(runs > 0)
+}
+
+/// Whether the backend may continue this conversation on its own after the
+/// usage limit resets: a live top-level session bound to an agent session,
+/// not driven by an engine, with its per-session switch on.
+async fn limit_continue_eligible(
+    conn: &DatabaseConnection,
+    row: &conversation::Model,
+) -> Result<bool, DbError> {
+    if row.deleted_at.is_some()
+        || row.parent_id.is_some()
+        || !matches!(row.kind, ConversationKind::Regular | ConversationKind::Chat)
+        || row.external_id.is_none()
+        || !row.limit_auto_continue
+    {
+        return Ok(false);
+    }
+    Ok(!is_engine_driven(conn, row.id).await?)
+}
+
+/// The turn ended because the account hit its usage limit, which resets at
+/// `resets_at`. Records the turn's end (the same columns [`finish_turn`]
+/// writes, with `status`) and, when the conversation can be continued on its
+/// own (`enabled` is the global setting), pauses it until the reset:
+///
+/// * a fresh pause starts at 0 attempts;
+/// * a continuation that hit the limit again keeps its attempt count, and is
+///   rescheduled from the new reset time while it is under `max_attempts` —
+///   at the cap it gives up and leaves a plain interruption.
+pub async fn finish_turn_on_usage_limit(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    status: Option<conversation::ConversationStatus>,
+    resets_at: chrono::DateTime<Utc>,
+    max_attempts: i32,
+    enabled: bool,
+) -> Result<UsageLimitTurnEnd, DbError> {
+    use conversation::ConversationLimitResume as L;
+    let Some(row) = conversation::Entity::find_by_id(conversation_id)
+        .one(conn)
+        .await?
+    else {
+        return Ok(UsageLimitTurnEnd::NotPaused);
+    };
+    if !enabled || !limit_continue_eligible(conn, &row).await? {
+        finish_turn(conn, conversation_id, status).await?;
+        return Ok(UsageLimitTurnEnd::NotPaused);
+    }
+    let attempts = match row.limit_resume_state {
+        Some(L::Claimed | L::Continuing) => row.limit_resume_attempts,
+        _ => 0,
+    };
+    let mut active: conversation::ActiveModel = row.into();
+    active.auto_resume = Set(None);
+    active.updated_at = Set(Utc::now());
+    if let Some(status) = status {
+        active.status = Set(status);
+    }
+    let outcome = if attempts >= max_attempts {
+        active.turn_state = Set(Some(conversation::ConversationTurnState::Interrupted));
+        active.limit_resume_state = Set(None);
+        active.limit_resume_at = Set(None);
+        active.limit_resume_attempts = Set(0);
+        UsageLimitTurnEnd::GaveUp
+    } else {
+        active.turn_state = Set(None);
+        active.limit_resume_state = Set(Some(L::Scheduled));
+        active.limit_resume_at = Set(Some(resets_at));
+        active.limit_resume_attempts = Set(attempts);
+        UsageLimitTurnEnd::Paused { attempts }
+    };
+    active.update(conn).await?;
+    Ok(outcome)
+}
+
+/// The paused conversations whose limit has reset by `now`, most recently
+/// active first — the order they are continued in.
+pub async fn list_due_limit_resumes(
+    conn: &DatabaseConnection,
+    now: chrono::DateTime<Utc>,
+) -> Result<Vec<conversation::Model>, DbError> {
+    Ok(conversation::Entity::find()
+        .filter(
+            conversation::Column::LimitResumeState
+                .eq(conversation::ConversationLimitResume::Scheduled),
+        )
+        .filter(conversation::Column::LimitResumeAt.lte(now))
+        .filter(conversation::Column::DeletedAt.is_null())
+        .order_by_desc(conversation::Column::UpdatedAt)
+        .all(conn)
+        .await?)
+}
+
+/// Every conversation paused and waiting for its reset.
+pub async fn list_scheduled_limit_resumes(
+    conn: &DatabaseConnection,
+) -> Result<Vec<conversation::Model>, DbError> {
+    Ok(conversation::Entity::find()
+        .filter(
+            conversation::Column::LimitResumeState
+                .eq(conversation::ConversationLimitResume::Scheduled),
+        )
+        .filter(conversation::Column::DeletedAt.is_null())
+        .order_by_asc(conversation::Column::LimitResumeAt)
+        .all(conn)
+        .await?)
+}
+
+/// Claim a paused conversation for its continuation: `scheduled → claimed`,
+/// counting one more attempt, as a compare-and-set on a live row with no turn
+/// running. `false`: someone got there first (the user sent a message, which
+/// settled the pause; cancelled it; deleted the row).
+pub async fn claim_limit_resume(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::Expr;
+    let res = conversation::Entity::update_many()
+        .col_expr(
+            conversation::Column::LimitResumeState,
+            Expr::value(conversation::ConversationLimitResume::Claimed),
+        )
+        .col_expr(
+            conversation::Column::LimitResumeAttempts,
+            Expr::cust("limit_resume_attempts + 1"),
+        )
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .filter(
+            conversation::Column::LimitResumeState
+                .eq(conversation::ConversationLimitResume::Scheduled),
+        )
+        .filter(conversation::Column::TurnState.is_null())
+        .filter(conversation::Column::DeletedAt.is_null())
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected > 0)
+}
+
+/// Put a claimed continuation back on the schedule, due at `at`: the session
+/// could not be reopened, or the prompt did not go out. `false` when the
+/// claim is gone (a turn started meanwhile).
+pub async fn reschedule_limit_resume(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    at: chrono::DateTime<Utc>,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::Expr;
+    let res = conversation::Entity::update_many()
+        .col_expr(
+            conversation::Column::LimitResumeState,
+            Expr::value(conversation::ConversationLimitResume::Scheduled),
+        )
+        .col_expr(conversation::Column::LimitResumeAt, Expr::value(at))
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .filter(
+            conversation::Column::LimitResumeState
+                .eq(conversation::ConversationLimitResume::Claimed),
+        )
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected > 0)
+}
+
+/// End a pause without continuing: the user cancelled the continuation (or
+/// turned it off), or it gave up. A pause with no turn running becomes a
+/// plain interruption, with the manual Continue; a continuation whose turn
+/// already runs is left to finish. Returns whether a pause was ended.
+pub async fn end_limit_pause(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::Expr;
+    let res = conversation::Entity::update_many()
+        .col_expr(
+            conversation::Column::TurnState,
+            Expr::value(conversation::ConversationTurnState::Interrupted),
+        )
+        .col_expr(
+            conversation::Column::LimitResumeState,
+            Expr::value(no_limit_state()),
+        )
+        .col_expr(conversation::Column::LimitResumeAt, Expr::value(no_limit_at()))
+        .col_expr(conversation::Column::LimitResumeAttempts, Expr::value(0))
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .filter(conversation::Column::LimitResumeState.is_in([
+            conversation::ConversationLimitResume::Scheduled,
+            conversation::ConversationLimitResume::Claimed,
+        ]))
+        .filter(conversation::Column::TurnState.is_null())
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected > 0)
+}
+
+/// Startup: a continuation claimed when the last process exited never got
+/// its prompt out (its turn would have made it `continuing`). Put it back on
+/// the schedule. Returns how many there were.
+pub async fn requeue_claimed_limit_resumes(conn: &DatabaseConnection) -> Result<u64, DbError> {
+    use sea_orm::sea_query::Expr;
+    let res = conversation::Entity::update_many()
+        .col_expr(
+            conversation::Column::LimitResumeState,
+            Expr::value(conversation::ConversationLimitResume::Scheduled),
+        )
+        .filter(
+            conversation::Column::LimitResumeState
+                .eq(conversation::ConversationLimitResume::Claimed),
+        )
+        .filter(conversation::Column::TurnState.is_null())
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected)
+}
+
+/// The per-session "continue when the usage limit resets" switch. A view
+/// preference, so it never bumps `updated_at`.
+pub async fn update_limit_auto_continue(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    enabled: bool,
+) -> Result<conversation::Model, DbError> {
+    let conv = conversation::Entity::find_by_id(conversation_id)
+        .filter(conversation::Column::DeletedAt.is_null())
+        .one(conn)
+        .await?
+        .ok_or_else(|| DbError::Migration(format!("Conversation not found: {conversation_id}")))?;
+    let mut active: conversation::ActiveModel = conv.into();
+    active.limit_auto_continue = Set(enabled);
+    Ok(active.update(conn).await?)
 }
 
 /// Heartbeat for a turn that is still streaming: move `updated_at` forward to
@@ -1573,6 +1933,10 @@ impl CarriedOverRow {
             auto_resume: Set(None),
             critical: Set(false),
             critical_stall: Set(true),
+            limit_resume_at: Set(None),
+            limit_resume_state: Set(None),
+            limit_resume_attempts: Set(0),
+            limit_auto_continue: Set(true),
         }
     }
 }
@@ -1752,6 +2116,8 @@ fn conv_to_summary(r: conversation::Model) -> DbConversationSummary {
         turn_state: r.turn_state,
         critical: r.critical,
         critical_stall: r.critical_stall,
+        limit_pause: limit_pause_of(r.limit_resume_at, r.limit_resume_state, r.limit_resume_attempts),
+        limit_auto_continue: r.limit_auto_continue,
         selector_state: ConversationSelectorState::parse(r.selector_state.as_deref()),
     }
 }

@@ -6,6 +6,7 @@ import {
   CircleDot,
   CircleDotDashed,
   CirclePause,
+  Hourglass,
   Loader2,
   Play,
   RotateCw,
@@ -24,12 +25,14 @@ import {
   type SessionActivity,
 } from "@/lib/session-activity"
 import { continueInterruptedSession } from "@/lib/session-continue"
+import { waitingLimitPause } from "@/lib/limit-continue"
 import { getAgentLabel } from "@/lib/custom-agents"
 import type { ConnectionAttachInfo } from "@/hooks/use-connection-status"
 import { useAttachPhaseLabel } from "@/hooks/use-attach-phase-label"
 import { useConversationAttention } from "@/stores/conversation-attention-store"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { LimitPauseButtons, useLimitResetParts } from "./limit-pause"
 
 /** The sidebar's wording for each "waiting on you" kind — reused so the
  *  Session Details view names the block exactly as the row's badge does. */
@@ -81,6 +84,14 @@ export function SessionActivityIcon({
         <CirclePause
           aria-hidden
           className={cn(base, "text-orange-600 dark:text-orange-400")}
+        />
+      )
+    case "limit_paused":
+      // Waiting on the clock, not on anyone.
+      return (
+        <Hourglass
+          aria-hidden
+          className={cn(base, "text-violet-600 dark:text-violet-400")}
         />
       )
     case "idle":
@@ -149,8 +160,17 @@ export function SessionActivityRow({
     connectionStatus,
     connection: connection?.state ?? null,
     awaitingBackground: heldBackgroundTasks != null,
+    limitPause: summary.limit_pause,
   })
+  const pause = activity === "limit_paused" ? waitingLimitPause(summary) : null
+  const reset = useLimitResetParts(pause?.resets_at)
   const count = heldBackgroundTasks ?? 0
+  // A paused session names when the limit resets; the others ignore these.
+  const labelValues = {
+    count,
+    time: reset?.time ?? "",
+    remaining: reset?.remaining ?? "",
+  }
   const agent = getAgentLabel(summary.agent_type)
   const phaseLabel = useAttachPhaseLabel(
     agent,
@@ -162,7 +182,7 @@ export function SessionActivityRow({
       ? tSidebar(ATTENTION_HINT_KEYS[attention])
       : activity === "connect_failed" && connection?.error
         ? connection.error
-        : t(SESSION_ACTIVITY_HINT_KEYS[activity], { count })
+        : t(SESSION_ACTIVITY_HINT_KEYS[activity], labelValues)
 
   return (
     <div
@@ -174,7 +194,9 @@ export function SessionActivityRow({
         <SessionActivityIcon activity={activity} className="mt-0.5" />
         <div className="min-w-0 space-y-0.5">
           <p className="text-sm font-medium leading-snug">
-            {t(SESSION_ACTIVITY_LABEL_KEYS[activity], { count })}
+            {pause?.state === "claimed"
+              ? t("limitClaimed")
+              : t(SESSION_ACTIVITY_LABEL_KEYS[activity], labelValues)}
           </p>
           {phaseLabel && (
             <p
@@ -212,6 +234,12 @@ export function SessionActivityRow({
           <RotateCw aria-hidden className={cn(retrying && "animate-spin")} />
           {t("retry")}
         </Button>
+      )}
+      {pause && (
+        <LimitPauseButtons
+          conversationId={summary.id}
+          claimed={pause.state === "claimed"}
+        />
       )}
       {activity === "interrupted" && (
         <Button

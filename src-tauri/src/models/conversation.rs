@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 
 use super::agent::AgentType;
 use super::message::{MessageTurn, TurnUsage};
-use crate::db::entities::conversation::{ConversationKind, ConversationTurnState};
+use crate::db::entities::conversation::{
+    ConversationKind, ConversationLimitResume, ConversationTurnState,
+};
 use crate::db::service::conversation_service::ConversationSelectorState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,6 +26,17 @@ pub struct ConversationSummary {
     pub parent_tool_use_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delegation_call_id: Option<String>,
+}
+
+/// A conversation paused by the account's usage limit (see
+/// `acp::limit_continue`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LimitPause {
+    /// When the limit resets. The continuation goes out shortly after.
+    pub resets_at: DateTime<Utc>,
+    pub state: ConversationLimitResume,
+    /// Continuations already sent for this pause.
+    pub attempts: i32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -87,6 +100,14 @@ pub struct DbConversationSummary {
     /// Mirror of `conversation.critical_stall`: whether a critical
     /// conversation also alerts when a working turn goes silent.
     pub critical_stall: bool,
+    /// The usage-limit pause, when the last turn ended because the account
+    /// hit its usage limit (see `acp::limit_continue`). Always serialized —
+    /// `null` when there is none — so the upsert that settles a pause clears
+    /// it on every client.
+    pub limit_pause: Option<LimitPause>,
+    /// Mirror of `conversation.limit_auto_continue`: this session continues
+    /// by itself once the usage limit resets (with the global setting on).
+    pub limit_auto_continue: bool,
     /// Mirror of `conversation.selector_state`: the mode/model/effort this
     /// conversation's session last had in effect. A tab whose session is not
     /// attached yet (idle-swept, reopened after a restart, another window)

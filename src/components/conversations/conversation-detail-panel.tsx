@@ -54,6 +54,8 @@ import { useAdvertisedGoalActions } from "@/hooks/use-goal-actions"
 import { ConversationShell } from "@/components/chat/conversation-shell"
 import { SessionConfigStaleBanner } from "@/components/chat/session-config-stale-banner"
 import { SessionInterruptedBanner } from "@/components/chat/session-interrupted-banner"
+import { LimitPausedBanner } from "@/components/conversations/limit-pause"
+import { waitingLimitPause } from "@/lib/limit-continue"
 import { deriveSessionActivity } from "@/lib/session-activity"
 import {
   canOfferContinue,
@@ -426,6 +428,13 @@ const ConversationTabView = memo(function ConversationTabView({
   const persistedTurnState = useAppWorkspaceStore((s) =>
     dbConversationId != null
       ? s.conversations.find((c) => c.id === dbConversationId)?.turn_state
+      : undefined
+  )
+  // The row's usage-limit pause: the session waits for the account's limit
+  // to reset, then continues by itself. Drives the paused banner.
+  const persistedLimitPause = useAppWorkspaceStore((s) =>
+    dbConversationId != null
+      ? s.conversations.find((c) => c.id === dbConversationId)?.limit_pause
       : undefined
   )
 
@@ -2405,6 +2414,22 @@ const ConversationTabView = memo(function ConversationTabView({
       <SessionInterruptedBanner onContinue={handleContinueInterrupted} />
     ) : null
 
+  // The last turn stopped on the account's usage limit: say when the session
+  // continues by itself, with Cancel auto-continue and Continue now (see
+  // `lib/limit-continue`). Hidden once a turn streams — the continuation, or
+  // a message the user sent, which settles the pause anyway.
+  const waitingPause = waitingLimitPause({ limit_pause: persistedLimitPause })
+  const limitPausedBanner =
+    waitingPause &&
+    dbConversationId != null &&
+    persistedTurnState !== "running" &&
+    connStatus !== "prompting" ? (
+      <LimitPausedBanner
+        conversationId={dbConversationId}
+        pause={waitingPause}
+      />
+    ) : null
+
   // The composer's one-click Continue (see `lib/continue-turn`): the agent has
   // replied and the session sits idle — or idle while background work holds
   // its turn open — so "keep going" is a click, not a typed message. The
@@ -2423,6 +2448,7 @@ const ConversationTabView = memo(function ConversationTabView({
       turnState: persistedTurnState,
       connectionStatus: connIsForOtherAgent ? null : connStatus,
       awaitingBackground,
+      limitPause: persistedLimitPause,
     }),
     endsWithAgentReply,
     pendingInteraction: Boolean(
@@ -2838,7 +2864,9 @@ const ConversationTabView = memo(function ConversationTabView({
       hideInput={isWelcomeMode || Boolean(acpLoadError)}
       injectContent={composerInject}
       onInjectConsumed={handleComposerInjectConsumed}
-      composerBanner={acpLoadErrorBanner ?? interruptedBanner}
+      composerBanner={
+        acpLoadErrorBanner ?? limitPausedBanner ?? interruptedBanner
+      }
       feedbackList={
         feedback.showList ? (
           <FeedbackNotesDisplay

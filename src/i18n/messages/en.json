@@ -1750,6 +1750,17 @@
     "description": "When codeg quits, crashes or restarts for an update in the middle of a turn, pick those sessions back up on the next start. Each interruption is resumed at most once.",
     "saveFailed": "Failed to save the setting: {message}"
   },
+  "LimitContinueSettings": {
+    "title": "Continue automatically when the usage limit resets",
+    "description": "When a turn stops because your account hit its usage limit, continue the session by itself shortly after the limit resets — with no window open, and across restarts. At most 3 tries per pause.",
+    "saveFailed": "Failed to save the setting: {message}"
+  },
+  "LimitContinueSession": {
+    "heading": "Usage limit",
+    "toggle": "Continue when the usage limit resets",
+    "toggleHint": "Pick this session back up by itself once the account's usage limit resets. Needs the General setting on too.",
+    "saveFailed": "Failed to save: {message}"
+  },
   "AutoResume": {
     "title": "Resuming {count, plural, one {# session} other {# sessions}} interrupted by the restart",
     "settledTitle": "Sessions interrupted by the restart",
@@ -2208,7 +2219,19 @@
       "connectingHint": "The agent is opening this session. Messages you send now wait until it is ready.",
       "connectFailed": "Couldn't connect",
       "connectFailedHint": "The agent could not be reached. Retry to open the session again.",
-      "retry": "Retry"
+      "retry": "Retry",
+      "limitPaused": "Paused — limit resets at {time} (in {remaining})",
+      "limitPausedHint": "The account hit its usage limit. This session continues by itself shortly after the limit resets.",
+      "limitClaimed": "Continuing — the usage limit has reset",
+      "limitBannerTitle": "Paused on the usage limit",
+      "limitBannerDescription": "Continues automatically when it resets at {time} (in {remaining}).",
+      "limitBannerClaimed": "The limit has reset — continuing now.",
+      "cancelAutoContinue": "Cancel auto-continue",
+      "cancelAutoContinueTitle": "Don't continue by itself: leave the turn interrupted, with Continue",
+      "continueNow": "Continue now",
+      "continueNowTitle": "Send the continuation now — it may hit the limit again",
+      "limitActionFailed": "Couldn't update the paused session: {message}",
+      "limitPausedBadge": "Paused until the usage limit resets at {time}"
     },
     "conversationCard": {
       "untitledConversation": "Untitled conversation",
@@ -3686,7 +3709,9 @@
         "continued": "Continued",
         "continuedHint": "You asked the agent to keep going",
         "resumedAfterRestart": "Resumed after restart",
-        "resumedAfterRestartHint": "codeg restarted in the middle of this turn and picked the session back up on its own"
+        "resumedAfterRestartHint": "codeg restarted in the middle of this turn and picked the session back up on its own",
+        "continuedAfterLimit": "Continued after limit reset",
+        "continuedAfterLimitHint": "The account's usage limit reset and codeg continued the session on its own"
       },
       "liveTurnStats": {
         "thinking": "Thinking...",
@@ -5321,14 +5346,18 @@
       "idle": "Critical session waiting",
       "needsYou": "Critical session needs you",
       "interrupted": "Critical session interrupted",
-      "stalled": "Critical session may be stuck"
+      "stalled": "Critical session may be stuck",
+      "limitPaused": "Critical session paused",
+      "limitContinued": "Critical session continued"
     },
     "body": {
       "idle": "The agent finished its turn {elapsed} ago, and nothing has happened since.",
       "needsYou": "The agent has been waiting for your answer for {elapsed}.",
       "interrupted": "The last turn was cut off {elapsed} ago, and nothing has happened since.",
       "stalled": "A turn is running, but nothing has streamed for {elapsed}.",
-      "backgroundStalled": "Background tasks are running, but none has made progress for {elapsed}."
+      "backgroundStalled": "Background tasks are running, but none has made progress for {elapsed}.",
+      "limitPaused": "Paused until {time} — usage limit",
+      "limitContinued": "The usage limit reset and the session continued by itself."
     },
     "duration": {
       "seconds": "{count} s",

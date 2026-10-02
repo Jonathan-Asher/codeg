@@ -1,8 +1,10 @@
+import { waitingLimitPause } from "@/lib/limit-continue"
 import type {
   AttentionKind,
   ConnectionStatus,
   ConversationTurnState,
   DbConversationSummary,
+  LimitPause,
 } from "@/lib/types"
 
 /**
@@ -22,6 +24,9 @@ import type {
  * - `idle`: nothing is running.
  * - `interrupted`: the last turn was cut off before it finished — codeg quit
  *   or crashed, or the agent process or its connection died mid-turn.
+ * - `limit_paused`: the last turn stopped on the account's usage limit, and
+ *   the session continues by itself once the limit resets
+ *   (`lib/limit-continue.ts`).
  * - `connecting`: this client is opening the session (the agent is starting
  *   or resuming it) and it cannot take a prompt yet.
  * - `connect_failed`: this client's attempt to open the session failed; the
@@ -33,6 +38,7 @@ export type SessionActivity =
   | "needs_you"
   | "idle"
   | "interrupted"
+  | "limit_paused"
   | "connecting"
   | "connect_failed"
 
@@ -46,6 +52,7 @@ export const SESSION_ACTIVITY_LABEL_KEYS = {
   needs_you: "needsYou",
   idle: "idle",
   interrupted: "interrupted",
+  limit_paused: "limitPaused",
   connecting: "connecting",
   connect_failed: "connectFailed",
 } as const satisfies Record<SessionActivity, string>
@@ -58,6 +65,7 @@ export const SESSION_ACTIVITY_HINT_KEYS = {
   needs_you: "needsYouHint",
   idle: "idleHint",
   interrupted: "interruptedHint",
+  limit_paused: "limitPausedHint",
   connecting: "connectingHint",
   connect_failed: "connectFailedHint",
 } as const satisfies Record<SessionActivity, string>
@@ -92,6 +100,10 @@ export interface SessionActivityInputs {
    *  only for background work (the agent is idle). Only meaningful together
    *  with `connectionStatus === "prompting"`. */
   awaitingBackground?: boolean
+  /** The summary's usage-limit pause (`limit_pause`). Waiting for the reset
+   *  reads as `limit_paused` — below a turn running, blocked on the user, or
+   *  this client's own connect state. */
+  limitPause?: LimitPause | null
 }
 
 /**
@@ -107,6 +119,7 @@ export function deriveSessionActivity({
   connectionStatus,
   connection,
   awaitingBackground,
+  limitPause,
 }: SessionActivityInputs): SessionActivity {
   // Blocked on the user outranks everything: the session IS mid-turn, but the
   // thing to know is that it can't continue without you — that includes a
@@ -127,6 +140,8 @@ export function deriveSessionActivity({
   // nothing about an interruption, though: a session resumed after one stays
   // interrupted until a turn is actually sent.
   const liveAndIdle = connectionStatus === "connected"
+  if (turnState !== "running" && waitingLimitPause({ limit_pause: limitPause }))
+    return "limit_paused"
   if (turnState === "interrupted") return "interrupted"
   if (turnState === "running") return liveAndIdle ? "idle" : "working"
   if (turnState === undefined && status === "in_progress" && !liveAndIdle) {
@@ -138,13 +153,15 @@ export function deriveSessionActivity({
 
 /** A summary's activity from its own fields — no live connection known. */
 export function summaryActivity(
-  summary: Pick<DbConversationSummary, "turn_state" | "status">,
+  summary: Pick<DbConversationSummary, "turn_state" | "status"> &
+    Partial<Pick<DbConversationSummary, "limit_pause">>,
   attention?: AttentionKind | null
 ): SessionActivity {
   return deriveSessionActivity({
     attention,
     turnState: summary.turn_state,
     status: summary.status,
+    limitPause: summary.limit_pause,
   })
 }
 

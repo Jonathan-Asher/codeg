@@ -1635,6 +1635,8 @@ fn critical_index(kind: crate::acp::critical_watch::CriticalAlertKind) -> usize 
         K::Interrupted => 2,
         K::Stalled => 3,
         K::BackgroundStalled => 4,
+        // Worded by `limit_alert_text`; never indexed.
+        K::LimitPaused | K::LimitContinued => 0,
     }
 }
 
@@ -1644,6 +1646,9 @@ pub fn critical_alert_title(
     lang: Lang,
     kind: crate::acp::critical_watch::CriticalAlertKind,
 ) -> &'static str {
+    if let Some((title, _)) = limit_alert_text(lang, kind) {
+        return title;
+    }
     let titles: [&'static str; 4] = match lang {
         Lang::ZhCn => [
             "关键会话等待中",
@@ -1714,6 +1719,9 @@ pub fn critical_alert_body(
     lang: Lang,
     kind: crate::acp::critical_watch::CriticalAlertKind,
 ) -> &'static str {
+    if let Some((_, body)) = limit_alert_text(lang, kind) {
+        return body;
+    }
     let bodies: [&'static str; 5] = match lang {
         Lang::ZhCn => [
             "智能体已完成本轮，之后没有任何动作。",
@@ -1802,6 +1810,78 @@ pub fn critical_untitled(lang: Lang) -> &'static str {
         Lang::Pt => "Sessão sem título",
         Lang::Ar => "جلسة بلا عنوان",
         Lang::En => "Untitled session",
+    }
+}
+
+/// Headline and body of the usage-limit announcements of a critical session
+/// (`acp::limit_continue`); `None` for every other kind.
+fn limit_alert_text(
+    lang: Lang,
+    kind: crate::acp::critical_watch::CriticalAlertKind,
+) -> Option<(&'static str, &'static str)> {
+    use crate::acp::critical_watch::CriticalAlertKind as K;
+    let paused = matches!(kind, K::LimitPaused);
+    if !paused && !matches!(kind, K::LimitContinued) {
+        return None;
+    }
+    let (paused_text, continued_text) = match lang {
+        Lang::ZhCn => (
+            ("关键会话已暂停：用量已达上限", "额度重置后会自动继续。"),
+            ("关键会话已继续", "用量额度已重置，会话已自动继续。"),
+        ),
+        Lang::ZhTw => (
+            ("關鍵對話已暫停：已達用量上限", "額度重置後會自動繼續。"),
+            ("關鍵對話已繼續", "用量額度已重置，對話已自動繼續。"),
+        ),
+        Lang::Ja => (
+            ("重要セッションを一時停止：使用量の上限", "上限がリセットされると自動で再開します。"),
+            ("重要セッションを再開しました", "使用量の上限がリセットされ、自動で再開しました。"),
+        ),
+        Lang::Ko => (
+            ("중요 세션 일시 중지: 사용량 한도", "한도가 초기화되면 자동으로 계속합니다."),
+            ("중요 세션을 계속합니다", "사용량 한도가 초기화되어 자동으로 계속했습니다."),
+        ),
+        Lang::Es => (
+            ("Sesión crítica en pausa: límite de uso", "Continuará sola cuando se restablezca el límite."),
+            ("Sesión crítica reanudada", "El límite de uso se restableció y la sesión continuó sola."),
+        ),
+        Lang::De => (
+            ("Kritische Sitzung pausiert: Nutzungslimit", "Sie macht automatisch weiter, sobald das Limit zurückgesetzt ist."),
+            ("Kritische Sitzung fortgesetzt", "Das Nutzungslimit wurde zurückgesetzt, die Sitzung macht automatisch weiter."),
+        ),
+        Lang::Fr => (
+            ("Session critique en pause : limite d'utilisation", "Elle reprendra d'elle-même quand la limite sera réinitialisée."),
+            ("Session critique reprise", "La limite d'utilisation a été réinitialisée et la session a repris d'elle-même."),
+        ),
+        Lang::Pt => (
+            ("Sessão crítica pausada: limite de uso", "Ela continua sozinha quando o limite for redefinido."),
+            ("Sessão crítica retomada", "O limite de uso foi redefinido e a sessão continuou sozinha."),
+        ),
+        Lang::Ar => (
+            ("جلسة حرجة متوقفة مؤقتًا: حد الاستخدام", "ستستأنف تلقائيًا عند إعادة تعيين الحد."),
+            ("استُؤنفت الجلسة الحرجة", "أُعيد تعيين حد الاستخدام واستُؤنفت الجلسة تلقائيًا."),
+        ),
+        Lang::En => (
+            ("Critical session paused: usage limit", "It continues by itself when the limit resets."),
+            ("Critical session continued", "The usage limit reset and the session continued by itself."),
+        ),
+    };
+    Some(if paused { paused_text } else { continued_text })
+}
+
+/// Label of the field with the time a usage limit resets.
+pub fn critical_resets_label(lang: Lang) -> &'static str {
+    match lang {
+        Lang::ZhCn => "重置时间",
+        Lang::ZhTw => "重置時間",
+        Lang::Ja => "リセット",
+        Lang::Ko => "초기화 시각",
+        Lang::Es => "Se restablece",
+        Lang::De => "Zurückgesetzt um",
+        Lang::Fr => "Réinitialisation",
+        Lang::Pt => "Redefine em",
+        Lang::Ar => "وقت إعادة التعيين",
+        Lang::En => "Resets at",
     }
 }
 

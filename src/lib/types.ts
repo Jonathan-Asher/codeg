@@ -535,6 +535,14 @@ export interface DbConversationSummary {
   /** Whether a critical conversation also alerts when a working turn goes
    *  silent ("may be stuck"). On unless turned off for this session. */
   critical_stall?: boolean
+  /** The usage-limit pause: the last turn stopped because the account hit
+   *  its usage limit, and the backend continues the session once it resets
+   *  (see `lib/limit-continue.ts`). `null` when there is none; absent from a
+   *  server that predates the field. */
+  limit_pause?: LimitPause | null
+  /** Whether this session continues by itself once the usage limit resets
+   *  (with the global setting on). On unless turned off for this session. */
+  limit_auto_continue?: boolean
   /** The mode / model / effort this conversation's session last had in
    *  effect, as the backend records it per conversation. A tab whose session
    *  is not attached yet shows these until the agent reports its own (see
@@ -552,6 +560,26 @@ export interface ConversationSelectorState {
 /** Mirrors Rust `ConversationTurnState`
  *  (src-tauri/src/db/entities/conversation.rs). */
 export type ConversationTurnState = "running" | "interrupted"
+
+/** Where a usage-limit pause stands (Rust `ConversationLimitResume`):
+ *  waiting for the reset, its continuation being sent, or that continuation's
+ *  turn running. */
+export type LimitResumeState = "scheduled" | "claimed" | "continuing"
+
+/** A conversation paused by the account's usage limit (Rust `LimitPause`). */
+export interface LimitPause {
+  /** When the limit resets (ISO). The continuation goes out shortly after. */
+  resets_at: string
+  state: LimitResumeState
+  /** Continuations already sent for this pause. */
+  attempts: number
+}
+
+/** "Continue automatically when the usage limit resets" (Rust
+ *  `LimitContinueSettings`). */
+export interface LimitContinueSettings {
+  enabled: boolean
+}
 
 /** Payload for the global `conversation://changed` side-channel that keeps
  *  every client's sidebar list/status in sync across desktop + browsers.
@@ -4061,6 +4089,10 @@ export type CriticalAlertKind =
   | "interrupted"
   | "stalled"
   | "background_stalled"
+  /** One-off: paused on the usage limit until `resets_at`. */
+  | "limit_paused"
+  /** One-off: the limit reset and the session continued by itself. */
+  | "limit_continued"
 
 /** One critical alert (Rust `CriticalAlert`). `id` is unique per firing. */
 export interface CriticalAlert {
@@ -4076,6 +4108,8 @@ export interface CriticalAlert {
   count: number
   fired_at: string
   sound: boolean
+  /** For `limit_paused`: when the usage limit resets. */
+  resets_at?: string
 }
 
 /** The alerts waiting for an acknowledgement (Rust

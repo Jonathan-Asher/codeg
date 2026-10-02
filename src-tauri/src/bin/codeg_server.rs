@@ -552,6 +552,17 @@ async fn async_main() -> ExitCode {
         state.data_dir.clone(),
     ));
 
+    // Continue the sessions the account's usage limit paused once it resets
+    // (mirrors lib.rs setup).
+    tokio::spawn(codeg_lib::acp::limit_continue::run_limit_continue(
+        codeg_lib::db::AppDatabase {
+            conn: state.db.conn.clone(),
+        },
+        state.connection_manager.clone_ref(),
+        state.emitter.clone(),
+        state.data_dir.clone(),
+    ));
+
     // Alert on critical sessions that sit idle or go silent (mirrors lib.rs
     // setup).
     tokio::spawn(codeg_lib::acp::critical_watch::critical_watch_task(

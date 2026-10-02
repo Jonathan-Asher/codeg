@@ -433,12 +433,74 @@ async fn reopen_and_prompt(
     data_dir: &Path,
     candidate: &DbConversationSummary,
 ) -> Result<Outcome, String> {
-    let agent_type = candidate.agent_type;
-    let session_id = candidate
+    let target = ReopenTarget {
+        conversation_id: candidate.id,
+        folder_id: candidate.folder_id,
+        agent_type: candidate.agent_type,
+        external_id: candidate.external_id.clone(),
+    };
+    let sent = reopen_and_send(
+        db,
+        manager,
+        emitter,
+        data_dir,
+        &target,
+        OWNER_LABEL,
+        RESUME_AFTER_RESTART_PROMPT,
+        "auto-resume",
+        || STOP.load(Ordering::SeqCst),
+    )
+    .await?;
+    Ok(match sent {
+        Sent::Prompted => Outcome::Resumed,
+        Sent::Busy => Outcome::Skipped,
+        Sent::Aborted => Outcome::Stopped,
+    })
+}
+
+/// The conversation a backend-driven prompt goes to.
+pub(crate) struct ReopenTarget {
+    pub conversation_id: i32,
+    pub folder_id: i32,
+    pub agent_type: AgentType,
+    pub external_id: Option<String>,
+}
+
+/// How [`reopen_and_send`] ended when it did not fail.
+pub(crate) enum Sent {
+    /// The prompt went out; the turn runs like any other.
+    Prompted,
+    /// A turn was already running on the session (someone sent one by hand).
+    Busy,
+    /// `abort` said stop after the session reopened, before the prompt.
+    Aborted,
+}
+
+/// Reopen a conversation's agent session the way a tab's connect does — same
+/// working directory (so a tab opening it meanwhile shares the one
+/// connection), same per-conversation selectors — then send `prompt` through
+/// the normal prompt path (conversation link, prompt ledger, cross-client
+/// `UserMessage` broadcast). Shared by the resume after a restart and the
+/// continuation after the usage limit (`acp::limit_continue`). `Err` carries
+/// why it could not happen.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn reopen_and_send(
+    db: &AppDatabase,
+    manager: &ConnectionManager,
+    emitter: &EventEmitter,
+    data_dir: &Path,
+    target: &ReopenTarget,
+    owner_label: &str,
+    prompt: &str,
+    message_id_prefix: &str,
+    abort: impl Fn() -> bool,
+) -> Result<Sent, String> {
+    let agent_type = target.agent_type;
+    let session_id = target
         .external_id
         .clone()
         .ok_or_else(|| "the conversation has no agent session".to_string())?;
-    let folder = folder_service::get_folder_by_id(&db.conn, candidate.folder_id)
+    let folder = folder_service::get_folder_by_id(&db.conn, target.folder_id)
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "the conversation's folder is gone".to_string())?;
@@ -471,7 +533,7 @@ async fn reopen_and_prompt(
             Some(folder.path.clone()),
             Some(session_id.clone()),
             runtime_env,
-            OWNER_LABEL.to_string(),
+            owner_label.to_string(),
             emitter.clone(),
             mode_id,
             config_values,
@@ -499,32 +561,32 @@ async fn reopen_and_prompt(
         return Err(reason.to_string());
     }
 
-    if STOP.load(Ordering::SeqCst) {
+    if abort() {
         // Reopened but not prompted: an idle connection, which the idle sweep
         // reaps unless a tab picks it up.
-        return Ok(Outcome::Stopped);
+        return Ok(Sent::Aborted);
     }
 
     let blocks = vec![PromptInputBlock::Text {
-        text: RESUME_AFTER_RESTART_PROMPT.to_string(),
+        text: prompt.to_string(),
     }];
-    let message_id = format!("auto-resume-{}", uuid::Uuid::new_v4());
+    let message_id = format!("{message_id_prefix}-{}", uuid::Uuid::new_v4());
     match manager
         .send_prompt_linked_with_message_id(
             db,
             &conn_id,
             blocks,
-            Some(candidate.folder_id),
-            Some(candidate.id),
+            Some(target.folder_id),
+            Some(target.conversation_id),
             None,
             Some(message_id),
         )
         .await
     {
-        Ok(_) => Ok(Outcome::Resumed),
-        // A turn is already running on it — someone continued it by hand in
-        // the moment between the claim and now.
-        Err(AcpError::TurnInProgress) => Ok(Outcome::Skipped),
+        Ok(_) => Ok(Sent::Prompted),
+        // A turn is already running on it — someone sent one by hand in the
+        // moment between the claim and now.
+        Err(AcpError::TurnInProgress) => Ok(Sent::Busy),
         Err(e) => Err(e.to_string()),
     }
 }
@@ -879,6 +941,8 @@ mod tests {
             turn_state: Some(ConversationTurnState::Interrupted),
             critical: false,
             critical_stall: true,
+            limit_pause: None,
+            limit_auto_continue: true,
             selector_state: None,
         }
     }

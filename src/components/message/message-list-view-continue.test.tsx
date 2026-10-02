@@ -81,6 +81,7 @@ import {
   useConversationRuntimeStore,
 } from "@/stores/conversation-runtime-store"
 import { RESUME_AFTER_RESTART_PROMPT } from "@/lib/auto-resume"
+import { LIMIT_CONTINUE_PROMPT } from "@/lib/limit-continue"
 import { CONTINUE_PROMPT } from "@/lib/session-activity"
 import type {
   ContentBlock,
@@ -326,6 +327,76 @@ describe("MessageListView: resumed after restart", () => {
     const { container } = renderList()
 
     expect(container.querySelector("[data-resume-marker]")).toBeNull()
+    expect(
+      within(rowFor(container, "persisted-user-turn-0")).getByTestId(
+        "user-bubble"
+      )
+    ).toBeInTheDocument()
+  })
+})
+
+describe("MessageListView: continued after the usage limit reset", () => {
+  it("renders the continuation read back from the session file as its own divider", async () => {
+    await seed([
+      userTurn("turn-0", "refactor the parser"),
+      replyTurn("turn-1", "half done"),
+      userTurn("turn-2", LIMIT_CONTINUE_PROMPT),
+      replyTurn("turn-3", "the rest is done"),
+    ])
+    const { container } = renderList({ onEditUserMessage: vi.fn() })
+
+    const row = rowFor(container, "persisted-user-turn-2")
+    expect(
+      row.querySelector("[data-limit-continue-marker]")
+    ).toBeInTheDocument()
+    expect(within(row).getByText(L.continuedAfterLimit)).toBeInTheDocument()
+    expect(
+      within(row).getByTitle(L.continuedAfterLimitHint)
+    ).toBeInTheDocument()
+    // Not a bubble, not the other dividers, and nothing to edit on it.
+    expect(within(row).queryByTestId("user-bubble")).toBeNull()
+    expect(within(row).queryByText(L.continued)).toBeNull()
+    expect(within(row).queryByText(L.resumedAfterRestart)).toBeNull()
+    expect(
+      within(row).queryByRole("button", { name: L.editMessage })
+    ).toBeNull()
+  })
+
+  it("renders the continuation as a divider live, as a watching client receives it", async () => {
+    await seed([
+      userTurn("turn-0", "refactor the parser"),
+      replyTurn("turn-1", "half done"),
+    ])
+    // The backend sent it with no window open on the session; a client
+    // watching gets the cross-client user-message echo.
+    useConversationRuntimeStore
+      .getState()
+      .actions.appendViewerUserTurn(
+        CONVERSATION,
+        userTurn("limit-continue-1", LIMIT_CONTINUE_PROMPT)
+      )
+    const { container } = renderList({ connStatus: "prompting" })
+
+    const markers = container.querySelectorAll<HTMLElement>(
+      "[data-limit-continue-marker]"
+    )
+    expect(markers).toHaveLength(1)
+    expect(
+      within(markers[0]).getByText(L.continuedAfterLimit)
+    ).toBeInTheDocument()
+    expect(
+      container.querySelectorAll('[data-testid="user-bubble"]')
+    ).toHaveLength(1)
+  })
+
+  it("keeps a message that merely contains the prompt as a bubble", async () => {
+    await seed([
+      userTurn("turn-0", `${LIMIT_CONTINUE_PROMPT} And add tests.`),
+      replyTurn("turn-1", "ok"),
+    ])
+    const { container } = renderList()
+
+    expect(container.querySelector("[data-limit-continue-marker]")).toBeNull()
     expect(
       within(rowFor(container, "persisted-user-turn-0")).getByTestId(
         "user-bubble"
