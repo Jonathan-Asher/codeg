@@ -67,7 +67,7 @@ use crate::models::agent::AgentType;
 use crate::models::message::MessageTurn;
 use crate::parsers::claude::{
     capture_tag, capture_title_record, find_clear_rollover_successor, find_session_file,
-    group_into_turns, is_meta_message, slash_command_display,
+    group_into_turns, is_meta_message, slash_command_display, stop_hook_feedback,
     task_notification_result_regex, task_notification_status_regex,
     task_notification_summary_regex, task_notification_task_id_regex,
     task_notification_tool_use_id_regex, ClaudeRecordAccumulator, BACKGROUND_RESULT_MAX_CHARS,
@@ -1590,6 +1590,11 @@ fn user_record_text(value: &serde_json::Value) -> Option<String> {
 ///   but always STRING content, so it still initiates);
 /// * auto-compaction continuation summaries land MID-turn while the wire is
 ///   still rendering it — never a boundary;
+/// * a blocking Stop hook's feedback (`isMeta` STRING, "Stop hook feedback:")
+///   lands mid-turn too: the model answers it in the turn the hook stopped,
+///   which the wire is still rendering. Read as an initiator, it matched no
+///   ledger entry and the model's reply to the hook surfaced a second time as
+///   out-of-turn activity;
 /// * everything else user-typed/injected (real prompts, `<task-notification>`
 ///   records, cron prompts) initiates.
 fn turn_initiator_text(value: &serde_json::Value) -> Option<TurnInitiatorText> {
@@ -1597,6 +1602,9 @@ fn turn_initiator_text(value: &serde_json::Value) -> Option<TurnInitiatorText> {
         return None;
     }
     let content = value.get("message")?.get("content")?;
+    if is_meta_message(value) && stop_hook_feedback(content).is_some() {
+        return None;
+    }
 
     if let Some(s) = content.as_str() {
         if s.starts_with(CONTEXT_CONTINUATION_PREFIX) {
@@ -2441,6 +2449,41 @@ mod tests {
         assert!(
             !turns.is_empty(),
             "an autonomous initiator after the reply is out-of-turn as before"
+        );
+    }
+
+    /// A blocking Stop hook writes its feedback as an `isMeta` user record
+    /// AFTER the reply started, so the submission window above is already
+    /// closed. The model's answer to the hook is still the foreground turn the
+    /// wire is rendering; surfacing it as out-of-turn activity drew the reply
+    /// to the hook twice while the turn streamed.
+    #[test]
+    fn a_stop_hooks_feedback_does_not_reopen_the_turn_as_background() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        let ledger = PromptLedger::shared();
+        ledger.record_text("check the release notes");
+
+        let mut ws = WatchState::new();
+        ws.session_id = Some("s1".into());
+        ws.epoch = Some(epoch("2020-01-01T00:00:00Z"));
+        ws.adopt_file(path.clone());
+
+        let prompt = r#"{"type":"user","timestamp":"2026-07-07T03:50:00.000Z","uuid":"u-1","promptId":"p1","message":{"role":"user","content":"check the release notes"}}"#;
+        let hook = r#"{"type":"user","timestamp":"2026-07-07T03:50:05.000Z","uuid":"u-hook","promptId":"p1","isMeta":true,"userType":"external","message":{"role":"user","content":"Stop hook feedback:\nRelease check outstanding: confirm the notes mention the flag."}}"#;
+        write_lines(
+            &path,
+            &[
+                prompt,
+                &assistant_text("a1", "The notes look right. Publish it?"),
+                hook,
+                &assistant_text("a2", "They mention the flag."),
+            ],
+        );
+        let event = tick_prompting(&mut ws, &ledger);
+        assert!(
+            event.is_none() || unpack(event.unwrap()).0.is_empty(),
+            "the reply to the hook belongs to the wire-rendered turn"
         );
     }
 
@@ -3485,6 +3528,18 @@ mod tests {
         );
         let cont: serde_json::Value = serde_json::from_str(&cont).unwrap();
         assert!(turn_initiator_text(&cont).is_none());
+
+        // A blocking Stop hook's feedback: the turn it stopped goes on, so it
+        // is no boundary — not even after the reply started, when the
+        // submission window is already closed. Shape as Claude Code 2.1.284
+        // writes it (same `promptId` as the prompt).
+        let hook = r#"{"type":"user","uuid":"u-hook","promptId":"p1","isMeta":true,"message":{"role":"user","content":"Stop hook feedback:\nRelease check outstanding: confirm the notes."}}"#;
+        let hook: serde_json::Value = serde_json::from_str(hook).unwrap();
+        assert!(turn_initiator_text(&hook).is_none());
+        // The same words typed by the user still start a turn.
+        let typed = r#"{"type":"user","uuid":"u-typed","message":{"role":"user","content":"Stop hook feedback:\nwhat does this mean?"}}"#;
+        let typed: serde_json::Value = serde_json::from_str(typed).unwrap();
+        assert!(turn_initiator_text(&typed).is_some());
 
         // slash command record matches via its display form.
         let cmd = r#"{"type":"user","uuid":"u-cmd","message":{"role":"user","content":"<command-name>/init</command-name><command-args>now</command-args>"}}"#;
