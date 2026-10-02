@@ -7,6 +7,7 @@ pub mod auto_resume;
 pub mod critical_sessions;
 #[cfg(feature = "tauri-runtime")]
 pub mod limit_continue;
+#[cfg(feature = "tauri-runtime")]
 pub mod push;
 pub mod automation;
 pub mod background;
