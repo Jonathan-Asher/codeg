@@ -47,6 +47,7 @@ import { EditMessageSettingsSection } from "@/components/settings/edit-message-s
 import { DesktopNotificationSettingsSection } from "@/components/settings/desktop-notification-settings"
 import { NotificationSoundSettingsSection } from "@/components/settings/notification-sound-settings"
 import { CriticalSessionSettingsSection } from "@/components/settings/critical-session-settings"
+import { IphonePushSettingsSection } from "@/components/settings/iphone-push-settings"
 import { ResumeAfterRestartSettingsSection } from "@/components/settings/resume-after-restart-settings"
 import { LimitContinueSettingsSection } from "@/components/settings/limit-continue-settings"
 import { QuickAskSettingsSection } from "@/components/settings/quick-ask-settings"
@@ -543,6 +544,9 @@ export function GeneralSettings() {
 
         {/* The alerts for sessions marked critical (the backend's watchdog). */}
         <CriticalSessionSettingsSection />
+
+        {/* The same notifications on the iPhone, through APNs. */}
+        <IphonePushSettingsSection />
       </div>
     </ScrollArea>
   )

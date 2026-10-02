@@ -4067,6 +4067,63 @@ export interface AutoResumeStatus {
   stopped: boolean
 }
 
+// --- iPhone push (Rust `crate::push`) ---
+
+export type ApnsEnvironment = "production" | "sandbox"
+
+/** "iPhone push" settings, minus the `.p8` key (which never leaves the
+ *  backend's keyring). */
+export interface PushSettings {
+  team_id: string
+  key_id: string
+  bundle_id: string
+  /** Environment of a device that registers without saying. */
+  environment: ApnsEnvironment
+  /** App language the notifications are worded in. */
+  language: string
+}
+
+export interface PushSettingsView extends PushSettings {
+  has_key: boolean
+  /** The keyring would not open. */
+  key_error: string | null
+  /** This server's push identity, sent in every notification. */
+  server_id: string
+  configured: boolean
+}
+
+/** When a kind of push goes out (Rust `push::prefs::Delivery`). */
+export type PushDelivery = "always" | "away" | "off"
+
+export interface PushDevicePrefs {
+  turn_finished: PushDelivery
+  needs_you: PushDelivery
+  critical: boolean
+  errors: boolean
+}
+
+export interface PushDevice {
+  id: number
+  name: string
+  platform: string
+  environment: string
+  bundle_id: string
+  /** The token's tail, "…1a2b3c4d". */
+  token_hint: string
+  prefs: PushDevicePrefs
+  created_at: string
+  last_seen_at: string
+}
+
+export interface TestPushResult {
+  device_id: number
+  name: string
+  ok: boolean
+  error: string | null
+  /** Apple said the token is dead; the device was removed. */
+  removed: boolean
+}
+
 // --- Critical sessions ---
 
 /** "Critical sessions" (Rust `CriticalSessionSettings`). Stored by the

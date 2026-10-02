@@ -46,7 +46,9 @@ pub mod pet_state_mapper;
 pub mod pets;
 #[cfg(feature = "tauri-runtime")]
 pub mod preferences;
+pub mod presence;
 pub mod process;
+pub mod push;
 pub mod supervise;
 mod terminal;
 pub mod turn_timings;
@@ -97,6 +99,7 @@ mod tauri_app {
         auto_resume as auto_resume_commands,
         critical_sessions as critical_sessions_commands,
         limit_continue as limit_continue_commands,
+        push as push_commands,
         conversation_export as conversation_export_commands,
         message_search as message_search_commands,
         conversations,
@@ -1290,6 +1293,17 @@ mod tauri_app {
                     crate::web::event_bridge::EventEmitter::Tauri(app.handle().clone()),
                 ));
 
+                // iPhone push for the desktop notification's moments (turn
+                // finished, needs you, errors). Mirrored in
+                // `bin/codeg_server.rs`.
+                tauri::async_runtime::spawn(crate::push::fanout::push_event_task(
+                    app.state::<std::sync::Arc<crate::acp::InternalEventBus>>()
+                        .inner()
+                        .clone(),
+                    app.state::<ConnectionManager>().clone_ref(),
+                    app.state::<crate::db::AppDatabase>().conn.clone(),
+                ));
+
                 // OS `codeg://` URLs. Register the listener after the DB is
                 // live so a warm-start click can look the conversation up.
                 // Cold-start URLs are also read here and baked into the main
@@ -1725,6 +1739,14 @@ mod tauri_app {
                 limit_continue_commands::cancel_limit_continue,
                 limit_continue_commands::continue_limit_now,
                 limit_continue_commands::update_conversation_limit_auto_continue,
+                push_commands::get_push_settings,
+                push_commands::update_push_settings,
+                push_commands::register_push_device,
+                push_commands::unregister_push_device,
+                push_commands::list_push_devices,
+                push_commands::update_push_device_prefs,
+                push_commands::send_test_push,
+                push_commands::report_client_presence,
                 message_search_commands::message_search,
                 conversations::get_folder_conversation_turns,
                 conversations::list_folders,

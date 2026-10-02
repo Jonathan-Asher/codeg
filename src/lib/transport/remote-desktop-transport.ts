@@ -5,6 +5,7 @@ import type { AttachTransportHost } from "./web-event-stream"
 import { WebEventStream } from "./web-event-stream"
 import type {
   CallOptions,
+  ClientPresence,
   ConnectionHealth,
   ConnectionHealthSource,
   EventStream,
@@ -12,6 +13,7 @@ import type {
   Transport,
   UnsubscribeFn,
 } from "./types"
+import { presenceFrame } from "./types"
 
 // See WebTransport for rationale. Bounded so an older remote codeg-server
 // (no `__ready__` support) can't permanently hang the desktop UI.
@@ -361,6 +363,14 @@ export class RemoteDesktopTransport
     return this.eventStreamInstance
   }
 
+  /** The latest presence report, re-sent on every new socket. */
+  private presence: ClientPresence | null = null
+
+  reportPresence(presence: ClientPresence): void {
+    this.presence = presence
+    this.sendWsFrame(presenceFrame(presence))
+  }
+
   private sendWsFrame(frame: object): boolean {
     if (!this.wsOpen) return false
     const text = JSON.stringify(frame)
@@ -469,6 +479,8 @@ export class RemoteDesktopTransport
           console.error("[RemoteDesktopTransport] wsReady callback threw:", err)
         }
       }
+      // A new socket starts as "not looking" on the server.
+      if (this.presence) this.sendWsFrame(presenceFrame(this.presence))
       if (this.hasReadiedOnce || this.missedWhileDown) {
         // Reconnect path: server-side receiver_count was 0 during the
         // disconnect window, so any event fired in that gap was dropped.

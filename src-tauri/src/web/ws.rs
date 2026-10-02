@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
 use axum::{
     extract::{Extension, WebSocketUpgrade},
+    http::HeaderMap,
     response::IntoResponse,
 };
 use tokio::sync::mpsc;
@@ -14,32 +14,7 @@ use super::shutdown::ShutdownSignal;
 use super::ws_attach::{self, ClientMsg, DetachReason, ServerMsg, OUTBOUND_CAPACITY};
 use crate::app_state::AppState;
 use crate::logging::throttle::{LagLogThrottle, LAG_LOG_WINDOW};
-
-/// Live event WebSockets: browsers, remote desktop windows. Read by the
-/// critical session watchdog to tell "nobody is connected" (send the alert to
-/// a chat channel instead).
-static CONNECTED_CLIENTS: AtomicUsize = AtomicUsize::new(0);
-
-/// Counts one live event WebSocket for as long as it is held.
-struct ConnectedClient;
-
-impl ConnectedClient {
-    fn new() -> Self {
-        CONNECTED_CLIENTS.fetch_add(1, Ordering::Relaxed);
-        Self
-    }
-}
-
-impl Drop for ConnectedClient {
-    fn drop(&mut self) {
-        CONNECTED_CLIENTS.fetch_sub(1, Ordering::Relaxed);
-    }
-}
-
-/// How many event WebSockets are connected right now.
-pub fn connected_client_count() -> usize {
-    CONNECTED_CLIENTS.load(Ordering::Relaxed)
-}
+use crate::presence::{ClientKind, PresenceReport, SocketPresence};
 
 /// One entry per live attach subscription. The `epoch` is the per-WS-session
 /// monotonic counter assigned at spawn time; it threads through the cleanup
@@ -77,17 +52,26 @@ const WS_READY_CHANNEL: &str = "__ready__";
 
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
+    headers: HeaderMap,
     Extension(state): Extension<Arc<AppState>>,
     Extension(shutdown_signal): Extension<Arc<ShutdownSignal>>,
 ) -> impl IntoResponse {
+    // The client kind rides as an extra offered subprotocol
+    // (`codeg-client.ios`); the server still selects only `codeg-events`.
+    let kind = ClientKind::from_ws_protocols(
+        headers
+            .get("sec-websocket-protocol")
+            .and_then(|v| v.to_str().ok()),
+    );
     ws.protocols([super::auth::WS_EVENT_PROTOCOL])
-        .on_upgrade(|socket| handle_ws_connection(socket, state, shutdown_signal))
+        .on_upgrade(move |socket| handle_ws_connection(socket, state, shutdown_signal, kind))
 }
 
 async fn handle_ws_connection(
     mut socket: WebSocket,
     state: Arc<AppState>,
     shutdown_signal: Arc<ShutdownSignal>,
+    kind: ClientKind,
 ) {
     // Late handshake guard: if shutdown already fired before this task
     // even started, exit before subscribing to anything else.
@@ -95,7 +79,10 @@ async fn handle_ws_connection(
         let _ = socket.send(Message::Close(None)).await;
         return;
     }
-    let _connected = ConnectedClient::new();
+    // This socket's presence: it counts as someone looking only once it
+    // reports visible and focused (see `crate::presence`), never for merely
+    // being open.
+    let presence = SocketPresence::register(kind);
 
     // Legacy global firehose subscriber. Removed in Phase 4 once all
     // transports use the attach protocol.
@@ -251,6 +238,7 @@ async fn handle_ws_connection(
                             Ok(cmsg) => {
                                 handle_client_msg(
                                     cmsg,
+                                    &presence,
                                     &state,
                                     &outbound_tx,
                                     &cleanup_tx,
@@ -281,6 +269,7 @@ async fn handle_ws_connection(
 
 async fn handle_client_msg(
     msg: ClientMsg,
+    presence: &SocketPresence,
     state: &Arc<AppState>,
     outbound_tx: &mpsc::Sender<ServerMsg>,
     cleanup_tx: &mpsc::Sender<(String, u64)>,
@@ -351,6 +340,17 @@ async fn handle_client_msg(
         ClientMsg::Ping => {
             let _ = outbound_tx.send(ServerMsg::Pong).await;
         }
+        ClientMsg::Presence {
+            visible,
+            focused,
+            idle_secs,
+            conversation_ids,
+        } => presence.report(PresenceReport {
+            visible,
+            focused,
+            idle_secs,
+            conversation_ids,
+        }),
     }
 }
 

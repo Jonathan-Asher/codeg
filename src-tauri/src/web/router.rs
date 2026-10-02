@@ -193,6 +193,25 @@ pub fn build_router(
             "/update_critical_session_settings",
             post(handlers::critical_sessions::update_critical_session_settings),
         )
+        .route("/get_push_settings", post(handlers::push::get_push_settings))
+        .route(
+            "/update_push_settings",
+            post(handlers::push::update_push_settings),
+        )
+        .route(
+            "/register_push_device",
+            post(handlers::push::register_push_device),
+        )
+        .route(
+            "/unregister_push_device",
+            post(handlers::push::unregister_push_device),
+        )
+        .route("/list_push_devices", post(handlers::push::list_push_devices))
+        .route(
+            "/update_push_device_prefs",
+            post(handlers::push::update_push_device_prefs),
+        )
+        .route("/send_test_push", post(handlers::push::send_test_push))
         .route(
             "/message_search",
             post(handlers::message_search::message_search),

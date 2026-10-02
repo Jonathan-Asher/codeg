@@ -12,6 +12,7 @@ import { AppearanceProvider } from "@/components/appearance-provider"
 import { OverlayScrollbarsInit } from "@/components/overlay-scrollbars-init"
 import { ClipboardFallbackInit } from "@/components/clipboard-fallback-init"
 import { WebConnectionGuard } from "@/components/connection/web-connection-guard"
+import { PresenceReporter } from "@/components/presence-reporter"
 import { WindowResizeGrips } from "@/components/layout/window-resize-grips"
 import { CloseRequestDialog } from "@/components/workspace/close-request-dialog"
 
@@ -73,6 +74,9 @@ export default async function RootLayout({
                 <OverlayScrollbarsInit />
                 <ClipboardFallbackInit />
                 <WebConnectionGuard />
+                {/* Whether the user is looking at this window: decides the
+                    iPhone push and the critical alerts' channel fallback. */}
+                <PresenceReporter />
                 <WindowResizeGrips />
                 {/* Self-gated to the main window: every route it can show
                     (/workspace, /login, the redirecting /) must be able to

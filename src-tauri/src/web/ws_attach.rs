@@ -51,6 +51,20 @@ pub enum ClientMsg {
     Detach { subscription_id: String },
     /// Liveness check. Server replies with `pong`.
     Ping,
+    /// The client's presence: whether the user is looking at it, and at
+    /// which session (see `crate::presence`). Sent on connect, on every
+    /// change, and at least every 30 s; no reply. A socket that never sends
+    /// one never counts as someone looking.
+    Presence {
+        #[serde(default)]
+        visible: bool,
+        #[serde(default)]
+        focused: bool,
+        #[serde(default)]
+        idle_secs: u64,
+        #[serde(default)]
+        conversation_ids: Vec<i32>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]

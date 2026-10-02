@@ -3,10 +3,12 @@ import type { AttachTransportHost } from "./web-event-stream"
 import { WebEventStream } from "./web-event-stream"
 import type {
   CallOptions,
+  ClientPresence,
   EventStream,
   Transport,
   UnsubscribeFn,
 } from "./types"
+import { presenceFrame } from "./types"
 import { buildCodegWebSocketProtocols } from "./ws-auth"
 import { parseJsonOrThrow } from "../json-parse-error"
 import { getCodegToken } from "./web-auth"
@@ -372,6 +374,14 @@ export class WebTransport implements Transport {
     return this.eventStreamInstance
   }
 
+  /** The latest presence report, re-sent on every new socket. */
+  private presence: ClientPresence | null = null
+
+  reportPresence(presence: ClientPresence): void {
+    this.presence = presence
+    this.sendWsFrame(presenceFrame(presence))
+  }
+
   private sendWsFrame(frame: object): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false
     try {
@@ -426,6 +436,8 @@ export class WebTransport implements Transport {
           console.error("[WebTransport] wsReady callback threw:", err)
         }
       }
+      // A new socket starts as "not looking" on the server.
+      if (this.presence) this.sendWsFrame(presenceFrame(this.presence))
     }
 
     this.ws.onmessage = (msg) => {
