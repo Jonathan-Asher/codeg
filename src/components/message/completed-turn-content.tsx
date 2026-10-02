@@ -323,8 +323,18 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
   // has not been written yet, so applying it would withhold the toggle for the
   // whole stream and hand it over one beat before the turn ends. Folding a live
   // reply is then an explicit choice; the round settling re-applies the rule.
+  //
+  // With stretches (a Stop hook reopened the turn), "ends on progress" is read
+  // off the LAST stretch: an earlier stretch's answer does not make it safe to
+  // fold away the card the reply finally stopped on.
+  const lastSegment = split.segments[split.segments.length - 1]
+  const endsOnProgress =
+    !!lastSegment &&
+    lastSegment.progress.length > 0 &&
+    !hasVisibleAnswer(lastSegment.answer)
   const foldable =
-    split.progress.length > 0 && (!completed || hasVisibleAnswer(split.answer))
+    split.progress.length > 0 &&
+    (!completed || (hasVisibleAnswer(split.answer) && !endsOnProgress))
 
   const label = !completed
     ? t("working")

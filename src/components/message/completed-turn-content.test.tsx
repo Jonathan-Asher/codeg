@@ -183,6 +183,31 @@ describe("a reply a Stop hook reopened", () => {
     expect(screen.queryByText("Neither file changed")).not.toBeInTheDocument()
   })
 
+  it("stays expanded when the reply to the hook stopped on its work", () => {
+    // The earlier stretch's answer must not make it safe to fold away the card
+    // the reply finally stopped on.
+    const parts: AdaptedContentPart[] = [
+      ...stopHookTurn().slice(0, 4),
+      {
+        type: "tool-call",
+        toolCallId: "call-final",
+        toolName: "attempt_completion",
+        input: '{"result":"Checked in the browser."}',
+        state: "output-available",
+        output: null,
+      },
+    ]
+    renderWithIntl(
+      <CompletedTurnContent parts={parts} durationMs={9_000} completed />
+    )
+
+    expect(screen.queryByRole("button", { name: /Worked for/ })).toBeNull()
+    expect(screen.getByText(/Decision for you:/)).toBeInTheDocument()
+    expect(
+      screen.getAllByText("Checked in the browser.").length
+    ).toBeGreaterThan(0)
+  })
+
   it("shows the marker inline while the turn is still running", () => {
     renderWithIntl(
       <CompletedTurnContent
