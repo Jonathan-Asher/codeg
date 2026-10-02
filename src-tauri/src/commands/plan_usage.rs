@@ -435,6 +435,11 @@ pub fn observe_claude_usage_meta(emitter: &EventEmitter, meta: &serde_json::Map<
     let Some(info) = meta.get(CLAUDE_RATE_LIMIT_META_KEY) else {
         return;
     };
+    if let Some(reset) = claude_rejection_reset(info) {
+        *CLAUDE_REJECTION
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((reset, now_secs()));
+    }
     let Some(update) = parse_claude_rate_limit(info) else {
         return;
     };
@@ -449,6 +454,75 @@ pub fn observe_claude_usage_meta(emitter: &EventEmitter, meta: &serde_json::Map<
 
 fn claude_snapshot() -> Option<PlanUsageSnapshot> {
     with_claude_store(|slot| slot.clone())
+}
+
+// ─── Usage-limit resets (for `acp::limit_continue`) ─────────────────────
+
+/// The newest Claude rate-limit event that said the account is blocked
+/// (`status: "rejected"`): when the blocking window resets, and when the
+/// event was seen (both epoch seconds).
+static CLAUDE_REJECTION: Mutex<Option<(i64, i64)>> = Mutex::new(None);
+
+/// How long a "rejected" event stays the answer to "when does the limit
+/// that just stopped a turn reset". The event and the failed turn arrive
+/// together; an older one is about an earlier block.
+const CLAUDE_REJECTION_MAX_AGE_SECS: i64 = 15 * 60;
+
+/// The reset time a `_claude/rateLimit` payload gives for the window that
+/// blocked the account: its `resetsAt` when `status` is `rejected`.
+pub(crate) fn claude_rejection_reset(info: &Value) -> Option<i64> {
+    if info.get("status").and_then(Value::as_str) != Some("rejected") {
+        return None;
+    }
+    info.get("resetsAt").and_then(epoch_secs)
+}
+
+/// The exact reset of the Claude limit that blocked the account, from a
+/// recent "rejected" rate-limit event, if one is still ahead of `now`.
+pub fn claude_blocking_reset(now: i64) -> Option<i64> {
+    let (resets_at, seen_at) = (*CLAUDE_REJECTION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()))?;
+    (now - seen_at <= CLAUDE_REJECTION_MAX_AGE_SECS && resets_at > now).then_some(resets_at)
+}
+
+/// The last known reset of one Claude window (`five_hour`, `seven_day`,
+/// `seven_day_opus`, …), from the merged plan-usage reading.
+pub fn claude_window_reset(id: &str) -> Option<i64> {
+    claude_snapshot()?
+        .windows
+        .into_iter()
+        .find(|w| w.id == id)
+        .and_then(|w| w.resets_at)
+}
+
+/// When the Codex window that is used up resets, from the newest rollout
+/// reading: the latest reset among the windows at their limit (or, when the
+/// reading says the account is limited without naming one, the latest
+/// reset of all). `None` when no reading is newer than `since` or none
+/// resets after `now`.
+pub fn codex_blocking_reset_of(snapshot: &PlanUsageSnapshot, since: i64, now: i64) -> Option<i64> {
+    if snapshot.observed_at < since {
+        return None;
+    }
+    let spent: Vec<i64> = snapshot
+        .windows
+        .iter()
+        .filter(|w| w.used_percent >= 99.5)
+        .filter_map(|w| w.resets_at)
+        .collect();
+    let candidates = if spent.is_empty() && snapshot.status.as_deref() == Some("limited") {
+        snapshot.windows.iter().filter_map(|w| w.resets_at).collect()
+    } else {
+        spent
+    };
+    candidates.into_iter().filter(|at| *at > now).max()
+}
+
+/// [`codex_blocking_reset_of`] on a fresh look at the rollouts.
+pub async fn codex_blocking_reset(since: i64, now: i64) -> Option<i64> {
+    let scan = codex_scan(true).await;
+    codex_blocking_reset_of(scan.snapshot.as_ref()?, since, now)
 }
 
 // ─── Codex (session rollouts) ───────────────────────────────────────────

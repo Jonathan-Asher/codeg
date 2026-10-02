@@ -43,6 +43,7 @@ import {
   elapsedSeconds,
   postCriticalNotification,
 } from "@/lib/critical-sessions"
+import { limitResetParts } from "@/lib/limit-continue"
 import { playCriticalAlertSound } from "@/lib/notification-sound"
 import { openNotificationTargetFromClick } from "@/lib/notification-target"
 import { onTransportReconnect, subscribe } from "@/lib/platform"
@@ -71,12 +72,14 @@ export function criticalAlertText(
   const session = liveTitle?.trim() || alert.title?.trim() || t("untitled")
   const { unit, count } = elapsedDuration(elapsedSeconds(alert.since, now))
   const elapsed = t(`duration.${unit}`, { count })
+  // A usage-limit pause names when the limit resets.
+  const time = alert.resets_at ? limitResetParts(alert.resets_at, now).time : ""
   return {
     headline,
     session,
     title: t("notificationTitle", { headline, session }),
     redactedTitle: t("notificationTitleRedacted", { headline }),
-    body: t(`body.${CRITICAL_ALERT_BODY_KEYS[alert.kind]}`, { elapsed }),
+    body: t(`body.${CRITICAL_ALERT_BODY_KEYS[alert.kind]}`, { elapsed, time }),
   }
 }
 

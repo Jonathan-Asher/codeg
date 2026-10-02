@@ -631,6 +631,13 @@ pub struct SessionState {
     /// `delegation_call_id`-bound child outcome. Cleared on the next prompt.
     pub last_assistant_text: Option<String>,
 
+    /// The agent's words when the turn that just ended stopped on the
+    /// account's usage limit ("You've hit your weekly limit · resets 10pm
+    /// (Asia/Jerusalem)"). Written by the connection right before it emits
+    /// `TurnComplete`, taken by the lifecycle subscriber, which pauses the
+    /// conversation until the limit resets (`acp::limit_continue`).
+    pub turn_usage_limit: Option<String>,
+
     /// The in-flight user prompt for the current turn, captured from
     /// `AcpEvent::UserMessage` and cleared on `TurnComplete` (alongside
     /// `live_message`). Carried on `to_snapshot()` so a client attaching
@@ -774,6 +781,7 @@ impl SessionState {
             async_tasks: BTreeMap::new(),
             async_task_activity_at: None,
             last_assistant_text: None,
+            turn_usage_limit: None,
             pending_user_message: None,
             pending_user_message_started_at: None,
             turn_in_flight: false,

@@ -1,4 +1,5 @@
 import { isResumeAfterRestartPrompt } from "@/lib/auto-resume"
+import { isLimitContinuePrompt } from "@/lib/limit-continue"
 import { isContinuePrompt } from "@/lib/continue-turn"
 import type { ContentBlock, MessageTurn } from "@/lib/types"
 
@@ -24,7 +25,8 @@ function textOf(turn: MessageTurn): string {
  * the same text twice is one entry to step through, not two. Continue turns
  * are skipped too: they came from a button (see `lib/continue-turn`), so Up
  * after a Continue recalls the last thing the user actually wrote. So is the
- * prompt codeg itself sent to resume a turn after a restart (`lib/auto-resume`).
+ * prompt codeg itself sent to resume a turn after a restart (`lib/auto-resume`)
+ * or to continue once the usage limit reset (`lib/limit-continue`).
  */
 export function userPromptHistory(
   turns: readonly MessageTurn[] | undefined
@@ -34,7 +36,12 @@ export function userPromptHistory(
   for (const turn of turns) {
     if (turn.role !== "user") continue
     const text = textOf(turn)
-    if (!text || isContinuePrompt(text) || isResumeAfterRestartPrompt(text)) {
+    if (
+      !text ||
+      isContinuePrompt(text) ||
+      isResumeAfterRestartPrompt(text) ||
+      isLimitContinuePrompt(text)
+    ) {
       continue
     }
     if (out[out.length - 1] === text) continue

@@ -70,6 +70,9 @@ export function withLiveSummaryFields(
     // Marked or unmarked critical from any client (or this one, optimistically).
     critical: live.critical,
     critical_stall: live.critical_stall,
+    // Paused on the usage limit, continued, or the switch flipped anywhere.
+    limit_pause: live.limit_pause,
+    limit_auto_continue: live.limit_auto_continue,
   }
 }
 

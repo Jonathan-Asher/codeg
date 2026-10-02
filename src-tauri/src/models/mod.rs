@@ -25,7 +25,7 @@ pub use chat_channel::{ChannelStatusInfo, ChatChannelInfo, ChatChannelMessageLog
 pub use conversation::{
     AgentConversationCount, AgentStats, ConversationDetail, ConversationSummary,
     ConversationTurnsPage, DbConversationDetail, DbConversationSummary, FolderInfo,
-    ImportFolderOutcome, ImportResult, ImportSelectedResult, ScanFolder, ScanResult, ScanSession,
+    ImportFolderOutcome, ImportResult, ImportSelectedResult, LimitPause, ScanFolder, ScanResult, ScanSession,
     ScanSessionStatus, SelectedSessionKey, SessionStats, SidebarData,
 };
 pub use folder::{

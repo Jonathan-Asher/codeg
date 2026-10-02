@@ -2,6 +2,7 @@ pub mod acp;
 pub mod app_update;
 pub mod auto_resume;
 pub mod critical_sessions;
+pub mod limit_continue;
 pub mod automation;
 pub mod canvas;
 pub mod background;

@@ -92,6 +92,7 @@ import { ConversationStatusDot } from "./conversation-status-dot"
 import { SessionDetailsDialog } from "./session-details-dialog"
 import { SidebarConversationHoverDetails } from "./sidebar-conversation-hover-details"
 import { SessionActivityIcon } from "./session-activity"
+import { useLimitResetParts } from "./limit-pause"
 import { AgentIcon } from "@/components/agent-icon"
 
 /**
@@ -336,6 +337,11 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   const activity = summaryActivity(conversation, attention)
   const isRunning = activity === "working"
   const isInterrupted = activity === "interrupted"
+  // Paused on the usage limit: the row says until when.
+  const isLimitPaused = activity === "limit_paused"
+  const limitReset = useLimitResetParts(
+    isLimitPaused ? conversation.limit_pause?.resets_at : null
+  )
   // When this conversation is open in a tab here, that tab's connection says
   // whether the agent can be reached right now: still opening the session, or
   // failed to. The selector yields a primitive, so the row re-renders only
@@ -668,6 +674,21 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                           <SessionActivityIcon activity="connect_failed" />
                           <span className="sr-only">
                             {tActivity("connectFailed")}
+                          </span>
+                        </span>
+                      ) : isLimitPaused ? (
+                        <span
+                          className="relative inline-flex shrink-0 items-center justify-center"
+                          title={tActivity("limitPausedBadge", {
+                            time: limitReset?.time ?? "",
+                          })}
+                          data-testid="conversation-limit-paused-badge"
+                        >
+                          <SessionActivityIcon activity="limit_paused" />
+                          <span className="sr-only">
+                            {tActivity("limitPausedBadge", {
+                              time: limitReset?.time ?? "",
+                            })}
                           </span>
                         </span>
                       ) : isInterrupted ? (

@@ -1750,6 +1750,17 @@
     "description": "Se o codeg fechar, travar ou reiniciar para uma atualização no meio de um turno, essas sessões são retomadas na próxima inicialização. Cada interrupção é retomada no máximo uma vez.",
     "saveFailed": "Não foi possível salvar a configuração: {message}"
   },
+  "LimitContinueSettings": {
+    "title": "Continuar automaticamente quando o limite de uso for redefinido",
+    "description": "Quando um turno para porque sua conta atingiu o limite de uso, a sessão continua sozinha pouco depois de o limite ser redefinido — sem janela aberta e mesmo após reiniciar. No máximo 3 tentativas por pausa.",
+    "saveFailed": "Falha ao salvar a configuração: {message}"
+  },
+  "LimitContinueSession": {
+    "heading": "Limite de uso",
+    "toggle": "Continuar quando o limite de uso for redefinido",
+    "toggleHint": "Retomar esta sessão sozinha quando o limite de uso da conta for redefinido. A configuração em Geral também precisa estar ativada.",
+    "saveFailed": "Falha ao salvar: {message}"
+  },
   "AutoResume": {
     "title": "Retomando {count, plural, one {# sessão interrompida} other {# sessões interrompidas}} pelo reinício",
     "settledTitle": "Sessões interrompidas pelo reinício",
@@ -2208,7 +2219,19 @@
       "connectingHint": "O agente está abrindo esta sessão. As mensagens enviadas agora aguardam até que ela esteja pronta.",
       "connectFailed": "Não foi possível conectar",
       "connectFailedHint": "Não foi possível contatar o agente. Tente de novo para abrir a sessão.",
-      "retry": "Tentar de novo"
+      "retry": "Tentar de novo",
+      "limitPaused": "Pausado — o limite é redefinido às {time} (em {remaining})",
+      "limitPausedHint": "A conta atingiu o limite de uso. Esta sessão continua sozinha pouco depois de o limite ser redefinido.",
+      "limitClaimed": "Continuando — o limite de uso foi redefinido",
+      "limitBannerTitle": "Pausado pelo limite de uso",
+      "limitBannerDescription": "Continua automaticamente quando for redefinido às {time} (em {remaining}).",
+      "limitBannerClaimed": "O limite foi redefinido — continuando agora.",
+      "cancelAutoContinue": "Cancelar continuação automática",
+      "cancelAutoContinueTitle": "Não continuar sozinho: deixar o turno interrompido, com Continuar",
+      "continueNow": "Continuar agora",
+      "continueNowTitle": "Enviar a continuação agora — pode atingir o limite de novo",
+      "limitActionFailed": "Não foi possível atualizar a sessão pausada: {message}",
+      "limitPausedBadge": "Pausado até o limite de uso ser redefinido às {time}"
     },
     "conversationCard": {
       "untitledConversation": "Conversa sem título",
@@ -3686,7 +3709,9 @@
         "continued": "Continuado",
         "continuedHint": "Você pediu ao agente para prosseguir",
         "resumedAfterRestart": "Retomada após reinício",
-        "resumedAfterRestartHint": "O codeg reiniciou no meio deste turno e retomou a sessão por conta própria"
+        "resumedAfterRestartHint": "O codeg reiniciou no meio deste turno e retomou a sessão por conta própria",
+        "continuedAfterLimit": "Continuado após o limite ser redefinido",
+        "continuedAfterLimitHint": "O limite de uso da conta foi redefinido e o codeg continuou a sessão sozinho"
       },
       "liveTurnStats": {
         "thinking": "Pensando...",
@@ -5321,14 +5346,18 @@
       "idle": "Sessão crítica aguardando",
       "needsYou": "Uma sessão crítica precisa de você",
       "interrupted": "Sessão crítica interrompida",
-      "stalled": "Uma sessão crítica pode estar travada"
+      "stalled": "Uma sessão crítica pode estar travada",
+      "limitPaused": "Sessão crítica pausada",
+      "limitContinued": "Sessão crítica retomada"
     },
     "body": {
       "idle": "O agente terminou o turno há {elapsed} e nada aconteceu desde então.",
       "needsYou": "O agente está aguardando sua resposta há {elapsed}.",
       "interrupted": "O último turno foi interrompido há {elapsed} e nada aconteceu desde então.",
       "stalled": "Um turno está em andamento, mas nada foi transmitido há {elapsed}.",
-      "backgroundStalled": "Tarefas em segundo plano estão em execução, mas nenhuma progrediu há {elapsed}."
+      "backgroundStalled": "Tarefas em segundo plano estão em execução, mas nenhuma progrediu há {elapsed}.",
+      "limitPaused": "Pausada até {time} — limite de uso",
+      "limitContinued": "O limite de uso foi redefinido e a sessão continuou sozinha."
     },
     "duration": {
       "seconds": "{count} s",

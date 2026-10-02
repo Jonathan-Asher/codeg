@@ -359,9 +359,14 @@ pub(crate) async fn handle_event(
             else {
                 return Ok(());
             };
-            let (conversation_id, last_text) = {
-                let snap = state_arc.read().await;
-                (snap.conversation_id, snap.last_assistant_text.clone())
+            let (conversation_id, last_text, agent_type, usage_limit) = {
+                let mut snap = state_arc.write().await;
+                (
+                    snap.conversation_id,
+                    snap.last_assistant_text.clone(),
+                    snap.agent_type,
+                    snap.turn_usage_limit.take(),
+                )
             };
             // No conversation row bound (defensive — should never happen in
             // practice since `send_prompt_linked` runs before TurnComplete can
@@ -374,8 +379,27 @@ pub(crate) async fn handle_event(
             // transition. DB write before emit so any downstream subscriber
             // that observes the ConversationStatusChanged event can assume the
             // row is already at the target status.
-            let wrote =
-                conversation_service::finish_turn(db_conn, cid, target_status.clone()).await?;
+            //
+            // A turn that stopped on the account's usage limit is paused until
+            // the limit resets instead (`acp::limit_continue`), in the same
+            // write.
+            let wrote = match usage_limit {
+                Some(text) => {
+                    crate::acp::limit_continue::finish_limited_turn(
+                        db_conn,
+                        manager,
+                        &emitter,
+                        cid,
+                        agent_type,
+                        target_status.clone(),
+                        &text,
+                    )
+                    .await?
+                }
+                None => {
+                    conversation_service::finish_turn(db_conn, cid, target_status.clone()).await?
+                }
+            };
             if let Some(ts) = target_status.clone() {
                 emit_with_state(
                     &state_arc,

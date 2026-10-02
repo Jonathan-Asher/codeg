@@ -11371,6 +11371,14 @@ async fn run_conversation_loop(
                                         current_session_model_id(state).await,
                                     )
                                     .await;
+                                    // An agent without the AIR failure records
+                                    // rejects a prompt that hit the account's
+                                    // usage limit with the limit's own words:
+                                    // pause like the AIR path does.
+                                    state.write().await.turn_usage_limit =
+                                        crate::acp::limit_continue::usage_limit_text_from_error(
+                                            &e.to_string(),
+                                        );
                                     // Same wedge guard as the normal turn exit
                                     // below — see there for why the drain and the
                                     // event must share one critical section.
@@ -11482,6 +11490,14 @@ async fn run_conversation_loop(
                             // permission on this connection from displaying. A
                             // no-op on the normal path (an agent blocked on
                             // approval does not end its turn).
+                            //
+                            // A turn that stopped on the account's usage limit
+                            // hands the agent's words to the lifecycle
+                            // subscriber first, which pauses the conversation
+                            // until the limit resets (`acp::limit_continue`).
+                            state.write().await.turn_usage_limit = terminal_failure
+                                .as_ref()
+                                .and_then(crate::acp::limit_continue::usage_limit_text_from_failure);
                             drain_permissions_then_emit(
                                 perms,
                                 state,

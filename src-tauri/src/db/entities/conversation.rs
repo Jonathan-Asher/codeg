@@ -59,6 +59,27 @@ pub enum ConversationAutoResume {
     Cancelled,
 }
 
+/// Where a conversation paused by the account's usage limit stands with
+/// respect to the automatic continuation (`acp::limit_continue`). `None` on
+/// the row means no pause.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::None)")]
+#[serde(rename_all = "snake_case")]
+pub enum ConversationLimitResume {
+    /// The last turn ended on the usage limit; a continuation goes out once
+    /// the limit resets (`limit_resume_at`).
+    #[sea_orm(string_value = "scheduled")]
+    Scheduled,
+    /// The continuation is being sent (the session is being reopened). The
+    /// next turn to start on the conversation is that continuation.
+    #[sea_orm(string_value = "claimed")]
+    Claimed,
+    /// The continuation's turn runs. Hitting the limit again reschedules it
+    /// (up to the attempt cap); any other end settles the pause.
+    #[sea_orm(string_value = "continuing")]
+    Continuing,
+}
+
 /// What kind of row this conversation is — drives sidebar visibility and
 /// grouping. `regular` renders under its folder group; `chat` renders in the
 /// flat "Chat" section; `loop` belongs to the Loop Engineering workbench and is
@@ -145,6 +166,18 @@ pub struct Model {
     /// has streamed nothing for the stall threshold. Defaults on; ignored
     /// while `critical` is false.
     pub critical_stall: bool,
+    /// When the usage limit that paused this conversation resets (UTC). Set
+    /// together with `limit_resume_state`; `None` means no pause. Written
+    /// only through the `conversation_service` limit functions.
+    pub limit_resume_at: Option<DateTimeUtc>,
+    /// Where the pause stands; see [`ConversationLimitResume`].
+    pub limit_resume_state: Option<ConversationLimitResume>,
+    /// Continuations sent for the current pause. Capped: a limit that keeps
+    /// coming back ends as a plain interruption.
+    pub limit_resume_attempts: i32,
+    /// Per-session switch for the continuation after the usage limit resets.
+    /// On by default; the global setting has to be on too.
+    pub limit_auto_continue: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

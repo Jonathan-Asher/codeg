@@ -31,6 +31,7 @@ import { AgentIcon } from "@/components/agent-icon"
 import { ConversationStatusDot } from "./conversation-status-dot"
 import { SessionActivityRow } from "./session-activity"
 import { CriticalSessionSection } from "./critical-session-section"
+import { LimitContinueSessionSection } from "./limit-continue-session-section"
 
 interface SessionDetailsContentProps {
   summary: DbConversationSummary
@@ -444,6 +445,9 @@ export function SessionDetailsContent({
 
       {/* Alert when this session sits idle (or a turn goes silent). */}
       <CriticalSessionSection summary={summary} />
+
+      {/* Continue by itself once the account's usage limit resets. */}
+      <LimitContinueSessionSection summary={summary} />
 
       {/* Identifiers, packed two-up to keep the view short. */}
       <dl className="grid grid-cols-1 gap-x-4 gap-y-3 border-t pt-4 @[20rem]:grid-cols-2">

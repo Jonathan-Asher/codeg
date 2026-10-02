@@ -1750,6 +1750,17 @@
     "description": "Si codeg se cierra, falla o se reinicia para actualizarse a mitad de un turno, esas sesiones se retoman en el siguiente inicio. Cada interrupción se reanuda como máximo una vez.",
     "saveFailed": "No se pudo guardar el ajuste: {message}"
   },
+  "LimitContinueSettings": {
+    "title": "Continuar automáticamente cuando se restablezca el límite de uso",
+    "description": "Cuando un turno se detiene porque tu cuenta alcanzó su límite de uso, continúa la sesión sola poco después de que el límite se restablezca, sin ninguna ventana abierta y también tras reiniciar. Como máximo 3 intentos por pausa.",
+    "saveFailed": "No se pudo guardar el ajuste: {message}"
+  },
+  "LimitContinueSession": {
+    "heading": "Límite de uso",
+    "toggle": "Continuar cuando se restablezca el límite de uso",
+    "toggleHint": "Retomar esta sesión sola cuando se restablezca el límite de uso de la cuenta. También requiere activar el ajuste en General.",
+    "saveFailed": "No se pudo guardar: {message}"
+  },
   "AutoResume": {
     "title": "Reanudando {count, plural, one {# sesión interrumpida} other {# sesiones interrumpidas}} por el reinicio",
     "settledTitle": "Sesiones interrumpidas por el reinicio",
@@ -2208,7 +2219,19 @@
       "connectingHint": "El agente está abriendo esta sesión. Los mensajes que envíes ahora esperan hasta que esté lista.",
       "connectFailed": "No se pudo conectar",
       "connectFailedHint": "No se pudo contactar con el agente. Reintenta para abrir la sesión de nuevo.",
-      "retry": "Reintentar"
+      "retry": "Reintentar",
+      "limitPaused": "En pausa — el límite se restablece a las {time} (en {remaining})",
+      "limitPausedHint": "La cuenta alcanzó su límite de uso. Esta sesión continuará sola poco después de que se restablezca el límite.",
+      "limitClaimed": "Continuando — el límite de uso se restableció",
+      "limitBannerTitle": "En pausa por el límite de uso",
+      "limitBannerDescription": "Continuará automáticamente cuando se restablezca a las {time} (en {remaining}).",
+      "limitBannerClaimed": "El límite se restableció — continuando ahora.",
+      "cancelAutoContinue": "Cancelar la continuación automática",
+      "cancelAutoContinueTitle": "No continuar solo: dejar el turno interrumpido, con Continuar",
+      "continueNow": "Continuar ahora",
+      "continueNowTitle": "Enviar la continuación ahora — puede volver a alcanzar el límite",
+      "limitActionFailed": "No se pudo actualizar la sesión en pausa: {message}",
+      "limitPausedBadge": "En pausa hasta que el límite de uso se restablezca a las {time}"
     },
     "conversationCard": {
       "untitledConversation": "Conversación sin título",
@@ -3686,7 +3709,9 @@
         "continued": "Continuado",
         "continuedHint": "Le pediste al agente que siguiera",
         "resumedAfterRestart": "Reanudada tras el reinicio",
-        "resumedAfterRestartHint": "codeg se reinició a mitad de este turno y retomó la sesión por su cuenta"
+        "resumedAfterRestartHint": "codeg se reinició a mitad de este turno y retomó la sesión por su cuenta",
+        "continuedAfterLimit": "Continuado tras restablecerse el límite",
+        "continuedAfterLimitHint": "El límite de uso de la cuenta se restableció y codeg continuó la sesión por su cuenta"
       },
       "liveTurnStats": {
         "thinking": "Pensando...",
@@ -5321,14 +5346,18 @@
       "idle": "Sesión crítica en espera",
       "needsYou": "Una sesión crítica te necesita",
       "interrupted": "Sesión crítica interrumpida",
-      "stalled": "Una sesión crítica podría estar atascada"
+      "stalled": "Una sesión crítica podría estar atascada",
+      "limitPaused": "Sesión crítica en pausa",
+      "limitContinued": "Sesión crítica reanudada"
     },
     "body": {
       "idle": "El agente terminó su turno hace {elapsed} y no ha pasado nada desde entonces.",
       "needsYou": "El agente lleva {elapsed} esperando tu respuesta.",
       "interrupted": "El último turno se cortó hace {elapsed} y no ha pasado nada desde entonces.",
       "stalled": "Hay un turno en curso, pero no transmite nada desde hace {elapsed}.",
-      "backgroundStalled": "Hay tareas en segundo plano en curso, pero ninguna avanza desde hace {elapsed}."
+      "backgroundStalled": "Hay tareas en segundo plano en curso, pero ninguna avanza desde hace {elapsed}.",
+      "limitPaused": "En pausa hasta las {time} — límite de uso",
+      "limitContinued": "El límite de uso se restableció y la sesión continuó sola."
     },
     "duration": {
       "seconds": "{count} s",

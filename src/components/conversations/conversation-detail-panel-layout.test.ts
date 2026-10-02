@@ -602,10 +602,10 @@ describe("ConversationDetailPanel session-load failure surface", () => {
       "hideInput={isWelcomeMode || Boolean(acpLoadError)}"
     )
     // …and the banner takes its place, explaining why and offering recovery.
-    // It outranks the interrupted-turn banner, which shares the slot: a
-    // session that can't be loaded can't be continued either.
+    // It outranks the usage-limit and interrupted-turn banners, which share
+    // the slot: a session that can't be loaded can't be continued either.
     expect(source).toContain(
-      "composerBanner={acpLoadErrorBanner ?? interruptedBanner}"
+      "acpLoadErrorBanner ?? limitPausedBanner ?? interruptedBanner"
     )
     const bannerStart = source.indexOf("const acpLoadErrorBanner")
     expect(bannerStart).toBeGreaterThan(-1)
@@ -654,6 +654,19 @@ describe("ConversationDetailPanel session-load failure surface", () => {
     expect(block).toContain('persistedTurnState === "interrupted"')
     expect(block).toContain('connStatus !== "prompting"')
     expect(block).toContain("msgQueue.length === 0")
+  })
+
+  it("shows the usage-limit pause while the session waits for the reset", () => {
+    const start = source.indexOf("const waitingPause = waitingLimitPause(")
+    expect(start).toBeGreaterThan(-1)
+    const end = source.indexOf("const goalControlValue", start)
+    const block = source.slice(start, end)
+    // Read from the persisted row, so it shows with no live connection.
+    expect(block).toContain("limit_pause: persistedLimitPause")
+    // Gone the moment a turn streams (the continuation, or the user's own).
+    expect(block).toContain('persistedTurnState !== "running"')
+    expect(block).toContain('connStatus !== "prompting"')
+    expect(block).toContain("<LimitPausedBanner")
   })
 
   it("gates the composer's Continue on this tab's own session activity", () => {

@@ -154,6 +154,26 @@ pub fn build_router(
             post(handlers::critical_sessions::update_conversation_critical),
         )
         .route(
+            "/get_limit_continue_settings",
+            post(handlers::limit_continue::get_limit_continue_settings),
+        )
+        .route(
+            "/update_limit_continue_settings",
+            post(handlers::limit_continue::update_limit_continue_settings),
+        )
+        .route(
+            "/cancel_limit_continue",
+            post(handlers::limit_continue::cancel_limit_continue),
+        )
+        .route(
+            "/continue_limit_now",
+            post(handlers::limit_continue::continue_limit_now),
+        )
+        .route(
+            "/update_conversation_limit_auto_continue",
+            post(handlers::limit_continue::update_conversation_limit_auto_continue),
+        )
+        .route(
             "/get_critical_alerts",
             post(handlers::critical_sessions::get_critical_alerts),
         )
