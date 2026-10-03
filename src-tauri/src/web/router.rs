@@ -213,6 +213,18 @@ pub fn build_router(
         )
         .route("/send_test_push", post(handlers::push::send_test_push))
         .route(
+            "/refine_dictation",
+            post(handlers::dictation_refine::refine_dictation),
+        )
+        .route(
+            "/get_dictation_refine_settings",
+            post(handlers::dictation_refine::get_dictation_refine_settings),
+        )
+        .route(
+            "/update_dictation_refine_settings",
+            post(handlers::dictation_refine::update_dictation_refine_settings),
+        )
+        .route(
             "/message_search",
             post(handlers::message_search::message_search),
         )

@@ -29,6 +29,9 @@ pub mod chat_channel;
 pub mod commands;
 pub mod db;
 pub mod deep_link;
+/// Dictation clean-up and translation for clients that transcribe speech
+/// themselves (the iOS app).
+pub mod dictation_refine;
 pub mod folder_links;
 pub mod forge;
 pub mod git_credential;
@@ -105,6 +108,7 @@ mod tauri_app {
         conversations,
         custom_skills as custom_skills_commands,
         deepseek_settings as deepseek_settings_commands, delegation as delegation_commands,
+        dictation_refine as dictation_refine_commands,
         experts as experts_commands, feedback as feedback_commands, file_io, folder_commands,
         folder_links, office_tools as office_tools_commands, open_in,
         folders, logging as logging_commands, mcp as mcp_commands,
@@ -1747,6 +1751,9 @@ mod tauri_app {
                 push_commands::update_push_device_prefs,
                 push_commands::send_test_push,
                 push_commands::report_client_presence,
+                dictation_refine_commands::refine_dictation,
+                dictation_refine_commands::get_dictation_refine_settings,
+                dictation_refine_commands::update_dictation_refine_settings,
                 message_search_commands::message_search,
                 conversations::get_folder_conversation_turns,
                 conversations::list_folders,
