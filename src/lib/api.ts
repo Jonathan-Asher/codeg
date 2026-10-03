@@ -173,6 +173,10 @@ import type {
   PushSettings,
   PushSettingsView,
   TestPushResult,
+  DictationRefineSettingsUpdate,
+  DictationRefineSettingsView,
+  RefineDictationArgs,
+  RefineDictationResult,
   CloseRequestPayload,
   CloseWindowBehavior,
   SystemCloseBehaviorSettingsView,
@@ -2131,6 +2135,25 @@ export async function sendTestPush(
     "send_test_push",
     deviceId === undefined ? {} : { deviceId }
   )
+}
+
+// --- Dictation clean-up and translation ---
+
+export async function getDictationRefineSettings(): Promise<DictationRefineSettingsView> {
+  return getTransport().call("get_dictation_refine_settings")
+}
+
+export async function updateDictationRefineSettings(
+  update: DictationRefineSettingsUpdate
+): Promise<DictationRefineSettingsView> {
+  return getTransport().call("update_dictation_refine_settings", { ...update })
+}
+
+/** Clean up and/or translate a dictation with the configured provider. */
+export async function refineDictation(
+  args: RefineDictationArgs
+): Promise<RefineDictationResult> {
+  return getTransport().call("refine_dictation", { ...args })
 }
 
 // --- Close window behavior ---
