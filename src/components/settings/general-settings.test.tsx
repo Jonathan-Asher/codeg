@@ -68,6 +68,8 @@ vi.mock("@/lib/api", () => ({
   // The iPhone push section stays hidden (its own test covers it).
   getPushSettings: vi.fn(() => new Promise(() => {})),
   listPushDevices: vi.fn(async () => []),
+  // So does the dictation section.
+  getDictationRefineSettings: vi.fn(() => new Promise(() => {})),
 }))
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))

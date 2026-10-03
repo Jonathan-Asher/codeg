@@ -33,6 +33,9 @@ pub mod custom_agents;
 pub mod custom_skills;
 pub mod deepseek_settings;
 pub mod delegation;
+/// Dictation clean-up and translation. Compiled in every runtime: the iOS app
+/// calls it on codeg-server.
+pub mod dictation_refine;
 pub mod experts;
 pub mod feedback;
 #[cfg(feature = "tauri-runtime")]

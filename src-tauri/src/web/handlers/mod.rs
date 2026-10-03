@@ -18,6 +18,7 @@ pub mod config_sync;
 pub mod conversations;
 pub mod custom_skills;
 pub mod delegation;
+pub mod dictation_refine;
 mod error;
 pub mod event_metrics;
 pub mod experts;

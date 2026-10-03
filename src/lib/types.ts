@@ -4124,6 +4124,78 @@ export interface TestPushResult {
   removed: boolean
 }
 
+// --- Dictation clean-up and translation ---
+
+/** Rust `dictation_refine::RefineProvider`. */
+export type DictationRefineProviderId =
+  | "groq"
+  | "cerebras"
+  | "openai"
+  | "anthropic"
+  | "google"
+  | "custom"
+
+/** Rust `DictationRefineSettings`. Keys are never part of it. */
+export interface DictationRefineSettings {
+  provider: DictationRefineProviderId
+  /** Model override; "" uses the provider's default. */
+  model: string
+  /** The custom provider's base URL. */
+  endpoint: string
+  targetLanguage: string
+  refine: boolean
+  translate: boolean
+  instructions: string
+}
+
+export interface DictationRefineProvider {
+  id: DictationRefineProviderId
+  label: string
+  hasKey: boolean
+  /** null for Google (no model) and custom (no default). */
+  defaultModel: string | null
+}
+
+export interface DictationRefineSettingsView extends DictationRefineSettings {
+  /** The selected provider can be called. */
+  configured: boolean
+  providers: DictationRefineProvider[]
+  /** The key store would not open. */
+  keyError: string | null
+}
+
+/** A partial update: absent fields keep their value. `apiKey` replaces the
+ *  key of `keyProvider` (default: the provider after the update); "" removes
+ *  it. */
+export interface DictationRefineSettingsUpdate {
+  provider?: DictationRefineProviderId
+  model?: string
+  endpoint?: string
+  targetLanguage?: string
+  refine?: boolean
+  translate?: boolean
+  instructions?: string
+  apiKey?: string
+  keyProvider?: DictationRefineProviderId
+}
+
+/** `refine_dictation`'s arguments; null/absent falls back to the settings. */
+export interface RefineDictationArgs {
+  text: string
+  translate?: boolean | null
+  refine?: boolean | null
+  targetLanguage?: string | null
+  sourceLanguage?: string | null
+}
+
+export interface RefineDictationResult {
+  text: string
+  /** The provider id, or "none" when neither step was asked for. */
+  provider: string
+  model: string
+  elapsedMs: number
+}
+
 // --- Critical sessions ---
 
 /** "Critical sessions" (Rust `CriticalSessionSettings`). Stored by the

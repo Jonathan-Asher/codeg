@@ -48,6 +48,7 @@ import { DesktopNotificationSettingsSection } from "@/components/settings/deskto
 import { NotificationSoundSettingsSection } from "@/components/settings/notification-sound-settings"
 import { CriticalSessionSettingsSection } from "@/components/settings/critical-session-settings"
 import { IphonePushSettingsSection } from "@/components/settings/iphone-push-settings"
+import { DictationRefineSettingsSection } from "@/components/settings/dictation-refine-settings"
 import { ResumeAfterRestartSettingsSection } from "@/components/settings/resume-after-restart-settings"
 import { LimitContinueSettingsSection } from "@/components/settings/limit-continue-settings"
 import { QuickAskSettingsSection } from "@/components/settings/quick-ask-settings"
@@ -547,6 +548,9 @@ export function GeneralSettings() {
 
         {/* The same notifications on the iPhone, through APNs. */}
         <IphonePushSettingsSection />
+
+        {/* What the iPhone's dictation goes through before the agent. */}
+        <DictationRefineSettingsSection />
       </div>
     </ScrollArea>
   )
