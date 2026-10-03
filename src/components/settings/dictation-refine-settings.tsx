@@ -55,6 +55,15 @@ const PROVIDER_LABEL = {
 export const DICTATION_TEST_SAMPLE =
   "אה… תשמע, בעצם, אני צריך לשלוח, אני צריך לשלוח את המסמך ללקוח עד מחר בבוקר."
 
+/** Picking another provider drops the model override: model ids rarely
+ *  carry across providers (the backend does the same). */
+export function withProvider(
+  form: DictationRefineSettings,
+  provider: DictationRefineProviderId
+): DictationRefineSettings {
+  return provider === form.provider ? form : { ...form, provider, model: "" }
+}
+
 function formFrom(view: DictationRefineSettingsView): DictationRefineSettings {
   return {
     provider: view.provider,
@@ -186,12 +195,7 @@ export function DictationRefineSettingsSection() {
             <Select
               value={form.provider}
               onValueChange={(value) =>
-                setForm({
-                  ...form,
-                  provider: value as DictationRefineProviderId,
-                  // Model ids rarely carry across providers.
-                  model: "",
-                })
+                setForm(withProvider(form, value as DictationRefineProviderId))
               }
             >
               <SelectTrigger

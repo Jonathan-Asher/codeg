@@ -4,7 +4,10 @@ import { NextIntlClientProvider } from "next-intl"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import enMessages from "@/i18n/messages/en.json"
-import type { DictationRefineSettingsView } from "@/lib/types"
+import type {
+  DictationRefineSettings,
+  DictationRefineSettingsView,
+} from "@/lib/types"
 
 const h = vi.hoisted(() => ({
   getDictationRefineSettings: vi.fn(),
@@ -17,6 +20,7 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 import {
   DICTATION_TEST_SAMPLE,
   DictationRefineSettingsSection,
+  withProvider,
 } from "./dictation-refine-settings"
 
 const PROVIDERS: DictationRefineSettingsView["providers"] = [
@@ -66,7 +70,7 @@ const VIEW: DictationRefineSettingsView = {
   keyError: null,
 }
 
-const FORM = {
+const FORM: DictationRefineSettings = {
   provider: "groq",
   model: "",
   endpoint: "",
@@ -177,28 +181,46 @@ describe("DictationRefineSettingsSection", () => {
     )
   })
 
-  it("switching provider resets the model and shows what that provider needs", async () => {
-    const user = userEvent.setup()
+  it("shows what Google and a custom endpoint need", async () => {
     h.getDictationRefineSettings.mockResolvedValue({
       ...VIEW,
-      model: "openai/gpt-oss-20b",
+      provider: "google",
     })
-    renderSection()
-    await user.click(await screen.findByRole("combobox", { name: "Provider" }))
-    await user.click(
-      await screen.findByRole("option", { name: "Google Cloud Translation" })
-    )
+    const { unmount } = renderSection()
+    expect(
+      (await screen.findByRole("combobox", { name: "Provider" })).textContent
+    ).toBe("Google Cloud Translation")
     expect(screen.queryByLabelText("Model")).toBeNull()
+    expect(screen.queryByLabelText("Endpoint")).toBeNull()
     expect(screen.getByText(/Google can only translate/)).toBeTruthy()
     expect(screen.getByText("No key saved for this provider yet.")).toBeTruthy()
+    unmount()
 
-    await user.click(screen.getByRole("combobox", { name: "Provider" }))
-    await user.click(
-      await screen.findByRole("option", { name: "Custom (OpenAI-compatible)" })
+    h.getDictationRefineSettings.mockResolvedValue({
+      ...VIEW,
+      provider: "custom",
+      endpoint: "http://localhost:11434/v1",
+      model: "llama3",
+    })
+    renderSection()
+    expect(
+      ((await screen.findByLabelText("Endpoint")) as HTMLInputElement).value
+    ).toBe("http://localhost:11434/v1")
+    expect((screen.getByLabelText("Model") as HTMLInputElement).value).toBe(
+      "llama3"
     )
-    expect((screen.getByLabelText("Model") as HTMLInputElement).value).toBe("")
-    expect(screen.getByLabelText("Endpoint")).toBeTruthy()
+    expect(screen.getByText("Required for a custom endpoint.")).toBeTruthy()
     expect(screen.getByText(/Optional: a local server/)).toBeTruthy()
+  })
+
+  it("drops the model override when the provider changes", () => {
+    const form = { ...FORM, model: "openai/gpt-oss-20b" }
+    expect(withProvider(form, "anthropic")).toEqual({
+      ...form,
+      provider: "anthropic",
+      model: "",
+    })
+    expect(withProvider(form, "groq")).toBe(form)
   })
 
   it("tests the saved settings on a Hebrew sample and shows the answer", async () => {
