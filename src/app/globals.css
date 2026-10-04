@@ -2421,6 +2421,15 @@ div.monaco-diff-editor.side-by-side .editor.modified {
   opacity: 0;
 }
 
+/* A grouped strip holds a dragged tab inside its own group (TabItem's lane
+   clamp). While the pointer pulls past the group's edge, the whole document
+   shows "no drop here" — it has to beat every element's own cursor, the
+   tab's grab cursor included. */
+html.tab-drag-blocked,
+html.tab-drag-blocked * {
+  cursor: not-allowed !important;
+}
+
 /* Under a workspace background image, lift the inter-tab separators (and the
    trailing new-conversation divider) to the boosted `--ws-chrome-border` so they
    match the tab's own arch / strip-line border color instead of the faint
