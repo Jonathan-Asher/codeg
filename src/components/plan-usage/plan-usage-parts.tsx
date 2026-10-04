@@ -149,22 +149,24 @@ export function WindowResetText({
   )
 }
 
-/** A window's usage bar, tinted as it gets tight and faded once the window
- *  has rolled over past its reading. */
+/** A window's usage bar, tinted as it gets tight (or by `level`, when the
+ *  caller judges tightness differently) and faded once the window has rolled
+ *  over past its reading. */
 export function WindowUsageBar({
   limit,
   title,
   now,
+  level = usageLevel(limit.used_percent),
   className,
 }: {
   limit: PlanUsageWindow
   title: string
   now: number
+  level?: PlanUsageLevel
   className?: string
 }) {
   const t = useTranslations("PlanUsage")
   const { used } = splitPercent(limit.used_percent)
-  const level = usageLevel(limit.used_percent)
   // The shared Progress draws `value` but doesn't hand it to Radix, so the
   // bar would read as indeterminate; state the number explicitly.
   return (

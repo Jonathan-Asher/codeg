@@ -6449,7 +6449,54 @@
     "preview": {
       "percent": "{percent}%",
       "staleEntry": "{entry}（已过时）",
-      "openFullView": "打开完整视图"
+      "openFullView": "打开完整视图",
+      "poolExhausted": "{count} 个已耗尽",
+      "poolExhaustedShort": "{count} 耗尽"
+    },
+    "pool": {
+      "label": "账号池",
+      "labelTitle": "请求经由本地账号池（maxpool）发送",
+      "labelVersion": "请求经由本地账号池（maxpool {version}）发送",
+      "accounts": "{count, plural, other {# 个账号}}",
+      "serving": "<b>{name}</b> 正在使用",
+      "noneServing": "没有正在使用的账号",
+      "nextReset": "{duration}后下次重置",
+      "servingBadge": "使用中",
+      "preferredBadge": "首选",
+      "state": {
+        "exhausted": "已耗尽",
+        "at_threshold": "超过阈值",
+        "cooling_down": "冷却中",
+        "failing": "故障",
+        "disabled": "已停用"
+      },
+      "stateHint": {
+        "exhausted": "已达到上限。重置前，账号池会把请求发往其他账号。",
+        "at_threshold": "已超过账号池的切换阈值（{threshold}%）。窗口重置前，新请求会发往其他账号。",
+        "cooling_down": "因错误或速率限制而短暂暂停。",
+        "failing": "处于账号池不会路由的错误状态，例如登录已无法续期。请检查 maxpool。",
+        "disabled": "已在账号池配置中关闭。"
+      },
+      "backIn": "{duration}后恢复",
+      "signInFailed": "登录已无法续期",
+      "probeFailing": "用量查询失败——数字可能已过时",
+      "probeFailingStatus": "用量查询失败（HTTP {status}）——数字可能已过时",
+      "noWindows": "暂无用量读数",
+      "allExhausted": "所有账号都已达到上限。最早的一个将在{duration}后可用。",
+      "allExhaustedUnknown": "所有账号都已达到上限。",
+      "staleNotice": "账号池没有响应（{error}）。显示的是{duration}前的读数。",
+      "unansweredNotice": "已配置账号池，但它没有响应（{error}）。显示的是智能体自己的读数。",
+      "error": {
+        "unreachable": "无法连接",
+        "timeout": "超时",
+        "unauthorized": "密钥被拒绝",
+        "http_status": "HTTP {status}",
+        "invalid_response": "响应异常",
+        "config_unreadable": "配置无法读取"
+      },
+      "liveReading": "智能体最近上报的读数",
+      "liveReadingHint": "它描述的是处理上一轮的账号池账号，因此可能与上面的账号不一致。",
+      "privacyNote": "账号池的数字来自 maxpool 的本地状态接口；codeg 只从其配置中读取代理的地址和密钥，从不读取各账号的登录凭据。"
     }
   },
   "Forge": {

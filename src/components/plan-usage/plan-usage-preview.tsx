@@ -6,14 +6,18 @@ import { AgentIcon } from "@/components/agent-icon"
 import { Badge } from "@/components/ui/badge"
 import { getAgentLabel } from "@/lib/custom-agents"
 import {
+  activePool,
   findSnapshot,
+  isPoolStale,
   isSnapshotStale,
   PLAN_USAGE_AGENTS,
   splitPercent,
+  unansweredPool,
   type PlanUsagePreviewEntry,
 } from "@/lib/plan-usage"
 import type {
   PlanUsageAgent,
+  PlanUsagePool,
   PlanUsageReport,
   PlanUsageSnapshot,
   PlanUsageWindow,
@@ -27,6 +31,12 @@ import {
   WindowResetText,
   WindowUsageBar,
 } from "./plan-usage-parts"
+import {
+  PoolAccountList,
+  PoolNotices,
+  PoolSummaryLine,
+  UnansweredPoolNotice,
+} from "./plan-usage-pool"
 
 /** Short provider names for the status bar, where "Claude Code" is too wide.
  *  Product names, so not translated. */
@@ -40,6 +50,10 @@ const SHORT_NAME: Record<PlanUsageAgent, string> = {
  * percentage used — `Claude 35% · Codex 99%` — tinted amber from 75% and red
  * from 90% (or once the limit is reached), dimmed and italic when the reading
  * is stale. `showNames` off leaves just the numbers, for the compact bar.
+ *
+ * Behind an account pool the agent's entry names the serving account and
+ * shows its 5-hour window (`backup 56%`), tinted from the pool's switch
+ * threshold, with a count when any account is exhausted.
  */
 export function PlanUsageInlinePreview({
   entries,
@@ -68,6 +82,11 @@ export function PlanUsageInlinePreview({
             className={cn(entry.stale && "italic opacity-60")}
           >
             {showNames && `${SHORT_NAME[entry.agent]} `}
+            {showNames && entry.pool && (
+              <>
+                <bdi data-slot="pool-account">{entry.pool.account}</bdi>{" "}
+              </>
+            )}
             <span
               className={cn(
                 LEVEL_TEXT[entry.level],
@@ -76,6 +95,20 @@ export function PlanUsageInlinePreview({
             >
               {t("preview.percent", { percent: entry.percent })}
             </span>
+            {entry.pool && entry.pool.exhausted > 0 && (
+              <span
+                data-slot="pool-exhausted-count"
+                className="ms-1 text-destructive"
+              >
+                {showNames
+                  ? t("preview.poolExhausted", {
+                      count: entry.pool.exhausted,
+                    })
+                  : t("preview.poolExhaustedShort", {
+                      count: entry.pool.exhausted,
+                    })}
+              </span>
+            )}
           </span>
         </Fragment>
       ))}
@@ -91,9 +124,15 @@ export function usePlanUsagePreviewSummary(
   const t = useTranslations("PlanUsage")
   const format = useFormatter()
   const parts = entries.map((entry) => {
-    const text = `${SHORT_NAME[entry.agent]} ${t("preview.percent", {
-      percent: entry.percent,
-    })}`
+    const name = entry.pool
+      ? `${SHORT_NAME[entry.agent]} ${entry.pool.account}`
+      : SHORT_NAME[entry.agent]
+    let text = `${name} ${t("preview.percent", { percent: entry.percent })}`
+    if (entry.pool && entry.pool.exhausted > 0) {
+      text = `${text} (${t("preview.poolExhausted", {
+        count: entry.pool.exhausted,
+      })})`
+    }
     return entry.stale ? t("preview.staleEntry", { entry: text }) : text
   })
   return format.list(parts, { style: "narrow", type: "conjunction" })
@@ -178,6 +217,15 @@ function PreviewProvider({
 }) {
   const label = getAgentLabel(agent)
   const hasData = snapshot != null && snapshot.windows.length > 0
+  const pool = activePool(report)
+  if (pool && pool.agent === agent) {
+    return (
+      <section aria-label={label} data-agent={agent} data-pool={pool.kind}>
+        <PoolReading agent={agent} label={label} pool={pool} now={now} />
+      </section>
+    )
+  }
+  const unanswered = unansweredPool(report)
   return (
     <section aria-label={label} data-agent={agent}>
       {hasData ? (
@@ -188,7 +236,53 @@ function PreviewProvider({
           <EmptyLine agent={agent} report={report} />
         </>
       )}
+      {unanswered && unanswered.agent === agent && (
+        <UnansweredPoolNotice pool={unanswered} compact />
+      )}
     </section>
+  )
+}
+
+function PoolReading({
+  agent,
+  label,
+  pool,
+  now,
+}: {
+  agent: PlanUsageAgent
+  label: string
+  pool: PlanUsagePool
+  now: number
+}) {
+  const t = useTranslations("PlanUsage")
+  const stale = isPoolStale(pool, now)
+  return (
+    <>
+      <ProviderHeading agent={agent} label={label}>
+        <span className="ms-auto flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground">
+          <span>{t("pool.label")}</span>
+          {stale && (
+            <Badge
+              variant="outline"
+              className="h-4 px-1.5 text-[0.625rem] text-muted-foreground"
+            >
+              {t("stale")}
+            </Badge>
+          )}
+        </span>
+      </ProviderHeading>
+      <PoolSummaryLine
+        pool={pool}
+        now={now}
+        className="mt-0.5 text-[0.6875rem]"
+      />
+      <div className="mt-1 space-y-1 empty:hidden">
+        <PoolNotices pool={pool} now={now} compact />
+      </div>
+      <div className="mt-1.5">
+        <PoolAccountList pool={pool} now={now} compact />
+      </div>
+    </>
   )
 }
 

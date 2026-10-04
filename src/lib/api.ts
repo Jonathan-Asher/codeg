@@ -212,6 +212,7 @@ import type {
   OfficecliInfo,
   OfficecliSkill,
   SkillSyncReport,
+  PlanUsagePool,
   PlanUsageReport,
   PlanUsageSnapshot,
   TokenUsageFacets,
@@ -3914,6 +3915,20 @@ export async function subscribePlanUsageChanged(
 ): Promise<() => void> {
   return getTransport().subscribe<PlanUsageSnapshot>(
     PLAN_USAGE_CHANGED_EVENT,
+    handler
+  )
+}
+
+/** Pushed on every read of the local account pool while one is configured,
+ *  and once as `null` when it goes away. See `PLAN_USAGE_POOL_CHANGED_EVENT`
+ *  in `web/event_bridge.rs`. */
+export const PLAN_USAGE_POOL_CHANGED_EVENT = "plan-usage://pool-changed"
+
+export async function subscribePlanUsagePoolChanged(
+  handler: (pool: PlanUsagePool | null) => void
+): Promise<() => void> {
+  return getTransport().subscribe<PlanUsagePool | null>(
+    PLAN_USAGE_POOL_CHANGED_EVENT,
     handler
   )
 }

@@ -6449,7 +6449,54 @@
     "preview": {
       "percent": "{percent} %",
       "staleEntry": "{entry} (veraltet)",
-      "openFullView": "Vollansicht öffnen"
+      "openFullView": "Vollansicht öffnen",
+      "poolExhausted": "{count} erschöpft",
+      "poolExhaustedShort": "{count} aus"
+    },
+    "pool": {
+      "label": "Konten-Pool",
+      "labelTitle": "Anfragen laufen über einen lokalen Konten-Pool (maxpool)",
+      "labelVersion": "Anfragen laufen über einen lokalen Konten-Pool (maxpool {version})",
+      "accounts": "{count, plural, one {# Konto} other {# Konten}}",
+      "serving": "<b>{name}</b> aktiv",
+      "noneServing": "kein Konto aktiv",
+      "nextReset": "nächster Reset in {duration}",
+      "servingBadge": "Aktiv",
+      "preferredBadge": "Bevorzugt",
+      "state": {
+        "exhausted": "Erschöpft",
+        "at_threshold": "Über Schwelle",
+        "cooling_down": "Abkühlphase",
+        "failing": "Fehlerhaft",
+        "disabled": "Deaktiviert"
+      },
+      "stateHint": {
+        "exhausted": "Am Limit. Der Pool leitet Anfragen an andere Konten, bis es zurückgesetzt wird.",
+        "at_threshold": "Über der Umschaltschwelle des Pools von {threshold} %. Neue Anfragen gehen an andere Konten, bis das Fenster zurückgesetzt wird.",
+        "cooling_down": "Nach einem Fehler oder Ratenlimit kurz pausiert.",
+        "failing": "In einem Fehlerzustand, in den der Pool nicht routet – etwa eine Anmeldung, die sich nicht mehr erneuern lässt. Prüfe maxpool.",
+        "disabled": "In der Pool-Konfiguration ausgeschaltet."
+      },
+      "backIn": "Wieder verfügbar in {duration}",
+      "signInFailed": "Anmeldung lässt sich nicht mehr erneuern",
+      "probeFailing": "Nutzungsabfrage schlägt fehl – Zahlen sind evtl. veraltet",
+      "probeFailingStatus": "Nutzungsabfrage schlägt fehl (HTTP {status}) – Zahlen sind evtl. veraltet",
+      "noWindows": "Noch keine Nutzungsdaten",
+      "allExhausted": "Alle Konten sind am Limit. Das erste wird in {duration} frei.",
+      "allExhaustedUnknown": "Alle Konten sind am Limit.",
+      "staleNotice": "Der Pool antwortet nicht ({error}). Angezeigt wird sein Stand von vor {duration}.",
+      "unansweredNotice": "Ein Konten-Pool ist eingerichtet, antwortet aber nicht ({error}). Angezeigt wird die eigene Messung des Agenten.",
+      "error": {
+        "unreachable": "nicht erreichbar",
+        "timeout": "Zeitüberschreitung",
+        "unauthorized": "Schlüssel abgelehnt",
+        "http_status": "HTTP {status}",
+        "invalid_response": "unerwartete Antwort",
+        "config_unreadable": "Konfiguration nicht lesbar"
+      },
+      "liveReading": "Letzte vom Agenten gemeldete Messung",
+      "liveReadingHint": "Sie beschreibt das Pool-Konto, das den letzten Turn bedient hat, und kann daher von den Konten oben abweichen.",
+      "privacyNote": "Die Zahlen des Konten-Pools stammen vom lokalen Status-Endpunkt von maxpool; codeg liest aus dessen Konfiguration nur Adresse und Schlüssel des Proxys, nie die Anmeldungen der Konten."
     }
   },
   "Forge": {

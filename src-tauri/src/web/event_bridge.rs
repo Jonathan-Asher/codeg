@@ -438,6 +438,13 @@ pub const TOKEN_USAGE_SYNC_PROGRESS_EVENT: &str = "token-usage-sync://progress";
 /// for that agent; clients replace their copy of it in place.
 pub const PLAN_USAGE_CHANGED_EVENT: &str = "plan-usage://changed";
 
+/// A new reading of the local account pool the agent's requests go through
+/// (see `commands::usage_pool`), sent on every poll while a pool is
+/// configured and once more, as `null`, when it goes away. Payload is
+/// `Option<`[`crate::commands::usage_pool::PlanUsagePool`]`>`; clients
+/// replace the report's `pool` with it.
+pub const PLAN_USAGE_POOL_CHANGED_EVENT: &str = "plan-usage://pool-changed";
+
 /// Unified event emission: serializes the payload exactly once and dispatches
 /// the shared `Arc<Value>` to both the Tauri webview and the web broadcaster.
 pub fn emit_event(emitter: &EventEmitter, event: &str, payload: impl Serialize) {

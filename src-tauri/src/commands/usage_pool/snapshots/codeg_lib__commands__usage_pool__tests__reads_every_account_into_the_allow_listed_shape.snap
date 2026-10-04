@@ -1,0 +1,133 @@
+---
+source: src/commands/usage_pool/tests.rs
+expression: fixture_pool()
+---
+{
+  "kind": "maxpool",
+  "agent": "claude_code",
+  "version": "9.9.9",
+  "accounts": [
+    {
+      "name": "alpha",
+      "enabled": true,
+      "status": "active",
+      "state": "exhausted",
+      "blocked_until": 1800007200,
+      "serving": false,
+      "preferred": true,
+      "windows": [
+        {
+          "id": "five_hour",
+          "kind": "session",
+          "label": "5h",
+          "used_percent": 100.0,
+          "resets_at": 1800007200,
+          "window_minutes": 300,
+          "observed_at": 1799999700
+        },
+        {
+          "id": "seven_day",
+          "kind": "weekly",
+          "label": "7d",
+          "used_percent": 51.0,
+          "resets_at": 1800259200,
+          "window_minutes": 10080,
+          "observed_at": 1799999700
+        }
+      ],
+      "limit_status": "rejected",
+      "weekly_state": "exhausted",
+      "cooling_until": null,
+      "in_flight": 0,
+      "probe_failures": 4,
+      "probe_error_status": 429,
+      "refresh_failed": false,
+      "observed_at": 1799999700
+    },
+    {
+      "name": "beta",
+      "enabled": true,
+      "status": "active",
+      "state": "available",
+      "blocked_until": null,
+      "serving": true,
+      "preferred": false,
+      "windows": [
+        {
+          "id": "five_hour",
+          "kind": "session",
+          "label": "5h",
+          "used_percent": 56.00000000000001,
+          "resets_at": 1800004320,
+          "window_minutes": 300,
+          "observed_at": 1799999880
+        },
+        {
+          "id": "seven_day",
+          "kind": "weekly",
+          "label": "7d",
+          "used_percent": 6.0,
+          "resets_at": 1800518400,
+          "window_minutes": 10080,
+          "observed_at": 1799999880
+        },
+        {
+          "id": "seven_day_orca",
+          "kind": "weekly_model",
+          "label": "Orca",
+          "used_percent": 30.0,
+          "resets_at": 1800518400,
+          "window_minutes": 10080,
+          "observed_at": 1799999880
+        }
+      ],
+      "limit_status": "allowed",
+      "weekly_state": "normal",
+      "cooling_until": null,
+      "in_flight": 2,
+      "probe_failures": 0,
+      "probe_error_status": null,
+      "refresh_failed": false,
+      "observed_at": 1799999880
+    },
+    {
+      "name": "gamma",
+      "enabled": false,
+      "status": "active",
+      "state": "disabled",
+      "blocked_until": null,
+      "serving": false,
+      "preferred": false,
+      "windows": [
+        {
+          "id": "five_hour",
+          "kind": "session",
+          "label": "5h",
+          "used_percent": 10.0,
+          "resets_at": null,
+          "window_minutes": 300,
+          "observed_at": null
+        }
+      ],
+      "limit_status": null,
+      "weekly_state": null,
+      "cooling_until": null,
+      "in_flight": 0,
+      "probe_failures": 0,
+      "probe_error_status": null,
+      "refresh_failed": false,
+      "observed_at": null
+    }
+  ],
+  "current_account": "beta",
+  "preferred_account": "alpha",
+  "routing_mode": "preferred",
+  "switch_threshold": 90.0,
+  "exhausted": false,
+  "resumes_at": null,
+  "observed_at": 1799999880,
+  "checked_at": 1800000000,
+  "stale": false,
+  "error": null,
+  "error_status": null
+}

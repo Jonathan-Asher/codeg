@@ -1,5 +1,8 @@
 import type {
   PlanUsageAgent,
+  PlanUsagePool,
+  PlanUsagePoolAccount,
+  PlanUsagePoolAccountState,
   PlanUsageReport,
   PlanUsageSnapshot,
   PlanUsageWindow,
@@ -49,21 +52,48 @@ export function replaceSnapshot(
   }
 }
 
+/** Fold a pushed account-pool reading into the report; `null` means the
+ *  pool went away. */
+export function replacePool(
+  report: PlanUsageReport | null,
+  pool: PlanUsagePool | null
+): PlanUsageReport {
+  const base: PlanUsageReport = report ?? {
+    snapshots: [],
+    codex_sessions_dir: null,
+    codex_rollouts_found: false,
+  }
+  return { ...base, pool }
+}
+
 /**
  * Take a fetched report without losing a live push that overtook it: a
  * Claude snapshot pushed while the request was in flight is newer than the
- * one the response carries (or the response has none yet), so it stays.
- * Everything else comes from the response as-is.
+ * one the response carries (or the response has none yet), so it stays; so
+ * does a pool reading taken after the response's. Everything else comes from
+ * the response as-is.
  */
 export function mergeFetchedReport(
   current: PlanUsageReport | null,
   fetched: PlanUsageReport
 ): PlanUsageReport {
+  let merged = fetched
   const pushed = findSnapshot(current, "claude_code")
-  if (!pushed || pushed.source !== "live") return fetched
-  const answered = findSnapshot(fetched, "claude_code")
-  if (answered && answered.observed_at >= pushed.observed_at) return fetched
-  return replaceSnapshot(fetched, pushed)
+  if (pushed && pushed.source === "live") {
+    const answered = findSnapshot(fetched, "claude_code")
+    if (!answered || answered.observed_at < pushed.observed_at) {
+      merged = replaceSnapshot(merged, pushed)
+    }
+  }
+  const pushedPool = current?.pool
+  if (
+    pushedPool &&
+    fetched.pool &&
+    pushedPool.checked_at > fetched.pool.checked_at
+  ) {
+    merged = { ...merged, pool: pushedPool }
+  }
+  return merged
 }
 
 export function isSnapshotStale(
@@ -126,8 +156,15 @@ export function tightestWindow(
   snapshot: PlanUsageSnapshot,
   now: number
 ): PlanUsageWindow | null {
+  return tightestOf(snapshot.windows, now)
+}
+
+function tightestOf(
+  windows: readonly PlanUsageWindow[],
+  now: number
+): PlanUsageWindow | null {
   let tightest: PlanUsageWindow | null = null
-  for (const window of snapshot.windows) {
+  for (const window of windows) {
     if (hasWindowReset(window, now)) continue
     if (tightest == null || window.used_percent > tightest.used_percent) {
       tightest = window
@@ -139,12 +176,16 @@ export function tightestWindow(
 /** One provider's entry in the status-bar preview. */
 export interface PlanUsagePreviewEntry {
   agent: PlanUsageAgent
-  /** Its tightest window. */
+  /** Its tightest window — or, behind an account pool, the serving
+   *  account's 5-hour window. */
   window: PlanUsageWindow
   /** Whole-number percent used, as `splitPercent` shows it. */
   percent: number
   level: PlanUsageLevel
   stale: boolean
+  /** Behind an account pool: the account serving now, and how many of the
+   *  pool's accounts are exhausted. */
+  pool?: { account: string; exhausted: number }
 }
 
 const LEVEL_RANK: Record<PlanUsageLevel, number> = {
@@ -165,7 +206,15 @@ export function planUsagePreview(
   now: number
 ): PlanUsagePreviewEntry[] {
   const entries: PlanUsagePreviewEntry[] = []
+  const pool = activePool(report)
   for (const agent of PLAN_USAGE_AGENTS) {
+    if (pool && pool.agent === agent) {
+      const entry = poolPreviewEntry(pool, now)
+      if (entry) {
+        entries.push(entry)
+        continue
+      }
+    }
     const snapshot = findSnapshot(report, agent)
     if (!snapshot) continue
     const window = tightestWindow(snapshot, now)
@@ -200,6 +249,146 @@ export function tightestPreviewEntry(
     }
   }
   return tightest
+}
+
+// ─── Account pool ───────────────────────────────────────────────────────
+
+/** A pool reading whose last ask is this old is no longer being refreshed
+ *  (the backend asks every minute). */
+export const PLAN_USAGE_POOL_STALE_AFTER_SECONDS = 10 * 60
+
+/** The report's account pool when it has accounts to show. A configured pool
+ *  that never answered has none: the agent's own reading stands in for it. */
+export function activePool(
+  report: PlanUsageReport | null
+): PlanUsagePool | null {
+  const pool = report?.pool
+  return pool && pool.accounts.length > 0 ? pool : null
+}
+
+/** A configured pool that never answered, for the notice beside the agent's
+ *  own reading. */
+export function unansweredPool(
+  report: PlanUsageReport | null
+): PlanUsagePool | null {
+  const pool = report?.pool
+  return pool && pool.accounts.length === 0 && pool.error != null ? pool : null
+}
+
+export function isPoolStale(pool: PlanUsagePool, now: number): boolean {
+  return (
+    pool.stale || now - pool.checked_at > PLAN_USAGE_POOL_STALE_AFTER_SECONDS
+  )
+}
+
+/** Tint for a pool account's window: amber from the pool's switch threshold,
+ *  where it moves requests elsewhere; red once the window is full. */
+export function poolUsageLevel(
+  usedPercent: number,
+  switchThreshold: number
+): PlanUsageLevel {
+  if (usedPercent >= 100) return "critical"
+  if (usedPercent >= switchThreshold) return "high"
+  return "normal"
+}
+
+const HELD_STATES: readonly PlanUsagePoolAccountState[] = [
+  "exhausted",
+  "at_threshold",
+  "cooling_down",
+]
+
+/** The account's state now: a hold that has run out since the reading
+ *  counts as over. */
+export function poolAccountState(
+  account: PlanUsagePoolAccount,
+  now: number
+): PlanUsagePoolAccountState {
+  if (
+    HELD_STATES.includes(account.state) &&
+    account.blocked_until != null &&
+    account.blocked_until <= now
+  ) {
+    return "available"
+  }
+  return account.state
+}
+
+/** The account the pool serves from now: the one it names, else the first
+ *  enabled account. */
+export function servingAccount(
+  pool: PlanUsagePool
+): PlanUsagePoolAccount | null {
+  return (
+    pool.accounts.find((a) => a.serving) ??
+    pool.accounts.find((a) => a.enabled) ??
+    null
+  )
+}
+
+/** How many enabled accounts are exhausted now. */
+export function exhaustedAccountCount(
+  pool: PlanUsagePool,
+  now: number
+): number {
+  return pool.accounts.filter(
+    (a) => a.enabled && poolAccountState(a, now) === "exhausted"
+  ).length
+}
+
+/** The next reset of any enabled account's window still ahead, in epoch
+ *  seconds; `null` when none is known. */
+export function poolNextReset(pool: PlanUsagePool, now: number): number | null {
+  let next: number | null = null
+  for (const account of pool.accounts) {
+    if (!account.enabled) continue
+    for (const window of account.windows) {
+      const at = window.resets_at
+      if (at != null && at > now && (next == null || at < next)) next = at
+    }
+  }
+  return next
+}
+
+/** Every enabled account is held back right now; `resumesAt` is when the
+ *  first frees up, if known. */
+export function poolExhaustion(
+  pool: PlanUsagePool,
+  now: number
+): { exhausted: boolean; resumesAt: number | null } {
+  if (!pool.exhausted) return { exhausted: false, resumesAt: null }
+  if (pool.resumes_at != null && pool.resumes_at <= now) {
+    return { exhausted: false, resumesAt: null }
+  }
+  return { exhausted: true, resumesAt: pool.resumes_at }
+}
+
+/** The status-bar entry behind a pool: the serving account's 5-hour window
+ *  (or its tightest, without one), red when every account is held back. */
+function poolPreviewEntry(
+  pool: PlanUsagePool,
+  now: number
+): PlanUsagePreviewEntry | null {
+  const account = servingAccount(pool)
+  if (!account) return null
+  const fiveHour = account.windows.find(
+    (w) => w.id === "five_hour" && !hasWindowReset(w, now)
+  )
+  const window = fiveHour ?? tightestOf(account.windows, now)
+  if (!window) return null
+  return {
+    agent: pool.agent,
+    window,
+    percent: splitPercent(window.used_percent).used,
+    level: poolExhaustion(pool, now).exhausted
+      ? "critical"
+      : poolUsageLevel(window.used_percent, pool.switch_threshold),
+    stale: isPoolStale(pool, now),
+    pool: {
+      account: account.name,
+      exhausted: exhaustedAccountCount(pool, now),
+    },
+  }
 }
 
 /** A window's display name as a message key (under `PlanUsage.window`) plus

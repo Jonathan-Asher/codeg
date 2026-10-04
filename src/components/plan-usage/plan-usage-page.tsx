@@ -1,7 +1,13 @@
 "use client"
 
 import { useLocale, useTranslations } from "next-intl"
-import { Gauge, RefreshCw, ShieldCheck } from "lucide-react"
+import {
+  ChevronDown,
+  ChevronRight,
+  Gauge,
+  RefreshCw,
+  ShieldCheck,
+} from "lucide-react"
 import { AgentIcon } from "@/components/agent-icon"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -10,17 +16,21 @@ import { WorkbenchPageTitle } from "@/components/workbench/workbench-page-title"
 import { usePlanUsageReport } from "@/hooks/use-plan-usage-report"
 import { getAgentLabel } from "@/lib/custom-agents"
 import {
+  activePool,
   findSnapshot,
   formatAbsoluteTime,
   formatCompactDuration,
   hasWindowReset,
+  isPoolStale,
   isSnapshotStale,
   PLAN_USAGE_AGENTS,
   splitPercent,
+  unansweredPool,
   windowLagSince,
 } from "@/lib/plan-usage"
 import type {
   PlanUsageAgent,
+  PlanUsagePool,
   PlanUsageReport,
   PlanUsageSnapshot,
   PlanUsageWindow,
@@ -34,6 +44,12 @@ import {
   WindowResetText,
   WindowUsageBar,
 } from "./plan-usage-parts"
+import {
+  PoolAccountList,
+  PoolNotices,
+  PoolSummaryLine,
+  UnansweredPoolNotice,
+} from "./plan-usage-pool"
 
 /** How often relative times ("resets in 2h 14m") re-render. */
 const TICK_MS = 30_000
@@ -61,7 +77,9 @@ export function PlanUsagePageTitle() {
  * The Subscription usage route: one card per provider, one bar per limit
  * window. Claude Code's numbers arrive live (pushed during a turn) and
  * survive restarts via the backend's saved copy; Codex's come from its newest
- * session log and are re-read on Refresh.
+ * session log and are re-read on Refresh. Behind a local account pool the
+ * Claude Code card lists every account in it instead, from the pool's own
+ * status, and keeps the live reading folded away beneath them.
  */
 export function PlanUsagePage() {
   const t = useTranslations("PlanUsage")
@@ -128,7 +146,10 @@ export function PlanUsagePage() {
                 className="mt-0.5 size-3 shrink-0"
                 aria-hidden="true"
               />
-              {t("privacyNote")}
+              <span>
+                {t("privacyNote")}
+                {report?.pool != null && <> {t("pool.privacyNote")}</>}
+              </span>
             </p>
           </div>
         </div>
@@ -156,6 +177,19 @@ function ProviderCard({
     hasData && !stale && snapshot.status && snapshot.status in STATUS_KEYS
       ? (snapshot.status as keyof typeof STATUS_KEYS)
       : null
+  const pool = activePool(report)
+  if (pool && pool.agent === agent) {
+    return (
+      <PoolProviderCard
+        agent={agent}
+        label={label}
+        pool={pool}
+        snapshot={hasData ? snapshot : null}
+        now={now}
+      />
+    )
+  }
+  const unanswered = unansweredPool(report)
 
   return (
     <section
@@ -193,6 +227,9 @@ function ProviderCard({
         )}
       </header>
 
+      {unanswered && unanswered.agent === agent && (
+        <UnansweredPoolNotice pool={unanswered} />
+      )}
       {hasData ? (
         <>
           <ObservedLine snapshot={snapshot} now={now} />
@@ -209,6 +246,92 @@ function ProviderCard({
         </>
       ) : (
         <EmptyState agent={agent} report={report} />
+      )}
+    </section>
+  )
+}
+
+/**
+ * The card behind an account pool: every account with its windows, which
+ * one serves, and why any is held back. The agent's own reading describes
+ * whichever account served last, so it is folded away underneath.
+ */
+function PoolProviderCard({
+  agent,
+  label,
+  pool,
+  snapshot,
+  now,
+}: {
+  agent: PlanUsageAgent
+  label: string
+  pool: PlanUsagePool
+  snapshot: PlanUsageSnapshot | null
+  now: number
+}) {
+  const t = useTranslations("PlanUsage")
+  const stale = isPoolStale(pool, now)
+  return (
+    <section
+      aria-label={label}
+      data-agent={agent}
+      data-pool={pool.kind}
+      className="flex flex-col rounded-xl border border-border bg-card p-4"
+    >
+      <header className="flex flex-wrap items-center gap-2">
+        <AgentIcon agentType={agent} className="size-4" />
+        <h2 className="text-[0.8125rem] font-semibold">{label}</h2>
+        <Badge
+          variant="secondary"
+          title={
+            pool.version
+              ? t("pool.labelVersion", { version: pool.version })
+              : t("pool.labelTitle")
+          }
+        >
+          {t("pool.label")}
+        </Badge>
+        {stale && (
+          <Badge variant="outline" className="text-muted-foreground">
+            {t("stale")}
+          </Badge>
+        )}
+      </header>
+      <PoolSummaryLine pool={pool} now={now} className="mt-1.5" />
+      <div className="mt-3 space-y-2 empty:hidden">
+        <PoolNotices pool={pool} now={now} />
+      </div>
+      <div className="mt-3">
+        <PoolAccountList pool={pool} now={now} />
+      </div>
+      {snapshot && (
+        <details data-slot="live-reading" className="group mt-4">
+          <summary className="flex cursor-pointer list-none items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+            <ChevronRight
+              className="size-3.5 group-open:hidden rtl:-scale-x-100"
+              aria-hidden="true"
+            />
+            <ChevronDown
+              className="hidden size-3.5 group-open:block"
+              aria-hidden="true"
+            />
+            {t("pool.liveReading")}
+          </summary>
+          <p className="mt-1 text-[0.6875rem] leading-relaxed text-muted-foreground">
+            {t("pool.liveReadingHint")}
+          </p>
+          <ObservedLine snapshot={snapshot} now={now} />
+          <ul className="mt-3 space-y-4">
+            {snapshot.windows.map((limit) => (
+              <WindowRow
+                key={limit.id}
+                limit={limit}
+                snapshot={snapshot}
+                now={now}
+              />
+            ))}
+          </ul>
+        </details>
       )}
     </section>
   )

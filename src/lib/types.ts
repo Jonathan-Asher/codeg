@@ -2530,6 +2530,92 @@ export interface PlanUsageReport {
   codex_sessions_dir: string | null
   /** Any Codex rollout exists there, with or without limits. */
   codex_rollouts_found: boolean
+  /** The local account pool the agent's requests go through, when one is
+   *  configured (`commands/usage_pool.rs`). Absent otherwise. */
+  pool?: PlanUsagePool | null
+}
+
+/** What the pool says of an account's own health. */
+export type PlanUsagePoolAccountStatus =
+  | "active"
+  | "throttled"
+  | "exhausted"
+  | "error"
+  | "unknown"
+
+/** Where an account stands for taking requests, most severe first.
+ *  `at_threshold` — past the pool's switch threshold, so requests go to
+ *  another account until the window resets. */
+export type PlanUsagePoolAccountState =
+  | "disabled"
+  | "failing"
+  | "exhausted"
+  | "at_threshold"
+  | "cooling_down"
+  | "available"
+
+export type PlanUsagePoolError =
+  | "unreachable"
+  | "timeout"
+  | "unauthorized"
+  | "http_status"
+  | "invalid_response"
+  | "config_unreadable"
+
+export interface PlanUsagePoolAccount {
+  name: string
+  enabled: boolean
+  status: PlanUsagePoolAccountStatus
+  state: PlanUsagePoolAccountState
+  /** When the account takes requests again, if held back (epoch seconds). */
+  blocked_until: number | null
+  /** The account the pool sends new requests to now. */
+  serving: boolean
+  /** The account the pool's routing prefers while it has headroom. */
+  preferred: boolean
+  /** 5h, 7d, then each model-scoped weekly window in effect. */
+  windows: PlanUsageWindow[]
+  limit_status: "allowed" | "allowed_warning" | "rejected" | null
+  weekly_state:
+    | "normal"
+    | "soft"
+    | "reserve"
+    | "critical"
+    | "exhausted"
+    | "capped"
+    | "unknown"
+    | null
+  cooling_until: number | null
+  in_flight: number
+  /** Usage probes failed in a row, and the last one's HTTP status. */
+  probe_failures: number
+  probe_error_status: number | null
+  /** The account's sign-in can no longer be refreshed. */
+  refresh_failed: boolean
+  observed_at: number | null
+}
+
+export interface PlanUsagePool {
+  kind: "maxpool"
+  agent: PlanUsageAgent
+  version: string | null
+  accounts: PlanUsagePoolAccount[]
+  current_account: string | null
+  preferred_account: string | null
+  routing_mode: string | null
+  /** Percent of the 5-hour window at which the pool moves off an account. */
+  switch_threshold: number
+  /** Every enabled account is held back. */
+  exhausted: boolean
+  /** When the first held-back account frees up, if known (epoch seconds). */
+  resumes_at: number | null
+  observed_at: number | null
+  checked_at: number
+  /** The last ask failed (`error`); `accounts` is the reading before it, or
+   *  empty when there never was one. */
+  stale: boolean
+  error: PlanUsagePoolError | null
+  error_status: number | null
 }
 
 /** Payload of the `token-usage-sync://progress` event. */

@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type {
+  PlanUsagePool,
+  PlanUsagePoolAccount,
   PlanUsageReport,
   PlanUsageSnapshot,
   PlanUsageWindow,
@@ -9,6 +11,7 @@ import type {
 
 const getPlanUsage = vi.fn<(force?: boolean) => Promise<PlanUsageReport>>()
 let pushHandler: ((snapshot: PlanUsageSnapshot) => void) | null = null
+let poolHandler: ((pool: PlanUsagePool | null) => void) | null = null
 
 vi.mock("@/lib/api", () => ({
   getPlanUsage: (force?: boolean) => getPlanUsage(force),
@@ -16,6 +19,14 @@ vi.mock("@/lib/api", () => ({
     pushHandler = handler
     return Promise.resolve(() => {
       pushHandler = null
+    })
+  },
+  subscribePlanUsagePoolChanged: (
+    handler: (p: PlanUsagePool | null) => void
+  ) => {
+    poolHandler = handler
+    return Promise.resolve(() => {
+      poolHandler = null
     })
   },
 }))
@@ -105,11 +116,84 @@ function codex(overrides: Partial<PlanUsageSnapshot> = {}): PlanUsageSnapshot {
   }
 }
 
-function report(snapshots: PlanUsageSnapshot[]): PlanUsageReport {
+function report(
+  snapshots: PlanUsageSnapshot[],
+  pool?: PlanUsagePool
+): PlanUsageReport {
   return {
     snapshots,
     codex_sessions_dir: "/home/u/.codex/sessions",
     codex_rollouts_found: true,
+    ...(pool ? { pool } : {}),
+  }
+}
+
+function poolAccount(
+  overrides: Partial<PlanUsagePoolAccount>
+): PlanUsagePoolAccount {
+  return {
+    name: "alpha",
+    enabled: true,
+    status: "active",
+    state: "available",
+    blocked_until: null,
+    serving: false,
+    preferred: false,
+    windows: [],
+    limit_status: "allowed",
+    weekly_state: "normal",
+    cooling_until: null,
+    in_flight: 0,
+    probe_failures: 0,
+    probe_error_status: null,
+    refresh_failed: false,
+    observed_at: NOW - 60,
+    ...overrides,
+  }
+}
+
+/** `primary` at its 5-hour limit, `backup` serving at 56%. */
+function pool(overrides: Partial<PlanUsagePool> = {}): PlanUsagePool {
+  return {
+    kind: "maxpool",
+    agent: "claude_code",
+    version: "9.9.9",
+    accounts: [
+      poolAccount({
+        name: "primary",
+        preferred: true,
+        state: "exhausted",
+        blocked_until: NOW + 2 * 3600,
+        windows: [limit({ used_percent: 100, resets_at: NOW + 2 * 3600 })],
+      }),
+      poolAccount({
+        name: "backup",
+        serving: true,
+        windows: [
+          limit({ used_percent: 56, resets_at: NOW + 72 * 60 }),
+          limit({
+            id: "seven_day",
+            kind: "weekly",
+            label: "7d",
+            window_minutes: 10080,
+            used_percent: 6,
+            resets_at: NOW + 6 * 86_400,
+          }),
+        ],
+      }),
+    ],
+    current_account: "backup",
+    preferred_account: "primary",
+    routing_mode: "preferred",
+    switch_threshold: 90,
+    exhausted: false,
+    resumes_at: null,
+    observed_at: NOW - 60,
+    checked_at: NOW - 10,
+    stale: false,
+    error: null,
+    error_status: null,
+    ...overrides,
   }
 }
 
@@ -150,6 +234,7 @@ beforeEach(() => {
   getPlanUsage.mockReset()
   setRoute.mockReset()
   pushHandler = null
+  poolHandler = null
   hidden = false
   Object.defineProperty(document, "hidden", {
     configurable: true,
@@ -401,5 +486,76 @@ describe("StatusBarPlanUsage live updates", () => {
     await flush(60_000)
     expect(within(claudeCard).getByText("Resets in 2h 55m")).toBeInTheDocument()
     expect(within(claudeCard).getByText("Updated 4m ago")).toBeInTheDocument()
+  })
+})
+
+describe("StatusBarPlanUsage behind an account pool", () => {
+  it("shows the serving account's 5-hour window and how many are exhausted", async () => {
+    getPlanUsage.mockResolvedValue(
+      report([claude({ status: "limited" }), codex()], pool())
+    )
+    await mount()
+
+    expect(preview()).toHaveTextContent(
+      "Claude backup 56%1 exhausted·Codex 99%"
+    )
+    const claudeEntry = entry("claude_code")!
+    expect(claudeEntry).toHaveAttribute("data-level", "normal")
+    expect(
+      claudeEntry.querySelector('[data-slot="pool-exhausted-count"]')
+    ).toHaveClass("text-destructive")
+    expect(trigger()).toHaveAccessibleName(
+      "Limits: Claude backup 56% (1 exhausted), Codex 99%"
+    )
+  })
+
+  it("turns red when every account is out", async () => {
+    const out = pool({ exhausted: true, resumes_at: NOW + 3600 })
+    out.accounts[1] = {
+      ...out.accounts[1],
+      state: "at_threshold",
+      blocked_until: NOW + 3600,
+      windows: [limit({ used_percent: 93, resets_at: NOW + 3600 })],
+    }
+    getPlanUsage.mockResolvedValue(report([], out))
+    await mount()
+    expect(entry("claude_code")).toHaveAttribute("data-level", "critical")
+    expect(preview()).toHaveTextContent("Claude backup 93%1 exhausted")
+  })
+
+  it("keeps just the number and the count in the compact bar", async () => {
+    getPlanUsage.mockResolvedValue(report([], pool()))
+    await mount({ compact: true })
+    expect(preview()).toHaveTextContent(/^56%1 out$/)
+  })
+
+  it("lists every account in the hover card", async () => {
+    getPlanUsage.mockResolvedValue(report([claude()], pool()))
+    await mount()
+    await hover()
+    const card = within(bubble()!).getByRole("region", { name: "Claude Code" })
+    expect(card).toHaveAttribute("data-pool", "maxpool")
+    const names = Array.from(
+      card.querySelectorAll<HTMLElement>("[data-account]")
+    ).map((row) => row.dataset.account)
+    expect(names).toEqual(["primary", "backup"])
+    expect(within(card).getByText("Exhausted")).toBeInTheDocument()
+    expect(within(card).getByText("Serving")).toBeInTheDocument()
+  })
+
+  it("takes pool readings as they are pushed", async () => {
+    getPlanUsage.mockResolvedValue(report([claude()]))
+    await mount()
+    expect(preview()).toHaveTextContent(/^Claude 35%$/)
+
+    act(() => {
+      poolHandler?.(pool())
+    })
+    expect(preview()).toHaveTextContent("Claude backup 56%")
+
+    act(() => {
+      poolHandler?.(null)
+    })
+    expect(preview()).toHaveTextContent(/^Claude 35%$/)
   })
 })

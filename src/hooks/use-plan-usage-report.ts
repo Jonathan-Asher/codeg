@@ -1,10 +1,18 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { getPlanUsage, subscribePlanUsageChanged } from "@/lib/api"
+import {
+  getPlanUsage,
+  subscribePlanUsageChanged,
+  subscribePlanUsagePoolChanged,
+} from "@/lib/api"
 import { toErrorMessage } from "@/lib/app-error"
 import { onTransportReconnect } from "@/lib/platform"
-import { mergeFetchedReport, replaceSnapshot } from "@/lib/plan-usage"
+import {
+  mergeFetchedReport,
+  replacePool,
+  replaceSnapshot,
+} from "@/lib/plan-usage"
 import type { PlanUsageReport } from "@/lib/types"
 
 export interface PlanUsageReportState {
@@ -21,8 +29,9 @@ export interface PlanUsageReportState {
 /**
  * Every agent's latest subscription-limit reading, kept current: fetched on
  * mount through the active transport (so a remote-workspace window reads its
- * server's limits), with Claude Code readings folded in as turns push them and
- * a refetch after the transport reconnects.
+ * server's limits), with Claude Code readings folded in as turns push them,
+ * account-pool readings as the backend polls the pool, and a refetch after
+ * the transport reconnects.
  *
  * `pollMs` also refetches on that interval while the document is visible —
  * Codex readings are only picked up by a fetch, and the backend caches its log
@@ -71,6 +80,22 @@ export function usePlanUsageReport({
     let cancelled = false
     void subscribePlanUsageChanged((snapshot) => {
       setReport((prev) => replaceSnapshot(prev, snapshot))
+    }).then((u) => {
+      if (cancelled) u()
+      else unsub = u
+    })
+    return () => {
+      cancelled = true
+      unsub?.()
+    }
+  }, [])
+
+  // The account pool's readings, pushed each time the backend polls it.
+  useEffect(() => {
+    let unsub: (() => void) | undefined
+    let cancelled = false
+    void subscribePlanUsagePoolChanged((pool) => {
+      setReport((prev) => replacePool(prev, pool))
     }).then((u) => {
       if (cancelled) u()
       else unsub = u

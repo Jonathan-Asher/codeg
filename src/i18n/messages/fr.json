@@ -6449,7 +6449,54 @@
     "preview": {
       "percent": "{percent} %",
       "staleEntry": "{entry} (obsolète)",
-      "openFullView": "Ouvrir la vue complète"
+      "openFullView": "Ouvrir la vue complète",
+      "poolExhausted": "{count, plural, one {# épuisé} other {# épuisés}}",
+      "poolExhaustedShort": "{count} hors"
+    },
+    "pool": {
+      "label": "Pool de comptes",
+      "labelTitle": "Les requêtes passent par un pool de comptes local (maxpool)",
+      "labelVersion": "Les requêtes passent par un pool de comptes local (maxpool {version})",
+      "accounts": "{count, plural, one {# compte} other {# comptes}}",
+      "serving": "<b>{name}</b> actif",
+      "noneServing": "aucun compte actif",
+      "nextReset": "prochaine réinitialisation dans {duration}",
+      "servingBadge": "Actif",
+      "preferredBadge": "Préféré",
+      "state": {
+        "exhausted": "Épuisé",
+        "at_threshold": "Au-delà du seuil",
+        "cooling_down": "En pause",
+        "failing": "En échec",
+        "disabled": "Désactivé"
+      },
+      "stateHint": {
+        "exhausted": "À sa limite. Le pool envoie les requêtes vers d'autres comptes jusqu'à sa réinitialisation.",
+        "at_threshold": "Au-delà du seuil de bascule du pool ({threshold} %). Les nouvelles requêtes vont vers d'autres comptes jusqu'à la réinitialisation de la fenêtre.",
+        "cooling_down": "Mis en pause brièvement après une erreur ou une limite de débit.",
+        "failing": "Dans un état d'erreur vers lequel le pool n'envoie rien, par exemple une connexion qui ne peut plus être renouvelée. Vérifiez maxpool.",
+        "disabled": "Désactivé dans la configuration du pool."
+      },
+      "backIn": "De retour dans {duration}",
+      "signInFailed": "La connexion ne peut plus être renouvelée",
+      "probeFailing": "La vérification d'usage échoue — les chiffres peuvent être périmés",
+      "probeFailingStatus": "La vérification d'usage échoue (HTTP {status}) — les chiffres peuvent être périmés",
+      "noWindows": "Pas encore de relevé d'usage",
+      "allExhausted": "Tous les comptes sont à leur limite. Le premier se libère dans {duration}.",
+      "allExhaustedUnknown": "Tous les comptes sont à leur limite.",
+      "staleNotice": "Le pool ne répond pas ({error}). Affichage de son relevé d'il y a {duration}.",
+      "unansweredNotice": "Un pool de comptes est configuré mais ne répond pas ({error}). Affichage du relevé propre à l'agent.",
+      "error": {
+        "unreachable": "injoignable",
+        "timeout": "délai dépassé",
+        "unauthorized": "clé refusée",
+        "http_status": "HTTP {status}",
+        "invalid_response": "réponse inattendue",
+        "config_unreadable": "configuration illisible"
+      },
+      "liveReading": "Dernier relevé transmis par l'agent",
+      "liveReadingHint": "Il décrit le compte du pool qui a servi le dernier tour, il peut donc différer des comptes ci-dessus.",
+      "privacyNote": "Les chiffres du pool de comptes viennent du point d'accès d'état local de maxpool ; codeg ne lit dans sa configuration que l'adresse et la clé du proxy, jamais les connexions des comptes."
     }
   },
   "Forge": {
