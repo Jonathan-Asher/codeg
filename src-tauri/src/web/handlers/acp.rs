@@ -555,6 +555,48 @@ pub async fn acp_fork(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AcpForkToNewConversationParams {
+    pub connection_id: String,
+    /// The conversation the tab shows, for a connection that has not linked
+    /// its row yet. See `ConnectionManager::fork_session_to_new_conversation`.
+    #[serde(default)]
+    pub conversation_id: Option<i32>,
+    /// The finished reply to fork at.
+    pub fork_from_turn_id: String,
+}
+
+/// "Fork from here" while a turn is running — into a new conversation, in a
+/// separate agent process. See `ConnectionManager::fork_session_to_new_conversation`.
+pub async fn acp_fork_to_new_conversation(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpForkToNewConversationParams>,
+) -> Result<Json<crate::acp::types::ForkToNewConversationInfo>, AppCommandError> {
+    let result = acp_commands::acp_fork_to_new_conversation_core(
+        &state.connection_manager,
+        &state.db,
+        &state.data_dir,
+        &params.connection_id,
+        params.conversation_id,
+        &params.fork_from_turn_id,
+    )
+    .await
+    .map_err(|e| {
+        let message = e.to_string();
+        // Both refusals are answers about this request, not server faults:
+        // an agent that only forks between turns, and a reply that is not a
+        // fork point (still being written, or not one the agent can name).
+        match e {
+            AcpError::ForkNeedsIdle | AcpError::ForkPointUnresolved(_) => {
+                AppCommandError::new(AppErrorCode::InvalidInput, message)
+            }
+            _ => AppCommandError::task_execution_failed(message),
+        }
+    })?;
+    Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AcpStopAsyncTaskParams {
     pub connection_id: String,
     pub task_id: String,

@@ -2686,6 +2686,9 @@ pub async fn spawn_agent_connection(
     preferred_config_values: BTreeMap<String, String>,
     delegation_injection: Option<DelegationInjection>,
     terminal_shell_config: TerminalShellRuntimeConfig,
+    // `Some` opens this connection only to fork another session and end — see
+    // `DetachedForkRequest`. `session_id` is `None` alongside it.
+    detached_fork: Option<DetachedForkRequest>,
 ) -> Result<(), AcpError> {
     // Create the authoritative session state up front. Subsequent emit_with_state
     // calls write through this state and increment its seq counter so the first
@@ -2930,6 +2933,7 @@ pub async fn spawn_agent_connection(
             session_persistence,
             stderr_tail,
             lifeline_rx,
+            detached_fork,
         )
         .await;
 
@@ -5988,6 +5992,8 @@ async fn run_connection(
     // Resolves when the manager drops this connection's entry; see
     // `AttachLifeline`.
     lifeline: tokio::sync::oneshot::Receiver<()>,
+    // Fork another process's session and end; see `DetachedForkRequest`.
+    detached_fork: Option<DetachedForkRequest>,
 ) -> Result<(), AcpError> {
     let pending_perms: PendingPermissions =
         Arc::new(tokio::sync::Mutex::new(PermissionQueue::default()));
@@ -6557,6 +6563,57 @@ async fn run_connection(
                 "[ACP] Agent capabilities: load_session={}, fork={}, resume={}",
                 init_resp.agent_capabilities.load_session, supports_fork, supports_resume
             );
+
+            // A connection opened only to fork another process's session: fork
+            // it, hand the new id back, and end — before any MCP server is
+            // started or a session of this connection's own is opened. See
+            // `DetachedForkRequest`.
+            if let Some(DetachedForkRequest {
+                source_session_id,
+                fork_point,
+                reply,
+            }) = detached_fork
+            {
+                if !supports_fork {
+                    let _ = reply.send(Err(AcpError::protocol(
+                        "This agent does not support session/fork".to_string(),
+                    )));
+                    return Ok(());
+                }
+                tracing::info!(
+                    "[ACP] detached fork: session/fork for session_id={} cwd={} fork_point={}",
+                    source_session_id,
+                    cwd_string,
+                    fork_point.message_id
+                );
+                let source = SessionId::new(source_session_id);
+                let forked = match attach
+                    .run(crate::acp::fork::fork_session(
+                        &cx,
+                        &source,
+                        &cwd_string,
+                        Some(&fork_point),
+                    ))
+                    .await
+                {
+                    Ok(forked) => forked,
+                    // Dropped by the manager, or past the attach ceiling: the
+                    // reply sender goes with this frame and the caller reports.
+                    Err(why) => return attach.stop(why).await,
+                };
+                let outcome = forked.map(|(response, _)| {
+                    let forked_session_id = response.session_id.0.to_string();
+                    tracing::info!(
+                        "[ACP] detached fork succeeded: new_session_id={forked_session_id}"
+                    );
+                    forked_session_id
+                });
+                if let Err(e) = &outcome {
+                    tracing::warn!("[ACP] detached fork failed: {e}");
+                }
+                let _ = reply.send(outcome);
+                return Ok(());
+            }
 
             // Native live-feedback steering, synthesized ONCE from three gates
             // so every consumer (the submit split, the snapshot, the frontend)
@@ -9868,6 +9925,25 @@ fn live_mode_for_fork(
     parent_modes: Option<&SessionModeState>,
 ) -> Option<String> {
     parent_modes.and(state.current_mode.clone())
+}
+
+/// What a connection opened ONLY to fork someone else's session does instead
+/// of opening a session of its own — "fork from here" while that session is
+/// running a turn in another process (see
+/// `ConnectionManager::fork_session_to_new_conversation`).
+///
+/// Such a connection sends `session/fork` for `source_session_id` right after
+/// `initialize`, replies with the forked session's id, and ends: no session of
+/// its own is created, resumed or attached, no MCP server is started, and the
+/// session it forks is never opened here, so the turn running on it in the
+/// other process is not touched. Only agents whose fork reads the parent from
+/// disk can serve this (`acp::fork::forks_while_running`).
+pub struct DetachedForkRequest {
+    pub source_session_id: String,
+    /// Always a named reply: forked mid-turn, the tail is the reply still
+    /// being written.
+    pub fork_point: crate::acp::fork::ForkPoint,
+    pub reply: tokio::sync::oneshot::Sender<Result<String, AcpError>>,
 }
 
 /// Result when the conversation loop exits due to a fork request.

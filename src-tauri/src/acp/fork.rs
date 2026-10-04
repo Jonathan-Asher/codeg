@@ -284,6 +284,96 @@ pub fn settle_fork_point(
     }
 }
 
+/// Whether "fork from here" can run while a turn is in flight on the session,
+/// by forking in a SEPARATE agent process into a new conversation (see
+/// `ConnectionManager::fork_session_to_new_conversation`) instead of
+/// re-pointing the live connection, which has to wait for the turn to end.
+///
+/// That needs an adapter whose `session/fork` reads the parent session from
+/// disk without opening it, tolerates the parent's transcript being appended
+/// to by the other process mid-read, and never writes to it. Verified per
+/// adapter against the versions codeg ships:
+///
+/// * **claude-agent-acp** (0.81.1 pinned, 0.84.0 installed — `fork-session.js`
+///   is byte-identical in both): `unstable_forkSession` needs no live session.
+///   It resolves the point through `getSessionMessages` (the transcript on
+///   disk), then the SDK's `forkSession(id, {dir, upToMessageId})` reads the
+///   JSONL into one buffer, parses it line by line with every unparsable line
+///   skipped (`try { JSON.parse } catch {}` — a half-written tail line is
+///   dropped, not fatal), keeps the entries up to the named message, and
+///   writes them under a NEW session id as a new file. The parent's file is
+///   only ever read. A COMPLETED reply's entries were flushed before the next
+///   prompt was, so the fork point always lies before the partial tail.
+/// * **codex-acp** (1.13.1): its fork goes through codex's own app-server
+///   (`thread/read` to find the point, then `thread/fork`). The rollout
+///   reader skips a torn JSON line, but codex core's fork preparation
+///   (`thread-store/src/local/paginated_fork.rs`) also materializes the
+///   SOURCE rollout into the shared `~/.codex` state database, guarded only by
+///   in-process locks, while the live turn's app-server — another process —
+///   keeps appending to that rollout and materializing it itself. Not shown
+///   safe, so not enabled.
+/// * **deepseek-acp** (0.9.0): refuses a fork of a session with a prompt in
+///   flight in its own process, and the cross-process read goes through the
+///   dsh session store, which it does not ship in source. Not verified, not
+///   enabled.
+///
+/// Every other agent forks at the tail at best, and a tail fork taken mid-turn
+/// would copy the half-written reply — never offered.
+pub fn forks_while_running(agent_type: AgentType) -> bool {
+    matches!(agent_type, AgentType::ClaudeCode)
+}
+
+/// Settle the fork point for a fork taken in a separate process while the
+/// session may be running a turn ([`forks_while_running`]).
+///
+/// Stricter than a plain branch: there is no tail fallback. The tail of a
+/// session with a turn in flight IS the half-written reply, so a point that
+/// cannot be named is refused instead.
+///
+/// While a turn runs (`running`), the point must also lie BEFORE the turn's
+/// prompt: only a reply that finished is a fork point. The prompt is the turn
+/// `in_flight_prompt_turn_id` names when the caller could match it to the
+/// live turn; otherwise the last user turn in the transcript stands in for it.
+/// Neither existing means the prompt has not reached the transcript yet, and
+/// nothing can be shown to have finished — refused, and the user retries a
+/// moment later.
+pub fn settle_mid_run_fork_point(
+    turns: Result<&[MessageTurn], &str>,
+    turn_id: &str,
+    agent_type: AgentType,
+    running: bool,
+    in_flight_prompt_turn_id: Option<&str>,
+) -> Result<ForkPoint, AcpError> {
+    if !forks_while_running(agent_type) {
+        return Err(AcpError::ForkNeedsIdle);
+    }
+    let turns = turns.map_err(|reason| {
+        AcpError::ForkPointUnresolved(format!("the conversation could not be read ({reason})"))
+    })?;
+    let idx = turns
+        .iter()
+        .position(|t| t.id == turn_id && matches!(t.role, TurnRole::Assistant))
+        .ok_or_else(|| {
+            AcpError::ForkPointUnresolved("this reply is not in the conversation".to_string())
+        })?;
+    if running {
+        let is_user = |t: &MessageTurn| matches!(t.role, TurnRole::User);
+        let prompt_idx = in_flight_prompt_turn_id
+            .and_then(|id| turns.iter().position(|t| t.id == id && is_user(t)))
+            .or_else(|| turns.iter().rposition(is_user));
+        if !prompt_idx.is_some_and(|prompt| idx < prompt) {
+            return Err(AcpError::ForkPointUnresolved(
+                "this reply is still being written; fork from an earlier one, or wait for \
+                 the turn to finish"
+                    .to_string(),
+            ));
+        }
+    }
+    resolve_fork_point(turns, turn_id, agent_type).ok_or_else(|| {
+        AcpError::ForkPointUnresolved("the agent cannot fork at this reply".to_string())
+    })
+}
+
 /// The `(before edit)` marker an edit fork gives the row holding the original
 /// branch. Plain English on purpose: conversation titles are data, not UI
 /// copy — the `[Fork] ` prefix is not localized either.
@@ -800,6 +890,164 @@ mod tests {
         assert_eq!(ForkMode::default(), ForkMode::Branch);
         assert!(ForkMode::Edit.is_edit() && ForkMode::EditInPlace.is_edit());
         assert!(!ForkMode::Branch.is_edit());
+    }
+
+    /// A finished exchange, then the prompt of the turn still running and the
+    /// first half of its reply.
+    fn running_history() -> Vec<MessageTurn> {
+        vec![
+            turn("turn-0", TurnRole::User, "hi", None),
+            turn("turn-1", TurnRole::Assistant, "hello", Some("msg_01")),
+            turn("turn-2", TurnRole::User, "count to 30", None),
+            turn("turn-3", TurnRole::Assistant, "1, 2, 3", Some("msg_02")),
+        ]
+    }
+
+    /// The whole point: a reply that finished before the running turn's prompt
+    /// is a fork point, named exactly as a plain fork would name it.
+    #[test]
+    fn mid_run_forks_at_a_reply_that_finished_before_the_running_turn() {
+        let turns = running_history();
+        let point = settle_mid_run_fork_point(
+            Ok(turns.as_slice()),
+            "turn-1",
+            AgentType::ClaudeCode,
+            true,
+            Some("turn-2"),
+        )
+        .expect("a finished reply is a fork point mid-run");
+        let plain = resolve_fork_point(&turns, "turn-1", AgentType::ClaudeCode).unwrap();
+        assert_eq!(point.message_id, "msg_01");
+        assert_eq!(point.message_fingerprint, plain.message_fingerprint);
+        assert_eq!(point.message_occurrence, plain.message_occurrence);
+    }
+
+    /// The reply being written is never a fork point — it is past the running
+    /// turn's prompt, whether or not the caller matched that prompt.
+    #[test]
+    fn mid_run_refuses_the_reply_still_being_written() {
+        let turns = running_history();
+        for prompt in [Some("turn-2"), None] {
+            let err = settle_mid_run_fork_point(
+                Ok(turns.as_slice()),
+                "turn-3",
+                AgentType::ClaudeCode,
+                true,
+                prompt,
+            )
+            .expect_err("the in-flight reply must not be forked");
+            assert!(matches!(err, AcpError::ForkPointUnresolved(_)), "{prompt:?}: {err:?}");
+        }
+    }
+
+    /// A message the user steers into the running turn is a user turn AFTER
+    /// the prompt. Matching the prompt keeps the first half of the running
+    /// reply — which that message now follows — from passing as finished.
+    #[test]
+    fn mid_run_measures_from_the_running_prompt_not_a_steered_message() {
+        let mut turns = running_history();
+        turns.push(turn("turn-4", TurnRole::User, "faster please", None));
+        turns.push(turn("turn-5", TurnRole::Assistant, "4, 5", Some("msg_03")));
+        assert!(settle_mid_run_fork_point(
+            Ok(turns.as_slice()),
+            "turn-3",
+            AgentType::ClaudeCode,
+            true,
+            Some("turn-2"),
+        )
+        .is_err());
+        assert!(settle_mid_run_fork_point(
+            Ok(turns.as_slice()),
+            "turn-1",
+            AgentType::ClaudeCode,
+            true,
+            Some("turn-2"),
+        )
+        .is_ok());
+    }
+
+    /// The running turn's prompt is not in the transcript yet: nothing can be
+    /// shown to have finished, so even the last reply is refused.
+    #[test]
+    fn mid_run_refuses_when_no_prompt_marks_where_the_running_turn_starts() {
+        let turns = vec![
+            turn("turn-0", TurnRole::User, "hi", None),
+            turn("turn-1", TurnRole::Assistant, "hello", Some("msg_01")),
+        ];
+        // Running, with only the last reply's own prompt before it.
+        assert!(settle_mid_run_fork_point(
+            Ok(turns.as_slice()),
+            "turn-1",
+            AgentType::ClaudeCode,
+            true,
+            None,
+        )
+        .is_err());
+        // Idle (the turn ended in the meantime): every reply is finished.
+        assert!(settle_mid_run_fork_point(
+            Ok(turns.as_slice()),
+            "turn-1",
+            AgentType::ClaudeCode,
+            false,
+            None,
+        )
+        .is_ok());
+    }
+
+    /// No tail fallback: mid-run, the tail is the half-written reply.
+    #[test]
+    fn mid_run_never_degrades_to_a_tail_fork() {
+        let turns = running_history();
+        let unreadable = settle_mid_run_fork_point(
+            Err("session file missing"),
+            "turn-1",
+            AgentType::ClaudeCode,
+            true,
+            None,
+        );
+        assert!(matches!(unreadable, Err(AcpError::ForkPointUnresolved(_))));
+        let unknown = settle_mid_run_fork_point(
+            Ok(turns.as_slice()),
+            "turn-9",
+            AgentType::ClaudeCode,
+            true,
+            None,
+        );
+        assert!(matches!(unknown, Err(AcpError::ForkPointUnresolved(_))));
+        // A finished reply with neither an id nor text: a plain fork would
+        // fork at the tail; this one has to refuse.
+        let mut textless = running_history();
+        textless[1].agent_message_id = None;
+        textless[1].blocks = Vec::new();
+        let unnamed = settle_mid_run_fork_point(
+            Ok(textless.as_slice()),
+            "turn-1",
+            AgentType::ClaudeCode,
+            true,
+            Some("turn-2"),
+        );
+        assert!(matches!(unnamed, Err(AcpError::ForkPointUnresolved(_))));
+    }
+
+    /// Only Claude Code is verified to fork from a transcript another process
+    /// is still writing; every other agent waits for the turn to end.
+    #[test]
+    fn only_claude_code_forks_while_running() {
+        assert!(forks_while_running(AgentType::ClaudeCode));
+        let turns = running_history();
+        for agent in [
+            AgentType::Codex,
+            AgentType::DeepSeek,
+            AgentType::Pi,
+            AgentType::Gemini,
+            AgentType::Custom("acme"),
+        ] {
+            assert!(!forks_while_running(agent), "{agent}");
+            let err = settle_mid_run_fork_point(Ok(turns.as_slice()), "turn-1", agent, true, None)
+                .expect_err("refused up front");
+            assert!(matches!(err, AcpError::ForkNeedsIdle), "{agent}: {err:?}");
+            assert_eq!(err.code(), Some("fork_needs_idle"));
+        }
     }
 
     #[test]
