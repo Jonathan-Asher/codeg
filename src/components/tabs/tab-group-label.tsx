@@ -183,13 +183,14 @@ export const TabGroupLabel = memo(function TabGroupLabel({
 })
 
 /** Where a dragged group would land: a bar on the left edge of the group it
- *  would precede (or of the strip's tail, for the end). */
+ *  would precede (or of the strip's tail, for the end). Drawn above the held
+ *  label, which may be passing right over it. */
 export function GroupDropMarker() {
   return (
     <span
       aria-hidden
       data-group-drop-marker
-      className="pointer-events-none absolute top-1.5 bottom-1.5 left-0 z-30 w-0.5 -translate-x-1/2 rounded-full bg-primary"
+      className="pointer-events-none absolute top-1.5 bottom-1.5 left-0 z-40 w-0.5 -translate-x-1/2 rounded-full bg-primary"
     />
   )
 }
