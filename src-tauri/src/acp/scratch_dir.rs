@@ -135,6 +135,75 @@ fn registry() -> &'static Mutex<HashSet<String>> {
     REGISTRY.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
+/// Paths this process still needs, which no sweep may delete or delete an
+/// ancestor of. See [`protect`].
+static PROTECTED: OnceLock<Mutex<Vec<PathBuf>>> = OnceLock::new();
+
+fn protected_registry() -> &'static Mutex<Vec<PathBuf>> {
+    PROTECTED.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Never let a sweep delete `path` or any directory above it.
+///
+/// For things this process keeps for its whole life that can end up inside a
+/// scratch directory it does not own — above all the delegation socket. The
+/// sweeps reason about directories by the pid in their name, and a socket
+/// placed inside another process's scratch directory is invisible to that
+/// reasoning: when its owner is dead the directory reads as an orphan and goes,
+/// socket and all. That happened to a codeg started from inside one of its own
+/// agent sessions, which inherited that session's `TMPDIR`, bound its socket
+/// there, and deleted it half a second later in the startup sweep.
+pub fn protect(path: &Path) {
+    if let Ok(mut guard) = protected_registry().lock() {
+        if !guard.iter().any(|p| p == path) {
+            guard.push(path.to_path_buf());
+        }
+    }
+}
+
+/// Everything a sweep must leave standing: the registered paths plus this
+/// process's own temp directory, under every name it is known by. Read at
+/// sweep time rather than cached, so it follows whatever the environment says
+/// when the sweep actually runs.
+fn protected_paths() -> Vec<PathBuf> {
+    let mut paths = vec![std::env::temp_dir()];
+    for key in TEMP_ENV_KEYS {
+        if let Some(value) = std::env::var_os(key).filter(|v| !v.is_empty()) {
+            paths.push(PathBuf::from(value));
+        }
+    }
+    if let Ok(guard) = protected_registry().lock() {
+        paths.extend(guard.iter().cloned());
+    }
+    paths
+}
+
+/// Whether deleting `candidate` would take one of `protected` with it.
+///
+/// Compared both as written and resolved, because the two sides are spelled
+/// independently: a sweep enumerates `/tmp/codeg-acp-501/…` while the same
+/// directory can reach `TMPDIR` as `/private/tmp/codeg-acp-501/…` on macOS. A
+/// path that no longer exists cannot be resolved and is compared as written.
+fn shelters_protected(candidate: &Path, protected: &[PathBuf]) -> bool {
+    let resolved_candidate = std::fs::canonicalize(candidate).ok();
+    let candidates: Vec<&Path> = std::iter::once(candidate)
+        .chain(resolved_candidate.as_deref())
+        .collect();
+    protected.iter().any(|path| {
+        let resolved_path = std::fs::canonicalize(path).ok();
+        std::iter::once(path.as_path())
+            .chain(resolved_path.as_deref())
+            .any(|spelling| candidates.iter().any(|c| spelling.starts_with(c)))
+    })
+}
+
+/// Whether a sweep would currently leave `candidate` standing because it holds
+/// something this process uses.
+#[cfg(test)]
+pub(crate) fn is_protected_for_test(candidate: &Path) -> bool {
+    shelters_protected(candidate, &protected_paths())
+}
+
 /// Whether `name` is a directory name codeg uses for a scratch root: the plain
 /// namespace, or the euid-scoped short root in `/tmp`.
 fn is_namespace_dir_name(name: &std::ffi::OsStr) -> bool {
@@ -603,7 +672,12 @@ pub(crate) fn apply_to_env(env: &mut std::collections::BTreeMap<String, String>,
 /// Exact set arithmetic, no heuristic: a live launch is in the registry by
 /// construction (invariant 1), so it can never appear in the diff.
 pub fn sweep_own_orphans() {
-    let roots = sweep_roots();
+    sweep_own_orphans_in(&sweep_roots(), &protected_paths());
+}
+
+/// [`sweep_own_orphans`] over explicit roots, so a test can point it at a
+/// directory of its own instead of the machine's real scratch roots.
+fn sweep_own_orphans_in(roots: &[PathBuf], protected: &[PathBuf]) {
     let our_pid = std::process::id();
 
     // INVARIANT 3: enumerate + diff under the lock...
@@ -625,10 +699,21 @@ pub fn sweep_own_orphans() {
     };
     // ...delete outside it.
     for path in claimed {
+        if shelters_protected(&path, protected) {
+            log_kept_protected(&path);
+            continue;
+        }
         if remove_dir_robust(&path).is_ok() {
             tracing::info!("[ACP][scratch] reclaimed orphan {}", path.display());
         }
     }
+}
+
+fn log_kept_protected(path: &Path) {
+    tracing::info!(
+        "[ACP][scratch] keeping {}: it holds this process's temp dir or delegation socket",
+        path.display()
+    );
 }
 
 /// Reclaim scratch directories left by OTHER codeg processes that have exited.
@@ -636,10 +721,21 @@ pub fn sweep_own_orphans() {
 /// Runs at startup, where the interesting orphans are the ones a crash or a
 /// force-quit left behind. Deletes only on a positively confirmed dead owner —
 /// see [`probe_pid`] for why "the probe failed" must not be read as "the owner
-/// is gone".
+/// is gone" — and never a directory holding something this process still uses
+/// (see [`protect`]).
 pub fn sweep_foreign_orphans() {
+    sweep_foreign_orphans_in(&sweep_roots(), &protected_paths(), probe_pid);
+}
+
+/// [`sweep_foreign_orphans`] over explicit roots and an explicit liveness
+/// probe, so a test can stage a "dead" owner without finding a real dead pid.
+fn sweep_foreign_orphans_in(
+    roots: &[PathBuf],
+    protected: &[PathBuf],
+    probe: impl Fn(u32) -> PidState,
+) {
     let our_pid = std::process::id();
-    for entry in sweep_roots()
+    for entry in roots
         .iter()
         .filter_map(|root| std::fs::read_dir(root).ok())
         .flatten()
@@ -654,10 +750,16 @@ pub fn sweep_foreign_orphans() {
         if pid == our_pid {
             continue;
         }
-        if probe_pid(pid) != PidState::Dead {
+        if probe(pid) != PidState::Dead {
             continue;
         }
         let path = entry.path();
+        // Dead owner or not, a directory that holds our own temp dir or our
+        // delegation socket is in use — by us.
+        if shelters_protected(&path, protected) {
+            log_kept_protected(&path);
+            continue;
+        }
         if remove_dir_robust(&path).is_ok() {
             tracing::info!(
                 "[ACP][scratch] reclaimed orphan {} from dead pid {pid}",
@@ -1015,6 +1117,90 @@ mod tests {
         ] {
             assert!(!is_in_scratch_namespace(Path::new(outside)), "{outside}");
         }
+    }
+
+    /// Two scratch directories whose owner the probe calls dead. The one
+    /// holding a protected path survives the sweep; the other goes.
+    #[test]
+    fn the_foreign_sweep_keeps_a_directory_holding_a_protected_path() {
+        let holder = tempfile::tempdir().expect("tempdir");
+        let root = holder.path().join(SCRATCH_NAMESPACE);
+        std::fs::create_dir(&root).expect("root");
+        let kept = root.join("4000000000-ecf15960");
+        let reclaimed = root.join("4000000001-ecf15961");
+        std::fs::create_dir(&kept).expect("kept");
+        std::fs::create_dir(&reclaimed).expect("reclaimed");
+        let socket = kept.join("codeg-delegation-1.sock");
+        std::fs::write(&socket, b"").expect("socket stand-in");
+
+        sweep_foreign_orphans_in(&[root], std::slice::from_ref(&socket), |_| PidState::Dead);
+
+        assert!(socket.exists(), "the protected socket must survive");
+        assert!(
+            !reclaimed.exists(),
+            "an unprotected orphan is still reclaimed"
+        );
+    }
+
+    /// The protected path and the sweep's root reach the same directory under
+    /// different names — on macOS `/tmp` is `/private/tmp`, and `TMPDIR` and a
+    /// sweep root can each use either. Protection has to hold across that.
+    #[cfg(unix)]
+    #[test]
+    fn protection_holds_across_a_symlinked_spelling() {
+        let holder = tempfile::tempdir().expect("tempdir");
+        let real = holder.path().join("real");
+        let root = real.join(SCRATCH_NAMESPACE);
+        let dir = root.join("4000000002-ecf15962");
+        std::fs::create_dir_all(&dir).expect("dir");
+        let alias = holder.path().join("alias");
+        std::os::unix::fs::symlink(&real, &alias).expect("symlink");
+        // The process sees its temp dir through the alias...
+        let tmpdir = alias.join(SCRATCH_NAMESPACE).join("4000000002-ecf15962");
+        assert!(tmpdir.exists());
+
+        // ...while the sweep enumerates the real path.
+        sweep_foreign_orphans_in(&[root], &[tmpdir], |_| PidState::Dead);
+
+        assert!(dir.exists(), "deleted through the other spelling");
+    }
+
+    /// Same guarantee for the in-session sweep, which reclaims directories
+    /// carrying our own pid that the registry does not know.
+    #[test]
+    fn the_own_sweep_keeps_a_directory_holding_a_protected_path() {
+        let holder = tempfile::tempdir().expect("tempdir");
+        let root = holder.path().join(SCRATCH_NAMESPACE);
+        std::fs::create_dir(&root).expect("root");
+        let kept = root.join(new_dir_name(std::process::id()));
+        let reclaimed = root.join(new_dir_name(std::process::id()));
+        std::fs::create_dir(&kept).expect("kept");
+        std::fs::create_dir(&reclaimed).expect("reclaimed");
+
+        sweep_own_orphans_in(&[root], std::slice::from_ref(&kept));
+
+        assert!(kept.exists(), "the protected directory must survive");
+        assert!(
+            !reclaimed.exists(),
+            "an unregistered orphan is still reclaimed"
+        );
+    }
+
+    /// This process's own temp directory is shielded without anyone having to
+    /// register it, and a registered path is shielded from then on.
+    #[test]
+    fn the_temp_dir_and_registered_paths_are_protected() {
+        assert!(is_protected_for_test(&std::env::temp_dir()));
+
+        let holder = tempfile::tempdir().expect("tempdir");
+        let socket = holder.path().join("nested").join("x.sock");
+        assert!(!is_protected_for_test(holder.path()));
+        protect(&socket);
+        assert!(is_protected_for_test(holder.path()), "an ancestor of it");
+        assert!(
+            !is_protected_for_test(&holder.path().join("sibling")),
+            "but not a sibling"
+        );
     }
 
     #[test]

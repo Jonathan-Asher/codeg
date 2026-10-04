@@ -265,6 +265,10 @@ impl DelegationListener {
                 ));
             }
         }
+        // Before anything exists on disk: the startup scratch sweep runs on its
+        // own thread and must already know this path is ours when the socket
+        // appears, wherever it ends up.
+        crate::acp::scratch_dir::protect(socket_path);
         if let Some(parent) = socket_path.parent() {
             // Compared as WRITTEN, not resolved: `default_socket_path` builds
             // the fallback by joining onto `short_socket_dir()`, so the two
@@ -3525,6 +3529,20 @@ mod tests {
             );
             assert!(!crate::acp::scratch_dir::is_in_scratch_namespace(&path));
         }
+    }
+
+    /// `bind` registers its socket with the scratch sweeps before it creates
+    /// anything, so a sweep running on another thread can never reclaim the
+    /// directory the socket lives in.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn bind_shields_the_socket_from_the_scratch_sweeps() {
+        let holder = tempfile::tempdir_in("/tmp").unwrap();
+        let socket = holder.path().join("d.sock");
+        let bound = DelegationListener::bind(&socket).await.expect("bind");
+        let shielded = crate::acp::scratch_dir::is_protected_for_test(holder.path());
+        drop(bound);
+        assert!(shielded, "the socket's directory must be shielded");
     }
 
     /// The STAGED path is measured too, not assumed shorter than the real one.
