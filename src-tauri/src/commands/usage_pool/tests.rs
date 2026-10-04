@@ -767,3 +767,29 @@ async fn the_status_is_read_with_the_key_and_errors_are_classified() {
     let error = fetch_status(&down).await.err().unwrap();
     assert_eq!(error.kind, PoolError::Unreachable);
 }
+
+// ─── Pushing ────────────────────────────────────────────────────────────
+
+#[test]
+fn each_reading_is_pushed_and_the_pool_going_away_once() {
+    use crate::web::event_bridge::WebEventBroadcaster;
+    use std::sync::Arc;
+
+    let broadcaster = Arc::new(WebEventBroadcaster::new());
+    let mut rx = broadcaster.subscribe();
+    let emitter = EventEmitter::test_web_only(broadcaster);
+    let pool = fixture_pool();
+
+    publish(&emitter, Some(&pool));
+    let event = rx.try_recv().expect("a reading is pushed");
+    assert_eq!(event.channel, PLAN_USAGE_POOL_CHANGED_EVENT);
+    assert_eq!(event.payload["accounts"].as_array().map(Vec::len), Some(3));
+    assert_clean(&event.payload.to_string());
+
+    publish(&emitter, None);
+    let gone = rx.try_recv().expect("the pool going away is pushed");
+    assert!(gone.payload.is_null());
+    // Once.
+    publish(&emitter, None);
+    assert!(rx.try_recv().is_err());
+}

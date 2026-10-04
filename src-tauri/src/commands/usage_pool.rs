@@ -28,7 +28,7 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde::de::{DeserializeOwned, Deserializer};
@@ -1046,6 +1046,8 @@ struct PoolStore {
     polled: bool,
     reading: Option<PlanUsagePool>,
     fetched_at: Option<Instant>,
+    /// The clients were last sent a pool (so its going away is news).
+    pushed: bool,
 }
 
 static STORE: Mutex<PoolStore> = Mutex::new(PoolStore {
@@ -1053,7 +1055,11 @@ static STORE: Mutex<PoolStore> = Mutex::new(PoolStore {
     polled: false,
     reading: None,
     fetched_at: None,
+    pushed: false,
 });
+
+/// Where new readings go; set once the poll task starts.
+static EMITTER: OnceLock<EventEmitter> = OnceLock::new();
 
 /// One ask of the pool at a time: concurrent callers wait for it and share
 /// the answer.
@@ -1084,6 +1090,22 @@ async fn next_reading(previous: Option<PlanUsagePool>, now: i64) -> Option<PlanU
     }
 }
 
+/// Send a new reading to every client: each pool reading, and `None` once
+/// when the pool goes away. Whoever asked for it (the poll, the screen's
+/// refresh, limit-continue), every window and the status bar see it at once.
+fn publish(emitter: &EventEmitter, reading: Option<&PlanUsagePool>) {
+    let send = with_store(|store| match reading {
+        Some(_) => {
+            store.pushed = true;
+            true
+        }
+        None => std::mem::replace(&mut store.pushed, false),
+    });
+    if send {
+        emit_event(emitter, PLAN_USAGE_POOL_CHANGED_EVENT, reading);
+    }
+}
+
 /// The current reading, asking the pool again unless the held one is younger
 /// than `min_age`.
 async fn refresh(min_age: Duration) -> Option<PlanUsagePool> {
@@ -1101,6 +1123,9 @@ async fn refresh(min_age: Duration) -> Option<PlanUsagePool> {
         store.reading = reading.clone();
         store.fetched_at = Some(Instant::now());
     });
+    if let Some(emitter) = EMITTER.get() {
+        publish(emitter, reading.as_ref());
+    }
     reading
 }
 
@@ -1115,12 +1140,12 @@ fn log_state(reading: Option<&PlanUsagePool>) -> Option<Option<PoolError>> {
     reading.map(|pool| pool.error)
 }
 
-/// Keep the pool's reading fresh while one is configured and push each one
-/// to the clients; push `None` once when the pool goes away. Runs for the
-/// life of the app (desktop and server alike).
+/// Keep the pool's reading fresh while one is configured; each new reading
+/// goes to the clients ([`publish`]). Runs for the life of the app (desktop
+/// and server alike).
 pub async fn run_usage_pool(emitter: EventEmitter) {
+    let _ = EMITTER.set(emitter);
     with_store(|store| store.polled = true);
-    let mut pushed = false;
     let mut logged: Option<Option<PoolError>> = None;
     loop {
         let reading = refresh(POLL_MIN_AGE).await;
@@ -1138,21 +1163,6 @@ pub async fn run_usage_pool(emitter: EventEmitter) {
                 (Some(_), None) => {}
             }
             logged = state;
-        }
-        match &reading {
-            Some(pool) => {
-                emit_event(&emitter, PLAN_USAGE_POOL_CHANGED_EVENT, Some(pool));
-                pushed = true;
-            }
-            None if pushed => {
-                emit_event(
-                    &emitter,
-                    PLAN_USAGE_POOL_CHANGED_EVENT,
-                    Option::<&PlanUsagePool>::None,
-                );
-                pushed = false;
-            }
-            None => {}
         }
         tokio::time::sleep(POLL_INTERVAL).await;
     }
