@@ -105,7 +105,7 @@ use crate::web::event_bridge::{emit_with_state, emit_with_state_gated, EventEmit
 /// at all under Finder — not anything the agent is attached to. Pinning one
 /// known-good entry is what makes the toggle behave the same in a packaged app
 /// as in `pnpm tauri dev`. A per-agent env row still outranks all four.
-const DEFAULT_COMMAND_COLOR_ENV: [(&str, &str); 4] = [
+pub(crate) const DEFAULT_COMMAND_COLOR_ENV: [(&str, &str); 4] = [
     ("CLICOLOR", "1"),
     ("CLICOLOR_FORCE", "1"),
     ("FORCE_COLOR", "1"),
@@ -991,6 +991,14 @@ fn merge_antigravity_settings(
     Ok((root != before).then_some(root))
 }
 
+/// Variables the codex launch path sets on top of the merged env: the MCP
+/// filtering override and the initial-mode preset from
+/// [`apply_codex_env_policy`], and the adapter log directory set under
+/// `CODEG_ACP_DEBUG`.
+pub(crate) const CODEX_MCP_FILTERING_ENV: &str = "DISABLE_MCP_CONFIG_FILTERING";
+pub(crate) const CODEX_INITIAL_MODE_ENV: &str = "INITIAL_AGENT_MODE";
+pub(crate) const CODEX_APP_SERVER_LOGS_ENV: &str = "APP_SERVER_LOGS";
+
 /// Codex-only launch policy: force codex-acp's MCP name-conflict de-duplication
 /// OFF. codeg injects its companion server (`codeg-mcp`) over ACP
 /// `session/new.mcpServers`; codex-acp otherwise drops any ACP-passed server
@@ -1011,7 +1019,7 @@ fn apply_codex_env_policy(
     if agent_type != AgentType::Codex {
         return;
     }
-    let key = "DISABLE_MCP_CONFIG_FILTERING";
+    let key = CODEX_MCP_FILTERING_ENV;
     merged.retain(|(k, _)| k != key);
     merged.push((key.to_string(), "true".to_string()));
 
@@ -1025,7 +1033,7 @@ fn apply_codex_env_policy(
     // user-set key, a stronger signal than a config-file inference. A
     // `preferred_mode_id` / `config_values["mode"]` still overrides this after
     // connect via `set_config_option` — explicit choice > config inference.
-    let mode_key = "INITIAL_AGENT_MODE";
+    let mode_key = CODEX_INITIAL_MODE_ENV;
     if merged
         .iter()
         .any(|(k, v)| k == mode_key && !v.trim().is_empty())
@@ -2311,7 +2319,7 @@ async fn build_agent(
                     .unwrap_or(false);
             if want_codex_logs {
                 if let Some(dir) = codex_app_server_log_dir() {
-                    merged_env.push(("APP_SERVER_LOGS".to_string(), dir));
+                    merged_env.push((CODEX_APP_SERVER_LOGS_ENV.to_string(), dir));
                 }
             }
             let mut parts: Vec<String> = Vec::new();
@@ -2370,7 +2378,7 @@ async fn build_agent(
                 // pass --reset-session so OpenClaw mints a fresh transcript
                 // instead of appending to the previous one.
                 if runtime_env
-                    .get("OPENCLAW_RESET_SESSION")
+                    .get(crate::commands::acp::OPENCLAW_RESET_SESSION_ENV)
                     .is_some_and(|v| v == "1")
                 {
                     parts.push("--reset-session".into());

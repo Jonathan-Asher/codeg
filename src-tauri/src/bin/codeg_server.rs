@@ -46,6 +46,16 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
+    // Before anything reads the environment, and while still single-threaded:
+    // a server started from inside one of codeg's own agent sessions inherits
+    // that session's scratch `TMPDIR` (which the sweeps delete, socket and
+    // all) and its identity, and would pass both to every agent it starts.
+    // `CODEG_*` configuration is kept. Logged once the subscriber exists.
+    //
+    // SAFETY: no runtime or other thread has been started yet.
+    let inherited_session_env =
+        unsafe { codeg_lib::launch_env::sanitize(codeg_lib::launch_env::Runtime::Server) };
+
     // PATH initialisation MUST happen before the tokio runtime is created.
     // std::env::set_var is not thread-safe (unsafe in Rust edition 2024);
     // #[tokio::main] would spawn worker threads before we reach this point.
@@ -90,6 +100,9 @@ fn main() -> ExitCode {
     // abort. Hold the guard for the whole process so buffered file lines flush
     // on a graceful exit.
     let _log_guard = codeg_lib::logging::init::init_server();
+    if let Some(sanitized) = &inherited_session_env {
+        sanitized.log();
+    }
 
     // `CODEG_HOME` overrides `CODEG_DATA_DIR` for uploads/pets inside
     // `paths::codeg_*_root` (legacy `~/.codeg/` layout). If both are set

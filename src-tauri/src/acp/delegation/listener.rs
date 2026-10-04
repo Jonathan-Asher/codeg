@@ -265,6 +265,10 @@ impl DelegationListener {
                 ));
             }
         }
+        // Before anything exists on disk: the startup scratch sweep runs on its
+        // own thread and must already know this path is ours when the socket
+        // appears, wherever it ends up.
+        crate::acp::scratch_dir::protect(socket_path);
         if let Some(parent) = socket_path.parent() {
             // Compared as WRITTEN, not resolved: `default_socket_path` builds
             // the fallback by joining onto `short_socket_dir()`, so the two
@@ -1399,12 +1403,30 @@ fn short_socket_dir() -> PathBuf {
 /// Without the fallback that produced a socket nobody could dial and no error
 /// anywhere — see [`DelegationListener::bind`].
 ///
+/// Never inside codeg's agent scratch space either, however short the path.
+/// A codeg started from inside one of its own agent sessions inherits that
+/// session's `TMPDIR`, which is a per-launch scratch directory: disposable by
+/// design, deleted by the scratch sweeps once its owner is gone and by the
+/// owning codeg the moment the agent exits. A socket bound there was deleted
+/// half a second after startup, and every companion call failed with `No such
+/// file or directory` from then on.
+///
 /// Windows: a named pipe address `\\.\pipe\codeg-delegation-<pid>`. Windows
 /// named pipes live in their own kernel namespace and ignore `temp_dir`; the
 /// argument is kept for signature parity across platforms.
 #[cfg(unix)]
 pub fn default_socket_path(temp_dir: &Path) -> PathBuf {
     let name = format!("codeg-delegation-{}.sock", std::process::id());
+    if crate::acp::scratch_dir::is_in_scratch_namespace(temp_dir) {
+        let short = short_socket_dir().join(&name);
+        tracing::info!(
+            "[delegation] {} is inside codeg's agent scratch space, which is swept; \
+             binding {} instead",
+            temp_dir.display(),
+            short.display(),
+        );
+        return short;
+    }
     let preferred = temp_dir.join(&name);
     if fits_sun_path(&preferred) {
         return preferred;
@@ -3455,13 +3477,14 @@ mod tests {
     #[test]
     fn an_over_long_temp_dir_falls_back_to_the_short_socket_dir() {
         let name = format!("codeg-delegation-{}.sock", std::process::id());
-        // A macOS `/var/folders/…/T` with codeg's own per-session nesting under
-        // it — the shape that actually produces this — padded so the composed
-        // path lands exactly ONE byte past what `sun_path` can hold. Sized from
-        // the cap rather than hard-coded, so it keeps straddling the boundary
-        // if either side of it moves.
+        // A macOS `/var/folders/…/T` with a per-session directory nested under
+        // it, padded so the composed path lands exactly ONE byte past what
+        // `sun_path` can hold. Sized from the cap rather than hard-coded, so it
+        // keeps straddling the boundary if either side of it moves. NOT a
+        // codeg scratch name: that shape falls back on its own, before length
+        // is even considered, and would leave this check untested.
         let prefix = "/var/folders/hl/";
-        let suffix = "/T/codeg-acp/12345-deadbeef";
+        let suffix = "/T/agent-tmp/12345-deadbeef";
         let pad = SUN_PATH_CAP - 1 - name.len() - prefix.len() - suffix.len();
         let ambient = PathBuf::from(format!("{prefix}{}{suffix}", "z".repeat(pad)));
         assert_eq!(ambient.as_os_str().len() + 1 + name.len(), SUN_PATH_CAP);
@@ -3476,6 +3499,50 @@ mod tests {
             path.display(),
             path.as_os_str().len()
         );
+    }
+
+    /// A temp directory inside codeg's agent scratch space is never used, even
+    /// when the socket would fit: it is what a codeg started from inside one of
+    /// its own agent sessions inherits, and the scratch sweeps delete it. The
+    /// first case is the exact directory from the incident — 31 bytes, nowhere
+    /// near the length cap, and gone half a second after the bind.
+    #[cfg(unix)]
+    #[test]
+    fn a_temp_dir_inside_the_scratch_space_falls_back_to_the_short_socket_dir() {
+        for ambient in [
+            "/tmp/codeg-acp-501/38441-ecf15960",
+            "/private/tmp/codeg-acp-501/38441-ecf15960",
+            "/var/folders/hl/x/T/codeg-acp/38441-ecf15960",
+            "/var/folders/hl/x/T/codeg-acp/38441-ecf15960/nested",
+            "/tmp/codeg-acp-501",
+        ] {
+            let ambient = Path::new(ambient);
+            assert!(fits_sun_path(
+                &ambient.join(format!("codeg-delegation-{}.sock", std::process::id()))
+            ));
+            let path = default_socket_path(ambient);
+            assert_eq!(
+                path.parent(),
+                Some(short_socket_dir().as_path()),
+                "{} must not host the socket",
+                ambient.display()
+            );
+            assert!(!crate::acp::scratch_dir::is_in_scratch_namespace(&path));
+        }
+    }
+
+    /// `bind` registers its socket with the scratch sweeps before it creates
+    /// anything, so a sweep running on another thread can never reclaim the
+    /// directory the socket lives in.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn bind_shields_the_socket_from_the_scratch_sweeps() {
+        let holder = tempfile::tempdir_in("/tmp").unwrap();
+        let socket = holder.path().join("d.sock");
+        let bound = DelegationListener::bind(&socket).await.expect("bind");
+        let shielded = crate::acp::scratch_dir::is_protected_for_test(holder.path());
+        drop(bound);
+        assert!(shielded, "the socket's directory must be shielded");
     }
 
     /// The STAGED path is measured too, not assumed shorter than the real one.
@@ -3531,7 +3598,7 @@ mod tests {
     #[tokio::test]
     async fn the_chosen_socket_path_can_actually_be_bound_and_dialed() {
         let ambient = PathBuf::from(format!(
-            "/var/folders/hl/{}/T/codeg-acp/12345-deadbeef",
+            "/var/folders/hl/{}/T/agent-tmp/12345-deadbeef",
             "z".repeat(60)
         ));
         let path = default_socket_path(&ambient);

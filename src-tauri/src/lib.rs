@@ -38,6 +38,7 @@ pub mod git_credential;
 pub mod git_repo;
 pub mod intern;
 pub mod keyring_store;
+pub mod launch_env;
 pub mod logging;
 pub mod models;
 mod network;
@@ -484,6 +485,19 @@ mod tauri_app {
 
     #[cfg_attr(mobile, tauri::mobile_entry_point)]
     pub fn run() {
+        // First of all, while `main()` has only just called in and no other
+        // thread exists: a codeg started from inside one of its own agent
+        // sessions inherits that session's environment — a scratch `TMPDIR`
+        // the sweeps delete, the parent's data dir, another session's
+        // identity — and would hand all of it to every agent it starts. Ahead
+        // of the logging init too, because the log file's location is read
+        // from the environment this cleans; the result is logged once the
+        // subscriber exists.
+        //
+        // SAFETY: single-threaded, as argued above and below.
+        let inherited_session_env =
+            unsafe { crate::launch_env::sanitize(crate::launch_env::Runtime::Desktop) };
+
         // Ahead of the logging init, which is otherwise the first statement
         // here: `init_desktop` builds a `tracing_appender::non_blocking` file
         // writer, and that spawns a worker thread. `set_var` is UB once any
@@ -504,6 +518,9 @@ mod tauri_app {
         // needed); hold the guard for the whole process so buffered file lines
         // flush on a graceful exit.
         let _log_guard = crate::logging::init::init_desktop();
+        if let Some(sanitized) = &inherited_session_env {
+            sanitized.log();
+        }
 
         if let Err(err) = fix_path_env::fix() {
             tracing::error!("[PATH] fix_path_env failed: {err}");

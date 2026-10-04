@@ -12,8 +12,9 @@ use tokio::task::JoinHandle;
 
 use super::shutdown::ShutdownSignal;
 use super::ws_attach::{self, ClientMsg, DetachReason, ServerMsg, OUTBOUND_CAPACITY};
+use super::ws_frame_cap::{self, Frame, MAX_FRAME_BYTES};
 use crate::app_state::AppState;
-use crate::logging::throttle::{LagLogThrottle, LAG_LOG_WINDOW};
+use crate::logging::throttle::{LagLogThrottle, LeadingEdgeThrottle, LAG_LOG_WINDOW};
 use crate::presence::{ClientKind, PresenceReport, SocketPresence};
 
 /// One entry per live attach subscription. The `epoch` is the per-WS-session
@@ -65,6 +66,25 @@ pub async fn ws_handler(
     );
     ws.protocols([super::auth::WS_EVENT_PROTOCOL])
         .on_upgrade(move |socket| handle_ws_connection(socket, state, shutdown_signal, kind))
+}
+
+/// Log a frame that had to be cut to fit [`MAX_FRAME_BYTES`]. Sizes and a
+/// count only — never content. Throttled per connection: a large out-of-turn
+/// turn is re-sent on every watcher tick, and each re-send is cut the same way.
+fn log_cut_frame(frame: &Frame, kind: &str, throttle: &mut LeadingEdgeThrottle) {
+    let Some(shrunk) = frame.shrunk else {
+        return;
+    };
+    if let Some(summary) = throttle.record(1) {
+        tracing::warn!(
+            "[WS] {kind} frame of {} bytes is past the {MAX_FRAME_BYTES}-byte cap; cut {} \
+             string field(s) to send {} bytes ({} oversized frame(s) since the last report)",
+            shrunk.original_bytes,
+            shrunk.fields,
+            shrunk.sent_bytes,
+            summary.occurrences,
+        );
+    }
 }
 
 async fn handle_ws_connection(
@@ -144,6 +164,8 @@ async fn handle_ws_connection(
     // reading behind a steady side-channel stream can't trickle near-duplicate
     // lines. Task-local: one instance per WS connection.
     let mut lag_throttle = LagLogThrottle::new(LAG_LOG_WINDOW);
+    // Same idea for frames cut to fit the frame cap.
+    let mut cut_throttle = LeadingEdgeThrottle::new(LAG_LOG_WINDOW);
 
     loop {
         tokio::select! {
@@ -181,9 +203,13 @@ async fn handle_ws_connection(
             outgoing = outbound_rx.recv() => {
                 match outgoing {
                     Some(msg) => {
-                        match serde_json::to_string(&msg) {
-                            Ok(text) => {
-                                if socket.send(Message::Text(text.into())).await.is_err() {
+                        // Capped: snapshots, replays and live events can carry
+                        // whole transcript turns, and a client with a message
+                        // limit loses its stream on the first frame past it.
+                        match ws_frame_cap::to_frame_text(&msg) {
+                            Ok(frame) => {
+                                log_cut_frame(&frame, "attach", &mut cut_throttle);
+                                if socket.send(Message::Text(frame.text.into())).await.is_err() {
                                     break;
                                 }
                             }
@@ -205,8 +231,9 @@ async fn handle_ws_connection(
             result = global_rx.recv() => {
                 match result {
                     Ok(event) => {
-                        if let Ok(msg) = serde_json::to_string(&event) {
-                            if socket.send(Message::Text(msg.into())).await.is_err() {
+                        if let Ok(frame) = ws_frame_cap::to_frame_text(&event) {
+                            log_cut_frame(&frame, "broadcast", &mut cut_throttle);
+                            if socket.send(Message::Text(frame.text.into())).await.is_err() {
                                 break;
                             }
                         }
