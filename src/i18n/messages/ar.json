@@ -2127,7 +2127,7 @@
       "forkSession": "تفريع الجلسة",
       "forkSessionSuccess": "تم تفريع الجلسة بنجاح",
       "forkSessionFailed": "فشل في تفريع الجلسة: {error}",
-      "forkSessionBusy": "فشل التفريع: هناك دور قيد التنفيذ",
+      "forkSessionBusy": "لا يمكن التفريع بعد: هذا الوكيل لا يمكنه التفريع إلا بين الأدوار",
       "editMessageFailed": "تعذّر تعديل الرسالة: {error}",
       "editMessageBusy": "لا يمكن تعديل الرسالة أثناء تنفيذ دور",
       "editMessageQueued": "لا يمكن تعديل الرسالة بينما توجد رسائل تنتظر في الطابور",
@@ -3649,7 +3649,7 @@
         "systemMessage": "رسالة النظام",
         "copyMessage": "نسخ",
         "forkFromHere": "تفريع من هنا",
-        "forkBusy": "لا يمكن التفريع أثناء تنفيذ دور",
+        "forkBusy": "هذا الوكيل لا يمكنه التفريع إلا بين الأدوار",
         "forkNotReady": "لا يمكن التفريع من هذا الرد بعد، أعد المحاولة بعد قليل",
         "editMessage": "تعديل الرسالة",
         "editBusy": "لا يمكن التعديل أثناء تنفيذ دور",
@@ -3720,7 +3720,8 @@
         "elapsedMinutes": "{value}د",
         "elapsedSeconds": "{value}ث",
         "outputSpeedAria": "السرعة التقديرية للإخراج",
-        "outputSpeedTooltip": "السرعة التقديرية للإخراج (نص + تفكير)"
+        "outputSpeedTooltip": "السرعة التقديرية للإخراج (نص + تفكير)",
+        "forkInFlight": "لا يزال هذا الرد قيد التنفيذ. فرّع من رد سابق، أو من هذا الرد بعد اكتماله"
       },
       "jsonTree": {
         "viewRaw": "عرض JSON الخام",

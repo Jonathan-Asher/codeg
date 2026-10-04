@@ -193,9 +193,16 @@ interface MessageListViewProps {
    *
    * "No turn in flight" is deliberately NOT part of this gate: that condition
    * is transient and comes back, so the view renders it as a disabled button
-   * (see `forkBusy`) rather than making every reply's footer flicker.
+   * (see `forkLocked`) rather than making every reply's footer flicker.
    */
   onForkFromTurn?: (turnId: string) => void
+  /**
+   * The agent forks while a turn is running — into a new conversation (see
+   * `lib/fork-from-turn`). Then a turn in flight greys out only the reply
+   * still being written; every finished reply above it stays forkable.
+   * Without it, every fork button greys out until the turn ends.
+   */
+  forkWhileRunning?: boolean
   /**
    * Edit a past user message and continue from there (see `lib/edit-message`).
    * The host forks at the reply before the message — or, for the first
@@ -1249,6 +1256,7 @@ export function MessageListView({
   onAskSelection,
   onSaveNoteSelection,
   onForkFromTurn,
+  forkWhileRunning = false,
   onEditUserMessage,
   hasQueuedMessages = false,
 }: MessageListViewProps) {
@@ -1675,6 +1683,10 @@ export function MessageListView({
   // its gate in `conversation-detail-panel`), and every reply's footer says
   // "not right now" instead of dropping its button and shifting the icon row.
   const forkBusy = connStatus === "prompting"
+  // ...unless the agent forks while running: then a finished reply forks into
+  // a new tab, and only the reply still being written can't (it has no
+  // footer until it settles; the live stats bar says why instead).
+  const forkLocked = forkBusy && !forkWhileRunning
 
   // --- Edit message ---------------------------------------------------------
   // Busy like forking — plus a message just sent that isn't a turn yet: an
@@ -1936,7 +1948,7 @@ export function MessageListView({
                   onRoundOpenChange={handleRoundOpenChange}
                   foldEpoch={fold.epoch}
                   onForkFromTurn={onForkFromTurn}
-                  forkDisabled={forkBusy}
+                  forkDisabled={forkLocked}
                   isThreadTail={item.isThreadTail}
                   editKey={editTarget ? item.key : undefined}
                   // Another message's edit being saved greys this one out
@@ -1986,7 +1998,7 @@ export function MessageListView({
       fold.epoch,
       handleRoundOpenChange,
       onForkFromTurn,
-      forkBusy,
+      forkLocked,
       findOpen,
       activeFindHit?.key,
       onRetryTurn,
@@ -2296,6 +2308,7 @@ export function MessageListView({
             agentType={agentType}
             isStreaming={connStatus === "prompting"}
             heldBackgroundTasks={heldBackgroundTasks}
+            forkInFlight={Boolean(onForkFromTurn) && forkWhileRunning}
           />
         )}
         {/* Shared overlay stack pinned to the inline-start edge (top-left in LTR,

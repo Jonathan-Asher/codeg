@@ -2127,7 +2127,7 @@
       "forkSession": "Bifurcar sesión",
       "forkSessionSuccess": "Sesión bifurcada exitosamente",
       "forkSessionFailed": "Error al bifurcar la sesión: {error}",
-      "forkSessionBusy": "Error al bifurcar: hay un turno en curso",
+      "forkSessionBusy": "Aún no se puede bifurcar: este agente solo puede bifurcar entre turnos",
       "editMessageFailed": "No se pudo editar el mensaje: {error}",
       "editMessageBusy": "No se puede editar el mensaje mientras hay un turno en curso",
       "editMessageQueued": "No se puede editar el mensaje mientras hay mensajes esperando en la cola",
@@ -3649,7 +3649,7 @@
         "systemMessage": "Mensaje del sistema",
         "copyMessage": "Copiar",
         "forkFromHere": "Bifurcar desde aquí",
-        "forkBusy": "No se puede bifurcar mientras hay un turno en curso",
+        "forkBusy": "Este agente solo puede bifurcar entre turnos",
         "forkNotReady": "Todavía no se puede bifurcar desde esta respuesta; inténtalo en un momento",
         "editMessage": "Editar mensaje",
         "editBusy": "No se puede editar mientras hay un turno en curso",
@@ -3720,7 +3720,8 @@
         "elapsedMinutes": "{value} min",
         "elapsedSeconds": "{value} s",
         "outputSpeedAria": "Velocidad de salida estimada",
-        "outputSpeedTooltip": "Velocidad de salida estimada (texto + razonamiento)"
+        "outputSpeedTooltip": "Velocidad de salida estimada (texto + razonamiento)",
+        "forkInFlight": "Esta respuesta aún está en curso. Bifurca desde una respuesta anterior, o desde esta cuando termine"
       },
       "jsonTree": {
         "viewRaw": "Ver JSON sin formato",

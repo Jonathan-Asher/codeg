@@ -2127,7 +2127,7 @@
       "forkSession": "Fork Session",
       "forkSessionSuccess": "Session forked successfully",
       "forkSessionFailed": "Failed to fork session: {error}",
-      "forkSessionBusy": "Failed to fork session: a turn is running",
+      "forkSessionBusy": "Can't fork yet: this agent can only fork between turns",
       "editMessageFailed": "Couldn't edit the message: {error}",
       "editMessageBusy": "Can't edit the message while a turn is running",
       "editMessageQueued": "Can't edit the message while messages are waiting in the queue",
@@ -3649,7 +3649,7 @@
         "systemMessage": "System message",
         "copyMessage": "Copy",
         "forkFromHere": "Fork from here",
-        "forkBusy": "Can't fork while a turn is running",
+        "forkBusy": "This agent can only fork between turns",
         "forkNotReady": "Can't fork from this reply just yet — try again in a moment",
         "editMessage": "Edit message",
         "editBusy": "Can't edit while a turn is running",
@@ -3720,7 +3720,8 @@
         "elapsedMinutes": "{value}m",
         "elapsedSeconds": "{value}s",
         "outputSpeedAria": "Estimated output speed",
-        "outputSpeedTooltip": "Estimated output speed (text + thinking)"
+        "outputSpeedTooltip": "Estimated output speed (text + thinking)",
+        "forkInFlight": "This reply is still running. Fork from an earlier reply, or from this one once it finishes"
       },
       "jsonTree": {
         "viewRaw": "Show raw JSON",

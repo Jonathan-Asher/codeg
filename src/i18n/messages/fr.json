@@ -2127,7 +2127,7 @@
       "forkSession": "Dupliquer la session",
       "forkSessionSuccess": "Session dupliquée avec succès",
       "forkSessionFailed": "Échec de la duplication de la session : {error}",
-      "forkSessionBusy": "Échec de la bifurcation : un tour est en cours",
+      "forkSessionBusy": "Impossible de bifurquer pour l'instant : cet agent ne peut bifurquer qu'entre deux tours",
       "editMessageFailed": "Impossible de modifier le message : {error}",
       "editMessageBusy": "Impossible de modifier le message pendant qu'un tour est en cours",
       "editMessageQueued": "Impossible de modifier le message tant que des messages attendent dans la file",
@@ -3649,7 +3649,7 @@
         "systemMessage": "Message système",
         "copyMessage": "Copier",
         "forkFromHere": "Bifurquer d'ici",
-        "forkBusy": "Impossible de bifurquer pendant qu'un tour est en cours",
+        "forkBusy": "Cet agent ne peut bifurquer qu'entre deux tours",
         "forkNotReady": "Impossible de bifurquer depuis cette réponse pour le moment, réessayez dans un instant",
         "editMessage": "Modifier le message",
         "editBusy": "Impossible de modifier pendant qu'un tour est en cours",
@@ -3720,7 +3720,8 @@
         "elapsedMinutes": "{value} min",
         "elapsedSeconds": "{value} s",
         "outputSpeedAria": "Vitesse de sortie estimée",
-        "outputSpeedTooltip": "Vitesse de sortie estimée (texte + raisonnement)"
+        "outputSpeedTooltip": "Vitesse de sortie estimée (texte + raisonnement)",
+        "forkInFlight": "Cette réponse est encore en cours. Bifurquez depuis une réponse précédente, ou depuis celle-ci une fois terminée"
       },
       "jsonTree": {
         "viewRaw": "Afficher le JSON brut",

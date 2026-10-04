@@ -2127,7 +2127,7 @@
       "forkSession": "Sitzung forken",
       "forkSessionSuccess": "Sitzung erfolgreich geforkt",
       "forkSessionFailed": "Sitzung konnte nicht geforkt werden: {error}",
-      "forkSessionBusy": "Verzweigen fehlgeschlagen: Ein Zug läuft",
+      "forkSessionBusy": "Verzweigen noch nicht möglich: Dieser Agent kann nur zwischen Zügen verzweigen",
       "editMessageFailed": "Nachricht konnte nicht bearbeitet werden: {error}",
       "editMessageBusy": "Nachricht kann nicht bearbeitet werden, während ein Zug läuft",
       "editMessageQueued": "Nachricht kann nicht bearbeitet werden, solange Nachrichten in der Warteschlange warten",
@@ -3649,7 +3649,7 @@
         "systemMessage": "Systemnachricht",
         "copyMessage": "Kopieren",
         "forkFromHere": "Ab hier verzweigen",
-        "forkBusy": "Verzweigen nicht möglich, während ein Zug läuft",
+        "forkBusy": "Dieser Agent kann nur zwischen Zügen verzweigen",
         "forkNotReady": "Von dieser Antwort kann noch nicht verzweigt werden – bitte gleich erneut versuchen",
         "editMessage": "Nachricht bearbeiten",
         "editBusy": "Bearbeiten nicht möglich, während ein Zug läuft",
@@ -3720,7 +3720,8 @@
         "elapsedMinutes": "{value} Min",
         "elapsedSeconds": "{value} Sek",
         "outputSpeedAria": "Geschätzte Ausgabegeschwindigkeit",
-        "outputSpeedTooltip": "Geschätzte Ausgabegeschwindigkeit (Text + Denken)"
+        "outputSpeedTooltip": "Geschätzte Ausgabegeschwindigkeit (Text + Denken)",
+        "forkInFlight": "Diese Antwort läuft noch. Verzweige von einer früheren Antwort oder von dieser, sobald sie fertig ist"
       },
       "jsonTree": {
         "viewRaw": "Rohes JSON anzeigen",
