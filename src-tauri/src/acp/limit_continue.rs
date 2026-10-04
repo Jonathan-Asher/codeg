@@ -17,12 +17,16 @@
 //! instead ([`usage_limit_text_from_error`]).
 //!
 //! When it resets ([`resolve_reset`]), most exact first:
-//! 1. the rate-limit event the agent sent with the block (Claude's
+//! 1. behind a local account pool (`commands::usage_pool`), the pool's own
+//!    reading: the message names one account's limit, but the session can
+//!    go on as soon as any enabled account can take it — in a minute when
+//!    one still has headroom, else at the first account's reset;
+//! 2. the rate-limit event the agent sent with the block (Claude's
 //!    `_claude/rateLimit` with `status: "rejected"` carries the blocking
 //!    window's exact `resetsAt`; Codex's rollouts carry each window's reset);
-//! 2. the window the message names ("weekly limit" → `seven_day`) in the
+//! 3. the window the message names ("weekly limit" → `seven_day`) in the
 //!    plan-usage reading, when it agrees with the message to the minute;
-//! 3. the message itself, in the time zone it names ([`parse_reset_time`]).
+//! 4. the message itself, in the time zone it names ([`parse_reset_time`]).
 //!
 //! The scheduler ([`run_limit_continue`]) sends [`LIMIT_CONTINUE_PROMPT`]
 //! through the normal prompt path once the reset has passed, plus a safety
@@ -462,17 +466,22 @@ pub async fn resolve_reset(
     text: &str,
     now: DateTime<Utc>,
 ) -> Option<(DateTime<Utc>, ResetSource)> {
-    use crate::commands::plan_usage;
+    use crate::commands::{plan_usage, usage_pool};
     let now_secs = now.timestamp();
     let (blocking, window) = match agent_type {
         AgentType::Codex => (
             plan_usage::codex_blocking_reset(now_secs - STRUCTURED_MAX_AGE_SECS, now_secs).await,
             None,
         ),
-        _ => (
-            plan_usage::claude_blocking_reset(now_secs),
-            named_claude_window(text).and_then(plan_usage::claude_window_reset),
-        ),
+        _ => match usage_pool::pool_resume_at(now_secs, named_claude_window(text)).await {
+            // Behind an account pool the message speaks for one account;
+            // the pool knows when any of them can take the session again.
+            Some(at) => (Some(at), None),
+            None => (
+                plan_usage::claude_blocking_reset(now_secs),
+                named_claude_window(text).and_then(plan_usage::claude_window_reset),
+            ),
+        },
     };
     choose_reset(text, now, host_time_zone(), blocking, window)
 }
