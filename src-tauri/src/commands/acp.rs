@@ -10439,11 +10439,16 @@ pub(crate) async fn build_session_runtime_env(
     }
 
     if agent_type == AgentType::OpenClaw && session_id.is_none() {
-        runtime_env.insert("OPENCLAW_RESET_SESSION".into(), "1".into());
+        runtime_env.insert(OPENCLAW_RESET_SESSION_ENV.into(), "1".into());
     }
 
     Ok(runtime_env)
 }
+
+/// Set on an OpenClaw launch that has no session to resume. The launch turns it
+/// into `--reset-session`, so OpenClaw starts a fresh transcript instead of
+/// appending to the previous one.
+pub(crate) const OPENCLAW_RESET_SESSION_ENV: &str = "OPENCLAW_RESET_SESSION";
 
 /// Per-launch env keys that vary by session/run but don't represent user
 /// config, so they're excluded from the config fingerprint. Without this, a
@@ -10451,7 +10456,7 @@ pub(crate) async fn build_session_runtime_env(
 /// session id is assigned and make every session look "stale". Currently only
 /// OpenClaw's reset flag (set iff `session_id` is None at spawn).
 fn is_volatile_fingerprint_key(key: &str) -> bool {
-    key == "OPENCLAW_RESET_SESSION"
+    key == OPENCLAW_RESET_SESSION_ENV
         || key == crate::acp::session_persistence::SESSION_PERSISTENCE_ENV
 }
 

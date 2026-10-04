@@ -59,6 +59,12 @@ pub fn absolutize(p: &Path) -> PathBuf {
         .unwrap_or_else(|_| p.to_path_buf())
 }
 
+/// File name (without extension) of the credential helper script codeg writes
+/// into its data dir and points `credential.helper` at, in every agent process
+/// and integrated terminal it starts. Because it appears in nothing else, it
+/// also tells a codeg process that it was started from inside one of those.
+pub const CREDENTIAL_HELPER_SCRIPT_STEM: &str = "git-credential-codeg";
+
 /// Create a credential helper that calls the app binary directly with
 /// `--credential-helper` flag. The app binary opens the DB, looks up
 /// the matching account, and outputs credentials to stdout.
@@ -83,7 +89,7 @@ pub fn create_credential_helper_script(
 
     #[cfg(unix)]
     {
-        let script_path = app_data_dir.join("git-credential-codeg.sh");
+        let script_path = app_data_dir.join(format!("{CREDENTIAL_HELPER_SCRIPT_STEM}.sh"));
         let content = format!(
             r#"#!/bin/sh
 # Codeg credential helper — calls the app binary to look up credentials.
@@ -102,7 +108,7 @@ exec {binary} --credential-helper --data-dir {data_dir} < /dev/stdin
 
     #[cfg(windows)]
     {
-        let script_path = app_data_dir.join("git-credential-codeg.bat");
+        let script_path = app_data_dir.join(format!("{CREDENTIAL_HELPER_SCRIPT_STEM}.bat"));
         let content = format!(
             r#"@echo off
 if not "%~1"=="get" exit /b 0
