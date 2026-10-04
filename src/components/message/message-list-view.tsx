@@ -1080,6 +1080,7 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
   foldEpoch = 0,
   onForkFromTurn,
   forkDisabled = false,
+  forkNamesLiveReplies = false,
   isThreadTail = false,
   editKey,
   editBlocked = null,
@@ -1097,6 +1098,9 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
   foldEpoch?: number
   onForkFromTurn?: (turnId: string) => void
   forkDisabled?: boolean
+  /** The host names a `live-…` reply itself before forking (a mid-turn fork,
+   *  see `resolveForkFromHereTurnId`), so such a reply is not "not ready". */
+  forkNamesLiveReplies?: boolean
   /** Whether nothing follows this group in the thread — the one position where
    *  a turn the backend cannot name still forks where the user pointed. */
   isThreadTail?: boolean
@@ -1117,7 +1121,8 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
   const forkPoint = sourceTurns?.length
     ? sourceTurns[sourceTurns.length - 1]
     : null
-  const forkPointUnnamed = isForkPointUnnamed(forkPoint, isThreadTail)
+  const forkPointUnnamed =
+    !forkNamesLiveReplies && isForkPointUnnamed(forkPoint, isThreadTail)
 
   return (
     <div className={dimmed ? "opacity-70" : undefined}>
@@ -1687,6 +1692,10 @@ export function MessageListView({
   // a new tab, and only the reply still being written can't (it has no
   // footer until it settles; the live stats bar says why instead).
   const forkLocked = forkBusy && !forkWhileRunning
+  // A mid-turn fork names a reply still called `live-…` from a fresh read of
+  // the transcript (the reparse that names it waits for the turn to end), so
+  // those replies don't grey out as "not ready" while it runs.
+  const forkNamesLiveReplies = forkBusy && forkWhileRunning
 
   // --- Edit message ---------------------------------------------------------
   // Busy like forking — plus a message just sent that isn't a turn yet: an
@@ -1949,6 +1958,7 @@ export function MessageListView({
                   foldEpoch={fold.epoch}
                   onForkFromTurn={onForkFromTurn}
                   forkDisabled={forkLocked}
+                  forkNamesLiveReplies={forkNamesLiveReplies}
                   isThreadTail={item.isThreadTail}
                   editKey={editTarget ? item.key : undefined}
                   // Another message's edit being saved greys this one out
@@ -1999,6 +2009,7 @@ export function MessageListView({
       handleRoundOpenChange,
       onForkFromTurn,
       forkLocked,
+      forkNamesLiveReplies,
       findOpen,
       activeFindHit?.key,
       onRetryTurn,

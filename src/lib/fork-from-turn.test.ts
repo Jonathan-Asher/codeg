@@ -25,11 +25,13 @@ import {
   useTabStore,
   type TabItemInternal,
 } from "@/stores/tab-store"
+import type { MessageTurn } from "@/lib/types"
 import {
   ForkBetweenTurnsOnlyError,
   forkFromTurn,
   isForkNeedsIdleRejection,
   openForkedConversationTab,
+  resolveForkFromHereTurnId,
   supportsForkWhileRunning,
 } from "./fork-from-turn"
 
@@ -207,5 +209,96 @@ describe("openForkedConversationTab", () => {
       tab(9).id,
       "conv-1-claude_code-42",
     ])
+  })
+})
+
+describe("resolveForkFromHereTurnId", () => {
+  function t(
+    id: string,
+    role: "user" | "assistant" | "system",
+    text: string | null
+  ): MessageTurn {
+    return {
+      id,
+      role,
+      blocks: text === null ? [] : [{ type: "text", text }],
+      timestamp: "2026-10-04T10:00:00.000Z",
+    } as MessageTurn
+  }
+
+  /** On screen mid-turn: a reply this session streamed, never renamed. */
+  const thread = [
+    t("turn-0", "user", "Remember PELICAN"),
+    t("turn-1", "assistant", "noted"),
+    t("live-9-u", "user", "list the files"),
+    t("live-9-lm-1", "assistant", "a.txt b.txt"),
+  ]
+  /** The transcript, read mid-turn: that reply was two API messages, and
+   *  the running turn's prompt and first half are on disk too. */
+  const transcript = [
+    t("turn-0", "user", "Remember PELICAN"),
+    t("turn-1", "assistant", "noted"),
+    t("turn-2", "user", "list   the files"),
+    t("turn-3", "assistant", "running ls"),
+    t("turn-4", "assistant", "a.txt b.txt"),
+    t("turn-5", "assistant", null),
+    t("turn-6", "user", "count slowly to 30"),
+    t("turn-7", "assistant", "1, 2"),
+  ]
+
+  it("passes a parser id through without reading anything", async () => {
+    const readTranscript = vi.fn()
+    expect(
+      await resolveForkFromHereTurnId({
+        turnId: "turn-1",
+        thread,
+        readTranscript,
+      })
+    ).toBe("turn-1")
+    expect(readTranscript).not.toHaveBeenCalled()
+  })
+
+  it("names a streamed reply by its prompt's place in a fresh parse", async () => {
+    // The reply's LAST non-empty turn before the next prompt — what the
+    // button forks at — and never the running turn after it.
+    expect(
+      await resolveForkFromHereTurnId({
+        turnId: "live-9-lm-1",
+        thread,
+        readTranscript: async () => transcript,
+      })
+    ).toBe("turn-4")
+  })
+
+  it("finds nothing when the count has drifted", async () => {
+    // The transcript's prompt at that place says something else: refuse
+    // rather than fork at the wrong reply.
+    const drifted = transcript.map((turn) =>
+      turn.id === "turn-2" ? t("turn-2", "user", "something else") : turn
+    )
+    expect(
+      await resolveForkFromHereTurnId({
+        turnId: "live-9-lm-1",
+        thread,
+        readTranscript: async () => drifted,
+      })
+    ).toBeNull()
+  })
+
+  it("finds nothing for a reply that is not on screen or not on disk", async () => {
+    expect(
+      await resolveForkFromHereTurnId({
+        turnId: "live-0-lm-0",
+        thread,
+        readTranscript: async () => transcript,
+      })
+    ).toBeNull()
+    expect(
+      await resolveForkFromHereTurnId({
+        turnId: "live-9-lm-1",
+        thread,
+        readTranscript: async () => transcript.slice(0, 2),
+      })
+    ).toBeNull()
   })
 })

@@ -112,6 +112,7 @@ import {
   ForkBetweenTurnsOnlyError,
   forkFromTurn,
   openForkedConversationTab,
+  resolveForkFromHereTurnId,
   supportsForkWhileRunning,
 } from "@/lib/fork-from-turn"
 import {
@@ -1537,6 +1538,21 @@ const ConversationTabView = memo(function ConversationTabView({
     handleSendRef.current = handleSend
   }, [handleSend])
 
+  // A fresh parse of this conversation, for `resolveEditForkTurnId` and
+  // `resolveForkFromHereTurnId`: from the turn the thread on screen starts at —
+  // the loaded window's first turn, or the very first — so the two line up
+  // turn for turn.
+  const readTranscriptForEdit = useCallback(async () => {
+    const dbId = dbConvIdRef.current
+    if (dbId == null) return []
+    const loaded = getRuntimeSession(effectiveConversationId)?.detail ?? null
+    const fromIndex = isWindowedDetail(loaded) ? loaded.turns_offset : 0
+    const fresh = await getFolderConversation(dbId, { fromIndex })
+    // Started anywhere else, the turns wouldn't line up — nothing to match.
+    if (isWindowedDetail(fresh) && fresh.turns_offset !== fromIndex) return []
+    return fresh.turns
+  }, [effectiveConversationId])
+
   // "Fork from here": fork at a rendered assistant turn, sending nothing. The
   // ONLY fork entry point — the composer's fork-and-send was removed once this
   // existed, since the tail is just one of the turns this can be aimed at.
@@ -1587,14 +1603,39 @@ const ConversationTabView = memo(function ConversationTabView({
       const staleLiveTurnIds = (preForkSession?.localTurns ?? []).map(
         (t) => t.id
       )
+      const turnRunning = status === "prompting"
       try {
+        // Mid-turn, a reply this session streamed may still carry only its
+        // `live-…` id: the reparse that names it waits for the turn to end.
+        // The backend can't fork at that, so find the parser's name in a
+        // fresh read of the transcript, as an edit does. (Between turns such
+        // a reply is only offered at the thread's tail, which is where the
+        // backend's tail fork lands anyway — unchanged.)
+        let forkPointId: string | null = turnId
+        if (turnRunning) {
+          forkPointId = await resolveForkFromHereTurnId({
+            turnId,
+            thread: getTimelineTurns(effectiveConversationId)
+              .filter((entry) => entry.phase === "persisted")
+              .map((entry) => entry.turn),
+            readTranscript: () => readTranscriptForEdit(),
+          })
+        }
+        if (forkPointId === null) {
+          notify({
+            level: "error",
+            key: `fork-failed:${connectionId}`,
+            title: tMessageList("forkNotReady"),
+          })
+          return
+        }
         const outcome = await forkFromTurn({
           agentType: selectedAgent,
           connectionId,
           conversationId: dbConvIdRef.current,
           folderId,
-          turnId,
-          turnRunning: status === "prompting",
+          turnId: forkPointId,
+          turnRunning,
         })
         if (outcome.kind === "new_conversation") {
           // Nothing on THIS tab changes: the running turn keeps streaming
@@ -1651,11 +1692,13 @@ const ConversationTabView = memo(function ConversationTabView({
       conn.connectionId,
       effectiveConversationId,
       folderId,
+      readTranscriptForEdit,
       refetchDetail,
       refreshConversations,
       selectedAgent,
       setExternalId,
       t,
+      tMessageList,
       tabId,
     ]
   )
@@ -2035,20 +2078,6 @@ const ConversationTabView = memo(function ConversationTabView({
     },
     [effectiveConversationId, refetchDetail]
   )
-
-  // A fresh parse of this conversation, for `resolveEditForkTurnId`: from the
-  // turn the thread on screen starts at — the loaded window's first turn, or
-  // the very first — so the two line up turn for turn.
-  const readTranscriptForEdit = useCallback(async () => {
-    const dbId = dbConvIdRef.current
-    if (dbId == null) return []
-    const loaded = getRuntimeSession(effectiveConversationId)?.detail ?? null
-    const fromIndex = isWindowedDetail(loaded) ? loaded.turns_offset : 0
-    const fresh = await getFolderConversation(dbId, { fromIndex })
-    // Started anywhere else, the turns wouldn't line up — nothing to match.
-    if (isWindowedDetail(fresh) && fresh.turns_offset !== fromIndex) return []
-    return fresh.turns
-  }, [effectiveConversationId])
 
   /**
    * "Edit message" (see `lib/edit-message`): continue this conversation from a

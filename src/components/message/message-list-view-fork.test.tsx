@@ -253,6 +253,30 @@ describe("MessageListView: fork from here while a turn runs", () => {
     expect(liveForkButton()).toBeNull()
   })
 
+  it("keeps a reply this session streamed forkable while the turn runs", async () => {
+    // Still named `live-…` (the reparse that names it waits for the turn to
+    // end): the host names it from a fresh read before forking, so the button
+    // must not grey out as "not ready" — and it hands over that live id.
+    mockGetFolderConversation.mockResolvedValue(
+      detail([
+        turn("turn-0", "user", "hi"),
+        turn("live-3-lm-1", "assistant", "hello"),
+        turn("turn-2", "user", "count slowly to 30"),
+      ])
+    )
+    const actions = useConversationRuntimeStore.getState().actions
+    expect(await actions.refetchDetail(CONVERSATION)).toBe(true)
+    const onForkFromTurn = vi.fn()
+    const { container } = renderList({
+      onForkFromTurn,
+      forkWhileRunning: true,
+    })
+    const button = replyForkButton(container, "live-3-lm-1")
+    expect(button).not.toHaveAttribute("aria-disabled")
+    await userEvent.click(button)
+    expect(onForkFromTurn).toHaveBeenCalledWith("live-3-lm-1")
+  })
+
   it("forks as before between turns", async () => {
     mockGetFolderConversation.mockResolvedValue(
       detail([...HISTORY, turn("turn-5", "assistant", "1 … 30")])

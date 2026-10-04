@@ -3,8 +3,10 @@ import {
   acpForkToNewConversation,
   type ForkToNewConversationResult,
 } from "@/lib/api"
+import { editableUserMessageText } from "@/lib/edit-message"
 import { TurnBusyError } from "@/lib/turn-busy"
-import type { AgentType } from "@/lib/types"
+import type { AgentType, MessageTurn } from "@/lib/types"
+import { isLiveTurnId } from "@/stores/conversation-runtime-store"
 import { useTabStore } from "@/stores/tab-store"
 
 /**
@@ -60,6 +62,96 @@ export function isForkNeedsIdleRejection(err: unknown): boolean {
       return message.includes(FORK_NEEDS_IDLE_MARKER)
   }
   return false
+}
+
+/** Text compared as a person reads it: runs of whitespace are one space. */
+function comparableText(text: string): string {
+  return text.replace(/\s+/g, " ").trim()
+}
+
+/**
+ * The reply answering the `promptOrdinal`-th user turn of a freshly parsed
+ * transcript: the LAST non-empty turn before the next user turn (or the end),
+ * which is where "fork from here" on that reply forks. The prompt must carry
+ * `promptText`, or the count has drifted and nothing is returned rather than
+ * the wrong reply. `null` when the prompt or its reply can't be found.
+ */
+export function resolveReplyInTranscript(
+  turns: MessageTurn[],
+  promptOrdinal: number,
+  promptText: string
+): string | null {
+  let promptIndex = -1
+  let usersSeen = 0
+  for (let i = 0; i < turns.length; i++) {
+    if (turns[i].role !== "user") continue
+    if (usersSeen === promptOrdinal) {
+      promptIndex = i
+      break
+    }
+    usersSeen += 1
+  }
+  if (promptIndex < 0) return null
+  if (
+    comparableText(editableUserMessageText(turns[promptIndex])) !==
+    comparableText(promptText)
+  ) {
+    return null
+  }
+  let end = turns.length
+  for (let i = promptIndex + 1; i < turns.length; i++) {
+    if (turns[i].role === "user") {
+      end = i
+      break
+    }
+  }
+  for (let i = end - 1; i > promptIndex; i--) {
+    if (turns[i].blocks.length === 0) continue
+    return turns[i].role === "assistant" ? turns[i].id : null
+  }
+  return null
+}
+
+/**
+ * The parser's id of a reply "fork from here" was clicked on while a turn
+ * runs — the id the backend resolves the fork point by.
+ *
+ * A reply this session streamed is named `live-…` until the post-turn reparse
+ * gives it the parser's name, and that reparse waits out a turn in flight: a
+ * follow-up sent soon after a reply leaves it unnamed for exactly the length
+ * of the turn a mid-run fork happens in. So read the transcript afresh — a
+ * full parse names every turn — and find the reply there by its prompt's
+ * place among the user turns, as an edit does (`resolveEditForkTurnId`).
+ *
+ * `thread` is the settled turns on screen, in order; `readTranscript` returns
+ * a fresh parse starting at the same turn the thread does. A parser id is
+ * returned as is. `null` when the reply can't be found; a failed read rejects.
+ */
+export async function resolveForkFromHereTurnId({
+  turnId,
+  thread,
+  readTranscript,
+}: {
+  turnId: string
+  thread: MessageTurn[]
+  readTranscript: () => Promise<MessageTurn[]>
+}): Promise<string | null> {
+  if (!isLiveTurnId(turnId)) return turnId
+  const replyIndex = thread.findIndex((turn) => turn.id === turnId)
+  if (replyIndex < 0) return null
+  let promptIndex = -1
+  let promptOrdinal = -1
+  for (let i = 0; i < replyIndex; i++) {
+    if (thread[i].role !== "user") continue
+    promptIndex = i
+    promptOrdinal += 1
+  }
+  if (promptIndex < 0) return null
+  return resolveReplyInTranscript(
+    await readTranscript(),
+    promptOrdinal,
+    editableUserMessageText(thread[promptIndex])
+  )
 }
 
 export type ForkFromTurnOutcome =
