@@ -147,7 +147,9 @@ export const TabGroupLabel = memo(function TabGroupLabel({
       className={cn(
         "relative flex h-full shrink-0 items-center pl-1.5 pr-1 pb-1.5 ws-strip-line",
         movable && "cursor-grab active:cursor-grabbing",
-        held && "z-30"
+        // Lifted while held: opaque, so it reads over the labels and tabs it
+        // passes instead of blending into them.
+        held && "z-30 rounded-md bg-muted"
       )}
     >
       {dropBefore && <GroupDropMarker />}
