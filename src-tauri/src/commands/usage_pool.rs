@@ -315,9 +315,14 @@ fn discover_at(path: &Path) -> Discovery {
     {
         return Discovery::Unreadable;
     }
-    match serde_json::from_str::<RawConfig>(&text) {
-        Ok(raw) => Discovery::Found(PoolConfig::from_raw(raw)),
-        Err(_) => Discovery::Unreadable,
+    // Only an object is a config: serde would also read a struct out of a
+    // JSON array, field by field.
+    match serde_json::from_str::<Value>(&text) {
+        Ok(value @ Value::Object(_)) => match serde_json::from_value::<RawConfig>(value) {
+            Ok(raw) => Discovery::Found(PoolConfig::from_raw(raw)),
+            Err(_) => Discovery::Unreadable,
+        },
+        _ => Discovery::Unreadable,
     }
 }
 
