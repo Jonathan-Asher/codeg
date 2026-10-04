@@ -563,6 +563,12 @@ async fn async_main() -> ExitCode {
         state.data_dir.clone(),
     ));
 
+    // Read the local account pool the agent's requests go through, when one
+    // is configured, and push each reading (mirrors lib.rs setup).
+    tokio::spawn(codeg_lib::commands::usage_pool::run_usage_pool(
+        state.emitter.clone(),
+    ));
+
     // Alert on critical sessions that sit idle or go silent (mirrors lib.rs
     // setup).
     tokio::spawn(codeg_lib::acp::critical_watch::critical_watch_task(

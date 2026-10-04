@@ -1286,6 +1286,13 @@ mod tauri_app {
                     effective_data_dir.clone(),
                 ));
 
+                // Read the local account pool the agent's requests go
+                // through, when one is configured, and push each reading.
+                // Mirrored in `bin/codeg_server.rs`.
+                tauri::async_runtime::spawn(crate::commands::usage_pool::run_usage_pool(
+                    crate::web::event_bridge::EventEmitter::Tauri(app.handle().clone()),
+                ));
+
                 // Alert on critical sessions that sit idle or go silent, with
                 // or without a window open. Mirrored in `bin/codeg_server.rs`.
                 tauri::async_runtime::spawn(crate::acp::critical_watch::critical_watch_task(

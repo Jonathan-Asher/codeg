@@ -70,6 +70,7 @@ pub mod system_settings;
 pub mod terminal;
 pub mod token_usage;
 pub mod turn_window;
+pub mod usage_pool;
 pub mod version_control;
 #[cfg(feature = "tauri-runtime")]
 pub mod windows;

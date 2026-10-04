@@ -38,6 +38,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::app_error::AppCommandError;
+use crate::commands::usage_pool::{self, PlanUsagePool};
 use crate::web::event_bridge::{emit_event, EventEmitter, PLAN_USAGE_CHANGED_EVENT};
 
 /// `_meta` key claude-agent-acp puts the SDK's rate-limit info under.
@@ -126,9 +127,14 @@ pub struct PlanUsageReport {
     /// Whether any Codex rollout exists there, with or without limits. Tells
     /// "no Codex sessions" apart from "sessions, but none report limits".
     pub codex_rollouts_found: bool,
+    /// The local account pool the agent's requests are spread over, when
+    /// one is configured ([`crate::commands::usage_pool`]). Absent otherwise,
+    /// so a machine without a pool sees the report it always did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool: Option<PlanUsagePool>,
 }
 
-fn now_secs() -> i64 {
+pub(crate) fn now_secs() -> i64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -145,7 +151,7 @@ fn epoch_secs(value: &Value) -> Option<i64> {
     Some(secs as i64)
 }
 
-fn clamp_percent(value: f64) -> f64 {
+pub(crate) fn clamp_percent(value: f64) -> f64 {
     if value.is_finite() {
         value.clamp(0.0, 100.0)
     } else {
@@ -216,7 +222,11 @@ fn claude_window_shape(id: &str) -> (PlanUsageWindowKind, String, Option<u32>) {
     }
 }
 
-fn claude_window(id: &str, used_percent: f64, resets_at: Option<i64>) -> PlanUsageWindow {
+pub(crate) fn claude_window(
+    id: &str,
+    used_percent: f64,
+    resets_at: Option<i64>,
+) -> PlanUsageWindow {
     let (kind, label, window_minutes) = claude_window_shape(id);
     PlanUsageWindow {
         id: id.to_string(),
@@ -796,9 +806,10 @@ async fn codex_scan(force: bool) -> CodexScan {
 // ─── Entry points ───────────────────────────────────────────────────────
 
 /// Every agent's latest plan usage. `force` skips the Codex cache (the
-/// screen's refresh button); Claude's reading is always the latest one held.
+/// screen's refresh button) and re-reads the account pool; the live reading
+/// is always the latest one held.
 pub async fn get_plan_usage_core(force: bool) -> Result<PlanUsageReport, AppCommandError> {
-    let codex = codex_scan(force).await;
+    let (codex, pool) = tokio::join!(codex_scan(force), usage_pool::report_reading(force));
     let snapshots = [claude_snapshot(), codex.snapshot]
         .into_iter()
         .flatten()
@@ -807,6 +818,7 @@ pub async fn get_plan_usage_core(force: bool) -> Result<PlanUsageReport, AppComm
         snapshots,
         codex_sessions_dir: Some(codex.sessions_dir.to_string_lossy().into_owned()),
         codex_rollouts_found: codex.rollouts_found,
+        pool,
     })
 }
 
@@ -1308,6 +1320,7 @@ mod tests {
             snapshots: vec![snapshot],
             codex_sessions_dir: Some("/home/u/.codex/sessions".into()),
             codex_rollouts_found: false,
+            pool: None,
         })
         .unwrap();
         assert_eq!(
