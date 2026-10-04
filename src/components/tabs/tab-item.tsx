@@ -8,7 +8,7 @@ import {
   useRef,
   type CSSProperties,
 } from "react"
-import { Reorder } from "motion/react"
+import { Reorder, useMotionValue } from "motion/react"
 import type { PanInfo } from "motion/react"
 import { X } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -99,15 +99,31 @@ interface TabItemProps {
   isTouchSorting: boolean
   onTouchSortingStart: (tabId: string) => void
   onTouchSortingEnd: () => void
-  /** False while the strip is grouped by folder or sorted by status: the
-   *  displayed order is derived there, so a drag would have nothing coherent
-   *  to write back. Defaults to true. */
+  /** False while the strip is sorted by status, activity or name: that order
+   *  is derived, so a drag would have nothing coherent to write back. Defaults
+   *  to true. */
   reorderable?: boolean
+  /** Appended to the tooltip while `reorderable` is false, saying why. */
+  dragDisabledHint?: string
+  /** The group (run key) this tab is shown in while the strip is grouped. */
+  runKey?: string
+  /** While grouped: the range the tab may be dragged within, in px relative to
+   *  its resting spot — its own group's span. A drag past either end is held
+   *  there and flagged as a no-drop (a tab can't change group by dragging).
+   *  Null / undefined = no limit. Must be referentially stable. */
+  dragLane?: (tabId: string) => { min: number; max: number } | null
+  /** Its group is being dragged by the group label: fade it, so it reads as
+   *  the thing moving. */
+  dimmed?: boolean
   /** Tint vars (`folderTitleTintVars`) for the thin group-color stripe along
    *  the tab's top edge, shown while grouped / sorted. Must be referentially
    *  stable per group — this component is memoized. */
   accentStyle?: CSSProperties
 }
+
+/** How far past its group's edge a drag must push before it reads as a
+ *  no-drop, so brushing the edge doesn't flicker. */
+const LANE_BLOCK_SLOP_PX = 8
 
 export const TabItem = memo(function TabItem({
   tab,
@@ -139,6 +155,10 @@ export const TabItem = memo(function TabItem({
   onTouchSortingStart,
   onTouchSortingEnd,
   reorderable = true,
+  dragDisabledHint,
+  runKey,
+  dragLane,
+  dimmed = false,
   accentStyle,
 }: TabItemProps) {
   const t = useTranslations("Folder.tabs")
@@ -166,9 +186,13 @@ export const TabItem = memo(function TabItem({
   }, [conversationId, isCritical, t])
 
   const resolvedFolderName = folderName ?? String(tab.folderId)
-  const tooltip = folderBranch
+  const baseTooltip = folderBranch
     ? `${resolvedFolderName} · ${folderBranch}  —  ${tab.title}`
     : `${resolvedFolderName}  —  ${tab.title}`
+  const tooltip =
+    !reorderable && dragDisabledHint
+      ? `${baseTooltip}\n${dragDisabledHint}`
+      : baseTooltip
 
   const clearResidualStyles = useCallback(() => {
     const el = itemRef.current
@@ -215,6 +239,51 @@ export const TabItem = memo(function TabItem({
   }, [])
   useEffect(() => releaseGuard, [releaseGuard])
 
+  // ── Group lane ───────────────────────────────────────────────────────────
+  // While grouped, a tab only moves among its own group. Every write to the
+  // drag offset (the gesture itself, the re-anchoring after a neighbour swap,
+  // the snap back) passes through this clamp, so the tab stops at its group's
+  // edge and the reorder list never sees it reach another group. Pushing past
+  // the edge marks the tab and the cursor as a no-drop.
+  const x = useMotionValue(0)
+  const dragLaneRef = useRef(dragLane)
+  useEffect(() => {
+    dragLaneRef.current = dragLane
+  }, [dragLane])
+  const blockedRef = useRef(false)
+  const setBlocked = useCallback((blocked: boolean) => {
+    if (blockedRef.current === blocked) return
+    blockedRef.current = blocked
+    const el = itemRef.current
+    if (blocked) el?.setAttribute("data-drag-blocked", "true")
+    else el?.removeAttribute("data-drag-blocked")
+    document.documentElement.classList.toggle("tab-drag-blocked", blocked)
+  }, [])
+  const tabId = tab.id
+  useEffect(() => {
+    x.attach(
+      (value, set) => {
+        const lane = dragLaneRef.current?.(tabId)
+        if (!lane) {
+          set(value)
+          return
+        }
+        const clamped = Math.min(lane.max, Math.max(lane.min, value))
+        setBlocked(Math.abs(value - clamped) > LANE_BLOCK_SLOP_PX)
+        set(clamped)
+      },
+      () => {}
+    )
+    return () => {
+      x.attach(
+        (value, set) => set(value),
+        () => {}
+      )
+      setBlocked(false)
+    }
+  }, [x, tabId, setBlocked])
+  const motionStyle = useMemo(() => ({ x }), [x])
+
   const handleDragStart = useCallback(() => {
     acquireGuard()
     longPressDragStart()
@@ -230,10 +299,11 @@ export const TabItem = memo(function TabItem({
   const handleDragEnd = useCallback(
     (event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
       releaseGuard()
+      setBlocked(false)
       longPressDragEnd()
       onTabDragEnd?.(tab, event, info)
     },
-    [releaseGuard, longPressDragEnd, onTabDragEnd, tab]
+    [releaseGuard, setBlocked, longPressDragEnd, onTabDragEnd, tab]
   )
 
   const handleClick = useCallback(() => {
@@ -282,7 +352,9 @@ export const TabItem = memo(function TabItem({
       ref={itemRef}
       as="div"
       value={tab}
+      style={motionStyle}
       data-tab-id={tab.id}
+      data-tab-run={runKey}
       drag={reorderable ? "x" : false}
       dragControls={dragControls}
       dragListener={!isCoarsePointer && reorderable}
@@ -317,7 +389,10 @@ export const TabItem = memo(function TabItem({
           (embedded
             ? "active:z-50"
             : "active:opacity-90 active:shadow-md active:z-50"),
-        isTouchSorting && "z-50 opacity-90 shadow-md ring-1 ring-primary/25"
+        isTouchSorting && "z-50 opacity-90 shadow-md ring-1 ring-primary/25",
+        // Pushed against its group's edge: a tab can't change group.
+        "data-[drag-blocked=true]:opacity-60 data-[drag-blocked=true]:ring-1 data-[drag-blocked=true]:ring-destructive/60",
+        dimmed && "opacity-40"
       )}
     >
       {/* Reverse (concave) bottom corners — the browser-tab seat (globals.css).

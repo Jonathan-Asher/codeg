@@ -4,18 +4,15 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
 } from "react"
 import { Reorder } from "motion/react"
 import type { PanInfo } from "motion/react"
-import {
-  ArrowDownWideNarrow,
-  ChevronDown,
-  ChevronRight,
-  SquarePen,
-} from "lucide-react"
+import { ArrowDownWideNarrow, SquarePen } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
@@ -40,31 +37,44 @@ import {
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
   STATUS_BAND_COLOR,
-  TAB_ARRANGE_MODES,
-  arrangeTabs,
+  TAB_GROUP_BYS,
+  TAB_SORTS,
+  bandOrder,
+  effectiveSort,
   folderAccentColor,
-  shownTabs,
-  type TabArrangeMode,
+  mergeGroupOrder,
+  moveGroupKey,
+  reinsertInGroupOrder,
+  type TabGroupBy,
   type TabRun,
+  type TabSort,
   type TabStatusBand,
 } from "@/lib/tab-arrangement"
 import { folderTitleTintVars } from "@/lib/theme-presets"
 import { useTabArrangeStore } from "@/stores/tab-arrangement-store"
-import { useConversationAttentionStore } from "@/stores/conversation-attention-store"
+import { useArrangedTabs } from "@/hooks/use-arranged-tabs"
 import { TabItem, type TabMoveTarget } from "./tab-item"
+import { GroupDropMarker, TabGroupLabel } from "./tab-group-label"
 
-/** i18n keys (Folder.tabs) for the arrange menu and the status band labels.
+/** i18n keys (Folder.tabs) for the view menu and the status band labels.
  *  `as const` keeps them literal: next-intl's `t` is typed against the
  *  message catalogue and rejects a plain `string` key. */
-const ARRANGE_MODE_LABEL = {
-  manual: { label: "arrangeManual", hint: "arrangeManualHint" },
-  folder: { label: "arrangeByFolder", hint: "arrangeByFolderHint" },
-  status: { label: "arrangeByStatus", hint: "arrangeByStatusHint" },
-} as const satisfies Record<TabArrangeMode, { label: string; hint: string }>
+const GROUP_BY_LABEL = {
+  none: { label: "groupNone", hint: "groupNoneHint" },
+  folder: { label: "groupByFolder", hint: "groupByFolderHint" },
+  status: { label: "groupByStatus", hint: "groupByStatusHint" },
+} as const satisfies Record<TabGroupBy, { label: string; hint: string }>
+const SORT_LABEL = {
+  manual: { label: "sortManual", hint: "sortManualHint" },
+  status: { label: "sortStatus", hint: "sortStatusHint" },
+  recent: { label: "sortRecent", hint: "sortRecentHint" },
+  name: { label: "sortName", hint: "sortNameHint" },
+} as const satisfies Record<TabSort, { label: string; hint: string }>
 const STATUS_BAND_LABEL = {
   needs_you: "bandNeedsYou",
   awaiting_reply: "bandAwaitingReply",
@@ -132,30 +142,28 @@ export function TabBar({ groupId }: TabBarProps) {
   const displayActiveId =
     groupId == null ? activeTabId : (groupSelection[groupId] ?? null)
 
-  // Display arrangement (manual / grouped by folder / sorted by status). Pure
-  // presentation over `groupTabs`: the manual order underneath is untouched and
-  // comes back as-is on `manual`. Every strip (split groups included) follows
-  // the one per-device choice.
-  const arrangeMode = useTabArrangeStore((s) => s.mode)
-  const setArrangeMode = useTabArrangeStore((s) => s.setMode)
-  useEffect(() => {
-    useTabArrangeStore.getState().hydrate()
-  }, [])
-  const isManualOrder = arrangeMode === "manual"
-  const attentionByConversationId = useConversationAttentionStore(
-    (s) => s.byConversationId
-  )
-  const arranged = useMemo(
-    () => arrangeTabs(groupTabs, arrangeMode, attentionByConversationId),
-    [groupTabs, arrangeMode, attentionByConversationId]
-  )
+  // Display view: grouping (none / work folder / status band) and sorting
+  // (manual / status / recent activity / name) are independent choices. Pure
+  // presentation over `groupTabs`: the manual order underneath is what a
+  // manual sort shows and what a drag writes back to. Every strip (split
+  // groups included) follows the one per-device choice.
+  const groupBy = useTabArrangeStore((s) => s.groupBy)
+  const sort = useTabArrangeStore((s) => s.sort)
+  const groupOrder = useTabArrangeStore((s) => s.groupOrder)
+  const setGroupBy = useTabArrangeStore((s) => s.setGroupBy)
+  const setSort = useTabArrangeStore((s) => s.setSort)
+  const setFolderOrder = useTabArrangeStore((s) => s.setFolderOrder)
+  const setBandOrder = useTabArrangeStore((s) => s.setBandOrder)
+  const shownSort = effectiveSort({ groupBy, sort })
+  const sortIsManual = shownSort === "manual"
+  const grouped = groupBy !== "none"
   // A group or band can be folded to its label (click the label). The tab in
   // use stays visible next to a folded label, so it never vanishes.
   const collapsedRuns = useTabArrangeStore((s) => s.collapsedRuns)
   const toggleRunCollapsed = useTabArrangeStore((s) => s.toggleRunCollapsed)
-  const displayTabs = useMemo(
-    () => shownTabs(arranged, collapsedRuns, displayActiveId),
-    [arranged, collapsedRuns, displayActiveId]
+  const { arranged, shown: displayTabs } = useArrangedTabs(
+    groupTabs,
+    displayActiveId
   )
   const isTileMode = !!tileByGroup[stripGroupId]
   const handleToggleTile = useCallback(
@@ -268,9 +276,11 @@ export function TabBar({ groupId }: TabBarProps) {
     },
     [resolveDropTarget, endTabDrag, moveTabToGroup]
   )
-  // Dragging only makes sense in manual order: grouped / sorted layouts are
-  // derived, so a drop would have no coherent order to write back.
-  const crossDragEnabled = groupId != null && isSplit && isManualOrder
+  // Moving a tab to another split group by dragging: only in the plain view
+  // (no grouping, manual sort). Grouped, a tab is held inside its own group;
+  // sorted, the order is derived and tabs don't drag at all.
+  const crossDragEnabled =
+    groupId != null && isSplit && !grouped && sortIsManual
 
   // New-conversation affordance at the end of the tab strip. Mirrors the
   // sidebar's "New chat": return to the conversation workspace, then open a
@@ -394,25 +404,193 @@ export function TabBar({ groupId }: TabBarProps) {
     el.scrollLeft += e.deltaY
   }, [])
 
+  // The tab under the pointer when a drag begins. Motion reports a drag's
+  // start only after its first move — too late for the first reorder — so the
+  // press itself is recorded.
+  const pressedTabIdRef = useRef<string | null>(null)
+  const handlePointerDownCapture = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const target = event.target as Element | null
+      pressedTabIdRef.current =
+        target?.closest?.("[data-tab-id]")?.getAttribute("data-tab-id") ?? null
+    },
+    []
+  )
+  // A reorder that is turned down must still re-render the strip: the reorder
+  // list stays locked from one reorder until the next render.
+  const [, rerender] = useReducer((n: number) => n + 1, 0)
+
   const handleReorder = useCallback(
     (nextTabs: TabItemData[]) => {
-      if (!isManualOrder) return
+      if (!sortIsManual) return
       if (isCoarsePointer && !touchSortingTabId) return
+      let written: TabItemData[] = nextTabs
+      if (grouped) {
+        // Within one group only: every slot must keep a tab of the same group
+        // (the lane clamp in TabItem makes that the only possible outcome; this
+        // is the guard). The moved tab is then re-inserted among its group-mates
+        // in the manual order, leaving every other tab where it was.
+        const runOfTab = runVisuals.runOfTab
+        const movedId = touchSortingTabId ?? pressedTabIdRef.current
+        const runKey = movedId != null ? runOfTab.get(movedId) : undefined
+        const sameGroups =
+          nextTabs.length === displayTabs.length &&
+          nextTabs.every(
+            (tab, i) => runOfTab.get(tab.id) === runOfTab.get(displayTabs[i].id)
+          )
+        const result =
+          movedId != null && runKey != null && sameGroups
+            ? reinsertInGroupOrder(
+                groupTabs,
+                nextTabs
+                  .filter((tab) => runOfTab.get(tab.id) === runKey)
+                  .map((tab) => tab.id),
+                movedId
+              )
+            : null
+        if (!result) {
+          rerender()
+          return
+        }
+        written = result
+      }
       if (groupId == null) {
-        reorderTabs(nextTabs)
+        reorderTabs(written)
       } else {
-        reorderGroupTabs(groupId, nextTabs)
+        reorderGroupTabs(groupId, written)
       }
     },
     [
+      displayTabs,
       groupId,
+      groupTabs,
+      grouped,
       isCoarsePointer,
-      isManualOrder,
       reorderGroupTabs,
       reorderTabs,
+      runVisuals,
+      sortIsManual,
       touchSortingTabId,
     ]
   )
+
+  // While grouped: a tab drags only within its own group's span (see
+  // TabItem's lane clamp). Measured from layout boxes (`offsetLeft`, which a
+  // drag's transform doesn't move) at every step, so it follows the swaps.
+  const dragLane = useCallback((tabId: string) => {
+    const strip = scrollRef.current
+    const self = strip?.querySelector<HTMLElement>(`[data-tab-id="${tabId}"]`)
+    const runKey = self?.getAttribute("data-tab-run")
+    if (!strip || !self || !runKey) return null
+    let left = Infinity
+    let right = -Infinity
+    strip
+      .querySelectorAll<HTMLElement>(`[data-tab-run="${runKey}"]`)
+      .forEach((el) => {
+        left = Math.min(left, el.offsetLeft)
+        right = Math.max(right, el.offsetLeft + el.offsetWidth)
+      })
+    if (!Number.isFinite(left)) return null
+    return {
+      min: left - self.offsetLeft,
+      max: right - (self.offsetLeft + self.offsetWidth),
+    }
+  }, [])
+
+  // ── Moving whole groups (drag a group's label) ───────────────────────────
+  // Works under every sort: it orders the groups, not the tabs. The landing
+  // spot is counted against the other groups' midpoints; the order is saved
+  // per grouping (folder ids / bands) for every strip.
+  const runKeys = useMemo(
+    () => (arranged.runs ?? []).map((run) => run.key),
+    [arranged.runs]
+  )
+  const [groupDrag, setGroupDrag] = useState<{
+    runKey: string
+    dropIndex: number
+  } | null>(null)
+  const groupDropIndex = useCallback(
+    (draggedKey: string, clientX: number): number | null => {
+      const strip = scrollRef.current
+      const from = runKeys.indexOf(draggedKey)
+      if (!strip || from < 0) return null
+      const midpoints = runKeys
+        .filter((key) => key !== draggedKey)
+        .map((key) => {
+          let left = Infinity
+          let right = -Infinity
+          strip
+            .querySelectorAll(
+              `[data-tab-group-label="${key}"], [data-tab-run="${key}"]`
+            )
+            .forEach((el) => {
+              const rect = el.getBoundingClientRect()
+              left = Math.min(left, rect.left)
+              right = Math.max(right, rect.right)
+            })
+          return (left + right) / 2
+        })
+      const among = dropIndexFromMidpoints(clientX, midpoints)
+      // Back to an insertion point on the full order (dragged one included).
+      return among < from ? among : among + 1
+    },
+    [runKeys]
+  )
+  const handleGroupDrag = useCallback(
+    (runKey: string, clientX: number) => {
+      const dropIndex = groupDropIndex(runKey, clientX)
+      if (dropIndex == null) return
+      setGroupDrag((prev) =>
+        prev?.runKey === runKey && prev.dropIndex === dropIndex
+          ? prev
+          : { runKey, dropIndex }
+      )
+    },
+    [groupDropIndex]
+  )
+  const handleGroupDragEnd = useCallback(
+    (runKey: string, clientX: number) => {
+      setGroupDrag(null)
+      const dropIndex = groupDropIndex(runKey, clientX)
+      const next =
+        dropIndex == null ? null : moveGroupKey(runKeys, runKey, dropIndex)
+      if (!next || !arranged.runs) return
+      const runByKey = new Map(arranged.runs.map((run) => [run.key, run]))
+      const nextRuns = next.flatMap((key) => {
+        const run = runByKey.get(key)
+        return run ? [run] : []
+      })
+      if (groupBy === "folder") {
+        const folders = nextRuns.flatMap((run) =>
+          run.kind === "folder" ? [run.folderId] : []
+        )
+        setFolderOrder(mergeGroupOrder(groupOrder.folder, folders))
+      } else if (groupBy === "status") {
+        const bands = nextRuns.flatMap((run) =>
+          run.kind === "status" ? [run.band] : []
+        )
+        setBandOrder(mergeGroupOrder(bandOrder(groupOrder.status), bands))
+      }
+    },
+    [
+      arranged.runs,
+      groupBy,
+      groupDropIndex,
+      groupOrder,
+      runKeys,
+      setBandOrder,
+      setFolderOrder,
+    ]
+  )
+  // The marker only shows where the group would actually move to.
+  const dropMarkerAt =
+    groupDrag == null
+      ? null
+      : (() => {
+          const from = runKeys.indexOf(groupDrag.runKey)
+          const to = groupDrag.dropIndex
+          return from < 0 || to === from || to === from + 1 ? null : to
+        })()
 
   const handleTouchSortingEnd = useCallback(
     () => setTouchSortingTabId(null),
@@ -465,6 +643,7 @@ export function TabBar({ groupId }: TabBarProps) {
       axis="x"
       values={displayTabs as TabItemData[]}
       onReorder={handleReorder}
+      onPointerDownCapture={handlePointerDownCapture}
       // Cross-group drop target: group strips advertise their group id for the
       // drag hit-test and tint while a foreign tab hovers.
       data-conv-group-strip={groupId ?? undefined}
@@ -495,43 +674,24 @@ export function TabBar({ groupId }: TabBarProps) {
         if (entry.kind === "label") {
           const visual = runVisuals.byRun.get(entry.runKey)
           return (
-            <div
+            <TabGroupLabel
               key={`group-label-${entry.runKey}`}
-              data-tab-group-label={entry.runKey}
-              data-adjacent-active={adjacencyAt(pos)}
-              // Sits in the tabs' flex line and carries the strip's bottom
-              // hairline like they do; `relative` anchors the inset-baseline
-              // pseudo-element used next to the active tab.
-              className="relative flex h-full shrink-0 items-center pl-1.5 pr-1 pb-1.5 ws-strip-line"
-            >
-              {/* The label folds its group / band away (and back). */}
-              <button
-                type="button"
-                data-tab-group-toggle={entry.runKey}
-                aria-expanded={!entry.collapsed}
-                aria-label={tTabs(
-                  entry.collapsed ? "expandGroup" : "collapseGroup",
-                  { name: visual?.label ?? "", count: entry.count }
-                )}
-                onClick={() => toggleRunCollapsed(entry.runKey)}
-                className={cn(
-                  "flex max-w-[9rem] items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.6875rem] leading-none font-medium transition-opacity hover:opacity-80",
-                  visual?.style
-                    ? "folder-title-tint bg-current/10"
-                    : "bg-muted text-muted-foreground"
-                )}
-                style={visual?.style}
-                title={`${visual?.label ?? ""} · ${entry.count}`}
-              >
-                {entry.collapsed ? (
-                  <ChevronRight aria-hidden className="h-3 w-3 shrink-0" />
-                ) : (
-                  <ChevronDown aria-hidden className="h-3 w-3 shrink-0" />
-                )}
-                <span className="truncate">{visual?.label}</span>
-                <span className="tabular-nums opacity-60">{entry.count}</span>
-              </button>
-            </div>
+              runKey={entry.runKey}
+              label={visual?.label ?? ""}
+              count={entry.count}
+              collapsed={entry.collapsed}
+              accentStyle={visual?.style}
+              adjacentActive={adjacencyAt(pos)}
+              movable={runKeys.length > 1}
+              dropBefore={
+                dropMarkerAt != null && runKeys[dropMarkerAt] === entry.runKey
+              }
+              dragging={groupDrag?.runKey === entry.runKey}
+              isCoarsePointer={isCoarsePointer}
+              onToggle={toggleRunCollapsed}
+              onGroupDrag={handleGroupDrag}
+              onGroupDragEnd={handleGroupDragEnd}
+            />
           )
         }
         const tab = entry.tab
@@ -578,7 +738,13 @@ export function TabBar({ groupId }: TabBarProps) {
             isTouchSorting={touchSortingTabId === tab.id}
             onTouchSortingStart={setTouchSortingTabId}
             onTouchSortingEnd={handleTouchSortingEnd}
-            reorderable={isManualOrder}
+            reorderable={sortIsManual}
+            dragDisabledHint={
+              sortIsManual ? undefined : tTabs("dragNeedsManualSort")
+            }
+            runKey={runKey}
+            dragLane={grouped && sortIsManual ? dragLane : undefined}
+            dimmed={runKey != null && groupDrag?.runKey === runKey}
             accentStyle={
               runKey ? runVisuals.byRun.get(runKey)?.style : undefined
             }
@@ -611,6 +777,9 @@ export function TabBar({ groupId }: TabBarProps) {
         // stay pinned at its right edge on the strip's own background.
         className="tab-strip-tail sticky right-0 z-20 flex h-full flex-1 items-stretch bg-muted ws-transparent-bg ws-strip-line"
       >
+        {dropMarkerAt != null && dropMarkerAt === runKeys.length && (
+          <GroupDropMarker />
+        )}
         <button
           type="button"
           onClick={handleNewConversation}
@@ -632,10 +801,11 @@ export function TabBar({ groupId }: TabBarProps) {
         >
           <SquarePen className="h-3.5 w-3.5" />
         </button>
-        {/* Arrange the strip: manual order, grouped by work folder (colored),
-            or sorted by status (waiting on you first). Same ghost-circle style
-            as the new-conversation button; tinted while a derived layout is
-            on so the non-draggable state never looks like a bug. */}
+        {/* The strip's view: how tabs are grouped and how they are sorted,
+            two independent choices. Same ghost-circle style as the
+            new-conversation button; tinted while anything but the plain view
+            is on, so a strip that won't drag never looks like a bug. The menu
+            stays open on a pick, so both can be set in one go. */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -643,7 +813,9 @@ export function TabBar({ groupId }: TabBarProps) {
               data-tab-arrange-trigger
               className={cn(
                 "mr-0.5 flex h-7 w-7 shrink-0 items-center justify-center self-start rounded-full backdrop-blur-sm transition-colors hover:bg-foreground/10 hover:text-foreground",
-                isManualOrder ? "text-muted-foreground" : "text-primary"
+                !grouped && sortIsManual
+                  ? "text-muted-foreground"
+                  : "text-primary"
               )}
               aria-label={tTabs("arrangeTabs")}
               title={tTabs("arrangeTabs")}
@@ -652,21 +824,55 @@ export function TabBar({ groupId }: TabBarProps) {
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-64">
-            <DropdownMenuLabel>{tTabs("arrangeTabs")}</DropdownMenuLabel>
+            <DropdownMenuLabel>{tTabs("groupBy")}</DropdownMenuLabel>
             <DropdownMenuRadioGroup
-              value={arrangeMode}
-              onValueChange={(value) => setArrangeMode(value as TabArrangeMode)}
+              value={groupBy}
+              onValueChange={(value) => setGroupBy(value as TabGroupBy)}
             >
-              {TAB_ARRANGE_MODES.map((mode) => (
-                <DropdownMenuRadioItem key={mode} value={mode}>
+              {TAB_GROUP_BYS.map((option) => (
+                <DropdownMenuRadioItem
+                  key={option}
+                  value={option}
+                  data-tab-group-by={option}
+                  onSelect={(event) => event.preventDefault()}
+                >
                   <span className="flex flex-col gap-0.5">
-                    <span>{tTabs(ARRANGE_MODE_LABEL[mode].label)}</span>
+                    <span>{tTabs(GROUP_BY_LABEL[option].label)}</span>
                     <span className="text-xs text-muted-foreground">
-                      {tTabs(ARRANGE_MODE_LABEL[mode].hint)}
+                      {tTabs(GROUP_BY_LABEL[option].hint)}
                     </span>
                   </span>
                 </DropdownMenuRadioItem>
               ))}
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>{tTabs("sortBy")}</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={shownSort}
+              onValueChange={(value) => setSort(value as TabSort)}
+            >
+              {TAB_SORTS.map((option) => {
+                // Status bands already are one status each.
+                const redundant = option === "status" && groupBy === "status"
+                return (
+                  <DropdownMenuRadioItem
+                    key={option}
+                    value={option}
+                    data-tab-sort={option}
+                    disabled={redundant}
+                    onSelect={(event) => event.preventDefault()}
+                  >
+                    <span className="flex flex-col gap-0.5">
+                      <span>{tTabs(SORT_LABEL[option].label)}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {redundant
+                          ? tTabs("sortStatusRedundant")
+                          : tTabs(SORT_LABEL[option].hint)}
+                      </span>
+                    </span>
+                  </DropdownMenuRadioItem>
+                )
+              })}
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
