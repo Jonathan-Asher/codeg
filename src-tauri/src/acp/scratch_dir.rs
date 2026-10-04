@@ -135,6 +135,37 @@ fn registry() -> &'static Mutex<HashSet<String>> {
     REGISTRY.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
+/// Whether `name` is a directory name codeg uses for a scratch root: the plain
+/// namespace, or the euid-scoped short root in `/tmp`.
+fn is_namespace_dir_name(name: &std::ffi::OsStr) -> bool {
+    let Some(name) = name.to_str() else {
+        return false;
+    };
+    if name == SCRATCH_NAMESPACE {
+        return true;
+    }
+    name.strip_prefix(SCRATCH_NAMESPACE)
+        .and_then(|rest| rest.strip_prefix('-'))
+        .is_some_and(|uid| !uid.is_empty() && uid.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Whether `path` is a scratch root or anything below one.
+///
+/// Decided by name rather than by comparing against [`sweep_roots`], because
+/// the question is usually asked about a path inherited from ANOTHER codeg
+/// process, whose roots were derived from its own environment, not ours. The
+/// names are codeg's by contract: nothing else writes under them, which is
+/// what lets the sweeps delete there without asking.
+///
+/// Nothing long-lived belongs under one: every entry in a scratch root is
+/// disposable by design and goes the moment its owner is gone.
+pub fn is_in_scratch_namespace(path: &Path) -> bool {
+    path.components().any(|component| match component {
+        std::path::Component::Normal(name) => is_namespace_dir_name(name),
+        _ => false,
+    })
+}
+
 /// Whether launches get an isolated temp directory. On unless explicitly
 /// disabled with `CODEG_ACP_TMP_ISOLATION=0`.
 pub fn isolation_enabled() -> bool {
@@ -958,6 +989,32 @@ mod tests {
             "and the ambient one, which a previous version may have filled"
         );
         assert!(roots.contains(&short_root()), "and the short fallback");
+    }
+
+    /// Every root shape codeg creates is recognised, from any spelling and at
+    /// any depth below it — and nothing else is.
+    #[test]
+    fn the_scratch_namespace_is_recognised_by_name() {
+        for inside in [
+            "/tmp/codeg-acp-501",
+            "/tmp/codeg-acp-501/38441-ecf15960",
+            "/private/tmp/codeg-acp-501/38441-ecf15960",
+            "/var/folders/hl/x/T/codeg-acp/38441-ecf15960/deeper",
+            "/mnt/big/codeg-acp/7-deadbeef",
+        ] {
+            assert!(is_in_scratch_namespace(Path::new(inside)), "{inside}");
+        }
+        for outside in [
+            "/tmp",
+            "/var/folders/hl/x/T/",
+            "/tmp/codeg-501",
+            "/tmp/codeg-acp-",
+            "/tmp/codeg-acp-x1",
+            "/tmp/codeg-acpx/1-deadbeef",
+            "/home/me/my-codeg-acp/1-deadbeef",
+        ] {
+            assert!(!is_in_scratch_namespace(Path::new(outside)), "{outside}");
+        }
     }
 
     #[test]
