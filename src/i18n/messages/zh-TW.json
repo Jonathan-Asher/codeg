@@ -2127,7 +2127,7 @@
       "forkSession": "分叉會話",
       "forkSessionSuccess": "會話分叉成功",
       "forkSessionFailed": "會話分叉失敗：{error}",
-      "forkSessionBusy": "分叉失敗：目前有回合正在進行",
+      "forkSessionBusy": "暫時無法分叉：此代理只能在回合之間分叉",
       "editMessageFailed": "編輯訊息失敗：{error}",
       "editMessageBusy": "目前有回合正在進行，暫不可編輯訊息",
       "editMessageQueued": "佇列中還有待發送的訊息，暫不可編輯訊息",
@@ -3649,7 +3649,7 @@
         "systemMessage": "系統訊息",
         "copyMessage": "複製",
         "forkFromHere": "從此處分叉",
-        "forkBusy": "目前有回合正在進行，暫不可分叉",
+        "forkBusy": "此代理只能在回合之間分叉",
         "forkNotReady": "這則回覆暫時還不能作為分叉點，請稍後再試",
         "editMessage": "編輯訊息",
         "editBusy": "目前有回合正在進行，暫不可編輯",
@@ -3720,7 +3720,8 @@
         "elapsedMinutes": "{value} 分鐘",
         "elapsedSeconds": "{value} 秒",
         "outputSpeedAria": "估算輸出速度",
-        "outputSpeedTooltip": "估算輸出速度（正文 + 思考）"
+        "outputSpeedTooltip": "估算輸出速度（正文 + 思考）",
+        "forkInFlight": "這則回覆仍在進行中。可從更早的回覆分叉，或等它完成後再從這裡分叉"
       },
       "jsonTree": {
         "viewRaw": "檢視原始 JSON",

@@ -10883,6 +10883,66 @@ pub async fn acp_fork(
         .await
 }
 
+/// "Fork from here" while a turn is running: fork into a new conversation in
+/// a separate agent process, leaving the running turn alone — see
+/// [`ConnectionManager::fork_session_to_new_conversation`]. Shared by the
+/// Tauri command and the web handler.
+pub(crate) async fn acp_fork_to_new_conversation_core(
+    manager: &ConnectionManager,
+    db: &AppDatabase,
+    data_dir: &Path,
+    connection_id: &str,
+    conversation_id: Option<i32>,
+    fork_from_turn_id: &str,
+) -> Result<crate::acp::types::ForkToNewConversationInfo, AcpError> {
+    let agent_type = match manager.get_state(connection_id).await {
+        Some(state) => state.read().await.agent_type,
+        None => return Err(AcpError::ConnectionNotFound(connection_id.into())),
+    };
+    if !crate::acp::fork::forks_while_running(agent_type) {
+        return Err(AcpError::ForkNeedsIdle);
+    }
+    // The fork runs in a new agent process, launched with what any
+    // conversation of this agent launches with. It opens no session of its
+    // own, hence no session id here.
+    let runtime_env = build_session_runtime_env(db, agent_type, None, data_dir).await?;
+    manager
+        .fork_session_to_new_conversation(
+            db,
+            connection_id,
+            conversation_id,
+            fork_from_turn_id,
+            runtime_env,
+        )
+        .await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_fork_to_new_conversation(
+    connection_id: String,
+    conversation_id: Option<i32>,
+    fork_from_turn_id: String,
+    db: State<'_, AppDatabase>,
+    manager: State<'_, ConnectionManager>,
+    app_handle: tauri::AppHandle,
+) -> Result<crate::acp::types::ForkToNewConversationInfo, AcpError> {
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map(|p| crate::paths::resolve_effective_data_dir(&p))
+        .unwrap_or_else(|_| PathBuf::from("."));
+    acp_fork_to_new_conversation_core(
+        &manager,
+        &db,
+        &app_data_dir,
+        &connection_id,
+        conversation_id,
+        &fork_from_turn_id,
+    )
+    .await
+}
+
 /// Stop one AIR async task. `Ok(false)` = the adapter declined (unknown,
 /// already terminal, or a stop already in flight) — a real answer, not a
 /// failure.

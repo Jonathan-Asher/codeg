@@ -512,12 +512,15 @@ describe("ConversationDetailPanel send-path hardening", () => {
 
     // The read goes to the backend directly: loading it through the store
     // would swap the session's own turns for parsed copies under new ids,
-    // unmounting the very editor that is saving.
+    // unmounting the very editor that is saving. (It is shared with "fork
+    // from here", so it sits above both handlers; only its own body counts.)
     const readStart = source.indexOf(
       "const readTranscriptForEdit = useCallback("
     )
     expect(readStart).toBeGreaterThan(-1)
-    const read = source.slice(readStart, editStart)
+    const readEnd = source.indexOf("}, [effectiveConversationId])", readStart)
+    expect(readEnd).toBeGreaterThan(readStart)
+    const read = source.slice(readStart, readEnd)
     expect(read).toContain("getFolderConversation(")
     expect(read).not.toContain("refetchDetail(")
   })

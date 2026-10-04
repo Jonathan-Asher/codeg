@@ -2127,7 +2127,7 @@
       "forkSession": "세션 포크",
       "forkSessionSuccess": "세션 포크 성공",
       "forkSessionFailed": "세션 포크 실패: {error}",
-      "forkSessionBusy": "분기 실패: 턴이 실행 중입니다",
+      "forkSessionBusy": "아직 분기할 수 없습니다: 이 에이전트는 턴 사이에만 분기할 수 있습니다",
       "editMessageFailed": "메시지를 편집하지 못했습니다: {error}",
       "editMessageBusy": "턴이 실행 중일 때는 메시지를 편집할 수 없습니다",
       "editMessageQueued": "대기열에 메시지가 남아 있는 동안에는 메시지를 편집할 수 없습니다",
@@ -3649,7 +3649,7 @@
         "systemMessage": "시스템 메시지",
         "copyMessage": "복사",
         "forkFromHere": "여기서 분기",
-        "forkBusy": "턴이 실행 중일 때는 분기할 수 없습니다",
+        "forkBusy": "이 에이전트는 턴 사이에만 분기할 수 있습니다",
         "forkNotReady": "아직 이 응답에서 분기할 수 없습니다. 잠시 후 다시 시도하세요",
         "editMessage": "메시지 편집",
         "editBusy": "턴이 실행 중일 때는 편집할 수 없습니다",
@@ -3720,7 +3720,8 @@
         "elapsedMinutes": "{value}분",
         "elapsedSeconds": "{value}초",
         "outputSpeedAria": "예상 출력 속도",
-        "outputSpeedTooltip": "예상 출력 속도（텍스트 + 추론）"
+        "outputSpeedTooltip": "예상 출력 속도（텍스트 + 추론）",
+        "forkInFlight": "이 응답은 아직 진행 중입니다. 이전 응답에서 분기하거나, 완료된 후 여기에서 분기하세요"
       },
       "jsonTree": {
         "viewRaw": "원본 JSON 보기",

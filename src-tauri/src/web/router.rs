@@ -957,6 +957,10 @@ pub fn build_router(
         .route("/acp_cancel", post(handlers::acp::acp_cancel))
         .route("/acp_fork", post(handlers::acp::acp_fork))
         .route(
+            "/acp_fork_to_new_conversation",
+            post(handlers::acp::acp_fork_to_new_conversation),
+        )
+        .route(
             "/acp_stop_async_task",
             post(handlers::acp::acp_stop_async_task),
         )

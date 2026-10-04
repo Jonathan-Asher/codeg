@@ -89,7 +89,6 @@ import { useZoomLevel } from "@/hooks/use-appearance"
 import { isDesktop } from "@/lib/platform"
 import { leftChromeReserve, rightChromeReserve } from "@/lib/window-chrome"
 import {
-  acpFork,
   acpStopAsyncTask,
   createChatConversation,
   createChatDir,
@@ -109,6 +108,13 @@ import {
   shouldRejectDuplicateCreate,
 } from "@/lib/queue-flush"
 import { TurnBusyError, isNoActiveTurnRejection } from "@/lib/turn-busy"
+import {
+  ForkBetweenTurnsOnlyError,
+  forkFromTurn,
+  openForkedConversationTab,
+  resolveForkFromHereTurnId,
+  supportsForkWhileRunning,
+} from "@/lib/fork-from-turn"
 import {
   backgroundTaskCount as countBackgroundTasks,
   canDeliverIntoHeldTurn,
@@ -1532,6 +1538,21 @@ const ConversationTabView = memo(function ConversationTabView({
     handleSendRef.current = handleSend
   }, [handleSend])
 
+  // A fresh parse of this conversation, for `resolveEditForkTurnId` and
+  // `resolveForkFromHereTurnId`: from the turn the thread on screen starts at —
+  // the loaded window's first turn, or the very first — so the two line up
+  // turn for turn.
+  const readTranscriptForEdit = useCallback(async () => {
+    const dbId = dbConvIdRef.current
+    if (dbId == null) return []
+    const loaded = getRuntimeSession(effectiveConversationId)?.detail ?? null
+    const fromIndex = isWindowedDetail(loaded) ? loaded.turns_offset : 0
+    const fresh = await getFolderConversation(dbId, { fromIndex })
+    // Started anywhere else, the turns wouldn't line up — nothing to match.
+    if (isWindowedDetail(fresh) && fresh.turns_offset !== fromIndex) return []
+    return fresh.turns
+  }, [effectiveConversationId])
+
   // "Fork from here": fork at a rendered assistant turn, sending nothing. The
   // ONLY fork entry point — the composer's fork-and-send was removed once this
   // existed, since the tail is just one of the turns this can be aimed at.
@@ -1543,6 +1564,13 @@ const ConversationTabView = memo(function ConversationTabView({
   // (`resolve_fork_point`): a turn it cannot name forks at the tail rather than
   // failing, so this never has to reason about per-agent identity.
   //
+  // Between turns the fork happens IN PLACE: this row and connection move to
+  // the forked session. While a turn runs, an agent that can
+  // (`supportsForkWhileRunning`) forks into a NEW conversation instead, in an
+  // agent process of its own, and it opens in a new tab beside this one —
+  // this conversation, its running turn and its queue are left alone. Where
+  // the fork lands is `forkFromTurn`'s decision (see `lib/fork-from-turn`).
+  //
   // Liveness is read off `connStatusRef` rather than captured: this callback is
   // handed to every rendered reply, so taking `connStatus` as a dependency
   // would swap its identity at both ends of every turn and re-render the whole
@@ -1551,7 +1579,10 @@ const ConversationTabView = memo(function ConversationTabView({
   const handleForkFromTurn = useCallback(
     async (turnId: string) => {
       const connectionId = conn.connectionId
-      if (!connectionId || connStatusRef.current !== "connected") return
+      const status = connStatusRef.current
+      if (!connectionId || (status !== "connected" && status !== "prompting")) {
+        return
+      }
       // Snapshot which live turns belong to the PRE-fork session, before the
       // await. The fork RPC is a window in which a send can still start — a
       // queued auto-flush, a fast typist, another client — and such a turn
@@ -1560,25 +1591,60 @@ const ConversationTabView = memo(function ConversationTabView({
       // clearing wholesale is what keeps that distinction.
       //
       // COMPLETED turns only. An optimistic user turn is one whose prompt has
-      // not reached the agent yet, and the backend refuses a fork while a turn
-      // is in flight (`AcpError::TurnInProgress`) — so a fork that SUCCEEDS
-      // proves any optimistic turn standing at this moment never started a
-      // turn on the old session, and it will therefore run on the forked one.
-      // Sweeping it would erase the user's own message while its reply streams
-      // in underneath.
+      // not reached the agent yet, and the backend refuses an in-place fork
+      // while a turn is in flight (`AcpError::TurnInProgress`) — so an
+      // in-place fork that SUCCEEDS proves any optimistic turn standing at
+      // this moment never started a turn on the old session, and it will
+      // therefore run on the forked one. Sweeping it would erase the user's
+      // own message while its reply streams in underneath.
       const preForkSession = useConversationRuntimeStore
         .getState()
         .byConversationId.get(effectiveConversationId)
       const staleLiveTurnIds = (preForkSession?.localTurns ?? []).map(
         (t) => t.id
       )
+      const turnRunning = status === "prompting"
       try {
-        const { forkedSessionId } = await acpFork(
+        // Mid-turn, a reply this session streamed may still carry only its
+        // `live-…` id: the reparse that names it waits for the turn to end.
+        // The backend can't fork at that, so find the parser's name in a
+        // fresh read of the transcript, as an edit does. (Between turns such
+        // a reply is only offered at the thread's tail, which is where the
+        // backend's tail fork lands anyway — unchanged.)
+        let forkPointId: string | null = turnId
+        if (turnRunning) {
+          forkPointId = await resolveForkFromHereTurnId({
+            turnId,
+            thread: getTimelineTurns(effectiveConversationId)
+              .filter((entry) => entry.phase === "persisted")
+              .map((entry) => entry.turn),
+            readTranscript: () => readTranscriptForEdit(),
+          })
+        }
+        if (forkPointId === null) {
+          notify({
+            level: "error",
+            key: `fork-failed:${connectionId}`,
+            title: tMessageList("forkNotReady"),
+          })
+          return
+        }
+        const outcome = await forkFromTurn({
+          agentType: selectedAgent,
           connectionId,
-          dbConvIdRef.current,
+          conversationId: dbConvIdRef.current,
           folderId,
-          turnId
-        )
+          turnId: forkPointId,
+          turnRunning,
+        })
+        if (outcome.kind === "new_conversation") {
+          // Nothing on THIS tab changes: the running turn keeps streaming
+          // here, and the fork opens beside it.
+          refreshConversations()
+          openForkedConversationTab(outcome.result, selectedAgent, tabId)
+          return
+        }
+        const { forkedSessionId } = outcome
         sessionIdRef.current = forkedSessionId
         setExternalId(effectiveConversationId, forkedSessionId)
         // The backend's two-row reshuffle: the current row now points at S2
@@ -1602,13 +1668,14 @@ const ConversationTabView = memo(function ConversationTabView({
           dropLiveTurnIds: staleLiveTurnIds,
         })
       } catch (err) {
-        // A turn in flight is transient here, not a failure to report as one —
-        // there is no draft to re-queue, so say so and let the user retry.
+        // An agent that only forks between turns, caught mid-turn, is
+        // transient here, not a failure to report as one — there is no draft
+        // to re-queue, so say why and let the user retry once it ends.
         notify({
           level: "error",
           key: `fork-failed:${connectionId}`,
           title:
-            err instanceof TurnBusyError
+            err instanceof ForkBetweenTurnsOnlyError
               ? t("forkSessionBusy")
               : t("forkSessionFailed", {
                   error:
@@ -1625,10 +1692,14 @@ const ConversationTabView = memo(function ConversationTabView({
       conn.connectionId,
       effectiveConversationId,
       folderId,
+      readTranscriptForEdit,
       refetchDetail,
       refreshConversations,
+      selectedAgent,
       setExternalId,
       t,
+      tMessageList,
+      tabId,
     ]
   )
 
@@ -2007,20 +2078,6 @@ const ConversationTabView = memo(function ConversationTabView({
     },
     [effectiveConversationId, refetchDetail]
   )
-
-  // A fresh parse of this conversation, for `resolveEditForkTurnId`: from the
-  // turn the thread on screen starts at — the loaded window's first turn, or
-  // the very first — so the two line up turn for turn.
-  const readTranscriptForEdit = useCallback(async () => {
-    const dbId = dbConvIdRef.current
-    if (dbId == null) return []
-    const loaded = getRuntimeSession(effectiveConversationId)?.detail ?? null
-    const fromIndex = isWindowedDetail(loaded) ? loaded.turns_offset : 0
-    const fresh = await getFolderConversation(dbId, { fromIndex })
-    // Started anywhere else, the turns wouldn't line up — nothing to match.
-    if (isWindowedDetail(fresh) && fresh.turns_offset !== fromIndex) return []
-    return fresh.turns
-  }, [effectiveConversationId])
 
   /**
    * "Edit message" (see `lib/edit-message`): continue this conversation from a
@@ -2632,15 +2689,14 @@ const ConversationTabView = memo(function ConversationTabView({
         // blocked (session/load failure) can still spawn the question elsewhere.
         onAskSelection={canAskSelection ? handleAskSelection : undefined}
         // Fork carries no draft, so — unlike a send — a non-empty queue is
-        // not at risk of being jumped and needs no guard here. A turn in
-        // flight is still rejected, by the backend, which is the only place
-        // that can see it without racing.
+        // not at risk of being jumped and needs no guard here.
         //
         // "prompting" belongs on this side of the gate (same shape as the
         // goal-control gate above): this answers "can this surface fork at
-        // all", and a turn in flight is a passing "not right now" that the
-        // view greys the button out for. Dropping the handler instead made
-        // every reply's fork icon disappear for the length of each reply.
+        // all". Mid-turn, an agent that forks while running forks a finished
+        // reply into a new tab; any other agent's buttons grey out for a
+        // passing "not right now". Dropping the handler instead made every
+        // reply's fork icon disappear for the length of each reply.
         // `handleForkFromTurn` re-checks liveness at click time.
         onForkFromTurn={
           (connStatus === "connected" || connStatus === "prompting") &&
@@ -2649,6 +2705,7 @@ const ConversationTabView = memo(function ConversationTabView({
             ? handleForkFromTurn
             : undefined
         }
+        forkWhileRunning={supportsForkWhileRunning(selectedAgent)}
         // Editing is a fork too, so it takes the fork's gate — plus an agent
         // whose fork lands exactly on the named reply or refuses (see
         // `supportsMessageEdit`). A turn in flight and a non-empty queue grey

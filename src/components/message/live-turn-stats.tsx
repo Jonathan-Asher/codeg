@@ -12,9 +12,15 @@ import {
   countUnifiedDiffLineChanges,
   estimateChangedLineStats,
 } from "@/lib/line-change-stats"
-import { FilePenLine, Plane, Timer } from "lucide-react"
+import { FilePenLine, Plane, Split, Timer } from "lucide-react"
 import type { AgentType } from "@/lib/types"
 import { AgentIcon } from "@/components/agent-icon"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { useTokenOutputSpeed } from "@/hooks/use-token-output-speed"
 
 interface LiveTurnStatsProps {
@@ -26,6 +32,11 @@ interface LiveTurnStatsProps {
    *  "Idle — N background tasks running", and the pulse and output speed
    *  go, since nothing is streaming. `null` otherwise. */
   heldBackgroundTasks?: number | null
+  /** "Fork from here" works mid-turn on this surface, from any FINISHED reply
+   *  (see `forkWhileRunning` on `MessageListView`). The reply being written
+   *  is the one exception, and it has no footer of its own until it settles,
+   *  so this bar carries its fork button — greyed out, saying why. */
+  forkInFlight?: boolean
 }
 
 interface LineChangeStats {
@@ -317,9 +328,11 @@ export function LiveTurnStats({
   agentType,
   isStreaming = true,
   heldBackgroundTasks = null,
+  forkInFlight = false,
 }: LiveTurnStatsProps) {
   const locale = useLocale()
   const t = useTranslations("Folder.chat.liveTurnStats")
+  const tList = useTranslations("Folder.chat.messageList")
   const tConn = useTranslations("Folder.statusBar.connection")
   const held = heldBackgroundTasks != null
   const [elapsed, setElapsed] = useState(() => Date.now() - message.startedAt)
@@ -406,6 +419,29 @@ export function LiveTurnStats({
               />
               {tps.toFixed(1)} tok/s
             </span>
+          </>
+        )}
+        {forkInFlight && (
+          <>
+            <span className="text-border leading-none">|</span>
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  {/* `aria-disabled`, not `disabled`, as on every reply's
+                      fork button: a disabled element gets no pointer
+                      events, and the tooltip is the whole point. */}
+                  <button
+                    type="button"
+                    aria-disabled="true"
+                    aria-label={tList("forkFromHere")}
+                    className="inline-flex h-5 w-5 cursor-not-allowed items-center justify-center rounded-full opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <Split aria-hidden="true" className="h-3 w-3" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">{t("forkInFlight")}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </>
         )}
       </div>

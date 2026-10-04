@@ -2127,7 +2127,7 @@
       "forkSession": "セッションをフォーク",
       "forkSessionSuccess": "セッションのフォークに成功しました",
       "forkSessionFailed": "セッションのフォークに失敗しました：{error}",
-      "forkSessionBusy": "分岐に失敗しました: ターンの実行中です",
+      "forkSessionBusy": "まだ分岐できません: このエージェントはターンの合間にしか分岐できません",
       "editMessageFailed": "メッセージを編集できませんでした：{error}",
       "editMessageBusy": "ターンの実行中はメッセージを編集できません",
       "editMessageQueued": "キューにメッセージが待機している間はメッセージを編集できません",
@@ -3649,7 +3649,7 @@
         "systemMessage": "システムメッセージ",
         "copyMessage": "コピー",
         "forkFromHere": "ここから分岐",
-        "forkBusy": "ターンの実行中は分岐できません",
+        "forkBusy": "このエージェントはターンの合間にしか分岐できません",
         "forkNotReady": "この返信からはまだ分岐できません。少し待ってからお試しください",
         "editMessage": "メッセージを編集",
         "editBusy": "ターンの実行中は編集できません",
@@ -3720,7 +3720,8 @@
         "elapsedMinutes": "{value}分",
         "elapsedSeconds": "{value}秒",
         "outputSpeedAria": "推定出力速度",
-        "outputSpeedTooltip": "推定出力速度（テキスト + 思考）"
+        "outputSpeedTooltip": "推定出力速度（テキスト + 思考）",
+        "forkInFlight": "この返信はまだ実行中です。前の返信から分岐するか、完了してからここで分岐してください"
       },
       "jsonTree": {
         "viewRaw": "生の JSON を表示",

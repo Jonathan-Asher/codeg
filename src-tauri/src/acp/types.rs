@@ -2063,6 +2063,22 @@ pub struct ForkResultInfo {
     pub sibling_conversation_id: i32,
 }
 
+/// What "fork from here" did while a turn was running: the session was forked
+/// in a separate agent process into a NEW conversation row, for the caller to
+/// open in a new tab. The original row, its connection and its running turn
+/// were not touched.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForkToNewConversationInfo {
+    pub forked_session_id: String,
+    pub original_session_id: String,
+    /// The new row, bound to the forked session.
+    pub conversation_id: i32,
+    pub folder_id: i32,
+    /// The new row's title (`[Fork] …`), `None` for an untitled original.
+    pub title: Option<String>,
+}
+
 #[cfg(test)]
 mod envelope_tests {
     use super::*;

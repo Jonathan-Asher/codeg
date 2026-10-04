@@ -2127,7 +2127,7 @@
       "forkSession": "Bifurcar sessão",
       "forkSessionSuccess": "Sessão bifurcada com sucesso",
       "forkSessionFailed": "Falha ao bifurcar a sessão: {error}",
-      "forkSessionBusy": "Falha ao bifurcar: há um turno em andamento",
+      "forkSessionBusy": "Ainda não é possível bifurcar: este agente só pode bifurcar entre turnos",
       "editMessageFailed": "Não foi possível editar a mensagem: {error}",
       "editMessageBusy": "Não é possível editar a mensagem enquanto há um turno em andamento",
       "editMessageQueued": "Não é possível editar a mensagem enquanto há mensagens esperando na fila",
@@ -3649,7 +3649,7 @@
         "systemMessage": "Mensagem do sistema",
         "copyMessage": "Copiar",
         "forkFromHere": "Bifurcar a partir daqui",
-        "forkBusy": "Não é possível bifurcar enquanto há um turno em andamento",
+        "forkBusy": "Este agente só pode bifurcar entre turnos",
         "forkNotReady": "Ainda não é possível bifurcar a partir desta resposta; tente novamente em instantes",
         "editMessage": "Editar mensagem",
         "editBusy": "Não é possível editar enquanto há um turno em andamento",
@@ -3720,7 +3720,8 @@
         "elapsedMinutes": "{value} min",
         "elapsedSeconds": "{value} s",
         "outputSpeedAria": "Velocidade de saída estimada",
-        "outputSpeedTooltip": "Velocidade de saída estimada (texto + raciocínio)"
+        "outputSpeedTooltip": "Velocidade de saída estimada (texto + raciocínio)",
+        "forkInFlight": "Esta resposta ainda está em andamento. Bifurque a partir de uma resposta anterior, ou desta quando terminar"
       },
       "jsonTree": {
         "viewRaw": "Ver JSON bruto",

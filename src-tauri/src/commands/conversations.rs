@@ -1676,7 +1676,7 @@ const MAX_IN_FLIGHT_WALK_USER_TURNS: usize = 32;
 /// could hide a *completed* reply in the end-of-turn race (the agent may persist
 /// the final assistant row before the backend processes `TurnComplete` and clears
 /// the live state, after which an attaching client's snapshot can't recover it).
-fn apply_in_flight_message_id(
+pub(crate) fn apply_in_flight_message_id(
     turns: &mut [MessageTurn],
     pending: &crate::acp::session_state::PendingUserMessage,
     started_at: Option<chrono::DateTime<chrono::Utc>>,

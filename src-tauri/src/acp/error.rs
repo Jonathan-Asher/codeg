@@ -96,6 +96,13 @@ pub enum AcpError {
     /// the reason shown to the user.
     #[error("{0}")]
     ForkPointUnresolved(String),
+    /// "Fork from here" while a turn is running, on an agent that can only
+    /// fork between turns: its fork has to take over the live connection (see
+    /// `acp::fork::forks_while_running` for which agents can fork from a
+    /// separate process instead, and why the rest can't). Transient — the
+    /// same click works once the turn ends.
+    #[error("this agent can only fork between turns")]
+    ForkNeedsIdle,
 }
 
 impl AcpError {
@@ -152,6 +159,7 @@ impl AcpError {
             Self::McpRejectedByAgent(_) => Some("mcp_rejected_by_agent"),
             Self::AgentAuthRequired(_) => Some("agent_auth_required"),
             Self::ForkPointUnresolved(_) => Some("fork_point_unresolved"),
+            Self::ForkNeedsIdle => Some("fork_needs_idle"),
             Self::Protocol(_) => None,
         }
     }

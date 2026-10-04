@@ -193,9 +193,16 @@ interface MessageListViewProps {
    *
    * "No turn in flight" is deliberately NOT part of this gate: that condition
    * is transient and comes back, so the view renders it as a disabled button
-   * (see `forkBusy`) rather than making every reply's footer flicker.
+   * (see `forkLocked`) rather than making every reply's footer flicker.
    */
   onForkFromTurn?: (turnId: string) => void
+  /**
+   * The agent forks while a turn is running — into a new conversation (see
+   * `lib/fork-from-turn`). Then a turn in flight greys out only the reply
+   * still being written; every finished reply above it stays forkable.
+   * Without it, every fork button greys out until the turn ends.
+   */
+  forkWhileRunning?: boolean
   /**
    * Edit a past user message and continue from there (see `lib/edit-message`).
    * The host forks at the reply before the message — or, for the first
@@ -1073,6 +1080,7 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
   foldEpoch = 0,
   onForkFromTurn,
   forkDisabled = false,
+  forkNamesLiveReplies = false,
   isThreadTail = false,
   editKey,
   editBlocked = null,
@@ -1090,6 +1098,9 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
   foldEpoch?: number
   onForkFromTurn?: (turnId: string) => void
   forkDisabled?: boolean
+  /** The host names a `live-…` reply itself before forking (a mid-turn fork,
+   *  see `resolveForkFromHereTurnId`), so such a reply is not "not ready". */
+  forkNamesLiveReplies?: boolean
   /** Whether nothing follows this group in the thread — the one position where
    *  a turn the backend cannot name still forks where the user pointed. */
   isThreadTail?: boolean
@@ -1110,7 +1121,8 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
   const forkPoint = sourceTurns?.length
     ? sourceTurns[sourceTurns.length - 1]
     : null
-  const forkPointUnnamed = isForkPointUnnamed(forkPoint, isThreadTail)
+  const forkPointUnnamed =
+    !forkNamesLiveReplies && isForkPointUnnamed(forkPoint, isThreadTail)
 
   return (
     <div className={dimmed ? "opacity-70" : undefined}>
@@ -1249,6 +1261,7 @@ export function MessageListView({
   onAskSelection,
   onSaveNoteSelection,
   onForkFromTurn,
+  forkWhileRunning = false,
   onEditUserMessage,
   hasQueuedMessages = false,
 }: MessageListViewProps) {
@@ -1675,6 +1688,14 @@ export function MessageListView({
   // its gate in `conversation-detail-panel`), and every reply's footer says
   // "not right now" instead of dropping its button and shifting the icon row.
   const forkBusy = connStatus === "prompting"
+  // ...unless the agent forks while running: then a finished reply forks into
+  // a new tab, and only the reply still being written can't (it has no
+  // footer until it settles; the live stats bar says why instead).
+  const forkLocked = forkBusy && !forkWhileRunning
+  // A mid-turn fork names a reply still called `live-…` from a fresh read of
+  // the transcript (the reparse that names it waits for the turn to end), so
+  // those replies don't grey out as "not ready" while it runs.
+  const forkNamesLiveReplies = forkBusy && forkWhileRunning
 
   // --- Edit message ---------------------------------------------------------
   // Busy like forking — plus a message just sent that isn't a turn yet: an
@@ -1936,7 +1957,8 @@ export function MessageListView({
                   onRoundOpenChange={handleRoundOpenChange}
                   foldEpoch={fold.epoch}
                   onForkFromTurn={onForkFromTurn}
-                  forkDisabled={forkBusy}
+                  forkDisabled={forkLocked}
+                  forkNamesLiveReplies={forkNamesLiveReplies}
                   isThreadTail={item.isThreadTail}
                   editKey={editTarget ? item.key : undefined}
                   // Another message's edit being saved greys this one out
@@ -1986,7 +2008,8 @@ export function MessageListView({
       fold.epoch,
       handleRoundOpenChange,
       onForkFromTurn,
-      forkBusy,
+      forkLocked,
+      forkNamesLiveReplies,
       findOpen,
       activeFindHit?.key,
       onRetryTurn,
@@ -2296,6 +2319,7 @@ export function MessageListView({
             agentType={agentType}
             isStreaming={connStatus === "prompting"}
             heldBackgroundTasks={heldBackgroundTasks}
+            forkInFlight={Boolean(onForkFromTurn) && forkWhileRunning}
           />
         )}
         {/* Shared overlay stack pinned to the inline-start edge (top-left in LTR,

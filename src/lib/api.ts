@@ -508,6 +508,45 @@ export async function acpFork(
   }
 }
 
+/** What "fork from here" did while a turn was running (Rust
+ *  `ForkToNewConversationInfo`): the session was forked into a NEW
+ *  conversation, for the caller to open in a new tab. */
+export interface ForkToNewConversationResult {
+  forkedSessionId: string
+  originalSessionId: string
+  /** The new row, bound to the forked session. */
+  conversationId: number
+  folderId: number
+  /** `[Fork] …`, or null for an untitled original. */
+  title: string | null
+}
+
+/**
+ * "Fork from here" without waiting for the running turn: the backend forks the
+ * session at `forkFromTurnId` — a FINISHED reply — in a separate agent process,
+ * into a new conversation row. The running turn, its connection and its row
+ * are left alone; nothing about the conversation on screen changes.
+ *
+ * Only agents that can fork a session another process is still writing
+ * support it (`supportsForkWhileRunning`); the backend refuses the rest with
+ * "this agent can only fork between turns" (`isForkNeedsIdleRejection`).
+ */
+export async function acpForkToNewConversation(
+  connectionId: string,
+  // As for `acpFork`: the conversation the tab shows, for a connection that
+  // has not linked its row yet. Ignored once it has.
+  conversationId: number | null,
+  forkFromTurnId: string
+): Promise<ForkToNewConversationResult> {
+  return getTransport().call(
+    "acp_fork_to_new_conversation",
+    { connectionId, conversationId, forkFromTurnId },
+    // The fork launches an agent process of its own, which the backend waits
+    // on up to its spawn-handshake timeout — the same wait as a connect.
+    { timeoutMs: ACP_CONNECT_TIMEOUT_MS }
+  )
+}
+
 /**
  * Stop one AIR async task (`_session/async_task/stop`).
  *
