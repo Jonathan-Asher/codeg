@@ -6449,7 +6449,54 @@
     "preview": {
       "percent": "{percent}%",
       "staleEntry": "{entry} (오래됨)",
-      "openFullView": "전체 보기 열기"
+      "openFullView": "전체 보기 열기",
+      "poolExhausted": "{count}개 소진",
+      "poolExhaustedShort": "{count} 소진"
+    },
+    "pool": {
+      "label": "계정 풀",
+      "labelTitle": "요청은 로컬 계정 풀(maxpool)을 거칩니다",
+      "labelVersion": "요청은 로컬 계정 풀(maxpool {version})을 거칩니다",
+      "accounts": "{count, plural, other {계정 #개}}",
+      "serving": "<b>{name}</b> 사용 중",
+      "noneServing": "사용 중인 계정 없음",
+      "nextReset": "다음 초기화까지 {duration}",
+      "servingBadge": "사용 중",
+      "preferredBadge": "우선",
+      "state": {
+        "exhausted": "소진됨",
+        "at_threshold": "임계값 초과",
+        "cooling_down": "대기 중",
+        "failing": "오류",
+        "disabled": "비활성"
+      },
+      "stateHint": {
+        "exhausted": "한도에 도달했습니다. 초기화될 때까지 풀이 다른 계정으로 요청을 보냅니다.",
+        "at_threshold": "풀의 전환 임계값({threshold}%)을 넘었습니다. 창이 초기화될 때까지 새 요청은 다른 계정으로 갑니다.",
+        "cooling_down": "오류나 속도 제한 후 잠시 쉬고 있습니다.",
+        "failing": "풀이 요청을 보내지 않는 오류 상태입니다(더 이상 갱신할 수 없는 로그인 등). maxpool을 확인하세요.",
+        "disabled": "풀 설정에서 꺼져 있습니다."
+      },
+      "backIn": "{duration} 후 복귀",
+      "signInFailed": "로그인을 더 이상 갱신할 수 없습니다",
+      "probeFailing": "사용량 확인 실패 — 수치가 오래되었을 수 있습니다",
+      "probeFailingStatus": "사용량 확인 실패(HTTP {status}) — 수치가 오래되었을 수 있습니다",
+      "noWindows": "아직 사용량 정보가 없습니다",
+      "allExhausted": "모든 계정이 한도에 도달했습니다. 첫 계정은 {duration} 후에 풀립니다.",
+      "allExhaustedUnknown": "모든 계정이 한도에 도달했습니다.",
+      "staleNotice": "풀이 응답하지 않습니다({error}). {duration} 전 정보를 표시합니다.",
+      "unansweredNotice": "계정 풀이 설정되어 있지만 응답하지 않습니다({error}). 에이전트 자체 정보를 표시합니다.",
+      "error": {
+        "unreachable": "연결할 수 없음",
+        "timeout": "시간 초과",
+        "unauthorized": "키 거부됨",
+        "http_status": "HTTP {status}",
+        "invalid_response": "예상치 못한 응답",
+        "config_unreadable": "설정을 읽을 수 없음"
+      },
+      "liveReading": "에이전트가 마지막으로 보고한 정보",
+      "liveReadingHint": "마지막 턴을 처리한 풀 계정의 값이라 위의 계정들과 다를 수 있습니다.",
+      "privacyNote": "계정 풀 수치는 maxpool의 로컬 상태 엔드포인트에서 가져옵니다. codeg는 설정에서 프록시 주소와 키만 읽으며 계정의 로그인 정보는 읽지 않습니다."
     }
   },
   "Forge": {

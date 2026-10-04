@@ -6449,7 +6449,54 @@
     "preview": {
       "percent": "{percent}%",
       "staleEntry": "{entry}（古いデータ）",
-      "openFullView": "詳細画面を開く"
+      "openFullView": "詳細画面を開く",
+      "poolExhausted": "{count} 件上限",
+      "poolExhaustedShort": "{count} 停止"
+    },
+    "pool": {
+      "label": "アカウントプール",
+      "labelTitle": "リクエストはローカルのアカウントプール (maxpool) を経由します",
+      "labelVersion": "リクエストはローカルのアカウントプール (maxpool {version}) を経由します",
+      "accounts": "{count, plural, other {# 個のアカウント}}",
+      "serving": "<b>{name}</b> が使用中",
+      "noneServing": "使用中のアカウントなし",
+      "nextReset": "次のリセットまで {duration}",
+      "servingBadge": "使用中",
+      "preferredBadge": "優先",
+      "state": {
+        "exhausted": "上限到達",
+        "at_threshold": "しきい値超過",
+        "cooling_down": "クールダウン中",
+        "failing": "エラー",
+        "disabled": "無効"
+      },
+      "stateHint": {
+        "exhausted": "上限に達しています。リセットされるまで、プールは他のアカウントにリクエストを送ります。",
+        "at_threshold": "プールの切り替えしきい値 ({threshold}%) を超えています。ウィンドウがリセットされるまで、新しいリクエストは他のアカウントに送られます。",
+        "cooling_down": "エラーまたはレート制限のため、しばらく休止しています。",
+        "failing": "プールがリクエストを送らないエラー状態です (更新できなくなったサインインなど)。maxpool を確認してください。",
+        "disabled": "プールの設定で無効になっています。"
+      },
+      "backIn": "{duration} 後に復帰",
+      "signInFailed": "サインインを更新できなくなりました",
+      "probeFailing": "使用量の確認に失敗しています — 数値が古い可能性があります",
+      "probeFailingStatus": "使用量の確認に失敗しています (HTTP {status}) — 数値が古い可能性があります",
+      "noWindows": "まだ使用量の読み取りがありません",
+      "allExhausted": "すべてのアカウントが上限に達しています。最初のアカウントは {duration} 後に空きます。",
+      "allExhaustedUnknown": "すべてのアカウントが上限に達しています。",
+      "staleNotice": "プールが応答していません ({error})。{duration} 前の読み取りを表示しています。",
+      "unansweredNotice": "アカウントプールが設定されていますが応答していません ({error})。エージェント自身の読み取りを表示しています。",
+      "error": {
+        "unreachable": "到達できません",
+        "timeout": "タイムアウト",
+        "unauthorized": "キーが拒否されました",
+        "http_status": "HTTP {status}",
+        "invalid_response": "予期しない応答",
+        "config_unreadable": "設定を読み取れません"
+      },
+      "liveReading": "エージェントが最後に報告した読み取り",
+      "liveReadingHint": "直前のターンを処理したプールのアカウントについての値のため、上のアカウントと一致しないことがあります。",
+      "privacyNote": "アカウントプールの数値は maxpool のローカルのステータスエンドポイントから取得します。codeg が設定から読み取るのはプロキシのアドレスとキーだけで、各アカウントのサインイン情報は読み取りません。"
     }
   },
   "Forge": {

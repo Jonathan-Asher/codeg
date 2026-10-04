@@ -6449,7 +6449,54 @@
     "preview": {
       "percent": "{percent}%",
       "staleEntry": "{entry} (قديمة)",
-      "openFullView": "فتح العرض الكامل"
+      "openFullView": "فتح العرض الكامل",
+      "poolExhausted": "{count, plural, one {حساب مستنفد} two {حسابان مستنفدان} few {# حسابات مستنفدة} many {# حسابًا مستنفدًا} other {# حساب مستنفد}}",
+      "poolExhaustedShort": "{count} متوقف"
+    },
+    "pool": {
+      "label": "مجموعة الحسابات",
+      "labelTitle": "تمر الطلبات عبر مجموعة حسابات محلية (maxpool)",
+      "labelVersion": "تمر الطلبات عبر مجموعة حسابات محلية (maxpool {version})",
+      "accounts": "{count, plural, zero {لا حسابات} one {حساب واحد} two {حسابان} few {# حسابات} many {# حسابًا} other {# حساب}}",
+      "serving": "<b>{name}</b> قيد الاستخدام",
+      "noneServing": "لا يوجد حساب قيد الاستخدام",
+      "nextReset": "إعادة التعيين التالية بعد {duration}",
+      "servingBadge": "قيد الاستخدام",
+      "preferredBadge": "مفضّل",
+      "state": {
+        "exhausted": "مستنفد",
+        "at_threshold": "فوق الحد",
+        "cooling_down": "في فترة تهدئة",
+        "failing": "متعطّل",
+        "disabled": "معطّل"
+      },
+      "stateHint": {
+        "exhausted": "بلغ حده. ترسل المجموعة الطلبات إلى حسابات أخرى حتى تتم إعادة تعيينه.",
+        "at_threshold": "تجاوز حد التبديل في المجموعة ({threshold}%). تذهب الطلبات الجديدة إلى حسابات أخرى حتى تتم إعادة تعيين النافذة.",
+        "cooling_down": "متوقف لفترة قصيرة بعد خطأ أو حد للمعدل.",
+        "failing": "في حالة خطأ لا توجّه إليها المجموعة الطلبات، مثل تسجيل دخول لم يعد بالإمكان تجديده. تحقّق من maxpool.",
+        "disabled": "مُطفأ في إعدادات المجموعة."
+      },
+      "backIn": "يعود بعد {duration}",
+      "signInFailed": "لم يعد بالإمكان تجديد تسجيل الدخول",
+      "probeFailing": "فشل التحقق من الاستخدام — قد تكون الأرقام قديمة",
+      "probeFailingStatus": "فشل التحقق من الاستخدام (HTTP {status}) — قد تكون الأرقام قديمة",
+      "noWindows": "لا توجد قراءة استخدام بعد",
+      "allExhausted": "بلغت كل الحسابات حدودها. يتحرر أولها بعد {duration}.",
+      "allExhaustedUnknown": "بلغت كل الحسابات حدودها.",
+      "staleNotice": "المجموعة لا تستجيب ({error}). تُعرض قراءتها من قبل {duration}.",
+      "unansweredNotice": "تم إعداد مجموعة حسابات لكنها لا تستجيب ({error}). تُعرض قراءة الوكيل نفسه.",
+      "error": {
+        "unreachable": "يتعذر الوصول",
+        "timeout": "انتهت المهلة",
+        "unauthorized": "رُفض المفتاح",
+        "http_status": "HTTP {status}",
+        "invalid_response": "استجابة غير متوقعة",
+        "config_unreadable": "تتعذر قراءة الإعدادات"
+      },
+      "liveReading": "آخر قراءة أبلغ عنها الوكيل",
+      "liveReadingHint": "تصف حساب المجموعة الذي خدم الدور الأخير، لذا قد تختلف عن الحسابات أعلاه.",
+      "privacyNote": "تأتي أرقام مجموعة الحسابات من نقطة الحالة المحلية في maxpool؛ لا يقرأ codeg من إعداداتها سوى عنوان الخادم الوسيط ومفتاحه، ولا يقرأ أبدًا بيانات تسجيل دخول الحسابات."
     }
   },
   "Forge": {

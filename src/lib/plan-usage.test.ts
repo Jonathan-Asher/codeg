@@ -1,22 +1,35 @@
 import { describe, expect, it } from "vitest"
 import {
+  activePool,
+  exhaustedAccountCount,
   findSnapshot,
   formatAbsoluteTime,
   formatCompactDuration,
   hasWindowReset,
+  isPoolStale,
   isSnapshotStale,
   mergeFetchedReport,
+  PLAN_USAGE_POOL_STALE_AFTER_SECONDS,
   PLAN_USAGE_STALE_AFTER_SECONDS,
   planUsagePreview,
+  poolAccountState,
+  poolExhaustion,
+  poolNextReset,
+  poolUsageLevel,
+  replacePool,
   replaceSnapshot,
+  servingAccount,
   splitPercent,
   tightestPreviewEntry,
   tightestWindow,
+  unansweredPool,
   usageLevel,
   windowLagSince,
   windowName,
 } from "./plan-usage"
 import type {
+  PlanUsagePool,
+  PlanUsagePoolAccount,
   PlanUsageReport,
   PlanUsageSnapshot,
   PlanUsageWindow,
@@ -381,5 +394,236 @@ describe("status-bar preview", () => {
       now
     )
     expect(tightestPreviewEntry(even)?.agent).toBe("claude_code")
+  })
+})
+
+describe("account pool", () => {
+  const now = 100_000
+
+  function account(
+    overrides: Partial<PlanUsagePoolAccount> = {}
+  ): PlanUsagePoolAccount {
+    return {
+      name: "alpha",
+      enabled: true,
+      status: "active",
+      state: "available",
+      blocked_until: null,
+      serving: false,
+      preferred: false,
+      windows: [
+        makeWindow({ used_percent: 40, resets_at: now + 3_600 }),
+        makeWindow({
+          id: "seven_day",
+          kind: "weekly",
+          label: "7d",
+          window_minutes: 10_080,
+          used_percent: 20,
+          resets_at: now + 3 * 86_400,
+        }),
+      ],
+      limit_status: "allowed",
+      weekly_state: "normal",
+      cooling_until: null,
+      in_flight: 0,
+      probe_failures: 0,
+      probe_error_status: null,
+      refresh_failed: false,
+      observed_at: now - 60,
+      ...overrides,
+    }
+  }
+
+  function pool(overrides: Partial<PlanUsagePool> = {}): PlanUsagePool {
+    return {
+      kind: "maxpool",
+      agent: "claude_code",
+      version: "9.9.9",
+      accounts: [
+        account({
+          name: "alpha",
+          preferred: true,
+          state: "exhausted",
+          blocked_until: now + 2 * 3_600,
+          windows: [
+            makeWindow({ used_percent: 100, resets_at: now + 2 * 3_600 }),
+          ],
+        }),
+        account({ name: "beta", serving: true }),
+      ],
+      current_account: "beta",
+      preferred_account: "alpha",
+      routing_mode: "preferred",
+      switch_threshold: 90,
+      exhausted: false,
+      resumes_at: null,
+      observed_at: now - 60,
+      checked_at: now - 30,
+      stale: false,
+      error: null,
+      error_status: null,
+      ...overrides,
+    }
+  }
+
+  function withPool(
+    p: PlanUsagePool | null,
+    snapshots: PlanUsageSnapshot[] = []
+  ): PlanUsageReport {
+    return { ...makeReport(snapshots), pool: p }
+  }
+
+  it("folds a pushed pool into the report, or drops it with null", () => {
+    const report = makeReport([makeSnapshot()])
+    const next = replacePool(report, pool())
+    expect(next.pool?.accounts).toHaveLength(2)
+    expect(next.snapshots).toBe(report.snapshots)
+    expect(replacePool(next, null).pool).toBeNull()
+    expect(replacePool(null, pool()).snapshots).toEqual([])
+  })
+
+  it("keeps a pool push newer than the fetched one", () => {
+    const pushed = pool({ checked_at: now })
+    const older = pool({ checked_at: now - 60 })
+    expect(mergeFetchedReport(withPool(pushed), withPool(older)).pool).toBe(
+      pushed
+    )
+    const newer = pool({ checked_at: now + 60 })
+    expect(mergeFetchedReport(withPool(pushed), withPool(newer)).pool).toBe(
+      newer
+    )
+    // The fetch says the pool is gone: it is.
+    expect(
+      mergeFetchedReport(withPool(pushed), makeReport([])).pool
+    ).toBeUndefined()
+  })
+
+  it("only treats a pool with accounts as active", () => {
+    expect(activePool(withPool(pool()))?.kind).toBe("maxpool")
+    const unanswered = pool({ accounts: [], stale: true, error: "timeout" })
+    expect(activePool(withPool(unanswered))).toBeNull()
+    expect(unansweredPool(withPool(unanswered))).toBe(unanswered)
+    expect(unansweredPool(withPool(pool()))).toBeNull()
+    expect(activePool(makeReport([]))).toBeNull()
+    expect(activePool(null)).toBeNull()
+  })
+
+  it("tints from the switch threshold and turns red when full", () => {
+    expect(poolUsageLevel(56, 90)).toBe("normal")
+    expect(poolUsageLevel(89.9, 90)).toBe("normal")
+    expect(poolUsageLevel(90, 90)).toBe("high")
+    expect(poolUsageLevel(99, 90)).toBe("high")
+    expect(poolUsageLevel(100, 90)).toBe("critical")
+    expect(poolUsageLevel(80, 75)).toBe("high")
+  })
+
+  it("lets a hold run out", () => {
+    const held = account({ state: "exhausted", blocked_until: now + 60 })
+    expect(poolAccountState(held, now)).toBe("exhausted")
+    expect(poolAccountState(held, now + 60)).toBe("available")
+    // No known end, or not a timed hold: as reported.
+    expect(
+      poolAccountState(account({ state: "exhausted" }), now + 86_400)
+    ).toBe("exhausted")
+    expect(
+      poolAccountState(
+        account({ state: "failing", blocked_until: now - 1 }),
+        now
+      )
+    ).toBe("failing")
+  })
+
+  it("finds the serving account, the next reset and the exhausted count", () => {
+    const p = pool()
+    expect(servingAccount(p)?.name).toBe("beta")
+    expect(
+      servingAccount(
+        pool({ accounts: p.accounts.map((a) => ({ ...a, serving: false })) })
+      )?.name
+    ).toBe("alpha")
+    expect(poolNextReset(p, now)).toBe(now + 3_600)
+    expect(exhaustedAccountCount(p, now)).toBe(1)
+    expect(exhaustedAccountCount(p, now + 2 * 3_600)).toBe(0)
+    // A disabled account's windows don't count.
+    const disabled = pool({
+      accounts: [account({ enabled: false, state: "disabled" })],
+    })
+    expect(poolNextReset(disabled, now)).toBeNull()
+    expect(exhaustedAccountCount(disabled, now)).toBe(0)
+  })
+
+  it("is exhausted only until it resumes", () => {
+    const out = pool({ exhausted: true, resumes_at: now + 600 })
+    expect(poolExhaustion(out, now)).toEqual({
+      exhausted: true,
+      resumesAt: now + 600,
+    })
+    expect(poolExhaustion(out, now + 600).exhausted).toBe(false)
+    expect(poolExhaustion(pool({ exhausted: true }), now)).toEqual({
+      exhausted: true,
+      resumesAt: null,
+    })
+    expect(poolExhaustion(pool(), now).exhausted).toBe(false)
+  })
+
+  it("goes stale on a failed ask or when the pushes stop", () => {
+    expect(isPoolStale(pool(), now)).toBe(false)
+    expect(isPoolStale(pool({ stale: true }), now)).toBe(true)
+    expect(
+      isPoolStale(
+        pool({ checked_at: now - PLAN_USAGE_POOL_STALE_AFTER_SECONDS - 1 }),
+        now
+      )
+    ).toBe(true)
+  })
+
+  it("previews the serving account's 5-hour window", () => {
+    const entries = planUsagePreview(
+      withPool(pool(), [
+        makeSnapshot({
+          windows: [makeWindow({ used_percent: 100 })],
+          observed_at: now,
+          status: "limited",
+        }),
+      ]),
+      now
+    )
+    expect(entries).toHaveLength(1)
+    const [entry] = entries
+    expect(entry.agent).toBe("claude_code")
+    expect(entry.percent).toBe(40)
+    expect(entry.level).toBe("normal")
+    expect(entry.pool).toEqual({ account: "beta", exhausted: 1 })
+    expect(entry.stale).toBe(false)
+  })
+
+  it("tints the preview from the threshold, red when every account is out", () => {
+    const near = pool({
+      accounts: [
+        account({
+          name: "beta",
+          serving: true,
+          windows: [makeWindow({ used_percent: 92, resets_at: now + 600 })],
+        }),
+      ],
+    })
+    expect(planUsagePreview(withPool(near), now)[0].level).toBe("high")
+    const out = pool({ exhausted: true, resumes_at: now + 600 })
+    expect(planUsagePreview(withPool(out), now)[0].level).toBe("critical")
+    const stale = pool({ stale: true })
+    expect(planUsagePreview(withPool(stale), now)[0].stale).toBe(true)
+  })
+
+  it("falls back to the agent's reading when no account has numbers", () => {
+    const empty = pool({
+      accounts: [account({ name: "beta", serving: true, windows: [] })],
+    })
+    const entries = planUsagePreview(
+      withPool(empty, [makeSnapshot({ observed_at: now })]),
+      now
+    )
+    expect(entries).toHaveLength(1)
+    expect(entries[0].pool).toBeUndefined()
+    expect(entries[0].percent).toBe(42)
   })
 })

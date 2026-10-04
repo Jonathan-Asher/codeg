@@ -6449,7 +6449,54 @@
     "preview": {
       "percent": "{percent}%",
       "staleEntry": "{entry}（已過時）",
-      "openFullView": "開啟完整檢視"
+      "openFullView": "開啟完整檢視",
+      "poolExhausted": "{count} 個已用盡",
+      "poolExhaustedShort": "{count} 用盡"
+    },
+    "pool": {
+      "label": "帳號池",
+      "labelTitle": "請求經由本機帳號池（maxpool）傳送",
+      "labelVersion": "請求經由本機帳號池（maxpool {version}）傳送",
+      "accounts": "{count, plural, other {# 個帳號}}",
+      "serving": "<b>{name}</b> 使用中",
+      "noneServing": "沒有使用中的帳號",
+      "nextReset": "{duration}後下次重設",
+      "servingBadge": "使用中",
+      "preferredBadge": "優先",
+      "state": {
+        "exhausted": "已用盡",
+        "at_threshold": "超過門檻",
+        "cooling_down": "冷卻中",
+        "failing": "故障",
+        "disabled": "已停用"
+      },
+      "stateHint": {
+        "exhausted": "已達上限。重設前，帳號池會把請求送往其他帳號。",
+        "at_threshold": "已超過帳號池的切換門檻（{threshold}%）。視窗重設前，新請求會送往其他帳號。",
+        "cooling_down": "因錯誤或速率限制而短暫暫停。",
+        "failing": "處於帳號池不會路由的錯誤狀態，例如登入已無法續期。請檢查 maxpool。",
+        "disabled": "已在帳號池設定中關閉。"
+      },
+      "backIn": "{duration}後恢復",
+      "signInFailed": "登入已無法續期",
+      "probeFailing": "用量查詢失敗——數字可能已過時",
+      "probeFailingStatus": "用量查詢失敗（HTTP {status}）——數字可能已過時",
+      "noWindows": "尚無用量讀數",
+      "allExhausted": "所有帳號都已達上限。最早的一個將在{duration}後可用。",
+      "allExhaustedUnknown": "所有帳號都已達上限。",
+      "staleNotice": "帳號池沒有回應（{error}）。顯示的是{duration}前的讀數。",
+      "unansweredNotice": "已設定帳號池，但它沒有回應（{error}）。顯示的是代理自己的讀數。",
+      "error": {
+        "unreachable": "無法連線",
+        "timeout": "逾時",
+        "unauthorized": "金鑰遭拒",
+        "http_status": "HTTP {status}",
+        "invalid_response": "回應異常",
+        "config_unreadable": "設定無法讀取"
+      },
+      "liveReading": "代理最近回報的讀數",
+      "liveReadingHint": "它描述的是處理上一輪的帳號池帳號，因此可能與上方的帳號不一致。",
+      "privacyNote": "帳號池的數字來自 maxpool 的本機狀態端點；codeg 只從其設定讀取代理伺服器的位址和金鑰，從不讀取各帳號的登入憑證。"
     }
   },
   "Forge": {

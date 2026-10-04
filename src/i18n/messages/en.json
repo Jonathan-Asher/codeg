@@ -6449,7 +6449,54 @@
     "preview": {
       "percent": "{percent}%",
       "staleEntry": "{entry} (stale)",
-      "openFullView": "Open full view"
+      "openFullView": "Open full view",
+      "poolExhausted": "{count} exhausted",
+      "poolExhaustedShort": "{count} out"
+    },
+    "pool": {
+      "label": "Account pool",
+      "labelTitle": "Requests go through a local account pool (maxpool)",
+      "labelVersion": "Requests go through a local account pool (maxpool {version})",
+      "accounts": "{count, plural, one {# account} other {# accounts}}",
+      "serving": "<b>{name}</b> serving",
+      "noneServing": "no account serving",
+      "nextReset": "next reset in {duration}",
+      "servingBadge": "Serving",
+      "preferredBadge": "Preferred",
+      "state": {
+        "exhausted": "Exhausted",
+        "at_threshold": "Over threshold",
+        "cooling_down": "Cooling down",
+        "failing": "Failing",
+        "disabled": "Disabled"
+      },
+      "stateHint": {
+        "exhausted": "At its limit. The pool sends requests to other accounts until it resets.",
+        "at_threshold": "Past the pool's {threshold}% switch threshold. New requests go to other accounts until the window resets.",
+        "cooling_down": "Benched for a short while after an error or a rate limit.",
+        "failing": "In an error state the pool won't route to, such as a sign-in that can no longer be refreshed. Check maxpool.",
+        "disabled": "Switched off in the pool's config."
+      },
+      "backIn": "Back in {duration}",
+      "signInFailed": "Sign-in can no longer be refreshed",
+      "probeFailing": "Usage check failing — numbers may be out of date",
+      "probeFailingStatus": "Usage check failing (HTTP {status}) — numbers may be out of date",
+      "noWindows": "No usage reading yet",
+      "allExhausted": "Every account is at its limit. The first frees up in {duration}.",
+      "allExhaustedUnknown": "Every account is at its limit.",
+      "staleNotice": "The pool isn't answering ({error}). Showing its reading from {duration} ago.",
+      "unansweredNotice": "An account pool is set up but isn't answering ({error}). Showing the agent's own reading.",
+      "error": {
+        "unreachable": "not reachable",
+        "timeout": "timed out",
+        "unauthorized": "key refused",
+        "http_status": "HTTP {status}",
+        "invalid_response": "unexpected answer",
+        "config_unreadable": "config unreadable"
+      },
+      "liveReading": "Last reading the agent reported",
+      "liveReadingHint": "It describes whichever pool account served the last turn, so it can disagree with the accounts above.",
+      "privacyNote": "Account-pool numbers come from maxpool's local status endpoint; codeg reads only the proxy's address and key from its config, never the accounts' sign-ins."
     }
   },
   "Forge": {

@@ -6449,7 +6449,54 @@
     "preview": {
       "percent": "{percent} %",
       "staleEntry": "{entry} (desactualizado)",
-      "openFullView": "Abrir vista completa"
+      "openFullView": "Abrir vista completa",
+      "poolExhausted": "{count, plural, one {# agotada} other {# agotadas}}",
+      "poolExhaustedShort": "{count} fuera"
+    },
+    "pool": {
+      "label": "Grupo de cuentas",
+      "labelTitle": "Las solicitudes pasan por un grupo local de cuentas (maxpool)",
+      "labelVersion": "Las solicitudes pasan por un grupo local de cuentas (maxpool {version})",
+      "accounts": "{count, plural, one {# cuenta} other {# cuentas}}",
+      "serving": "<b>{name}</b> en uso",
+      "noneServing": "ninguna cuenta en uso",
+      "nextReset": "próximo reinicio en {duration}",
+      "servingBadge": "En uso",
+      "preferredBadge": "Preferida",
+      "state": {
+        "exhausted": "Agotada",
+        "at_threshold": "Sobre el umbral",
+        "cooling_down": "En pausa",
+        "failing": "Con fallos",
+        "disabled": "Desactivada"
+      },
+      "stateHint": {
+        "exhausted": "En su límite. El grupo envía las solicitudes a otras cuentas hasta que se reinicie.",
+        "at_threshold": "Por encima del umbral de cambio del grupo ({threshold} %). Las nuevas solicitudes van a otras cuentas hasta que la ventana se reinicie.",
+        "cooling_down": "En pausa breve tras un error o un límite de frecuencia.",
+        "failing": "En un estado de error al que el grupo no envía solicitudes, como un inicio de sesión que ya no se puede renovar. Revisa maxpool.",
+        "disabled": "Desactivada en la configuración del grupo."
+      },
+      "backIn": "Vuelve en {duration}",
+      "signInFailed": "El inicio de sesión ya no se puede renovar",
+      "probeFailing": "La consulta de uso falla: los números pueden estar desactualizados",
+      "probeFailingStatus": "La consulta de uso falla (HTTP {status}): los números pueden estar desactualizados",
+      "noWindows": "Aún no hay lectura de uso",
+      "allExhausted": "Todas las cuentas están en su límite. La primera se libera en {duration}.",
+      "allExhaustedUnknown": "Todas las cuentas están en su límite.",
+      "staleNotice": "El grupo no responde ({error}). Se muestra su lectura de hace {duration}.",
+      "unansweredNotice": "Hay un grupo de cuentas configurado, pero no responde ({error}). Se muestra la lectura propia del agente.",
+      "error": {
+        "unreachable": "inaccesible",
+        "timeout": "tiempo agotado",
+        "unauthorized": "clave rechazada",
+        "http_status": "HTTP {status}",
+        "invalid_response": "respuesta inesperada",
+        "config_unreadable": "configuración ilegible"
+      },
+      "liveReading": "Última lectura informada por el agente",
+      "liveReadingHint": "Describe la cuenta del grupo que atendió el último turno, así que puede no coincidir con las cuentas de arriba.",
+      "privacyNote": "Los números del grupo de cuentas vienen del endpoint de estado local de maxpool; codeg solo lee de su configuración la dirección y la clave del proxy, nunca los inicios de sesión de las cuentas."
     }
   },
   "Forge": {

@@ -6449,7 +6449,54 @@
     "preview": {
       "percent": "{percent}%",
       "staleEntry": "{entry} (desatualizado)",
-      "openFullView": "Abrir visualização completa"
+      "openFullView": "Abrir visualização completa",
+      "poolExhausted": "{count, plural, one {# esgotada} other {# esgotadas}}",
+      "poolExhaustedShort": "{count} fora"
+    },
+    "pool": {
+      "label": "Pool de contas",
+      "labelTitle": "As solicitações passam por um pool local de contas (maxpool)",
+      "labelVersion": "As solicitações passam por um pool local de contas (maxpool {version})",
+      "accounts": "{count, plural, one {# conta} other {# contas}}",
+      "serving": "<b>{name}</b> em uso",
+      "noneServing": "nenhuma conta em uso",
+      "nextReset": "próxima redefinição em {duration}",
+      "servingBadge": "Em uso",
+      "preferredBadge": "Preferida",
+      "state": {
+        "exhausted": "Esgotada",
+        "at_threshold": "Acima do limiar",
+        "cooling_down": "Em pausa",
+        "failing": "Com falha",
+        "disabled": "Desativada"
+      },
+      "stateHint": {
+        "exhausted": "No limite. O pool envia as solicitações para outras contas até ela ser redefinida.",
+        "at_threshold": "Acima do limiar de troca do pool ({threshold}%). Novas solicitações vão para outras contas até a janela ser redefinida.",
+        "cooling_down": "Em pausa breve após um erro ou um limite de taxa.",
+        "failing": "Em um estado de erro para o qual o pool não envia solicitações, como um login que não pode mais ser renovado. Verifique o maxpool.",
+        "disabled": "Desativada na configuração do pool."
+      },
+      "backIn": "Volta em {duration}",
+      "signInFailed": "O login não pode mais ser renovado",
+      "probeFailing": "A verificação de uso está falhando — os números podem estar desatualizados",
+      "probeFailingStatus": "A verificação de uso está falhando (HTTP {status}) — os números podem estar desatualizados",
+      "noWindows": "Ainda sem leitura de uso",
+      "allExhausted": "Todas as contas estão no limite. A primeira é liberada em {duration}.",
+      "allExhaustedUnknown": "Todas as contas estão no limite.",
+      "staleNotice": "O pool não está respondendo ({error}). Mostrando a leitura de {duration} atrás.",
+      "unansweredNotice": "Há um pool de contas configurado, mas ele não responde ({error}). Mostrando a leitura do próprio agente.",
+      "error": {
+        "unreachable": "inacessível",
+        "timeout": "tempo esgotado",
+        "unauthorized": "chave recusada",
+        "http_status": "HTTP {status}",
+        "invalid_response": "resposta inesperada",
+        "config_unreadable": "configuração ilegível"
+      },
+      "liveReading": "Última leitura informada pelo agente",
+      "liveReadingHint": "Ela descreve a conta do pool que atendeu o último turno, então pode divergir das contas acima.",
+      "privacyNote": "Os números do pool de contas vêm do endpoint de status local do maxpool; o codeg lê da configuração apenas o endereço e a chave do proxy, nunca os logins das contas."
     }
   },
   "Forge": {
