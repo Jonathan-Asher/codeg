@@ -4371,7 +4371,25 @@
     "loading": "Carregando...",
     "emptyDirectory": "Este diretório está vazio",
     "errorLoadingDir": "Falha ao carregar o diretório",
-    "permissionDenied": "Permissão negada"
+    "permissionDenied": "Permissão negada",
+    "newFolder": {
+      "button": "Nova pasta",
+      "placeholder": "Nome da pasta",
+      "create": "Criar pasta",
+      "location": "Em {path}",
+      "errors": {
+        "empty": "Digite um nome para a pasta.",
+        "reservedName": "“{name}” não pode ser usado como nome de pasta.",
+        "separator": "O nome de uma pasta não pode conter / nem \\.",
+        "controlCharacter": "O nome de uma pasta não pode conter caracteres de controle nem quebras de linha.",
+        "reservedCharacter": "O nome de uma pasta não pode conter {character}.",
+        "invalidParent": "Não é possível criar uma pasta em {path}.",
+        "parentNotFound": "{path} não existe mais.",
+        "alreadyExists": "“{name}” já existe aqui.",
+        "permissionDenied": "Você não tem permissão para criar uma pasta aqui.",
+        "failed": "Não foi possível criar a pasta: {reason}"
+      }
+    }
   },
   "ChatChannelSettings": {
     "loading": "Carregando...",

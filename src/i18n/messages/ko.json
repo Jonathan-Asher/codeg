@@ -4371,7 +4371,25 @@
     "loading": "로딩 중...",
     "emptyDirectory": "이 디렉토리는 비어 있습니다",
     "errorLoadingDir": "디렉토리 로딩 실패",
-    "permissionDenied": "권한이 없습니다"
+    "permissionDenied": "권한이 없습니다",
+    "newFolder": {
+      "button": "새 폴더",
+      "placeholder": "폴더 이름",
+      "create": "폴더 만들기",
+      "location": "위치: {path}",
+      "errors": {
+        "empty": "폴더 이름을 입력하세요.",
+        "reservedName": "“{name}”은(는) 폴더 이름으로 사용할 수 없습니다.",
+        "separator": "폴더 이름에는 / 또는 \\를 사용할 수 없습니다.",
+        "controlCharacter": "폴더 이름에는 제어 문자나 줄 바꿈을 사용할 수 없습니다.",
+        "reservedCharacter": "폴더 이름에는 {character} 문자를 사용할 수 없습니다.",
+        "invalidParent": "{path}에는 폴더를 만들 수 없습니다.",
+        "parentNotFound": "{path}이(가) 더 이상 존재하지 않습니다.",
+        "alreadyExists": "“{name}”이(가) 이미 있습니다.",
+        "permissionDenied": "여기에 폴더를 만들 권한이 없습니다.",
+        "failed": "폴더를 만들지 못했습니다: {reason}"
+      }
+    }
   },
   "ChatChannelSettings": {
     "loading": "로딩 중...",

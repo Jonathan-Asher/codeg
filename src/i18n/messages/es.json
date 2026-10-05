@@ -4371,7 +4371,25 @@
     "loading": "Cargando...",
     "emptyDirectory": "Este directorio está vacío",
     "errorLoadingDir": "Error al cargar el directorio",
-    "permissionDenied": "Permiso denegado"
+    "permissionDenied": "Permiso denegado",
+    "newFolder": {
+      "button": "Nueva carpeta",
+      "placeholder": "Nombre de la carpeta",
+      "create": "Crear carpeta",
+      "location": "En {path}",
+      "errors": {
+        "empty": "Escribe un nombre para la carpeta.",
+        "reservedName": "«{name}» no se puede usar como nombre de carpeta.",
+        "separator": "El nombre de una carpeta no puede contener / ni \\.",
+        "controlCharacter": "El nombre de una carpeta no puede contener caracteres de control ni saltos de línea.",
+        "reservedCharacter": "El nombre de una carpeta no puede contener {character}.",
+        "invalidParent": "No se puede crear una carpeta en {path}.",
+        "parentNotFound": "{path} ya no existe.",
+        "alreadyExists": "«{name}» ya existe aquí.",
+        "permissionDenied": "No tienes permiso para crear una carpeta aquí.",
+        "failed": "No se pudo crear la carpeta: {reason}"
+      }
+    }
   },
   "ChatChannelSettings": {
     "loading": "Cargando...",

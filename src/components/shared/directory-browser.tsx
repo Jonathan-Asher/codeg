@@ -5,6 +5,7 @@ import {
   useEffect,
   useLayoutEffect,
   useCallback,
+  useId,
   useRef,
   useImperativeHandle,
   forwardRef,
@@ -14,11 +15,15 @@ import { useTranslations } from "next-intl"
 import {
   Check,
   ChevronRight,
+  FolderPlus,
   Home,
   Loader2,
   UndoDot,
+  X,
   type LucideIcon,
 } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   InputGroup,
   InputGroupAddon,
@@ -34,7 +39,15 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useImeGuard } from "@/hooks/use-ime-guard"
 import { cn } from "@/lib/utils"
-import { getHomeDirectory, listDirectoryEntries } from "@/lib/api"
+import {
+  createDirectory,
+  getHomeDirectory,
+  listDirectoryEntries,
+} from "@/lib/api"
+import {
+  toLocalizedErrorMessage,
+  type AppErrorTranslator,
+} from "@/lib/app-error"
 import { parentFsPath } from "@/lib/path-utils"
 import type { DirectoryEntry } from "@/lib/types"
 
@@ -100,6 +113,18 @@ interface DirectoryBrowserProps {
   pathInputAction?: ReactNode
   /** Tailwind height for the scroll area. */
   heightClassName?: string
+  /**
+   * Offer "New folder", which creates a folder inside the directory being
+   * listed and then moves into it, so the host's confirm picks it up.
+   */
+  allowCreateFolder?: boolean
+}
+
+/** The inline "New folder" row while it is open. */
+interface NewFolderDraft {
+  name: string
+  error: string | null
+  busy: boolean
 }
 
 /**
@@ -123,6 +148,7 @@ export const DirectoryBrowser = forwardRef<
     onToggleSelected,
     pathInputAction,
     heightClassName = "h-[18.75rem]",
+    allowCreateFolder = false,
   },
   ref
 ) {
@@ -137,6 +163,8 @@ export const DirectoryBrowser = forwardRef<
   const [loading, setLoading] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
+  const [newFolder, setNewFolder] = useState<NewFolderDraft | null>(null)
+  const newFolderInputRef = useRef<HTMLInputElement>(null)
 
   const initialized = useRef(false)
   // Monotonic session id, bumped synchronously on every real show/hide
@@ -169,9 +197,12 @@ export const DirectoryBrowser = forwardRef<
   useIsomorphicLayoutEffect(() => {
     busyRef.current = onBusyChange
   }, [onBusyChange])
+  // A folder being created counts as busy too: confirming meanwhile would
+  // commit the directory it is being created in, not the new one.
+  const creatingFolder = newFolder?.busy ?? false
   useEffect(() => {
-    busyRef.current?.(confirming)
-  }, [confirming])
+    busyRef.current?.(confirming || creatingFolder)
+  }, [confirming, creatingFolder])
 
   const loadEntries = useCallback(
     async (path: string): Promise<DirectoryEntry[] | null> => {
@@ -217,6 +248,8 @@ export const DirectoryBrowser = forwardRef<
         setRootPath(path)
         onValueChange(path)
         setExpandedPaths(new Set())
+        // A half-typed new folder belonged to the directory just left.
+        setNewFolder(null)
       }
     },
     [loadEntries, onValueChange]
@@ -243,6 +276,7 @@ export const DirectoryBrowser = forwardRef<
     setError(null)
     setLoading(new Set())
     setConfirming(false)
+    setNewFolder(null)
 
     const init = async () => {
       try {
@@ -333,6 +367,59 @@ export const DirectoryBrowser = forwardRef<
       setError(t("errorLoadingDir"))
     }
   }, [navigateTo, t])
+
+  const openNewFolder = useCallback(() => {
+    setNewFolder((prev) => prev ?? { name: "", error: null, busy: false })
+    // Already open: bring the caret back rather than resetting what was typed.
+    newFolderInputRef.current?.focus()
+  }, [])
+
+  const handleCreateFolder = useCallback(async () => {
+    if (!newFolder || newFolder.busy) return
+    const name = newFolder.name.trim()
+    const parent = rootPath
+    if (!name || !parent) return
+    const gen = sessionGen.current
+    setNewFolder({ ...newFolder, error: null, busy: true })
+    let created: string
+    try {
+      created = await createDirectory(parent, name)
+    } catch (err) {
+      if (gen !== sessionGen.current) return
+      const message = toLocalizedErrorMessage(
+        err,
+        t as unknown as AppErrorTranslator
+      )
+      setNewFolder((prev) => prev && { ...prev, error: message, busy: false })
+      return
+    }
+    if (gen !== sessionGen.current) return
+    // Every cached listing that could show the parent is now stale (its rows,
+    // and its chevron one level up), so start the cache over.
+    setEntries(new Map())
+    setNewFolder(null)
+    // Fill the path box first, so the new folder is what a confirm commits
+    // even if listing it fails below.
+    onValueChange(created)
+    await navigateTo(created)
+  }, [newFolder, rootPath, onValueChange, navigateTo, t])
+
+  // Escape belongs to the row while it is open. The host dialog dismisses on
+  // Escape from a capture listener on `document`, which runs before anything
+  // on the input itself, so the key is claimed on `window`, one step earlier.
+  const newFolderOpen = newFolder !== null
+  useEffect(() => {
+    if (!newFolderOpen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || ime.isComposing(event)) return
+      if (event.target !== newFolderInputRef.current) return
+      event.preventDefault()
+      event.stopPropagation()
+      setNewFolder(null)
+    }
+    window.addEventListener("keydown", onKeyDown, true)
+    return () => window.removeEventListener("keydown", onKeyDown, true)
+  }, [newFolderOpen, ime])
 
   const handlePathInputKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -463,6 +550,14 @@ export const DirectoryBrowser = forwardRef<
               label={t("navigateUp")}
               onClick={handleNavigateUp}
             />
+            {allowCreateFolder ? (
+              <NavButton
+                icon={FolderPlus}
+                label={t("newFolder.button")}
+                onClick={openNewFolder}
+                disabled={!rootPath}
+              />
+            ) : null}
           </InputGroupAddon>
           <InputGroupInput
             value={value}
@@ -482,6 +577,18 @@ export const DirectoryBrowser = forwardRef<
 
       <ScrollArea className={cn(heightClassName, "rounded-md border")}>
         <div className="p-1">
+          {newFolder && rootPath ? (
+            <NewFolderRow
+              inputRef={newFolderInputRef}
+              parentPath={rootPath}
+              draft={newFolder}
+              onNameChange={(name) =>
+                setNewFolder((prev) => prev && { ...prev, name, error: null })
+              }
+              onSubmit={handleCreateFolder}
+              onCancel={() => setNewFolder(null)}
+            />
+          ) : null}
           {renderEntries(rootPath, 0)}
           {error && !loading.size && (
             <div className="p-4 text-center text-sm text-destructive">
@@ -503,10 +610,12 @@ function NavButton({
   icon: Icon,
   label,
   onClick,
+  disabled,
 }: {
   icon: LucideIcon
   label: string
   onClick: () => void
+  disabled?: boolean
 }) {
   return (
     <Tooltip>
@@ -516,6 +625,7 @@ function NavButton({
           variant="ghost"
           type="button"
           onClick={onClick}
+          disabled={disabled}
           aria-label={label}
         >
           <Icon className="size-3.5" />
@@ -523,5 +633,108 @@ function NavButton({
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
+  )
+}
+
+/**
+ * The name box "New folder" opens at the top of the listing. Enter creates;
+ * Escape (claimed by the panel, see there) or the X cancels. The box stays
+ * editable while the request runs, so a rejected name is fixed in place
+ * without the caret jumping away.
+ */
+function NewFolderRow({
+  inputRef,
+  parentPath,
+  draft,
+  onNameChange,
+  onSubmit,
+  onCancel,
+}: {
+  inputRef: React.RefObject<HTMLInputElement | null>
+  parentPath: string
+  draft: NewFolderDraft
+  onNameChange: (name: string) => void
+  onSubmit: () => void
+  onCancel: () => void
+}) {
+  const t = useTranslations("DirectoryBrowser")
+  const ime = useImeGuard()
+  const errorId = useId()
+
+  return (
+    <div className="mb-1 space-y-1 rounded-md bg-muted/40 p-1.5">
+      <div className="flex items-center gap-1">
+        <FolderPlus
+          className="ms-1 size-3.5 shrink-0 text-muted-foreground"
+          aria-hidden
+        />
+        <Input
+          ref={inputRef}
+          value={draft.name}
+          onChange={(e) => onNameChange(e.target.value)}
+          {...ime.props}
+          onKeyDown={(e) => {
+            if (ime.isComposing(e)) return
+            if (e.key === "Enter") {
+              e.preventDefault()
+              onSubmit()
+            }
+          }}
+          readOnly={draft.busy}
+          placeholder={t("newFolder.placeholder")}
+          aria-label={t("newFolder.placeholder")}
+          aria-invalid={draft.error ? true : undefined}
+          aria-describedby={draft.error ? errorId : undefined}
+          className="h-7 text-sm"
+          autoFocus
+          spellCheck={false}
+          autoComplete="off"
+        />
+        <Button
+          size="icon"
+          variant="ghost"
+          className="size-7 shrink-0"
+          type="button"
+          onClick={onSubmit}
+          disabled={draft.busy || !draft.name.trim()}
+          aria-label={t("newFolder.create")}
+          title={t("newFolder.create")}
+        >
+          {draft.busy ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <Check className="size-3.5" />
+          )}
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="size-7 shrink-0"
+          type="button"
+          onClick={onCancel}
+          disabled={draft.busy}
+          aria-label={t("cancel")}
+          title={t("cancel")}
+        >
+          <X className="size-3.5" />
+        </Button>
+      </div>
+      {draft.error ? (
+        <div
+          id={errorId}
+          role="alert"
+          className="ps-6 text-xs text-destructive"
+        >
+          {draft.error}
+        </div>
+      ) : (
+        <div
+          className="truncate ps-6 text-xs text-muted-foreground"
+          title={parentPath}
+        >
+          {t("newFolder.location", { path: parentPath })}
+        </div>
+      )}
+    </div>
   )
 }

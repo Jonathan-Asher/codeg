@@ -15,6 +15,7 @@ import { WorkspaceFolderDialog } from "./workspace-folder-dialog"
 const api = vi.hoisted(() => ({
   getHomeDirectory: vi.fn(),
   listDirectoryEntries: vi.fn(),
+  createDirectory: vi.fn(),
   listFolderLinks: vi.fn(),
   previewFolderLinks: vi.fn(),
   createFolderLinks: vi.fn(),
@@ -152,6 +153,45 @@ describe("WorkspaceFolderDialog — creation flow", () => {
 
     expect(toast.error).toHaveBeenCalled()
     expect(screen.getByRole("button", { name: "Next" })).toBeInTheDocument()
+  })
+
+  it("makes a new folder and opens it as the workspace", async () => {
+    api.listDirectoryEntries.mockImplementation((path: string) =>
+      Promise.resolve(
+        path === "/home/me" ? [dir("other", "/home/me/other")] : []
+      )
+    )
+    api.createDirectory.mockResolvedValue("/home/me/fresh")
+    openFolder.mockResolvedValue(folder({ path: "/home/me/fresh" }))
+    render(<Harness />)
+    await screen.findByText("other")
+
+    fireEvent.click(screen.getByRole("button", { name: "New folder" }))
+    const name = screen.getByRole("textbox", { name: "Folder name" })
+    fireEvent.change(name, { target: { value: "fresh" } })
+    await act(async () => {
+      fireEvent.keyDown(name, { key: "Enter" })
+    })
+
+    expect(api.createDirectory).toHaveBeenCalledWith("/home/me", "fresh")
+    await screen.findByDisplayValue("/home/me/fresh")
+    // Creating is not opening: that still waits for Next.
+    expect(openFolder).not.toHaveBeenCalled()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Next" }))
+    })
+    expect(openFolder).toHaveBeenCalledWith("/home/me/fresh")
+    expect(await screen.findByText("/home/me/fresh")).toBeInTheDocument()
+  })
+
+  it("does not offer a new folder when picking link targets", async () => {
+    render(<Harness manage={folder()} />)
+    fireEvent.click(await screen.findByRole("button", { name: /Add folders/ }))
+    await screen.findByRole("button", { name: "Go to parent directory" })
+    expect(
+      screen.queryByRole("button", { name: "New folder" })
+    ).not.toBeInTheDocument()
   })
 })
 
