@@ -4316,6 +4316,18 @@ export async function listDirectoryEntries(
   return getTransport().call("list_directory_entries", { path })
 }
 
+/**
+ * Create the folder `name` directly inside `parentPath`, on the host that owns
+ * the filesystem the directory browser walks, and resolve to its path. One
+ * level only, and an existing entry of that name is an error, never reused.
+ */
+export async function createDirectory(
+  parentPath: string,
+  name: string
+): Promise<string> {
+  return getTransport().call("create_directory", { parentPath, name })
+}
+
 export async function listDirectoryWithFiles(
   path: string
 ): Promise<DirectoryItem[]> {

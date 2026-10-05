@@ -27,6 +27,8 @@ pub mod clipboard;
 pub mod config_sync;
 pub mod attention;
 pub mod conversation_export;
+/// "New folder" in the directory browser (both runtimes).
+pub mod create_directory;
 pub mod message_search;
 pub mod conversations;
 pub mod custom_agents;
