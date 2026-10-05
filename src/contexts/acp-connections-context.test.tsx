@@ -13,6 +13,7 @@ import {
 import { acpSetConfigOption } from "@/lib/api"
 import {
   CONNECTION_IDLE_TIMEOUT_MS,
+  CONNECTION_KEEPALIVE_INTERVAL_MS,
   IDLE_SWEEP_INTERVAL_MS,
 } from "@/lib/constants"
 import { parsePermissionToolCall } from "@/lib/permission-request"
@@ -48,6 +49,7 @@ const h = vi.hoisted(() => {
     acpFindConnectionForConversation: vi.fn(),
     acpConnect: vi.fn(),
     acpDisconnect: vi.fn(),
+    acpReleaseConnection: vi.fn(),
     acpGetSessionSnapshot: vi.fn(),
     acpTouchConnection: vi.fn(),
     acpCancel: vi.fn(),
@@ -124,6 +126,7 @@ vi.mock("@/lib/api", () => ({
   acpFindConnectionForConversation: h.acpFindConnectionForConversation,
   acpConnect: h.acpConnect,
   acpDisconnect: h.acpDisconnect,
+  acpReleaseConnection: h.acpReleaseConnection,
   acpGetSessionSnapshot: h.acpGetSessionSnapshot,
   acpPrompt: vi.fn(),
   acpSetMode: vi.fn(),
@@ -210,6 +213,8 @@ beforeEach(() => {
   })
   h.acpConnect.mockResolvedValue("spawned-conn")
   h.acpDisconnect.mockResolvedValue(undefined)
+  h.acpReleaseConnection.mockReset()
+  h.acpReleaseConnection.mockResolvedValue("disconnected")
   h.acpGetSessionSnapshot.mockResolvedValue(null)
   h.acpTouchConnection.mockReset()
   // Default: the backend still holds every connection under test. The liveness
@@ -611,6 +616,71 @@ describe("AcpConnectionsProvider cross-client viewer lifecycle", () => {
     })
 
     expect(h.acpDisconnect).toHaveBeenCalledWith("spawned-conn")
+  })
+
+  it("owner release hands the connection back to the backend instead of killing it", async () => {
+    h.acpFindConnectionForConversation.mockResolvedValue(null)
+    h.acpReleaseConnection.mockResolvedValue("kept_warm")
+    await mountProvider()
+
+    await act(async () => {
+      await h.actions!.connect(TAB, "claude_code", "/tmp/x", "sess-1", 42)
+    })
+    await act(async () => {
+      await h.actions!.release(TAB)
+    })
+
+    expect(h.acpReleaseConnection).toHaveBeenCalledWith("spawned-conn")
+    expect(h.acpDisconnect).not.toHaveBeenCalled()
+    // The local entry goes away exactly as with a disconnect.
+    expect(h.store!.getConnection(TAB)).toBeUndefined()
+  })
+
+  it("viewer release only detaches — no backend call at all", async () => {
+    h.acpFindConnectionForConversation.mockResolvedValue({
+      connection_id: "owner-conn",
+      event_seq: 0,
+    })
+    await mountProvider()
+    await act(async () => {
+      await h.actions!.connect(TAB, "claude_code", "/tmp/x", "s", 42)
+    })
+    await act(async () => {
+      await h.actions!.release(TAB)
+    })
+    expect(h.acpReleaseConnection).not.toHaveBeenCalled()
+    expect(h.acpDisconnect).not.toHaveBeenCalled()
+  })
+
+  it("the keepalive marks only the active tab's session as viewed", async () => {
+    vi.useFakeTimers()
+    try {
+      h.acpFindConnectionForConversation.mockResolvedValue(null)
+      await mountProvider()
+      await act(async () => {
+        await h.actions!.connect(TAB, "claude_code", "/tmp/x", "sess-1", 42)
+      })
+      h.actions!.setActiveKey(TAB)
+      h.acpTouchConnection.mockClear()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(CONNECTION_KEEPALIVE_INTERVAL_MS + 10)
+      })
+      expect(h.acpTouchConnection).toHaveBeenCalledWith("spawned-conn", true)
+
+      h.actions!.setActiveKey("some-other-surface")
+      h.actions!.registerOpenTabKeys(new Set([TAB]))
+      h.acpTouchConnection.mockClear()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(CONNECTION_KEEPALIVE_INTERVAL_MS + 10)
+      })
+      expect(h.acpTouchConnection).toHaveBeenCalledWith("spawned-conn")
+      expect(h.acpTouchConnection).not.toHaveBeenCalledWith(
+        "spawned-conn",
+        true
+      )
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("desktop viewer torn down DURING snapshot fetch does not seed delegations or route", async () => {
@@ -5590,7 +5660,9 @@ describe("live surfaces that are not tabs", () => {
       await connectOwner()
       h.actions!.setActiveKey("some-other-surface")
       await sweepPastIdleTimeout()
-      expect(h.acpDisconnect).toHaveBeenCalledWith("spawned-conn")
+      // Released, not killed: the backend decides whether it stays warm.
+      expect(h.acpReleaseConnection).toHaveBeenCalledWith("spawned-conn")
+      expect(h.acpDisconnect).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
     }
@@ -5603,14 +5675,14 @@ describe("live surfaces that are not tabs", () => {
       h.actions!.setActiveKey("some-other-surface")
       h.actions!.registerLiveSurfaceKeys("canvas", new Set([TAB]))
       await sweepPastIdleTimeout()
-      expect(h.acpDisconnect).not.toHaveBeenCalled()
+      expect(h.acpReleaseConnection).not.toHaveBeenCalled()
       expect(h.store!.getConnection(TAB)?.status).toBe("connected")
 
       // The board unmounts (or the card collapses) and the claim is dropped —
       // the connection goes back to being sweepable.
       h.actions!.registerLiveSurfaceKeys("canvas", new Set())
       await sweepPastIdleTimeout()
-      expect(h.acpDisconnect).toHaveBeenCalledWith("spawned-conn")
+      expect(h.acpReleaseConnection).toHaveBeenCalledWith("spawned-conn")
     } finally {
       vi.useRealTimers()
     }
@@ -5626,7 +5698,7 @@ describe("live surfaces that are not tabs", () => {
       // first one's claim — that is exactly how a single shared set breaks.
       h.actions!.registerLiveSurfaceKeys("pet-window", new Set())
       await sweepPastIdleTimeout()
-      expect(h.acpDisconnect).not.toHaveBeenCalled()
+      expect(h.acpReleaseConnection).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
     }

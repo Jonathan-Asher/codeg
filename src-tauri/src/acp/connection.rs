@@ -1609,6 +1609,13 @@ impl AttachGate {
     }
 }
 
+/// Whether a resume could take an attach slot right now without queueing.
+/// Advisory (another connect may take the slot a moment later); a speculative
+/// open checks it before spawning anything, and re-checks at the gate.
+pub(crate) fn attach_slot_available() -> bool {
+    attach_gate().is_none_or(|gate| gate.lock().free > 0)
+}
+
 /// Take an attach slot for a connection about to spawn its agent. `Ok(None)`
 /// when the connection is not gated (a new session, or the limit is off),
 /// `Ok(Some)` with the slot, `Err(())` if the connection was dropped while it
@@ -1626,6 +1633,16 @@ async fn acquire_attach_slot(
     };
     if let Some(permit) = AttachGate::try_acquire(gate) {
         return Ok(Some(permit));
+    }
+    // A speculative open never waits for a slot: it would only delay the
+    // sessions someone is actually opening. Ending here starts nothing.
+    if state.read().await.speculative {
+        tracing::info!(
+            "[ACP][attach] conn={conn_id} session={session_id} speculative open skipped: \
+             {} attach slot(s) busy",
+            max_concurrent_attaches()
+        );
+        return Err(());
     }
     let total_ms = state.read().await.attach_elapsed_ms();
     tracing::info!(
@@ -2697,6 +2714,10 @@ pub async fn spawn_agent_connection(
     // `Some` opens this connection only to fork another session and end — see
     // `DetachedForkRequest`. `session_id` is `None` alongside it.
     detached_fork: Option<DetachedForkRequest>,
+    // Opened on intent, before anyone asked for the session — see
+    // `ConnectionManager::preconnect`. Starts parked and never queues for an
+    // attach slot.
+    speculative: bool,
 ) -> Result<(), AcpError> {
     // Create the authoritative session state up front. Subsequent emit_with_state
     // calls write through this state and increment its seq counter so the first
@@ -2718,6 +2739,12 @@ pub async fn spawn_agent_connection(
     // this point.
     initial_state.env_pinned_config_option_ids =
         env_pinned_config_option_ids(agent_type, &runtime_env);
+    initial_state.keeps_transcript =
+        SessionPersistence::from_env(&runtime_env) == SessionPersistence::Default;
+    // A speculative connection has no owner until a client opens the session
+    // and claims it through the connect dedup.
+    initial_state.speculative = speculative;
+    initial_state.parked = speculative;
 
     let session_state = Arc::new(RwLock::new(initial_state));
 

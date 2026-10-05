@@ -131,6 +131,10 @@ export interface UseConnectionReturn {
     options?: ConnectOptions
   ) => Promise<void>
   disconnect: () => Promise<void>
+  /** Let go of the connection because this surface went away (tab closed,
+   *  preview replaced). The backend keeps a recently viewed session warm;
+   *  see `AcpActionsValue.release`. */
+  release: () => Promise<void>
   /** Restart the session (disconnect + resume same sessionId) so it picks up
    *  current agent/model settings. Returns `true` if it actually restarted,
    *  `false` on a no-op (viewer / delegation child / no connection). */
@@ -340,6 +344,10 @@ export function useConnection(contextKey: string): UseConnectionReturn {
     await actions.disconnect(contextKey)
   }, [actions, contextKey])
 
+  const release = useCallback(async () => {
+    await actions.release(contextKey)
+  }, [actions, contextKey])
+
   const sendPrompt = useCallback(
     (
       blocks: PromptInputBlock[],
@@ -431,6 +439,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       nativeSteering,
       connect,
       disconnect,
+      release,
       reapplyConfig,
       dismissConfigStale,
       sendPrompt,
@@ -477,6 +486,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       nativeSteering,
       connect,
       disconnect,
+      release,
       reapplyConfig,
       dismissConfigStale,
       sendPrompt,
