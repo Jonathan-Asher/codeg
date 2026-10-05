@@ -505,6 +505,14 @@
         "title": "이전 탭",
         "description": "이전 대화 또는 파일 탭으로 전환"
       },
+      "next_session": {
+        "title": "다음 세션",
+        "description": "사이드바에서 현재 세션 아래의 세션 열기"
+      },
+      "prev_session": {
+        "title": "이전 세션",
+        "description": "사이드바에서 현재 세션 위의 세션 열기"
+      },
       "switch_tab_1": {
         "title": "1번 탭으로 이동",
         "description": "1번째 대화 또는 파일 탭으로 이동"

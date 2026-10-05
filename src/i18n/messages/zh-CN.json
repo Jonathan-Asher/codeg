@@ -505,6 +505,14 @@
         "title": "上一个标签页",
         "description": "切换到上一个会话或文件标签页"
       },
+      "next_session": {
+        "title": "下一个会话",
+        "description": "打开侧边栏中当前会话下方的会话"
+      },
+      "prev_session": {
+        "title": "上一个会话",
+        "description": "打开侧边栏中当前会话上方的会话"
+      },
       "switch_tab_1": {
         "title": "切换到第 1 个标签",
         "description": "跳转到第 1 个会话或文件标签"

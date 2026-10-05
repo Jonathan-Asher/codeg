@@ -73,6 +73,57 @@ describe("tab cycling shortcuts", () => {
   })
 })
 
+describe("sidebar session stepping shortcuts", () => {
+  it("registers next_session and prev_session on Cmd/Ctrl+Shift+Down/Up", () => {
+    const ids = SHORTCUT_DEFINITIONS.map((definition) => definition.id)
+    expect(ids).toContain("next_session")
+    expect(ids).toContain("prev_session")
+    expect(DEFAULT_SHORTCUTS.next_session).toBe("mod+shift+arrowdown")
+    expect(DEFAULT_SHORTCUTS.prev_session).toBe("mod+shift+arrowup")
+  })
+
+  it("collides with no other default", () => {
+    for (const id of ["next_session", "prev_session"] as const) {
+      const clashes = SHORTCUT_DEFINITIONS.filter(
+        (definition) =>
+          definition.id !== id &&
+          shortcutsConflict(
+            DEFAULT_SHORTCUTS[definition.id],
+            DEFAULT_SHORTCUTS[id]
+          )
+      ).map((definition) => definition.id)
+      expect(clashes).toEqual([])
+    }
+  })
+
+  it("records the chord as pressed and labels it per platform", () => {
+    expect(
+      shortcutFromKeyboardEvent(
+        keyEvent("ArrowDown", { metaKey: true, shiftKey: true })
+      )
+    ).toBe(DEFAULT_SHORTCUTS.next_session)
+    expect(formatShortcutLabel(DEFAULT_SHORTCUTS.next_session, true)).toBe(
+      "⌘⇧Down"
+    )
+    expect(formatShortcutLabel(DEFAULT_SHORTCUTS.prev_session, false)).toBe(
+      "Ctrl+Shift+Up"
+    )
+  })
+
+  it("arrives unbound when a stored binding already holds the chord", () => {
+    // A profile from before these actions existed, with the chord on zoom.
+    localStorage.setItem(
+      SHORTCUTS_STORAGE_KEY,
+      JSON.stringify({ zoom_in: "mod+shift+arrowdown" })
+    )
+    const settings = readShortcutSettings()
+    expect(settings.zoom_in).toBe("mod+shift+arrowdown")
+    expect(settings.next_session).toBe("")
+    expect(settings.prev_session).toBe(DEFAULT_SHORTCUTS.prev_session)
+    localStorage.removeItem(SHORTCUTS_STORAGE_KEY)
+  })
+})
+
 describe("numbered tab shortcuts", () => {
   it("registers Ctrl/Cmd+1 through 9 as switch_tab_N", () => {
     const ids = SHORTCUT_DEFINITIONS.map((definition) => definition.id)

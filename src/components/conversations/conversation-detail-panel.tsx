@@ -63,6 +63,7 @@ import {
   threadEndsWithAgentReply,
 } from "@/lib/continue-turn"
 import { useConversationAttention } from "@/stores/conversation-attention-store"
+import { useSessionConnectHoldStore } from "@/stores/session-connect-hold-store"
 import { PiProjectTrustBanner } from "@/components/chat/pi-project-trust-banner"
 import { FeedbackNotesDisplay } from "@/components/chat/feedback-notes-display"
 import { FeedbackDialog } from "@/components/chat/feedback-dialog"
@@ -662,6 +663,10 @@ const ConversationTabView = memo(function ConversationTabView({
     !(selectedAgentNotInstalled && !hasPersistedConversation) &&
     !(hasPersistedConversation && detailError) &&
     !(hasPersistedConversation && acpLoadError)
+  // Stepping through the sidebar with the keyboard opens each session as it
+  // passes, but only the one the steps stop on should start its agent. Read
+  // only by the active tab, so the hold never re-renders a background one.
+  const connectHeld = useSessionConnectHoldStore((s) => isActive && s.held)
   // Draft composer text is keyed PER TAB while unbound: each split group has its
   // own draft, and a single shared key made them overwrite each other. The key
   // survives restarts with the tab id (persisted in the group blob).
@@ -727,7 +732,7 @@ const ConversationTabView = memo(function ConversationTabView({
   } = useConnectionLifecycle({
     contextKey: tabId,
     agentType: selectedAgent,
-    isActive: isActive && canAutoConnect,
+    isActive: isActive && canAutoConnect && !connectHeld,
     workingDir: workingDirForConnection,
     sessionId:
       dbConversationId != null && selectedAgent !== "cline"

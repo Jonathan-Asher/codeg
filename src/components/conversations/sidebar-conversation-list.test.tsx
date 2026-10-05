@@ -27,6 +27,7 @@ import {
   __resetConversationAttentionForTests,
   useConversationAttentionStore,
 } from "@/stores/conversation-attention-store"
+import { releaseSessionConnectHold } from "@/stores/session-connect-hold-store"
 import enMessages from "@/i18n/messages/en.json"
 
 // ── Probes ────────────────────────────────────────────────────────────────
@@ -66,7 +67,7 @@ const stableWorkspaceFns = vi.hoisted(() => ({
 }))
 
 const stableTabFns = vi.hoisted(() => ({
-  openTab: () => {},
+  openTab: vi.fn(),
   closeConversationTab: () => {},
   closeTabsByFolder: () => {},
   openNewConversationTab: () => {},
@@ -1935,5 +1936,123 @@ describe("SidebarConversationList — sessions shown per folder", () => {
       fireEvent.click(nameButton())
     })
     expect(visibleIds()).toEqual([])
+  })
+})
+
+describe("SidebarConversationList — stepping through sessions with the keyboard", () => {
+  const GROUP_EXPANDED_KEY = "workspace:sidebar-folder-group-expanded"
+
+  function at(minutesAgo: number) {
+    return new Date(FIXED - minutesAgo * MINUTE).toISOString()
+  }
+
+  function activate(conversationId: number, folderId: number) {
+    store.activeTabId = `tab-${conversationId}`
+    store.tabSpec = [
+      {
+        id: `tab-${conversationId}`,
+        conversationId,
+        agentType: "claude_code",
+        folderId,
+        title: `conv-${conversationId}`,
+        isPinned: false,
+      },
+    ]
+  }
+
+  function pressDown() {
+    const event = new KeyboardEvent("keydown", {
+      key: "ArrowDown",
+      metaKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    act(() => {
+      document.body.dispatchEvent(event)
+    })
+    return event
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ now: FIXED })
+    stableTabFns.openTab.mockClear()
+    // Earlier suites persist folder / section collapse state; start open.
+    localStorage.clear()
+    // Folder 1, then group 7 holding folder 5, then folder 9.
+    const folders = [
+      { ...folder(1, "Loose A"), sort_order: 1, group_id: null },
+      { ...folder(5, "Member"), sort_order: 1, group_id: 7 },
+      { ...folder(9, "Loose B"), sort_order: 3, group_id: null },
+    ] as FolderDetail[]
+    useAppWorkspaceStore.setState({
+      folders,
+      allFolders: folders,
+      folderGroups: [{ id: 7, name: "Work", color: "inherit", sort_order: 2 }],
+      conversations: [
+        conv(11, 1, { created_at: at(1), updated_at: at(1) }),
+        conv(12, 1, { created_at: at(2), updated_at: at(2) }),
+        conv(51, 5, { created_at: at(3), updated_at: at(3) }),
+        conv(91, 9, { created_at: at(4), updated_at: at(4) }),
+      ],
+    })
+  })
+
+  afterEach(() => {
+    releaseSessionConnectHold()
+    store.activeTabId = null
+    store.tabSpec = []
+    localStorage.clear()
+    vi.useRealTimers()
+  })
+
+  it("opens the next session exactly as clicking its row does", () => {
+    activate(11, 1)
+    render(tree())
+
+    const event = pressDown()
+    expect(event.defaultPrevented).toBe(true)
+    const row = document.querySelector('[data-conversation-id="12"]')
+    if (!row) throw new Error("row 12 not found")
+    act(() => {
+      fireEvent.click(row)
+    })
+
+    expect(stableTabFns.openTab).toHaveBeenCalledTimes(2)
+    const [byKey, byClick] = stableTabFns.openTab.mock.calls
+    expect(byKey).toEqual([1, 12, "claude_code", false])
+    expect(byKey).toEqual(byClick)
+  })
+
+  it("steps from one folder into the next group's folder", () => {
+    activate(12, 1)
+    render(tree())
+    pressDown()
+    expect(stableTabFns.openTab).toHaveBeenCalledWith(
+      5,
+      51,
+      "claude_code",
+      false
+    )
+  })
+
+  it("passes over a collapsed group's sessions", () => {
+    localStorage.setItem(GROUP_EXPANDED_KEY, JSON.stringify({ 7: false }))
+    activate(12, 1)
+    render(tree())
+    pressDown()
+    expect(stableTabFns.openTab).toHaveBeenCalledWith(
+      9,
+      91,
+      "claude_code",
+      false
+    )
+  })
+
+  it("opens nothing past the last session", () => {
+    activate(91, 9)
+    render(tree())
+    expect(pressDown().defaultPrevented).toBe(true)
+    expect(stableTabFns.openTab).not.toHaveBeenCalled()
   })
 })

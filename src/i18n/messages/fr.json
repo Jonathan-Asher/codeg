@@ -505,6 +505,14 @@
         "title": "Onglet précédent",
         "description": "Passer à l'onglet de conversation ou de fichier précédent"
       },
+      "next_session": {
+        "title": "Session suivante",
+        "description": "Ouvrir la session située sous la session actuelle dans la barre latérale"
+      },
+      "prev_session": {
+        "title": "Session précédente",
+        "description": "Ouvrir la session située au-dessus de la session actuelle dans la barre latérale"
+      },
       "switch_tab_1": {
         "title": "Aller à l'onglet 1",
         "description": "Ouvrir l'onglet de conversation ou de fichier 1"

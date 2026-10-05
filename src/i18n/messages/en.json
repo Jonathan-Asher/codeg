@@ -505,6 +505,14 @@
         "title": "Previous Tab",
         "description": "Switch to the previous conversation or file tab"
       },
+      "next_session": {
+        "title": "Next Session",
+        "description": "Open the session below the current one in the sidebar"
+      },
+      "prev_session": {
+        "title": "Previous Session",
+        "description": "Open the session above the current one in the sidebar"
+      },
       "switch_tab_1": {
         "title": "Switch to Tab 1",
         "description": "Jump to conversation or file tab 1"
