@@ -454,11 +454,10 @@ describe("PlanUsagePage account pool", () => {
     expect(primary.getByText("Preferred")).toBeInTheDocument()
     expect(primary.getByText("Exhausted")).toBeInTheDocument()
     expect(primary.getByText(/^Back in 2h 3[01]m$/)).toBeInTheDocument()
+    // Its usage check is failing, but its reading is a minute old.
     expect(
-      primary.getByText(
-        "Usage check failing (HTTP 429) — numbers may be out of date"
-      )
-    ).toBeInTheDocument()
+      accountRow("primary").querySelector('[data-slot="probe-failing"]')
+    ).toBeNull()
     expect(primary.getByText("100% used")).toBeInTheDocument()
     expect(
       accountRow("primary").querySelector('[data-window="five_hour"]')
@@ -491,6 +490,38 @@ describe("PlanUsagePage account pool", () => {
     ).toBeInTheDocument()
     expect(within(claude).queryByText("Limit reached")).not.toBeInTheDocument()
     expect(screen.getByText(/never the accounts' sign-ins/)).toBeInTheDocument()
+  })
+
+  it("warns of a failing usage check once an account's reading is stale", async () => {
+    const failing = pool()
+    // Failing, last read over 14 minutes ago.
+    failing.accounts[0] = {
+      ...failing.accounts[0],
+      observed_at: now() - 14 * 60 - 20,
+    }
+    // Failing, never read.
+    failing.accounts[1] = {
+      ...failing.accounts[1],
+      probe_failures: 2,
+      probe_error_status: 429,
+      observed_at: null,
+    }
+    // Stale, but its usage check isn't failing.
+    failing.accounts[2] = {
+      ...failing.accounts[2],
+      observed_at: now() - 3600,
+    }
+    getPlanUsage.mockResolvedValue(report([], { pool: failing }))
+    await mount()
+    const warning = (name: string) =>
+      accountRow(name).querySelector('[data-slot="probe-failing"]')
+    expect(warning("primary")).toHaveTextContent(
+      /^Usage last updated 1[45]m ago — usage check failing \(HTTP 429\)$/
+    )
+    expect(warning("backup")).toHaveTextContent(
+      "Usage check failing (HTTP 429) — numbers may be out of date"
+    )
+    expect(warning("spare")).toBeNull()
   })
 
   it("tints an account past the switch threshold", async () => {

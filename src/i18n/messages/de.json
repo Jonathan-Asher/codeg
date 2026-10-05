@@ -6481,6 +6481,8 @@
       "signInFailed": "Anmeldung lässt sich nicht mehr erneuern",
       "probeFailing": "Nutzungsabfrage schlägt fehl – Zahlen sind evtl. veraltet",
       "probeFailingStatus": "Nutzungsabfrage schlägt fehl (HTTP {status}) – Zahlen sind evtl. veraltet",
+      "probeStale": "Nutzung zuletzt vor {duration} aktualisiert – Nutzungsabfrage schlägt fehl",
+      "probeStaleStatus": "Nutzung zuletzt vor {duration} aktualisiert – Nutzungsabfrage schlägt fehl (HTTP {status})",
       "noWindows": "Noch keine Nutzungsdaten",
       "allExhausted": "Alle Konten sind am Limit. Das erste wird in {duration} frei.",
       "allExhaustedUnknown": "Alle Konten sind am Limit.",

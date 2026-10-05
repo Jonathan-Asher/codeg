@@ -12,6 +12,7 @@ import {
   PLAN_USAGE_POOL_STALE_AFTER_SECONDS,
   PLAN_USAGE_STALE_AFTER_SECONDS,
   planUsagePreview,
+  poolAccountProbeWarning,
   poolAccountState,
   poolExhaustion,
   poolNextReset,
@@ -575,6 +576,34 @@ describe("account pool", () => {
         now
       )
     ).toBe(true)
+  })
+
+  it("warns of a failing usage check only once the numbers are stale", () => {
+    const failing = (overrides: Partial<PlanUsagePoolAccount>) =>
+      account({ probe_failures: 1, probe_error_status: 429, ...overrides })
+    // Routine: the newest reading is still fresh.
+    expect(poolAccountProbeWarning(failing({}), now)).toBeNull()
+    expect(
+      poolAccountProbeWarning(
+        failing({ observed_at: now - PLAN_USAGE_POOL_STALE_AFTER_SECONDS }),
+        now
+      )
+    ).toBeNull()
+    // Gone stale while failing: with its age.
+    expect(
+      poolAccountProbeWarning(failing({ observed_at: now - 14 * 60 }), now)
+    ).toEqual({ age: 14 * 60 })
+    // Failing with no reading at all.
+    expect(
+      poolAccountProbeWarning(failing({ observed_at: null }), now)
+    ).toEqual({ age: null })
+    // Stale but not failing: the pool-level notice covers that.
+    expect(
+      poolAccountProbeWarning(
+        account({ observed_at: now - 3_600, probe_failures: 0 }),
+        now
+      )
+    ).toBeNull()
   })
 
   it("previews the serving account's 5-hour window", () => {

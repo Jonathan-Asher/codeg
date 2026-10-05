@@ -6481,6 +6481,8 @@
       "signInFailed": "登录已无法续期",
       "probeFailing": "用量查询失败——数字可能已过时",
       "probeFailingStatus": "用量查询失败（HTTP {status}）——数字可能已过时",
+      "probeStale": "用量{duration}前更新——用量查询失败",
+      "probeStaleStatus": "用量{duration}前更新——用量查询失败（HTTP {status}）",
       "noWindows": "暂无用量读数",
       "allExhausted": "所有账号都已达到上限。最早的一个将在{duration}后可用。",
       "allExhaustedUnknown": "所有账号都已达到上限。",

@@ -6481,6 +6481,8 @@
       "signInFailed": "لم يعد بالإمكان تجديد تسجيل الدخول",
       "probeFailing": "فشل التحقق من الاستخدام — قد تكون الأرقام قديمة",
       "probeFailingStatus": "فشل التحقق من الاستخدام (HTTP {status}) — قد تكون الأرقام قديمة",
+      "probeStale": "آخر تحديث للاستخدام قبل {duration} — فشل التحقق من الاستخدام",
+      "probeStaleStatus": "آخر تحديث للاستخدام قبل {duration} — فشل التحقق من الاستخدام (HTTP {status})",
       "noWindows": "لا توجد قراءة استخدام بعد",
       "allExhausted": "بلغت كل الحسابات حدودها. يتحرر أولها بعد {duration}.",
       "allExhaustedUnknown": "بلغت كل الحسابات حدودها.",

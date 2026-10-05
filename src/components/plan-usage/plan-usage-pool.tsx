@@ -6,6 +6,7 @@ import {
   formatCompactDuration,
   hasWindowReset,
   isPoolStale,
+  poolAccountProbeWarning,
   poolAccountState,
   poolExhaustion,
   poolNextReset,
@@ -262,6 +263,7 @@ function PoolAccountRow({
         : undefined
   const badge = compact ? "h-4 px-1.5 text-[0.625rem]" : undefined
   const muted = state === "disabled"
+  const probeText = useProbeWarningText(account, now)
 
   return (
     <li
@@ -313,14 +315,12 @@ function PoolAccountRow({
           {t("signInFailed")}
         </p>
       )}
-      {account.probe_failures > 0 && (
+      {probeText && (
         <p
           data-slot="probe-failing"
           className="mt-1 text-[0.6875rem] text-amber-700 dark:text-amber-400"
         >
-          {account.probe_error_status != null
-            ? t("probeFailingStatus", { status: account.probe_error_status })
-            : t("probeFailing")}
+          {probeText}
         </p>
       )}
       {account.windows.length > 0 ? (
@@ -347,6 +347,29 @@ function PoolAccountRow({
       )}
     </li>
   )
+}
+
+/** "Usage last updated 14m ago — usage check failing (HTTP 429)", once the
+ *  account's numbers have gone stale while its usage check fails; `null`
+ *  while they are fresh. */
+function useProbeWarningText(
+  account: PlanUsagePoolAccount,
+  now: number
+): string | null {
+  const t = useTranslations("PlanUsage.pool")
+  const locale = useLocale()
+  const warning = poolAccountProbeWarning(account, now)
+  if (!warning) return null
+  const status = account.probe_error_status
+  if (warning.age == null) {
+    return status != null
+      ? t("probeFailingStatus", { status })
+      : t("probeFailing")
+  }
+  const duration = formatCompactDuration(warning.age, locale)
+  return status != null
+    ? t("probeStaleStatus", { status, duration })
+    : t("probeStale", { duration })
 }
 
 function PoolWindowRow({

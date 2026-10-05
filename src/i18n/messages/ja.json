@@ -6481,6 +6481,8 @@
       "signInFailed": "サインインを更新できなくなりました",
       "probeFailing": "使用量の確認に失敗しています — 数値が古い可能性があります",
       "probeFailingStatus": "使用量の確認に失敗しています (HTTP {status}) — 数値が古い可能性があります",
+      "probeStale": "使用量の最終更新は{duration}前 — 使用量の確認に失敗しています",
+      "probeStaleStatus": "使用量の最終更新は{duration}前 — 使用量の確認に失敗しています (HTTP {status})",
       "noWindows": "まだ使用量の読み取りがありません",
       "allExhausted": "すべてのアカウントが上限に達しています。最初のアカウントは {duration} 後に空きます。",
       "allExhaustedUnknown": "すべてのアカウントが上限に達しています。",
