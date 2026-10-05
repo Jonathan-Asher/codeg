@@ -8915,6 +8915,8 @@ async fn apply_preferred_session_options(
     preferred_config_values: &BTreeMap<String, String>,
     initial_config_options: Vec<SessionConfigOption>,
 ) -> Vec<SessionConfigOption> {
+    let session_id = session.session_id().clone();
+    let mut options = initial_config_options;
     if let Some(pref_mode) = preferred_mode_id {
         let needs_apply = session
             .modes()
@@ -8933,20 +8935,30 @@ async fn apply_preferred_session_options(
                  the agent no longer offers that mode"
             );
         } else if needs_apply {
-            if let Err(e) = set_session_mode(session, state, emitter, pref_mode.to_string()).await {
-                tracing::error!(
+            let started = std::time::Instant::now();
+            match set_session_mode(session, state, emitter, pref_mode.to_string()).await {
+                Ok(()) => {
+                    tracing::info!(
+                        "[ACP][attach] session={session_id} configure: session/set_mode \
+                         '{pref_mode}' took {} ms",
+                        started.elapsed().as_millis()
+                    );
+                    // The agent now holds this mode, and its `mode` option with
+                    // it. Without this the replay below would compare against
+                    // the pre-resume copy and set the same mode a second time.
+                    mirror_confirmed_mode(&mut options, pref_mode);
+                }
+                Err(e) => tracing::error!(
                     "[ACP] failed to apply preferred mode '{pref_mode}' on connect: {e}"
-                );
+                ),
             }
         }
     }
 
     if preferred_config_values.is_empty() {
-        return initial_config_options;
+        return options;
     }
 
-    let session_id = session.session_id().clone();
-    let mut options = initial_config_options;
     // Ids this launch must not replay a saved preference for. Two rules:
     //
     //   * what this launch's environment froze — a set can only fail, and it is
@@ -9032,7 +9044,15 @@ async fn apply_preferred_session_options(
         let is_boolean =
             advertised.is_some_and(|o| matches!(o.kind, SessionConfigKind::Boolean(_)));
         let value = encode_config_option_value(is_boolean, value_id);
-        match set_session_config_option_inner(cx, &session_id, config_id.clone(), value).await {
+        let started = std::time::Instant::now();
+        let outcome = set_session_config_option_inner(cx, &session_id, config_id.clone(), value).await;
+        tracing::info!(
+            "[ACP][attach] session={session_id} configure: session/set_config_option \
+             '{config_id}'='{value_id}' took {} ms ({})",
+            started.elapsed().as_millis(),
+            if outcome.is_ok() { "ok" } else { "error" }
+        );
+        match outcome {
             Ok(updated) => options = updated,
             // An id the agent does not offer in this session was only ever a
             // try (see above). The usual case is an option that hangs off the
@@ -9068,6 +9088,37 @@ async fn apply_preferred_session_options(
     state.write().await.asserted_config_values = establishment_ledger(requested, &settled);
 
     options
+}
+
+/// After `session/set_mode` confirmed `mode_id`, bring the local copy of the
+/// option that mirrors the session mode up to date. The establishment replay
+/// then sees that option already holding the value and skips it, instead of
+/// asking the agent for the same mode a second time — a request that, right
+/// after a resume, queues behind the agent's own startup work.
+///
+/// An agent that offers both channels keeps them in step; claude-agent-acp's
+/// `session/set_mode` updates its `mode` option itself. Only a select in the
+/// `mode` category that offers `mode_id` is touched, so any option this
+/// reading does not fit is still left to the replay. Returns whether an
+/// option changed.
+fn mirror_confirmed_mode(options: &mut [SessionConfigOption], mode_id: &str) -> bool {
+    let mut changed = false;
+    for option in options.iter_mut() {
+        if !matches!(option.category, Some(SessionConfigOptionCategory::Mode)) {
+            continue;
+        }
+        if config_option_rejects_value(option, mode_id) {
+            continue;
+        }
+        let SessionConfigKind::Select(select) = &mut option.kind else {
+            continue;
+        };
+        if select.current_value.to_string() != mode_id {
+            select.current_value = mode_id.to_string().into();
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// The values establishment may defend against a later agent re-pin: each one
@@ -23979,6 +24030,102 @@ mod tests {
         }))
         .expect("parses");
         assert!(!session_modes_reject_id(&empty, "bypassPermissions"));
+    }
+
+    /// The config options claude-agent-acp 0.84.0 answered `session/resume`
+    /// with, measured live from a session whose settings default is not the
+    /// mode its conversation record asks for.
+    fn claude_resume_options() -> Vec<SessionConfigOption> {
+        serde_json::from_value(serde_json::json!([
+            {
+                "id": "mode", "name": "Mode", "category": "mode", "type": "select",
+                "currentValue": "default",
+                "options": [
+                    {"value": "default", "name": "Manual"},
+                    {"value": "acceptEdits", "name": "Accept edits"},
+                    {"value": "plan", "name": "Plan"},
+                    {"value": "bypassPermissions", "name": "Bypass permissions"}
+                ]
+            },
+            {
+                "id": "model", "name": "Model", "category": "model", "type": "select",
+                "currentValue": "opus[1m]",
+                "options": [{"value": "opus[1m]", "name": "Opus"}]
+            },
+            {
+                "id": "effort", "name": "Effort", "category": "thought_level", "type": "select",
+                "currentValue": "xhigh",
+                "options": [{"value": "high", "name": "High"}, {"value": "xhigh", "name": "Extra high"}]
+            }
+        ]))
+        .expect("parses")
+    }
+
+    fn select_value(options: &[SessionConfigOption], id: &str) -> String {
+        let option = options.iter().find(|o| o.id.to_string() == id).expect("present");
+        match &option.kind {
+            SessionConfigKind::Select(s) => s.current_value.to_string(),
+            _ => panic!("{id} is not a select"),
+        }
+    }
+
+    #[test]
+    fn a_confirmed_mode_is_not_replayed_through_its_config_option() {
+        let mut options = claude_resume_options();
+        let preferred: BTreeMap<String, String> = [
+            ("mode", "bypassPermissions"),
+            ("model", "opus[1m]"),
+            ("effort", "xhigh"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        // Before: the replay would send `mode` again even though
+        // `session/set_mode` just set it.
+        let pending = |options: &[SessionConfigOption]| -> Vec<String> {
+            preferred
+                .iter()
+                .filter(|(id, value)| {
+                    options
+                        .iter()
+                        .find(|o| o.id.to_string() == **id)
+                        .is_none_or(|o| !config_option_already_holds(o, value))
+                })
+                .map(|(id, _)| id.clone())
+                .collect()
+        };
+        assert_eq!(pending(&options), vec!["mode".to_string()]);
+
+        assert!(mirror_confirmed_mode(&mut options, "bypassPermissions"));
+        assert_eq!(select_value(&options, "mode"), "bypassPermissions");
+        // Nothing left to send: every preference already matches.
+        assert!(pending(&options).is_empty());
+        // Options outside the mode category are untouched.
+        assert_eq!(select_value(&options, "model"), "opus[1m]");
+        assert_eq!(select_value(&options, "effort"), "xhigh");
+        // Idempotent.
+        assert!(!mirror_confirmed_mode(&mut options, "bypassPermissions"));
+    }
+
+    #[test]
+    fn mode_mirror_leaves_options_that_do_not_offer_the_mode() {
+        let mut options = claude_resume_options();
+        // A mode the option does not list: left alone for the replay (and the
+        // agent) to judge, exactly as before.
+        assert!(!mirror_confirmed_mode(&mut options, "auto"));
+        assert_eq!(select_value(&options, "mode"), "default");
+
+        // An option named `mode` without the mode category is not assumed to
+        // mirror the session mode.
+        let mut uncategorized: Vec<SessionConfigOption> =
+            serde_json::from_value(serde_json::json!([{
+                "id": "mode", "name": "Mode", "type": "select",
+                "currentValue": "default",
+                "options": [{"value": "default", "name": "Default"}, {"value": "plan", "name": "Plan"}]
+            }]))
+            .expect("parses");
+        assert!(!mirror_confirmed_mode(&mut uncategorized, "plan"));
+        assert_eq!(select_value(&uncategorized, "mode"), "default");
     }
 
     #[test]
