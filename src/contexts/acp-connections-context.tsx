@@ -30,6 +30,7 @@ import {
   acpAnswerQuestion,
   acpAnswerPlanApproval,
   acpDisconnect,
+  acpReleaseConnection,
   acpTouchConnection,
   acpGetSessionSnapshot,
   acpFindConnectionForConversation,
@@ -3169,13 +3170,22 @@ export interface AcpActionsValue {
    */
   disconnect(contextKey: string): Promise<boolean>
   /**
+   * Let go of `contextKey`'s connection because its surface went away (a tab
+   * closed, a preview replaced) — not because the user asked to stop it. The
+   * local entry goes away exactly as with `disconnect`; the backend keeps one
+   * of the few most recently viewed sessions warm, so reopening it skips the
+   * agent spawn and the session resume, and disconnects anything else.
+   * Viewers only detach, as with `disconnect`.
+   */
+  release(contextKey: string): Promise<void>
+  /**
    * Release a connection whose SURFACE went away on its own (a preview tab
    * replaced by the next single-click in the sidebar) — never a user-intent
-   * teardown. Disconnects viewers and idle owners; a busy owner (prompting
-   * turn, or unresolved background tasks) is left running for the idle sweep,
-   * because `acpDisconnect` kills the agent CLI mid-turn and the agent records
-   * that as an interrupted request. Use `disconnect` when the user asked to
-   * stop.
+   * teardown. Detaches viewers and `release`s idle owners (the backend keeps a
+   * recently viewed one warm); a busy owner (prompting turn, or unresolved
+   * background tasks) is left running for the idle sweep, because
+   * `acpDisconnect` kills the agent CLI mid-turn and the agent records that as
+   * an interrupted request. Use `disconnect` when the user asked to stop.
    */
   disconnectIfIdle(contextKey: string): Promise<void>
   disconnectAll(): Promise<void>
@@ -6120,9 +6130,11 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
    * healthy streaming session.
    */
   const isConnectionLiveOnBackend = useCallback(
-    async (connectionId: string): Promise<boolean> => {
+    async (connectionId: string, viewed = false): Promise<boolean> => {
       try {
-        return await acpTouchConnection(connectionId)
+        return viewed
+          ? await acpTouchConnection(connectionId, true)
+          : await acpTouchConnection(connectionId)
       } catch {
         return true
       }
@@ -6194,7 +6206,11 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       const currentActiveKey = storeRef.current.activeKey
       const currentOpenTabKeys = heldOpenKeys()
       const seen = new Set<string>()
-      const toTouch: { contextKey: string; connectionId: string }[] = []
+      const toTouch: {
+        contextKey: string
+        connectionId: string
+        viewed: boolean
+      }[] = []
       const consider = (contextKey: string) => {
         if (seen.has(contextKey)) return
         seen.add(contextKey)
@@ -6205,12 +6221,18 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         // released by `detachDelegationChild`; settling one here would fight
         // that lifecycle.
         if (conn.isDelegationChild) return
-        toTouch.push({ contextKey, connectionId: conn.connectionId })
+        toTouch.push({
+          contextKey,
+          connectionId: conn.connectionId,
+          // The active tab is the session on screen: ranks it for the
+          // backend's warm set of recently viewed sessions.
+          viewed: contextKey === currentActiveKey,
+        })
       }
       if (currentActiveKey) consider(currentActiveKey)
       for (const contextKey of currentOpenTabKeys) consider(contextKey)
-      for (const { contextKey, connectionId } of toTouch) {
-        void isConnectionLiveOnBackend(connectionId).then((live) => {
+      for (const { contextKey, connectionId, viewed } of toTouch) {
+        void isConnectionLiveOnBackend(connectionId, viewed).then((live) => {
           if (!live) markConnectionGone(contextKey, connectionId)
         })
       }
@@ -6276,7 +6298,10 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       }
 
       for (const { contextKey, connectionId } of toDisconnect) {
-        acpDisconnect(connectionId).catch(() => {})
+        // Nothing shows it any more, but nobody asked to stop it either: the
+        // backend keeps it warm if it is one of the most recently viewed
+        // sessions, else disconnects it.
+        acpReleaseConnection(connectionId).catch(() => {})
         releaseConnectionRoute(connectionId, contextKey)
         teardownAttachSubscription(contextKey)
         lastActivityRef.current.delete(contextKey)
@@ -7091,8 +7116,11 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
   )
   connectRef.current = connect
 
-  const disconnect = useCallback(
-    async (contextKey: string): Promise<boolean> => {
+  const teardown = useCallback(
+    async (
+      contextKey: string,
+      how: "disconnect" | "release"
+    ): Promise<boolean> => {
       pendingConnectRequestsRef.current.delete(contextKey)
       // Whatever the surface does next — close, switch agent, reconnect — the
       // last attempt's failure no longer describes it.
@@ -7155,7 +7183,11 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       // the follow-up connect can re-attach to the process it believed it had
       // replaced. Report which happened and let the caller decide.
       let tornDown = true
-      await acpDisconnect(conn.connectionId).catch((error: unknown) => {
+      const backendTeardown =
+        how === "release"
+          ? acpReleaseConnection(conn.connectionId)
+          : acpDisconnect(conn.connectionId)
+      await backendTeardown.catch((error: unknown) => {
         if (isConnectionGoneError(error)) return
         console.warn("[Acp] backend teardown failed, releasing locally:", error)
         tornDown = false
@@ -7177,6 +7209,19 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     ]
   )
 
+  const disconnect = useCallback(
+    (contextKey: string): Promise<boolean> =>
+      teardown(contextKey, "disconnect"),
+    [teardown]
+  )
+
+  const release = useCallback(
+    async (contextKey: string): Promise<void> => {
+      await teardown(contextKey, "release")
+    },
+    [teardown]
+  )
+
   // Lifecycle release for a surface that vanished on its own — currently the
   // preview tab replaced by the next single-click in the sidebar. `disconnect`
   // stays unconditional because its other callers express user INTENT (agent
@@ -7184,7 +7229,10 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
   // work nobody asked to stop. Same policy as the unmount cleanup
   // (`shouldDisconnectOnUnmount`): a busy owner keeps running and the idle
   // sweep reclaims it once its turn / background work settles — it is no
-  // longer in `openTabKeys`, so nothing else keeps it alive.
+  // longer in `openTabKeys`, so nothing else keeps it alive. An idle owner is
+  // RELEASED, like the unmount cleanup does: the two race on the same
+  // replacement, and a disconnect here would kill the connection the backend
+  // just kept warm.
   const disconnectIfIdle = useCallback(
     async (contextKey: string) => {
       const conn = storeRef.current.connections.get(contextKey)
@@ -7192,9 +7240,9 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       // acpDisconnects), and leaving one attached would leak its subscription
       // — the idle sweep skips viewers.
       if (conn && !conn.isViewer && isConnectionBusy(conn)) return
-      await disconnect(contextKey)
+      await release(contextKey)
     },
-    [disconnect]
+    [release]
   )
 
   const reapplyConfig = useCallback(
@@ -7753,6 +7801,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     () => ({
       connect,
       disconnect,
+      release,
       disconnectIfIdle,
       disconnectAll,
       sendPrompt,
@@ -7781,6 +7830,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     [
       connect,
       disconnect,
+      release,
       disconnectIfIdle,
       disconnectAll,
       sendPrompt,

@@ -35,6 +35,10 @@ import { useTranslations } from "next-intl"
 import { useImeGuard } from "@/hooks/use-ime-guard"
 import { useTabStore } from "@/contexts/tab-context"
 import { emitAttachSessionToSession } from "@/lib/session-attachment-events"
+import {
+  cancelConversationPreconnect,
+  preconnectConversation,
+} from "@/lib/session-preconnect"
 import type {
   AttentionKind,
   DbConversationSummary,
@@ -254,6 +258,17 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
     conversation.folder_id,
   ])
 
+  // Resting the pointer on a row starts opening its session in the
+  // background (debounced, capped and deduplicated in `session-preconnect`
+  // and on the backend), so it is ready by the time the click lands. A row
+  // already open in a tab is live already.
+  const handlePointerEnter = useCallback(() => {
+    if (!isOpenInTab) preconnectConversation(conversation)
+  }, [conversation, isOpenInTab])
+  const handlePointerLeave = useCallback(() => {
+    cancelConversationPreconnect(conversation)
+  }, [conversation])
+
   const handleDblClick = useCallback(() => {
     onDoubleClick?.(
       conversation.id,
@@ -404,6 +419,8 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
               <div
                 className="relative h-[2rem] bg-sidebar ws-transparent-bg"
                 data-conv-key={`${conversation.agent_type}:${conversation.id}`}
+                onPointerEnter={handlePointerEnter}
+                onPointerLeave={handlePointerLeave}
                 // Per-level indent: shift the shared rail axis right by one step per
                 // depth. Root rows (depth 0) leave the var untouched so they inherit
                 // the list's `--conv-rail-axis: 0.875rem` and render exactly as

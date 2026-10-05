@@ -56,6 +56,7 @@ vi.mock("@/hooks/use-connection", () => ({
     selectorsReady: true,
     connect: vi.fn().mockResolvedValue(undefined),
     disconnect: vi.fn().mockResolvedValue(undefined),
+    release: vi.fn().mockResolvedValue(undefined),
     sendPrompt,
     setMode: vi.fn().mockResolvedValue(undefined),
     setConfigOption: vi.fn().mockResolvedValue(undefined),
