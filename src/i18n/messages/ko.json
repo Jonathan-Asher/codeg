@@ -6481,6 +6481,8 @@
       "signInFailed": "로그인을 더 이상 갱신할 수 없습니다",
       "probeFailing": "사용량 확인 실패 — 수치가 오래되었을 수 있습니다",
       "probeFailingStatus": "사용량 확인 실패(HTTP {status}) — 수치가 오래되었을 수 있습니다",
+      "probeStale": "사용량 마지막 업데이트 {duration} 전 — 사용량 확인 실패",
+      "probeStaleStatus": "사용량 마지막 업데이트 {duration} 전 — 사용량 확인 실패(HTTP {status})",
       "noWindows": "아직 사용량 정보가 없습니다",
       "allExhausted": "모든 계정이 한도에 도달했습니다. 첫 계정은 {duration} 후에 풀립니다.",
       "allExhaustedUnknown": "모든 계정이 한도에 도달했습니다.",

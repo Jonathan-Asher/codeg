@@ -253,8 +253,10 @@ export function tightestPreviewEntry(
 
 // ─── Account pool ───────────────────────────────────────────────────────
 
-/** A pool reading whose last ask is this old is no longer being refreshed
- *  (the backend asks every minute). */
+/** Pool numbers this old are no longer being refreshed: the pool's last ask
+ *  (the backend asks every minute), and an account's newest reading (the
+ *  pool probes each account about every minute and reads the serving one's
+ *  response headers as well). */
 export const PLAN_USAGE_POOL_STALE_AFTER_SECONDS = 10 * 60
 
 /** The report's account pool when it has accounts to show. A configured pool
@@ -279,6 +281,24 @@ export function isPoolStale(pool: PlanUsagePool, now: number): boolean {
   return (
     pool.stale || now - pool.checked_at > PLAN_USAGE_POOL_STALE_AFTER_SECONDS
   )
+}
+
+/**
+ * Whether an account's failing usage check is worth a word, and how old its
+ * numbers are then (`age` in seconds; `null` when it has no reading at all).
+ * The pool's probe endpoint is rate-limited and the pool backs off on it, so
+ * a failure or two is routine; it only matters once the newest reading is
+ * older than {@link PLAN_USAGE_POOL_STALE_AFTER_SECONDS}. `null` otherwise.
+ */
+export function poolAccountProbeWarning(
+  account: PlanUsagePoolAccount,
+  now: number
+): { age: number | null } | null {
+  if (account.probe_failures <= 0) return null
+  const at = account.observed_at
+  if (at == null || at <= 0) return { age: null }
+  const age = Math.max(0, now - at)
+  return age > PLAN_USAGE_POOL_STALE_AFTER_SECONDS ? { age } : null
 }
 
 /** Tint for a pool account's window: amber from the pool's switch threshold,

@@ -6481,6 +6481,8 @@
       "signInFailed": "El inicio de sesión ya no se puede renovar",
       "probeFailing": "La consulta de uso falla: los números pueden estar desactualizados",
       "probeFailingStatus": "La consulta de uso falla (HTTP {status}): los números pueden estar desactualizados",
+      "probeStale": "Uso actualizado por última vez hace {duration}: la consulta de uso falla",
+      "probeStaleStatus": "Uso actualizado por última vez hace {duration}: la consulta de uso falla (HTTP {status})",
       "noWindows": "Aún no hay lectura de uso",
       "allExhausted": "Todas las cuentas están en su límite. La primera se libera en {duration}.",
       "allExhaustedUnknown": "Todas las cuentas están en su límite.",

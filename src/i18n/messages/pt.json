@@ -6481,6 +6481,8 @@
       "signInFailed": "O login não pode mais ser renovado",
       "probeFailing": "A verificação de uso está falhando — os números podem estar desatualizados",
       "probeFailingStatus": "A verificação de uso está falhando (HTTP {status}) — os números podem estar desatualizados",
+      "probeStale": "Uso atualizado há {duration} — a verificação de uso está falhando",
+      "probeStaleStatus": "Uso atualizado há {duration} — a verificação de uso está falhando (HTTP {status})",
       "noWindows": "Ainda sem leitura de uso",
       "allExhausted": "Todas as contas estão no limite. A primeira é liberada em {duration}.",
       "allExhaustedUnknown": "Todas as contas estão no limite.",

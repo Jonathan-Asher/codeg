@@ -6481,6 +6481,8 @@
       "signInFailed": "Sign-in can no longer be refreshed",
       "probeFailing": "Usage check failing — numbers may be out of date",
       "probeFailingStatus": "Usage check failing (HTTP {status}) — numbers may be out of date",
+      "probeStale": "Usage last updated {duration} ago — usage check failing",
+      "probeStaleStatus": "Usage last updated {duration} ago — usage check failing (HTTP {status})",
       "noWindows": "No usage reading yet",
       "allExhausted": "Every account is at its limit. The first frees up in {duration}.",
       "allExhaustedUnknown": "Every account is at its limit.",

@@ -543,6 +543,31 @@ describe("StatusBarPlanUsage behind an account pool", () => {
     expect(within(card).getByText("Serving")).toBeInTheDocument()
   })
 
+  it("warns of a failing usage check only once the account's reading goes stale", async () => {
+    const failing = pool()
+    failing.accounts[1] = {
+      ...failing.accounts[1],
+      probe_failures: 3,
+      probe_error_status: 429,
+      observed_at: NOW - 9 * 60,
+    }
+    getPlanUsage.mockResolvedValue(report([claude()], failing))
+    await mount()
+    await hover()
+    const warning = () =>
+      bubble()!.querySelector(
+        '[data-account="backup"] [data-slot="probe-failing"]'
+      )
+    // A few failed probes with a 9-minute-old reading: routine.
+    expect(warning()).toBeNull()
+
+    // Two ticks later the reading is past 10 minutes.
+    await flush(2 * 60_000)
+    expect(warning()).toHaveTextContent(
+      "Usage last updated 11m ago — usage check failing (HTTP 429)"
+    )
+  })
+
   it("takes pool readings as they are pushed", async () => {
     getPlanUsage.mockResolvedValue(report([claude()]))
     await mount()

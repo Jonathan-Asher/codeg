@@ -6481,6 +6481,8 @@
       "signInFailed": "登入已無法續期",
       "probeFailing": "用量查詢失敗——數字可能已過時",
       "probeFailingStatus": "用量查詢失敗（HTTP {status}）——數字可能已過時",
+      "probeStale": "用量{duration}前更新——用量查詢失敗",
+      "probeStaleStatus": "用量{duration}前更新——用量查詢失敗（HTTP {status}）",
       "noWindows": "尚無用量讀數",
       "allExhausted": "所有帳號都已達上限。最早的一個將在{duration}後可用。",
       "allExhaustedUnknown": "所有帳號都已達上限。",
