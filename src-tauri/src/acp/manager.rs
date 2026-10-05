@@ -434,6 +434,87 @@ pub(crate) struct MidRunForkJob {
     pub fork_point: crate::acp::fork::ForkPoint,
 }
 
+/// What [`ConnectionManager::release`] did with a connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReleaseOutcome {
+    /// Kept alive and parked: one of the most recently viewed sessions, or
+    /// busy with a turn or background work.
+    KeptWarm,
+    /// Disconnected, as an explicit disconnect would.
+    Disconnected,
+    /// Already gone.
+    Gone,
+}
+
+/// What [`ConnectionManager::preconnect`] did.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum PreconnectOutcome {
+    /// A speculative connection is opening the session.
+    Opening { connection_id: String },
+    /// A live connection already represents the session; nothing started.
+    AlreadyOpen { connection_id: String },
+    /// Skipped: the speculative cap or every attach slot is taken.
+    Busy,
+    /// Skipped: nothing to reopen (no session id).
+    Skipped,
+    /// Speculative connects are turned off.
+    Disabled,
+}
+
+/// Unclaimed speculative connections allowed at once, by default.
+pub const DEFAULT_MAX_SPECULATIVE_CONNECTS: usize = 1;
+
+/// The speculative cap: `CODEG_ACP_MAX_SPECULATIVE_CONNECTS` (`0` disables
+/// pre-connecting), else [`DEFAULT_MAX_SPECULATIVE_CONNECTS`]. Read once.
+pub fn max_speculative_connects() -> usize {
+    static N: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *N.get_or_init(|| {
+        std::env::var("CODEG_ACP_MAX_SPECULATIVE_CONNECTS")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(DEFAULT_MAX_SPECULATIVE_CONNECTS)
+    })
+}
+
+/// Whether another speculative open may start with `opening` already in
+/// flight under a cap of `max`.
+pub(crate) fn speculative_slot_free(opening: usize, max: usize) -> bool {
+    max > 0 && opening < max
+}
+
+/// Decide whether a new speculative open may start, and which unclaimed
+/// pre-opened connections to drop first so that no more than `max` speculative
+/// connections are alive at once — opening or open. `None` means it may not
+/// start: `max` opens are already in flight. Otherwise the ids to drop, oldest
+/// first (empty when there is room).
+///
+/// Bounding only the opens in flight would not bound memory: hovering one row
+/// after another would leave a trail of idle agents, each held until the idle
+/// sweep, at ~150-200 MB apiece.
+pub(crate) fn plan_speculative_open(
+    opening: usize,
+    mut open_unclaimed: Vec<(String, std::time::Instant)>,
+    max: usize,
+) -> Option<Vec<String>> {
+    if !speculative_slot_free(opening, max) {
+        return None;
+    }
+    let alive = opening + open_unclaimed.len();
+    if alive < max {
+        return Some(Vec::new());
+    }
+    open_unclaimed.sort_by_key(|(_, started)| *started);
+    Some(
+        open_unclaimed
+            .into_iter()
+            .take(alive + 1 - max)
+            .map(|(id, _)| id)
+            .collect(),
+    )
+}
+
 pub struct ConnectionManager {
     pub(crate) connections: Arc<Mutex<HashMap<String, AgentConnection>>>,
     /// Connections whose teardown was requested but whose child process has
@@ -743,6 +824,7 @@ impl ConnectionManager {
             preferred_mode_id,
             preferred_config_values,
             AttachWait::UntilReady,
+            false,
         )
         .await
     }
@@ -779,6 +861,7 @@ impl ConnectionManager {
             preferred_mode_id,
             preferred_config_values,
             AttachWait::No,
+            false,
         )
         .await
     }
@@ -795,6 +878,7 @@ impl ConnectionManager {
         preferred_mode_id: Option<String>,
         preferred_config_values: BTreeMap<String, String>,
         wait: AttachWait,
+        speculative: bool,
     ) -> Result<String, AcpError> {
         // Held until the new connection is in the map. A restore writing back
         // to the agents' own directories takes the write side, so it can never
@@ -858,11 +942,12 @@ impl ConnectionManager {
         } else {
             let connection_id = uuid::Uuid::new_v4().to_string();
             tracing::info!(
-                "[ACP] spawning connection id={} owner_window={} agent={:?} session_id={}",
+                "[ACP] spawning connection id={} owner_window={} agent={:?} session_id={}{}",
                 connection_id,
                 owner_window_label,
                 agent_type,
-                session_id.as_deref().unwrap_or("<new>")
+                session_id.as_deref().unwrap_or("<new>"),
+                if speculative { " (speculative)" } else { "" }
             );
 
             // `spawn_agent_connection` inserts the entry into
@@ -883,6 +968,7 @@ impl ConnectionManager {
                 self.delegation_snapshot(),
                 self.terminal_shell_config.clone(),
                 None,
+                speculative,
             )
             .await?;
             connection_id
@@ -979,19 +1065,282 @@ impl ConnectionManager {
         true
     }
 
+    /// Record that a UI is showing this session now (it connected to it, or
+    /// it is the active tab): ranks it for the warm set and counts as
+    /// activity. `false` if the connection is gone or terminal.
+    pub async fn mark_viewed(&self, conn_id: &str) -> bool {
+        let Some(state_arc) = self.get_state(conn_id).await else {
+            return false;
+        };
+        let mut state = state_arc.write().await;
+        if matches!(
+            state.status,
+            ConnectionStatus::Disconnected | ConnectionStatus::Error
+        ) {
+            return false;
+        }
+        let now = chrono::Utc::now();
+        state.last_viewed_at = Some(now);
+        state.last_activity_at = now;
+        true
+    }
+
+    /// A UI connect landed on `conn_id` (spawned or shared through the dedup):
+    /// it is that client's connection now. Takes over a parked or speculative
+    /// connection — viewer discovery stops skipping it — and marks it viewed.
+    pub async fn claim_for_view(&self, conn_id: &str) {
+        let Some(state_arc) = self.get_state(conn_id).await else {
+            return;
+        };
+        let mut state = state_arc.write().await;
+        if matches!(
+            state.status,
+            ConnectionStatus::Disconnected | ConnectionStatus::Error
+        ) {
+            return;
+        }
+        let now = chrono::Utc::now();
+        if state.parked || state.speculative {
+            let session = state
+                .external_id
+                .clone()
+                .or_else(|| state.requested_session_id.clone())
+                .unwrap_or_else(|| "<new>".to_string());
+            let idle_secs = now
+                .signed_duration_since(state.last_activity_at)
+                .num_seconds()
+                .max(0);
+            let progress = if state.attach_phase.is_attaching() {
+                format!("still opening, {} ms in", state.attach_elapsed_ms())
+            } else {
+                format!("idle {idle_secs} s")
+            };
+            tracing::info!(
+                "[ACP][attach] conn={conn_id} session={session} reopened a {} connection \
+                 (attach_phase={}, {progress})",
+                if state.speculative { "pre-opened" } else { "warm" },
+                state.attach_phase.as_str(),
+            );
+        }
+        state.parked = false;
+        state.speculative = false;
+        state.last_viewed_at = Some(now);
+        state.last_activity_at = now;
+    }
+
+    /// A client let go of `conn_id` because its surface went away (a tab
+    /// closed, a preview replaced) — not because anyone asked to stop it.
+    ///
+    /// One of the few most recently viewed sessions (see
+    /// [`WarmPolicy`](crate::acp::idle_sweep::WarmPolicy)) is kept alive and
+    /// parked, so reopening it is instant; the idle sweep reclaims it after the
+    /// warm allowance. Anything else is disconnected now, as before. A
+    /// connection with a turn or background work in flight is never killed
+    /// here: it is parked and left to the sweep.
+    pub async fn release(&self, conn_id: &str) -> Result<ReleaseOutcome, AcpError> {
+        self.release_with(conn_id, crate::acp::idle_sweep::WarmPolicy::current())
+            .await
+    }
+
+    pub(crate) async fn release_with(
+        &self,
+        conn_id: &str,
+        warm: crate::acp::idle_sweep::WarmPolicy,
+    ) -> Result<ReleaseOutcome, AcpError> {
+        let Some(state_arc) = self.get_state(conn_id).await else {
+            return Ok(ReleaseOutcome::Gone);
+        };
+        let warm_ids = self.warm_set(warm).await;
+        let keep = {
+            let mut state = state_arc.write().await;
+            if matches!(
+                state.status,
+                ConnectionStatus::Disconnected | ConnectionStatus::Error
+            ) {
+                return Ok(ReleaseOutcome::Gone);
+            }
+            let now = chrono::Utc::now();
+            let busy = state.status == ConnectionStatus::Prompting
+                || state.pending_permission.is_some()
+                || state.has_active_background_work(now);
+            // Worth keeping only if it can be reopened: a private session keeps
+            // no transcript, and a brand-new one that never took a prompt has
+            // nothing for anyone to come back to.
+            let reopenable = state.keeps_transcript
+                && (state.requested_session_id.is_some() || state.turns_completed > 0);
+            let keep = busy || (reopenable && warm_ids.contains(conn_id));
+            if keep {
+                state.parked = true;
+                // The idle allowance runs from the moment nobody shows it.
+                state.last_activity_at = now;
+            }
+            keep
+        };
+        if keep {
+            tracing::info!(
+                "[ACP] release connection={conn_id}: kept ({} warm slot(s), {} s idle allowance)",
+                warm.slots,
+                warm.idle_timeout.as_secs()
+            );
+            return Ok(ReleaseOutcome::KeptWarm);
+        }
+        tracing::info!("[ACP] release connection={conn_id}: not in the warm set; disconnecting");
+        match self.disconnect(conn_id).await {
+            Ok(()) => Ok(ReleaseOutcome::Disconnected),
+            Err(AcpError::ConnectionNotFound(_)) => Ok(ReleaseOutcome::Gone),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Ids of the connections the warm policy currently covers: the
+    /// `warm.slots` most recently viewed live connections.
+    async fn warm_set(
+        &self,
+        warm: crate::acp::idle_sweep::WarmPolicy,
+    ) -> std::collections::HashSet<String> {
+        if !warm.is_enabled() {
+            return std::collections::HashSet::new();
+        }
+        let views: Vec<(String, Option<chrono::DateTime<chrono::Utc>>)> = {
+            let connections = self.connections.lock().await;
+            let mut views = Vec::with_capacity(connections.len());
+            for (id, conn) in connections.iter() {
+                let state = conn.state.read().await;
+                if matches!(
+                    state.status,
+                    ConnectionStatus::Disconnected | ConnectionStatus::Error
+                ) {
+                    continue;
+                }
+                views.push((id.clone(), state.last_viewed_at));
+            }
+            views
+        };
+        warm.warm_set(views.iter().map(|(id, at)| (id.as_str(), *at)))
+    }
+
+    /// Open `session_id` in the background because the user is about to look
+    /// at it (hovering its row, selecting it). The connection starts parked,
+    /// so the client that then opens the session takes it over through the
+    /// ordinary connect dedup; if nobody does, it is an idle connection like
+    /// any other and the idle sweep reclaims it.
+    ///
+    /// Bounded, and never in the way of a real open: at most
+    /// [`max_speculative_connects`] unclaimed speculative connections exist at
+    /// once (a newer intent replaces the oldest one already open; none starts
+    /// while that many are still opening), and none starts (or ever queues)
+    /// while every attach slot is busy.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn preconnect(
+        &self,
+        agent_type: AgentType,
+        working_dir: Option<String>,
+        session_id: String,
+        runtime_env: BTreeMap<String, String>,
+        owner_window_label: String,
+        emitter: EventEmitter,
+        preferred_mode_id: Option<String>,
+        preferred_config_values: BTreeMap<String, String>,
+    ) -> Result<PreconnectOutcome, AcpError> {
+        let max_speculative = max_speculative_connects();
+        if max_speculative == 0 {
+            return Ok(PreconnectOutcome::Disabled);
+        }
+        if session_id.is_empty() {
+            return Ok(PreconnectOutcome::Skipped);
+        }
+        let working_dir_path = working_dir.as_ref().map(PathBuf::from);
+        if let Some(existing) = self
+            .find_connection_for_reuse(agent_type, working_dir_path.as_ref(), Some(session_id.as_str()))
+            .await
+        {
+            return Ok(PreconnectOutcome::AlreadyOpen {
+                connection_id: existing,
+            });
+        }
+        let (opening, open_unclaimed) = self.speculative_census().await;
+        let Some(evict) = plan_speculative_open(opening, open_unclaimed, max_speculative) else {
+            tracing::debug!(
+                "[ACP] preconnect session={session_id} skipped: {opening} speculative open(s) in flight"
+            );
+            return Ok(PreconnectOutcome::Busy);
+        };
+        if !crate::acp::connection::attach_slot_available() {
+            tracing::debug!("[ACP] preconnect session={session_id} skipped: attach slots busy");
+            return Ok(PreconnectOutcome::Busy);
+        }
+        // The pointer has moved on: the newest intent is the better guess, and
+        // an unclaimed pre-open is a whole agent process held for nobody.
+        for id in evict {
+            tracing::info!(
+                "[ACP] preconnect session={session_id}: dropping unclaimed pre-opened connection={id}"
+            );
+            let _ = self.disconnect(&id).await;
+        }
+        let connection_id = self
+            .spawn_agent_with(
+                agent_type,
+                working_dir,
+                Some(session_id),
+                runtime_env,
+                owner_window_label,
+                emitter,
+                preferred_mode_id,
+                preferred_config_values,
+                AttachWait::No,
+                true,
+            )
+            .await?;
+        Ok(PreconnectOutcome::Opening { connection_id })
+    }
+
+    /// Unclaimed speculative connections: how many are still opening their
+    /// session, and the ids of those already open with when they started.
+    async fn speculative_census(&self) -> (usize, Vec<(String, std::time::Instant)>) {
+        let connections = self.connections.lock().await;
+        let mut opening = 0;
+        let mut open = Vec::new();
+        for (id, conn) in connections.iter() {
+            let state = conn.state.read().await;
+            if !state.speculative
+                || matches!(
+                    state.status,
+                    ConnectionStatus::Disconnected | ConnectionStatus::Error
+                )
+            {
+                continue;
+            }
+            if state.attach_phase.is_attaching() {
+                opening += 1;
+            } else {
+                open.push((id.clone(), state.attach_started_at));
+            }
+        }
+        (opening, open)
+    }
+
     /// Disconnect connections that have been idle longer than `idle_timeout`.
     /// "Idle" means: status is `Connected`, no `pending_permission`, no
     /// launched-but-unresolved background work (async sub-agent / background
     /// shell — disconnecting kills the agent CLI and the background work with
     /// it), and no activity (no events, no commands) for at least
     /// `idle_timeout`. `Prompting` connections are always preserved (a turn is
-    /// in flight). Returns the number of connections that were disconnected.
+    /// in flight). The few most recently viewed connections get the longer
+    /// allowance of the process-wide
+    /// [`WarmPolicy`](crate::acp::idle_sweep::WarmPolicy). Returns the number
+    /// of connections that were disconnected.
     pub async fn sweep_idle(&self, idle_timeout: Duration) -> usize {
+        self.sweep_idle_with(idle_timeout, crate::acp::idle_sweep::WarmPolicy::current())
+            .await
+    }
+
+    pub(crate) async fn sweep_idle_with(
+        &self,
+        idle_timeout: Duration,
+        warm: crate::acp::idle_sweep::WarmPolicy,
+    ) -> usize {
         let now = chrono::Utc::now();
-        let timeout = match chrono::Duration::from_std(idle_timeout) {
-            Ok(d) => d,
-            Err(_) => return 0,
-        };
+        let warm_ids = self.warm_set(warm).await;
         let to_disconnect: Vec<String> = {
             let connections = self.connections.lock().await;
             let mut victims = Vec::new();
@@ -1019,6 +1368,10 @@ impl ConnectionManager {
                 if state.has_active_background_work(now) {
                     continue;
                 }
+                let threshold = warm.threshold(idle_timeout, warm_ids.contains(id));
+                let Ok(timeout) = chrono::Duration::from_std(threshold) else {
+                    continue;
+                };
                 let elapsed = now.signed_duration_since(state.last_activity_at);
                 if elapsed >= timeout {
                     victims.push(id.clone());
@@ -2991,6 +3344,7 @@ impl ConnectionManager {
                     fork_point,
                     reply: reply_tx,
                 }),
+                false,
             )
             .await?;
         }
@@ -7889,6 +8243,260 @@ mod tests {
         let n = mgr.sweep_idle(Duration::from_secs(300)).await;
         assert_eq!(n, 0);
         assert!(mgr.connections.lock().await.contains_key("fresh"));
+    }
+
+    fn warm_policy(slots: usize, secs: u64) -> crate::acp::idle_sweep::WarmPolicy {
+        crate::acp::idle_sweep::WarmPolicy {
+            slots,
+            idle_timeout: Duration::from_secs(secs),
+        }
+    }
+
+    /// A Claude Code connection reopening `session`, viewed `viewed_secs_ago`
+    /// (never, for `None`) and idle for `idle_secs`.
+    async fn insert_viewed_connection(
+        mgr: &ConnectionManager,
+        id: &str,
+        viewed_secs_ago: Option<i64>,
+        idle_secs: i64,
+    ) {
+        insert_fake_connection(mgr, id, AgentType::ClaudeCode, None, EventEmitter::Noop).await;
+        let state = mgr.get_state(id).await.expect("inserted");
+        let mut s = state.write().await;
+        let now = chrono::Utc::now();
+        s.requested_session_id = Some(format!("session-{id}"));
+        s.external_id = Some(format!("session-{id}"));
+        s.last_viewed_at = viewed_secs_ago.map(|secs| now - chrono::Duration::seconds(secs));
+        s.last_activity_at = now - chrono::Duration::seconds(idle_secs);
+    }
+
+    async fn live_ids(mgr: &ConnectionManager) -> Vec<String> {
+        let mut ids: Vec<String> = mgr.connections.lock().await.keys().cloned().collect();
+        ids.sort();
+        ids
+    }
+
+    #[tokio::test]
+    async fn sweep_gives_the_most_recently_viewed_connections_the_warm_allowance() {
+        let mgr = ConnectionManager::new();
+        // All idle for 10 minutes: past the 5-minute base, inside the
+        // 20-minute warm allowance.
+        insert_viewed_connection(&mgr, "viewed-1m", Some(60), 600).await;
+        insert_viewed_connection(&mgr, "viewed-2m", Some(120), 600).await;
+        insert_viewed_connection(&mgr, "viewed-9m", Some(540), 600).await;
+        insert_viewed_connection(&mgr, "never-viewed", None, 600).await;
+
+        let n = mgr
+            .sweep_idle_with(Duration::from_secs(300), warm_policy(2, 1200))
+            .await;
+        assert_eq!(n, 2);
+        assert_eq!(live_ids(&mgr).await, vec!["viewed-1m", "viewed-2m"]);
+
+        // The warm allowance is an allowance, not immortality.
+        backdate_last_activity(&mgr, "viewed-2m", 1300).await;
+        let n = mgr
+            .sweep_idle_with(Duration::from_secs(300), warm_policy(2, 1200))
+            .await;
+        assert_eq!(n, 1);
+        assert_eq!(live_ids(&mgr).await, vec!["viewed-1m"]);
+    }
+
+    #[tokio::test]
+    async fn sweep_without_a_warm_set_keeps_the_base_threshold_for_everyone() {
+        let mgr = ConnectionManager::new();
+        insert_viewed_connection(&mgr, "viewed", Some(10), 600).await;
+        let n = mgr
+            .sweep_idle_with(
+                Duration::from_secs(300),
+                crate::acp::idle_sweep::WarmPolicy::disabled(),
+            )
+            .await;
+        assert_eq!(n, 1);
+        assert!(live_ids(&mgr).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn release_keeps_a_recently_viewed_session_warm_and_parked() {
+        let mgr = ConnectionManager::new();
+        insert_viewed_connection(&mgr, "a", Some(5), 0).await;
+        let outcome = mgr.release_with("a", warm_policy(3, 1200)).await.unwrap();
+        assert_eq!(outcome, ReleaseOutcome::KeptWarm);
+        let state = mgr.get_state("a").await.expect("still alive");
+        assert!(state.read().await.parked);
+    }
+
+    #[tokio::test]
+    async fn release_disconnects_a_session_outside_the_warm_set() {
+        let mgr = ConnectionManager::new();
+        insert_viewed_connection(&mgr, "older", Some(300), 0).await;
+        insert_viewed_connection(&mgr, "newer", Some(5), 0).await;
+        let outcome = mgr
+            .release_with("older", warm_policy(1, 1200))
+            .await
+            .unwrap();
+        assert_eq!(outcome, ReleaseOutcome::Disconnected);
+        assert_eq!(live_ids(&mgr).await, vec!["newer"]);
+        // Releasing what is already gone is not an error.
+        assert_eq!(
+            mgr.release_with("older", warm_policy(1, 1200)).await.unwrap(),
+            ReleaseOutcome::Gone
+        );
+    }
+
+    #[tokio::test]
+    async fn release_never_keeps_a_session_that_cannot_be_reopened() {
+        let mgr = ConnectionManager::new();
+        // A private (Quick Ask) session keeps no transcript.
+        insert_viewed_connection(&mgr, "private", Some(5), 0).await;
+        mgr.get_state("private").await.unwrap().write().await.keeps_transcript = false;
+        // A brand-new conversation that never took a prompt.
+        insert_viewed_connection(&mgr, "blank", Some(6), 0).await;
+        {
+            let state = mgr.get_state("blank").await.unwrap();
+            let mut s = state.write().await;
+            s.requested_session_id = None;
+            s.turns_completed = 0;
+        }
+        for id in ["private", "blank"] {
+            assert_eq!(
+                mgr.release_with(id, warm_policy(3, 1200)).await.unwrap(),
+                ReleaseOutcome::Disconnected,
+                "{id}"
+            );
+        }
+        assert!(live_ids(&mgr).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn release_never_kills_a_turn_in_flight() {
+        let mgr = ConnectionManager::new();
+        insert_viewed_connection(&mgr, "busy", None, 0).await;
+        mgr.get_state("busy").await.unwrap().write().await.status = ConnectionStatus::Prompting;
+        assert_eq!(
+            mgr.release_with("busy", crate::acp::idle_sweep::WarmPolicy::disabled())
+                .await
+                .unwrap(),
+            ReleaseOutcome::KeptWarm
+        );
+        assert_eq!(live_ids(&mgr).await, vec!["busy"]);
+    }
+
+    #[tokio::test]
+    async fn a_ui_connect_claims_a_parked_or_speculative_connection() {
+        let mgr = ConnectionManager::new();
+        insert_viewed_connection(&mgr, "pre", None, 30).await;
+        {
+            let state = mgr.get_state("pre").await.unwrap();
+            let mut s = state.write().await;
+            s.parked = true;
+            s.speculative = true;
+        }
+        mgr.claim_for_view("pre").await;
+        let state = mgr.get_state("pre").await.unwrap();
+        let s = state.read().await;
+        assert!(!s.parked);
+        assert!(!s.speculative);
+        assert!(s.last_viewed_at.is_some());
+        assert!(chrono::Utc::now().signed_duration_since(s.last_activity_at) < chrono::Duration::seconds(5));
+    }
+
+    #[test]
+    fn the_speculative_cap_admits_at_most_max_opens() {
+        assert!(speculative_slot_free(0, 1));
+        assert!(!speculative_slot_free(1, 1));
+        assert!(speculative_slot_free(1, 2));
+        assert!(!speculative_slot_free(2, 2));
+        // 0 turns pre-connecting off.
+        assert!(!speculative_slot_free(0, 0));
+    }
+
+    #[tokio::test]
+    async fn the_speculative_census_counts_only_unclaimed_pre_opens() {
+        let mgr = ConnectionManager::new();
+        insert_viewed_connection(&mgr, "opening", None, 0).await;
+        insert_viewed_connection(&mgr, "opened", None, 0).await;
+        insert_viewed_connection(&mgr, "real", Some(1), 0).await;
+        for (id, speculative, phase) in [
+            ("opening", true, AttachPhase::Resuming),
+            ("opened", true, AttachPhase::Ready),
+            ("real", false, AttachPhase::Resuming),
+        ] {
+            let state = mgr.get_state(id).await.unwrap();
+            let mut s = state.write().await;
+            s.speculative = speculative;
+            s.attach_phase = phase;
+        }
+        let (opening, open) = mgr.speculative_census().await;
+        assert_eq!(opening, 1);
+        assert_eq!(
+            open.into_iter().map(|(id, _)| id).collect::<Vec<_>>(),
+            vec!["opened".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_new_pre_open_replaces_the_oldest_unclaimed_one() {
+        let t0 = std::time::Instant::now();
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        // Room left: nothing to drop.
+        assert_eq!(plan_speculative_open(0, vec![], 1), Some(vec![]));
+        assert_eq!(
+            plan_speculative_open(0, vec![("a".into(), at(0))], 2),
+            Some(vec![])
+        );
+        // Cap reached by an open, unclaimed pre-open: drop it for the new one.
+        assert_eq!(
+            plan_speculative_open(0, vec![("a".into(), at(0))], 1),
+            Some(vec!["a".to_string()])
+        );
+        // Oldest first, and only as many as needed.
+        assert_eq!(
+            plan_speculative_open(
+                0,
+                vec![("new".into(), at(20)), ("old".into(), at(10))],
+                2
+            ),
+            Some(vec!["old".to_string()])
+        );
+        // With one still opening under a cap of 2, one open pre-open has to go.
+        assert_eq!(
+            plan_speculative_open(1, vec![("a".into(), at(0))], 2),
+            Some(vec!["a".to_string()])
+        );
+    }
+
+    #[test]
+    fn no_pre_open_starts_while_the_cap_is_taken_by_opens_in_flight() {
+        assert_eq!(plan_speculative_open(1, vec![], 1), None);
+        assert_eq!(plan_speculative_open(2, vec![], 2), None);
+        // 0 turns pre-connecting off.
+        assert_eq!(plan_speculative_open(0, vec![], 0), None);
+    }
+
+    #[tokio::test]
+    async fn preconnect_starts_nothing_for_a_session_that_is_already_open() {
+        let mgr = ConnectionManager::new();
+        insert_viewed_connection(&mgr, "live", Some(1), 0).await;
+        let outcome = mgr
+            .preconnect(
+                AgentType::ClaudeCode,
+                None,
+                "session-live".to_string(),
+                BTreeMap::new(),
+                "test-window".to_string(),
+                EventEmitter::Noop,
+                None,
+                BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            outcome,
+            PreconnectOutcome::AlreadyOpen {
+                connection_id: "live".to_string()
+            }
+        );
+        assert_eq!(live_ids(&mgr).await, vec!["live"]);
     }
 
     #[tokio::test]

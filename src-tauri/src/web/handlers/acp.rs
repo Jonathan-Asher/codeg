@@ -147,8 +147,69 @@ pub async fn acp_connect(
     .await
     .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?
     .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    // This client owns it now — including a warm or pre-opened connection the
+    // dedup just handed back.
+    state
+        .connection_manager
+        .claim_for_view(&connection_id)
+        .await;
 
     Ok(Json(connection_id))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpPreconnectParams {
+    pub agent_type: AgentType,
+    pub working_dir: Option<String>,
+    pub session_id: String,
+}
+
+/// Open a session in the background because the user is about to look at it;
+/// see `ConnectionManager::preconnect`.
+pub async fn acp_preconnect(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpPreconnectParams>,
+) -> Result<Json<crate::acp::manager::PreconnectOutcome>, AppCommandError> {
+    // Own task, like `acp_connect`: a client that goes away mid-request must
+    // not cut the spawn short between the dedup lookup and the map insert.
+    let spawn_state = Arc::clone(&state);
+    let outcome = tokio::spawn(async move {
+        acp_commands::acp_preconnect_core(
+            &spawn_state.connection_manager,
+            &spawn_state.db,
+            &spawn_state.data_dir,
+            params.agent_type,
+            params.working_dir,
+            params.session_id,
+            "web".to_string(),
+            spawn_state.emitter.clone(),
+        )
+        .await
+    })
+    .await
+    .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?
+    .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    Ok(Json(outcome))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpReleaseConnectionParams {
+    pub connection_id: String,
+}
+
+/// A surface let go of its connection; see `ConnectionManager::release`.
+pub async fn acp_release_connection(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpReleaseConnectionParams>,
+) -> Result<Json<crate::acp::manager::ReleaseOutcome>, AppCommandError> {
+    let outcome = state
+        .connection_manager
+        .release(&params.connection_id)
+        .await
+        .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    Ok(Json(outcome))
 }
 
 #[derive(Deserialize)]
@@ -173,13 +234,21 @@ pub async fn acp_disconnect(
 #[serde(rename_all = "camelCase")]
 pub struct AcpTouchConnectionParams {
     pub connection_id: String,
+    /// The active tab's touch: ranks the session for the warm set.
+    #[serde(default)]
+    pub viewed: Option<bool>,
 }
 
 pub async fn acp_touch_connection(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<AcpTouchConnectionParams>,
 ) -> Result<Json<bool>, AppCommandError> {
-    let touched = state.connection_manager.touch(&params.connection_id).await;
+    let touched = acp_commands::acp_touch_connection_core(
+        &state.connection_manager,
+        &params.connection_id,
+        params.viewed.unwrap_or(false),
+    )
+    .await;
     Ok(Json(touched))
 }
 

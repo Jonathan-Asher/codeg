@@ -198,7 +198,7 @@ export function useConnectionLifecycle({
     status,
     selectorsReady,
     connect: connConnect,
-    disconnect: connDisconnect,
+    release: connRelease,
     sendPrompt,
     setMode: connSetMode,
     setConfigOption: connSetConfigOption,
@@ -474,19 +474,22 @@ export function useConnectionLifecycle({
     t,
   ])
 
-  // Keep a ref to disconnect so the unmount cleanup always calls the
-  // latest version without adding it as a dependency.
-  const connDisconnectRef = useRef(connDisconnect)
+  // Keep a ref to release so the unmount cleanup always calls the latest
+  // version without adding it as a dependency.
+  const connReleaseRef = useRef(connRelease)
   useEffect(() => {
-    connDisconnectRef.current = connDisconnect
-  }, [connDisconnect])
+    connReleaseRef.current = connRelease
+  }, [connRelease])
   const isTransientUnmountRef = useRef(isTransientUnmount)
   useEffect(() => {
     isTransientUnmountRef.current = isTransientUnmount
   }, [isTransientUnmount])
 
-  // Clean up on unmount (e.g. tab closed): disconnect the ACP connection
-  // so it doesn't leak, and remove lingering tasks.
+  // Clean up on unmount (e.g. tab closed): let go of the ACP connection so it
+  // doesn't leak, and remove lingering tasks. A release, not a disconnect:
+  // nobody asked to stop the session, and the backend keeps one of the few
+  // most recently viewed sessions warm so reopening it is instant (anything
+  // else it disconnects, as before).
   // However, if the agent is actively prompting (generating a response),
   // keep it alive so it can finish in the background — the idle sweep
   // will clean it up once it transitions back to "connected".
@@ -512,7 +515,7 @@ export function useConnectionLifecycle({
           transientUnmount: isTransientUnmountRef.current?.() === true,
         })
       ) {
-        connDisconnectRef.current().catch(() => {})
+        connReleaseRef.current().catch(() => {})
       }
       // Task cleanup stays unconditional even on transient unmounts — the
       // remounted instance mints fresh task ids, so stale ones would orphan.

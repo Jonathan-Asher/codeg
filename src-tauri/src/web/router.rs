@@ -931,6 +931,11 @@ pub fn build_router(
         )
         .route("/acp_connect", post(handlers::acp::acp_connect))
         .route("/acp_disconnect", post(handlers::acp::acp_disconnect))
+        .route("/acp_preconnect", post(handlers::acp::acp_preconnect))
+        .route(
+            "/acp_release_connection",
+            post(handlers::acp::acp_release_connection),
+        )
         .route(
             "/acp_touch_connection",
             post(handlers::acp::acp_touch_connection),

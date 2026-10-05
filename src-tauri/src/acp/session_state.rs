@@ -484,6 +484,25 @@ pub struct SessionState {
     pub event_seq: u64,
     pub last_activity_at: DateTime<Utc>,
 
+    /// When a UI last opened or showed this session (a connect from the
+    /// composer, the active tab's keepalive). Ranks the warm set — see
+    /// `idle_sweep::WarmPolicy`. `None` for a connection nobody looked at: a
+    /// speculative pre-connect, a delegation child, an automation run.
+    pub last_viewed_at: Option<DateTime<Utc>>,
+    /// No client owns this connection right now: its surface let go of it
+    /// (`ConnectionManager::release`) or it was opened speculatively
+    /// (`ConnectionManager::preconnect`). Viewer discovery skips it, so the
+    /// next client to open the session takes it over as its owner through the
+    /// connect dedup instead of watching it as a viewer.
+    pub parked: bool,
+    /// Opened on intent (a hover, a selection) before anyone asked for it.
+    /// Never queues for an attach slot, and counts against the speculative
+    /// cap while it is still opening. Cleared when a client claims it.
+    pub speculative: bool,
+    /// The agent keeps a transcript of this session, so it can be reopened
+    /// later. A private (Quick Ask) session cannot, and is never kept warm.
+    pub keeps_transcript: bool,
+
     /// Per-connection event broadcaster used by the WS attach protocol.
     /// New subscribers register receivers here while holding the SessionState
     /// read lock; `emit_with_state` broadcasts after releasing the write
@@ -766,6 +785,10 @@ impl SessionState {
             attach_tx: tokio::sync::watch::Sender::new(AttachPhase::Starting),
             event_seq: 0,
             last_activity_at: Utc::now(),
+            last_viewed_at: None,
+            parked: false,
+            speculative: false,
+            keeps_transcript: true,
             event_stream: Arc::new(ConnectionEventStream::new()),
             recent_events: RecentEventsBuffer::new(),
             delegation_token: None,

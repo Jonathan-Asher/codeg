@@ -10718,7 +10718,7 @@ pub async fn acp_connect(
     // Detached, like the web handler: the window follows the attach through
     // `AttachProgress` events instead of sitting on this call while the
     // agent opens the session.
-    manager
+    let connection_id = manager
         .spawn_agent_detached(
             agent_type,
             working_dir,
@@ -10729,7 +10729,11 @@ pub async fn acp_connect(
             preferred_mode_id,
             preferred_config_values,
         )
-        .await
+        .await?;
+    // This window owns it now — including a warm or pre-opened connection the
+    // dedup just handed back.
+    manager.claim_for_view(&connection_id).await;
+    Ok(connection_id)
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -11009,13 +11013,125 @@ pub async fn acp_disconnect(
     manager.disconnect(&connection_id).await
 }
 
+/// Keepalive touch. `viewed` marks the session as the one the user is looking
+/// at (the active tab), which ranks it for the warm set — see
+/// `idle_sweep::WarmPolicy`.
+pub(crate) async fn acp_touch_connection_core(
+    manager: &ConnectionManager,
+    connection_id: &str,
+    viewed: bool,
+) -> bool {
+    if viewed {
+        manager.mark_viewed(connection_id).await
+    } else {
+        manager.touch(connection_id).await
+    }
+}
+
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn acp_touch_connection(
     connection_id: String,
+    viewed: Option<bool>,
     manager: State<'_, ConnectionManager>,
 ) -> Result<bool, AcpError> {
-    Ok(manager.touch(&connection_id).await)
+    Ok(acp_touch_connection_core(&manager, &connection_id, viewed.unwrap_or(false)).await)
+}
+
+/// A surface let go of its connection (tab closed, preview replaced): keep it
+/// warm if it is one of the most recently viewed sessions, else disconnect it.
+/// See [`ConnectionManager::release`].
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_release_connection(
+    connection_id: String,
+    manager: State<'_, ConnectionManager>,
+) -> Result<crate::acp::manager::ReleaseOutcome, AcpError> {
+    manager.release(&connection_id).await
+}
+
+/// Open a session in the background because the user is about to look at it.
+/// Builds exactly what [`acp_connect`] would — the same runtime env and the
+/// conversation's own selectors — so the connect that follows shares the
+/// connection through the dedup. See [`ConnectionManager::preconnect`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn acp_preconnect_core(
+    manager: &ConnectionManager,
+    db: &AppDatabase,
+    data_dir: &Path,
+    agent_type: AgentType,
+    working_dir: Option<String>,
+    session_id: String,
+    owner_window_label: String,
+    emitter: EventEmitter,
+) -> Result<crate::acp::manager::PreconnectOutcome, AcpError> {
+    if session_id.is_empty() {
+        return Ok(crate::acp::manager::PreconnectOutcome::Skipped);
+    }
+    if crate::acp::manager::max_speculative_connects() == 0 {
+        return Ok(crate::acp::manager::PreconnectOutcome::Disabled);
+    }
+    // Cheap answer first: a session that is already open needs nothing built.
+    let working_dir_path = working_dir.as_ref().map(PathBuf::from);
+    if let Some(existing) = manager
+        .find_connection_for_reuse(agent_type, working_dir_path.as_ref(), Some(session_id.as_str()))
+        .await
+    {
+        return Ok(crate::acp::manager::PreconnectOutcome::AlreadyOpen {
+            connection_id: existing,
+        });
+    }
+    verify_agent_installed(agent_type).await?;
+    let runtime_env = build_session_runtime_env(db, agent_type, Some(session_id.as_str()), data_dir).await?;
+    let (preferred_mode_id, preferred_config_values) = resolve_connect_selector_prefs(
+        &db.conn,
+        agent_type,
+        Some(session_id.as_str()),
+        None,
+        BTreeMap::new(),
+    )
+    .await;
+    manager
+        .preconnect(
+            agent_type,
+            working_dir,
+            session_id,
+            runtime_env,
+            owner_window_label,
+            emitter,
+            preferred_mode_id,
+            preferred_config_values,
+        )
+        .await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_preconnect(
+    agent_type: AgentType,
+    working_dir: Option<String>,
+    session_id: String,
+    manager: State<'_, ConnectionManager>,
+    db: State<'_, AppDatabase>,
+    app_handle: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<crate::acp::manager::PreconnectOutcome, AcpError> {
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map(|p| crate::paths::resolve_effective_data_dir(&p))
+        .unwrap_or_else(|_| PathBuf::from("."));
+    acp_preconnect_core(
+        &manager,
+        &db,
+        &app_data_dir,
+        agent_type,
+        working_dir,
+        session_id,
+        window.label().to_string(),
+        EventEmitter::Tauri(app_handle),
+    )
+    .await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -11128,6 +11244,13 @@ pub(crate) async fn acp_find_connection_for_conversation_core(
         s.status,
         ConnectionStatus::Disconnected | ConnectionStatus::Error
     ) {
+        return Ok(None);
+    }
+    // Nobody owns a parked connection (a released warm session, a speculative
+    // pre-open): the client opening the conversation should take it over, not
+    // watch it. Reporting none sends it to `acp_connect`, whose dedup hands it
+    // this very connection to own.
+    if s.parked {
         return Ok(None);
     }
     Ok(Some(crate::acp::ConversationConnectionInfo {
@@ -16937,6 +17060,49 @@ wire_api = "chat"
                 "terminal status {terminal:?} must not be returned as a live connection"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn find_connection_for_conversation_core_skips_a_parked_connection() {
+        // A parked connection (released warm, or opened speculatively) has no
+        // owner. Discovery must not hand it out for a viewer attach: the
+        // opener goes through `acp_connect`, whose dedup makes it the owner.
+        use crate::acp::manager::ConnectionManager;
+        use crate::models::AgentType;
+        use crate::web::event_bridge::EventEmitter;
+
+        let mgr = ConnectionManager::new();
+        mgr.insert_test_connection("c1", AgentType::ClaudeCode, None, EventEmitter::Noop)
+            .await;
+        {
+            let state = mgr.get_state("c1").await.expect("state present");
+            let mut s = state.write().await;
+            s.conversation_id = Some(42);
+            s.external_id = Some("sid-1".into());
+            s.parked = true;
+        }
+        for session_id in [None, Some("sid-1")] {
+            assert!(
+                acp_find_connection_for_conversation_core(
+                    &mgr,
+                    42,
+                    session_id,
+                    AgentType::ClaudeCode
+                )
+                .await
+                .expect("ok")
+                .is_none(),
+                "a parked connection is not a viewer target"
+            );
+        }
+        // Once a client claims it, it is discoverable again.
+        mgr.claim_for_view("c1").await;
+        assert!(
+            acp_find_connection_for_conversation_core(&mgr, 42, None, AgentType::ClaudeCode)
+                .await
+                .expect("ok")
+                .is_some()
+        );
     }
 
     #[test]

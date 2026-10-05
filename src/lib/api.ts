@@ -617,10 +617,59 @@ export async function acpDisconnect(connectionId: string): Promise<void> {
   return getTransport().call("acp_disconnect", { connectionId })
 }
 
+/**
+ * Keepalive touch. `viewed` marks the session as the one on screen (the
+ * active tab), which ranks it for the backend's warm set of recently viewed
+ * sessions.
+ */
 export async function acpTouchConnection(
-  connectionId: string
+  connectionId: string,
+  viewed = false
 ): Promise<boolean> {
-  return getTransport().call("acp_touch_connection", { connectionId })
+  return getTransport().call(
+    "acp_touch_connection",
+    viewed ? { connectionId, viewed } : { connectionId }
+  )
+}
+
+/** What the backend did with a released connection. */
+export type AcpReleaseOutcome = "kept_warm" | "disconnected" | "gone"
+
+/**
+ * Let go of a connection whose surface went away on its own (a tab closed, a
+ * preview replaced). The backend keeps one of the few most recently viewed
+ * sessions alive for a while, so reopening it is instant, and disconnects
+ * anything else. Use `acpDisconnect` when the user asked to stop.
+ */
+export async function acpReleaseConnection(
+  connectionId: string
+): Promise<AcpReleaseOutcome> {
+  return getTransport().call("acp_release_connection", { connectionId })
+}
+
+/** What the backend did with a pre-connect request. */
+export type AcpPreconnectOutcome =
+  | { status: "opening"; connection_id: string }
+  | { status: "already_open"; connection_id: string }
+  | { status: "busy" }
+  | { status: "skipped" }
+  | { status: "disabled" }
+
+/**
+ * Open a session in the background because the user is about to look at it.
+ * The connect that follows shares the connection through the backend dedup;
+ * an unused one is reclaimed by the backend's idle sweep.
+ */
+export async function acpPreconnect(
+  agentType: AgentType,
+  workingDir: string,
+  sessionId: string
+): Promise<AcpPreconnectOutcome> {
+  return getTransport().call("acp_preconnect", {
+    agentType,
+    workingDir,
+    sessionId,
+  })
 }
 
 export async function acpListConnections(): Promise<ConnectionInfo[]> {

@@ -2054,6 +2054,8 @@ mod tauri_app {
                 acp_commands::acp_answer_plan_approval,
                 acp_commands::acp_disconnect,
                 acp_commands::acp_touch_connection,
+                acp_commands::acp_release_connection,
+                acp_commands::acp_preconnect,
                 acp_commands::acp_list_connections,
                 acp_commands::acp_get_session_snapshot,
                 acp_commands::acp_get_session_snapshot_by_conversation,
