@@ -145,6 +145,7 @@ import {
 import { useRemoteWorkspaceConnections } from "@/hooks/use-remote-workspace-connections"
 import { useSubsessionSync } from "@/hooks/use-subsession-sync"
 import { SidebarSectionHeader } from "./sidebar-section-header"
+import { useSidebarSessionNav } from "./use-sidebar-session-nav"
 import { AttentionCountBadge } from "./attention-count-badge"
 import {
   PINNED_ROW_ATTR,
@@ -2248,6 +2249,33 @@ export function SidebarConversationList({
     },
     [openTab, openConversations]
   )
+
+  // Next / previous session (⌘⇧↓ / ⌘⇧↑ by default): step through the sessions
+  // in the order listed here, opening each the way a click on its row does.
+  const selectedConversationRef = useRef(selectedConversation)
+  selectedConversationRef.current = selectedConversation
+  const isSessionNavSuspended = useCallback(
+    () => draggingRef.current !== null,
+    []
+  )
+  const handleSessionNavOpen = useCallback(
+    (conversation: DbConversationSummary) =>
+      handleSelect(
+        conversation.id,
+        conversation.agent_type,
+        conversation.folder_id
+      ),
+    [handleSelect]
+  )
+  useSidebarSessionNav({
+    rowsRef,
+    selectionRef: selectedConversationRef,
+    ownerHeaderIndexRef,
+    virtualizerRef,
+    sidebarRef: viewportRef,
+    isSuspended: isSessionNavSuspended,
+    onOpen: handleSessionNavOpen,
+  })
 
   // An interrupted row's Continue: back to the conversation workspace, then
   // open the session and send "continue" through its tab's own queue.

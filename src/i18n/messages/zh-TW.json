@@ -505,6 +505,14 @@
         "title": "上一個標籤頁",
         "description": "切換到上一個會話或檔案標籤頁"
       },
+      "next_session": {
+        "title": "下一個會話",
+        "description": "開啟側邊欄中目前會話下方的會話"
+      },
+      "prev_session": {
+        "title": "上一個會話",
+        "description": "開啟側邊欄中目前會話上方的會話"
+      },
       "switch_tab_1": {
         "title": "切換到第 1 個標籤",
         "description": "跳到第 1 個會話或檔案標籤"

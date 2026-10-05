@@ -505,6 +505,14 @@
         "title": "Vorheriger Tab",
         "description": "Zum vorherigen Konversations- oder Datei-Tab wechseln"
       },
+      "next_session": {
+        "title": "Nächste Sitzung",
+        "description": "Die Sitzung unter der aktuellen in der Seitenleiste öffnen"
+      },
+      "prev_session": {
+        "title": "Vorherige Sitzung",
+        "description": "Die Sitzung über der aktuellen in der Seitenleiste öffnen"
+      },
       "switch_tab_1": {
         "title": "Zu Tab 1 wechseln",
         "description": "Zum 1. Konversations- oder Datei-Tab springen"

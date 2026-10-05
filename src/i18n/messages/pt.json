@@ -505,6 +505,14 @@
         "title": "Aba anterior",
         "description": "Mudar para a aba anterior de conversa ou arquivo"
       },
+      "next_session": {
+        "title": "Próxima sessão",
+        "description": "Abrir a sessão abaixo da atual na barra lateral"
+      },
+      "prev_session": {
+        "title": "Sessão anterior",
+        "description": "Abrir a sessão acima da atual na barra lateral"
+      },
       "switch_tab_1": {
         "title": "Ir para a aba 1",
         "description": "Saltar para a aba de conversa ou arquivo 1"

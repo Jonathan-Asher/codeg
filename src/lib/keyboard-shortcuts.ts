@@ -14,6 +14,8 @@ export type ShortcutActionId =
   | "close_window"
   | "next_tab"
   | "prev_tab"
+  | "next_session"
+  | "prev_session"
   | "switch_tab_1"
   | "switch_tab_2"
   | "switch_tab_3"
@@ -79,6 +81,12 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   },
   {
     id: "prev_tab",
+  },
+  {
+    id: "next_session",
+  },
+  {
+    id: "prev_session",
   },
   { id: "switch_tab_1" },
   { id: "switch_tab_2" },
@@ -154,6 +162,10 @@ export const DEFAULT_SHORTCUTS: ShortcutSettings = {
   close_window: "mod+shift+w",
   next_tab: "mod+tab",
   prev_tab: "mod+shift+tab",
+  // Step through the sidebar's sessions in the order they are listed. Inside a
+  // text field this replaces the platform's "select to the start/end" chord.
+  next_session: "mod+shift+arrowdown",
+  prev_session: "mod+shift+arrowup",
   switch_tab_1: "mod+1",
   switch_tab_2: "mod+2",
   switch_tab_3: "mod+3",

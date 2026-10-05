@@ -505,6 +505,14 @@
         "title": "Pestaña anterior",
         "description": "Cambiar a la pestaña anterior de conversación o archivo"
       },
+      "next_session": {
+        "title": "Sesión siguiente",
+        "description": "Abrir la sesión que está debajo de la actual en la barra lateral"
+      },
+      "prev_session": {
+        "title": "Sesión anterior",
+        "description": "Abrir la sesión que está encima de la actual en la barra lateral"
+      },
       "switch_tab_1": {
         "title": "Ir a la pestaña 1",
         "description": "Saltar a la pestaña de conversación o archivo 1"

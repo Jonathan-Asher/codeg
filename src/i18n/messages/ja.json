@@ -505,6 +505,14 @@
         "title": "前のタブ",
         "description": "前の会話またはファイルタブに切り替える"
       },
+      "next_session": {
+        "title": "次の会話",
+        "description": "サイドバーで現在の会話の下にある会話を開く"
+      },
+      "prev_session": {
+        "title": "前の会話",
+        "description": "サイドバーで現在の会話の上にある会話を開く"
+      },
       "switch_tab_1": {
         "title": "タブ 1 に切り替え",
         "description": "1 番目の会話またはファイルタブに移動"
