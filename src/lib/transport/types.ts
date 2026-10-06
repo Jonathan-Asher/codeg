@@ -59,6 +59,13 @@ export interface AttachHandlers {
   onReplay(events: EventEnvelope[], highWaterSeq: number): void
   onEvent(envelope: EventEnvelope): void
   onDetached(reason: AttachDetachReason): void
+  /**
+   * The server had to shrink a frame of this subscription to fit the socket's
+   * budget (`frame_cut`): what it carried is an incomplete copy — images by
+   * reference, long tool output cut — and the conversation's own detail is
+   * the complete one. Called after the frame's own handler.
+   */
+  onFrameCut?(): void
 }
 
 export interface AttachOptions {

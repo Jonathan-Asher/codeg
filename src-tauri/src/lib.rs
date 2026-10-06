@@ -513,6 +513,16 @@ mod tauri_app {
             apply_webview_rendering_override()
         };
 
+        // Export the app data dir that `setup` adopts anyway, before the file
+        // appender reads its directory from the same variable: otherwise the
+        // log file goes to ~/.codeg/logs while the log viewer, which resolves
+        // after setup, lists the app data dir's logs. See
+        // `paths::desktop_data_dir_to_pin`.
+        if let Some(dir) = crate::paths::desktop_data_dir_to_pin() {
+            // SAFETY: single-threaded, as argued above.
+            unsafe { std::env::set_var("CODEG_DATA_DIR", &dir) };
+        }
+
         // Install the logging subscriber next so it captures everything from
         // here on. The file appender's logs dir is resolved from env (no DB
         // needed); hold the guard for the whole process so buffered file lines

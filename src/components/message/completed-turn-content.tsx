@@ -193,6 +193,76 @@ const manualFold = new WeakMap<
 >()
 
 /**
+ * The same overrides, keyed by the reply's first tool call id: the one handle
+ * on a settled reply that survives its `parts` being rebuilt. A reply that
+ * finishes (the stream settling into a local turn), a detail refetch after
+ * the NEXT reply finishes, and a reconnect's resync all hand a turn above the
+ * current round a fresh `parts` array, and a WeakMap entry on the old one is
+ * gone with it — so a reply the reader had opened folded itself shut again a
+ * few seconds later, taking what they were reading with it. Tool call ids are
+ * the agent's own and read the same live and from the transcript.
+ *
+ * Bounded: the oldest entries go first, past `MAX_FOLD_IDS`.
+ */
+const manualFoldById = new Map<string, { epoch: number; open: boolean }>()
+const MAX_FOLD_IDS = 500
+
+/** Forget every remembered fold. Module state outlives a render, so tests that
+ *  reuse a tool call id start from a clean slate with this. */
+export function resetManualFoldMemory(): void {
+  manualFoldById.clear()
+}
+
+function foldIdentity(parts: AdaptedContentPart[]): string | null {
+  for (const part of parts) {
+    if (part.type === "tool-call" && part.toolCallId) {
+      return `tool:${part.toolCallId}`
+    }
+    if (part.type === "tool-group") {
+      const id = part.items.find((item) => item.toolCallId)?.toolCallId
+      if (id) return `tool:${id}`
+    }
+  }
+  return null
+}
+
+function readManualFold(
+  parts: AdaptedContentPart[]
+): { epoch: number; open: boolean } | undefined {
+  const direct = manualFold.get(parts)
+  if (direct) return direct
+  const id = foldIdentity(parts)
+  return id ? manualFoldById.get(id) : undefined
+}
+
+function writeManualFold(
+  parts: AdaptedContentPart[],
+  entry: { epoch: number; open: boolean }
+): void {
+  manualFold.set(parts, entry)
+  const id = foldIdentity(parts)
+  if (!id) return
+  manualFoldById.delete(id)
+  manualFoldById.set(id, entry)
+  while (manualFoldById.size > MAX_FOLD_IDS) {
+    const oldest = manualFoldById.keys().next().value
+    if (oldest === undefined) break
+    manualFoldById.delete(oldest)
+  }
+}
+
+/**
+ * Images are what a reply made or looked at — a drawing it rendered and read
+ * back, a screenshot it took — not the work of getting there, so a fold never
+ * hides them. With the fold shut, the images from the folded stretch show
+ * right under its header, in order; opened, they sit back in place between
+ * the tool calls that produced them.
+ */
+function imagesOf(parts: AdaptedContentPart[]): AdaptedContentPart[] {
+  return parts.filter((part) => part.type === "generated-image")
+}
+
+/**
  * Shared between the interactive trigger and the static (nothing-to-fold) row
  * so a turn's header keeps the same shape whether or not it can be folded.
  *
@@ -247,9 +317,14 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
     () => splitAssistantTurnParts(parts, { keepLongNotes: completed }),
     [parts, completed]
   )
+  // Per stretch, the images its fold would otherwise hide (see `imagesOf`).
+  const foldedImages = useMemo(
+    () => split.segments.map((segment) => imagesOf(segment.progress)),
+    [split]
+  )
 
   const [localOpen, setLocalOpen] = useState(() => {
-    const entry = manualFold.get(parts)
+    const entry = readManualFold(parts)
     if (entry?.epoch === foldEpoch) return entry.open
     // A reply still being written is never folded by default — folding it is
     // an explicit act. Normally `currentRound` covers the live reply, but a
@@ -301,7 +376,7 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
         onRoundOpenChange?.(next)
         return
       }
-      manualFold.set(parts, { epoch: foldEpoch, open: next })
+      writeManualFold(parts, { epoch: foldEpoch, open: next })
       setLocalOpen(next)
     },
     [currentRound, foldEpoch, onRoundOpenChange, parts]
@@ -447,6 +522,15 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
           </CollapsibleContent>
         )}
       </Collapsible>
+      {!open && foldedImages[0]!.length > 0 && (
+        <div data-folded-images="">
+          <ContentPartsRenderer
+            parts={foldedImages[0]!}
+            role="assistant"
+            isStreaming={isStreaming}
+          />
+        </div>
+      )}
       {first && first.answer.length > 0 && (
         <ContentPartsRenderer
           parts={first.answer}
@@ -475,6 +559,18 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
                 </div>
               </CollapsibleContent>
             </Collapsible>
+          )}
+          {!open && foldedImages[i + 1]!.length > 0 && (
+            <div
+              data-folded-images=""
+              className={segment.hook ? "pt-4" : undefined}
+            >
+              <ContentPartsRenderer
+                parts={foldedImages[i + 1]!}
+                role="assistant"
+                isStreaming={isStreaming}
+              />
+            </div>
           )}
           {segment.answer.length > 0 && (
             <div

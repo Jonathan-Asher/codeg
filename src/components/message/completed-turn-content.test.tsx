@@ -1,14 +1,19 @@
 import { type ReactElement } from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it } from "vitest"
 
 import enMessages from "@/i18n/messages/en.json"
 import type { AdaptedContentPart } from "@/lib/adapters/ai-elements-adapter"
 import {
   CompletedTurnContent,
+  resetManualFoldMemory,
   splitAssistantTurnParts,
 } from "./completed-turn-content"
+
+// A hand-opened fold is also remembered by the reply's first tool call id, and
+// the fixtures below reuse their ids from test to test.
+beforeEach(() => resetManualFoldMemory())
 
 function renderWithIntl(ui: ReactElement) {
   return render(
@@ -37,8 +42,9 @@ const COMPLETED_PARTS: AdaptedContentPart[] = [
 ]
 
 // Expansion is remembered per `parts` array identity (so a virtualizer-
-// recycled row re-mounts open), which makes a shared array a hidden channel
-// between tests. Render tests take a fresh copy.
+// recycled row re-mounts open) and per first tool call id (so a rebuilt
+// array does too), which makes a shared array a hidden channel between tests.
+// Render tests take a fresh copy, and the id memory is reset before each.
 const freshCompletedParts = (): AdaptedContentPart[] => [...COMPLETED_PARTS]
 
 describe("splitAssistantTurnParts", () => {
@@ -602,5 +608,184 @@ describe("CompletedTurnContent", () => {
 
     expect(screen.queryByText("Finished working")).not.toBeInTheDocument()
     expect(container.textContent).toBe("")
+  })
+})
+
+// The turn from the 2026-10-06 report: the agent drew a logo placement, read
+// the PNGs back, ran a few more commands and summed up. When the next message
+// went out, the reply folded under "Worked for …" and every drawing went with
+// it — the data was all there, the reader just stopped seeing it.
+const IMAGE = (name: string) => ({
+  name,
+  data: "iVBORw0KGgo=",
+  mime_type: "image/png",
+  uri: null,
+})
+const drawingTurn = (): AdaptedContentPart[] => [
+  { type: "reasoning", content: "Planning the drawing", isStreaming: false },
+  {
+    type: "tool-call",
+    toolCallId: "toolu_render",
+    toolName: "Bash",
+    input: '{"command":"python3 draw.py"}',
+    state: "output-available",
+    output: "wrote placement.png",
+  },
+  {
+    type: "generated-image",
+    revisedPrompt: null,
+    image: IMAGE("placement.png"),
+    status: null,
+    label: "Read placement.png",
+  },
+  {
+    type: "tool-call",
+    toolCallId: "toolu_check",
+    toolName: "Bash",
+    input: '{"command":"ls -la out"}',
+    state: "output-available",
+    output: "placement.png",
+  },
+  { type: "text", text: "The logo sits 24 px from the top-left corner." },
+]
+
+describe("images in a folded reply", () => {
+  it("stay visible when the reply folds", () => {
+    renderWithIntl(
+      <CompletedTurnContent
+        parts={drawingTurn()}
+        durationMs={149_000}
+        completed
+      />
+    )
+
+    expect(
+      screen.getByRole("button", { name: "Worked for 2m 29s" })
+    ).toHaveAttribute("aria-expanded", "false")
+    // The work is folded…
+    expect(screen.queryByText(/python3 draw\.py/)).not.toBeInTheDocument()
+    // …the drawing and the answer are not.
+    expect(screen.getByAltText("placement.png")).toBeInTheDocument()
+    expect(screen.getByText("Read placement.png")).toBeInTheDocument()
+    expect(
+      screen.getByText("The logo sits 24 px from the top-left corner.")
+    ).toBeInTheDocument()
+  })
+
+  it("stay visible when a send folds the reply the reader was looking at", () => {
+    const parts = drawingTurn()
+    const view = renderWithIntl(
+      <CompletedTurnContent
+        parts={parts}
+        durationMs={149_000}
+        completed
+        foldEpoch={1}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Worked for 2m 29s" }))
+    expect(screen.getAllByAltText("placement.png")).toHaveLength(1)
+
+    view.rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <CompletedTurnContent
+          parts={parts}
+          durationMs={149_000}
+          completed
+          foldEpoch={2}
+        />
+      </NextIntlClientProvider>
+    )
+
+    expect(
+      screen.getByRole("button", { name: "Worked for 2m 29s" })
+    ).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByAltText("placement.png")).toBeInTheDocument()
+  })
+
+  it("render once, in place, when the reply is opened", () => {
+    const { container } = renderWithIntl(
+      <CompletedTurnContent
+        parts={drawingTurn()}
+        durationMs={149_000}
+        completed
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Worked for 2m 29s" }))
+
+    expect(screen.getAllByAltText("placement.png")).toHaveLength(1)
+    expect(container.querySelector("[data-folded-images]")).toBeNull()
+  })
+
+  it("leave a reply that ends on its work as it was", () => {
+    const [, render, image, check] = drawingTurn()
+    renderWithIntl(
+      <CompletedTurnContent
+        parts={[render!, image!, check!]}
+        durationMs={9_000}
+        completed
+      />
+    )
+    // Never folded: the image shows once, where it is.
+    expect(screen.getAllByAltText("placement.png")).toHaveLength(1)
+    expect(screen.getByText(/python3 draw\.py/)).toBeInTheDocument()
+  })
+})
+
+describe("a reply the reader opened", () => {
+  it("stays open when the thread rebuilds its parts", () => {
+    // The next reply finishing refetches the conversation, and every settled
+    // turn above comes back as a new `parts` array. Keyed on the array alone,
+    // the reader's expansion was dropped and the reply snapped shut under them.
+    const view = renderWithIntl(
+      <CompletedTurnContent
+        parts={drawingTurn()}
+        durationMs={149_000}
+        completed
+        foldEpoch={5}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Worked for 2m 29s" }))
+    view.unmount()
+
+    renderWithIntl(
+      <CompletedTurnContent
+        parts={drawingTurn()}
+        durationMs={149_000}
+        completed
+        foldEpoch={5}
+      />
+    )
+
+    expect(
+      screen.getByRole("button", { name: "Worked for 2m 29s" })
+    ).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByText(/python3 draw\.py/)).toBeInTheDocument()
+  })
+
+  it("still folds on the next send, keeping its images", () => {
+    const view = renderWithIntl(
+      <CompletedTurnContent
+        parts={drawingTurn()}
+        durationMs={149_000}
+        completed
+        foldEpoch={5}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Worked for 2m 29s" }))
+    view.unmount()
+
+    renderWithIntl(
+      <CompletedTurnContent
+        parts={drawingTurn()}
+        durationMs={149_000}
+        completed
+        foldEpoch={6}
+      />
+    )
+
+    expect(
+      screen.getByRole("button", { name: "Worked for 2m 29s" })
+    ).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByAltText("placement.png")).toBeInTheDocument()
   })
 })

@@ -1944,6 +1944,13 @@ pub fn build_router(
             "/workspace_media/{token}/{name}",
             get(handlers::workspace_files::serve_named_media),
         )
+        // An image an event frame carried by reference because its client
+        // could not take it inline. The unguessable key is the credential, as
+        // for the media path above. See `web::live_images`.
+        .route(
+            "/live_image/{key}",
+            get(crate::web::live_images::serve_live_image),
+        )
         // Office watch preview proxy (server mode): the iframe can't carry a
         // Bearer header, so these self-authenticate via a per-watch `?cap=`
         // capability + an SSRF port whitelist. `any` so OPTIONS (CORS preflight)

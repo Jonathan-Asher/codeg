@@ -10,9 +10,10 @@ use axum::{
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use super::live_images;
 use super::shutdown::ShutdownSignal;
 use super::ws_attach::{self, ClientMsg, DetachReason, ServerMsg, OUTBOUND_CAPACITY};
-use super::ws_frame_cap::{self, Frame, MAX_FRAME_BYTES};
+use super::ws_frame_cap::{self, Frame, FrameBudget};
 use crate::app_state::AppState;
 use crate::logging::throttle::{LagLogThrottle, LeadingEdgeThrottle, LAG_LOG_WINDOW};
 use crate::presence::{ClientKind, PresenceReport, SocketPresence};
@@ -57,30 +58,47 @@ pub async fn ws_handler(
     Extension(state): Extension<Arc<AppState>>,
     Extension(shutdown_signal): Extension<Arc<ShutdownSignal>>,
 ) -> impl IntoResponse {
-    // The client kind rides as an extra offered subprotocol
-    // (`codeg-client.ios`); the server still selects only `codeg-events`.
-    let kind = ClientKind::from_ws_protocols(
-        headers
-            .get("sec-websocket-protocol")
-            .and_then(|v| v.to_str().ok()),
-    );
+    // The client kind and its frame limit ride as extra offered subprotocols
+    // (`codeg-client.ios`, `codeg-max-frame.<bytes>`); the server still selects
+    // only `codeg-events`.
+    let offered = headers
+        .get("sec-websocket-protocol")
+        .and_then(|v| v.to_str().ok());
+    let kind = ClientKind::from_ws_protocols(offered);
+    let budget = FrameBudget::for_client(offered);
     ws.protocols([super::auth::WS_EVENT_PROTOCOL])
-        .on_upgrade(move |socket| handle_ws_connection(socket, state, shutdown_signal, kind))
+        .on_upgrade(move |socket| {
+            handle_ws_connection(socket, state, shutdown_signal, kind, budget)
+        })
 }
 
-/// Log a frame that had to be cut to fit [`MAX_FRAME_BYTES`]. Sizes and a
-/// count only — never content. Throttled per connection: a large out-of-turn
-/// turn is re-sent on every watcher tick, and each re-send is cut the same way.
-fn log_cut_frame(frame: &Frame, kind: &str, throttle: &mut LeadingEdgeThrottle) {
+/// Log a frame that had to be shrunk to fit this client's budget. Sizes and
+/// counts only — never content. Throttled per connection: a large out-of-turn
+/// turn is re-sent on every watcher tick, and each re-send shrinks the same way.
+fn log_cut_frame(
+    frame: &Frame,
+    kind: &str,
+    budget: FrameBudget,
+    throttle: &mut LeadingEdgeThrottle,
+) {
     let Some(shrunk) = frame.shrunk else {
         return;
     };
     if let Some(summary) = throttle.record(1) {
         tracing::warn!(
-            "[WS] {kind} frame of {} bytes is past the {MAX_FRAME_BYTES}-byte cap; cut {} \
-             string field(s) to send {} bytes ({} oversized frame(s) since the last report)",
+            "[WS] {kind} frame of {} bytes is past this client's {}-byte budget; moved {} \
+             image(s) out by reference, left out {} finished tool payload(s), cut {} string \
+             field(s){}; sent {} bytes ({} oversized frame(s) since the last report)",
             shrunk.original_bytes,
+            budget.limit().unwrap_or_default(),
+            shrunk.images,
+            shrunk.tool_payloads,
             shrunk.fields,
+            if shrunk.dropped {
+                "; still too large, sent a frame_dropped notice instead"
+            } else {
+                ""
+            },
             shrunk.sent_bytes,
             summary.occurrences,
         );
@@ -92,6 +110,7 @@ async fn handle_ws_connection(
     state: Arc<AppState>,
     shutdown_signal: Arc<ShutdownSignal>,
     kind: ClientKind,
+    budget: FrameBudget,
 ) {
     // Late handshake guard: if shutdown already fired before this task
     // even started, exit before subscribing to anything else.
@@ -203,12 +222,13 @@ async fn handle_ws_connection(
             outgoing = outbound_rx.recv() => {
                 match outgoing {
                     Some(msg) => {
-                        // Capped: snapshots, replays and live events can carry
+                        // Budgeted: snapshots, replays and live events can carry
                         // whole transcript turns, and a client with a message
                         // limit loses its stream on the first frame past it.
-                        match ws_frame_cap::to_frame_text(&msg) {
+                        // A client without one gets every frame as serialized.
+                        match ws_frame_cap::to_frame_text(&msg, budget, live_images::store()) {
                             Ok(frame) => {
-                                log_cut_frame(&frame, "attach", &mut cut_throttle);
+                                log_cut_frame(&frame, "attach", budget, &mut cut_throttle);
                                 if socket.send(Message::Text(frame.text.into())).await.is_err() {
                                     break;
                                 }
@@ -231,8 +251,10 @@ async fn handle_ws_connection(
             result = global_rx.recv() => {
                 match result {
                     Ok(event) => {
-                        if let Ok(frame) = ws_frame_cap::to_frame_text(&event) {
-                            log_cut_frame(&frame, "broadcast", &mut cut_throttle);
+                        if let Ok(frame) =
+                            ws_frame_cap::to_frame_text(&event, budget, live_images::store())
+                        {
+                            log_cut_frame(&frame, "broadcast", budget, &mut cut_throttle);
                             if socket.send(Message::Text(frame.text.into())).await.is_err() {
                                 break;
                             }
