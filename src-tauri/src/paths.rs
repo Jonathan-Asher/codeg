@@ -144,6 +144,41 @@ pub fn codeg_logs_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(CODEG_DIR_NAME).join(LOGS_DIR_NAME))
 }
 
+/// The desktop app's bundle identifier (`tauri.conf.json`). Tauri's app data
+/// dir is the platform data dir joined with it.
+pub const DESKTOP_APP_IDENTIFIER: &str = "app.codeg";
+
+/// The data dir the desktop app should export before its logging starts, or
+/// `None` when the environment already names one.
+///
+/// The desktop's setup exports its effective data dir (the app data dir,
+/// where the database lives) as `CODEG_DATA_DIR`, and everything that runs
+/// after it — the log viewer's file list, download and "open folder" included
+/// — resolves [`codeg_logs_root`] under it. The file appender is created
+/// earlier, before Tauri exists, so with nothing exported yet it wrote to
+/// `~/.codeg/logs` while the viewer read the app data dir. Exporting the same
+/// value first puts both in one place. `CODEG_HOME` or a pre-set
+/// `CODEG_DATA_DIR` already resolve the same way at both moments.
+pub fn desktop_data_dir_to_pin() -> Option<PathBuf> {
+    desktop_data_dir_to_pin_from(
+        std::env::var_os("CODEG_HOME"),
+        std::env::var_os("CODEG_DATA_DIR"),
+        dirs::data_dir(),
+    )
+}
+
+fn desktop_data_dir_to_pin_from(
+    codeg_home: Option<std::ffi::OsString>,
+    codeg_data_dir: Option<std::ffi::OsString>,
+    platform_data_dir: Option<PathBuf>,
+) -> Option<PathBuf> {
+    let set = |v: &Option<std::ffi::OsString>| v.as_ref().is_some_and(|s| !s.is_empty());
+    if set(&codeg_home) || set(&codeg_data_dir) {
+        return None;
+    }
+    platform_data_dir.map(|dir| dir.join(DESKTOP_APP_IDENTIFIER))
+}
+
 /// Root directory for codeg's own per-turn timing observations (see
 /// `crate::turn_timings`) — wall-clock turn spans the ACP connection layer
 /// records for agents whose native session store carries no per-turn
@@ -294,6 +329,42 @@ fn strip_prefix_ignore_ascii_case<'a>(text: &'a str, prefix: &str) -> Option<&'a
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Tauri derives the app data dir from the bundle identifier; the log dir
+    /// the desktop pins before Tauri exists must use the same one.
+    #[test]
+    fn the_desktop_identifier_matches_the_bundle() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(conf["identifier"], DESKTOP_APP_IDENTIFIER);
+    }
+
+    #[test]
+    fn the_desktop_pins_its_app_data_dir_only_when_nothing_else_names_one() {
+        let platform = Some(PathBuf::from("/Users/u/Library/Application Support"));
+        assert_eq!(
+            desktop_data_dir_to_pin_from(None, None, platform.clone()),
+            Some(PathBuf::from(
+                "/Users/u/Library/Application Support/app.codeg"
+            ))
+        );
+        assert_eq!(
+            desktop_data_dir_to_pin_from(Some("".into()), Some("".into()), platform.clone()),
+            Some(PathBuf::from(
+                "/Users/u/Library/Application Support/app.codeg"
+            )),
+            "empty values are unset"
+        );
+        assert_eq!(
+            desktop_data_dir_to_pin_from(None, Some("/srv/codeg".into()), platform.clone()),
+            None
+        );
+        assert_eq!(
+            desktop_data_dir_to_pin_from(Some("/opt/codeg".into()), None, platform),
+            None
+        );
+        assert_eq!(desktop_data_dir_to_pin_from(None, None, None), None);
+    }
 
     /// The shape `fs::canonicalize` hands back on Windows, and the one that
     /// broke image attachments in issue #392.
