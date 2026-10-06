@@ -1664,6 +1664,22 @@ const OVERLAY_FOLD_MIN_INTERVAL_MS = 30_000
  *  active background overlay). */
 const overlayFoldRefetchAt = new Map<number, number>()
 
+/**
+ * Frames the server shrank for this socket (`frame_cut`, see `onFrameCut`):
+ * the conversation is reloaded from its transcript at most this often per
+ * connection, however many shrunk frames arrive (an out-of-turn upsert is
+ * re-sent on every watcher tick).
+ */
+const FRAME_CUT_RESYNC_MIN_INTERVAL_MS = 5_000
+/** contextKey → epoch ms of the last frame-cut reload. */
+const frameCutResyncAt = new Map<string, number>()
+/** contextKeys whose running turn streamed a shrunk frame: reloaded again once
+ *  the turn ends, so the settled reply is the transcript's complete copy and
+ *  not the shrunk stream promoted into the thread. */
+const frameCutDuringTurn = new Set<string>()
+/** Give the agent a moment to flush the turn's last records before the reload. */
+const FRAME_CUT_SETTLE_DELAY_MS = 1_500
+
 /** Upsert one out-of-turn tool-call info into the bounded registry,
  *  evicting the oldest entry past the cap. Returns a fresh map. */
 function recordOutOfTurnToolCall(
@@ -5442,6 +5458,23 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             contextKey,
             status: "connected",
           })
+          // The turn streamed shrunk frames (see `onFrameCut`): what was just
+          // promoted into the thread is that incomplete copy. Replace it with
+          // the transcript's.
+          if (frameCutDuringTurn.delete(contextKey)) {
+            const sessionId =
+              storeRef.current.connections.get(contextKey)?.sessionId
+            const conversationId = sessionId
+              ? getConversationIdByExternalIdFromStore(sessionId)
+              : null
+            if (conversationId != null) {
+              setTimeout(() => {
+                void useConversationRuntimeStore
+                  .getState()
+                  .actions.refetchDetail(conversationId)
+              }, FRAME_CUT_SETTLE_DELAY_MS)
+            }
+          }
           // Detect pending question from tool calls in the completed turn
           const turnConn = storeRef.current.connections.get(contextKey)
           if (turnConn?.liveMessage) {
@@ -5924,6 +5957,31 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         },
         onEvent: (envelope) => {
           applyMappedEnvelope(contextKey, envelope)
+        },
+        onFrameCut: () => {
+          // The frame just applied was shrunk to fit this socket: images came
+          // by reference, long output cut. Never leave that copy standing in
+          // for the real one — reload the conversation from its transcript
+          // (keeping the live reply while the turn runs), and once more when
+          // the turn ends.
+          const conn = storeRef.current.connections.get(contextKey)
+          const conversationId = conn?.sessionId
+            ? getConversationIdByExternalIdFromStore(conn.sessionId)
+            : null
+          if (conversationId == null) return
+          const prompting = conn?.status === "prompting"
+          if (prompting) frameCutDuringTurn.add(contextKey)
+          const now = Date.now()
+          if (
+            now - (frameCutResyncAt.get(contextKey) ?? 0) <
+            FRAME_CUT_RESYNC_MIN_INTERVAL_MS
+          ) {
+            return
+          }
+          frameCutResyncAt.set(contextKey, now)
+          void useConversationRuntimeStore
+            .getState()
+            .actions.refetchDetail(conversationId, { preserveLive: prompting })
         },
         onDetached: (reason) => {
           if (reason === "lagged" || reason === "server_shutdown") {

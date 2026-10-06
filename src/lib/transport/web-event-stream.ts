@@ -149,6 +149,9 @@ export class WebEventStream implements EventStream {
         safeInvoke("onDetached", () => sub.handlers.onDetached(frame.reason))
         break
     }
+    if ((frame as { frame_cut?: unknown }).frame_cut === true) {
+      safeInvoke("onFrameCut", () => sub.handlers.onFrameCut?.())
+    }
   }
 
   destroy(): void {
