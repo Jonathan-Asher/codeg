@@ -1595,10 +1595,20 @@ fn user_record_text(value: &serde_json::Value) -> Option<String> {
 ///   which the wire is still rendering. Read as an initiator, it matched no
 ///   ledger entry and the model's reply to the hook surfaced a second time as
 ///   out-of-turn activity;
+/// * a record Claude Code flags `turnCompanion` rides along with the running
+///   turn: after a Read of a picture it writes the picture's size as an
+///   `isMeta` STRING ("[Image: original 3000x2710, displayed at 2000x1807.
+///   ..."). Read as an initiator — STRING content, like a cron prompt — it
+///   matched no ledger entry, and the rest of the turn surfaced as out-of-turn
+///   activity: a second copy of the reply's last pictures and text under the
+///   live one, gone again at the next reload;
 /// * everything else user-typed/injected (real prompts, `<task-notification>`
 ///   records, cron prompts) initiates.
 fn turn_initiator_text(value: &serde_json::Value) -> Option<TurnInitiatorText> {
     if value.get("type").and_then(|t| t.as_str()) != Some("user") {
+        return None;
+    }
+    if value.get("turnCompanion").and_then(|v| v.as_bool()) == Some(true) {
         return None;
     }
     let content = value.get("message")?.get("content")?;
@@ -2485,6 +2495,46 @@ mod tests {
             event.is_none() || unpack(event.unwrap()).0.is_empty(),
             "the reply to the hook belongs to the wire-rendered turn"
         );
+    }
+
+    /// After a Read of a picture, Claude Code writes the picture's size as an
+    /// `isMeta` STRING record flagged `turnCompanion`, in the middle of the
+    /// turn. Taken for a prompt (STRING content, like a cron prompt), it
+    /// opened an "out-of-turn" turn holding the rest of the reply, and the web
+    /// client drew those pictures and that text a second time under the live
+    /// copy (seen 2026-10-06 in a session that read back three drawings).
+    #[test]
+    fn a_pictures_size_note_does_not_reopen_the_turn_as_background() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        let ledger = PromptLedger::shared();
+        ledger.record_text("draw the logo placement");
+
+        let mut ws = WatchState::new();
+        ws.session_id = Some("s1".into());
+        ws.epoch = Some(epoch("2020-01-01T00:00:00Z"));
+        ws.adopt_file(path.clone());
+
+        let prompt = r#"{"type":"user","timestamp":"2026-10-06T10:34:41.000Z","uuid":"u-1","promptId":"p1","message":{"role":"user","content":[{"type":"text","text":"draw the logo placement"}]}}"#;
+        let read = r#"{"type":"assistant","timestamp":"2026-10-06T10:36:36.100Z","uuid":"a-read","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"toolu_read","name":"Read","input":{"file_path":"/w/placement.png"}}]}}"#;
+        let result = r#"{"type":"user","timestamp":"2026-10-06T10:36:36.150Z","uuid":"u-res","promptId":"p1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_read","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}]}]}}"#;
+        let note = r#"{"type":"user","timestamp":"2026-10-06T10:36:36.160Z","uuid":"u-note","promptId":"p1","isMeta":true,"turnCompanion":true,"message":{"role":"user","content":"[Image: original 3000x2710, displayed at 2000x1807. Multiply coordinates by 1.50 to map to original image.]"}}"#;
+        write_lines(
+            &path,
+            &[
+                prompt,
+                read,
+                result,
+                note,
+                &assistant_text("a2", "The logo sits 24 px from the corner."),
+            ],
+        );
+        let event = tick_prompting(&mut ws, &ledger);
+        assert!(
+            event.is_none() || unpack(event.unwrap()).0.is_empty(),
+            "the rest of the reply belongs to the wire-rendered turn"
+        );
+        assert!(turn_initiator_text(&serde_json::from_str(note).unwrap()).is_none());
     }
 
     /// The command record is the only one the ledger can match, and its
