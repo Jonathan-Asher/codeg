@@ -1,4 +1,11 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -136,6 +143,91 @@ describe("UserMessageEditor", () => {
     expect(
       screen.getByRole("button", { name: L.editSavingNewConversation })
     ).toBeDisabled()
+  })
+
+  describe("switching to the saving state", () => {
+    afterEach(() => {
+      localStorage.clear()
+    })
+
+    /** Whether a class list transitions `opacity` (unprefixed classes only). */
+    function easesOpacity(className: string): boolean {
+      return className.split(/\s+/).some((name) => {
+        if (
+          ["transition", "transition-all", "transition-opacity"].includes(name)
+        ) {
+          return true
+        }
+        const list = /^transition-\[(.+)\]$/.exec(name)?.[1]
+        return list !== undefined && /(^|,)(all|opacity)(,|$)/.test(list)
+      })
+    }
+
+    function editorProps(
+      saving: boolean,
+      startsNewConversation: boolean
+    ): UserMessageEditorProps {
+      return {
+        draftKey: "persisted-user-turn-2",
+        initialText: "original text",
+        recallDraft: () => undefined,
+        rememberDraft: () => {},
+        images: [],
+        startsNewConversation,
+        saving,
+        blocked: null,
+        onCancel: () => {},
+        onSave: () => {},
+      }
+    }
+
+    // Each path's wording: in place (the default), a new branch with the
+    // original kept, and the first message (a new conversation).
+    it.each([
+      ["in place", false, false, L.editSavingInPlace],
+      ["as a new branch", true, false, L.editSaving],
+      ["into a new conversation", false, true, L.editSavingNewConversation],
+    ])(
+      "saving %s swaps the one button row without easing its dimming",
+      (_path, keepOriginal, startsNewConversation, savingLabel) => {
+        // The buttons dim (disabled) as the spinner starts. Eased, that
+        // opacity change left WebKit painting the idle row — Cancel and
+        // "Save & send" — under the saving one until the edit landed.
+        if (keepOriginal) saveKeepOriginalOnEdit(true)
+        const { rerender } = render(
+          <NextIntlClientProvider locale="en" messages={enMessages}>
+            <UserMessageEditor {...editorProps(false, startsNewConversation)} />
+          </NextIntlClientProvider>
+        )
+        rerender(
+          <NextIntlClientProvider locale="en" messages={enMessages}>
+            <UserMessageEditor {...editorProps(true, startsNewConversation)} />
+          </NextIntlClientProvider>
+        )
+        const editor = screen.getByRole("group", { name: L.editMessage })
+        const buttons = within(editor).getAllByRole("button")
+        expect(buttons.map((b) => b.textContent?.trim())).toEqual([
+          L.editCancel,
+          savingLabel,
+        ])
+        for (const button of buttons) {
+          expect(button).toBeDisabled()
+          expect(easesOpacity(button.className)).toBe(false)
+        }
+        // And back: a save that didn't go out restores the idle row, alone.
+        rerender(
+          <NextIntlClientProvider locale="en" messages={enMessages}>
+            <UserMessageEditor {...editorProps(false, startsNewConversation)} />
+          </NextIntlClientProvider>
+        )
+        const idle = within(editor).getAllByRole("button")
+        expect(idle).toHaveLength(2)
+        expect(idle[1]).toHaveAccessibleName(L.editSave)
+        for (const button of idle) {
+          expect(easesOpacity(button.className)).toBe(false)
+        }
+      }
+    )
   })
 
   describe("what saving does to the original", () => {

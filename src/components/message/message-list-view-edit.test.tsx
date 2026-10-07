@@ -8,7 +8,7 @@
  * editing, and in jsdom it only adds noise.
  */
 import type { ComponentProps, ReactNode } from "react"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -423,6 +423,45 @@ describe("MessageListView: the in-place editor", () => {
     expect(screen.getByRole("textbox", { name: L.editMessage })).toHaveValue(
       "second question!"
     )
+  })
+
+  it("holds one editor through an in-place save, and none once it lands", async () => {
+    // The in-place path end to end: the save runs, the forked history (which
+    // ends before the message) replaces the thread, and the edited message
+    // comes back under the very id the parser gave the original — its place
+    // in the transcript. Exactly one editor while saving; afterwards, the
+    // message, not a reopened editor.
+    let settle: (sent: boolean) => void = () => {}
+    const onEditUserMessage = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          settle = resolve
+        })
+    )
+    const { container } = await openEditor("turn-2", { onEditUserMessage })
+    await userEvent.click(screen.getByRole("button", { name: L.editSave }))
+    const editors = () =>
+      screen.queryAllByRole("group", { name: L.editMessage })
+    expect(editors()).toHaveLength(1)
+    expect(
+      within(editors()[0]).getByRole("button", { name: L.editSavingInPlace })
+    ).toBeDisabled()
+
+    await act(() => seed(HISTORY.slice(0, 2)))
+    expect(editors()).toHaveLength(0)
+
+    await act(async () => settle(true))
+    await act(() =>
+      seed([
+        ...HISTORY.slice(0, 2),
+        userTurn("turn-2", "second question, sharper"),
+        replyTurn("turn-3", "sharper answer"),
+      ])
+    )
+    expect(editors()).toHaveLength(0)
+    expect(
+      within(row(container, "turn-2")).getByText("second question, sharper")
+    ).toBeInTheDocument()
   })
 
   it("greys Save out, saying why, while a turn is running", async () => {
