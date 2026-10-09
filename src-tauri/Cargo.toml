@@ -179,6 +179,9 @@ tower-http = { version = "0.6", features = ["fs", "cors", "compression-gzip", "c
 http = "1"
 percent-encoding = "2"
 http-body = "1"
+# TCP keepalive on accepted web-client connections (`web::client_keepalive`).
+# Already in the graph via tokio, with the same features.
+socket2 = { version = "0.6", features = ["all"] }
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 futures-util = "0.3"
 tokio-util = { version = "0.7", features = ["io", "rt", "compat"] }

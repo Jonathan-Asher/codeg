@@ -1251,6 +1251,47 @@ fn last_record_timestamp(path: &Path) -> Option<DateTime<Utc>> {
     last.or_else(|| meta.modified().ok().map(DateTime::<Utc>::from))
 }
 
+/// The id a transcript is listed (and imported) under.
+///
+/// The file stem wins whenever it is a session uuid: Claude Code names every
+/// transcript `<sessionId>.jsonl`, and `get_conversation` resolves an id back
+/// to exactly that file, so the stem is the only id that round-trips. The
+/// first record's `sessionId` is not reliable for this. A transcript that
+/// opens with history copied from the session it was forked or resumed from
+/// can carry that session's id on the copied lines, and taking it would list
+/// two distinct transcripts under one id: the import's `(agent, id)` dedup
+/// then keeps one and silently drops the other.
+///
+/// A stem that is not a uuid (fixtures, hand-named files) keeps the old
+/// behaviour: the first `sessionId`, falling back to the stem.
+fn summary_session_id(path: &Path, first_session_id: Option<String>) -> String {
+    let stem = path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    if uuid::Uuid::parse_str(&stem).is_ok() {
+        return stem;
+    }
+    first_session_id.unwrap_or(stem)
+}
+
+/// The process is out of file descriptors (`EMFILE`/`ENFILE`). Says nothing
+/// about the file or directory that hit it, and every open after it fails the
+/// same way, so a listing that sees it must fail as a whole rather than skip
+/// the entry and return a silently partial list.
+fn is_descriptor_exhaustion(err: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        matches!(err.raw_os_error(), Some(code) if code == libc::EMFILE || code == libc::ENFILE)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = err;
+        false
+    }
+}
+
 impl ClaudeParser {
 
     fn parse_jsonl_summary(
@@ -1363,13 +1404,7 @@ impl ClaudeParser {
             None => return Ok(None),
         };
 
-        // Use filename (without .jsonl) as ID fallback
-        let id = conversation_id.unwrap_or_else(|| {
-            path.file_stem()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string()
-        });
+        let id = summary_session_id(path, conversation_id);
 
         let folder_path = cwd.clone();
         let folder_name = folder_path.as_ref().map(|p| folder_name_from_path(p));
@@ -1429,7 +1464,22 @@ impl AgentParser for ClaudeParser {
                 continue;
             }
 
-            let jsonl_files = fs::read_dir(&project_dir)?;
+            // One project directory that cannot be read must not take every
+            // other project's sessions down with it: a bare `?` here used to
+            // fail the whole listing, and the import scan reports a failed
+            // parser as zero sessions. Running out of descriptors is the
+            // exception (see `is_descriptor_exhaustion`).
+            let jsonl_files = match fs::read_dir(&project_dir) {
+                Ok(files) => files,
+                Err(e) if is_descriptor_exhaustion(&e) => return Err(e.into()),
+                Err(e) => {
+                    tracing::warn!(
+                        "[claude] skipping unreadable project dir {}: {e}",
+                        project_dir.display()
+                    );
+                    continue;
+                }
+            };
             for file_entry in jsonl_files {
                 let file_entry = match file_entry {
                     Ok(e) => e,
@@ -1458,7 +1508,18 @@ impl AgentParser for ClaudeParser {
                         conversations.push(summary);
                     }
                     Ok(None) => continue,
-                    Err(_) => continue,
+                    Err(ParseError::Io(e)) if is_descriptor_exhaustion(&e) => {
+                        return Err(ParseError::Io(e));
+                    }
+                    Err(e) => {
+                        // Still skipped (a transcript deleted mid-scan is
+                        // normal), but no longer silently.
+                        tracing::warn!(
+                            "[claude] skipping transcript {}: {e}",
+                            file_path.display()
+                        );
+                        continue;
+                    }
                 }
             }
         }
@@ -7215,5 +7276,195 @@ mod tests {
         assert!(!turns
             .iter()
             .any(|t| t.blocks.iter().any(|b| stop_hook_marker(b).is_some())));
+    }
+
+    // ─── Session listing: what the import scan sees ────────────────────────
+
+    const LISTING_PARENT: &str = "11111111-1111-4111-8111-111111111111";
+    const LISTING_FORK: &str = "22222222-2222-4222-8222-222222222222";
+
+    fn write_transcript(dir: &Path, stem: &str, records: &[serde_json::Value]) {
+        fs::create_dir_all(dir).expect("create project dir");
+        let mut file = fs::File::create(dir.join(format!("{stem}.jsonl"))).expect("create jsonl");
+        for record in records {
+            writeln!(file, "{record}").expect("write record");
+        }
+    }
+
+    fn listing_user(session: &str, uuid: &str, ts: &str, cwd: &str, text: &str) -> serde_json::Value {
+        json!({
+            "type": "user", "sessionId": session, "uuid": uuid, "timestamp": ts,
+            "cwd": cwd, "gitBranch": "main", "isSidechain": false, "userType": "external",
+            "entrypoint": "cli",
+            "message": { "role": "user", "content": text }
+        })
+    }
+
+    fn listing_assistant(session: &str, uuid: &str, ts: &str, cwd: &str) -> serde_json::Value {
+        json!({
+            "type": "assistant", "sessionId": session, "uuid": uuid, "timestamp": ts,
+            "cwd": cwd, "gitBranch": "main", "isSidechain": false,
+            "message": { "id": format!("msg_{uuid}"), "role": "assistant",
+                "model": "claude-opus-4-1", "content": [{"type": "text", "text": "on it"}] }
+        })
+    }
+
+    /// The shape of a terminal-run transcript (`claude --resume <id>`) as
+    /// Claude Code writes it today: a header of untimestamped metadata records
+    /// (`custom-title` first), the bridge/PR bookkeeping, then the turns, with
+    /// the cwd moving into a linked worktree mid-session.
+    fn terminal_transcript(session: &str, title: &str) -> Vec<serde_json::Value> {
+        vec![
+            json!({"type": "custom-title", "customTitle": title, "sessionId": session}),
+            json!({"type": "agent-name", "agentName": title, "sessionId": session}),
+            json!({"type": "ai-title", "aiTitle": "docx-artifact-delivery-upgrade", "sessionId": session}),
+            json!({"type": "mode", "mode": "normal", "sessionId": session}),
+            json!({"type": "permission-mode", "permissionMode": "auto", "sessionId": session}),
+            json!({"type": "atis-latch", "atis": "", "sessionId": session}),
+            json!({"type": "pr-link", "sessionId": session, "prNumber": 74,
+                "prUrl": "https://example.invalid/pull/74", "prRepository": "acme/backend",
+                "timestamp": "2026-08-31T06:06:23.295Z"}),
+            json!({"type": "bridge-session", "sessionId": session,
+                "bridgeSessionId": "cse_0001", "lastSequenceNum": 0}),
+            json!({"type": "file-history-snapshot", "messageId": "m0", "snapshot": {},
+                "isSnapshotUpdate": false}),
+            listing_user(session, "t-u1", "2026-08-31T06:07:00Z", "/work/legalix", "upgrade the docx delivery"),
+            listing_assistant(session, "t-a1", "2026-08-31T06:07:05Z", "/work/legalix"),
+            listing_user(session, "t-u2", "2026-09-16T09:00:00Z", "/work/legalix/.wt/wt-mcp-main", "continue"),
+            listing_assistant(session, "t-a2", "2026-09-16T09:00:05Z", "/work/legalix/.wt/wt-mcp-main"),
+            json!({"type": "last-prompt", "lastPrompt": "continue", "leafUuid": "t-a2", "sessionId": session}),
+        ]
+    }
+
+    fn summary_by_id<'a>(summaries: &'a [ConversationSummary], id: &str) -> &'a ConversationSummary {
+        summaries
+            .iter()
+            .find(|s| s.id == id)
+            .unwrap_or_else(|| panic!("{id} missing from {:?}", summaries.iter().map(|s| &s.id).collect::<Vec<_>>()))
+    }
+
+    #[test]
+    fn lists_a_terminal_transcript_that_opens_with_metadata_records() {
+        let base = tempfile::tempdir().unwrap();
+        write_transcript(
+            &base.path().join("-work-legalix"),
+            LISTING_FORK,
+            &terminal_transcript(LISTING_FORK, "legalix-tax"),
+        );
+
+        let summaries = ClaudeParser::with_base_dir(base.path().to_path_buf())
+            .list_conversations()
+            .unwrap();
+
+        assert_eq!(summaries.len(), 1);
+        let s = &summaries[0];
+        assert_eq!(s.id, LISTING_FORK);
+        assert_eq!(s.title.as_deref(), Some("legalix-tax"), "the /rename wins");
+        assert_eq!(s.folder_path.as_deref(), Some("/work/legalix"), "the first cwd, not the worktree");
+        assert_eq!(s.message_count, 4);
+        assert!(s.parent_id.is_none());
+    }
+
+    #[test]
+    fn lists_a_fork_that_opens_with_its_parents_history() {
+        // A transcript resumed or forked from another can open with the
+        // other session's history copied in VERBATIM — same uuids, same
+        // timestamps, and the other session's `sessionId`. Taking the id from
+        // the first record listed both files as the parent, and the scan's
+        // `(agent, id)` dedup then kept one and dropped the other.
+        let base = tempfile::tempdir().unwrap();
+        let project = base.path().join("-work-legalix");
+        let shared = vec![
+            listing_user(LISTING_PARENT, "p-u1", "2026-08-20T10:00:00Z", "/work/legalix", "plan the docx delivery"),
+            listing_assistant(LISTING_PARENT, "p-a1", "2026-08-20T10:00:05Z", "/work/legalix"),
+        ];
+        let mut parent = vec![
+            json!({"type": "custom-title", "customTitle": "legalix-eng-2", "sessionId": LISTING_PARENT}),
+            json!({"type": "ai-title", "aiTitle": "docx-artifact-delivery-upgrade", "sessionId": LISTING_PARENT}),
+        ];
+        parent.extend(shared.iter().cloned());
+        write_transcript(&project, LISTING_PARENT, &parent);
+
+        let mut fork = shared;
+        fork.extend(terminal_transcript(LISTING_FORK, "legalix-tax"));
+        write_transcript(&project, LISTING_FORK, &fork);
+
+        let summaries = ClaudeParser::with_base_dir(base.path().to_path_buf())
+            .list_conversations()
+            .unwrap();
+
+        assert_eq!(summaries.len(), 2, "two transcripts, two sessions");
+        assert_eq!(summary_by_id(&summaries, LISTING_PARENT).title.as_deref(), Some("legalix-eng-2"));
+        let fork = summary_by_id(&summaries, LISTING_FORK);
+        assert_eq!(fork.title.as_deref(), Some("legalix-tax"));
+        // Its id is the one `get_conversation` can open.
+        let parser = ClaudeParser::with_base_dir(base.path().to_path_buf());
+        assert_eq!(parser.get_conversation(&fork.id).unwrap().summary.id, LISTING_FORK);
+    }
+
+    #[test]
+    fn the_same_transcript_under_two_project_dirs_lists_under_one_id() {
+        // A genuine duplicate still collapses downstream: both copies carry
+        // the same id, which is what the scan dedups on.
+        let base = tempfile::tempdir().unwrap();
+        let records = terminal_transcript(LISTING_FORK, "legalix-tax");
+        write_transcript(&base.path().join("-work-legalix"), LISTING_FORK, &records);
+        write_transcript(&base.path().join("-work-legalix--wt-wt-mcp-main"), LISTING_FORK, &records);
+
+        let summaries = ClaudeParser::with_base_dir(base.path().to_path_buf())
+            .list_conversations()
+            .unwrap();
+
+        assert_eq!(summaries.len(), 2);
+        assert!(summaries.iter().all(|s| s.id == LISTING_FORK));
+    }
+
+    #[test]
+    fn a_non_uuid_file_name_keeps_the_records_session_id() {
+        let base = tempfile::tempdir().unwrap();
+        write_transcript(
+            &base.path().join("-work-legalix"),
+            "hand-named",
+            &terminal_transcript(LISTING_FORK, "legalix-tax"),
+        );
+
+        let summaries = ClaudeParser::with_base_dir(base.path().to_path_buf())
+            .list_conversations()
+            .unwrap();
+
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].id, LISTING_FORK);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_project_dir_does_not_hide_the_other_projects() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let base = tempfile::tempdir().unwrap();
+        write_transcript(
+            &base.path().join("-work-legalix"),
+            LISTING_FORK,
+            &terminal_transcript(LISTING_FORK, "legalix-tax"),
+        );
+        let locked = base.path().join("-work-locked");
+        write_transcript(&locked, LISTING_PARENT, &terminal_transcript(LISTING_PARENT, "locked"));
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let listed = ClaudeParser::with_base_dir(base.path().to_path_buf()).list_conversations();
+        // Restore before asserting so the tempdir can always be cleaned up.
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let summaries = listed.expect("one unreadable dir must not fail the listing");
+        assert!(summaries.iter().any(|s| s.id == LISTING_FORK));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn descriptor_exhaustion_is_told_apart_from_a_bad_entry() {
+        assert!(is_descriptor_exhaustion(&std::io::Error::from_raw_os_error(libc::EMFILE)));
+        assert!(is_descriptor_exhaustion(&std::io::Error::from_raw_os_error(libc::ENFILE)));
+        assert!(!is_descriptor_exhaustion(&std::io::Error::from_raw_os_error(libc::EACCES)));
+        assert!(!is_descriptor_exhaustion(&std::io::Error::from_raw_os_error(libc::ENOENT)));
     }
 }

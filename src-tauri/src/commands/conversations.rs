@@ -1086,8 +1086,51 @@ pub async fn import_selected_sessions_core(
         .try_lock()
         .map_err(|_| AppCommandError::invalid_input("An import is already in progress"))?;
 
-    let summaries = import_service::collect_local_summaries(|_, _, _, _| {}).await;
-    import_selected_from_summaries(conn, emitter, summaries, selections).await
+    let (summaries, listing_failures) =
+        import_service::collect_local_summaries_reporting(|_, _, _, _| {}).await;
+    import_selected_with_listing_failures(conn, emitter, summaries, &listing_failures, selections)
+        .await
+}
+
+/// [`import_selected_from_summaries`] for a walk in which some parsers failed.
+///
+/// A selection whose agent could not be listed at all is reported as FAILED,
+/// with the listing error, never as `not_found`: the session may well be on
+/// disk, and "not found" sends the user looking for a missing file instead of
+/// at the error (it was `Too many open files` when this was added). The rest
+/// of the selection imports normally.
+pub(crate) async fn import_selected_with_listing_failures(
+    conn: &sea_orm::DatabaseConnection,
+    emitter: &EventEmitter,
+    summaries: Vec<(AgentType, ConversationSummary)>,
+    listing_failures: &[(AgentType, String)],
+    selections: Vec<SelectedSessionKey>,
+) -> Result<ImportSelectedResult, AppCommandError> {
+    const MAX_ERRORS: usize = 10;
+
+    let (unlisted, listed): (Vec<SelectedSessionKey>, Vec<SelectedSessionKey>) = selections
+        .into_iter()
+        .partition(|key| listing_failures.iter().any(|(at, _)| *at == key.agent_type));
+
+    let mut result = import_selected_from_summaries(conn, emitter, summaries, listed).await?;
+
+    // Duplicate keys count once, as they do in `import_selected_from_summaries`.
+    let unlisted: HashSet<(AgentType, String)> = unlisted
+        .into_iter()
+        .map(|key| (key.agent_type, key.external_id))
+        .collect();
+    result.failed += unlisted.len() as u32;
+    for (at, error) in listing_failures {
+        if result.errors.len() >= MAX_ERRORS {
+            break;
+        }
+        if unlisted.iter().any(|(selected, _)| selected == at) {
+            result
+                .errors
+                .push(format!("{at} sessions could not be read: {error}"));
+        }
+    }
+    Ok(result)
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -6502,6 +6545,48 @@ mod tests {
         assert_eq!(
             result.not_found, 1,
             "a delegation child must never import as a root row"
+        );
+    }
+
+    #[tokio::test]
+    async fn batch_import_reports_an_unreadable_agent_as_failed_not_missing() {
+        // The Claude Code walk failed (out of file descriptors), so its
+        // sessions are absent from `summaries` — but they are not "not found".
+        // Another agent's selection in the same batch still imports.
+        let db = fresh_in_memory_db().await;
+        let summaries = vec![scan_summary(
+            "codex-1",
+            AgentType::Codex,
+            Some("/tmp/proj-listing"),
+            at(0),
+        )];
+        let failures = vec![(
+            AgentType::ClaudeCode,
+            "IO error: Too many open files (os error 24)".to_string(),
+        )];
+
+        let result = import_selected_with_listing_failures(
+            &db.conn,
+            &EventEmitter::Noop,
+            summaries,
+            &failures,
+            vec![
+                key_of(AgentType::ClaudeCode, "56306542-ae45-4ed3-8db4-41dfefe24132"),
+                key_of(AgentType::ClaudeCode, "56306542-ae45-4ed3-8db4-41dfefe24132"),
+                key_of(AgentType::Codex, "codex-1"),
+            ],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.imported, 1, "the readable agent's session imports");
+        assert_eq!(result.not_found, 0, "an unread session is not a missing one");
+        assert_eq!(result.failed, 1, "duplicate keys count once");
+        assert_eq!(result.errors.len(), 1);
+        assert!(
+            result.errors[0].contains("Too many open files"),
+            "the listing error reaches the user: {:?}",
+            result.errors
         );
     }
 

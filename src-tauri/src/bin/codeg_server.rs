@@ -103,6 +103,9 @@ fn main() -> ExitCode {
     if let Some(sanitized) = &inherited_session_env {
         sanitized.log();
     }
+    // Many hosts start a service at 1024 descriptors, macOS at 256; see
+    // `fd_limit`.
+    codeg_lib::fd_limit::raise_open_file_limit_logged();
 
     // `CODEG_HOME` overrides `CODEG_DATA_DIR` for uploads/pets inside
     // `paths::codeg_*_root` (legacy `~/.codeg/` layout). If both are set
@@ -712,6 +715,7 @@ async fn async_main() -> ExitCode {
     }
 
     // Start serving
+    let listener = codeg_lib::web::client_keepalive::listener(listener);
     if let Err(e) = axum::serve(listener, router).await {
         tracing::error!("[SERVER] Server error: {}", e);
         return ExitCode::from(1);

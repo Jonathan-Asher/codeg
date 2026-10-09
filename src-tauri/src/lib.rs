@@ -32,6 +32,7 @@ pub mod deep_link;
 /// Dictation clean-up and translation for clients that transcribe speech
 /// themselves (the iOS app).
 pub mod dictation_refine;
+pub mod fd_limit;
 pub mod folder_links;
 pub mod forge;
 pub mod git_credential;
@@ -531,6 +532,8 @@ mod tauri_app {
         if let Some(sanitized) = &inherited_session_env {
             sanitized.log();
         }
+        // A Finder/Dock launch starts at 256 descriptors; see `fd_limit`.
+        crate::fd_limit::raise_open_file_limit_logged();
 
         if let Err(err) = fix_path_env::fix() {
             tracing::error!("[PATH] fix_path_env failed: {err}");

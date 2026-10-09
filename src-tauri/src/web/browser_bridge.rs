@@ -816,6 +816,7 @@ fn serve(socket: tokio::net::TcpListener, listener: Arc<Listener>) {
         .fallback(any(forward))
         .with_state(listener.clone());
     let task = tokio::spawn(async move {
+        let socket = super::client_keepalive::listener(socket);
         let serve = axum::serve(socket, router).with_graceful_shutdown(async move {
             let _ = rx.await;
         });

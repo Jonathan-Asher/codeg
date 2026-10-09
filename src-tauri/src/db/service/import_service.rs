@@ -46,62 +46,97 @@ fn build_parser(agent_type: AgentType) -> Box<dyn AgentParser> {
 /// parser listing would surface a sub-session as a root conversation.
 /// Duplicates are dropped by `(agent_type, id)`, matching
 /// `list_conversations_sync`.
+///
+/// A parser whose listing fails contributes zero sessions here; callers that
+/// must tell "not on disk" from "could not be read" use
+/// [`collect_local_summaries_reporting`].
 pub(crate) async fn collect_local_summaries<F>(
-    mut on_agent_done: F,
+    on_agent_done: F,
 ) -> Vec<(AgentType, ConversationSummary)>
+where
+    F: FnMut(AgentType, u32, u32, u32),
+{
+    collect_local_summaries_reporting(on_agent_done).await.0
+}
+
+/// [`collect_local_summaries`], plus every parser whose listing failed
+/// outright, with its error.
+///
+/// That distinction is what an import owes the user. A failed listing reads
+/// exactly like an empty one, so without it a session that is plainly on disk
+/// comes back as `not_found` — which is how a whole agent's sessions went
+/// missing from the import when the process had run out of file descriptors.
+pub(crate) async fn collect_local_summaries_reporting<F>(
+    mut on_agent_done: F,
+) -> (Vec<(AgentType, ConversationSummary)>, Vec<(AgentType, String)>)
 where
     F: FnMut(AgentType, u32, u32, u32),
 {
     let total = ALL_PARSER_AGENTS.len() as u32;
 
-    let tasks: Vec<(AgentType, tokio::task::JoinHandle<Vec<ConversationSummary>>)> =
-        ALL_PARSER_AGENTS
-            .into_iter()
-            .map(|at| {
-                (
-                    at,
-                    tokio::task::spawn_blocking(move || {
-                        match build_parser(at).list_conversations() {
-                            Ok(convs) => convs,
-                            Err(e) => {
-                                tracing::error!("Error listing {} conversations: {}", at, e);
-                                Vec::new()
-                            }
-                        }
-                    }),
-                )
-            })
-            .collect();
+    type Listing = Result<Vec<ConversationSummary>, String>;
+    let tasks: Vec<(AgentType, tokio::task::JoinHandle<Listing>)> = ALL_PARSER_AGENTS
+        .into_iter()
+        .map(|at| {
+            (
+                at,
+                tokio::task::spawn_blocking(move || {
+                    build_parser(at).list_conversations().map_err(|e| {
+                        tracing::error!("Error listing {} conversations: {}", at, e);
+                        e.to_string()
+                    })
+                }),
+            )
+        })
+        .collect();
 
     let mut all: Vec<(AgentType, ConversationSummary)> = Vec::new();
+    let mut failures: Vec<(AgentType, String)> = Vec::new();
     let mut seen: std::collections::HashSet<(AgentType, String)> = std::collections::HashSet::new();
     let mut done = 0u32;
 
     // Awaiting in parser order only affects callback ordering — all twelve
     // walks already run concurrently on the blocking pool.
     for (at, task) in tasks {
-        let mut count = 0u32;
-        match task.await {
-            Ok(convs) => {
-                for c in convs {
-                    if c.parent_id.is_some() {
-                        continue;
-                    }
-                    if seen.insert((at, c.id.clone())) {
-                        all.push((at, c));
-                        count += 1;
-                    }
-                }
+        let count = match task.await {
+            Ok(Ok(convs)) => merge_listing(at, convs, &mut seen, &mut all),
+            Ok(Err(e)) => {
+                failures.push((at, e));
+                0
             }
             Err(e) => {
                 tracing::error!("Session listing task for {} panicked: {}", at, e);
+                failures.push((at, format!("listing task panicked: {e}")));
+                0
             }
-        }
+        };
         done += 1;
         on_agent_done(at, done, total, count);
     }
 
-    all
+    (all, failures)
+}
+
+/// Append one parser's listing to `all`: delegation children are left out (see
+/// [`collect_local_summaries`]) and a session already seen under the same
+/// `(agent_type, id)` is dropped. Returns how many were appended.
+fn merge_listing(
+    at: AgentType,
+    convs: Vec<ConversationSummary>,
+    seen: &mut std::collections::HashSet<(AgentType, String)>,
+    all: &mut Vec<(AgentType, ConversationSummary)>,
+) -> u32 {
+    let mut count = 0u32;
+    for c in convs {
+        if c.parent_id.is_some() {
+            continue;
+        }
+        if seen.insert((at, c.id.clone())) {
+            all.push((at, c));
+            count += 1;
+        }
+    }
+    count
 }
 
 /// What an import does when a parsed session already has a SOFT-DELETED row.
@@ -565,6 +600,44 @@ mod tests {
             message_count,
             ..summary(id, title)
         }
+    }
+
+    #[test]
+    fn merge_listing_keeps_forks_and_drops_only_true_duplicates() {
+        // Two transcripts that share their early history (a fork and its
+        // parent, same generated title) are distinct sessions: distinct ids.
+        // The same session listed twice (one transcript under two project
+        // dirs) is not.
+        let parent = summary("11111111-1111-4111-8111-111111111111", Some("docx-upgrade"));
+        let fork = summary("22222222-2222-4222-8222-222222222222", Some("docx-upgrade"));
+        let copy = summary("11111111-1111-4111-8111-111111111111", Some("docx-upgrade"));
+        let child = ConversationSummary {
+            parent_id: Some(parent.id.clone()),
+            ..summary("33333333-3333-4333-8333-333333333333", Some("child"))
+        };
+
+        let mut seen = std::collections::HashSet::new();
+        let mut all = Vec::new();
+        let count = merge_listing(
+            AgentType::ClaudeCode,
+            vec![parent, fork, copy, child],
+            &mut seen,
+            &mut all,
+        );
+
+        assert_eq!(count, 2);
+        let ids: Vec<&str> = all.iter().map(|(_, c)| c.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [
+                "11111111-1111-4111-8111-111111111111",
+                "22222222-2222-4222-8222-222222222222"
+            ]
+        );
+
+        // The same id under ANOTHER agent is a different session.
+        let other = summary("11111111-1111-4111-8111-111111111111", None);
+        assert_eq!(merge_listing(AgentType::Codex, vec![other], &mut seen, &mut all), 1);
     }
 
     async fn find_row(conn: &DatabaseConnection, ext: &str) -> conversation::Model {

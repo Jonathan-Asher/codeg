@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod browser_bridge;
 pub mod browser_tunnel;
+pub mod client_keepalive;
 pub mod compression;
 pub mod event_bridge;
 pub mod handlers;
@@ -623,6 +624,7 @@ pub(crate) async fn do_start_web_server_with_state(
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let handle = tokio::spawn(async move {
+        let listener = client_keepalive::listener(listener);
         let serve = axum::serve(listener, router).with_graceful_shutdown(async move {
             let _ = shutdown_rx.await;
         });
@@ -955,6 +957,7 @@ pub(crate) async fn do_start_web_server_tauri(
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let handle = tokio::spawn(async move {
+        let listener = client_keepalive::listener(listener);
         let serve = axum::serve(listener, router).with_graceful_shutdown(async move {
             let _ = shutdown_rx.await;
         });
