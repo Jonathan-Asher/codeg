@@ -1,16 +1,19 @@
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use chrono::{DateTime, Utc};
 use regex::Regex;
 
 use crate::models::*;
+use crate::parsers::detail_cache::FileStamp;
 use crate::parsers::{
     folder_name_from_path, is_safe_subagent_id, title_from_user_text, truncate_str, AgentParser,
     ParseError,
 };
+
+mod transcript_cache;
 
 /// Regex that matches Claude Code system-injected XML tags and their content.
 /// These tags are internal metadata and should not be displayed to users.
@@ -50,6 +53,7 @@ pub(crate) const BACKGROUND_TASK_MARKER: &str = "[[codeg-background-task]]";
 pub(crate) const BACKGROUND_RESULT_MAX_CHARS: usize = 16_000;
 
 /// Latest `<task-notification>` observed for a background task id.
+#[derive(Clone)]
 struct BackgroundNotification {
     status: String,
     summary: Option<String>,
@@ -366,6 +370,7 @@ enum GoalPhase {
 }
 
 /// A goal transition waiting to be written into the transcript.
+#[derive(Clone)]
 struct PendingGoal {
     /// Provider-neutral goal snapshot, ready for
     /// [`crate::acp::codex_goal::goal_marker`].
@@ -1468,6 +1473,25 @@ impl AgentParser for ClaudeParser {
     }
 
     fn get_conversation(&self, conversation_id: &str) -> Result<ConversationDetail, ParseError> {
+        let (resolved_id, resolved_path) = self.locate_transcript(conversation_id)?;
+        self.parse_conversation_detail(&resolved_path, &resolved_id)
+    }
+
+    /// Served from the transcript cache: unchanged files are not read again,
+    /// and a file that only grew is parsed from where the last parse stopped.
+    fn get_conversation_shared(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Arc<ConversationDetail>, ParseError> {
+        let (resolved_id, resolved_path) = self.locate_transcript(conversation_id)?;
+        transcript_cache::cached_detail(&resolved_path, &resolved_id)
+    }
+}
+
+impl ClaudeParser {
+    /// The transcript `conversation_id` names, after following any `/clear`
+    /// rollovers: `(resolved id, path)`.
+    fn locate_transcript(&self, conversation_id: &str) -> Result<(String, PathBuf), ParseError> {
         // Find the conversation file by searching all directories
         if !self.base_dir.exists() {
             return Err(ParseError::ConversationNotFound(
@@ -1489,9 +1513,7 @@ impl AgentParser for ClaudeParser {
             if file_path.exists() {
                 // `/clear` leaves the old file in place and writes a sibling
                 // uuid. Follow that chain so reopen shows post-clear turns.
-                let (resolved_id, resolved_path) =
-                    follow_clear_rollover_chain(&file_path, conversation_id);
-                return self.parse_conversation_detail(&resolved_path, &resolved_id);
+                return Ok(follow_clear_rollover_chain(&file_path, conversation_id));
             }
         }
 
@@ -1508,6 +1530,11 @@ impl AgentParser for ClaudeParser {
 /// interpretation over an incremental transcript tail; full-file behavior is
 /// unchanged (guarded by the parser snapshot tests and the whole-vs-chunked
 /// differential test in this file's test module).
+///
+/// `Clone` so the transcript cache can keep the state reached at the last
+/// complete line and finish a copy of it (`finalize_background_lifecycle` and
+/// a trailing unterminated line act on the copy, never on the kept state).
+#[derive(Clone)]
 pub(crate) struct ClaudeRecordAccumulator {
     /// Session transcript path — the subagent-stats lookup resolves
     /// `<session>/subagents/agent-<id>.jsonl` relative to it.
@@ -1572,6 +1599,14 @@ pub(crate) struct ClaudeRecordAccumulator {
     /// up: the index of the divider it produced. See the insert in `feed_value`
     /// for why the prompt can't simply be emitted where the CLI wrote it.
     compaction_prompt_slot: Option<usize>,
+    /// Lent by the transcript cache: sub-agent transcripts already read, by
+    /// file stamp. `None` (every other feed) reads each one from disk.
+    subagent_memo: Option<Arc<transcript_cache::SubagentMemo>>,
+    /// Sub-agent transcripts this feed read for an Agent card's tool calls,
+    /// with the file's stamp at that moment (`None`: it did not exist). Only
+    /// recorded when `subagent_memo` is set: the cache must know when a file
+    /// the records it already fed depended on has changed since.
+    subagent_reads: Vec<(PathBuf, Option<FileStamp>)>,
 }
 
 impl ClaudeRecordAccumulator {
@@ -1596,6 +1631,8 @@ impl ClaudeRecordAccumulator {
             pending_assistant_message_id: None,
             seen_compaction_uuids: std::collections::HashSet::new(),
             compaction_prompt_slot: None,
+            subagent_memo: None,
+            subagent_reads: Vec::new(),
         }
     }
 
@@ -1705,6 +1742,8 @@ impl ClaudeRecordAccumulator {
             pending_assistant_message_id,
             seen_compaction_uuids,
             compaction_prompt_slot,
+            subagent_memo,
+            subagent_reads,
         } = self;
 
         let msg_type = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
@@ -2023,7 +2062,13 @@ impl ClaudeRecordAccumulator {
                                 let subagent_dir = path.with_extension("").join("subagents");
                                 let subagent_path =
                                     subagent_dir.join(format!("agent-{}.jsonl", agent_id));
-                                if subagent_path.exists() {
+                                if let Some(memo) = subagent_memo.as_deref() {
+                                    let (stamp, parsed) = memo.read(&subagent_path);
+                                    if let Some(parsed) = parsed {
+                                        stats.tool_calls = parsed.calls.clone();
+                                    }
+                                    subagent_reads.push((subagent_path, stamp));
+                                } else if subagent_path.exists() {
                                     stats.tool_calls =
                                         parse_subagent_tool_calls(&subagent_path).0;
                                 }
@@ -2517,82 +2562,130 @@ impl ClaudeParser {
         let transcript_watermark = bytes.len() as u64;
 
         let mut acc = ClaudeRecordAccumulator::new(path.clone());
-        for chunk in bytes.split(|b| *b == b'\n') {
-            // Mirror `BufReader::lines()`: a line that isn't valid UTF-8 is
-            // skipped (the old loop's per-line `Err(_) => continue`).
-            let Ok(line) = std::str::from_utf8(chunk) else {
-                continue;
-            };
-            acc.feed_line(line);
-        }
-        acc.finalize_background_lifecycle();
-
-        let ClaudeRecordAccumulator {
-            messages,
-            cwd,
-            git_branch,
-            model,
-            title,
-            ai_title,
-            custom_title,
-            first_timestamp,
-            last_timestamp,
-            ..
-        } = acc;
-
-        let folder_path = cwd.clone();
-        let folder_name = folder_path.as_ref().map(|p| folder_name_from_path(p));
-
-        let mut turns = group_into_turns(messages);
-        super::relocate_orphaned_tool_results(&mut turns);
-        super::structurize_read_tool_output(&mut turns);
-        super::resolve_patch_line_numbers(&mut turns, cwd.as_deref());
-        // Only very old Claude Code builds wrote `system` / `turn_duration`
-        // records; current ones log no timings at all, so without this every
-        // reply lost its elapsed-time chip the moment the live timer stopped.
-        // Runs before the facts are derived, so the usage dashboard's elapsed
-        // time is backfilled too.
-        super::backfill_turn_durations(&mut turns, &[]);
-        // Read the context window *before* folding in delegated spend: the
-        // gauge measures how full this conversation's own prompt is, and a
-        // sub-agent's context is its own, not this one's.
-        let context_window_used_tokens = latest_claude_context_window_used_tokens(&turns);
-        let context_window_max_tokens =
-            claude_context_window_max_tokens_for_model(model.as_deref());
-        attribute_subagent_usage(path, &mut turns);
-        let session_stats = merge_claude_context_window_stats(
-            super::compute_session_stats(&turns),
+        feed_transcript_bytes(&mut acc, &bytes);
+        let Assembled {
+            mut detail,
+            context_window_used_tokens,
+            context_window_max_tokens,
+        } = assemble_detail(acc, conversation_id, transcript_watermark);
+        attribute_subagent_usage(path, &mut detail.turns);
+        finish_session_stats(
+            &mut detail,
             context_window_used_tokens,
             context_window_max_tokens,
         );
+        Ok(detail)
+    }
+}
 
-        // Same precedence as `parse_jsonl_summary` — the two paths MUST agree,
-        // or the auto-title backfill would oscillate between them.
-        let title = custom_title.or(ai_title).or(title);
-
-        let summary = ConversationSummary {
-            id: conversation_id.to_string(),
-            agent_type: AgentType::ClaudeCode,
-            folder_path,
-            folder_name,
-            title,
-            started_at: first_timestamp.unwrap_or_else(Utc::now),
-            ended_at: last_timestamp,
-            message_count: turns.len() as u32,
-            model,
-            git_branch,
-            parent_id: None,
-            parent_tool_use_id: None,
-            delegation_call_id: None,
+/// Feed every line of `bytes` (a whole transcript, or a run of complete lines
+/// from one) into `acc`.
+fn feed_transcript_bytes(acc: &mut ClaudeRecordAccumulator, bytes: &[u8]) {
+    for chunk in bytes.split(|b| *b == b'\n') {
+        // Mirror `BufReader::lines()`: a line that isn't valid UTF-8 is
+        // skipped (the old loop's per-line `Err(_) => continue`).
+        let Ok(line) = std::str::from_utf8(chunk) else {
+            continue;
         };
+        acc.feed_line(line);
+    }
+}
 
-        Ok(ConversationDetail {
+/// A detail built from a fed accumulator, before sub-agent spend is folded in
+/// (`session_stats` is still `None`; [`finish_session_stats`] sets it).
+struct Assembled {
+    detail: ConversationDetail,
+    context_window_used_tokens: Option<u64>,
+    context_window_max_tokens: Option<u64>,
+}
+
+/// Stage B of the detail parse: everything after the records are fed, except
+/// the sub-agent attribution and the stats it changes. Split out so the
+/// transcript cache can redo just the attribution when only a sub-agent's file
+/// moved, and run this on a copy of an accumulator it keeps.
+fn assemble_detail(
+    mut acc: ClaudeRecordAccumulator,
+    conversation_id: &str,
+    transcript_watermark: u64,
+) -> Assembled {
+    acc.finalize_background_lifecycle();
+
+    let ClaudeRecordAccumulator {
+        messages,
+        cwd,
+        git_branch,
+        model,
+        title,
+        ai_title,
+        custom_title,
+        first_timestamp,
+        last_timestamp,
+        ..
+    } = acc;
+
+    let folder_path = cwd.clone();
+    let folder_name = folder_path.as_ref().map(|p| folder_name_from_path(p));
+
+    let mut turns = group_into_turns(messages);
+    super::relocate_orphaned_tool_results(&mut turns);
+    super::structurize_read_tool_output(&mut turns);
+    super::resolve_patch_line_numbers(&mut turns, cwd.as_deref());
+    // Only very old Claude Code builds wrote `system` / `turn_duration`
+    // records; current ones log no timings at all, so without this every
+    // reply lost its elapsed-time chip the moment the live timer stopped.
+    // Runs before the facts are derived, so the usage dashboard's elapsed
+    // time is backfilled too.
+    super::backfill_turn_durations(&mut turns, &[]);
+    // Read the context window *before* folding in delegated spend: the
+    // gauge measures how full this conversation's own prompt is, and a
+    // sub-agent's context is its own, not this one's.
+    let context_window_used_tokens = latest_claude_context_window_used_tokens(&turns);
+    let context_window_max_tokens = claude_context_window_max_tokens_for_model(model.as_deref());
+
+    // Same precedence as `parse_jsonl_summary` — the two paths MUST agree,
+    // or the auto-title backfill would oscillate between them.
+    let title = custom_title.or(ai_title).or(title);
+
+    let summary = ConversationSummary {
+        id: conversation_id.to_string(),
+        agent_type: AgentType::ClaudeCode,
+        folder_path,
+        folder_name,
+        title,
+        started_at: first_timestamp.unwrap_or_else(Utc::now),
+        ended_at: last_timestamp,
+        message_count: turns.len() as u32,
+        model,
+        git_branch,
+        parent_id: None,
+        parent_tool_use_id: None,
+        delegation_call_id: None,
+    };
+
+    Assembled {
+        detail: ConversationDetail {
             summary,
             turns,
-            session_stats,
+            session_stats: None,
             transcript_watermark: Some(transcript_watermark),
-        })
+        },
+        context_window_used_tokens,
+        context_window_max_tokens,
     }
+}
+
+/// Session totals over the finished turns (sub-agent spend included), plus the
+/// context-window gauge read before that spend was folded in.
+fn finish_session_stats(
+    detail: &mut ConversationDetail,
+    context_window_used_tokens: Option<u64>,
+    context_window_max_tokens: Option<u64>,
+) {
+    detail.session_stats = merge_claude_context_window_stats(
+        super::compute_session_stats(&detail.turns),
+        context_window_used_tokens,
+        context_window_max_tokens,
+    );
 }
 
 fn parse_timestamp(value: &serde_json::Value) -> Option<DateTime<Utc>> {
@@ -3014,55 +3107,69 @@ fn extract_agent_execution_stats(tur: &serde_json::Value) -> AgentExecutionStats
 /// window has been read: delegated tokens are this session's *spend*, but they
 /// never occupied this session's prompt.
 fn attribute_subagent_usage(session_path: &Path, turns: &mut [MessageTurn]) {
+    for transcript in list_subagent_transcripts(session_path) {
+        let (_, usage, started_at) = parse_subagent_tool_calls(&transcript);
+        fold_subagent_spend(turns, usage, started_at);
+    }
+}
+
+/// `<session>/subagents/*.jsonl`, sorted. Directory order is
+/// filesystem-defined; sorting keeps attribution identical on every parse of
+/// the same session. Empty when the directory does not exist.
+fn list_subagent_transcripts(session_path: &Path) -> Vec<PathBuf> {
     let subagent_dir = session_path.with_extension("").join("subagents");
     let Ok(entries) = fs::read_dir(&subagent_dir) else {
-        return;
+        return Vec::new();
     };
-
     let mut transcripts: Vec<PathBuf> = entries
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
         .collect();
-    // Directory order is filesystem-defined; sort so attribution is identical
-    // on every parse of the same session.
     transcripts.sort();
+    transcripts
+}
 
-    for transcript in transcripts {
-        let (_, usage, started_at) = parse_subagent_tool_calls(&transcript);
-        let Some(extra) = usage else { continue };
+/// Add one sub-agent transcript's spend to the assistant turn that launched
+/// it. Returns the index of the turn it changed and that turn's usage before
+/// the change, so the transcript cache can take the fold back out.
+fn fold_subagent_spend(
+    turns: &mut [MessageTurn],
+    usage: Option<TurnUsage>,
+    started_at: Option<DateTime<Utc>>,
+) -> Option<(usize, Option<TurnUsage>)> {
+    let extra = usage?;
 
-        // The turn that was speaking when the sub-agent began. Falling back to
-        // the last assistant message keeps the tokens in the session even when
-        // the transcript carries no usable timestamp.
-        let target = started_at
-            .and_then(|start| {
-                turns
-                    .iter()
-                    .rposition(|t| matches!(t.role, TurnRole::Assistant) && t.timestamp <= start)
-            })
-            .or_else(|| {
-                turns
-                    .iter()
-                    .rposition(|t| matches!(t.role, TurnRole::Assistant))
-            });
-        let Some(launcher) = target.and_then(|i| turns.get_mut(i)) else {
-            continue;
-        };
-        launcher.usage = Some(match launcher.usage {
-            Some(ref own) => TurnUsage {
-                input_tokens: own.input_tokens.saturating_add(extra.input_tokens),
-                output_tokens: own.output_tokens.saturating_add(extra.output_tokens),
-                cache_creation_input_tokens: own
-                    .cache_creation_input_tokens
-                    .saturating_add(extra.cache_creation_input_tokens),
-                cache_read_input_tokens: own
-                    .cache_read_input_tokens
-                    .saturating_add(extra.cache_read_input_tokens),
-            },
-            None => extra,
-        });
-    }
+    // The turn that was speaking when the sub-agent began. Falling back to
+    // the last assistant message keeps the tokens in the session even when
+    // the transcript carries no usable timestamp.
+    let target = started_at
+        .and_then(|start| {
+            turns
+                .iter()
+                .rposition(|t| matches!(t.role, TurnRole::Assistant) && t.timestamp <= start)
+        })
+        .or_else(|| {
+            turns
+                .iter()
+                .rposition(|t| matches!(t.role, TurnRole::Assistant))
+        })?;
+    let launcher = turns.get_mut(target)?;
+    let previous = launcher.usage.clone();
+    launcher.usage = Some(match launcher.usage {
+        Some(ref own) => TurnUsage {
+            input_tokens: own.input_tokens.saturating_add(extra.input_tokens),
+            output_tokens: own.output_tokens.saturating_add(extra.output_tokens),
+            cache_creation_input_tokens: own
+                .cache_creation_input_tokens
+                .saturating_add(extra.cache_creation_input_tokens),
+            cache_read_input_tokens: own
+                .cache_read_input_tokens
+                .saturating_add(extra.cache_read_input_tokens),
+        },
+        None => extra,
+    });
+    Some((target, previous))
 }
 
 /// Read one sub-agent's transcript: the tool calls it made, what it spent, and
@@ -3354,40 +3461,39 @@ fn is_tool_result_only(msg: &UnifiedMessage) -> bool {
 /// this same Stage-B grouping over an incremental record suffix so overlay
 /// turns assemble exactly like a full detail parse would.
 pub(crate) fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
+    // Consumes the messages: their content MOVES into the turns. Copying it
+    // was most of this pass's cost on a long transcript, for nothing — every
+    // caller hands over a vector it never reads again.
     let mut turns = Vec::new();
-    let mut i = 0;
+    let mut messages = messages.into_iter().peekable();
 
-    while i < messages.len() {
-        let msg = &messages[i];
-
+    while let Some(msg) = messages.next() {
         if matches!(msg.role, MessageRole::Assistant) {
-            let mut blocks: Vec<ContentBlock> = msg.content.clone();
+            let mut blocks: Vec<ContentBlock> = msg.content;
             let timestamp = msg.timestamp;
             let id = format!("turn-{}", turns.len());
             // The turn's fork point is the assistant message that OPENS it —
             // the tool-result-only messages absorbed below are the same API
             // call continuing, and forking "up to" one of those would cut the
             // turn in half. Absent on synthesized turns, which name no record.
-            let agent_message_id = msg.agent_message_id.clone();
-            let usage = msg.usage.clone();
+            let agent_message_id = msg.agent_message_id;
+            let usage = msg.usage;
             let duration_ms = msg.duration_ms;
-            let turn_model = msg.model.clone();
+            let turn_model = msg.model;
             // Track the latest event time across the assistant message and
             // any tool-result-only user messages absorbed below; that's the
             // turn's true completion moment, not `timestamp + duration_ms`
             // (turn_duration encodes the entire turn span and adding it to
             // the assistant event time double-counts).
             let mut completed_at = msg.completed_at;
-            i += 1;
 
             // Only absorb immediately following tool-result-only user msgs
             // (stop at the next assistant message to keep turns small for virtualization)
-            while i < messages.len() && is_tool_result_only(&messages[i]) {
-                blocks.extend(messages[i].content.clone());
-                if messages[i].completed_at.is_some() {
-                    completed_at = messages[i].completed_at;
+            while let Some(next) = messages.next_if(is_tool_result_only) {
+                blocks.extend(next.content);
+                if next.completed_at.is_some() {
+                    completed_at = next.completed_at;
                 }
-                i += 1;
             }
 
             turns.push(MessageTurn {
@@ -3405,28 +3511,26 @@ pub(crate) fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn
             turns.push(MessageTurn {
                 id: format!("turn-{}", turns.len()),
                 role: TurnRole::System,
-                blocks: msg.content.clone(),
+                blocks: msg.content,
                 timestamp: msg.timestamp,
                 usage: None,
                 duration_ms: None,
                 model: None,
                 completed_at: msg.completed_at,
-            agent_message_id: None,
+                agent_message_id: None,
             });
-            i += 1;
         } else {
             turns.push(MessageTurn {
                 id: format!("turn-{}", turns.len()),
                 role: TurnRole::User,
-                blocks: msg.content.clone(),
+                blocks: msg.content,
                 timestamp: msg.timestamp,
                 usage: None,
                 duration_ms: None,
                 model: None,
                 completed_at: msg.completed_at,
-            agent_message_id: None,
+                agent_message_id: None,
             });
-            i += 1;
         }
     }
 

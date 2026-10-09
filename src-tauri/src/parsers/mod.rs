@@ -15,11 +15,12 @@ pub mod openclaw;
 pub mod opencode;
 pub mod pi;
 pub mod qoder;
+pub(crate) mod detail_cache;
 mod summary_cache;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 /// A root of external agent-CLI transcript data, archived under
 /// `external/<agent>/` by the optional "include conversation content" toggle.
@@ -290,6 +291,22 @@ pub enum ParseError {
 pub trait AgentParser {
     fn list_conversations(&self) -> Result<Vec<ConversationSummary>, ParseError>;
     fn get_conversation(&self, conversation_id: &str) -> Result<ConversationDetail, ParseError>;
+
+    /// The finished detail behind an `Arc`, already through the route-frame
+    /// pass ([`sanitize_detail`]), so a parser that caches can hand one parse
+    /// to every reader without copying it. Readers that need to change the
+    /// turns clone what they change.
+    ///
+    /// The default parses afresh on every call; parsers backed by the
+    /// transcript cache ([`detail_cache`]) override it.
+    fn get_conversation_shared(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Arc<ConversationDetail>, ParseError> {
+        let mut detail = self.get_conversation(conversation_id)?;
+        sanitize_detail(&mut detail);
+        Ok(Arc::new(detail))
+    }
 }
 
 /// The ONE place a history parser is constructed.
@@ -366,33 +383,47 @@ impl AgentParser for RouteSanitized {
 
     fn get_conversation(&self, conversation_id: &str) -> Result<ConversationDetail, ParseError> {
         let mut detail = self.0.get_conversation(conversation_id)?;
-        let before = detail.turns.len();
-        detail.turns.retain_mut(|turn| {
-            if !matches!(turn.role, TurnRole::User) {
-                return true;
-            }
-            turn.blocks.retain_mut(|block| {
-                let ContentBlock::Text { text } = block else {
-                    return true;
-                };
-                // Only a block that actually HELD a frame is eligible to go: an
-                // empty text block a parser produced for some other reason is
-                // left exactly as it was found.
-                !(sanitize_text(text) && text.trim().is_empty())
-            });
-            // A turn whose ONLY content was the frame carried no user message.
-            !turn.blocks.iter().all(|block| match block {
-                ContentBlock::Text { text } => text.trim().is_empty(),
-                _ => false,
-            })
-        });
-        // Keep the count the sidebar shows in step with the turns actually
-        // rendered; the summary rides along inside the detail.
-        let dropped = (before - detail.turns.len()) as u32;
-        detail.summary.message_count = detail.summary.message_count.saturating_sub(dropped);
-        sanitize_summary(&mut detail.summary);
+        sanitize_detail(&mut detail);
         Ok(detail)
     }
+
+    fn get_conversation_shared(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Arc<ConversationDetail>, ParseError> {
+        // Already sanitized: that is the method's contract (see the trait).
+        self.0.get_conversation_shared(conversation_id)
+    }
+}
+
+/// The route-frame pass [`RouteSanitized`] applies to every detail. Idempotent,
+/// so a detail that already went through it (a cached one) is left as it is.
+pub(crate) fn sanitize_detail(detail: &mut ConversationDetail) {
+    let before = detail.turns.len();
+    detail.turns.retain_mut(|turn| {
+        if !matches!(turn.role, TurnRole::User) {
+            return true;
+        }
+        turn.blocks.retain_mut(|block| {
+            let ContentBlock::Text { text } = block else {
+                return true;
+            };
+            // Only a block that actually HELD a frame is eligible to go: an
+            // empty text block a parser produced for some other reason is
+            // left exactly as it was found.
+            !(sanitize_text(text) && text.trim().is_empty())
+        });
+        // A turn whose ONLY content was the frame carried no user message.
+        !turn.blocks.iter().all(|block| match block {
+            ContentBlock::Text { text } => text.trim().is_empty(),
+            _ => false,
+        })
+    });
+    // Keep the count the sidebar shows in step with the turns actually
+    // rendered; the summary rides along inside the detail.
+    let dropped = (before - detail.turns.len()) as u32;
+    detail.summary.message_count = detail.summary.message_count.saturating_sub(dropped);
+    sanitize_summary(&mut detail.summary);
 }
 
 fn sanitize_summary(summary: &mut ConversationSummary) {

@@ -1269,80 +1269,227 @@ fn parse_resume_task_id(input: &str) -> Option<String> {
 /// an earlier turn). Without this the resumed card would be frozen at the
 /// `running` its ack reported, forever — the child's real outcome landed on the
 /// DB row, not on the resume result.
+///
+/// The whole-list form, kept as the reference the windowed paths are tested
+/// against; they build a [`DelegationIndex`] over the shared turn list and
+/// write only into the turns they return.
+#[cfg(test)]
 fn inject_delegation_meta(turns: &mut [MessageTurn], children: &[DbConversationSummary]) {
-    if children.is_empty() {
-        return;
+    if let Some(index) = DelegationIndex::new(turns, children) {
+        index.apply(turns);
     }
-    let by_parent_tool_use_id: HashMap<&str, &DbConversationSummary> = children
-        .iter()
-        .filter_map(|c| c.parent_tool_use_id.as_deref().map(|tu| (tu, c)))
-        .collect();
-    let by_task_id: HashMap<&str, &DbConversationSummary> = children
-        .iter()
-        .filter_map(|c| c.delegation_call_id.as_deref().map(|id| (id, c)))
-        .collect();
+}
 
-    // The task id lives on the call's RESULT, which the parsers emit as a
-    // separate block (usually a later turn), so collect it up front.
-    let mut task_id_by_call: HashMap<String, String> = HashMap::new();
-    if !by_task_id.is_empty() {
-        for turn in turns.iter() {
-            for block in turn.blocks.iter() {
-                if let ContentBlock::ToolResult {
-                    tool_use_id: Some(tu),
-                    output_preview: Some(output),
-                    ..
-                } = block
-                {
-                    if let Some(task_id) = parse_delegate_task_id(output) {
-                        task_id_by_call.insert(tu.clone(), task_id);
+/// The lookups [`inject_delegation_meta`] matches blocks against, built from
+/// the WHOLE transcript. Kept apart from the pass that writes the meta so a
+/// windowed fetch can build them over the full (shared) turn list and write
+/// only into the turns it returns: each block's meta depends on the block
+/// itself and these maps, never on where the window starts.
+struct DelegationIndex<'a> {
+    by_parent_tool_use_id: HashMap<&'a str, &'a DbConversationSummary>,
+    by_task_id: HashMap<&'a str, &'a DbConversationSummary>,
+    task_id_by_call: HashMap<String, String>,
+}
+
+impl<'a> DelegationIndex<'a> {
+    /// `None` when there are no children, i.e. nothing to inject.
+    fn new(turns: &[MessageTurn], children: &'a [DbConversationSummary]) -> Option<Self> {
+        if children.is_empty() {
+            return None;
+        }
+        let by_parent_tool_use_id: HashMap<&str, &DbConversationSummary> = children
+            .iter()
+            .filter_map(|c| c.parent_tool_use_id.as_deref().map(|tu| (tu, c)))
+            .collect();
+        let by_task_id: HashMap<&str, &DbConversationSummary> = children
+            .iter()
+            .filter_map(|c| c.delegation_call_id.as_deref().map(|id| (id, c)))
+            .collect();
+
+        // The task id lives on the call's RESULT, which the parsers emit as a
+        // separate block (usually a later turn), so collect it up front. Only
+        // a `delegate_to_agent` call's result is ever looked up, so only those
+        // results are read — not every tool output in the transcript.
+        let mut task_id_by_call: HashMap<String, String> = HashMap::new();
+        if !by_task_id.is_empty() {
+            let delegate_calls: HashSet<&str> = turns
+                .iter()
+                .flat_map(|turn| turn.blocks.iter())
+                .filter_map(|block| match block {
+                    ContentBlock::ToolUse {
+                        tool_use_id: Some(tu),
+                        tool_name,
+                        ..
+                    } if tool_name.contains("delegate_to_agent") => Some(tu.as_str()),
+                    _ => None,
+                })
+                .collect();
+            if !delegate_calls.is_empty() {
+                for turn in turns.iter() {
+                    for block in turn.blocks.iter() {
+                        if let ContentBlock::ToolResult {
+                            tool_use_id: Some(tu),
+                            output_preview: Some(output),
+                            ..
+                        } = block
+                        {
+                            if !delegate_calls.contains(tu.as_str()) {
+                                continue;
+                            }
+                            if let Some(task_id) = parse_delegate_task_id(output) {
+                                task_id_by_call.insert(tu.clone(), task_id);
+                            }
+                        }
                     }
                 }
             }
         }
+        Some(Self {
+            by_parent_tool_use_id,
+            by_task_id,
+            task_id_by_call,
+        })
     }
 
-    for turn in turns.iter_mut() {
-        for block in turn.blocks.iter_mut() {
-            let ContentBlock::ToolUse {
-                tool_use_id,
-                tool_name,
-                input_preview,
-                meta,
-                ..
-            } = block
-            else {
-                continue;
-            };
-            if meta.is_some() {
-                continue;
-            }
-            let child: Option<&DbConversationSummary> =
-                if tool_name.contains("delegate_to_agent") {
-                    tool_use_id.as_deref().and_then(|tu| {
-                        by_parent_tool_use_id
-                            .get(tu)
-                            .or_else(|| {
-                                task_id_by_call
-                                    .get(tu)
-                                    .and_then(|task_id| by_task_id.get(task_id.as_str()))
-                            })
-                            .copied()
-                    })
-                } else if tool_name.contains("resume_delegation") {
-                    input_preview
-                        .as_deref()
-                        .and_then(parse_resume_task_id)
-                        .and_then(|task_id| by_task_id.get(task_id.as_str()).copied())
-                } else {
+    fn apply(&self, turns: &mut [MessageTurn]) {
+        let Self {
+            by_parent_tool_use_id,
+            by_task_id,
+            task_id_by_call,
+        } = self;
+        for turn in turns.iter_mut() {
+            for block in turn.blocks.iter_mut() {
+                let ContentBlock::ToolUse {
+                    tool_use_id,
+                    tool_name,
+                    input_preview,
+                    meta,
+                    ..
+                } = block
+                else {
                     continue;
                 };
-            if let Some(child) = child {
-                *meta = Some(serde_json::json!({
-                    "codeg.delegation": build_historical_delegation_meta(child),
-                }));
+                if meta.is_some() {
+                    continue;
+                }
+                let child: Option<&DbConversationSummary> =
+                    if tool_name.contains("delegate_to_agent") {
+                        tool_use_id.as_deref().and_then(|tu| {
+                            by_parent_tool_use_id
+                                .get(tu)
+                                .or_else(|| {
+                                    task_id_by_call
+                                        .get(tu)
+                                        .and_then(|task_id| by_task_id.get(task_id.as_str()))
+                                })
+                                .copied()
+                        })
+                    } else if tool_name.contains("resume_delegation") {
+                        input_preview
+                            .as_deref()
+                            .and_then(parse_resume_task_id)
+                            .and_then(|task_id| by_task_id.get(task_id.as_str()).copied())
+                    } else {
+                        continue;
+                    };
+                if let Some(child) = child {
+                    *meta = Some(serde_json::json!({
+                        "codeg.delegation": build_historical_delegation_meta(child),
+                    }));
+                }
             }
         }
+    }
+}
+
+/// A folder conversation's row and its parsed transcript, before any turn is
+/// copied out: [`get_folder_conversation_core`] materializes all of it, the
+/// windowed paths only the turns they return.
+struct LoadedFolderConversation {
+    /// The row, patched the way the detail reports it (followed external id,
+    /// turn count, transcript model).
+    summary: DbConversationSummary,
+    /// The parser's detail, shared with the transcript cache. `None` when no
+    /// session file matched.
+    parsed: Option<std::sync::Arc<ConversationDetail>>,
+    /// Child rows, for the delegation meta.
+    children: Vec<DbConversationSummary>,
+}
+
+impl LoadedFolderConversation {
+    fn all_turns(&self) -> &[MessageTurn] {
+        self.parsed.as_deref().map_or(&[], |d| d.turns.as_slice())
+    }
+
+    fn parsed_title(&self) -> Option<String> {
+        self.parsed.as_ref().and_then(|d| d.summary.title.clone())
+    }
+
+    fn into_detail(self, shaped: ShapedTurns) -> DbConversationDetail {
+        let window = shaped.window;
+        DbConversationDetail {
+            summary: self.summary,
+            turns: shaped.turns,
+            session_stats: self.parsed.as_ref().and_then(|d| d.session_stats.clone()),
+            transcript_watermark: self.parsed.as_ref().and_then(|d| d.transcript_watermark),
+            in_flight_user_turn_id: shaped.in_flight_user_turn_id,
+            turns_offset: window.as_ref().map(|m| m.offset),
+            turns_total: window.as_ref().map(|m| m.total),
+            assistant_turns_before_offset: window.as_ref().map(|m| m.assistant_before),
+            prefix_hash: window.as_ref().map(|m| m.prefix_hash.clone()),
+            uncovered_prefix_max_ts: window.and_then(|m| m.uncovered_prefix_max_ts),
+        }
+    }
+}
+
+/// The turns a detail response carries, and what goes with them.
+struct ShapedTurns {
+    turns: Vec<MessageTurn>,
+    in_flight_user_turn_id: Option<String>,
+    /// Set when a window was requested.
+    window: Option<crate::commands::turn_window::WindowMeta>,
+}
+
+/// Copy the requested window (all of `all` without one) out of the shared turn
+/// list and apply the per-response passes to the copy.
+///
+/// Equivalent to running those passes over a full copy and slicing afterwards
+/// (`apply_turn_window`'s contract), without copying the turns the response
+/// leaves out. Everything that needs the whole transcript reads `all`, and none
+/// of it depends on what another pass writes: the window and its fingerprint
+/// read roles and timestamps only, the delegation meta goes on tool-use blocks,
+/// and the in-flight stamp is one user turn's id, which neither of the others
+/// reads.
+fn shape_turns(
+    all: &[MessageTurn],
+    children: &[DbConversationSummary],
+    window: Option<crate::commands::turn_window::TurnWindowReq>,
+    pending: Option<(
+        &crate::acp::session_state::PendingUserMessage,
+        Option<chrono::DateTime<chrono::Utc>>,
+    )>,
+) -> ShapedTurns {
+    use crate::commands::turn_window;
+    let offset = window.map_or(0, |req| turn_window::resolve_window_offset(all, req));
+    let mut turns = all[offset..].to_vec();
+    if let Some(index) = DelegationIndex::new(all, children) {
+        index.apply(&mut turns);
+    }
+    let mut in_flight_user_turn_id = None;
+    if let Some((pending, started_at)) = pending {
+        // Decided over the whole transcript; stamped only if that turn is in
+        // the window, and reported either way, as the full response did.
+        if let Some(target) = find_in_flight_turn(all, pending, started_at) {
+            if let Some(turn) = target.checked_sub(offset).and_then(|i| turns.get_mut(i)) {
+                turn.id = pending.message_id.clone();
+            }
+            in_flight_user_turn_id = Some(pending.message_id.clone());
+        }
+    }
+    ShapedTurns {
+        turns,
+        in_flight_user_turn_id,
+        window: window.map(|_| turn_window::window_meta(all, offset)),
     }
 }
 
@@ -1357,12 +1504,23 @@ pub async fn get_folder_conversation_core(
     conn: &sea_orm::DatabaseConnection,
     conversation_id: i32,
 ) -> Result<(DbConversationDetail, Option<String>), AppCommandError> {
+    let loaded = load_folder_conversation(conn, conversation_id).await?;
+    let parsed_title = loaded.parsed_title();
+    let shaped = shape_turns(loaded.all_turns(), &loaded.children, None, None);
+    Ok((loaded.into_detail(shaped), parsed_title))
+}
+
+/// Resolve the row, read its transcript (through the parser's cache), follow
+/// any external-id change the parse revealed, and fetch the child rows.
+async fn load_folder_conversation(
+    conn: &sea_orm::DatabaseConnection,
+    conversation_id: i32,
+) -> Result<LoadedFolderConversation, AppCommandError> {
     let summary = conversation_service::get_by_id(conn, conversation_id)
         .await
         .map_err(AppCommandError::from)?;
 
-    let (mut turns, session_stats, resolved_ext_id, parsed_title, parsed_model, transcript_watermark) =
-        if let Some(ref ext_id) = summary.external_id {
+    let (parsed, resolved_ext_id) = if let Some(ref ext_id) = summary.external_id {
         let at = summary.agent_type;
         let eid = ext_id.clone();
         let db_created_at = summary.created_at;
@@ -1380,20 +1538,13 @@ pub async fn get_folder_conversation_core(
         };
         tokio::task::spawn_blocking(move || -> Result<_, AppCommandError> {
             let parser = build_agent_parser(at);
-            match parser.get_conversation(&eid) {
+            match parser.get_conversation_shared(&eid) {
                 Ok(d) => {
                     // Claude `/clear` (and similar on-disk id changes) make
                     // the parser resolve a different uuid than we asked for.
                     // Persist that so reopen/reconnect follow the live file.
                     let resolved = (d.summary.id != eid).then(|| d.summary.id.clone());
-                    Ok((
-                        d.turns,
-                        d.session_stats,
-                        resolved,
-                        d.summary.title,
-                        d.summary.model,
-                        d.transcript_watermark,
-                    ))
+                    Ok((Some(d), resolved))
                 }
                 Err(crate::parsers::ParseError::ConversationNotFound(_)) => {
                     // The external_id may no longer match any local file —
@@ -1426,20 +1577,13 @@ pub async fn get_folder_conversation_core(
                                 });
                             if let Some(conv) = matched {
                                 let new_ext_id = conv.id.clone();
-                                if let Ok(d) = parser.get_conversation(&new_ext_id) {
-                                    return Ok((
-                                        d.turns,
-                                        d.session_stats,
-                                        Some(new_ext_id),
-                                        d.summary.title,
-                                        d.summary.model,
-                                        d.transcript_watermark,
-                                    ));
+                                if let Ok(d) = parser.get_conversation_shared(&new_ext_id) {
+                                    return Ok((Some(d), Some(new_ext_id)));
                                 }
                             }
                         }
                     }
-                    Ok((vec![], None, None, None, None, None))
+                    Ok((None, None))
                 }
                 Err(e) => Err(parse_error_to_app_error(e)),
             }
@@ -1452,7 +1596,7 @@ pub async fn get_folder_conversation_core(
             .with_detail(e.to_string())
         })??
     } else {
-        (vec![], None, None, None, None, None)
+        (None, None)
     };
 
     // If we resolved a different external_id (e.g. ACP UUID → parser branch ID,
@@ -1506,7 +1650,7 @@ pub async fn get_folder_conversation_core(
             summary.external_id = Some(new_ext_id);
         }
     }
-    summary.message_count = turns.len() as u32;
+    summary.message_count = parsed.as_ref().map_or(0, |d| d.turns.len()) as u32;
     // The transcript is the richer source for the session's model. Codex is
     // the concrete case: an ACP-driven row is created before any
     // `turn_context` names a model, so the DB column can stay NULL forever
@@ -1519,8 +1663,12 @@ pub async fn get_folder_conversation_core(
     // first value for the life of the conversation, and a mid-session `/model`
     // switch would never show. The stored value stays as the fallback for a
     // transcript that names no model at all.
-    if let Some(parsed) = parsed_model.filter(|m| !m.trim().is_empty()) {
-        summary.model = Some(parsed);
+    if let Some(model) = parsed
+        .as_ref()
+        .and_then(|d| d.summary.model.clone())
+        .filter(|m| !m.trim().is_empty())
+    {
+        summary.model = Some(model);
     }
 
     // Historical recovery for the read-only sub-agent viewer: JSONL parsers
@@ -1528,27 +1676,17 @@ pub async fn get_folder_conversation_core(
     // can't drive the parent UI's child-conversation lookup. Join on
     // `parent_id = summary.id` to repopulate it from the DB. Failure to
     // fetch children silently degrades to "no button on the card" (the
-    // pre-fix behavior), never to a failed detail load.
+    // pre-fix behavior), never to a failed detail load. The meta itself is
+    // injected into whichever turns the caller copies out (`detail_with`).
     let children = conversation_service::list_children(conn, conversation_id)
         .await
         .unwrap_or_default();
-    inject_delegation_meta(&mut turns, &children);
 
-    Ok((
-        DbConversationDetail {
-            summary,
-            turns,
-            session_stats,
-            transcript_watermark,
-            in_flight_user_turn_id: None,
-            turns_offset: None,
-            turns_total: None,
-            assistant_turns_before_offset: None,
-            prefix_hash: None,
-            uncovered_prefix_max_ts: None,
-        },
-        parsed_title,
-    ))
+    Ok(LoadedFolderConversation {
+        summary,
+        parsed,
+        children,
+    })
 }
 
 /// A normalized, comparable view of a user turn's renderable content. Used to
@@ -1676,11 +1814,29 @@ const MAX_IN_FLIGHT_WALK_USER_TURNS: usize = 32;
 /// could hide a *completed* reply in the end-of-turn race (the agent may persist
 /// the final assistant row before the backend processes `TurnComplete` and clears
 /// the live state, after which an attaching client's snapshot can't recover it).
+///
+/// The live fetch decides with [`find_in_flight_turn`] over the shared turn
+/// list and stamps only its window; this whole-list form is the reference the
+/// tests hold it to.
+#[cfg(test)]
 pub(crate) fn apply_in_flight_message_id(
     turns: &mut [MessageTurn],
     pending: &crate::acp::session_state::PendingUserMessage,
     started_at: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Option<String> {
+    let target_idx = find_in_flight_turn(turns, pending, started_at)?;
+    turns[target_idx].id = pending.message_id.clone();
+    Some(pending.message_id.clone())
+}
+
+/// The decision half of [`apply_in_flight_message_id`]: the index of the turn
+/// to stamp, read-only, so a windowed fetch can decide over the whole (shared)
+/// transcript and stamp only the copy it returns.
+fn find_in_flight_turn(
+    turns: &[MessageTurn],
+    pending: &crate::acp::session_state::PendingUserMessage,
+    started_at: Option<chrono::DateTime<chrono::Utc>>,
+) -> Option<usize> {
     let n = turns.len();
     if n == 0 {
         return None;
@@ -1804,8 +1960,7 @@ pub(crate) fn apply_in_flight_message_id(
     if collides {
         return None;
     }
-    turns[target_idx].id = pending.message_id.clone();
-    Some(pending.message_id.clone())
+    Some(target_idx)
 }
 
 /// Resolve the raw `tailTurns` / `fromIndex` request fields into a window
@@ -1831,6 +1986,11 @@ pub fn resolve_turn_window_req(
 /// full turn list (delegation meta, auto-title, in-flight stamping) — slicing
 /// is strictly a serialization concern, so the windowed `turns` are identical
 /// to the corresponding region of the full response.
+///
+/// The reference form: the live fetch now copies only the window out of the
+/// shared parse and computes the same metadata over the shared list, and the
+/// tests compare the two.
+#[cfg(test)]
 fn apply_turn_window(
     detail: &mut DbConversationDetail,
     req: crate::commands::turn_window::TurnWindowReq,
@@ -1865,9 +2025,10 @@ pub async fn get_folder_conversation_with_live_core(
     conversation_id: i32,
     window: Option<crate::commands::turn_window::TurnWindowReq>,
 ) -> Result<DbConversationDetail, AppCommandError> {
-    let (mut detail, parsed_title) = get_folder_conversation_core(conn, conversation_id).await?;
+    let mut loaded = load_folder_conversation(conn, conversation_id).await?;
+    let parsed_title = loaded.parsed_title();
 
-    // Per-turn auto-title backfill. The parse `get_folder_conversation_core`
+    // Per-turn auto-title backfill. The parse `load_folder_conversation`
     // just did already produced the session-file title; adopt it (and broadcast
     // a sidebar upsert) whenever the user hasn't renamed this conversation by
     // hand. `refresh_auto_title` re-checks the lock and equality, so once the
@@ -1878,9 +2039,9 @@ pub async fn get_folder_conversation_with_live_core(
     // the same open, and the sidebar has no use for two broadcasts of the same
     // row a microsecond apart.
     let mut upserted = false;
-    if !detail.summary.title_locked {
+    if !loaded.summary.title_locked {
         if let Some(parsed) = parsed_title.as_deref().map(str::trim) {
-            if !parsed.is_empty() && detail.summary.title.as_deref() != Some(parsed) {
+            if !parsed.is_empty() && loaded.summary.title.as_deref() != Some(parsed) {
                 match conversation_service::refresh_auto_title(
                     conn,
                     conversation_id,
@@ -1889,7 +2050,7 @@ pub async fn get_folder_conversation_with_live_core(
                 .await
                 {
                     Ok(true) => {
-                        detail.summary.title = Some(parsed.to_string());
+                        loaded.summary.title = Some(parsed.to_string());
                         upserted = true;
                         chat_channel_manager
                             .sync_conversation_title(conn, conversation_id, parsed)
@@ -1909,7 +2070,7 @@ pub async fn get_folder_conversation_with_live_core(
     // sidebar reads the row rather than the transcript this parse just walked.
     // `seed_model_if_empty` re-checks emptiness in SQL, so once a session has a
     // model this is a no-op that writes nothing.
-    if let Some(model) = detail.summary.model.clone() {
+    if let Some(model) = loaded.summary.model.clone() {
         match conversation_service::seed_model_if_empty(conn, conversation_id, &model).await {
             Ok(true) => upserted = true,
             Ok(false) => {}
@@ -1923,23 +2084,24 @@ pub async fn get_folder_conversation_with_live_core(
         emit_conversation_upsert(emitter, conn, conversation_id).await;
     }
 
-    if let Some((pending, started_at)) = manager
+    // Only the turns the response carries are copied out of the shared
+    // (cached) parse; see `shape_turns`.
+    let pending = manager
         .pending_user_message_for_conversation(conversation_id)
-        .await
-    {
-        detail.in_flight_user_turn_id =
-            apply_in_flight_message_id(&mut detail.turns, &pending, started_at);
-    }
-    if let Some(req) = window {
-        apply_turn_window(&mut detail, req);
-    }
-    Ok(detail)
+        .await;
+    let shaped = shape_turns(
+        loaded.all_turns(),
+        &loaded.children,
+        window,
+        pending.as_ref().map(|(p, started_at)| (p, *started_at)),
+    );
+    Ok(loaded.into_detail(shaped))
 }
 
 /// One page of older history for the reverse-infinite-scroll path. Light
-/// variant of the detail fetch: full parse + delegation-meta injection (both
-/// happen inside `get_folder_conversation_core`), then a pure slice — no
-/// auto-title refresh, no live correlation, no sidebar events.
+/// variant of the detail fetch: the (cached) parse, then only the page's turns
+/// copied out with their delegation meta — no auto-title refresh, no live
+/// correlation, no sidebar events.
 pub async fn get_folder_conversation_turns_core(
     conn: &sea_orm::DatabaseConnection,
     conversation_id: i32,
@@ -1947,13 +2109,17 @@ pub async fn get_folder_conversation_turns_core(
     limit: usize,
 ) -> Result<ConversationTurnsPage, AppCommandError> {
     use crate::commands::turn_window;
-    let (detail, _parsed_title) = get_folder_conversation_core(conn, conversation_id).await?;
-    let turns = detail.turns;
-    let (start, end) = turn_window::resolve_page_bounds(&turns, before_index, limit);
-    let meta = turn_window::window_meta(&turns, start);
-    let seam = turn_window::window_meta(&turns, before_index.min(turns.len()));
+    let loaded = load_folder_conversation(conn, conversation_id).await?;
+    let turns = loaded.all_turns();
+    let (start, end) = turn_window::resolve_page_bounds(turns, before_index, limit);
+    let meta = turn_window::window_meta(turns, start);
+    let seam = turn_window::window_meta(turns, before_index.min(turns.len()));
+    let mut page = turns[start..end].to_vec();
+    if let Some(index) = DelegationIndex::new(turns, &loaded.children) {
+        index.apply(&mut page);
+    }
     Ok(ConversationTurnsPage {
-        turns: turns[start..end].to_vec(),
+        turns: page,
         turns_offset: meta.offset,
         turns_total: meta.total,
         assistant_turns_before_offset: meta.assistant_before,
@@ -6797,6 +6963,126 @@ mod tests {
         assert_eq!(detail.turns_offset, Some(4));
         assert_eq!(detail.turns_total, Some(4));
         assert!(detail.turns.is_empty());
+    }
+
+    /// `shape_turns` copies only the window out of the shared parse; the
+    /// response must be exactly what the full-list passes followed by the
+    /// slice produce, for every window and with or without a turn in flight —
+    /// including when the delegation result or the in-flight prompt lies
+    /// outside the window.
+    #[test]
+    fn shaped_window_matches_full_list_passes_then_slice() {
+        use crate::commands::turn_window::TurnWindowReq;
+
+        let delegate = "mcp__codeg-mcp__delegate_to_agent";
+        let mut all = vec![
+            user_text_turn("turn-0", "delegate this", at(-60)),
+            tool_use_turn(Some("tu-early"), delegate),
+            tool_result_turn("tu-early", r#"{"task_id":"call-1","status":"running"}"#),
+            user_text_turn("turn-3", "and this", at(-40)),
+            tool_use_turn(Some("tu-by-task"), delegate),
+            assistant_text_turn("turn-5", "launched", at(-38), true),
+            user_text_turn("turn-6", "hello", at(-20)),
+            assistant_text_turn("turn-7", "hi", at(-19), true),
+            user_text_turn("turn-8", "resume it", at(-10)),
+            tool_use_turn_with_input(
+                Some("tu-resume"),
+                "mcp__codeg-mcp__resume_delegation",
+                Some(r#"{"task_id":"call-1"}"#),
+            ),
+            user_text_turn("turn-10", "hello", at(2)),
+            assistant_text_turn("turn-11", "partial", at(3), false),
+        ];
+        // Distinct ids and ordered timestamps; the last prompt and its partial
+        // reply were written after the running turn started.
+        for (i, turn) in all.iter_mut().enumerate() {
+            turn.id = format!("turn-{i}");
+            let i = i as i64;
+            turn.timestamp = at(if i >= 10 { i - 8 } else { -60 + i * 5 });
+        }
+        let mut by_task = summary_child(7, "tu-unrelated", "completed");
+        by_task.delegation_call_id = Some("call-1".into());
+        let children = vec![summary_child(42, "tu-early", "running"), by_task];
+
+        let len = all.len();
+        let windows = [
+            None,
+            Some(TurnWindowReq::Tail(1)),
+            Some(TurnWindowReq::Tail(3)),
+            Some(TurnWindowReq::Tail(7)),
+            Some(TurnWindowReq::Tail(500)),
+            Some(TurnWindowReq::FromIndex(0)),
+            Some(TurnWindowReq::FromIndex(4)),
+            Some(TurnWindowReq::FromIndex(len - 1)),
+            Some(TurnWindowReq::FromIndex(len)),
+            Some(TurnWindowReq::FromIndex(len + 5)),
+        ];
+        let in_window = pending_text("msg-live", "hello");
+        let pendings = [
+            None,
+            Some((&in_window, Some(turn_started()))),
+            Some((&in_window, None)),
+            // A prompt matching an early turn: started long before.
+            Some((&in_window, Some(at(-120)))),
+        ];
+
+        for window in windows {
+            for pending in pendings {
+                let mut reference = windowless_detail(all.clone());
+                inject_delegation_meta(&mut reference.turns, &children);
+                if let Some((p, started_at)) = pending {
+                    reference.in_flight_user_turn_id =
+                        apply_in_flight_message_id(&mut reference.turns, p, started_at);
+                }
+                if let Some(req) = window {
+                    apply_turn_window(&mut reference, req);
+                }
+
+                let shaped = shape_turns(&all, &children, window, pending);
+                let ctx = format!("window {window:?}, pending {:?}", pending.map(|(_, s)| s));
+                assert_eq!(
+                    serde_json::to_value(&shaped.turns).unwrap(),
+                    serde_json::to_value(&reference.turns).unwrap(),
+                    "{ctx}"
+                );
+                assert_eq!(
+                    shaped.in_flight_user_turn_id, reference.in_flight_user_turn_id,
+                    "{ctx}"
+                );
+                let meta = shaped.window.as_ref();
+                assert_eq!(meta.map(|m| m.offset), reference.turns_offset, "{ctx}");
+                assert_eq!(meta.map(|m| m.total), reference.turns_total, "{ctx}");
+                assert_eq!(
+                    meta.map(|m| m.assistant_before),
+                    reference.assistant_turns_before_offset,
+                    "{ctx}"
+                );
+                assert_eq!(
+                    meta.map(|m| m.prefix_hash.clone()),
+                    reference.prefix_hash,
+                    "{ctx}"
+                );
+                assert_eq!(
+                    meta.and_then(|m| m.uncovered_prefix_max_ts),
+                    reference.uncovered_prefix_max_ts,
+                    "{ctx}"
+                );
+            }
+        }
+        // The cases above really exercise both passes from outside the window.
+        let tail = shape_turns(&all, &children, Some(TurnWindowReq::FromIndex(9)), None);
+        assert!(
+            first_block_meta(&tail.turns[0]).is_some(),
+            "resume card found its child"
+        );
+        let stamped = shape_turns(
+            &all,
+            &children,
+            Some(TurnWindowReq::FromIndex(len)),
+            Some((&in_window, Some(turn_started()))),
+        );
+        assert!(stamped.turns.is_empty());
+        assert_eq!(stamped.in_flight_user_turn_id.as_deref(), Some("msg-live"));
     }
 
     #[tokio::test]
