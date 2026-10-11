@@ -1,6 +1,14 @@
 import { useCallback, useRef, useSyncExternalStore } from "react"
 import { act, renderHook } from "@testing-library/react"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type Mock,
+} from "vitest"
 
 import { useMessageQueue, type QueuedMessage } from "./use-message-queue"
 import { useQueueAutoSend } from "./use-queue-auto-send"
@@ -13,17 +21,36 @@ import type { PromptDraft } from "@/lib/types"
  * backend gate admits one prompt at a time and bounces the rest; `accepted`
  * is what reached the agent, `delivered` what went into a held turn.
  */
-function createSession() {
+interface SessionState {
+  status: "connected" | "prompting" | "error"
+  awaitingPersist: boolean
+  heldTurnReady: boolean
+}
+
+interface Session {
+  state: SessionState
+  busy: boolean
+  accepted: string[]
+  delivered: string[]
+  trySend: (who: string, text: string) => boolean
+  deliver: Mock<(text: string) => Promise<void>>
+  set: (patch: Partial<SessionState>) => void
+  subscribe: (cb: () => void) => () => void
+  endTurn: () => void
+  startTurn: () => void
+}
+
+function createSession(): Session {
   const listeners = new Set<() => void>()
-  const session = {
+  const session: Session = {
     state: {
-      status: "prompting" as "connected" | "prompting" | "error",
+      status: "prompting",
       awaitingPersist: false,
       heldTurnReady: false,
     },
     busy: true,
-    accepted: [] as string[],
-    delivered: [] as string[],
+    accepted: [],
+    delivered: [],
     /** A prompt from `who`: accepted (its turn starts and is waiting to
      *  persist), or bounced because a turn is already running. */
     trySend(who: string, text: string): boolean {
@@ -38,13 +65,15 @@ function createSession() {
       // Delivering wakes the agent: the turn is working again.
       session.set({ heldTurnReady: false })
     }),
-    set(patch: Partial<typeof session.state>) {
+    set(patch: Partial<SessionState>) {
       session.state = { ...session.state, ...patch }
       listeners.forEach((l) => l())
     },
     subscribe(cb: () => void) {
       listeners.add(cb)
-      return () => listeners.delete(cb)
+      return () => {
+        listeners.delete(cb)
+      }
     },
     /** The turn running now ends; the surface that sent it settles. */
     endTurn() {
@@ -62,7 +91,6 @@ function createSession() {
   }
   return session
 }
-type Session = ReturnType<typeof createSession>
 
 function draft(text: string): PromptDraft {
   return { blocks: [{ type: "text", text }], displayText: text }
