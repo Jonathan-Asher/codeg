@@ -16,14 +16,22 @@ import { MessageListView } from "@/components/message/message-list-view"
 import { useAcpActions } from "@/contexts/acp-connections-context"
 import { useConnectionLifecycle } from "@/hooks/use-connection-lifecycle"
 import { useConversationDetail } from "@/hooks/use-conversation-detail"
+import { useMessageQueue, type QueuedMessage } from "@/hooks/use-message-queue"
+import { useQueueAutoSend } from "@/hooks/use-queue-auto-send"
 import {
   acpStopAsyncTask,
   createChatConversation,
   createConversation,
   createChatDir,
+  submitSessionFeedback,
 } from "@/lib/api"
 import { toErrorMessage } from "@/lib/app-error"
+import {
+  backgroundTaskCount as countBackgroundTasks,
+  canDeliverIntoHeldTurn,
+} from "@/lib/background-idle"
 import { notify } from "@/lib/notify"
+import { shouldQueueDirectSend } from "@/lib/queue-flush"
 import { getAgentLabel } from "@/lib/custom-agents"
 import {
   extractUserImagesFromDraft,
@@ -45,6 +53,7 @@ import type {
   MessageTurn,
   PlanApprovalAnswer,
   PromptDraft,
+  PromptInputBlock,
   QuestionAnswer,
 } from "@/lib/types"
 import { cn, randomUUID } from "@/lib/utils"
@@ -74,11 +83,14 @@ import { useShallow } from "zustand/react/shallow"
  *   `registerLiveMessageSink` streaming deltas → the runtime store
  *   `MessageListView`         the transcript (reads turns by conversation id)
  *   `ConversationShell`       composer + the three interrupt dialogs
+ *   `useMessageQueue`,        messages sent while the agent is busy: they
+ *   `useQueueAutoSend`        wait above the composer and go out in order,
+ *                             as in a workspace tab
  *
- * What it deliberately leaves out: the message queue, live-feedback steering,
- * transcript export and the welcome-page quick actions. Those belong
- * to the full workspace surface, which the card's "open in workspace" menu
- * entry is one click away from.
+ * What it deliberately leaves out: live-feedback steering, transcript export
+ * and the welcome-page quick actions. Those belong to the full workspace
+ * surface, which the card's "open in workspace" menu entry is one click away
+ * from.
  *
  * `contextKey` is the ACP connection key and must be STABLE for the card's
  * lifetime; when this conversation is also open in a workspace tab, the two
@@ -188,6 +200,7 @@ export function CanvasConversationSurface({
 }: CanvasConversationSurfaceProps) {
   const t = useTranslations("Canvas")
   const sharedT = useTranslations("Folder.chat.shared")
+  const tComposer = useTranslations("Folder.chat.messageInput")
   const tAsyncTasks = useTranslations("Folder.chat.asyncTasks")
   const acpActions = useAcpActions()
   const {
@@ -294,11 +307,16 @@ export function CanvasConversationSurface({
     acpLoadError,
   } = useConversationDetail(effectiveConversationId)
 
-  const { externalId: runtimeExternalId } = useConversationRuntimeStore(
-    useShallow((s) => ({
-      externalId: s.byConversationId.get(effectiveConversationId)?.externalId,
-    }))
-  )
+  const { externalId: runtimeExternalId, syncState: runtimeSyncState } =
+    useConversationRuntimeStore(
+      useShallow((s) => {
+        const session = s.byConversationId.get(effectiveConversationId)
+        return {
+          externalId: session?.externalId,
+          syncState: session?.syncState,
+        }
+      })
+    )
   const externalId =
     detail?.summary.external_id ?? runtimeExternalId ?? undefined
 
@@ -546,8 +564,36 @@ export function CanvasConversationSurface({
     [agentType, displayModes]
   )
 
+  // Messages sent while the agent is busy wait here, above the composer, and
+  // go out in order once it can take them — see `useQueueAutoSend` below.
+  const {
+    queue: msgQueue,
+    enqueue: mqEnqueue,
+    holdUntilTurnEnd: mqHoldUntilTurnEnd,
+    requeueFront: mqRequeueFront,
+    getQueueLength: mqGetQueueLength,
+    dequeue: mqDequeue,
+    remove: mqRemove,
+    reorder: mqReorder,
+    updateItem: mqUpdateItem,
+    editingItemId: mqEditingItemId,
+    startEditing: mqStartEditing,
+    cancelEditing: mqCancelEditing,
+  } = useMessageQueue()
+  // Stamped when the backend bounces a send because a turn is already running
+  // (the same conversation open in a workspace tab or another window, which
+  // started its turn first). The queue's retry backs off from it.
+  const lastFlushBounceAtRef = useRef(0)
+
   const handleSend = useCallback(
-    (draft: PromptDraft, selectedModeIdArg?: string | null) => {
+    (
+      draft: PromptDraft,
+      selectedModeIdArg?: string | null,
+      // `fromQueueFlush` marks the queue sending its head: that always sends
+      // and, on a bounce, goes back to the FRONT. A direct send while messages
+      // wait joins the end of the line instead of overtaking them.
+      opts?: { fromQueueFlush?: boolean }
+    ) => {
       // Bail BEFORE the optimistic turn exists. A second submit while the first
       // one is still minting the conversation row cannot be sent (there is no
       // row to send it against yet), and painting it into the transcript first
@@ -555,6 +601,12 @@ export function CanvasConversationSurface({
       // never rolled back.
       const alreadyPersisted = dbConversationIdRef.current != null
       if (!alreadyPersisted && (creatingRef.current || !draftTarget)) return
+
+      const fromQueueFlush = opts?.fromQueueFlush ?? false
+      if (shouldQueueDirectSend(fromQueueFlush, mqGetQueueLength())) {
+        mqEnqueue(draft, selectedModeIdArg ?? null)
+        return
+      }
 
       const optimisticTurn = buildOptimisticUserTurn(
         draft,
@@ -567,9 +619,7 @@ export function CanvasConversationSurface({
       )
       setSendSignal((prev) => prev + 1)
       setSyncState(effectiveConversationId, "awaiting_persist")
-      // No message queue on this surface: a send the backend bounces (a turn
-      // already in flight) rolls back and surfaces as a toast rather than
-      // silently parking the draft somewhere the card doesn't render.
+      // A failed send rolls its optimistic turn back.
       //
       // Rolled back against BOTH ids the turn can be filed under. A rejection
       // is a round trip of its own, so it can land after the row has arrived
@@ -587,6 +637,19 @@ export function CanvasConversationSurface({
           removeOptimisticTurn(persistedId, optimisticTurn.id)
         }
       }
+      // The backend refused it because a turn is already running (another
+      // surface on this conversation started one first, or this card had not
+      // heard of it yet). Not an error: it waits in the queue and goes out when
+      // that turn ends — back at the front if it was the queue's head.
+      const onTurnInProgress = () => {
+        lastFlushBounceAtRef.current = Date.now()
+        onSendFailed()
+        if (fromQueueFlush) {
+          mqRequeueFront(draft, selectedModeIdArg ?? null)
+        } else {
+          mqEnqueue(draft, selectedModeIdArg ?? null)
+        }
+      }
 
       const persistedId = dbConversationIdRef.current
       if (persistedId) {
@@ -594,7 +657,7 @@ export function CanvasConversationSurface({
           folderId: boundFolderId ?? undefined,
           conversationId: persistedId,
           clientMessageId: optimisticTurn.id,
-          onTurnInProgress: onSendFailed,
+          onTurnInProgress,
           onSendFailed,
         })
         return
@@ -643,7 +706,7 @@ export function CanvasConversationSurface({
             folderId: sendFolderId,
             conversationId: newId,
             clientMessageId: optimisticTurn.id,
-            onTurnInProgress: onSendFailed,
+            onTurnInProgress,
             onSendFailed,
           })
         } catch (e) {
@@ -674,6 +737,9 @@ export function CanvasConversationSurface({
       draftTarget,
       effectiveConversationId,
       lifecycleSend,
+      mqEnqueue,
+      mqGetQueueLength,
+      mqRequeueFront,
       onConversationCreated,
       refreshConversations,
       removeOptimisticTurn,
@@ -684,6 +750,90 @@ export function CanvasConversationSurface({
       t,
       upsertFolder,
     ]
+  )
+
+  // The turn in flight is held open only for background work: the agent is
+  // idle, so a plain send is delivered into the turn right away and the queue
+  // drains into it (see `lib/background-idle.ts`), as in a workspace tab.
+  const awaitingBackground =
+    connStatus === "prompting" && conn.awaitingBackground
+  const heldTurnReady =
+    conn.connectionId != null &&
+    canDeliverIntoHeldTurn({
+      status: connStatus,
+      awaitingBackground: conn.awaitingBackground,
+      nativeSteering: conn.nativeSteering,
+    })
+  const connectionId = conn.connectionId
+  const deliverIntoHeldTurn = useCallback(
+    async (text: string, blocks?: PromptInputBlock[]) => {
+      if (!connectionId) throw new Error("no connection")
+      await submitSessionFeedback(connectionId, text.trim(), blocks)
+    },
+    [connectionId]
+  )
+
+  const connStatusRef = useRef(connStatus)
+  useEffect(() => {
+    connStatusRef.current = connStatus
+  }, [connStatus])
+  const selectedModeIdRef = useRef<string | null>(null)
+  const sendQueueHead = useCallback(
+    (item: QueuedMessage) =>
+      handleSend(
+        item.draft,
+        // Queued before this card knew its modes: take the mode in effect now.
+        item.adoptSendTimeMode ? selectedModeIdRef.current : item.modeId,
+        { fromQueueFlush: true }
+      ),
+    [handleSend]
+  )
+  const isQueueConnectionReady = useCallback(
+    () => connStatusRef.current === "connected",
+    []
+  )
+  const notifyHeldDeliveryFailed = useCallback(
+    (error: unknown) =>
+      notify({
+        level: "error",
+        key: `held-turn-send-failed:${contextKey}`,
+        title: tComposer("heldTurnSendFailed"),
+        description: toErrorMessage(error),
+      }),
+    [contextKey, tComposer]
+  )
+  useQueueAutoSend({
+    queue: msgQueue,
+    dequeue: mqDequeue,
+    remove: mqRemove,
+    holdUntilTurnEnd: mqHoldUntilTurnEnd,
+    editingItemId: mqEditingItemId,
+    // A persisted conversation only: a draft card's first send is what
+    // creates the row, and the card that replaces it carries on from there.
+    canSendNow:
+      dbConversationId != null &&
+      connStatus === "connected" &&
+      runtimeSyncState !== "awaiting_persist",
+    isConnectionReady: isQueueConnectionReady,
+    heldTurnReady,
+    lastBounceAtRef: lastFlushBounceAtRef,
+    sendHead: sendQueueHead,
+    deliverIntoHeldTurn,
+    onHeldDeliveryFailed: notifyHeldDeliveryFailed,
+  })
+
+  const editingQueueItem = useMemo(
+    () =>
+      mqEditingItemId
+        ? (msgQueue.find((m) => m.id === mqEditingItemId) ?? null)
+        : null,
+    [mqEditingItemId, msgQueue]
+  )
+  const handleSaveQueueEdit = useCallback(
+    (draft: PromptDraft) => {
+      if (mqEditingItemId) mqUpdateItem(mqEditingItemId, draft)
+    },
+    [mqEditingItemId, mqUpdateItem]
   )
 
   const handleAnswerQuestion = useCallback(
@@ -760,6 +910,9 @@ export function CanvasConversationSurface({
     }
     return displayModes?.current_mode_id ?? connectionModes[0]?.id ?? null
   }, [displayModes, connectionModes, modeId])
+  useEffect(() => {
+    selectedModeIdRef.current = selectedModeId
+  }, [selectedModeId])
 
   // Arrow-key history source, read lazily on the first Up/Down (see
   // `MessageInput.getSentHistory`) so streaming tokens cost nothing here.
@@ -820,6 +973,26 @@ export function CanvasConversationSurface({
           attachmentTabId={contextKey}
           folderPickerOverride={folderPickerOverride}
           isActive={isActive}
+          queue={msgQueue}
+          // A draft card's first send creates the conversation; it has no
+          // queue until then (see `canSendNow` above).
+          onEnqueue={isDraft ? undefined : mqEnqueue}
+          awaitingBackground={awaitingBackground}
+          backgroundTaskCount={countBackgroundTasks(
+            conn.backgroundOutstanding,
+            conn.asyncTasks
+          )}
+          heldTurnReady={heldTurnReady}
+          onDeliverNow={heldTurnReady ? deliverIntoHeldTurn : undefined}
+          onQueueReorder={mqReorder}
+          onQueueEdit={mqStartEditing}
+          onQueueDelete={mqRemove}
+          editingItemId={mqEditingItemId}
+          editingDraftText={editingQueueItem?.draft.displayText ?? null}
+          editingDraftBlocks={editingQueueItem?.draft.blocks ?? null}
+          isEditingQueueItem={mqEditingItemId != null}
+          onSaveQueueEdit={handleSaveQueueEdit}
+          onCancelQueueEdit={mqCancelEditing}
         >
           {isDraft && onAgentTypeChange && (
             <div className="flex shrink-0 justify-center border-b border-border/60 px-3 py-2">
