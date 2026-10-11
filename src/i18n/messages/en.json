@@ -7201,5 +7201,13 @@
     "saveFailed": "Couldn't save the Quick Ask settings: {error}",
     "open": "Try it",
     "openButton": "Open Quick Ask"
+  },
+  "AppErrorBoundary": {
+    "title": "Something went wrong here",
+    "body": "This part of codeg hit an unexpected error. The rest of the window keeps working.",
+    "reconnectingTitle": "Waiting for the server",
+    "reconnectingBody": "The connection to the server was lost. This view reloads by itself once it is back.",
+    "retry": "Try again",
+    "reload": "Reload window"
   }
 }

@@ -7201,5 +7201,13 @@
     "saveFailed": "Quick-Ask-Einstellungen konnten nicht gespeichert werden: {error}",
     "open": "Ausprobieren",
     "openButton": "Quick Ask öffnen"
+  },
+  "AppErrorBoundary": {
+    "title": "Hier ist etwas schiefgelaufen",
+    "body": "In diesem Teil von codeg ist ein unerwarteter Fehler aufgetreten. Der Rest des Fensters funktioniert weiter.",
+    "reconnectingTitle": "Warte auf den Server",
+    "reconnectingBody": "Die Verbindung zum Server ist unterbrochen. Diese Ansicht lädt sich neu, sobald er wieder erreichbar ist.",
+    "retry": "Erneut versuchen",
+    "reload": "Fenster neu laden"
   }
 }

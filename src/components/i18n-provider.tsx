@@ -36,6 +36,8 @@ interface AppI18nContextValue {
 
 const AppI18nContext = createContext<AppI18nContextValue | null>(null)
 const LANGUAGE_SETTINGS_UPDATED_EVENT = "app://language-settings-updated"
+/** Background retries of a failed startup load, and the waits before them. */
+export const STARTUP_RETRY_DELAYS_MS = [2_000, 5_000, 15_000, 30_000, 60_000]
 
 function subscribeSystemLocale(onStoreChange: () => void) {
   if (typeof window === "undefined") return () => {}
@@ -179,25 +181,39 @@ export function AppI18nProvider({
     }
   }, [setLanguageSettings])
 
+  // The saved language. A failed load (the server restarting, a browser
+  // tab opened while it was down) must not hold the window on the boot
+  // screen: it renders at once with the locale it started with, and the
+  // load is retried in the background until it answers.
   useEffect(() => {
     let cancelled = false
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
 
-    getSystemLanguageSettings()
-      .then((settings) => {
-        if (cancelled) return
-        setLanguageSettings(settings)
-      })
-      .catch((err) => {
-        console.error("[i18n] load language settings failed:", err)
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLanguageSettingsLoaded(true)
-        }
-      })
+    const load = (attempt: number) => {
+      getSystemLanguageSettings()
+        .then((settings) => {
+          if (cancelled) return
+          setLanguageSettings(settings)
+        })
+        .catch((err) => {
+          if (cancelled) return
+          console.warn("[i18n] load language settings failed:", err)
+          const delay = STARTUP_RETRY_DELAYS_MS[attempt]
+          if (delay !== undefined) {
+            retryTimer = setTimeout(() => load(attempt + 1), delay)
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setLanguageSettingsLoaded(true)
+          }
+        })
+    }
+    load(0)
 
     return () => {
       cancelled = true
+      if (retryTimer !== null) clearTimeout(retryTimer)
     }
   }, [setLanguageSettings])
 
@@ -226,29 +242,48 @@ export function AppI18nProvider({
       })
   }, [appLocale])
 
+  // The locale's messages are a chunk the page loads on demand — from the
+  // server, in a browser. When that fails the window renders with the
+  // messages it already has (instead of staying on the boot screen for good)
+  // and the load is retried a few times, further apart each time.
+  const [messagesFailedFor, setMessagesFailedFor] = useState<AppLocale | null>(
+    null
+  )
+  const [messagesAttempt, setMessagesAttempt] = useState(0)
   useEffect(() => {
     if (appLocale === messagesLocale) {
       return
     }
     let cancelled = false
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
 
     getMessagesForLocale(appLocale)
       .then((nextMessages) => {
         if (!cancelled) {
           setMessages(nextMessages)
           setMessagesLocale(appLocale)
+          setMessagesFailedFor(null)
+          setMessagesAttempt(0)
         }
       })
       .catch((err) => {
-        console.error("[i18n] load locale messages failed:", err)
+        if (cancelled) return
+        console.warn("[i18n] load locale messages failed:", err)
+        setMessagesFailedFor(appLocale)
+        const delay = STARTUP_RETRY_DELAYS_MS[messagesAttempt]
+        if (delay !== undefined) {
+          retryTimer = setTimeout(() => setMessagesAttempt((n) => n + 1), delay)
+        }
       })
 
     return () => {
       cancelled = true
+      if (retryTimer !== null) clearTimeout(retryTimer)
     }
-  }, [appLocale, messagesLocale])
+  }, [appLocale, messagesLocale, messagesAttempt])
 
-  const localeReady = appLocale === messagesLocale
+  const localeReady =
+    appLocale === messagesLocale || messagesFailedFor === appLocale
   const appReady = languageSettingsLoaded && localeReady
   const activeIntlLocale = toIntlLocale(messagesLocale)
 

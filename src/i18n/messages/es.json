@@ -7201,5 +7201,13 @@
     "saveFailed": "No se pudieron guardar los ajustes de Quick Ask: {error}",
     "open": "Probarlo",
     "openButton": "Abrir Quick Ask"
+  },
+  "AppErrorBoundary": {
+    "title": "Algo salió mal aquí",
+    "body": "Esta parte de codeg encontró un error inesperado. El resto de la ventana sigue funcionando.",
+    "reconnectingTitle": "Esperando al servidor",
+    "reconnectingBody": "Se perdió la conexión con el servidor. Esta vista se recargará sola cuando vuelva.",
+    "retry": "Reintentar",
+    "reload": "Recargar ventana"
   }
 }

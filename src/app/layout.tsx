@@ -15,6 +15,11 @@ import { WebConnectionGuard } from "@/components/connection/web-connection-guard
 import { PresenceReporter } from "@/components/presence-reporter"
 import { WindowResizeGrips } from "@/components/layout/window-resize-grips"
 import { CloseRequestDialog } from "@/components/workspace/close-request-dialog"
+import {
+  AppErrorBoundary,
+  RouteErrorBoundary,
+} from "@/components/error-boundary/app-error-boundary"
+import { ClientErrorReporting } from "@/components/error-boundary/client-error-reporting"
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -56,6 +61,8 @@ export default async function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: APPEARANCE_INIT_SCRIPT }} />
         {/* Suppress benign ResizeObserver loop warnings (W3C spec §3.3) */}
         <script>{`window.addEventListener("error",function(e){if(e.message&&e.message.indexOf("ResizeObserver")!==-1){e.stopImmediatePropagation();e.preventDefault()}});window.onerror=function(m){if(typeof m==="string"&&m.indexOf("ResizeObserver")!==-1)return true}`}</script>
+        {/* Uncaught errors and unhandled rejections → the backend's log. */}
+        <ClientErrorReporting />
         <NextIntlClientProvider
           locale={initialLocale}
           messages={initialMessages}
@@ -73,16 +80,22 @@ export default async function RootLayout({
               <AppearanceProvider>
                 <OverlayScrollbarsInit />
                 <ClipboardFallbackInit />
+                {/* Outside every error boundary below: whatever else fails,
+                    the window keeps telling the user about its link. */}
                 <WebConnectionGuard />
-                {/* Whether the user is looking at this window: decides the
-                    iPhone push and the critical alerts' channel fallback. */}
-                <PresenceReporter />
-                <WindowResizeGrips />
-                {/* Self-gated to the main window: every route it can show
-                    (/workspace, /login, the redirecting /) must be able to
-                    answer a close press. */}
-                <CloseRequestDialog />
-                {children}
+                <AppErrorBoundary scope="root-widgets" variant="silent">
+                  {/* Whether the user is looking at this window: decides the
+                      iPhone push and the critical alerts' channel fallback. */}
+                  <PresenceReporter />
+                  <WindowResizeGrips />
+                </AppErrorBoundary>
+                <AppErrorBoundary scope="close-request" variant="silent">
+                  {/* Self-gated to the main window: every route it can show
+                      (/workspace, /login, the redirecting /) must be able to
+                      answer a close press. */}
+                  <CloseRequestDialog />
+                </AppErrorBoundary>
+                <RouteErrorBoundary scope="page">{children}</RouteErrorBoundary>
               </AppearanceProvider>
             </ThemeProvider>
           </AppI18nProvider>

@@ -181,8 +181,11 @@ export function CriticalAlerts() {
   }, [t])
 
   const applySnapshot = useCallback((snapshot: CriticalAlertsSnapshot) => {
-    alertsRef.current = snapshot.alerts
-    setAlerts(snapshot.alerts)
+    // A malformed snapshot (or none) reads as "no alerts" rather than
+    // reaching render as `undefined.length`.
+    const alerts = Array.isArray(snapshot?.alerts) ? snapshot.alerts : []
+    alertsRef.current = alerts
+    setAlerts(alerts)
     setNow(Date.now())
   }, [])
 

@@ -7201,5 +7201,13 @@
     "saveFailed": "無法儲存 Quick Ask 設定：{error}",
     "open": "試試看",
     "openButton": "開啟 Quick Ask"
+  },
+  "AppErrorBoundary": {
+    "title": "這裡出了點問題",
+    "body": "codeg 的這一部分遇到了意外錯誤。視窗的其餘部分仍可正常使用。",
+    "reconnectingTitle": "正在等待伺服器",
+    "reconnectingBody": "與伺服器的連線已中斷。連線恢復後，此檢視會自動重新載入。",
+    "retry": "重試",
+    "reload": "重新載入視窗"
   }
 }
