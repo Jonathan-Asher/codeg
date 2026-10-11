@@ -715,11 +715,9 @@ async fn async_main() -> ExitCode {
     }
 
     // Start serving
-    let listener = codeg_lib::web::client_keepalive::listener(listener);
-    if let Err(e) = axum::serve(listener, router).await {
-        tracing::error!("[SERVER] Server error: {}", e);
-        return ExitCode::from(1);
-    }
+    // Runs until the process is told to stop; see `web::serve` for the
+    // connection timeouts it adds over `axum::serve`.
+    codeg_lib::web::serve::serve(listener, router, std::future::pending()).await;
     // Graceful shutdown: release any live office watch preview servers
     // (kill_on_drop is the backstop, but this frees their ports promptly).
     codeg_lib::office_watch::stop_all_office_watches();

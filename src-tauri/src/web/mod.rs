@@ -8,11 +8,13 @@ pub mod handlers;
 pub mod live_images;
 pub mod port_probe;
 pub mod router;
+pub mod serve;
 pub mod shutdown;
 pub mod socket_inherit;
 pub mod ws;
 pub mod ws_attach;
 pub mod ws_frame_cap;
+pub mod ws_liveness;
 
 pub use port_probe::{PortState, WebServicePortProbe};
 
@@ -624,13 +626,10 @@ pub(crate) async fn do_start_web_server_with_state(
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let handle = tokio::spawn(async move {
-        let listener = client_keepalive::listener(listener);
-        let serve = axum::serve(listener, router).with_graceful_shutdown(async move {
+        serve::serve(listener, router, async move {
             let _ = shutdown_rx.await;
-        });
-        if let Err(e) = serve.await {
-            tracing::error!("[WEB] Server error: {}", e);
-        }
+        })
+        .await;
     });
 
     *ws.handle.lock().unwrap() = Some(handle);
@@ -957,13 +956,10 @@ pub(crate) async fn do_start_web_server_tauri(
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let handle = tokio::spawn(async move {
-        let listener = client_keepalive::listener(listener);
-        let serve = axum::serve(listener, router).with_graceful_shutdown(async move {
+        serve::serve(listener, router, async move {
             let _ = shutdown_rx.await;
-        });
-        if let Err(e) = serve.await {
-            tracing::error!("[WEB] Server error: {}", e);
-        }
+        })
+        .await;
     });
 
     *ws.handle.lock().unwrap() = Some(handle);

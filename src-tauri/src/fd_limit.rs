@@ -64,15 +64,62 @@ pub fn raise_open_file_limit() -> Option<(u64, u64)> {
     None
 }
 
-/// [`raise_open_file_limit`], logging the result. For the binaries' startup,
-/// once the logging subscriber exists.
-pub fn raise_open_file_limit_logged() {
-    match raise_open_file_limit() {
-        Some((before, after)) => {
-            tracing::info!("[fd] raised the open-file limit from {before} to {after}")
-        }
-        None => tracing::debug!("[fd] open-file limit left as is"),
+/// The current `(soft, hard)` `RLIMIT_NOFILE`, when it can be read.
+#[cfg(unix)]
+#[allow(clippy::unnecessary_cast)] // `rlim_t` is not u64 on every target.
+pub fn open_file_limits() -> Option<(u64, u64)> {
+    let mut limit = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: plain syscall with a valid, writable out-pointer.
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) } != 0 {
+        return None;
     }
+    Some((limit.rlim_cur as u64, limit.rlim_max as u64))
+}
+
+#[cfg(not(unix))]
+pub fn open_file_limits() -> Option<(u64, u64)> {
+    None
+}
+
+/// A limit for the log: `RLIM_INFINITY` (all ones on Linux, `i64::MAX` on
+/// macOS) reads as "unlimited".
+fn describe_limit(limit: u64) -> String {
+    if limit >= i64::MAX as u64 {
+        "unlimited".to_string()
+    } else {
+        limit.to_string()
+    }
+}
+
+/// The startup log line: what the limit was, what it is now, and the hard
+/// ceiling it was raised toward.
+pub fn describe_open_file_limit(
+    changed: Option<(u64, u64)>,
+    current: Option<(u64, u64)>,
+) -> String {
+    let hard = current
+        .map(|(_, hard)| describe_limit(hard))
+        .unwrap_or_else(|| "unknown".to_string());
+    match (changed, current) {
+        (Some((before, after)), _) => {
+            format!("[fd] raised the open-file limit from {before} to {after} (hard limit {hard})")
+        }
+        (None, Some((soft, _))) => format!(
+            "[fd] open-file limit left at {} (hard limit {hard})",
+            describe_limit(soft)
+        ),
+        (None, None) => "[fd] open-file limit unknown on this platform".to_string(),
+    }
+}
+
+/// [`raise_open_file_limit`], logging the outcome in one INFO line either
+/// way. For the binaries' startup, once the logging subscriber exists.
+pub fn raise_open_file_limit_logged() {
+    let changed = raise_open_file_limit();
+    tracing::info!("{}", describe_open_file_limit(changed, open_file_limits()));
 }
 
 #[cfg(test)]
@@ -93,6 +140,26 @@ mod tests {
         assert_eq!(open_file_limit_target(65_536, u64::MAX), None);
         // No headroom at all.
         assert_eq!(open_file_limit_target(1024, 1024), None);
+    }
+
+    #[test]
+    fn the_log_line_names_both_limits_and_reads_infinity_as_unlimited() {
+        assert_eq!(
+            describe_open_file_limit(Some((256, 10_240)), Some((10_240, i64::MAX as u64))),
+            "[fd] raised the open-file limit from 256 to 10240 (hard limit unlimited)"
+        );
+        assert_eq!(
+            describe_open_file_limit(None, Some((65_536, u64::MAX))),
+            "[fd] open-file limit left at 65536 (hard limit unlimited)"
+        );
+        assert_eq!(
+            describe_open_file_limit(None, Some((1024, 1024))),
+            "[fd] open-file limit left at 1024 (hard limit 1024)"
+        );
+        assert_eq!(
+            describe_open_file_limit(None, None),
+            "[fd] open-file limit unknown on this platform"
+        );
     }
 
     #[cfg(unix)]

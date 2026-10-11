@@ -1121,6 +1121,7 @@ dependencies = [
  "gtk",
  "http",
  "http-body",
+ "hyper-util",
  "iana-time-zone",
  "if-addrs",
  "ignore",
