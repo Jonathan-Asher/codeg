@@ -19,7 +19,7 @@ import {
 import Image from "next/image"
 import { useStickToBottomContext } from "use-stick-to-bottom"
 import { useTranslations } from "next-intl"
-import { AlertCircle, Clock, CornerDownRight } from "lucide-react"
+import { AlertCircle, Clock, CornerDownRight, X } from "lucide-react"
 
 import {
   useConnectionStore,
@@ -132,14 +132,32 @@ function UserBubble({
   text,
   images,
   state,
+  heldForBackground = false,
+  onUnqueue,
 }: {
   text: string
   images?: ImageInputAttachment[]
   state: QuickAskUserTurnState
+  /** The turn it waits for is held open only for background work. */
+  heldForBackground?: boolean
+  /** Take a queued question back out (shown on queued questions only). */
+  onUnqueue?: () => void
 }) {
   const t = useTranslations("QuickAsk")
+  // A turn held for background work has no reply being written: say what the
+  // question is really waiting for.
+  const label =
+    state === "queued" && heldForBackground
+      ? "status.queuedBackground"
+      : state === "sent"
+        ? null
+        : STATE_LABEL_KEYS[state]
   return (
-    <div className="flex flex-col items-end gap-1" data-testid="qa-question">
+    <div
+      className="flex flex-col items-end gap-1"
+      data-testid="qa-question"
+      data-state={state}
+    >
       {images && images.length > 0 && (
         <div
           className={cn(
@@ -183,7 +201,19 @@ function UserBubble({
           {state === "queued" && <Clock className="size-3" />}
           {state === "steered" && <CornerDownRight className="size-3" />}
           {state === "failed" && <AlertCircle className="size-3" />}
-          {t(STATE_LABEL_KEYS[state])}
+          {label && t(label)}
+          {state === "queued" && onUnqueue && (
+            <button
+              type="button"
+              onClick={onUnqueue}
+              className="-my-0.5 rounded-sm p-0.5 hover:bg-muted-foreground/15"
+              aria-label={t("actions.unqueue")}
+              title={t("actions.unqueue")}
+              data-testid="qa-unqueue"
+            >
+              <X className="size-3" />
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -194,6 +224,8 @@ export function QuickAskThread({
   contextKey,
   thread,
   streaming,
+  heldForBackground = false,
+  onUnqueue,
   footer,
 }: {
   /** The connection the live reply streams from. */
@@ -201,6 +233,10 @@ export function QuickAskThread({
   thread: QuickAskTurn[]
   /** A reply is being written (render it live under the thread). */
   streaming: boolean
+  /** The running turn is held open only for background work. */
+  heldForBackground?: boolean
+  /** Take a queued question back out of the queue. */
+  onUnqueue?: (turnId: string) => void
   footer?: React.ReactNode
 }) {
   const isQueued = (turn: QuickAskTurn) =>
@@ -249,6 +285,8 @@ export function QuickAskThread({
               text={turn.text}
               images={turn.images}
               state={turn.state}
+              heldForBackground={heldForBackground}
+              onUnqueue={onUnqueue ? () => onUnqueue(turn.id) : undefined}
             />
           ) : null
         )}

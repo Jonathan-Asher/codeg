@@ -7156,11 +7156,13 @@
     "actions": {
       "newQuestion": "新しい質問",
       "openInCodeg": "codeg で開く",
-      "hide": "隠す"
+      "hide": "隠す",
+      "unqueue": "キューから削除"
     },
     "status": {
       "connecting": "{agent} を起動中…",
       "queued": "キュー待ち。現在の返信が終わると送信します",
+      "queuedBackground": "キュー待ち。バックグラウンド処理が終わると送信します",
       "steered": "実行中の返信に送りました",
       "failed": "未送信"
     },

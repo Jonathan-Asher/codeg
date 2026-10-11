@@ -7156,11 +7156,13 @@
     "actions": {
       "newQuestion": "Nova pergunta",
       "openInCodeg": "Abrir no codeg",
-      "hide": "Ocultar"
+      "hide": "Ocultar",
+      "unqueue": "Remover da fila"
     },
     "status": {
       "connecting": "Iniciando {agent}…",
       "queued": "Na fila; enviada quando a resposta atual terminar",
+      "queuedBackground": "Na fila; enviada quando o trabalho em segundo plano terminar",
       "steered": "Enviada para a resposta em andamento",
       "failed": "Não enviada"
     },

@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { TurnBusyError } from "@/lib/turn-busy"
 import type { ImageInputAttachment } from "@/components/chat/message-input-attachments"
@@ -15,6 +15,7 @@ const h = vi.hoisted(() => {
     workingDir: string | null
     status: string
     nativeSteering: boolean
+    awaitingBackground: boolean
     sessionId: string | null
     isViewer: boolean
     error: string | null
@@ -65,6 +66,7 @@ const h = vi.hoisted(() => {
           workingDir: workingDir ?? null,
           status: state.connectedStatus,
           nativeSteering: state.nativeSteering,
+          awaitingBackground: false,
           sessionId: sessionId ?? "sess-new",
           isViewer: false,
           error: null,
@@ -113,6 +115,8 @@ vi.mock("@/hooks/use-connection", () => ({
     status: h.state.conn?.status ?? null,
     agentType: h.state.conn?.agentType ?? null,
     configOptions: null,
+    awaitingBackground: h.state.conn?.awaitingBackground ?? false,
+    nativeSteering: h.state.conn?.nativeSteering ?? false,
   }),
 }))
 vi.mock("@/lib/api", () => h.api)
@@ -121,6 +125,7 @@ import {
   insertReplyBeforeQueued,
   quickAskContextKey,
   useQuickAskSession,
+  type QueuedQuestion,
   type QuickAskTurn,
   type UseQuickAskSessionArgs,
 } from "./use-quick-ask-session"
@@ -166,19 +171,23 @@ function setup(overrides: Partial<UseQuickAskSessionArgs>) {
   return { ...hook, args }
 }
 
-/** Move the fake connection to `status` (optionally with a reply) and let
- *  the hook see it. */
+/** Move the fake connection to `status` (optionally with a reply, and any
+ *  other connection fields) and let the hook see it. Leaving `prompting`
+ *  ends the hold for background work, as the reducer does. */
 function moveTo(
   rerender: (props: UseQuickAskSessionArgs) => void,
   args: UseQuickAskSessionArgs,
   status: string,
-  liveMessage?: unknown
+  liveMessage?: unknown,
+  patch: Partial<NonNullable<typeof h.state.conn>> = {}
 ) {
   act(() => {
     h.state.conn = {
       ...h.state.conn!,
       status,
+      awaitingBackground: false,
       ...(liveMessage !== undefined ? { liveMessage } : {}),
+      ...patch,
     }
     h.emit()
     rerender({ ...args })
@@ -443,13 +452,16 @@ describe("useQuickAskSession", () => {
       expect(result.current.thread[0]).toMatchObject({ state: "queued" })
 
       moveTo(rerender, args, "connected")
-      await act(async () => {})
-      expect(h.actions.sendPrompt).toHaveBeenCalledWith(
-        QUICK_ASK_CONTEXT_KEY,
-        [{ type: "text", text: "later please" }],
-        { folderId: 4, conversationId: 12 }
+      await waitFor(() =>
+        expect(h.actions.sendPrompt).toHaveBeenCalledWith(
+          QUICK_ASK_CONTEXT_KEY,
+          [{ type: "text", text: "later please" }],
+          { folderId: 4, conversationId: 12 }
+        )
       )
-      expect(result.current.thread[0]).toMatchObject({ state: "sent" })
+      await waitFor(() =>
+        expect(result.current.thread[0]).toMatchObject({ state: "sent" })
+      )
     })
 
     it("queues when another client won the race to start a turn", async () => {
@@ -542,11 +554,12 @@ describe("useQuickAskSession", () => {
       const thread = result.current.thread
       expect(thread[thread.length - 1]).toMatchObject({ state: "queued" })
       moveTo(rerender, args, "connected")
-      await act(async () => {})
-      expect(h.actions.sendPrompt).toHaveBeenLastCalledWith(
-        QUICK_ASK_CONTEXT_KEY,
-        [{ type: "text", text: "now this" }, SQUARE_BLOCK],
-        { folderId: 5, conversationId: 77 }
+      await waitFor(() =>
+        expect(h.actions.sendPrompt).toHaveBeenLastCalledWith(
+          QUICK_ASK_CONTEXT_KEY,
+          [{ type: "text", text: "now this" }, SQUARE_BLOCK],
+          { folderId: 5, conversationId: 77 }
+        )
       )
     })
 
@@ -835,6 +848,448 @@ describe("useQuickAskSession", () => {
         ])
       })
       expect(h.api.createChatDir).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  // The queue is the floating window's own: it has to drain on its own, the
+  // way the workspace composer's does, whatever the session is doing in
+  // another window.
+  describe("queue drain", () => {
+    const session = {
+      id: 12,
+      folderId: 4,
+      folderPath: "/work/app",
+      agentType: "claude_code" as const,
+      externalId: "claude-sess",
+      title: "Refactor",
+    }
+
+    /** The backend's one-turn-at-a-time gate: a prompt sent while a turn
+     *  runs is bounced, an accepted one starts a turn. `accepted` is what
+     *  actually reached the agent. */
+    function backendGate() {
+      const gate = { busy: false, accepted: [] as string[] }
+      h.actions.sendPrompt.mockImplementation((async (
+        _key: string,
+        blocks: { type: string; text?: string }[]
+      ) => {
+        if (gate.busy) throw new TurnBusyError()
+        gate.busy = true
+        gate.accepted.push(blocks.map((b) => b.text ?? "").join(""))
+      }) as unknown as () => Promise<void>)
+      return gate
+    }
+
+    /** Let timers (the drain's backoff) and the promises they start run. */
+    const advance = (ms = 0) =>
+      act(async () => {
+        await vi.advanceTimersByTimeAsync(ms)
+      })
+
+    const states = (thread: QuickAskTurn[]) =>
+      thread.flatMap((turn) =>
+        turn.role === "user" ? [`${turn.text}:${turn.state}`] : []
+      )
+
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+    afterEach(() => {
+      vi.useRealTimers()
+      h.actions.sendPrompt.mockImplementation(async () => {})
+      h.api.submitSessionFeedback.mockImplementation(async () => ({
+        id: "note-1",
+      }))
+    })
+
+    it("sends every queued question once, in order, as each reply ends", async () => {
+      const gate = backendGate()
+      const { result, rerender, args } = setup({ target: "existing", session })
+      await act(async () => {
+        await result.current.send("one")
+      })
+      moveTo(rerender, args, "prompting", reply("r1"))
+      await act(async () => {
+        await result.current.send("two")
+      })
+      await act(async () => {
+        await result.current.send("three")
+      })
+      expect(states(result.current.thread)).toEqual([
+        "one:sent",
+        "two:queued",
+        "three:queued",
+      ])
+
+      gate.busy = false
+      moveTo(rerender, args, "connected")
+      await advance()
+      expect(gate.accepted).toEqual(["one", "two"])
+      moveTo(rerender, args, "prompting", reply("r2"))
+      gate.busy = false
+      moveTo(rerender, args, "connected")
+      await advance(1000)
+      expect(gate.accepted).toEqual(["one", "two", "three"])
+      moveTo(rerender, args, "prompting", reply("r3"))
+      gate.busy = false
+      moveTo(rerender, args, "connected")
+      await advance(5000)
+
+      // Nothing bounced and nothing went twice.
+      expect(h.actions.sendPrompt).toHaveBeenCalledTimes(3)
+      expect(states(result.current.thread)).toEqual([
+        "one:sent",
+        "two:sent",
+        "three:sent",
+      ])
+    })
+
+    it("sends a question another window's turn bounced, even with no turn end seen here", async () => {
+      // The main window holds the same session and started a turn this
+      // window has not heard about. By the time the bounce lands, that turn
+      // is already over: this window never sees a prompting → idle edge.
+      const gate = backendGate()
+      const { result } = setup({ target: "existing", session })
+      gate.busy = true
+      await act(async () => {
+        await result.current.send("mine")
+      })
+      expect(states(result.current.thread)).toEqual(["mine:queued"])
+      expect(gate.accepted).toEqual([])
+
+      gate.busy = false
+      // Backs off from the bounce instead of retrying at once…
+      await advance(500)
+      expect(gate.accepted).toEqual([])
+      // …then goes out, once.
+      await advance(600)
+      expect(gate.accepted).toEqual(["mine"])
+      await advance(5000)
+      expect(gate.accepted).toEqual(["mine"])
+      expect(states(result.current.thread)).toEqual(["mine:sent"])
+    })
+
+    it("takes turns with the main window on one session: each question goes out exactly once", async () => {
+      const gate = backendGate()
+      const { result, rerender, args } = setup({ target: "existing", session })
+      await act(async () => {
+        await result.current.send("q1")
+      })
+      moveTo(rerender, args, "prompting", reply("r1"))
+      await act(async () => {
+        await result.current.send("q2")
+      })
+      await act(async () => {
+        await result.current.send("q3")
+      })
+
+      // The reply ends, and the main window's own queue gets its message in
+      // first: this window's head bounces and keeps its place.
+      moveTo(rerender, args, "connected")
+      gate.accepted.push("main-window")
+      gate.busy = true
+      await advance()
+      expect(states(result.current.thread)).toEqual([
+        "q1:sent",
+        "q2:queued",
+        "q3:queued",
+      ])
+
+      // The main window's turn runs and ends.
+      moveTo(rerender, args, "prompting", reply("main"))
+      gate.busy = false
+      moveTo(rerender, args, "connected")
+      await advance(1000)
+      moveTo(rerender, args, "prompting", reply("r2"))
+      gate.busy = false
+      moveTo(rerender, args, "connected")
+      await advance(1000)
+      moveTo(rerender, args, "prompting", reply("r3"))
+      gate.busy = false
+      moveTo(rerender, args, "connected")
+      await advance(5000)
+
+      expect(gate.accepted).toEqual(["q1", "main-window", "q2", "q3"])
+      expect(states(result.current.thread)).toEqual([
+        "q1:sent",
+        "q2:sent",
+        "q3:sent",
+      ])
+    })
+
+    it("sends what waits once Stop has ended the reply, as the workspace does", async () => {
+      const gate = backendGate()
+      const { result, rerender, args } = setup({ target: "new" })
+      await act(async () => {
+        await result.current.send("long one")
+      })
+      moveTo(rerender, args, "prompting", reply("partial"))
+      await act(async () => {
+        await result.current.send("actually, do this")
+      })
+      await act(async () => {
+        await result.current.cancel()
+      })
+      expect(h.actions.cancel).toHaveBeenCalledWith(QUICK_ASK_CONTEXT_KEY)
+
+      gate.busy = false
+      moveTo(rerender, args, "connected")
+      await advance()
+      expect(gate.accepted).toEqual(["long one", "actually, do this"])
+      expect(states(result.current.thread)).toEqual([
+        "long one:sent",
+        "actually, do this:sent",
+      ])
+    })
+
+    it("delivers queued questions into a turn held open for background work", async () => {
+      const gate = backendGate()
+      const { result, rerender, args } = setup({
+        target: "existing",
+        session,
+        steeringEnabled: false,
+      })
+      await act(async () => {
+        await result.current.send("start the sub-agents")
+      })
+      moveTo(rerender, args, "prompting", reply("working"))
+      await act(async () => {
+        await result.current.send("two")
+      })
+      await act(async () => {
+        await result.current.send("three")
+      })
+      expect(h.api.submitSessionFeedback).not.toHaveBeenCalled()
+      // A message delivered into the held turn wakes the agent: the backend
+      // reports the turn as working again until its reply is done.
+      h.api.submitSessionFeedback.mockImplementation(async () => {
+        h.state.conn = { ...h.state.conn!, awaitingBackground: false }
+        h.emit()
+        return { id: "note-1" }
+      })
+
+      // The agent answered; only its background work holds the turn open.
+      moveTo(rerender, args, "prompting", undefined, {
+        awaitingBackground: true,
+        nativeSteering: true,
+      })
+      await advance()
+      expect(h.api.submitSessionFeedback).toHaveBeenCalledTimes(1)
+      expect(h.api.submitSessionFeedback).toHaveBeenLastCalledWith(
+        "conn-1",
+        "two"
+      )
+      expect(states(result.current.thread)).toEqual([
+        "start the sub-agents:sent",
+        "two:steered",
+        "three:queued",
+      ])
+
+      // That woke the agent; the next question waits for its next idle
+      // stretch, then goes in the same way.
+      moveTo(rerender, args, "prompting", undefined, {
+        awaitingBackground: false,
+        nativeSteering: true,
+      })
+      await advance()
+      expect(h.api.submitSessionFeedback).toHaveBeenCalledTimes(1)
+      moveTo(rerender, args, "prompting", undefined, {
+        awaitingBackground: true,
+        nativeSteering: true,
+      })
+      await advance()
+      expect(h.api.submitSessionFeedback).toHaveBeenCalledTimes(2)
+      expect(h.api.submitSessionFeedback).toHaveBeenLastCalledWith(
+        "conn-1",
+        "three"
+      )
+
+      // A new question goes straight in, live feedback off or not.
+      moveTo(rerender, args, "prompting", undefined, {
+        awaitingBackground: true,
+        nativeSteering: true,
+      })
+      await act(async () => {
+        await result.current.send("four")
+      })
+      expect(h.api.submitSessionFeedback).toHaveBeenLastCalledWith(
+        "conn-1",
+        "four"
+      )
+      expect(gate.accepted).toEqual(["start the sub-agents"])
+      expect(states(result.current.thread)).toEqual([
+        "start the sub-agents:sent",
+        "two:steered",
+        "three:steered",
+        "four:steered",
+      ])
+    })
+
+    it("never sends a question twice when the held turn ends mid-delivery", async () => {
+      const gate = backendGate()
+      let confirm: () => void = () => {}
+      h.api.submitSessionFeedback.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            confirm = () => resolve({ id: "note-1" })
+          })
+      )
+      const { result, rerender, args } = setup({ target: "existing", session })
+      await act(async () => {
+        await result.current.send("one")
+      })
+      moveTo(rerender, args, "prompting", reply("r1"))
+      await act(async () => {
+        await result.current.send("two")
+      })
+      moveTo(rerender, args, "prompting", undefined, {
+        awaitingBackground: true,
+        nativeSteering: true,
+      })
+      await advance()
+      expect(h.api.submitSessionFeedback).toHaveBeenCalledTimes(1)
+
+      // The turn ends while the delivery is still on the wire: the question
+      // is not also sent as the next prompt.
+      gate.busy = false
+      moveTo(rerender, args, "connected")
+      await advance(5000)
+      expect(gate.accepted).toEqual(["one"])
+
+      await act(async () => confirm())
+      await advance(5000)
+      expect(gate.accepted).toEqual(["one"])
+      expect(states(result.current.thread)).toEqual(["one:sent", "two:steered"])
+    })
+
+    it("sends a question the held turn refused once that turn ends, and only then", async () => {
+      const gate = backendGate()
+      h.api.submitSessionFeedback.mockRejectedValueOnce(
+        new Error("steering channel closed")
+      )
+      const { result, rerender, args } = setup({ target: "existing", session })
+      await act(async () => {
+        await result.current.send("one")
+      })
+      moveTo(rerender, args, "prompting", reply("r1"))
+      await act(async () => {
+        await result.current.send("two")
+      })
+      moveTo(rerender, args, "prompting", undefined, {
+        awaitingBackground: true,
+        nativeSteering: true,
+      })
+      await advance(5000)
+      // Not retried into the same failure while the turn stays held.
+      expect(h.api.submitSessionFeedback).toHaveBeenCalledTimes(1)
+      expect(states(result.current.thread)).toEqual(["one:sent", "two:queued"])
+
+      gate.busy = false
+      moveTo(rerender, args, "connected")
+      await advance()
+      expect(gate.accepted).toEqual(["one", "two"])
+    })
+
+    it("keeps a private question for the end of a held turn", async () => {
+      const gate = backendGate()
+      const { result, rerender, args } = setup({
+        target: "private",
+        folder: null,
+        steeringEnabled: true,
+      })
+      await act(async () => {
+        await result.current.send("one")
+      })
+      moveTo(rerender, args, "prompting", reply("r1"), {
+        awaitingBackground: true,
+        nativeSteering: true,
+      })
+      await act(async () => {
+        await result.current.send("two")
+      })
+      await advance(5000)
+      expect(h.api.submitSessionFeedback).not.toHaveBeenCalled()
+      expect(states(result.current.thread)).toEqual(["one:sent", "two:queued"])
+
+      gate.busy = false
+      moveTo(rerender, args, "connected")
+      await advance()
+      expect(gate.accepted).toEqual(["one", "two"])
+      expect(h.actions.sendPrompt).toHaveBeenLastCalledWith(
+        QUICK_ASK_CONTEXT_KEY,
+        [{ type: "text", text: "two" }],
+        { unlinked: true }
+      )
+    })
+
+    it("says what waits can no longer be sent when the session dies", async () => {
+      const gate = backendGate()
+      const { result, rerender, args } = setup({ target: "existing", session })
+      await act(async () => {
+        await result.current.send("one")
+      })
+      moveTo(rerender, args, "prompting", reply("r1"))
+      await act(async () => {
+        await result.current.send("two")
+      })
+      moveTo(rerender, args, "error", undefined, { error: "agent exited" })
+      await advance(5000)
+      expect(gate.accepted).toEqual(["one"])
+      expect(states(result.current.thread)).toEqual(["one:sent", "two:failed"])
+      expect(result.current.error).toEqual({
+        code: "send_failed",
+        detail: "agent exited",
+      })
+    })
+
+    it("takes a waiting question back out, and never sends it", async () => {
+      const gate = backendGate()
+      const { result, rerender, args } = setup({ target: "existing", session })
+      await act(async () => {
+        await result.current.send("one")
+      })
+      moveTo(rerender, args, "prompting", reply("r1"))
+      await act(async () => {
+        await result.current.send("never mind")
+      })
+      const turnId = result.current.thread[1].id
+      let taken: QueuedQuestion | null = null
+      act(() => {
+        taken = result.current.unqueue(turnId)
+      })
+      expect(taken).toMatchObject({ text: "never mind" })
+      expect(states(result.current.thread)).toEqual(["one:sent"])
+
+      gate.busy = false
+      moveTo(rerender, args, "connected")
+      await advance(5000)
+      expect(gate.accepted).toEqual(["one"])
+    })
+
+    it("lines a new question up behind ones still waiting to go", async () => {
+      const gate = backendGate()
+      const { result, rerender, args } = setup({ target: "existing", session })
+      gate.busy = true
+      await act(async () => {
+        await result.current.send("first")
+      })
+      // Idle again as far as this window can tell, but "first" is still
+      // backing off: "second" must not overtake it.
+      gate.busy = false
+      await act(async () => {
+        await result.current.send("second")
+      })
+      expect(states(result.current.thread)).toEqual([
+        "first:queued",
+        "second:queued",
+      ])
+      await advance(1000)
+      expect(gate.accepted).toEqual(["first"])
+      moveTo(rerender, args, "prompting", reply("r1"))
+      gate.busy = false
+      moveTo(rerender, args, "connected")
+      await advance(1000)
+      expect(gate.accepted).toEqual(["first", "second"])
     })
   })
 })

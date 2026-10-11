@@ -7156,11 +7156,13 @@
     "actions": {
       "newQuestion": "New question",
       "openInCodeg": "Open in codeg",
-      "hide": "Hide"
+      "hide": "Hide",
+      "unqueue": "Remove from queue"
     },
     "status": {
       "connecting": "Starting {agent}…",
       "queued": "Queued, sends when the current reply ends",
+      "queuedBackground": "Queued, sends when the background work finishes",
       "steered": "Sent into the running reply",
       "failed": "Not sent"
     },

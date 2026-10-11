@@ -7156,11 +7156,13 @@
     "actions": {
       "newQuestion": "새 질문",
       "openInCodeg": "codeg에서 열기",
-      "hide": "숨기기"
+      "hide": "숨기기",
+      "unqueue": "대기열에서 제거"
     },
     "status": {
       "connecting": "{agent} 시작 중…",
       "queued": "대기 중. 현재 답변이 끝나면 보냅니다",
+      "queuedBackground": "대기 중. 백그라운드 작업이 끝나면 보냅니다",
       "steered": "진행 중인 답변에 보냈습니다",
       "failed": "보내지 못함"
     },
