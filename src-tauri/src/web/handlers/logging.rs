@@ -66,6 +66,21 @@ pub async fn get_recent_logs(
     )))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogClientErrorParams {
+    pub report: crate::logging::client_report::ClientErrorReport,
+}
+
+/// An uncaught error from a browser client's frontend (see
+/// `logging::client_report`).
+pub async fn log_client_error(
+    Json(params): Json<LogClientErrorParams>,
+) -> Result<Json<()>, AppCommandError> {
+    crate::logging::client_report::log_client_error(&params.report);
+    Ok(Json(()))
+}
+
 pub async fn list_log_files() -> Result<Json<Vec<LogFileInfo>>, AppCommandError> {
     Ok(Json(logging_commands::list_log_files_core()))
 }
