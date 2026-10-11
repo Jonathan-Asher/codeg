@@ -28,12 +28,25 @@ const WEB_CALL_TIMEOUT_MS = 60_000
 // pre-fix race window reopens, but the UI stays responsive.
 const READY_TIMEOUT_MS = 5_000
 // Exponential backoff bounds, in milliseconds: 1s → 2s → 4s → … capped at
-// 32s. Cap matches the Rust-side WS_BACKOFF_MAX_SECS. We never stop retrying:
+// 30s, each wait spread over its upper half by jitter (`reconnectDelayMs`).
+// Same shape as the Rust-side `ws_backoff_delay`. We never stop retrying:
 // a dropped WS is treated as a transient connectivity problem (server
 // restart, network blip, laptop sleep), surfaced via the reconnect dialog,
 // not as a reason to discard the token and bounce to /login.
 const WS_BACKOFF_INITIAL_MS = 1_000
-const WS_BACKOFF_MAX_MS = 32_000
+const WS_BACKOFF_MAX_MS = 30_000
+
+/**
+ * The wait before reconnect attempt `failCount` (1-based): 1s doubling up to
+ * 30s, then spread over its upper half by `draw` (from `[0, 1)`), so every
+ * tab that lost the server together does not come back in the same instant.
+ */
+export function reconnectDelayMs(failCount: number, draw: number): number {
+  const shift = Math.min(Math.max(failCount - 1, 0), 8)
+  const base = Math.min(WS_BACKOFF_INITIAL_MS * 2 ** shift, WS_BACKOFF_MAX_MS)
+  const jitter = Math.min(Math.max(draw, 0), 1)
+  return Math.round(base * (0.5 + 0.5 * jitter))
+}
 // Upper bound on the `/api/health` probe that classifies a dropped WS. The
 // browser's native WebSocket can't read the HTTP status of a rejected
 // handshake (onclose only reports code 1006), so we can't tell "token
@@ -520,15 +533,14 @@ export class WebTransport implements Transport {
 
   // Schedule the next reconnect attempt with exponential backoff. Each failed
   // cycle (a drop, or a probe that found the server unreachable) grows the
-  // delay 1s → 2s → 4s → … → 32s; we keep retrying forever. The timer fires a
+  // delay 1s → 2s → 4s → … → 30s (jittered); we keep retrying forever. The timer fires a
   // health probe (not a bare connectWs) so every attempt re-classifies the
   // failure — crucially catching a token that expired while we were offline.
   private scheduleReconnect() {
     if (this.destroyed) return
     this.wsFailCount++
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
-    const shift = Math.min(this.wsFailCount - 1, 8)
-    const delay = Math.min(WS_BACKOFF_INITIAL_MS << shift, WS_BACKOFF_MAX_MS)
+    const delay = reconnectDelayMs(this.wsFailCount, Math.random())
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
       void this.probeHealth()
