@@ -49,6 +49,47 @@ describe("routeQuickAskSend", () => {
         steerable: true,
       })
     ).toBe("queue")
+    expect(
+      routeQuickAskSend({
+        target: "private",
+        status: "prompting",
+        steerable: false,
+        heldTurnReady: true,
+      })
+    ).toBe("queue")
+  })
+
+  it("delivers into a turn held for background work, live feedback on or off", () => {
+    for (const target of ["new", "existing"] as const) {
+      expect(
+        routeQuickAskSend({
+          target,
+          status: "prompting",
+          steerable: false,
+          heldTurnReady: true,
+        })
+      ).toBe("steer")
+    }
+  })
+
+  it("lines an idle session's question up behind the ones still waiting", () => {
+    expect(
+      routeQuickAskSend({
+        target: "existing",
+        status: "connected",
+        steerable: false,
+        queued: true,
+      })
+    ).toBe("queue")
+    // Steering is immediate, like the composer's: it does not wait its turn.
+    expect(
+      routeQuickAskSend({
+        target: "existing",
+        status: "prompting",
+        steerable: true,
+        queued: true,
+      })
+    ).toBe("steer")
   })
 })
 

@@ -378,6 +378,16 @@ export function QuickAskWindow() {
     }
   }
 
+  // A question taken back out of the queue returns to an empty input, as if
+  // it had never been sent; typed text already there is left alone.
+  const unqueue = (turnId: string) => {
+    const question = qa.unqueue(turnId)
+    if (!question || input.trim().length > 0 || hasImages) return
+    setInput(question.text)
+    if (question.images.length > 0) attach.setAttachments(question.images)
+    inputRef.current?.focus()
+  }
+
   const newQuestion = async () => {
     const report = await qa.clear()
     setInput("")
@@ -575,6 +585,8 @@ export function QuickAskWindow() {
           contextKey={qa.contextKey}
           thread={qa.thread}
           streaming={streaming}
+          heldForBackground={streaming && conn.awaitingBackground}
+          onUnqueue={unqueue}
           footer={footer}
         />
       )}

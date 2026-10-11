@@ -10,6 +10,7 @@ const h = vi.hoisted(() => {
       status: null as string | null,
       agentType: null as string | null,
       configOptions: null as unknown,
+      awaitingBackground: false,
       pendingPermission: null,
       pendingAskQuestion: null,
       respondPermission: () => Promise.resolve(),
@@ -29,6 +30,7 @@ const h = vi.hoisted(() => {
       images?: unknown[]
     ) => Promise<boolean>,
     cancel: () => Promise.resolve(),
+    unqueue: (() => null) as (turnId: string) => unknown,
     clear: () => Promise.resolve(null as unknown),
     setConfigOption: () => Promise.resolve(),
     dismissError: () => {},
@@ -161,6 +163,7 @@ describe("QuickAskWindow", () => {
     h.session.conn.status = null
     h.session.conn.agentType = null
     h.session.conn.configOptions = null
+    h.session.conn.awaitingBackground = false
     h.session.setConfigOption = vi.fn(async () => {})
     h.uploadAttachment
       .mockReset()
@@ -314,6 +317,68 @@ describe("QuickAskWindow", () => {
     h.session.isPrivate = true
     renderWindow()
     expect(screen.queryByTestId("qa-open")).not.toBeInTheDocument()
+  })
+
+  describe("queued questions", () => {
+    const binding = {
+      target: "existing",
+      agentType: "claude_code",
+      workingDir: "/work/codeg",
+      folderId: 1,
+      conversationId: 9,
+      title: "hi",
+    }
+    const thread = [
+      { id: "q1", role: "user", text: "first", state: "sent" },
+      { id: "q2", role: "user", text: "wait for it", state: "queued" },
+    ]
+
+    it("can be taken back out, into the empty input", () => {
+      h.session.binding = binding
+      h.session.thread = thread
+      h.session.conn.status = "prompting"
+      h.session.unqueue = vi.fn(() => ({
+        turnId: "q2",
+        text: "wait for it",
+        images: [],
+      }))
+      renderWindow()
+      expect(
+        screen.getByText("Queued, sends when the current reply ends")
+      ).toBeInTheDocument()
+      fireEvent.click(screen.getByTestId("qa-unqueue"))
+      expect(h.session.unqueue).toHaveBeenCalledWith("q2")
+      expect(screen.getByTestId("qa-input")).toHaveValue("wait for it")
+    })
+
+    it("leave text already being typed alone when taken back", () => {
+      h.session.binding = binding
+      h.session.thread = thread
+      h.session.conn.status = "prompting"
+      h.session.unqueue = vi.fn(() => ({
+        turnId: "q2",
+        text: "wait for it",
+        images: [],
+      }))
+      renderWindow()
+      fireEvent.change(screen.getByTestId("qa-input"), {
+        target: { value: "something new" },
+      })
+      fireEvent.click(screen.getByTestId("qa-unqueue"))
+      expect(h.session.unqueue).toHaveBeenCalledWith("q2")
+      expect(screen.getByTestId("qa-input")).toHaveValue("something new")
+    })
+
+    it("say they wait for the background work of a held turn", () => {
+      h.session.binding = binding
+      h.session.thread = thread
+      h.session.conn.status = "prompting"
+      h.session.conn.awaitingBackground = true
+      renderWindow()
+      expect(
+        screen.getByText("Queued, sends when the background work finishes")
+      ).toBeInTheDocument()
+    })
   })
 
   it("clears on New question and confirms a private question was deleted", async () => {

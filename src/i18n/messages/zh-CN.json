@@ -7156,11 +7156,13 @@
     "actions": {
       "newQuestion": "新问题",
       "openInCodeg": "在 codeg 中打开",
-      "hide": "隐藏"
+      "hide": "隐藏",
+      "unqueue": "从队列中移除"
     },
     "status": {
       "connecting": "正在启动 {agent}…",
       "queued": "已排队，当前回复结束后发送",
+      "queuedBackground": "已排队，后台任务结束后发送",
       "steered": "已插入正在进行的回复",
       "failed": "未发送"
     },

@@ -7156,11 +7156,13 @@
     "actions": {
       "newQuestion": "Neue Frage",
       "openInCodeg": "In codeg öffnen",
-      "hide": "Ausblenden"
+      "hide": "Ausblenden",
+      "unqueue": "Aus der Warteschlange entfernen"
     },
     "status": {
       "connecting": "{agent} wird gestartet…",
       "queued": "In der Warteschlange, wird nach der aktuellen Antwort gesendet",
+      "queuedBackground": "In der Warteschlange, wird gesendet, wenn die Hintergrundarbeit endet",
       "steered": "In die laufende Antwort gesendet",
       "failed": "Nicht gesendet"
     },

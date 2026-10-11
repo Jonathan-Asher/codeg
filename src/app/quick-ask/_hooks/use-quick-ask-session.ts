@@ -48,6 +48,11 @@ import {
 } from "@/lib/api"
 import { describeError } from "@/lib/app-error"
 import {
+  canDeliverIntoHeldTurn,
+  shouldDrainIntoHeldTurn,
+} from "@/lib/background-idle"
+import { flushRetryDelayMs } from "@/lib/queue-flush"
+import {
   promptOptionsFor,
   routeQuickAskSend,
   type QuickAskPromptTarget,
@@ -119,6 +124,23 @@ export type QuickAskTurn =
       /** Wall-clock time the reply took, for its "Worked for" header. */
       durationMs: number | null
     }
+
+/**
+ * A question waiting for the session to take it. The thread shows it as
+ * `queued` for exactly as long as it sits here.
+ */
+export interface QueuedQuestion {
+  turnId: string
+  text: string
+  images: ImageInputAttachment[]
+  /**
+   * Wait for the END of the turn, not merely for the agent to go idle in a
+   * turn held open for background work: its delivery into that turn failed
+   * outright, so it goes out as an ordinary prompt once the turn is over
+   * (the composer's `QueuedMessage.holdUntilTurnEnd`).
+   */
+  holdUntilTurnEnd?: boolean
+}
 
 /** What the window is talking to once the first question went out. */
 export interface QuickAskBinding {
@@ -321,9 +343,28 @@ export function useQuickAskSession({
   const bindingRef = useRef<QuickAskBinding | null>(null)
   const privateDirRef = useRef<string | null>(null)
   const privateDirPromiseRef = useRef<Promise<string> | null>(null)
-  const queueRef = useRef<
-    { turnId: string; text: string; images: ImageInputAttachment[] }[]
-  >([])
+  // The questions waiting for the session, oldest first. The ref is the
+  // authoritative copy (async paths read it the moment they run); the version
+  // bump re-runs the drain below on every change.
+  const queueRef = useRef<QueuedQuestion[]>([])
+  const [queueVersion, setQueueVersion] = useState(0)
+  const setQueue = useCallback((next: QueuedQuestion[]) => {
+    queueRef.current = next
+    setQueueVersion((v) => v + 1)
+  }, [])
+  // The turn of the question the drain has on the wire right now (a prompt,
+  // or a delivery into a held turn), or null. Nothing else leaves the queue
+  // until it settles, so no question can go out twice.
+  const drainingRef = useRef<string | null>(null)
+  // Identifies the drain in flight, so one that settles after "New question"
+  // moved on cannot release the next question's drain.
+  const drainTokenRef = useRef(0)
+  const [drainVersion, setDrainVersion] = useState(0)
+  // When the drain last sent a prompt or saw one bounce. The next prompt waits
+  // out `flushRetryDelayMs` from here, so a session that still reads idle a
+  // moment after a send (its "prompting" not in yet), or that keeps bouncing,
+  // is retried at a bounded rate instead of being hammered.
+  const lastDrainAttemptAtRef = useRef(0)
   const committedLiveIdsRef = useRef(new Set<string>())
   const argsRef = useRef({
     target,
@@ -480,6 +521,38 @@ export function useQuickAskSession({
     )
   }, [actions, desiredConnection, store])
 
+  /** Put a question at the end of the line. */
+  const enqueue = useCallback(
+    (question: QueuedQuestion) => {
+      setQueue([...queueRef.current, question])
+      updateTurn(question.turnId, "queued")
+    },
+    [setQueue, updateTurn]
+  )
+
+  /** Steer a question into the turn running now. Images ride along as the
+   *  steer's blocks, as the composer's mid-turn send does; plain text stays a
+   *  plain note. */
+  const steerInto = useCallback(
+    async (
+      connectionId: string,
+      text: string,
+      images: ImageInputAttachment[],
+      caps: PromptCapabilitiesInfo | undefined
+    ) => {
+      if (images.length > 0) {
+        await submitSessionFeedback(
+          connectionId,
+          text,
+          questionBlocks(text, images, caps)
+        )
+      } else {
+        await submitSessionFeedback(connectionId, text)
+      }
+    },
+    []
+  )
+
   /** Deliver one question on the bound session along `route`. */
   const deliver = useCallback(
     async (
@@ -490,47 +563,49 @@ export function useQuickAskSession({
       b: QuickAskBinding
     ): Promise<void> => {
       if (route === "queue") {
-        queueRef.current.push({ turnId, text, images })
-        updateTurn(turnId, "queued")
+        enqueue({ turnId, text, images })
         return
       }
       const live = store.getConnection(keyRef.current)
-      const blocks = questionBlocks(text, images, live?.promptCapabilities)
       if (route === "steer" && live) {
         try {
-          // Images ride along as the steer's blocks, as the composer's
-          // mid-turn send does; plain text stays a plain note.
-          if (images.length > 0) {
-            await submitSessionFeedback(live.connectionId, text, blocks)
-          } else {
-            await submitSessionFeedback(live.connectionId, text)
-          }
+          await steerInto(
+            live.connectionId,
+            text,
+            images,
+            live.promptCapabilities
+          )
           updateTurn(turnId, "steered")
           return
         } catch (e) {
-          // The reply ended in the meantime: it is an ordinary prompt now.
           if (!isNoActiveTurnRejection(e)) throw e
+          // The reply ended in the meantime: it is an ordinary prompt now,
+          // and the queue sends it as soon as the session takes one, behind
+          // anything that was already waiting.
+          enqueue({ turnId, text, images })
+          return
         }
       }
       try {
         await actions.sendPrompt(
           keyRef.current,
-          blocks,
+          questionBlocks(text, images, live?.promptCapabilities),
           promptOptionsFor(promptTargetOf(b))
         )
         updateTurn(turnId, "sent")
       } catch (e) {
         if (e instanceof TurnBusyError) {
           // Another client started a turn first: wait for it, like the
-          // composer's queue does.
-          queueRef.current.push({ turnId, text, images })
-          updateTurn(turnId, "queued")
+          // composer's queue does. The bounce is stamped so the drain retries
+          // at a bounded rate if this window still reads the session as idle.
+          lastDrainAttemptAtRef.current = Date.now()
+          enqueue({ turnId, text, images })
           return
         }
         throw e
       }
     },
-    [actions, promptTargetOf, store, updateTurn]
+    [actions, enqueue, promptTargetOf, steerInto, store, updateTurn]
   )
 
   /** Take back a question that could not go out as asked: the window puts
@@ -538,6 +613,32 @@ export function useQuickAskSession({
   const withdraw = useCallback((turnId: string) => {
     setThread((prev) => prev.filter((turn) => turn.id !== turnId))
   }, [])
+
+  /** Where a question for the bound session goes right now. */
+  const routeFor = useCallback(
+    async (b: QuickAskBinding, text: string): Promise<QuickAskSendRoute> => {
+      // A steer is a note: it needs words (images may ride along).
+      const steerable = text.length > 0 && (await canSteer(b))
+      // Everything else is read after that await, which can be a round trip.
+      const live = store.getConnection(keyRef.current)
+      return routeQuickAskSend({
+        target: b.target,
+        status: live?.status ?? null,
+        steerable,
+        heldTurnReady:
+          text.length > 0 &&
+          live != null &&
+          canDeliverIntoHeldTurn({
+            status: live.status,
+            awaitingBackground: live.awaitingBackground,
+            nativeSteering: live.nativeSteering,
+          }),
+        // A question the drain has on the wire counts as waiting.
+        queued: queueRef.current.length > 0 || drainingRef.current != null,
+      })
+    },
+    [canSteer, store]
+  )
 
   const send = useCallback(
     async (
@@ -587,15 +688,14 @@ export function useQuickAskSession({
           setError({ code: "images_unsupported", detail: null })
           return false
         }
-        const live = store.getConnection(keyRef.current)
-        const route = routeQuickAskSend({
-          target: bound.target,
-          status: live?.status ?? null,
-          // A steer is a note: it needs words (images may ride along).
-          steerable: text.length > 0 && (await canSteer(bound)),
-        })
         try {
-          await deliver(route, turnId, text, images, bound)
+          await deliver(
+            await routeFor(bound, text),
+            turnId,
+            text,
+            images,
+            bound
+          )
         } catch (e) {
           updateTurn(turnId, "failed")
           setError({ code: "send_failed", detail: describeError(e) })
@@ -672,12 +772,7 @@ export function useQuickAskSession({
         if (next.target === "existing" && next.conversationId != null) {
           onSessionUsed?.(next.conversationId)
         }
-        const route = routeQuickAskSend({
-          target: next.target,
-          status: live?.status ?? null,
-          steerable: text.length > 0 && (await canSteer(next)),
-        })
-        await deliver(route, turnId, text, images, next)
+        await deliver(await routeFor(next, text), turnId, text, images, next)
       } catch (e) {
         updateTurn(turnId, "failed")
         setError({ code: "send_failed", detail: describeError(e) })
@@ -688,11 +783,11 @@ export function useQuickAskSession({
     },
     [
       actions,
-      canSteer,
       deliver,
       onFolderUsed,
       onSessionUsed,
       prepare,
+      routeFor,
       store,
       updateTurn,
       withdraw,
@@ -700,7 +795,8 @@ export function useQuickAskSession({
   )
 
   // Settle each reply: when the agent leaves `prompting`, keep its final
-  // message in the thread, then send the next queued question.
+  // message in the thread. Sending what waits behind it is the drain's job
+  // (below), which runs after this in the same commit.
   const lastStatusRef = useRef(conn.status)
   useEffect(() => {
     const previous = lastStatusRef.current
@@ -722,24 +818,198 @@ export function useQuickAskSession({
         })
       )
     }
-    const bound = bindingRef.current
-    const nextQueued = queueRef.current.shift()
-    if (bound && nextQueued && conn.status === "connected") {
-      void deliver(
-        "send",
-        nextQueued.turnId,
-        nextQueued.text,
-        nextQueued.images,
-        bound
-      ).catch((e: unknown) => {
-        updateTurn(nextQueued.turnId, "failed")
-        setError({ code: "send_failed", detail: describeError(e) })
-      })
-    }
-  }, [conn.status, deliver, store, updateTurn])
+  }, [conn.status, store])
 
+  /** Mark the drain idle again (if `token` is still the drain in flight) and
+   *  let it look at the queue once more. */
+  const settleDrain = useCallback((token: number) => {
+    if (drainTokenRef.current !== token) return
+    drainingRef.current = null
+    setDrainVersion((v) => v + 1)
+  }, [])
+
+  /**
+   * Send the oldest waiting question as an ordinary prompt. Runs only while
+   * the session is idle; re-checks that at the moment it runs, since it is
+   * scheduled from a timer.
+   */
+  const sendQueueHead = useCallback(() => {
+    if (drainingRef.current != null) return
+    const b = bindingRef.current
+    const key = keyRef.current
+    const live = store.getConnection(key)
+    if (!b || live?.status !== "connected") return
+    const [next, ...rest] = queueRef.current
+    if (!next) return
+    setQueue(rest)
+    const token = ++drainTokenRef.current
+    const generation = generationRef.current
+    drainingRef.current = next.turnId
+    lastDrainAttemptAtRef.current = Date.now()
+    void (async () => {
+      try {
+        await actions.sendPrompt(
+          key,
+          questionBlocks(next.text, next.images, live.promptCapabilities),
+          promptOptionsFor(promptTargetOf(b))
+        )
+        updateTurn(next.turnId, "sent")
+      } catch (e) {
+        if (generationRef.current !== generation) return
+        if (e instanceof TurnBusyError) {
+          // A turn started first (another window on the same session, or one
+          // this window has not heard about yet). It was the head, so it goes
+          // back to the FRONT and retries once the session is idle again.
+          lastDrainAttemptAtRef.current = Date.now()
+          setQueue([next, ...queueRef.current])
+          return
+        }
+        updateTurn(next.turnId, "failed")
+        setError({ code: "send_failed", detail: describeError(e) })
+      } finally {
+        settleDrain(token)
+      }
+    })()
+  }, [actions, promptTargetOf, setQueue, settleDrain, store, updateTurn])
+
+  /**
+   * Deliver the oldest waiting question into a turn held open only for
+   * background work, the way the composer drains its queue into one (see
+   * `lib/background-idle.ts`): the agent is idle, so it reads the question
+   * now instead of after the background work, which can run for an hour. The
+   * question stays queued until the delivery is confirmed.
+   */
+  const deliverQueueHead = useCallback(() => {
+    if (drainingRef.current != null) return
+    const live = store.getConnection(keyRef.current)
+    const head = queueRef.current[0]
+    if (!live || !head) return
+    const token = ++drainTokenRef.current
+    const generation = generationRef.current
+    drainingRef.current = head.turnId
+    void steerInto(
+      live.connectionId,
+      head.text,
+      head.images,
+      live.promptCapabilities
+    )
+      .then(() => {
+        if (generationRef.current !== generation) return
+        setQueue(queueRef.current.filter((q) => q.turnId !== head.turnId))
+        updateTurn(head.turnId, "steered")
+      })
+      .catch(() => {
+        if (generationRef.current !== generation) return
+        // It goes out as an ordinary prompt once the turn is over, keeping
+        // its place (everything behind it waits too), and is not delivered
+        // again meanwhile: either the backend said the turn already ended —
+        // the idle drain sends it as soon as this window sees that too — or
+        // the delivery would fail the same way again.
+        setQueue(
+          queueRef.current.map((q) =>
+            q.turnId === head.turnId ? { ...q, holdUntilTurnEnd: true } : q
+          )
+        )
+      })
+      .finally(() => settleDrain(token))
+  }, [setQueue, settleDrain, steerInto, store, updateTurn])
+
+  /** The session is gone (the agent exited or failed): nothing waiting can be
+   *  sent any more, so say so instead of showing it queued forever. */
+  const abandonQueue = useCallback(
+    (detail: string | null) => {
+      const waiting = new Set(queueRef.current.map((q) => q.turnId))
+      if (waiting.size === 0) return
+      setQueue([])
+      setThread((prev) =>
+        prev.map((turn) =>
+          turn.role === "user" && waiting.has(turn.id)
+            ? { ...turn, state: "failed" }
+            : turn
+        )
+      )
+      setError({ code: "send_failed", detail })
+    },
+    [setQueue]
+  )
+
+  const heldTurnReady = canDeliverIntoHeldTurn({
+    status: conn.status,
+    awaitingBackground: conn.awaitingBackground,
+    nativeSteering: conn.nativeSteering,
+  })
+
+  /**
+   * The queue's send engine — level-triggered, like the composer's: whenever
+   * the session is idle and a question waits, the oldest one goes out. It
+   * does not wait for a prompting → idle edge, so a question that lands in the
+   * queue after the edge passed (a send that bounced because another window
+   * started a turn, a steer that lost the race with the turn's end, a route
+   * decided while the reply was finishing) still goes out, and Stop sends
+   * what waits once the reply has stopped, as it does in the workspace. One
+   * question at a time: the next waits until the drain in flight settles.
+   */
+  useEffect(() => {
+    if (!binding || drainingRef.current != null) return
+    const head = queueRef.current[0]
+    if (!head) return
+    const status = conn.status
+    if (status === "error" || status === "disconnected") {
+      abandonQueue(store.getConnection(keyRef.current)?.error ?? status)
+      return
+    }
+    if (status === "connected") {
+      const timer = setTimeout(
+        sendQueueHead,
+        flushRetryDelayMs(Date.now(), lastDrainAttemptAtRef.current)
+      )
+      return () => clearTimeout(timer)
+    }
+    if (
+      status === "prompting" &&
+      binding.target !== "private" &&
+      head.text.length > 0 &&
+      shouldDrainIntoHeldTurn({
+        canDeliverNow: heldTurnReady,
+        head: { id: head.turnId, holdUntilTurnEnd: head.holdUntilTurnEnd },
+        busy: false,
+        editingItemId: null,
+      })
+    ) {
+      deliverQueueHead()
+    }
+  }, [
+    abandonQueue,
+    binding,
+    conn.status,
+    deliverQueueHead,
+    drainVersion,
+    heldTurnReady,
+    queueVersion,
+    sendQueueHead,
+    store,
+  ])
+
+  /**
+   * Take a waiting question back out of the queue (and the thread). Returns it
+   * so the window can put it back in the input, or null when it already left:
+   * a question on its way out cannot be recalled.
+   */
+  const unqueue = useCallback(
+    (turnId: string): QueuedQuestion | null => {
+      if (drainingRef.current === turnId) return null
+      const question = queueRef.current.find((q) => q.turnId === turnId)
+      if (!question) return null
+      setQueue(queueRef.current.filter((q) => q.turnId !== turnId))
+      setThread((prev) => prev.filter((turn) => turn.id !== turnId))
+      return question
+    },
+    [setQueue]
+  )
+
+  // Stop ends the reply being written, nothing more: questions still waiting
+  // go out once it has stopped, as the workspace composer's queue does.
   const cancel = useCallback(async () => {
-    queueRef.current = []
     await actions.cancel(keyRef.current)
   }, [actions])
 
@@ -766,7 +1036,10 @@ export function useQuickAskSession({
       setUploadBucket(nextBucket)
       bindingRef.current = null
       privateDirRef.current = null
-      queueRef.current = []
+      setQueue([])
+      drainingRef.current = null
+      drainTokenRef.current += 1
+      lastDrainAttemptAtRef.current = 0
       committedLiveIdsRef.current = new Set()
       setBinding(null)
       setThread([])
@@ -797,7 +1070,7 @@ export function useQuickAskSession({
         await actions.disconnectIfIdle(oldKey)
       }
       return report
-    }, [actions, store])
+    }, [actions, setQueue, store])
 
   // A private scratch dir prepared for a question that was never asked (the
   // user switched to another target) is discarded right away. Its upload
@@ -871,6 +1144,7 @@ export function useQuickAskSession({
       prepare,
       send,
       cancel,
+      unqueue,
       clear,
       setConfigOption,
       dismissError: () => setError(null),
@@ -889,6 +1163,7 @@ export function useQuickAskSession({
       prepare,
       send,
       cancel,
+      unqueue,
       clear,
       setConfigOption,
     ]
