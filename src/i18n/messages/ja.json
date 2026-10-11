@@ -7203,5 +7203,13 @@
     "saveFailed": "Quick Ask の設定を保存できませんでした：{error}",
     "open": "試してみる",
     "openButton": "Quick Ask を開く"
+  },
+  "AppErrorBoundary": {
+    "title": "問題が発生しました",
+    "body": "codeg のこの部分で予期しないエラーが発生しました。ウィンドウのほかの部分は引き続き使用できます。",
+    "reconnectingTitle": "サーバーを待機しています",
+    "reconnectingBody": "サーバーとの接続が切れました。接続が戻ると、この表示は自動的に再読み込みされます。",
+    "retry": "再試行",
+    "reload": "ウィンドウを再読み込み"
   }
 }

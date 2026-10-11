@@ -18,6 +18,8 @@ import { presenceFrame } from "./types"
 // See WebTransport for rationale. Bounded so an older remote codeg-server
 // (no `__ready__` support) can't permanently hang the desktop UI.
 const READY_TIMEOUT_MS = 5_000
+/// Shortest gap between two liveness probes triggered by failed calls.
+const CALL_FAILURE_PROBE_GAP_MS = 5_000
 
 /// Internal lifecycle channels emitted by the Rust-side proxy
 /// (`src-tauri/src/commands/remote_proxy.rs`). Keep these in sync with
@@ -226,7 +228,12 @@ export class RemoteDesktopTransport
         // A failed request only asks the WS task to check the link now: a
         // live socket answers the ping and nothing changes; a dead one is
         // replaced, and the dialog follows the task's state from there.
-        this.probeLiveness()
+        // Only while the link is believed up, though: once the task knows
+        // it is down it is already retrying on its own backoff, and a probe
+        // per failed call (every poller fails as fast as it calls) cut each
+        // wait short — ten connect attempts a second against a server that
+        // was restarting.
+        if (this.connState === "connected") this.probeLivenessThrottled()
       }
       throw err
     }
@@ -278,11 +285,25 @@ export class RemoteDesktopTransport
    */
   probeLiveness(): void {
     if (this.destroyed || !this.wsStarted) return
+    this.lastProbeAt = Date.now()
     void invoke("remote_ws_probe", { connectionId: this.config.id }).catch(
       (err) => {
         console.warn("[RemoteDesktopTransport] remote_ws_probe failed:", err)
       }
     )
+  }
+
+  /** When `probeLiveness` last asked; 0 = never. */
+  private lastProbeAt = 0
+
+  /**
+   * `probeLiveness` for failed calls, at most once per
+   * `CALL_FAILURE_PROBE_GAP_MS`: a burst of calls failing together is one
+   * question about the link, not one each.
+   */
+  private probeLivenessThrottled(): void {
+    if (Date.now() - this.lastProbeAt < CALL_FAILURE_PROBE_GAP_MS) return
+    this.probeLiveness()
   }
 
   // ── Connection health (consumed by the global connection dialog) ────────

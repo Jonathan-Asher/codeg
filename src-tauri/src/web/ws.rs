@@ -14,6 +14,7 @@ use super::live_images;
 use super::shutdown::ShutdownSignal;
 use super::ws_attach::{self, ClientMsg, DetachReason, ServerMsg, OUTBOUND_CAPACITY};
 use super::ws_frame_cap::{self, Frame, FrameBudget};
+use super::ws_liveness::{self, send_bounded, PeerLiveness, Tick};
 use crate::app_state::AppState;
 use crate::logging::throttle::{LagLogThrottle, LeadingEdgeThrottle, LAG_LOG_WINDOW};
 use crate::presence::{ClientKind, PresenceReport, SocketPresence};
@@ -168,8 +169,11 @@ async fn handle_ws_connection(
     });
     match serde_json::to_string(&ready_payload) {
         Ok(text) => {
-            if let Err(e) = socket.send(Message::Text(text.into())).await {
-                tracing::warn!("[WS][WARN] failed to send __ready__ frame: {e}");
+            if send_bounded(socket.send(Message::Text(text.into())))
+                .await
+                .is_err()
+            {
+                tracing::warn!("[WS][WARN] failed to send __ready__ frame");
                 return;
             }
         }
@@ -186,6 +190,12 @@ async fn handle_ws_connection(
     // Same idea for frames cut to fit the frame cap.
     let mut cut_throttle = LeadingEdgeThrottle::new(LAG_LOG_WINDOW);
 
+    // Server-side heartbeat (see `ws_liveness`): a client that vanished
+    // without closing is let go after two silent ping intervals instead of
+    // pinning this task, its subscriptions and its descriptor forever.
+    let mut liveness = PeerLiveness::new(tokio::time::Instant::now());
+    let mut ping_ticker = ws_liveness::ping_ticker();
+
     loop {
         tokio::select! {
             // Server-initiated shutdown: notify any active attach
@@ -198,11 +208,35 @@ async fn handle_ws_connection(
                         reason: DetachReason::ServerShutdown,
                     };
                     if let Ok(text) = serde_json::to_string(&frame) {
-                        let _ = socket.send(Message::Text(text.into())).await;
+                        if send_bounded(socket.send(Message::Text(text.into()))).await.is_err() {
+                            break;
+                        }
                     }
                 }
-                let _ = socket.send(Message::Close(None)).await;
+                let _ = send_bounded(socket.send(Message::Close(None))).await;
                 break;
+            }
+
+            _ = ping_ticker.tick() => {
+                let now = tokio::time::Instant::now();
+                match liveness.on_tick(now) {
+                    Tick::Dead => {
+                        tracing::info!(
+                            "[WS] closing a {kind:?} socket that has been silent for {}s \
+                             (peer gone without closing)",
+                            liveness.silent_for(now).as_secs()
+                        );
+                        break;
+                    }
+                    Tick::Ping => {
+                        if send_bounded(socket.send(Message::Ping(Default::default())))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                }
             }
 
             // Forwarder self-cleanup: a per-attach task that exited (Lagged
@@ -229,7 +263,10 @@ async fn handle_ws_connection(
                         match ws_frame_cap::to_frame_text(&msg, budget, live_images::store()) {
                             Ok(frame) => {
                                 log_cut_frame(&frame, "attach", budget, &mut cut_throttle);
-                                if socket.send(Message::Text(frame.text.into())).await.is_err() {
+                                if send_bounded(socket.send(Message::Text(frame.text.into())))
+                                    .await
+                                    .is_err()
+                                {
                                     break;
                                 }
                             }
@@ -255,7 +292,10 @@ async fn handle_ws_connection(
                             ws_frame_cap::to_frame_text(&event, budget, live_images::store())
                         {
                             log_cut_frame(&frame, "broadcast", budget, &mut cut_throttle);
-                            if socket.send(Message::Text(frame.text.into())).await.is_err() {
+                            if send_bounded(socket.send(Message::Text(frame.text.into())))
+                                .await
+                                .is_err()
+                            {
                                 break;
                             }
                         }
@@ -280,7 +320,11 @@ async fn handle_ws_connection(
             // Client-→-server messages. Text frames are parsed as
             // `ClientMsg`; everything else is ignored (binary, ping/pong
             // are handled by axum, close is handled by the None match arm).
+            // Every frame, pongs and pings included, is proof of life.
             msg = socket.recv() => {
+                if let Some(Ok(_)) = &msg {
+                    liveness.on_inbound(tokio::time::Instant::now());
+                }
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         match serde_json::from_str::<ClientMsg>(&text) {

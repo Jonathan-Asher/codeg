@@ -919,6 +919,10 @@ pub fn build_router(
         .route("/get_recent_logs", post(handlers::logging::get_recent_logs))
         .route("/list_log_files", post(handlers::logging::list_log_files))
         .route("/read_log_file", post(handlers::logging::read_log_file))
+        .route(
+            "/log_client_error",
+            post(handlers::logging::log_client_error),
+        )
         // ─── ACP ───
         .route(
             "/acp_get_agent_status",

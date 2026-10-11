@@ -1,5 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { WebTransport } from "./web-transport"
+import { WebTransport, reconnectDelayMs } from "./web-transport"
+
+describe("reconnectDelayMs", () => {
+  it("doubles from 1s to a 30s cap, spread over the upper half of each step", () => {
+    expect(reconnectDelayMs(1, 0)).toBe(500)
+    expect(reconnectDelayMs(1, 1)).toBe(1_000)
+    expect(reconnectDelayMs(2, 0)).toBe(1_000)
+    expect(reconnectDelayMs(5, 0.999)).toBeLessThanOrEqual(16_000)
+    for (const failCount of [6, 9, 50]) {
+      for (const draw of [0, 0.5, 0.999]) {
+        const delay = reconnectDelayMs(failCount, draw)
+        expect(delay).toBeGreaterThanOrEqual(15_000)
+        expect(delay).toBeLessThanOrEqual(30_000)
+      }
+    }
+    // Out-of-range draws are clamped.
+    expect(reconnectDelayMs(1, -1)).toBe(500)
+    expect(reconnectDelayMs(1, 5)).toBe(1_000)
+  })
+})
 
 // Minimal controllable WebSocket stand-in: records instances and lets the test
 // drive the lifecycle (open / __ready__ frame / drop) deterministically. The

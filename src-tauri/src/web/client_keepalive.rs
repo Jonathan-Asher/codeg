@@ -10,7 +10,15 @@
 //! accepts and the import scan started failing with `EMFILE`.
 //!
 //! Keepalive probes let the kernel find the dead ones and close them. A live
-//! but idle client answers the probes and is not affected.
+//! but idle client answers the probes and is not affected. A peer whose host
+//! is up but whose socket is gone (the app restarted, or the OS dropped the
+//! connection when its network interface went away) answers the first probe
+//! with a reset, so that case is reaped right after the idle time.
+//!
+//! This is the backstop under `web::serve`'s idle timeout and the WebSocket
+//! heartbeats: it also covers a connection that is quiet in the middle of a
+//! request (a long call whose response has not started) and every byte
+//! stream that has no protocol-level liveness of its own.
 
 use std::time::Duration;
 
@@ -18,12 +26,12 @@ use axum::serve::{ListenerExt, TapIo};
 use tokio::net::{TcpListener, TcpStream};
 
 /// Silence after which the kernel starts probing a connection.
-pub const KEEPALIVE_IDLE: Duration = Duration::from_secs(120);
+pub const KEEPALIVE_IDLE: Duration = Duration::from_secs(60);
 /// Gap between unanswered probes.
-pub const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
-/// Unanswered probes before the kernel drops the connection: a dead peer is
-/// reaped about four minutes after it last spoke.
-pub const KEEPALIVE_RETRIES: u32 = 4;
+pub const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(10);
+/// Unanswered probes before the kernel drops the connection: a peer that
+/// vanished is reaped about 90 seconds after it last spoke.
+pub const KEEPALIVE_RETRIES: u32 = 3;
 
 /// Turn keepalive on for one accepted connection. Best effort: a socket that
 /// refuses it is still served.
@@ -37,8 +45,8 @@ pub fn enable(stream: &mut TcpStream) {
     }
 }
 
-/// `listener`, with [`enable`] applied to every connection it accepts. Hand
-/// this to `axum::serve` in place of the bare listener.
+/// `listener`, with [`enable`] applied to every connection it accepts.
+/// `web::serve` wraps every listener it is given in this.
 pub fn listener(listener: TcpListener) -> TapIo<TcpListener, fn(&mut TcpStream)> {
     listener.tap_io(enable as fn(&mut TcpStream))
 }

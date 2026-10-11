@@ -7203,5 +7203,13 @@
     "saveFailed": "Não foi possível salvar as configurações do Quick Ask: {error}",
     "open": "Experimentar",
     "openButton": "Abrir o Quick Ask"
+  },
+  "AppErrorBoundary": {
+    "title": "Algo deu errado aqui",
+    "body": "Esta parte do codeg encontrou um erro inesperado. O restante da janela continua funcionando.",
+    "reconnectingTitle": "Aguardando o servidor",
+    "reconnectingBody": "A conexão com o servidor foi perdida. Esta visualização será recarregada sozinha quando ele voltar.",
+    "retry": "Tentar novamente",
+    "reload": "Recarregar janela"
   }
 }

@@ -98,9 +98,36 @@ const HTTP_TIMEOUT_MAX: Duration = Duration::from_secs(600);
 /// the browser-side `WebTransport` does.
 const WS_RECONNECT_FAIL_THRESHOLD: u32 = 3;
 
-/// Exponential backoff bounds for WS reconnect. 1s/2s/4s/8s/16s/32s.
-const WS_BACKOFF_INITIAL_SECS: u64 = 1;
-const WS_BACKOFF_MAX_SECS: u64 = 32;
+/// Exponential backoff bounds for WS reconnect: 1 s doubling up to 30 s,
+/// each wait spread by jitter (`ws_backoff_delay`).
+const WS_BACKOFF_INITIAL: Duration = Duration::from_secs(1);
+const WS_BACKOFF_MAX: Duration = Duration::from_secs(30);
+/// Shortest gap between two connect attempts, however often the frontend
+/// asks for an early retry (`remote_ws_probe`). Every failed HTTP call used
+/// to ask for one, and each skipped the whole backoff: with the server down
+/// and the UI's calls failing as fast as they were made, the task retried
+/// about ten times a second.
+const WS_MIN_RETRY_GAP: Duration = Duration::from_secs(2);
+
+/// Most idle connections the proxy's HTTP pool keeps per remote. HTTP/1.1
+/// carries one request at a time per connection and reqwest sets no
+/// per-host cap, so a window's startup burst opens one connection for every
+/// request in flight — about 70 against the box after an app restart. With
+/// no cap on the idle pool they all stayed open until its idle timeout, and
+/// any the client lost meanwhile (sleep, a network change) stayed open on
+/// the server for good. Past this many, a connection is closed as soon as
+/// its request is done.
+const HTTP_POOL_MAX_IDLE_PER_HOST: usize = 8;
+/// An idle pooled connection is closed by this side well before the
+/// server's own idle timeout (120 s, `web::serve`), so a request never
+/// races the server closing the very connection it picked.
+const HTTP_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+/// TCP keepalive on the proxy's connections, for a long call whose answer
+/// has not started: the server vanishing is noticed by the probes.
+const HTTP_TCP_KEEPALIVE: Duration = Duration::from_secs(60);
+/// A remote that does not even answer the TCP handshake (asleep, off the
+/// tailnet) fails a call fast instead of after the whole request timeout.
+const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Heartbeat for the proxied WS. A socket that died while the laptop slept
 /// (lid closed) never produces a read error or a close frame by itself:
@@ -272,18 +299,27 @@ pub struct RemoteProxyState {
     workspace_http: reqwest::Client,
 }
 
+/// The builder both of the proxy's long-lived HTTP clients start from: one
+/// shared pool per client, bounded (see `HTTP_POOL_MAX_IDLE_PER_HOST`).
+fn proxy_http_client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .redirect(connection_redirect_policy())
+        .pool_max_idle_per_host(HTTP_POOL_MAX_IDLE_PER_HOST)
+        .pool_idle_timeout(HTTP_POOL_IDLE_TIMEOUT)
+        .tcp_keepalive(HTTP_TCP_KEEPALIVE)
+        .connect_timeout(HTTP_CONNECT_TIMEOUT)
+}
+
 impl RemoteProxyState {
     pub fn new() -> Self {
         Self {
             tasks: Mutex::new(HashMap::new()),
             destroyed_window_instances: Mutex::new(HashSet::new()),
-            http: reqwest::Client::builder()
+            http: proxy_http_client_builder()
                 .timeout(HTTP_TIMEOUT)
-                .redirect(connection_redirect_policy())
                 .build()
                 .expect("failed to build reqwest client for remote proxy"),
-            workspace_http: reqwest::Client::builder()
-                .redirect(connection_redirect_policy())
+            workspace_http: proxy_http_client_builder()
                 .build()
                 .expect("failed to build reqwest workspace client for remote proxy"),
         }
@@ -1841,7 +1877,7 @@ pub async fn remote_ws_unsubscribe(
 /// to retry at once. The frontend calls this on wake-up signals (tab
 /// visible, lid open, network back) and from the "Reconnect now" button, so
 /// a socket that died during sleep is replaced within seconds instead of at
-/// the next quiet-interval ping or the end of a 32 s backoff. No entry
+/// the next quiet-interval ping or the end of a 30 s backoff. No entry
 /// (nothing subscribed, or already torn down) is not an error: there is no
 /// socket to check.
 #[tauri::command]
@@ -2006,6 +2042,8 @@ async fn run_ws_task(
             break;
         }
 
+        // When this connect attempt started (`WS_MIN_RETRY_GAP`).
+        let attempt_started = Instant::now();
         let connect_result = tokio::select! {
             biased;
             _ = shutdown_rx.changed() => {
@@ -2029,7 +2067,14 @@ async fn run_ws_task(
                         break;
                     }
                 }
-                if backoff_sleep(&mut shutdown_rx, &entry.probe, backoff_step).await {
+                if backoff_sleep(
+                    &mut shutdown_rx,
+                    &entry.probe,
+                    backoff_step,
+                    attempt_started,
+                )
+                .await
+                {
                     break;
                 }
                 continue;
@@ -2146,7 +2191,14 @@ async fn run_ws_task(
         *entry.ready.write().await = false;
         emit_internal(&app, &entry, &event_name, WS_DISCONNECTED_CHANNEL).await;
         backoff_step = backoff_step.saturating_add(1);
-        if backoff_sleep(&mut shutdown_rx, &entry.probe, backoff_step).await {
+        if backoff_sleep(
+            &mut shutdown_rx,
+            &entry.probe,
+            backoff_step,
+            attempt_started,
+        )
+        .await
+        {
             break;
         }
     }
@@ -2165,29 +2217,52 @@ async fn run_ws_task(
     }
 }
 
-/// Sleep for the exponential-backoff duration corresponding to
-/// `fail_count` (1s, 2s, 4s, … capped at `WS_BACKOFF_MAX_SECS`). Returns
-/// `true` if shutdown was requested during the wait — caller should exit
-/// its loop in that case.
+/// The wait before reconnect attempt `fail_count` (1-based): 1 s doubling up
+/// to `WS_BACKOFF_MAX`, then spread over its upper half by `jitter` (a draw
+/// from `[0, 1)`), so every window — and every client — that lost the
+/// server together does not knock on its door in the same instant when it
+/// comes back.
+fn ws_backoff_delay(fail_count: u32, jitter: f64) -> Duration {
+    let shift = fail_count.saturating_sub(1).min(16);
+    let base = WS_BACKOFF_INITIAL
+        .saturating_mul(1u32 << shift)
+        .min(WS_BACKOFF_MAX);
+    base.mul_f64(0.5 + 0.5 * jitter.clamp(0.0, 1.0))
+}
+
+/// Sleep for the backoff before reconnect attempt `fail_count`
+/// (`ws_backoff_delay`). Returns `true` if shutdown was requested during the
+/// wait — caller should exit its loop in that case.
 ///
 /// `wake` (the entry's probe signal) cuts the wait short: a wake-up probe
 /// (lid opened, network back) or the user's "Reconnect now" means "try now",
-/// not "after the remaining 32 s". A request that landed while a connect
+/// not "after the remaining 30 s". A request that landed while a connect
 /// attempt was in flight is kept as a `Notify` permit, so the retry after
-/// that attempt starts at once too.
+/// that attempt starts promptly too. Promptly, not at once: the next attempt
+/// still starts no sooner than `WS_MIN_RETRY_GAP` after `attempt_started`,
+/// so a stream of wake requests cannot turn the backoff into a tight loop.
 async fn backoff_sleep(
     shutdown_rx: &mut watch::Receiver<bool>,
     wake: &Notify,
     fail_count: u32,
+    attempt_started: Instant,
 ) -> bool {
-    let shift = fail_count.saturating_sub(1).min(8) as u64;
-    let secs = (WS_BACKOFF_INITIAL_SECS << shift).min(WS_BACKOFF_MAX_SECS);
-    tokio::select! {
+    let delay = ws_backoff_delay(fail_count, rand::random::<f64>());
+    let woken = tokio::select! {
         biased;
-        changed = shutdown_rx.changed() => changed.is_ok() && *shutdown_rx.borrow(),
-        _ = wake.notified() => false,
-        _ = tokio::time::sleep(Duration::from_secs(secs)) => false,
+        changed = shutdown_rx.changed() => return changed.is_ok() && *shutdown_rx.borrow(),
+        _ = wake.notified() => true,
+        _ = tokio::time::sleep(delay) => false,
+    };
+    if woken {
+        let earliest = attempt_started + WS_MIN_RETRY_GAP;
+        tokio::select! {
+            biased;
+            changed = shutdown_rx.changed() => return changed.is_ok() && *shutdown_rx.borrow(),
+            _ = tokio::time::sleep_until(earliest) => {}
+        }
     }
+    false
 }
 
 /// Forward a text frame from the remote WS to all current subscribers of
@@ -3175,27 +3250,218 @@ mod tests {
 
     // ─── Reconnect backoff ─────────────────────────────────────────────
 
-    #[tokio::test]
+    #[test]
+    fn backoff_doubles_from_one_second_up_to_thirty_with_jitter_in_the_upper_half() {
+        let ms = |d: Duration| d.as_millis();
+        // No jitter draw at the bottom of the range: half the step.
+        assert_eq!(ms(ws_backoff_delay(1, 0.0)), 500);
+        assert_eq!(ms(ws_backoff_delay(2, 0.0)), 1_000);
+        assert_eq!(ms(ws_backoff_delay(3, 0.0)), 2_000);
+        assert_eq!(ms(ws_backoff_delay(5, 0.0)), 8_000);
+        // At the top of the range: the whole step.
+        assert_eq!(ms(ws_backoff_delay(1, 1.0)), 1_000);
+        assert_eq!(ms(ws_backoff_delay(5, 1.0)), 16_000);
+        // Capped at 30 s however long the outage, and never below 15 s there.
+        for fail_count in [6, 7, 20, u32::MAX] {
+            for jitter in [0.0, 0.37, 0.999] {
+                let delay = ws_backoff_delay(fail_count, jitter);
+                assert!(
+                    delay >= WS_BACKOFF_MAX / 2,
+                    "{fail_count} {jitter}: {delay:?}"
+                );
+                assert!(delay <= WS_BACKOFF_MAX, "{fail_count} {jitter}: {delay:?}");
+            }
+        }
+        // The first attempts are not a burst: even the shortest wait is half
+        // a second, and a draw outside [0, 1) is clamped.
+        assert_eq!(ms(ws_backoff_delay(0, -3.0)), 500);
+        assert_eq!(ms(ws_backoff_delay(1, 7.0)), 1_000);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn a_wake_request_cuts_the_backoff_short() {
         let (_shutdown_tx, mut shutdown_rx) = watch::channel(false);
         let wake = Notify::new();
         // A probe or "Reconnect now" that landed while a connect attempt was
-        // still in flight: kept as a permit, so the next wait ends at once.
+        // still in flight: kept as a permit, so the next wait ends early —
+        // right away when the last attempt is already a while back.
         wake.notify_one();
-        let started = std::time::Instant::now();
-        let shutdown = backoff_sleep(&mut shutdown_rx, &wake, 6).await; // a 32 s step
+        let attempt_started = Instant::now() - WS_MIN_RETRY_GAP;
+        let started = Instant::now();
+        let shutdown = backoff_sleep(&mut shutdown_rx, &wake, 6, attempt_started).await;
         assert!(!shutdown);
-        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(started.elapsed(), Duration::ZERO);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_wake_request_never_retries_sooner_than_the_minimum_gap() {
+        let (_shutdown_tx, mut shutdown_rx) = watch::channel(false);
+        let wake = Notify::new();
+        wake.notify_one();
+        // The attempt that just failed started this very moment (a refused
+        // connection fails in microseconds).
+        let attempt_started = Instant::now();
+        let shutdown = backoff_sleep(&mut shutdown_rx, &wake, 6, attempt_started).await;
+        assert!(!shutdown);
+        assert_eq!(attempt_started.elapsed(), WS_MIN_RETRY_GAP);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wake_requests_on_every_failed_call_cannot_make_a_tight_reconnect_loop() {
+        // The 2026-10-11 loop: the server down, every failed HTTP call asking
+        // for an early retry, every connect refused at once. Drive the same
+        // shape for a simulated minute and count the attempts.
+        let (_shutdown_tx, mut shutdown_rx) = watch::channel(false);
+        let wake = Notify::new();
+        let start = Instant::now();
+        let mut attempts = 0u32;
+        let mut fail_count = 0u32;
+        while start.elapsed() < Duration::from_secs(60) {
+            let attempt_started = Instant::now();
+            attempts += 1;
+            fail_count += 1;
+            // A failed call's probe lands while the attempt is "in flight".
+            wake.notify_one();
+            backoff_sleep(&mut shutdown_rx, &wake, fail_count, attempt_started).await;
+        }
+        let ceiling = (60 / WS_MIN_RETRY_GAP.as_secs()) as u32 + 1;
+        assert!(attempts <= ceiling, "{attempts} attempts in a minute");
     }
 
     #[tokio::test]
     async fn backoff_sleep_reports_a_shutdown() {
         let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
         let wake = Notify::new();
-        let (shutdown, _) = tokio::join!(backoff_sleep(&mut shutdown_rx, &wake, 6), async {
-            shutdown_tx.send(true).unwrap();
-        });
+        let (shutdown, _) = tokio::join!(
+            backoff_sleep(&mut shutdown_rx, &wake, 6, Instant::now()),
+            async {
+                shutdown_tx.send(true).unwrap();
+            }
+        );
         assert!(shutdown);
+    }
+
+    #[tokio::test]
+    async fn backoff_sleep_reports_a_shutdown_while_holding_the_retry_gap() {
+        let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+        let wake = Notify::new();
+        wake.notify_one();
+        let (shutdown, _) = tokio::join!(
+            backoff_sleep(&mut shutdown_rx, &wake, 6, Instant::now()),
+            async {
+                tokio::task::yield_now().await;
+                shutdown_tx.send(true).unwrap();
+            }
+        );
+        assert!(shutdown);
+    }
+
+    // ─── Proxy HTTP pool ───────────────────────────────────────────────
+
+    /// A bare HTTP/1.1 server that answers every request on a connection
+    /// after `delay`, keeping the connection open. Counts the connections
+    /// its clients still hold, and every connection it ever accepted.
+    async fn counting_server(
+        delay: Duration,
+    ) -> (
+        std::net::SocketAddr,
+        Arc<std::sync::atomic::AtomicUsize>,
+        Arc<std::sync::atomic::AtomicUsize>,
+    ) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let open = Arc::new(AtomicUsize::new(0));
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let counter = open.clone();
+        let total = accepted.clone();
+        tokio::spawn(async move {
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                counter.fetch_add(1, Ordering::SeqCst);
+                total.fetch_add(1, Ordering::SeqCst);
+                let counter = counter.clone();
+                tokio::spawn(async move {
+                    let mut pending = Vec::new();
+                    let mut buf = [0u8; 4096];
+                    'conn: loop {
+                        // One request: head, then a Content-Length body.
+                        let head_end = loop {
+                            if let Some(end) = pending.windows(4).position(|w| w == b"\r\n\r\n") {
+                                break end + 4;
+                            }
+                            match stream.read(&mut buf).await {
+                                Ok(0) | Err(_) => break 'conn,
+                                Ok(n) => pending.extend_from_slice(&buf[..n]),
+                            }
+                        };
+                        let head = String::from_utf8_lossy(&pending[..head_end]).to_lowercase();
+                        let body_len = head
+                            .lines()
+                            .find_map(|l| l.strip_prefix("content-length:"))
+                            .and_then(|v| v.trim().parse::<usize>().ok())
+                            .unwrap_or(0);
+                        while pending.len() < head_end + body_len {
+                            match stream.read(&mut buf).await {
+                                Ok(0) | Err(_) => break 'conn,
+                                Ok(n) => pending.extend_from_slice(&buf[..n]),
+                            }
+                        }
+                        pending.drain(..head_end + body_len);
+                        tokio::time::sleep(delay).await;
+                        let response = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                                        content-length: 2\r\n\r\n{}";
+                        if stream.write_all(response.as_bytes()).await.is_err() {
+                            break;
+                        }
+                    }
+                    counter.fetch_sub(1, Ordering::SeqCst);
+                });
+            }
+        });
+        (addr, open, accepted)
+    }
+
+    #[tokio::test]
+    async fn a_request_burst_leaves_no_more_than_the_idle_cap_open() {
+        use std::sync::atomic::Ordering;
+
+        let (addr, open, accepted) = counting_server(Duration::from_millis(150)).await;
+        // The proxy's own settings, minus the system proxy (see above).
+        let client = proxy_http_client_builder().no_proxy().build().unwrap();
+        let burst = 40;
+        let calls = (0..burst).map(|_| {
+            let client = client.clone();
+            async move {
+                client
+                    .post(format!("http://{addr}/api/list_all_conversations"))
+                    .json(&serde_json::json!({}))
+                    .send()
+                    .await
+                    .unwrap()
+                    .bytes()
+                    .await
+                    .unwrap()
+            }
+        });
+        futures_util::future::join_all(calls).await;
+        // HTTP/1.1: one connection per request in flight.
+        assert!(accepted.load(Ordering::SeqCst) > HTTP_POOL_MAX_IDLE_PER_HOST);
+
+        // Once the burst is over, every connection past the idle cap is
+        // closed by the client right away, not after the pool's idle timeout.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while open.load(Ordering::SeqCst) > HTTP_POOL_MAX_IDLE_PER_HOST {
+            assert!(
+                Instant::now() < deadline,
+                "{} connections still open after the burst",
+                open.load(Ordering::SeqCst)
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(HTTP_POOL_IDLE_TIMEOUT < crate::web::serve::ConnectionTimeouts::DEFAULT.idle);
     }
 
     #[tokio::test(start_paused = true)]

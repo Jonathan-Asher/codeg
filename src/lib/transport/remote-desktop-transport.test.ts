@@ -117,12 +117,60 @@ describe("RemoteDesktopTransport recovery after calls failed", () => {
   it("probes the link when a call cannot reach the remote", async () => {
     const transport = makeTransport()
     await startLink(transport)
+    frame("__ready__")
     tauri.invoke.mockImplementation(async (command: string) => {
       if (command === "remote_http_call") throw UNREACHABLE
     })
 
     await expect(transport.call("list_folders")).rejects.toBe(UNREACHABLE)
     expect(invoked("remote_ws_probe")).toBe(1)
+  })
+
+  it("asks once for a burst of failed calls, not once per call", async () => {
+    const transport = makeTransport()
+    await startLink(transport)
+    frame("__ready__")
+    tauri.invoke.mockImplementation(async (command: string) => {
+      if (command === "remote_http_call") throw UNREACHABLE
+    })
+
+    await Promise.all(
+      Array.from({ length: 25 }, () =>
+        transport.call("list_folders").catch(() => {})
+      )
+    )
+    expect(invoked("remote_ws_probe")).toBe(1)
+  })
+
+  it("leaves the retrying to the proxy's backoff once the link is known down", async () => {
+    // The 2026-10-11 loop: every failed call's probe cut the proxy's backoff
+    // short, and the UI's calls failed as fast as they were made.
+    const transport = makeTransport()
+    await startLink(transport)
+    frame("__ready__")
+    frame("__disconnected__")
+    tauri.invoke.mockImplementation(async (command: string) => {
+      if (command === "remote_http_call") throw UNREACHABLE
+    })
+
+    for (let i = 0; i < 25; i++) {
+      await transport.call("list_folders").catch(() => {})
+    }
+    expect(invoked("remote_ws_probe")).toBe(0)
+    // The user's own "Reconnect now" still goes through.
+    transport.reconnectNow()
+    expect(invoked("remote_ws_probe")).toBe(1)
+  })
+
+  it("does not probe while the first connect is still under way", async () => {
+    const transport = makeTransport()
+    await startLink(transport)
+    tauri.invoke.mockImplementation(async (command: string) => {
+      if (command === "remote_http_call") throw UNREACHABLE
+    })
+
+    await transport.call("list_folders").catch(() => {})
+    expect(invoked("remote_ws_probe")).toBe(0)
   })
 
   it("does not treat the server's own network errors as a lost link", async () => {

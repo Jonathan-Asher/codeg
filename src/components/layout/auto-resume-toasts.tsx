@@ -205,7 +205,8 @@ export function AutoResumeToasts() {
 
   useEffect(() => {
     const batch = status?.started_at
-    if (!status || !batch || status.items.length === 0) return
+    if (!status || !batch || !Array.isArray(status.items)) return
+    if (status.items.length === 0) return
     if (closedFor.current === batch) return
     const unsettled = unsettledAutoResumes(status)
     if (raisedFor.current !== batch) {

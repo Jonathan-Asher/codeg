@@ -7203,5 +7203,13 @@
     "saveFailed": "تعذّر حفظ إعدادات Quick Ask: {error}",
     "open": "جرّبه",
     "openButton": "فتح Quick Ask"
+  },
+  "AppErrorBoundary": {
+    "title": "حدث خطأ هنا",
+    "body": "واجه هذا الجزء من codeg خطأً غير متوقع. يستمر باقي النافذة في العمل.",
+    "reconnectingTitle": "في انتظار الخادم",
+    "reconnectingBody": "انقطع الاتصال بالخادم. سيُعاد تحميل هذا العرض تلقائيًا عند عودته.",
+    "retry": "إعادة المحاولة",
+    "reload": "إعادة تحميل النافذة"
   }
 }

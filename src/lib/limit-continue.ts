@@ -48,6 +48,9 @@ export function limitResetParts(
   locale?: string
 ): LimitResetParts {
   const at = new Date(resetsAt)
+  // An unparseable time renders as unknown instead of throwing a RangeError
+  // out of `Intl.DateTimeFormat.format` mid-render.
+  if (Number.isNaN(at.getTime())) return { time: "—", remaining: "—" }
   const ms = at.getTime() - now
   const sameDayish = ms < 24 * 60 * 60 * 1000
   const time = new Intl.DateTimeFormat(locale, {

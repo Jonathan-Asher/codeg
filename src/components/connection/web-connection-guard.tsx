@@ -72,7 +72,7 @@ export function WebConnectionGuard() {
 
   // Fast recovery on network restore / tab wake. Two things can be wrong when
   // the machine wakes. Either the transport already knows the link is down —
-  // backoff caps at 32s, so probe right away instead of waiting it out — or
+  // backoff caps at 30s, so probe right away instead of waiting it out — or
   // it does NOT know: a socket that died during sleep sits in OPEN state
   // until the OS times it out, with no close event to trigger reconnection,
   // and the event stream stays dark for minutes. `probeTransportLiveness`

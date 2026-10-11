@@ -19,6 +19,7 @@
 //!   of the process.
 
 pub mod budget;
+pub mod client_report;
 pub mod hub;
 pub mod init;
 pub mod layer;

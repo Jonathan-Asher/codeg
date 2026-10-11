@@ -296,6 +296,19 @@ pub async fn open_logs_dir() -> Result<String, AppCommandError> {
     open_logs_dir_core()
 }
 
+/// An uncaught error from this window's frontend, for the log (see
+/// `logging::client_report`). A remote-workspace window reports here too —
+/// to the desktop it runs on, which is where its frontend lives, and which
+/// is still reachable when the remote server is not.
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn log_client_error(
+    report: crate::logging::client_report::ClientErrorReport,
+) -> Result<(), AppCommandError> {
+    crate::logging::client_report::log_client_error(&report);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

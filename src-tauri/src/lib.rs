@@ -2019,6 +2019,7 @@ mod tauri_app {
                 logging_commands::get_recent_logs,
                 logging_commands::list_log_files,
                 logging_commands::open_logs_dir,
+                logging_commands::log_client_error,
                 delegation_commands::get_delegation_settings,
                 delegation_commands::set_delegation_settings,
                 crate::commands::mcp_service::get_codeg_mcp_service_status,

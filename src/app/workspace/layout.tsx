@@ -107,6 +107,7 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { usePlatform } from "@/hooks/use-platform"
 import { Drawer, DrawerContent, DrawerTitle } from "@/components/ui/drawer"
 import { OverlayHostHiddenProvider } from "@/components/ui/overlay-host-hidden"
+import { AppErrorBoundary } from "@/components/error-boundary/app-error-boundary"
 
 function WorkspaceDocumentTitle() {
   const { activeFolder } = useActiveFolder()
@@ -139,6 +140,20 @@ const LAYOUT_EPSILON = 0.25
 // (removing it mid-transition would snap the final pixels).
 const PANEL_SLIDE_MS = 240
 const PANEL_SLIDE_CLEANUP_MS = PANEL_SLIDE_MS + 60
+
+/** A failing conversation view, isolated; switching tabs clears the error. */
+function ConversationErrorBoundary({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  const activeTabId = useTabStore((s) => s.activeTabId)
+  return (
+    <AppErrorBoundary scope="conversation" resetKey={activeTabId}>
+      {children}
+    </AppErrorBoundary>
+  )
+}
 
 function TabKeysSync() {
   const tabs = useTabStore((s) => s.tabs)
@@ -442,7 +457,9 @@ function WorkspaceContent({ children }: { children: React.ReactNode }) {
                   onPointerDownCapture={markConversationActive}
                   onFocusCapture={markConversationActive}
                 >
-                  {children}
+                  <ConversationErrorBoundary>
+                    {children}
+                  </ConversationErrorBoundary>
                 </div>
               </section>
             </OverlayHostHiddenProvider>
@@ -540,7 +557,9 @@ function WorkspaceContent({ children }: { children: React.ReactNode }) {
               >
                 <FileWorkspaceHeader />
                 <div className="flex-1 min-h-0 overflow-hidden">
-                  <FileWorkspacePanel />
+                  <AppErrorBoundary scope="files">
+                    <FileWorkspacePanel />
+                  </AppErrorBoundary>
                 </div>
               </div>
             </section>
@@ -600,7 +619,7 @@ function MobileWorkspaceContent({ children }: { children: React.ReactNode }) {
           // are navigated from the sidebar (single active conversation at a time).
           <section className="flex h-full min-h-0 flex-col overflow-hidden">
             <div className="relative flex-1 min-h-0 overflow-hidden">
-              {children}
+              <ConversationErrorBoundary>{children}</ConversationErrorBoundary>
             </div>
           </section>
         ) : (
@@ -609,7 +628,9 @@ function MobileWorkspaceContent({ children }: { children: React.ReactNode }) {
           <section className="flex h-full min-h-0 flex-col overflow-hidden">
             <FileWorkspaceHeader />
             <div className="flex-1 min-h-0 overflow-hidden">
-              <FileWorkspacePanel />
+              <AppErrorBoundary scope="files">
+                <FileWorkspacePanel />
+              </AppErrorBoundary>
             </div>
           </section>
         )}
@@ -669,7 +690,9 @@ function MobileFolderWorkspaceShell({
           className="w-[85%] max-w-[22.5rem] p-0"
         >
           <DrawerTitle className="sr-only">Sidebar</DrawerTitle>
-          <Sidebar />
+          <AppErrorBoundary scope="sidebar">
+            <Sidebar />
+          </AppErrorBoundary>
         </DrawerContent>
       </Drawer>
 
@@ -688,7 +711,9 @@ function MobileFolderWorkspaceShell({
           className="w-[85%] max-w-[22.5rem] p-0"
         >
           <DrawerTitle className="sr-only">Panel</DrawerTitle>
-          <AuxPanel />
+          <AppErrorBoundary scope="aux-panel">
+            <AuxPanel />
+          </AppErrorBoundary>
         </DrawerContent>
       </Drawer>
 
@@ -701,7 +726,9 @@ function MobileFolderWorkspaceShell({
         <DrawerContent showCloseButton={false} className="h-[95vh] p-0">
           <DrawerTitle className="sr-only">Terminal</DrawerTitle>
           <div className="h-full min-h-0 overflow-hidden">
-            <TerminalPanel />
+            <AppErrorBoundary scope="terminal">
+              <TerminalPanel />
+            </AppErrorBoundary>
           </div>
         </DrawerContent>
       </Drawer>
@@ -1067,7 +1094,9 @@ function FolderWorkspaceShell({ children }: { children: React.ReactNode }) {
               slide — an un-backed wrapper would show the root `bg-background`
               (white) through that gap. */}
           <div className="h-full min-h-0 overflow-hidden ws-surface-sidebar">
-            <Sidebar />
+            <AppErrorBoundary scope="sidebar">
+              <Sidebar />
+            </AppErrorBoundary>
           </div>
         </ResizablePanel>
 
@@ -1137,7 +1166,9 @@ function FolderWorkspaceShell({ children }: { children: React.ReactNode }) {
                 maxSize={terminalOpen ? terminalSizeRange.maxSize : 0}
               >
                 <div className="h-full min-h-0 overflow-hidden">
-                  <TerminalPanel />
+                  <AppErrorBoundary scope="terminal">
+                    <TerminalPanel />
+                  </AppErrorBoundary>
                 </div>
               </ResizablePanel>
             </ResizablePanelGroup>
@@ -1167,7 +1198,9 @@ function FolderWorkspaceShell({ children }: { children: React.ReactNode }) {
               to the old opaque wrapper, so the 240ms collapse slide still never
               flashes white while AuxPanel `return null`s. */}
           <div className="h-full min-h-0 overflow-hidden bg-background ws-transparent-bg">
-            <AuxPanel />
+            <AppErrorBoundary scope="aux-panel">
+              <AuxPanel />
+            </AppErrorBoundary>
           </div>
         </ResizablePanel>
       </ResizablePanelGroup>
@@ -1233,7 +1266,9 @@ function FolderLayoutShell({ children }: { children: React.ReactNode }) {
       ) : (
         <FolderWorkspaceShell>{children}</FolderWorkspaceShell>
       )}
-      <StatusBar />
+      <AppErrorBoundary scope="status-bar" variant="silent">
+        <StatusBar />
+      </AppErrorBoundary>
       {/* Desktop window chrome, pinned to the window corners so it never moves —
           or re-mounts — when the side panels open/close (that re-parenting is
           what made the old in-header clusters flicker). Left = sidebar toggle +
@@ -1244,33 +1279,51 @@ function FolderLayoutShell({ children }: { children: React.ReactNode }) {
       {!isMobile && (
         <>
           <div className="absolute left-0 top-0 z-50 h-10">
-            <LeftEdgeChrome />
+            <AppErrorBoundary scope="left-chrome" variant="silent">
+              <LeftEdgeChrome />
+            </AppErrorBoundary>
           </div>
           <div
             className="absolute top-0 z-50 h-10"
             style={{ right: winLinuxControls ? WINDOW_CAPTION_WIDTH : 0 }}
           >
-            <RightEdgeChrome />
+            <AppErrorBoundary scope="right-chrome" variant="silent">
+              <RightEdgeChrome />
+            </AppErrorBoundary>
           </div>
           <div className="absolute right-0 top-0 z-50 h-10">
-            <WindowControls />
+            <AppErrorBoundary scope="window-controls" variant="silent">
+              <WindowControls />
+            </AppErrorBoundary>
           </div>
         </>
       )}
-      <AppToaster
-        position="bottom-right"
-        duration={TOAST_DURATION_MS}
-        closeButton
-      />
+      {/* A toast renders inside the toaster: one that throws takes the
+          toaster down, not the window. */}
+      <AppErrorBoundary scope="toaster" variant="silent">
+        <AppToaster
+          position="bottom-right"
+          duration={TOAST_DURATION_MS}
+          closeButton
+        />
+      </AppErrorBoundary>
       {/* Live progress toasts for remote-workspace downloads. */}
-      <WorkspaceTransfersToasts />
+      <AppErrorBoundary scope="transfer-toasts" variant="silent">
+        <WorkspaceTransfersToasts />
+      </AppErrorBoundary>
       {/* The sessions a restart cut off, as the backend resumes them. */}
-      <AutoResumeToasts />
+      <AppErrorBoundary scope="auto-resume-toasts" variant="silent">
+        <AutoResumeToasts />
+      </AppErrorBoundary>
       {/* Critical sessions that sat idle or went silent: banner, system
           notification and tone (the backend decides when). */}
-      <CriticalAlerts />
+      <AppErrorBoundary scope="critical-alerts" variant="silent">
+        <CriticalAlerts />
+      </AppErrorBoundary>
       {/* The active tab's session, for the presence reports. */}
-      <ShownSessionPresence />
+      <AppErrorBoundary scope="shown-session-presence" variant="silent">
+        <ShownSessionPresence />
+      </AppErrorBoundary>
     </div>
   )
 }
@@ -1313,31 +1366,41 @@ function WorkspaceLayoutInner({ children }: { children: React.ReactNode }) {
                 <ConversationRuntimeProvider>
                   <WorkspaceProvider>
                     <TabProvider>
-                      <WorkspaceDocumentTitle />
-                      <TabKeysSync />
-                      <BrowserEventsBridge />
-                      {/* Beside the events bridge and not inside it: that one
+                      <AppErrorBoundary
+                        scope="workspace-bridges"
+                        variant="silent"
+                      >
+                        <WorkspaceDocumentTitle />
+                        <TabKeysSync />
+                        <BrowserEventsBridge />
+                        {/* Beside the events bridge and not inside it: that one
                           stops where no built-in browser exists, and a local
                           server is worth hearing about in web mode too (the
                           port bridge can show it). */}
-                      <BrowserServiceBridge />
-                      {/* Mounted beside the bridge, not inside a tab: the tab
+                        <BrowserServiceBridge />
+                        {/* Mounted beside the bridge, not inside a tab: the tab
                           an agent asks to run code on is usually not the one
                           the person is looking at. */}
-                      <BrowserEvalConfirm />
-                      {/* Here and not in the browser tab it is opened from:
+                        <BrowserEvalConfirm />
+                        {/* Here and not in the browser tab it is opened from:
                           only the tab on screen is mounted, and a tab opening
                           on its own would take the marks with it. */}
-                      <BrowserScreenshotMarkupHost />
-                      <BrowserTabsPersistence />
-                      <BrowserTabsSuspender />
-                      <HeavyPluginsWarmup />
-                      <DeepLinkBootstrap />
-                      <PetFocusBridge />
-                      <QuickAskActiveFolderPublisher />
+                        <BrowserScreenshotMarkupHost />
+                        <BrowserTabsPersistence />
+                        <BrowserTabsSuspender />
+                        <HeavyPluginsWarmup />
+                        <DeepLinkBootstrap />
+                        <PetFocusBridge />
+                        <QuickAskActiveFolderPublisher />
+                      </AppErrorBoundary>
                       {/* Always mounted: external-change conflicts must be
                             resolvable even with the aux file tree closed. */}
-                      <ExternalConflictDialog />
+                      <AppErrorBoundary
+                        scope="external-conflict-dialog"
+                        variant="silent"
+                      >
+                        <ExternalConflictDialog />
+                      </AppErrorBoundary>
                       <SidebarProvider>
                         <AuxPanelProvider>
                           <TerminalProvider>

@@ -33,6 +33,7 @@ use self::frame::{CloseCode, Frame, TUNNEL_PROTOCOL};
 use self::policy::TunnelPolicy;
 use self::pump::{pump, StreamEvent};
 use super::shutdown::ShutdownSignal;
+use super::ws_liveness::{self, send_bounded, PeerLiveness, Tick};
 
 /// Frames waiting for the WebSocket: control frames and at most a window of
 /// data per stream (the pumps wait for credit), so this only bounds bursts.
@@ -56,14 +57,27 @@ async fn session(socket: WebSocket, policy: TunnelPolicy, shutdown: Arc<Shutdown
     }
     let (mut sink, mut incoming) = socket.split();
     let (frames, mut outgoing) = mpsc::channel::<Frame>(OUTGOING_QUEUE);
+    // The heartbeat's pings go out through the writer, which owns the sink.
+    let (pings, mut ping_requests) = mpsc::channel::<()>(1);
     let writer = tokio::spawn(async move {
-        while let Some(frame) = outgoing.recv().await {
-            if sink.send(Message::Binary(frame.encode().into())).await.is_err() {
+        loop {
+            let message = tokio::select! {
+                frame = outgoing.recv() => match frame {
+                    Some(frame) => Message::Binary(frame.encode().into()),
+                    None => break,
+                },
+                Some(()) = ping_requests.recv() => Message::Ping(Default::default()),
+            };
+            if send_bounded(sink.send(message)).await.is_err() {
                 break;
             }
         }
-        let _ = sink.close().await;
+        let _ = send_bounded(sink.close()).await;
     });
+    // A desktop that vanished mid-session (see `ws_liveness`). Its tunnel
+    // client pings every 20 s, so a live one is never near the limit.
+    let mut liveness = PeerLiveness::new(tokio::time::Instant::now());
+    let mut ping_ticker = ws_liveness::ping_ticker();
 
     // Open streams, by id: where the peer's frames for each one go.
     let mut streams: HashMap<u32, mpsc::UnboundedSender<StreamEvent>> = HashMap::new();
@@ -75,7 +89,20 @@ async fn session(socket: WebSocket, policy: TunnelPolicy, shutdown: Arc<Shutdown
             Some(id) = ended_rx.recv() => {
                 streams.remove(&id);
             }
+            _ = ping_ticker.tick() => match liveness.on_tick(tokio::time::Instant::now()) {
+                Tick::Dead => {
+                    tracing::debug!("[browser-tunnel] peer silent past the limit; closing");
+                    break;
+                }
+                // Full means a ping is already on its way.
+                Tick::Ping => {
+                    let _ = pings.try_send(());
+                }
+            },
             message = incoming.next() => {
+                if let Some(Ok(_)) = &message {
+                    liveness.on_inbound(tokio::time::Instant::now());
+                }
                 let bytes = match message {
                     Some(Ok(Message::Binary(bytes))) => bytes,
                     // axum answers pings itself; nothing else is expected.
@@ -139,6 +166,7 @@ async fn session(socket: WebSocket, policy: TunnelPolicy, shutdown: Arc<Shutdown
     // Every pump sees its event channel close and lets its connection go.
     drop(streams);
     drop(frames);
+    drop(pings);
     let _ = writer.await;
 }
 
