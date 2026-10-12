@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { SearchCommandDialog } from "./search-command-dialog"
 import enMessages from "@/i18n/messages/en.json"
@@ -58,7 +58,14 @@ const folders = vi.hoisted(() => ({
   all: [
     { id: 3, name: "codeg", path: "/work/codeg" },
     { id: 5, name: "legalix", path: "/work/legalix" },
-  ],
+  ] as Array<{
+    id: number
+    name: string
+    path: string
+    archived?: boolean
+    group_id?: number | null
+  }>,
+  groups: [] as Array<{ id: number; archived?: boolean }>,
 }))
 
 vi.mock("@/contexts/active-folder-context", () => ({
@@ -72,7 +79,11 @@ const store = vi.hoisted(() => ({ conversations: [] as unknown[] }))
 
 vi.mock("@/stores/app-workspace-store", () => ({
   useAppWorkspaceStore: (selector: (s: unknown) => unknown) =>
-    selector({ conversations: store.conversations, allFolders: folders.all }),
+    selector({
+      conversations: store.conversations,
+      allFolders: folders.all,
+      folderGroups: folders.groups,
+    }),
 }))
 
 vi.mock("@/hooks/use-file-tree", () => ({
@@ -395,5 +406,75 @@ describe("SearchCommandDialog recent sessions", () => {
       "Older codeg work",
     ])
     expect(screen.queryByText("Current")).toBeNull()
+  })
+})
+
+describe("SearchCommandDialog archived folders", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    folders.active = folders.all[0]
+    // legalix is archived through its group.
+    folders.all = [
+      { id: 3, name: "codeg", path: "/work/codeg" },
+      { id: 5, name: "legalix", path: "/work/legalix", group_id: 9 },
+    ]
+    folders.groups = [{ id: 9, archived: true }]
+    h.listAllConversations.mockResolvedValue([])
+    store.conversations = [
+      conv(1, 3, "Release prep", { updated_at: "2026-09-30T10:00:00Z" }),
+      conv(2, 5, "Legal brief", { updated_at: "2026-09-30T11:00:00Z" }),
+    ]
+    tabState.tabs = []
+    tabState.activeTabId = null
+  })
+
+  afterEach(() => {
+    folders.all = [
+      { id: 3, name: "codeg", path: "/work/codeg" },
+      { id: 5, name: "legalix", path: "/work/legalix" },
+    ]
+    folders.groups = []
+  })
+
+  function renderDialog() {
+    render(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <SearchCommandDialog open onOpenChange={vi.fn()} />
+      </NextIntlClientProvider>
+    )
+    return userEvent.setup()
+  }
+
+  it("leaves archived folders' sessions out of the recent list", async () => {
+    renderDialog()
+    await waitFor(() =>
+      expect(screen.queryAllByRole("option").length).toBeGreaterThan(0)
+    )
+    expect(screen.getByText("Release prep")).toBeTruthy()
+    expect(screen.queryByText("Legal brief")).toBeNull()
+  })
+
+  it("still finds them when searched, marked Archived", async () => {
+    h.listAllConversations.mockResolvedValue([
+      conv(1, 3, "Upload fixes"),
+      conv(2, 5, "Upload the brief"),
+    ])
+    const user = renderDialog()
+    await user.type(
+      screen.getByPlaceholderText("Search conversations..."),
+      "upload"
+    )
+
+    const archivedRow = (await screen.findByText("Upload the brief")).closest(
+      '[role="option"]'
+    )
+    expect(archivedRow?.textContent).toContain(
+      enMessages.Folder.search.archivedBadge
+    )
+    const liveRow = screen.getByText("Upload fixes").closest('[role="option"]')
+    expect(liveRow?.textContent).not.toContain(
+      enMessages.Folder.search.archivedBadge
+    )
   })
 })
