@@ -17952,12 +17952,12 @@ mod tests {
             "mode": "default"
         });
         let req: GrokAskUserQuestionRequest = serde_json::from_value(params).unwrap();
-        let specs = crate::acp::question::parse_grok_ext_questions(&req.0).unwrap();
+        let mut specs = crate::acp::question::parse_grok_ext_questions(&req.0).unwrap();
         assert_eq!(specs.len(), 1);
         assert_eq!(specs[0].question, "What is your favorite color?");
         assert_eq!(specs[0].options.len(), 3);
         assert!(!specs[0].multi_select);
-        crate::acp::question::validate_specs(&specs).unwrap();
+        crate::acp::question::validate_specs(&mut specs).unwrap();
     }
 
     fn diff_content(path: &str, old: Option<&str>, new: &str) -> ToolCallContent {

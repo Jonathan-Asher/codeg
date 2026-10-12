@@ -142,6 +142,9 @@ zstd = "0.13"
 tar = "0.4"
 zip = "2"
 regex = "1"
+# Grapheme-safe shortening of an ask-question header chip, so a Hebrew letter
+# keeps its niqqud and an emoji its modifiers. Already in the desktop tree.
+unicode-segmentation = "1"
 portable-pty = "0.8"
 urlencoding = "2"
 # WHATWG URL parsing outside the desktop runtime. `tauri::Url` is this same
