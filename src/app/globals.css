@@ -1509,6 +1509,22 @@
 [data-streamdown="table-header-cell"] {
   text-align: start;
 }
+/* WebKit gives `li` `text-align: match-parent`, which aligns an item by its
+   LIST's direction: a Hebrew item in an English list would stay left-aligned.
+   `start` follows the item's own `dir`; it is the same edge whenever the two
+   agree, which is every list that is not mixed. */
+[data-streamdown="list-item"] {
+  text-align: start;
+}
+/* The table toolbar floats over the table's top-right corner (see "Toolbar"
+   below), where a left-to-right line above it has usually already ended.
+   Above a right-to-left table that corner is where the line starts, so the
+   toolbar moves to the top-left one instead of covering the text. */
+[data-streamdown="table-wrapper"]:has([data-streamdown="table"]:dir(rtl))
+  > div:first-child:has(button) {
+  right: auto;
+  left: 0;
+}
 [data-streamdown="code-block-body"],
 .katex {
   direction: ltr;

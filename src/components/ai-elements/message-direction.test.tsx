@@ -191,4 +191,11 @@ describe("rehypeBlockDirection", () => {
     const spans = p.children!.filter((child) => child.tagName === "span")
     expect(spans.map((span) => span.children![0].value)).toEqual(["src/app.ts"])
   })
+
+  it("leaves numbers with slashes alone", () => {
+    const p = el("p", [text("הרווח נצבר שם (9%/0%) עד 12/10/2026, יחס 1/2")])
+    run(el("root", [p]))
+    expect(p.children).toHaveLength(1)
+    expect(p.children![0].type).toBe("text")
+  })
 })

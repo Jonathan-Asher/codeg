@@ -140,10 +140,13 @@ function ownText(node: HastNode): string {
 
 // A bare path or URL in prose: a scheme or `www.` address, or path segments
 // joined by `/` or `\` — `~/`, `./`, `../` or `/` led, or starting with a name.
-// Trailing sentence punctuation is not part of it, and neither is a leading
-// hyphen (`ל-src/a.ts`: the hyphen belongs to the Hebrew prefix).
+// A path starts a word (after a space, an opening bracket or quote, or the
+// hyphen of a Hebrew prefix — `ל-src/a.ts`, whose hyphen stays Hebrew), so the
+// `/0` of `9%/0%` is not one. Trailing sentence punctuation is not part of it.
 const PATH_OR_URL =
-  /(?:\b[a-z][a-z0-9+.-]*:\/\/|\bwww\.)[^\s<>"]*[^\s<>".,;:!?)\]]|(?:(?:~|\.{1,2})?(?:[\\/][\w.@~+-]+)+|[\w@~+][\w.@~+-]*(?:[\\/][\w.@~+-]+)+)[\\/]?(?<![.,;:!?])/gi
+  /(?:\b[a-z][a-z0-9+.-]*:\/\/|\bwww\.)[^\s<>"]*[^\s<>".,;:!?)\]]|(?<![^\s([{"'-])(?:(?:~|\.{1,2})?(?:[\\/][\w.@~+-]+)+|[\w@~+][\w.@~+-]*(?:[\\/][\w.@~+-]+)+)[\\/]?(?<![.,;:!?])/gi
+// A path has a name in it; `12/10/2026` and `1/2` are numbers.
+const HAS_LATIN_LETTER = /[a-z]/i
 
 /**
  * Split a text node that sits in a right-to-left block so each path or URL in
@@ -158,8 +161,8 @@ function isolatePaths(value: string): HastNode[] | null {
   const parts: HastNode[] = []
   while ((match = PATH_OR_URL.exec(value))) {
     const token = match[0]
-    // A slash between Hebrew words (`ו/או`) is prose, not a path.
-    if (hasRtlLetter(token)) continue
+    // A slash between Hebrew words (`ו/או`) is prose, and a date is a number.
+    if (hasRtlLetter(token) || !HAS_LATIN_LETTER.test(token)) continue
     if (match.index > last) {
       parts.push({ type: "text", value: value.slice(last, match.index) })
     }
