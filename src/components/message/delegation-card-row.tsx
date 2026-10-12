@@ -25,6 +25,7 @@ import { AgentIcon } from "@/components/agent-icon"
 import { StatusBadge } from "@/components/message/delegation-status-badge"
 import type { DelegationCardStatus } from "@/lib/delegation-card"
 import type { AgentType } from "@/lib/types"
+import { detectTextDirection } from "@/lib/text-direction"
 
 interface Props {
   agentType: AgentType | null
@@ -80,7 +81,10 @@ export function DelegationCardRow({
             <StatusBadge status={status} errorCode={errorCode} />
           </div>
           {task && (
-            <div className="text-xs text-muted-foreground whitespace-pre-wrap break-words line-clamp-1">
+            <div
+              dir={detectTextDirection(task)}
+              className="text-xs text-muted-foreground whitespace-pre-wrap break-words line-clamp-1"
+            >
               {task}
             </div>
           )}

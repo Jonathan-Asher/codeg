@@ -37,6 +37,7 @@ import {
 } from "@/lib/adapters/ai-elements-adapter"
 import { usePageHandoffName } from "@/lib/browser/use-page-handoff-name"
 import { buildStreamingTurnsFromLiveMessage } from "@/stores/conversation-runtime-store"
+import { detectTextDirection } from "@/lib/text-direction"
 import { cn } from "@/lib/utils"
 import type { ImageInputAttachment } from "@/components/chat/message-input-attachments"
 import type {
@@ -182,6 +183,9 @@ function UserBubble({
       )}
       {text && (
         <div
+          // The question reads in its own direction (a Hebrew one right to
+          // left in the English UI).
+          dir={detectTextDirection(text)}
           className={cn(
             "max-w-[85%] whitespace-pre-wrap break-words rounded-xl bg-muted px-3 py-1.5 text-sm",
             state === "queued" && "opacity-60",

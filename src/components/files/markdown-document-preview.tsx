@@ -1,10 +1,14 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Streamdown } from "streamdown"
+import { Streamdown, defaultRehypePlugins } from "streamdown"
 import { readFileBase64 } from "@/lib/api"
 import { normalizeMathDelimiters } from "@/components/ai-elements/message"
 import { mermaidComponents } from "@/components/ai-elements/mermaid-block"
+import {
+  STREAMDOWN_LOGICAL_QUOTE_CLASSES,
+  rehypeBlockDirection,
+} from "@/components/ai-elements/rehype-block-direction"
 import { useStreamdownPlugins } from "@/components/ai-elements/streamdown-plugins"
 import { BrowserLink } from "@/components/ui/browser-link"
 import {
@@ -127,6 +131,13 @@ function preprocessMarkdownPaths(
 
   return result
 }
+
+// Streamdown's default pipeline (what it runs when given none), then every
+// block takes the direction of its own text.
+const PREVIEW_REHYPE_PLUGINS = [
+  ...Object.values(defaultRehypePlugins),
+  rehypeBlockDirection,
+]
 
 const MIME_BY_EXT: Record<string, string> = {
   png: "image/png",
@@ -262,12 +273,16 @@ export function MarkdownDocumentPreview({
   return (
     <div
       className={cn(
-        "h-full overflow-auto p-6 [&_a_img]:inline [&_ol]:list-decimal [&_ul]:list-disc [&_ol]:pl-6 [&_ul]:pl-6",
+        // Logical indents: a Hebrew or Arabic document's blocks carry
+        // `dir="rtl"` (rehype-block-direction) and indent from the right.
+        "h-full overflow-auto p-6 [&_a_img]:inline [&_ol]:list-decimal [&_ul]:list-disc [&_ol]:ps-6 [&_ul]:ps-6",
+        STREAMDOWN_LOGICAL_QUOTE_CLASSES,
         className
       )}
     >
       <Streamdown
         plugins={plugins}
+        rehypePlugins={PREVIEW_REHYPE_PLUGINS}
         mode="static"
         parseIncompleteMarkdown={false}
         components={{

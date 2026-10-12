@@ -19,6 +19,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import { splitRecommended } from "@/lib/ask-question"
+import { detectTextDirection } from "@/lib/text-direction"
 import type {
   PendingQuestionState,
   QuestionAnswer,
@@ -299,7 +300,10 @@ export function AskQuestionCard({
     description?: string
   ) => (
     <span className="min-w-0 flex-1">
-      <span className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
+      <span
+        dir={detectTextDirection(text)}
+        className="flex flex-wrap items-center gap-1.5 text-sm font-medium"
+      >
         {text}
         {recommended && (
           <Badge variant="secondary" className="text-3xs">
@@ -308,7 +312,10 @@ export function AskQuestionCard({
         )}
       </span>
       {description && (
-        <span className="mt-0.5 block text-xs text-muted-foreground">
+        <span
+          dir={detectTextDirection(description)}
+          className="mt-0.5 block text-xs text-muted-foreground"
+        >
           {description}
         </span>
       )}
@@ -338,6 +345,7 @@ export function AskQuestionCard({
           aria-label={q.question}
           disabled={locked}
           value={s?.otherText ?? ""}
+          dir={detectTextDirection(s?.otherText)}
           onChange={(e) => setOtherText(q, e.target.value)}
           placeholder={t("otherPlaceholder")}
           className={inputClass}
@@ -353,6 +361,7 @@ export function AskQuestionCard({
         aria-label={t("other")}
         disabled={locked}
         value={s.otherText}
+        dir={detectTextDirection(s.otherText)}
         onChange={(e) => setOtherText(q, e.target.value)}
         placeholder={t("otherPlaceholder")}
         className={inputClass}
@@ -444,7 +453,12 @@ export function AskQuestionCard({
       <Badge variant="outline" className="shrink-0 text-3xs">
         {q.multi_select ? t("multiSelect") : t("singleSelect")}
       </Badge>
-      <p className="text-sm text-foreground/90">{q.question}</p>
+      <p
+        dir={detectTextDirection(q.question)}
+        className="text-sm text-foreground/90"
+      >
+        {q.question}
+      </p>
     </div>
   )
 

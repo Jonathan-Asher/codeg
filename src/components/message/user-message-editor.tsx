@@ -11,6 +11,7 @@ import { useImeGuard } from "@/hooks/use-ime-guard"
 import { detectPlatform } from "@/hooks/use-platform"
 import type { UserImageDisplay } from "@/lib/adapters/ai-elements-adapter"
 import { useKeepOriginalOnEdit } from "@/lib/edit-message-prefs"
+import { detectTextDirection } from "@/lib/text-direction"
 
 /** Why a save can't run right now (the Save button greys out and says so). */
 export type UserEditBlock = "busy" | "queued" | "notReady"
@@ -134,6 +135,9 @@ export function UserMessageEditor({
         readOnly={saving}
         aria-label={t("editMessage")}
         rows={Math.min(12, Math.max(3, text.split("\n").length))}
+        // Follows the text as it is typed: a Hebrew message edits right to
+        // left whatever the UI language (see detectTextDirection).
+        dir={detectTextDirection(text)}
         className="max-h-80 min-h-20 overflow-y-auto bg-background"
         onChange={(event) => {
           setText(event.target.value)

@@ -25,6 +25,7 @@ import {
   type PermissionOptionChange,
 } from "@/lib/permission-request"
 import { useAgentVocabulary } from "@/hooks/use-agent-vocabulary"
+import { detectTextDirection } from "@/lib/text-direction"
 import type { AgentType } from "@/lib/types"
 
 interface PermissionDialogProps {
@@ -131,7 +132,10 @@ export function PermissionDialog({
                 shell command, which the command block below already shows).
                 `parsePermissionToolCall` also drops a description that IS that
                 command, which is what claude-agent-acp ≥0.79.0 puts there. */}
-            <span className="truncate">
+            <span
+              dir={detectTextDirection(parsed.description ?? parsed.title)}
+              className="truncate"
+            >
               {parsed.description ?? parsed.title}
             </span>
           </div>
@@ -139,7 +143,10 @@ export function PermissionDialog({
               more informative than the boilerplate subtitle it replaces, and
               the only place codex-acp ≥1.7.0 still carries it. Wraps rather
               than truncating: this is the sentence the decision rests on. */}
-          <p className="text-xs text-muted-foreground">
+          <p
+            dir={detectTextDirection(parsed.reason)}
+            className="text-xs text-muted-foreground"
+          >
             {parsed.reason ?? t("subtitle")}
           </p>
         </div>
@@ -192,7 +199,12 @@ export function PermissionDialog({
               <div className="space-y-1 rounded-md bg-muted/40 p-2">
                 {parsed.planEntries.map((entry, index) => (
                   <div key={`${entry.text}-${index}`} className="text-xs">
-                    <span className="text-foreground/90">{entry.text}</span>
+                    <span
+                      dir={detectTextDirection(entry.text)}
+                      className="text-foreground/90"
+                    >
+                      {entry.text}
+                    </span>
                     {entry.status && (
                       <span className="ml-2 text-muted-foreground">
                         ({entry.status})
@@ -318,7 +330,10 @@ export function PermissionDialog({
                             {t(CHANGE_SCOPE_LABEL_KEYS[change.scope])}
                           </Badge>
                         )}
-                        <span className="min-w-0 break-words text-foreground/90">
+                        <span
+                          dir={detectTextDirection(change.description)}
+                          className="min-w-0 break-words text-foreground/90"
+                        >
                           {change.description}
                         </span>
                       </div>

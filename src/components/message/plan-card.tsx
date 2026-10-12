@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import type { PlanEntryInfo } from "@/lib/types"
+import { detectTextDirection } from "@/lib/text-direction"
 import { cn } from "@/lib/utils"
 import {
   CheckCircle2Icon,
@@ -118,6 +119,7 @@ export const PlanEntriesList = memo(function PlanEntriesList({
             <StatusIcon status={entry.status} isStreaming={isStreaming} />
           </span>
           <span
+            dir={detectTextDirection(entry.content)}
             className={cn(
               "min-w-0 flex-1 leading-5 break-words [overflow-wrap:anywhere]",
               entry.status === "completed"

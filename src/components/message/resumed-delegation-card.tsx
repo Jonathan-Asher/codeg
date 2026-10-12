@@ -48,6 +48,7 @@ import { DelegationCardRow } from "@/components/message/delegation-card-row"
 import { SubAgentSessionDialog } from "@/components/message/sub-agent-session-dialog"
 import { useSessionViewerHost } from "@/components/message/session-viewer-host"
 import { useDelegationCardModel } from "@/hooks/use-delegation-card-model"
+import { detectTextDirection } from "@/lib/text-direction"
 
 interface Props {
   /** This `resume_delegation` call's own tool_call_id. */
@@ -195,7 +196,10 @@ export function ResumedDelegationCard({
           <div className="mb-1 text-3xs font-medium uppercase tracking-wide text-muted-foreground">
             {t("resumeReasonLabel")}
           </div>
-          <div className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/40 px-2 py-1.5 text-xs text-foreground/90">
+          <div
+            dir={detectTextDirection(reason)}
+            className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/40 px-2 py-1.5 text-xs text-foreground/90"
+          >
             {reason}
           </div>
         </div>

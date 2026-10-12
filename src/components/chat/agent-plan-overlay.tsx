@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { LiveMessage } from "@/contexts/acp-connections-context"
 import type { PlanEntryInfo } from "@/lib/types"
+import { detectTextDirection } from "@/lib/text-direction"
 import { cn } from "@/lib/utils"
 import {
   CheckCircle2Icon,
@@ -194,6 +195,7 @@ export const AgentPlanOverlay = memo(function AgentPlanOverlay({
               <div className="flex items-start gap-2">
                 <StatusIcon status={entry.status} isStreaming={isStreaming} />
                 <p
+                  dir={detectTextDirection(entry.content)}
                   className={cn(
                     "min-w-0 flex-1 text-sm leading-5 break-words [overflow-wrap:anywhere]",
                     entry.status === "completed"
@@ -204,7 +206,7 @@ export const AgentPlanOverlay = memo(function AgentPlanOverlay({
                   {entry.content}
                 </p>
               </div>
-              <div className="mt-2 flex items-center gap-1.5 pl-5">
+              <div className="mt-2 flex items-center gap-1.5 ps-5">
                 <Badge variant="outline" className="h-5 text-3xs uppercase">
                   {t(getStatusKey(entry.status))}
                 </Badge>

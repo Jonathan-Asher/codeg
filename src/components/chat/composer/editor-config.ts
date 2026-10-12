@@ -2,6 +2,7 @@ import type { Extensions } from "@tiptap/core"
 import { Placeholder } from "@tiptap/extension-placeholder"
 import StarterKit from "@tiptap/starter-kit"
 
+import { ComposerDirection } from "./composer-direction"
 import { InactiveSelectionHighlight } from "./inactive-selection"
 import { Reference } from "./nodes/reference-node"
 import { QuoteLineDecoration } from "./quote-decoration"
@@ -88,6 +89,8 @@ export function buildComposerExtensions(
     // Paints line-leading `> ` markers as a blockquote rule. Decoration only —
     // the characters stay in the document, so send/copy/draft text is unchanged.
     QuoteLineDecoration,
+    // `dir` follows the draft's text: Hebrew or Arabic flips it right to left.
+    ComposerDirection,
   ]
   if (options.mentionController) {
     extensions.push(

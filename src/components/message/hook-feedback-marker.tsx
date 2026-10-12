@@ -10,6 +10,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/instant-collapsible"
+import { detectTextDirection } from "@/lib/text-direction"
 
 /** The first non-blank line of a hook's feedback: what the marker shows. */
 export function hookFeedbackHeadline(feedback: string): string {
@@ -59,7 +60,10 @@ export const HookFeedbackMarker = memo(function HookFeedbackMarker({
         )}
       </CollapsibleTrigger>
       <CollapsibleContent className="w-full outline-none">
-        <div className="mt-2 whitespace-pre-wrap break-words rounded-md border border-foreground/10 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+        <div
+          dir={detectTextDirection(part.feedback)}
+          className="mt-2 whitespace-pre-wrap break-words rounded-md border border-foreground/10 bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+        >
           {part.feedback}
         </div>
       </CollapsibleContent>
