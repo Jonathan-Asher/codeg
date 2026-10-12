@@ -38,6 +38,7 @@ fn to_detail(m: folder_group::Model) -> FolderGroupDetail {
         name: m.name,
         color: m.color,
         sort_order: m.sort_order,
+        archived: m.archived,
     }
 }
 
@@ -97,6 +98,7 @@ pub async fn create_folder_group(
         name: Set(name),
         color: Set(color.unwrap_or_else(|| DEFAULT_FOLDER_COLOR.to_string())),
         sort_order: Set(next_order),
+        archived: Set(false),
         created_at: Set(now),
         updated_at: Set(now),
     };
@@ -129,12 +131,41 @@ pub async fn update_folder_group(
     Ok(Some(to_detail(active.update(conn).await?)))
 }
 
+/// Archive or unarchive a whole group. Its members follow it into (and out of)
+/// the sidebar's "Archived" section without their own `folder.archived` being
+/// touched, so a member that was archived on its own before stays archived
+/// after the group comes back. Nothing else changes: the group keeps its name,
+/// color and `sort_order`, which is what returns it to its old slot.
+///
+/// Returns `None` when the group doesn't exist.
+pub async fn set_folder_group_archived(
+    conn: &DatabaseConnection,
+    id: i32,
+    archived: bool,
+) -> Result<Option<FolderGroupDetail>, DbError> {
+    let Some(row) = folder_group::Entity::find_by_id(id).one(conn).await? else {
+        return Ok(None);
+    };
+    if row.archived == archived {
+        return Ok(Some(to_detail(row)));
+    }
+    let mut active: folder_group::ActiveModel = row.into();
+    active.archived = Set(archived);
+    active.updated_at = Set(Utc::now());
+    Ok(Some(to_detail(active.update(conn).await?)))
+}
+
 /// Delete a group and return its members to the top level.
 ///
 /// The folders themselves are never touched beyond `group_id` / `sort_order` —
 /// deleting a group must not close, hide or forget a single folder. Members are
 /// appended after the existing top-level entries, preserving their relative
 /// order, so the list reads the same minus the group band.
+///
+/// The one exception is an ARCHIVED group: its members were archived through
+/// it, and dropping the group must not pop them back into the main list, so
+/// each of them is archived on its own first. They land in the "Archived"
+/// section's top level instead.
 pub async fn delete_folder_group(conn: &DatabaseConnection, id: i32) -> Result<bool, DbError> {
     let members = folder::Entity::find()
         .filter(folder::Column::DeletedAt.is_null())
@@ -143,6 +174,20 @@ pub async fn delete_folder_group(conn: &DatabaseConnection, id: i32) -> Result<b
         .order_by_asc(folder::Column::Id)
         .all(conn)
         .await?;
+
+    let group_archived = folder_group::Entity::find_by_id(id)
+        .one(conn)
+        .await?
+        .is_some_and(|g| g.archived);
+    if group_archived && !members.is_empty() {
+        folder::Entity::update_many()
+            .col_expr(folder::Column::Archived, Expr::value(true))
+            .col_expr(folder::Column::UpdatedAt, Expr::value(Utc::now()))
+            .filter(folder::Column::GroupId.eq(id))
+            .filter(folder::Column::DeletedAt.is_null())
+            .exec(conn)
+            .await?;
+    }
 
     if !members.is_empty() {
         let base = max_top_level_sort_order(conn).await?;
@@ -297,6 +342,7 @@ mod tests {
             kind: Set(FolderKind::Regular),
             alias: Set(None),
             group_id: Set(group_id),
+            archived: Set(false),
         }
         .insert(conn)
         .await
@@ -556,6 +602,77 @@ mod tests {
         // The vanished group still consumed its top-level slot, so the folder
         // keeps the position the user actually dropped it in.
         assert_eq!(folder_row(conn, folder).await.sort_order, 2);
+    }
+
+    #[tokio::test]
+    async fn archiving_a_group_keeps_it_and_its_members_in_place() {
+        let db = fresh_in_memory_db().await;
+        let conn = &db.conn;
+        let group = create_folder_group(conn, "Work".into(), Some("blue".into()))
+            .await
+            .expect("create");
+        let member = seed_folder(conn, "/member", 1, Some(group.id)).await;
+
+        let archived = set_folder_group_archived(conn, group.id, true)
+            .await
+            .expect("archive")
+            .expect("present");
+        assert!(archived.archived);
+        assert_eq!(archived.sort_order, group.sort_order, "keeps its slot");
+        assert_eq!(archived.color, "blue");
+        let row = folder_row(conn, member).await;
+        assert_eq!(row.group_id, Some(group.id), "members stay in the group");
+        assert!(!row.archived, "members are archived through the group only");
+        assert!(row.is_open, "archiving closes nothing");
+
+        let listed = list_folder_groups(conn).await.expect("list");
+        assert_eq!(listed.len(), 1, "an archived group is still listed");
+        assert!(listed[0].archived);
+
+        let restored = set_folder_group_archived(conn, group.id, false)
+            .await
+            .expect("unarchive")
+            .expect("present");
+        assert!(!restored.archived);
+        assert_eq!(restored.sort_order, group.sort_order);
+
+        assert!(set_folder_group_archived(conn, 4242, true)
+            .await
+            .expect("missing")
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn deleting_an_archived_group_keeps_its_members_archived() {
+        let db = fresh_in_memory_db().await;
+        let conn = &db.conn;
+        let archived_group = create_folder_group(conn, "Old".into(), None)
+            .await
+            .expect("create");
+        let live_group = create_folder_group(conn, "Live".into(), None)
+            .await
+            .expect("create");
+        let old_member = seed_folder(conn, "/old", 1, Some(archived_group.id)).await;
+        let live_member = seed_folder(conn, "/live", 1, Some(live_group.id)).await;
+        set_folder_group_archived(conn, archived_group.id, true)
+            .await
+            .expect("archive");
+
+        assert!(delete_folder_group(conn, archived_group.id)
+            .await
+            .expect("delete"));
+        let row = folder_row(conn, old_member).await;
+        assert_eq!(row.group_id, None);
+        assert!(
+            row.archived,
+            "a member of an archived group must not pop back into the main list"
+        );
+
+        // A live group's members come back unarchived, as before.
+        assert!(delete_folder_group(conn, live_group.id)
+            .await
+            .expect("delete"));
+        assert!(!folder_row(conn, live_member).await.archived);
     }
 
     #[tokio::test]

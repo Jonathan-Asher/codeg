@@ -55,6 +55,7 @@ mod m20260928_000002_conversation_auto_resume;
 mod m20261001_000001_conversation_critical;
 mod m20261002_000001_conversation_limit_resume;
 mod m20261002_000001_push_devices;
+mod m20261012_000001_folder_archived;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -116,6 +117,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261001_000001_conversation_critical::Migration),
             Box::new(m20261002_000001_conversation_limit_resume::Migration),
             Box::new(m20261002_000001_push_devices::Migration),
+            Box::new(m20261012_000001_folder_archived::Migration),
         ]
     }
 }

@@ -801,6 +801,7 @@ mod tests {
                     kind: FolderKind::Regular,
                     alias: None,
                     group_id: None,
+                    archived: false,
                 }),
             },
         );
@@ -858,6 +859,7 @@ mod tests {
                     name: "Work".to_string(),
                     color: "blue".to_string(),
                     sort_order: 2,
+                    archived: false,
                 },
             },
         );

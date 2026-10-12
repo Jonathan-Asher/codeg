@@ -270,6 +270,50 @@ pub async fn set_folder_group(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SetFolderArchivedParams {
+    pub folder_id: i32,
+    pub archived: bool,
+}
+
+pub async fn set_folder_archived(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<SetFolderArchivedParams>,
+) -> Result<Json<FolderDetail>, AppCommandError> {
+    Ok(Json(
+        folder_commands::set_folder_archived_core(
+            &state.emitter,
+            &state.db,
+            params.folder_id,
+            params.archived,
+        )
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetFolderGroupArchivedParams {
+    pub group_id: i32,
+    pub archived: bool,
+}
+
+pub async fn set_folder_group_archived(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<SetFolderGroupArchivedParams>,
+) -> Result<Json<FolderGroupDetail>, AppCommandError> {
+    Ok(Json(
+        folder_commands::set_folder_group_archived_core(
+            &state.emitter,
+            &state.db,
+            params.group_id,
+            params.archived,
+        )
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateFolderColorParams {
     pub folder_id: i32,
     pub color: String,

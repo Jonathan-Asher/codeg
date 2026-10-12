@@ -75,6 +75,7 @@ fn to_detail(m: folder::Model) -> FolderDetail {
         kind: m.kind,
         alias: m.alias,
         group_id: m.group_id,
+        archived: m.archived,
     }
 }
 
@@ -176,6 +177,7 @@ async fn add_folder_inner(
             // A newly opened folder always lands at the top level; the user
             // moves it into a group afterwards.
             group_id: Set(None),
+            archived: Set(false),
         };
         active.insert(conn).await?
     };
@@ -254,6 +256,7 @@ pub async fn ensure_folder_for_path(
             kind: Set(FolderKind::Regular),
             alias: Set(None),
             group_id: Set(None),
+            archived: Set(false),
         };
         active.insert(conn).await?
     };
@@ -294,6 +297,7 @@ pub async fn add_chat_folder(
         // Hidden chat folders never appear in the sidebar's folder list, so
         // they are never in a group.
         group_id: Set(None),
+        archived: Set(false),
     };
     let model = active.insert(conn).await?;
     Ok(to_detail(model))
@@ -318,6 +322,83 @@ pub async fn update_folder_color(
     active.updated_at = Set(Utc::now());
     let updated = active.update(conn).await?;
     Ok(Some(to_detail(updated)))
+}
+
+/// Archive or unarchive one folder: the sidebar moves an archived folder into
+/// its "Archived" section and keeps its sessions out of Recent. Presentational
+/// only — `is_open`, `sort_order` and `group_id` are left exactly as they were,
+/// which is what puts an unarchived folder back where it came from.
+///
+/// Returns `None` for a missing or deleted row. Setting the value it already
+/// has writes nothing and hands the row back as is.
+pub async fn set_folder_archived(
+    conn: &DatabaseConnection,
+    folder_id: i32,
+    archived: bool,
+) -> Result<Option<FolderDetail>, DbError> {
+    let row = folder::Entity::find_by_id(folder_id)
+        .filter(folder::Column::DeletedAt.is_null())
+        .one(conn)
+        .await?;
+
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    if row.archived == archived {
+        return Ok(Some(to_detail(row)));
+    }
+
+    let mut active = row.into_active_model();
+    active.archived = Set(archived);
+    active.updated_at = Set(Utc::now());
+    let updated = active.update(conn).await?;
+    Ok(Some(to_detail(updated)))
+}
+
+/// Ids of every live folder that is archived: by its own flag, through its
+/// folder group, or — for a worktree folder — through the repo it was created
+/// under (worktrees follow their repo in the sidebar). The server-side copy of
+/// the sidebar's rule, for the session lists the server builds itself.
+pub async fn archived_folder_ids(
+    conn: &DatabaseConnection,
+) -> Result<std::collections::HashSet<i32>, DbError> {
+    use sea_orm::QuerySelect;
+
+    let archived_groups: std::collections::HashSet<i32> = folder_group::Entity::find()
+        .filter(folder_group::Column::Archived.eq(true))
+        .select_only()
+        .column(folder_group::Column::Id)
+        .into_tuple::<i32>()
+        .all(conn)
+        .await?
+        .into_iter()
+        .collect();
+    let rows = folder::Entity::find()
+        .filter(folder::Column::DeletedAt.is_null())
+        .all(conn)
+        .await?;
+
+    let direct: std::collections::HashMap<i32, bool> = rows
+        .iter()
+        .map(|f| {
+            let through_group = f
+                .group_id
+                .is_some_and(|group| archived_groups.contains(&group));
+            (f.id, f.archived || through_group)
+        })
+        .collect();
+
+    Ok(rows
+        .iter()
+        .filter(|f| {
+            direct.get(&f.id).copied().unwrap_or(false)
+                || f
+                    .parent_id
+                    .and_then(|parent| direct.get(&parent).copied())
+                    .unwrap_or(false)
+        })
+        .map(|f| f.id)
+        .collect())
 }
 
 /// Sets (or clears) a folder's display alias. `alias = None` clears it; callers
@@ -634,4 +715,104 @@ pub(crate) async fn assign_folder_positions(
         .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod archive_tests {
+    use super::*;
+    use crate::db::service::folder_group_service;
+    use crate::db::test_helpers::fresh_in_memory_db;
+
+    #[tokio::test]
+    async fn set_folder_archived_round_trips_and_keeps_the_folders_place() {
+        let db = fresh_in_memory_db().await;
+        let conn = &db.conn;
+        let group = folder_group_service::create_folder_group(conn, "Work".into(), None)
+            .await
+            .expect("create group");
+        let added = add_folder(conn, "/repo").await.expect("add folder");
+        folder_group_service::set_folder_group(conn, added.id, Some(group.id))
+            .await
+            .expect("move into group");
+        let before = get_folder_by_id(conn, added.id)
+            .await
+            .expect("read")
+            .expect("row");
+        assert!(!before.archived, "a new folder starts unarchived");
+
+        let archived = set_folder_archived(conn, added.id, true)
+            .await
+            .expect("archive")
+            .expect("row");
+        assert!(archived.archived);
+        // Presentational only: the folder stays open, in its group, at its slot.
+        assert_eq!(archived.group_id, Some(group.id));
+        assert_eq!(archived.sort_order, before.sort_order);
+        let open: Vec<i32> = list_open_folder_details(conn)
+            .await
+            .expect("list open")
+            .into_iter()
+            .map(|f| f.id)
+            .collect();
+        assert!(open.contains(&added.id), "archiving never closes a folder");
+
+        let restored = set_folder_archived(conn, added.id, false)
+            .await
+            .expect("unarchive")
+            .expect("row");
+        assert!(!restored.archived);
+        assert_eq!(restored.group_id, Some(group.id));
+        assert_eq!(restored.sort_order, before.sort_order);
+
+        assert!(set_folder_archived(conn, 9999, true)
+            .await
+            .expect("missing folder")
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn archived_folder_ids_follow_groups_and_parent_repos() {
+        let db = fresh_in_memory_db().await;
+        let conn = &db.conn;
+        let own = add_folder(conn, "/own").await.expect("add");
+        let loose = add_folder(conn, "/loose").await.expect("add");
+        let member = add_folder(conn, "/member").await.expect("add");
+        let repo = add_folder(conn, "/repo").await.expect("add");
+        let child = add_folder_with_parent(conn, "/repo-wt", Some(repo.id))
+            .await
+            .expect("add child folder");
+        let group = folder_group_service::create_folder_group(conn, "Old".into(), None)
+            .await
+            .expect("create group");
+        folder_group_service::set_folder_group(conn, member.id, Some(group.id))
+            .await
+            .expect("move into group");
+
+        assert!(archived_folder_ids(conn).await.expect("ids").is_empty());
+
+        set_folder_archived(conn, own.id, true)
+            .await
+            .expect("archive own");
+        folder_group_service::set_folder_group_archived(conn, group.id, true)
+            .await
+            .expect("archive group");
+        set_folder_archived(conn, repo.id, true)
+            .await
+            .expect("archive repo");
+
+        let ids = archived_folder_ids(conn).await.expect("ids");
+        assert!(ids.contains(&own.id), "its own flag");
+        assert!(ids.contains(&member.id), "through its group");
+        assert!(ids.contains(&repo.id));
+        assert!(ids.contains(&child.id), "a child folder follows its repo");
+        assert!(!ids.contains(&loose.id));
+        let member_row = get_folder_by_id(conn, member.id)
+            .await
+            .expect("read")
+            .expect("row");
+        assert!(
+            !member_row.archived,
+            "a group's archive never rewrites its members' own flags"
+        );
+    }
 }

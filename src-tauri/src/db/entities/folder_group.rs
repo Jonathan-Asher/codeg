@@ -21,6 +21,9 @@ pub struct Model {
     /// Position among TOP-LEVEL siblings, sharing one numeric space with the
     /// `sort_order` of ungrouped folders so the two interleave in the sidebar.
     pub sort_order: i32,
+    /// The whole group, members included, sits in the sidebar's "Archived"
+    /// section. Members keep their own `folder.archived` as it was.
+    pub archived: bool,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }

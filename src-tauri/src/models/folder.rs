@@ -36,6 +36,11 @@ pub struct FolderDetail {
     /// Display-only grouping — never consulted for cwd, agent or conversation
     /// resolution. Always NULL on worktree children (they follow their repo).
     pub group_id: Option<i32>,
+    /// This folder's own archive flag. The sidebar moves an archived folder
+    /// into its "Archived" section and keeps its sessions out of Recent. A
+    /// folder whose group is archived is archived too, through the group,
+    /// while this stays false. Older clients ignore the field.
+    pub archived: bool,
 }
 
 /// A sidebar folder group. Ordered against ungrouped top-level folders by the
@@ -48,6 +53,8 @@ pub struct FolderGroupDetail {
     /// own header row; member folders keep their own color.
     pub color: String,
     pub sort_order: i32,
+    /// The group, with every folder in it, sits in the "Archived" section.
+    pub archived: bool,
 }
 
 /// Which kind of sidebar entry a {@link SidebarLayoutEntry} names.

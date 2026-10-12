@@ -355,6 +355,14 @@ pub fn build_router(
             post(handlers::folders::set_folder_group),
         )
         .route(
+            "/set_folder_archived",
+            post(handlers::folders::set_folder_archived),
+        )
+        .route(
+            "/set_folder_group_archived",
+            post(handlers::folders::set_folder_group_archived),
+        )
+        .route(
             "/update_folder_color",
             post(handlers::folders::update_folder_color),
         )

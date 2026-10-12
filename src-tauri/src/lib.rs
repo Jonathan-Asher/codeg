@@ -1821,6 +1821,8 @@ mod tauri_app {
                 folders::delete_folder_group,
                 folders::apply_sidebar_layout,
                 folders::set_folder_group,
+                folders::set_folder_archived,
+                folders::set_folder_group_archived,
                 folders::update_folder_color,
                 folders::update_folder_alias,
                 folders::update_folder_default_agent,
