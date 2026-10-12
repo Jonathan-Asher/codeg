@@ -10,13 +10,15 @@ import {
   SquarePen,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
-import type { SidebarSectionKey } from "@/lib/sidebar-view-mode-storage"
+import type { SidebarRowSection } from "@/lib/sidebar-view-mode-storage"
 import { cn } from "@/lib/utils"
+import { AttentionCountBadge } from "./attention-count-badge"
 
 /**
  * Collapsible heading for one of the top-level sidebar sections: "pinned"
  * (shown only when there are pinned conversations), "folders" (wraps the whole
- * folder list), "chats", and "recent". One flat row in the virtualized list,
+ * folder list), "chats", "recent", and "archived" (archived folders and
+ * groups, at the bottom, only while something is archived). One flat row in the virtualized list,
  * height-matched to every other row (`h-[2rem]`) so `virtua`'s fixed item-size
  * estimate stays accurate.
  *
@@ -36,11 +38,13 @@ export const SidebarSectionHeader = memo(function SidebarSectionHeader({
   onCloneRepository,
   onImportSessions,
   onNewFolderGroup,
+  runningCount = 0,
+  attentionCount = 0,
   topGap = false,
 }: {
-  section: SidebarSectionKey
+  section: SidebarRowSection
   expanded: boolean
-  onToggle: (section: SidebarSectionKey) => void
+  onToggle: (section: SidebarRowSection) => void
   /**
    * When provided on the "chats" or "recent" section, renders a New-chat /
    * New-conversation action button at the row's right edge, revealed only while
@@ -75,6 +79,14 @@ export const SidebarSectionHeader = memo(function SidebarSectionHeader({
    */
   onNewFolderGroup?: () => void
   /**
+   * Live-activity chips beside the label, for the "archived" section: how many
+   * sessions in archived folders are running, and how many wait on the user.
+   * The section is collapsed by default, so without them a permission request
+   * in an archived folder would sit there unseen. Zero renders nothing.
+   */
+  runningCount?: number
+  attentionCount?: number
+  /**
    * Adds breathing room above the header so the "Folders" section reads as
    * visually separated from the "Pinned" section above it. Implemented as
    * padding (not margin) on a wrapper so the row's measured border-box grows —
@@ -96,7 +108,9 @@ export const SidebarSectionHeader = memo(function SidebarSectionHeader({
         ? t("sectionChats")
         : section === "recent"
           ? t("sectionRecent")
-          : t("sectionFolders")
+          : section === "archived"
+            ? t("sectionArchived")
+            : t("sectionFolders")
   // "Recent" gets the same right-edge affordance as "Chats": it is a section
   // people scan to resume work, so "start a new one" belongs at its head too.
   // The label differs — Chats starts a folderless chat, Recent starts a
@@ -164,6 +178,28 @@ export const SidebarSectionHeader = memo(function SidebarSectionHeader({
           )}
         >
           <span className="text-[0.875rem] font-normal">{label}</span>
+          <AttentionCountBadge
+            count={attentionCount}
+            label={t("attentionCountBadge", { count: attentionCount })}
+          />
+          {runningCount > 0 && (
+            <span
+              title={t("runningCountBadge", { count: runningCount })}
+              data-testid="section-running-badge"
+              className={cn(
+                "inline-flex shrink-0 items-center justify-center",
+                "h-[0.9375rem] min-w-[1rem] rounded-[0.3125rem] px-[0.25rem]",
+                "text-[0.625rem] font-semibold leading-none tabular-nums",
+                "bg-amber-500/12 text-amber-700",
+                "dark:bg-amber-400/15 dark:text-amber-300"
+              )}
+            >
+              <span aria-hidden>{runningCount}</span>
+              <span className="sr-only">
+                {t("runningCountBadge", { count: runningCount })}
+              </span>
+            </span>
+          )}
           <ChevronRight
             aria-hidden
             className={cn(

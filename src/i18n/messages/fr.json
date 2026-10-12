@@ -2005,6 +2005,8 @@
         "updateGroupFailed": "Échec de la mise à jour du groupe : {message}",
         "deleteGroupFailed": "Échec de la suppression du groupe : {message}",
         "moveToGroupFailed": "Échec du déplacement du dossier : {message}",
+        "archiveFolderFailed": "Impossible de modifier l'archivage du dossier : {message}",
+        "archiveGroupFailed": "Impossible de modifier l'archivage du groupe : {message}",
         "applyLayoutFailed": "Échec de l'enregistrement de l'ordre des dossiers : {message}",
         "reorderPinsFailed": "Échec de la réorganisation des conversations épinglées : {message}",
         "exportMarkdownDone": "Exported: {path}",
@@ -2058,6 +2060,8 @@
         "setAliasPlaceholder": "Saisir un alias (laisser vide pour effacer)",
         "setAliasSave": "Enregistrer",
         "setAliasCancel": "Annuler",
+        "archive": "Archiver le dossier",
+        "unarchive": "Désarchiver le dossier",
         "removeFromWorkspace": "Retirer de l'espace de travail"
       },
       "manageConversations": {
@@ -2090,6 +2094,7 @@
       "sectionFolders": "Dossiers",
       "sectionChats": "Discussion",
       "sectionRecent": "Récents",
+      "sectionArchived": "Archivés",
       "noChats": "Aucune discussion",
       "noRecent": "Aucune conversation récente",
       "showMoreRecent": "Afficher plus ({count})",
@@ -2116,6 +2121,8 @@
         "rename": "Renommer le groupe…",
         "renameTitle": "Renommer le groupe de dossiers",
         "delete": "Supprimer le groupe",
+        "archive": "Archiver le groupe",
+        "unarchive": "Désarchiver le groupe",
         "deleteConfirmTitle": "Supprimer ce groupe ?",
         "deleteConfirmDescription": "« {name} » sera supprimé. {count, plural, one {Le # dossier qu'il contient reste} other {Les # dossiers qu'il contient restent}} dans l'espace de travail et {count, plural, one {revient} other {reviennent}} au niveau supérieur.",
         "empty": "Aucun dossier dans ce groupe",
@@ -2288,7 +2295,8 @@
       "roleAssistant": "Assistant",
       "roleSystem": "Système",
       "currentSession": "Actuelle",
-      "recentHeading": "Récentes"
+      "recentHeading": "Récentes",
+      "archivedBadge": "Archivé"
     },
     "folderTitleBar": {
       "showSidebar": "Afficher la barre latérale",

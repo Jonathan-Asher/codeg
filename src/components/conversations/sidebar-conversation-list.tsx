@@ -16,6 +16,8 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { Virtualizer, type VirtualizerHandle } from "virtua"
 import {
+  Archive,
+  ArchiveRestore,
   Bot,
   Check,
   ChevronDown,
@@ -86,10 +88,12 @@ import {
   saveSectionCollapsed,
   loadConversationExpanded,
   saveConversationExpanded,
+  loadArchivedExpanded,
+  saveArchivedExpanded,
   DEFAULT_SECTION_ORDER,
   SIDEBAR_SECTION_KEYS,
   type SidebarSectionCollapsed,
-  type SidebarSectionKey,
+  type SidebarRowSection,
   type SidebarSortMode,
   type SidebarSectionOrder,
 } from "@/lib/sidebar-view-mode-storage"
@@ -109,6 +113,7 @@ import {
 } from "./sidebar-conversation-card"
 import {
   applyLayoutMove,
+  archivedFolderIds,
   buildDragSlots,
   buildOwnerHeaderIndex,
   buildRows,
@@ -138,6 +143,8 @@ import {
   worktreeChildrenByParent,
   worktreeHeaderAlias,
   type DragSlot,
+  type FolderArchiveState,
+  type RecentArchiveFilter,
   type SidebarEntry,
   type SidebarLayout,
   type SidebarRow,
@@ -243,6 +250,8 @@ const FolderHeader = memo(function FolderHeader({
   currentGroupId,
   onMoveToGroup,
   onNewGroupWithFolder,
+  archiveState,
+  onSetArchived,
   isDragging,
   onGripPointerDown,
   suppressed = false,
@@ -317,6 +326,14 @@ const FolderHeader = memo(function FolderHeader({
   /** Create a group and move this folder into it in one step — the path a user
    *  takes when the group they want doesn't exist yet. */
   onNewGroupWithFolder?: (folderId: number) => void
+  /**
+   * What "Archive" means for this header: `active` offers "Archive folder",
+   * `archived` offers "Unarchive folder", and `inherited` (archived through its
+   * group) offers neither — the group heading owns that switch. Omitted on
+   * worktree / root sub-groups, which follow their repo.
+   */
+  archiveState?: FolderArchiveState
+  onSetArchived?: (folderId: number, archived: boolean) => void
   isDragging?: boolean
   /**
    * Starts a folder reorder gesture from the header's grip. Omitted on the drag
@@ -853,6 +870,28 @@ const FolderHeader = memo(function FolderHeader({
               </ContextMenuSubContent>
             </ContextMenuSub>
           )}
+          {onSetArchived != null &&
+            (archiveState === "active" || archiveState === "archived") && (
+              <ContextMenuItem
+                data-testid={
+                  archiveState === "archived"
+                    ? "folder-menu-unarchive"
+                    : "folder-menu-archive"
+                }
+                onSelect={() =>
+                  onSetArchived(folderId, archiveState === "active")
+                }
+              >
+                {archiveState === "archived" ? (
+                  <ArchiveRestore className="h-4 w-4" />
+                ) : (
+                  <Archive className="h-4 w-4" />
+                )}
+                {archiveState === "archived"
+                  ? t("folderHeaderMenu.unarchive")
+                  : t("folderHeaderMenu.archive")}
+              </ContextMenuItem>
+            )}
           <ContextMenuSeparator />
           <ContextMenuItem
             variant="destructive"
@@ -979,6 +1018,12 @@ export function SidebarConversationList({
     (s) => s.deleteFolderGroup
   )
   const setFolderGroupAction = useAppWorkspaceStore((s) => s.setFolderGroup)
+  const setFolderArchivedAction = useAppWorkspaceStore(
+    (s) => s.setFolderArchived
+  )
+  const setFolderGroupArchivedAction = useAppWorkspaceStore(
+    (s) => s.setFolderGroupArchived
+  )
   const refreshFolder = useAppWorkspaceStore((s) => s.refreshFolder)
   const refreshing = loading
   const { activeFolder } = useActiveFolder()
@@ -1004,6 +1049,7 @@ export function SidebarConversationList({
         color: string
         defaultAgentType: AgentType | null
         gitBranch: string | null
+        archived: boolean
       }
     >()
     for (const f of allFolders)
@@ -1014,6 +1060,7 @@ export function SidebarConversationList({
         color: f.color,
         defaultAgentType: f.default_agent_type,
         gitBranch: f.git_branch,
+        archived: f.archived === true,
       })
     return map
   }, [allFolders])
@@ -1078,6 +1125,9 @@ export function SidebarConversationList({
   const [sectionCollapsed, setSectionCollapsed] =
     useState<SidebarSectionCollapsed>({})
   const pinnedExpanded = !sectionCollapsed.pinned
+  // The "Archived" section starts CLOSED (the others start open), so it keeps
+  // its own state rather than a `sectionCollapsed` key.
+  const [archivedExpanded, setArchivedExpanded] = useState(false)
   const foldersExpanded = !sectionCollapsed.folders
   const chatsExpanded = !sectionCollapsed.chats
   const recentExpanded = !sectionCollapsed.recent
@@ -1211,10 +1261,23 @@ export function SidebarConversationList({
     setFolderShowAll(loadFolderShowAll())
     setFolderGroupExpanded(loadFolderGroupExpanded())
     setSectionCollapsed(loadSectionCollapsed())
+    setArchivedExpanded(loadArchivedExpanded())
     setConversationExpanded(new Set(loadConversationExpanded()))
   }, [])
 
-  const toggleSection = useCallback((section: SidebarSectionKey) => {
+  const setArchivedSectionExpanded = useCallback((expanded: boolean) => {
+    setArchivedExpanded(expanded)
+    saveArchivedExpanded(expanded)
+  }, [])
+
+  const toggleSection = useCallback((section: SidebarRowSection) => {
+    if (section === "archived") {
+      setArchivedExpanded((prev) => {
+        saveArchivedExpanded(!prev)
+        return !prev
+      })
+      return
+    }
     setSectionCollapsed((prev) => {
       const next = { ...prev, [section]: !prev[section] }
       saveSectionCollapsed(next)
@@ -1404,23 +1467,6 @@ export function SidebarConversationList({
     [folders]
   )
 
-  // Flat "Recent" bucket: every reachable conversation — folder-bound and chat
-  // alike — newest first, gated on the folder still being open so closing a
-  // folder also removes its sessions here. Reference reuse keeps an unrelated
-  // status event from rebuilding it and defeating the section's card memos.
-  const recentConvsRef = useRef<DbConversationSummary[]>([])
-  const recentConversations = useMemo(() => {
-    const next = selectRecentConversationsWithReuse(
-      conversations,
-      showCompleted,
-      sortMode,
-      openFolderIds,
-      recentConvsRef.current
-    )
-    recentConvsRef.current = next
-    return next
-  }, [conversations, showCompleted, sortMode, openFolderIds])
-
   // Maps each open worktree child folder → its (open) root folder. A child is
   // only redirected when its parent is also open, so a worktree whose root was
   // closed/removed falls back to standing on its own (its conversations stay
@@ -1434,6 +1480,62 @@ export function SidebarConversationList({
     }
     return map
   }, [folders, openFolderIds])
+
+  // Open folders that are archived — on their own, through their group, or (a
+  // worktree child) through their repo. They move to the "Archived" section and
+  // their sessions leave Recent. Depends only on folders and groups, and is
+  // reused by content, so status events never rebuild it.
+  const archivedIdsRef = useRef<Set<number>>(new Set())
+  const archivedIds = useMemo(() => {
+    const next = archivedFolderIds({
+      folders,
+      groups: folderGroups,
+      childToParent,
+    })
+    const reused = reuseSet(archivedIdsRef.current, next)
+    archivedIdsRef.current = reused
+    return reused
+  }, [folders, folderGroups, childToParent])
+
+  // Sessions blocked waiting on the user, keyed by the visible row. Read here
+  // (not only for the header chips below) because Recent keeps an archived
+  // folder's session that needs an answer: archiving must never quietly hide
+  // a permission request or a question.
+  const attentionByConversationId = useConversationAttentionStore(
+    (s) => s.byConversationId
+  )
+  const recentArchiveFilter = useMemo<RecentArchiveFilter | undefined>(
+    () =>
+      archivedIds.size === 0
+        ? undefined
+        : { folderIds: archivedIds, keep: attentionByConversationId },
+    [archivedIds, attentionByConversationId]
+  )
+
+  // Flat "Recent" bucket: every reachable conversation — folder-bound and chat
+  // alike — newest first, gated on the folder still being open so closing a
+  // folder also removes its sessions here, and on it not being archived.
+  // Reference reuse keeps an unrelated status event from rebuilding it and
+  // defeating the section's card memos.
+  const recentConvsRef = useRef<DbConversationSummary[]>([])
+  const recentConversations = useMemo(() => {
+    const next = selectRecentConversationsWithReuse(
+      conversations,
+      showCompleted,
+      sortMode,
+      openFolderIds,
+      recentConvsRef.current,
+      recentArchiveFilter
+    )
+    recentConvsRef.current = next
+    return next
+  }, [
+    conversations,
+    showCompleted,
+    sortMode,
+    openFolderIds,
+    recentArchiveFilter,
+  ])
 
   // The merge map used for DISPLAY (grouping, counts, theming). When "Show
   // worktrees" is on it is empty, so each worktree child keeps its own bucket /
@@ -1495,9 +1597,6 @@ export function SidebarConversationList({
   // Sessions blocked waiting on the user, per display group — the rose chip
   // beside the running one. Same counting rules as `folderRunningCounts` (full
   // list, pinned included, never a `buildRows` input).
-  const attentionByConversationId = useConversationAttentionStore(
-    (s) => s.byConversationId
-  )
   const folderAttentionCounts = useMemo(() => {
     const map = new Map<number, number>()
     if (attentionByConversationId.size === 0) return map
@@ -1528,10 +1627,47 @@ export function SidebarConversationList({
   // (an automation minting a worktree, say) neither disappears nor sticks
   // around. Reconciling means re-deriving from the store and then re-applying
   // the drag's single move, rather than trusting a stale snapshot.
+  //
+  // Archived folders and groups are left out here — they get a layout of their
+  // own (`archivedLayout`) at the bottom of the sidebar, and are never part of
+  // a drag. Their `sort_order` / `group_id` are untouched while they are away,
+  // so unarchiving puts each one back where it was.
+  const activeFolderGroups = useMemo(
+    () =>
+      folderGroups.some((g) => g.archived === true)
+        ? folderGroups.filter((g) => g.archived !== true)
+        : folderGroups,
+    [folderGroups]
+  )
   const storeLayout = useMemo(
     () =>
-      buildSidebarLayout({ folders: reorderableFolders, groups: folderGroups }),
-    [reorderableFolders, folderGroups]
+      buildSidebarLayout({
+        folders:
+          archivedIds.size === 0
+            ? reorderableFolders
+            : reorderableFolders.filter((f) => !archivedIds.has(f.id)),
+        groups: activeFolderGroups,
+      }),
+    [reorderableFolders, activeFolderGroups, archivedIds]
+  )
+  // The "Archived" section's own layout: archived groups (with every member)
+  // and folders archived on their own, interleaved by their old positions
+  // exactly as `storeLayout` would have placed them.
+  const archivedLayout = useMemo(() => {
+    const archivedGroups = folderGroups.filter((g) => g.archived === true)
+    if (archivedIds.size === 0 && archivedGroups.length === 0) {
+      return EMPTY_SIDEBAR_LAYOUT
+    }
+    return buildSidebarLayout({
+      folders: reorderableFolders.filter((f) => archivedIds.has(f.id)),
+      groups: archivedGroups,
+    })
+  }, [reorderableFolders, folderGroups, archivedIds])
+  const archivedLayoutRef = useRef<SidebarLayout>(archivedLayout)
+  archivedLayoutRef.current = archivedLayout
+  const archivedLayoutFolderIds = useMemo(
+    () => layoutFolderIds(archivedLayout),
+    [archivedLayout]
   )
   const layout = useMemo(
     () => (dragLayout ? reconcileLayout(dragLayout, storeLayout) : storeLayout),
@@ -1552,9 +1688,14 @@ export function SidebarConversationList({
   const containerChildren = useMemo(
     () =>
       showWorktrees
-        ? worktreeChildrenByParent(reorderableFolderIds, folders)
+        ? worktreeChildrenByParent(
+            archivedLayoutFolderIds.length === 0
+              ? reorderableFolderIds
+              : [...reorderableFolderIds, ...archivedLayoutFolderIds],
+            folders
+          )
         : EMPTY_CONTAINER_CHILDREN,
-    [showWorktrees, reorderableFolderIds, folders]
+    [showWorktrees, reorderableFolderIds, archivedLayoutFolderIds, folders]
   )
   // The repo ids that are containers (have ≥1 open worktree child). Drives the
   // header render's container/plain distinction (total count, subtree toggle).
@@ -1643,6 +1784,8 @@ export function SidebarConversationList({
         folderSessionLimit,
         folderShowAll,
         alwaysVisibleIds,
+        archivedLayout,
+        archivedExpanded,
       }),
     [
       pinned,
@@ -1669,6 +1812,8 @@ export function SidebarConversationList({
       folderSessionLimit,
       folderShowAll,
       alwaysVisibleIds,
+      archivedLayout,
+      archivedExpanded,
     ]
   )
 
@@ -1722,6 +1867,10 @@ export function SidebarConversationList({
       setFolderExpanded((prev) => {
         const next: Record<number, boolean> = { ...prev }
         for (const id of reorderableFolderIds) next[id] = true
+        // Archived folders open too, so the section reads expanded whenever
+        // it is opened — but the section itself stays as it is: archived
+        // folders are out of the way until asked for, even by "Expand all".
+        for (const id of archivedLayoutFolderIds) next[id] = true
         // Worktree children (containers only) are separate folder ids.
         for (const kids of containerChildren.values())
           for (const id of kids) next[id] = true
@@ -1739,6 +1888,7 @@ export function SidebarConversationList({
       setFolderExpanded((prev) => {
         const next: Record<number, boolean> = { ...prev }
         for (const id of reorderableFolderIds) next[id] = false
+        for (const id of archivedLayoutFolderIds) next[id] = false
         for (const kids of containerChildren.values())
           for (const id of kids) next[id] = false
         saveFolderExpanded(next)
@@ -1746,6 +1896,7 @@ export function SidebarConversationList({
       })
       setAllGroupsCollapsed(true)
       setAllSectionsCollapsed(true)
+      setArchivedSectionExpanded(false)
     },
   }))
 
@@ -1781,6 +1932,25 @@ export function SidebarConversationList({
           setSectionCollapsed((prev) => {
             const next = { ...prev, chats: false }
             saveSectionCollapsed(next)
+            return next
+          })
+          pendingScrollRef.current = true
+          return
+        }
+      } else if (archivedIds.has(conv.folder_id)) {
+        // An archived folder's conversation lives in the Archived section:
+        // open it, then the folder below.
+        if (!archivedExpanded) {
+          setArchivedSectionExpanded(true)
+          pendingScrollRef.current = true
+          return
+        }
+        const displayFolderId =
+          displayChildToParent.get(conv.folder_id) ?? conv.folder_id
+        if (!(folderExpanded[displayFolderId] ?? true)) {
+          setFolderExpanded((prev) => {
+            const next = { ...prev, [displayFolderId]: true }
+            saveFolderExpanded(next)
             return next
           })
           pendingScrollRef.current = true
@@ -1884,6 +2054,9 @@ export function SidebarConversationList({
     pinnedExpanded,
     foldersExpanded,
     chatsExpanded,
+    archivedIds,
+    archivedExpanded,
+    setArchivedSectionExpanded,
   ])
 
   const toggleFolder = useCallback((folderId: number) => {
@@ -2539,6 +2712,35 @@ export function SidebarConversationList({
     t,
   ])
 
+  // Archive / unarchive. Purely presentational: the folder (or every folder in
+  // the group) moves between the Folders and Archived sections; nothing about
+  // its sessions, files or git changes, and a running session keeps running.
+  const handleSetFolderArchived = useCallback(
+    async (folderId: number, archived: boolean) => {
+      try {
+        await setFolderArchivedAction(folderId, archived)
+      } catch (e) {
+        toast.error(
+          t("toasts.archiveFolderFailed", { message: toErrorMessage(e) })
+        )
+      }
+    },
+    [setFolderArchivedAction, t]
+  )
+
+  const handleSetGroupArchived = useCallback(
+    async (groupId: number, archived: boolean) => {
+      try {
+        await setFolderGroupArchivedAction(groupId, archived)
+      } catch (e) {
+        toast.error(
+          t("toasts.archiveGroupFailed", { message: toErrorMessage(e) })
+        )
+      }
+    },
+    [setFolderGroupArchivedAction, t]
+  )
+
   const handleRenameGroup = useCallback(
     async (groupId: number, name: string) => {
       try {
@@ -2574,7 +2776,12 @@ export function SidebarConversationList({
         .getState()
         .folderGroups.find((g) => g.id === groupId)
       if (!group) return
-      const count = layoutRef.current.membersByGroup.get(groupId)?.length ?? 0
+      // An archived group's members are in the Archived section's layout.
+      const count =
+        (
+          layoutRef.current.membersByGroup.get(groupId) ??
+          archivedLayoutRef.current.membersByGroup.get(groupId)
+        )?.length ?? 0
       if (count === 0) {
         void deleteFolderGroupAction(groupId).catch((e) => {
           toast.error(
@@ -2926,8 +3133,17 @@ export function SidebarConversationList({
     for (const [groupId, members] of layout.membersByGroup) {
       for (const memberId of members) map.set(memberId, groupId)
     }
+    for (const [groupId, members] of archivedLayout.membersByGroup) {
+      for (const memberId of members) map.set(memberId, groupId)
+    }
     return map
-  }, [layout])
+  }, [layout, archivedLayout])
+
+  // A group's members, whichever section it is in.
+  const groupMembers = (groupId: number): readonly number[] =>
+    layout.membersByGroup.get(groupId) ??
+    archivedLayout.membersByGroup.get(groupId) ??
+    []
 
   // A folder inside a group is indented one level, exactly like a worktree
   // sub-group — the same `depth` machinery drives its glyph inset, connector
@@ -2962,7 +3178,7 @@ export function SidebarConversationList({
   // rebuild the row model.
   const groupRunningCount = (groupId: number): number => {
     let total = 0
-    for (const memberId of layout.membersByGroup.get(groupId) ?? []) {
+    for (const memberId of groupMembers(groupId)) {
       total += containerRunningCount(memberId)
     }
     return total
@@ -2979,10 +3195,26 @@ export function SidebarConversationList({
   }
   const groupAttentionCount = (groupId: number): number => {
     let total = 0
-    for (const memberId of layout.membersByGroup.get(groupId) ?? []) {
+    for (const memberId of groupMembers(groupId)) {
       total += containerAttentionCount(memberId)
     }
     return total
+  }
+
+  // The Archived section heading's chips: everything running in, or waiting on
+  // the user from, an archived folder. The section starts collapsed, so these
+  // are what keep a permission request in there from going unseen.
+  let archivedRunningCount = 0
+  let archivedAttentionCount = 0
+  for (const folderId of archivedLayoutFolderIds) {
+    archivedRunningCount += containerRunningCount(folderId)
+    archivedAttentionCount += containerAttentionCount(folderId)
+  }
+
+  // Which archive switch a header's menu shows (see `FolderArchiveState`).
+  const folderArchiveState = (folderId: number): FolderArchiveState => {
+    if (folderIndex.get(folderId)?.archived) return "archived"
+    return archivedIds.has(folderId) ? "inherited" : "active"
   }
 
   const folderHeaderElement = (
@@ -3081,13 +3313,25 @@ export function SidebarConversationList({
         // sub-group and a container's "root" sub-group follow their repo and
         // can't be grouped on their own, so they get no submenu at all rather
         // than one that silently moves something else.
-        folderGroups={isRootGroup || isWorktree ? undefined : folderGroups}
+        // Archived groups are not offered: a folder moved into one would vanish
+        // into the Archived section, which is what "Archive" is for.
+        folderGroups={
+          isRootGroup || isWorktree ? undefined : activeFolderGroups
+        }
         currentGroupId={groupIdByFolder.get(folderId) ?? null}
         onMoveToGroup={
           isRootGroup || isWorktree ? undefined : handleMoveToGroup
         }
         onNewGroupWithFolder={
           isRootGroup || isWorktree ? undefined : handleNewGroupWithFolder
+        }
+        // Worktree and root sub-groups follow their repo, so only a real
+        // (reorderable) folder header archives.
+        archiveState={
+          isRootGroup || isWorktree ? undefined : folderArchiveState(folderId)
+        }
+        onSetArchived={
+          isRootGroup || isWorktree ? undefined : handleSetFolderArchived
         }
         isDragging={opts.dragging}
         onGripPointerDown={opts.grip ? beginFolderDrag : undefined}
@@ -3148,6 +3392,14 @@ export function SidebarConversationList({
           onNewFolderGroup={
             row.section === "folders" ? openNewGroupDialog : undefined
           }
+          // The Archived heading carries the live chips of everything under
+          // it, since it is collapsed by default.
+          runningCount={
+            row.section === "archived" ? archivedRunningCount : undefined
+          }
+          attentionCount={
+            row.section === "archived" ? archivedAttentionCount : undefined
+          }
           // Every section header carries a top gap: it separates "Folders" from
           // the "Pinned" section above it, and — now that a fixed New chat /
           // Search region sits above the scrolled list — gives the first section
@@ -3171,10 +3423,15 @@ export function SidebarConversationList({
           onRename={handleRenameGroup}
           onChangeColor={handleChangeGroupColor}
           onDelete={handleDeleteGroup}
+          archived={group.archived === true}
+          onSetArchived={handleSetGroupArchived}
           themeColor={normalizeFolderThemeColor(group.color)}
           appThemeColor={appThemeColor}
           isDragging={dragging?.kind === "group" && dragging.id === row.groupId}
-          onGripPointerDown={beginGroupDrag}
+          // An archived group sits outside the reorderable list.
+          onGripPointerDown={
+            group.archived === true ? undefined : beginGroupDrag
+          }
         />
       )
     }
@@ -3197,8 +3454,11 @@ export function SidebarConversationList({
         dragging: dragging?.kind === "folder" && dragging.id === row.folderId,
         // Worktree child headers follow their parent and never reorder on
         // their own, so they are not drag initiators (no grip). Only
-        // reorderable top-level repos keep the grip.
-        grip: !(showWorktrees && childToParent.has(row.folderId)),
+        // reorderable top-level repos keep the grip — and not while they are
+        // archived, since the Archived section is not part of the drag.
+        grip:
+          !(showWorktrees && childToParent.has(row.folderId)) &&
+          !archivedIds.has(row.folderId),
         // While this folder's sticky overlay is showing, the overlay is the
         // accessible control; make the (occluded) in-list copy inert so it is
         // not a duplicate tab stop / announcement.

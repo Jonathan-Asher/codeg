@@ -2005,6 +2005,8 @@
         "updateGroupFailed": "فشل تحديث المجموعة: {message}",
         "deleteGroupFailed": "فشل حذف المجموعة: {message}",
         "moveToGroupFailed": "فشل نقل المجلد: {message}",
+        "archiveFolderFailed": "تعذّر تغيير حالة أرشفة المجلد: {message}",
+        "archiveGroupFailed": "تعذّر تغيير حالة أرشفة المجموعة: {message}",
         "applyLayoutFailed": "فشل حفظ ترتيب المجلدات: {message}",
         "reorderPinsFailed": "فشل إعادة ترتيب المحادثات المثبّتة: {message}",
         "exportMarkdownDone": "Exported: {path}",
@@ -2058,6 +2060,8 @@
         "setAliasPlaceholder": "أدخل اسمًا مستعارًا (اتركه فارغًا للمسح)",
         "setAliasSave": "حفظ",
         "setAliasCancel": "إلغاء",
+        "archive": "أرشفة المجلد",
+        "unarchive": "إلغاء أرشفة المجلد",
         "removeFromWorkspace": "إزالة من مساحة العمل"
       },
       "manageConversations": {
@@ -2090,6 +2094,7 @@
       "sectionFolders": "المجلدات",
       "sectionChats": "محادثة",
       "sectionRecent": "الأحدث",
+      "sectionArchived": "المؤرشفة",
       "noChats": "لا توجد محادثات",
       "noRecent": "لا توجد محادثات حديثة",
       "showMoreRecent": "عرض المزيد ({count})",
@@ -2116,6 +2121,8 @@
         "rename": "إعادة تسمية المجموعة…",
         "renameTitle": "إعادة تسمية مجموعة المجلدات",
         "delete": "حذف المجموعة",
+        "archive": "أرشفة المجموعة",
+        "unarchive": "إلغاء أرشفة المجموعة",
         "deleteConfirmTitle": "حذف هذه المجموعة؟",
         "deleteConfirmDescription": "ستتم إزالة \"{name}\". تبقى المجلدات ({count}) بداخلها في مساحة العمل وتعود إلى المستوى الأعلى.",
         "empty": "لا توجد مجلدات في هذه المجموعة",
@@ -2288,7 +2295,8 @@
       "roleAssistant": "المساعد",
       "roleSystem": "النظام",
       "currentSession": "الحالية",
-      "recentHeading": "الأخيرة"
+      "recentHeading": "الأخيرة",
+      "archivedBadge": "مؤرشف"
     },
     "folderTitleBar": {
       "showSidebar": "إظهار الشريط الجانبي",

@@ -2005,6 +2005,8 @@
         "updateGroupFailed": "Falha ao atualizar o grupo: {message}",
         "deleteGroupFailed": "Falha ao excluir o grupo: {message}",
         "moveToGroupFailed": "Falha ao mover a pasta: {message}",
+        "archiveFolderFailed": "Falha ao alterar o arquivamento da pasta: {message}",
+        "archiveGroupFailed": "Falha ao alterar o arquivamento do grupo: {message}",
         "applyLayoutFailed": "Falha ao salvar a ordem das pastas: {message}",
         "reorderPinsFailed": "Falha ao reordenar as conversas fixadas: {message}",
         "exportMarkdownDone": "Exported: {path}",
@@ -2058,6 +2060,8 @@
         "setAliasPlaceholder": "Insira um alias (deixe vazio para limpar)",
         "setAliasSave": "Salvar",
         "setAliasCancel": "Cancelar",
+        "archive": "Arquivar pasta",
+        "unarchive": "Desarquivar pasta",
         "removeFromWorkspace": "Remover do espaço de trabalho"
       },
       "manageConversations": {
@@ -2090,6 +2094,7 @@
       "sectionFolders": "Pastas",
       "sectionChats": "Chat",
       "sectionRecent": "Recentes",
+      "sectionArchived": "Arquivadas",
       "noChats": "Sem chats",
       "noRecent": "Sem conversas recentes",
       "showMoreRecent": "Mostrar mais ({count})",
@@ -2116,6 +2121,8 @@
         "rename": "Renomear grupo…",
         "renameTitle": "Renomear grupo de pastas",
         "delete": "Excluir grupo",
+        "archive": "Arquivar grupo",
+        "unarchive": "Desarquivar grupo",
         "deleteConfirmTitle": "Excluir este grupo?",
         "deleteConfirmDescription": "\"{name}\" será removido. {count, plural, one {A # pasta dentro dele permanece} other {As # pastas dentro dele permanecem}} no espaço de trabalho e {count, plural, one {volta} other {voltam}} para o nível superior.",
         "empty": "Nenhuma pasta neste grupo",
@@ -2288,7 +2295,8 @@
       "roleAssistant": "Assistente",
       "roleSystem": "Sistema",
       "currentSession": "Atual",
-      "recentHeading": "Recentes"
+      "recentHeading": "Recentes",
+      "archivedBadge": "Arquivada"
     },
     "folderTitleBar": {
       "showSidebar": "Mostrar barra lateral",

@@ -10,7 +10,7 @@ import {
   DEFAULT_SECTION_ORDER,
   normalizeSectionOrder,
   type SidebarSortMode,
-  type SidebarSectionKey,
+  type SidebarRowSection,
   type SidebarSectionOrder,
 } from "@/lib/sidebar-view-mode-storage"
 
@@ -438,13 +438,21 @@ export function selectRecentConversationsWithReuse(
   showCompleted: boolean,
   sortMode: SidebarSortMode,
   openFolderIds: ReadonlySet<number>,
-  prev: DbConversationSummary[]
+  prev: DbConversationSummary[],
+  archived?: RecentArchiveFilter
 ): DbConversationSummary[] {
   const next: DbConversationSummary[] = []
   for (const conv of conversations) {
     if (conv.pinned_at != null) continue
     if (!showCompleted && conv.status === "completed") continue
     if (conv.kind !== "chat" && !openFolderIds.has(conv.folder_id)) continue
+    if (
+      archived &&
+      conv.kind !== "chat" &&
+      archived.folderIds.has(conv.folder_id) &&
+      !archived.keep.has(conv.id)
+    )
+      continue
     next.push(conv)
   }
   next.sort(
@@ -452,6 +460,77 @@ export function selectRecentConversationsWithReuse(
   )
   return arraysShallowEqual(prev, next) ? prev : next
 }
+
+// ── Archive ─────────────────────────────────────────────────────────────────
+// Archiving is presentational: an archived folder (or a folder in an archived
+// group) moves from the Folders section into the "Archived" section at the
+// bottom of the sidebar, and its sessions leave Recent. Nothing else about the
+// folder or its sessions changes — a running session keeps running, and one
+// that is waiting on the user still surfaces (see `RecentArchiveFilter.keep`).
+
+/** What Recent leaves out for archiving, and what it keeps anyway. */
+export interface RecentArchiveFilter {
+  /** Open folders that are archived (see {@link archivedFolderIds}). */
+  folderIds: ReadonlySet<number>
+  /**
+   * Sessions listed even though their folder is archived: the ones waiting on
+   * the user (a permission, a question, a plan). Archiving must never quietly
+   * hide a session that needs an answer. Keyed by the visible (top-level)
+   * conversation id, like the attention store.
+   */
+  keep: { has(id: number): boolean }
+}
+
+/**
+ * The folders the sidebar treats as archived: a folder archived on its own, a
+ * folder whose group is archived, and — since worktree children follow their
+ * repo everywhere in the sidebar — a worktree child whose open repo is. A
+ * child's own flag is not consulted while it renders under its repo.
+ *
+ * `childToParent` is the caller's worktree-child → repo map (open repos only
+ * in the sidebar). A folder naming a group that isn't in `groups` counts as
+ * ungrouped, matching {@link buildSidebarLayout}. Folders and groups from a
+ * server that predates archiving carry no flag and are never archived.
+ */
+export function archivedFolderIds(args: {
+  folders: readonly Pick<FolderDetail, "id" | "group_id" | "archived">[]
+  groups: readonly Pick<FolderGroupDetail, "id" | "archived">[]
+  childToParent: ReadonlyMap<number, number>
+}): Set<number> {
+  const { folders, groups, childToParent } = args
+  const archivedGroups = new Set<number>()
+  for (const group of groups) {
+    if (group.archived === true) archivedGroups.add(group.id)
+  }
+  const direct = new Map<number, boolean>()
+  for (const folder of folders) {
+    direct.set(
+      folder.id,
+      folder.archived === true ||
+        (folder.group_id != null && archivedGroups.has(folder.group_id))
+    )
+  }
+  const out = new Set<number>()
+  for (const folder of folders) {
+    const repoId = childToParent.get(folder.id)
+    const archived =
+      repoId != null && direct.has(repoId)
+        ? direct.get(repoId) === true
+        : direct.get(folder.id) === true
+    if (archived) out.add(folder.id)
+  }
+  return out
+}
+
+/** The archive state a folder header's menu offers to change. */
+export type FolderArchiveState =
+  /** Not archived: the menu offers "Archive folder". */
+  | "active"
+  /** Archived on its own: the menu offers "Unarchive folder". */
+  | "archived"
+  /** Archived through its group (or its repo): the group header owns the
+   *  switch, so the folder's menu offers none. */
+  | "inherited"
 
 // ── Folder display ordering (worktree nesting) ──────────────────────────────
 
@@ -1147,7 +1226,9 @@ export interface FolderMoreRow {
  */
 export interface SectionHeaderRow {
   kind: "section"
-  section: SidebarSectionKey
+  /** One of the four sections above, or "archived" — the archived folders and
+   *  groups, always last and present only while something is archived. */
+  section: SidebarRowSection
   expanded: boolean
   /** Pinned count, folder count, chat- or recent-conversation count — shown
    *  beside the title. */
@@ -1447,6 +1528,15 @@ export function buildRows(args: {
   /** Session ids a limited folder must list regardless of the limit (the
    *  active tab's session, and running / blocked / interrupted ones). */
   alwaysVisibleIds?: ReadonlySet<number>
+  /** The archived folders and groups, in the same shape as `layout`. When it
+   *  holds anything, an "archived" section is emitted after every other
+   *  section — the bottom of the sidebar, regardless of `sectionOrder` — and,
+   *  while expanded, lists them exactly as the Folders section would. Omitted
+   *  or empty emits nothing, the pre-archive row model. */
+  archivedLayout?: SidebarLayout
+  /** Whether the archived section is open. Defaults to collapsed: archived
+   *  folders are out of the way until asked for. */
+  archivedExpanded?: boolean
 }): SidebarRow[] {
   const {
     pinned,
@@ -1473,6 +1563,8 @@ export function buildRows(args: {
     folderSessionLimit = null,
     folderShowAll = EMPTY_FOLDER_SHOW_ALL,
     alwaysVisibleIds = EMPTY_EXPANDED,
+    archivedLayout,
+    archivedExpanded = false,
   } = args
   const rows: SidebarRow[] = []
 
@@ -1609,6 +1701,14 @@ export function buildRows(args: {
       rows.push({ kind: "folders-empty" })
       return
     }
+    pushLayoutEntries(resolved)
+  }
+
+  // Emit a resolved layout's entries: each top-level folder, and each group's
+  // heading followed (while it is open) by its members. Shared by the Folders
+  // section and the Archived section, which lists archived folders and groups
+  // exactly the way they looked before they were archived.
+  function pushLayoutEntries(resolved: SidebarLayout) {
     for (const entry of resolved.top) {
       if (entry.kind === "folder") {
         pushFolderEntry(entry.id, 0)
@@ -1709,6 +1809,19 @@ export function buildRows(args: {
     if (section === "folders") pushFolders()
     else if (section === "chats") pushChats()
     else if (showRecent) pushRecent()
+  }
+
+  // The archived folders and groups, always last. The count is folders, like
+  // the Folders section's, and the section only exists while something is
+  // archived — an empty "Archived" heading would just be noise.
+  if (archivedLayout && archivedLayout.top.length > 0) {
+    rows.push({
+      kind: "section",
+      section: "archived",
+      expanded: archivedExpanded,
+      count: layoutFolderIds(archivedLayout).length,
+    })
+    if (archivedExpanded) pushLayoutEntries(archivedLayout)
   }
 
   return rows

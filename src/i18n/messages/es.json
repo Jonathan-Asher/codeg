@@ -2005,6 +2005,8 @@
         "updateGroupFailed": "Error al actualizar el grupo: {message}",
         "deleteGroupFailed": "Error al eliminar el grupo: {message}",
         "moveToGroupFailed": "Error al mover la carpeta: {message}",
+        "archiveFolderFailed": "No se pudo cambiar el archivado de la carpeta: {message}",
+        "archiveGroupFailed": "No se pudo cambiar el archivado del grupo: {message}",
         "applyLayoutFailed": "Error al guardar el orden de las carpetas: {message}",
         "reorderPinsFailed": "Error al reordenar las conversaciones fijadas: {message}",
         "exportMarkdownDone": "Exported: {path}",
@@ -2058,6 +2060,8 @@
         "setAliasPlaceholder": "Introduce un alias (déjalo vacío para borrarlo)",
         "setAliasSave": "Guardar",
         "setAliasCancel": "Cancelar",
+        "archive": "Archivar carpeta",
+        "unarchive": "Desarchivar carpeta",
         "removeFromWorkspace": "Quitar del espacio de trabajo"
       },
       "manageConversations": {
@@ -2090,6 +2094,7 @@
       "sectionFolders": "Carpetas",
       "sectionChats": "Chat",
       "sectionRecent": "Recientes",
+      "sectionArchived": "Archivadas",
       "noChats": "Sin chats",
       "noRecent": "Sin conversaciones recientes",
       "showMoreRecent": "Mostrar más ({count})",
@@ -2116,6 +2121,8 @@
         "rename": "Renombrar grupo…",
         "renameTitle": "Renombrar grupo de carpetas",
         "delete": "Eliminar grupo",
+        "archive": "Archivar grupo",
+        "unarchive": "Desarchivar grupo",
         "deleteConfirmTitle": "¿Eliminar este grupo?",
         "deleteConfirmDescription": "Se eliminará «{name}». {count, plural, one {La # carpeta que contiene permanece} other {Las # carpetas que contiene permanecen}} en el espacio de trabajo y {count, plural, one {vuelve} other {vuelven}} al nivel superior.",
         "empty": "No hay carpetas en este grupo",
@@ -2288,7 +2295,8 @@
       "roleAssistant": "Asistente",
       "roleSystem": "Sistema",
       "currentSession": "Actual",
-      "recentHeading": "Recientes"
+      "recentHeading": "Recientes",
+      "archivedBadge": "Archivada"
     },
     "folderTitleBar": {
       "showSidebar": "Mostrar barra lateral",

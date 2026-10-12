@@ -2005,6 +2005,8 @@
         "updateGroupFailed": "Gruppe konnte nicht aktualisiert werden: {message}",
         "deleteGroupFailed": "Gruppe konnte nicht gelöscht werden: {message}",
         "moveToGroupFailed": "Ordner konnte nicht verschoben werden: {message}",
+        "archiveFolderFailed": "Archivierung des Ordners konnte nicht geändert werden: {message}",
+        "archiveGroupFailed": "Archivierung der Gruppe konnte nicht geändert werden: {message}",
         "applyLayoutFailed": "Ordnerreihenfolge konnte nicht gespeichert werden: {message}",
         "reorderPinsFailed": "Angeheftete Konversationen konnten nicht neu angeordnet werden: {message}",
         "exportMarkdownDone": "Exported: {path}",
@@ -2058,6 +2060,8 @@
         "setAliasPlaceholder": "Alias eingeben (zum Entfernen leer lassen)",
         "setAliasSave": "Speichern",
         "setAliasCancel": "Abbrechen",
+        "archive": "Ordner archivieren",
+        "unarchive": "Ordner wiederherstellen",
         "removeFromWorkspace": "Aus Arbeitsbereich entfernen"
       },
       "manageConversations": {
@@ -2090,6 +2094,7 @@
       "sectionFolders": "Ordner",
       "sectionChats": "Chat",
       "sectionRecent": "Zuletzt",
+      "sectionArchived": "Archiviert",
       "noChats": "Keine Chats",
       "noRecent": "Keine kürzlichen Konversationen",
       "showMoreRecent": "Mehr anzeigen ({count})",
@@ -2116,6 +2121,8 @@
         "rename": "Gruppe umbenennen…",
         "renameTitle": "Ordnergruppe umbenennen",
         "delete": "Gruppe löschen",
+        "archive": "Gruppe archivieren",
+        "unarchive": "Gruppe wiederherstellen",
         "deleteConfirmTitle": "Diese Gruppe löschen?",
         "deleteConfirmDescription": "„{name}“ wird entfernt. Die {count, plural, one {# Ordner darin bleibt} other {# Ordner darin bleiben}} im Arbeitsbereich und {count, plural, one {wechselt} other {wechseln}} zurück auf die oberste Ebene.",
         "empty": "Keine Ordner in dieser Gruppe",
@@ -2288,7 +2295,8 @@
       "roleAssistant": "Assistent",
       "roleSystem": "System",
       "currentSession": "Aktuell",
-      "recentHeading": "Zuletzt"
+      "recentHeading": "Zuletzt",
+      "archivedBadge": "Archiviert"
     },
     "folderTitleBar": {
       "showSidebar": "Seitenleiste anzeigen",

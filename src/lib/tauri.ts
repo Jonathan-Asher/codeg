@@ -629,6 +629,20 @@ export async function setFolderGroup(
   return invoke("set_folder_group", { folderId, groupId })
 }
 
+export async function setFolderArchived(
+  folderId: number,
+  archived: boolean
+): Promise<FolderDetail> {
+  return invoke("set_folder_archived", { folderId, archived })
+}
+
+export async function setFolderGroupArchived(
+  groupId: number,
+  archived: boolean
+): Promise<FolderGroupDetail> {
+  return invoke("set_folder_group_archived", { groupId, archived })
+}
+
 export async function importLocalConversations(
   folderId: number
 ): Promise<ImportResult> {

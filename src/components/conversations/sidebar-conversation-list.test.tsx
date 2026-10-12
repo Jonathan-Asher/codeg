@@ -258,9 +258,21 @@ vi.mock("@/hooks/use-subsession-sync", () => ({ useSubsessionSync: () => {} }))
 // The pinned-drag suite asserts what a drop persists; every other api call
 // stays real.
 const pinReorder = vi.hoisted(() => vi.fn(() => Promise.resolve()))
+// The archive suite asserts what the menus send; the store's optimistic patch
+// is what moves the rows, so these only need to resolve.
+const archiveApi = vi.hoisted(() => ({
+  folder: vi.fn((folderId: number, archived: boolean) =>
+    Promise.resolve({ id: folderId, archived })
+  ),
+  group: vi.fn((groupId: number, archived: boolean) =>
+    Promise.resolve({ id: groupId, archived })
+  ),
+}))
 vi.mock("@/lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api")>()),
   reorderConversationPins: pinReorder,
+  setFolderArchived: archiveApi.folder,
+  setFolderGroupArchived: archiveApi.group,
 }))
 vi.mock("@/components/shared/directory-browser-dialog", () => ({
   DirectoryBrowserDialog: () => null,
@@ -2054,5 +2066,307 @@ describe("SidebarConversationList — stepping through sessions with the keyboar
     render(tree())
     expect(pressDown().defaultPrevented).toBe(true)
     expect(stableTabFns.openTab).not.toHaveBeenCalled()
+  })
+})
+
+describe("SidebarConversationList — archived folders and groups", () => {
+  const ARCHIVED_EXPANDED_KEY = "workspace:sidebar-archived-expanded"
+  const { sectionArchived, sectionRecent } = enMessages.Folder.sidebar
+
+  function archiveTree() {
+    return (
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <SidebarConversationList showCompleted showRecent sortMode="created" />
+      </NextIntlClientProvider>
+    )
+  }
+
+  // Section toggles are the buttons carrying `aria-expanded` whose text starts
+  // with the label (the Archived one can trail live-activity chips).
+  const sectionToggle = (label: string) =>
+    Array.from(document.querySelectorAll("button[aria-expanded]")).find((b) =>
+      b.textContent?.startsWith(label)
+    ) as HTMLElement | undefined
+
+  // Rows in render order: section headings, group headings, folder headers and
+  // cards (Recent's copies tagged so they can be told apart).
+  function rowShape(): string[] {
+    const out: string[] = []
+    let section = ""
+    for (const el of Array.from(
+      document.querySelectorAll(
+        "button[aria-expanded], [data-folder-group-id], [data-folder-id], [data-conversation-id]"
+      )
+    )) {
+      const group = el.getAttribute("data-folder-group-id")
+      const folderId = el.getAttribute("data-folder-id")
+      const convId = el.getAttribute("data-conversation-id")
+      if (group) out.push(`group:${group}`)
+      else if (folderId) out.push(`folder:${folderId}`)
+      else if (convId) out.push(`${section}conv:${convId}`)
+      else if (el.textContent?.startsWith(sectionRecent)) {
+        section = "recent:"
+        out.push("section:recent")
+      } else if (el.textContent?.startsWith(sectionArchived)) {
+        section = ""
+        out.push("section:archived")
+      }
+    }
+    return out
+  }
+
+  function seed(opts: {
+    folders: FolderDetail[]
+    groups?: Array<{
+      id: number
+      name: string
+      color: string
+      sort_order: number
+      archived?: boolean
+    }>
+    conversations: DbConversationSummary[]
+  }) {
+    useAppWorkspaceStore.setState({
+      folders: opts.folders,
+      allFolders: opts.folders,
+      folderGroups: opts.groups ?? [],
+      conversations: opts.conversations,
+    })
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ now: FIXED })
+    localStorage.removeItem(ARCHIVED_EXPANDED_KEY)
+    store.activeTabId = null
+    store.tabSpec = []
+    archiveApi.folder.mockClear()
+    archiveApi.group.mockClear()
+  })
+  afterEach(() => {
+    localStorage.removeItem(ARCHIVED_EXPANDED_KEY)
+    __resetConversationAttentionForTests()
+    vi.useRealTimers()
+  })
+
+  it("moves an archived folder into a collapsed Archived section and out of Recent", () => {
+    seed({
+      folders: [
+        { ...folder(1, "Live"), sort_order: 1, group_id: null },
+        { ...folder(2, "Old"), sort_order: 2, group_id: null, archived: true },
+      ] as FolderDetail[],
+      conversations: [conv(11, 1), conv(21, 2)],
+    })
+    render(archiveTree())
+
+    // Closed by default: only the heading shows, at the bottom.
+    const toggle = sectionToggle(sectionArchived)
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false")
+    expect(rowShape()).not.toContain("folder:2")
+    // Recent no longer lists the archived folder's session.
+    expect(rowShape()).toContain("recent:conv:11")
+    expect(rowShape()).not.toContain("recent:conv:21")
+    expect(rowShape().slice(-1)).toEqual(["section:archived"])
+
+    act(() => {
+      fireEvent.click(toggle!)
+    })
+    // Opened, it lists the folder and its sessions as the Folders section did.
+    const shape = rowShape()
+    expect(shape.slice(shape.indexOf("section:archived"))).toEqual([
+      "section:archived",
+      "folder:2",
+      "conv:21",
+    ])
+    expect(localStorage.getItem(ARCHIVED_EXPANDED_KEY)).toBe("true")
+  })
+
+  it("archives a group as a unit, its folders following it", () => {
+    localStorage.setItem(ARCHIVED_EXPANDED_KEY, "true")
+    seed({
+      folders: [
+        { ...folder(1, "Live"), sort_order: 1, group_id: null },
+        { ...folder(5, "Member"), sort_order: 1, group_id: 7 },
+      ] as FolderDetail[],
+      groups: [
+        {
+          id: 7,
+          name: "Old work",
+          color: "inherit",
+          sort_order: 2,
+          archived: true,
+        },
+      ],
+      conversations: [conv(11, 1), conv(51, 5)],
+    })
+    render(archiveTree())
+
+    const shape = rowShape()
+    const archivedAt = shape.indexOf("section:archived")
+    // The group and its member are gone from the Folders section…
+    expect(shape.slice(0, archivedAt)).not.toContain("group:7")
+    expect(shape.slice(0, archivedAt)).not.toContain("folder:5")
+    expect(shape.slice(0, archivedAt)).not.toContain("recent:conv:51")
+    // …and sit in the Archived one, group heading over its member.
+    expect(shape.slice(archivedAt)).toEqual([
+      "section:archived",
+      "group:7",
+      "folder:5",
+      "conv:51",
+    ])
+  })
+
+  it("keeps a session that waits on the user in Recent, and badges the heading", () => {
+    seed({
+      folders: [
+        { ...folder(1, "Live"), sort_order: 1, group_id: null },
+        { ...folder(2, "Old"), sort_order: 2, group_id: null, archived: true },
+      ] as FolderDetail[],
+      conversations: [
+        conv(11, 1),
+        conv(21, 2),
+        conv(22, 2, { turn_state: "running" }),
+      ],
+    })
+    useConversationAttentionStore.setState({
+      byConversationId: new Map<number, AttentionKind>([[21, "permission"]]),
+    })
+    render(archiveTree())
+
+    // Archiving never hides a session that needs an answer…
+    expect(rowShape()).toContain("recent:conv:21")
+    // …while a merely running one leaves Recent with its folder.
+    expect(rowShape()).not.toContain("recent:conv:22")
+    // The collapsed heading still says what is going on in there.
+    const toggle = sectionToggle(sectionArchived)
+    expect(
+      toggle?.querySelector('[data-testid="attention-count-badge"]')
+    ).not.toBeNull()
+    expect(
+      toggle?.querySelector('[data-testid="section-running-badge"]')
+        ?.textContent
+    ).toContain("1")
+  })
+
+  it("archives a folder from its menu and unarchives it from the Archived section", async () => {
+    seed({
+      folders: [
+        { ...folder(1, "Live"), sort_order: 1, group_id: null },
+        { ...folder(2, "Soon old"), sort_order: 2, group_id: null },
+      ] as FolderDetail[],
+      conversations: [conv(11, 1), conv(21, 2)],
+    })
+    render(archiveTree())
+    expect(sectionToggle(sectionArchived)).toBeUndefined()
+
+    const header = document.querySelector('[data-folder-id="2"]')
+    act(() => {
+      fireEvent.contextMenu(header!)
+    })
+    const archiveItem = document.querySelector(
+      '[data-testid="folder-menu-archive"]'
+    )
+    expect(archiveItem).not.toBeNull()
+    await act(async () => {
+      fireEvent.click(archiveItem!)
+    })
+    expect(archiveApi.folder).toHaveBeenCalledWith(2, true)
+    // The folder moved at once (optimistically) into the Archived section.
+    expect(sectionToggle(sectionArchived)).toBeDefined()
+    expect(rowShape()).not.toContain("folder:2")
+    expect(rowShape()).not.toContain("recent:conv:21")
+
+    act(() => {
+      fireEvent.click(sectionToggle(sectionArchived)!)
+    })
+    act(() => {
+      fireEvent.contextMenu(document.querySelector('[data-folder-id="2"]')!)
+    })
+    const unarchiveItem = document.querySelector(
+      '[data-testid="folder-menu-unarchive"]'
+    )
+    expect(unarchiveItem).not.toBeNull()
+    await act(async () => {
+      fireEvent.click(unarchiveItem!)
+    })
+    expect(archiveApi.folder).toHaveBeenLastCalledWith(2, false)
+    // Back in the Folders section, in its old place, and in Recent again.
+    expect(sectionToggle(sectionArchived)).toBeUndefined()
+    expect(rowShape().filter((r) => r.startsWith("folder:"))).toEqual([
+      "folder:1",
+      "folder:2",
+    ])
+    expect(rowShape()).toContain("recent:conv:21")
+  })
+
+  it("archives a group from its heading's menu", async () => {
+    seed({
+      folders: [
+        { ...folder(5, "Member"), sort_order: 1, group_id: 7 },
+      ] as FolderDetail[],
+      groups: [{ id: 7, name: "Work", color: "inherit", sort_order: 1 }],
+      conversations: [conv(51, 5)],
+    })
+    render(archiveTree())
+    act(() => {
+      fireEvent.contextMenu(
+        document.querySelector('[data-folder-group-id="7"]')!
+      )
+    })
+    const item = document.querySelector('[data-testid="group-menu-archive"]')
+    expect(item).not.toBeNull()
+    await act(async () => {
+      fireEvent.click(item!)
+    })
+    expect(archiveApi.group).toHaveBeenCalledWith(7, true)
+    expect(useAppWorkspaceStore.getState().folderGroups[0].archived).toBe(true)
+    // A member archived through its group offers no folder-level switch.
+    act(() => {
+      fireEvent.click(sectionToggle(sectionArchived)!)
+    })
+    act(() => {
+      fireEvent.contextMenu(document.querySelector('[data-folder-id="5"]')!)
+    })
+    expect(
+      document.querySelector('[data-testid="folder-menu-archive"]')
+    ).toBeNull()
+    expect(
+      document.querySelector('[data-testid="folder-menu-unarchive"]')
+    ).toBeNull()
+  })
+
+  it("does not offer an archived group in Move to group", () => {
+    seed({
+      folders: [
+        { ...folder(1, "Loose"), sort_order: 1, group_id: null },
+      ] as FolderDetail[],
+      groups: [
+        { id: 7, name: "Live group", color: "inherit", sort_order: 2 },
+        {
+          id: 8,
+          name: "Old group",
+          color: "inherit",
+          sort_order: 3,
+          archived: true,
+        },
+      ],
+      conversations: [conv(11, 1)],
+    })
+    render(archiveTree())
+    act(() => {
+      fireEvent.contextMenu(document.querySelector('[data-folder-id="1"]')!)
+    })
+    const sub = Array.from(document.querySelectorAll('[role="menuitem"]')).find(
+      (el) => el.textContent?.includes("Move to group")
+    )
+    expect(sub).toBeDefined()
+    act(() => {
+      fireEvent.pointerMove(sub!)
+      fireEvent.keyDown(sub!, { key: "ArrowRight" })
+    })
+    expect(document.body.textContent).toContain("Live group")
+    const menuText = Array.from(document.querySelectorAll('[role="menu"]'))
+      .map((m) => m.textContent)
+      .join("|")
+    expect(menuText).not.toContain("Old group")
   })
 })

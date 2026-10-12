@@ -9,6 +9,12 @@ export interface RecentSessionOptions {
   folderId?: number | null
   /** Only this agent's sessions, or every agent's when null. */
   agentType?: AgentType | null
+  /**
+   * Folders whose sessions stay out of the list — the archived ones. Ignored
+   * when `folderId` names one of them: narrowing to a folder is asking for
+   * that folder's sessions, archived or not.
+   */
+  excludeFolderIds?: ReadonlySet<number>
   limit: number
 }
 
@@ -26,7 +32,14 @@ export function recentSessions(
   conversations: readonly DbConversationSummary[],
   options: RecentSessionOptions
 ): DbConversationSummary[] {
-  const { knownFolderIds, excludeId, folderId, agentType, limit } = options
+  const {
+    knownFolderIds,
+    excludeId,
+    folderId,
+    agentType,
+    excludeFolderIds,
+    limit,
+  } = options
   return conversations
     .filter(
       (c) =>
@@ -36,6 +49,9 @@ export function recentSessions(
         c.id !== excludeId &&
         knownFolderIds.has(c.folder_id) &&
         (folderId == null || c.folder_id === folderId) &&
+        (folderId != null ||
+          excludeFolderIds == null ||
+          !excludeFolderIds.has(c.folder_id)) &&
         (agentType == null || c.agent_type === agentType)
     )
     .sort((a, b) => activityTime(b) - activityTime(a) || b.id - a.id)

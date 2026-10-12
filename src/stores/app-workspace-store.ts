@@ -14,7 +14,9 @@ import {
   openFolderById as apiOpenFolderById,
   openWorktreeFolder as apiOpenWorktreeFolder,
   removeFolderFromWorkspace as apiRemoveFolderFromWorkspace,
+  setFolderArchived as apiSetFolderArchived,
   setFolderGroup as apiSetFolderGroup,
+  setFolderGroupArchived as apiSetFolderGroupArchived,
   updateFolderGroup as apiUpdateFolderGroup,
 } from "@/lib/api"
 import { toErrorMessage } from "@/lib/app-error"
@@ -162,6 +164,14 @@ export interface AppWorkspaceStoreState {
   deleteFolderGroup: (groupId: number) => Promise<void>
   /** Move one folder into (`groupId`) or out of (`null`) a group, appending it. */
   setFolderGroup: (folderId: number, groupId: number | null) => Promise<void>
+  /**
+   * Archive or unarchive one folder. Optimistic, like the other sidebar
+   * mutations: the flag flips locally first (the sidebar moves the folder at
+   * once) and is rolled back if the write fails. Presentational only.
+   */
+  setFolderArchived: (folderId: number, archived: boolean) => Promise<void>
+  /** Archive or unarchive a whole group; its folders follow it. Optimistic. */
+  setFolderGroupArchived: (groupId: number, archived: boolean) => Promise<void>
   /** Apply a `folder-group://changed` broadcast from another window/client. */
   applyFolderGroupChange: (change: FolderGroupChange) => void
   refreshFolder: (id: number) => Promise<void>
@@ -786,9 +796,21 @@ export const useAppWorkspaceStore = create<AppWorkspaceStoreState>()(
       // Members return to the top level — they are never closed or forgotten.
       // Their exact new `sort_order` comes from the server; clearing `group_id`
       // is enough for the sidebar to place them, and the `layout` broadcast
-      // reconciles the positions.
+      // reconciles the positions. Members of an ARCHIVED group are archived on
+      // their own by the server so they stay in the Archived section; mirror
+      // that here so they don't flash through the main list first.
+      const wasArchived =
+        prevGroups.find((g) => g.id === groupId)?.archived === true
       const ungroup = (list: FolderDetail[]) =>
-        list.map((f) => (f.group_id === groupId ? { ...f, group_id: null } : f))
+        list.map((f) =>
+          f.group_id === groupId
+            ? {
+                ...f,
+                group_id: null,
+                ...(wasArchived ? { archived: true } : {}),
+              }
+            : f
+        )
       // Stamped BEFORE the request: a `listFolderGroups` snapshot that was
       // already in flight would otherwise put this band back on screen, and the
       // `deleted` broadcast that would have taken it down has already been
@@ -831,6 +853,47 @@ export const useAppWorkspaceStore = create<AppWorkspaceStoreState>()(
       }
     },
 
+    setFolderArchived: async (folderId, archived) => {
+      const { folders: prevFolders, allFolders: prevAllFolders } = get()
+      const patchList = (list: FolderDetail[]) =>
+        list.map((f) =>
+          f.id === folderId && (f.archived ?? false) !== archived
+            ? { ...f, archived }
+            : f
+        )
+      set({
+        folders: patchList(prevFolders),
+        allFolders: patchList(prevAllFolders),
+      })
+      try {
+        await apiSetFolderArchived(folderId, archived)
+      } catch (err) {
+        rollbackAndResync(set, get, {
+          folders: prevFolders,
+          allFolders: prevAllFolders,
+        })
+        throw err
+      }
+    },
+
+    setFolderGroupArchived: async (groupId, archived) => {
+      const prev = get().folderGroups
+      if (!prev.some((g) => g.id === groupId)) return
+      set({
+        folderGroups: prev.map((g) =>
+          g.id === groupId && (g.archived ?? false) !== archived
+            ? { ...g, archived }
+            : g
+        ),
+      })
+      try {
+        await apiSetFolderGroupArchived(groupId, archived)
+      } catch (err) {
+        rollbackAndResync(set, get, { folderGroups: prev })
+        throw err
+      }
+    },
+
     applyFolderGroupChange: (change) => {
       if (change.kind === "upsert") {
         const { folderGroups } = get()
@@ -855,10 +918,20 @@ export const useAppWorkspaceStore = create<AppWorkspaceStoreState>()(
         // a `listFolderGroups` snapshot from before the delete may still be in
         // flight, and this is the only record that would filter it out.
         rememberDeletedGroup(change.id)
-        if (!folderGroups.some((g) => g.id === change.id)) return
+        const gone = folderGroups.find((g) => g.id === change.id)
+        if (!gone) return
+        // Same rule as `deleteFolderGroup`: an archived group's members stay
+        // archived on their own.
+        const wasArchived = gone.archived === true
         const ungroup = (list: FolderDetail[]) =>
           list.map((f) =>
-            f.group_id === change.id ? { ...f, group_id: null } : f
+            f.group_id === change.id
+              ? {
+                  ...f,
+                  group_id: null,
+                  ...(wasArchived ? { archived: true } : {}),
+                }
+              : f
           )
         set({
           folderGroups: folderGroups.filter((g) => g.id !== change.id),

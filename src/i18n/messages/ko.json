@@ -2005,6 +2005,8 @@
         "updateGroupFailed": "그룹 업데이트 실패: {message}",
         "deleteGroupFailed": "그룹 삭제 실패: {message}",
         "moveToGroupFailed": "폴더 이동 실패: {message}",
+        "archiveFolderFailed": "폴더 보관 상태를 변경하지 못했습니다: {message}",
+        "archiveGroupFailed": "그룹 보관 상태를 변경하지 못했습니다: {message}",
         "applyLayoutFailed": "폴더 순서 저장 실패: {message}",
         "reorderPinsFailed": "고정된 대화 순서 변경 실패: {message}",
         "exportMarkdownDone": "Exported: {path}",
@@ -2058,6 +2060,8 @@
         "setAliasPlaceholder": "별칭 입력 (비우면 지움)",
         "setAliasSave": "저장",
         "setAliasCancel": "취소",
+        "archive": "폴더 보관",
+        "unarchive": "폴더 보관 해제",
         "removeFromWorkspace": "워크스페이스에서 제거"
       },
       "manageConversations": {
@@ -2090,6 +2094,7 @@
       "sectionFolders": "폴더",
       "sectionChats": "채팅",
       "sectionRecent": "최근",
+      "sectionArchived": "보관됨",
       "noChats": "채팅 없음",
       "noRecent": "최근 대화 없음",
       "showMoreRecent": "더 보기 ({count})",
@@ -2116,6 +2121,8 @@
         "rename": "그룹 이름 변경…",
         "renameTitle": "폴더 그룹 이름 변경",
         "delete": "그룹 삭제",
+        "archive": "그룹 보관",
+        "unarchive": "그룹 보관 해제",
         "deleteConfirmTitle": "이 그룹을 삭제할까요?",
         "deleteConfirmDescription": "\"{name}\"이(가) 삭제됩니다. 그룹 안의 폴더 {count}개는 작업 공간에 그대로 남아 최상위로 이동합니다.",
         "empty": "이 그룹에 폴더가 없습니다",
@@ -2288,7 +2295,8 @@
       "roleAssistant": "어시스턴트",
       "roleSystem": "시스템",
       "currentSession": "현재",
-      "recentHeading": "최근"
+      "recentHeading": "최근",
+      "archivedBadge": "보관됨"
     },
     "folderTitleBar": {
       "showSidebar": "사이드바 표시",

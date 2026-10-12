@@ -2005,6 +2005,8 @@
         "updateGroupFailed": "グループの更新に失敗しました: {message}",
         "deleteGroupFailed": "グループの削除に失敗しました: {message}",
         "moveToGroupFailed": "フォルダの移動に失敗しました: {message}",
+        "archiveFolderFailed": "フォルダのアーカイブ状態を変更できませんでした: {message}",
+        "archiveGroupFailed": "グループのアーカイブ状態を変更できませんでした: {message}",
         "applyLayoutFailed": "フォルダの並び順の保存に失敗しました: {message}",
         "reorderPinsFailed": "ピン留めした会話の並べ替えに失敗しました: {message}",
         "exportMarkdownDone": "Exported: {path}",
@@ -2058,6 +2060,8 @@
         "setAliasPlaceholder": "エイリアスを入力（空欄でクリア）",
         "setAliasSave": "保存",
         "setAliasCancel": "キャンセル",
+        "archive": "フォルダをアーカイブ",
+        "unarchive": "フォルダのアーカイブを解除",
         "removeFromWorkspace": "ワークスペースから削除"
       },
       "manageConversations": {
@@ -2090,6 +2094,7 @@
       "sectionFolders": "フォルダ",
       "sectionChats": "チャット",
       "sectionRecent": "最近",
+      "sectionArchived": "アーカイブ済み",
       "noChats": "チャットがありません",
       "noRecent": "最近の会話はありません",
       "showMoreRecent": "さらに表示（{count}）",
@@ -2116,6 +2121,8 @@
         "rename": "グループ名を変更…",
         "renameTitle": "フォルダグループの名前を変更",
         "delete": "グループを削除",
+        "archive": "グループをアーカイブ",
+        "unarchive": "グループのアーカイブを解除",
         "deleteConfirmTitle": "このグループを削除しますか？",
         "deleteConfirmDescription": "「{name}」を削除します。グループ内の {count} 個のフォルダはワークスペースに残り、最上位に戻ります。",
         "empty": "このグループにフォルダはありません",
@@ -2288,7 +2295,8 @@
       "roleAssistant": "アシスタント",
       "roleSystem": "システム",
       "currentSession": "現在",
-      "recentHeading": "最近"
+      "recentHeading": "最近",
+      "archivedBadge": "アーカイブ済み"
     },
     "folderTitleBar": {
       "showSidebar": "サイドバーを表示",

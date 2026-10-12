@@ -2005,6 +2005,8 @@
         "updateGroupFailed": "Failed to update group: {message}",
         "deleteGroupFailed": "Failed to delete group: {message}",
         "moveToGroupFailed": "Failed to move folder: {message}",
+        "archiveFolderFailed": "Failed to change the folder's archive state: {message}",
+        "archiveGroupFailed": "Failed to change the group's archive state: {message}",
         "applyLayoutFailed": "Failed to save the folder order: {message}",
         "reorderPinsFailed": "Failed to reorder pinned conversations: {message}",
         "exportMarkdownDone": "Exported: {path}",
@@ -2058,6 +2060,8 @@
         "setAliasPlaceholder": "Enter an alias (leave empty to clear)",
         "setAliasSave": "Save",
         "setAliasCancel": "Cancel",
+        "archive": "Archive folder",
+        "unarchive": "Unarchive folder",
         "removeFromWorkspace": "Remove from workspace"
       },
       "manageConversations": {
@@ -2090,6 +2094,7 @@
       "sectionFolders": "Folders",
       "sectionChats": "Chat",
       "sectionRecent": "Recent",
+      "sectionArchived": "Archived",
       "noChats": "No chats",
       "noRecent": "No recent conversations",
       "showMoreRecent": "Show more ({count})",
@@ -2116,6 +2121,8 @@
         "rename": "Rename group…",
         "renameTitle": "Rename folder group",
         "delete": "Delete group",
+        "archive": "Archive group",
+        "unarchive": "Unarchive group",
         "deleteConfirmTitle": "Delete this group?",
         "deleteConfirmDescription": "\"{name}\" will be removed. The {count, plural, one {# folder} other {# folders}} inside it stay in the workspace and move back to the top level.",
         "empty": "No folders in this group",
@@ -2288,7 +2295,8 @@
       "roleAssistant": "Assistant",
       "roleSystem": "System",
       "currentSession": "Current",
-      "recentHeading": "Recent"
+      "recentHeading": "Recent",
+      "archivedBadge": "Archived"
     },
     "folderTitleBar": {
       "showSidebar": "Show Sidebar",

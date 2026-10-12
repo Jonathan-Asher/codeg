@@ -2005,6 +2005,8 @@
         "updateGroupFailed": "更新分組失敗：{message}",
         "deleteGroupFailed": "刪除分組失敗：{message}",
         "moveToGroupFailed": "移動資料夾失敗：{message}",
+        "archiveFolderFailed": "變更資料夾封存狀態失敗：{message}",
+        "archiveGroupFailed": "變更群組封存狀態失敗：{message}",
         "applyLayoutFailed": "儲存資料夾順序失敗：{message}",
         "reorderPinsFailed": "置頂會話排序失敗：{message}",
         "exportMarkdownDone": "已匯出：{path}",
@@ -2058,6 +2060,8 @@
         "setAliasPlaceholder": "輸入別名（留空清除）",
         "setAliasSave": "儲存",
         "setAliasCancel": "取消",
+        "archive": "封存資料夾",
+        "unarchive": "取消封存資料夾",
         "removeFromWorkspace": "從工作區移除"
       },
       "manageConversations": {
@@ -2090,6 +2094,7 @@
       "sectionFolders": "資料夾",
       "sectionChats": "聊天",
       "sectionRecent": "最近",
+      "sectionArchived": "已封存",
       "noChats": "沒有聊天",
       "noRecent": "暫無最近對話",
       "showMoreRecent": "顯示更多（{count}）",
@@ -2116,6 +2121,8 @@
         "rename": "重新命名分組…",
         "renameTitle": "重新命名資料夾分組",
         "delete": "刪除分組",
+        "archive": "封存群組",
+        "unarchive": "取消封存群組",
         "deleteConfirmTitle": "刪除此分組？",
         "deleteConfirmDescription": "將刪除「{name}」。組內的 {count} 個資料夾會保留在工作區，並回到頂層。",
         "empty": "分組內尚無資料夾",
@@ -2288,7 +2295,8 @@
       "roleAssistant": "助手",
       "roleSystem": "系統",
       "currentSession": "目前",
-      "recentHeading": "最近"
+      "recentHeading": "最近",
+      "archivedBadge": "已封存"
     },
     "folderTitleBar": {
       "showSidebar": "顯示側邊欄",
