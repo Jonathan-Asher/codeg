@@ -38,6 +38,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use tokio::sync::{oneshot, RwLock};
+use unicode_segmentation::UnicodeSegmentation;
 
 /// Max questions per `ask_user_question` call. Matches Claude Code's
 /// `AskUserQuestion` contract; the JSON schema advertises the same `maxItems`.
@@ -46,8 +47,11 @@ pub const MAX_QUESTIONS: usize = 4;
 /// meaningful choice; more than four overwhelms the card. Matches Claude Code.
 pub const MIN_OPTIONS: usize = 2;
 pub const MAX_OPTIONS: usize = 4;
-/// Max characters for a question's short `header` chip.
+/// Max characters for a question's short `header` chip. A longer header is
+/// shortened to fit ([`fit_header`]), never rejected: it is only a label.
 pub const MAX_HEADER_CHARS: usize = 12;
+/// Marks a header [`fit_header`] had to shorten.
+const HEADER_ELLIPSIS: char = '…';
 /// Per-field sanity bound (characters) for every agent/user-supplied free-text
 /// field: the question text, each option label + description, and the free-text
 /// "Other" answer. The full text rides in the broadcast event, the snapshot, and
@@ -76,7 +80,8 @@ pub struct QuestionSpec {
     pub id: String,
     /// The full question shown to the user.
     pub question: String,
-    /// Short category label (≤ [`MAX_HEADER_CHARS`]) rendered as a chip.
+    /// Short category label (≤ [`MAX_HEADER_CHARS`], see [`header_or_derived`])
+    /// rendered as a chip.
     pub header: String,
     /// When true the user may select multiple options.
     pub multi_select: bool,
@@ -186,11 +191,18 @@ pub trait SessionQuestionAccess: Send + Sync {
 
 /// Validate + parse the MCP `ask_user_question` arguments into typed
 /// [`QuestionSpec`]s, minting a stable id per question. Enforces the contract
-/// (1..=[`MAX_QUESTIONS`] questions, each with a non-empty question + header
-/// ≤ [`MAX_HEADER_CHARS`] and [`MIN_OPTIONS`]..=[`MAX_OPTIONS`] labeled options)
-/// so a malformed call is rejected synchronously with a helpful message the LLM
-/// can fix, rather than round-tripping bad data. `multiSelect` defaults to
-/// false; an option `description` defaults to empty (lenient).
+/// (1..=[`MAX_QUESTIONS`] questions, each with a non-empty question and
+/// [`MIN_OPTIONS`]..=[`MAX_OPTIONS`] labeled options) so a malformed call is
+/// rejected synchronously with a helpful message the LLM can fix, rather than
+/// round-tripping bad data. `multiSelect` defaults to false; an option
+/// `description` defaults to empty (lenient).
+///
+/// The `header` is lenient too ([`header_or_derived`]): models routinely write
+/// one a few characters over [`MAX_HEADER_CHARS`], and failing the whole call
+/// for a chip label cost a visible error card plus a retry round trip on almost
+/// every ask. A long header is shortened to fit; a missing one is derived from
+/// the question. The result still reports the header as sent — see
+/// [`restore_sent_headers`].
 pub fn parse_questions(arguments: &Value) -> Result<Vec<QuestionSpec>, String> {
     let arr = arguments
         .get("questions")
@@ -217,17 +229,7 @@ pub fn parse_questions(arguments: &Value) -> Result<Vec<QuestionSpec>, String> {
                 "questions[{qi}] `question` exceeds {MAX_QUESTION_TEXT_CHARS} characters"
             ));
         }
-        let header = q
-            .get("header")
-            .and_then(|v| v.as_str())
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| format!("questions[{qi}] is missing a non-empty `header`"))?;
-        if header.chars().count() > MAX_HEADER_CHARS {
-            return Err(format!(
-                "questions[{qi}] `header` exceeds {MAX_HEADER_CHARS} characters"
-            ));
-        }
+        let header = header_or_derived(q.get("header").and_then(|v| v.as_str()), question);
         let multi_select = q
             .get("multiSelect")
             .and_then(|v| v.as_bool())
@@ -288,7 +290,7 @@ pub fn parse_questions(arguments: &Value) -> Result<Vec<QuestionSpec>, String> {
         out.push(QuestionSpec {
             id: uuid::Uuid::new_v4().to_string(),
             question: question.to_string(),
-            header: header.to_string(),
+            header,
             multi_select,
             options,
             is_secret: false,
@@ -305,7 +307,13 @@ pub fn parse_questions(arguments: &Value) -> Result<Vec<QuestionSpec>, String> {
 /// this, declining the ask on `Err` rather than trusting unbounded input — the
 /// authoritative answer-side bounds already live in [`build_outcome`], so this
 /// closes the matching gap on the request side. Bounds mirror `parse_questions`.
-pub fn validate_specs(specs: &[QuestionSpec]) -> Result<(), String> {
+///
+/// Also like `parse_questions`, the header is the one field repaired rather
+/// than rejected: once the set passes, every header is run through
+/// [`header_or_derived`] in place (a no-op for one that already fits, so the
+/// bridges that keep their own copy of the specs still match the stored one).
+/// A set that fails is left untouched.
+pub fn validate_specs(specs: &mut [QuestionSpec]) -> Result<(), String> {
     if specs.is_empty() || specs.len() > MAX_QUESTIONS {
         return Err(format!(
             "expected 1..={MAX_QUESTIONS} questions, got {}",
@@ -329,14 +337,6 @@ pub fn validate_specs(specs: &[QuestionSpec]) -> Result<(), String> {
         if q.question.chars().count() > MAX_QUESTION_TEXT_CHARS {
             return Err(format!(
                 "questions[{qi}] `question` exceeds {MAX_QUESTION_TEXT_CHARS} characters"
-            ));
-        }
-        if q.header.trim().is_empty() {
-            return Err(format!("questions[{qi}] has an empty `header`"));
-        }
-        if q.header.chars().count() > MAX_HEADER_CHARS {
-            return Err(format!(
-                "questions[{qi}] `header` exceeds {MAX_HEADER_CHARS} characters"
             ));
         }
         // Unlike `parse_questions` (the codeg-mcp tool contract, which keeps
@@ -374,6 +374,9 @@ pub fn validate_specs(specs: &[QuestionSpec]) -> Result<(), String> {
                 ));
             }
         }
+    }
+    for q in specs.iter_mut() {
+        q.header = header_or_derived(Some(&q.header), &q.question);
     }
     Ok(())
 }
@@ -445,15 +448,119 @@ pub fn build_outcome(questions: &[QuestionSpec], answer: &QuestionAnswer) -> Que
 /// Some native asks carry NO `header` (the short category chip codeg renders):
 /// grok's `ask_user_question` tool and pi's extension-UI `select` both send bare
 /// question text. Synthesize one from the leading characters, bounded to
-/// [`MAX_HEADER_CHARS`]. Always returns a non-empty, in-bounds string so
-/// [`validate_specs`] accepts it.
+/// [`MAX_HEADER_CHARS`]. Always returns a non-empty, in-bounds string that
+/// [`header_or_derived`] leaves as it is.
 pub(crate) fn synthesize_header(question: &str) -> String {
-    let header: String = question.trim().chars().take(MAX_HEADER_CHARS).collect();
-    let header = header.trim();
+    let header = grapheme_prefix(question.trim(), MAX_HEADER_CHARS).trim();
     if header.is_empty() {
         "Ask".to_string()
     } else {
         header.to_string()
+    }
+}
+
+/// Fit an agent-supplied header to the chip: trimmed, and when it runs past
+/// [`MAX_HEADER_CHARS`], cut to leave room for a trailing "…" so the chip shows
+/// it was shortened. The cut falls between grapheme clusters, so a Hebrew
+/// letter keeps its niqqud and an emoji its modifiers or ZWJ sequence. Empty
+/// for a blank header. Idempotent: a fitted header comes back unchanged.
+pub fn fit_header(header: &str) -> String {
+    let header = header.trim();
+    if header.chars().count() <= MAX_HEADER_CHARS {
+        return header.to_string();
+    }
+    let mut fitted = grapheme_prefix(header, MAX_HEADER_CHARS - 1)
+        .trim_end()
+        .to_string();
+    fitted.push(HEADER_ELLIPSIS);
+    fitted
+}
+
+/// The header a question carries: the one it was given, fitted to the chip
+/// ([`fit_header`]), or — when that is absent or blank — one derived from the
+/// question ([`synthesize_header`]). Every path that builds or registers a
+/// [`QuestionSpec`] goes through this, so a header is never a reason to fail an
+/// ask and the result is always non-empty and in bounds.
+pub(crate) fn header_or_derived(header: Option<&str>, question: &str) -> String {
+    match header.map(fit_header) {
+        Some(fitted) if !fitted.is_empty() => fitted,
+        _ => synthesize_header(question),
+    }
+}
+
+/// The longest prefix of `s` made of whole grapheme clusters and at most
+/// `max_chars` chars long. A single cluster longer than the whole budget (a
+/// pathological pile of combining marks) can't be kept whole, so that one case
+/// falls back to a plain char cut rather than returning nothing.
+fn grapheme_prefix(s: &str, max_chars: usize) -> &str {
+    let mut chars = 0;
+    let mut end = 0;
+    for g in s.graphemes(true) {
+        chars += g.chars().count();
+        if chars > max_chars {
+            break;
+        }
+        end += g.len();
+    }
+    if end == 0 {
+        return match s.char_indices().nth(max_chars) {
+            Some((i, _)) => &s[..i],
+            None => s,
+        };
+    }
+    &s[..end]
+}
+
+/// The header each `ask_user_question` question was SENT with, index-aligned
+/// with what [`parse_questions`] returns: verbatim, or empty when the agent
+/// gave none (or a non-string). `None` marks a header too large to echo back
+/// (over [`MAX_QUESTION_TEXT_CHARS`]), which keeps its fitted form instead.
+pub fn sent_headers(arguments: &Value) -> Vec<Option<String>> {
+    arguments
+        .get("questions")
+        .and_then(Value::as_array)
+        .map(|qs| {
+            qs.iter()
+                .map(|q| {
+                    let sent = q.get("header").and_then(Value::as_str).unwrap_or("");
+                    (sent.chars().count() <= MAX_QUESTION_TEXT_CHARS).then(|| sent.to_string())
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Put the headers the agent SENT back on its `ask_user_question` result (the
+/// `{ answers, declined }` envelope), replacing the fitted ones the card used.
+///
+/// The agent CLI persists that result next to the tool input it sent, and the
+/// history cards (web and iOS) pair each answer with its question by the
+/// `(header, question)` signature. A header [`parse_questions`] shortened or
+/// derived would break that pairing, and the reloaded card would lose the
+/// user's picks. Answers arrive in asked order ([`build_outcome`] walks the
+/// specs in order, skipping unanswered ones), so they are matched forward
+/// against `specs` — two questions that share the same text and fitted header
+/// still map back one-to-one. `sent` is [`sent_headers`] of the same call.
+pub fn restore_sent_headers(outcome: &mut Value, specs: &[QuestionSpec], sent: &[Option<String>]) {
+    let Some(answers) = outcome.get_mut("answers").and_then(Value::as_array_mut) else {
+        return;
+    };
+    let mut next = 0;
+    for answer in answers {
+        let question = answer.get("question").and_then(Value::as_str);
+        let header = answer.get("header").and_then(Value::as_str);
+        let Some(offset) = specs.get(next..).and_then(|rest| {
+            rest.iter().position(|s| {
+                question == Some(s.question.as_str()) && header == Some(s.header.as_str())
+            })
+        }) else {
+            continue;
+        };
+        let idx = next + offset;
+        next = idx + 1;
+        if let (Some(Some(original)), Some(slot)) = (sent.get(idx), answer.get_mut("header")) {
+            *slot = Value::String(original.clone());
+        }
     }
 }
 
@@ -1502,12 +1609,10 @@ fn parse_form_questions(
                 description: String::new(),
             });
         }
-        let header = header_text
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(|h| h.chars().take(MAX_HEADER_CHARS).collect())
-            .unwrap_or_else(|| synthesize_header(question));
+        // Fitted exactly as `validate_specs` would refit it, so the copy kept
+        // here still equals the registered one and `build_elicitation_response`
+        // can correlate the answer back by `(question, header)`.
+        let header = header_or_derived(header_text.as_deref(), question);
         specs.push(QuestionSpec {
             id: id.clone(),
             question: question.chars().take(MAX_QUESTION_TEXT_CHARS).collect(),
@@ -1996,16 +2101,10 @@ mod tests {
             classify_elicitation(&raw, ElicitationPeer::Codex(Some(CodexUserInputShape::QuestionInDescription))).unwrap(),
         );
         assert_eq!(q.specs[0].question, "Approach");
-        // …and the question text lands in the header slot, where the
-        // `MAX_HEADER_CHARS` clamp shears it — which is what the wrong
-        // orientation costs a user: a truncated chip and no question.
-        assert_eq!(
-            q.specs[0].header,
-            "Which approach should I take?"
-                .chars()
-                .take(MAX_HEADER_CHARS)
-                .collect::<String>()
-        );
+        // …and the question text lands in the header slot, where
+        // `fit_header` shortens it — which is what the wrong orientation costs a
+        // user: a truncated chip and no question.
+        assert_eq!(q.specs[0].header, "Which appro…");
 
         // Adapter reported no usable version — fall back to the pinned shape.
         let q = expect_questions(classify_elicitation(&raw, ElicitationPeer::Codex(None)).unwrap());
@@ -2312,7 +2411,10 @@ mod tests {
         assert_eq!(q.specs[0].id, "q1");
         assert!(q.specs[0].options.is_empty(), "free text has no options");
         assert!(q.specs[0].is_secret, "secret marker read from raw _meta");
-        assert!(validate_specs(&q.specs).is_ok(), "0-option specs register");
+        assert!(
+            validate_specs(&mut q.specs.clone()).is_ok(),
+            "0-option specs register"
+        );
 
         // The typed answer rides the main field verbatim.
         let answer = QuestionAnswer {
@@ -2643,8 +2745,8 @@ mod tests {
     #[test]
     fn validate_specs_accepts_well_formed_and_rejects_malformed() {
         // What parse_questions mints passes the request-side re-check.
-        let good = parse_questions(&valid_args()).unwrap();
-        assert!(validate_specs(&good).is_ok());
+        let mut good = parse_questions(&valid_args()).unwrap();
+        assert!(validate_specs(&mut good).is_ok());
 
         // Build a spec with a tunable question, option count, and first-label
         // length so each bound can be tripped independently.
@@ -2666,29 +2768,32 @@ mod tests {
             is_secret: false,
         };
 
-        assert!(validate_specs(&[]).is_err(), "empty set");
+        assert!(validate_specs(&mut []).is_err(), "empty set");
         assert!(
-            validate_specs(&[spec(&"q".repeat(MAX_QUESTION_TEXT_CHARS + 1), 2, 0)]).is_err(),
+            validate_specs(&mut [spec(&"q".repeat(MAX_QUESTION_TEXT_CHARS + 1), 2, 0)]).is_err(),
             "oversized question text"
         );
         assert!(
-            validate_specs(&[spec("ok", 0, 0)]).is_ok(),
+            validate_specs(&mut [spec("ok", 0, 0)]).is_ok(),
             "0 options is a legal free-text ask (elicitation / MCP forms)"
         );
         assert!(
-            validate_specs(&[spec("ok", MAX_OPTIONS + 1, 0)]).is_err(),
+            validate_specs(&mut [spec("ok", MAX_OPTIONS + 1, 0)]).is_err(),
             "too many options"
         );
         assert!(
-            validate_specs(&[spec("ok", 2, MAX_QUESTION_TEXT_CHARS + 1)]).is_err(),
+            validate_specs(&mut [spec("ok", 2, MAX_QUESTION_TEXT_CHARS + 1)]).is_err(),
             "oversized option label"
         );
-        assert!(validate_specs(&[spec("   ", 2, 0)]).is_err(), "blank question");
+        assert!(
+            validate_specs(&mut [spec("   ", 2, 0)]).is_err(),
+            "blank question"
+        );
 
         // Duplicate question id across the set (spec() hardcodes id "q") — answer
         // routing + UI state key on id, so duplicates must be rejected.
         assert!(
-            validate_specs(&[spec("a", 2, 0), spec("b", 2, 0)]).is_err(),
+            validate_specs(&mut [spec("a", 2, 0), spec("b", 2, 0)]).is_err(),
             "duplicate question id"
         );
         let blank_id = QuestionSpec {
@@ -2708,7 +2813,7 @@ mod tests {
             ],
             is_secret: false,
         };
-        assert!(validate_specs(&[blank_id]).is_err(), "blank id");
+        assert!(validate_specs(&mut [blank_id]).is_err(), "blank id");
         // Duplicate option label within one question (parse_questions rejects it).
         let dup_label = QuestionSpec {
             id: "q".into(),
@@ -2728,7 +2833,7 @@ mod tests {
             is_secret: false,
         };
         assert!(
-            validate_specs(&[dup_label]).is_err(),
+            validate_specs(&mut [dup_label]).is_err(),
             "duplicate option label (trimmed)"
         );
     }
@@ -2748,19 +2853,244 @@ mod tests {
     }
 
     #[test]
-    fn parse_questions_enforces_option_count_and_header_len() {
+    fn parse_questions_enforces_option_count_but_fits_the_header() {
         // One option is not a choice.
         let one_opt = json!({ "questions": [{
             "question": "q", "header": "h", "multiSelect": false,
             "options": [{ "label": "only", "description": "" }]
         }] });
         assert!(parse_questions(&one_opt).is_err());
-        // Header too long.
+        // A header past the chip bound is shortened, not refused: it is only a
+        // label, and refusing it cost an error card plus a retry on most asks.
         let long_header = json!({ "questions": [{
             "question": "q", "header": "this-header-is-way-too-long", "multiSelect": false,
             "options": [{ "label": "a", "description": "" }, { "label": "b", "description": "" }]
         }] });
-        assert!(parse_questions(&long_header).is_err());
+        let qs = parse_questions(&long_header).expect("a long header is not an error");
+        assert_eq!(qs[0].header, "this-header…");
+        assert_eq!(qs[0].header.chars().count(), MAX_HEADER_CHARS);
+    }
+
+    fn two_options() -> Value {
+        json!([{ "label": "a", "description": "" }, { "label": "b", "description": "" }])
+    }
+
+    #[test]
+    fn fit_header_shortens_ascii_hebrew_and_emoji_on_grapheme_boundaries() {
+        // Fits already: trimmed, otherwise untouched.
+        assert_eq!(fit_header("  Approach "), "Approach");
+        assert_eq!(fit_header("Exactly12chr"), "Exactly12chr");
+        assert_eq!(fit_header("   "), "");
+        // ASCII: 11 chars + "…".
+        assert_eq!(fit_header("Implementation approach"), "Implementat…");
+        // A space at the cut is trimmed before the ellipsis.
+        assert_eq!(fit_header("Deploy the app now"), "Deploy the…");
+        // Hebrew (RTL) letters cut the same way.
+        assert_eq!(fit_header("בחירת מסד נתונים"), "בחירת מסד נ…");
+        // Hebrew with niqqud: char 11 is a bare letter whose marks follow it; a
+        // char cut would strip them, the grapheme cut drops the whole letter.
+        assert_eq!(fit_header("בְּחִירַת שִׁיטָה"), "בְּחִירַת…");
+        // Emoji with a skin-tone modifier (2 chars each): a char cut at 11
+        // would split the second thumbs-up from its modifier.
+        assert_eq!(fit_header("Ratings 👍🏽👍🏽👍🏽"), "Ratings 👍🏽…");
+        // A ZWJ family emoji (7 chars) is kept whole or dropped whole.
+        assert_eq!(fit_header("Pick 👨‍👩‍👧‍👦 now"), "Pick…");
+        let long = "x".repeat(MAX_QUESTION_TEXT_CHARS * 2);
+        for h in [
+            "Implementation approach",
+            "בְּחִירַת שִׁיטָה",
+            "Ratings 👍🏽👍🏽👍🏽",
+            "Pick 👨‍👩‍👧‍👦 now",
+            long.as_str(),
+        ] {
+            let fitted = fit_header(h);
+            assert!(
+                fitted.chars().count() <= MAX_HEADER_CHARS,
+                "{fitted:?} fits"
+            );
+            assert_eq!(fit_header(&fitted), fitted, "idempotent for {h:?}");
+        }
+        // One grapheme longer than the whole budget still yields a bounded,
+        // non-empty chip (char-cut fallback).
+        let piled = format!("a{}", "\u{0301}".repeat(30));
+        let fitted = fit_header(&piled);
+        assert!(!fitted.is_empty() && fitted.chars().count() <= MAX_HEADER_CHARS);
+    }
+
+    #[test]
+    fn parse_questions_derives_a_missing_or_blank_header() {
+        let question = "Which database should the service use?";
+        for header in [None, Some(json!("")), Some(json!("   ")), Some(json!(42))] {
+            let mut q =
+                json!({ "question": question, "multiSelect": false, "options": two_options() });
+            if let Some(h) = header.clone() {
+                q["header"] = h;
+            }
+            let qs = parse_questions(&json!({ "questions": [q] }))
+                .unwrap_or_else(|e| panic!("header {header:?} must not fail the ask: {e}"));
+            assert_eq!(
+                qs[0].header,
+                synthesize_header(question),
+                "header {header:?}"
+            );
+            assert_eq!(qs[0].header, "Which databa");
+        }
+    }
+
+    #[test]
+    fn parse_questions_still_rejects_real_errors() {
+        let ask = |q: Value| parse_questions(&json!({ "questions": [q] }));
+        assert!(
+            ask(json!({ "header": "H", "options": two_options() })).is_err(),
+            "missing question"
+        );
+        assert!(
+            ask(json!({ "question": "   ", "header": "H", "options": two_options() })).is_err(),
+            "blank question"
+        );
+        assert!(
+            ask(json!({ "question": "q", "header": "H" })).is_err(),
+            "no options"
+        );
+        let five: Vec<Value> = (0..5)
+            .map(|i| json!({ "label": format!("o{i}") }))
+            .collect();
+        assert!(
+            ask(json!({ "question": "q", "header": "H", "options": five })).is_err(),
+            "too many options"
+        );
+        assert!(
+            ask(json!({ "question": "q", "header": "H",
+                "options": [{ "label": "a" }, { "label": " a " }] }))
+            .is_err(),
+            "duplicate option label"
+        );
+    }
+
+    #[test]
+    fn validate_specs_fits_headers_in_place_and_keeps_its_rejects() {
+        let spec = |id: &str, header: &str| QuestionSpec {
+            id: id.into(),
+            question: "Which database should the service use?".into(),
+            header: header.into(),
+            multi_select: false,
+            options: vec![
+                QuestionOption {
+                    label: "a".into(),
+                    description: String::new(),
+                },
+                QuestionOption {
+                    label: "b".into(),
+                    description: String::new(),
+                },
+            ],
+            is_secret: false,
+        };
+        let mut specs = [
+            spec("1", "Implementation approach"),
+            spec("2", "   "),
+            spec("3", " Approach "),
+            spec("4", &"h".repeat(MAX_QUESTION_TEXT_CHARS * 2)),
+        ];
+        validate_specs(&mut specs).expect("headers are fitted, not refused");
+        assert_eq!(specs[0].header, "Implementat…");
+        assert_eq!(specs[1].header, "Which databa", "blank header derived");
+        assert_eq!(specs[2].header, "Approach");
+        assert_eq!(
+            specs[3].header,
+            format!("{}…", "h".repeat(MAX_HEADER_CHARS - 1))
+        );
+        // A set that fails for a real reason is refused, and left untouched.
+        let mut dup = [spec("same", "Implementation approach"), spec("same", "H")];
+        assert!(
+            validate_specs(&mut dup).is_err(),
+            "duplicate id still rejected"
+        );
+        assert_eq!(dup[0].header, "Implementation approach");
+    }
+
+    #[test]
+    fn restore_sent_headers_reports_the_header_as_sent() {
+        let args = json!({ "questions": [
+            { "question": "Which approach?", "header": "Implementation approach",
+              "multiSelect": false, "options": two_options() },
+            { "question": "Which database?", "multiSelect": false, "options": two_options() },
+            { "question": "Which approach?", "header": "Implementation approach!",
+              "multiSelect": false, "options": two_options() },
+            { "question": "Ship it?", "header": "Ship", "multiSelect": false, "options": two_options() }
+        ] });
+        let specs = parse_questions(&args).unwrap();
+        // The card shows fitted headers; questions 1 and 3 collide on both
+        // question text and fitted header.
+        assert_eq!(specs[0].header, "Implementat…");
+        assert_eq!(specs[2].header, "Implementat…");
+        assert_eq!(specs[1].header, "Which databa");
+        let answer = |i: usize, label: &str| QuestionAnswerItem {
+            question_id: specs[i].id.clone(),
+            labels: vec![label.into()],
+        };
+        // Question 2 (index 1) left unanswered: answers are a subsequence.
+        let outcome = build_outcome(
+            &specs,
+            &QuestionAnswer {
+                answers: vec![answer(0, "a"), answer(2, "b"), answer(3, "a")],
+                declined: false,
+            },
+        );
+        let mut wire = serde_json::to_value(&outcome).unwrap();
+        restore_sent_headers(&mut wire, &specs, &sent_headers(&args));
+        let headers: Vec<&str> = wire["answers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["header"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            headers,
+            [
+                "Implementation approach",
+                "Implementation approach!",
+                "Ship"
+            ],
+            "each answer gets back its own question's header"
+        );
+        assert_eq!(wire["answers"][1]["selected"], json!(["b"]));
+
+        // A missing header goes back as the empty string the history card reads
+        // from the persisted input.
+        let outcome = build_outcome(
+            &specs,
+            &QuestionAnswer {
+                answers: vec![answer(1, "a")],
+                declined: false,
+            },
+        );
+        let mut wire = serde_json::to_value(&outcome).unwrap();
+        restore_sent_headers(&mut wire, &specs, &sent_headers(&args));
+        assert_eq!(wire["answers"][0]["header"], "");
+
+        // A declined envelope has nothing to restore.
+        let mut declined = json!({ "answers": [], "declined": true });
+        restore_sent_headers(&mut declined, &specs, &sent_headers(&args));
+        assert_eq!(declined, json!({ "answers": [], "declined": true }));
+    }
+
+    #[test]
+    fn sent_headers_are_verbatim_or_empty_and_skip_oversized() {
+        let huge = "h".repeat(MAX_QUESTION_TEXT_CHARS + 1);
+        let args = json!({ "questions": [
+            { "header": " Spaced " }, {}, { "header": 7 }, { "header": huge }
+        ] });
+        assert_eq!(
+            sent_headers(&args),
+            vec![
+                Some(" Spaced ".to_string()),
+                Some(String::new()),
+                Some(String::new()),
+                None
+            ]
+        );
+        assert!(sent_headers(&json!({})).is_empty());
     }
 
     #[test]
@@ -2950,7 +3280,11 @@ mod tests {
         assert!(specs[0].header.chars().count() <= MAX_HEADER_CHARS);
         // Whatever we synthesize MUST satisfy the register-time re-validation,
         // else `register_question` silently declines the whole ask.
-        validate_specs(&specs).expect("synthesized specs must pass validate_specs");
+        // …and leave them as they are, or a bridge holding its own copy could
+        // no longer correlate the answer.
+        let mut registered = specs.clone();
+        validate_specs(&mut registered).expect("synthesized specs must pass validate_specs");
+        assert_eq!(registered, specs, "a synthesized header is already fitted");
     }
 
     #[test]
@@ -2967,7 +3301,7 @@ mod tests {
         let specs = parse_grok_ext_questions(&grok_params(json!(many))).unwrap();
         assert_eq!(specs.len(), MAX_QUESTIONS, "questions clamped");
         assert!(specs.iter().all(|s| s.options.len() == MAX_OPTIONS), "options clamped");
-        validate_specs(&specs).unwrap();
+        validate_specs(&mut specs.clone()).unwrap();
     }
 
     #[test]
@@ -2983,7 +3317,7 @@ mod tests {
         }])))
         .unwrap();
         assert_eq!(specs[0].options.len(), 2);
-        validate_specs(&specs).unwrap();
+        validate_specs(&mut specs.clone()).unwrap();
     }
 
     #[test]
@@ -3053,8 +3387,12 @@ mod tests {
         // Whatever we synthesize MUST satisfy the register-time re-validation,
         // else `register_question` silently declines the ask and the user is
         // left with the raw approval card.
-        validate_specs(std::slice::from_ref(&ask.spec))
-            .expect("synthesized spec must pass validate_specs");
+        let mut registered = [ask.spec.clone()];
+        validate_specs(&mut registered).expect("synthesized spec must pass validate_specs");
+        assert_eq!(
+            registered[0], ask.spec,
+            "a synthesized header is already fitted"
+        );
         // Labels round-trip to the ids pi replies against.
         assert_eq!(
             ask.option_ids

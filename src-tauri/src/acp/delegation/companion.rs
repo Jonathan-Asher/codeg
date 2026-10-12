@@ -62,7 +62,7 @@ use crate::acp::delegation::transport::{
     BrokerResumeTaskRequest, BrokerSessionRequest, BrokerStatusRequest,
     BrokerTaskCompleteRequest, BrokerTaskProgressRequest,
 };
-use crate::acp::question::parse_questions;
+use crate::acp::question::{parse_questions, restore_sent_headers, sent_headers};
 use crate::acp::session_info::MAX_SESSION_MESSAGES;
 use crate::models::AutomationAction;
 
@@ -686,6 +686,10 @@ async fn build_tools_call_spawn(
                 Ok(qs) => qs,
                 Err(msg) => return LineAction::Respond(err(id, -32602, msg)),
             };
+            // `parse_questions` fits each header to the chip; the result has to
+            // report the header as sent, or history cards can't pair it with
+            // the persisted tool input (see `restore_sent_headers`).
+            let sent = sent_headers(&arguments);
             let req = BrokerAskRequest {
                 token: ctx.token.clone(),
                 questions,
@@ -694,7 +698,11 @@ async fn build_tools_call_spawn(
             // response. The companion dropping the round-trip future closes the
             // socket, which the listener observes (peer-close) to tear the
             // pending question down — no broker-side cancel to dispatch.
-            let round_trip = Box::pin(async move { client_ask_round_trip(&socket, &req).await });
+            let round_trip = Box::pin(async move {
+                let mut resp = client_ask_round_trip(&socket, &req).await?;
+                restore_sent_headers(&mut resp.outcome, &req.questions, &sent);
+                Ok::<_, std::io::Error>(resp)
+            });
             register_and_spawn(inflight, id, None, round_trip, render_ask_result).await
         }
         "get_session_info" => {
@@ -3408,6 +3416,30 @@ mod tests {
             dispatch_with_features(ASK_ONLY, &line).await,
             LineAction::Spawn(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn ask_user_question_with_a_long_or_missing_header_still_spawns() {
+        // A header over the chip bound used to fail the whole call with -32602
+        // ("`header` exceeds 12 characters"): an error card plus a retry.
+        let mut long = ask_args();
+        long["questions"][0]["header"] = json!("Implementation approach");
+        let mut missing = ask_args();
+        missing["questions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("header");
+        for (id, arguments) in [(43, long), (44, missing)] {
+            let line = json!({
+                "jsonrpc": "2.0", "id": id, "method": "tools/call",
+                "params": { "name": "ask_user_question", "arguments": arguments }
+            })
+            .to_string();
+            assert!(matches!(
+                dispatch_with_features(ASK_ONLY, &line).await,
+                LineAction::Spawn(_)
+            ));
+        }
     }
 
     #[tokio::test]

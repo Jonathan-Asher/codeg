@@ -139,8 +139,7 @@
               },
               "header": {
                 "type": "string",
-                "maxLength": 12,
-                "description": "Short category label (≤ 12 chars) shown as a chip, e.g. 'Approach', 'Format'."
+                "description": "Short category label (≤ 12 chars) shown as a chip, e.g. 'Approach', 'Format'. A longer one is shortened to fit."
               },
               "multiSelect": {
                 "type": "boolean",

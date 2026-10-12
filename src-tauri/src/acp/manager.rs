@@ -4506,12 +4506,13 @@ impl ConnectionManager {
     pub async fn register_question(
         &self,
         conn_id: &str,
-        questions: Vec<QuestionSpec>,
+        mut questions: Vec<QuestionSpec>,
     ) -> Option<RegisteredQuestion> {
         // Defense-in-depth: the companion validates, but the broker socket is
         // only token-gated, so refuse to broadcast malformed/oversized specs
         // (None → the listener declines the ask, as for any other None path).
-        if crate::acp::question::validate_specs(&questions).is_err() {
+        // An over-long or blank header is fitted here rather than refused.
+        if crate::acp::question::validate_specs(&mut questions).is_err() {
             return None;
         }
         let (state, emitter) = self.get_state_and_emitter(conn_id).await?;
