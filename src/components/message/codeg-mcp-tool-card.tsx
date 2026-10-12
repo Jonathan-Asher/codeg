@@ -38,6 +38,7 @@ import type { ToolCallState } from "@/lib/adapters/ai-elements-adapter"
 import { MessageResponse } from "@/components/ai-elements/message"
 import { Shimmer } from "@/components/ai-elements/shimmer"
 import { StatusBadge } from "@/components/message/delegation-status-badge"
+import { detectTextDirection } from "@/lib/text-direction"
 
 interface Props {
   /** Canonical tool name — selects the label, icon and argument to state. */
@@ -191,7 +192,10 @@ export function CodegMcpToolCard({
               <div className="mb-1 text-3xs font-medium uppercase tracking-wide text-muted-foreground">
                 {t("promptLabel")}
               </div>
-              <div className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/40 px-2 py-1.5 text-xs text-foreground/90">
+              <div
+                dir={detectTextDirection(prompt)}
+                className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/40 px-2 py-1.5 text-xs text-foreground/90"
+              >
                 {prompt}
               </div>
             </div>

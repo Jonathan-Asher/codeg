@@ -31,6 +31,10 @@ import { markdownLinkComponents } from "./markdown-link"
 import { mermaidComponents } from "./mermaid-block"
 import { LIVE_REMEND, normalizeMathDelimiters } from "./message"
 import { rehypePluginsAllowingCodeg } from "./rehype-allow-codeg"
+import {
+  STREAMDOWN_LOGICAL_QUOTE_CLASSES,
+  rehypeBlockDirection,
+} from "./rehype-block-direction"
 import { remarkTrimCjkAutolinkTail } from "./remark-cjk-autolink-tail"
 import { withRelativeFileLinks } from "./rehype-relative-file-links"
 import { remarkRewriteFileUriLinks } from "./remark-file-uri-links"
@@ -218,10 +222,12 @@ const remarkPlugins = [
 // their href through sanitize (rehype-allow-codeg), which would otherwise leave
 // "@Codex [blocked]", and relative local links keep theirs through harden —
 // without that `./a.md` would leave harden as `/a.md` and a bare `a.md` would
-// be blocked (rehype-relative-file-links).
-const rehypePlugins = rehypePluginsAllowingCodeg(
-  withRelativeFileLinks(defaultRehypePlugins)
-)
+// be blocked (rehype-relative-file-links). Last, every block takes the
+// direction of its own text (rehype-block-direction).
+const rehypePlugins = [
+  ...rehypePluginsAllowingCodeg(withRelativeFileLinks(defaultRehypePlugins)),
+  rehypeBlockDirection,
+]
 
 const reasoningComponents = { ...markdownLinkComponents, ...mermaidComponents }
 
@@ -252,6 +258,7 @@ export const ReasoningContent = memo(
         {...props}
       >
         <Streamdown
+          className={STREAMDOWN_LOGICAL_QUOTE_CLASSES}
           plugins={plugins}
           remarkPlugins={remarkPlugins}
           rehypePlugins={rehypePlugins}

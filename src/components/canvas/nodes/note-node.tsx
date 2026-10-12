@@ -3,6 +3,7 @@
 import { memo, useEffect, useRef, useState } from "react"
 import { NodeResizer, type Node, type NodeProps } from "@xyflow/react"
 import { useTranslations } from "next-intl"
+import { detectTextDirection } from "@/lib/text-direction"
 import { cn } from "@/lib/utils"
 import type { NoteNodeData } from "../canvas-model"
 import { ColorWash } from "../canvas-swatches"
@@ -122,6 +123,8 @@ export const NoteNode = memo(function NoteNode({
         <textarea
           autoFocus
           value={draft}
+          // A Hebrew or Arabic note reads right to left, as it is typed too.
+          dir={detectTextDirection(draft)}
           onChange={(e) => edit(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => {
@@ -142,6 +145,7 @@ export const NoteNode = memo(function NoteNode({
         // `overflow-hidden` rather than a scrollbar: at rest the note is a card
         // to be moved, and a scroll region here would swallow the drag.
         <div
+          dir={detectTextDirection(draft)}
           className={cn(
             "relative min-h-0 flex-1 overflow-hidden p-3 text-[13px] leading-relaxed whitespace-pre-wrap",
             !draft && "text-muted-foreground/50"

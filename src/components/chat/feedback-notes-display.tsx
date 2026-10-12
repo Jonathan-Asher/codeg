@@ -21,6 +21,7 @@
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { Check, CircleAlert, Clock, X } from "lucide-react"
+import { detectTextDirection } from "@/lib/text-direction"
 import { cn } from "@/lib/utils"
 import type { FeedbackItem } from "@/lib/types"
 
@@ -86,7 +87,10 @@ export function FeedbackNotesDisplay({
                   aria-hidden
                 />
               )}
-              <span className="min-w-0 flex-1 truncate text-3xs text-foreground/80">
+              <span
+                dir={detectTextDirection(note.text)}
+                className="min-w-0 flex-1 truncate text-3xs text-foreground/80"
+              >
                 {note.text}
               </span>
               {expired ? (

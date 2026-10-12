@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl"
 import { MessageCircleQuestion, SendHorizonal } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { matchShortcutEvent } from "@/lib/keyboard-shortcuts"
+import { detectTextDirection } from "@/lib/text-direction"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import { useImeGuard } from "@/hooks/use-ime-guard"
 import type { PendingQuestion } from "@/contexts/acp-connections-context"
@@ -64,7 +65,10 @@ export function QuestionDialog({ question, onAnswer }: QuestionDialogProps) {
         <span>{t("title")}</span>
       </div>
 
-      <p className="mt-2 text-sm text-foreground/90 whitespace-pre-wrap">
+      <p
+        dir={detectTextDirection(question.question)}
+        className="mt-2 text-sm text-foreground/90 whitespace-pre-wrap"
+      >
         {question.question}
       </p>
 
@@ -72,6 +76,7 @@ export function QuestionDialog({ question, onAnswer }: QuestionDialogProps) {
         <textarea
           ref={textareaRef}
           value={answer}
+          dir={detectTextDirection(answer)}
           onChange={(e) => setAnswer(e.target.value)}
           {...ime.props}
           onKeyDown={handleKeyDown}

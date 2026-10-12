@@ -4,6 +4,10 @@ import { memo, useMemo } from "react"
 
 import { ReferenceBadge } from "@/components/chat/composer/badges/reference-badge"
 import { parseQuoteBlocks, type QuoteBlock } from "@/lib/message-quote"
+import {
+  detectTextDirection,
+  splitLinesByDirection,
+} from "@/lib/text-direction"
 import { cn } from "@/lib/utils"
 
 import { FileReferenceActions } from "./file-reference-actions"
@@ -41,12 +45,54 @@ const TextRun = memo(function TextRun({ text }: { text: string }) {
 })
 
 /**
+ * Plain text as `whitespace-pre-wrap` blocks that each read in their own
+ * direction: lines are grouped into runs that share one
+ * ({@link splitLinesByDirection}), so a Hebrew message aligns right with its
+ * punctuation where it belongs, and an English line above a Hebrew paragraph
+ * keeps its own side. One run — every message in a single language — is one
+ * block, the same markup as before plus its `dir`.
+ */
+function DirectedText({
+  text,
+  className,
+}: {
+  text: string
+  className?: string
+}) {
+  const runs = useMemo(() => splitLinesByDirection(text), [text])
+  if (runs.length === 1) {
+    return (
+      <div dir={runs[0].dir} className={cn("whitespace-pre-wrap", className)}>
+        <TextRun text={text} />
+      </div>
+    )
+  }
+  return (
+    <div className={className}>
+      {runs.map((run, index) => (
+        <div key={index} dir={run.dir} className="whitespace-pre-wrap">
+          <TextRun text={run.text} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function blockText(block: QuoteBlock): string {
+  return block.kind === "text"
+    ? block.text
+    : block.children.map(blockText).join("\n")
+}
+
+/**
  * Render one parsed block. A quote nests, so this recurses.
  *
  * The rule is `border-foreground/25`, not `border-border`: a user bubble sits on
  * `bg-secondary` (see `ai-elements/message.tsx`), where `--border` all but
  * disappears. Quoted text keeps the surrounding color rather than going muted —
  * muted on `bg-secondary` washes out, and the rule already marks it as quoted.
+ * The rule and indent are logical: a quote of right-to-left text takes `dir`
+ * from it and draws them on the right.
  */
 function renderBlock(block: QuoteBlock, key: number) {
   if (block.kind === "quote") {
@@ -54,17 +100,14 @@ function renderBlock(block: QuoteBlock, key: number) {
       <div
         key={key}
         data-testid="user-message-quote"
-        className="my-1.5 border-l-2 border-foreground/25 pl-3 first:mt-0 last:mb-0"
+        dir={detectTextDirection(blockText(block))}
+        className="my-1.5 border-s-2 border-foreground/25 ps-3 first:mt-0 last:mb-0"
       >
         {block.children.map(renderBlock)}
       </div>
     )
   }
-  return (
-    <div key={key} className="whitespace-pre-wrap">
-      <TextRun text={block.text} />
-    </div>
-  )
+  return <DirectedText key={key} text={block.text} />
 }
 
 /**
@@ -97,12 +140,14 @@ export const PlainTextWithBadges = memo(function PlainTextWithBadges({
   const blocks = useMemo(() => parseQuoteBlocks(text), [text])
 
   // Fast path for the overwhelming majority of messages, which quote nothing:
-  // one prose run, rendered by exactly the markup this component always emitted.
+  // one prose run, rendered by the markup this component always emitted (plus
+  // `dir`) unless its lines change direction.
   if (blocks.length === 1 && blocks[0].kind === "text") {
     return (
-      <div className={cn("whitespace-pre-wrap break-words", className)}>
-        <TextRun text={blocks[0].text} />
-      </div>
+      <DirectedText
+        text={blocks[0].text}
+        className={cn("break-words", className)}
+      />
     )
   }
 

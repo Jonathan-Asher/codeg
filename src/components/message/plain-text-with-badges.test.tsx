@@ -112,7 +112,9 @@ describe("PlainTextWithBadges", () => {
       )
       const [quote] = quotes(container)
       expect(quote).toBeDefined()
-      expect(quote.className).toContain("border-l-2")
+      // Logical: the rule is on the left for left-to-right text.
+      expect(quote.className).toContain("border-s-2")
+      expect(quote).toHaveAttribute("dir", "ltr")
       expect(quote.textContent).toBe("first\nsecond")
       // No stray marker anywhere in the bubble.
       expect(container.textContent).not.toContain(">")
@@ -163,6 +165,62 @@ describe("PlainTextWithBadges", () => {
       const { container } = render(<PlainTextWithBadges text="2 > 1 is true" />)
       expect(quotes(container)).toHaveLength(0)
       expect(container.textContent).toBe("2 > 1 is true")
+    })
+  })
+
+  describe("direction", () => {
+    it("gives a Hebrew message one right-to-left block", () => {
+      const text =
+        "אני מעוניין במחקר של מיסוי בין לאומי\nמחר יש שיחה עם PayPal ו Fulfillment center's בסין"
+      const { container } = render(<PlainTextWithBadges text={text} />)
+      const root = container.firstElementChild as HTMLElement
+      expect(root).toHaveAttribute("dir", "rtl")
+      expect(root.className).toContain("whitespace-pre-wrap")
+      expect(root.querySelectorAll("div")).toHaveLength(0)
+      expect(container.textContent).toBe(text)
+    })
+
+    it("keeps an English message's markup, now with dir=ltr", () => {
+      const { container } = render(<PlainTextWithBadges text={"a\nb"} />)
+      const root = container.firstElementChild as HTMLElement
+      expect(root).toHaveAttribute("dir", "ltr")
+      expect(container.querySelectorAll("div")).toHaveLength(1)
+    })
+
+    it("gives each run of lines its own block when the direction changes", () => {
+      const text = "Fix this please:\n\nהבאג נמצא בטופס\nשורה שנייה"
+      const { container } = render(<PlainTextWithBadges text={text} />)
+      const blocks = Array.from(
+        container.querySelectorAll<HTMLElement>(".whitespace-pre-wrap")
+      )
+      expect(blocks.map((block) => block.getAttribute("dir"))).toEqual([
+        "ltr",
+        "rtl",
+      ])
+      expect(blocks[0].textContent).toBe("Fix this please:")
+      expect(blocks[1].textContent).toBe("\nהבאג נמצא בטופס\nשורה שנייה")
+    })
+
+    it("does not let a reference badge decide the direction", () => {
+      const { container } = render(
+        <PlainTextWithBadges
+          text={
+            "[@src/app/page.tsx](file:///repo/src/app/page.tsx) תבדוק את הקובץ"
+          }
+        />
+      )
+      expect(container.firstElementChild).toHaveAttribute("dir", "rtl")
+    })
+
+    it("draws a Hebrew quote's rule on its own side", () => {
+      const { container } = render(
+        <PlainTextWithBadges text={"> ציטוט בעברית\n\nושאלה"} />
+      )
+      const quote = container.querySelector(
+        "[data-testid='user-message-quote']"
+      )
+      expect(quote).toHaveAttribute("dir", "rtl")
+      expect(quote?.className).toContain("ps-3")
     })
   })
 })

@@ -196,15 +196,19 @@ export function MarkdownLink({
       data-resource-kind={kind ?? undefined}
       title={href}
       onClick={handleClick}
+      // The label reads in its own direction — a URL or an English title
+      // inside a Hebrew sentence stays left to right, a Hebrew title inside an
+      // English one right to left — and the icon sits at its start.
+      dir="auto"
       className={cn(
-        "wrap-anywhere appearance-none text-left font-medium text-primary underline",
+        "wrap-anywhere appearance-none text-start font-medium text-primary underline",
         className
       )}
     >
       {Icon ? (
         <Icon
           aria-hidden="true"
-          className="mr-0.5 inline size-[1em] align-[-0.15em] opacity-80"
+          className="me-0.5 inline size-[1em] align-[-0.15em] opacity-80"
         />
       ) : null}
       {children}

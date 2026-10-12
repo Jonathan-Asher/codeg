@@ -28,6 +28,7 @@ import type {
 import { useFileTree, type FlatFileEntry } from "@/hooks/use-file-tree"
 import { rankFileMatches } from "@/lib/file-search-match"
 import { splitSnippet } from "@/lib/message-search-snippet"
+import { detectTextDirection } from "@/lib/text-direction"
 import { compareAgentType } from "@/lib/types"
 import { getAgentLabel } from "@/lib/custom-agents"
 import { AgentIcon } from "@/components/agent-icon"
@@ -682,7 +683,17 @@ export function SearchCommandDialog({
                           {getAgentLabel(hit.agent_type)}
                         </span>
                       </div>
-                      <div className="truncate text-xs text-muted-foreground">
+                      {/* The excerpt's own direction: a Hebrew match reads
+                          right to left, its role label first on the right,
+                          and truncates at its end rather than its start. */}
+                      <div
+                        dir={detectTextDirection(
+                          splitSnippet(hit.snippet)
+                            .map((part) => part.text)
+                            .join("")
+                        )}
+                        className="truncate text-xs text-muted-foreground"
+                      >
                         <span className="me-1.5 font-medium">
                           {t(MESSAGE_ROLE_KEYS[hit.role])}
                         </span>

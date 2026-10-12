@@ -28,6 +28,7 @@ import {
   isAsyncLaunchAckText,
   parseBackgroundTaskMarker,
 } from "@/lib/background-agent"
+import { detectTextDirection } from "@/lib/text-direction"
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
@@ -579,6 +580,7 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
                 entry.text.trim() ? (
                   <div
                     key={i}
+                    dir={detectTextDirection(entry.text)}
                     className="whitespace-pre-wrap text-xs italic text-muted-foreground/80"
                   >
                     {entry.text}

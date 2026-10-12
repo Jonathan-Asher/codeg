@@ -32,6 +32,7 @@ import { markdownLinkComponents } from "./markdown-link"
 import { maskLiteralSpans } from "./markdown-mask"
 import { mermaidComponents } from "./mermaid-block"
 import { rehypePluginsAllowingCodeg } from "./rehype-allow-codeg"
+import { rehypeBlockDirection } from "./rehype-block-direction"
 import { remarkTrimCjkAutolinkTail } from "./remark-cjk-autolink-tail"
 import { withRelativeFileLinks } from "./rehype-relative-file-links"
 import { remarkRewriteFileUriLinks } from "./remark-file-uri-links"
@@ -481,9 +482,12 @@ const remarkPlugins = [
 // …and relative local links (`./a.md`, `src/a.md`, `~/a.md`) keep their href
 // through harden, which would otherwise flatten them to a root path or block
 // them. See rehype-relative-file-links.
-const rehypePlugins = rehypePluginsAllowingCodeg(
-  withRelativeFileLinks(defaultRehypePlugins)
-)
+// Last, after sanitize: every block takes the direction of its own text (see
+// rehype-block-direction).
+const rehypePlugins = [
+  ...rehypePluginsAllowingCodeg(withRelativeFileLinks(defaultRehypePlugins)),
+  rehypeBlockDirection,
+]
 
 /**
  * How finished Markdown renders. Streamdown defaults to `mode="streaming"` +
@@ -557,7 +561,11 @@ function MessageResponseImpl({
   return (
     <Streamdown
       className={cn(
-        "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-3 [&_ol]:pl-3",
+        // Indents are logical (`ps-*`, `border-s-*`) so a right-to-left block
+        // — every block carries its own `dir`, see rehype-block-direction —
+        // puts its list indent and quote rule on the right. Left to right they
+        // are the same `padding-left` / `border-left` as ever.
+        "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:ps-3 [&_ol]:ps-3",
         // Streamdown gives `blockquote` its own `border-l-4
         // border-muted-foreground/30 … italic`, but those class names live in
         // node_modules, which Tailwind v4 does not scan — so the two border
@@ -565,11 +573,14 @@ function MessageResponseImpl({
         // with no rule (the `pl-4`/`my-4`/`text-muted-foreground` on the same
         // element only survive because they happen to be used elsewhere in src).
         // Re-declare the rule here, where it IS scanned; the descendant selector
-        // also outranks Streamdown's plain utility class. No `pl-*` — its `pl-4`
-        // already works and a same-specificity duplicate would be a coin flip.
-        // Upright, not italic: CJK has no true italic, so a browser fakes it by
-        // skewing, which looks broken.
-        "[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:not-italic",
+        // also outranks Streamdown's plain utility class. The indent is
+        // restated as `ps-4` (the same 1rem as Streamdown's `pl-4`) so it
+        // follows the quote's direction, and `border-e-0` / `pe-0` clear
+        // Streamdown's physical left rule and indent when the quote reads right
+        // to left; left to right they only restate the zero right edge it
+        // already had. Upright, not italic: CJK has no true italic, so a
+        // browser fakes it by skewing, which looks broken.
+        "[&_blockquote]:border-s-2 [&_blockquote]:border-e-0 [&_blockquote]:border-border [&_blockquote]:ps-4 [&_blockquote]:pe-0 [&_blockquote]:not-italic",
         className
       )}
       plugins={plugins}

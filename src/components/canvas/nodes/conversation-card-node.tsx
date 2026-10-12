@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl"
 import { AgentIcon } from "@/components/agent-icon"
 import { ConversationStatusDot } from "@/components/conversations/conversation-status-dot"
 import { formatConversationTitle } from "@/lib/conversation-title"
+import { detectTextDirection } from "@/lib/text-direction"
 import type { ConversationStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import type { ConversationCardData } from "../canvas-model"
@@ -167,7 +168,10 @@ export const ConversationCardNode = memo(function ConversationCardNode({
           The 0.75 left over still goes to `mt-auto`, and `min-h-0` keeps the
           order of sacrifice right if a future row ever overflows: the title
           gives, the two metadata rows don't. */}
-      <p className="relative mt-[7px] line-clamp-4 min-h-0 text-[13px] font-medium leading-snug">
+      <p
+        dir={detectTextDirection(title)}
+        className="relative mt-[7px] line-clamp-4 min-h-0 text-[13px] font-medium leading-snug"
+      >
         {title}
       </p>
       {/* Where the conversation lives: folder on the left, branch on the right.

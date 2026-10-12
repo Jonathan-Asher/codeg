@@ -51,7 +51,7 @@ describe("MessageResponse", () => {
 
     expect(screen.getByTestId("streamdown-root")).toHaveClass(
       "[&_ol]:list-decimal",
-      "[&_ol]:pl-3"
+      "[&_ol]:ps-3"
     )
   })
 
@@ -84,8 +84,13 @@ describe("MessageResponse", () => {
     // Declaring them here (scanned source) is what actually paints them.
     render(<MessageResponse>{"> quoted"}</MessageResponse>)
 
+    // Logical, so a right-to-left quote draws its rule on the right; the
+    // end-side zeros clear Streamdown's physical left rule and indent there.
     expect(screen.getByTestId("streamdown-root")).toHaveClass(
-      "[&_blockquote]:border-l-2",
+      "[&_blockquote]:border-s-2",
+      "[&_blockquote]:border-e-0",
+      "[&_blockquote]:ps-4",
+      "[&_blockquote]:pe-0",
       "[&_blockquote]:border-border",
       "[&_blockquote]:not-italic"
     )

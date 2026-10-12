@@ -1497,6 +1497,51 @@
   display: inline;
 }
 
+/* Right-to-left message blocks.
+   Every rendered Markdown block carries the `dir` of its own text
+   (rehype-block-direction.ts), so a Hebrew or Arabic paragraph, list or table
+   reads right to left in an English UI and vice versa. Streamdown's header
+   cells say `text-left`; `start` is the same edge left to right and the right
+   edge in a right-to-left table. Code bodies and typeset math read left to
+   right in any block — a right-to-left `pre` would right-align every line and
+   a right-to-left KaTeX box would lay its glyphs out mirrored — and isolate
+   themselves from the sentence around them. */
+[data-streamdown="table-header-cell"] {
+  text-align: start;
+}
+/* WebKit gives `li` `text-align: match-parent`, which aligns an item by its
+   LIST's direction: a Hebrew item in an English list would stay left-aligned.
+   `start` follows the item's own `dir`; it is the same edge whenever the two
+   agree, which is every list that is not mixed. */
+[data-streamdown="list-item"] {
+  text-align: start;
+}
+/* The table toolbar floats over the table's top-right corner (see "Toolbar"
+   below), where a left-to-right line above it has usually already ended.
+   Above a right-to-left table that corner is where the line starts, so the
+   toolbar moves to the top-left one instead of covering the text. Keyed on
+   the `dir` attribute rehype-block-direction puts on the table: in testing,
+   WebKit (the desktop webview) matched `:dir()` inside `:has()` by the page's
+   direction rather than the table's. */
+[data-streamdown="table-wrapper"]:has([data-streamdown="table"][dir="rtl"])
+  > div:first-child:has(button) {
+  right: auto;
+  left: 0;
+}
+[data-streamdown="code-block-body"],
+.katex {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+/* The same for code anywhere else — tool-call commands and their output, JSON
+   previews, terminal and error text, inline code in a card — inside a
+   right-to-left message block or under the Arabic UI. Zero specificity, and an
+   element's own `dir` still wins. */
+:where(pre, code, kbd, samp):not([dir]) {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
 /* Streamdown table overrides */
 [data-streamdown="table-wrapper"] {
   position: relative;
@@ -2249,7 +2294,8 @@ div.monaco-diff-editor.side-by-side .editor.modified {
 .codeg-composer .ProseMirror .codeg-quote-marker::before {
   content: "";
   position: absolute;
-  left: 0.1875rem;
+  /* Logical: in a right-to-left draft the marker opens the line on the right. */
+  inset-inline-start: 0.1875rem;
   top: 50%;
   width: 2px;
   /* Exactly one line box tall so consecutive quoted lines' rules meet with no
@@ -2296,7 +2342,7 @@ div.monaco-diff-editor.side-by-side .editor.modified {
 }
 
 .codeg-composer .ProseMirror :is(ul, ol) {
-  padding-left: 1.25rem;
+  padding-inline-start: 1.25rem;
 }
 .codeg-composer .ProseMirror ul {
   list-style: disc;
@@ -2341,7 +2387,8 @@ div.monaco-diff-editor.side-by-side .editor.modified {
 .codeg-composer .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   color: var(--muted-foreground);
-  float: left;
+  /* The caret's side: left in a left-to-right UI, right in the Arabic one. */
+  float: inline-start;
   height: 0;
   pointer-events: none;
 }
