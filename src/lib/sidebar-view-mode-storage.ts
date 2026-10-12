@@ -12,6 +12,7 @@ const SECTION_COLLAPSED_KEY = "workspace:sidebar-section-collapsed"
 const CONVERSATION_EXPANDED_KEY = "workspace:sidebar-conversation-expanded"
 const FOLDER_SHOW_ALL_KEY = "workspace:sidebar-folder-show-all"
 const FOLDER_SESSION_LIMIT_KEY = "workspace:sidebar-folder-session-limit"
+const ARCHIVED_EXPANDED_KEY = "workspace:sidebar-archived-expanded"
 
 export type SidebarSortMode = "created" | "updated"
 
@@ -59,6 +60,16 @@ export type SidebarSectionId = (typeof SIDEBAR_SECTION_IDS)[number]
 export const SIDEBAR_SECTION_KEYS = ["pinned", ...SIDEBAR_SECTION_IDS] as const
 
 export type SidebarSectionKey = (typeof SIDEBAR_SECTION_KEYS)[number]
+
+/**
+ * Every section that can own a header row in the list: the keys above, plus
+ * "archived" — archived folders and groups, always at the very bottom and only
+ * while something is archived. Kept out of {@link SIDEBAR_SECTION_KEYS} on
+ * purpose: it is not reorderable, it defaults to COLLAPSED where the others
+ * default to open (so its state is stored on its own, see
+ * {@link loadArchivedExpanded}), and "Expand all" leaves it closed.
+ */
+export type SidebarRowSection = SidebarSectionKey | "archived"
 
 /**
  * Vertical order of the reorderable sidebar sections, top to bottom. Always a
@@ -503,6 +514,26 @@ export function saveSectionCollapsed(state: SidebarSectionCollapsed): void {
   if (typeof window === "undefined") return
   try {
     localStorage.setItem(SECTION_COLLAPSED_KEY, JSON.stringify(state))
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Whether the "Archived" section is open. Absent (or unreadable) = closed:
+ *  archived folders stay out of the way until asked for. */
+export function loadArchivedExpanded(): boolean {
+  if (typeof window === "undefined") return false
+  try {
+    return localStorage.getItem(ARCHIVED_EXPANDED_KEY) === "true"
+  } catch {
+    return false
+  }
+}
+
+export function saveArchivedExpanded(expanded: boolean): void {
+  if (typeof window === "undefined") return
+  try {
+    localStorage.setItem(ARCHIVED_EXPANDED_KEY, expanded ? "true" : "false")
   } catch {
     /* ignore */
   }

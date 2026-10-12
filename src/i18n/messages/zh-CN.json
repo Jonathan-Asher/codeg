@@ -2005,6 +2005,8 @@
         "updateGroupFailed": "更新分组失败：{message}",
         "deleteGroupFailed": "删除分组失败：{message}",
         "moveToGroupFailed": "移动文件夹失败：{message}",
+        "archiveFolderFailed": "更改文件夹归档状态失败：{message}",
+        "archiveGroupFailed": "更改分组归档状态失败：{message}",
         "applyLayoutFailed": "保存文件夹顺序失败：{message}",
         "reorderPinsFailed": "置顶会话排序失败：{message}",
         "exportMarkdownDone": "已导出：{path}",
@@ -2058,6 +2060,8 @@
         "setAliasPlaceholder": "输入别名（留空清除）",
         "setAliasSave": "保存",
         "setAliasCancel": "取消",
+        "archive": "归档文件夹",
+        "unarchive": "取消归档文件夹",
         "removeFromWorkspace": "从工作区移除"
       },
       "manageConversations": {
@@ -2090,6 +2094,7 @@
       "sectionFolders": "文件夹",
       "sectionChats": "聊天",
       "sectionRecent": "最近",
+      "sectionArchived": "已归档",
       "noChats": "没有聊天",
       "noRecent": "暂无最近会话",
       "showMoreRecent": "显示更多（{count}）",
@@ -2116,6 +2121,8 @@
         "rename": "重命名分组…",
         "renameTitle": "重命名文件夹分组",
         "delete": "删除分组",
+        "archive": "归档分组",
+        "unarchive": "取消归档分组",
         "deleteConfirmTitle": "删除该分组？",
         "deleteConfirmDescription": "将删除“{name}”。组内的 {count} 个文件夹会保留在工作区，并回到顶层。",
         "empty": "分组内暂无文件夹",
@@ -2288,7 +2295,8 @@
       "roleAssistant": "助手",
       "roleSystem": "系统",
       "currentSession": "当前",
-      "recentHeading": "最近"
+      "recentHeading": "最近",
+      "archivedBadge": "已归档"
     },
     "folderTitleBar": {
       "showSidebar": "显示侧边栏",

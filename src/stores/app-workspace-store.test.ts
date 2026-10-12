@@ -21,6 +21,8 @@ vi.mock("@/lib/api", () => ({
   updateFolderGroup: vi.fn(),
   deleteFolderGroup: vi.fn(),
   setFolderGroup: vi.fn(),
+  setFolderArchived: vi.fn(),
+  setFolderGroupArchived: vi.fn(),
 }))
 
 const { getFolder, getGitHead, listAllFolderDetails, listOpenFolderDetails } =
@@ -604,6 +606,81 @@ describe("folder groups", () => {
     // A peer's delete releases the members here too, so they don't render as
     // belonging to a group that no longer exists.
     expect(useAppWorkspaceStore.getState().folders[0].group_id).toBeNull()
+  })
+
+  it("archives a folder at once and keeps it in place", async () => {
+    const { setFolderArchived } = await import("@/lib/api")
+    vi.mocked(setFolderArchived).mockResolvedValue(
+      makeFolder({ id: 5, archived: true })
+    )
+    const folders = [makeFolder({ id: 5, group_id: 7, sort_order: 3 })]
+    useAppWorkspaceStore.setState({ folders, allFolders: folders })
+
+    await useAppWorkspaceStore.getState().setFolderArchived(5, true)
+    expect(setFolderArchived).toHaveBeenCalledWith(5, true)
+    // Only the flag changes: the folder stays open, in its group, at its slot.
+    expect(useAppWorkspaceStore.getState().folders[0]).toMatchObject({
+      id: 5,
+      archived: true,
+      group_id: 7,
+      sort_order: 3,
+    })
+    expect(useAppWorkspaceStore.getState().allFolders[0].archived).toBe(true)
+  })
+
+  it("puts a folder's archive flag back when the write fails", async () => {
+    const { setFolderArchived } = await import("@/lib/api")
+    vi.mocked(setFolderArchived).mockRejectedValue(new Error("nope"))
+    const folders = [makeFolder({ id: 5 })]
+    useAppWorkspaceStore.setState({ folders, allFolders: folders })
+    mockListOpenFolders.mockResolvedValue(folders)
+    mockListAllFolders.mockResolvedValue(folders)
+
+    await expect(
+      useAppWorkspaceStore.getState().setFolderArchived(5, true)
+    ).rejects.toThrow("nope")
+    expect(useAppWorkspaceStore.getState().folders[0].archived).toBeFalsy()
+    await flushResync()
+    expect(useAppWorkspaceStore.getState().folders[0].archived).toBeFalsy()
+  })
+
+  it("archives and unarchives a group", async () => {
+    const { setFolderGroupArchived } = await import("@/lib/api")
+    vi.mocked(setFolderGroupArchived).mockResolvedValue({
+      id: 7,
+      name: "Work",
+      color: "inherit",
+      sort_order: 1,
+      archived: true,
+    })
+    useAppWorkspaceStore.setState({
+      folderGroups: [{ id: 7, name: "Work", color: "inherit", sort_order: 1 }],
+    })
+    await useAppWorkspaceStore.getState().setFolderGroupArchived(7, true)
+    expect(setFolderGroupArchived).toHaveBeenCalledWith(7, true)
+    expect(useAppWorkspaceStore.getState().folderGroups[0].archived).toBe(true)
+
+    await useAppWorkspaceStore.getState().setFolderGroupArchived(7, false)
+    expect(useAppWorkspaceStore.getState().folderGroups[0].archived).toBe(false)
+  })
+
+  it("keeps an archived group's folders archived when the group is deleted", async () => {
+    const folders = [makeFolder({ id: 5, group_id: 7 })]
+    useAppWorkspaceStore.setState({
+      folders,
+      allFolders: folders,
+      folderGroups: [
+        { id: 7, name: "Old", color: "inherit", sort_order: 1, archived: true },
+      ],
+    })
+
+    await useAppWorkspaceStore.getState().deleteFolderGroup(7)
+    // The server archives them on their own; mirrored here so they never flash
+    // through the main list.
+    expect(useAppWorkspaceStore.getState().folders[0]).toMatchObject({
+      group_id: null,
+      archived: true,
+    })
   })
 
   it("answers a layout broadcast with a re-read", async () => {

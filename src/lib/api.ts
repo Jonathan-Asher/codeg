@@ -2614,6 +2614,26 @@ export async function setFolderGroup(
   return getTransport().call("set_folder_group", { folderId, groupId })
 }
 
+/** Archive or unarchive one folder. Presentational only: the folder stays
+ *  open and in place, and nothing about its sessions changes. */
+export async function setFolderArchived(
+  folderId: number,
+  archived: boolean
+): Promise<FolderDetail> {
+  return getTransport().call("set_folder_archived", { folderId, archived })
+}
+
+/** Archive or unarchive a folder group; its folders follow it. */
+export async function setFolderGroupArchived(
+  groupId: number,
+  archived: boolean
+): Promise<FolderGroupDetail> {
+  return getTransport().call("set_folder_group_archived", {
+    groupId,
+    archived,
+  })
+}
+
 export async function updateFolderColor(
   folderId: number,
   color: FolderThemeColor

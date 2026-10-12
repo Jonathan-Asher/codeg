@@ -559,6 +559,7 @@ mod tests {
             kind,
             alias: None,
             group_id: None,
+            archived: false,
         }
     }
 

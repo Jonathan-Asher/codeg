@@ -1377,14 +1377,24 @@ async fn resume_topic_binding_and_send_followup(
 
 // ── /resume (list recent) ──
 
-async fn list_recent_sessions(db: &DatabaseConnection, lang: Lang, prefix: &str) -> RichMessage {
-    let recent = match conversation::Entity::find()
+/// The sessions `/resume` offers: the ten newest, leaving out every session in
+/// an archived folder (or group). Archiving is the user's "keep this out of my
+/// recent lists"; `/resume <id>` still opens an archived session by its id.
+async fn recent_resumable_sessions(
+    db: &DatabaseConnection,
+) -> Result<Vec<conversation::Model>, crate::db::error::DbError> {
+    let archived = folder_service::archived_folder_ids(db).await?;
+    let mut query = conversation::Entity::find()
         .filter(conversation::Column::DeletedAt.is_null())
-        .order_by_desc(conversation::Column::CreatedAt)
-        .limit(10)
-        .all(db)
-        .await
-    {
+        .order_by_desc(conversation::Column::CreatedAt);
+    if !archived.is_empty() {
+        query = query.filter(conversation::Column::FolderId.is_not_in(archived));
+    }
+    Ok(query.limit(10).all(db).await?)
+}
+
+async fn list_recent_sessions(db: &DatabaseConnection, lang: Lang, prefix: &str) -> RichMessage {
+    let recent = match recent_resumable_sessions(db).await {
         Ok(rows) => rows,
         Err(e) => {
             return RichMessage {
@@ -1752,6 +1762,45 @@ mod tests {
         .await
         .expect("seed chat channel")
         .id
+    }
+
+    #[tokio::test]
+    async fn resume_list_leaves_out_archived_folders_and_groups() {
+        use crate::db::service::folder_group_service;
+
+        let db = fresh_in_memory_db().await;
+        let live = seed_folder(&db, "/tmp/codeg-resume-live").await;
+        let archived = seed_folder(&db, "/tmp/codeg-resume-archived").await;
+        let grouped = seed_folder(&db, "/tmp/codeg-resume-grouped").await;
+        let live_conv = seed_conversation(&db, live, AgentType::ClaudeCode).await;
+        let archived_conv = seed_conversation(&db, archived, AgentType::ClaudeCode).await;
+        let grouped_conv = seed_conversation(&db, grouped, AgentType::Codex).await;
+
+        let ids = |rows: Vec<conversation::Model>| rows.into_iter().map(|c| c.id).collect::<Vec<_>>();
+        let before = ids(recent_resumable_sessions(&db.conn).await.expect("list"));
+        assert_eq!(before.len(), 3, "nothing archived yet");
+
+        folder_service::set_folder_archived(&db.conn, archived, true)
+            .await
+            .expect("archive folder");
+        let group = folder_group_service::create_folder_group(&db.conn, "Old".into(), None)
+            .await
+            .expect("group");
+        folder_group_service::set_folder_group(&db.conn, grouped, Some(group.id))
+            .await
+            .expect("move");
+        folder_group_service::set_folder_group_archived(&db.conn, group.id, true)
+            .await
+            .expect("archive group");
+
+        let after = ids(recent_resumable_sessions(&db.conn).await.expect("list"));
+        assert_eq!(after, vec![live_conv]);
+        assert!(!after.contains(&archived_conv));
+        assert!(!after.contains(&grouped_conv));
+
+        let message = list_recent_sessions(&db.conn, Lang::En, "/").await;
+        assert!(message.body.contains(&format!("#{live_conv}")));
+        assert!(!message.body.contains(&format!("#{archived_conv} ")));
     }
 
     #[tokio::test]

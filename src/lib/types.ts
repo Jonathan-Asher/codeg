@@ -398,6 +398,14 @@ export interface FolderDetail {
    * folder back to the top level rather than hiding it.
    */
   group_id: number | null
+  /**
+   * This folder's own archive flag: the sidebar moves it into the "Archived"
+   * section and keeps its sessions out of Recent. A folder whose group is
+   * archived is archived too, through the group, while this stays false (see
+   * `archivedFolderIds`). Absent on servers that predate archiving, which
+   * reads as not archived.
+   */
+  archived?: boolean
 }
 
 /**
@@ -417,6 +425,9 @@ export interface FolderGroupDetail {
    */
   color: string
   sort_order: number
+  /** The group, with every folder in it, sits in the "Archived" section.
+   *  Absent on servers that predate archiving. */
+  archived?: boolean
 }
 
 /** Which kind of sidebar entry a {@link SidebarLayoutEntry} names. */

@@ -2,6 +2,8 @@
 
 import { memo, useCallback, useState } from "react"
 import {
+  Archive,
+  ArchiveRestore,
   ChevronRight,
   Layers,
   MoreHorizontal,
@@ -68,6 +70,8 @@ export const SidebarFolderGroupHeader = memo(function SidebarFolderGroupHeader({
   onRename,
   onChangeColor,
   onDelete,
+  archived = false,
+  onSetArchived,
   themeColor,
   appThemeColor,
   isDragging,
@@ -91,6 +95,12 @@ export const SidebarFolderGroupHeader = memo(function SidebarFolderGroupHeader({
   onRename?: (groupId: number, name: string) => void
   onChangeColor?: (groupId: number, color: FolderThemeColor) => void
   onDelete?: (groupId: number) => void
+  /** Whether the group is archived — it then sits in the "Archived" section,
+   *  and its menu offers "Unarchive group" instead of "Archive group". */
+  archived?: boolean
+  /** Archive (`true`) or unarchive (`false`) the group and every folder in
+   *  it. Omitted hides the menu item. */
+  onSetArchived?: (groupId: number, archived: boolean) => void
   themeColor: FolderThemeColor
   appThemeColor: ThemeColor
   isDragging?: boolean
@@ -334,6 +344,21 @@ export const SidebarFolderGroupHeader = memo(function SidebarFolderGroupHeader({
               </div>
             </ContextMenuSubContent>
           </ContextMenuSub>
+          {onSetArchived != null && (
+            <ContextMenuItem
+              data-testid={
+                archived ? "group-menu-unarchive" : "group-menu-archive"
+              }
+              onSelect={() => onSetArchived(groupId, !archived)}
+            >
+              {archived ? (
+                <ArchiveRestore className="h-4 w-4" />
+              ) : (
+                <Archive className="h-4 w-4" />
+              )}
+              {archived ? t("folderGroup.unarchive") : t("folderGroup.archive")}
+            </ContextMenuItem>
+          )}
           <ContextMenuSeparator />
           <ContextMenuItem
             variant="destructive"

@@ -18,6 +18,7 @@ import {
 } from "@/lib/api"
 import { setPendingFind } from "@/lib/pending-find"
 import { recentSessions } from "@/lib/recent-sessions"
+import { archivedFolderIds } from "@/components/conversations/sidebar-conversation-grouping"
 import { useShowRecentOnSearch } from "@/lib/search-recent-prefs"
 import type {
   AgentType,
@@ -139,6 +140,25 @@ export function SearchCommandDialog({
     () => new Map(allFolders.map((f) => [f.id, f.name])),
     [allFolders]
   )
+  // Archived folders (on their own, through their group, or through the repo
+  // a worktree folder belongs to). With nothing typed, their sessions stay out
+  // of the recent list, like the sidebar's Recent; a search still finds them,
+  // marked "Archived".
+  const folderGroups = useAppWorkspaceStore((s) => s.folderGroups)
+  const archivedIds = useMemo(() => {
+    const known = new Set(allFolders.map((f) => f.id))
+    const repoOf = new Map<number, number>()
+    for (const f of allFolders) {
+      if (f.parent_id != null && known.has(f.parent_id)) {
+        repoOf.set(f.id, f.parent_id)
+      }
+    }
+    return archivedFolderIds({
+      folders: allFolders,
+      groups: folderGroups,
+      childToParent: repoOf,
+    })
+  }, [allFolders, folderGroups])
   // With nothing typed, the Conversations tab is a session switcher: the
   // current session first (selected), the most recently active ones below,
   // so ↓ Enter goes back to the last session you were in.
@@ -221,6 +241,7 @@ export function SearchCommandDialog({
             excludeId: currentConversation?.id ?? null,
             folderId: scopedFolderId,
             agentType: agentFilter,
+            excludeFolderIds: archivedIds,
             limit: RECENT_SESSION_LIMIT,
           })
         : [],
@@ -232,6 +253,7 @@ export function SearchCommandDialog({
       currentConversation,
       scopedFolderId,
       agentFilter,
+      archivedIds,
     ]
   )
 
@@ -620,6 +642,11 @@ export function SearchCommandDialog({
                     folderName={folderLabel(conv.folder_id)}
                     agentType={conv.agent_type}
                     time={relativeTime(conv.created_at)}
+                    badge={
+                      archivedIds.has(conv.folder_id)
+                        ? t("archivedBadge")
+                        : undefined
+                    }
                   />
                 ))}
               </CommandGroup>

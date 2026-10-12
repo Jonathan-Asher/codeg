@@ -48,6 +48,11 @@ pub struct Model {
     /// concurrently) is tolerated: the sidebar falls the folder back to top
     /// level. See `super::folder_group`.
     pub group_id: Option<i32>,
+    /// Moved out of the sidebar's folder list into its "Archived" section, with
+    /// its sessions kept out of the Recent lists. Purely presentational. A
+    /// folder inside an archived group is archived through the group and keeps
+    /// its own flag untouched. See `m20261012_000001_folder_archived`.
+    pub archived: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

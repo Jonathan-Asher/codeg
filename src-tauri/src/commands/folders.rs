@@ -1000,6 +1000,70 @@ pub async fn set_folder_group_core(
     Ok(())
 }
 
+/// Archive or unarchive one workspace folder (the sidebar's "Archive folder").
+///
+/// Purely presentational: the folder stays open, in its group and at its
+/// position; no session, file or git state is touched, and a session running
+/// in it keeps running. The `folder://changed` upsert carries the new flag to
+/// every window and WebSocket client, so they all move the folder at once.
+///
+/// Hidden chat folders are refused: they never appear in a folder list, so
+/// there is nothing to move.
+pub async fn set_folder_archived_core(
+    emitter: &EventEmitter,
+    db: &AppDatabase,
+    folder_id: i32,
+    archived: bool,
+) -> Result<FolderDetail, AppCommandError> {
+    let current = folder_service::get_folder_by_id(&db.conn, folder_id)
+        .await
+        .map_err(AppCommandError::from)?
+        .ok_or_else(|| AppCommandError::not_found("Folder not found"))?;
+    if current.kind == crate::db::entities::folder::FolderKind::Chat {
+        return Err(AppCommandError::invalid_input(
+            "Chat folders cannot be archived",
+        ));
+    }
+    let detail = folder_service::set_folder_archived(&db.conn, folder_id, archived)
+        .await
+        .map_err(AppCommandError::from)?
+        .ok_or_else(|| AppCommandError::not_found("Folder not found"))?;
+    // Only an OPEN folder is broadcast. Clients treat an upsert as "this
+    // folder is in the workspace" and would add a closed one to their open
+    // list; a closed folder shows nowhere, and the next folder fetch carries
+    // its new flag anyway.
+    let is_open = folder_service::get_open_folder_by_id(&db.conn, folder_id)
+        .await
+        .map_err(AppCommandError::from)?
+        .is_some();
+    if is_open {
+        emit_folder_upsert(emitter, detail.clone());
+    }
+    Ok(detail)
+}
+
+/// Archive or unarchive a whole folder group: the group and every folder in it
+/// move to (or back from) the sidebar's "Archived" section. Members keep their
+/// own archive flags, so the group can come back exactly as it went.
+pub async fn set_folder_group_archived_core(
+    emitter: &EventEmitter,
+    db: &AppDatabase,
+    group_id: i32,
+    archived: bool,
+) -> Result<FolderGroupDetail, AppCommandError> {
+    let group = folder_group_service::set_folder_group_archived(&db.conn, group_id, archived)
+        .await
+        .map_err(AppCommandError::from)?
+        .ok_or_else(|| AppCommandError::not_found("Folder group not found"))?;
+    emit_folder_group_change(
+        emitter,
+        crate::web::event_bridge::FolderGroupChange::Upsert {
+            group: group.clone(),
+        },
+    );
+    Ok(group)
+}
+
 pub async fn update_folder_color_core(
     db: &AppDatabase,
     folder_id: i32,
@@ -1216,6 +1280,28 @@ pub async fn set_folder_group(
     group_id: Option<i32>,
 ) -> Result<(), AppCommandError> {
     set_folder_group_core(&EventEmitter::Tauri(app), &db, folder_id, group_id).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn set_folder_archived(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, AppDatabase>,
+    folder_id: i32,
+    archived: bool,
+) -> Result<FolderDetail, AppCommandError> {
+    set_folder_archived_core(&EventEmitter::Tauri(app), &db, folder_id, archived).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn set_folder_group_archived(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, AppDatabase>,
+    group_id: i32,
+    archived: bool,
+) -> Result<FolderGroupDetail, AppCommandError> {
+    set_folder_group_archived_core(&EventEmitter::Tauri(app), &db, group_id, archived).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -6588,6 +6674,7 @@ mod tests {
                 kind: FolderKind::Regular,
                 alias: None,
                 group_id: None,
+                archived: false,
             },
         );
 
@@ -8177,6 +8264,91 @@ branch refs/heads/main";
         assert_eq!(updated.color, "#ff8800");
         let read_back = get_folder_core(&db, entry.id).await.expect("get");
         assert_eq!(read_back.color, "#ff8800");
+    }
+
+    #[tokio::test]
+    async fn set_folder_archived_core_broadcasts_the_folder() {
+        use crate::web::event_bridge::{WebEventBroadcaster, FOLDER_CHANGED_EVENT};
+        use std::sync::Arc;
+
+        let db = fresh_in_memory_db().await;
+        let entry = add_folder_to_history_core(&db, "/tmp/codeg-archive-test".into())
+            .await
+            .expect("add");
+        let broadcaster = Arc::new(WebEventBroadcaster::new());
+        let mut rx = broadcaster.subscribe();
+        let emitter = EventEmitter::test_web_only(broadcaster.clone());
+
+        let archived = set_folder_archived_core(&emitter, &db, entry.id, true)
+            .await
+            .expect("archive");
+        assert!(archived.archived);
+        // Every client moves the folder off the same broadcast.
+        let evt = rx.try_recv().expect("archive should broadcast the folder");
+        assert_eq!(evt.channel, FOLDER_CHANGED_EVENT);
+        assert_eq!(evt.payload["kind"], "upsert");
+        assert_eq!(evt.payload["folder"]["id"], entry.id);
+        assert_eq!(evt.payload["folder"]["archived"], true);
+        assert!(get_folder_core(&db, entry.id).await.expect("get").archived);
+
+        let restored = set_folder_archived_core(&emitter, &db, entry.id, false)
+            .await
+            .expect("unarchive");
+        assert!(!restored.archived);
+        assert_eq!(
+            rx.try_recv().expect("unarchive broadcasts too").payload["folder"]["archived"],
+            false
+        );
+
+        let missing = set_folder_archived_core(&emitter, &db, 9999, true).await;
+        assert!(missing.is_err(), "an unknown folder is an error");
+    }
+
+    #[tokio::test]
+    async fn set_folder_archived_core_refuses_chat_folders() {
+        let db = fresh_in_memory_db().await;
+        let chat = folder_service::add_chat_folder(&db.conn, "/tmp/codeg-chat-scratch")
+            .await
+            .expect("add chat folder");
+        let emitter = test_emitter();
+        let result = set_folder_archived_core(&emitter, &db, chat.id, true).await;
+        assert!(result.is_err(), "a hidden chat folder has no row to move");
+        assert!(!get_folder_core(&db, chat.id).await.expect("get").archived);
+    }
+
+    #[tokio::test]
+    async fn set_folder_group_archived_core_broadcasts_the_group() {
+        use crate::web::event_bridge::{WebEventBroadcaster, FOLDER_GROUP_CHANGED_EVENT};
+        use std::sync::Arc;
+
+        let db = fresh_in_memory_db().await;
+        let broadcaster = Arc::new(WebEventBroadcaster::new());
+        let emitter = EventEmitter::test_web_only(broadcaster.clone());
+        let group = create_folder_group_core(&emitter, &db, "Old work".into(), None)
+            .await
+            .expect("create");
+        let mut rx = broadcaster.subscribe();
+
+        let archived = set_folder_group_archived_core(&emitter, &db, group.id, true)
+            .await
+            .expect("archive");
+        assert!(archived.archived);
+        let evt = rx.try_recv().expect("archive should broadcast the group");
+        assert_eq!(evt.channel, FOLDER_GROUP_CHANGED_EVENT);
+        assert_eq!(evt.payload["kind"], "upsert");
+        assert_eq!(evt.payload["group"]["archived"], true);
+        assert!(
+            list_folder_groups_core(&db).await.expect("list")[0].archived,
+            "the flag survives a re-read"
+        );
+
+        let restored = set_folder_group_archived_core(&emitter, &db, group.id, false)
+            .await
+            .expect("unarchive");
+        assert!(!restored.archived);
+        assert!(set_folder_group_archived_core(&emitter, &db, 4242, true)
+            .await
+            .is_err());
     }
 
     #[tokio::test]
