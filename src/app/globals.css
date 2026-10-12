@@ -1519,8 +1519,11 @@
 /* The table toolbar floats over the table's top-right corner (see "Toolbar"
    below), where a left-to-right line above it has usually already ended.
    Above a right-to-left table that corner is where the line starts, so the
-   toolbar moves to the top-left one instead of covering the text. */
-[data-streamdown="table-wrapper"]:has([data-streamdown="table"]:dir(rtl))
+   toolbar moves to the top-left one instead of covering the text. Keyed on
+   the `dir` attribute rehype-block-direction puts on the table: in testing,
+   WebKit (the desktop webview) matched `:dir()` inside `:has()` by the page's
+   direction rather than the table's. */
+[data-streamdown="table-wrapper"]:has([data-streamdown="table"][dir="rtl"])
   > div:first-child:has(button) {
   right: auto;
   left: 0;
