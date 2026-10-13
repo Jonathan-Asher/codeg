@@ -31,6 +31,9 @@ export type ShortcutActionId =
   | "zoom_in"
   | "zoom_out"
   | "zoom_reset"
+  | "chat_text_zoom_in"
+  | "chat_text_zoom_out"
+  | "chat_text_zoom_reset"
 
 export interface ShortcutDefinition {
   id: ShortcutActionId
@@ -115,6 +118,15 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: "zoom_reset",
   },
+  {
+    id: "chat_text_zoom_in",
+  },
+  {
+    id: "chat_text_zoom_out",
+  },
+  {
+    id: "chat_text_zoom_reset",
+  },
 ]
 
 /** Actions that allow shortcuts without modifier keys (e.g. plain Enter). */
@@ -185,6 +197,14 @@ export const DEFAULT_SHORTCUTS: ShortcutSettings = {
   zoom_in: "mod+=",
   zoom_out: "mod+-",
   zoom_reset: "mod+0",
+  // The same three keys with Shift scale only the conversation text (Settings →
+  // Appearance → Chat text size). Shift+= is how a US keyboard types "+", so
+  // this is the "Cmd/Ctrl +" chord. A binding that names Shift outranks the
+  // window zoom's surplus-Shift tolerance on these keys (`matchShortcutEvent`),
+  // so one press never does both.
+  chat_text_zoom_in: "mod+shift+=",
+  chat_text_zoom_out: "mod+shift+-",
+  chat_text_zoom_reset: "mod+shift+0",
 }
 
 export const SHORTCUTS_STORAGE_KEY = "settings:shortcuts:v1"
@@ -506,13 +526,15 @@ function matchesNumpadCode(
  */
 function matchesDigitRowCode(
   event: ShortcutEventLike,
-  boundKey: string
+  bound: ParsedShortcut
 ): boolean {
-  if (!DIGIT_KEY_PATTERN.test(boundKey)) return false
-  // Unshifted only: with Shift the digit row yields a character that belongs to
-  // someone else — ")" on US, "=" on QWERTZ — and claiming it by position makes
-  // one press satisfy two bindings.
-  if (event.shiftKey) return false
+  if (!DIGIT_KEY_PATTERN.test(bound.key)) return false
+  // A binding without Shift claims the position unshifted only: with Shift the
+  // digit row yields a character that belongs to someone else — ")" on US, "="
+  // on QWERTZ — and claiming it by position makes one press satisfy two
+  // bindings. A binding that names Shift (`mod+shift+0`) means exactly that
+  // shifted key, which on US reports ")" and is otherwise unreachable.
+  if (event.shiftKey && !bound.shift) return false
   // Same reason, for the unshifted half: AZERTY puts `-` on Digit6 and `_` on
   // Digit8, so a bare positional match would let one `Ctrl+-` press satisfy
   // both `mod+-` (by key) and `mod+6` (by code) — and `shortcutsConflict`
@@ -521,10 +543,11 @@ function matchesDigitRowCode(
   // stopPropagation, so both handlers really would run. Decline the position
   // whenever the key typed a character some binding owns by name; `mod+6` is
   // still reachable there as Shift + the digit row, which the surplus-Shift
-  // tolerance for digits in `matchShortcutEvent` already accepts.
+  // tolerance for digits in `shortcutMatchStrength` already accepts. The same
+  // holds shifted: QWERTZ Shift+Digit0 types "=", which `mod+shift+=` owns.
   const typed = eventKeyToken(event)
   if (typed !== null && typed in PHYSICAL_KEY_SIBLINGS) return false
-  return event.code === `Digit${boundKey}`
+  return event.code === `Digit${bound.key}`
 }
 
 export const NUMBERED_TAB_ACTION_IDS = [
@@ -563,59 +586,137 @@ export function numberedTabIndexFromEvent(
   return null
 }
 
-export function matchShortcutEvent(
+/**
+ * How literally a press spells a binding, or 0 when it does not match at all.
+ *
+ * The matcher has tolerances: a surplus Shift on `=`/`-` (Shift is how `=`
+ * becomes `+`) and on digits (AZERTY needs Shift to type one), and positional
+ * fallbacks on the digit row and the numpad. A tolerance lets one press reach a
+ * binding that does not spell it, so two bindings can both accept the same
+ * press: `mod+=` (through the surplus Shift) and `mod+shift+=` (exactly) both
+ * accept Ctrl/Cmd+Shift+=. Ranking the matches lets the literal one win instead
+ * of both firing:
+ *
+ *   - the Shift state is exactly the binding's   (+2)
+ *   - the press typed the bound key itself        (+1, vs a digit-row or numpad
+ *     position)
+ *
+ * so 4 is a press that spells the binding outright and 1 the loosest match.
+ */
+export function shortcutMatchStrength(
   event: ShortcutEventLike,
   shortcut: string
-): boolean {
+): number {
   const parsed = parseShortcut(shortcut)
-  if (!parsed) return false
+  if (!parsed) return 0
 
   const keys = siblingKeys(parsed.key)
   const actualKey = eventKeyToken(event)
   const matchesKey = actualKey !== null && keys.has(actualKey)
-  const matchesDigitRow = matchesDigitRowCode(event, parsed.key)
   if (
     !matchesKey &&
-    !matchesDigitRow &&
+    !matchesDigitRowCode(event, parsed) &&
     !matchesNumpadCode(event, parsed.key)
   ) {
-    return false
+    return 0
   }
 
   const hasMod = event.metaKey || event.ctrlKey
-  if (hasMod !== parsed.mod) return false
-  if (event.altKey !== parsed.alt) return false
+  if (hasMod !== parsed.mod) return 0
+  if (event.altKey !== parsed.alt) return 0
 
   // Extra Shift is how `=` becomes `+` (and `-` becomes `_`), and on a shifted
   // digit row it is how you type the digit at all. Require Shift when the
   // binding asked for it; ignore a surplus Shift only in those cases.
   if (parsed.shift) {
-    if (!event.shiftKey) return false
+    if (!event.shiftKey) return 0
   } else if (
     event.shiftKey &&
     keys.size === 1 &&
     !DIGIT_KEY_PATTERN.test(parsed.key)
   ) {
-    return false
+    return 0
   }
 
+  return 1 + (event.shiftKey === parsed.shift ? 2 : 0) + (matchesKey ? 1 : 0)
+}
+
+const EXACT_MATCH_STRENGTH = 4
+
+/**
+ * The bindings in force, for `matchShortcutEvent` to weigh a tolerated match
+ * against. Read through localStorage — one string compare per call, re-parsed
+ * only when the stored profile changed — so every listener sees the same
+ * profile without each call site threading it through.
+ */
+let activeBindingsCache: { raw: string | null; bindings: string[] } | null =
+  null
+
+function activeShortcutBindings(): string[] {
+  let raw: string | null = null
+  if (typeof window !== "undefined") {
+    try {
+      raw = window.localStorage.getItem(SHORTCUTS_STORAGE_KEY)
+    } catch {
+      raw = null
+    }
+  }
+  if (activeBindingsCache && activeBindingsCache.raw === raw) {
+    return activeBindingsCache.bindings
+  }
+  const bindings = Object.values(readShortcutSettings()).filter(Boolean)
+  activeBindingsCache = { raw, bindings }
+  return bindings
+}
+
+/**
+ * Does this press fire `shortcut`?
+ *
+ * A press that spells the binding outright always does. One that reaches it
+ * only through a tolerance (see `shortcutMatchStrength`) does unless another
+ * binding in force spells that press more literally; that binding takes it.
+ * This is how Ctrl/Cmd+Shift+= enlarges the chat text while Ctrl/Cmd+= still
+ * zooms the window, and why unbinding the chat chord hands Shift+= back to the
+ * window zoom.
+ *
+ * `rivals` defaults to the stored shortcut profile; tests pass their own.
+ */
+export function matchShortcutEvent(
+  event: ShortcutEventLike,
+  shortcut: string,
+  rivals?: Iterable<string>
+): boolean {
+  const strength = shortcutMatchStrength(event, shortcut)
+  if (strength === 0) return false
+  if (strength >= EXACT_MATCH_STRENGTH) return true
+
+  for (const rival of rivals ?? activeShortcutBindings()) {
+    if (!rival || rival === shortcut) continue
+    if (shortcutMatchStrength(event, rival) > strength) return false
+  }
   return true
 }
 
 /**
- * Two bindings collide when some event matches both. String equality misses
- * that: `mod+=` and `mod+shift++` are different strings that both fire on
- * Ctrl/Cmd+Shift+=. Round-trip each side through the real matcher instead.
+ * Two bindings collide when some press fires both. String equality misses
+ * that: `mod+=` and `mod++` are different strings for one chord. So probe each
+ * side's canonical press through the real matcher, and weigh it the way the
+ * matcher does: `mod+=` and `mod+shift+=` both accept Ctrl/Cmd+Shift+=, but
+ * only the Shift binding fires on it, so the two coexist. A collision is a
+ * press both accept equally literally.
  */
 export function shortcutsConflict(a: string, b: string): boolean {
   const parsedA = parseShortcut(a)
   const parsedB = parseShortcut(b)
   if (!parsedA || !parsedB) return false
 
-  return (
-    matchShortcutEvent(syntheticEvent(parsedA), b) ||
-    matchShortcutEvent(syntheticEvent(parsedB), a)
-  )
+  for (const event of [syntheticEvent(parsedA), syntheticEvent(parsedB)]) {
+    const strengthA = shortcutMatchStrength(event, a)
+    if (strengthA > 0 && strengthA === shortcutMatchStrength(event, b)) {
+      return true
+    }
+  }
+  return false
 }
 
 /** The canonical event a binding describes, as the matcher would see it. */
@@ -634,13 +735,37 @@ function syntheticEvent(parsed: ParsedShortcut): ShortcutEventLike {
   }
 }
 
+export type ZoomShortcutAction = "in" | "out" | "reset"
+
 export function resolveWindowZoomAction(
   event: ShortcutEventLike,
-  shortcuts: Pick<ShortcutSettings, "zoom_in" | "zoom_out" | "zoom_reset">
-): "in" | "out" | "reset" | null {
-  if (matchShortcutEvent(event, shortcuts.zoom_in)) return "in"
-  if (matchShortcutEvent(event, shortcuts.zoom_out)) return "out"
-  if (matchShortcutEvent(event, shortcuts.zoom_reset)) return "reset"
+  shortcuts: Pick<ShortcutSettings, "zoom_in" | "zoom_out" | "zoom_reset">,
+  rivals?: Iterable<string>
+): ZoomShortcutAction | null {
+  if (matchShortcutEvent(event, shortcuts.zoom_in, rivals)) return "in"
+  if (matchShortcutEvent(event, shortcuts.zoom_out, rivals)) return "out"
+  if (matchShortcutEvent(event, shortcuts.zoom_reset, rivals)) return "reset"
+  return null
+}
+
+/** Settings → Appearance → Chat text size, from the keyboard. */
+export function resolveChatTextZoomAction(
+  event: ShortcutEventLike,
+  shortcuts: Pick<
+    ShortcutSettings,
+    "chat_text_zoom_in" | "chat_text_zoom_out" | "chat_text_zoom_reset"
+  >,
+  rivals?: Iterable<string>
+): ZoomShortcutAction | null {
+  if (matchShortcutEvent(event, shortcuts.chat_text_zoom_in, rivals)) {
+    return "in"
+  }
+  if (matchShortcutEvent(event, shortcuts.chat_text_zoom_out, rivals)) {
+    return "out"
+  }
+  if (matchShortcutEvent(event, shortcuts.chat_text_zoom_reset, rivals)) {
+    return "reset"
+  }
   return null
 }
 

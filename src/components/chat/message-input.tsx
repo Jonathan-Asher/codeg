@@ -2504,6 +2504,7 @@ export function MessageInput({
                 onExternalMenuKeyDown={handleExternalMenuKeyDown}
                 onHistoryKeyDown={handleHistoryKeyDown}
                 onContinueShortcut={handleContinueShortcut}
+                followChatTextSize
                 // `grow`, not `flex-1`: a content flex basis, so the editable
                 // area is always at least as tall as the text it holds even
                 // where no free space is handed out. A zero basis (`flex-1`)

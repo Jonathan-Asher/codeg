@@ -3,6 +3,7 @@
 import type { ComponentProps } from "react"
 
 import { Button } from "@/components/ui/button"
+import { CHAT_TEXT_SCOPE_CLASS } from "@/lib/chat-text-scale"
 import { cn } from "@/lib/utils"
 import { ArrowDownIcon, DownloadIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -111,12 +112,16 @@ export type MessageThreadContentProps = ComponentProps<
   typeof StickToBottom.Content
 >
 
+// Every transcript renders its rows in here (workspace tabs and split panes,
+// canvas cards, the live/sub-agent drawers, Quick Ask), so this is where the
+// chat text size takes hold. The scroll button, find bar and composer around it
+// stay chrome.
 export const MessageThreadContent = ({
   className,
   ...props
 }: MessageThreadContentProps) => (
   <StickToBottom.Content
-    className={cn("flex flex-col gap-8 p-4", className)}
+    className={cn(CHAT_TEXT_SCOPE_CLASS, "flex flex-col gap-8 p-4", className)}
     {...props}
   />
 )

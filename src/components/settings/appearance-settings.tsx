@@ -1,8 +1,17 @@
 "use client"
 
-import { LayoutGrid, Monitor, Moon, Sun, Type } from "lucide-react"
+import {
+  LayoutGrid,
+  MessageSquareText,
+  Monitor,
+  Moon,
+  RotateCcw,
+  Sun,
+  Type,
+} from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useTheme } from "next-themes"
+import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
@@ -13,10 +22,16 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import {
+  useChatTextScale,
   useThemeColor,
   useZoomLevel,
   useWelcomeQuickActions,
 } from "@/hooks/use-appearance"
+import {
+  CHAT_TEXT_SCALE_LEVELS,
+  DEFAULT_CHAT_TEXT_SCALE,
+  normalizeChatTextScale,
+} from "@/lib/chat-text-scale"
 import { cn } from "@/lib/utils"
 import {
   DEFAULT_ZOOM_LEVEL,
@@ -38,6 +53,7 @@ export function AppearanceSettings() {
   const { theme, resolvedTheme, setTheme } = useTheme()
   const { themeColor, setThemeColor } = useThemeColor()
   const { zoomLevel, setZoomLevel } = useZoomLevel()
+  const { chatTextScale, setChatTextScale } = useChatTextScale()
   const { showWelcomeQuickActions, setShowWelcomeQuickActions } =
     useWelcomeQuickActions()
 
@@ -204,6 +220,63 @@ export function AppearanceSettings() {
             </Select>
             <p className="text-2xs text-muted-foreground">
               {t("zoomLevel.current", { zoom: zoomLevel })}
+            </p>
+          </div>
+        </section>
+
+        {/* ===== Chat text size ===== */}
+        <section
+          className="rounded-xl border bg-card p-4 space-y-4"
+          data-testid="chat-text-size-section"
+        >
+          <div className="flex items-center gap-2">
+            <MessageSquareText className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold">
+              {t("chatTextSize.sectionTitle")}
+            </h2>
+          </div>
+
+          <p className="text-xs text-muted-foreground leading-5">
+            {t("chatTextSize.sectionDescription")}
+          </p>
+
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Select
+                value={String(chatTextScale)}
+                onValueChange={(value) =>
+                  setChatTextScale(normalizeChatTextScale(parseInt(value, 10)))
+                }
+              >
+                <SelectTrigger
+                  className="w-56"
+                  aria-label={t("chatTextSize.sectionTitle")}
+                >
+                  <SelectValue placeholder={t("chatTextSize.placeholder")} />
+                </SelectTrigger>
+                <SelectContent align="start">
+                  {CHAT_TEXT_SCALE_LEVELS.map((level) => (
+                    <SelectItem key={level} value={String(level)}>
+                      {level}%
+                      {level === DEFAULT_CHAT_TEXT_SCALE
+                        ? ` (${t("chatTextSize.default")})`
+                        : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setChatTextScale(DEFAULT_CHAT_TEXT_SCALE)}
+                disabled={chatTextScale === DEFAULT_CHAT_TEXT_SCALE}
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                {t("chatTextSize.reset")}
+              </Button>
+            </div>
+            <p className="text-2xs text-muted-foreground">
+              {t("chatTextSize.current", { percent: chatTextScale })}
             </p>
           </div>
         </section>

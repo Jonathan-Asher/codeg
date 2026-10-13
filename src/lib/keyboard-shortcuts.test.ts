@@ -10,10 +10,12 @@ import {
   matchShortcutEvent,
   normalizeShortcut,
   readShortcutSettings,
+  resolveChatTextZoomAction,
   resolveWindowZoomAction,
   numberedTabIndexFromEvent,
   pickNumberedTabId,
   shortcutFromKeyboardEvent,
+  shortcutMatchStrength,
   shortcutsConflict,
   writeShortcutSettings,
 } from "./keyboard-shortcuts"
@@ -290,10 +292,20 @@ describe("window zoom shortcuts", () => {
     expect(matchShortcutEvent(keyEvent("=", { ctrlKey: true }), "mod+=")).toBe(
       true
     )
+    // QWERTZ types + on its own key, without Shift.
+    expect(
+      matchShortcutEvent(
+        keyEvent("+", { ctrlKey: true, code: "BracketRight" }),
+        "mod+="
+      )
+    ).toBe(true)
+    // Shift+= reaches it too, as long as no binding claims Shift+= outright
+    // (the chat text size does by default — see below).
     expect(
       matchShortcutEvent(
         keyEvent("+", { ctrlKey: true, shiftKey: true }),
-        "mod+="
+        "mod+=",
+        []
       )
     ).toBe(true)
     expect(matchShortcutEvent(keyEvent("k", { ctrlKey: true }), "mod+=")).toBe(
@@ -308,7 +320,8 @@ describe("window zoom shortcuts", () => {
     expect(
       matchShortcutEvent(
         keyEvent("_", { ctrlKey: true, shiftKey: true }),
-        "mod+-"
+        "mod+-",
+        []
       )
     ).toBe(true)
     expect(matchShortcutEvent(keyEvent("=", { ctrlKey: true }), "mod+-")).toBe(
@@ -375,6 +388,191 @@ describe("window zoom shortcuts", () => {
   })
 })
 
+describe("chat text size shortcuts", () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  /** Which zoom a press reaches under a profile: one at most. */
+  function zoomFor(
+    event: ReturnType<typeof keyEvent>,
+    settings = DEFAULT_SHORTCUTS
+  ): string | null {
+    const rivals = Object.values(settings)
+    const chat = resolveChatTextZoomAction(event, settings, rivals)
+    const win = resolveWindowZoomAction(event, settings, rivals)
+    expect(chat !== null && win !== null).toBe(false)
+    if (chat) return `chat:${chat}`
+    if (win) return `window:${win}`
+    return null
+  }
+
+  it("registers the three actions on Shift + the window zoom keys", () => {
+    const ids = SHORTCUT_DEFINITIONS.map((definition) => definition.id)
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        "chat_text_zoom_in",
+        "chat_text_zoom_out",
+        "chat_text_zoom_reset",
+      ])
+    )
+    expect(DEFAULT_SHORTCUTS.chat_text_zoom_in).toBe("mod+shift+=")
+    expect(DEFAULT_SHORTCUTS.chat_text_zoom_out).toBe("mod+shift+-")
+    expect(DEFAULT_SHORTCUTS.chat_text_zoom_reset).toBe("mod+shift+0")
+    expect(formatShortcutLabel(DEFAULT_SHORTCUTS.chat_text_zoom_in, true)).toBe(
+      "⌘⇧="
+    )
+    expect(
+      formatShortcutLabel(DEFAULT_SHORTCUTS.chat_text_zoom_reset, false)
+    ).toBe("Ctrl+Shift+0")
+  })
+
+  it("collides with no other default", () => {
+    const chatIds = [
+      "chat_text_zoom_in",
+      "chat_text_zoom_out",
+      "chat_text_zoom_reset",
+    ] as const
+    for (const id of chatIds) {
+      const clashes = SHORTCUT_DEFINITIONS.filter(
+        (definition) =>
+          definition.id !== id &&
+          shortcutsConflict(
+            DEFAULT_SHORTCUTS[definition.id],
+            DEFAULT_SHORTCUTS[id]
+          )
+      ).map((definition) => definition.id)
+      expect(clashes).toEqual([])
+    }
+  })
+
+  // US: Shift+= types "+", Shift+- types "_", Shift+0 types ")". The browser
+  // reports the shifted character in `key` and the physical key in `code`.
+  it("splits the US keys between the two zooms by Shift", () => {
+    const mac = (key: string, code: string, shiftKey = false) =>
+      keyEvent(key, { metaKey: true, shiftKey, code })
+
+    expect(zoomFor(mac("+", "Equal", true))).toBe("chat:in")
+    expect(zoomFor(mac("=", "Equal"))).toBe("window:in")
+    expect(zoomFor(mac("_", "Minus", true))).toBe("chat:out")
+    expect(zoomFor(mac("-", "Minus"))).toBe("window:out")
+    expect(zoomFor(mac(")", "Digit0", true))).toBe("chat:reset")
+    expect(zoomFor(mac("0", "Digit0"))).toBe("window:reset")
+    // Some engines leave the unshifted character in `key` while Cmd is held.
+    expect(zoomFor(mac("=", "Equal", true))).toBe("chat:in")
+    expect(zoomFor(mac("0", "Digit0", true))).toBe("chat:reset")
+  })
+
+  it("does the same with Ctrl on Windows and Linux", () => {
+    const ctrl = (key: string, code: string, shiftKey = false) =>
+      keyEvent(key, { ctrlKey: true, shiftKey, code })
+
+    expect(zoomFor(ctrl("+", "Equal", true))).toBe("chat:in")
+    expect(zoomFor(ctrl("=", "Equal"))).toBe("window:in")
+    expect(zoomFor(ctrl("_", "Minus", true))).toBe("chat:out")
+    expect(zoomFor(ctrl(")", "Digit0", true))).toBe("chat:reset")
+  })
+
+  it("follows the numpad + and - with and without Shift", () => {
+    expect(zoomFor(keyEvent("+", { ctrlKey: true, code: "NumpadAdd" }))).toBe(
+      "window:in"
+    )
+    expect(
+      zoomFor(
+        keyEvent("+", { ctrlKey: true, shiftKey: true, code: "NumpadAdd" })
+      )
+    ).toBe("chat:in")
+    expect(
+      zoomFor(
+        keyEvent("-", {
+          ctrlKey: true,
+          shiftKey: true,
+          code: "NumpadSubtract",
+        })
+      )
+    ).toBe("chat:out")
+  })
+
+  // French AZERTY: = sits on its own key (Slash on macOS, Equal on Windows)
+  // with + on Shift, and the digit row needs Shift to type a digit.
+  it("works on AZERTY, where the digits need Shift", () => {
+    expect(
+      zoomFor(keyEvent("+", { metaKey: true, shiftKey: true, code: "Slash" }))
+    ).toBe("chat:in")
+    expect(zoomFor(keyEvent("=", { metaKey: true, code: "Slash" }))).toBe(
+      "window:in"
+    )
+    expect(
+      zoomFor(keyEvent("0", { ctrlKey: true, shiftKey: true, code: "Digit0" }))
+    ).toBe("chat:reset")
+    // The unshifted zero key types "à" and stays the window reset.
+    expect(zoomFor(keyEvent("à", { ctrlKey: true, code: "Digit0" }))).toBe(
+      "window:reset"
+    )
+    // AZERTY ")" sits on the Minus position: neither zoom out, shifted or not.
+    expect(
+      zoomFor(keyEvent(")", { ctrlKey: true, shiftKey: true, code: "Minus" }))
+    ).toBeNull()
+  })
+
+  it("hands Shift+= back to the window zoom once the chat key is unbound", () => {
+    const shiftEquals = keyEvent("+", {
+      metaKey: true,
+      shiftKey: true,
+      code: "Equal",
+    })
+    const unbound = { ...DEFAULT_SHORTCUTS, chat_text_zoom_in: "" }
+
+    // Through explicit rivals…
+    expect(zoomFor(shiftEquals, unbound)).toBe("window:in")
+
+    // …and through the stored profile every listener reads by default.
+    writeShortcutSettings(unbound)
+    expect(resolveChatTextZoomAction(shiftEquals, unbound)).toBeNull()
+    expect(resolveWindowZoomAction(shiftEquals, unbound)).toBe("in")
+  })
+
+  it("follows a rebound chat key, and the old chord stops working", () => {
+    const rebound = { ...DEFAULT_SHORTCUTS, chat_text_zoom_in: "mod+alt+=" }
+    writeShortcutSettings(rebound)
+
+    expect(
+      resolveChatTextZoomAction(
+        keyEvent("=", { metaKey: true, altKey: true, code: "Equal" }),
+        rebound
+      )
+    ).toBe("in")
+    const shiftEquals = keyEvent("+", {
+      metaKey: true,
+      shiftKey: true,
+      code: "Equal",
+    })
+    expect(resolveChatTextZoomAction(shiftEquals, rebound)).toBeNull()
+    expect(resolveWindowZoomAction(shiftEquals, rebound)).toBe("in")
+  })
+
+  it("ranks a literal match above every tolerated one", () => {
+    const shiftEquals = keyEvent("+", { ctrlKey: true, shiftKey: true })
+    expect(shortcutMatchStrength(shiftEquals, "mod+shift+=")).toBe(4)
+    expect(shortcutMatchStrength(shiftEquals, "mod+=")).toBe(2)
+    expect(
+      shortcutMatchStrength(
+        keyEvent(")", { ctrlKey: true, shiftKey: true, code: "Digit0" }),
+        "mod+shift+0"
+      )
+    ).toBe(3)
+    expect(
+      shortcutMatchStrength(
+        keyEvent("à", { ctrlKey: true, code: "Digit0" }),
+        "mod+0"
+      )
+    ).toBe(3)
+    expect(
+      shortcutMatchStrength(keyEvent("k", { ctrlKey: true }), "mod+=")
+    ).toBe(0)
+  })
+})
+
 describe("digit bindings on a shifted digit row", () => {
   // AZERTY shifts the digit row: unshifted Digit0 types "à", and "0" needs
   // Shift. Both spellings used to miss `mod+0`, leaving reset unpressable.
@@ -388,10 +586,23 @@ describe("digit bindings on a shifted digit row", () => {
   })
 
   it("resolves reset from the shifted AZERTY spelling that actually types 0", () => {
+    // Ctrl+Shift+0 is the chat text reset by default, which spells this press
+    // outright; the window reset only reaches it through the surplus-Shift
+    // tolerance, so it yields. Unbind the chat reset and the window gets it.
+    const shiftedZero = keyEvent("0", {
+      ctrlKey: true,
+      shiftKey: true,
+      code: "Digit0",
+    })
+    expect(resolveWindowZoomAction(shiftedZero, defaultZoom)).toBeNull()
+    expect(resolveChatTextZoomAction(shiftedZero, DEFAULT_SHORTCUTS)).toBe(
+      "reset"
+    )
     expect(
       resolveWindowZoomAction(
-        keyEvent("0", { ctrlKey: true, shiftKey: true, code: "Digit0" }),
-        defaultZoom
+        shiftedZero,
+        defaultZoom,
+        Object.values(defaultZoom)
       )
     ).toBe("reset")
   })
@@ -420,16 +631,24 @@ describe("digit bindings on a shifted digit row", () => {
     ).toBe(false)
   })
 
-  it("gives QWERTZ Ctrl+Shift+0 to zoom in only, not also to reset", () => {
-    // On German QWERTZ that keypress types "=", which is the zoom-in binding.
+  it("gives QWERTZ Ctrl+Shift+0 to one zoom-in only, not also to a reset", () => {
+    // On German QWERTZ that keypress types "=" with Shift held: exactly the
+    // chat text zoom-in, and the window zoom-in only through a surplus Shift.
     const event = keyEvent("=", {
       ctrlKey: true,
       shiftKey: true,
       code: "Digit0",
     })
     expect(matchShortcutEvent(event, "mod+0")).toBe(false)
-    expect(matchShortcutEvent(event, "mod+=")).toBe(true)
-    expect(resolveWindowZoomAction(event, defaultZoom)).toBe("in")
+    expect(matchShortcutEvent(event, "mod+shift+0")).toBe(false)
+    expect(matchShortcutEvent(event, "mod+shift+=")).toBe(true)
+    expect(matchShortcutEvent(event, "mod+=")).toBe(false)
+    expect(resolveChatTextZoomAction(event, DEFAULT_SHORTCUTS)).toBe("in")
+    expect(resolveWindowZoomAction(event, defaultZoom)).toBeNull()
+    // With the chat chord unbound, it is the window's again.
+    expect(
+      resolveWindowZoomAction(event, defaultZoom, Object.values(defaultZoom))
+    ).toBe("in")
   })
 
   // AZERTY puts `-` on Digit6 and `_` on Digit8. Binding the digits 1-9 to tab
@@ -505,25 +724,28 @@ describe("digit bindings on a shifted digit row", () => {
 
 describe("binding conflicts use matcher semantics", () => {
   it("catches two different strings that fire on the same event", () => {
-    // Ctrl/Cmd+Shift+= matches both, so string equality reports no conflict
-    // while both actions run.
-    expect(
-      matchShortcutEvent(
-        keyEvent("+", { ctrlKey: true, shiftKey: true }),
-        "mod+="
-      )
-    ).toBe(true)
-    expect(
-      matchShortcutEvent(
-        keyEvent("+", { ctrlKey: true, shiftKey: true }),
-        "mod+shift++"
-      )
-    ).toBe(true)
-    expect(shortcutsConflict("mod+=", "mod+shift++")).toBe(true)
+    // One chord, two spellings: string equality reports no conflict while
+    // both actions run.
+    expect(shortcutsConflict("mod+=", "mod++")).toBe(true)
+    expect(shortcutsConflict("mod+shift+=", "mod+shift++")).toBe(true)
+    expect(shortcutsConflict("mod+-", "mod+_")).toBe(true)
   })
 
-  it("catches a digit colliding with its own shifted spelling", () => {
-    expect(shortcutsConflict("mod+0", "mod+shift+0")).toBe(true)
+  it("lets a Shift binding coexist with the one that only tolerates Shift", () => {
+    // Both accept Ctrl/Cmd+Shift+=, but only the binding that names Shift
+    // fires on it (the other yields), so no press fires both.
+    const shiftEquals = keyEvent("+", { ctrlKey: true, shiftKey: true })
+    const both = ["mod+=", "mod+shift++"]
+    expect(matchShortcutEvent(shiftEquals, "mod+shift++", both)).toBe(true)
+    expect(matchShortcutEvent(shiftEquals, "mod+=", both)).toBe(false)
+    expect(shortcutsConflict("mod+=", "mod+shift++")).toBe(false)
+    expect(shortcutsConflict("mod+=", "mod+shift+=")).toBe(false)
+    expect(shortcutsConflict("mod+-", "mod+shift+-")).toBe(false)
+  })
+
+  it("does the same for a digit and its own shifted spelling", () => {
+    expect(shortcutsConflict("mod+0", "mod+shift+0")).toBe(false)
+    expect(shortcutsConflict("mod+shift+0", "mod+shift+0")).toBe(true)
   })
 
   it("does not invent a conflict between genuinely distinct chords", () => {
@@ -567,13 +789,34 @@ describe("a new default never steals a stored binding", () => {
   })
 
   it("compares with matcher semantics, not string equality", () => {
-    // `mod+shift++` is not the string `mod+=`, but the same event fires both.
+    // `mod+shift++` is not the string `mod+shift+=`, but it is the same chord,
+    // so the new chat text default arrives unbound. The window zoom-in stays:
+    // the stored Shift binding outranks its surplus-Shift tolerance instead.
     localStorage.setItem(
       SHORTCUTS_STORAGE_KEY,
       JSON.stringify({ toggle_search: "mod+shift++" })
     )
 
-    expect(readShortcutSettings().zoom_in).toBe("")
+    const settings = readShortcutSettings()
+    expect(settings.chat_text_zoom_in).toBe("")
+    expect(settings.zoom_in).toBe(DEFAULT_SHORTCUTS.zoom_in)
+  })
+
+  it("seeds the chat text keys on a profile saved before they existed", () => {
+    // What every earlier build wrote back: the full set minus the new actions.
+    const previous = Object.fromEntries(
+      Object.entries(DEFAULT_SHORTCUTS).filter(
+        ([id]) => !id.startsWith("chat_text_zoom_")
+      )
+    )
+    expect(Object.keys(previous)).not.toContain("chat_text_zoom_in")
+    localStorage.setItem(SHORTCUTS_STORAGE_KEY, JSON.stringify(previous))
+
+    const settings = readShortcutSettings()
+    expect(settings.chat_text_zoom_in).toBe("mod+shift+=")
+    expect(settings.chat_text_zoom_out).toBe("mod+shift+-")
+    expect(settings.chat_text_zoom_reset).toBe("mod+shift+0")
+    expect(settings.zoom_in).toBe("mod+=")
   })
 
   it("survives a later write instead of reseeding the collision", () => {

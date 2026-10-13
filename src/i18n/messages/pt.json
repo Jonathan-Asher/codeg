@@ -148,10 +148,19 @@
     },
     "zoomLevel": {
       "sectionTitle": "Zoom da janela",
-      "sectionDescription": "Dimensiona toda a interface. Aplica imediatamente e é salvo por dispositivo. ⌘/Ctrl + e - percorrem os mesmos níveis de zoom deste menu (⌘/Ctrl 0 volta para 100%).",
+      "sectionDescription": "Dimensiona toda a interface. Aplica imediatamente e é salvo por dispositivo. ⌘/Ctrl = e - percorrem os mesmos níveis de zoom deste menu (⌘/Ctrl 0 volta para 100%).",
       "placeholder": "Selecione o nível de zoom",
       "default": "Padrão",
       "current": "Zoom atual: {zoom}%"
+    },
+    "chatTextSize": {
+      "sectionTitle": "Tamanho do texto do chat",
+      "sectionDescription": "Dimensiona apenas o texto da conversa: mensagens, blocos de código, saída de ferramentas, suas próprias mensagens e a caixa de escrita. A barra lateral, as abas e os demais painéis seguem só o zoom da janela. Aplica-se a todas as conversas e é salvo por dispositivo. ⌘/Ctrl Shift = e Shift - percorrem estes tamanhos (⌘/Ctrl Shift 0 volta para 100%).",
+      "placeholder": "Selecione o tamanho do texto do chat",
+      "default": "Padrão",
+      "current": "Tamanho atual do texto do chat: {percent}%",
+      "reset": "Redefinir",
+      "toast": "Texto do chat {percent}%"
     },
     "fonts": {
       "sectionTitle": "Fontes",
@@ -572,6 +581,18 @@
       "zoom_reset": {
         "title": "Redefinir zoom",
         "description": "Restaura o zoom da janela para 100%"
+      },
+      "chat_text_zoom_in": {
+        "title": "Aumentar o texto do chat",
+        "description": "Aumenta o texto da conversa em um nível, sem dar zoom na janela"
+      },
+      "chat_text_zoom_out": {
+        "title": "Diminuir o texto do chat",
+        "description": "Diminui o texto da conversa em um nível, sem dar zoom na janela"
+      },
+      "chat_text_zoom_reset": {
+        "title": "Redefinir o tamanho do texto do chat",
+        "description": "Restaura o texto da conversa para 100%"
       }
     }
   },

@@ -1,6 +1,12 @@
 // src/lib/appearance-script.ts
 
 import {
+  CHAT_TEXT_SCALE_LEVELS,
+  CHAT_TEXT_SCALE_PROPERTY,
+  DEFAULT_CHAT_TEXT_SCALE,
+  STORAGE_KEY_CHAT_TEXT_SCALE,
+} from "./chat-text-scale"
+import {
   CUSTOM_CSS_ELEMENT_ID,
   CUSTOM_THEME_TOKENS,
   SAFE_STYLE_QUERY_PARAM,
@@ -102,6 +108,14 @@ const SCRIPT = `
     var storedZoom = parseInt(localStorage.getItem("${STORAGE_KEY_ZOOM_LEVEL}") || "", 10);
     var zoom = VALID_ZOOMS.indexOf(storedZoom) >= 0 ? storedZoom : 100;
     document.documentElement.style.fontSize = (16 * zoom / 100) + "px";
+
+    // Chat text size: only rungs are honoured here; anything else waits for
+    // AppearanceProvider, which snaps it to the nearest rung. 100% writes nothing.
+    var VALID_CHAT_SCALES = ${JSON.stringify(CHAT_TEXT_SCALE_LEVELS)};
+    var storedChatScale = parseInt(localStorage.getItem("${STORAGE_KEY_CHAT_TEXT_SCALE}") || "", 10);
+    if (VALID_CHAT_SCALES.indexOf(storedChatScale) >= 0 && storedChatScale !== ${DEFAULT_CHAT_TEXT_SCALE}) {
+      document.documentElement.style.setProperty("${CHAT_TEXT_SCALE_PROPERTY}", String(storedChatScale / 100));
+    }
 
     // 界面字体：预水合写入 --font-sans（普通组件与会话消息区都跟随它）。
     // stack 只是「显式选择」的缓存，不是偏好本身：仅当存在显式 id（codeg-ui-font）

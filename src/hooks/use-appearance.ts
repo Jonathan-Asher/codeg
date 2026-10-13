@@ -2,6 +2,7 @@
 
 import { useContext } from "react"
 import { AppearanceContext } from "@/components/appearance-provider"
+import { DEFAULT_CHAT_TEXT_SCALE } from "@/lib/chat-text-scale"
 import { resolveFontStack } from "@/lib/font-presets"
 
 export function useAppearance() {
@@ -22,6 +23,22 @@ export function useThemeColor() {
 export function useZoomLevel() {
   const { zoomLevel, setZoomLevel } = useAppearance()
   return { zoomLevel, setZoomLevel }
+}
+
+const noopSetChatTextScale = () => {}
+
+/**
+ * Conversation text size (Settings → Appearance → Chat text size). Tolerates a
+ * missing provider (100%, read-only): conversation surfaces read it only to
+ * re-fit to a size the CSS already applies, and some render on their own.
+ */
+export function useChatTextScale() {
+  const ctx = useContext(AppearanceContext)
+  return {
+    chatTextScale: ctx?.chatTextScale ?? DEFAULT_CHAT_TEXT_SCALE,
+    setChatTextScale: ctx?.setChatTextScale ?? noopSetChatTextScale,
+    chatTextScaleNotice: ctx?.chatTextScaleNotice ?? null,
+  }
 }
 
 /** 语义化包装：新会话欢迎页「模式选择区域」显示开关 */

@@ -1037,10 +1037,55 @@
    刻意只声明 font-size、不声明 line-height：被它们替换掉的 `text-[Npx]` 任意值同样
    只写 font-size，行高照旧由 leading-* 或继承决定，换过来在 100% 缩放下零视觉差异。 */
 @utility text-2xs {
-  font-size: 0.6875rem; /* 11px @100% */
+  /* The token is defined only inside `.chat-text-scope` (below); everywhere
+     else the fallback is the size. */
+  font-size: var(--text-2xs, 0.6875rem); /* 11px @100% */
 }
 @utility text-3xs {
-  font-size: 0.625rem; /* 10px @100% */
+  font-size: var(--text-3xs, 0.625rem); /* 10px @100% */
+}
+
+/* Chat text size (Settings → Appearance; Cmd/Ctrl+Shift+= / - / 0). Scales the
+   conversation's own text and nothing else: the transcript, the composer's
+   input, Quick Ask — each marked with this class — while the sidebar, tabs,
+   status bar and settings keep the window zoom alone.
+
+   Same move as `.canvas-board-units` below: every Tailwind v4 text utility
+   resolves through a `--text-*` token, so restating the tokens for a subtree
+   resizes its text with real font sizes. Layout, the virtualizer's measured
+   row heights and the scroll position all follow, which a CSS `zoom` or a
+   transform would not give. Paddings, gaps and icons keep their size: this
+   is text size, not a second window zoom.
+
+   `--chat-text-scale` (a plain number, 1 = 100%) sits on <html>, written by
+   the pre-hydration script and AppearanceProvider. `--chat-text-unit` is
+   what 100% means: the root rem normally, and the board's fixed 16px inside
+   a canvas card (`.canvas-board-units`), so a card scales from its own units
+   and keeps ignoring the window zoom.
+
+   `@layer components` so a text utility on the scope element itself
+   (`chat-text-scope text-sm`) still sets that element's size. */
+@layer components {
+  .chat-text-scope {
+    --chat-rem: calc(var(--chat-text-unit, 1rem) * var(--chat-text-scale, 1));
+    --text-3xs: calc(var(--chat-rem) * 0.625);
+    --text-2xs: calc(var(--chat-rem) * 0.6875);
+    --text-xs: calc(var(--chat-rem) * 0.75);
+    --text-sm: calc(var(--chat-rem) * 0.875);
+    --text-base: var(--chat-rem);
+    --text-lg: calc(var(--chat-rem) * 1.125);
+    --text-xl: calc(var(--chat-rem) * 1.25);
+    --text-2xl: calc(var(--chat-rem) * 1.5);
+    --text-3xl: calc(var(--chat-rem) * 1.875);
+    --text-4xl: calc(var(--chat-rem) * 2.25);
+    /* Text with no size utility of its own inherits from outside the scope;
+       scale that too. Relative (em), so it compounds with nothing: a nested
+       scope inherits an already scaled size and must not scale it again. */
+    font-size: calc(1em * var(--chat-text-scale, 1));
+  }
+  .chat-text-scope .chat-text-scope {
+    font-size: inherit;
+  }
 }
 
 @layer base {
@@ -2332,13 +2377,13 @@ div.monaco-diff-editor.side-by-side .editor.modified {
   line-height: 1.3;
 }
 .codeg-composer .ProseMirror h1 {
-  font-size: 1.25rem;
+  font-size: calc(var(--chat-rem, 1rem) * 1.25);
 }
 .codeg-composer .ProseMirror h2 {
-  font-size: 1.125rem;
+  font-size: calc(var(--chat-rem, 1rem) * 1.125);
 }
 .codeg-composer .ProseMirror :is(h3, h4) {
-  font-size: 1rem;
+  font-size: var(--chat-rem, 1rem);
 }
 
 .codeg-composer .ProseMirror :is(ul, ol) {
@@ -2374,7 +2419,7 @@ div.monaco-diff-editor.side-by-side .editor.modified {
 .codeg-composer .ProseMirror pre code {
   background: transparent;
   padding: 0;
-  font-size: 0.8125rem;
+  font-size: calc(var(--chat-rem, 1rem) * 0.8125);
 }
 
 .codeg-composer .ProseMirror a {
@@ -2984,6 +3029,9 @@ html.tab-drag-blocked * {
   --text-xl: 20px;
   --text-2xl: 24px;
   --radius: 10px;
+  /* What 100% chat text means inside a card: board units, not the root rem
+     (see `.chat-text-scope`). */
+  --chat-text-unit: 16px;
 }
 [data-workspace-bg="on"] .canvas-surface {
   background-color: transparent;

@@ -148,10 +148,19 @@
     },
     "zoomLevel": {
       "sectionTitle": "Zoom de ventana",
-      "sectionDescription": "Escala toda la interfaz. Se aplica al instante y se guarda por dispositivo. ⌘/Ctrl + y - recorren los mismos niveles de zoom que este menú (⌘/Ctrl 0 vuelve al 100%).",
+      "sectionDescription": "Escala toda la interfaz. Se aplica al instante y se guarda por dispositivo. ⌘/Ctrl = y - recorren los mismos niveles de zoom que este menú (⌘/Ctrl 0 vuelve al 100%).",
       "placeholder": "Selecciona el nivel de zoom",
       "default": "Predeterminado",
       "current": "Zoom actual: {zoom}%"
+    },
+    "chatTextSize": {
+      "sectionTitle": "Tamaño del texto del chat",
+      "sectionDescription": "Escala solo el texto de la conversación: mensajes, bloques de código, salida de herramientas, tus propios mensajes y el cuadro de redacción. La barra lateral, las pestañas y los demás paneles siguen solo el zoom de ventana. Se aplica a todas las conversaciones y se guarda por dispositivo. ⌘/Ctrl Mayús = y Mayús - recorren estos tamaños (⌘/Ctrl Mayús 0 vuelve al 100%).",
+      "placeholder": "Selecciona el tamaño del texto del chat",
+      "default": "Predeterminado",
+      "current": "Tamaño actual del texto del chat: {percent}%",
+      "reset": "Restablecer",
+      "toast": "Texto del chat {percent}%"
     },
     "fonts": {
       "sectionTitle": "Fuentes",
@@ -572,6 +581,18 @@
       "zoom_reset": {
         "title": "Restablecer zoom",
         "description": "Restaura el zoom de la ventana al 100%"
+      },
+      "chat_text_zoom_in": {
+        "title": "Agrandar el texto del chat",
+        "description": "Agranda un nivel el texto de la conversación, sin hacer zoom en la ventana"
+      },
+      "chat_text_zoom_out": {
+        "title": "Reducir el texto del chat",
+        "description": "Reduce un nivel el texto de la conversación, sin hacer zoom en la ventana"
+      },
+      "chat_text_zoom_reset": {
+        "title": "Restablecer el tamaño del texto del chat",
+        "description": "Devuelve el texto de la conversación al 100%"
       }
     }
   },

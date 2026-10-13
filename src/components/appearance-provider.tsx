@@ -70,8 +70,21 @@ import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import {
   isShortcutRecorderArmed,
   matchShortcutEvent,
+  resolveChatTextZoomAction,
   resolveWindowZoomAction,
 } from "@/lib/keyboard-shortcuts"
+import {
+  CHAT_TEXT_SCALE_PROPERTY,
+  CHAT_TEXT_SCALE_WILL_CHANGE_EVENT,
+  DEFAULT_CHAT_TEXT_SCALE,
+  STORAGE_KEY_CHAT_TEXT_SCALE,
+  applyChatTextScale,
+  normalizeChatTextScale,
+  persistChatTextScale,
+  readStoredChatTextScale,
+  stepChatTextScale,
+  type ChatTextScaleLevel,
+} from "@/lib/chat-text-scale"
 import {
   DEFAULT_WORKSPACE_BG_ENABLED,
   DEFAULT_WORKSPACE_BG_MASK_OPACITY,
@@ -114,6 +127,15 @@ type AppearanceContextValue = {
   setThemeColor: (color: ThemeColor) => void
   zoomLevel: ZoomLevel
   setZoomLevel: (zoom: ZoomLevel) => void
+  /** Conversation text size in percent (see lib/chat-text-scale). */
+  chatTextScale: ChatTextScaleLevel
+  setChatTextScale: (level: ChatTextScaleLevel) => void
+  /**
+   * Bumped each time a chat-text shortcut is pressed in THIS window (even at
+   * either end of the range), so the announcer can show the size; null until
+   * the first press. Changes from Settings or another window do not bump it.
+   */
+  chatTextScaleNotice: { level: ChatTextScaleLevel; seq: number } | null
   /** 新会话欢迎页是否显示「模式选择区域」（QuickActions 快捷卡片），默认开启 */
   showWelcomeQuickActions: boolean
   setShowWelcomeQuickActions: (on: boolean) => void
@@ -514,6 +536,66 @@ export function AppearanceProvider({
     [setZoomLevel]
   )
 
+  // Chat text size. The pre-hydration script already wrote the property for a
+  // stored rung; the state only mirrors it. Same ref discipline as the window
+  // zoom above, for the same held-key reason.
+  const [chatTextScale, setChatTextScaleState] = useState<ChatTextScaleLevel>(
+    () => readStoredChatTextScale()
+  )
+  const chatTextScaleRef = useRef(chatTextScale)
+  const [chatTextScaleNotice, setChatTextScaleNotice] = useState<{
+    level: ChatTextScaleLevel
+    seq: number
+  } | null>(null)
+
+  /** Write a level to the DOM, telling scrolled transcripts first. */
+  const applyChatTextScaleToDom = useCallback((level: ChatTextScaleLevel) => {
+    window.dispatchEvent(new Event(CHAT_TEXT_SCALE_WILL_CHANGE_EVENT))
+    applyChatTextScale(document.documentElement, level)
+  }, [])
+
+  const setChatTextScale = useCallback(
+    (level: ChatTextScaleLevel) => {
+      const next = normalizeChatTextScale(level)
+      if (chatTextScaleRef.current === next) return
+      chatTextScaleRef.current = next
+      setChatTextScaleState(next)
+      applyChatTextScaleToDom(next)
+      persistChatTextScale(next)
+    },
+    [applyChatTextScaleToDom]
+  )
+
+  const stepChatTextScaleBy = useCallback(
+    (direction: 1 | -1 | 0) => {
+      const next =
+        direction === 0
+          ? DEFAULT_CHAT_TEXT_SCALE
+          : stepChatTextScale(chatTextScaleRef.current, direction)
+      setChatTextScale(next)
+      setChatTextScaleNotice((previous) => ({
+        level: next,
+        seq: (previous?.seq ?? 0) + 1,
+      }))
+    },
+    [setChatTextScale]
+  )
+
+  // A stored value that is not a rung (hand-edited, or from a build with other
+  // rungs) is skipped by the pre-hydration script; apply the snapped one here.
+  useEffect(() => {
+    const root = document.documentElement
+    const expected =
+      chatTextScale === DEFAULT_CHAT_TEXT_SCALE
+        ? ""
+        : String(chatTextScale / 100)
+    if (root.style.getPropertyValue(CHAT_TEXT_SCALE_PROPERTY) !== expected) {
+      applyChatTextScale(root, chatTextScale)
+    }
+    // Mount only: later changes go through the setter / storage sync.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const setShowWelcomeQuickActions = useCallback((on: boolean) => {
     setShowWelcomeQuickActionsState(on)
     persist(STORAGE_KEY_WELCOME_QUICK_ACTIONS, on ? "1" : "0")
@@ -818,6 +900,9 @@ export function AppearanceProvider({
   const zoomInShortcut = shortcuts.zoom_in
   const zoomOutShortcut = shortcuts.zoom_out
   const zoomResetShortcut = shortcuts.zoom_reset
+  const chatTextZoomInShortcut = shortcuts.chat_text_zoom_in
+  const chatTextZoomOutShortcut = shortcuts.chat_text_zoom_out
+  const chatTextZoomResetShortcut = shortcuts.chat_text_zoom_reset
   useEffect(() => {
     if (!toggleCustomStyleShortcut) return
     const onKeyDown = (event: KeyboardEvent) => {
@@ -831,20 +916,38 @@ export function AppearanceProvider({
     return () => window.removeEventListener("keydown", onKeyDown, true)
   }, [toggleCustomStyleShortcut, customStyleSuspended, setCustomStyleSuspended])
 
-  // Same levels as Settings → Window zoom. Capture-phase so the webview
-  // does not eat Ctrl/Cmd +/- as its own page zoom.
+  // Same levels as Settings → Window zoom (and Chat text size, with Shift).
+  // Capture-phase so the webview does not eat Ctrl/Cmd +/- as its own page
+  // zoom. One listener for both families: the matcher already hands a press to
+  // exactly one of them (a Shift binding outranks the window zoom's
+  // surplus-Shift tolerance), and the checks below apply to both alike.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.isComposing) return
       if (isShortcutRecorderArmed()) return
-      // Ctrl+- and Ctrl+= carry shell meaning inside the terminal, so decline
-      // there. Cmd+- does not, so on macOS the terminal keeps zooming.
+      // Ctrl+- and Ctrl+= carry shell meaning inside the terminal (and so do
+      // their Shift forms: Ctrl+_ is readline's undo), so decline there.
+      // Cmd+- does not, so on macOS the terminal keeps zooming.
       if (
         event.ctrlKey &&
         !event.metaKey &&
         event.target instanceof Element &&
         event.target.closest('[data-terminal-panel-region="true"]')
       ) {
+        return
+      }
+
+      const chatAction = resolveChatTextZoomAction(event, {
+        chat_text_zoom_in: chatTextZoomInShortcut,
+        chat_text_zoom_out: chatTextZoomOutShortcut,
+        chat_text_zoom_reset: chatTextZoomResetShortcut,
+      })
+      if (chatAction) {
+        // Repeats included, like the window zoom: a held key walks the rungs.
+        event.preventDefault()
+        stepChatTextScaleBy(
+          chatAction === "in" ? 1 : chatAction === "out" ? -1 : 0
+        )
         return
       }
 
@@ -877,6 +980,10 @@ export function AppearanceProvider({
     zoomInShortcut,
     zoomOutShortcut,
     zoomResetShortcut,
+    stepChatTextScaleBy,
+    chatTextZoomInShortcut,
+    chatTextZoomOutShortcut,
+    chatTextZoomResetShortcut,
   ])
 
   // 跨标签页同步：用户在另一个窗口改了设置时，本窗口实时跟进
@@ -947,6 +1054,16 @@ export function AppearanceProvider({
           setZoomLevelState(zoom)
           document.documentElement.style.fontSize = `${(16 * zoom) / 100}px`
           syncTrafficLightPosition(zoom)
+        }
+      }
+      // Another window changed the chat text size (or Settings did). A removed
+      // key (null) is 100%, same as a fresh profile.
+      if (e.key === STORAGE_KEY_CHAT_TEXT_SCALE) {
+        const level = normalizeChatTextScale(e.newValue)
+        if (chatTextScaleRef.current !== level) {
+          chatTextScaleRef.current = level
+          setChatTextScaleState(level)
+          applyChatTextScaleToDom(level)
         }
       }
       // "0" 是合法值，故不做 newValue 真值判断，交给 readBool 处理 null→默认。
@@ -1048,6 +1165,7 @@ export function AppearanceProvider({
     reloadWorkspaceBackgroundImage,
     resetCustomThemeBaseline,
     resetCustomCssBaseline,
+    applyChatTextScaleToDom,
   ])
 
   return (
@@ -1057,6 +1175,9 @@ export function AppearanceProvider({
         setThemeColor,
         zoomLevel,
         setZoomLevel,
+        chatTextScale,
+        setChatTextScale,
+        chatTextScaleNotice,
         showWelcomeQuickActions,
         setShowWelcomeQuickActions,
         uiFont,

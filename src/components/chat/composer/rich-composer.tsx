@@ -17,6 +17,7 @@ import { EditorContent, useEditor } from "@tiptap/react"
 import { exitSuggestion } from "@tiptap/suggestion"
 
 import type { HistoryDirection } from "@/lib/composer-history"
+import { CHAT_TEXT_SCOPE_CLASS } from "@/lib/chat-text-scale"
 import { CONTINUE_SHORTCUT } from "@/lib/continue-turn"
 import { isImeCompositionKey } from "@/lib/ime-composition"
 import {
@@ -114,6 +115,13 @@ export interface RichComposerProps {
   className?: string
   /** Inline style for the outer wrapper (e.g. max-height). */
   style?: CSSProperties
+  /**
+   * Size the typed text with the chat text size (Settings → Appearance), as
+   * the chat composer does. Only the editable text: the `@` panel and the
+   * host's action row stay chrome. Off for composers that are not a chat
+   * (task and automation editors).
+   */
+  followChatTextSize?: boolean
   /**
    * Fires on every document change with the serialized plain text. Serialization
    * runs once per keystroke *only when a handler is attached* (the call is
@@ -259,6 +267,7 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(
       ariaLabel,
       className,
       style,
+      followChatTextSize = false,
       onChange,
       onSubmit,
       onFocus,
@@ -727,7 +736,10 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(
             equivalent for. */}
         <EditorContent
           editor={editor}
-          className="codeg-composer-scroll flex min-h-0 grow flex-col overflow-y-auto px-3 py-2 text-base md:text-sm"
+          className={cn(
+            "codeg-composer-scroll flex min-h-0 grow flex-col overflow-y-auto px-3 py-2 text-base md:text-sm",
+            followChatTextSize && CHAT_TEXT_SCOPE_CLASS
+          )}
         />
         {referenceSearch && mentionState && (
           <SuggestionPopup

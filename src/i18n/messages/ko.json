@@ -148,10 +148,19 @@
     },
     "zoomLevel": {
       "sectionTitle": "창 확대/축소",
-      "sectionDescription": "전체 인터페이스를 확대하거나 축소합니다. 즉시 적용되며 장치별로 저장됩니다. ⌘/Ctrl +와 -는 이 메뉴와 같은 단계로 확대/축소합니다(⌘/Ctrl 0은 100%로 되돌립니다).",
+      "sectionDescription": "전체 인터페이스를 확대하거나 축소합니다. 즉시 적용되며 장치별로 저장됩니다. ⌘/Ctrl =와 -는 이 메뉴와 같은 단계로 확대/축소합니다(⌘/Ctrl 0은 100%로 되돌립니다).",
       "placeholder": "확대/축소 단계 선택",
       "default": "기본값",
       "current": "현재 확대/축소: {zoom}%"
+    },
+    "chatTextSize": {
+      "sectionTitle": "채팅 글자 크기",
+      "sectionDescription": "대화 텍스트만 확대/축소합니다: 메시지, 코드 블록, 도구 출력, 내가 보낸 메시지와 입력창. 사이드바, 탭, 기타 패널은 창 확대/축소만 따릅니다. 모든 대화에 적용되며 장치별로 저장됩니다. ⌘/Ctrl Shift =와 Shift -로 이 단계를 이동합니다(⌘/Ctrl Shift 0은 100%로 되돌립니다).",
+      "placeholder": "채팅 글자 크기 선택",
+      "default": "기본값",
+      "current": "현재 채팅 글자 크기: {percent}%",
+      "reset": "초기화",
+      "toast": "채팅 글자 {percent}%"
     },
     "fonts": {
       "sectionTitle": "글꼴",
@@ -572,6 +581,18 @@
       "zoom_reset": {
         "title": "확대/축소 초기화",
         "description": "창 확대/축소를 100%로 되돌립니다"
+      },
+      "chat_text_zoom_in": {
+        "title": "채팅 글자 크게",
+        "description": "창은 그대로 두고 대화 텍스트를 한 단계 크게 만듭니다"
+      },
+      "chat_text_zoom_out": {
+        "title": "채팅 글자 작게",
+        "description": "창은 그대로 두고 대화 텍스트를 한 단계 작게 만듭니다"
+      },
+      "chat_text_zoom_reset": {
+        "title": "채팅 글자 크기 초기화",
+        "description": "대화 텍스트를 100%로 되돌립니다"
       }
     }
   },
