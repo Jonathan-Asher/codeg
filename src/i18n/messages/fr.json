@@ -148,10 +148,19 @@
     },
     "zoomLevel": {
       "sectionTitle": "Zoom de la fenêtre",
-      "sectionDescription": "Met à l'échelle toute l'interface. S'applique immédiatement et est enregistré par appareil. ⌘/Ctrl + et - parcourent les mêmes niveaux de zoom que ce menu (⌘/Ctrl 0 rétablit 100%).",
+      "sectionDescription": "Met à l'échelle toute l'interface. S'applique immédiatement et est enregistré par appareil. ⌘/Ctrl = et - parcourent les mêmes niveaux de zoom que ce menu (⌘/Ctrl 0 rétablit 100%).",
       "placeholder": "Sélectionnez le niveau de zoom",
       "default": "Par défaut",
       "current": "Zoom actuel : {zoom}%"
+    },
+    "chatTextSize": {
+      "sectionTitle": "Taille du texte du chat",
+      "sectionDescription": "Met à l'échelle uniquement le texte de la conversation : messages, blocs de code, sorties d'outils, vos propres messages et la zone de saisie. La barre latérale, les onglets et les autres panneaux ne suivent que le zoom de la fenêtre. S'applique à toutes les conversations et est enregistré par appareil. ⌘/Ctrl Maj = et Maj - parcourent ces tailles (⌘/Ctrl Maj 0 rétablit 100%).",
+      "placeholder": "Sélectionnez la taille du texte du chat",
+      "default": "Par défaut",
+      "current": "Taille actuelle du texte du chat : {percent}%",
+      "reset": "Réinitialiser",
+      "toast": "Texte du chat {percent}%"
     },
     "fonts": {
       "sectionTitle": "Polices",
@@ -572,6 +581,18 @@
       "zoom_reset": {
         "title": "Réinitialiser le zoom",
         "description": "Remet le zoom de la fenêtre à 100%"
+      },
+      "chat_text_zoom_in": {
+        "title": "Agrandir le texte du chat",
+        "description": "Agrandit d'un cran le texte de la conversation, sans zoomer la fenêtre"
+      },
+      "chat_text_zoom_out": {
+        "title": "Réduire le texte du chat",
+        "description": "Réduit d'un cran le texte de la conversation, sans zoomer la fenêtre"
+      },
+      "chat_text_zoom_reset": {
+        "title": "Réinitialiser la taille du texte du chat",
+        "description": "Remet le texte de la conversation à 100%"
       }
     }
   },

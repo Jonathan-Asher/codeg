@@ -26,7 +26,9 @@ import { PermissionDialog } from "@/components/chat/permission-dialog"
 import { Button } from "@/components/ui/button"
 import { useRemoteConnection } from "@/contexts/remote-connection-context"
 import { useAcpAgents } from "@/hooks/use-acp-agents"
+import { useChatTextScale } from "@/hooks/use-appearance"
 import { useFeedbackEnabled } from "@/hooks/use-feedback-enabled"
+import { CHAT_TEXT_SCOPE_CLASS } from "@/lib/chat-text-scale"
 import { getAgentLabel } from "@/lib/custom-agents"
 import {
   hideQuickAskWindow,
@@ -316,12 +318,14 @@ export function QuickAskWindow() {
     !qa.starting &&
     !attach.hasUploadingImage
 
+  // Re-fit on a chat text size change too, or the box keeps the old height.
+  const { chatTextScale } = useChatTextScale()
   useEffect(() => {
     const el = inputRef.current
     if (!el) return
     el.style.height = "auto"
     el.style.height = `${Math.min(el.scrollHeight, INPUT_MAX_HEIGHT_PX)}px`
-  }, [input])
+  }, [input, chatTextScale])
 
   // Each time the window is shown: focus the question box and refresh what
   // the pickers offer.
@@ -662,7 +666,13 @@ export function QuickAskWindow() {
                   void submit()
                 }
               }}
-              className="min-h-6 flex-1 resize-none bg-transparent py-0.5 text-sm leading-6 outline-none placeholder:text-muted-foreground"
+              // Follows the chat text size like the thread above it. The line
+              // height is a ratio (24px at 14px, as `leading-6` was) so it
+              // grows with the text instead of clipping it.
+              className={cn(
+                CHAT_TEXT_SCOPE_CLASS,
+                "min-h-6 flex-1 resize-none bg-transparent py-0.5 text-sm leading-[1.7143] outline-none placeholder:text-muted-foreground"
+              )}
               data-testid="qa-input"
             />
             {streaming ? (

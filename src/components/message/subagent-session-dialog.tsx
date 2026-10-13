@@ -44,6 +44,7 @@ import {
   type AdaptedMessage,
 } from "@/lib/adapters/ai-elements-adapter"
 import { getConversation } from "@/lib/api"
+import { CHAT_TEXT_SCOPE_CLASS } from "@/lib/chat-text-scale"
 import { usePageHandoffName } from "@/lib/browser/use-page-handoff-name"
 import { toolStatusUnsettled } from "@/lib/tool-call-lifecycle"
 import type { AgentType, MessageTurn } from "@/lib/types"
@@ -232,7 +233,8 @@ export function SubagentSessionDialog({
               {error}
             </p>
           ) : messages && messages.length > 0 ? (
-            <div className="flex flex-col gap-4">
+            // A transcript like any other, so it follows the chat text size.
+            <div className={cn(CHAT_TEXT_SCOPE_CLASS, "flex flex-col gap-4")}>
               {messages.map((message, i) => (
                 <div
                   key={`${message.id ?? "turn"}-${i}`}

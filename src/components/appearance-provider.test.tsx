@@ -2,11 +2,16 @@ import { act, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AppearanceProvider } from "./appearance-provider"
-import { useCustomStyle } from "@/hooks/use-appearance"
+import { useChatTextScale, useCustomStyle } from "@/hooks/use-appearance"
 import {
   STORAGE_KEY_CUSTOM_THEME,
   STORAGE_KEY_ZOOM_LEVEL,
 } from "@/lib/appearance-script"
+import {
+  CHAT_TEXT_SCALE_PROPERTY,
+  CHAT_TEXT_SCALE_WILL_CHANGE_EVENT,
+  STORAGE_KEY_CHAT_TEXT_SCALE,
+} from "@/lib/chat-text-scale"
 
 function Probe() {
   const { setCustomThemeToken } = useCustomStyle()
@@ -229,5 +234,188 @@ describe("window zoom keys", () => {
     })
 
     expect(currentZoomPx()).toBe("16px")
+  })
+})
+
+describe("chat text size keys", () => {
+  function scaleProperty(): string {
+    return document.documentElement.style.getPropertyValue(
+      CHAT_TEXT_SCALE_PROPERTY
+    )
+  }
+
+  function keydown(
+    key: string,
+    init: KeyboardEventInit = {},
+    target: EventTarget = window
+  ) {
+    const event = new KeyboardEvent("keydown", {
+      key,
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+      ...init,
+    })
+    target.dispatchEvent(event)
+    return event
+  }
+
+  /** US layout: Shift+= reports "+", Shift+- "_", Shift+0 ")". */
+  const enlarge = (init: KeyboardEventInit = {}) =>
+    keydown("+", { shiftKey: true, code: "Equal", ...init })
+  const shrink = () => keydown("_", { shiftKey: true, code: "Minus" })
+  const reset = () => keydown(")", { shiftKey: true, code: "Digit0" })
+
+  function NoticeProbe() {
+    const { chatTextScale, chatTextScaleNotice } = useChatTextScale()
+    return (
+      <span data-testid="notice">
+        {`${chatTextScale}:${chatTextScaleNotice?.level ?? "-"}:${chatTextScaleNotice?.seq ?? 0}`}
+      </span>
+    )
+  }
+
+  function renderChat() {
+    render(
+      <AppearanceProvider>
+        <NoticeProbe />
+        <div data-terminal-panel-region="true">
+          <span data-testid="terminal-child">term</span>
+        </div>
+      </AppearanceProvider>
+    )
+  }
+
+  it("enlarges the chat text and leaves the window zoom alone", () => {
+    document.documentElement.style.fontSize = "16px"
+    renderChat()
+
+    let event!: KeyboardEvent
+    act(() => {
+      event = enlarge()
+    })
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(scaleProperty()).toBe("1.1")
+    expect(localStorage.getItem(STORAGE_KEY_CHAT_TEXT_SCALE)).toBe("110")
+    expect(document.documentElement.style.fontSize).toBe("16px")
+    expect(localStorage.getItem(STORAGE_KEY_ZOOM_LEVEL)).toBeNull()
+  })
+
+  it("leaves Cmd+= to the window zoom", () => {
+    document.documentElement.style.fontSize = "16px"
+    renderChat()
+
+    act(() => {
+      keydown("=", { code: "Equal" })
+    })
+
+    expect(document.documentElement.style.fontSize).toBe("17.6px")
+    expect(scaleProperty()).toBe("")
+    expect(localStorage.getItem(STORAGE_KEY_CHAT_TEXT_SCALE)).toBeNull()
+  })
+
+  it("walks the rungs on a held key, shrinks and resets", () => {
+    renderChat()
+
+    act(() => {
+      enlarge()
+      enlarge({ repeat: true })
+      enlarge({ repeat: true })
+    })
+    expect(scaleProperty()).toBe("1.5")
+
+    act(() => {
+      shrink()
+    })
+    expect(scaleProperty()).toBe("1.25")
+
+    act(() => {
+      reset()
+    })
+    expect(scaleProperty()).toBe("")
+    expect(localStorage.getItem(STORAGE_KEY_CHAT_TEXT_SCALE)).toBe("100")
+  })
+
+  it("stops writing at the top rung but still announces the size", () => {
+    localStorage.setItem(STORAGE_KEY_CHAT_TEXT_SCALE, "200")
+    renderChat()
+    const setItem = vi.spyOn(Storage.prototype, "setItem")
+
+    act(() => {
+      enlarge()
+      enlarge({ repeat: true })
+    })
+
+    const writes = setItem.mock.calls.filter(
+      ([key]) => key === STORAGE_KEY_CHAT_TEXT_SCALE
+    )
+    expect(writes).toHaveLength(0)
+    expect(screen.getByTestId("notice").textContent).toBe("200:200:2")
+    setItem.mockRestore()
+  })
+
+  it("announces only key presses, not changes from elsewhere", () => {
+    renderChat()
+    expect(screen.getByTestId("notice").textContent).toBe("100:-:0")
+
+    act(() => {
+      enlarge()
+    })
+    expect(screen.getByTestId("notice").textContent).toBe("110:110:1")
+
+    act(() => {
+      localStorage.setItem(STORAGE_KEY_CHAT_TEXT_SCALE, "150")
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: STORAGE_KEY_CHAT_TEXT_SCALE,
+          newValue: "150",
+        })
+      )
+    })
+    expect(scaleProperty()).toBe("1.5")
+    expect(screen.getByTestId("notice").textContent).toBe("150:110:1")
+  })
+
+  it("tells transcripts before it writes the new size", () => {
+    renderChat()
+    const seen: string[] = []
+    const onWillChange = () => seen.push(scaleProperty())
+    window.addEventListener(CHAT_TEXT_SCALE_WILL_CHANGE_EVENT, onWillChange)
+
+    act(() => {
+      enlarge()
+      enlarge()
+    })
+    window.removeEventListener(CHAT_TEXT_SCALE_WILL_CHANGE_EVENT, onWillChange)
+
+    // Each notice saw the size from before its own step.
+    expect(seen).toEqual(["", "1.1"])
+  })
+
+  it("declines Ctrl over the terminal, where Ctrl+_ means undo", () => {
+    renderChat()
+    const terminalChild = screen.getByTestId("terminal-child")
+
+    act(() => {
+      keydown(
+        "_",
+        { metaKey: false, ctrlKey: true, shiftKey: true, code: "Minus" },
+        terminalChild
+      )
+    })
+    expect(localStorage.getItem(STORAGE_KEY_CHAT_TEXT_SCALE)).toBeNull()
+
+    act(() => {
+      keydown("+", { shiftKey: true, code: "Equal" }, terminalChild)
+    })
+    expect(scaleProperty()).toBe("1.1")
+  })
+
+  it("snaps a stored off-rung size on mount", () => {
+    localStorage.setItem(STORAGE_KEY_CHAT_TEXT_SCALE, "130")
+    renderChat()
+    expect(scaleProperty()).toBe("1.25")
+    expect(screen.getByTestId("notice").textContent).toBe("125:-:0")
   })
 })

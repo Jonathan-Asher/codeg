@@ -9,6 +9,7 @@ import {
   MessageThreadContent,
   type MessageThreadContentProps,
 } from "@/components/ai-elements/message-thread"
+import { CHAT_TEXT_SCALE_WILL_CHANGE_EVENT } from "@/lib/chat-text-scale"
 import { cn } from "@/lib/utils"
 import {
   MessageScrollProvider,
@@ -89,6 +90,48 @@ interface VirtualizedMessageThreadProps<T> {
   prependScopeKey?: string | number
 }
 
+/** Frames over which a chat-text-size scroll anchor is re-applied. */
+const ANCHOR_RESTORE_FRAMES = 6
+
+export interface ScrollAnchor {
+  /** Virtual index of the row under the viewport's top edge. */
+  index: number
+  /** How far into that row the top edge sits, 0..1 of its height. */
+  fraction: number
+}
+
+type AnchorHandle = Pick<
+  VirtualizerHandle,
+  | "scrollOffset"
+  | "findItemIndex"
+  | "getItemOffset"
+  | "getItemSize"
+  | "scrollTo"
+>
+
+/** Exported for unit tests. */
+export function captureScrollAnchor(handle: AnchorHandle): ScrollAnchor | null {
+  const offset = handle.scrollOffset
+  const index = handle.findItemIndex(offset)
+  if (index < 0) return null
+  const size = handle.getItemSize(index)
+  const start = handle.getItemOffset(index)
+  const fraction =
+    size > 0 ? Math.min(1, Math.max(0, (offset - start) / size)) : 0
+  return { index, fraction }
+}
+
+/** Exported for unit tests. */
+export function restoreScrollAnchor(
+  handle: AnchorHandle,
+  anchor: ScrollAnchor
+): void {
+  const target =
+    handle.getItemOffset(anchor.index) +
+    anchor.fraction * handle.getItemSize(anchor.index)
+  if (Math.abs(handle.scrollOffset - target) >= 1) handle.scrollTo(target)
+}
+
 /**
  * `shift` decision for one render: same scope, epoch advanced. Exported for
  * unit tests.
@@ -121,7 +164,7 @@ function VirtualizedMessageThreadImpl<T>({
   prependEpoch = 0,
   prependScopeKey,
 }: VirtualizedMessageThreadProps<T>) {
-  const { scrollRef } = useStickToBottomContext()
+  const { scrollRef, state: stickState } = useStickToBottomContext()
   const virtualizerHandleRef = useRef<VirtualizerHandle>(null)
 
   // The loader row occupies virtua index 0 when present, shifting every data
@@ -217,6 +260,51 @@ function VirtualizedMessageThreadImpl<T>({
       s.onLoadOlder()
     }
   }, [])
+
+  // Keep the reader's place across a chat text size change. Every row changes
+  // height at once; virtua compensates for rows wholly above the viewport, but
+  // the row under the top edge keeps its top fixed while it grows — and a long
+  // reply can be thousands of pixels tall, so the line being read would slide
+  // away by a quarter of its offset into that row. Instead hold the same
+  // FRACTION of that row at the top edge. A thread pinned to the bottom is left
+  // to stick-to-bottom, which follows the content resize on its own.
+  useEffect(() => {
+    let frame = 0
+    let pending: ScrollAnchor | null = null
+    const onWillChange = () => {
+      const handle = virtualizerHandleRef.current
+      // `?.`: test doubles of the stick-to-bottom context carry no state.
+      if (!handle || stickState?.isAtBottom) return
+      // A tab in the background is not laid out; it has no reading position
+      // to keep, and scrolling it from stale sizes would only misplace it.
+      if (!scrollRef.current?.clientHeight) return
+      // A burst (a held key) keeps the anchor taken before its first step: the
+      // rows have not settled since, so a fresh reading would be off.
+      const anchor = pending ?? captureScrollAnchor(handle)
+      if (!anchor) return
+      pending = anchor
+      cancelAnimationFrame(frame)
+      // Rows re-measure through virtua's ResizeObserver after the next layout,
+      // and unmounted rows only once they mount, so re-apply for a few frames
+      // until the measured sizes settle.
+      let remaining = ANCHOR_RESTORE_FRAMES
+      const restore = () => {
+        restoreScrollAnchor(handle, anchor)
+        remaining -= 1
+        if (remaining > 0) frame = requestAnimationFrame(restore)
+        else pending = null
+      }
+      frame = requestAnimationFrame(restore)
+    }
+    window.addEventListener(CHAT_TEXT_SCALE_WILL_CHANGE_EVENT, onWillChange)
+    return () => {
+      window.removeEventListener(
+        CHAT_TEXT_SCALE_WILL_CHANGE_EVENT,
+        onWillChange
+      )
+      cancelAnimationFrame(frame)
+    }
+  }, [scrollRef, stickState])
 
   // Make the scroll viewport focusable so the browser's native keyboard
   // scrolling (Arrow keys, PageUp/PageDown, Home/End, Space) works — matching

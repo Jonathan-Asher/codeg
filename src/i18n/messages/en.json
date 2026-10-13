@@ -148,10 +148,19 @@
     },
     "zoomLevel": {
       "sectionTitle": "Window zoom",
-      "sectionDescription": "Scale the entire interface. Applies immediately and persists per device. ⌘/Ctrl + and - move through the same zoom levels as this menu (⌘/Ctrl 0 resets to 100%).",
+      "sectionDescription": "Scale the entire interface. Applies immediately and persists per device. ⌘/Ctrl = and - move through the same zoom levels as this menu (⌘/Ctrl 0 resets to 100%).",
       "placeholder": "Select zoom level",
       "default": "Default",
       "current": "Current zoom: {zoom}%"
+    },
+    "chatTextSize": {
+      "sectionTitle": "Chat text size",
+      "sectionDescription": "Scale only the conversation text: messages, code blocks, tool output, your own messages and the composer. The sidebar, tabs and other panels keep the window zoom. Applies to every conversation and persists per device. ⌘/Ctrl Shift = and Shift - step through these sizes (⌘/Ctrl Shift 0 resets to 100%).",
+      "placeholder": "Select chat text size",
+      "default": "Default",
+      "current": "Current chat text size: {percent}%",
+      "reset": "Reset",
+      "toast": "Chat text {percent}%"
     },
     "fonts": {
       "sectionTitle": "Fonts",
@@ -572,6 +581,18 @@
       "zoom_reset": {
         "title": "Reset zoom",
         "description": "Set the window zoom back to 100%"
+      },
+      "chat_text_zoom_in": {
+        "title": "Enlarge chat text",
+        "description": "Make the conversation text one step larger, without zooming the window"
+      },
+      "chat_text_zoom_out": {
+        "title": "Shrink chat text",
+        "description": "Make the conversation text one step smaller, without zooming the window"
+      },
+      "chat_text_zoom_reset": {
+        "title": "Reset chat text size",
+        "description": "Set the conversation text back to 100%"
       }
     }
   },

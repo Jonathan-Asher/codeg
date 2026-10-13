@@ -148,10 +148,19 @@
     },
     "zoomLevel": {
       "sectionTitle": "視窗縮放",
-      "sectionDescription": "整體放大或縮小介面，立即生效，依裝置分別儲存。⌘/Ctrl + 和 - 依與此選單相同的檔位調節（⌘/Ctrl 0 恢復為 100%）。",
+      "sectionDescription": "整體放大或縮小介面，立即生效，依裝置分別儲存。⌘/Ctrl = 和 - 依與此選單相同的檔位調節（⌘/Ctrl 0 恢復為 100%）。",
       "placeholder": "請選擇縮放檔位",
       "default": "預設",
       "current": "目前縮放：{zoom}%"
+    },
+    "chatTextSize": {
+      "sectionTitle": "聊天文字大小",
+      "sectionDescription": "只縮放對話文字：訊息、程式碼區塊、工具輸出、你送出的訊息和輸入框。側欄、分頁和其他面板仍只跟隨視窗縮放。套用於所有對話，依裝置分別儲存。⌘/Ctrl Shift = 和 Shift - 依這些檔位調節（⌘/Ctrl Shift 0 恢復為 100%）。",
+      "placeholder": "請選擇聊天文字大小",
+      "default": "預設",
+      "current": "目前聊天文字大小：{percent}%",
+      "reset": "重設",
+      "toast": "聊天文字 {percent}%"
     },
     "fonts": {
       "sectionTitle": "字型",
@@ -572,6 +581,18 @@
       "zoom_reset": {
         "title": "重設縮放",
         "description": "把視窗縮放恢復為 100%"
+      },
+      "chat_text_zoom_in": {
+        "title": "放大聊天文字",
+        "description": "把對話文字調大一檔，不縮放視窗"
+      },
+      "chat_text_zoom_out": {
+        "title": "縮小聊天文字",
+        "description": "把對話文字調小一檔，不縮放視窗"
+      },
+      "chat_text_zoom_reset": {
+        "title": "重設聊天文字大小",
+        "description": "把對話文字恢復為 100%"
       }
     }
   },

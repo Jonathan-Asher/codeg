@@ -9,6 +9,10 @@ import {
   STORAGE_KEY_THEME_COLOR,
   STORAGE_KEY_ZOOM_LEVEL,
 } from "./appearance-script"
+import {
+  CHAT_TEXT_SCALE_PROPERTY,
+  STORAGE_KEY_CHAT_TEXT_SCALE,
+} from "./chat-text-scale"
 import { CUSTOM_CSS_ELEMENT_ID } from "./custom-style"
 
 /**
@@ -222,5 +226,36 @@ describe("APPEARANCE_INIT_SCRIPT — escape hatches", () => {
     expect(document.documentElement.style.getPropertyValue("--primary")).toBe(
       "#111111"
     )
+  })
+})
+
+describe("APPEARANCE_INIT_SCRIPT — chat text size", () => {
+  const chatScale = () =>
+    document.documentElement.style.getPropertyValue(CHAT_TEXT_SCALE_PROPERTY)
+
+  it("applies a stored rung before first paint", () => {
+    localStorage.setItem(STORAGE_KEY_CHAT_TEXT_SCALE, "125")
+    runInitScript()
+    expect(chatScale()).toBe("1.25")
+  })
+
+  it("writes nothing for 100%, a fresh profile, or an off-rung value", () => {
+    for (const stored of ["100", null, "130", "huge"]) {
+      resetDocument()
+      localStorage.clear()
+      if (stored !== null) {
+        localStorage.setItem(STORAGE_KEY_CHAT_TEXT_SCALE, stored)
+      }
+      runInitScript()
+      expect(chatScale(), String(stored)).toBe("")
+    }
+  })
+
+  it("leaves the window zoom to its own key", () => {
+    localStorage.setItem(STORAGE_KEY_CHAT_TEXT_SCALE, "200")
+    localStorage.setItem(STORAGE_KEY_ZOOM_LEVEL, "110")
+    runInitScript()
+    expect(chatScale()).toBe("2")
+    expect(document.documentElement.style.fontSize).toBe("17.6px")
   })
 })

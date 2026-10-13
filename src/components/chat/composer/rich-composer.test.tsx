@@ -31,6 +31,22 @@ describe("RichComposer", () => {
     ).not.toBeNull()
   })
 
+  it("sizes the typed text with the chat text size only when asked", async () => {
+    // The chat composer opts in; task and automation editors do not. Only the
+    // editable area joins the scope, not the wrapper the `@` panel lives in.
+    const chat = await mount({ followChatTextSize: true })
+    const scoped = chat.container.querySelectorAll(".chat-text-scope")
+    expect(scoped).toHaveLength(1)
+    expect(scoped[0]).toContainElement(
+      chat.container.querySelector('[role="textbox"]') as HTMLElement
+    )
+    expect(chat.container.firstElementChild).not.toHaveClass("chat-text-scope")
+    chat.unmount()
+
+    const plain = await mount()
+    expect(plain.container.querySelector(".chat-text-scope")).toBeNull()
+  })
+
   it("exposes an accessible multiline textbox", async () => {
     const { container } = await mount({ ariaLabel: "Message" })
     const textbox = container.querySelector('[role="textbox"]')

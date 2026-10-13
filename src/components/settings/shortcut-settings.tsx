@@ -68,7 +68,9 @@ export function ShortcutSettings() {
       if (!shortcut) return
 
       // Matcher semantics, not string equality: two different strings can fire
-      // on the same event (`mod+=` and `mod+shift++` both match Ctrl/Cmd+Shift+=).
+      // on the same event (`mod+=` and `mod++` are one chord). A binding that
+      // only reaches the press through a tolerance yields to the one that
+      // spells it, so `mod+=` and `mod+shift+=` coexist.
       const conflict = SHORTCUT_DEFINITIONS.find(
         (definition) =>
           definition.id !== recordingAction &&

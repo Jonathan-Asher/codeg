@@ -148,10 +148,19 @@
     },
     "zoomLevel": {
       "sectionTitle": "ウィンドウズーム",
-      "sectionDescription": "インターフェイス全体を拡大・縮小します。すぐに反映され、デバイスごとに保存されます。⌘/Ctrl + と - で、このメニューと同じ段階で拡大縮小します（⌘/Ctrl 0 で 100% に戻します）。",
+      "sectionDescription": "インターフェイス全体を拡大・縮小します。すぐに反映され、デバイスごとに保存されます。⌘/Ctrl = と - で、このメニューと同じ段階で拡大縮小します（⌘/Ctrl 0 で 100% に戻します）。",
       "placeholder": "ズームレベルを選択",
       "default": "デフォルト",
       "current": "現在のズーム：{zoom}%"
+    },
+    "chatTextSize": {
+      "sectionTitle": "チャットの文字サイズ",
+      "sectionDescription": "会話のテキストだけを拡大・縮小します（メッセージ、コードブロック、ツール出力、自分のメッセージ、入力欄）。サイドバー、タブ、その他のパネルはウィンドウズームのままです。すべての会話に適用され、デバイスごとに保存されます。⌘/Ctrl Shift = と Shift - でこの段階を切り替えます（⌘/Ctrl Shift 0 で 100% に戻します）。",
+      "placeholder": "チャットの文字サイズを選択",
+      "default": "デフォルト",
+      "current": "現在のチャットの文字サイズ：{percent}%",
+      "reset": "リセット",
+      "toast": "チャットの文字 {percent}%"
     },
     "fonts": {
       "sectionTitle": "フォント",
@@ -572,6 +581,18 @@
       "zoom_reset": {
         "title": "ズームをリセット",
         "description": "ウィンドウのズームを 100% に戻します"
+      },
+      "chat_text_zoom_in": {
+        "title": "チャットの文字を拡大",
+        "description": "ウィンドウはそのままで、会話の文字を一段階大きくします"
+      },
+      "chat_text_zoom_out": {
+        "title": "チャットの文字を縮小",
+        "description": "ウィンドウはそのままで、会話の文字を一段階小さくします"
+      },
+      "chat_text_zoom_reset": {
+        "title": "チャットの文字サイズをリセット",
+        "description": "会話の文字を 100% に戻します"
       }
     }
   },
