@@ -1625,7 +1625,8 @@
         "medium": "中",
         "high": "高",
         "minimal": "极低",
-        "xhigh": "极高"
+        "xhigh": "极高",
+        "max": "最大"
       },
       "apiKeyLabel": "API Key",
       "apiKeyHint": "为所选提供方写入 ~/.pi/agent/auth.json。",

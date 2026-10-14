@@ -6440,7 +6440,7 @@ pub struct PiModelReasoningSpec {
 /// pi's fixed thinking-level vocabulary (`EXTENDED_THINKING_LEVELS` in pi-ai). A name
 /// outside this list is rejected by pi-acp with `invalidParams`, so it must never reach
 /// `models.json`.
-const PI_THINKING_LEVELS: [&str; 6] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+const PI_THINKING_LEVELS: [&str; 7] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 /// Read a JSON file into an owned object map, returning an empty map when the
 /// file is absent, unreadable, or does not parse to a JSON object. Pi's native
@@ -15649,7 +15649,7 @@ base_url = \"https://example.test/v1\"
         assert!(models[0].get("thinkingLevelMap").is_none());
     }
 
-    /// pi-acp rejects a level name outside pi's fixed six with `invalidParams`, so
+    /// pi-acp rejects a level name outside pi's fixed seven with `invalidParams`, so
     /// one must never reach disk.
     #[test]
     fn pi_custom_model_filters_levels_pi_does_not_know() {
@@ -15667,6 +15667,34 @@ base_url = \"https://example.test/v1\"
         let models = pi_models_of(&entry);
         let map = models[0]["thinkingLevelMap"].as_object().unwrap();
         assert!(!map.contains_key("ultra"));
+        assert_eq!(map["high"], "high");
+    }
+
+    /// `max` is a real pi level (GLM-5.x, DeepSeek, adaptive Claude); saving a model
+    /// from the panel must keep it, holes and all.
+    #[test]
+    fn pi_custom_model_keeps_the_max_level() {
+        let mut entry = serde_json::Map::new();
+
+        apply_pi_custom_model(
+            &mut entry,
+            "zai-org/GLM-5.3",
+            Some(&pi_reasoning_spec(
+                true,
+                &[
+                    ("off", None),
+                    ("medium", None),
+                    ("high", Some("high")),
+                    ("xhigh", None),
+                    ("max", Some("max")),
+                ],
+            )),
+        );
+
+        let models = pi_models_of(&entry);
+        let map = models[0]["thinkingLevelMap"].as_object().unwrap();
+        assert_eq!(map["max"], "max");
+        assert!(map["xhigh"].is_null());
         assert_eq!(map["high"], "high");
     }
 

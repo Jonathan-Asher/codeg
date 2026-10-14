@@ -14,7 +14,7 @@ import {
  * whole feature exists to kill.
  */
 describe("levelsFromMap", () => {
-  it("offers everything but xhigh for an undeclared map", () => {
+  it("offers everything but xhigh and max for an undeclared map", () => {
     expect(levelsFromMap(undefined)).toEqual([
       "off",
       "minimal",
@@ -38,6 +38,26 @@ describe("levelsFromMap", () => {
     expect(levelsFromMap({ xhigh: null })).not.toContain("xhigh")
   })
 
+  it("needs an explicit entry before max appears", () => {
+    expect(levelsFromMap({})).not.toContain("max")
+    expect(levelsFromMap({ max: "max" })).toContain("max")
+    expect(levelsFromMap({ max: null })).not.toContain("max")
+  })
+
+  it("reads a GLM-style low/high/max declaration with holes", () => {
+    expect(
+      levelsFromMap({
+        off: null,
+        minimal: null,
+        low: "low",
+        medium: null,
+        high: "high",
+        xhigh: null,
+        max: "max",
+      })
+    ).toEqual(["low", "high", "max"])
+  })
+
   it("reads pi's own built-in gpt-5.5 declaration", () => {
     expect(
       levelsFromMap({ off: "none", xhigh: "xhigh", minimal: null })
@@ -52,11 +72,11 @@ describe("reasoningToMap", () => {
     expect(
       reasoningToMap({
         ...base,
-        levels: ["off", "minimal", "low", "medium", "high", "xhigh"],
+        levels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
       })
       // minimal/low/medium/high are omitted: absent already means "offered,
-      // sent verbatim". off and xhigh cannot be left to the default.
-    ).toEqual({ off: "none", xhigh: "xhigh" })
+      // sent verbatim". off, xhigh and max cannot be left to the default.
+    ).toEqual({ off: "none", xhigh: "xhigh", max: "max" })
   })
 
   it("pins every unchecked level to null and omits the checked ones", () => {
@@ -65,6 +85,7 @@ describe("reasoningToMap", () => {
       minimal: null,
       medium: null,
       xhigh: null,
+      max: null,
     })
   })
 
@@ -105,7 +126,12 @@ describe("round trip", () => {
   const cases: Record<string, PiModelReasoning> = {
     "full set": {
       enabled: true,
-      levels: ["off", "minimal", "low", "medium", "high", "xhigh"],
+      levels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+      wireValues: {},
+    },
+    "GLM low/high/max": {
+      enabled: true,
+      levels: ["low", "high", "max"],
       wireValues: {},
     },
     "narrow set": {
@@ -158,8 +184,12 @@ describe("reasoningFromModel", () => {
 
   it("folds away a wire value that restates the default", () => {
     expect(
-      reasoningFromModel(true, { off: "none", low: "low", xhigh: "xhigh" })
-        .wireValues
+      reasoningFromModel(true, {
+        off: "none",
+        low: "low",
+        xhigh: "xhigh",
+        max: "max",
+      }).wireValues
     ).toEqual({})
   })
 })
