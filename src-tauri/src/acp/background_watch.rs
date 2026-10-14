@@ -1654,12 +1654,31 @@ impl WatchState {
                 "[bg-watch] out-of-turn initiator: {:?}",
                 initiator_text.chars().take(60).collect::<String>()
             );
+            let origin_task_id = task_notification_origin_id(initiator_text);
             let rotate = self
                 .episode
                 .as_ref()
                 .is_some_and(|e| e.acc.messages.len() >= MAX_EPISODE_MESSAGES);
-            if matches!(self.mode, Mode::Foreground) || self.episode.is_none() || rotate {
-                if rotate {
+            // A turn started by a different initiator than the open episode's
+            // own gets an episode of its own. The held-turn suppression filter
+            // in `tick()` judges every turn by its EPISODE's origin, so a turn
+            // folded into the episode of a held turn's follow-up inherited
+            // that follow-up's suppression: once a sub-agent's notification
+            // had been answered inside a held turn, every later out-of-turn
+            // turn (each monitor event, each cron fire) was dropped from the
+            // overlay until codeg's next prompt — the session view showed
+            // none of the agent's work. Consecutive turns from the same
+            // origin (a monitor's events, cron fires) still share one.
+            let new_origin = self
+                .episode
+                .as_ref()
+                .is_some_and(|e| e.origin_task_id != origin_task_id);
+            if matches!(self.mode, Mode::Foreground)
+                || self.episode.is_none()
+                || rotate
+                || new_origin
+            {
+                if rotate || new_origin {
                     self.collect_changed_turns(cwd, changed_turns);
                 }
                 // Any stable, strictly-increasing base works — turn ids only
@@ -1670,7 +1689,7 @@ impl WatchState {
                         self.file.clone().unwrap_or_else(|| PathBuf::from("")),
                     ),
                     emitted_hashes: HashMap::new(),
-                    origin_task_id: task_notification_origin_id(initiator_text),
+                    origin_task_id,
                 });
             }
             self.mode = Mode::Background;
@@ -4139,6 +4158,75 @@ mod tests {
 
         // Nothing changes on an idle tick.
         assert!(tick_now(&mut ws, &ledger).is_none());
+    }
+
+    /// The sequence behind a session whose out-of-turn work never showed
+    /// (2026-10-14, every surfacing logged `turns=0`): a sub-agent launched in
+    /// a turn #870 then held open notifies inside the hold (wire-rendered, so
+    /// its overlay copy is suppressed), and the agent arms a monitor there.
+    /// The turn ends normally. From then on each monitor event wakes the agent
+    /// for a turn of its own that nothing else renders — those must surface,
+    /// not inherit the held follow-up's suppression.
+    #[test]
+    fn turns_after_a_held_follow_up_are_not_suppressed_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_lines(&path, &[&agent_ack("agent1")]);
+        let ledger = PromptLedger::shared();
+        let mut ws = WatchState::with_file_for_test("s1", path.clone());
+        let _ = tick_prompting(&mut ws, &ledger);
+
+        // Inside the hold: the notification, the agent's reply, a monitor.
+        write_lines(
+            &path,
+            &[
+                &notification("agent1", "completed"),
+                &assistant_tool_use(
+                    "a1",
+                    "toolu_mon",
+                    "Monitor",
+                    r#"{"description":"main run: errors","timeout_ms":1800000}"#,
+                ),
+                &tool_result(
+                    "u-mon",
+                    "toolu_mon",
+                    r#","toolUseResult":{"taskId":"bq4s928n8","timeoutMs":1800000,"persistent":false}"#,
+                ),
+                &assistant_final("a2", "The full run has started.", "end_turn"),
+                &stop_hook_summary(),
+            ],
+        );
+        let (turns, ..) = unpack(tick_prompting(&mut ws, &ledger).expect("held follow-up"));
+        assert!(turns.is_empty(), "the held follow-up is on the wire: {turns:?}");
+
+        // The turn ends normally; a monitor event wakes the agent later.
+        write_lines(
+            &path,
+            &[
+                &monitor_event("bq4s928n8", "u-m1"),
+                &assistant_final("a3", "Progress: 56 of 584.", "end_turn"),
+                &stop_hook_summary(),
+            ],
+        );
+        let (turns, ..) = unpack(tick_now(&mut ws, &ledger).expect("monitor turn"));
+        assert_eq!(turns.len(), 1, "the agent's own turn must surface: {turns:?}");
+        assert!(serde_json::to_string(&turns[0]).unwrap().contains("Progress: 56 of 584."));
+
+        // And the next event's turn too.
+        write_lines(
+            &path,
+            &[
+                &monitor_event("bq4s928n8", "u-m2"),
+                &assistant_final("a4", "Progress: 392 of 584.", "end_turn"),
+            ],
+        );
+        let (turns, ..) = unpack(tick_now(&mut ws, &ledger).expect("next monitor turn"));
+        assert!(
+            turns
+                .iter()
+                .any(|t| serde_json::to_string(t).unwrap().contains("392 of 584")),
+            "{turns:?}"
+        );
     }
 
     #[test]
