@@ -134,6 +134,10 @@ pub fn build_router(
             post(handlers::attention::list_conversation_attention),
         )
         .route(
+            "/list_conversation_background",
+            post(handlers::attention::list_conversation_background),
+        )
+        .route(
             "/get_auto_resume_settings",
             post(handlers::auto_resume::get_auto_resume_settings),
         )

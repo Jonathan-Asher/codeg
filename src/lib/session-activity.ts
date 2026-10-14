@@ -2,6 +2,7 @@ import { waitingLimitPause } from "@/lib/limit-continue"
 import type {
   AttentionKind,
   ConnectionStatus,
+  ConversationBackground,
   ConversationTurnState,
   DbConversationSummary,
   LimitPause,
@@ -14,11 +15,14 @@ import type {
  * for a session that is working, one waiting for you, one idle for days and
  * one whose turn was killed.
  *
- * - `working`: a turn is in flight.
- * - `background`: a turn is in flight only because background work holds it
- *   open — the agent itself answered and is idle, and a message runs right
- *   away (see `lib/background-idle.ts`). Known only to a client holding the
- *   session's live connection.
+ * - `working`: a turn is in flight — one codeg sent, or one the agent runs by
+ *   itself after its background work woke it (a task notification, a cron
+ *   prompt), which the persisted `turn_state` never shows.
+ * - `background`: the agent is idle while its background work runs — a turn
+ *   held open only for background tasks (a message runs right away, see
+ *   `lib/background-idle.ts`), or tasks still running after the turn ended.
+ *   Known from this client's own live connection, or for any session from the
+ *   server's live status (`conversation-background-store`).
  * - `needs_you`: the agent is blocked on a permission, a question or a plan
  *   approval.
  * - `idle`: nothing is running.
@@ -104,6 +108,12 @@ export interface SessionActivityInputs {
    *  reads as `limit_paused` — below a turn running, blocked on the user, or
    *  this client's own connect state. */
   limitPause?: LimitPause | null
+  /** The server's live background status for the session
+   *  (`conversation-background-store`): background tasks running, the agent
+   *  working out of turn, a turn held open. Absent when there is none, and
+   *  always against a server that predates it — which then reads exactly as
+   *  before. */
+  background?: ConversationBackground | null
 }
 
 /**
@@ -120,6 +130,7 @@ export function deriveSessionActivity({
   connection,
   awaitingBackground,
   limitPause,
+  background,
 }: SessionActivityInputs): SessionActivity {
   // Blocked on the user outranks everything: the session IS mid-turn, but the
   // thing to know is that it can't continue without you — that includes a
@@ -135,41 +146,78 @@ export function deriveSessionActivity({
   // to go yet.
   if (connection === "failed") return "connect_failed"
   if (connection === "connecting") return "connecting"
+  // The agent is running a turn of its own — its background work woke it.
+  // No turn codeg sent is in flight, so neither the persisted turn state nor
+  // this client's connection knows; the server's live status does.
+  if (background?.out_of_turn) return "working"
   // A live connection sitting idle is first-hand proof that no turn is running,
   // so a persisted `running` that hasn't caught up yet doesn't count. It says
   // nothing about an interruption, though: a session resumed after one stays
   // interrupted until a turn is actually sent.
   const liveAndIdle = connectionStatus === "connected"
+  // The turn is held open only for background work (the server says so; this
+  // client either has no connection to it or its own hasn't caught up).
+  if (background?.held_open && !liveAndIdle) return "background"
+  const tasksRunning = (background?.task_count ?? 0) > 0
   if (turnState !== "running" && waitingLimitPause({ limit_pause: limitPause }))
     return "limit_paused"
   if (turnState === "interrupted") return "interrupted"
-  if (turnState === "running") return liveAndIdle ? "idle" : "working"
+  if (turnState === "running") {
+    if (!liveAndIdle) return "working"
+    return tasksRunning ? "background" : "idle"
+  }
   if (turnState === undefined && status === "in_progress" && !liveAndIdle) {
     // Server predates `turn_state`: fall back to what the sidebar always read.
     return "working"
   }
+  // The turn ended, the work it started didn't.
+  if (tasksRunning) return "background"
   return "idle"
 }
 
-/** A summary's activity from its own fields — no live connection known. */
+/** A summary's activity from its own fields — no live connection known.
+ *  `background` is the live store's value for the row, never the summary's
+ *  own fetch-time `background` field, which goes stale the moment it lands. */
 export function summaryActivity(
   summary: Pick<DbConversationSummary, "turn_state" | "status"> &
     Partial<Pick<DbConversationSummary, "limit_pause">>,
-  attention?: AttentionKind | null
+  attention?: AttentionKind | null,
+  background?: ConversationBackground | null
 ): SessionActivity {
   return deriveSessionActivity({
     attention,
     turnState: summary.turn_state,
     status: summary.status,
     limitPause: summary.limit_pause,
+    background,
   })
 }
 
+/** Whether the session has work in progress — a turn running (codeg's or one
+ *  the agent started by itself) or background tasks — ignoring whether it is
+ *  currently blocked on the user. What the sidebar's "running" counts count. */
+export function isSessionRunning(
+  summary: Pick<DbConversationSummary, "turn_state" | "status">,
+  background?: ConversationBackground | null
+): boolean {
+  const activity = summaryActivity(summary, null, background)
+  return activity === "working" || activity === "background"
+}
+
 /** Whether the conversation's latest turn is running, ignoring whether it is
- *  currently blocked on the user. What the sidebar's per-folder "running"
- *  count counts. */
+ *  currently blocked on the user. */
 export function isTurnRunning(
   summary: Pick<DbConversationSummary, "turn_state" | "status">
 ): boolean {
   return summaryActivity(summary) === "working"
+}
+
+/** How many background tasks to name for a session: this client's own
+ *  held-turn count when it has one (first-hand), else the server's. `0`
+ *  means "running, count unknown". */
+export function backgroundTaskTotal(
+  heldBackgroundTasks: number | null | undefined,
+  background: ConversationBackground | null | undefined
+): number {
+  return Math.max(heldBackgroundTasks ?? 0, background?.task_count ?? 0)
 }

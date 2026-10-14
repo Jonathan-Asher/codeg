@@ -60,6 +60,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::RwLock;
 
+use crate::acp::background_status::{clip_label, BackgroundTaskBrief};
 use crate::acp::session_state::{background_keepalive_max_age, SessionState};
 use crate::acp::session_title::publish_native_title;
 use crate::acp::types::{AcpEvent, BackgroundSettledInfo, ConnectionStatus};
@@ -74,7 +75,7 @@ use crate::parsers::claude::{
     CONTEXT_CONTINUATION_PREFIX,
 };
 use crate::parsers::truncate_str;
-use crate::web::event_bridge::{emit_with_state, EventEmitter};
+use crate::web::event_bridge::{emit_with_state, refresh_background_broadcast, EventEmitter};
 
 /// Poll cadence while background work is outstanding or the transcript moved
 /// recently — tight enough that a completed task surfaces within a beat.
@@ -569,6 +570,12 @@ async fn run_watch(
             }
             emit_with_state(&state, &emitter, event).await;
         }
+
+        // The session lists' background status can change with no event at
+        // all — an async-task row the adapter went quiet about ages out of
+        // the keep-alive window. This poll is already running for every
+        // Claude connection; one read-lock comparison per tick catches it.
+        refresh_background_broadcast(&state, &emitter).await;
     }
 }
 
@@ -576,7 +583,24 @@ async fn run_watch(
 struct TaskEntry {
     kind: &'static str,
     started_at: Instant,
+    /// The `description` the agent gave the launching tool call, when the
+    /// launch was read by this watch (see `WatchState::launch_labels`).
+    label: String,
 }
+
+/// How long an out-of-turn turn may go without a single transcript write
+/// before the watch stops reporting the agent as working. A live turn writes
+/// a record per model response and per tool result, so silence this long
+/// means the turn died without its end being written (the CLI crashed, the
+/// API call hung). Generous on purpose: a foreground tool can legitimately
+/// run for many minutes (a ten-minute `Bash`, a synchronous sub-agent, which
+/// writes only to its own sidechain file).
+const OUT_OF_TURN_STALE: Duration = Duration::from_secs(30 * 60);
+
+/// Launching tool calls whose labels are remembered until their ack lands.
+/// The ack follows its call within the same response, so a handful would do;
+/// the cap only bounds a pathological transcript.
+const LAUNCH_LABELS_CAP: usize = 64;
 
 /// The current out-of-turn episode: a contiguous run of transcript records
 /// not belonging to any codeg-sent prompt turn, assembled into turns via the
@@ -685,6 +709,22 @@ pub(crate) struct WatchState {
     turn_origin_task_ids: HashMap<String, Option<String>>,
     last_disk_activity: Option<Instant>,
     last_emitted_outstanding: Option<u32>,
+    /// Task ids (sorted) and the out-of-turn flag as last emitted. The task
+    /// LIST rides every event whole, so a swap — one task settling as another
+    /// launches, same count — must still emit. Both survive a re-arm (see
+    /// `rearm`) so the state the connection was last told is what the next
+    /// tick compares against.
+    last_emitted_task_ids: Vec<String>,
+    last_emitted_out_of_turn: bool,
+    /// `description` of recent tool calls that can launch background work
+    /// (`Agent`/`Task`, `Bash`), keyed by `tool_use_id`, until their launch ack
+    /// names the task. Bounded by [`LAUNCH_LABELS_CAP`].
+    launch_labels: HashMap<String, String>,
+    /// The agent is working on an out-of-turn turn right now: an out-of-turn
+    /// initiator opened it, and neither the model's final response
+    /// (`stop_reason` other than `tool_use`) nor the CLI's end-of-turn system
+    /// record has followed. See `track_out_of_turn`.
+    out_of_turn: bool,
     armed_logged: bool,
     /// Base of the most recently created episode's id namespace. Episode
     /// bases must be STRICTLY increasing: two episodes created while
@@ -750,6 +790,10 @@ impl WatchState {
             // so the first tick must not emit an accounting-only event for a
             // connection with no background work.
             last_emitted_outstanding: Some(0),
+            last_emitted_task_ids: Vec::new(),
+            last_emitted_out_of_turn: false,
+            launch_labels: HashMap::new(),
+            out_of_turn: false,
             armed_logged: false,
             last_episode_base: 0,
             epoch: None,
@@ -809,7 +853,9 @@ impl WatchState {
     fn rearm(&mut self, session_id: String, epoch: std::time::SystemTime) {
         let tasks = std::mem::take(&mut self.tasks);
         let settled_ids = std::mem::take(&mut self.settled_ids);
+        let emitted = self.take_emitted_accounting();
         *self = Self::new();
+        self.restore_emitted_accounting(emitted);
         // Keep the accounting across a fork/resume of the same CLI process —
         // the background work is still running in it; the max-age valve and
         // future notifications (same task-id) still resolve these entries.
@@ -837,7 +883,9 @@ impl WatchState {
         let session_id = self.session_id.take();
         let tasks = std::mem::take(&mut self.tasks);
         let settled_ids = std::mem::take(&mut self.settled_ids);
+        let emitted = self.take_emitted_accounting();
         *self = Self::new();
+        self.restore_emitted_accounting(emitted);
         self.session_id = session_id;
         self.tasks = tasks;
         self.settled_ids = settled_ids;
@@ -845,6 +893,102 @@ impl WatchState {
         self.rolled_over_id = Some(new_id);
         self.epoch = Some(std::time::UNIX_EPOCH);
         self.adopt_file(f);
+    }
+
+    /// What the connection was last told about task ids and out-of-turn work,
+    /// carried across a re-arm: the fresh watch starts not working out of turn
+    /// and must still tell the connection so if it had said otherwise — a
+    /// reset to the default would compare equal and leave the session
+    /// reading "working" for good.
+    fn take_emitted_accounting(&mut self) -> (Vec<String>, bool) {
+        (
+            std::mem::take(&mut self.last_emitted_task_ids),
+            self.last_emitted_out_of_turn,
+        )
+    }
+
+    fn restore_emitted_accounting(&mut self, emitted: (Vec<String>, bool)) {
+        self.last_emitted_task_ids = emitted.0;
+        self.last_emitted_out_of_turn = emitted.1;
+    }
+
+    /// The running tasks as the connection's background status lists them,
+    /// oldest launch first.
+    fn task_briefs(&self) -> Vec<BackgroundTaskBrief> {
+        let mut entries: Vec<(&String, &TaskEntry)> = self.tasks.iter().collect();
+        entries.sort_by(|a, b| a.1.started_at.cmp(&b.1.started_at).then(a.0.cmp(b.0)));
+        entries
+            .into_iter()
+            .map(|(id, t)| BackgroundTaskBrief::new(id.clone(), t.kind, &t.label))
+            .collect()
+    }
+
+    /// The label recorded for the tool call this launch ack answers.
+    fn launch_label_for(&mut self, value: &serde_json::Value) -> String {
+        let Some(blocks) = value
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_array())
+        else {
+            return String::new();
+        };
+        blocks
+            .iter()
+            .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_result"))
+            .filter_map(|b| b.get("tool_use_id").and_then(|t| t.as_str()))
+            .find_map(|id| self.launch_labels.remove(id))
+            .unwrap_or_default()
+    }
+
+    /// Follow an out-of-turn turn from the record that opened it to the one
+    /// that closes it. Called for every record, after `classify_and_feed`
+    /// decided which mode it belongs to.
+    ///
+    /// * Foreground (a codeg-sent turn, which the wire reports): never out of
+    ///   turn.
+    /// * Background: an initiator or a tool result means the agent is at
+    ///   work; a model response says by its `stop_reason` whether the agent
+    ///   goes on (`tool_use`, or none yet) or is done (`end_turn` and every
+    ///   other final reason); the CLI's end-of-turn system records
+    ///   (`stop_hook_summary`, `turn_duration`) close it too. A blocking Stop
+    ///   hook re-opens it: the model's next response reads as working again.
+    fn track_out_of_turn(&mut self, value: &serde_json::Value) {
+        if matches!(self.mode, Mode::Foreground) {
+            self.out_of_turn = false;
+            return;
+        }
+        match value.get("type").and_then(|t| t.as_str()).unwrap_or("") {
+            "user" => {
+                let tool_result = value
+                    .get("message")
+                    .and_then(|m| m.get("content"))
+                    .and_then(|c| c.as_array())
+                    .is_some_and(|blocks| {
+                        blocks
+                            .iter()
+                            .any(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_result"))
+                    });
+                if tool_result || turn_initiator_text(value).is_some() {
+                    self.out_of_turn = true;
+                }
+            }
+            "assistant" => {
+                let stop_reason = value
+                    .get("message")
+                    .and_then(|m| m.get("stop_reason"))
+                    .and_then(|r| r.as_str());
+                self.out_of_turn = matches!(stop_reason, None | Some("tool_use"));
+            }
+            "system" => {
+                if matches!(
+                    value.get("subtype").and_then(|s| s.as_str()),
+                    Some("stop_hook_summary" | "turn_duration")
+                ) {
+                    self.out_of_turn = false;
+                }
+            }
+            _ => {}
+        }
     }
 
     fn poll_delay(&self) -> Duration {
@@ -1027,6 +1171,7 @@ impl WatchState {
                         self.account(&value, &mut settled);
                         self.capture_title(&value);
                         self.classify_and_feed(&value, ledger, cwd, &mut changed_turns);
+                        self.track_out_of_turn(&value);
                     }
                     if !lines.is_empty() {
                         // Regroup once per tick (not per record): collect the
@@ -1076,19 +1221,48 @@ impl WatchState {
             !matches!(origin, Some(task_id) if self.current_turn_launched_ids.contains(&task_id))
         });
 
+        // A turn whose end never reached the transcript (the CLI died, the
+        // request hung) must not read as working for good.
+        if self.out_of_turn
+            && self
+                .last_disk_activity
+                .is_none_or(|at| at.elapsed() >= OUT_OF_TURN_STALE)
+        {
+            tracing::info!(
+                "[bg-watch] out-of-turn work went silent for {}s, no longer reporting it connection={conn_id}",
+                OUT_OF_TURN_STALE.as_secs()
+            );
+            self.out_of_turn = false;
+        }
+
         let outstanding = self.tasks.len() as u32;
-        let accounting_changed =
-            expired_any || self.last_emitted_outstanding != Some(outstanding);
+        let tasks = self.task_briefs();
+        let mut task_ids: Vec<String> = tasks.iter().map(|t| t.id.clone()).collect();
+        task_ids.sort();
+        let accounting_changed = expired_any
+            || self.last_emitted_outstanding != Some(outstanding)
+            || self.last_emitted_task_ids != task_ids
+            || self.last_emitted_out_of_turn != self.out_of_turn;
         if changed_turns.is_empty() && settled.is_empty() && !accounting_changed {
             return None;
         }
+        if self.last_emitted_out_of_turn != self.out_of_turn {
+            tracing::info!(
+                "[bg-watch] out-of-turn work {} connection={conn_id}",
+                if self.out_of_turn { "started" } else { "ended" }
+            );
+        }
         self.last_emitted_outstanding = Some(outstanding);
+        self.last_emitted_task_ids = task_ids;
+        self.last_emitted_out_of_turn = self.out_of_turn;
         Some(AcpEvent::BackgroundActivity {
             session_id,
             turns: changed_turns,
             outstanding,
             settled,
             watermark: self.committed,
+            tasks,
+            out_of_turn: self.out_of_turn,
         })
     }
 
@@ -1212,6 +1386,7 @@ impl WatchState {
                             .and_then(|v| v.as_str())
                             .filter(|s| !s.is_empty())
                         {
+                            let label = self.launch_label_for(value);
                             // `entry().or_insert_with()`, not a blind `insert`:
                             // a re-observed id (e.g. a resumed sub-agent's ack
                             // repeating) must not reset `started_at` to now —
@@ -1225,6 +1400,7 @@ impl WatchState {
                                 TaskEntry {
                                     kind: "agent",
                                     started_at: Instant::now(),
+                                    label,
                                 }
                             });
                             // This turn is still `Prompting` at launch time — a
@@ -1246,11 +1422,13 @@ impl WatchState {
                         // doubly important here since a still-running shell is
                         // typically observed via REPEATED `BashOutput`-style
                         // reads of this identical shape.
+                        let label = self.launch_label_for(value);
                         self.tasks.entry(id.to_string()).or_insert_with(|| {
                             tracing::info!("[bg-watch] registered background shell task={id}");
                             TaskEntry {
                                 kind: "shell",
                                 started_at: Instant::now(),
+                                label,
                             }
                         });
                         // Deliberately NOT inserted into `current_turn_launched_ids`:
@@ -1345,6 +1523,24 @@ impl WatchState {
                     }
                     let name = block.get("name").and_then(|n| n.as_str()).unwrap_or("");
                     let input = block.get("input");
+                    // Remember what the agent called a call that can launch
+                    // background work, for the ack that names the task (it
+                    // arrives in a later record). Only the ack decides that
+                    // a task exists; this is just its label.
+                    if matches!(name, "Agent" | "Task" | "Bash") {
+                        let description = input
+                            .and_then(|i| i.get("description"))
+                            .and_then(|d| d.as_str())
+                            .unwrap_or("");
+                        let tool_use_id = block.get("id").and_then(|i| i.as_str());
+                        if let (Some(id), false) = (tool_use_id, description.trim().is_empty()) {
+                            if self.launch_labels.len() >= LAUNCH_LABELS_CAP {
+                                self.launch_labels.clear();
+                            }
+                            self.launch_labels
+                                .insert(id.to_string(), clip_label(description));
+                        }
+                    }
                     match name {
                         // A settled sub-agent can be resumed: `SendMessage(to:
                         // <id>)` re-arms its accounting entry (it will notify
@@ -1363,6 +1559,10 @@ impl WatchState {
                                     TaskEntry {
                                         kind: "agent",
                                         started_at: Instant::now(),
+                                        // The launch label left with the
+                                        // settled entry; a resumed sub-agent
+                                        // lists unnamed.
+                                        label: String::new(),
                                     },
                                 );
                                 // Mirrors the launch-time insert in the
@@ -3841,5 +4041,257 @@ mod tests {
             ws.pending_title.take().as_deref(),
             Some("Find current vLLM stable release tag")
         );
+    }
+
+    // ── Background status: task labels and out-of-turn work ─────────────────
+
+    /// The fields a background-status test reads off an event.
+    fn status_of(event: AcpEvent) -> (Vec<BackgroundTaskBrief>, bool, Vec<MessageTurn>) {
+        match event {
+            AcpEvent::BackgroundActivity {
+                tasks,
+                out_of_turn,
+                turns,
+                ..
+            } => (tasks, out_of_turn, turns),
+            other => panic!("expected BackgroundActivity, got {other:?}"),
+        }
+    }
+
+    /// Real-shape monitor event as Claude Code 2.1.284 writes it: string
+    /// content, `origin`/`turnOrigin` marking it a task notification, no
+    /// `<status>` (captured 2026-10-14).
+    fn monitor_event(task_id: &str, uuid: &str) -> String {
+        let inner = format!(
+            "<task-notification>\\n<task-id>{task_id}</task-id>\\n<summary>Monitor event: \\\"main run: errors, rate limits, and completion\\\"</summary>\\n<event>progress: 392/584 result files</event>\\n</task-notification>"
+        );
+        format!(
+            r#"{{"parentUuid":"p0","isSidechain":false,"promptId":"pr-{uuid}","type":"user","message":{{"role":"user","content":"{inner}"}},"uuid":"{uuid}","timestamp":"2026-10-14T13:49:45.512Z","permissionMode":"bypassPermissions","origin":{{"kind":"task-notification","producer":"session-task"}},"promptSource":"system","turnOrigin":"task_notification","userType":"external","entrypoint":"sdk-ts","sessionId":"s1"}}"#
+        )
+    }
+
+    /// An assistant record with an explicit `stop_reason`, the way the CLI
+    /// writes every content block of a finished response.
+    fn assistant_final(uuid: &str, text: &str, stop_reason: &str) -> String {
+        format!(
+            r#"{{"type":"assistant","timestamp":"2026-10-14T13:49:47.000Z","uuid":"{uuid}","message":{{"id":"msg-{uuid}","role":"assistant","model":"claude-opus-5-5","content":[{{"type":"text","text":"{text}"}}],"stop_reason":"{stop_reason}"}}}}"#
+        )
+    }
+
+    fn assistant_tool_use(uuid: &str, tool_use_id: &str, name: &str, input: &str) -> String {
+        format!(
+            r#"{{"type":"assistant","timestamp":"2026-10-14T13:54:49.000Z","uuid":"{uuid}","message":{{"id":"msg-{uuid}","role":"assistant","model":"claude-opus-5-5","content":[{{"type":"tool_use","id":"{tool_use_id}","name":"{name}","input":{input}}}],"stop_reason":"tool_use"}}}}"#
+        )
+    }
+
+    fn tool_result(uuid: &str, tool_use_id: &str, extra: &str) -> String {
+        format!(
+            r#"{{"type":"user","timestamp":"2026-10-14T13:54:50.000Z","uuid":"{uuid}","message":{{"role":"user","content":[{{"tool_use_id":"{tool_use_id}","type":"tool_result","content":"ok"}}]}}{extra}}}"#
+        )
+    }
+
+    fn stop_hook_summary() -> String {
+        r#"{"type":"system","subtype":"stop_hook_summary","hookCount":1,"timestamp":"2026-10-14T13:49:52.000Z","uuid":"sys-1"}"#.to_string()
+    }
+
+    #[test]
+    fn out_of_turn_work_is_reported_from_its_start_to_its_end() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_lines(&path, &[]);
+        let ledger = PromptLedger::shared();
+        let mut ws = WatchState::with_file_for_test("s1", path.clone());
+
+        // A monitor event wakes the agent; it runs a tool.
+        write_lines(
+            &path,
+            &[
+                &monitor_event("bq4s928n8", "u-m1"),
+                &assistant_tool_use(
+                    "a1",
+                    "toolu_x",
+                    "Bash",
+                    r#"{"command":"grep -c DONE run.log","description":"Count finished runs"}"#,
+                ),
+            ],
+        );
+        let (_, out_of_turn, turns) =
+            status_of(tick_now(&mut ws, &ledger).expect("work started"));
+        assert!(out_of_turn, "the agent is working on a turn codeg didn't send");
+        assert!(!turns.is_empty(), "the out-of-turn turn renders as overlay");
+
+        // The tool returns: still working, and nothing new to say about it.
+        write_lines(&path, &[&tool_result("u-r1", "toolu_x", "")]);
+        if let Some(event) = tick_now(&mut ws, &ledger) {
+            assert!(status_of(event).1, "still working after a tool result");
+        }
+
+        // The reply ends the turn; the CLI's end-of-turn record follows.
+        write_lines(
+            &path,
+            &[
+                &assistant_final("a2", "Progress: 392 of 584.", "end_turn"),
+                &stop_hook_summary(),
+            ],
+        );
+        let (_, out_of_turn, _) = status_of(tick_now(&mut ws, &ledger).expect("work ended"));
+        assert!(!out_of_turn);
+
+        // Nothing changes on an idle tick.
+        assert!(tick_now(&mut ws, &ledger).is_none());
+    }
+
+    #[test]
+    fn a_blocking_stop_hook_reopens_out_of_turn_work() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_lines(&path, &[]);
+        let ledger = PromptLedger::shared();
+        let mut ws = WatchState::with_file_for_test("s1", path.clone());
+
+        write_lines(
+            &path,
+            &[
+                &monitor_event("bq4s928n8", "u-m1"),
+                &assistant_final("a1", "Done.", "end_turn"),
+                &stop_hook_summary(),
+            ],
+        );
+        let _ = tick_now(&mut ws, &ledger);
+        assert!(!ws.out_of_turn);
+        // The hook blocked: its feedback lands mid-turn, the model answers.
+        write_lines(
+            &path,
+            &[&assistant_tool_use(
+                "a2",
+                "toolu_y",
+                "Read",
+                r#"{"file_path":"/tmp/x"}"#,
+            )],
+        );
+        let (_, out_of_turn, _) = status_of(tick_now(&mut ws, &ledger).expect("reopened"));
+        assert!(out_of_turn);
+    }
+
+    #[test]
+    fn a_codeg_turn_is_never_out_of_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_lines(&path, &[]);
+        let ledger = PromptLedger::shared();
+        let mut ws = WatchState::with_file_for_test("s1", path.clone());
+
+        ledger.record_text("run the evals");
+        write_lines(
+            &path,
+            &[
+                &user_prompt_array("u1", "run the evals"),
+                &assistant_tool_use("a1", "toolu_z", "Read", r#"{"file_path":"/tmp/x"}"#),
+            ],
+        );
+        assert!(tick_prompting(&mut ws, &ledger).is_none());
+        assert!(!ws.out_of_turn);
+    }
+
+    #[test]
+    fn a_launch_is_listed_with_the_description_the_agent_gave_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_lines(&path, &[]);
+        let ledger = PromptLedger::shared();
+        let mut ws = WatchState::with_file_for_test("s1", path.clone());
+
+        write_lines(
+            &path,
+            &[
+                &assistant_tool_use(
+                    "a1",
+                    "toolu_bg",
+                    "Bash",
+                    r#"{"command":"until grep -q DONE run_rest.log; do sleep 60; done","description":"Wait for runs, then judge, recall, and aggregate","run_in_background":true}"#,
+                ),
+                &tool_result(
+                    "u-ack",
+                    "toolu_bg",
+                    r#","toolUseResult":{"stdout":"","stderr":"","interrupted":false,"backgroundTaskId":"bm227ltpx"}"#,
+                ),
+                &assistant_tool_use(
+                    "a2",
+                    "toolu_agent",
+                    "Agent",
+                    r#"{"description":"Plant defects in eval documents","prompt":"...","run_in_background":true}"#,
+                ),
+                &tool_result(
+                    "u-ack2",
+                    "toolu_agent",
+                    r#","toolUseResult":{"isAsync":true,"status":"async_launched","agentId":"a4dc3101"}"#,
+                ),
+            ],
+        );
+        let (mut tasks, _, _) = status_of(tick_prompting(&mut ws, &ledger).expect("launches"));
+        tasks.sort_by(|a, b| a.id.cmp(&b.id));
+        assert_eq!(
+            tasks,
+            vec![
+                BackgroundTaskBrief::new("a4dc3101", "agent", "Plant defects in eval documents"),
+                BackgroundTaskBrief::new(
+                    "bm227ltpx",
+                    "shell",
+                    "Wait for runs, then judge, recall, and aggregate"
+                ),
+            ]
+        );
+        assert!(ws.launch_labels.is_empty(), "labels are taken by their acks");
+
+        // One settles while another launches (same count): the list still
+        // goes out.
+        write_lines(
+            &path,
+            &[
+                &taskstop("bm227ltpx"),
+                &bash_ack("bnew"),
+            ],
+        );
+        let (tasks, _, _) = status_of(tick_prompting(&mut ws, &ledger).expect("swap"));
+        let ids: Vec<_> = tasks.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, vec!["a4dc3101", "bnew"]);
+    }
+
+    #[test]
+    fn a_rearm_still_reports_out_of_turn_work_ending() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_lines(&path, &[]);
+        let ledger = PromptLedger::shared();
+        let mut ws = WatchState::with_file_for_test("s1", path.clone());
+        write_lines(&path, &[&monitor_event("bq4s928n8", "u-m1")]);
+        assert!(status_of(tick_now(&mut ws, &ledger).unwrap()).1);
+
+        // A fork/resume re-arms the watch: the fresh state is not working,
+        // and the connection, told otherwise, must hear it.
+        ws.rearm("s2".to_string(), std::time::SystemTime::now());
+        ws.file = Some(path.clone());
+        ws.committed = std::fs::metadata(&path).unwrap().len();
+        let (_, out_of_turn, _) = status_of(tick_now(&mut ws, &ledger).expect("ended"));
+        assert!(!out_of_turn);
+    }
+
+    #[test]
+    fn silent_out_of_turn_work_stops_reading_as_working() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_lines(&path, &[]);
+        let ledger = PromptLedger::shared();
+        let mut ws = WatchState::with_file_for_test("s1", path.clone());
+        write_lines(&path, &[&monitor_event("bq4s928n8", "u-m1")]);
+        assert!(status_of(tick_now(&mut ws, &ledger).unwrap()).1);
+
+        let Some(long_ago) = Instant::now().checked_sub(OUT_OF_TURN_STALE + Duration::from_secs(1))
+        else {
+            return; // a clock this young can't express the gap
+        };
+        ws.last_disk_activity = Some(long_ago);
+        let (_, out_of_turn, _) = status_of(tick_now(&mut ws, &ledger).expect("stale"));
+        assert!(!out_of_turn);
     }
 }

@@ -123,6 +123,7 @@ import type {
   GitWorktreeRemoval,
   DbConversationSummary,
   ConversationAttentionEntry,
+  ConversationBackgroundEntry,
   ImportResult,
   ImportSelectedResult,
   ScanResult,
@@ -228,6 +229,13 @@ export async function listConversationAttention(): Promise<
   ConversationAttentionEntry[]
 > {
   return getTransport().call("list_conversation_attention")
+}
+
+/** Every live session's background activity (see `commands/attention.rs`). */
+export async function listConversationBackground(): Promise<
+  ConversationBackgroundEntry[]
+> {
+  return getTransport().call("list_conversation_background")
 }
 
 export async function listConversations(params?: {

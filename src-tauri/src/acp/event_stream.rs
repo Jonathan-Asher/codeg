@@ -444,10 +444,21 @@ fn estimate_envelope_size(envelope: &EventEnvelope) -> usize {
             outstanding: _,
             settled,
             watermark: _,
+            tasks,
+            out_of_turn: _,
         } => {
             json_str_len(session_id)
                 + turns.len().saturating_sub(1)
                 + turns.iter().map(message_turn_size).sum::<usize>()
+                // `"tasks":[…]` and `"out_of_turn":true`, keys and braces
+                // fixed generously like `settled` below.
+                + 64
+                + tasks
+                    .iter()
+                    .map(|t| {
+                        48 + json_str_len(&t.id) + json_str_len(&t.kind) + json_str_len(&t.label)
+                    })
+                    .sum::<usize>()
                 + settled
                     .iter()
                     .map(|s| {
@@ -1056,6 +1067,15 @@ mod tests {
                     },
                 ],
                 watermark: u64::MAX,
+                tasks: vec![
+                    crate::acp::background_status::BackgroundTaskBrief::new(
+                        "bm227ltpx",
+                        "shell",
+                        "Wait for \"runs\", then judge\t— 背景",
+                    ),
+                    crate::acp::background_status::BackgroundTaskBrief::new("a4", "agent", ""),
+                ],
+                out_of_turn: true,
             },
         });
         assert_ge_serialized(&env);
@@ -1070,6 +1090,8 @@ mod tests {
                 outstanding: 0,
                 settled: vec![],
                 watermark: 0,
+                tasks: vec![],
+                out_of_turn: false,
             },
         });
         assert_ge_serialized(&env);

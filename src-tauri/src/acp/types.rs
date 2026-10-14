@@ -687,6 +687,18 @@ pub enum AcpEvent {
         /// `transcript_watermark` catches up (`>=`), closing the emit/refetch
         /// race without cross-namespace id dedup.
         watermark: u64,
+        /// The tasks behind `outstanding`, by id, kind and the label the agent
+        /// gave them — the WHOLE current set on every emission, not a delta.
+        /// Empty from an emitter that only counts (Grok's sub-agents), so
+        /// `outstanding` stays the count of record. Feeds the session lists'
+        /// background status (`acp::background_status`).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tasks: Vec<crate::acp::background_status::BackgroundTaskBrief>,
+        /// The agent is working right now on a turn codeg did not send — one
+        /// a task notification or a cron prompt started — as the transcript
+        /// shows it: set when such a turn starts, cleared when it ends.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        out_of_turn: bool,
     },
     /// A `delegate_to_agent` MCP tool call from the parent agent has spawned a
     /// child sub-session and the child's prompt is in flight. Emitted as soon

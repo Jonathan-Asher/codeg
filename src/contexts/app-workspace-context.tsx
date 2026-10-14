@@ -5,6 +5,7 @@ import { getGitHead } from "@/lib/api"
 import { onTransportReconnect, subscribe } from "@/lib/platform"
 import { useAcpEvent } from "@/contexts/acp-connections-context"
 import { useConversationAttentionSync } from "@/hooks/use-conversation-attention-sync"
+import { useConversationBackgroundSync } from "@/hooks/use-conversation-background-sync"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { useConversationRuntimeStore } from "@/stores/conversation-runtime-store"
 import { useTabStore } from "@/stores/tab-store"
@@ -47,6 +48,8 @@ function syncOpenViewerDetail(conversationId: number): void {
 export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
   // "Waiting on you" flags for the sidebar rows (permission / question / plan).
   useConversationAttentionSync()
+  // Background tasks / out-of-turn work, for every row (open here or not).
+  useConversationBackgroundSync()
 
   useEffect(() => {
     const { fetchFolders, refreshConversations } =

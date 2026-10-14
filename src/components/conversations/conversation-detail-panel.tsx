@@ -63,6 +63,7 @@ import {
   threadEndsWithAgentReply,
 } from "@/lib/continue-turn"
 import { useConversationAttention } from "@/stores/conversation-attention-store"
+import { useConversationBackground } from "@/stores/conversation-background-store"
 import { useSessionConnectHoldStore } from "@/stores/session-connect-hold-store"
 import { PiProjectTrustBanner } from "@/components/chat/pi-project-trust-banner"
 import { FeedbackNotesDisplay } from "@/components/chat/feedback-notes-display"
@@ -2501,6 +2502,12 @@ const ConversationTabView = memo(function ConversationTabView({
   // all keep the button away. The composer adds its half: an empty box, and
   // the same route Enter takes in that state.
   const attentionKind = useConversationAttention(dbConversationId ?? -1)
+  // The agent running a turn of its own (its background work woke it) is
+  // working, whatever this tab's idle connection says: no Continue then. Only
+  // that part of the live background status is fed in — the rest (tasks
+  // running after the turn ended) leaves Continue gated on the connection,
+  // as before.
+  const liveBackground = useConversationBackground(dbConversationId)
   const endsWithAgentReply = useConversationRuntimeStore((s) =>
     threadEndsWithAgentReply(selectTimelineTurns(s, effectiveConversationId))
   )
@@ -2511,6 +2518,7 @@ const ConversationTabView = memo(function ConversationTabView({
       connectionStatus: connIsForOtherAgent ? null : connStatus,
       awaitingBackground,
       limitPause: persistedLimitPause,
+      background: liveBackground?.out_of_turn ? liveBackground : null,
     }),
     endsWithAgentReply,
     pendingInteraction: Boolean(

@@ -16,14 +16,17 @@ import { useTranslations } from "next-intl"
 import type {
   AttentionKind,
   ConnectionStatus,
+  ConversationBackground,
   DbConversationSummary,
 } from "@/lib/types"
 import {
+  backgroundTaskTotal,
   deriveSessionActivity,
   SESSION_ACTIVITY_HINT_KEYS,
   SESSION_ACTIVITY_LABEL_KEYS,
   type SessionActivity,
 } from "@/lib/session-activity"
+import { useConversationBackground } from "@/stores/conversation-background-store"
 import { continueInterruptedSession } from "@/lib/session-continue"
 import { waitingLimitPause } from "@/lib/limit-continue"
 import { getAgentLabel } from "@/lib/custom-agents"
@@ -41,6 +44,55 @@ const ATTENTION_HINT_KEYS = {
   question: "attentionQuestion",
   plan_approval: "attentionPlanApproval",
 } as const satisfies Record<AttentionKind, string>
+
+/** The i18n key (under `Folder.sessionActivity`) naming each background task
+ *  kind. A kind this client doesn't know reads as a plain "Task". */
+const TASK_KIND_KEYS = {
+  agent: "taskKind.agent",
+  shell: "taskKind.shell",
+  monitor: "taskKind.monitor",
+  workflow: "taskKind.workflow",
+  task: "taskKind.task",
+} as const
+
+function taskKindKey(kind: string) {
+  return (
+    TASK_KIND_KEYS[kind as keyof typeof TASK_KIND_KEYS] ?? TASK_KIND_KEYS.task
+  )
+}
+
+/**
+ * What a session runs in the background, as tooltip text: the state on the
+ * first line ("Background · 2 tasks", or "Working — woken by its background
+ * work" while the agent runs a turn of its own), then one line per running
+ * task the way the session's task strip names it ("Shell: Wait for runs…"),
+ * and "+N more" for tasks past the listed few. Empty when there is nothing
+ * in the background to describe.
+ */
+export function useBackgroundTitle(
+  activity: SessionActivity,
+  background: ConversationBackground | null | undefined,
+  heldBackgroundTasks: number | null | undefined
+): string {
+  const t = useTranslations("Folder.sessionActivity")
+  if (activity !== "background" && !background?.out_of_turn) return ""
+  const count = backgroundTaskTotal(heldBackgroundTasks, background)
+  const lines: string[] = [
+    activity === "background"
+      ? t("backgroundBadge", { count })
+      : t("workingOutOfTurn"),
+  ]
+  const tasks = background?.tasks ?? []
+  for (const task of tasks) {
+    const kind = t(taskKindKey(task.kind))
+    lines.push(task.label ? `${kind}: ${task.label}` : kind)
+  }
+  const unlisted = (background?.task_count ?? 0) - tasks.length
+  if (unlisted > 0 && tasks.length > 0) {
+    lines.push(t("moreTasks", { count: unlisted }))
+  }
+  return lines.join("\n")
+}
 
 /** The glyph for each activity, in the colours the sidebar already uses for
  *  them (amber = running, rose = blocked on you). */
@@ -152,6 +204,7 @@ export function SessionActivityRow({
   const tSidebar = useTranslations("Folder.sidebar")
   const tPhase = useTranslations("Folder.chat.attachPhase")
   const attention = useConversationAttention(summary.id)
+  const background = useConversationBackground(summary.id)
   const [retrying, setRetrying] = useState(false)
   const activity = deriveSessionActivity({
     attention,
@@ -161,10 +214,23 @@ export function SessionActivityRow({
     connection: connection?.state ?? null,
     awaitingBackground: heldBackgroundTasks != null,
     limitPause: summary.limit_pause,
+    background,
   })
   const pause = activity === "limit_paused" ? waitingLimitPause(summary) : null
   const reset = useLimitResetParts(pause?.resets_at)
-  const count = heldBackgroundTasks ?? 0
+  const count = backgroundTaskTotal(heldBackgroundTasks, background)
+  // Working on a turn of its own: say what woke it, not "a turn is running".
+  const outOfTurn =
+    activity === "working" &&
+    connectionStatus !== "prompting" &&
+    background?.out_of_turn === true
+  const taskLines = useBackgroundTitle(
+    activity,
+    background,
+    heldBackgroundTasks
+  )
+    .split("\n")
+    .slice(1)
   // A paused session names when the limit resets; the others ignore these.
   const labelValues = {
     count,
@@ -182,7 +248,9 @@ export function SessionActivityRow({
       ? tSidebar(ATTENTION_HINT_KEYS[attention])
       : activity === "connect_failed" && connection?.error
         ? connection.error
-        : t(SESSION_ACTIVITY_HINT_KEYS[activity], labelValues)
+        : outOfTurn
+          ? t("workingOutOfTurnHint")
+          : t(SESSION_ACTIVITY_HINT_KEYS[activity], labelValues)
 
   return (
     <div
@@ -212,6 +280,18 @@ export function SessionActivityRow({
           >
             {hint}
           </p>
+          {taskLines.length > 0 && (
+            <ul
+              className="space-y-0.5 text-xs leading-snug text-muted-foreground"
+              data-testid="session-activity-tasks"
+            >
+              {taskLines.map((line, i) => (
+                <li key={i} className="wrap-anywhere">
+                  {line}
+                </li>
+              ))}
+            </ul>
+          )}
           {phaseLabel?.slow && (
             <p className="text-xs leading-snug text-muted-foreground">
               {tPhase("slowHint", { agent })}

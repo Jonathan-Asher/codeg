@@ -23,22 +23,26 @@ pub async fn list_all_conversations(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<ListAllConversationsParams>,
 ) -> Result<Json<Vec<DbConversationSummary>>, AppCommandError> {
-    Ok(Json(
-        conv_commands::list_all_conversations_core(
-            &state.db.conn,
-            &state.emitter,
-            &state.chat_channel_manager,
-            conv_commands::ListAllConversationsOptions {
-                folder_ids: params.folder_ids,
-                agent_type: params.agent_type,
-                search: params.search,
-                sort_by: params.sort_by,
-                status: params.status,
-                include_children: params.include_children.unwrap_or(false),
-            },
-        )
-        .await?,
-    ))
+    let mut summaries = conv_commands::list_all_conversations_core(
+        &state.db.conn,
+        &state.emitter,
+        &state.chat_channel_manager,
+        conv_commands::ListAllConversationsOptions {
+            folder_ids: params.folder_ids,
+            agent_type: params.agent_type,
+            search: params.search,
+            sort_by: params.sort_by,
+            status: params.status,
+            include_children: params.include_children.unwrap_or(false),
+        },
+    )
+    .await?;
+    crate::commands::attention::fill_conversation_background(
+        &state.connection_manager,
+        &mut summaries,
+    )
+    .await;
+    Ok(Json(summaries))
 }
 
 #[derive(Deserialize)]
@@ -51,10 +55,15 @@ pub async fn list_child_conversations(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<ListChildConversationsParams>,
 ) -> Result<Json<Vec<DbConversationSummary>>, AppCommandError> {
-    Ok(Json(
+    let mut summaries =
         conv_commands::list_child_conversations_core(&state.db.conn, params.parent_conversation_id)
-            .await?,
-    ))
+            .await?;
+    crate::commands::attention::fill_conversation_background(
+        &state.connection_manager,
+        &mut summaries,
+    )
+    .await;
+    Ok(Json(summaries))
 }
 
 pub async fn list_opened_tabs(

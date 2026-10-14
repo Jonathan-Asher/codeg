@@ -978,6 +978,8 @@ mod tests {
                     outstanding: 4,
                     settled: vec![],
                     watermark: 79_991_152,
+                    tasks: vec![],
+                    out_of_turn: false,
                 },
             }),
         };

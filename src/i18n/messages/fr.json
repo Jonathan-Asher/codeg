@@ -2247,6 +2247,17 @@
       "interruptedHint": "Le dernier tour a été coupé avant la fin : codeg s'est fermé ou l'agent s'est arrêté. Continuer le reprend là où il s'était arrêté.",
       "background": "Inactive — {count, plural, =0 {travail en arrière-plan en cours} one {# tâche en arrière-plan en cours} other {# tâches en arrière-plan en cours}}",
       "backgroundHint": "L'agent a répondu et attend, inactif, la fin de son travail en arrière-plan. Un message envoyé maintenant s'exécute tout de suite.",
+      "backgroundBadge": "Arrière-plan · {count, plural, =0 {travail en cours} one {# tâche} other {# tâches}}",
+      "workingOutOfTurn": "En cours — réveillé par son travail en arrière-plan",
+      "workingOutOfTurnHint": "L'agent exécute un tour de lui-même : son travail en arrière-plan l'a réveillé (une tâche s'est terminée ou un moniteur s'est déclenché).",
+      "moreTasks": "+{count} de plus",
+      "taskKind": {
+        "agent": "Sous-agent",
+        "shell": "Shell",
+        "monitor": "Moniteur",
+        "workflow": "Workflow",
+        "task": "Tâche"
+      },
       "interruptedBadge": "Interrompue : le dernier tour a été coupé",
       "continue": "Continuer",
       "continueTitle": "Reprendre cette session et envoyer « continue »",

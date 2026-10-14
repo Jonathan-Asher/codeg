@@ -52,6 +52,10 @@ vi.mock("@/stores/tab-store", () => ({
 vi.mock("@/hooks/use-conversation-attention-sync", () => ({
   useConversationAttentionSync: () => {},
 }))
+// Same for the background-status sync (`conversation-background-store.test.ts`).
+vi.mock("@/hooks/use-conversation-background-sync", () => ({
+  useConversationBackgroundSync: () => {},
+}))
 
 vi.mock("@/lib/platform", () => ({
   // The provider registers four subscriptions — `conversation://changed`,

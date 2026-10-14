@@ -2247,6 +2247,17 @@
       "interruptedHint": "上一轮在完成前被中断：codeg 已关闭，或智能体已停止。点击“继续”可从中断处接着做。",
       "background": "空闲 — {count, plural, =0 {后台任务运行中} other {# 个后台任务运行中}}",
       "backgroundHint": "智能体已经答复，正在空闲等待后台任务完成。现在发送的消息会立即执行。",
+      "backgroundBadge": "后台 · {count, plural, =0 {任务运行中} other {# 个任务}}",
+      "workingOutOfTurn": "运行中 — 由后台任务唤起",
+      "workingOutOfTurnHint": "智能体正在自行运行一轮：由它的后台任务唤起（某个任务完成或监视器触发）。",
+      "moreTasks": "另有 {count} 个",
+      "taskKind": {
+        "agent": "子智能体",
+        "shell": "Shell",
+        "monitor": "监视器",
+        "workflow": "工作流",
+        "task": "任务"
+      },
       "interruptedBadge": "已中断：上一轮没有完成",
       "continue": "继续",
       "continueTitle": "恢复此会话并发送 “continue”",

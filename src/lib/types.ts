@@ -559,6 +559,56 @@ export interface DbConversationSummary {
    *  is not attached yet shows these until the agent reports its own (see
    *  `lib/selector-display.ts`). Absent when nothing is recorded yet. */
   selector_state?: ConversationSelectorState | null
+  /** The session's background activity from its live connection, as of the
+   *  list fetch (see `ConversationBackground`). Absent when there is none, and
+   *  from a server that predates it. The sidebar reads the live
+   *  `conversation-background-store` instead, which events keep current. */
+  background?: ConversationBackground | null
+}
+
+/** One background task of a live session (Rust
+ *  `acp::background_status::BackgroundTaskBrief`). */
+export interface BackgroundTaskBrief {
+  /** The agent's own task id. */
+  id: string
+  /** `agent` (async sub-agent), `shell`, `monitor`, `workflow`, or `task`;
+   *  a kind added later arrives as itself. */
+  kind: string
+  /** The description the agent gave it; absent when it gave none. */
+  label?: string
+}
+
+/** What a live session is doing in the background (Rust
+ *  `acp::background_status::ConversationBackground`): work `turn_state` alone
+ *  reads as "not running". */
+export interface ConversationBackground {
+  /** Background tasks still running. `0` while a turn is held open with no
+   *  task known by name. */
+  task_count: number
+  /** The running tasks, at most a handful (`task_count` has them all). */
+  tasks?: BackgroundTaskBrief[]
+  /** The agent is working right now on a turn codeg didn't send — woken by
+   *  a task notification (a sub-agent finished, a monitor fired) or a cron
+   *  prompt. */
+  out_of_turn?: boolean
+  /** The turn codeg sent is still open only because background work holds
+   *  it; the agent itself is idle. */
+  held_open?: boolean
+}
+
+/** Payload for the global `conversation://background` side-channel: a
+ *  session's background activity changed. `background: null` clears. */
+export interface ConversationBackgroundChange {
+  id: number
+  background: ConversationBackground | null
+}
+
+export const CONVERSATION_BACKGROUND_EVENT = "conversation://background"
+
+/** One row of the `list_conversation_background` snapshot. */
+export interface ConversationBackgroundEntry {
+  conversation_id: number
+  background: ConversationBackground
 }
 
 /** Mirrors Rust `conversation_service::ConversationSelectorState` (camelCase on
@@ -624,6 +674,8 @@ export interface ConversationAttentionEntry {
   kind: AttentionKind
   /** The top-level row the sidebar shows for it (itself unless a sub-agent). */
   root_conversation_id: number
+  /** What the blocked session also runs in the background, when anything. */
+  background?: ConversationBackground | null
 }
 
 /** Payload for the global `folder://changed` side-channel. A folder created or

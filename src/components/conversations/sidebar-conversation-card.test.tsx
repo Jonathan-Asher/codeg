@@ -14,11 +14,15 @@ import {
   ATTACH_SESSION_TO_SESSION_EVENT,
   type AttachSessionToSessionDetail,
 } from "@/lib/session-attachment-events"
-import type { DbConversationSummary } from "@/lib/types"
+import type { ConversationBackground, DbConversationSummary } from "@/lib/types"
 import {
   __resetConversationAttentionForTests,
   useConversationAttentionStore,
 } from "@/stores/conversation-attention-store"
+import {
+  __resetConversationBackgroundForTests,
+  useConversationBackgroundStore,
+} from "@/stores/conversation-background-store"
 import enMessages from "@/i18n/messages/en.json"
 
 // AgentIcon renders exactly once per card body execution, so counting its
@@ -839,5 +843,178 @@ describe("SidebarConversationCard activity indicator", () => {
     expect(
       screen.queryByTestId("conversation-continue-action")
     ).not.toBeInTheDocument()
+  })
+})
+
+// Work the persisted turn state can't show, from the server's live status
+// (`conversation://background`): tasks still running after the turn ended,
+// the agent running a turn of its own, a turn held open for background work.
+describe("SidebarConversationCard background activity", () => {
+  afterEach(() => {
+    cleanup()
+    __resetConversationAttentionForTests()
+    __resetConversationBackgroundForTests()
+  })
+
+  function renderRow(c: DbConversationSummary) {
+    return renderWithIntl(
+      <SidebarConversationCard
+        conversation={c}
+        isSelected={false}
+        timeLabel="5m"
+        onSelect={onSelect}
+        onDoubleClick={onDoubleClick}
+        onRename={onRename}
+        onDelete={onDelete}
+        onStatusChange={onStatusChange}
+      />
+    )
+  }
+
+  function setBackground(id: number, background: ConversationBackground) {
+    act(() => {
+      useConversationBackgroundStore.getState().applyChange({ id, background })
+    })
+  }
+
+  const TASKS: ConversationBackground = {
+    task_count: 2,
+    tasks: [
+      {
+        id: "bm227ltpx",
+        kind: "shell",
+        label: "Wait for runs, then judge, recall, and aggregate",
+      },
+      { id: "bq4s928n8", kind: "monitor", label: "main run: errors" },
+    ],
+    out_of_turn: false,
+    held_open: false,
+  }
+
+  it("shows background tasks after the turn ended, with the count and the tasks by name", () => {
+    setBackground(1, TASKS)
+    renderRow({ ...conv(1), status: "pending_review", turn_state: null })
+
+    const badge = screen.getByTestId("conversation-background-badge")
+    expect(badge).toHaveAttribute("data-task-count", "2")
+    expect(badge).toHaveTextContent("2")
+    expect(badge.getAttribute("title")).toBe(
+      [
+        "Background · 2 tasks",
+        "Shell: Wait for runs, then judge, recall, and aggregate",
+        "Monitor: main run: errors",
+      ].join("\n")
+    )
+    // The quieter indicator replaces the time label, not a spinner.
+    expect(screen.queryByTitle("Running")).not.toBeInTheDocument()
+    expect(screen.queryByText("5m")).not.toBeInTheDocument()
+  })
+
+  it("goes back to Working while the agent runs a turn of its own", () => {
+    setBackground(1, { ...TASKS, out_of_turn: true })
+    renderRow({ ...conv(1), status: "pending_review", turn_state: null })
+
+    const spinner = screen.getByTestId("conversation-running-badge")
+    expect(spinner).toHaveAttribute("data-out-of-turn", "true")
+    expect(spinner.getAttribute("title")).toMatch(
+      /^Working — woken by its background work\nShell: Wait for runs/
+    )
+    expect(
+      screen.queryByTestId("conversation-background-badge")
+    ).not.toBeInTheDocument()
+  })
+
+  it("reads a turn held open for background work as background, not running", () => {
+    setBackground(1, {
+      task_count: 1,
+      tasks: [{ id: "a4dc", kind: "agent", label: "Plant defects" }],
+      out_of_turn: false,
+      held_open: true,
+    })
+    renderRow({ ...conv(1), status: "in_progress", turn_state: "running" })
+
+    const badge = screen.getByTestId("conversation-background-badge")
+    expect(badge.getAttribute("title")).toBe(
+      "Background · 1 task\nSub-agent: Plant defects"
+    )
+    expect(
+      screen.queryByTestId("conversation-running-badge")
+    ).not.toBeInTheDocument()
+  })
+
+  it("keeps a plain Working spinner for an ordinary turn", () => {
+    renderRow({ ...conv(1), status: "in_progress", turn_state: "running" })
+    expect(screen.getByTestId("conversation-running-badge")).toHaveAttribute(
+      "title",
+      "Running"
+    )
+  })
+
+  it("lets a request for the user outrank background work", () => {
+    setBackground(1, TASKS)
+    act(() => {
+      useConversationAttentionStore.setState({
+        byConversationId: new Map([[1, "permission"]]),
+      })
+    })
+    renderRow({ ...conv(1), status: "pending_review", turn_state: null })
+    expect(
+      screen.getByTestId("conversation-attention-badge")
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByTestId("conversation-background-badge")
+    ).not.toBeInTheDocument()
+  })
+
+  it("returns to the time label once the work settles", () => {
+    setBackground(1, TASKS)
+    renderRow({ ...conv(1), status: "pending_review", turn_state: null })
+    expect(
+      screen.getByTestId("conversation-background-badge")
+    ).toBeInTheDocument()
+    act(() => {
+      useConversationBackgroundStore
+        .getState()
+        .applyChange({ id: 1, background: null })
+    })
+    expect(
+      screen.queryByTestId("conversation-background-badge")
+    ).not.toBeInTheDocument()
+    expect(screen.getByText("5m")).toBeInTheDocument()
+  })
+
+  it("names unlisted tasks as more, and an unnamed count as work running", () => {
+    setBackground(1, {
+      task_count: 11,
+      tasks: [{ id: "x", kind: "agent" }],
+      out_of_turn: false,
+      held_open: false,
+    })
+    renderRow({ ...conv(1), status: "pending_review", turn_state: null })
+    expect(
+      screen.getByTestId("conversation-background-badge").getAttribute("title")
+    ).toBe("Background · 11 tasks\nSub-agent\n+10 more")
+    cleanup()
+
+    setBackground(2, {
+      task_count: 0,
+      out_of_turn: false,
+      held_open: true,
+    })
+    renderRow({ ...conv(2), status: "in_progress", turn_state: "running" })
+    const badge = screen.getByTestId("conversation-background-badge")
+    expect(badge.getAttribute("title")).toBe("Background · work running")
+    expect(badge).not.toHaveTextContent(/\d/)
+  })
+
+  it("re-renders only the card whose background changed", () => {
+    renderWithIntl(<CardList conversations={BASE} now={NOW} />)
+    probe.agentIconRenders = 0
+    setBackground(4, TASKS)
+    expect(probe.agentIconRenders).toBe(1)
+    // The same value re-announced changes nothing.
+    probe.agentIconRenders = 0
+    setBackground(4, { ...TASKS })
+    expect(probe.agentIconRenders).toBe(0)
   })
 })

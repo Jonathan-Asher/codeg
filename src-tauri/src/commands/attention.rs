@@ -10,6 +10,7 @@
 use sea_orm::DatabaseConnection;
 use serde::Serialize;
 
+use crate::acp::background_status::{ConversationBackground, ConversationBackgroundEntry};
 use crate::acp::manager::ConnectionManager;
 use crate::acp::session_state::AttentionKind;
 use crate::app_error::AppCommandError;
@@ -30,6 +31,12 @@ pub struct ConversationAttention {
     /// (sub-agent rows are hidden, and a blocked sub-agent otherwise surfaces
     /// only as its parent "running").
     pub root_conversation_id: i32,
+    /// What the blocked session also has running in the background (see
+    /// `acp::background_status`). Absent when nothing — and from a server
+    /// that predates it. Sessions with background work and nothing to ask
+    /// are not in this list: `list_conversation_background` has every one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub background: Option<ConversationBackground>,
 }
 
 pub async fn list_conversation_attention_core(
@@ -37,15 +44,62 @@ pub async fn list_conversation_attention_core(
     db: &DatabaseConnection,
 ) -> Result<Vec<ConversationAttention>, AppCommandError> {
     let raw = manager.list_attention().await;
+    let mut background = if raw.is_empty() {
+        Default::default()
+    } else {
+        manager.background_by_conversation().await
+    };
     let mut out = Vec::with_capacity(raw.len());
     for (conversation_id, kind) in raw {
         out.push(ConversationAttention {
             conversation_id,
             kind,
             root_conversation_id: root_of(db, conversation_id).await,
+            background: background.remove(&conversation_id),
         });
     }
     Ok(out)
+}
+
+/// Every live session's background activity — background tasks running, the
+/// agent working on a turn codeg didn't send, a turn held open for background
+/// work. The snapshot half of the `conversation://background` broadcast:
+/// clients load it on start and after every reconnect, and re-read it shortly
+/// after live events, exactly like the attention snapshot above. Keyed by the
+/// conversation the connection is bound to (no root walk: a sub-session's
+/// background work shows on its own row).
+pub async fn list_conversation_background_core(
+    manager: &ConnectionManager,
+) -> Result<Vec<ConversationBackgroundEntry>, AppCommandError> {
+    let mut out: Vec<ConversationBackgroundEntry> = manager
+        .background_by_conversation()
+        .await
+        .into_iter()
+        .map(|(conversation_id, background)| ConversationBackgroundEntry {
+            conversation_id,
+            background,
+        })
+        .collect();
+    out.sort_by_key(|e| e.conversation_id);
+    Ok(out)
+}
+
+/// Fill `background` on conversation summaries from the live connections.
+/// One pass over the connection map serves the whole list.
+pub async fn fill_conversation_background(
+    manager: &ConnectionManager,
+    summaries: &mut [crate::models::DbConversationSummary],
+) {
+    if summaries.is_empty() {
+        return;
+    }
+    let mut background = manager.background_by_conversation().await;
+    if background.is_empty() {
+        return;
+    }
+    for summary in summaries.iter_mut() {
+        summary.background = background.remove(&summary.id);
+    }
 }
 
 /// Walk `parent_id` up to the top-level row. A row that can't be read ends the
@@ -74,4 +128,12 @@ pub async fn list_conversation_attention(
     db: tauri::State<'_, crate::db::AppDatabase>,
 ) -> Result<Vec<ConversationAttention>, AppCommandError> {
     list_conversation_attention_core(manager.inner(), &db.conn).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn list_conversation_background(
+    manager: tauri::State<'_, ConnectionManager>,
+) -> Result<Vec<ConversationBackgroundEntry>, AppCommandError> {
+    list_conversation_background_core(manager.inner()).await
 }
