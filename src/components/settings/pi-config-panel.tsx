@@ -46,6 +46,7 @@ import { PI_CONFIG_DIR_ENV } from "@/lib/pi-config"
 import {
   PI_THINKING_LEVELS,
   implicitWireValue,
+  isExtendedPiThinkingLevel,
   reasoningFromModel,
   reasoningToMap,
   toggleLevel,
@@ -1042,11 +1043,11 @@ export function PiConfigPanel({
                       ...prev,
                       enabled: checked,
                       // First enable with nothing remembered → offer pi's whole
-                      // vocabulary bar xhigh, which most backends reject.
+                      // vocabulary bar xhigh/max, which most backends reject.
                       levels:
                         checked && prev.levels.length === 0
                           ? PI_THINKING_LEVELS.filter(
-                              (level) => level !== "xhigh"
+                              (level) => !isExtendedPiThinkingLevel(level)
                             )
                           : prev.levels,
                     }))
