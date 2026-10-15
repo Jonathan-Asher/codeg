@@ -1157,6 +1157,10 @@ impl WatchState {
             self.carry.clear();
             self.episode = None;
             self.mode = Mode::Foreground;
+            // The out-of-turn turn went with the episode: its end can no
+            // longer be read, so stop reporting it now rather than on the
+            // next unrelated write.
+            self.out_of_turn = false;
         } else if !unchanged {
             match self.read_new_lines(&path) {
                 Ok(lines) => {
@@ -2330,10 +2334,18 @@ mod tests {
         std::fs::copy(&path, &forked).unwrap();
         ws.rearm("s2".into(), epoch("2030-01-01T00:00:00Z"));
         ws.adopt_file(forked.clone());
+        // The notification opened out-of-turn work the forked file will never
+        // close, so the re-arm reports it over (see
+        // `a_rearm_still_reports_out_of_turn_work_ending`) — and nothing else.
+        let event = tick_now(&mut ws, &ledger).expect("out-of-turn work ends with the re-arm");
+        let (_, out_of_turn, _) = status_of(event.clone());
+        assert!(!out_of_turn);
+        let (turns, outstanding, settled, _) = unpack(event);
         assert!(
-            tick_now(&mut ws, &ledger).is_none(),
+            turns.is_empty() && settled.is_empty() && outstanding == 0,
             "copied history must not re-account"
         );
+        assert!(tick_now(&mut ws, &ledger).is_none());
 
         let send = r#"{"type":"assistant","timestamp":"2026-07-07T03:52:00.000Z","uuid":"a-send2","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_04","name":"SendMessage","input":{"to":"agentX","summary":"continue","message":"go on"}}]}}"#;
         write_lines(&forked, &[send]);
@@ -3594,14 +3606,16 @@ mod tests {
         let _ = tick_now(&mut ws, &ledger);
 
         std::fs::write(&path, b"").unwrap();
-        // Shrink triggers re-baseline; no panic, no stale content.
-        let event = tick_now(&mut ws, &ledger);
-        if let Some(e) = event {
-            let (turns, _, settled, watermark) = unpack(e);
-            assert!(turns.is_empty());
-            assert!(settled.is_empty());
-            assert_eq!(watermark, 0);
-        }
+        // Shrink triggers re-baseline; no panic, no stale content. The
+        // notification had opened out-of-turn work whose end can no longer
+        // be read: the re-baseline reports it over at once.
+        let event = tick_now(&mut ws, &ledger).expect("out-of-turn work ends with the re-baseline");
+        let (_, out_of_turn, _) = status_of(event.clone());
+        assert!(!out_of_turn);
+        let (turns, _, settled, watermark) = unpack(event);
+        assert!(turns.is_empty());
+        assert!(settled.is_empty());
+        assert_eq!(watermark, 0);
         write_lines(&path, &[&assistant_text("a9", "after rewrite")]);
         // Post-truncation content is foreground by default (no initiator seen).
         assert!(tick_now(&mut ws, &ledger).is_none());
