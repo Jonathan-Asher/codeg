@@ -3481,6 +3481,9 @@ type TurnFailurePart =
       kind: "verdict"
       title: string
       evidence?: string
+      /** Buttons for a verdict told on its own (no typed record pairs it):
+       *  a sign-in the agent asked for gets its "Sign in". */
+      actions?: NotifyAction[]
       session?: NotifySession | null
     }
 
@@ -4348,6 +4351,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           key,
           title: part.title,
           evidence: part.evidence,
+          actions: part.actions,
           session: part.session,
         })
         return
@@ -5617,6 +5621,28 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
               kind: "verdict",
               title: text,
               evidence,
+              // A refused prompt that needs a sign-in: straight to the
+              // agent's sign-in (Settings → Agents), from the toast and the
+              // alert list alike. Claude Code's panel there signs the host's
+              // CLI in from this device.
+              actions:
+                e.code === "turn_failed_auth_required" && nc
+                  ? [
+                      {
+                        label: tFailure("action.login"),
+                        onClick: () => {
+                          openSettingsWindow("agents", {
+                            agentType: nc.agentType,
+                          }).catch((err) => {
+                            console.error(
+                              "[AcpConnections] open agent settings:",
+                              err
+                            )
+                          })
+                        },
+                      },
+                    ]
+                  : undefined,
               session: toastSession(contextKey),
             })
             break

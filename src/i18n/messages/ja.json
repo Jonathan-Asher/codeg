@@ -1733,7 +1733,39 @@
     "customAgentRemoveWithData": "記録された会話履歴も削除する",
     "customAgentRemoved": "{name} を削除しました",
     "customAgentBadge": "カスタム",
-    "customAgentNotLaunchable": "この環境では起動できません: {reason}"
+    "customAgentNotLaunchable": "この環境では起動できません: {reason}",
+    "claudeAuth": {
+      "title": "Claude Code のサインイン",
+      "hint": "codeg ホスト上のすべての Claude Code セッションが使うサインインです。このデバイスからサインインできます。リンクはここで開き、ページに表示されたコードを貼り付けます。",
+      "refresh": "再確認",
+      "checking": "サインインを確認しています…",
+      "statusFailed": "サインイン状態を読み取れませんでした: {message}",
+      "signedInAs": "{email} としてサインイン中",
+      "signedIn": "サインイン中",
+      "plan": "{plan} プラン",
+      "signedOut": "サインインしていません。Claude Code のセッションはサインインを求めます。",
+      "method": {
+        "claude_ai": "Claude サブスクリプション",
+        "console": "Anthropic Console",
+        "api_key": "API キー",
+        "oauth_token": "長期トークン",
+        "third_party": "クラウドプロバイダー",
+        "none": "なし",
+        "other": "その他"
+      },
+      "signIn": "サインイン",
+      "signInAgain": "再サインイン",
+      "signOut": "サインアウト",
+      "stepOpen": "1. サインインページを開いてアクセスを許可します。",
+      "stepPaste": "2. ページに表示されたコードを貼り付けます。",
+      "pastePlaceholder": "ここにコードを貼り付け",
+      "signedInToast": "Claude Code にサインインしました",
+      "signedOutToast": "Claude Code からサインアウトしました",
+      "signOutFailed": "サインアウトできませんでした: {message}",
+      "signOutConfirmTitle": "Claude Code からサインアウトしますか？",
+      "signOutConfirmBody": "codeg ホスト上のすべての Claude Code セッションがこのサインインを共有しています。誰かが再度サインインするまで、実行中のセッションは動作しなくなります。",
+      "cancel": "キャンセル"
+    }
   },
   "AgentVocabulary": {
     "deepseekModeDefault": "通常",
@@ -6580,7 +6612,46 @@
       },
       "liveReading": "エージェントが最後に報告した読み取り",
       "liveReadingHint": "直前のターンを処理したプールのアカウントについての値のため、上のアカウントと一致しないことがあります。",
-      "privacyNote": "アカウントプールの数値は maxpool のローカルのステータスエンドポイントから取得します。codeg が設定から読み取るのはプロキシのアドレスとキーだけで、各アカウントのサインイン情報は読み取りません。"
+      "privacyNote": "アカウントプールの数値は maxpool のローカルのステータスエンドポイントから取得します。codeg が設定から読み取るのはプロキシのアドレスとキーだけで、各アカウントのサインイン情報は読み取りません。",
+      "manage": {
+        "addAccount": "アカウントを追加",
+        "addTitle": "プールにアカウントを追加",
+        "addHint": "サインインした Claude アカウントをプールに追加します。別のアカウントを追加するには、先に claude.ai でそのアカウントにサインインするか、プライベートウィンドウを使ってください。",
+        "reconnectTitle": "{name} に再サインイン",
+        "reconnectHint": "同じ Claude アカウントでサインインすると、プールに戻ります。",
+        "nameLabel": "名前（任意）",
+        "namePlaceholder": "既定はアカウントのメールアドレス",
+        "continue": "続ける",
+        "cancel": "キャンセル",
+        "stepOpen": "1. サインインページを開いてアクセスを許可します。",
+        "stepPaste": "2. ブラウザは最後に読み込めないページで止まります。そのページのアドレスをコピーしてここに貼り付けてください。",
+        "pastePlaceholder": "http://localhost:…/callback?code=…",
+        "addedToast": "アカウントを追加しました",
+        "reconnectedToast": "{name} に再サインインしました",
+        "appliedLive": "プールは 15 秒以内に反映します。",
+        "appliedRestarting": "リクエストが実行されていないときに、プールが再起動して反映します。",
+        "appliedNeedsRestart": "次に maxpool が再起動したときに反映されます。",
+        "actionsFor": "{name} の操作",
+        "reconnect": "再接続",
+        "signInAgain": "再サインイン",
+        "rename": "名前を変更",
+        "disable": "オフにする",
+        "enable": "オンにする",
+        "remove": "削除",
+        "renameTitle": "{name} の名前を変更",
+        "renameHint": "64 文字まで。ダッシュで始めたり、数字だけにしたりはできません。",
+        "save": "保存",
+        "renamedToast": "{name} に名前を変更しました",
+        "disabledToast": "{name} をオフにしました",
+        "enabledToast": "{name} をオンにしました",
+        "removeTitle": "{name} をプールから削除しますか？",
+        "removeBody": "プールはこのアカウントを使わなくなり、そのサインイン情報は maxpool の設定から削除されます。後でもう一度追加できます。",
+        "removedToast": "{name} を削除しました",
+        "failed": "うまくいきませんでした: {message}",
+        "reloadWaiting": "アカウントの変更は、リクエストが実行されていないときにプールが再起動すると反映されます。",
+        "reloadNeedsRestart": "アカウントの変更は、次に maxpool が再起動したときに反映されます。codeg はこのプールを再起動できません。",
+        "restartNow": "今すぐ再起動"
+      }
     }
   },
   "Forge": {
@@ -7267,5 +7338,23 @@
     "reconnectingBody": "サーバーとの接続が切れました。接続が戻ると、この表示は自動的に再読み込みされます。",
     "retry": "再試行",
     "reload": "ウィンドウを再読み込み"
+  },
+  "PasteSignIn": {
+    "starting": "サインインを開始しています…",
+    "done": "サインインしました。",
+    "openLink": "サインインページを開く",
+    "copyLink": "リンクをコピー",
+    "linkCopied": "リンクをコピーしました",
+    "submit": "送信",
+    "cancel": "キャンセル",
+    "tryAgain": "やり直す",
+    "close": "閉じる",
+    "failure": {
+      "invalid_code": "ページに表示されたコードではありません。すべてコピーしてもう一度貼り付けてください。",
+      "rejected": "サインインが拒否されました。最初からやり直し、新しいコードを使ってください。",
+      "timeout": "サインインが時間内に完了しませんでした。最初からやり直してください。",
+      "expired": "このサインインはもう待機していません。最初からやり直してください。",
+      "failed": "サインインが完了しませんでした。最初からやり直してください。"
+    }
   }
 }

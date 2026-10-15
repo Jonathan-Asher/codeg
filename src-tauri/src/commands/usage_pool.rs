@@ -1212,5 +1212,7 @@ pub(crate) fn resume_at_from(
     }
 }
 
+pub(crate) mod manage;
+
 #[cfg(test)]
 mod tests;

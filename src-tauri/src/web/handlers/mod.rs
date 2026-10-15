@@ -10,6 +10,7 @@ pub mod backup;
 pub mod browser_bridge;
 pub mod browser_tools;
 pub mod chat_authoring;
+pub mod claude_auth;
 pub mod chat_channel;
 pub mod attention;
 pub mod conversation_export;

@@ -2629,6 +2629,65 @@ export interface PlanUsagePool {
   error_status: number | null
 }
 
+/** Why a pasted sign-in code did not work — fixed codes, never the CLI's
+ *  own words. `retry` on the outcome means the same sign-in still waits. */
+export type SignInFailure =
+  | "invalid_code"
+  | "rejected"
+  | "timeout"
+  | "expired"
+  | "failed"
+
+export interface SignInOutcome {
+  ok: boolean
+  reason: SignInFailure | null
+  retry: boolean
+}
+
+/** Where a pending sign-in stands; one can finish without a paste. */
+export type SignInState = "waiting" | "succeeded" | "failed" | "expired"
+
+/** A started sign-in: the link to open, and the handle to answer it with. */
+export interface SignInStart {
+  handle: string
+  url: string
+}
+
+/** How Claude Code's CLI is signed in on the codeg host. */
+export type ClaudeAuthMethod =
+  | "claude_ai"
+  | "console"
+  | "api_key"
+  | "oauth_token"
+  | "third_party"
+  | "none"
+  | "other"
+
+export interface ClaudeAuthStatus {
+  loggedIn: boolean
+  method: ClaudeAuthMethod
+  email: string | null
+  /** `max`, `pro`, … for a claude.ai sign-in. */
+  subscription: string | null
+  provider: string | null
+}
+
+/** Whether a removal or rename waits for the pool's server to restart. */
+export type PoolReloadState = "idle" | "waiting" | "needs_restart"
+
+export interface PoolManageInfo {
+  /** A pool is configured on the host and its CLI can be run. */
+  available: boolean
+  reload: PoolReloadState
+}
+
+/** How an account change reaches the running pool. */
+export type PoolApply = "live" | "restarting" | "needs_restart"
+
+export interface PoolChange {
+  applied: PoolApply
+}
+
 /** Payload of the `token-usage-sync://progress` event. */
 export interface TokenUsageSyncProgress {
   done: number

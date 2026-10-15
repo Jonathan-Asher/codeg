@@ -1733,7 +1733,39 @@
     "customAgentRemoveWithData": "同时删除已记录的会话历史",
     "customAgentRemoved": "已移除 {name}",
     "customAgentBadge": "自定义",
-    "customAgentNotLaunchable": "该智能体在此环境无法启动：{reason}"
+    "customAgentNotLaunchable": "该智能体在此环境无法启动：{reason}",
+    "claudeAuth": {
+      "title": "Claude Code 登录",
+      "hint": "codeg 主机上所有 Claude Code 会话共用此登录。可以在本设备上登录：链接在这里打开，然后粘贴页面显示的代码。",
+      "refresh": "重新检查",
+      "checking": "正在检查登录…",
+      "statusFailed": "无法读取登录状态：{message}",
+      "signedInAs": "已登录为 {email}",
+      "signedIn": "已登录",
+      "plan": "{plan} 套餐",
+      "signedOut": "未登录。Claude Code 会话会要求你登录。",
+      "method": {
+        "claude_ai": "Claude 订阅",
+        "console": "Anthropic Console",
+        "api_key": "API 密钥",
+        "oauth_token": "长期令牌",
+        "third_party": "云服务商",
+        "none": "无",
+        "other": "其他"
+      },
+      "signIn": "登录",
+      "signInAgain": "重新登录",
+      "signOut": "退出登录",
+      "stepOpen": "1. 打开登录页面并批准访问。",
+      "stepPaste": "2. 粘贴页面显示的代码。",
+      "pastePlaceholder": "在此粘贴代码",
+      "signedInToast": "Claude Code 已登录",
+      "signedOutToast": "Claude Code 已退出登录",
+      "signOutFailed": "无法退出登录：{message}",
+      "signOutConfirmTitle": "让 Claude Code 退出登录？",
+      "signOutConfirmBody": "codeg 主机上所有 Claude Code 会话共用此登录。在有人重新登录之前，正在运行的会话将无法工作。",
+      "cancel": "取消"
+    }
   },
   "AgentVocabulary": {
     "deepseekModeDefault": "常规",
@@ -6580,7 +6612,46 @@
       },
       "liveReading": "智能体最近上报的读数",
       "liveReadingHint": "它描述的是处理上一轮的账号池账号，因此可能与上面的账号不一致。",
-      "privacyNote": "账号池的数字来自 maxpool 的本地状态接口；codeg 只从其配置中读取代理的地址和密钥，从不读取各账号的登录凭据。"
+      "privacyNote": "账号池的数字来自 maxpool 的本地状态接口；codeg 只从其配置中读取代理的地址和密钥，从不读取各账号的登录凭据。",
+      "manage": {
+        "addAccount": "添加账号",
+        "addTitle": "向账号池添加账号",
+        "addHint": "将你登录的 Claude 账号加入账号池。要添加其他账号，请先在 claude.ai 登录该账号，或使用无痕窗口。",
+        "reconnectTitle": "重新登录 {name}",
+        "reconnectHint": "使用同一个 Claude 账号登录，让它重新回到账号池。",
+        "nameLabel": "名称（可选）",
+        "namePlaceholder": "默认为账号邮箱",
+        "continue": "继续",
+        "cancel": "取消",
+        "stepOpen": "1. 打开登录页面并批准访问。",
+        "stepPaste": "2. 浏览器最后会停在一个无法加载的页面。复制该页面的地址并粘贴到这里。",
+        "pastePlaceholder": "http://localhost:…/callback?code=…",
+        "addedToast": "账号已添加",
+        "reconnectedToast": "{name} 已重新登录",
+        "appliedLive": "账号池会在 15 秒内生效。",
+        "appliedRestarting": "在没有请求运行时，账号池会重启以应用更改。",
+        "appliedNeedsRestart": "将在 maxpool 下次重启时生效。",
+        "actionsFor": "{name} 的操作",
+        "reconnect": "重新连接",
+        "signInAgain": "重新登录",
+        "rename": "重命名",
+        "disable": "停用",
+        "enable": "启用",
+        "remove": "移除",
+        "renameTitle": "重命名 {name}",
+        "renameHint": "最多 64 个字符，不能以短横线开头，也不能全是数字。",
+        "save": "保存",
+        "renamedToast": "已重命名为 {name}",
+        "disabledToast": "{name} 已停用",
+        "enabledToast": "{name} 已启用",
+        "removeTitle": "从账号池移除 {name}？",
+        "removeBody": "账号池将不再使用此账号，其登录信息会从 maxpool 的配置中删除。之后可以重新添加。",
+        "removedToast": "已移除 {name}",
+        "failed": "操作失败：{message}",
+        "reloadWaiting": "账号更改将在账号池重启时生效，重启会等到没有请求运行时进行。",
+        "reloadNeedsRestart": "账号更改将在 maxpool 下次重启时生效。codeg 无法重启此账号池。",
+        "restartNow": "立即重启"
+      }
     }
   },
   "Forge": {
@@ -7267,5 +7338,23 @@
     "reconnectingBody": "与服务器的连接已断开。连接恢复后，此视图会自动重新加载。",
     "retry": "重试",
     "reload": "重新加载窗口"
+  },
+  "PasteSignIn": {
+    "starting": "正在启动登录…",
+    "done": "已登录。",
+    "openLink": "打开登录页面",
+    "copyLink": "复制链接",
+    "linkCopied": "链接已复制",
+    "submit": "提交",
+    "cancel": "取消",
+    "tryAgain": "重试",
+    "close": "关闭",
+    "failure": {
+      "invalid_code": "这不是页面显示的代码。请完整复制后重新粘贴。",
+      "rejected": "登录被拒绝。请重新开始并使用新的代码。",
+      "timeout": "登录未能及时完成。请重新开始。",
+      "expired": "此登录已不再等待。请重新开始。",
+      "failed": "登录未完成。请重新开始。"
+    }
   }
 }

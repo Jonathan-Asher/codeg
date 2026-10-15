@@ -157,6 +157,7 @@ import {
   ANTIGRAVITY_ENV_KEYS,
   AntigravityConfigPanel,
 } from "./antigravity-config-panel"
+import { ClaudeCodeAuthPanel } from "./claude-code-auth-panel"
 import { CodeBuddyConfigPanel } from "./codebuddy-config-panel"
 import { CursorConfigPanel } from "./cursor-config-panel"
 import {
@@ -8021,6 +8022,12 @@ export function AcpAgentSettings() {
                       </div>
                     )}
                 </div>
+
+                {/* First thing under the agent's checks: the sign-in a failed
+                    turn's "Sign in" button sends the user here for. */}
+                {selectedAgent.agent_type === "claude_code" && (
+                  <ClaudeCodeAuthPanel />
+                )}
 
                 <div className="space-y-2">
                   <label className="text-xs font-medium">{t("envVars")}</label>

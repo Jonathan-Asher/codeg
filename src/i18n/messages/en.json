@@ -1733,7 +1733,39 @@
     "customAgentRemoveWithData": "Also delete its recorded conversation history",
     "customAgentRemoved": "Removed {name}",
     "customAgentBadge": "Custom",
-    "customAgentNotLaunchable": "This agent cannot launch here: {reason}"
+    "customAgentNotLaunchable": "This agent cannot launch here: {reason}",
+    "claudeAuth": {
+      "title": "Claude Code sign-in",
+      "hint": "The sign-in every Claude Code session on the codeg host uses. You can sign in from this device: the link opens here, and you paste back the code the page shows.",
+      "refresh": "Check again",
+      "checking": "Checking the sign-in…",
+      "statusFailed": "Couldn't read the sign-in: {message}",
+      "signedInAs": "Signed in as {email}",
+      "signedIn": "Signed in",
+      "plan": "{plan} plan",
+      "signedOut": "Not signed in. Claude Code sessions will ask you to sign in.",
+      "method": {
+        "claude_ai": "Claude subscription",
+        "console": "Anthropic Console",
+        "api_key": "API key",
+        "oauth_token": "Long-lived token",
+        "third_party": "Cloud provider",
+        "none": "None",
+        "other": "Other"
+      },
+      "signIn": "Sign in",
+      "signInAgain": "Sign in again",
+      "signOut": "Sign out",
+      "stepOpen": "1. Open the sign-in page and approve access.",
+      "stepPaste": "2. Paste the code the page shows.",
+      "pastePlaceholder": "Paste the code here",
+      "signedInToast": "Claude Code is signed in",
+      "signedOutToast": "Claude Code is signed out",
+      "signOutFailed": "Couldn't sign out: {message}",
+      "signOutConfirmTitle": "Sign Claude Code out?",
+      "signOutConfirmBody": "Every Claude Code session on the codeg host shares this sign-in. Running sessions will stop working until someone signs in again.",
+      "cancel": "Cancel"
+    }
   },
   "AgentVocabulary": {
     "deepseekModeDefault": "Normal",
@@ -6580,7 +6612,46 @@
       },
       "liveReading": "Last reading the agent reported",
       "liveReadingHint": "It describes whichever pool account served the last turn, so it can disagree with the accounts above.",
-      "privacyNote": "Account-pool numbers come from maxpool's local status endpoint; codeg reads only the proxy's address and key from its config, never the accounts' sign-ins."
+      "privacyNote": "Account-pool numbers come from maxpool's local status endpoint; codeg reads only the proxy's address and key from its config, never the accounts' sign-ins.",
+      "manage": {
+        "addAccount": "Add account",
+        "addTitle": "Add an account to the pool",
+        "addHint": "Adds the Claude account you sign in with to the pool. To add a different account, sign into it at claude.ai first, or use a private window.",
+        "reconnectTitle": "Sign {name} in again",
+        "reconnectHint": "Sign in with the same Claude account to bring it back into the pool.",
+        "nameLabel": "Name (optional)",
+        "namePlaceholder": "Defaults to the account email",
+        "continue": "Continue",
+        "cancel": "Cancel",
+        "stepOpen": "1. Open the sign-in page and approve access.",
+        "stepPaste": "2. Your browser ends on a page that won't load. Copy that page's address and paste it here.",
+        "pastePlaceholder": "http://localhost:…/callback?code=…",
+        "addedToast": "Account added",
+        "reconnectedToast": "{name} is signed in again",
+        "appliedLive": "The pool picks it up within 15 seconds.",
+        "appliedRestarting": "The pool restarts to apply it once no request is running.",
+        "appliedNeedsRestart": "It applies the next time maxpool restarts.",
+        "actionsFor": "Actions for {name}",
+        "reconnect": "Reconnect",
+        "signInAgain": "Sign in again",
+        "rename": "Rename",
+        "disable": "Turn off",
+        "enable": "Turn on",
+        "remove": "Remove",
+        "renameTitle": "Rename {name}",
+        "renameHint": "Up to 64 characters. It cannot start with a dash or be only digits.",
+        "save": "Save",
+        "renamedToast": "Renamed to {name}",
+        "disabledToast": "{name} is turned off",
+        "enabledToast": "{name} is turned on",
+        "removeTitle": "Remove {name} from the pool?",
+        "removeBody": "The pool stops using this account, and its sign-in is deleted from maxpool's config. You can add it again later.",
+        "removedToast": "{name} removed",
+        "failed": "That didn't work: {message}",
+        "reloadWaiting": "An account change applies when the pool restarts, once no request is running.",
+        "reloadNeedsRestart": "An account change applies the next time maxpool restarts. codeg cannot restart this pool.",
+        "restartNow": "Restart now"
+      }
     }
   },
   "Forge": {
@@ -7267,5 +7338,23 @@
     "reconnectingBody": "The connection to the server was lost. This view reloads by itself once it is back.",
     "retry": "Try again",
     "reload": "Reload window"
+  },
+  "PasteSignIn": {
+    "starting": "Starting the sign-in…",
+    "done": "Signed in.",
+    "openLink": "Open sign-in page",
+    "copyLink": "Copy link",
+    "linkCopied": "Link copied",
+    "submit": "Submit",
+    "cancel": "Cancel",
+    "tryAgain": "Try again",
+    "close": "Close",
+    "failure": {
+      "invalid_code": "That isn't the code the page showed. Copy all of it and paste it again.",
+      "rejected": "The sign-in was refused. Start again and use a fresh code.",
+      "timeout": "The sign-in didn't finish in time. Start again.",
+      "expired": "This sign-in is no longer waiting. Start again.",
+      "failed": "The sign-in didn't complete. Start again."
+    }
   }
 }

@@ -6,6 +6,7 @@ pub mod auto_resume;
 pub mod critical_watch;
 pub mod background_watch;
 pub mod binary_cache;
+pub mod claude_auth;
 pub mod browser_tools;
 pub mod chat_authoring;
 pub mod codex_catalog_source;

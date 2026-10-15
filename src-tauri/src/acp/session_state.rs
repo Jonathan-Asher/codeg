@@ -18,8 +18,8 @@ use crate::acp::plan_approval::PendingPlanApprovalState;
 use crate::acp::question::PendingQuestionState;
 use crate::acp::types::{
     AcpEvent, AsyncTaskRecord, AttachPhase, AvailableCommandInfo, ConfigStaleKind, ConnectionStatus,
-    EventEnvelope, GrokModelSpec, PromptCapabilitiesInfo, SessionConfigOptionInfo,
-    SessionFailureRecord, SessionModeStateInfo, ToolCallImageInfo,
+    EventEnvelope, GrokModelSpec, PromptCapabilitiesInfo, PromptInputBlock,
+    SessionConfigOptionInfo, SessionFailureRecord, SessionModeStateInfo, ToolCallImageInfo,
 };
 use crate::models::agent::AgentType;
 use crate::models::message::MessageRole;
@@ -736,6 +736,24 @@ pub struct SessionState {
     /// `ConversationLinked` so a title dropped while the row was still
     /// unbound can be accepted on the next send.
     pub last_native_title: Option<String>,
+
+    /// Claude Code only: how to ask this connection's CLI, with the
+    /// connection's own environment, whether it is signed in. Read when a
+    /// prompt is refused with `authRequired`, to tell a CLI process holding a
+    /// dead credential (a fresh process recovers) from a real sign-out (it
+    /// does not). Backend-internal.
+    pub claude_cli: Option<Arc<crate::acp::claude_auth::ClaudeCli>>,
+    /// Set by the turn loop when a refused prompt is worth one retry on a new
+    /// agent process: the prompt to send again. The connection driver takes
+    /// it once the loop has exited, and restarts the process in place.
+    pub claude_auth_respawn: Option<Vec<PromptInputBlock>>,
+    /// Handed to the restarted process: the turn loop sends it before
+    /// anything queued, as the same turn, and never retries it again.
+    pub claude_auth_retry_prompt: Option<Vec<PromptInputBlock>>,
+    /// From the retry decision until the retried prompt is sent: the turn
+    /// is still running as far as every client knows, so the restart's
+    /// attach keeps quiet about the connection going back to `Connected`.
+    pub claude_auth_respawning: bool,
 }
 
 impl SessionState {
@@ -813,6 +831,10 @@ impl SessionState {
             config_stale: false,
             config_stale_kind: None,
             last_native_title: None,
+            claude_cli: None,
+            claude_auth_respawn: None,
+            claude_auth_retry_prompt: None,
+            claude_auth_respawning: false,
         }
     }
 

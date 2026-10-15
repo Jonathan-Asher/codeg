@@ -1733,7 +1733,39 @@
     "customAgentRemoveWithData": "同時刪除已記錄的會話歷史",
     "customAgentRemoved": "已移除 {name}",
     "customAgentBadge": "自訂",
-    "customAgentNotLaunchable": "該智慧體在此環境無法啟動：{reason}"
+    "customAgentNotLaunchable": "該智慧體在此環境無法啟動：{reason}",
+    "claudeAuth": {
+      "title": "Claude Code 登入",
+      "hint": "codeg 主機上所有 Claude Code 工作階段共用此登入。可以在本裝置上登入：連結在這裡開啟，然後貼上頁面顯示的代碼。",
+      "refresh": "重新檢查",
+      "checking": "正在檢查登入…",
+      "statusFailed": "無法讀取登入狀態：{message}",
+      "signedInAs": "已登入為 {email}",
+      "signedIn": "已登入",
+      "plan": "{plan} 方案",
+      "signedOut": "尚未登入。Claude Code 工作階段會要求你登入。",
+      "method": {
+        "claude_ai": "Claude 訂閱",
+        "console": "Anthropic Console",
+        "api_key": "API 金鑰",
+        "oauth_token": "長期權杖",
+        "third_party": "雲端服務商",
+        "none": "無",
+        "other": "其他"
+      },
+      "signIn": "登入",
+      "signInAgain": "重新登入",
+      "signOut": "登出",
+      "stepOpen": "1. 開啟登入頁面並核准存取。",
+      "stepPaste": "2. 貼上頁面顯示的代碼。",
+      "pastePlaceholder": "在此貼上代碼",
+      "signedInToast": "Claude Code 已登入",
+      "signedOutToast": "Claude Code 已登出",
+      "signOutFailed": "無法登出：{message}",
+      "signOutConfirmTitle": "讓 Claude Code 登出？",
+      "signOutConfirmBody": "codeg 主機上所有 Claude Code 工作階段共用此登入。在有人重新登入之前，執行中的工作階段將無法運作。",
+      "cancel": "取消"
+    }
   },
   "AgentVocabulary": {
     "deepseekModeDefault": "常規",
@@ -6580,7 +6612,46 @@
       },
       "liveReading": "代理最近回報的讀數",
       "liveReadingHint": "它描述的是處理上一輪的帳號池帳號，因此可能與上方的帳號不一致。",
-      "privacyNote": "帳號池的數字來自 maxpool 的本機狀態端點；codeg 只從其設定讀取代理伺服器的位址和金鑰，從不讀取各帳號的登入憑證。"
+      "privacyNote": "帳號池的數字來自 maxpool 的本機狀態端點；codeg 只從其設定讀取代理伺服器的位址和金鑰，從不讀取各帳號的登入憑證。",
+      "manage": {
+        "addAccount": "新增帳號",
+        "addTitle": "在帳號池新增帳號",
+        "addHint": "將你登入的 Claude 帳號加入帳號池。若要新增其他帳號，請先在 claude.ai 登入該帳號，或使用無痕視窗。",
+        "reconnectTitle": "重新登入 {name}",
+        "reconnectHint": "使用同一個 Claude 帳號登入，讓它重新回到帳號池。",
+        "nameLabel": "名稱（選填）",
+        "namePlaceholder": "預設為帳號電子郵件",
+        "continue": "繼續",
+        "cancel": "取消",
+        "stepOpen": "1. 開啟登入頁面並核准存取。",
+        "stepPaste": "2. 瀏覽器最後會停在一個無法載入的頁面。複製該頁面的網址並貼到這裡。",
+        "pastePlaceholder": "http://localhost:…/callback?code=…",
+        "addedToast": "已新增帳號",
+        "reconnectedToast": "{name} 已重新登入",
+        "appliedLive": "帳號池會在 15 秒內套用。",
+        "appliedRestarting": "在沒有請求執行時，帳號池會重新啟動以套用變更。",
+        "appliedNeedsRestart": "將在 maxpool 下次重新啟動時套用。",
+        "actionsFor": "{name} 的動作",
+        "reconnect": "重新連線",
+        "signInAgain": "重新登入",
+        "rename": "重新命名",
+        "disable": "停用",
+        "enable": "啟用",
+        "remove": "移除",
+        "renameTitle": "重新命名 {name}",
+        "renameHint": "最多 64 個字元，不能以短橫線開頭，也不能全是數字。",
+        "save": "儲存",
+        "renamedToast": "已重新命名為 {name}",
+        "disabledToast": "{name} 已停用",
+        "enabledToast": "{name} 已啟用",
+        "removeTitle": "要從帳號池移除 {name} 嗎？",
+        "removeBody": "帳號池將不再使用此帳號，其登入資訊會從 maxpool 的設定中刪除。之後可以再新增回來。",
+        "removedToast": "已移除 {name}",
+        "failed": "操作失敗：{message}",
+        "reloadWaiting": "帳號變更將在帳號池重新啟動時套用，重新啟動會等到沒有請求執行時進行。",
+        "reloadNeedsRestart": "帳號變更將在 maxpool 下次重新啟動時套用。codeg 無法重新啟動此帳號池。",
+        "restartNow": "立即重新啟動"
+      }
     }
   },
   "Forge": {
@@ -7267,5 +7338,23 @@
     "reconnectingBody": "與伺服器的連線已中斷。連線恢復後，此檢視會自動重新載入。",
     "retry": "重試",
     "reload": "重新載入視窗"
+  },
+  "PasteSignIn": {
+    "starting": "正在啟動登入…",
+    "done": "已登入。",
+    "openLink": "開啟登入頁面",
+    "copyLink": "複製連結",
+    "linkCopied": "已複製連結",
+    "submit": "送出",
+    "cancel": "取消",
+    "tryAgain": "重試",
+    "close": "關閉",
+    "failure": {
+      "invalid_code": "這不是頁面顯示的代碼。請完整複製後重新貼上。",
+      "rejected": "登入遭拒。請重新開始並使用新的代碼。",
+      "timeout": "登入未能及時完成。請重新開始。",
+      "expired": "此登入已不再等待。請重新開始。",
+      "failed": "登入未完成。請重新開始。"
+    }
   }
 }

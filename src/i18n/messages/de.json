@@ -1733,7 +1733,39 @@
     "customAgentRemoveWithData": "Auch den aufgezeichneten Gesprächsverlauf löschen",
     "customAgentRemoved": "{name} entfernt",
     "customAgentBadge": "Eigen",
-    "customAgentNotLaunchable": "Dieser Agent kann hier nicht gestartet werden: {reason}"
+    "customAgentNotLaunchable": "Dieser Agent kann hier nicht gestartet werden: {reason}",
+    "claudeAuth": {
+      "title": "Claude-Code-Anmeldung",
+      "hint": "Die Anmeldung, die jede Claude-Code-Sitzung auf dem codeg-Host verwendet. Du kannst dich auf diesem Gerät anmelden: Der Link öffnet sich hier, und du fügst den Code ein, den die Seite anzeigt.",
+      "refresh": "Erneut prüfen",
+      "checking": "Anmeldung wird geprüft…",
+      "statusFailed": "Die Anmeldung konnte nicht gelesen werden: {message}",
+      "signedInAs": "Angemeldet als {email}",
+      "signedIn": "Angemeldet",
+      "plan": "Tarif {plan}",
+      "signedOut": "Nicht angemeldet. Claude-Code-Sitzungen fordern dich zur Anmeldung auf.",
+      "method": {
+        "claude_ai": "Claude-Abo",
+        "console": "Anthropic Console",
+        "api_key": "API-Schlüssel",
+        "oauth_token": "Langlebiges Token",
+        "third_party": "Cloud-Anbieter",
+        "none": "Keine",
+        "other": "Andere"
+      },
+      "signIn": "Anmelden",
+      "signInAgain": "Erneut anmelden",
+      "signOut": "Abmelden",
+      "stepOpen": "1. Öffne die Anmeldeseite und erlaube den Zugriff.",
+      "stepPaste": "2. Füge den Code ein, den die Seite anzeigt.",
+      "pastePlaceholder": "Code hier einfügen",
+      "signedInToast": "Claude Code ist angemeldet",
+      "signedOutToast": "Claude Code ist abgemeldet",
+      "signOutFailed": "Abmelden nicht möglich: {message}",
+      "signOutConfirmTitle": "Claude Code abmelden?",
+      "signOutConfirmBody": "Alle Claude-Code-Sitzungen auf dem codeg-Host teilen sich diese Anmeldung. Laufende Sitzungen funktionieren nicht mehr, bis sich jemand wieder anmeldet.",
+      "cancel": "Abbrechen"
+    }
   },
   "AgentVocabulary": {
     "deepseekModeDefault": "Normal",
@@ -6580,7 +6612,46 @@
       },
       "liveReading": "Letzte vom Agenten gemeldete Messung",
       "liveReadingHint": "Sie beschreibt das Pool-Konto, das den letzten Turn bedient hat, und kann daher von den Konten oben abweichen.",
-      "privacyNote": "Die Zahlen des Konten-Pools stammen vom lokalen Status-Endpunkt von maxpool; codeg liest aus dessen Konfiguration nur Adresse und Schlüssel des Proxys, nie die Anmeldungen der Konten."
+      "privacyNote": "Die Zahlen des Konten-Pools stammen vom lokalen Status-Endpunkt von maxpool; codeg liest aus dessen Konfiguration nur Adresse und Schlüssel des Proxys, nie die Anmeldungen der Konten.",
+      "manage": {
+        "addAccount": "Konto hinzufügen",
+        "addTitle": "Konto zum Pool hinzufügen",
+        "addHint": "Fügt das Claude-Konto, mit dem du dich anmeldest, zum Pool hinzu. Um ein anderes Konto hinzuzufügen, melde dich zuerst bei claude.ai damit an oder nutze ein privates Fenster.",
+        "reconnectTitle": "{name} erneut anmelden",
+        "reconnectHint": "Melde dich mit demselben Claude-Konto an, um es wieder in den Pool zu holen.",
+        "nameLabel": "Name (optional)",
+        "namePlaceholder": "Standardmäßig die E-Mail des Kontos",
+        "continue": "Weiter",
+        "cancel": "Abbrechen",
+        "stepOpen": "1. Öffne die Anmeldeseite und erlaube den Zugriff.",
+        "stepPaste": "2. Dein Browser landet auf einer Seite, die nicht lädt. Kopiere deren Adresse und füge sie hier ein.",
+        "pastePlaceholder": "http://localhost:…/callback?code=…",
+        "addedToast": "Konto hinzugefügt",
+        "reconnectedToast": "{name} ist wieder angemeldet",
+        "appliedLive": "Der Pool übernimmt es innerhalb von 15 Sekunden.",
+        "appliedRestarting": "Der Pool startet neu, um es zu übernehmen, sobald keine Anfrage läuft.",
+        "appliedNeedsRestart": "Es wird beim nächsten Neustart von maxpool übernommen.",
+        "actionsFor": "Aktionen für {name}",
+        "reconnect": "Neu verbinden",
+        "signInAgain": "Erneut anmelden",
+        "rename": "Umbenennen",
+        "disable": "Ausschalten",
+        "enable": "Einschalten",
+        "remove": "Entfernen",
+        "renameTitle": "{name} umbenennen",
+        "renameHint": "Bis zu 64 Zeichen. Darf nicht mit einem Bindestrich beginnen oder nur aus Ziffern bestehen.",
+        "save": "Speichern",
+        "renamedToast": "Umbenannt in {name}",
+        "disabledToast": "{name} ist ausgeschaltet",
+        "enabledToast": "{name} ist eingeschaltet",
+        "removeTitle": "{name} aus dem Pool entfernen?",
+        "removeBody": "Der Pool verwendet dieses Konto nicht mehr, und seine Anmeldung wird aus der maxpool-Konfiguration gelöscht. Du kannst es später wieder hinzufügen.",
+        "removedToast": "{name} entfernt",
+        "failed": "Das hat nicht funktioniert: {message}",
+        "reloadWaiting": "Eine Kontoänderung wird übernommen, wenn der Pool neu startet, sobald keine Anfrage läuft.",
+        "reloadNeedsRestart": "Eine Kontoänderung wird beim nächsten Neustart von maxpool übernommen. codeg kann diesen Pool nicht neu starten.",
+        "restartNow": "Jetzt neu starten"
+      }
     }
   },
   "Forge": {
@@ -7267,5 +7338,23 @@
     "reconnectingBody": "Die Verbindung zum Server ist unterbrochen. Diese Ansicht lädt sich neu, sobald er wieder erreichbar ist.",
     "retry": "Erneut versuchen",
     "reload": "Fenster neu laden"
+  },
+  "PasteSignIn": {
+    "starting": "Anmeldung wird gestartet…",
+    "done": "Angemeldet.",
+    "openLink": "Anmeldeseite öffnen",
+    "copyLink": "Link kopieren",
+    "linkCopied": "Link kopiert",
+    "submit": "Absenden",
+    "cancel": "Abbrechen",
+    "tryAgain": "Erneut versuchen",
+    "close": "Schließen",
+    "failure": {
+      "invalid_code": "Das ist nicht der Code, den die Seite angezeigt hat. Kopiere ihn vollständig und füge ihn erneut ein.",
+      "rejected": "Die Anmeldung wurde abgelehnt. Starte neu und verwende einen neuen Code.",
+      "timeout": "Die Anmeldung wurde nicht rechtzeitig abgeschlossen. Starte neu.",
+      "expired": "Diese Anmeldung wartet nicht mehr. Starte neu.",
+      "failed": "Die Anmeldung wurde nicht abgeschlossen. Starte neu."
+    }
   }
 }

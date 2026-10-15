@@ -1656,6 +1656,68 @@ pub fn build_router(
             "/get_plan_usage",
             post(handlers::plan_usage::get_plan_usage),
         )
+        // ─── Account pool management (maxpool) ───
+        .route(
+            "/usage_pool_manage_info",
+            post(handlers::plan_usage::usage_pool_manage_info),
+        )
+        .route(
+            "/usage_pool_login_start",
+            post(handlers::plan_usage::usage_pool_login_start),
+        )
+        .route(
+            "/usage_pool_login_finish",
+            post(handlers::plan_usage::usage_pool_login_finish),
+        )
+        .route(
+            "/usage_pool_login_state",
+            post(handlers::plan_usage::usage_pool_login_state),
+        )
+        .route(
+            "/usage_pool_login_cancel",
+            post(handlers::plan_usage::usage_pool_login_cancel),
+        )
+        .route(
+            "/usage_pool_rename",
+            post(handlers::plan_usage::usage_pool_rename),
+        )
+        .route(
+            "/usage_pool_set_enabled",
+            post(handlers::plan_usage::usage_pool_set_enabled),
+        )
+        .route(
+            "/usage_pool_remove",
+            post(handlers::plan_usage::usage_pool_remove),
+        )
+        .route(
+            "/usage_pool_restart_now",
+            post(handlers::plan_usage::usage_pool_restart_now),
+        )
+        // ─── Claude Code sign-in ───
+        .route(
+            "/claude_auth_status",
+            post(handlers::claude_auth::claude_auth_status),
+        )
+        .route(
+            "/claude_auth_login_start",
+            post(handlers::claude_auth::claude_auth_login_start),
+        )
+        .route(
+            "/claude_auth_login_finish",
+            post(handlers::claude_auth::claude_auth_login_finish),
+        )
+        .route(
+            "/claude_auth_login_state",
+            post(handlers::claude_auth::claude_auth_login_state),
+        )
+        .route(
+            "/claude_auth_login_cancel",
+            post(handlers::claude_auth::claude_auth_login_cancel),
+        )
+        .route(
+            "/claude_auth_logout",
+            post(handlers::claude_auth::claude_auth_logout),
+        )
         // ─── Work tasks ───
         .route("/work_task_list", post(handlers::work_task::work_task_list))
         .route("/work_task_get", post(handlers::work_task::work_task_get))

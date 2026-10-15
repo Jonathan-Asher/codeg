@@ -50,6 +50,11 @@ import {
   PoolSummaryLine,
   UnansweredPoolNotice,
 } from "./plan-usage-pool"
+import {
+  PoolAddAccountButton,
+  PoolReloadNotice,
+  usePoolManage,
+} from "./plan-usage-pool-manage"
 
 /** How often relative times ("resets in 2h 14m") re-render. */
 const TICK_MS = 30_000
@@ -136,6 +141,7 @@ export function PlanUsagePage() {
                     snapshot={findSnapshot(report, agent)}
                     report={report}
                     now={now}
+                    onPoolChanged={() => void load(true)}
                   />
                 ))}
               </div>
@@ -163,11 +169,13 @@ function ProviderCard({
   snapshot,
   report,
   now,
+  onPoolChanged,
 }: {
   agent: PlanUsageAgent
   snapshot: PlanUsageSnapshot | null
   report: PlanUsageReport | null
   now: number
+  onPoolChanged?: () => void
 }) {
   const t = useTranslations("PlanUsage")
   const label = getAgentLabel(agent)
@@ -186,6 +194,7 @@ function ProviderCard({
         pool={pool}
         snapshot={hasData ? snapshot : null}
         now={now}
+        onPoolChanged={onPoolChanged}
       />
     )
   }
@@ -262,15 +271,25 @@ function PoolProviderCard({
   pool,
   snapshot,
   now,
+  onPoolChanged,
 }: {
   agent: PlanUsageAgent
   label: string
   pool: PlanUsagePool
   snapshot: PlanUsageSnapshot | null
   now: number
+  /** Re-read the report after an account change. */
+  onPoolChanged?: () => void
 }) {
   const t = useTranslations("PlanUsage")
   const stale = isPoolStale(pool, now)
+  const { info: manage, reload: reloadManage } = usePoolManage(pool)
+  const managed = manage?.available
+    ? () => {
+        reloadManage()
+        onPoolChanged?.()
+      }
+    : undefined
   return (
     <section
       aria-label={label}
@@ -296,13 +315,17 @@ function PoolProviderCard({
             {t("stale")}
           </Badge>
         )}
+        {managed && <PoolAddAccountButton onChanged={managed} />}
       </header>
       <PoolSummaryLine pool={pool} now={now} className="mt-1.5" />
       <div className="mt-3 space-y-2 empty:hidden">
         <PoolNotices pool={pool} now={now} />
+        {manage?.available && managed && (
+          <PoolReloadNotice info={manage} onChanged={managed} />
+        )}
       </div>
       <div className="mt-3">
-        <PoolAccountList pool={pool} now={now} />
+        <PoolAccountList pool={pool} now={now} onManaged={managed} />
       </div>
       {snapshot && (
         <details data-slot="live-reading" className="group mt-4">
