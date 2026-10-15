@@ -45,8 +45,9 @@ import type {
   ConversationStatus,
 } from "@/lib/types"
 import { useConversationAttention } from "@/stores/conversation-attention-store"
+import { useConversationBackground } from "@/stores/conversation-background-store"
 import { STATUS_ORDER } from "@/lib/types"
-import { summaryActivity } from "@/lib/session-activity"
+import { backgroundTaskTotal, summaryActivity } from "@/lib/session-activity"
 import { ATTACH_PHASE_LABEL_KEYS, isAttachingPhase } from "@/lib/attach-phase"
 import { getAgentLabel } from "@/lib/custom-agents"
 import {
@@ -95,7 +96,7 @@ import { Input } from "@/components/ui/input"
 import { ConversationStatusDot } from "./conversation-status-dot"
 import { SessionDetailsDialog } from "./session-details-dialog"
 import { SidebarConversationHoverDetails } from "./sidebar-conversation-hover-details"
-import { SessionActivityIcon } from "./session-activity"
+import { SessionActivityIcon, useBackgroundTitle } from "./session-activity"
 import { useLimitResetParts } from "./limit-pause"
 import { AgentIcon } from "@/components/agent-icon"
 
@@ -348,8 +349,12 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   const attentionBadge = attention ? ATTENTION_BADGE[attention] : null
   // What the session is doing, from its persisted turn state — NOT from
   // `status`, the review state, which stays `in_progress` for a conversation
-  // whose turn was killed or which was merely reopened.
-  const activity = summaryActivity(conversation, attention)
+  // whose turn was killed or which was merely reopened — and from the
+  // server's live background status, which knows what the turn state can't:
+  // tasks still running after the turn ended, the agent running a turn of its
+  // own, a turn held open only for background work.
+  const background = useConversationBackground(conversation.id)
+  const activity = summaryActivity(conversation, attention, background)
   const isRunning = activity === "working"
   const isInterrupted = activity === "interrupted"
   // Paused on the usage limit: the row says until when.
@@ -368,10 +373,19 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   const connection = useConnectionAttachInfo(openTabId)
   // The open tab's turn is held open only for background work: the persisted
   // state still says "running", but the agent is idle — show that instead of
-  // the spinner. Only this client's own tab knows; other windows keep the
-  // spinner until the turn ends.
+  // the spinner. This client's own tab knows first-hand; every other client
+  // learns it from the server's live status (`held_open`).
   const heldBackgroundTasks = useHeldTurnBackground(openTabId)
   const heldForBackground = isRunning && heldBackgroundTasks != null
+  // Idle with background work running: held open here, or by the server's
+  // word (held open elsewhere, or tasks still running after the turn ended).
+  const inBackground = heldForBackground || activity === "background"
+  const backgroundCount = backgroundTaskTotal(heldBackgroundTasks, background)
+  const backgroundTitle = useBackgroundTitle(
+    heldForBackground ? "background" : activity,
+    background,
+    heldBackgroundTasks
+  )
   const isConnecting = connection.state === "connecting"
   const connectFailed = connection.state === "failed"
   const acpActions = useOptionalAcpActions()
@@ -639,32 +653,49 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                             {tSidebar(attentionBadge.label)}
                           </span>
                         </span>
-                      ) : heldForBackground ? (
+                      ) : inBackground ? (
+                        // Idle while background work runs: the sky glyph's
+                        // slow pulse, quieter than the working spinner, with
+                        // the task count beside it and the tasks by name in
+                        // the tooltip.
                         <span
-                          className="relative inline-flex shrink-0 items-center justify-center"
-                          title={tActivity("background", {
-                            count: heldBackgroundTasks ?? 0,
-                          })}
+                          className="relative inline-flex shrink-0 items-center justify-center gap-0.5"
+                          title={backgroundTitle}
                           data-testid="conversation-background-badge"
+                          data-task-count={backgroundCount}
                         >
                           <SessionActivityIcon activity="background" />
-                          <span className="sr-only">
-                            {tActivity("background", {
-                              count: heldBackgroundTasks ?? 0,
-                            })}
-                          </span>
+                          {backgroundCount > 0 && (
+                            <span
+                              aria-hidden
+                              className="text-[0.6875rem] font-medium tabular-nums text-sky-700/80 dark:text-sky-300/80"
+                            >
+                              {backgroundCount}
+                            </span>
+                          )}
+                          <span className="sr-only">{backgroundTitle}</span>
                         </span>
                       ) : isRunning ? (
                         <span
                           className="relative inline-flex shrink-0 items-center justify-center"
-                          title={tSidebar("statusRunningBadge")}
+                          title={
+                            background?.out_of_turn
+                              ? backgroundTitle
+                              : tSidebar("statusRunningBadge")
+                          }
+                          data-testid="conversation-running-badge"
+                          data-out-of-turn={
+                            background?.out_of_turn ? "true" : undefined
+                          }
                         >
                           <Loader2
                             className="h-3.5 w-3.5 animate-spin text-amber-600 dark:text-amber-400"
                             aria-hidden
                           />
                           <span className="sr-only">
-                            {tSidebar("statusRunningBadge")}
+                            {background?.out_of_turn
+                              ? backgroundTitle
+                              : tSidebar("statusRunningBadge")}
                           </span>
                         </span>
                       ) : isConnecting ? (

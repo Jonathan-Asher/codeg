@@ -174,6 +174,20 @@ pub struct ConversationAttentionChange {
     pub kind: Option<AttentionKind>,
 }
 
+/// Global side-channel for a session's background activity — background tasks
+/// still running, the agent working on a turn codeg didn't send, a turn held
+/// open only for background work — and its clearing. Payload:
+/// [`crate::acp::background_status::ConversationBackgroundChange`]
+/// (`background: null` clears). Emitted from [`emit_with_state_gated`]
+/// whenever an event changes what a connection announces, and from
+/// [`refresh_background_broadcast`] for changes no event causes. The snapshot
+/// half is `list_conversation_background`.
+///
+/// Its own channel for the reason [`CONVERSATION_ATTENTION_EVENT`] is: an
+/// older client reads an unknown `conversation://changed` kind as a status
+/// change.
+pub const CONVERSATION_BACKGROUND_EVENT: &str = "conversation://background";
+
 /// Global side-channel announcing a live-feedback enable/disable. The settings
 /// UI runs in a SEPARATE window (`openSettingsWindow`), so the conversation
 /// feedback bar can't learn about a save through any frontend-only cache — it
@@ -515,7 +529,7 @@ pub async fn emit_with_state_gated<F>(
 where
     F: FnOnce(&SessionState) -> bool,
 {
-    let (envelope_arc, stream, evicted, attention_change) = {
+    let (envelope_arc, stream, evicted, attention_change, background_changes) = {
         let mut s = state.write().await;
         if !gate(&s) {
             return false;
@@ -526,6 +540,10 @@ where
         let attention_before = (s.conversation_id, s.attention_kind());
         s.apply_event(&payload);
         let attention_after = (s.conversation_id, s.attention_kind());
+        // Compared against what was last announced (not sampled around this
+        // event), under the same lock, so concurrent emits can't announce the
+        // same change twice or out of order.
+        let background_changes = s.take_background_changes(chrono::Utc::now());
         s.event_seq += 1;
         let envelope = Arc::new(EventEnvelope {
             seq: s.event_seq,
@@ -538,6 +556,7 @@ where
             s.event_stream(),
             evicted,
             attention_transition(attention_before, attention_after),
+            background_changes,
         )
     };
 
@@ -607,7 +626,29 @@ where
     if let Some(change) = attention_change {
         emit_event(emitter, CONVERSATION_ATTENTION_EVENT, change);
     }
+    // And for background work: every session list needs it, attached or not.
+    for change in background_changes {
+        emit_event(emitter, CONVERSATION_BACKGROUND_EVENT, change);
+    }
     true
+}
+
+/// Announce a background-status change that no event caused: an async-task
+/// row aging out of the keep-alive window is the case in practice. Called on
+/// a timer (the transcript watcher's poll, the idle sweep). A read lock first,
+/// so a connection with nothing to announce costs one comparison.
+pub async fn refresh_background_broadcast(
+    state: &Arc<RwLock<SessionState>>,
+    emitter: &EventEmitter,
+) {
+    let now = chrono::Utc::now();
+    if !state.read().await.background_change_pending(now) {
+        return;
+    }
+    let changes = state.write().await.take_background_changes(now);
+    for change in changes {
+        emit_event(emitter, CONVERSATION_BACKGROUND_EVENT, change);
+    }
 }
 
 /// The attention broadcast owed by one event, given the session's
@@ -717,6 +758,115 @@ mod tests {
         assert_eq!(p["kind"], "status");
         assert_eq!(p["id"], 7);
         assert_eq!(p["status"], "pending_review");
+    }
+
+    fn background_event(
+        tasks: Vec<crate::acp::background_status::BackgroundTaskBrief>,
+        out_of_turn: bool,
+    ) -> AcpEvent {
+        AcpEvent::BackgroundActivity {
+            session_id: "sess".into(),
+            turns: Vec::new(),
+            outstanding: tasks.len() as u32,
+            settled: Vec::new(),
+            watermark: 0,
+            tasks,
+            out_of_turn,
+        }
+    }
+
+    fn drain(rx: &mut broadcast::Receiver<WebEvent>, channel: &str) -> Vec<serde_json::Value> {
+        let mut out = Vec::new();
+        while let Ok(evt) = rx.try_recv() {
+            if evt.channel == channel {
+                out.push((*evt.payload).clone());
+            }
+        }
+        out
+    }
+
+    #[tokio::test]
+    async fn background_changes_broadcast_on_their_own_channel() {
+        use crate::acp::background_status::BackgroundTaskBrief;
+        let state = fresh_state();
+        {
+            let mut s = state.write().await;
+            s.conversation_id = Some(144);
+            s.status = crate::acp::types::ConnectionStatus::Connected;
+        }
+        let broadcaster = Arc::new(WebEventBroadcaster::new());
+        let mut rx = broadcaster.subscribe();
+        let emitter = EventEmitter::test_web_only(broadcaster.clone());
+
+        // A background shell starts: one announcement with the task.
+        let shell = BackgroundTaskBrief::new("bm227ltpx", "shell", "Wait for runs");
+        emit_with_state(&state, &emitter, background_event(vec![shell.clone()], false)).await;
+        let sent = drain(&mut rx, CONVERSATION_BACKGROUND_EVENT);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0]["id"], 144);
+        assert_eq!(sent[0]["background"]["task_count"], 1);
+        assert_eq!(sent[0]["background"]["tasks"][0]["label"], "Wait for runs");
+        assert_eq!(sent[0]["background"]["out_of_turn"], false);
+
+        // The same state again (a watcher tick with overlay turns only) says
+        // nothing new.
+        emit_with_state(&state, &emitter, background_event(vec![shell.clone()], false)).await;
+        assert!(drain(&mut rx, CONVERSATION_BACKGROUND_EVENT).is_empty());
+
+        // The agent wakes up out of turn, then finishes.
+        emit_with_state(&state, &emitter, background_event(vec![shell.clone()], true)).await;
+        let sent = drain(&mut rx, CONVERSATION_BACKGROUND_EVENT);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0]["background"]["out_of_turn"], true);
+        emit_with_state(&state, &emitter, background_event(vec![shell], false)).await;
+        assert_eq!(
+            drain(&mut rx, CONVERSATION_BACKGROUND_EVENT)[0]["background"]["out_of_turn"],
+            false
+        );
+
+        // The connection closes: cleared, even with the task still listed.
+        emit_with_state(
+            &state,
+            &emitter,
+            AcpEvent::StatusChanged {
+                status: crate::acp::types::ConnectionStatus::Disconnected,
+            },
+        )
+        .await;
+        let sent = drain(&mut rx, CONVERSATION_BACKGROUND_EVENT);
+        assert_eq!(sent, vec![serde_json::json!({"id": 144, "background": null})]);
+    }
+
+    #[tokio::test]
+    async fn refresh_announces_a_change_no_event_caused() {
+        let state = fresh_state();
+        {
+            let mut s = state.write().await;
+            s.conversation_id = Some(5);
+            s.status = crate::acp::types::ConnectionStatus::Connected;
+            // Announced as busy, but the state has since moved on without an
+            // event (an async-task row aging out is the real case).
+            s.background_announced = (
+                Some(5),
+                Some(crate::acp::background_status::ConversationBackground {
+                    task_count: 1,
+                    tasks: Vec::new(),
+                    out_of_turn: false,
+                    held_open: false,
+                }),
+            );
+        }
+        let broadcaster = Arc::new(WebEventBroadcaster::new());
+        let mut rx = broadcaster.subscribe();
+        let emitter = EventEmitter::test_web_only(broadcaster.clone());
+        refresh_background_broadcast(&state, &emitter).await;
+        assert_eq!(
+            drain(&mut rx, CONVERSATION_BACKGROUND_EVENT),
+            vec![serde_json::json!({"id": 5, "background": null})]
+        );
+        // Nothing left to say.
+        refresh_background_broadcast(&state, &emitter).await;
+        assert!(drain(&mut rx, CONVERSATION_BACKGROUND_EVENT).is_empty());
     }
 
     #[tokio::test]

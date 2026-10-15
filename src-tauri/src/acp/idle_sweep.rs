@@ -161,6 +161,10 @@ pub async fn idle_sweep_task(
         if n > 0 {
             tracing::info!("[ACP] idle sweep disconnected {n} connection(s)");
         }
+        // Background statuses can lapse with time alone (an async task the
+        // adapter went quiet about past the keep-alive window); announce them
+        // on the same once-a-minute beat.
+        manager.refresh_background_broadcasts().await;
     }
 }
 

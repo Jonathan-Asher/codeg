@@ -944,6 +944,7 @@ mod tests {
             limit_pause: None,
             limit_auto_continue: true,
             selector_state: None,
+            background: None,
         }
     }
 }

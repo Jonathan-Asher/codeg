@@ -2119,6 +2119,7 @@ fn conv_to_summary(r: conversation::Model) -> DbConversationSummary {
         limit_pause: limit_pause_of(r.limit_resume_at, r.limit_resume_state, r.limit_resume_attempts),
         limit_auto_continue: r.limit_auto_continue,
         selector_state: ConversationSelectorState::parse(r.selector_state.as_deref()),
+        background: None,
     }
 }
 

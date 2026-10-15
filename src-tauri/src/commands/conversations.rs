@@ -115,7 +115,7 @@ pub async fn list_all_conversations(
     let db = app.state::<AppDatabase>();
     let chat_channel_manager =
         app.state::<crate::chat_channel::manager::ChatChannelManager>();
-    list_all_conversations_core(
+    let mut summaries = list_all_conversations_core(
         &db.conn,
         &emitter,
         &chat_channel_manager,
@@ -128,7 +128,11 @@ pub async fn list_all_conversations(
             include_children: include_children.unwrap_or(false),
         },
     )
-    .await
+    .await?;
+    let manager = app.state::<crate::acp::manager::ConnectionManager>();
+    crate::commands::attention::fill_conversation_background(manager.inner(), &mut summaries)
+        .await;
+    Ok(summaries)
 }
 
 pub async fn list_child_conversations_core(
@@ -144,9 +148,13 @@ pub async fn list_child_conversations_core(
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn list_child_conversations(
     db: tauri::State<'_, AppDatabase>,
+    manager: tauri::State<'_, crate::acp::manager::ConnectionManager>,
     parent_conversation_id: i32,
 ) -> Result<Vec<DbConversationSummary>, AppCommandError> {
-    list_child_conversations_core(&db.conn, parent_conversation_id).await
+    let mut summaries = list_child_conversations_core(&db.conn, parent_conversation_id).await?;
+    crate::commands::attention::fill_conversation_background(manager.inner(), &mut summaries)
+        .await;
+    Ok(summaries)
 }
 
 pub async fn list_opened_tabs_core(
@@ -2937,6 +2945,7 @@ mod tests {
             limit_pause: None,
             limit_auto_continue: true,
             selector_state: None,
+            background: None,
         }
     }
 
@@ -6787,6 +6796,7 @@ mod tests {
                 limit_pause: None,
                 limit_auto_continue: true,
                 selector_state: None,
+                background: None,
             },
             turns,
             session_stats: None,

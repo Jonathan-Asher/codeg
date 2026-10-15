@@ -373,6 +373,25 @@ pub struct SessionState {
     /// while `status == Prompting`; every turn boundary clears it. Carried on
     /// `to_snapshot()` so a client attaching mid-hold gets it too.
     pub awaiting_background: bool,
+    /// The transcript watcher's launched-but-unresolved tasks with their kind
+    /// and label — the list behind `background_outstanding`, mirrored from
+    /// `AcpEvent::BackgroundActivity` (whole set per event). Empty from
+    /// emitters that only count. Feeds [`Self::background_status`]; not on the
+    /// snapshot (the attach path has `background_outstanding` and the async
+    /// task table for its own strip).
+    pub background_tasks: Vec<crate::acp::background_status::BackgroundTaskBrief>,
+    /// The agent is working on a turn codeg did not send (a task notification
+    /// or a cron prompt woke it), as the transcript watcher sees it. Mirrored
+    /// from `AcpEvent::BackgroundActivity`.
+    pub background_out_of_turn: bool,
+    /// What the `conversation://background` side-channel last announced for
+    /// this connection: the conversation it was bound to and the value. Lets
+    /// every change be announced exactly once, including the ones no event
+    /// causes (see `SessionState::take_background_changes`). Backend-internal.
+    pub background_announced: (
+        Option<i32>,
+        Option<crate::acp::background_status::ConversationBackground>,
+    ),
 
     // ACP 协商出的能力
     pub modes: Option<SessionModeStateInfo>,
@@ -784,6 +803,9 @@ impl SessionState {
             background_outstanding: 0,
             background_activity_at: None,
             awaiting_background: false,
+            background_tasks: Vec::new(),
+            background_out_of_turn: false,
+            background_announced: (None, None),
             modes: None,
             current_mode: None,
             config_options: None,
@@ -1507,7 +1529,12 @@ impl SessionState {
                     }
                 }
             }
-            AcpEvent::BackgroundActivity { outstanding, .. } => {
+            AcpEvent::BackgroundActivity {
+                outstanding,
+                tasks,
+                out_of_turn,
+                ..
+            } => {
                 // Mirror the watcher's authoritative accounting so the idle
                 // sweeps can exempt this connection while background work is
                 // pending. The turns/settled payloads are frontend-only; the
@@ -1515,6 +1542,10 @@ impl SessionState {
                 // the backend idle timer on every batch of transcript activity.
                 self.background_outstanding = *outstanding;
                 self.background_activity_at = Some(Utc::now());
+                // Whole-set replacement: every emission carries the full list
+                // and the current out-of-turn flag (see the event's docs).
+                self.background_tasks = tasks.clone();
+                self.background_out_of_turn = *out_of_turn;
             }
             AcpEvent::SessionFailure { record } => {
                 // Monotonic per-id merge — the SAME rule the frontend reducer
@@ -3125,6 +3156,8 @@ mod tests {
             outstanding: 2,
             settled: vec![],
             watermark: 42,
+            tasks: vec![],
+            out_of_turn: false,
         });
         assert_eq!(s.background_outstanding, 2);
         let now = Utc::now();
@@ -3142,6 +3175,8 @@ mod tests {
             outstanding: 0,
             settled: vec![],
             watermark: 43,
+            tasks: vec![],
+            out_of_turn: false,
         });
         assert!(!s.has_active_background_work(Utc::now()));
     }
@@ -3155,6 +3190,8 @@ mod tests {
             outstanding: 3,
             settled: vec![],
             watermark: 0,
+            tasks: vec![],
+            out_of_turn: false,
         });
         assert_eq!(s.to_snapshot().background_outstanding, 3);
         let json = serde_json::to_value(s.to_snapshot()).unwrap();

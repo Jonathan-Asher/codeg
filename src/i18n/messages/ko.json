@@ -2279,6 +2279,17 @@
       "interruptedHint": "마지막 턴이 끝나기 전에 중단되었습니다(codeg 종료 또는 에이전트 중지). 계속을 누르면 중단된 곳부터 이어갑니다.",
       "background": "대기 중 — {count, plural, =0 {백그라운드 작업 실행 중} other {백그라운드 작업 #개 실행 중}}",
       "backgroundHint": "에이전트가 응답을 마치고 백그라운드 작업이 끝나기를 기다리고 있습니다. 지금 보내는 메시지는 바로 실행됩니다.",
+      "backgroundBadge": "백그라운드 · {count, plural, =0 {작업 실행 중} other {작업 #개}}",
+      "workingOutOfTurn": "작업 중 — 백그라운드 작업으로 다시 시작됨",
+      "workingOutOfTurnHint": "에이전트가 스스로 턴을 실행하고 있습니다. 백그라운드 작업이 계기가 되었습니다(작업 완료 또는 모니터 알림).",
+      "moreTasks": "외 {count}개",
+      "taskKind": {
+        "agent": "하위 에이전트",
+        "shell": "셸",
+        "monitor": "모니터",
+        "workflow": "워크플로",
+        "task": "작업"
+      },
       "interruptedBadge": "중단됨: 마지막 턴이 끝나지 않았습니다",
       "continue": "계속",
       "continueTitle": "이 세션을 재개하고 “continue”를 보냅니다",

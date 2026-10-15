@@ -24,6 +24,8 @@ import {
 } from "@/lib/drag-selection-guard"
 import type { ConversationStatus } from "@/lib/types"
 import { ConversationStatusDot } from "@/components/conversations/conversation-status-dot"
+import { useBackgroundTitle } from "@/components/conversations/session-activity"
+import { useConversationBackground } from "@/stores/conversation-background-store"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -178,6 +180,15 @@ export const TabItem = memo(function TabItem({
       conversationId != null &&
       s.conversations.find((c) => c.id === conversationId)?.parent_id != null
   )
+  // Live background activity the review-status dot can't show: the agent
+  // running a turn of its own, or idle while its background tasks run.
+  const background = useConversationBackground(conversationId)
+  const dotActivity = background?.out_of_turn
+    ? "working"
+    : background && (background.task_count > 0 || background.held_open)
+      ? "background"
+      : null
+  const dotTitle = useBackgroundTitle(dotActivity ?? "idle", background, null)
   const handleToggleCritical = useCallback(() => {
     if (conversationId == null) return
     setConversationCritical(conversationId, !isCritical).catch((err) => {
@@ -458,6 +469,8 @@ export const TabItem = memo(function TabItem({
             )}
             <ConversationStatusDot
               status={tab.status as ConversationStatus | undefined}
+              activity={dotActivity}
+              title={dotTitle || undefined}
             />
             {isCritical ? <CriticalFlag /> : null}
             <span

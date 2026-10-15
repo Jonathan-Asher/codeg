@@ -2279,6 +2279,17 @@
       "interruptedHint": "Die letzte Runde wurde abgebrochen, bevor sie fertig war: codeg wurde beendet oder der Agent hat angehalten. „Fortsetzen“ macht dort weiter, wo sie aufgehört hat.",
       "background": "Leerlauf — {count, plural, =0 {Hintergrundarbeit läuft} one {# Hintergrundaufgabe läuft} other {# Hintergrundaufgaben laufen}}",
       "backgroundHint": "Der Agent hat geantwortet und wartet, bis seine Hintergrundarbeit fertig ist. Eine Nachricht, die du jetzt sendest, läuft sofort.",
+      "backgroundBadge": "Hintergrund · {count, plural, =0 {Arbeit läuft} one {# Aufgabe} other {# Aufgaben}}",
+      "workingOutOfTurn": "Arbeitet — von seiner Hintergrundarbeit geweckt",
+      "workingOutOfTurnHint": "Der Agent führt eine eigene Runde aus: Seine Hintergrundarbeit hat ihn geweckt (eine Aufgabe ist fertig oder ein Monitor hat gemeldet).",
+      "moreTasks": "+{count} weitere",
+      "taskKind": {
+        "agent": "Sub-Agent",
+        "shell": "Shell",
+        "monitor": "Monitor",
+        "workflow": "Workflow",
+        "task": "Aufgabe"
+      },
       "interruptedBadge": "Unterbrochen: die letzte Runde wurde abgebrochen",
       "continue": "Fortsetzen",
       "continueTitle": "Diese Sitzung wieder aufnehmen und „continue“ senden",

@@ -116,6 +116,15 @@ pub struct DbConversationSummary {
     /// when nothing is recorded yet.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selector_state: Option<ConversationSelectorState>,
+    /// What the session is doing in the background right now, from its live
+    /// connection: background tasks running, the agent working on a turn
+    /// codeg didn't send, a turn held open for background work (see
+    /// `acp::background_status`). Not stored — filled on the list endpoints
+    /// from the live connections, absent when there is none (and from a
+    /// server that predates it). `turn_state` alone reads all three as "not
+    /// running".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub background: Option<crate::acp::background_status::ConversationBackground>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

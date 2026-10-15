@@ -2279,6 +2279,17 @@
       "interruptedHint": "前回のターンは完了前に中断されました（codeg が終了したか、エージェントが停止しました）。「続行」で中断したところから再開します。",
       "background": "待機中 — {count, plural, =0 {バックグラウンド処理を実行中} other {# 件のバックグラウンドタスクを実行中}}",
       "backgroundHint": "エージェントは応答を終え、バックグラウンド処理の完了を待っています。いま送信したメッセージはすぐに実行されます。",
+      "backgroundBadge": "バックグラウンド · {count, plural, =0 {処理を実行中} other {# 件のタスク}}",
+      "workingOutOfTurn": "実行中 — バックグラウンド処理によって再開",
+      "workingOutOfTurnHint": "エージェントが自らターンを実行しています。バックグラウンド処理がきっかけです（タスクの完了やモニターの通知）。",
+      "moreTasks": "ほか {count} 件",
+      "taskKind": {
+        "agent": "サブエージェント",
+        "shell": "シェル",
+        "monitor": "モニター",
+        "workflow": "ワークフロー",
+        "task": "タスク"
+      },
       "interruptedBadge": "中断：前回のターンは完了していません",
       "continue": "続行",
       "continueTitle": "このセッションを再開して「continue」を送信",

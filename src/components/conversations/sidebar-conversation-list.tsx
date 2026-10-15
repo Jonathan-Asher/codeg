@@ -159,6 +159,7 @@ import {
   usePinnedPointerReorder,
 } from "./use-pinned-pointer-reorder"
 import { useConversationAttentionStore } from "@/stores/conversation-attention-store"
+import { useConversationBackgroundStore } from "@/stores/conversation-background-store"
 import { SidebarFolderGroupHeader } from "./sidebar-folder-group-header"
 import { ConversationManageDialog } from "./conversation-manage-dialog"
 import { CloneDialog } from "@/components/layout/clone-dialog"
@@ -199,7 +200,7 @@ import { cn } from "@/lib/utils"
 import { FolderAliasLabel } from "./folder-alias-label"
 import { toErrorMessage } from "@/lib/app-error"
 import { setConversationCritical } from "@/lib/critical-sessions"
-import { isTurnRunning } from "@/lib/session-activity"
+import { isSessionRunning } from "@/lib/session-activity"
 import { continueInterruptedSession } from "@/lib/session-continue"
 
 // Layout effect on the client (so the sticky overlay is positioned before
@@ -1504,6 +1505,12 @@ export function SidebarConversationList({
   const attentionByConversationId = useConversationAttentionStore(
     (s) => s.byConversationId
   )
+  // Every live session's background activity (tasks running, the agent
+  // working on a turn of its own) — what `turn_state` can't say. Feeds the
+  // running counts and the rows a limited folder keeps listed.
+  const backgroundByConversationId = useConversationBackgroundStore(
+    (s) => s.byConversationId
+  )
   const recentArchiveFilter = useMemo<RecentArchiveFilter | undefined>(
     () =>
       archivedIds.size === 0
@@ -1577,8 +1584,9 @@ export function SidebarConversationList({
     return map
   }, [conversations, displayChildToParent])
 
-  // Running sessions (a turn in flight) per display group — what the folder header
-  // badge shows. Counted off the FULL conversation list rather than `byFolder`
+  // Running sessions (a turn in flight — codeg's own or one the agent runs by
+  // itself — or background tasks still going) per display group — what the
+  // folder header badge shows. Counted off the FULL conversation list rather than `byFolder`
   // on purpose: the badge answers "is there work running in here", so neither
   // the "Show completed" filter nor a session being pinned into the Pinned
   // section should be able to hide it. Deliberately NOT a `buildRows` input, so
@@ -1587,12 +1595,13 @@ export function SidebarConversationList({
   const folderRunningCounts = useMemo(() => {
     const map = new Map<number, number>()
     for (const conv of conversations) {
-      if (!isTurnRunning(conv)) continue
+      if (!isSessionRunning(conv, backgroundByConversationId.get(conv.id)))
+        continue
       const groupId = displayChildToParent.get(conv.folder_id) ?? conv.folder_id
       map.set(groupId, (map.get(groupId) ?? 0) + 1)
     }
     return map
-  }, [conversations, displayChildToParent])
+  }, [conversations, displayChildToParent, backgroundByConversationId])
 
   // Sessions blocked waiting on the user, per display group — the rose chip
   // beside the running one. Same counting rules as `folderRunningCounts` (full
@@ -1737,7 +1746,8 @@ export function SidebarConversationList({
             folderConversations,
             selectedConversation?.id ?? null,
             attentionByConversationId,
-            childrenByParent
+            childrenByParent,
+            backgroundByConversationId
           )
     const reused = reuseSet(alwaysVisibleRef.current, next)
     alwaysVisibleRef.current = reused
@@ -1748,6 +1758,7 @@ export function SidebarConversationList({
     selectedConversation,
     attentionByConversationId,
     childrenByParent,
+    backgroundByConversationId,
   ])
 
   // Flat row model for windowing — the pinned section, the folders section, and

@@ -1,5 +1,6 @@
 import type {
   AttentionKind,
+  ConversationBackground,
   DbConversationSummary,
   FolderDetail,
   FolderGroupDetail,
@@ -178,6 +179,7 @@ export function reuseSet<T>(
 export function isAlwaysVisibleActivity(activity: SessionActivity): boolean {
   return (
     activity === "working" ||
+    activity === "background" ||
     activity === "needs_you" ||
     activity === "interrupted" ||
     activity === "limit_paused"
@@ -217,8 +219,9 @@ export function delegationRootId(
  * the active tab (or, for a delegation sub-session, the top-level session it
  * sits under — see {@link delegationRootId}), plus every session in an
  * {@link isAlwaysVisibleActivity} state. `attention` is the attention store's
- * map (what the session is blocked on), the same input the cards read their
- * state from.
+ * map (what the session is blocked on) and `background` the background
+ * store's (tasks running, work out of turn) — the same inputs the cards read
+ * their state from.
  */
 export function collectAlwaysVisibleIds(
   conversations: readonly DbConversationSummary[],
@@ -227,7 +230,8 @@ export function collectAlwaysVisibleIds(
   childrenByParent: ReadonlyMap<
     number,
     readonly DbConversationSummary[]
-  > = EMPTY_CHILDREN
+  > = EMPTY_CHILDREN,
+  background: ReadonlyMap<number, ConversationBackground> = EMPTY_BACKGROUND
 ): Set<number> {
   const ids = new Set<number>()
   if (selectedId != null) {
@@ -235,11 +239,17 @@ export function collectAlwaysVisibleIds(
     ids.add(delegationRootId(selectedId, childrenByParent))
   }
   for (const conv of conversations) {
-    if (isAlwaysVisibleActivity(summaryActivity(conv, attention.get(conv.id))))
-      ids.add(conv.id)
+    const activity = summaryActivity(
+      conv,
+      attention.get(conv.id),
+      background.get(conv.id)
+    )
+    if (isAlwaysVisibleActivity(activity)) ids.add(conv.id)
   }
   return ids
 }
+
+const EMPTY_BACKGROUND: ReadonlyMap<number, ConversationBackground> = new Map()
 
 /**
  * The rows a folder lists while it is limited to `limit` sessions.

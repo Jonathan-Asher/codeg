@@ -4014,6 +4014,46 @@ impl ConnectionManager {
         out
     }
 
+    /// Every live session's background activity, one value per conversation —
+    /// the snapshot half of the `conversation://background` broadcast (see
+    /// `acp::background_status`). Unbound connections are skipped, and two
+    /// connections on one conversation are merged. Lock discipline mirrors
+    /// `list_attention`.
+    pub async fn background_by_conversation(
+        &self,
+    ) -> std::collections::HashMap<i32, crate::acp::background_status::ConversationBackground>
+    {
+        let now = chrono::Utc::now();
+        let connections = self.connections.lock().await;
+        let mut entries = Vec::new();
+        for conn in connections.values() {
+            let state = conn.state.read().await;
+            if let (Some(conversation_id), Some(background)) =
+                (state.conversation_id, state.background_status(now))
+            {
+                entries.push((conversation_id, background));
+            }
+        }
+        crate::acp::background_status::by_conversation(entries)
+    }
+
+    /// Re-announce any connection's background status that changed with no
+    /// event to carry it (see `web::event_bridge::refresh_background_broadcast`).
+    /// Run from the idle sweep's timer, which covers the agents the transcript
+    /// watcher's own per-tick re-check doesn't (codex background terminals).
+    pub async fn refresh_background_broadcasts(&self) {
+        let targets: Vec<_> = {
+            let connections = self.connections.lock().await;
+            connections
+                .values()
+                .map(|conn| (conn.state.clone(), conn.emitter.clone()))
+                .collect()
+        };
+        for (state, emitter) in targets {
+            crate::web::event_bridge::refresh_background_broadcast(&state, &emitter).await;
+        }
+    }
+
     /// `(conversation_id, kind)` for every live session blocked on the user —
     /// the snapshot half of the `conversation://attention` broadcast (see
     /// `SessionState::attention_kind`). Connections not yet bound to a

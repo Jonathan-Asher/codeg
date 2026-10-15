@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  backgroundTaskTotal,
   deriveSessionActivity,
+  isSessionRunning,
   isTurnRunning,
   summaryActivity,
 } from "./session-activity"
@@ -228,5 +230,134 @@ describe("deriveSessionActivity with this client's connection attempt", () => {
     expect(
       isTurnRunning({ turn_state: "running", status: "in_progress" })
     ).toBe(true)
+  })
+})
+
+describe("deriveSessionActivity with the server's background status", () => {
+  const tasks = (task_count: number) => ({
+    task_count,
+    out_of_turn: false,
+    held_open: false,
+  })
+
+  it("reads tasks still running after the turn ended as background", () => {
+    expect(
+      deriveSessionActivity({ turnState: null, background: tasks(2) })
+    ).toBe("background")
+    // Including on a client whose own connection is idle.
+    expect(
+      deriveSessionActivity({
+        turnState: null,
+        connectionStatus: "connected",
+        background: tasks(1),
+      })
+    ).toBe("background")
+    expect(
+      deriveSessionActivity({ turnState: null, background: tasks(0) })
+    ).toBe("idle")
+  })
+
+  it("reads the agent running a turn of its own as working", () => {
+    const outOfTurn = { ...tasks(1), out_of_turn: true }
+    expect(
+      deriveSessionActivity({ turnState: null, background: outOfTurn })
+    ).toBe("working")
+    // The client's own idle connection doesn't know about that turn.
+    expect(
+      deriveSessionActivity({
+        turnState: null,
+        connectionStatus: "connected",
+        background: outOfTurn,
+      })
+    ).toBe("working")
+    // An interrupted codeg turn doesn't hide the agent working now.
+    expect(
+      deriveSessionActivity({ turnState: "interrupted", background: outOfTurn })
+    ).toBe("working")
+  })
+
+  it("reads a turn the server says is held open as background", () => {
+    const held = { ...tasks(0), held_open: true }
+    expect(
+      deriveSessionActivity({ turnState: "running", background: held })
+    ).toBe("background")
+    // This client's own connection is first-hand: prompting and not awaiting
+    // means the agent is answering right now.
+    expect(
+      deriveSessionActivity({
+        turnState: "running",
+        connectionStatus: "prompting",
+        awaitingBackground: false,
+        background: held,
+      })
+    ).toBe("working")
+  })
+
+  it("keeps a normal turn working even with tasks around it", () => {
+    expect(
+      deriveSessionActivity({ turnState: "running", background: tasks(3) })
+    ).toBe("working")
+  })
+
+  it("lets the user's attention outrank everything in the background", () => {
+    expect(
+      deriveSessionActivity({
+        attention: "question",
+        turnState: null,
+        background: { ...tasks(2), out_of_turn: true },
+      })
+    ).toBe("needs_you")
+  })
+
+  it("keeps an interrupted turn's Continue when only tasks remain", () => {
+    expect(
+      deriveSessionActivity({ turnState: "interrupted", background: tasks(1) })
+    ).toBe("interrupted")
+  })
+
+  it("behaves exactly as before against a server without the status", () => {
+    expect(
+      deriveSessionActivity({ turnState: null, background: undefined })
+    ).toBe("idle")
+    expect(
+      deriveSessionActivity({ turnState: "running", background: null })
+    ).toBe("working")
+  })
+})
+
+describe("isSessionRunning", () => {
+  it("counts turns and background work, not idle or interrupted sessions", () => {
+    expect(
+      isSessionRunning({ turn_state: "running", status: "in_progress" })
+    ).toBe(true)
+    expect(
+      isSessionRunning(
+        { turn_state: null, status: "pending_review" },
+        { task_count: 1 }
+      )
+    ).toBe(true)
+    expect(
+      isSessionRunning(
+        { turn_state: null, status: "pending_review" },
+        { task_count: 0, out_of_turn: true }
+      )
+    ).toBe(true)
+    expect(
+      isSessionRunning({ turn_state: null, status: "pending_review" })
+    ).toBe(false)
+    expect(
+      isSessionRunning(
+        { turn_state: "interrupted", status: "pending_review" },
+        { task_count: 1 }
+      )
+    ).toBe(false)
+  })
+})
+
+describe("backgroundTaskTotal", () => {
+  it("takes the larger of the held turn's own count and the server's", () => {
+    expect(backgroundTaskTotal(null, undefined)).toBe(0)
+    expect(backgroundTaskTotal(2, { task_count: 1 })).toBe(2)
+    expect(backgroundTaskTotal(null, { task_count: 3 })).toBe(3)
   })
 })

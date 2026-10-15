@@ -1766,6 +1766,7 @@ mod tauri_app {
                 conversations::get_folder_conversation,
                 conversation_export_commands::conversation_export_markdown,
                 attention_commands::list_conversation_attention,
+                attention_commands::list_conversation_background,
                 auto_resume_commands::get_auto_resume_settings,
                 auto_resume_commands::update_auto_resume_settings,
                 auto_resume_commands::get_auto_resume_status,

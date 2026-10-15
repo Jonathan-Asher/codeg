@@ -2279,6 +2279,17 @@
       "interruptedHint": "El último turno se cortó antes de terminar: codeg se cerró o el agente se detuvo. Continuar lo retoma donde se quedó.",
       "background": "Inactiva — {count, plural, =0 {trabajo en segundo plano en curso} one {# tarea en segundo plano en curso} other {# tareas en segundo plano en curso}}",
       "backgroundHint": "El agente ya respondió y espera inactivo a que termine su trabajo en segundo plano. Un mensaje que envíes ahora se ejecuta de inmediato.",
+      "backgroundBadge": "Segundo plano · {count, plural, =0 {trabajo en curso} one {# tarea} other {# tareas}}",
+      "workingOutOfTurn": "Trabajando — lo despertó su trabajo en segundo plano",
+      "workingOutOfTurnHint": "El agente ejecuta un turno por su cuenta: lo despertó su trabajo en segundo plano (terminó una tarea o un monitor avisó).",
+      "moreTasks": "+{count} más",
+      "taskKind": {
+        "agent": "Subagente",
+        "shell": "Shell",
+        "monitor": "Monitor",
+        "workflow": "Flujo de trabajo",
+        "task": "Tarea"
+      },
       "interruptedBadge": "Interrumpida: el último turno se cortó",
       "continue": "Continuar",
       "continueTitle": "Reanudar esta sesión y enviar «continue»",

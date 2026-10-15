@@ -1874,7 +1874,24 @@ describe("collectAlwaysVisibleIds", () => {
     expect(isAlwaysVisibleActivity("needs_you")).toBe(true)
     expect(isAlwaysVisibleActivity("interrupted")).toBe(true)
     expect(isAlwaysVisibleActivity("idle")).toBe(false)
-    expect(isAlwaysVisibleActivity("background")).toBe(false)
+    // Background work is work in progress: never folded away.
+    expect(isAlwaysVisibleActivity("background")).toBe(true)
+  })
+
+  it("keeps sessions with background work or a turn of their own listed", () => {
+    const background = new Map([
+      [1, { task_count: 2 }],
+      [5, { task_count: 0, out_of_turn: true }],
+    ])
+    expect(
+      collectAlwaysVisibleIds(
+        [quiet, waiting],
+        null,
+        new Map(),
+        undefined,
+        background
+      )
+    ).toEqual(new Set([1, 5]))
   })
 })
 
