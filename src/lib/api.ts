@@ -216,6 +216,12 @@ import type {
   PlanUsagePool,
   PlanUsageReport,
   PlanUsageSnapshot,
+  ClaudeAuthStatus,
+  PoolChange,
+  PoolManageInfo,
+  SignInOutcome,
+  SignInStart,
+  SignInState,
   TokenUsageFacets,
   TokenUsageFilter,
   TokenUsageReport,
@@ -3978,6 +3984,119 @@ export const PLAN_USAGE_CHANGED_EVENT = "plan-usage://changed"
  *  Codex session logs instead of reusing the backend's one-minute cache. */
 export async function getPlanUsage(force = false): Promise<PlanUsageReport> {
   return getTransport().call("get_plan_usage", { force })
+}
+
+// Managing the account pool (maxpool) — host-side, and only where one is
+// configured. See `commands/usage_pool/manage.rs`.
+
+export async function usagePoolManageInfo(): Promise<PoolManageInfo> {
+  return getTransport().call("usage_pool_manage_info", {})
+}
+
+/** Start `maxpool login` on the host: a new account (`name`, or the email it
+ *  signs in as), or `reconnect` an existing one whose sign-in died. */
+export async function usagePoolLoginStart(options: {
+  name?: string | null
+  reconnect?: string | null
+}): Promise<SignInStart> {
+  // The host waits up to a minute for maxpool to print its link.
+  return getTransport().call(
+    "usage_pool_login_start",
+    { name: options.name ?? null, reconnect: options.reconnect ?? null },
+    { timeoutMs: 90_000 }
+  )
+}
+
+/** Hand the sign-in the address the browser was sent back to (or its code). */
+export async function usagePoolLoginFinish(
+  handle: string,
+  pasted: string
+): Promise<SignInOutcome> {
+  return getTransport().call(
+    "usage_pool_login_finish",
+    { handle, pasted },
+    { timeoutMs: 120_000 }
+  )
+}
+
+export async function usagePoolLoginState(
+  handle: string
+): Promise<SignInState> {
+  return getTransport().call("usage_pool_login_state", { handle })
+}
+
+export async function usagePoolLoginCancel(handle: string): Promise<void> {
+  return getTransport().call("usage_pool_login_cancel", { handle })
+}
+
+export async function usagePoolRename(
+  name: string,
+  newName: string
+): Promise<PoolChange> {
+  return getTransport().call("usage_pool_rename", { name, newName })
+}
+
+export async function usagePoolSetEnabled(
+  name: string,
+  enabled: boolean
+): Promise<PoolChange> {
+  return getTransport().call("usage_pool_set_enabled", { name, enabled })
+}
+
+export async function usagePoolRemove(name: string): Promise<PoolChange> {
+  return getTransport().call("usage_pool_remove", { name })
+}
+
+/** Restart the pool's server now to apply a waiting change. */
+export async function usagePoolRestartNow(): Promise<PoolManageInfo> {
+  return getTransport().call(
+    "usage_pool_restart_now",
+    {},
+    { timeoutMs: 90_000 }
+  )
+}
+
+// Claude Code's own sign-in on the codeg host. See `acp/claude_auth.rs`.
+
+export async function claudeAuthStatus(): Promise<ClaudeAuthStatus> {
+  return getTransport().call("claude_auth_status", {}, { timeoutMs: 45_000 })
+}
+
+/** Start `claude auth login` on the host and get the link to open. */
+export async function claudeAuthLoginStart(
+  console = false
+): Promise<SignInStart> {
+  return getTransport().call(
+    "claude_auth_login_start",
+    { console },
+    { timeoutMs: 90_000 }
+  )
+}
+
+/** Hand the sign-in the code the consent page showed. */
+export async function claudeAuthLoginFinish(
+  handle: string,
+  code: string
+): Promise<SignInOutcome> {
+  return getTransport().call(
+    "claude_auth_login_finish",
+    { handle, code },
+    { timeoutMs: 120_000 }
+  )
+}
+
+export async function claudeAuthLoginState(
+  handle: string
+): Promise<SignInState> {
+  return getTransport().call("claude_auth_login_state", { handle })
+}
+
+export async function claudeAuthLoginCancel(handle: string): Promise<void> {
+  return getTransport().call("claude_auth_login_cancel", { handle })
+}
+
+export async function claudeAuthLogout(): Promise<void> {
+  return getTransport().call("claude_auth_logout", {}, { timeoutMs: 45_000 })
 }
 
 export async function subscribePlanUsageChanged(

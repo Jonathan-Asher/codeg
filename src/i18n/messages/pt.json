@@ -1733,7 +1733,39 @@
     "customAgentRemoveWithData": "Excluir também o histórico de conversas registrado",
     "customAgentRemoved": "{name} removido",
     "customAgentBadge": "Personalizado",
-    "customAgentNotLaunchable": "Este agente não pode ser iniciado aqui: {reason}"
+    "customAgentNotLaunchable": "Este agente não pode ser iniciado aqui: {reason}",
+    "claudeAuth": {
+      "title": "Login do Claude Code",
+      "hint": "O login que todas as sessões do Claude Code no host do codeg usam. Você pode entrar por este dispositivo: o link abre aqui, e você cola o código que a página mostra.",
+      "refresh": "Verificar de novo",
+      "checking": "Verificando o login…",
+      "statusFailed": "Não foi possível ler o login: {message}",
+      "signedInAs": "Conectado como {email}",
+      "signedIn": "Conectado",
+      "plan": "plano {plan}",
+      "signedOut": "Não conectado. As sessões do Claude Code vão pedir que você entre.",
+      "method": {
+        "claude_ai": "Assinatura do Claude",
+        "console": "Anthropic Console",
+        "api_key": "Chave de API",
+        "oauth_token": "Token de longa duração",
+        "third_party": "Provedor de nuvem",
+        "none": "Nenhum",
+        "other": "Outro"
+      },
+      "signIn": "Entrar",
+      "signInAgain": "Entrar de novo",
+      "signOut": "Sair",
+      "stepOpen": "1. Abra a página de login e aprove o acesso.",
+      "stepPaste": "2. Cole o código que a página mostra.",
+      "pastePlaceholder": "Cole o código aqui",
+      "signedInToast": "O Claude Code está conectado",
+      "signedOutToast": "O Claude Code foi desconectado",
+      "signOutFailed": "Não foi possível sair: {message}",
+      "signOutConfirmTitle": "Desconectar o Claude Code?",
+      "signOutConfirmBody": "Todas as sessões do Claude Code no host do codeg compartilham este login. As sessões em andamento vão parar de funcionar até que alguém entre de novo.",
+      "cancel": "Cancelar"
+    }
   },
   "AgentVocabulary": {
     "deepseekModeDefault": "Normal",
@@ -6580,7 +6612,46 @@
       },
       "liveReading": "Última leitura informada pelo agente",
       "liveReadingHint": "Ela descreve a conta do pool que atendeu o último turno, então pode divergir das contas acima.",
-      "privacyNote": "Os números do pool de contas vêm do endpoint de status local do maxpool; o codeg lê da configuração apenas o endereço e a chave do proxy, nunca os logins das contas."
+      "privacyNote": "Os números do pool de contas vêm do endpoint de status local do maxpool; o codeg lê da configuração apenas o endereço e a chave do proxy, nunca os logins das contas.",
+      "manage": {
+        "addAccount": "Adicionar conta",
+        "addTitle": "Adicionar uma conta ao pool",
+        "addHint": "Adiciona ao pool a conta do Claude com que você entrar. Para adicionar outra conta, entre nela em claude.ai primeiro ou use uma janela privada.",
+        "reconnectTitle": "Entrar de novo em {name}",
+        "reconnectHint": "Entre com a mesma conta do Claude para trazê-la de volta ao pool.",
+        "nameLabel": "Nome (opcional)",
+        "namePlaceholder": "Por padrão, o e-mail da conta",
+        "continue": "Continuar",
+        "cancel": "Cancelar",
+        "stepOpen": "1. Abra a página de login e aprove o acesso.",
+        "stepPaste": "2. Seu navegador termina numa página que não carrega. Copie o endereço dessa página e cole aqui.",
+        "pastePlaceholder": "http://localhost:…/callback?code=…",
+        "addedToast": "Conta adicionada",
+        "reconnectedToast": "{name} entrou de novo",
+        "appliedLive": "O pool aplica em até 15 segundos.",
+        "appliedRestarting": "O pool reinicia para aplicar assim que nenhuma solicitação estiver em andamento.",
+        "appliedNeedsRestart": "Vale na próxima vez que o maxpool reiniciar.",
+        "actionsFor": "Ações de {name}",
+        "reconnect": "Reconectar",
+        "signInAgain": "Entrar de novo",
+        "rename": "Renomear",
+        "disable": "Desativar",
+        "enable": "Ativar",
+        "remove": "Remover",
+        "renameTitle": "Renomear {name}",
+        "renameHint": "Até 64 caracteres. Não pode começar com hífen nem ter só dígitos.",
+        "save": "Salvar",
+        "renamedToast": "Renomeada para {name}",
+        "disabledToast": "{name} foi desativada",
+        "enabledToast": "{name} foi ativada",
+        "removeTitle": "Remover {name} do pool?",
+        "removeBody": "O pool deixa de usar esta conta, e o login dela é apagado da configuração do maxpool. Você pode adicioná-la de novo depois.",
+        "removedToast": "{name} removida",
+        "failed": "Não deu certo: {message}",
+        "reloadWaiting": "Uma mudança de conta vale quando o pool reiniciar, assim que nenhuma solicitação estiver em andamento.",
+        "reloadNeedsRestart": "Uma mudança de conta vale na próxima vez que o maxpool reiniciar. O codeg não consegue reiniciar este pool.",
+        "restartNow": "Reiniciar agora"
+      }
     }
   },
   "Forge": {
@@ -7267,5 +7338,23 @@
     "reconnectingBody": "A conexão com o servidor foi perdida. Esta visualização será recarregada sozinha quando ele voltar.",
     "retry": "Tentar novamente",
     "reload": "Recarregar janela"
+  },
+  "PasteSignIn": {
+    "starting": "Iniciando o login…",
+    "done": "Login feito.",
+    "openLink": "Abrir página de login",
+    "copyLink": "Copiar link",
+    "linkCopied": "Link copiado",
+    "submit": "Enviar",
+    "cancel": "Cancelar",
+    "tryAgain": "Tentar novamente",
+    "close": "Fechar",
+    "failure": {
+      "invalid_code": "Esse não é o código que a página mostrou. Copie-o inteiro e cole de novo.",
+      "rejected": "O login foi recusado. Comece de novo e use um código novo.",
+      "timeout": "O login não terminou a tempo. Comece de novo.",
+      "expired": "Este login não está mais aguardando. Comece de novo.",
+      "failed": "O login não foi concluído. Comece de novo."
+    }
   }
 }

@@ -6354,6 +6354,31 @@ describe("AIR session failures are told as notifications", () => {
     ).toEqual(["action.login"])
   })
 
+  it("gives a lone auth-required verdict its own sign-in button", async () => {
+    const handlers = await connectOwner()
+    startTurn(handlers)
+    // No typed record pairs it (an agent without AIR, or the record never
+    // came): codeg's verdict alone still leads to the sign-in.
+    emit(handlers, {
+      type: "error",
+      message: "raw",
+      agent_type: "claude_code",
+      code: "turn_failed_auth_required",
+    })
+
+    expect(h.toastError).toHaveBeenCalledTimes(1)
+    const options = toastOptions(h.toastError.mock.calls[0])
+    expect(options.action?.label).toBe("action.login")
+    act(() => options.action!.onClick())
+    expect(h.openSettingsWindow).toHaveBeenCalledWith("agents", {
+      agentType: "claude_code",
+    })
+    const alert = h.recordAlert.mock.calls[0][0]
+    expect(
+      alert.actions.map((action: { label: string }) => action.label)
+    ).toEqual(["action.login"])
+  })
+
   it("offers retry / new session only while the conversation view answers them", async () => {
     const handlers = await connectOwner()
     const record = failure({

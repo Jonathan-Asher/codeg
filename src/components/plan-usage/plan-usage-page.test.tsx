@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type {
@@ -13,7 +14,52 @@ const getPlanUsage = vi.fn<(force?: boolean) => Promise<PlanUsageReport>>()
 let pushHandler: ((snapshot: PlanUsageSnapshot) => void) | null = null
 let poolHandler: ((pool: PlanUsagePool | null) => void) | null = null
 
+const manage = vi.hoisted(() => {
+  type Change = Promise<{ applied: string }>
+  return {
+    usagePoolManageInfo: vi.fn<
+      () => Promise<{ available: boolean; reload: string }>
+    >(() => Promise.resolve({ available: false, reload: "idle" })),
+    usagePoolLoginStart: vi.fn<
+      (options: {
+        name?: string | null
+        reconnect?: string | null
+      }) => Promise<{ handle: string; url: string }>
+    >(() =>
+      Promise.resolve({
+        handle: "h1",
+        url: "https://claude.test/oauth/authorize?state=st",
+      })
+    ),
+    usagePoolLoginFinish: vi.fn<
+      (
+        handle: string,
+        pasted: string
+      ) => Promise<{ ok: boolean; reason: null; retry: boolean }>
+    >(() => Promise.resolve({ ok: true, reason: null, retry: false })),
+    usagePoolLoginState: vi.fn<(handle: string) => Promise<string>>(() =>
+      Promise.resolve("waiting")
+    ),
+    usagePoolLoginCancel: vi.fn<(handle: string) => Promise<void>>(() =>
+      Promise.resolve()
+    ),
+    usagePoolRename: vi.fn<(name: string, newName: string) => Change>(() =>
+      Promise.resolve({ applied: "restarting" })
+    ),
+    usagePoolSetEnabled: vi.fn<(name: string, enabled: boolean) => Change>(() =>
+      Promise.resolve({ applied: "live" })
+    ),
+    usagePoolRemove: vi.fn<(name: string) => Change>(() =>
+      Promise.resolve({ applied: "restarting" })
+    ),
+    usagePoolRestartNow: vi.fn<
+      () => Promise<{ available: boolean; reload: string }>
+    >(() => Promise.resolve({ available: true, reload: "idle" })),
+  }
+})
+
 vi.mock("@/lib/api", () => ({
+  ...manage,
   getPlanUsage: (force?: boolean) => getPlanUsage(force),
   subscribePlanUsageChanged: (handler: (s: PlanUsageSnapshot) => void) => {
     pushHandler = handler
@@ -33,7 +79,10 @@ vi.mock("@/lib/api", () => ({
 
 vi.mock("@/lib/platform", () => ({
   onTransportReconnect: () => null,
+  openUrl: vi.fn(),
 }))
+
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 import { PlanUsagePage } from "./plan-usage-page"
 import enMessages from "@/i18n/messages/en.json"
@@ -249,6 +298,10 @@ beforeEach(() => {
   getPlanUsage.mockReset()
   pushHandler = null
   poolHandler = null
+  for (const fn of Object.values(manage)) fn.mockClear()
+  manage.usagePoolManageInfo.mockImplementation(() =>
+    Promise.resolve({ available: false, reload: "idle" })
+  )
 })
 
 describe("PlanUsagePage empty states", () => {
@@ -624,5 +677,121 @@ describe("PlanUsagePage account pool", () => {
     expect(
       within(card("Claude Code")).getByText("42% used")
     ).toBeInTheDocument()
+  })
+})
+
+describe("PlanUsagePage account pool management", () => {
+  const accountRow = (name: string) =>
+    card("Claude Code").querySelector<HTMLElement>(`[data-account="${name}"]`)!
+
+  async function mountManaged(reload = "idle") {
+    manage.usagePoolManageInfo.mockImplementation(() =>
+      Promise.resolve({ available: true, reload })
+    )
+    getPlanUsage.mockResolvedValue(report([claudeSnapshot()], { pool: pool() }))
+    await mount()
+    await screen.findByRole("button", { name: "Add account" })
+  }
+
+  async function openActions(name: string) {
+    const user = userEvent.setup()
+    await user.click(
+      within(accountRow(name)).getByRole("button", {
+        name: `Actions for ${name}`,
+      })
+    )
+    return user
+  }
+
+  it("offers nothing where the host has no pool to manage", async () => {
+    getPlanUsage.mockResolvedValue(report([claudeSnapshot()], { pool: pool() }))
+    await mount()
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(manage.usagePoolManageInfo).toHaveBeenCalled()
+    expect(screen.queryByRole("button", { name: "Add account" })).toBeNull()
+    expect(
+      within(accountRow("backup")).queryByRole("button", {
+        name: "Actions for backup",
+      })
+    ).toBeNull()
+  })
+
+  it("adds an account: a name, the link, then the pasted address", async () => {
+    await mountManaged()
+    fireEvent.click(screen.getByRole("button", { name: "Add account" }))
+    fireEvent.change(
+      screen.getByPlaceholderText("Defaults to the account email"),
+      {
+        target: { value: "work" },
+      }
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }))
+    await screen.findByText("https://claude.test/oauth/authorize?state=st")
+    expect(manage.usagePoolLoginStart).toHaveBeenCalledWith({ name: "work" })
+
+    fireEvent.change(
+      screen.getByPlaceholderText("http://localhost:…/callback?code=…"),
+      { target: { value: "http://localhost:1/callback?code=c&state=st" } }
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(manage.usagePoolLoginFinish).toHaveBeenCalledWith(
+      "h1",
+      "http://localhost:1/callback?code=c&state=st"
+    )
+    // The report is read again for the new account.
+    expect(getPlanUsage).toHaveBeenCalledWith(true)
+  })
+
+  it("signs a failed account in again from its menu", async () => {
+    await mountManaged()
+    const user = await openActions("primary")
+    await user.click(screen.getByRole("menuitem", { name: "Sign in again" }))
+    await screen.findByText("Sign primary in again")
+    expect(manage.usagePoolLoginStart).toHaveBeenCalledWith({
+      reconnect: "primary",
+    })
+  })
+
+  it("removes an account only after the confirmation", async () => {
+    await mountManaged()
+    const user = await openActions("spare")
+    await user.click(screen.getByRole("menuitem", { name: "Remove" }))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(dialog).toHaveTextContent("Remove spare from the pool?")
+    expect(manage.usagePoolRemove).not.toHaveBeenCalled()
+    await user.click(within(dialog).getByRole("button", { name: "Remove" }))
+    expect(manage.usagePoolRemove).toHaveBeenCalledWith("spare")
+  })
+
+  it("renames and switches accounts through the pool's own tools", async () => {
+    await mountManaged()
+    let user = await openActions("backup")
+    await user.click(screen.getByRole("menuitem", { name: "Rename" }))
+    const input = await screen.findByDisplayValue("backup")
+    fireEvent.change(input, { target: { value: "personal" } })
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    expect(manage.usagePoolRename).toHaveBeenCalledWith("backup", "personal")
+
+    user = await openActions("spare")
+    await user.click(screen.getByRole("menuitem", { name: "Turn on" }))
+    expect(manage.usagePoolSetEnabled).toHaveBeenCalledWith("spare", true)
+  })
+
+  it("says when a change waits for the pool to restart", async () => {
+    await mountManaged("waiting")
+    const notice = await screen.findByRole("status", {
+      name: (_, el) => el.getAttribute("data-slot") === "pool-reload-notice",
+    })
+    expect(notice).toHaveTextContent("applies when the pool restarts")
+    fireEvent.click(within(notice).getByRole("button", { name: "Restart now" }))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(manage.usagePoolRestartNow).toHaveBeenCalledTimes(1)
   })
 })

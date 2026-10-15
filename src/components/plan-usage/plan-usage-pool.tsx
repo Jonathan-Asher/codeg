@@ -27,6 +27,7 @@ import {
   WindowResetText,
   WindowUsageBar,
 } from "./plan-usage-parts"
+import { PoolAccountActions } from "./plan-usage-pool-manage"
 
 /**
  * The account pool's reading — every account the agent's requests are spread
@@ -204,10 +205,14 @@ export function PoolAccountList({
   pool,
   now,
   compact = false,
+  onManaged,
 }: {
   pool: PlanUsagePool
   now: number
   compact?: boolean
+  /** Offer each account's actions (sign in again, rename, switch, remove);
+   *  called after one changed the pool. Only where the host can run them. */
+  onManaged?: () => void
 }) {
   const stale = isPoolStale(pool, now)
   return (
@@ -225,6 +230,7 @@ export function PoolAccountList({
           pool={pool}
           now={now}
           compact={compact}
+          onManaged={onManaged}
         />
       ))}
     </ul>
@@ -236,11 +242,13 @@ function PoolAccountRow({
   pool,
   now,
   compact,
+  onManaged,
 }: {
   account: PlanUsagePoolAccount
   pool: PlanUsagePool
   now: number
   compact: boolean
+  onManaged?: () => void
 }) {
   const t = useTranslations("PlanUsage.pool")
   const locale = useLocale()
@@ -307,6 +315,11 @@ function PoolAccountRow({
         {backIn != null && (
           <span className="ms-auto text-[0.6875rem] text-muted-foreground tabular-nums">
             {t("backIn", { duration: formatCompactDuration(backIn, locale) })}
+          </span>
+        )}
+        {onManaged && !compact && (
+          <span className={cn(backIn == null && "ms-auto")}>
+            <PoolAccountActions account={account} onChanged={onManaged} />
           </span>
         )}
       </div>

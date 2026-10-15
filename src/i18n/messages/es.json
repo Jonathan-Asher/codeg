@@ -1733,7 +1733,39 @@
     "customAgentRemoveWithData": "Eliminar también su historial de conversaciones registrado",
     "customAgentRemoved": "{name} eliminado",
     "customAgentBadge": "Personalizado",
-    "customAgentNotLaunchable": "Este agente no puede iniciarse aquí: {reason}"
+    "customAgentNotLaunchable": "Este agente no puede iniciarse aquí: {reason}",
+    "claudeAuth": {
+      "title": "Inicio de sesión de Claude Code",
+      "hint": "La sesión que usan todas las sesiones de Claude Code en el host de codeg. Puedes iniciar sesión desde este dispositivo: el enlace se abre aquí y pegas el código que muestra la página.",
+      "refresh": "Comprobar de nuevo",
+      "checking": "Comprobando el inicio de sesión…",
+      "statusFailed": "No se pudo leer el inicio de sesión: {message}",
+      "signedInAs": "Sesión iniciada como {email}",
+      "signedIn": "Sesión iniciada",
+      "plan": "plan {plan}",
+      "signedOut": "No has iniciado sesión. Las sesiones de Claude Code te pedirán que inicies sesión.",
+      "method": {
+        "claude_ai": "Suscripción de Claude",
+        "console": "Anthropic Console",
+        "api_key": "Clave de API",
+        "oauth_token": "Token de larga duración",
+        "third_party": "Proveedor en la nube",
+        "none": "Ninguno",
+        "other": "Otro"
+      },
+      "signIn": "Iniciar sesión",
+      "signInAgain": "Volver a iniciar sesión",
+      "signOut": "Cerrar sesión",
+      "stepOpen": "1. Abre la página de inicio de sesión y aprueba el acceso.",
+      "stepPaste": "2. Pega el código que muestra la página.",
+      "pastePlaceholder": "Pega el código aquí",
+      "signedInToast": "Claude Code ha iniciado sesión",
+      "signedOutToast": "Claude Code ha cerrado sesión",
+      "signOutFailed": "No se pudo cerrar sesión: {message}",
+      "signOutConfirmTitle": "¿Cerrar la sesión de Claude Code?",
+      "signOutConfirmBody": "Todas las sesiones de Claude Code en el host de codeg comparten este inicio de sesión. Las sesiones en curso dejarán de funcionar hasta que alguien vuelva a iniciar sesión.",
+      "cancel": "Cancelar"
+    }
   },
   "AgentVocabulary": {
     "deepseekModeDefault": "Normal",
@@ -6580,7 +6612,46 @@
       },
       "liveReading": "Última lectura informada por el agente",
       "liveReadingHint": "Describe la cuenta del grupo que atendió el último turno, así que puede no coincidir con las cuentas de arriba.",
-      "privacyNote": "Los números del grupo de cuentas vienen del endpoint de estado local de maxpool; codeg solo lee de su configuración la dirección y la clave del proxy, nunca los inicios de sesión de las cuentas."
+      "privacyNote": "Los números del grupo de cuentas vienen del endpoint de estado local de maxpool; codeg solo lee de su configuración la dirección y la clave del proxy, nunca los inicios de sesión de las cuentas.",
+      "manage": {
+        "addAccount": "Añadir cuenta",
+        "addTitle": "Añadir una cuenta al grupo",
+        "addHint": "Añade al grupo la cuenta de Claude con la que inicies sesión. Para añadir otra cuenta, inicia sesión con ella en claude.ai primero o usa una ventana privada.",
+        "reconnectTitle": "Volver a iniciar sesión en {name}",
+        "reconnectHint": "Inicia sesión con la misma cuenta de Claude para devolverla al grupo.",
+        "nameLabel": "Nombre (opcional)",
+        "namePlaceholder": "Por defecto, el correo de la cuenta",
+        "continue": "Continuar",
+        "cancel": "Cancelar",
+        "stepOpen": "1. Abre la página de inicio de sesión y aprueba el acceso.",
+        "stepPaste": "2. Tu navegador termina en una página que no carga. Copia la dirección de esa página y pégala aquí.",
+        "pastePlaceholder": "http://localhost:…/callback?code=…",
+        "addedToast": "Cuenta añadida",
+        "reconnectedToast": "{name} ha vuelto a iniciar sesión",
+        "appliedLive": "El grupo lo aplica en menos de 15 segundos.",
+        "appliedRestarting": "El grupo se reinicia para aplicarlo cuando no haya ninguna solicitud en curso.",
+        "appliedNeedsRestart": "Se aplica la próxima vez que se reinicie maxpool.",
+        "actionsFor": "Acciones de {name}",
+        "reconnect": "Reconectar",
+        "signInAgain": "Volver a iniciar sesión",
+        "rename": "Cambiar nombre",
+        "disable": "Desactivar",
+        "enable": "Activar",
+        "remove": "Quitar",
+        "renameTitle": "Cambiar el nombre de {name}",
+        "renameHint": "Hasta 64 caracteres. No puede empezar por un guion ni tener solo dígitos.",
+        "save": "Guardar",
+        "renamedToast": "Nombre cambiado a {name}",
+        "disabledToast": "{name} está desactivada",
+        "enabledToast": "{name} está activada",
+        "removeTitle": "¿Quitar {name} del grupo?",
+        "removeBody": "El grupo deja de usar esta cuenta y su inicio de sesión se elimina de la configuración de maxpool. Puedes volver a añadirla más tarde.",
+        "removedToast": "{name} quitada",
+        "failed": "No funcionó: {message}",
+        "reloadWaiting": "Un cambio de cuenta se aplica cuando el grupo se reinicia, en cuanto no haya solicitudes en curso.",
+        "reloadNeedsRestart": "Un cambio de cuenta se aplica la próxima vez que se reinicie maxpool. codeg no puede reiniciar este grupo.",
+        "restartNow": "Reiniciar ahora"
+      }
     }
   },
   "Forge": {
@@ -7267,5 +7338,23 @@
     "reconnectingBody": "Se perdió la conexión con el servidor. Esta vista se recargará sola cuando vuelva.",
     "retry": "Reintentar",
     "reload": "Recargar ventana"
+  },
+  "PasteSignIn": {
+    "starting": "Iniciando el inicio de sesión…",
+    "done": "Sesión iniciada.",
+    "openLink": "Abrir página de inicio de sesión",
+    "copyLink": "Copiar enlace",
+    "linkCopied": "Enlace copiado",
+    "submit": "Enviar",
+    "cancel": "Cancelar",
+    "tryAgain": "Intentar de nuevo",
+    "close": "Cerrar",
+    "failure": {
+      "invalid_code": "Ese no es el código que mostró la página. Cópialo completo y pégalo de nuevo.",
+      "rejected": "Se rechazó el inicio de sesión. Empieza de nuevo y usa un código nuevo.",
+      "timeout": "El inicio de sesión no terminó a tiempo. Empieza de nuevo.",
+      "expired": "Este inicio de sesión ya no está esperando. Empieza de nuevo.",
+      "failed": "El inicio de sesión no se completó. Empieza de nuevo."
+    }
   }
 }

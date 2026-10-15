@@ -1733,7 +1733,39 @@
     "customAgentRemoveWithData": "Supprimer aussi l'historique de conversation enregistré",
     "customAgentRemoved": "{name} supprimé",
     "customAgentBadge": "Personnalisé",
-    "customAgentNotLaunchable": "Cet agent ne peut pas démarrer ici : {reason}"
+    "customAgentNotLaunchable": "Cet agent ne peut pas démarrer ici : {reason}",
+    "claudeAuth": {
+      "title": "Connexion de Claude Code",
+      "hint": "La connexion qu'utilisent toutes les sessions Claude Code sur l'hôte codeg. Vous pouvez vous connecter depuis cet appareil : le lien s'ouvre ici, puis vous collez le code affiché par la page.",
+      "refresh": "Vérifier à nouveau",
+      "checking": "Vérification de la connexion…",
+      "statusFailed": "Impossible de lire la connexion : {message}",
+      "signedInAs": "Connecté en tant que {email}",
+      "signedIn": "Connecté",
+      "plan": "forfait {plan}",
+      "signedOut": "Non connecté. Les sessions Claude Code vous demanderont de vous connecter.",
+      "method": {
+        "claude_ai": "Abonnement Claude",
+        "console": "Anthropic Console",
+        "api_key": "Clé d'API",
+        "oauth_token": "Jeton longue durée",
+        "third_party": "Fournisseur cloud",
+        "none": "Aucune",
+        "other": "Autre"
+      },
+      "signIn": "Se connecter",
+      "signInAgain": "Se reconnecter",
+      "signOut": "Se déconnecter",
+      "stepOpen": "1. Ouvrez la page de connexion et autorisez l'accès.",
+      "stepPaste": "2. Collez le code affiché par la page.",
+      "pastePlaceholder": "Collez le code ici",
+      "signedInToast": "Claude Code est connecté",
+      "signedOutToast": "Claude Code est déconnecté",
+      "signOutFailed": "Impossible de se déconnecter : {message}",
+      "signOutConfirmTitle": "Déconnecter Claude Code ?",
+      "signOutConfirmBody": "Toutes les sessions Claude Code sur l'hôte codeg partagent cette connexion. Les sessions en cours cesseront de fonctionner jusqu'à ce que quelqu'un se reconnecte.",
+      "cancel": "Annuler"
+    }
   },
   "AgentVocabulary": {
     "deepseekModeDefault": "Normal",
@@ -6580,7 +6612,46 @@
       },
       "liveReading": "Dernier relevé transmis par l'agent",
       "liveReadingHint": "Il décrit le compte du pool qui a servi le dernier tour, il peut donc différer des comptes ci-dessus.",
-      "privacyNote": "Les chiffres du pool de comptes viennent du point d'accès d'état local de maxpool ; codeg ne lit dans sa configuration que l'adresse et la clé du proxy, jamais les connexions des comptes."
+      "privacyNote": "Les chiffres du pool de comptes viennent du point d'accès d'état local de maxpool ; codeg ne lit dans sa configuration que l'adresse et la clé du proxy, jamais les connexions des comptes.",
+      "manage": {
+        "addAccount": "Ajouter un compte",
+        "addTitle": "Ajouter un compte au pool",
+        "addHint": "Ajoute au pool le compte Claude avec lequel vous vous connectez. Pour ajouter un autre compte, connectez-vous d'abord à celui-ci sur claude.ai ou utilisez une fenêtre privée.",
+        "reconnectTitle": "Reconnecter {name}",
+        "reconnectHint": "Connectez-vous avec le même compte Claude pour le remettre dans le pool.",
+        "nameLabel": "Nom (facultatif)",
+        "namePlaceholder": "Par défaut, l'e-mail du compte",
+        "continue": "Continuer",
+        "cancel": "Annuler",
+        "stepOpen": "1. Ouvrez la page de connexion et autorisez l'accès.",
+        "stepPaste": "2. Votre navigateur s'arrête sur une page qui ne se charge pas. Copiez l'adresse de cette page et collez-la ici.",
+        "pastePlaceholder": "http://localhost:…/callback?code=…",
+        "addedToast": "Compte ajouté",
+        "reconnectedToast": "{name} est reconnecté",
+        "appliedLive": "Le pool le prend en compte sous 15 secondes.",
+        "appliedRestarting": "Le pool redémarre pour l'appliquer dès qu'aucune requête n'est en cours.",
+        "appliedNeedsRestart": "Cela s'applique au prochain redémarrage de maxpool.",
+        "actionsFor": "Actions pour {name}",
+        "reconnect": "Reconnecter",
+        "signInAgain": "Se reconnecter",
+        "rename": "Renommer",
+        "disable": "Désactiver",
+        "enable": "Activer",
+        "remove": "Retirer",
+        "renameTitle": "Renommer {name}",
+        "renameHint": "64 caractères maximum. Le nom ne peut pas commencer par un tiret ni n'être composé que de chiffres.",
+        "save": "Enregistrer",
+        "renamedToast": "Renommé en {name}",
+        "disabledToast": "{name} est désactivé",
+        "enabledToast": "{name} est activé",
+        "removeTitle": "Retirer {name} du pool ?",
+        "removeBody": "Le pool cesse d'utiliser ce compte et sa connexion est supprimée de la configuration de maxpool. Vous pourrez l'ajouter de nouveau plus tard.",
+        "removedToast": "{name} retiré",
+        "failed": "Cela n'a pas fonctionné : {message}",
+        "reloadWaiting": "Un changement de compte s'applique au redémarrage du pool, dès qu'aucune requête n'est en cours.",
+        "reloadNeedsRestart": "Un changement de compte s'applique au prochain redémarrage de maxpool. codeg ne peut pas redémarrer ce pool.",
+        "restartNow": "Redémarrer maintenant"
+      }
     }
   },
   "Forge": {
@@ -7267,5 +7338,23 @@
     "reconnectingBody": "La connexion au serveur a été perdue. Cette vue se rechargera d'elle-même dès son retour.",
     "retry": "Réessayer",
     "reload": "Recharger la fenêtre"
+  },
+  "PasteSignIn": {
+    "starting": "Démarrage de la connexion…",
+    "done": "Connecté.",
+    "openLink": "Ouvrir la page de connexion",
+    "copyLink": "Copier le lien",
+    "linkCopied": "Lien copié",
+    "submit": "Envoyer",
+    "cancel": "Annuler",
+    "tryAgain": "Réessayer",
+    "close": "Fermer",
+    "failure": {
+      "invalid_code": "Ce n'est pas le code affiché par la page. Copiez-le en entier et collez-le à nouveau.",
+      "rejected": "La connexion a été refusée. Recommencez avec un nouveau code.",
+      "timeout": "La connexion ne s'est pas terminée à temps. Recommencez.",
+      "expired": "Cette connexion n'est plus en attente. Recommencez.",
+      "failed": "La connexion n'a pas abouti. Recommencez."
+    }
   }
 }

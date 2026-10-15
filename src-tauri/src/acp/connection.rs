@@ -172,7 +172,7 @@ pub fn set_force_command_color(enabled: bool) {
 /// [`crate::acp::scratch_dir`], or `None` when isolation is off or the
 /// directory could not be created (then the child inherits the ambient temp
 /// dir, exactly as it did before).
-fn merge_agent_env(
+pub(crate) fn merge_agent_env(
     env: &[(&'static str, &'static str)],
     runtime_env: &BTreeMap<String, String>,
     scratch: Option<&Path>,
@@ -2690,6 +2690,190 @@ async fn build_agent(
 /// into boxed sub-futures rather than raising it further.
 const ACP_CONNECTION_STACK_SIZE: usize = 8 * 1024 * 1024;
 
+/// One launch of a connection's agent: [`build_agent`] plus the pid and
+/// scratch-directory bookkeeping every launch needs. A connection restarted in
+/// place (see [`crate::acp::claude_auth`]) builds its next launch the same way.
+async fn build_connection_agent(
+    agent_type: AgentType,
+    runtime_env: &BTreeMap<String, String>,
+    launch_cwd: &Path,
+    stderr_tail: &Arc<StderrTail>,
+    child_pid: &Arc<std::sync::atomic::AtomicU32>,
+    connection_id: &str,
+    session_id: Option<&str>,
+) -> Result<AcpAgent, AcpError> {
+    // Per-launch temp directory, created BEFORE the spawn because it has to
+    // exist by the time the child looks: a self-extracting agent binary creates
+    // only its own leaf under whatever `TMP` names, so pointing at a directory
+    // that is not there yet is a failed launch rather than a graceful fallback.
+    // `None` (isolation off, or the directory could not be created) means the
+    // child inherits the ambient temp dir exactly as it did before.
+    let scratch = crate::acp::scratch_dir::create();
+    let agent = match build_agent(
+        agent_type,
+        runtime_env,
+        launch_cwd,
+        stderr_tail,
+        scratch.as_ref().map(|s| s.path()),
+    )
+    .await
+    {
+        Ok(agent) => agent,
+        Err(e) => {
+            // No process was spawned, so nothing will ever fire `on_exit` for
+            // it. Hand the directory back here or it waits for a sweep.
+            if let Some(scratch) = scratch {
+                scratch.release();
+            }
+            return Err(e);
+        }
+    };
+    // This launch's own pid, so its reap clears the connection's record only
+    // while the record is still this launch's: a restarted connection's next
+    // process may have been published by then.
+    let launch_pid = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    Ok(agent
+        .on_spawn({
+            let child_pid = Arc::clone(child_pid);
+            let launch_pid = Arc::clone(&launch_pid);
+            let conn_label = connection_id.to_string();
+            let session_label = session_id.unwrap_or("<new>").to_string();
+            move |pid| {
+                launch_pid.store(pid, std::sync::atomic::Ordering::SeqCst);
+                child_pid.store(pid, std::sync::atomic::Ordering::SeqCst);
+                tracing::info!(
+                    "[ACP][attach] conn={conn_label} session={session_label} agent process pid={pid}"
+                );
+            }
+        })
+        // Paired with `on_spawn`: publish 0 again once the process has been
+        // reaped, so the shutdown backstop can never `kill_tree` a pid the OS
+        // has already handed to someone else. Fires ONLY on a real reap — a
+        // connection that merely ended keeps its pid published, because
+        // `acp::agent_process`'s `ChildGuard` signals the tree without waiting
+        // and the agent may still be running.
+        //
+        // That "only on a real reap" is also why the scratch directory is
+        // released HERE and not from `ConnectionCleanupGuard`: the guard drops
+        // when the driver thread unwinds, which can be well before the agent is
+        // actually gone. Even so a reaped parent does not prove its descendants
+        // let go of the extracted files, so `release` retries on a ladder rather
+        // than deleting once and hoping.
+        //
+        // If this callback is instead DROPPED without ever firing — a
+        // connection that never reported a reap — `LaunchScratch`'s own `Drop`
+        // performs the same cleanup and logs that it had to. Nothing here is
+        // the last line of defence.
+        .on_exit({
+            let child_pid = Arc::clone(child_pid);
+            let launch_pid = Arc::clone(&launch_pid);
+            // `on_exit` is `Fn`, so the one-shot move needs interior mutability.
+            let scratch = std::sync::Mutex::new(scratch);
+            move || {
+                let mine = launch_pid.load(std::sync::atomic::Ordering::SeqCst);
+                let _ = child_pid.compare_exchange(
+                    mine,
+                    0,
+                    std::sync::atomic::Ordering::SeqCst,
+                    std::sync::atomic::Ordering::SeqCst,
+                );
+                if let Ok(mut held) = scratch.lock() {
+                    if let Some(scratch) = held.take() {
+                        scratch.release();
+                    }
+                }
+            }
+        }))
+}
+
+/// A lifeline receiver for one launch, resolving when `gone` is cancelled
+/// (the manager dropped the connection's entry).
+fn relayed_lifeline(
+    gone: &tokio_util::sync::CancellationToken,
+) -> tokio::sync::oneshot::Receiver<()> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let gone = gone.clone();
+    tokio::spawn(async move {
+        gone.cancelled().await;
+        drop(tx);
+    });
+    rx
+}
+
+/// What the next launch of a connection restarted for a Claude Code auth
+/// retry needs: the prompt to send again and the session it belongs to, with
+/// the selectors it had.
+struct AuthRestart {
+    blocks: Vec<PromptInputBlock>,
+    session_id: String,
+    mode_id: Option<String>,
+    config_values: BTreeMap<String, String>,
+}
+
+/// The restart the turn loop asked for (see `SessionState::claude_auth_respawn`),
+/// if it can still happen: the connection is still the manager's and has a
+/// session to resume.
+async fn prepare_auth_restart(
+    state: &Arc<RwLock<SessionState>>,
+    connections: &Arc<tokio::sync::Mutex<HashMap<String, AgentConnection>>>,
+    conn_id: &str,
+) -> Option<AuthRestart> {
+    let blocks = state.write().await.claude_auth_respawn.take()?;
+    if !connections.lock().await.contains_key(conn_id) {
+        tracing::info!("[ACP] conn={conn_id} closed before its auth retry could run");
+        return None;
+    }
+    let s = state.read().await;
+    let session_id = s.external_id.clone()?;
+    Some(AuthRestart {
+        blocks,
+        session_id,
+        mode_id: s.current_mode.clone(),
+        config_values: s
+            .config_options
+            .as_deref()
+            .map(current_config_option_values)
+            .unwrap_or_default(),
+    })
+}
+
+/// End the turn of an auth retry that never ran — the restart failed, or the
+/// connection closed first — the way a refused prompt ends one: the sign-in
+/// error and `TurnComplete(auth_required)`. No-op when no retry is pending.
+async fn end_stranded_auth_retry(
+    state: &Arc<RwLock<SessionState>>,
+    emitter: &EventEmitter,
+    agent_type: AgentType,
+) {
+    let (stranded, session_id) = {
+        let mut s = state.write().await;
+        let stranded = s.claude_auth_respawning
+            || s.claude_auth_respawn.is_some()
+            || s.claude_auth_retry_prompt.is_some();
+        s.claude_auth_respawning = false;
+        s.claude_auth_respawn = None;
+        s.claude_auth_retry_prompt = None;
+        (stranded, s.external_id.clone().unwrap_or_default())
+    };
+    if !stranded {
+        return;
+    }
+    tracing::info!("[ACP] the Claude Code auth retry could not run; asking the user to sign in");
+    if let Some(event) = turn_failure_error_event("auth_required", agent_type, None) {
+        emit_with_state(state, emitter, event).await;
+    }
+    emit_with_state(
+        state,
+        emitter,
+        AcpEvent::TurnComplete {
+            session_id,
+            stop_reason: "auth_required".into(),
+            agent_type: agent_type.to_string(),
+        },
+    )
+    .await;
+}
+
 /// Spawn an ACP agent process and run the connection loop in a background task.
 ///
 /// On success, the newly created `AgentConnection` is inserted into
@@ -2745,6 +2929,15 @@ pub async fn spawn_agent_connection(
     // and claims it through the connect dedup.
     initial_state.speculative = speculative;
     initial_state.parked = speculative;
+    // How a refused Claude Code prompt asks a NEW CLI process whether it is
+    // signed in, with this launch's environment (see `claude_auth`). Absent
+    // when the adapter can't be found; the spawn below then fails anyway.
+    if agent_type == AgentType::ClaudeCode {
+        initial_state.claude_cli = crate::acp::claude_auth::ClaudeCli::for_runtime_env(&runtime_env)
+            .await
+            .ok()
+            .map(Arc::new);
+    }
 
     let session_state = Arc::new(RwLock::new(initial_state));
 
@@ -2781,75 +2974,16 @@ pub async fn spawn_agent_connection(
     // turn is diagnosed as silently empty. Created here so both the spawn side
     // and the conversation loop share the same buffer.
     let stderr_tail = Arc::new(StderrTail::new());
-    // Per-launch temp directory, created BEFORE the spawn because it has to
-    // exist by the time the child looks: a self-extracting agent binary creates
-    // only its own leaf under whatever `TMP` names, so pointing at a directory
-    // that is not there yet is a failed launch rather than a graceful fallback.
-    // `None` (isolation off, or the directory could not be created) means the
-    // child inherits the ambient temp dir exactly as it did before.
-    let scratch = crate::acp::scratch_dir::create();
-    let agent = match build_agent(
+    let agent = build_connection_agent(
         agent_type,
         &runtime_env,
         &launch_cwd,
         &stderr_tail,
-        scratch.as_ref().map(|s| s.path()),
+        &child_pid,
+        &connection_id,
+        session_id.as_deref(),
     )
-    .await
-    {
-        Ok(agent) => agent,
-        Err(e) => {
-            // No process was spawned, so nothing will ever fire `on_exit` for
-            // it. Hand the directory back here or it waits for a sweep.
-            if let Some(scratch) = scratch {
-                scratch.release();
-            }
-            return Err(e);
-        }
-    };
-    let agent = agent
-        .on_spawn({
-            let child_pid = Arc::clone(&child_pid);
-            let conn_label = connection_id.clone();
-            let session_label = session_id.clone().unwrap_or_else(|| "<new>".to_string());
-            move |pid| {
-                child_pid.store(pid, std::sync::atomic::Ordering::SeqCst);
-                tracing::info!(
-                    "[ACP][attach] conn={conn_label} session={session_label} agent process pid={pid}"
-                );
-            }
-        })
-        // Paired with `on_spawn`: publish 0 again once the process has been
-        // reaped, so the shutdown backstop can never `kill_tree` a pid the OS
-        // has already handed to someone else. Fires ONLY on a real reap — a
-        // connection that merely ended keeps its pid published, because
-        // `acp::agent_process`'s `ChildGuard` signals the tree without waiting
-        // and the agent may still be running.
-        //
-        // That "only on a real reap" is also why the scratch directory is
-        // released HERE and not from `ConnectionCleanupGuard`: the guard drops
-        // when the driver thread unwinds, which can be well before the agent is
-        // actually gone. Even so a reaped parent does not prove its descendants
-        // let go of the extracted files, so `release` retries on a ladder rather
-        // than deleting once and hoping.
-        //
-        // If this callback is instead DROPPED without ever firing — a
-        // connection that never reported a reap — `LaunchScratch`'s own `Drop`
-        // performs the same cleanup and logs that it had to. Nothing here is
-        // the last line of defence.
-        .on_exit({
-            let child_pid = Arc::clone(&child_pid);
-            // `on_exit` is `Fn`, so the one-shot move needs interior mutability.
-            let scratch = std::sync::Mutex::new(scratch);
-            move || {
-                child_pid.store(0, std::sync::atomic::Ordering::SeqCst);
-                if let Ok(mut held) = scratch.lock() {
-                    if let Some(scratch) = held.take() {
-                        scratch.release();
-                    }
-                }
-            }
-        });
+    .await?;
 
     // Path policy for the ACP `fs/*` channel. Built HERE rather than inside
     // `run_connection` because it needs the full `runtime_env` (only the git
@@ -2890,6 +3024,13 @@ pub async fn spawn_agent_connection(
     let conn_id = connection_id.clone();
     let emitter_clone = emitter.clone();
     let cleanup_connections = connections.clone();
+    // A Claude Code connection may restart its agent in place to retry a
+    // refused prompt (see `claude_auth`); the restart builds the next launch
+    // from the same inputs, and only while the entry is still in the map.
+    let restart_connections = connections.clone();
+    let restart_runtime_env = runtime_env.clone();
+    let restart_launch_cwd = launch_cwd.clone();
+    let restart_child_pid = Arc::clone(&child_pid);
     let cleanup_connection_id = connection_id.clone();
     let state_clone = Arc::clone(&session_state);
 
@@ -2949,28 +3090,93 @@ pub async fn spawn_agent_connection(
             let _cleanup = cleanup_guard;
             connection_rt.block_on(async move {
         let delegation_for_cleanup = delegation_injection.clone();
-        let result = run_connection(
-            agent,
-            conn_id.clone(),
-            agent_type,
-            working_dir,
-            session_id,
-            cmd_rx,
-            emitter_clone.clone(),
-            Arc::clone(&state_clone),
-            terminal_base_env,
-            terminal_shell_config,
-            preferred_mode_id,
-            preferred_config_values,
-            delegation_injection,
-            fs_policy,
-            host_tools,
-            session_persistence,
-            stderr_tail,
-            lifeline_rx,
-            detached_fork,
-        )
-        .await;
+        // Every launch's attach consumes a lifeline receiver of its own, and
+        // there may be more than one launch (a Claude Code auth retry restarts
+        // the agent in place), so the manager's one lifeline is relayed.
+        let lifeline_gone = tokio_util::sync::CancellationToken::new();
+        {
+            let gone = lifeline_gone.clone();
+            tokio::spawn(async move {
+                let _ = lifeline_rx.await;
+                gone.cancel();
+            });
+        }
+        let mut cmd_rx = cmd_rx;
+        let mut agent = agent;
+        let mut session_id = session_id;
+        let mut preferred_mode_id = preferred_mode_id;
+        let mut preferred_config_values = preferred_config_values;
+        let mut detached_fork = detached_fork;
+        let result = loop {
+            let result = run_connection(
+                agent,
+                conn_id.clone(),
+                agent_type,
+                working_dir.clone(),
+                session_id.take(),
+                &mut cmd_rx,
+                emitter_clone.clone(),
+                Arc::clone(&state_clone),
+                terminal_base_env.clone(),
+                terminal_shell_config.clone(),
+                preferred_mode_id.take(),
+                std::mem::take(&mut preferred_config_values),
+                delegation_injection.clone(),
+                fs_policy.clone(),
+                host_tools,
+                session_persistence,
+                Arc::clone(&stderr_tail),
+                relayed_lifeline(&lifeline_gone),
+                detached_fork.take(),
+            )
+            .await;
+            let restart = if result.is_ok() {
+                prepare_auth_restart(&state_clone, &restart_connections, &conn_id).await
+            } else {
+                None
+            };
+            let Some(restart) = restart else {
+                break result;
+            };
+            // The process is gone, so its per-launch delegation token goes
+            // with it; the next launch mints its own. Pending delegations are
+            // NOT cancelled: they belong to the conversation, which carries on.
+            if let Some(inj) = &delegation_for_cleanup {
+                let token = state_clone.read().await.delegation_token.clone();
+                if let Some(tok) = token {
+                    inj.tokens.revoke(&tok).await;
+                }
+            }
+            tokio::time::sleep(crate::acp::claude_auth::RETRY_BACKOFF).await;
+            match build_connection_agent(
+                agent_type,
+                &restart_runtime_env,
+                &restart_launch_cwd,
+                &stderr_tail,
+                &restart_child_pid,
+                &conn_id,
+                Some(&restart.session_id),
+            )
+            .await
+            {
+                Ok(next) => {
+                    tracing::info!(
+                        "[ACP] restarting the Claude Code agent for conn={conn_id} session={} to retry \
+                         the refused prompt",
+                        restart.session_id
+                    );
+                    agent = next;
+                    session_id = Some(restart.session_id);
+                    preferred_mode_id = restart.mode_id;
+                    preferred_config_values = restart.config_values;
+                    state_clone.write().await.claude_auth_retry_prompt = Some(restart.blocks);
+                }
+                Err(e) => break Err(e),
+            }
+        };
+        // A retry that never got to run (the restart failed, or the connection
+        // went away first) still owes its turn an ending.
+        end_stranded_auth_retry(&state_clone, &emitter_clone, agent_type).await;
 
         // Revoke the per-launch token + cascade cancel any still-pending
         // delegations AND questions owned by this parent connection. All are
@@ -6009,7 +6215,7 @@ async fn run_connection(
     agent_type: AgentType,
     working_dir: Option<String>,
     session_id: Option<String>,
-    mut cmd_rx: mpsc::Receiver<ConnectionCommand>,
+    cmd_rx: &mut mpsc::Receiver<ConnectionCommand>,
     emitter: EventEmitter,
     state: Arc<RwLock<SessionState>>,
     terminal_base_env: BTreeMap<String, String>,
@@ -6831,14 +7037,21 @@ async fn run_connection(
             // selectors and enable sending while the session initialises.
             // Prompts sent before run_conversation_loop are buffered in
             // the cmd_rx channel and processed as soon as the loop starts.
-            emit_with_state(
-                &state,
-                &emitter_clone,
-                AcpEvent::StatusChanged {
-                    status: ConnectionStatus::Connected,
-                },
-            )
-            .await;
+            //
+            // Not for a process restarted to retry a refused Claude Code
+            // prompt (see `claude_auth`): that turn is still running for every
+            // client, and a `Connected` here would hand them a send button
+            // for the seconds the restart takes.
+            if !state.read().await.claude_auth_respawning {
+                emit_with_state(
+                    &state,
+                    &emitter_clone,
+                    AcpEvent::StatusChanged {
+                        status: ConnectionStatus::Connected,
+                    },
+                )
+                .await;
+            }
 
             if let Some(sid) = session_id {
                 // Prefer session/resume when the agent advertises the
@@ -6921,7 +7134,7 @@ async fn run_connection(
                                 &state,
                                 agent_type,
                                 &perms,
-                                &mut cmd_rx,
+                                &mut *cmd_rx,
                                 terminal_runtime.clone(),
                                 &cwd_string,
                                 supports_fork,
@@ -6943,7 +7156,7 @@ async fn run_connection(
                                 &state,
                                 agent_type,
                                 &perms,
-                                &mut cmd_rx,
+                                &mut *cmd_rx,
                                 terminal_runtime.clone(),
                                 &cwd,
                                 &cwd_string,
@@ -7193,7 +7406,7 @@ async fn run_connection(
                             &state,
                             agent_type,
                             &perms,
-                            &mut cmd_rx,
+                            &mut *cmd_rx,
                             terminal_runtime.clone(),
                             &cwd_string,
                             supports_fork,
@@ -7211,7 +7424,7 @@ async fn run_connection(
                             &state,
                             agent_type,
                             &perms,
-                            &mut cmd_rx,
+                            &mut *cmd_rx,
                             terminal_runtime.clone(),
                             &cwd,
                             &cwd_string,
@@ -7397,7 +7610,7 @@ async fn run_connection(
                             &state,
                             agent_type,
                             &perms,
-                            &mut cmd_rx,
+                            &mut *cmd_rx,
                             terminal_runtime.clone(),
                             &cwd_string,
                             supports_fork,
@@ -7417,7 +7630,7 @@ async fn run_connection(
                             &state,
                             agent_type,
                             &perms,
-                            &mut cmd_rx,
+                            &mut *cmd_rx,
                             terminal_runtime.clone(),
                             &cwd,
                             &cwd_string,
@@ -7500,7 +7713,7 @@ async fn run_connection(
                     &state,
                     agent_type,
                     &perms,
-                    &mut cmd_rx,
+                    &mut *cmd_rx,
                     terminal_runtime.clone(),
                     &cwd_string,
                     supports_fork,
@@ -7518,7 +7731,7 @@ async fn run_connection(
                     &state,
                     agent_type,
                     &perms,
-                    &mut cmd_rx,
+                    &mut *cmd_rx,
                     terminal_runtime.clone(),
                     &cwd,
                     &cwd_string,
@@ -10841,6 +11054,47 @@ fn finish_turn_reason<'a>(
     ("empty", Some(EmptyTurnReport { cause, details }))
 }
 
+/// Claude's AIR record for a turn that needs a sign-in (`auth_required`): the
+/// one whose recovery action is to log in.
+fn is_auth_failure_record(record: &SessionFailureRecord) -> bool {
+    record.actions.iter().any(|action| action == "login")
+}
+
+/// Publish the sign-in failure records a turn held back (see
+/// `CodeBuddyLiveState::held_auth_failures`) and stop holding.
+async fn flush_held_auth_failures(
+    state: &Arc<RwLock<SessionState>>,
+    emitter: &EventEmitter,
+    cb_state: &mut CodeBuddyLiveState,
+) {
+    for record in cb_state.held_auth_failures.take().unwrap_or_default() {
+        emit_with_state(state, emitter, AcpEvent::SessionFailure { record }).await;
+    }
+}
+
+/// Whether a Claude Code prompt refused with `authRequired` should be sent
+/// again on a fresh agent process: only when a NEW CLI process, run with
+/// this connection's environment, reports a valid sign-in. See
+/// [`crate::acp::claude_auth`].
+async fn claude_auth_wants_respawn(state: &Arc<RwLock<SessionState>>, agent_type: AgentType) -> bool {
+    use crate::acp::claude_auth::{self, AuthRetry};
+    let cli = state.read().await.claude_cli.clone();
+    let status = match cli.as_deref() {
+        Some(cli) => claude_auth::read_status(cli)
+            .await
+            .map(|status| status.logged_in)
+            .map_err(|e| tracing::warn!("[claude-auth] could not read the CLI's sign-in status: {e}")),
+        None => Err(()),
+    };
+    match claude_auth::decide_auth_retry(agent_type, false, cli.is_some(), || status) {
+        AuthRetry::Respawn => true,
+        AuthRetry::Surface(reason) => {
+            tracing::info!("[claude-auth] not retrying the refused prompt ({reason:?})");
+            false
+        }
+    }
+}
+
 /// Build an `AcpEvent::Error` for a non-success stop reason so the user gets a
 /// toast instead of a silent transition to `PendingReview`. Returns `None` for
 /// `end_turn` (success) and `cancelled` (already user-driven).
@@ -10981,9 +11235,21 @@ async fn run_conversation_loop(
     // The last attach timing line: when the agent's first `session/update`
     // (usually its slash-command list) arrived after the session opened.
     let mut first_update_logged = false;
+    // The prompt a process restarted for a Claude Code auth retry owes its
+    // first turn (see `claude_auth`). Sent before anything queued meanwhile,
+    // without a second `UserMessage`: the user's turn was announced once.
+    let mut auth_retry_prompt = state.write().await.claude_auth_retry_prompt.take();
+    let mut next_prompt_is_auth_retry = false;
     loop {
         // Wait for either a user command or a session update (e.g. available_commands_update)
         let cmd = loop {
+            if let Some(blocks) = auth_retry_prompt.take() {
+                next_prompt_is_auth_retry = true;
+                break Some(ConnectionCommand::Prompt {
+                    blocks,
+                    user_message: None,
+                });
+            }
             tokio::select! {
                 biased;
                 cmd = cmd_rx.recv() => break cmd,
@@ -11081,6 +11347,19 @@ async fn run_conversation_loop(
                 // consumed: the transcript record this prompt becomes must
                 // classify as wire-rendered foreground, not overlay.
                 prompt_ledger.record_prompt_blocks(&blocks);
+                // A Claude Code prompt refused for a stale sign-in gets one
+                // more try on a fresh process (see `claude_auth`), so keep
+                // what it said until the turn is over. The retry itself is
+                // never retried.
+                let is_auth_retry = std::mem::take(&mut next_prompt_is_auth_retry);
+                if is_auth_retry {
+                    state.write().await.claude_auth_respawning = false;
+                }
+                let mut auth_retry_blocks = (agent_type == AgentType::ClaudeCode
+                    && !is_auth_retry
+                    && state.read().await.claude_cli.is_some())
+                .then(|| blocks.clone());
+                cb_state.held_auth_failures = auth_retry_blocks.as_ref().map(|_| Vec::new());
                 // Establishment is over the moment the user speaks: from here a
                 // config push is attributable to the prompt (`/model` typed in
                 // chat is one), so codeg stops arbitrating and the agent owns
@@ -11456,12 +11735,41 @@ async fn run_conversation_loop(
                             // part ("The command \"/mcp\" is not supported in
                             // this mode.") and codeg has no vocabulary for them.
                             let response = match prompt_result {
-                                Ok(response) => response,
+                                Ok(response) => {
+                                    flush_held_auth_failures(state, emitter, &mut cb_state).await;
+                                    response
+                                }
                                 Err(e) if !prompt_rejection_is_terminal(&e) => {
                                     let auth_required = matches!(
                                         e.code,
                                         agent_client_protocol::schema::v1::ErrorCode::AuthRequired
                                     );
+                                    if auth_required {
+                                        if let Some(blocks) = auth_retry_blocks.take() {
+                                            if claude_auth_wants_respawn(state, agent_type).await {
+                                                tracing::info!(
+                                                    "[ACP] Claude Code refused the prompt as signed out, but a new CLI \
+                                                     process is signed in: restarting the agent and sending the prompt \
+                                                     once more"
+                                                );
+                                                {
+                                                    let mut s = state.write().await;
+                                                    s.claude_auth_respawn = Some(blocks);
+                                                    s.claude_auth_respawning = true;
+                                                }
+                                                // The failure was this process's, not the account's.
+                                                cb_state.held_auth_failures = None;
+                                                // No `TurnComplete`: the turn goes on in the next
+                                                // process, which the connection driver starts.
+                                                return Ok(None);
+                                            }
+                                        } else if is_auth_retry {
+                                            tracing::info!(
+                                                "[ACP] Claude Code refused the retried prompt too; asking the user to sign in"
+                                            );
+                                        }
+                                    }
+                                    flush_held_auth_failures(state, emitter, &mut cb_state).await;
                                     // Synthesized like `empty`: no `StopReason`
                                     // ever arrives for a rejected prompt, so the
                                     // turn needs a reason of its own.
@@ -11901,6 +12209,7 @@ async fn run_conversation_loop(
                                     );
                                 }
                                 Some(ConnectionCommand::Cancel) => {
+                                    flush_held_auth_failures(state, emitter, &mut cb_state).await;
                                     // Send CancelNotification to agent to stop the current turn
                                     let _ = cx.send_notification_to(
                                         Agent,
@@ -14657,6 +14966,12 @@ struct CodeBuddyLiveState {
     /// turn start — a shell call whose turn was canceled never sees a final
     /// status, and its lifecycle cannot span turns anyway.
     hosted_terminal_calls: HashMap<String, bool>,
+    /// Claude's AIR "sign in" failure records, held back for the turn when
+    /// a refused prompt may still be retried on a fresh process (see
+    /// `claude_auth`). `Some` while holding. A retry drops them — the
+    /// failure was the stale process's, not the account's; any other ending
+    /// publishes them as they would have been.
+    held_auth_failures: Option<Vec<SessionFailureRecord>>,
 }
 
 /// One announced-but-unpaired Grok `spawn_subagent` call. `description` /
@@ -16986,10 +17301,13 @@ async fn emit_conversation_update(
             // A record without usable identity cannot merge and is dropped.
             if let Some(raw) = air_session_failure(info.meta.as_ref()) {
                 match parse_session_failure_record(raw) {
-                    Some(record) => {
-                        emit_with_state(state, emitter, AcpEvent::SessionFailure { record })
-                            .await;
-                    }
+                    Some(record) => match cb_state.held_auth_failures.as_mut() {
+                        Some(held) if is_auth_failure_record(&record) => held.push(record),
+                        _ => {
+                            emit_with_state(state, emitter, AcpEvent::SessionFailure { record })
+                                .await;
+                        }
+                    },
                     None => tracing::debug!(
                         "[ACP] dropped AIR sessionFailure without usable id/revision: {raw:?}"
                     ),
@@ -28870,5 +29188,104 @@ mod tests {
         let on: SessionConfigOption = serde_json::from_value(on_json).expect("parses");
         assert!(config_option_already_holds(&on, "true"));
         assert!(!config_option_already_holds(&on, "false"));
+    }
+}
+
+#[cfg(test)]
+mod claude_auth_retry_tests {
+    use super::*;
+
+    fn claude_state() -> Arc<RwLock<SessionState>> {
+        Arc::new(RwLock::new(SessionState::new(
+            "conn-1".to_string(),
+            AgentType::ClaudeCode,
+            None,
+            "main".to_string(),
+            None,
+        )))
+    }
+
+    fn record(actions: &[&str]) -> SessionFailureRecord {
+        SessionFailureRecord {
+            id: "f1".to_string(),
+            revision: 1,
+            category: "access".to_string(),
+            severity: "error".to_string(),
+            title: "Sign in to continue using Claude.".to_string(),
+            details: None,
+            actions: actions.iter().map(|a| a.to_string()).collect(),
+            resolved: false,
+        }
+    }
+
+    #[test]
+    fn only_sign_in_records_are_held_back() {
+        assert!(is_auth_failure_record(&record(&["login"])));
+        assert!(!is_auth_failure_record(&record(&["retry"])));
+        assert!(!is_auth_failure_record(&record(&[])));
+    }
+
+    #[tokio::test]
+    async fn held_records_are_published_once_on_flush() {
+        let state = claude_state();
+        let mut cb = CodeBuddyLiveState {
+            held_auth_failures: Some(vec![record(&["login"])]),
+            ..CodeBuddyLiveState::default()
+        };
+        flush_held_auth_failures(&state, &EventEmitter::Noop, &mut cb).await;
+        assert!(cb.held_auth_failures.is_none(), "flushing stops the holding");
+        assert_eq!(state.read().await.session_failures.len(), 1);
+        // Nothing left to publish a second time.
+        flush_held_auth_failures(&state, &EventEmitter::Noop, &mut cb).await;
+        assert_eq!(state.read().await.session_failures.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_restart_needs_the_connection_and_a_session() {
+        let state = claude_state();
+        let connections: Arc<tokio::sync::Mutex<HashMap<String, AgentConnection>>> =
+            Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+        // Nothing asked for: nothing to restart.
+        assert!(prepare_auth_restart(&state, &connections, "conn-1")
+            .await
+            .is_none());
+
+        // Asked for, but the connection has left the manager's map (closed
+        // while the prompt was being refused): no restart, and the request
+        // is consumed so it can never fire later.
+        state.write().await.claude_auth_respawn = Some(vec![PromptInputBlock::Text {
+            text: "hello".to_string(),
+        }]);
+        assert!(prepare_auth_restart(&state, &connections, "conn-1")
+            .await
+            .is_none());
+        assert!(state.read().await.claude_auth_respawn.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_retry_that_never_ran_still_ends_its_turn() {
+        let state = claude_state();
+        {
+            let mut s = state.write().await;
+            s.turn_in_flight = true;
+            s.external_id = Some("sess-1".to_string());
+            s.claude_auth_respawning = true;
+            s.claude_auth_retry_prompt = Some(vec![PromptInputBlock::Text {
+                text: "hello".to_string(),
+            }]);
+        }
+        end_stranded_auth_retry(&state, &EventEmitter::Noop, AgentType::ClaudeCode).await;
+        let s = state.read().await;
+        assert!(!s.turn_in_flight, "the turn is over");
+        assert!(!s.claude_auth_respawning);
+        assert!(s.claude_auth_retry_prompt.is_none());
+    }
+
+    #[tokio::test]
+    async fn no_pending_retry_leaves_the_turn_alone() {
+        let state = claude_state();
+        state.write().await.turn_in_flight = true;
+        end_stranded_auth_retry(&state, &EventEmitter::Noop, AgentType::ClaudeCode).await;
+        assert!(state.read().await.turn_in_flight);
     }
 }

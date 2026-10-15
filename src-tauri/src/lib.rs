@@ -53,6 +53,7 @@ pub mod pets;
 pub mod preferences;
 pub mod presence;
 pub mod process;
+pub mod pty_flow;
 pub mod push;
 pub mod supervise;
 mod terminal;
@@ -2198,6 +2199,21 @@ mod tauri_app {
                 token_usage_commands::token_usage_status,
                 token_usage_commands::token_usage_sync,
                 plan_usage_commands::get_plan_usage,
+                crate::commands::usage_pool::manage::usage_pool_manage_info,
+                crate::commands::usage_pool::manage::usage_pool_login_start,
+                crate::commands::usage_pool::manage::usage_pool_login_finish,
+                crate::commands::usage_pool::manage::usage_pool_login_state,
+                crate::commands::usage_pool::manage::usage_pool_login_cancel,
+                crate::commands::usage_pool::manage::usage_pool_rename,
+                crate::commands::usage_pool::manage::usage_pool_set_enabled,
+                crate::commands::usage_pool::manage::usage_pool_remove,
+                crate::commands::usage_pool::manage::usage_pool_restart_now,
+                crate::commands::claude_auth::claude_auth_status,
+                crate::commands::claude_auth::claude_auth_login_start,
+                crate::commands::claude_auth::claude_auth_login_finish,
+                crate::commands::claude_auth::claude_auth_login_state,
+                crate::commands::claude_auth::claude_auth_login_cancel,
+                crate::commands::claude_auth::claude_auth_logout,
                 work_task_commands::work_task_list,
                 work_task_commands::work_task_get,
                 work_task_commands::work_task_events,

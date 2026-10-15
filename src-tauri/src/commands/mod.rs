@@ -20,6 +20,7 @@ pub mod browser_tools;
 pub mod canvas;
 pub mod chat_authoring;
 pub mod chat_channel;
+pub mod claude_auth;
 /// Files-onto-the-OS-clipboard. Only the command itself is desktop-gated; the
 /// path validation and URI encoding stay compiled in every mode so their tests
 /// run without the tauri stack.
