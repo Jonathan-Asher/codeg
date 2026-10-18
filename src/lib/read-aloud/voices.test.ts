@@ -4,7 +4,9 @@ import {
   langForText,
   normalizeLang,
   pickVoice,
+  voicesByTier,
   voicesFor,
+  voiceTier,
   type VoiceLike,
 } from "./voices"
 
@@ -143,6 +145,157 @@ describe("pickVoice for English", () => {
     expect(names.slice(-3)).toEqual(
       expect.arrayContaining(["Albert", "Bad News", "Eddy (English (US))"])
     )
+  })
+})
+
+// What WebKit reports on a Mac: `voiceURI` is the AVSpeechSynthesisVoice
+// identifier, which carries the voice's size, and every voice is `default`.
+function webkitVoice(id: string, name: string, lang: string): VoiceLike {
+  return { name, lang, voiceURI: id, default: true, localService: true }
+}
+
+const COMPACT_SAMANTHA = webkitVoice(
+  "com.apple.voice.compact.en-US.Samantha",
+  "Samantha",
+  "en-US"
+)
+const COMPACT_CARMIT = webkitVoice(
+  "com.apple.voice.compact.he-IL.Carmit",
+  "Carmit",
+  "he-IL"
+)
+
+describe("voiceTier", () => {
+  it("reads the tier from the identifier WebKit exposes", () => {
+    expect(
+      voiceTier(
+        webkitVoice("com.apple.voice.premium.en-US.Ava", "Ava", "en-US")
+      )
+    ).toBe("premium")
+    expect(
+      voiceTier(
+        webkitVoice("com.apple.voice.enhanced.he-IL.Carmit", "Carmit", "he-IL")
+      )
+    ).toBe("enhanced")
+    expect(voiceTier(COMPACT_SAMANTHA)).toBe("basic")
+    expect(
+      voiceTier(
+        webkitVoice(
+          "com.apple.voice.super-compact.en-AU.Karen",
+          "Karen",
+          "en-AU"
+        )
+      )
+    ).toBe("basic")
+  })
+
+  it("reads the tier from the name where the identifier is the name", () => {
+    expect(voiceTier(voice("Ava (Premium)", "en-US"))).toBe("premium")
+    expect(voiceTier(voice("Zoe (Enhanced)", "en-US"))).toBe("enhanced")
+    expect(
+      voiceTier(voice("Microsoft Aria Online (Natural) - English", "en-US"))
+    ).toBe("natural")
+    expect(voiceTier(voice("Samantha", "en-US"))).toBe("basic")
+  })
+})
+
+describe("voice quality outranks the default", () => {
+  it("takes a downloaded Premium voice over the compact system default (WebKit)", () => {
+    // The system voice is the compact Samantha, listed first.
+    const voices = [
+      COMPACT_SAMANTHA,
+      webkitVoice("com.apple.voice.compact.en-GB.Daniel", "Daniel", "en-GB"),
+      webkitVoice("com.apple.voice.premium.en-US.Ava", "Ava", "en-US"),
+      COMPACT_CARMIT,
+    ]
+    expect(pickVoice(voices, "en")?.voiceURI).toBe(
+      "com.apple.voice.premium.en-US.Ava"
+    )
+  })
+
+  it("takes a Premium or Enhanced voice over the flagged default (Chrome)", () => {
+    const voices = [
+      voice("Samantha", "en-US", { default: true }),
+      voice("Zoe (Enhanced)", "en-US"),
+    ]
+    expect(pickVoice(voices, "en")?.name).toBe("Zoe (Enhanced)")
+    expect(
+      pickVoice([...voices, voice("Ava (Premium)", "en-GB")], "en")?.name
+    ).toBe("Ava (Premium)")
+  })
+
+  it("still prefers the default among voices of one tier", () => {
+    const voices = [
+      voice("Ava (Premium)", "en-US"),
+      voice("Zoe (Premium)", "en-US", { default: true }),
+    ]
+    expect(pickVoice(voices, "en")?.name).toBe("Zoe (Premium)")
+  })
+
+  it("always honours the voice picked in Settings", () => {
+    const voices = [
+      COMPACT_SAMANTHA,
+      webkitVoice("com.apple.voice.premium.en-US.Ava", "Ava", "en-US"),
+    ]
+    expect(pickVoice(voices, "en", COMPACT_SAMANTHA.voiceURI)).toBe(
+      COMPACT_SAMANTHA
+    )
+  })
+
+  it("takes Carmit (Enhanced) over the compact Carmit, by identifier", () => {
+    const enhanced = webkitVoice(
+      "com.apple.voice.enhanced.he-IL.Carmit",
+      "Carmit",
+      "he-IL"
+    )
+    expect(pickVoice([COMPACT_CARMIT, enhanced], "he")).toBe(enhanced)
+  })
+
+  it("keeps Carmit ahead of other Hebrew voices of a better tier", () => {
+    const voices = [voice("Hebrew (Premium)", "he-IL"), COMPACT_CARMIT]
+    expect(pickVoice(voices, "he")).toBe(COMPACT_CARMIT)
+  })
+
+  it("never picks a novelty voice, even under a translated name", () => {
+    const voices = [
+      // Eloquence's Eddy, and the Effects voice Whisper, as a German Mac
+      // might name them, listed first.
+      webkitVoice("com.apple.eloquence.en-US.Eddy", "Eddy (Englisch)", "en-US"),
+      webkitVoice(
+        "com.apple.speech.synthesis.voice.Whisper",
+        "Flüstern",
+        "en-US"
+      ),
+      COMPACT_SAMANTHA,
+    ]
+    expect(pickVoice(voices, "en")).toBe(COMPACT_SAMANTHA)
+    expect(
+      voicesFor(voices, "en")
+        .slice(-2)
+        .map((v) => v.voiceURI)
+    ).toEqual([
+      "com.apple.eloquence.en-US.Eddy",
+      "com.apple.speech.synthesis.voice.Whisper",
+    ])
+  })
+})
+
+describe("voicesByTier", () => {
+  it("lists better tiers first, novelty voices last", () => {
+    const voices = [
+      voice("Albert", "en-US"),
+      COMPACT_SAMANTHA,
+      voice("Microsoft Aria Online (Natural)", "en-US"),
+      voice("Zoe (Enhanced)", "en-US"),
+      webkitVoice("com.apple.voice.premium.en-US.Ava", "Ava", "en-US"),
+    ]
+    expect(voicesByTier(voices, "en").map((v) => v.name)).toEqual([
+      "Ava",
+      "Zoe (Enhanced)",
+      "Microsoft Aria Online (Natural)",
+      "Samantha",
+      "Albert",
+    ])
   })
 })
 

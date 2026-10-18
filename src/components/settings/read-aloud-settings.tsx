@@ -3,7 +3,9 @@
 /**
  * Read-aloud settings: which installed system voice reads Hebrew and which
  * reads English, how fast, a sample to hear the choice, and whether a reply is
- * read on its own when it finishes.
+ * read on its own when it finishes. Each voice is listed with its tier
+ * (Premium, Enhanced, Natural, Basic), better tiers first, and on a Mac a
+ * language read by a basic voice says where to download a better one.
  *
  * Every value lives in this device's localStorage (`read-aloud/prefs.ts`) and
  * is written as it changes, like the notification-sound section next door:
@@ -50,10 +52,33 @@ import {
   useReadAloudSupported,
   useReadAloudVoices,
 } from "@/lib/read-aloud/use-read-aloud"
-import { pickVoice, voicesFor, type VoiceLike } from "@/lib/read-aloud/voices"
+import {
+  pickVoice,
+  voicesByTier,
+  voiceTier,
+  type VoiceLike,
+  type VoiceTier,
+} from "@/lib/read-aloud/voices"
 
 /** The Select value standing for "no pinned voice". */
 const AUTOMATIC = "__automatic__"
+
+/** The message key naming each voice tier. */
+const TIER_LABEL = {
+  premium: "tierPremium",
+  enhanced: "tierEnhanced",
+  natural: "tierNatural",
+  basic: "tierBasic",
+} as const satisfies Record<VoiceTier, string>
+
+/**
+ * The voice the better-voice hint names for each language: what macOS offers
+ * in that language, at the tier worth downloading.
+ */
+const BETTER_VOICE = {
+  he: { voice: "Carmit", tier: "enhanced" },
+  en: { voice: "Ava", tier: "premium" },
+} as const satisfies Record<"he" | "en", { voice: string; tier: VoiceTier }>
 
 /** The read-aloud id of the Test sample. */
 export const READ_ALOUD_TEST_ID = "settings-test"
@@ -65,8 +90,13 @@ export const READ_ALOUD_TEST_ID = "settings-test"
 export const READ_ALOUD_SAMPLE =
   "שלום! כך נשמע הקול העברי. And this is the English voice, at the speed you chose."
 
+/** "Ava (Premium)" → "Ava": the tier is shown on its own beside the name. */
+function voiceName(voice: VoiceLike): string {
+  return voice.name.replace(/\s*\((premium|enhanced)\)\s*$/i, "")
+}
+
 function voiceLabel(voice: VoiceLike): string {
-  return `${voice.name} (${voice.lang.replace(/_/g, "-")})`
+  return `${voiceName(voice)} (${voice.lang.replace(/_/g, "-")})`
 }
 
 interface VoiceSelectProps {
@@ -112,12 +142,18 @@ function VoiceSelect({
       <SelectContent align="end">
         <SelectItem value={AUTOMATIC}>
           {automatic
-            ? t("automatic", { voice: automatic.name })
+            ? t("automatic", {
+                voice: `${voiceName(automatic)} · ${t(TIER_LABEL[voiceTier(automatic)])}`,
+              })
             : t("automaticNone")}
         </SelectItem>
         {voices.map((voice) => (
           <SelectItem key={voice.voiceURI} value={voice.voiceURI}>
             {voiceLabel(voice)}
+            <span className="text-muted-foreground">
+              {" · "}
+              {t(TIER_LABEL[voiceTier(voice)])}
+            </span>
           </SelectItem>
         ))}
       </SelectContent>
@@ -136,8 +172,19 @@ export function ReadAloudSettingsSection() {
   const isMac = useIsMac()
   const [expanded, setExpanded] = useState(false)
 
-  const hebrewVoices = voicesFor(allVoices, "he")
-  const englishVoices = voicesFor(allVoices, "en")
+  const hebrewVoices = voicesByTier(allVoices, "he")
+  const englishVoices = voicesByTier(allVoices, "en")
+  // Where the voice that reads a language is a compact or basic one, say how
+  // to get a better one. The steps are the Mac's, so only there.
+  const betterVoiceHint = (lang: "he" | "en", pinned: string | null) => {
+    const chosen = pickVoice(allVoices, lang, pinned)
+    if (!isMac || !chosen || voiceTier(chosen) !== "basic") return undefined
+    const example = BETTER_VOICE[lang]
+    return t("betterVoiceHint", {
+      voice: example.voice,
+      tier: t(TIER_LABEL[example.tier]),
+    })
+  }
   const testing =
     state.currentId === READ_ALOUD_TEST_ID && state.status !== "idle"
   const save = (patch: Partial<ReadAloudPrefs>) =>
@@ -175,7 +222,7 @@ export function ReadAloudSettingsSection() {
             description={
               allVoices.length > 0 && hebrewVoices.length === 0
                 ? t("noHebrewVoice")
-                : undefined
+                : betterVoiceHint("he", prefs.hebrewVoice)
             }
             htmlFor="read-aloud-hebrew-voice"
             control={
@@ -193,6 +240,7 @@ export function ReadAloudSettingsSection() {
           <SettingRow
             icon={Languages}
             title={t("englishVoice")}
+            description={betterVoiceHint("en", prefs.englishVoice)}
             htmlFor="read-aloud-english-voice"
             control={
               <VoiceSelect
