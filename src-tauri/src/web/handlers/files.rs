@@ -219,7 +219,129 @@ pub async fn create_file_tree_entry(
 ///
 /// Mirrored by `UPLOAD_MAX_BYTES` in `commands/remote_proxy.rs` and
 /// `src/lib/api.ts` — keep the three in lockstep.
+///
+/// Video and audio files take [`UploadLimits::media_bytes`] instead: they are
+/// only ever linked by path, never read back into a prompt.
 pub const UPLOAD_MAX_BYTES: u64 = 20 * 1024 * 1024;
+
+/// Default per-file cap for a video or audio attachment, overridable with
+/// `CODEG_UPLOAD_MAX_MEDIA_BYTES`.
+pub const UPLOAD_MAX_MEDIA_BYTES_DEFAULT: u64 = 1024 * 1024 * 1024;
+
+/// Env override for the video/audio cap: a plain decimal byte count. `0`
+/// gives media no larger cap than every other file (`UPLOAD_MAX_BYTES`).
+const UPLOAD_MEDIA_BYTES_ENV: &str = "CODEG_UPLOAD_MAX_MEDIA_BYTES";
+
+/// Multipart framing allowance on top of the largest file a request may
+/// carry: boundary lines, part headers and the `session_id` field.
+pub const UPLOAD_MULTIPART_OVERHEAD_BYTES: u64 = 64 * 1024;
+
+/// Outcome of parsing `CODEG_UPLOAD_MAX_MEDIA_BYTES`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum MediaLimitConfig {
+    /// Unset or blank: [`UPLOAD_MAX_MEDIA_BYTES_DEFAULT`].
+    Default,
+    /// `0`: media gets the ordinary per-file cap.
+    SameAsFiles,
+    Bytes(u64),
+    /// Not a non-negative integer; the default applies and startup warns.
+    Invalid(String),
+}
+
+fn parse_media_limit_config(raw: Option<&str>) -> MediaLimitConfig {
+    let Some(s) = raw else {
+        return MediaLimitConfig::Default;
+    };
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return MediaLimitConfig::Default;
+    }
+    match trimmed.parse::<u64>() {
+        Ok(0) => MediaLimitConfig::SameAsFiles,
+        Ok(n) => MediaLimitConfig::Bytes(n),
+        Err(_) => MediaLimitConfig::Invalid(trimmed.to_string()),
+    }
+}
+
+/// Per-file size caps for `upload_attachment` and the resumable upload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UploadLimits {
+    /// Images, documents and everything else: the bytes may be re-inlined
+    /// into a prompt (`acp::prompt_hydration`).
+    pub file_bytes: u64,
+    /// `video/*` and `audio/*`: linked by path only.
+    pub media_bytes: u64,
+}
+
+impl UploadLimits {
+    fn from_media_config(config: &MediaLimitConfig) -> Self {
+        let media_bytes = match config {
+            MediaLimitConfig::Default | MediaLimitConfig::Invalid(_) => {
+                UPLOAD_MAX_MEDIA_BYTES_DEFAULT
+            }
+            MediaLimitConfig::SameAsFiles => UPLOAD_MAX_BYTES,
+            MediaLimitConfig::Bytes(n) => *n,
+        };
+        Self {
+            file_bytes: UPLOAD_MAX_BYTES,
+            media_bytes,
+        }
+    }
+
+    /// The cap for one file, given the part's declared content type and its
+    /// file name.
+    pub fn limit_for(&self, content_type: Option<&str>, file_name: Option<&str>) -> u64 {
+        if is_linked_media(content_type, file_name) {
+            self.media_bytes
+        } else {
+            self.file_bytes
+        }
+    }
+
+    /// The most any single file may be, whatever its type.
+    pub fn largest(&self) -> u64 {
+        self.file_bytes.max(self.media_bytes)
+    }
+
+    /// Body limit for the multipart route: the largest file plus framing.
+    pub fn multipart_body_limit(&self) -> usize {
+        usize::try_from(
+            self.largest()
+                .saturating_add(UPLOAD_MULTIPART_OVERHEAD_BYTES),
+        )
+        .unwrap_or(usize::MAX)
+    }
+}
+
+/// A video or audio file: by declared type (`video/*`, `audio/*`) or, when the
+/// client sent none or a generic one, by a known media extension.
+pub fn is_linked_media(content_type: Option<&str>, file_name: Option<&str>) -> bool {
+    if let Some(ct) = content_type {
+        let essence = ct
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        if essence.starts_with("video/") || essence.starts_with("audio/") {
+            return true;
+        }
+    }
+    file_name
+        .map(|name| crate::workspace_media::media_content_type(name).is_some())
+        .unwrap_or(false)
+}
+
+fn media_limit_config_from_env() -> MediaLimitConfig {
+    parse_media_limit_config(std::env::var(UPLOAD_MEDIA_BYTES_ENV).ok().as_deref())
+}
+
+/// The process's upload caps, read from the environment once so the route's
+/// body limit and the handler's checks always agree.
+pub fn upload_limits() -> UploadLimits {
+    static LIMITS: std::sync::OnceLock<UploadLimits> = std::sync::OnceLock::new();
+    *LIMITS.get_or_init(|| UploadLimits::from_media_config(&media_limit_config_from_env()))
+}
 
 /// Env-controlled cap on the *total* bytes resident under
 /// `uploads_root/`. Per-file `UPLOAD_MAX_BYTES` bounds one payload; this
@@ -228,15 +350,15 @@ pub const UPLOAD_MAX_BYTES: u64 = 20 * 1024 * 1024;
 /// or `0` disables the cap — preserves the original "no GC" behavior
 /// for operators who want it.
 ///
-/// The check is intentionally conservative: it fires before any bytes
-/// are streamed to disk, assuming the worst-case `UPLOAD_MAX_BYTES`.
-/// That over-rejects in the last `UPLOAD_MAX_BYTES` of headroom (e.g. a
-/// 100 KB upload may get rejected when only 1 MB remains under the
-/// cap), but it keeps the code free of mid-stream cleanup races. With
-/// the in-flight reservation (see `UPLOAD_IN_FLIGHT_BYTES` below) this
-/// is effectively a hard ceiling: concurrent admits cannot accumulate
-/// past `cap` because each one decrements the in-flight headroom seen
-/// by the next.
+/// The check fires before any bytes are streamed to disk, against the
+/// request's `Content-Length` (see `upload_reservation_bytes`); a chunked
+/// upload without one grows its reservation as it streams and is cut off,
+/// its partial file removed, once the next bytes no longer fit. A
+/// resumable upload reserves its declared size at create. With the
+/// in-flight reservation (see `UPLOAD_IN_FLIGHT_BYTES` below) this is
+/// effectively a hard ceiling: concurrent admits cannot accumulate past
+/// `cap` because each one decrements the in-flight headroom seen by the
+/// next.
 const UPLOAD_TOTAL_BYTES_ENV: &str = "CODEG_UPLOAD_MAX_TOTAL_BYTES";
 
 /// Opt-in fail-closed mode for the quota config. When truthy and
@@ -355,6 +477,19 @@ impl std::error::Error for UploadQuotaStrictError {}
 /// directory and listener are resolved. Cheap: two env reads + one
 /// `eprintln!`.
 pub fn log_upload_quota_config_at_startup() {
+    let media_config = media_limit_config_from_env();
+    let limits = upload_limits();
+    if let MediaLimitConfig::Invalid(raw) = &media_config {
+        tracing::warn!(
+            "[uploads][WARN] {UPLOAD_MEDIA_BYTES_ENV}={raw:?} is not a byte count; \
+             video/audio cap stays at the default {UPLOAD_MAX_MEDIA_BYTES_DEFAULT} bytes"
+        );
+    }
+    tracing::info!(
+        "[uploads] per-file cap: {} bytes; video/audio: {} bytes ({UPLOAD_MEDIA_BYTES_ENV})",
+        limits.file_bytes,
+        limits.media_bytes
+    );
     let config = upload_quota_config_from_env();
     let strict = upload_quota_strict_from_env();
     match &config {
@@ -415,11 +550,10 @@ pub fn validate_upload_quota_config() -> Result<(), UploadQuotaStrictError> {
 /// closes the TOCTOU race where two concurrent uploads both saw the
 /// same disk-level free space and admitted past the cap.
 ///
-/// Reservation strategy: each upload reserves the worst case
-/// (`UPLOAD_MAX_BYTES`) up front and releases it on guard drop.
-/// Over-reservation is acceptable — the operator-facing budget is the
-/// disk, not the counter — and a uniform reservation size keeps the
-/// CAS loop and the cleanup path symmetric.
+/// Reservation strategy: each upload reserves an upper bound on its size
+/// up front (its `Content-Length`, or a resumable upload's declared size)
+/// and releases it on guard drop. Over-reservation is acceptable — the
+/// operator-facing budget is the disk, not the counter.
 ///
 /// **Scope:** this counter is process-local. Multiple `codeg-server`
 /// processes sharing the same `uploads_root` (horizontally-scaled
@@ -440,12 +574,41 @@ struct InFlightGuard<'a> {
     bytes: u64,
 }
 
+impl InFlightGuard<'_> {
+    /// Reserve `extra` more bytes under the same rule as
+    /// `try_reserve_in_flight`; on `Err` the reservation is unchanged.
+    fn try_grow(&mut self, extra: u64, used: u64, cap: u64) -> Result<(), ()> {
+        cas_reserve(self.counter, extra, used, cap)?;
+        self.bytes += extra;
+        Ok(())
+    }
+}
+
 impl Drop for InFlightGuard<'_> {
     fn drop(&mut self) {
         // `AcqRel` here pairs with the `Acquire` load and `AcqRel` CAS
         // in `try_reserve_in_flight` so the next reservation sees the
         // post-decrement value.
         self.counter.fetch_sub(self.bytes, Ordering::AcqRel);
+    }
+}
+
+fn cas_reserve(counter: &AtomicU64, bytes: u64, used: u64, cap: u64) -> Result<(), ()> {
+    let mut current = counter.load(Ordering::Acquire);
+    loop {
+        let projected = used.saturating_add(current).saturating_add(bytes);
+        if projected > cap {
+            return Err(());
+        }
+        match counter.compare_exchange_weak(
+            current,
+            current + bytes,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => return Ok(()),
+            Err(observed) => current = observed,
+        }
     }
 }
 
@@ -462,20 +625,91 @@ fn try_reserve_in_flight<'a>(
     used: u64,
     cap: u64,
 ) -> Result<InFlightGuard<'a>, ()> {
-    let mut current = counter.load(Ordering::Acquire);
-    loop {
-        let projected = used.saturating_add(current).saturating_add(bytes);
-        if projected > cap {
-            return Err(());
+    cas_reserve(counter, bytes, used, cap)?;
+    Ok(InFlightGuard { counter, bytes })
+}
+
+/// Bytes a chunked (no `Content-Length`) upload adds to its reservation at a
+/// time as it streams.
+const UPLOAD_QUOTA_GROW_STEP: u64 = 8 * 1024 * 1024;
+
+/// One upload's share of the total-size quota.
+pub(super) struct QuotaReservation {
+    guard: InFlightGuard<'static>,
+    used: u64,
+    cap: u64,
+}
+
+impl QuotaReservation {
+    /// Make sure at least `total` bytes are reserved, growing by
+    /// `UPLOAD_QUOTA_GROW_STEP` (or the exact remainder when a full step no
+    /// longer fits). Fails with the quota error once the cap is reached.
+    fn cover(&mut self, total: u64) -> Result<(), AppCommandError> {
+        let have = self.guard.bytes;
+        if total <= have {
+            return Ok(());
         }
-        match counter.compare_exchange_weak(
-            current,
-            current + bytes,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
-            Ok(_) => return Ok(InFlightGuard { counter, bytes }),
-            Err(observed) => current = observed,
+        let needed = total - have;
+        self.guard
+            .try_grow(needed.max(UPLOAD_QUOTA_GROW_STEP), self.used, self.cap)
+            .or_else(|()| self.guard.try_grow(needed, self.used, self.cap))
+            .map_err(|()| quota_exceeded_error(self.used, self.cap))
+    }
+}
+
+fn quota_exceeded_error(used: u64, cap: u64) -> AppCommandError {
+    let mut params = BTreeMap::new();
+    params.insert("used".to_string(), used.to_string());
+    params.insert("limit".to_string(), cap.to_string());
+    AppCommandError::io_error("Upload quota exceeded for this server")
+        .with_detail(format!("used={used} limit={cap}"))
+        .with_i18n(UPLOAD_I18N_KEY_QUOTA_EXCEEDED, params)
+}
+
+pub(super) fn too_large_error(size: u64, limit: u64) -> AppCommandError {
+    // Symmetric with the proxy's pre/post-decode caps in
+    // `commands/remote_proxy.rs`: any layer can fire first depending on how
+    // the request reached us, and they all surface as the same i18n key so
+    // the toast text in the UI is uniform.
+    let mut params = BTreeMap::new();
+    params.insert("size".to_string(), size.to_string());
+    params.insert("limit".to_string(), limit.to_string());
+    AppCommandError::io_error("Upload exceeds the maximum allowed size")
+        .with_detail(format!("size={size} limit={limit}"))
+        .with_i18n(UPLOAD_I18N_KEY_TOO_LARGE, params)
+}
+
+/// What an upload needs from its surroundings. Tests point it at a temporary
+/// root, a private in-flight counter and fixed limits.
+pub(super) struct UploadEnv {
+    pub uploads_root: std::path::PathBuf,
+    pub limits: UploadLimits,
+    pub quota_cap: Option<u64>,
+    pub in_flight: &'static AtomicU64,
+}
+
+impl UploadEnv {
+    pub(super) fn live() -> Self {
+        Self {
+            uploads_root: codeg_uploads_root(),
+            limits: upload_limits(),
+            quota_cap: upload_quota_config_from_env().cap_bytes(),
+            in_flight: &UPLOAD_IN_FLIGHT_BYTES,
+        }
+    }
+
+    /// Admit `bytes` against the total quota, if one is configured.
+    pub(super) async fn reserve(
+        &self,
+        bytes: u64,
+    ) -> Result<Option<QuotaReservation>, AppCommandError> {
+        let Some(cap) = self.quota_cap else {
+            return Ok(None);
+        };
+        let used = current_uploads_total_bytes(&self.uploads_root).await;
+        match try_reserve_in_flight(self.in_flight, bytes, used, cap) {
+            Ok(guard) => Ok(Some(QuotaReservation { guard, used, cap })),
+            Err(()) => Err(quota_exceeded_error(used, cap)),
         }
     }
 }
@@ -684,7 +918,7 @@ async fn finalize_with_available_upload_name(
 /// distinct sessions whose ids degenerate to an empty string. Only allow
 /// `[A-Za-z0-9_-]`; everything else collapses to `_`. Empty input falls back
 /// to `"anon"`.
-fn sanitize_session_bucket(raw: &str) -> String {
+pub(super) fn sanitize_session_bucket(raw: &str) -> String {
     let cleaned: String = raw
         .chars()
         .map(|c| match c {
@@ -734,6 +968,8 @@ async fn ensure_path_inside(
 /// expected case on a fresh install, and permission issues should not block
 /// the server from starting.
 pub async fn purge_upload_staging() {
+    // Resumable uploads stage there too; their files are about to go.
+    super::resumable_upload::clear_live();
     let tmp_dir = codeg_uploads_root().join(".tmp");
     match tokio::fs::remove_dir_all(&tmp_dir).await {
         Ok(_) => {}
@@ -748,83 +984,76 @@ pub async fn purge_upload_staging() {
     }
 }
 
-/// Bytes to reserve against the total-quota in-flight counter for one upload.
+/// Bytes to reserve up front against the total quota for one multipart
+/// upload.
 ///
 /// The file's exact size isn't known until the multipart body is drained, but
 /// the request's `Content-Length` is a hard upper bound on it (the multipart
 /// framing only ever ADDS overhead, and hyper enforces the header as a body
-/// framing limit). Reserving `min(Content-Length, UPLOAD_MAX_BYTES)` is
-/// therefore always ≥ the bytes actually written — the streaming loop
-/// independently caps the file at `UPLOAD_MAX_BYTES` — so the quota stays a
-/// hard ceiling while a small upload only reserves its own size. This matters
-/// for operators with `CODEG_UPLOAD_MAX_TOTAL_BYTES` below `UPLOAD_MAX_BYTES`:
-/// a blanket worst-case reservation would reject every upload outright.
+/// framing limit). Reserving `min(Content-Length, largest)` is therefore
+/// always ≥ the bytes actually written — the streaming loop independently
+/// caps the file at its per-type limit — so the quota stays a hard ceiling
+/// while a small upload only reserves its own size.
 ///
-/// A missing/unparseable header (chunked transfer) falls back to the
-/// worst-case reservation, which over-rejects near the cap but never
-/// under-reserves.
-fn upload_reservation_bytes(content_length: Option<u64>) -> u64 {
-    content_length
-        .map(|cl| cl.min(UPLOAD_MAX_BYTES))
-        .unwrap_or(UPLOAD_MAX_BYTES)
+/// Without a `Content-Length` (chunked transfer) nothing is reserved up
+/// front: the streaming loop grows the reservation as bytes arrive
+/// (`QuotaReservation::cover`) and stops with the quota error once the next
+/// bytes no longer fit. A worst-case reservation would now be the video cap
+/// and reject every chunked upload in the last gigabyte of headroom.
+fn upload_reservation_bytes(content_length: Option<u64>, largest: u64) -> u64 {
+    content_length.map(|cl| cl.min(largest)).unwrap_or(0)
 }
 
-pub async fn upload_attachment(
-    headers: HeaderMap,
-    mut multipart: Multipart,
-) -> Result<Json<UploadAttachmentResult>, AppCommandError> {
-    let uploads_root = codeg_uploads_root();
-    // Ensure root exists before canonicalize/ensure_path_inside can compare.
-    tokio::fs::create_dir_all(&uploads_root)
-        .await
-        .map_err(|e| {
-            AppCommandError::io_error("Failed to create uploads root").with_detail(e.to_string())
-        })?;
+/// Removes a staged upload unless disarmed. Runs on an error return AND when
+/// the handler's future is dropped mid-stream: a client that disconnects
+/// makes hyper drop the request future, so cleanup written after an `.await`
+/// would never run and the partial file would sit in `.tmp/` until restart.
+struct StagingCleanup {
+    tmp_dir: std::path::PathBuf,
+    staging_name: String,
+    armed: bool,
+}
 
-    // Quota check, before staging any bytes. The reservation is bounded by
-    // the request's Content-Length (see `upload_reservation_bytes`) so a
-    // small upload fits a small quota; admitting a request we'd reject
-    // mid-stream would waste disk and require cleanup races.
-    //
-    // The reservation guard (`_quota_guard`) is bound to a name so its
-    // RAII drop runs at function exit, not immediately. Releasing it
-    // on every exit path (success, multipart error, panic) closes the
-    // TOCTOU window where two concurrent uploads both saw the same
-    // disk-level `used` and admitted past the cap.
-    let _quota_guard = if let Some(cap) = upload_quota_config_from_env().cap_bytes() {
-        let content_length = headers
-            .get(axum::http::header::CONTENT_LENGTH)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse::<u64>().ok());
-        let reserve = upload_reservation_bytes(content_length);
-        let used = current_uploads_total_bytes(&uploads_root).await;
-        match try_reserve_in_flight(&UPLOAD_IN_FLIGHT_BYTES, reserve, used, cap) {
-            Ok(guard) => Some(guard),
-            Err(()) => {
-                let mut params = BTreeMap::new();
-                params.insert("used".to_string(), used.to_string());
-                params.insert("limit".to_string(), cap.to_string());
-                return Err(
-                    AppCommandError::io_error("Upload quota exceeded for this server")
-                        .with_detail(format!("used={used} limit={cap}"))
-                        .with_i18n(UPLOAD_I18N_KEY_QUOTA_EXCEEDED, params),
-                );
-            }
+impl StagingCleanup {
+    fn new(tmp_dir: &std::path::Path, staging_name: &str) -> Self {
+        Self {
+            tmp_dir: tmp_dir.to_path_buf(),
+            staging_name: staging_name.to_string(),
+            armed: true,
         }
-    } else {
-        None
-    };
+    }
 
-    // Pre-stage the file under <uploads_root>/.tmp/<uuid>.part so we can
-    // stream bytes to disk without knowing the final bucket up front (the
-    // session_id form field may arrive after the file). On success we rename
-    // into place; on any error we delete it.
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for StagingCleanup {
+    fn drop(&mut self) {
+        if self.armed {
+            upload_jail::remove_staging_detached(
+                std::mem::take(&mut self.tmp_dir),
+                std::mem::take(&mut self.staging_name),
+            );
+        }
+    }
+}
+
+/// Create `<uploads_root>/.tmp/` and confirm it is a real directory inside
+/// the root. Returns its path.
+pub(super) async fn prepare_staging_dir(
+    uploads_root: &std::path::Path,
+) -> Result<std::path::PathBuf, AppCommandError> {
+    // Ensure root exists before canonicalize/ensure_path_inside can compare.
+    tokio::fs::create_dir_all(uploads_root).await.map_err(|e| {
+        AppCommandError::io_error("Failed to create uploads root").with_detail(e.to_string())
+    })?;
     let tmp_dir = uploads_root.join(".tmp");
     tokio::fs::create_dir_all(&tmp_dir).await.map_err(|e| {
         AppCommandError::io_error("Failed to create tmp directory").with_detail(e.to_string())
     })?;
     // Reject a symlinked `.tmp` for the same reason the bucket check
-    // below rejects a symlinked bucket: `create_dir_all` is a no-op when
+    // rejects a symlinked bucket: `create_dir_all` is a no-op when
     // the target of a symlink already exists, so a pre-placed symlink
     // would let staged bytes land outside the uploads root before the
     // rename even runs (and a failed-stream cleanup would `remove_file`
@@ -844,26 +1073,68 @@ pub async fn upload_attachment(
             );
         }
     }
-    ensure_path_inside(&tmp_dir, &uploads_root).await?;
-    let staging_id = uuid::Uuid::new_v4().simple().to_string();
-    let staging_name = format!("{staging_id}.part");
-
-    // Wrap the streaming work so any early return cleans up the staged file.
-    // Cleanup goes through `upload_jail::remove_staging_best_effort` so the
-    // unlink itself can't be redirected by a swap of `.tmp` between
-    // streaming and cleanup.
-    let result = stream_and_finalize(&mut multipart, &uploads_root, &tmp_dir, &staging_name).await;
-    if result.is_err() {
-        upload_jail::remove_staging_best_effort(&tmp_dir, &staging_name).await;
-    }
-    // `_quota_guard` drops here regardless of `result`, releasing the
-    // reservation for the next admission.
-    result.map(Json)
+    ensure_path_inside(&tmp_dir, uploads_root).await?;
+    Ok(tmp_dir)
 }
 
-/// Drain the multipart body and produce the final upload result. Splits out
-/// of `upload_attachment` so a single staging-file cleanup wraps every early
-/// return.
+pub(super) fn new_staging_name() -> String {
+    format!("{}.part", uuid::Uuid::new_v4().simple())
+}
+
+pub async fn upload_attachment(
+    headers: HeaderMap,
+    multipart: Multipart,
+) -> Result<Json<UploadAttachmentResult>, AppCommandError> {
+    // Abandoned resumable uploads hold quota; let them go before admitting.
+    super::resumable_upload::sweep_expired_live();
+    upload_multipart(&UploadEnv::live(), &headers, multipart)
+        .await
+        .map(Json)
+}
+
+/// The body of `upload_attachment`, against an explicit environment.
+pub(super) async fn upload_multipart(
+    env: &UploadEnv,
+    headers: &HeaderMap,
+    mut multipart: Multipart,
+) -> Result<UploadAttachmentResult, AppCommandError> {
+    // Quota check, before staging any bytes. The reservation is bounded by
+    // the request's Content-Length (see `upload_reservation_bytes`) so a
+    // small upload fits a small quota.
+    //
+    // The reservation (`quota`) lives to the end of this function, so its
+    // RAII drop runs on every exit path (success, multipart error, a dropped
+    // future, panic). That closes the TOCTOU window where two concurrent
+    // uploads both saw the same disk-level `used` and admitted past the cap.
+    let content_length = headers
+        .get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok());
+    let mut quota = env
+        .reserve(upload_reservation_bytes(
+            content_length,
+            env.limits.largest(),
+        ))
+        .await?;
+
+    // Pre-stage the file under <uploads_root>/.tmp/<uuid>.part so we can
+    // stream bytes to disk without knowing the final bucket up front (the
+    // session_id form field may arrive after the file). On success the
+    // file is linked into place; otherwise `cleanup` deletes it — also when
+    // this future is dropped by a disconnecting client. The unlink goes
+    // through `upload_jail` so it can't be redirected by a swap of `.tmp`.
+    let tmp_dir = prepare_staging_dir(&env.uploads_root).await?;
+    let staging_name = new_staging_name();
+    let mut cleanup = StagingCleanup::new(&tmp_dir, &staging_name);
+    let result =
+        stream_and_finalize(&mut multipart, env, &tmp_dir, &staging_name, quota.as_mut()).await;
+    if result.is_ok() {
+        cleanup.disarm();
+    }
+    result
+}
+
+/// Drain the multipart body and produce the final upload result.
 ///
 /// The staging file is created via `upload_jail::create_staging_file` so a
 /// pre-placed symlink at `<tmp_dir>/<staging_name>` cannot redirect the
@@ -873,9 +1144,10 @@ pub async fn upload_attachment(
 /// `tmp_dir` or `bucket` cannot land the file outside the root.
 async fn stream_and_finalize(
     multipart: &mut Multipart,
-    uploads_root: &std::path::Path,
+    env: &UploadEnv,
     tmp_dir: &std::path::Path,
     staging_name: &str,
+    mut quota: Option<&mut QuotaReservation>,
 ) -> Result<UploadAttachmentResult, AppCommandError> {
     let mut session_id: Option<String> = None;
     let mut raw_name: Option<String> = None;
@@ -907,6 +1179,12 @@ async fn stream_and_finalize(
                 file_seen = true;
                 raw_name = Some(field.file_name().unwrap_or("file").to_string());
                 mime_type = field.content_type().map(|s| s.to_string());
+                // Video and audio are linked by path, never re-inlined, so
+                // they take the larger media cap; everything else keeps the
+                // per-file cap `prompt_hydration` reads back.
+                let limit = env
+                    .limits
+                    .limit_for(mime_type.as_deref(), raw_name.as_deref());
 
                 let mut out = upload_jail::create_staging_file(tmp_dir, staging_name)
                     .await
@@ -919,22 +1197,11 @@ async fn stream_and_finalize(
                         .with_detail(e.to_string())
                 })? {
                     let new_total = written.saturating_add(chunk.len() as u64);
-                    if new_total > UPLOAD_MAX_BYTES {
-                        // Symmetric with the proxy's pre/post-decode caps
-                        // in `commands/remote_proxy.rs`: any of the three
-                        // layers can fire first depending on how the
-                        // request reached us (web direct, Tauri-proxied,
-                        // or local path read), and they all surface as
-                        // the same i18n key so the toast text in the UI
-                        // is uniform.
-                        let mut params = BTreeMap::new();
-                        params.insert("size".to_string(), new_total.to_string());
-                        params.insert("limit".to_string(), UPLOAD_MAX_BYTES.to_string());
-                        return Err(AppCommandError::io_error(
-                            "Upload exceeds the maximum allowed size",
-                        )
-                        .with_detail(format!("size={new_total} limit={UPLOAD_MAX_BYTES}"))
-                        .with_i18n(UPLOAD_I18N_KEY_TOO_LARGE, params));
+                    if new_total > limit {
+                        return Err(too_large_error(new_total, limit));
+                    }
+                    if let Some(q) = quota.as_deref_mut() {
+                        q.cover(new_total)?;
                     }
                     out.write_all(&chunk).await.map_err(|e| {
                         AppCommandError::io_error("Failed to write chunk")
@@ -963,8 +1230,32 @@ async fn stream_and_finalize(
         return Err(AppCommandError::io_error("Uploaded file is empty"));
     }
 
-    let safe_name = sanitize_upload_filename(raw_name.as_deref().unwrap_or("file"));
-    let bucket = session_id.unwrap_or_else(|| "anon".to_string());
+    finalize_staged_upload(
+        &env.uploads_root,
+        tmp_dir,
+        staging_name,
+        session_id,
+        raw_name.as_deref(),
+        written,
+        mime_type,
+    )
+    .await
+}
+
+/// Move a fully written staging file into its session bucket under a free
+/// name and describe the result. `bucket` must already be sanitized
+/// (`sanitize_session_bucket`); `None` is the shared `anon` bucket.
+pub(super) async fn finalize_staged_upload(
+    uploads_root: &std::path::Path,
+    tmp_dir: &std::path::Path,
+    staging_name: &str,
+    bucket: Option<String>,
+    raw_name: Option<&str>,
+    size: u64,
+    mime_type: Option<String>,
+) -> Result<UploadAttachmentResult, AppCommandError> {
+    let safe_name = sanitize_upload_filename(raw_name.unwrap_or("file"));
+    let bucket = bucket.unwrap_or_else(|| "anon".to_string());
     let dir = uploads_root.join(&bucket);
     tokio::fs::create_dir_all(&dir).await.map_err(|e| {
         AppCommandError::io_error("Failed to create uploads directory").with_detail(e.to_string())
@@ -1028,8 +1319,53 @@ async fn stream_and_finalize(
     Ok(UploadAttachmentResult {
         path: simplify_verbatim_path(&canon).to_string_lossy().to_string(),
         name: final_name,
-        size: written,
+        size,
         mime_type,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Upload limits
+// ---------------------------------------------------------------------------
+
+/// The upload caps a client should apply before sending, from
+/// `POST /api/upload_limits`.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadLimitsInfo {
+    /// Per-file cap for images, documents and every other non-media file.
+    pub max_file_bytes: u64,
+    /// Per-file cap for video and audio (`mediaTypes`).
+    pub max_media_bytes: u64,
+    /// The content types that take `maxMediaBytes`. A file sent without one
+    /// of them counts as media by a known video/audio extension.
+    pub media_types: [&'static str; 2],
+    /// `CODEG_UPLOAD_MAX_TOTAL_BYTES` when set: a cap on everything the
+    /// uploads directory holds.
+    pub max_total_bytes: Option<u64>,
+    /// What that cap leaves right now (on disk + in-flight reservations).
+    pub remaining_total_bytes: Option<u64>,
+    /// Resumable upload (`upload_attachment_create` and friends).
+    pub resumable: super::resumable_upload::ResumableLimitsInfo,
+}
+
+pub async fn upload_limits_info() -> Json<UploadLimitsInfo> {
+    let env = UploadEnv::live();
+    let remaining_total_bytes = match env.quota_cap {
+        Some(cap) => {
+            let used = current_uploads_total_bytes(&env.uploads_root).await;
+            let in_flight = env.in_flight.load(Ordering::Acquire);
+            Some(cap.saturating_sub(used.saturating_add(in_flight)))
+        }
+        None => None,
+    };
+    Json(UploadLimitsInfo {
+        max_file_bytes: env.limits.file_bytes,
+        max_media_bytes: env.limits.media_bytes,
+        media_types: ["video/*", "audio/*"],
+        max_total_bytes: env.quota_cap,
+        remaining_total_bytes,
+        resumable: super::resumable_upload::ResumableLimitsInfo::current(),
     })
 }
 
@@ -1262,30 +1598,34 @@ mod tests {
 
     // ─── upload_reservation_bytes ─────────────────────────────────────
 
+    const LARGEST: u64 = UPLOAD_MAX_MEDIA_BYTES_DEFAULT;
+
     #[test]
     fn reservation_uses_content_length_when_small() {
         // A 1 MiB upload against a 10 MiB total quota must reserve ~1 MiB,
-        // not the 20 MiB worst case (which would reject every upload on
-        // servers whose quota is below the per-file maximum).
+        // not the worst case (which would reject every upload on servers
+        // whose quota is below the per-file maximum).
         let cl = 1024 * 1024 + 300; // file + multipart framing overhead
-        assert_eq!(upload_reservation_bytes(Some(cl)), cl);
+        assert_eq!(upload_reservation_bytes(Some(cl), LARGEST), cl);
     }
 
     #[test]
-    fn reservation_clamps_content_length_to_per_file_max() {
-        // The streaming loop caps the file at UPLOAD_MAX_BYTES, so the
-        // reservation never needs to exceed it even when the body (file +
-        // framing) is slightly larger. min(CL, MAX) ≥ bytes written holds:
-        // written ≤ MAX (loop check) and written ≤ CL (hyper framing).
+    fn reservation_clamps_content_length_to_the_largest_cap() {
+        // The streaming loop caps the file at its per-type limit, so the
+        // reservation never needs to exceed the largest one even when the
+        // body (file + framing) is slightly larger. min(CL, MAX) ≥ bytes
+        // written holds: written ≤ MAX (loop check) and written ≤ CL.
         assert_eq!(
-            upload_reservation_bytes(Some(UPLOAD_MAX_BYTES + 500)),
-            UPLOAD_MAX_BYTES
+            upload_reservation_bytes(Some(LARGEST + 500), LARGEST),
+            LARGEST
         );
     }
 
     #[test]
-    fn reservation_falls_back_to_worst_case_without_content_length() {
-        assert_eq!(upload_reservation_bytes(None), UPLOAD_MAX_BYTES);
+    fn reservation_starts_empty_without_content_length() {
+        // Chunked uploads grow their reservation as they stream instead of
+        // reserving the video cap up front.
+        assert_eq!(upload_reservation_bytes(None, LARGEST), 0);
     }
 
     #[test]
@@ -1295,8 +1635,326 @@ mod tests {
         // reservation.
         let counter = AtomicU64::new(0);
         let cap = 10 * 1024 * 1024;
-        let reserve = upload_reservation_bytes(Some(1024 * 1024 + 300));
+        let reserve = upload_reservation_bytes(Some(1024 * 1024 + 300), LARGEST);
         assert!(try_reserve_in_flight(&counter, reserve, 0, cap).is_ok());
+    }
+
+    #[test]
+    fn a_growing_reservation_stops_at_the_cap_and_releases_everything() {
+        let counter: &'static AtomicU64 = Box::leak(Box::new(AtomicU64::new(0)));
+        let cap = UPLOAD_QUOTA_GROW_STEP + 100;
+        let guard = try_reserve_in_flight(counter, 0, 0, cap).expect("empty fits");
+        let mut quota = QuotaReservation {
+            guard,
+            used: 0,
+            cap,
+        };
+        // The first byte reserves a whole step.
+        quota.cover(1).unwrap();
+        assert_eq!(counter.load(Ordering::Acquire), UPLOAD_QUOTA_GROW_STEP);
+        // Past the step, a full second step no longer fits but the exact
+        // remainder does.
+        quota.cover(cap).unwrap();
+        assert_eq!(counter.load(Ordering::Acquire), cap);
+        let err = quota.cover(cap + 1).unwrap_err();
+        assert_eq!(
+            err.i18n_key.as_deref(),
+            Some(UPLOAD_I18N_KEY_QUOTA_EXCEEDED)
+        );
+        drop(quota);
+        assert_eq!(counter.load(Ordering::Acquire), 0);
+    }
+
+    // ─── per-type limits ──────────────────────────────────────────────
+
+    #[test]
+    fn media_limit_config_parses_bytes_zero_and_typos() {
+        assert_eq!(parse_media_limit_config(None), MediaLimitConfig::Default);
+        assert_eq!(
+            parse_media_limit_config(Some(" ")),
+            MediaLimitConfig::Default
+        );
+        assert_eq!(
+            parse_media_limit_config(Some("0")),
+            MediaLimitConfig::SameAsFiles
+        );
+        assert_eq!(
+            parse_media_limit_config(Some(" 524288000 ")),
+            MediaLimitConfig::Bytes(524_288_000)
+        );
+        assert_eq!(
+            parse_media_limit_config(Some("500MB")),
+            MediaLimitConfig::Invalid("500MB".into())
+        );
+    }
+
+    #[test]
+    fn limits_follow_the_media_config() {
+        let default = UploadLimits::from_media_config(&MediaLimitConfig::Default);
+        assert_eq!(default.file_bytes, UPLOAD_MAX_BYTES);
+        assert_eq!(default.media_bytes, UPLOAD_MAX_MEDIA_BYTES_DEFAULT);
+        assert_eq!(default.largest(), UPLOAD_MAX_MEDIA_BYTES_DEFAULT);
+        assert_eq!(
+            default.multipart_body_limit() as u64,
+            UPLOAD_MAX_MEDIA_BYTES_DEFAULT + UPLOAD_MULTIPART_OVERHEAD_BYTES
+        );
+        let typo = UploadLimits::from_media_config(&MediaLimitConfig::Invalid("x".into()));
+        assert_eq!(typo, default);
+        let off = UploadLimits::from_media_config(&MediaLimitConfig::SameAsFiles);
+        assert_eq!(off.media_bytes, UPLOAD_MAX_BYTES);
+        let small = UploadLimits::from_media_config(&MediaLimitConfig::Bytes(5 * 1024 * 1024));
+        assert_eq!(small.media_bytes, 5 * 1024 * 1024);
+        assert_eq!(small.largest(), UPLOAD_MAX_BYTES);
+    }
+
+    #[test]
+    fn video_and_audio_take_the_media_cap_and_everything_else_the_file_cap() {
+        let limits = UploadLimits {
+            file_bytes: 10,
+            media_bytes: 1000,
+        };
+        // By declared type, parameters and case ignored.
+        assert_eq!(limits.limit_for(Some("video/mp4"), Some("take.mp4")), 1000);
+        assert_eq!(limits.limit_for(Some("Video/QuickTime"), Some("x")), 1000);
+        assert_eq!(limits.limit_for(Some("audio/mpeg; rate=44100"), None), 1000);
+        // By extension when the type is missing or generic.
+        assert_eq!(limits.limit_for(None, Some("voice.m4a")), 1000);
+        assert_eq!(
+            limits.limit_for(Some("application/octet-stream"), Some("clip.MOV")),
+            1000
+        );
+        // Pictures, documents and the rest keep the small cap.
+        assert_eq!(limits.limit_for(Some("image/png"), Some("shot.png")), 10);
+        assert_eq!(limits.limit_for(Some("application/pdf"), Some("a.pdf")), 10);
+        assert_eq!(limits.limit_for(None, Some("notes.txt")), 10);
+        assert_eq!(limits.limit_for(None, None), 10);
+    }
+
+    // ─── streaming upload ─────────────────────────────────────────────
+
+    use axum::body::{Body, Bytes};
+    use axum::extract::FromRequest;
+    use futures::StreamExt;
+
+    const BOUNDARY: &str = "codeg-test-boundary";
+
+    fn test_env(root: &std::path::Path, quota_cap: Option<u64>) -> UploadEnv {
+        UploadEnv {
+            uploads_root: root.to_path_buf(),
+            limits: UploadLimits {
+                file_bytes: 1000,
+                media_bytes: 5000,
+            },
+            quota_cap,
+            in_flight: Box::leak(Box::new(AtomicU64::new(0))),
+        }
+    }
+
+    fn part_head(file_name: &str, content_type: &str) -> Vec<u8> {
+        format!(
+            "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"session_id\"\r\n\r\nbucket-1\r\n\
+             --{BOUNDARY}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\n\
+             Content-Type: {content_type}\r\n\r\n"
+        )
+        .into_bytes()
+    }
+
+    fn part_tail() -> Vec<u8> {
+        format!("\r\n--{BOUNDARY}--\r\n").into_bytes()
+    }
+
+    async fn multipart_from<S>(stream: S) -> Multipart
+    where
+        S: futures::Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static,
+    {
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .header(
+                axum::http::header::CONTENT_TYPE,
+                format!("multipart/form-data; boundary={BOUNDARY}"),
+            )
+            .body(Body::from_stream(stream))
+            .unwrap();
+        Multipart::from_request(request, &()).await.unwrap()
+    }
+
+    fn whole_body(file_name: &str, content_type: &str, size: usize) -> Vec<u8> {
+        let mut body = part_head(file_name, content_type);
+        body.extend(std::iter::repeat_n(b'v', size));
+        body.extend(part_tail());
+        body
+    }
+
+    async fn upload(
+        env: &UploadEnv,
+        file_name: &str,
+        content_type: &str,
+        size: usize,
+    ) -> Result<UploadAttachmentResult, AppCommandError> {
+        let body = whole_body(file_name, content_type, size);
+        // Several small chunks, like a socket delivers them.
+        let chunks: Vec<Result<Bytes, std::io::Error>> = body
+            .chunks(700)
+            .map(|c| Ok(Bytes::copy_from_slice(c)))
+            .collect();
+        let multipart = multipart_from(futures::stream::iter(chunks)).await;
+        upload_multipart(env, &HeaderMap::new(), multipart).await
+    }
+
+    fn staged_files(root: &std::path::Path) -> Vec<String> {
+        match std::fs::read_dir(root.join(".tmp")) {
+            Ok(entries) => entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect(),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    async fn wait_until_unstaged(root: &std::path::Path) {
+        for _ in 0..200 {
+            if staged_files(root).is_empty() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("staging files left behind: {:?}", staged_files(root));
+    }
+
+    #[tokio::test]
+    async fn a_video_over_the_file_cap_uploads_under_the_media_cap() {
+        let root = tempfile::tempdir().unwrap();
+        let env = test_env(root.path(), None);
+        let result = upload(&env, "take.mp4", "video/mp4", 3000).await.unwrap();
+        assert_eq!(result.size, 3000);
+        assert_eq!(result.name, "take.mp4");
+        assert_eq!(result.mime_type.as_deref(), Some("video/mp4"));
+        let on_disk = std::fs::metadata(root.path().join("bucket-1/take.mp4")).unwrap();
+        assert_eq!(on_disk.len(), 3000);
+        assert!(staged_files(root.path()).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_picture_over_the_file_cap_is_refused_and_leaves_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let env = test_env(root.path(), None);
+        let err = upload(&env, "shot.png", "image/png", 3000)
+            .await
+            .unwrap_err();
+        assert_eq!(err.i18n_key.as_deref(), Some(UPLOAD_I18N_KEY_TOO_LARGE));
+        assert_eq!(
+            err.i18n_params
+                .as_ref()
+                .and_then(|p| p.get("limit"))
+                .map(String::as_str),
+            Some("1000")
+        );
+        wait_until_unstaged(root.path()).await;
+        assert!(!root.path().join("bucket-1/shot.png").exists());
+    }
+
+    #[tokio::test]
+    async fn a_video_over_the_media_cap_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let env = test_env(root.path(), None);
+        let err = upload(&env, "long.mp4", "video/mp4", 6000)
+            .await
+            .unwrap_err();
+        assert_eq!(err.i18n_key.as_deref(), Some(UPLOAD_I18N_KEY_TOO_LARGE));
+        wait_until_unstaged(root.path()).await;
+    }
+
+    #[tokio::test]
+    async fn a_body_that_breaks_off_removes_the_partial_file() {
+        let root = tempfile::tempdir().unwrap();
+        let env = test_env(root.path(), None);
+        let mut head = part_head("take.mp4", "video/mp4");
+        head.extend(std::iter::repeat_n(b'v', 1500));
+        let stream = futures::stream::iter(vec![
+            Ok(Bytes::from(head)),
+            Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                "client went away",
+            )),
+        ]);
+        let multipart = multipart_from(stream).await;
+        assert!(upload_multipart(&env, &HeaderMap::new(), multipart)
+            .await
+            .is_err());
+        wait_until_unstaged(root.path()).await;
+        assert!(!root.path().join("bucket-1/take.mp4").exists());
+    }
+
+    #[tokio::test]
+    async fn a_dropped_upload_future_removes_the_partial_file() {
+        // A client that disconnects makes hyper drop the handler's future at
+        // whatever `.await` it is parked on; nothing after it runs.
+        let root = tempfile::tempdir().unwrap();
+        let env = test_env(root.path(), None);
+        let mut head = part_head("take.mp4", "video/mp4");
+        head.extend(std::iter::repeat_n(b'v', 1500));
+        let stream =
+            futures::stream::iter(vec![Ok(Bytes::from(head))]).chain(futures::stream::pending());
+        let multipart = multipart_from(stream).await;
+        {
+            let headers = HeaderMap::new();
+            let upload = upload_multipart(&env, &headers, multipart);
+            tokio::pin!(upload);
+            // Run it until the partial file is on disk, then drop it.
+            for _ in 0..200 {
+                tokio::select! {
+                    _ = &mut upload => panic!("the body never ends"),
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => {}
+                }
+                if !staged_files(root.path()).is_empty() {
+                    break;
+                }
+            }
+            assert_eq!(staged_files(root.path()).len(), 1, "partial file staged");
+        }
+        wait_until_unstaged(root.path()).await;
+    }
+
+    #[tokio::test]
+    async fn a_chunked_upload_grows_its_reservation_until_the_quota() {
+        let root = tempfile::tempdir().unwrap();
+        // No Content-Length (the test request has none): nothing reserved up
+        // front, then the reservation grows with the stream.
+        let env = test_env(root.path(), Some(2500));
+        let err = upload(&env, "take.mp4", "video/mp4", 3000)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.i18n_key.as_deref(),
+            Some(UPLOAD_I18N_KEY_QUOTA_EXCEEDED)
+        );
+        wait_until_unstaged(root.path()).await;
+        assert_eq!(env.in_flight.load(Ordering::Acquire), 0, "released");
+        // Under the quota it goes through, and the reservation is released.
+        let ok = upload(&env, "short.mp4", "video/mp4", 2000).await.unwrap();
+        assert_eq!(ok.size, 2000);
+        assert_eq!(env.in_flight.load(Ordering::Acquire), 0);
+    }
+
+    #[tokio::test]
+    async fn content_length_over_the_quota_is_refused_before_any_bytes() {
+        let root = tempfile::tempdir().unwrap();
+        let env = test_env(root.path(), Some(2500));
+        let body = whole_body("take.mp4", "video/mp4", 3000);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::CONTENT_LENGTH,
+            body.len().to_string().parse().unwrap(),
+        );
+        let multipart = multipart_from(futures::stream::iter(vec![Ok(Bytes::from(body))])).await;
+        let err = upload_multipart(&env, &headers, multipart)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.i18n_key.as_deref(),
+            Some(UPLOAD_I18N_KEY_QUOTA_EXCEEDED)
+        );
+        assert!(staged_files(root.path()).is_empty());
     }
 
     // ─── try_reserve_in_flight ────────────────────────────────────────

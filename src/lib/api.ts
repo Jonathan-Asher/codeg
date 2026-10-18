@@ -4538,6 +4538,122 @@ export async function listDirectoryWithFiles(
 // every mode; oversize is rejected up front with a visible toast.
 export const UPLOAD_MAX_BYTES = 20 * 1024 * 1024
 
+// Video and audio are only ever linked by path, never read back into a
+// prompt, so the server gives them a cap of their own
+// (`CODEG_UPLOAD_MAX_MEDIA_BYTES`, `web/handlers/files.rs`). The value comes
+// from `/api/upload_limits`; a server without that endpoint keeps every file
+// at `UPLOAD_MAX_BYTES`.
+export interface UploadLimits {
+  maxFileBytes: number
+  maxMediaBytes: number
+  maxTotalBytes: number | null
+  remainingTotalBytes: number | null
+}
+
+const FIXED_UPLOAD_LIMITS: UploadLimits = {
+  maxFileBytes: UPLOAD_MAX_BYTES,
+  maxMediaBytes: UPLOAD_MAX_BYTES,
+  maxTotalBytes: null,
+  remainingTotalBytes: null,
+}
+
+// Mirrors `workspace_media::media_content_type`, which the server falls back
+// to when a part carries no video/audio content type.
+const LINKED_MEDIA_EXTENSIONS = new Set([
+  "mp4",
+  "m4v",
+  "mov",
+  "webm",
+  "mkv",
+  "ogv",
+  "3gp",
+  "avi",
+  "wmv",
+  "flv",
+  "mpg",
+  "mpeg",
+  "mp3",
+  "m4a",
+  "aac",
+  "wav",
+  "flac",
+  "aif",
+  "aiff",
+  "caf",
+  "ogg",
+  "oga",
+  "opus",
+])
+
+/** Whether the server treats `file` as video/audio (the larger cap). */
+export function isLinkedMediaFile(file: { name: string; type: string }) {
+  const type = file.type.toLowerCase()
+  if (type.startsWith("video/") || type.startsWith("audio/")) return true
+  const dot = file.name.lastIndexOf(".")
+  return (
+    dot > 0 &&
+    LINKED_MEDIA_EXTENSIONS.has(file.name.slice(dot + 1).toLowerCase())
+  )
+}
+
+/** The per-file cap `file` is held to. */
+export function uploadLimitFor(
+  file: { name: string; type: string },
+  limits: UploadLimits
+): number {
+  return isLinkedMediaFile(file) ? limits.maxMediaBytes : limits.maxFileBytes
+}
+
+let uploadLimitsRequest: Promise<UploadLimits> | null = null
+
+// The caps `uploadAttachment` is held to. A desktop window attached to a
+// remote workspace sends the whole file base64 through
+// `remote_upload_attachment`, so it keeps `UPLOAD_MAX_BYTES` for every type;
+// the web client streams the file and asks its server once per page.
+export function getUploadLimits(): Promise<UploadLimits> {
+  if (isDesktop()) return Promise.resolve(FIXED_UPLOAD_LIMITS)
+  if (!uploadLimitsRequest) {
+    uploadLimitsRequest = getTransport()
+      .call<Partial<UploadLimits>>("upload_limits")
+      .then((raw) => ({
+        maxFileBytes: raw.maxFileBytes ?? UPLOAD_MAX_BYTES,
+        maxMediaBytes: raw.maxMediaBytes ?? UPLOAD_MAX_BYTES,
+        maxTotalBytes: raw.maxTotalBytes ?? null,
+        remainingTotalBytes: raw.remainingTotalBytes ?? null,
+      }))
+      .catch(() => {
+        uploadLimitsRequest = null
+        return FIXED_UPLOAD_LIMITS
+      })
+  }
+  return uploadLimitsRequest
+}
+
+// ─── stat_paths ───
+//
+// Existence, kind, size and mtime for up to 200 absolute paths at once. A
+// path must sit under one of `roots` (or codeg's uploads directory); one
+// outside them, or reached through a symlink that leads out, comes back
+// `allowed: false` rather than `exists: false`.
+export interface PathStat {
+  path: string
+  allowed: boolean
+  exists: boolean | null
+  isFile: boolean | null
+  isDir: boolean | null
+  size: number | null
+  modifiedMs: number | null
+  reason?: "invalidPath" | "outsideRoots" | "symlinkEscape"
+  error?: string
+}
+
+export async function statPaths(
+  paths: string[],
+  roots: string[]
+): Promise<PathStat[]> {
+  return getTransport().call("stat_paths", { paths, rootPaths: roots })
+}
+
 // `btoa` only accepts a binary string, and `String.fromCharCode(...bytes)`
 // hits the call-stack limit somewhere around a few hundred KB. Chunk the
 // buffer so a 2 MB upload encodes without blowing the stack.

@@ -53,6 +53,8 @@ pub mod mcp_service;
 pub mod model_provider;
 pub mod office_tools;
 pub mod open_in;
+/// `stat_paths`: existence, kind, size and mtime for a batch of paths.
+pub mod path_stat;
 #[cfg(feature = "tauri-runtime")]
 pub mod notification;
 pub mod pet;

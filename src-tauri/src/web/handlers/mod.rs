@@ -43,6 +43,7 @@ pub mod question;
 pub mod push;
 pub mod quick_ask;
 pub mod quick_messages;
+pub mod resumable_upload;
 pub mod science;
 pub mod session_info;
 pub mod system_settings;

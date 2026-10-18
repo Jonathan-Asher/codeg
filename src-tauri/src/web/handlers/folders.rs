@@ -427,6 +427,14 @@ pub async fn list_directory_with_files(
     Ok(Json(result))
 }
 
+pub async fn stat_paths(
+    Json(request): Json<crate::commands::path_stat::StatPathsRequest>,
+) -> Result<Json<Vec<crate::commands::path_stat::PathStat>>, AppCommandError> {
+    Ok(Json(
+        crate::commands::path_stat::stat_paths_core(request).await?,
+    ))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetFileTreeParams {
