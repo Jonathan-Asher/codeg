@@ -14,6 +14,7 @@ vi.mock("sonner", () => ({
 
 import { SelectionActionBubble } from "./selection-action-bubble"
 import enMessages from "@/i18n/messages/en.json"
+import { installFakeSpeech } from "@/lib/read-aloud/testing"
 
 // The container's box. jsdom does no layout, so every rect the component reads
 // is stubbed: the container via Element.prototype, the selection via the fake
@@ -286,6 +287,40 @@ describe("SelectionActionBubble", () => {
 
     expect(screen.getByRole("button", { name: "Copy Text" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Quote" })).toBeNull()
+  })
+
+  it("offers no Read where the runtime cannot speak", () => {
+    const { container } = render(<Harness />)
+    mockSelection(container.querySelector("[data-testid=para]"), "hello")
+    selectionChanged()
+    expect(screen.queryByRole("button", { name: "Read" })).toBeNull()
+  })
+
+  it("reads the selection aloud, then offers Stop while it is read", () => {
+    const speech = installFakeSpeech()
+    try {
+      const { container } = render(<Harness />)
+      const para = container.querySelector("[data-testid=para]")
+      mockSelection(para, "hello world")
+      selectionChanged()
+      act(() => {
+        fireEvent.click(screen.getByRole("button", { name: "Read" }))
+      })
+      expect(speech.synth.spoken.map((u) => u.text)).toEqual(["hello world."])
+      // Like every action, reading takes the toolbar down.
+      expect(removeAllRanges).toHaveBeenCalled()
+      expect(screen.queryByRole("toolbar")).toBeNull()
+
+      mockSelection(para, "hello world")
+      selectionChanged()
+      act(() => {
+        fireEvent.click(screen.getByRole("button", { name: "Stop reading" }))
+      })
+      expect(speech.synth.cancels).toBe(1)
+      expect(speech.synth.spoken).toHaveLength(1)
+    } finally {
+      speech.uninstall()
+    }
   })
 
   it("quotes the raw selected text, then clears the selection and hides", () => {

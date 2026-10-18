@@ -593,6 +593,10 @@
       "chat_text_zoom_reset": {
         "title": "Réinitialiser la taille du texte du chat",
         "description": "Remet le texte de la conversation à 100%"
+      },
+      "read_last_reply": {
+        "title": "Lire la dernière réponse",
+        "description": "Lire à voix haute la réponse la plus récente de la conversation en cours, ou arrêter la lecture"
       }
     }
   },
@@ -3771,6 +3775,10 @@
         "forkFromHere": "Bifurquer d'ici",
         "forkBusy": "Cet agent ne peut bifurquer qu'entre deux tours",
         "forkNotReady": "Impossible de bifurquer depuis cette réponse pour le moment, réessayez dans un instant",
+        "readAloud": "Lire à voix haute",
+        "stopReading": "Arrêter la lecture",
+        "pauseReading": "Mettre la lecture en pause",
+        "resumeReading": "Reprendre la lecture",
         "editMessage": "Modifier le message",
         "editBusy": "Impossible de modifier pendant qu'un tour est en cours",
         "editQueued": "Impossible de modifier tant que des messages attendent dans la file",
@@ -3789,6 +3797,8 @@
         "selectionCopy": "Copier le texte",
         "selectionCopied": "Copié",
         "selectionCopyFailed": "Échec de la copie",
+        "selectionRead": "Lire",
+        "selectionStop": "Arrêter",
         "selectionQuote": "Citer",
         "selectionSaveAsNote": "Note",
         "selectionAsk": "Demander",
@@ -5479,6 +5489,29 @@
     "tonePop": "Pop",
     "toneAlert": "Alerte",
     "toneDescend": "Descendant"
+  },
+  "ReadAloud": {
+    "nothingToRead": "Rien à lire à voix haute : uniquement du code, des liens ou des chemins de fichiers.",
+    "missingHebrewVoice": "Aucune voix hébraïque n’est installée",
+    "missingVoiceHint": "L’hébreu est lu par une autre voix pour l’instant. Sur un Mac, ajoutez Carmit dans Réglages Système → Accessibilité → Contenu énoncé → Voix du système → Gérer les voix."
+  },
+  "ReadAloudSettings": {
+    "title": "Lecture à voix haute",
+    "description": "Lit les réponses avec les voix système de cet appareil : l’hébreu avec la voix hébraïque, l’anglais avec la voix anglaise. Le code, les sorties d’outils, les liens et les chemins de fichiers sont ignorés.",
+    "keysHint": "Échap arrête la lecture ; {shortcut} lit la dernière réponse.",
+    "keysHintUnbound": "Échap arrête la lecture. Attribuez une touche à « Lire la dernière réponse » dans Raccourcis.",
+    "unsupported": "Ce navigateur ne propose pas de synthèse vocale : la lecture à voix haute n’est pas disponible ici.",
+    "hebrewVoice": "Voix hébraïque",
+    "englishVoice": "Voix anglaise",
+    "automatic": "Automatique ({voice})",
+    "automaticNone": "Automatique",
+    "noHebrewVoice": "Aucune voix hébraïque n’est installée. Sur un Mac, ajoutez Carmit dans Réglages Système → Accessibilité → Contenu énoncé → Voix du système → Gérer les voix.",
+    "rate": "Vitesse de lecture",
+    "rateValue": "{rate}×",
+    "test": "Tester",
+    "stopTest": "Arrêter",
+    "autoRead": "Lire automatiquement les réponses une fois terminées",
+    "autoReadHint": "Seule la conversation affichée est lue. Désactivé par défaut."
   },
   "PushSettings": {
     "title": "Notifications push sur iPhone",

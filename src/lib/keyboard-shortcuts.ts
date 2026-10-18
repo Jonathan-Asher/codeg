@@ -34,6 +34,7 @@ export type ShortcutActionId =
   | "chat_text_zoom_in"
   | "chat_text_zoom_out"
   | "chat_text_zoom_reset"
+  | "read_last_reply"
 
 export interface ShortcutDefinition {
   id: ShortcutActionId
@@ -127,6 +128,9 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: "chat_text_zoom_reset",
   },
+  {
+    id: "read_last_reply",
+  },
 ]
 
 /** Actions that allow shortcuts without modifier keys (e.g. plain Enter). */
@@ -205,6 +209,10 @@ export const DEFAULT_SHORTCUTS: ShortcutSettings = {
   chat_text_zoom_in: "mod+shift+=",
   chat_text_zoom_out: "mod+shift+-",
   chat_text_zoom_reset: "mod+shift+0",
+  // Read the active conversation's newest reply aloud, or stop it. "L" for
+  // listen: Cmd/Ctrl+Shift+R is the browsers' hard reload, which the web
+  // build must leave alone.
+  read_last_reply: "mod+shift+l",
 }
 
 export const SHORTCUTS_STORAGE_KEY = "settings:shortcuts:v1"

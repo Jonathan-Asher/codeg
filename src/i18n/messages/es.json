@@ -593,6 +593,10 @@
       "chat_text_zoom_reset": {
         "title": "Restablecer el tamaño del texto del chat",
         "description": "Devuelve el texto de la conversación al 100%"
+      },
+      "read_last_reply": {
+        "title": "Leer la última respuesta",
+        "description": "Lee en voz alta la respuesta más reciente de la conversación actual, o deja de leerla"
       }
     }
   },
@@ -3771,6 +3775,10 @@
         "forkFromHere": "Bifurcar desde aquí",
         "forkBusy": "Este agente solo puede bifurcar entre turnos",
         "forkNotReady": "Todavía no se puede bifurcar desde esta respuesta; inténtalo en un momento",
+        "readAloud": "Leer en voz alta",
+        "stopReading": "Dejar de leer",
+        "pauseReading": "Pausar la lectura",
+        "resumeReading": "Reanudar la lectura",
         "editMessage": "Editar mensaje",
         "editBusy": "No se puede editar mientras hay un turno en curso",
         "editQueued": "No se puede editar mientras hay mensajes esperando en la cola",
@@ -3789,6 +3797,8 @@
         "selectionCopy": "Copiar texto",
         "selectionCopied": "Copiado",
         "selectionCopyFailed": "Error al copiar",
+        "selectionRead": "Leer",
+        "selectionStop": "Detener",
         "selectionQuote": "Citar",
         "selectionSaveAsNote": "Nota",
         "selectionAsk": "Preguntar",
@@ -5479,6 +5489,29 @@
     "tonePop": "Pop",
     "toneAlert": "Alerta",
     "toneDescend": "Descendente"
+  },
+  "ReadAloud": {
+    "nothingToRead": "No hay nada que leer en voz alta: solo código, enlaces o rutas de archivo.",
+    "missingHebrewVoice": "No hay ninguna voz en hebreo instalada",
+    "missingVoiceHint": "Por ahora otra voz lee el hebreo. En un Mac, añade Carmit en Ajustes del Sistema → Accesibilidad → Contenido leído → Voz del sistema → Gestionar voces."
+  },
+  "ReadAloudSettings": {
+    "title": "Lectura en voz alta",
+    "description": "Lee las respuestas con las voces del sistema de este dispositivo: el hebreo con la voz hebrea y el inglés con la inglesa. Se omiten el código, la salida de herramientas, los enlaces y las rutas de archivo.",
+    "keysHint": "Esc detiene la lectura; {shortcut} lee la última respuesta.",
+    "keysHintUnbound": "Esc detiene la lectura. Asigna una tecla a «Leer la última respuesta» en Atajos.",
+    "unsupported": "Este navegador no tiene síntesis de voz, así que la lectura en voz alta no está disponible aquí.",
+    "hebrewVoice": "Voz en hebreo",
+    "englishVoice": "Voz en inglés",
+    "automatic": "Automática ({voice})",
+    "automaticNone": "Automática",
+    "noHebrewVoice": "No hay ninguna voz en hebreo instalada. En un Mac, añade Carmit en Ajustes del Sistema → Accesibilidad → Contenido leído → Voz del sistema → Gestionar voces.",
+    "rate": "Velocidad de lectura",
+    "rateValue": "{rate}×",
+    "test": "Probar",
+    "stopTest": "Detener",
+    "autoRead": "Leer las respuestas automáticamente al terminar",
+    "autoReadHint": "Solo se lee la conversación que estás viendo. Desactivado por defecto."
   },
   "PushSettings": {
     "title": "Notificaciones push en el iPhone",

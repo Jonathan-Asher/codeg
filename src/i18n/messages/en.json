@@ -593,6 +593,10 @@
       "chat_text_zoom_reset": {
         "title": "Reset chat text size",
         "description": "Set the conversation text back to 100%"
+      },
+      "read_last_reply": {
+        "title": "Read last reply",
+        "description": "Read the newest reply in the current conversation aloud, or stop reading it"
       }
     }
   },
@@ -3771,6 +3775,10 @@
         "forkFromHere": "Fork from here",
         "forkBusy": "This agent can only fork between turns",
         "forkNotReady": "Can't fork from this reply just yet — try again in a moment",
+        "readAloud": "Read aloud",
+        "stopReading": "Stop reading",
+        "pauseReading": "Pause reading",
+        "resumeReading": "Resume reading",
         "editMessage": "Edit message",
         "editBusy": "Can't edit while a turn is running",
         "editQueued": "Can't edit while messages are waiting in the queue",
@@ -3789,6 +3797,8 @@
         "selectionCopy": "Copy Text",
         "selectionCopied": "Copied",
         "selectionCopyFailed": "Copy failed",
+        "selectionRead": "Read",
+        "selectionStop": "Stop",
         "selectionQuote": "Quote",
         "selectionSaveAsNote": "Note",
         "selectionAsk": "Ask",
@@ -5479,6 +5489,29 @@
     "tonePop": "Pop",
     "toneAlert": "Alert",
     "toneDescend": "Descending"
+  },
+  "ReadAloud": {
+    "nothingToRead": "Nothing to read aloud here: only code, links or file paths.",
+    "missingHebrewVoice": "No Hebrew voice is installed",
+    "missingVoiceHint": "Hebrew is read by another voice for now. On a Mac, add Carmit in System Settings → Accessibility → Spoken Content → System voice → Manage Voices."
+  },
+  "ReadAloudSettings": {
+    "title": "Read aloud",
+    "description": "Reads replies with this device's own system voices: Hebrew with the Hebrew voice, English with the English one. Code, tool output, links and file paths are skipped.",
+    "keysHint": "Esc stops reading; {shortcut} reads the last reply.",
+    "keysHintUnbound": "Esc stops reading. Bind a key to “Read last reply” under Shortcuts.",
+    "unsupported": "This browser has no speech synthesis, so read aloud is not available here.",
+    "hebrewVoice": "Hebrew voice",
+    "englishVoice": "English voice",
+    "automatic": "Automatic ({voice})",
+    "automaticNone": "Automatic",
+    "noHebrewVoice": "No Hebrew voice is installed. On a Mac, add Carmit in System Settings → Accessibility → Spoken Content → System voice → Manage Voices.",
+    "rate": "Speaking rate",
+    "rateValue": "{rate}×",
+    "test": "Test",
+    "stopTest": "Stop",
+    "autoRead": "Read replies automatically when they finish",
+    "autoReadHint": "Only the conversation you are looking at is read. Off by default."
   },
   "PushSettings": {
     "title": "iPhone push",

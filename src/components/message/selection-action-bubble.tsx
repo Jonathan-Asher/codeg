@@ -7,13 +7,24 @@ import {
   ArrowUp,
   CopyIcon,
   MessageCircleQuestionMark,
+  Square,
   StickyNote,
   TextQuote,
+  Volume2,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { useImeGuard } from "@/hooks/use-ime-guard"
+import { selectionSpeechText } from "@/lib/read-aloud/selection-text"
+import {
+  useReadAloudActions,
+  useReadAloudState,
+  useReadAloudSupported,
+} from "@/lib/read-aloud/use-read-aloud"
 import { cn, copyTextToClipboard } from "@/lib/utils"
+
+/** The read-aloud id of whatever selection is being read. */
+export const SELECTION_READ_ALOUD_ID = "selection"
 
 /** Vertical gap between the selection box and the bubble. */
 const GAP = 8
@@ -90,10 +101,10 @@ interface SelectionActionBubbleProps {
 
 /**
  * Floating quick-action toolbar for a text selection inside a message
- * transcript: copy the selected text, quote it into the composer, or ask a
- * question about it in a new conversation. Every action dismisses the toolbar
- * and drops the selection; copy confirms with a toast, since the toolbar it
- * would otherwise confirm on is gone by then.
+ * transcript: copy the selected text, read it aloud, quote it into the
+ * composer, or ask a question about it in a new conversation. Every action
+ * dismisses the toolbar and drops the selection; copy confirms with a toast,
+ * since the toolbar it would otherwise confirm on is gone by then.
  *
  * Rendered IN-TREE (not portalled to `body`) on purpose. Inactive conversation
  * tabs stay mounted and are hidden with `visibility: hidden`, which is
@@ -108,6 +119,12 @@ export function SelectionActionBubble({
 }: SelectionActionBubbleProps) {
   const t = useTranslations("Folder.chat.messageList")
   const ime = useImeGuard()
+  const canReadAloud = useReadAloudSupported()
+  const readAloudState = useReadAloudState()
+  const readAloud = useReadAloudActions()
+  const readingSelection =
+    readAloudState.currentId === SELECTION_READ_ALOUD_ID &&
+    readAloudState.status !== "idle"
   const [state, setState] = useState<SelectionState>(NO_SELECTION)
   const stateRef = useRef<SelectionState>(NO_SELECTION)
   const bubbleRef = useRef<HTMLDivElement | null>(null)
@@ -332,6 +349,24 @@ export function SelectionActionBubble({
     })
   }, [dismiss, t])
 
+  /**
+   * Read the selection aloud — or stop, when a selection is what is being
+   * read. Rendered code blocks inside the selection are left out, as they are
+   * for a whole reply; a selection of nothing but code is read as selected.
+   */
+  const handleRead = useCallback(() => {
+    const current = stateRef.current
+    if (current.kind === "none") return
+    if (readingSelection) {
+      readAloud.stop()
+      dismiss()
+      return
+    }
+    const text = selectionSpeechText(window.getSelection()) || current.text
+    dismiss()
+    readAloud.read(SELECTION_READ_ALOUD_ID, text)
+  }, [dismiss, readAloud, readingSelection])
+
   const handleSaveAsNote = useCallback(() => {
     const current = stateRef.current
     if (current.kind === "none" || !onSaveAsNote) return
@@ -485,6 +520,24 @@ export function SelectionActionBubble({
             <CopyIcon />
             {t("selectionCopy")}
           </Button>
+          {canReadAloud && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={handleRead}
+              aria-label={
+                readingSelection ? t("stopReading") : t("selectionRead")
+              }
+            >
+              {readingSelection ? (
+                <Square className="fill-current" />
+              ) : (
+                <Volume2 />
+              )}
+              {readingSelection ? t("selectionStop") : t("selectionRead")}
+            </Button>
+          )}
           {onQuote && (
             <Button
               type="button"

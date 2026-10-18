@@ -182,6 +182,71 @@ describe("reopen last closed tab", () => {
   })
 })
 
+describe("read last reply", () => {
+  it("registers read_last_reply on Cmd/Ctrl+Shift+L", () => {
+    const ids = SHORTCUT_DEFINITIONS.map((definition) => definition.id)
+    expect(ids).toContain("read_last_reply")
+    expect(DEFAULT_SHORTCUTS.read_last_reply).toBe("mod+shift+l")
+    expect(
+      matchShortcutEvent(
+        keyEvent("L", { metaKey: true, shiftKey: true }),
+        DEFAULT_SHORTCUTS.read_last_reply
+      )
+    ).toBe(true)
+    expect(
+      matchShortcutEvent(
+        keyEvent("l", { ctrlKey: true }),
+        DEFAULT_SHORTCUTS.read_last_reply
+      )
+    ).toBe(false)
+    expect(formatShortcutLabel(DEFAULT_SHORTCUTS.read_last_reply, true)).toBe(
+      "⌘⇧L"
+    )
+  })
+
+  it("collides with no other default, and leaves the browsers' reload alone", () => {
+    const clashes = SHORTCUT_DEFINITIONS.filter(
+      (definition) =>
+        definition.id !== "read_last_reply" &&
+        shortcutsConflict(
+          DEFAULT_SHORTCUTS[definition.id],
+          DEFAULT_SHORTCUTS.read_last_reply
+        )
+    ).map((definition) => definition.id)
+    expect(clashes).toEqual([])
+    expect(shortcutsConflict(DEFAULT_SHORTCUTS.read_last_reply, "mod+r")).toBe(
+      false
+    )
+    expect(
+      shortcutsConflict(DEFAULT_SHORTCUTS.read_last_reply, "mod+shift+r")
+    ).toBe(false)
+  })
+
+  it("can be rebound, and the stored binding survives a reload", () => {
+    writeShortcutSettings({
+      ...readShortcutSettings(),
+      read_last_reply: "mod+alt+r",
+    })
+    expect(readShortcutSettings().read_last_reply).toBe("mod+alt+r")
+    expect(
+      matchShortcutEvent(
+        keyEvent("®", { metaKey: true, altKey: true, code: "KeyR" }),
+        readShortcutSettings().read_last_reply
+      )
+    ).toBe(true)
+    localStorage.removeItem(SHORTCUTS_STORAGE_KEY)
+  })
+
+  it("arrives unbound when a stored binding already holds the chord", () => {
+    localStorage.setItem(
+      SHORTCUTS_STORAGE_KEY,
+      JSON.stringify({ toggle_sidebar: "mod+shift+l" })
+    )
+    expect(readShortcutSettings().read_last_reply).toBe("")
+    localStorage.removeItem(SHORTCUTS_STORAGE_KEY)
+  })
+})
+
 describe("close window", () => {
   it("defaults to Ctrl/Cmd+Shift+W, shared with closing all file tabs", () => {
     const ids = SHORTCUT_DEFINITIONS.map((definition) => definition.id)

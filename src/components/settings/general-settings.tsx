@@ -46,6 +46,7 @@ import { CloseBehaviorSettingsSection } from "@/components/settings/close-behavi
 import { EditMessageSettingsSection } from "@/components/settings/edit-message-settings"
 import { DesktopNotificationSettingsSection } from "@/components/settings/desktop-notification-settings"
 import { NotificationSoundSettingsSection } from "@/components/settings/notification-sound-settings"
+import { ReadAloudSettingsSection } from "@/components/settings/read-aloud-settings"
 import { CriticalSessionSettingsSection } from "@/components/settings/critical-session-settings"
 import { IphonePushSettingsSection } from "@/components/settings/iphone-push-settings"
 import { DictationRefineSettingsSection } from "@/components/settings/dictation-refine-settings"
@@ -542,6 +543,9 @@ export function GeneralSettings() {
         <DesktopNotificationSettingsSection />
 
         <NotificationSoundSettingsSection />
+
+        {/* Replies read with this device's system voices. */}
+        <ReadAloudSettingsSection />
 
         {/* The alerts for sessions marked critical (the backend's watchdog). */}
         <CriticalSessionSettingsSection />
