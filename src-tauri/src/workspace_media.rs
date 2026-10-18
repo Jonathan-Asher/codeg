@@ -1,4 +1,4 @@
-//! Streaming workspace media (video preview).
+//! Streaming workspace media (video preview, audio playback).
 //!
 //! A `<video src>` can neither carry a Bearer header nor afford to receive a
 //! multi-GB file as base64 JSON, so previews go through a *capability*: the
@@ -205,6 +205,10 @@ fn extension_of(name: &str) -> String {
 /// `.mov` is labelled `video/mp4`: QuickTime and MP4 share the ISO base media
 /// layout, WebKit plays either label, and Chromium only plays the file when it
 /// is not announced as `video/quicktime`.
+///
+/// Audio streams through the same capability (the mobile client plays it with
+/// a native player and seeks with Range). `.ogg` is audio here: the video
+/// container's extension is `.ogv`.
 pub fn media_content_type(name: &str) -> Option<&'static str> {
     Some(match extension_of(name).as_str() {
         "mp4" | "m4v" | "mov" => "video/mp4",
@@ -216,6 +220,14 @@ pub fn media_content_type(name: &str) -> Option<&'static str> {
         "wmv" => "video/x-ms-wmv",
         "flv" => "video/x-flv",
         "mpg" | "mpeg" => "video/mpeg",
+        "mp3" => "audio/mpeg",
+        "m4a" => "audio/mp4",
+        "aac" => "audio/aac",
+        "wav" => "audio/wav",
+        "flac" => "audio/flac",
+        "aif" | "aiff" => "audio/aiff",
+        "caf" => "audio/x-caf",
+        "ogg" | "oga" | "opus" => "audio/ogg",
         _ => return None,
     })
 }
@@ -435,6 +447,31 @@ mod tests {
         assert_eq!(media_content_type("index.html"), None);
         assert_eq!(media_content_type("notes.txt"), None);
         assert_eq!(media_content_type("mp4"), None);
+    }
+
+    #[test]
+    fn media_types_cover_common_audio() {
+        for (name, expected) in [
+            ("song.mp3", "audio/mpeg"),
+            ("memo.m4a", "audio/mp4"),
+            ("clip.aac", "audio/aac"),
+            ("take.wav", "audio/wav"),
+            ("master.flac", "audio/flac"),
+            ("loop.aif", "audio/aiff"),
+            ("loop.aiff", "audio/aiff"),
+            ("voice.caf", "audio/x-caf"),
+            ("track.ogg", "audio/ogg"),
+            ("track.oga", "audio/ogg"),
+            ("call.opus", "audio/ogg"),
+            ("a/b/SONG.MP3", "audio/mpeg"),
+            ("Take.WAV", "audio/wav"),
+        ] {
+            assert_eq!(media_content_type(name), Some(expected), "{name}");
+        }
+        // Images (SVG above all, which is script-capable) are not media.
+        for name in ["logo.svg", "photo.png", "photo.jpg", "anim.gif", "mp3"] {
+            assert_eq!(media_content_type(name), None, "{name}");
+        }
     }
 
     #[test]
