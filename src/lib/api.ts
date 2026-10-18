@@ -4629,6 +4629,31 @@ export function getUploadLimits(): Promise<UploadLimits> {
   return uploadLimitsRequest
 }
 
+// ─── stat_paths ───
+//
+// Existence, kind, size and mtime for up to 200 absolute paths at once. A
+// path must sit under one of `roots` (or codeg's uploads directory); one
+// outside them, or reached through a symlink that leads out, comes back
+// `allowed: false` rather than `exists: false`.
+export interface PathStat {
+  path: string
+  allowed: boolean
+  exists: boolean | null
+  isFile: boolean | null
+  isDir: boolean | null
+  size: number | null
+  modifiedMs: number | null
+  reason?: "invalidPath" | "outsideRoots" | "symlinkEscape"
+  error?: string
+}
+
+export async function statPaths(
+  paths: string[],
+  roots: string[]
+): Promise<PathStat[]> {
+  return getTransport().call("stat_paths", { paths, rootPaths: roots })
+}
+
 // `btoa` only accepts a binary string, and `String.fromCharCode(...bytes)`
 // hits the call-stack limit somewhere around a few hundred KB. Chunk the
 // buffer so a 2 MB upload encodes without blowing the stack.

@@ -465,6 +465,7 @@ pub fn build_router(
             "/list_directory_with_files",
             post(handlers::folders::list_directory_with_files),
         )
+        .route("/stat_paths", post(handlers::folders::stat_paths))
         .route("/get_file_tree", post(handlers::folders::get_file_tree))
         .route(
             "/list_workspace_files",

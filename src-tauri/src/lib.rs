@@ -1901,6 +1901,7 @@ mod tauri_app {
                 folders::list_directory_entries,
                 crate::commands::create_directory::create_directory,
                 folders::list_directory_with_files,
+                crate::commands::path_stat::stat_paths,
                 folders::get_file_tree,
                 folders::list_workspace_files,
                 crate::commands::workspace_search::search_workspace_content,

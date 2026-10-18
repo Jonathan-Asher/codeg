@@ -89,3 +89,15 @@ describe("upload limits", () => {
     expect(mocks.call).not.toHaveBeenCalled()
   })
 })
+
+describe("statPaths", () => {
+  it("sends the paths with their roots", async () => {
+    mocks.call.mockReset().mockResolvedValue([])
+    const { statPaths } = await loadApi()
+    await statPaths(["/w/a.png"], ["/w"])
+    expect(mocks.call).toHaveBeenCalledWith("stat_paths", {
+      paths: ["/w/a.png"],
+      rootPaths: ["/w"],
+    })
+  })
+})
