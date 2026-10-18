@@ -593,6 +593,10 @@
       "chat_text_zoom_reset": {
         "title": "Chat-Textgröße zurücksetzen",
         "description": "Den Gesprächstext auf 100% zurücksetzen"
+      },
+      "read_last_reply": {
+        "title": "Letzte Antwort vorlesen",
+        "description": "Die neueste Antwort der aktuellen Unterhaltung vorlesen oder das Vorlesen beenden"
       }
     }
   },
@@ -3771,6 +3775,10 @@
         "forkFromHere": "Ab hier verzweigen",
         "forkBusy": "Dieser Agent kann nur zwischen Zügen verzweigen",
         "forkNotReady": "Von dieser Antwort kann noch nicht verzweigt werden – bitte gleich erneut versuchen",
+        "readAloud": "Vorlesen",
+        "stopReading": "Vorlesen beenden",
+        "pauseReading": "Vorlesen pausieren",
+        "resumeReading": "Vorlesen fortsetzen",
         "editMessage": "Nachricht bearbeiten",
         "editBusy": "Bearbeiten nicht möglich, während ein Zug läuft",
         "editQueued": "Bearbeiten nicht möglich, solange Nachrichten in der Warteschlange warten",
@@ -3789,6 +3797,8 @@
         "selectionCopy": "Text kopieren",
         "selectionCopied": "Kopiert",
         "selectionCopyFailed": "Kopieren fehlgeschlagen",
+        "selectionRead": "Vorlesen",
+        "selectionStop": "Stopp",
         "selectionQuote": "Zitieren",
         "selectionSaveAsNote": "Notiz",
         "selectionAsk": "Fragen",
@@ -5479,6 +5489,29 @@
     "tonePop": "Pop",
     "toneAlert": "Alarm",
     "toneDescend": "Absteigend"
+  },
+  "ReadAloud": {
+    "nothingToRead": "Hier gibt es nichts vorzulesen: nur Code, Links oder Dateipfade.",
+    "missingHebrewVoice": "Keine hebräische Stimme installiert",
+    "missingVoiceHint": "Hebräisch wird vorerst von einer anderen Stimme gelesen. Auf dem Mac fügen Sie Carmit unter Systemeinstellungen → Bedienungshilfen → Gesprochene Inhalte → Systemstimme → Stimmen verwalten hinzu."
+  },
+  "ReadAloudSettings": {
+    "title": "Vorlesen",
+    "description": "Liest Antworten mit den Systemstimmen dieses Geräts vor: Hebräisch mit der hebräischen, Englisch mit der englischen Stimme. Code, Werkzeugausgaben, Links und Dateipfade werden übersprungen.",
+    "keysHint": "Esc beendet das Vorlesen; {shortcut} liest die letzte Antwort vor.",
+    "keysHintUnbound": "Esc beendet das Vorlesen. Unter Tastenkürzel können Sie „Letzte Antwort vorlesen“ eine Taste zuweisen.",
+    "unsupported": "Dieser Browser hat keine Sprachausgabe, daher ist Vorlesen hier nicht verfügbar.",
+    "hebrewVoice": "Hebräische Stimme",
+    "englishVoice": "Englische Stimme",
+    "automatic": "Automatisch ({voice})",
+    "automaticNone": "Automatisch",
+    "noHebrewVoice": "Keine hebräische Stimme installiert. Auf dem Mac fügen Sie Carmit unter Systemeinstellungen → Bedienungshilfen → Gesprochene Inhalte → Systemstimme → Stimmen verwalten hinzu.",
+    "rate": "Sprechgeschwindigkeit",
+    "rateValue": "{rate}×",
+    "test": "Testen",
+    "stopTest": "Stopp",
+    "autoRead": "Antworten automatisch vorlesen, wenn sie fertig sind",
+    "autoReadHint": "Nur die Unterhaltung, die Sie gerade ansehen, wird vorgelesen. Standardmäßig aus."
   },
   "PushSettings": {
     "title": "iPhone-Push",

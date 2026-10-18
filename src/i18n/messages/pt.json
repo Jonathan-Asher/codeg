@@ -593,6 +593,10 @@
       "chat_text_zoom_reset": {
         "title": "Redefinir o tamanho do texto do chat",
         "description": "Restaura o texto da conversa para 100%"
+      },
+      "read_last_reply": {
+        "title": "Ler a última resposta",
+        "description": "Lê em voz alta a resposta mais recente da conversa atual, ou para a leitura"
       }
     }
   },
@@ -3771,6 +3775,10 @@
         "forkFromHere": "Bifurcar a partir daqui",
         "forkBusy": "Este agente só pode bifurcar entre turnos",
         "forkNotReady": "Ainda não é possível bifurcar a partir desta resposta; tente novamente em instantes",
+        "readAloud": "Ler em voz alta",
+        "stopReading": "Parar a leitura",
+        "pauseReading": "Pausar a leitura",
+        "resumeReading": "Retomar a leitura",
         "editMessage": "Editar mensagem",
         "editBusy": "Não é possível editar enquanto há um turno em andamento",
         "editQueued": "Não é possível editar enquanto há mensagens esperando na fila",
@@ -3789,6 +3797,8 @@
         "selectionCopy": "Copiar texto",
         "selectionCopied": "Copiado",
         "selectionCopyFailed": "Falha ao copiar",
+        "selectionRead": "Ler",
+        "selectionStop": "Parar",
         "selectionQuote": "Citar",
         "selectionSaveAsNote": "Nota",
         "selectionAsk": "Perguntar",
@@ -5479,6 +5489,29 @@
     "tonePop": "Pop",
     "toneAlert": "Alerta",
     "toneDescend": "Descendente"
+  },
+  "ReadAloud": {
+    "nothingToRead": "Nada para ler em voz alta: só código, links ou caminhos de arquivo.",
+    "missingHebrewVoice": "Nenhuma voz em hebraico instalada",
+    "missingVoiceHint": "Por enquanto o hebraico é lido por outra voz. No Mac, adicione Carmit em Ajustes do Sistema → Acessibilidade → Conteúdo Falado → Voz do sistema → Gerenciar Vozes."
+  },
+  "ReadAloudSettings": {
+    "title": "Leitura em voz alta",
+    "description": "Lê as respostas com as vozes do sistema deste dispositivo: o hebraico com a voz hebraica e o inglês com a inglesa. Código, saída de ferramentas, links e caminhos de arquivo são ignorados.",
+    "keysHint": "Esc para a leitura; {shortcut} lê a última resposta.",
+    "keysHintUnbound": "Esc para a leitura. Atribua uma tecla a “Ler a última resposta” em Atalhos.",
+    "unsupported": "Este navegador não tem síntese de voz, então a leitura em voz alta não está disponível aqui.",
+    "hebrewVoice": "Voz em hebraico",
+    "englishVoice": "Voz em inglês",
+    "automatic": "Automática ({voice})",
+    "automaticNone": "Automática",
+    "noHebrewVoice": "Nenhuma voz em hebraico instalada. No Mac, adicione Carmit em Ajustes do Sistema → Acessibilidade → Conteúdo Falado → Voz do sistema → Gerenciar Vozes.",
+    "rate": "Velocidade da fala",
+    "rateValue": "{rate}×",
+    "test": "Testar",
+    "stopTest": "Parar",
+    "autoRead": "Ler as respostas automaticamente quando terminarem",
+    "autoReadHint": "Só a conversa que você está vendo é lida. Desativado por padrão."
   },
   "PushSettings": {
     "title": "Push no iPhone",

@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/tooltip"
 import { useMessageScroll } from "@/components/message/message-scroll-context"
 import { useModelLabel } from "@/components/message/model-label-context"
+import { ReadAloudButton } from "./read-aloud-button"
 import { useCreateTaskFromMessage } from "./use-create-task-from-message"
 import { formatTokenCount } from "@/lib/token-format"
 import { cn, copyTextToClipboard } from "@/lib/utils"
@@ -46,6 +47,9 @@ interface TurnStatsProps {
    * name the backend can resolve yet (`unnamed` — the post-turn reparse fills
    * it in a moment later). Only read while `forkDisabled`. */
   forkDisabledReason?: "busy" | "unnamed"
+  /** Names this reply to the read-aloud player. Undefined hides "Read
+   * aloud" — the surface has no stable id for the reply. */
+  readAloudId?: string
 }
 
 const iconButtonClass =
@@ -63,6 +67,7 @@ export function TurnStats({
   onForkFromHere,
   forkDisabled = false,
   forkDisabledReason = "busy",
+  readAloudId,
 }: TurnStatsProps) {
   const locale = useLocale()
   const t = useTranslations("Folder.chat.messageList")
@@ -240,6 +245,13 @@ export function TurnStats({
                 : t("forkFromHere")}
             </TooltipContent>
           </Tooltip>
+        )}
+        {hasCopy && readAloudId && (
+          <ReadAloudButton
+            id={readAloudId}
+            text={copyText}
+            buttonClassName={iconButtonClass}
+          />
         )}
         {displayModels.length > 0 && (
           <Tooltip>

@@ -120,6 +120,16 @@ import { usePageHandoffName } from "@/lib/browser/use-page-handoff-name"
 import { unescapeComposerText } from "@/lib/composer-copy-text"
 import { useStickToBottomContext } from "use-stick-to-bottom"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
+import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
+import {
+  isShortcutRecorderArmed,
+  matchShortcutEvent,
+} from "@/lib/keyboard-shortcuts"
+import { useReadAloudPrefs } from "@/lib/read-aloud/prefs"
+import {
+  useReadAloudActions,
+  useReadAloudSupported,
+} from "@/lib/read-aloud/use-read-aloud"
 import { MarkdownImageProvider } from "@/components/ai-elements/markdown-local-image"
 
 interface MessageListViewProps {
@@ -563,6 +573,31 @@ function extractTextFromParts(parts: AdaptedContentPart[]): string {
 }
 
 type AssistantTurnItem = Extract<ThreadRenderItem, { kind: "turn" }>
+
+/** The read-aloud id of a reply: its conversation and its (first) turn id. */
+function readAloudReplyId(scope: string, group: ResolvedMessageGroup): string {
+  return `${scope}:${group.id}`
+}
+
+/**
+ * The newest finished assistant reply with something to read, as "Read last
+ * reply" and the auto-read after a turn see it. A reply still being written
+ * is passed over for the one before it.
+ */
+export function lastFinishedReply(
+  items: readonly ThreadRenderItem[],
+  scope: string
+): { id: string; text: string } | null {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]
+    if (item.kind !== "turn" || item.group.role !== "assistant") continue
+    if (!item.isResponseComplete) continue
+    const text = extractTextFromParts(item.group.parts)
+    if (!text.trim()) continue
+    return { id: readAloudReplyId(scope, item.group), text }
+  }
+  return null
+}
 
 /**
  * Cache entry for one merged assistant run, keyed on the run's FIRST member
@@ -1085,6 +1120,7 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
   editKey,
   editBlocked = null,
   onStartEdit,
+  readAloudScope,
 }: {
   group: ResolvedMessageGroup
   dimmed?: boolean
@@ -1111,6 +1147,8 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
   /** Why the Edit button is greyed out, or null when it can be clicked. */
   editBlocked?: UserEditBlock | null
   onStartEdit?: (itemKey: string) => void
+  /** Prefix of this transcript's read-aloud ids; absent → no "Read aloud". */
+  readAloudScope?: string
 }) {
   if (group.role === "system") {
     return <CollapsibleSystemMessage parts={group.parts} />
@@ -1177,6 +1215,9 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
           previousUserIndex={previousUserIndex}
           isResponseComplete={isResponseComplete}
           copyText={extractTextFromParts(group.parts)}
+          readAloudId={
+            readAloudScope ? readAloudReplyId(readAloudScope, group) : undefined
+          }
           completedAt={group.completed_at}
           forkDisabled={forkDisabled || forkPointUnnamed}
           forkDisabledReason={forkPointUnnamed ? "unnamed" : "busy"}
@@ -1544,6 +1585,69 @@ export function MessageListView({
       prev.roundOpen === open ? prev : { ...prev, roundOpen: open }
     )
   }, [])
+
+  // --- Read aloud -----------------------------------------------------------
+  // Every reply is named `<scope>:<turn id>` to the window's one player, so a
+  // footer can tell that the reply being read is its own. No scope where the
+  // runtime cannot speak: the footers then show no "Read aloud" at all.
+  const readAloudSupported = useReadAloudSupported()
+  const readAloudScope = readAloudSupported
+    ? `conversation-${conversationId}`
+    : undefined
+  const readAloud = useReadAloudActions()
+  const { autoRead } = useReadAloudPrefs()
+  const { shortcuts } = useShortcutSettings()
+  const readLastReplyShortcut = shortcuts.read_last_reply
+  const threadItemsRef = useRef(threadItems)
+  useEffect(() => {
+    threadItemsRef.current = threadItems
+  }, [threadItems])
+
+  // "Read last reply": the active transcript only, like find-in-chat, and
+  // only when nothing else took the key. A second press on the same reply
+  // stops it.
+  useEffect(() => {
+    if (!isActive || !readAloudScope || !readLastReplyShortcut) return
+    const scope = readAloudScope
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || isShortcutRecorderArmed()) return
+      if (!matchShortcutEvent(e, readLastReplyShortcut)) return
+      const target = e.target as Element | null
+      if (target?.closest?.('[data-terminal-panel-region="true"]')) return
+      e.preventDefault()
+      const reply = lastFinishedReply(threadItemsRef.current, scope)
+      if (reply) readAloud.toggle(reply.id, reply.text)
+    }
+    document.addEventListener("keydown", onKeyDown)
+    return () => document.removeEventListener("keydown", onKeyDown)
+  }, [isActive, readAloudScope, readLastReplyShortcut, readAloud])
+
+  // "Read replies automatically": armed while a reply is being written, with
+  // what the newest finished reply was then, and fired once the turn settles
+  // on a reply that differs from it — so opening a conversation, paging in
+  // history or a refetch never starts talking. A background tab stays quiet.
+  const replyBusy = lastAssistantRunning || connStatus === "prompting"
+  const autoReadArmRef = useRef<string | null | undefined>(undefined)
+  useEffect(() => {
+    if (!readAloudScope) return
+    const fingerprint = (reply: { id: string; text: string } | null) =>
+      reply ? `${reply.id}\u0000${reply.text.length}` : null
+    if (replyBusy) {
+      if (autoReadArmRef.current === undefined) {
+        autoReadArmRef.current = fingerprint(
+          lastFinishedReply(threadItems, readAloudScope)
+        )
+      }
+      return
+    }
+    const before = autoReadArmRef.current
+    if (before === undefined) return
+    autoReadArmRef.current = undefined
+    if (!autoRead || !isActive) return
+    const reply = lastFinishedReply(threadItems, readAloudScope)
+    if (!reply || fingerprint(reply) === before) return
+    readAloud.read(reply.id, reply.text)
+  }, [replyBusy, threadItems, readAloudScope, autoRead, isActive, readAloud])
 
   const historicalPlanEntries = useMemo(
     () => extractLatestPlanEntriesFromMessages(nonStreamingAdapted),
@@ -1965,6 +2069,7 @@ export function MessageListView({
                   // too: one edit at a time.
                   editBlocked={editing?.saving ? "busy" : editBlocked}
                   onStartEdit={handleStartEdit}
+                  readAloudScope={readAloudScope}
                 />
               )}
               {canRetry && (
@@ -2026,6 +2131,7 @@ export function MessageListView({
       handleStartEdit,
       handleCancelEdit,
       handleSaveEdit,
+      readAloudScope,
     ]
   )
 

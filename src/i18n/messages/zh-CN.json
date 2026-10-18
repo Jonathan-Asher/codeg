@@ -593,6 +593,10 @@
       "chat_text_zoom_reset": {
         "title": "重置聊天文字大小",
         "description": "把会话文字恢复为 100%"
+      },
+      "read_last_reply": {
+        "title": "朗读最新回复",
+        "description": "朗读当前对话中最新的回复，或停止朗读"
       }
     }
   },
@@ -3771,6 +3775,10 @@
         "forkFromHere": "从此处分叉",
         "forkBusy": "此智能体只能在回合之间分叉",
         "forkNotReady": "这条回复暂时还不能作为分叉点，请稍后再试",
+        "readAloud": "朗读",
+        "stopReading": "停止朗读",
+        "pauseReading": "暂停朗读",
+        "resumeReading": "继续朗读",
         "editMessage": "编辑消息",
         "editBusy": "当前有回合正在进行，暂不可编辑",
         "editQueued": "队列中还有待发送的消息，暂不可编辑",
@@ -3789,6 +3797,8 @@
         "selectionCopy": "复制文本",
         "selectionCopied": "已复制",
         "selectionCopyFailed": "复制失败",
+        "selectionRead": "朗读",
+        "selectionStop": "停止",
         "selectionQuote": "引用",
         "selectionSaveAsNote": "存为便签",
         "selectionAsk": "提问",
@@ -5479,6 +5489,29 @@
     "tonePop": "轻点",
     "toneAlert": "警示",
     "toneDescend": "下行音"
+  },
+  "ReadAloud": {
+    "nothingToRead": "没有可朗读的内容：只有代码、链接或文件路径。",
+    "missingHebrewVoice": "未安装希伯来语语音",
+    "missingVoiceHint": "希伯来语暂时由其他语音朗读。在 Mac 上，可在“系统设置 → 辅助功能 → 朗读内容 → 系统语音 → 管理语音”中添加 Carmit。"
+  },
+  "ReadAloudSettings": {
+    "title": "朗读",
+    "description": "使用本设备的系统语音朗读回复：希伯来语用希伯来语语音，英语用英语语音。代码、工具输出、链接和文件路径会被跳过。",
+    "keysHint": "按 Esc 停止朗读；按 {shortcut} 朗读最新回复。",
+    "keysHintUnbound": "按 Esc 停止朗读。可在“快捷键”中为“朗读最新回复”设置按键。",
+    "unsupported": "此浏览器不支持语音合成，因此无法在此使用朗读。",
+    "hebrewVoice": "希伯来语语音",
+    "englishVoice": "英语语音",
+    "automatic": "自动（{voice}）",
+    "automaticNone": "自动",
+    "noHebrewVoice": "未安装希伯来语语音。在 Mac 上，可在“系统设置 → 辅助功能 → 朗读内容 → 系统语音 → 管理语音”中添加 Carmit。",
+    "rate": "语速",
+    "rateValue": "{rate}×",
+    "test": "试听",
+    "stopTest": "停止",
+    "autoRead": "回复完成后自动朗读",
+    "autoReadHint": "只朗读当前查看的对话。默认关闭。"
   },
   "PushSettings": {
     "title": "iPhone 推送",

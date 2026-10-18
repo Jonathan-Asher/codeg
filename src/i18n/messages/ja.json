@@ -593,6 +593,10 @@
       "chat_text_zoom_reset": {
         "title": "チャットの文字サイズをリセット",
         "description": "会話の文字を 100% に戻します"
+      },
+      "read_last_reply": {
+        "title": "最新の返信を読み上げ",
+        "description": "現在の会話の最新の返信を読み上げる、または読み上げを停止する"
       }
     }
   },
@@ -3771,6 +3775,10 @@
         "forkFromHere": "ここから分岐",
         "forkBusy": "このエージェントはターンの合間にしか分岐できません",
         "forkNotReady": "この返信からはまだ分岐できません。少し待ってからお試しください",
+        "readAloud": "読み上げ",
+        "stopReading": "読み上げを停止",
+        "pauseReading": "読み上げを一時停止",
+        "resumeReading": "読み上げを再開",
         "editMessage": "メッセージを編集",
         "editBusy": "ターンの実行中は編集できません",
         "editQueued": "キューにメッセージが待機している間は編集できません",
@@ -3789,6 +3797,8 @@
         "selectionCopy": "テキストをコピー",
         "selectionCopied": "コピーしました",
         "selectionCopyFailed": "コピーに失敗しました",
+        "selectionRead": "読み上げ",
+        "selectionStop": "停止",
         "selectionQuote": "引用",
         "selectionSaveAsNote": "メモに保存",
         "selectionAsk": "質問",
@@ -5479,6 +5489,29 @@
     "tonePop": "ポップ",
     "toneAlert": "アラート",
     "toneDescend": "下降音"
+  },
+  "ReadAloud": {
+    "nothingToRead": "読み上げる内容がありません（コード、リンク、ファイルパスのみです）。",
+    "missingHebrewVoice": "ヘブライ語の音声がインストールされていません",
+    "missingVoiceHint": "当面、ヘブライ語はほかの音声で読み上げられます。Mac では システム設定 → アクセシビリティ → 読み上げコンテンツ → システムの声 → 声を管理 で Carmit を追加してください。"
+  },
+  "ReadAloudSettings": {
+    "title": "読み上げ",
+    "description": "このデバイスのシステム音声で返信を読み上げます。ヘブライ語はヘブライ語の音声、英語は英語の音声で読みます。コード、ツールの出力、リンク、ファイルパスは読み飛ばします。",
+    "keysHint": "Esc で読み上げを停止、{shortcut} で最新の返信を読み上げます。",
+    "keysHintUnbound": "Esc で読み上げを停止します。「最新の返信を読み上げ」のキーはショートカットで割り当てられます。",
+    "unsupported": "このブラウザには音声合成がないため、ここでは読み上げを使用できません。",
+    "hebrewVoice": "ヘブライ語の音声",
+    "englishVoice": "英語の音声",
+    "automatic": "自動（{voice}）",
+    "automaticNone": "自動",
+    "noHebrewVoice": "ヘブライ語の音声がインストールされていません。Mac では システム設定 → アクセシビリティ → 読み上げコンテンツ → システムの声 → 声を管理 で Carmit を追加してください。",
+    "rate": "読み上げ速度",
+    "rateValue": "{rate}×",
+    "test": "テスト",
+    "stopTest": "停止",
+    "autoRead": "返信が完了したら自動で読み上げる",
+    "autoReadHint": "表示中の会話だけが読み上げられます。既定ではオフです。"
   },
   "PushSettings": {
     "title": "iPhone プッシュ",
