@@ -60,7 +60,7 @@ pub struct DownloadTicket {
     pub expires_at: Instant,
 }
 
-/// One file a `<video>` element may stream, and how long it may do so.
+/// One video or audio file a player may stream, and how long it may do so.
 #[derive(Clone, Debug)]
 pub struct MediaCapability {
     pub root_path: PathBuf,

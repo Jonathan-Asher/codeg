@@ -777,10 +777,11 @@ pub(crate) async fn stream_file_response(
 }
 
 // ---------------------------------------------------------------------------
-// Media streaming (video preview)
+// Media streaming (video preview, audio playback)
 // ---------------------------------------------------------------------------
 
 const MEDIA_LINK_EXPIRED: &str = "Media link is invalid or expired";
+const MEDIA_TYPE_REFUSED: &str = "Only video and audio files can be streamed";
 
 fn inline_header(name: &str) -> Option<HeaderValue> {
     HeaderValue::from_str(&format!(
@@ -793,8 +794,8 @@ fn inline_header(name: &str) -> Option<HeaderValue> {
 
 /// Mint a streaming capability for one media file. Same path rules as a
 /// single-file download (relative, no `..`, lexically inside the root), and
-/// only for a video extension — the byte endpoint answers with the type the
-/// extension implies, so it must never be handed an HTML file.
+/// only for a video or audio extension — the byte endpoint answers with the
+/// type the extension implies, so it must never be handed an HTML file.
 pub(crate) async fn issue_media_capability_core(
     manager: &crate::workspace_transfer::WorkspaceTransferManager,
     params: MediaCapabilityRequest,
@@ -805,9 +806,8 @@ pub(crate) async fn issue_media_capability_core(
         .and_then(|s| s.to_str())
         .unwrap_or("media")
         .to_string();
-    let content_type = media_content_type(&filename).ok_or_else(|| {
-        AppCommandError::invalid_input("Only video files can be streamed for preview")
-    })?;
+    let content_type = media_content_type(&filename)
+        .ok_or_else(|| AppCommandError::invalid_input(MEDIA_TYPE_REFUSED))?;
     let size = tokio::fs::metadata(&target)
         .await
         .map_err(AppCommandError::io)?
@@ -854,7 +854,8 @@ pub async fn revoke_media_capability(
 }
 
 /// `GET /api/workspace_media/{token}` — public: the capability in the path is
-/// the credential (a `<video src>` cannot send a Bearer header).
+/// the credential (a `<video src>` or native player cannot send a Bearer
+/// header).
 pub async fn serve_media(
     Extension(state): Extension<Arc<AppState>>,
     AxumPath(token): AxumPath<String>,
@@ -1445,18 +1446,26 @@ mod tests {
     async fn mint_clip(
         manager: &crate::workspace_transfer::WorkspaceTransferManager,
     ) -> (tempfile::TempDir, MediaCapabilityIssued) {
+        mint_media(manager, "clip.mp4").await
+    }
+
+    /// Write `media/<name>` (ten bytes, `0`..`9`) and mint a capability for it.
+    async fn mint_media(
+        manager: &crate::workspace_transfer::WorkspaceTransferManager,
+        name: &str,
+    ) -> (tempfile::TempDir, MediaCapabilityIssued) {
         let root = tempfile::tempdir().unwrap();
         tokio::fs::create_dir(root.path().join("media"))
             .await
             .unwrap();
-        tokio::fs::write(root.path().join("media/clip.mp4"), b"0123456789")
+        tokio::fs::write(root.path().join("media").join(name), b"0123456789")
             .await
             .unwrap();
         let issued = issue_media_capability_core(
             manager,
             MediaCapabilityRequest {
                 root_path: root.path().to_string_lossy().to_string(),
-                path: "media/clip.mp4".to_string(),
+                path: format!("media/{name}"),
             },
         )
         .await
@@ -1608,7 +1617,98 @@ mod tests {
         // Missing files and directories are refused.
         assert!(mint("missing.mp4".to_string()).await.is_err());
         // Non-media files are refused, so the endpoint can't serve HTML.
-        assert!(mint("page.html".to_string()).await.is_err());
+        let refused = mint("page.html".to_string()).await.unwrap_err();
+        assert_eq!(refused.message, MEDIA_TYPE_REFUSED);
+    }
+
+    #[tokio::test]
+    async fn audio_capability_streams_with_its_own_type() {
+        let manager = media_manager();
+        for (name, content_type) in [
+            ("song.mp3", "audio/mpeg"),
+            ("memo.m4a", "audio/mp4"),
+            ("take.wav", "audio/wav"),
+            ("voice.caf", "audio/x-caf"),
+            ("call.opus", "audio/ogg"),
+        ] {
+            let (_root, issued) = mint_media(&manager, name).await;
+            assert_eq!(issued.content_type, content_type, "{name}");
+            assert_eq!(issued.size, 10, "{name}");
+            assert_eq!(
+                issued.url,
+                format!("/api/workspace_media/{}/{name}", issued.token)
+            );
+            let (status, headers, body) = fetch(&manager, &issued.token, None).await;
+            assert_eq!(status, StatusCode::OK, "{name}");
+            assert_eq!(body, b"0123456789", "{name}");
+            assert_eq!(header_str(&headers, header::CONTENT_TYPE), content_type);
+            assert_eq!(header_str(&headers, header::ACCEPT_RANGES), "bytes");
+        }
+    }
+
+    #[tokio::test]
+    async fn audio_honours_range_requests() {
+        let manager = media_manager();
+        let (_root, issued) = mint_media(&manager, "song.mp3").await;
+
+        let (status, headers, body) = fetch(&manager, &issued.token, Some("bytes=2-5")).await;
+        assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+        assert_eq!(body, b"2345");
+        assert_eq!(header_str(&headers, header::CONTENT_RANGE), "bytes 2-5/10");
+        assert_eq!(header_str(&headers, header::CONTENT_LENGTH), "4");
+        assert_eq!(header_str(&headers, header::CONTENT_TYPE), "audio/mpeg");
+
+        // AVPlayer probes with `bytes=0-1` before it plays.
+        let (status, headers, body) = fetch(&manager, &issued.token, Some("bytes=0-1")).await;
+        assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+        assert_eq!(body, b"01");
+        assert_eq!(header_str(&headers, header::CONTENT_RANGE), "bytes 0-1/10");
+
+        let (status, _, body) = fetch(&manager, &issued.token, Some("bytes=7-")).await;
+        assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+        assert_eq!(body, b"789");
+
+        let (status, _, body) = fetch(&manager, &issued.token, Some("bytes=-3")).await;
+        assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+        assert_eq!(body, b"789");
+
+        let (status, headers, _) = fetch(&manager, &issued.token, Some("bytes=10-")).await;
+        assert_eq!(status, StatusCode::RANGE_NOT_SATISFIABLE);
+        assert_eq!(header_str(&headers, header::CONTENT_RANGE), "bytes */10");
+
+        // The desktop URI-scheme transport slices audio the same way.
+        let response = buffered_media_response(&manager, &issued.token, Some("bytes=3-"), 4).await;
+        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(response.body(), b"3456");
+        assert_eq!(
+            header_str(response.headers(), header::CONTENT_RANGE),
+            "bytes 3-6/10"
+        );
+        assert_eq!(
+            header_str(response.headers(), header::CONTENT_TYPE),
+            "audio/mpeg"
+        );
+    }
+
+    #[tokio::test]
+    async fn images_are_not_streamable_media() {
+        let manager = media_manager();
+        let root = tempfile::tempdir().unwrap();
+        for name in ["logo.svg", "photo.png"] {
+            tokio::fs::write(root.path().join(name), b"<svg onload=alert(1)>")
+                .await
+                .unwrap();
+            let refused = issue_media_capability_core(
+                &manager,
+                MediaCapabilityRequest {
+                    root_path: root.path().to_string_lossy().to_string(),
+                    path: name.to_string(),
+                },
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(refused.message, MEDIA_TYPE_REFUSED, "{name}");
+        }
     }
 
     #[tokio::test]
