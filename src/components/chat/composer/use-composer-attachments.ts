@@ -15,9 +15,11 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
 import {
+  getUploadLimits,
   isEmptyAttachmentError,
   readFileBase64,
   uploadAttachment,
+  uploadLimitFor,
   uploadLocalPathToRemote,
   UPLOAD_I18N_KEY_NOT_A_FILE,
   UPLOAD_I18N_KEY_QUOTA_EXCEEDED,
@@ -435,14 +437,26 @@ export function useComposerAttachments({
   const uploadAndAppendFiles = useCallback(
     async (files: File[]) => {
       if (files.length === 0) return
-      const oversized = files.filter((f) => f.size > UPLOAD_MAX_BYTES)
-      const accepted = files.filter((f) => f.size <= UPLOAD_MAX_BYTES)
-      const limitMb = Math.round(UPLOAD_MAX_BYTES / (1024 * 1024))
-      if (oversized.length > 0) {
+      // Video and audio get the server's larger media cap (they are linked,
+      // never inlined); everything else keeps the per-file cap.
+      const limits = await getUploadLimits()
+      const oversizedByLimit = new Map<number, string[]>()
+      const accepted: File[] = []
+      for (const file of files) {
+        const limit = uploadLimitFor(file, limits)
+        if (file.size <= limit) {
+          accepted.push(file)
+          continue
+        }
+        const names = oversizedByLimit.get(limit) ?? []
+        names.push(file.name)
+        oversizedByLimit.set(limit, names)
+      }
+      for (const [limit, names] of oversizedByLimit) {
         toast.error(
           tAttach("attachUploadTooLarge", {
-            limit: limitMb,
-            names: oversized.map((f) => f.name).join(", "),
+            limit: Math.round(limit / (1024 * 1024)),
+            names: names.join(", "),
           })
         )
       }

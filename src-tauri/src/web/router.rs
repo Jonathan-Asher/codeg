@@ -5,11 +5,11 @@ use axum::{
     http::{StatusCode, Uri},
     middleware::{self, Next},
     response::IntoResponse,
-    routing::{any, get, post},
+    routing::{any, get, post, put},
     Json, Router,
 };
 
-use crate::web::handlers::files::UPLOAD_MAX_BYTES;
+use crate::web::handlers::files::upload_limits;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -654,16 +654,44 @@ pub fn build_router(
         )
         .route(
             "/upload_attachment",
-            // `UPLOAD_MAX_BYTES` is the *file payload* limit; the raw
-            // multipart body also carries boundary markers, the
-            // `Content-Disposition` headers, and the `session_id` field —
-            // ~256-512 bytes of overhead. Without this layer, axum's default
-            // 2MiB `DefaultBodyLimit` would reject anything bigger before our
-            // handler ever sees a chunk. Pad by 64KiB so the handler's own
+            // The per-file caps (`UPLOAD_MAX_BYTES`, and the larger one for
+            // video/audio) are *file payload* limits; the raw multipart body
+            // also carries boundary markers, the `Content-Disposition`
+            // headers, and the `session_id` field. Without this layer, axum's
+            // default 2MiB `DefaultBodyLimit` would reject anything bigger
+            // before our handler ever sees a chunk. The body limit is the
+            // largest cap plus 64KiB, so the handler's own per-type
             // chunk-summing check (in `files.rs`) stays the authoritative
-            // size boundary.
-            post(handlers::files::upload_attachment)
-                .layer(DefaultBodyLimit::max(UPLOAD_MAX_BYTES as usize + 64 * 1024)),
+            // size boundary. The handler streams to disk either way.
+            post(handlers::files::upload_attachment).layer(DefaultBodyLimit::max(
+                upload_limits().multipart_body_limit(),
+            )),
+        )
+        .route("/upload_limits", post(handlers::files::upload_limits_info))
+        // Resumable form of `/upload_attachment` (see
+        // `handlers::resumable_upload`). The chunk body is read as a raw
+        // stream and bounded by the size declared at create.
+        .route(
+            "/upload_attachment_create",
+            post(handlers::resumable_upload::create_upload),
+        )
+        .route(
+            "/upload_attachment_chunk",
+            put(handlers::resumable_upload::upload_chunk)
+                .post(handlers::resumable_upload::upload_chunk)
+                .layer(DefaultBodyLimit::disable()),
+        )
+        .route(
+            "/upload_attachment_status",
+            post(handlers::resumable_upload::upload_status),
+        )
+        .route(
+            "/upload_attachment_complete",
+            post(handlers::resumable_upload::complete_upload),
+        )
+        .route(
+            "/upload_attachment_cancel",
+            post(handlers::resumable_upload::cancel_upload),
         )
         // ─── Workspace files (web upload/download) ───
         //

@@ -313,29 +313,36 @@ pub async fn finalize_into_bucket(
     }
 }
 
-/// Best-effort cleanup of a staging file when the upload errored out.
-/// Failures are intentional to ignore — the file may have already been
-/// removed (or never created), and a stale temp is not a correctness
+/// Best-effort cleanup of a staging file when the upload errored out or was
+/// abandoned. Failures are intentional to ignore — the file may have already
+/// been removed (or never created), and a stale temp is not a correctness
 /// issue. On Unix this routes through `unlinkat` so the cleanup itself
-/// can't be redirected by a swap of the parent directory.
-///
-/// Routed through `spawn_blocking` for the same reason as
-/// `create_staging_file`.
-pub async fn remove_staging_best_effort(tmp_dir: &Path, staging_name: &str) {
+/// can't be redirected by a swap of the parent directory. Blocking: see
+/// [`remove_staging_detached`] for async and `Drop` callers.
+pub fn remove_staging_blocking(tmp_dir: &Path, staging_name: &str) {
     #[cfg(unix)]
     {
-        let tmp_dir = tmp_dir.to_path_buf();
-        let staging_name = staging_name.to_string();
-        let _ = tokio::task::spawn_blocking(move || {
-            if let Ok(tmp_fd) = unix::open_dir_nofollow(&tmp_dir) {
-                unix::unlink_at_best_effort(&tmp_fd, &staging_name);
-            }
-        })
-        .await;
+        if let Ok(tmp_fd) = unix::open_dir_nofollow(tmp_dir) {
+            unix::unlink_at_best_effort(&tmp_fd, staging_name);
+        }
     }
     #[cfg(not(unix))]
     {
-        let _ = tokio::fs::remove_file(tmp_dir.join(staging_name)).await;
+        let _ = std::fs::remove_file(tmp_dir.join(staging_name));
+    }
+}
+
+/// Remove a staging file from a `Drop` impl, which cannot await: hand the
+/// unlink to the blocking pool when a runtime is running, else do it inline.
+pub fn remove_staging_detached(tmp_dir: std::path::PathBuf, staging_name: String) {
+    if staging_name.is_empty() {
+        return;
+    }
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => {
+            handle.spawn_blocking(move || remove_staging_blocking(&tmp_dir, &staging_name));
+        }
+        Err(_) => remove_staging_blocking(&tmp_dir, &staging_name),
     }
 }
 

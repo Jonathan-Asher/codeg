@@ -30,6 +30,13 @@ vi.mock("@/lib/transport", () => ({
   getActiveRemoteConnectionId: () => h.remoteId,
 }))
 vi.mock("@/lib/api", () => ({
+  getUploadLimits: async () => ({
+    maxFileBytes: 20 * 1024 * 1024,
+    maxMediaBytes: 20 * 1024 * 1024,
+    maxTotalBytes: null,
+    remainingTotalBytes: null,
+  }),
+  uploadLimitFor: () => 20 * 1024 * 1024,
   isEmptyAttachmentError: () => false,
   readFileBase64: (...args: unknown[]) => h.readFileBase64(...args),
   uploadAttachment: (...args: unknown[]) => h.uploadAttachment(...args),
