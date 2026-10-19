@@ -36,6 +36,7 @@ describe("readConnectionAttachInfo", () => {
       phase: "starting",
       startedAt: null,
       error: null,
+      poolWait: null,
     })
   })
 
@@ -55,6 +56,7 @@ describe("readConnectionAttachInfo", () => {
       phase: "resuming",
       startedAt: 1_000,
       error: null,
+      poolWait: null,
     })
   })
 
@@ -92,6 +94,7 @@ describe("readConnectionAttachInfo", () => {
       startedAt: null,
       error:
         "Claude Code connection failed: Remote HTTP request failed: operation timed out",
+      poolWait: null,
     })
   })
 

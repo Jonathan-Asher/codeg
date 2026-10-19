@@ -267,30 +267,39 @@ pub async fn acp_prompt(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<AcpPromptParams>,
 ) -> Result<Json<()>, AppCommandError> {
-    state
-        .connection_manager
-        .send_prompt_linked_with_message_id(
-            &state.db,
-            &params.connection_id,
-            params.blocks,
-            params.folder_id,
-            params.conversation_id,
-            None,
-            params.client_message_id,
-        )
-        .await
-        .map_err(|e| {
-            let message = e.to_string();
-            // A concurrent send while a turn is in flight is an expected,
-            // recoverable condition (409), not a server fault (500). The
-            // frontend re-queues the draft. Other errors stay 500.
-            match e {
-                AcpError::TurnInProgress => {
-                    AppCommandError::new(AppErrorCode::TurnInProgress, message)
-                }
-                _ => AppCommandError::task_execution_failed(message),
+    let manager = &state.connection_manager;
+    let sent = match manager.check_pool_for_prompt(&params.connection_id).await {
+        Err(e) => Err(e),
+        Ok(()) => manager
+            .send_prompt_linked_with_message_id(
+                &state.db,
+                &params.connection_id,
+                params.blocks,
+                params.folder_id,
+                params.conversation_id,
+                None,
+                params.client_message_id,
+            )
+            .await
+            .map(|_| ()),
+    };
+    sent.map_err(|e| {
+        let message = e.to_string();
+        // A concurrent send while a turn is in flight is an expected,
+        // recoverable condition (409), not a server fault (500). The
+        // frontend re-queues the draft. So is a prompt held back while the
+        // account pool is out: it stays queued until the pool has room.
+        // Other errors stay 500.
+        match e {
+            AcpError::TurnInProgress => {
+                AppCommandError::new(AppErrorCode::TurnInProgress, message)
             }
-        })?;
+            AcpError::PoolExhausted { .. } => {
+                AppCommandError::new(AppErrorCode::PoolExhausted, message)
+            }
+            _ => AppCommandError::task_execution_failed(message),
+        }
+    })?;
     Ok(Json(()))
 }
 

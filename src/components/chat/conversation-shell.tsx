@@ -24,6 +24,7 @@ import type {
   ClaudeApiRetryState,
 } from "@/contexts/acp-connections-context"
 import type { QueuedMessage } from "@/hooks/use-message-queue"
+import type { QueueNotice } from "@/components/chat/message-queue-display"
 import { ChatInput } from "@/components/chat/chat-input"
 import type { ComposerInjectContent } from "@/components/chat/message-input"
 import { PermissionDialog } from "@/components/chat/permission-dialog"
@@ -125,6 +126,8 @@ interface ConversationShellProps {
   onDeliverNow?: (text: string, blocks?: PromptInputBlock[]) => Promise<void>
   /** Pass-through: see `MessageInput.canContinue`. */
   canContinue?: boolean
+  /** Why the queue is held, shown above it (see `QueueNotice`). */
+  queueNotice?: QueueNotice | null
   onQueueReorder?: (items: QueuedMessage[]) => void
   onQueueEdit?: (id: string) => void
   onQueueDelete?: (id: string) => void
@@ -211,6 +214,7 @@ export function ConversationShell({
   heldTurnReady,
   onDeliverNow,
   canContinue,
+  queueNotice,
   onQueueReorder,
   onQueueEdit,
   onQueueDelete,
@@ -318,6 +322,7 @@ export function ConversationShell({
               heldTurnReady={heldTurnReady}
               onDeliverNow={onDeliverNow}
               canContinue={canContinue}
+              queueNotice={queueNotice}
               onQueueReorder={onQueueReorder}
               onQueueEdit={onQueueEdit}
               onQueueDelete={onQueueDelete}

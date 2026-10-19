@@ -30,6 +30,7 @@ import {
   DEFAULT_FORGE_PAGE_SIZE,
 } from "./forge-list-prefs"
 import { TurnBusyError, isTurnInProgressRejection } from "./turn-busy"
+import { PoolExhaustedError, poolHoldFromError } from "./pool-hold"
 import type { FolderThemeColor } from "./theme-presets"
 import type { FollowUpIntent } from "./task-follow-up"
 import type {
@@ -378,6 +379,10 @@ export async function acpPrompt(
     })
   } catch (e) {
     if (isTurnInProgressRejection(e)) throw new TurnBusyError()
+    // Every Claude subscription behind the account pool is at its limit: the
+    // backend held the prompt back, to go out once one frees up.
+    const hold = poolHoldFromError(e)
+    if (hold) throw new PoolExhaustedError(hold.resumesAt)
     throw e
   }
 }

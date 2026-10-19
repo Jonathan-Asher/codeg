@@ -3388,7 +3388,9 @@
           "turnFailedEmpty": "{agent} finalizó el turno sin producir ninguna respuesta.",
           "turnFailedEmptyProtocol": "{agent} produjo una salida que codeg no pudo analizar; la versión del agente podría no coincidir con el protocolo.",
           "turnFailedEmptyMetadata": "{agent} solo envió actualizaciones de estado en este turno (plan / modo / uso) y ninguna respuesta.",
-          "attachTimeout": "{agent} no terminó de abrir la sesión y se detuvo."
+          "attachTimeout": "{agent} no terminó de abrir la sesión y se detuvo.",
+          "poolExhausted": "Todas las suscripciones de Claude han alcanzado su límite",
+          "poolExhaustedUntil": "Todas las suscripciones de Claude han alcanzado su límite: la próxima se libera a las {time}"
         },
         "unableReadAgentConfig": "No se puede leer la configuración del agente: {message}",
         "connectFailedTitle": "Falló la conexión de {agent}",
@@ -3428,7 +3430,10 @@
           "resumingTitle": "Reanudando la sesión de {agent}",
           "loadingSessionTitle": "Cargando la sesión de {agent}",
           "creatingSessionTitle": "Creando la sesión de {agent}",
-          "configuringSessionTitle": "Aplicando la configuración de la sesión de {agent}"
+          "configuringSessionTitle": "Aplicando la configuración de la sesión de {agent}",
+          "poolWaitTitle": "Todas las suscripciones de Claude han alcanzado su límite",
+          "poolWaitDescription": "La próxima se libera a las {time}; la sesión se abrirá sola entonces",
+          "poolWaitDescriptionUnknown": "La sesión se abrirá sola en cuanto se libere una"
         },
         "errors": {
           "connectionFailed": "Conexión fallida",
@@ -3529,7 +3534,11 @@
         "editItem": "Editar",
         "deleteItem": "Eliminar",
         "steerItemNow": "Insertar en el turno actual",
-        "steerItemAsNote": "Enviar como nota para la próxima comprobación"
+        "steerItemAsNote": "Enviar como nota para la próxima comprobación",
+        "poolWait": "Todas las suscripciones de Claude han alcanzado su límite. Los mensajes en cola se enviarán en cuanto se libere una.",
+        "poolWaitUntil": "Todas las suscripciones de Claude han alcanzado su límite: la próxima se libera a las {time}. Los mensajes en cola se enviarán entonces.",
+        "notSent": "No enviado: la conexión con {agent} falló. Los mensajes en cola se enviarán cuando vuelva.",
+        "retry": "Reintentar"
       },
       "welcomeInputPanel": {
         "agentsSettingsPath": "Ajustes > Agentes",
@@ -4292,6 +4301,8 @@
         "loading": "Cargando la sesión de {agent}",
         "creating": "Creando una sesión de {agent}",
         "configuring": "Aplicando la configuración de la sesión de {agent}",
+        "poolWait": "Todas las suscripciones de Claude han alcanzado su límite",
+        "poolWaitUntil": "Todas las suscripciones de Claude han alcanzado su límite: la próxima se libera a las {time}",
         "elapsedSeconds": "{seconds} s",
         "elapsedMinutes": "{minutes} min {seconds} s",
         "withElapsed": "{step} · {elapsed}",

@@ -1577,6 +1577,36 @@ impl ConnectionManager {
         Ok(conn.prompt_lock.clone())
     }
 
+    /// A user's prompt to a Claude Code connection while the local account
+    /// pool has no account that can take a request: refused before it reaches
+    /// the agent (`AcpError::PoolExhausted`, with when the first account frees
+    /// up), so the client keeps it queued and sends it then. Sent anyway, it
+    /// would sit in the agent's own 429 backoff with nothing said. `Ok` for
+    /// every other agent, without a pool, or while some account has headroom.
+    pub async fn check_pool_for_prompt(&self, conn_id: &str) -> Result<(), AcpError> {
+        let state = {
+            let connections = self.connections.lock().await;
+            match connections.get(conn_id) {
+                Some(conn) => Arc::clone(&conn.state),
+                // The send itself reports a missing connection.
+                None => return Ok(()),
+            }
+        };
+        let agent_type = state.read().await.agent_type;
+        if agent_type != AgentType::ClaudeCode {
+            return Ok(());
+        }
+        match crate::commands::usage_pool::claude_pool_block().await {
+            Some(block) => Err(AcpError::PoolExhausted {
+                agent: crate::acp::registry::get_agent_meta(agent_type)
+                    .name
+                    .to_string(),
+                resumes_at: block.resumes_at,
+            }),
+            None => Ok(()),
+        }
+    }
+
     pub async fn send_prompt(
         &self,
         conn_id: &str,

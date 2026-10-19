@@ -793,3 +793,61 @@ fn each_reading_is_pushed_and_the_pool_going_away_once() {
     publish(&emitter, None);
     assert!(rx.try_recv().is_err());
 }
+
+// ─── Holding new work while the pool is out ─────────────────────────────
+
+fn every_account_out() -> PlanUsagePool {
+    pool_from(with_account(
+        "beta",
+        json!({ "quota": { "unified5h": 1.0, "unified5hReset": ms(NOW + 4 * HOUR), "unifiedStatus": "rejected" } }),
+    ))
+}
+
+#[test]
+fn new_work_waits_only_while_no_account_has_headroom() {
+    // beta serves: nothing waits.
+    assert_eq!(block_from(&fixture_pool(), NOW), None);
+    // beta at its limit too: wait for alpha's reset, the first one.
+    assert_eq!(
+        block_from(&every_account_out(), NOW),
+        Some(PoolBlock {
+            resumes_at: Some(NOW + 2 * HOUR)
+        })
+    );
+    // Once that reset has passed, the same reading lets work through.
+    assert_eq!(block_from(&every_account_out(), NOW + 2 * HOUR), None);
+}
+
+#[test]
+fn a_reading_that_cannot_tell_holds_nothing_back() {
+    let mut stale = every_account_out();
+    stale.stale = true;
+    assert_eq!(block_from(&stale, NOW), None, "a stale reading decides nothing");
+    let mut empty = every_account_out();
+    empty.accounts.clear();
+    assert_eq!(block_from(&empty, NOW), None, "no accounts, no verdict");
+    let mut off = every_account_out();
+    for account in &mut off.accounts {
+        account.enabled = false;
+    }
+    assert_eq!(block_from(&off, NOW), None, "no enabled account, no verdict");
+}
+
+#[test]
+fn every_account_failing_blocks_with_no_known_end() {
+    let mut pool = fixture_pool();
+    for account in &mut pool.accounts {
+        account.status = PoolAccountStatus::Error;
+    }
+    assert_eq!(block_from(&pool, NOW), Some(PoolBlock { resumes_at: None }));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_waiter_wakes_as_soon_as_a_reading_lands() {
+    let start = tokio::time::Instant::now();
+    let waiter = tokio::spawn(reading_changed_or(Duration::from_secs(15)));
+    tokio::task::yield_now().await;
+    READING_CHANGED.notify_waiters();
+    waiter.await.unwrap();
+    assert!(start.elapsed() < Duration::from_secs(1), "woken by the reading");
+}

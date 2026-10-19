@@ -1065,6 +1065,10 @@ static EMITTER: OnceLock<EventEmitter> = OnceLock::new();
 /// the answer.
 static FETCH_LOCK: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::Mutex::new(()));
 
+/// Wakes whoever waits for the pool ([`reading_changed_or`]) each time a new
+/// reading lands.
+static READING_CHANGED: LazyLock<tokio::sync::Notify> = LazyLock::new(tokio::sync::Notify::new);
+
 fn with_store<R>(f: impl FnOnce(&mut PoolStore) -> R) -> R {
     let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
     f(&mut store)
@@ -1126,6 +1130,7 @@ async fn refresh(min_age: Duration) -> Option<PlanUsagePool> {
     if let Some(emitter) = EMITTER.get() {
         publish(emitter, reading.as_ref());
     }
+    READING_CHANGED.notify_waiters();
     reading
 }
 
@@ -1175,26 +1180,74 @@ pub async fn run_usage_pool(emitter: EventEmitter) {
 /// weekly limit only waits for accounts with that model's headroom. `None`
 /// when no pool is polled, its reading is stale, or it can't say.
 pub(crate) async fn pool_resume_at(now: i64, named_window: Option<&str>) -> Option<i64> {
+    let reading = recent_reading(RESUME_MAX_AGE).await;
+    resume_at_from(reading.as_ref()?, now, named_window)
+}
+
+/// The held reading when it is younger than `max_age`, else a new one (or the
+/// held one, should the pool not answer within [`RESUME_REFRESH_TIMEOUT`]).
+/// `None` when no pool is polled: then nothing here decides anything.
+async fn recent_reading(max_age: Duration) -> Option<PlanUsagePool> {
     let (polled, fresh) = with_store(|store| {
         (
             store.polled,
-            store
-                .fetched_at
-                .is_some_and(|t| t.elapsed() < RESUME_MAX_AGE),
+            store.fetched_at.is_some_and(|t| t.elapsed() < max_age),
         )
     });
     if !polled {
         return None;
     }
-    let reading = if fresh {
-        with_store(|store| store.reading.clone())
-    } else {
-        match tokio::time::timeout(RESUME_REFRESH_TIMEOUT, refresh(RESUME_MAX_AGE)).await {
-            Ok(reading) => reading,
-            Err(_) => with_store(|store| store.reading.clone()),
-        }
-    };
-    resume_at_from(reading.as_ref()?, now, named_window)
+    if fresh {
+        return with_store(|store| store.reading.clone());
+    }
+    match tokio::time::timeout(RESUME_REFRESH_TIMEOUT, refresh(max_age)).await {
+        Ok(reading) => reading,
+        Err(_) => with_store(|store| store.reading.clone()),
+    }
+}
+
+// ─── Holding new Claude Code work while the pool is out ─────────────────
+
+/// How old a reading may be when it decides whether new work waits: short,
+/// so a session waiting on the pool goes on soon after an account frees up.
+const GATE_MAX_AGE: Duration = Duration::from_secs(10);
+
+/// The pool has no enabled account that can take a request, so a Claude
+/// Code request sent now would only meet the pool's 429 and the CLI's own
+/// retry backoff — which held sessions on "applying settings" and prompts in
+/// the queue for minutes, with nothing said. See [`claude_pool_block`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PoolBlock {
+    /// When the first held-back account frees up (epoch seconds), if known.
+    pub resumes_at: Option<i64>,
+}
+
+/// [`claude_pool_block`]'s decision on a given reading: blocked only on a
+/// good, non-empty reading in which no enabled account has headroom. A stale
+/// or failed reading decides nothing, so work goes ahead as it would without
+/// a pool.
+pub(crate) fn block_from(pool: &PlanUsagePool, now: i64) -> Option<PoolBlock> {
+    if pool.stale || pool.accounts.is_empty() {
+        return None;
+    }
+    match pool_limit(pool, now, None)? {
+        PoolLimit::Headroom => None,
+        PoolLimit::Exhausted { resumes_at } => Some(PoolBlock { resumes_at }),
+    }
+}
+
+/// Whether new Claude Code work (opening a session, a prompt) should wait for
+/// the pool right now. `None` without a polled pool, on a reading that can't
+/// tell, or while some account has headroom: then everything goes ahead as
+/// it would without a pool.
+pub(crate) async fn claude_pool_block() -> Option<PoolBlock> {
+    let reading = recent_reading(GATE_MAX_AGE).await?;
+    block_from(&reading, now_secs())
+}
+
+/// Wait for the next pool reading, or `max`, whichever comes first.
+pub(crate) async fn reading_changed_or(max: Duration) {
+    let _ = tokio::time::timeout(max, READING_CHANGED.notified()).await;
 }
 
 /// [`pool_resume_at`]'s decision on a given reading.

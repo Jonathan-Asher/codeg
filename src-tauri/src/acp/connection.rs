@@ -1287,6 +1287,80 @@ fn attach_timeout() -> Option<std::time::Duration> {
     (secs > 0).then(|| std::time::Duration::from_secs(secs))
 }
 
+/// Default bound on the configure step alone: re-applying the saved mode and
+/// options once the session is open. Healthy, that is one or two control
+/// requests and about a second (the first one waits for the agent CLI's
+/// headless startup). The hang it bounds is a CLI whose startup requests sit
+/// in their own 429 retry backoff while every account behind it is at its
+/// limit, which used to hold configure for the whole attach ceiling.
+const DEFAULT_CONFIGURE_TIMEOUT_SECS: u64 = 45;
+
+/// Default lease on an attach slot. A healthy resume gives its slot back well
+/// within this; one still opening after it gives the slot back anyway and
+/// carries on without it, so one stuck session can keep others waiting to
+/// start for this long at most rather than for the whole attach ceiling.
+const DEFAULT_ATTACH_SLOT_LEASE_SECS: u64 = 45;
+
+/// Seconds from env var `name` (`0` = off), else `default`.
+fn secs_from_env(name: &str, default: u64) -> Option<std::time::Duration> {
+    let secs = std::env::var(name)
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(default);
+    (secs > 0).then(|| std::time::Duration::from_secs(secs))
+}
+
+/// The configure bound: `CODEG_ACP_CONFIGURE_TIMEOUT_SECS`, else
+/// [`DEFAULT_CONFIGURE_TIMEOUT_SECS`]. `0` leaves only the attach ceiling.
+/// Read once per process.
+fn configure_timeout() -> Option<std::time::Duration> {
+    static T: std::sync::OnceLock<Option<std::time::Duration>> = std::sync::OnceLock::new();
+    *T.get_or_init(|| {
+        secs_from_env(
+            "CODEG_ACP_CONFIGURE_TIMEOUT_SECS",
+            DEFAULT_CONFIGURE_TIMEOUT_SECS,
+        )
+    })
+}
+
+/// The attach-slot lease: `CODEG_ACP_ATTACH_SLOT_LEASE_SECS`, else
+/// [`DEFAULT_ATTACH_SLOT_LEASE_SECS`]. `0` holds the slot until the session
+/// is configuring. Read once per process.
+fn attach_slot_lease() -> Option<std::time::Duration> {
+    static T: std::sync::OnceLock<Option<std::time::Duration>> = std::sync::OnceLock::new();
+    *T.get_or_init(|| {
+        secs_from_env(
+            "CODEG_ACP_ATTACH_SLOT_LEASE_SECS",
+            DEFAULT_ATTACH_SLOT_LEASE_SECS,
+        )
+    })
+}
+
+/// Sleep until `at`, or forever when there is no `at`.
+async fn sleep_until_opt(at: Option<tokio::time::Instant>) {
+    match at {
+        Some(at) => tokio::time::sleep_until(at).await,
+        None => std::future::pending::<()>().await,
+    }
+}
+
+/// Sentinel for an attach stopped because the local account pool had no
+/// account that could take a request; followed by `:<resumes_at or ->`.
+/// Converted back to `AcpError::PoolExhausted` in `run_connection`.
+const POOL_EXHAUSTED_SENTINEL: &str = "__codeg_pool_exhausted__";
+
+/// Parse the `:<resumes_at>` tail a [`POOL_EXHAUSTED_SENTINEL`] carries:
+/// `None` without the sentinel, `Some(None)` when the reset is unknown.
+fn parse_pool_exhausted(raw: &str) -> Option<Option<i64>> {
+    let tail = raw.split(POOL_EXHAUSTED_SENTINEL).nth(1)?;
+    let digits: String = tail
+        .trim_start_matches(':')
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    Some(digits.parse().ok())
+}
+
 /// Why an attach step did not run to completion.
 enum AttachInterrupt {
     /// The manager dropped the connection (disconnect, idle sweep, window
@@ -1312,8 +1386,17 @@ struct AttachDriver {
     phase: AttachPhase,
     phase_started: std::time::Instant,
     /// The attach slot this connection holds (see [`AttachGate`]), handed
-    /// back the moment the session is open — or when the driver drops.
+    /// back once the session is open and only configuring is left (the heavy
+    /// part, spawning the agent and resuming, is over by then), when the
+    /// slot's lease runs out, or when the driver drops.
     permit: Option<AttachPermit>,
+    /// When the slot's lease runs out (see [`DEFAULT_ATTACH_SLOT_LEASE_SECS`]).
+    lease_until: Option<tokio::time::Instant>,
+    /// The bound on the configure step ([`configure_timeout`]).
+    configure_timeout: Option<std::time::Duration>,
+    /// The deadline of the step in flight, when it has one of its own
+    /// (configuring); the attach ceiling still applies on top.
+    step_deadline: Option<tokio::time::Instant>,
 }
 
 impl AttachDriver {
@@ -1331,9 +1414,14 @@ impl AttachDriver {
         phase_started: std::time::Instant,
         permit: Option<AttachPermit>,
     ) -> Self {
+        let now = tokio::time::Instant::now();
+        let lease_until = permit
+            .as_ref()
+            .and_then(|_| attach_slot_lease())
+            .map(|t| now + t);
         Self {
             lifeline,
-            deadline: attach_timeout().map(|t| tokio::time::Instant::now() + t),
+            deadline: attach_timeout().map(|t| now + t),
             state,
             emitter,
             conn_id,
@@ -1341,6 +1429,21 @@ impl AttachDriver {
             phase,
             phase_started,
             permit,
+            lease_until,
+            configure_timeout: configure_timeout(),
+            step_deadline: None,
+        }
+    }
+
+    /// Give the attach slot back now, if this connection still holds it.
+    /// `why` is logged; an empty one (the normal hand-back) is not.
+    fn release_slot(&mut self, why: &str) {
+        if self.permit.take().is_some() && !why.is_empty() {
+            tracing::info!(
+                "[ACP][attach] conn={} session={} attach slot released: {why}",
+                self.conn_id,
+                self.session_label,
+            );
         }
     }
 
@@ -1359,35 +1462,56 @@ impl AttachDriver {
         );
         self.phase = phase;
         self.phase_started = std::time::Instant::now();
-        if phase == AttachPhase::Ready {
-            drop(self.permit.take());
+        // Configuring is a control request or two to an agent that is already
+        // up: it holds no slot, so a configure that hangs cannot keep other
+        // sessions from starting.
+        if matches!(phase, AttachPhase::Configuring | AttachPhase::Ready) {
+            self.release_slot("");
         }
+        self.step_deadline = match phase {
+            AttachPhase::Configuring => self
+                .configure_timeout
+                .map(|t| tokio::time::Instant::now() + t),
+            _ => None,
+        };
         emit_with_state(
             &self.state,
             &self.emitter,
             AcpEvent::AttachProgress {
                 phase,
                 elapsed_ms: total_ms,
+                pool_resumes_at: None,
             },
         )
         .await;
     }
 
+    /// The deadline the step in flight runs against: the attach ceiling, or
+    /// the step's own bound when that comes first.
+    fn effective_deadline(&self) -> Option<tokio::time::Instant> {
+        match (self.deadline, self.step_deadline) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
     /// Run one attach step, unless the connection is dropped or the attach
     /// deadline passes first.
     async fn run<F: std::future::Future>(&mut self, step: F) -> Result<F::Output, AttachInterrupt> {
-        let at = self.deadline;
-        let deadline = async move {
-            match at {
-                Some(at) => tokio::time::sleep_until(at).await,
-                None => std::future::pending::<()>().await,
+        tokio::pin!(step);
+        loop {
+            let deadline = self.effective_deadline();
+            let lease = self.permit.as_ref().and(self.lease_until);
+            tokio::select! {
+                biased;
+                _ = &mut self.lifeline => return Err(AttachInterrupt::Abandoned),
+                _ = sleep_until_opt(deadline) => return Err(AttachInterrupt::TimedOut),
+                out = &mut step => return Ok(out),
+                _ = sleep_until_opt(lease) => {}
             }
-        };
-        tokio::select! {
-            biased;
-            _ = &mut self.lifeline => Err(AttachInterrupt::Abandoned),
-            _ = deadline => Err(AttachInterrupt::TimedOut),
-            out = step => Ok(out),
+            // The lease ran out with the step still in flight: the session
+            // goes on opening, just no longer at the expense of others.
+            self.release_slot("still opening when the slot's lease ran out");
         }
     }
 
@@ -1418,6 +1542,28 @@ impl AttachDriver {
                     attach_step_label(self.phase),
                     elapsed_ms
                 );
+                // Behind an account pool with no account left that can take a
+                // request, that is why it hung (the agent sits in its own 429
+                // backoff); say so, so the client waits for the pool instead
+                // of pointing at the user's hooks.
+                let agent_type = self.state.read().await.agent_type;
+                if agent_type == AgentType::ClaudeCode {
+                    if let Some(block) = crate::commands::usage_pool::claude_pool_block().await {
+                        tracing::warn!(
+                            "[ACP][attach] conn={} session={} the account pool has no account \
+                             with headroom (first frees at {:?})",
+                            self.conn_id,
+                            self.session_label,
+                            block.resumes_at
+                        );
+                        return Err(agent_client_protocol::util::internal_error(format!(
+                            "{POOL_EXHAUSTED_SENTINEL}:{}",
+                            block
+                                .resumes_at
+                                .map_or_else(|| "-".to_string(), |t| t.to_string())
+                        )));
+                    }
+                }
                 Err(agent_client_protocol::util::internal_error(format!(
                     "{ATTACH_TIMEOUT_SENTINEL}:{}:{}",
                     self.phase.as_str(),
@@ -1447,6 +1593,7 @@ fn parse_attach_timeout(raw: &str) -> Option<(String, u64)> {
 fn attach_step_label(phase: AttachPhase) -> &'static str {
     match phase {
         AttachPhase::Queued => "queued for an attach slot",
+        AttachPhase::PoolWait => "waiting for an account pool with headroom",
         AttachPhase::Starting => "spawn + initialize",
         AttachPhase::Resuming => "session/resume",
         AttachPhase::Loading => "session/load",
@@ -1461,6 +1608,7 @@ fn attach_step_label(phase: AttachPhase) -> &'static str {
 fn attach_next_label(phase: AttachPhase) -> &'static str {
     match phase {
         AttachPhase::Queued => "queued",
+        AttachPhase::PoolWait => "waiting for the account pool",
         AttachPhase::Starting => "spawning the agent",
         AttachPhase::Resuming => "session/resume sent",
         AttachPhase::Loading => "session/load sent",
@@ -1616,6 +1764,147 @@ pub(crate) fn attach_slot_available() -> bool {
     attach_gate().is_none_or(|gate| gate.lock().free > 0)
 }
 
+/// How long a connection waiting on the account pool goes between looks, at
+/// most; a new pool reading wakes it sooner.
+const POOL_WAIT_RECHECK: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// How long to wait before looking at the pool again while it blocks: until
+/// just after the first account frees up when that is sooner than `max`.
+fn pool_wait_pause(
+    block: crate::commands::usage_pool::PoolBlock,
+    now: i64,
+    max: std::time::Duration,
+) -> std::time::Duration {
+    match block.resumes_at {
+        Some(at) if at > now => {
+            let until = u64::try_from(at - now).unwrap_or(u64::MAX).saturating_add(1);
+            max.min(std::time::Duration::from_secs(until))
+        }
+        _ => max,
+    }
+}
+
+/// The wait behind [`wait_for_pool_headroom`]: look at the pool (`check`),
+/// and while it blocks, tell `on_block` whenever what it says changes and
+/// pause (`pause_for`) before looking again. `Ok(true)` once it no longer
+/// blocks after having blocked, `Ok(false)` when it never blocked, `Err(())`
+/// when the connection is dropped meanwhile.
+async fn pool_wait_loop<C, CF, P, PF, B, BF>(
+    mut check: C,
+    mut pause_for: P,
+    mut on_block: B,
+    lifeline: &mut tokio::sync::oneshot::Receiver<()>,
+) -> Result<bool, ()>
+where
+    C: FnMut() -> CF,
+    CF: std::future::Future<Output = Option<crate::commands::usage_pool::PoolBlock>>,
+    P: FnMut(crate::commands::usage_pool::PoolBlock) -> PF,
+    PF: std::future::Future<Output = ()>,
+    B: FnMut(crate::commands::usage_pool::PoolBlock) -> BF,
+    BF: std::future::Future<Output = ()>,
+{
+    let mut last = None;
+    loop {
+        let Some(block) = check().await else {
+            return Ok(last.is_some());
+        };
+        if last != Some(block) {
+            on_block(block).await;
+            last = Some(block);
+        }
+        tokio::select! {
+            biased;
+            _ = &mut *lifeline => return Err(()),
+            _ = pause_for(block) => {}
+        }
+    }
+}
+
+/// Before a Claude Code session is opened behind a local account pool: while
+/// no account can take a request, wait here with nothing spawned and no
+/// attach slot held, the UI saying so (`PoolWait`, with when the first account
+/// frees up), and go on by itself once one can. Opening it anyway would only
+/// park the agent in its own 429 backoff, holding a slot. Without a pool, or
+/// with a reading that cannot tell, it returns at once and the attach goes on
+/// as before. `Err(())` when the connection was dropped while it waited, or is
+/// a speculative open (which never waits): nothing was started.
+async fn wait_for_pool_headroom(
+    state: &Arc<RwLock<SessionState>>,
+    emitter: &EventEmitter,
+    conn_id: &str,
+    session_label: &str,
+    lifeline: &mut tokio::sync::oneshot::Receiver<()>,
+) -> Result<(), ()> {
+    use crate::commands::usage_pool;
+    let (agent_type, speculative) = {
+        let s = state.read().await;
+        (s.agent_type, s.speculative)
+    };
+    if agent_type != AgentType::ClaudeCode {
+        return Ok(());
+    }
+    if speculative {
+        if usage_pool::claude_pool_block().await.is_some() {
+            tracing::info!(
+                "[ACP][attach] conn={conn_id} session={session_label} speculative open skipped: \
+                 the account pool has no account with headroom"
+            );
+            return Err(());
+        }
+        return Ok(());
+    }
+    let started = std::time::Instant::now();
+    let waited = pool_wait_loop(
+        usage_pool::claude_pool_block,
+        |block| {
+            usage_pool::reading_changed_or(pool_wait_pause(
+                block,
+                crate::commands::plan_usage::now_secs(),
+                POOL_WAIT_RECHECK,
+            ))
+        },
+        |block| {
+            let state = Arc::clone(state);
+            let emitter = emitter.clone();
+            let conn_id = conn_id.to_string();
+            let session_label = session_label.to_string();
+            async move {
+                tracing::info!(
+                    "[ACP][attach] conn={conn_id} session={session_label} waiting for the \
+                     account pool: no account has headroom (first frees at {:?})",
+                    block.resumes_at
+                );
+                let elapsed_ms = state.read().await.attach_elapsed_ms();
+                emit_with_state(
+                    &state,
+                    &emitter,
+                    AcpEvent::AttachProgress {
+                        phase: AttachPhase::PoolWait,
+                        elapsed_ms,
+                        pool_resumes_at: block.resumes_at,
+                    },
+                )
+                .await;
+            }
+        },
+        lifeline,
+    )
+    .await;
+    match waited {
+        Ok(true) => tracing::info!(
+            "[ACP][attach] conn={conn_id} session={session_label} the account pool has \
+             headroom again after {} ms; opening the session",
+            started.elapsed().as_millis()
+        ),
+        Ok(false) => {}
+        Err(()) => tracing::info!(
+            "[ACP][attach] conn={conn_id} session={session_label} dropped while waiting for \
+             the account pool; no agent was started"
+        ),
+    }
+    waited.map(|_| ())
+}
+
 /// Take an attach slot for a connection about to spawn its agent. `Ok(None)`
 /// when the connection is not gated (a new session, or the limit is off),
 /// `Ok(Some)` with the slot, `Err(())` if the connection was dropped while it
@@ -1655,6 +1944,7 @@ async fn acquire_attach_slot(
         AcpEvent::AttachProgress {
             phase: AttachPhase::Queued,
             elapsed_ms: total_ms,
+            pool_resumes_at: None,
         },
     )
     .await;
@@ -6336,6 +6626,20 @@ async fn run_connection(
     // ends here, having started nothing.
     let mut lifeline = lifeline;
     let queued_at = std::time::Instant::now();
+    // And before the slot: behind an account pool with no account left that
+    // can take a request, wait for one without holding a slot.
+    if wait_for_pool_headroom(
+        &state,
+        &emitter,
+        &connection_id,
+        session_id.as_deref().unwrap_or("<new>"),
+        &mut lifeline,
+    )
+    .await
+    .is_err()
+    {
+        return Ok(());
+    }
     let attach_permit = match acquire_attach_slot(
         &state,
         &emitter,
@@ -6348,7 +6652,10 @@ async fn run_connection(
         Ok(permit) => permit,
         Err(()) => return Ok(()),
     };
-    let was_queued = state.read().await.attach_phase == AttachPhase::Queued;
+    let was_queued = matches!(
+        state.read().await.attach_phase,
+        AttachPhase::Queued | AttachPhase::PoolWait
+    );
     let prompt_ledger = background_watch::PromptLedger::shared();
     let _bg_watch = background_watch::spawn_if_claude(
         &connection_id,
@@ -7749,6 +8056,11 @@ async fn run_connection(
             let raw = e.to_string();
             if raw.contains(INIT_TIMEOUT_SENTINEL) {
                 AcpError::InitializeTimeout
+            } else if let Some(resumes_at) = parse_pool_exhausted(&raw) {
+                AcpError::PoolExhausted {
+                    agent: registry::get_agent_meta(agent_type).name.to_string(),
+                    resumes_at,
+                }
             } else if raw.contains(ATTACH_TIMEOUT_SENTINEL) {
                 let (phase, secs) = parse_attach_timeout(&raw)
                     .unwrap_or_else(|| (AttachPhase::Starting.as_str().to_string(), 0));
@@ -17434,6 +17746,216 @@ mod tests {
             "the abandoned place must not eat the slot"
         );
         assert!(AttachGate::try_acquire(&gate).is_some());
+    }
+
+    // ── AttachDriver: slot, lease, configure bound ──────────────────────────
+
+    /// A driver for a Claude Code resume holding `permit`, with the lifeline's
+    /// sender (dropping it abandons the attach).
+    fn test_driver(
+        permit: Option<AttachPermit>,
+    ) -> (AttachDriver, tokio::sync::oneshot::Sender<()>) {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let state = Arc::new(RwLock::new(SessionState::new(
+            "conn-test".into(),
+            AgentType::ClaudeCode,
+            None,
+            "main".into(),
+            None,
+        )));
+        let driver = AttachDriver::new(
+            rx,
+            state,
+            EventEmitter::Noop,
+            "conn-test".into(),
+            "sess-test".into(),
+            AttachPhase::Starting,
+            std::time::Instant::now(),
+            permit,
+        );
+        (driver, tx)
+    }
+
+    #[tokio::test]
+    async fn configuring_gives_the_attach_slot_back() {
+        let gate = AttachGate::new(1);
+        let permit = AttachGate::try_acquire(&gate).expect("one free slot");
+        let (mut driver, _tx) = test_driver(Some(permit));
+        driver.enter(AttachPhase::Resuming).await;
+        assert_eq!(gate.free_slots(), 0, "resuming still holds the slot");
+        driver.enter(AttachPhase::Configuring).await;
+        assert_eq!(
+            gate.free_slots(),
+            1,
+            "a configure that hangs must not keep other sessions waiting"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_hung_configure_times_out_on_its_own_bound() {
+        let (mut driver, _tx) = test_driver(None);
+        driver.deadline = Some(tokio::time::Instant::now() + Duration::from_secs(180));
+        driver.configure_timeout = Some(Duration::from_secs(45));
+        driver.enter(AttachPhase::Configuring).await;
+        let start = tokio::time::Instant::now();
+        let out = driver.run(std::future::pending::<()>()).await;
+        assert!(matches!(out, Err(AttachInterrupt::TimedOut)));
+        let waited = start.elapsed();
+        assert!(
+            waited >= Duration::from_secs(45) && waited < Duration::from_secs(46),
+            "configure is bounded at 45 s, not the 180 s ceiling: {waited:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_configure_bound_does_not_apply_to_other_steps() {
+        let (mut driver, _tx) = test_driver(None);
+        driver.deadline = Some(tokio::time::Instant::now() + Duration::from_secs(180));
+        driver.configure_timeout = Some(Duration::from_secs(45));
+        driver.enter(AttachPhase::Resuming).await;
+        let out = driver
+            .run(tokio::time::sleep(Duration::from_secs(60)))
+            .await;
+        assert!(out.is_ok(), "a 60 s resume is still within the ceiling");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_slow_attach_hands_its_slot_on_when_the_lease_runs_out() {
+        let gate = AttachGate::new(1);
+        let permit = AttachGate::try_acquire(&gate).expect("one free slot");
+        let (mut driver, _tx) = test_driver(Some(permit));
+        let start = tokio::time::Instant::now();
+        driver.deadline = Some(start + Duration::from_secs(180));
+        driver.lease_until = Some(start + Duration::from_secs(45));
+        let next = {
+            let gate = Arc::clone(&gate);
+            tokio::spawn(async move {
+                let _permit = AttachGate::acquire(&gate).await;
+                tokio::time::Instant::now()
+            })
+        };
+        // The stuck one's resume takes 100 s; it still finishes.
+        let out = driver
+            .run(tokio::time::sleep(Duration::from_secs(100)))
+            .await;
+        assert!(out.is_ok(), "the slow attach goes on without its slot");
+        let started = next.await.unwrap() - start;
+        assert!(
+            started >= Duration::from_secs(45) && started < Duration::from_secs(46),
+            "the next session waits for the lease, not the stuck one: {started:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_abandoned_attach_stops_waiting() {
+        let (mut driver, tx) = test_driver(None);
+        drop(tx);
+        let out = driver.run(std::future::pending::<()>()).await;
+        assert!(matches!(out, Err(AttachInterrupt::Abandoned)));
+    }
+
+    // ── Waiting on the account pool ─────────────────────────────────────────
+
+    use crate::commands::usage_pool::PoolBlock;
+    use std::time::Duration;
+
+    #[test]
+    fn pool_wait_pauses_until_just_after_the_first_reset_at_most() {
+        let block = |at| PoolBlock { resumes_at: at };
+        let max = Duration::from_secs(15);
+        assert_eq!(pool_wait_pause(block(Some(1_005)), 1_000, max), Duration::from_secs(6));
+        assert_eq!(pool_wait_pause(block(Some(5_000)), 1_000, max), max);
+        assert_eq!(pool_wait_pause(block(Some(900)), 1_000, max), max);
+        assert_eq!(pool_wait_pause(block(None), 1_000, max), max);
+    }
+
+    #[tokio::test]
+    async fn pool_wait_goes_on_once_the_pool_has_headroom() {
+        let early = PoolBlock {
+            resumes_at: Some(100),
+        };
+        let later = PoolBlock {
+            resumes_at: Some(200),
+        };
+        let readings = std::sync::Mutex::new(std::collections::VecDeque::from([
+            Some(early),
+            Some(early),
+            Some(later),
+            None,
+        ]));
+        let told = std::sync::Mutex::new(Vec::new());
+        let pauses = std::sync::atomic::AtomicUsize::new(0);
+        let (_tx, mut lifeline) = tokio::sync::oneshot::channel::<()>();
+        let out = pool_wait_loop(
+            || {
+                let next = readings.lock().unwrap().pop_front().flatten();
+                async move { next }
+            },
+            |_| {
+                pauses.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async {}
+            },
+            |block| {
+                told.lock().unwrap().push(block);
+                async {}
+            },
+            &mut lifeline,
+        )
+        .await;
+        assert_eq!(out, Ok(true));
+        assert_eq!(
+            *told.lock().unwrap(),
+            vec![early, later],
+            "the UI hears each change once"
+        );
+        assert_eq!(pauses.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn pool_wait_without_a_block_does_not_wait() {
+        let (_tx, mut lifeline) = tokio::sync::oneshot::channel::<()>();
+        let out = pool_wait_loop(
+            || async { None },
+            |_| async { panic!("never pauses") },
+            |_| async { panic!("never blocks") },
+            &mut lifeline,
+        )
+        .await;
+        assert_eq!(out, Ok(false));
+    }
+
+    #[tokio::test]
+    async fn a_connection_dropped_while_waiting_on_the_pool_starts_nothing() {
+        let (tx, mut lifeline) = tokio::sync::oneshot::channel::<()>();
+        drop(tx);
+        let out = pool_wait_loop(
+            || async { Some(PoolBlock { resumes_at: None }) },
+            |_| std::future::pending::<()>(),
+            |_| async {},
+            &mut lifeline,
+        )
+        .await;
+        assert_eq!(out, Err(()));
+    }
+
+    #[test]
+    fn a_pool_stop_reads_back_as_pool_exhausted() {
+        let raw = format!("Internal error: {POOL_EXHAUSTED_SENTINEL}:1800000000");
+        assert_eq!(parse_pool_exhausted(&raw), Some(Some(1_800_000_000)));
+        let unknown = format!("{POOL_EXHAUSTED_SENTINEL}:-");
+        assert_eq!(parse_pool_exhausted(&unknown), Some(None));
+        assert_eq!(parse_pool_exhausted("something else"), None);
+        let err = AcpError::PoolExhausted {
+            agent: "Claude Code".into(),
+            resumes_at: Some(1_800_000_000),
+        };
+        assert_eq!(err.code(), Some("pool_exhausted"));
+        let text = err.to_string();
+        assert!(text.contains("frees at 08:00 UTC"), "{text}");
+        assert!(
+            text.ends_with("[pool_exhausted resumes_at=1800000000]"),
+            "{text}"
+        );
     }
 
     // ── ConnectionCleanupGuard ──────────────────────────────────────────────

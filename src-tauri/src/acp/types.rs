@@ -509,7 +509,15 @@ pub enum AcpEvent {
     /// [`AttachPhase`]). `elapsed_ms` is measured from the moment the agent
     /// process was spawned, so a client that learns about the connection late
     /// still shows the real time spent.
-    AttachProgress { phase: AttachPhase, elapsed_ms: u64 },
+    ///
+    /// `pool_resumes_at` (epoch seconds) rides with `PoolWait`: when the first
+    /// held-back pool account frees up, if the pool knows.
+    AttachProgress {
+        phase: AttachPhase,
+        elapsed_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pool_resumes_at: Option<i64>,
+    },
     /// Error occurred
     Error {
         message: String,
@@ -1449,6 +1457,12 @@ pub enum AttachPhase {
     /// so a burst of reconnects cannot start a dozen agents together on a
     /// machine short of memory. Nothing is running yet.
     Queued,
+    /// Waiting for the local account pool to have an account that can take a
+    /// request: every enabled Claude subscription is at its limit, so the
+    /// agent would only sit in its own 429 backoff. Nothing is spawned and no
+    /// attach slot is held; the connection goes on by itself once one frees up
+    /// (`AttachProgress.pool_resumes_at` says when, if known).
+    PoolWait,
     /// The agent process is starting and has not answered `initialize` yet.
     #[default]
     Starting,
@@ -1470,6 +1484,7 @@ impl AttachPhase {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Queued => "queued",
+            Self::PoolWait => "pool_wait",
             Self::Starting => "starting",
             Self::Resuming => "resuming",
             Self::Loading => "loading",

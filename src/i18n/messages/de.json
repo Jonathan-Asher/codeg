@@ -3388,7 +3388,9 @@
           "turnFailedEmpty": "{agent} hat die Runde ohne jegliche Antwort beendet.",
           "turnFailedEmptyProtocol": "{agent} hat eine Ausgabe erzeugt, die codeg nicht auswerten konnte — die Agent-Version passt möglicherweise nicht zum Protokoll.",
           "turnFailedEmptyMetadata": "{agent} hat in dieser Runde nur Statusaktualisierungen gesendet (Plan / Modus / Verbrauch) und keine Antwort.",
-          "attachTimeout": "{agent} hat die Sitzung nicht fertig geöffnet und wurde gestoppt."
+          "attachTimeout": "{agent} hat die Sitzung nicht fertig geöffnet und wurde gestoppt.",
+          "poolExhausted": "Alle Claude-Abonnements haben ihr Limit erreicht",
+          "poolExhaustedUntil": "Alle Claude-Abonnements haben ihr Limit erreicht – das nächste wird um {time} frei"
         },
         "unableReadAgentConfig": "Agenten-Konfiguration kann nicht gelesen werden: {message}",
         "connectFailedTitle": "{agent} Verbindung fehlgeschlagen",
@@ -3428,7 +3430,10 @@
           "resumingTitle": "{agent}-Sitzung wird fortgesetzt",
           "loadingSessionTitle": "{agent}-Sitzung wird geladen",
           "creatingSessionTitle": "{agent}-Sitzung wird erstellt",
-          "configuringSessionTitle": "Einstellungen der {agent}-Sitzung werden angewendet"
+          "configuringSessionTitle": "Einstellungen der {agent}-Sitzung werden angewendet",
+          "poolWaitTitle": "Alle Claude-Abonnements haben ihr Limit erreicht",
+          "poolWaitDescription": "Das nächste wird um {time} frei; die Sitzung öffnet sich dann von selbst",
+          "poolWaitDescriptionUnknown": "Die Sitzung öffnet sich von selbst, sobald eines frei wird"
         },
         "errors": {
           "connectionFailed": "Verbindung fehlgeschlagen",
@@ -3529,7 +3534,11 @@
         "editItem": "Bearbeiten",
         "deleteItem": "Entfernen",
         "steerItemNow": "In aktuellen Turn einfügen",
-        "steerItemAsNote": "Als Notiz für die nächste Abfrage senden"
+        "steerItemAsNote": "Als Notiz für die nächste Abfrage senden",
+        "poolWait": "Alle Claude-Abonnements haben ihr Limit erreicht. Wartende Nachrichten werden gesendet, sobald eines frei wird.",
+        "poolWaitUntil": "Alle Claude-Abonnements haben ihr Limit erreicht – das nächste wird um {time} frei. Wartende Nachrichten werden dann gesendet.",
+        "notSent": "Nicht gesendet: Die Verbindung zu {agent} ist fehlgeschlagen. Wartende Nachrichten werden gesendet, sobald sie wieder steht.",
+        "retry": "Erneut versuchen"
       },
       "welcomeInputPanel": {
         "agentsSettingsPath": "Einstellungen > Agenten",
@@ -4292,6 +4301,8 @@
         "loading": "Die {agent}-Sitzung wird geladen",
         "creating": "Eine {agent}-Sitzung wird erstellt",
         "configuring": "Einstellungen der {agent}-Sitzung werden angewendet",
+        "poolWait": "Alle Claude-Abonnements haben ihr Limit erreicht",
+        "poolWaitUntil": "Alle Claude-Abonnements haben ihr Limit erreicht – das nächste wird um {time} frei",
         "elapsedSeconds": "{seconds} s",
         "elapsedMinutes": "{minutes} min {seconds} s",
         "withElapsed": "{step} · {elapsed}",

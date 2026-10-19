@@ -3388,7 +3388,9 @@
           "turnFailedEmpty": "{agent} は応答を生成せずにターンを終了しました。",
           "turnFailedEmptyProtocol": "{agent} の出力を codeg が解析できませんでした。エージェントのバージョンがプロトコルと一致していない可能性があります。",
           "turnFailedEmptyMetadata": "{agent} はこのターンでステータス更新（計画 / モード / 使用量）のみを送信し、応答はありませんでした。",
-          "attachTimeout": "{agent} がセッションを開き終えなかったため、停止しました。"
+          "attachTimeout": "{agent} がセッションを開き終えなかったため、停止しました。",
+          "poolExhausted": "すべての Claude サブスクリプションが上限に達しています",
+          "poolExhaustedUntil": "すべての Claude サブスクリプションが上限に達しています — 次は {time} に空きます"
         },
         "unableReadAgentConfig": "エージェント設定を読み取れません: {message}",
         "connectFailedTitle": "{agent} の接続に失敗しました",
@@ -3428,7 +3430,10 @@
           "resumingTitle": "{agent} セッションを再開中",
           "loadingSessionTitle": "{agent} セッションを読み込み中",
           "creatingSessionTitle": "{agent} セッションを作成中",
-          "configuringSessionTitle": "{agent} セッションの設定を適用中"
+          "configuringSessionTitle": "{agent} セッションの設定を適用中",
+          "poolWaitTitle": "すべての Claude サブスクリプションが上限に達しています",
+          "poolWaitDescription": "次は {time} に空きます。そのときセッションは自動で開きます",
+          "poolWaitDescriptionUnknown": "空きが出ればセッションは自動で開きます"
         },
         "errors": {
           "connectionFailed": "接続に失敗しました",
@@ -3529,7 +3534,11 @@
         "editItem": "編集",
         "deleteItem": "削除",
         "steerItemNow": "現在のターンに挿入",
-        "steerItemAsNote": "メモとして送信し次回チェック時に読ませる"
+        "steerItemAsNote": "メモとして送信し次回チェック時に読ませる",
+        "poolWait": "すべての Claude サブスクリプションが上限に達しています。空きが出ると、キューのメッセージが送信されます。",
+        "poolWaitUntil": "すべての Claude サブスクリプションが上限に達しています — 次は {time} に空きます。そのときキューのメッセージが送信されます。",
+        "notSent": "未送信：{agent} への接続に失敗しました。接続が戻ると、キューのメッセージが送信されます。",
+        "retry": "再試行"
       },
       "welcomeInputPanel": {
         "agentsSettingsPath": "設定 > エージェント",
@@ -4292,6 +4301,8 @@
         "loading": "{agent} セッションを読み込み中",
         "creating": "{agent} セッションを作成中",
         "configuring": "{agent} セッションの設定を適用中",
+        "poolWait": "すべての Claude サブスクリプションが上限に達しています",
+        "poolWaitUntil": "すべての Claude サブスクリプションが上限に達しています — 次は {time} に空きます",
         "elapsedSeconds": "{seconds} 秒",
         "elapsedMinutes": "{minutes} 分 {seconds} 秒",
         "withElapsed": "{step} · {elapsed}",

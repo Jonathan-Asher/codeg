@@ -3388,7 +3388,9 @@
           "turnFailedEmpty": "{agent} a terminé le tour sans produire de réponse.",
           "turnFailedEmptyProtocol": "{agent} a produit une sortie que codeg n'a pas pu analyser — la version de l'agent ne correspond peut-être pas au protocole.",
           "turnFailedEmptyMetadata": "{agent} n'a envoyé que des mises à jour d'état ce tour-ci (plan / mode / utilisation) et aucune réponse.",
-          "attachTimeout": "{agent} n’a pas fini d’ouvrir la session et a été arrêté."
+          "attachTimeout": "{agent} n’a pas fini d’ouvrir la session et a été arrêté.",
+          "poolExhausted": "Tous les abonnements Claude ont atteint leur limite",
+          "poolExhaustedUntil": "Tous les abonnements Claude ont atteint leur limite — le prochain se libère à {time}"
         },
         "unableReadAgentConfig": "Impossible de lire la configuration de l'agent : {message}",
         "connectFailedTitle": "Échec de la connexion de {agent}",
@@ -3428,7 +3430,10 @@
           "resumingTitle": "Reprise de la session {agent}",
           "loadingSessionTitle": "Chargement de la session {agent}",
           "creatingSessionTitle": "Création de la session {agent}",
-          "configuringSessionTitle": "Application des réglages de la session {agent}"
+          "configuringSessionTitle": "Application des réglages de la session {agent}",
+          "poolWaitTitle": "Tous les abonnements Claude ont atteint leur limite",
+          "poolWaitDescription": "Le prochain se libère à {time} ; la session s’ouvrira alors d’elle-même",
+          "poolWaitDescriptionUnknown": "La session s’ouvrira d’elle-même dès qu’un abonnement se libère"
         },
         "errors": {
           "connectionFailed": "Échec de la connexion",
@@ -3529,7 +3534,11 @@
         "editItem": "Modifier",
         "deleteItem": "Supprimer",
         "steerItemNow": "Insérer dans le tour en cours",
-        "steerItemAsNote": "Envoyer comme note pour la prochaine vérification"
+        "steerItemAsNote": "Envoyer comme note pour la prochaine vérification",
+        "poolWait": "Tous les abonnements Claude ont atteint leur limite. Les messages en file partiront dès qu’un abonnement se libère.",
+        "poolWaitUntil": "Tous les abonnements Claude ont atteint leur limite — le prochain se libère à {time}. Les messages en file partiront alors.",
+        "notSent": "Non envoyé : la connexion à {agent} a échoué. Les messages en file partiront dès son retour.",
+        "retry": "Réessayer"
       },
       "welcomeInputPanel": {
         "agentsSettingsPath": "Paramètres > Agents",
@@ -4292,6 +4301,8 @@
         "loading": "Chargement de la session {agent}",
         "creating": "Création d’une session {agent}",
         "configuring": "Application des réglages de la session {agent}",
+        "poolWait": "Tous les abonnements Claude ont atteint leur limite",
+        "poolWaitUntil": "Tous les abonnements Claude ont atteint leur limite — le prochain se libère à {time}",
         "elapsedSeconds": "{seconds} s",
         "elapsedMinutes": "{minutes} min {seconds} s",
         "withElapsed": "{step} · {elapsed}",

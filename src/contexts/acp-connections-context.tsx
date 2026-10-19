@@ -142,6 +142,15 @@ import { rememberModelLabels } from "@/lib/model-label-store"
 import { describeError } from "@/lib/app-error"
 import { isAttachingPhase, statusWhileAttaching } from "@/lib/attach-phase"
 import {
+  formatPoolResumeTime,
+  poolHoldFromError,
+  type PoolHold,
+} from "@/lib/pool-hold"
+
+/** How soon a connect that failed on an exhausted account pool is tried
+ *  again; the new attempt then waits for the pool without starting anything. */
+const POOL_RECONNECT_DELAY_MS = 3_000
+import {
   AcpActionsContext,
   ConnectionStoreContext,
   useOptionalConnectionStore,
@@ -492,6 +501,12 @@ export interface ConnectionState {
    *  from the backend's `elapsed_ms`; drives the "Resuming session · 14 s"
    *  labels. */
   attachStartedAt?: number | null
+  /**
+   * Set while this connection waits for the local account pool: its attach
+   * is in `pool_wait`, or it failed because every Claude subscription was at
+   * its limit (`pool_exhausted`). Carries when the first account frees up.
+   */
+  poolWait?: PoolHold | null
 }
 
 type ConnectRequest = {
@@ -577,6 +592,7 @@ type Action =
       contextKey: string
       phase: AttachPhase
       elapsedMs: number
+      poolResumesAt?: number | null
     }
   | {
       // One AIR typed session-failure upsert (`session_failure` event).
@@ -812,6 +828,8 @@ type Action =
       contextKey: string
       message: string
       level: AcpErrorLevel
+      /** A `pool_exhausted` error: when the account pool frees up. */
+      poolWait?: PoolHold | null
     }
   | {
       type: "ACP_LOAD_ERROR"
@@ -1949,6 +1967,12 @@ function connectionsReducer(
           action.patch.attachElapsedMs != null
             ? Date.now() - action.patch.attachElapsedMs
             : current.attachStartedAt,
+        poolWait:
+          hydratedAttachPhase === "pool_wait"
+            ? { resumesAt: action.patch.poolResumesAt ?? null }
+            : hydratedAttachPhase === "failed"
+              ? (current.poolWait ?? null)
+              : null,
         sessionId: action.patch.sessionId,
         modes: action.patch.modes,
         configOptions: action.patch.configOptions,
@@ -2050,6 +2074,10 @@ function connectionsReducer(
         ...conn,
         attachPhase: action.phase,
         attachStartedAt: Date.now() - action.elapsedMs,
+        poolWait:
+          action.phase === "pool_wait"
+            ? { resumesAt: action.poolResumesAt ?? null }
+            : null,
         // The backend reported `connected` back at `initialize`; it was held
         // at `connecting` while the session opened. Now it is open.
         status:
@@ -2988,6 +3016,7 @@ function connectionsReducer(
         claudeApiRetry: null,
         error: action.message,
         errorLevel: action.level,
+        poolWait: action.poolWait ?? null,
       })
       return next
     }
@@ -3103,6 +3132,10 @@ export interface ConnectErrorInfo {
   detail: string | null
   /** The fix lives in Settings → Agents (install, enable, configure). */
   opensAgentSettings: boolean
+  /** It failed because every Claude subscription behind the account pool was
+   *  at its limit: the connect is tried again by itself, and then waits for
+   *  the pool without starting the agent. */
+  poolWait?: PoolHold | null
 }
 
 interface InternalStore {
@@ -4686,6 +4719,15 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         // cause) rides as the detail — see `routeAcpError`.
         case "attach_timeout":
           return t("backendErrors.attachTimeout", { agent: agentLabel })
+        // Every Claude subscription behind the account pool is at its limit:
+        // the agent sat in its own 429 backoff, so codeg stopped it. The
+        // connect is retried by itself and then waits for the pool.
+        case "pool_exhausted": {
+          const at = formatPoolResumeTime(poolHoldFromError(message)?.resumesAt)
+          return at
+            ? t("backendErrors.poolExhaustedUntil", { time: at })
+            : t("backendErrors.poolExhausted")
+        }
         default:
           return message
       }
@@ -4769,6 +4811,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             contextKey,
             phase: e.phase,
             elapsedMs: e.elapsed_ms,
+            poolResumesAt: e.pool_resumes_at ?? null,
           })
           break
         case "content_delta":
@@ -5591,6 +5634,10 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
               contextKey,
               message: e.code === "attach_timeout" && reason ? reason : text,
               level: route.level,
+              poolWait:
+                e.code === "pool_exhausted"
+                  ? (poolHoldFromError(e.message) ?? { resumesAt: null })
+                  : null,
             })
           }
           // OS notification: only for a session that broke, and message-only —
@@ -6046,14 +6093,31 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             (gone.attachPhase === "failed" ||
               isAttachingPhase(gone.attachPhase))
           ) {
-            setConnectError(contextKey, {
+            const info: ConnectErrorInfo = {
               agentType: gone.agentType,
               title: t("connectFailedTitle", {
                 agent: getAgentLabel(gone.agentType),
               }),
               detail: gone.error ?? gone.loadError ?? null,
               opensAgentSettings: false,
-            })
+              poolWait: gone.poolWait ?? null,
+            }
+            setConnectError(contextKey, info)
+            // The agent hung because the account pool had no account left
+            // that could take a request. Try again by itself: the new attach
+            // waits for the pool without starting the agent or holding an
+            // attach slot, and queued messages go out once it opens. Only
+            // while this failure is still the key's latest — a newer attempt
+            // or the surface letting go retires it.
+            if (info.poolWait) {
+              setTimeout(() => {
+                if (storeRef.current.connectErrors.get(contextKey) !== info)
+                  return
+                void reconnectRef.current?.(contextKey).catch(() => {
+                  // A failed retry publishes its own failure.
+                })
+              }, POOL_RECONNECT_DELAY_MS)
+            }
           }
           dispatch({ type: "CONNECTION_REMOVED", contextKey })
         },

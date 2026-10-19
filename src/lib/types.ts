@@ -1468,6 +1468,9 @@ export type ConnectionStatus =
  */
 export type AttachPhase =
   | "queued"
+  /** Every account of the local account pool is at its limit: nothing is
+   *  started until one frees up (`pool_resumes_at`). */
+  | "pool_wait"
   | "starting"
   | "resuming"
   | "loading"
@@ -2967,6 +2970,9 @@ export type AcpEvent =
       phase: AttachPhase
       /** Milliseconds since the agent process was spawned. */
       elapsed_ms: number
+      /** With `pool_wait`: when the account pool's first held-back account
+       *  frees up (epoch seconds), if known. */
+      pool_resumes_at?: number | null
     }
   | {
       type: "error"
@@ -3607,6 +3613,9 @@ export interface LiveSessionSnapshot {
   attach_phase?: AttachPhase
   /** Milliseconds since the agent process was spawned, at snapshot time. */
   attach_elapsed_ms?: number
+  /** While `attach_phase` is `pool_wait`: when the account pool's first
+   *  held-back account frees up (epoch seconds), if known. */
+  pool_resumes_at?: number | null
   event_seq: number
 }
 

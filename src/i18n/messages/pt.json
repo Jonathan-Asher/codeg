@@ -3388,7 +3388,9 @@
           "turnFailedEmpty": "{agent} encerrou o turno sem produzir nenhuma resposta.",
           "turnFailedEmptyProtocol": "{agent} produziu uma saída que o codeg não conseguiu analisar — a versão do agente pode não corresponder ao protocolo.",
           "turnFailedEmptyMetadata": "{agent} enviou apenas atualizações de status neste turno (plano / modo / uso) e nenhuma resposta.",
-          "attachTimeout": "O {agent} não terminou de abrir a sessão e foi interrompido."
+          "attachTimeout": "O {agent} não terminou de abrir a sessão e foi interrompido.",
+          "poolExhausted": "Todas as assinaturas do Claude atingiram o limite",
+          "poolExhaustedUntil": "Todas as assinaturas do Claude atingiram o limite — a próxima libera às {time}"
         },
         "unableReadAgentConfig": "Não foi possível ler a configuração do agente: {message}",
         "connectFailedTitle": "Falha na conexão de {agent}",
@@ -3428,7 +3430,10 @@
           "resumingTitle": "Retomando a sessão do {agent}",
           "loadingSessionTitle": "Carregando a sessão do {agent}",
           "creatingSessionTitle": "Criando a sessão do {agent}",
-          "configuringSessionTitle": "Aplicando as configurações da sessão do {agent}"
+          "configuringSessionTitle": "Aplicando as configurações da sessão do {agent}",
+          "poolWaitTitle": "Todas as assinaturas do Claude atingiram o limite",
+          "poolWaitDescription": "A próxima libera às {time}; a sessão abre sozinha nessa hora",
+          "poolWaitDescriptionUnknown": "A sessão abre sozinha assim que uma liberar"
         },
         "errors": {
           "connectionFailed": "Falha na conexão",
@@ -3529,7 +3534,11 @@
         "editItem": "Editar",
         "deleteItem": "Remover",
         "steerItemNow": "Inserir na vez atual",
-        "steerItemAsNote": "Enviar como nota para a próxima verificação"
+        "steerItemAsNote": "Enviar como nota para a próxima verificação",
+        "poolWait": "Todas as assinaturas do Claude atingiram o limite. As mensagens na fila serão enviadas assim que uma liberar.",
+        "poolWaitUntil": "Todas as assinaturas do Claude atingiram o limite — a próxima libera às {time}. As mensagens na fila serão enviadas nessa hora.",
+        "notSent": "Não enviado: a conexão com {agent} falhou. As mensagens na fila serão enviadas quando ela voltar.",
+        "retry": "Tentar novamente"
       },
       "welcomeInputPanel": {
         "agentsSettingsPath": "Configurações > Agentes",
@@ -4292,6 +4301,8 @@
         "loading": "Carregando a sessão do {agent}",
         "creating": "Criando uma sessão do {agent}",
         "configuring": "Aplicando as configurações da sessão do {agent}",
+        "poolWait": "Todas as assinaturas do Claude atingiram o limite",
+        "poolWaitUntil": "Todas as assinaturas do Claude atingiram o limite — a próxima libera às {time}",
         "elapsedSeconds": "{seconds} s",
         "elapsedMinutes": "{minutes} min {seconds} s",
         "withElapsed": "{step} · {elapsed}",

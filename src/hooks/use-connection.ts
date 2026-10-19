@@ -12,6 +12,7 @@ import {
   type PendingUserMessage,
   type PendingQuestion,
 } from "@/contexts/acp-connections-context"
+import type { PoolHold } from "@/lib/pool-hold"
 import type {
   AgentType,
   AttachPhase,
@@ -65,6 +66,9 @@ export interface UseConnectionReturn {
   /** Client-clock estimate (epoch ms) of when the agent was spawned, for the
    *  elapsed-time label next to the phase. */
   attachStartedAt: number | null
+  /** Set while the connection waits for the account pool (its attach is in
+   *  `pool_wait`, or it failed on `pool_exhausted`), with when it frees up. */
+  poolWait: PoolHold | null
   promptCapabilities: PromptCapabilitiesInfo
   supportsFork: boolean
   selectorsReady: boolean
@@ -254,6 +258,16 @@ export function useConnection(contextKey: string): UseConnectionReturn {
     getPendingSnapshot,
     getPendingSnapshot
   )
+  // Why the key's last connect failed, once its entry is gone.
+  const getConnectErrorSnapshot = useCallback(
+    () => store.getConnectError(contextKey),
+    [store, contextKey]
+  )
+  const connectError = useSyncExternalStore(
+    subscribe,
+    getConnectErrorSnapshot,
+    getConnectErrorSnapshot
+  )
 
   const connectionId = connection?.connectionId ?? null
   const agentType = connection?.agentType ?? null
@@ -268,6 +282,9 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   const status = connection?.status ?? (connectPending ? "connecting" : null)
   const attachPhase = connection?.attachPhase ?? null
   const attachStartedAt = connection?.attachStartedAt ?? null
+  // Gone after a pool failure, the entry's reason lives on as the key's
+  // connect error until the retry starts.
+  const poolWait = connection?.poolWait ?? connectError?.poolWait ?? null
   const promptCapabilities =
     connection?.promptCapabilities ?? DEFAULT_PROMPT_CAPABILITIES
   const supportsFork = connection?.supportsFork ?? false
@@ -409,6 +426,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       status,
       attachPhase,
       attachStartedAt,
+      poolWait,
       promptCapabilities,
       supportsFork,
       selectorsReady,
@@ -456,6 +474,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       status,
       attachPhase,
       attachStartedAt,
+      poolWait,
       promptCapabilities,
       supportsFork,
       selectorsReady,

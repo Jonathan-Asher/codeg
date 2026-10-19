@@ -103,6 +103,19 @@ pub enum AcpError {
     /// same click works once the turn ends.
     #[error("this agent can only fork between turns")]
     ForkNeedsIdle,
+    /// Every enabled account of the local account pool is at its limit, so
+    /// the agent cannot take a request: a prompt held back before it reached
+    /// the agent, or an attach stopped because the agent hung in its own 429
+    /// backoff. `resumes_at` (epoch seconds) is when the first account frees
+    /// up, if the pool knows. Clients recognize it by its code or by the
+    /// bracketed marker at the end of the message, which carries the time
+    /// (see `pool_exhausted_marker`), keep the message queued and send it
+    /// once the pool has headroom again.
+    #[error("All Claude subscriptions behind the account pool are at their limit, so {agent} cannot take a request yet{}. {}", pool_frees_at(.resumes_at), pool_exhausted_marker(.resumes_at))]
+    PoolExhausted {
+        agent: String,
+        resumes_at: Option<i64>,
+    },
 }
 
 impl AcpError {
@@ -160,6 +173,7 @@ impl AcpError {
             Self::AgentAuthRequired(_) => Some("agent_auth_required"),
             Self::ForkPointUnresolved(_) => Some("fork_point_unresolved"),
             Self::ForkNeedsIdle => Some("fork_needs_idle"),
+            Self::PoolExhausted { .. } => Some("pool_exhausted"),
             Self::Protocol(_) => None,
         }
     }
@@ -174,10 +188,31 @@ impl Serialize for AcpError {
     }
 }
 
+/// "; the next one frees at 17:40 UTC" for [`AcpError::PoolExhausted`], or
+/// nothing when the reset is unknown.
+fn pool_frees_at(resumes_at: &Option<i64>) -> String {
+    resumes_at
+        .and_then(|t| chrono::DateTime::<chrono::Utc>::from_timestamp(t, 0))
+        .map(|t| format!("; the next one frees at {} UTC", t.format("%H:%M")))
+        .unwrap_or_default()
+}
+
+/// The machine-readable tail of [`AcpError::PoolExhausted`]'s message:
+/// `[pool_exhausted resumes_at=<epoch seconds>]`, or `[pool_exhausted]` when
+/// the reset is unknown. Tauri hands commands' errors over as this message
+/// alone, so it is how a client learns when to try again.
+fn pool_exhausted_marker(resumes_at: &Option<i64>) -> String {
+    match resumes_at {
+        Some(t) => format!("[pool_exhausted resumes_at={t}]"),
+        None => "[pool_exhausted]".to_string(),
+    }
+}
+
 /// Plain-words description of an attach phase for [`AcpError::AttachTimeout`].
 fn attach_phase_description(phase: &str) -> &'static str {
     match phase {
         "queued" => "waiting for other sessions to open first",
+        "pool_wait" => "waiting for an account of the account pool to free up",
         "starting" => "starting up",
         "resuming" => "resuming the session",
         "loading" => "loading the session",

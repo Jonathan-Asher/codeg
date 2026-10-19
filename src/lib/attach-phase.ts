@@ -13,6 +13,7 @@ export function isAttachingPhase(
 ): phase is AttachingPhase {
   return (
     phase === "queued" ||
+    phase === "pool_wait" ||
     phase === "starting" ||
     phase === "resuming" ||
     phase === "loading" ||
@@ -41,6 +42,7 @@ export function statusWhileAttaching(
 /** i18n key (under `Folder.chat.attachPhase`) naming each attaching phase. */
 export const ATTACH_PHASE_LABEL_KEYS = {
   queued: "queued",
+  pool_wait: "poolWait",
   starting: "starting",
   resuming: "resuming",
   loading: "loading",

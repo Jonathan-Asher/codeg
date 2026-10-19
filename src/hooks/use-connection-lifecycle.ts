@@ -17,6 +17,11 @@ import {
 } from "@/lib/selector-display"
 import { TurnBusyError } from "@/lib/turn-busy"
 import {
+  PoolExhaustedError,
+  formatPoolResumeTime,
+  type PoolHold,
+} from "@/lib/pool-hold"
+import {
   type AgentType,
   type PromptDraft,
   type SessionConfigOptionInfo,
@@ -96,6 +101,9 @@ export interface UseConnectionLifecycleReturn {
        * draft instead of treating it as an error.
        */
       onTurnInProgress?: () => void
+      /** The account pool had no account that could take it: the backend
+       *  held it back. The caller keeps it queued and waits for the pool. */
+      onPoolExhausted?: (hold: PoolHold) => void
       /**
        * Called for every OTHER send failure (413, hydration failure, network
        * drop) after the error toast is shown. The caller must settle any
@@ -144,6 +152,7 @@ export function shouldDisconnectOnUnmount(args: {
  *  step of opening a session the backend reports. */
 const ATTACH_TASK_TITLE_KEYS = {
   queued: "tasks.queuedTitle",
+  pool_wait: "tasks.poolWaitTitle",
   resuming: "tasks.resumingTitle",
   loading: "tasks.loadingSessionTitle",
   creating: "tasks.creatingSessionTitle",
@@ -366,9 +375,11 @@ export function useConnectionLifecycle({
   const taskIdRef = useRef<string | null>(null)
   const taskPhaseRef = useRef<string | null>(null)
   const attachPhase = conn.attachPhase
+  const poolResumesAt = conn.poolWait?.resumesAt ?? null
   useEffect(() => {
     const attachStep =
       attachPhase === "queued" ||
+      attachPhase === "pool_wait" ||
       attachPhase === "resuming" ||
       attachPhase === "loading" ||
       attachPhase === "creating" ||
@@ -379,7 +390,9 @@ export function useConnectionLifecycle({
       ? null
       : status === "connecting"
         ? attachStep
-          ? `connecting:${attachStep}`
+          ? `connecting:${attachStep}${
+              attachStep === "pool_wait" ? `:${poolResumesAt ?? ""}` : ""
+            }`
           : "connecting"
         : preparing
           ? "preparing"
@@ -413,18 +426,27 @@ export function useConnectionLifecycle({
         : phase === "preparing"
           ? t("tasks.preparingTitle", { agent })
           : t("tasks.connectingTitle", { agent })
+    // Waiting for the account pool: say when it frees up, and that the
+    // session opens by itself then.
+    const poolTime =
+      attachStep === "pool_wait" ? formatPoolResumeTime(poolResumesAt) : null
     addTask(
       id,
       title,
       phase === "preparing"
         ? t("tasks.preparingDescription")
-        : t("tasks.connectingDescription")
+        : attachStep === "pool_wait"
+          ? poolTime
+            ? t("tasks.poolWaitDescription", { time: poolTime })
+            : t("tasks.poolWaitDescriptionUnknown")
+          : t("tasks.connectingDescription")
     )
     updateTask(id, { status: "running" })
   }, [
     foreground,
     status,
     attachPhase,
+    poolResumesAt,
     preparing,
     addTask,
     updateTask,
@@ -573,11 +595,16 @@ export function useConnectionLifecycle({
         conversationId?: number | null
         clientMessageId?: string | null
         onTurnInProgress?: () => void
+        /** The account pool had no account that could take it: the backend
+         *  held it back. The caller keeps it queued and waits for the pool;
+         *  without this, it is re-queued like a busy bounce. */
+        onPoolExhausted?: (hold: PoolHold) => void
         onSendFailed?: (error: unknown) => void
       }
     ) => {
       touchActivity(contextKey)
       const onTurnInProgress = opts?.onTurnInProgress
+      const onPoolExhausted = opts?.onPoolExhausted
       const onSendFailed = opts?.onSendFailed
       void (async () => {
         const currentModeId = modeIdRef.current
@@ -589,6 +616,13 @@ export function useConnectionLifecycle({
         }
         await sendPrompt(draft.blocks, opts)
       })().catch((e: unknown) => {
+        if (e instanceof PoolExhaustedError) {
+          // Not an error either: the message waits in the queue, saying why,
+          // and goes out once the pool has room again.
+          if (onPoolExhausted) onPoolExhausted({ resumesAt: e.resumesAt })
+          else onTurnInProgress?.()
+          return
+        }
         if (e instanceof TurnBusyError) {
           // A turn was already in flight on the connection (another
           // co-controlling client, or a "prompting" status this client hadn't

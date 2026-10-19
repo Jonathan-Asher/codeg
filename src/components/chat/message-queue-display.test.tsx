@@ -143,3 +143,47 @@ describe("MessageQueueDisplay click-to-insert", () => {
     expect(screen.getAllByTitle(TQ.steerItemNow)).toHaveLength(1)
   })
 })
+
+describe("MessageQueueDisplay notice", () => {
+  it("shows nothing above the queue without a notice", () => {
+    renderDisplay()
+    expect(screen.queryByTestId("queue-notice")).toBeNull()
+  })
+
+  it("says why the queue waits for the account pool, with no action", () => {
+    renderDisplay({
+      notice: {
+        tone: "waiting",
+        text: "All Claude subscriptions are at their limit — the next one frees at 17:40. Queued messages go out then.",
+      },
+    })
+    const notice = screen.getByTestId("queue-notice")
+    expect(notice.getAttribute("data-tone")).toBe("waiting")
+    expect(notice.textContent).toContain("frees at 17:40")
+    expect(screen.queryByRole("button", { name: TQ.retry })).toBeNull()
+  })
+
+  it("marks queued messages not sent and offers Retry", async () => {
+    const onClick = vi.fn()
+    renderDisplay({
+      notice: {
+        tone: "failed",
+        text: "Not sent",
+        action: { label: TQ.retry, onClick },
+      },
+    })
+    expect(screen.getByTestId("queue-notice").getAttribute("data-tone")).toBe(
+      "failed"
+    )
+    await userEvent.click(screen.getByRole("button", { name: TQ.retry }))
+    expect(onClick).toHaveBeenCalledTimes(1)
+  })
+
+  it("is not shown once the queue is empty", () => {
+    renderDisplay({
+      queue: [],
+      notice: { tone: "failed", text: "Not sent" },
+    })
+    expect(screen.queryByTestId("queue-notice")).toBeNull()
+  })
+})

@@ -2,14 +2,37 @@
 
 import { useCallback, useRef, useState, type PointerEvent } from "react"
 import { Reorder, useDragControls } from "motion/react"
-import { Clock, GripVertical, Pencil, X, Zap } from "lucide-react"
+import {
+  CircleAlert,
+  Clock,
+  GripVertical,
+  Hourglass,
+  Pencil,
+  X,
+  Zap,
+} from "lucide-react"
 import { useTranslations } from "next-intl"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { draftRidesBlocks } from "@/lib/prompt-draft"
 import type { QueuedMessage } from "@/hooks/use-message-queue"
 
+/**
+ * Why the queue is not going out, shown above it (see `queueNoticeFor`).
+ * `waiting`: it clears by itself (the account pool frees up, the session
+ * finishes opening) and the queue sends then. `failed`: nothing goes out
+ * until the connection is back, which `action` (Retry) asks for.
+ */
+export interface QueueNotice {
+  tone: "waiting" | "failed"
+  text: string
+  action?: { label: string; onClick: () => void }
+}
+
 interface MessageQueueDisplayProps {
   queue: QueuedMessage[]
+  /** Why the queue is held, if it is (see {@link QueueNotice}). */
+  notice?: QueueNotice | null
   onReorder: (items: QueuedMessage[]) => void
   onEdit: (id: string) => void
   onDelete: (id: string) => void
@@ -142,8 +165,41 @@ function QueueItem({
   )
 }
 
+function QueueNoticeRow({ notice }: { notice: QueueNotice }) {
+  const failed = notice.tone === "failed"
+  const Icon = failed ? CircleAlert : Hourglass
+  return (
+    <div
+      role="status"
+      data-testid="queue-notice"
+      data-tone={notice.tone}
+      className={cn(
+        "flex items-center gap-1.5 px-1 pb-0.5 text-3xs",
+        failed
+          ? "text-red-600 dark:text-red-400"
+          : "text-amber-600 dark:text-amber-400"
+      )}
+    >
+      <Icon className="h-3 w-3 shrink-0" aria-hidden />
+      <span className="min-w-0 flex-1">{notice.text}</span>
+      {notice.action && (
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          className="h-5 shrink-0 px-2 text-3xs"
+          onClick={notice.action.onClick}
+        >
+          {notice.action.label}
+        </Button>
+      )}
+    </div>
+  )
+}
+
 export function MessageQueueDisplay({
   queue,
+  notice,
   onReorder,
   onEdit,
   onDelete,
@@ -178,6 +234,7 @@ export function MessageQueueDisplay({
 
   return (
     <div className="max-h-28 overflow-y-auto pb-1">
+      {notice && <QueueNoticeRow notice={notice} />}
       <Reorder.Group
         as="div"
         axis="y"

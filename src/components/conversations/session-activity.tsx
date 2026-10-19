@@ -241,7 +241,8 @@ export function SessionActivityRow({
   const phaseLabel = useAttachPhaseLabel(
     agent,
     activity === "connecting" ? connection?.phase : null,
-    connection?.startedAt
+    connection?.startedAt,
+    connection?.poolWait
   )
   const hint =
     activity === "needs_you" && attention

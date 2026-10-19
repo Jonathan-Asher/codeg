@@ -3388,7 +3388,9 @@
           "turnFailedEmpty": "أنهى {agent} الجولة دون إنتاج أي رد.",
           "turnFailedEmptyProtocol": "أنتج {agent} مخرجات تعذّر على codeg تحليلها — قد لا يتوافق إصدار الوكيل مع البروتوكول.",
           "turnFailedEmptyMetadata": "أرسل {agent} تحديثات حالة فقط في هذه الجولة (الخطة / الوضع / الاستخدام) دون أي رد.",
-          "attachTimeout": "لم يُكمل {agent} فتح الجلسة وتم إيقافه."
+          "attachTimeout": "لم يُكمل {agent} فتح الجلسة وتم إيقافه.",
+          "poolExhausted": "بلغت جميع اشتراكات Claude حدّها",
+          "poolExhaustedUntil": "بلغت جميع اشتراكات Claude حدّها — يتحرر الاشتراك التالي عند {time}"
         },
         "unableReadAgentConfig": "تعذر قراءة إعدادات الوكيل: {message}",
         "connectFailedTitle": "فشل اتصال {agent}",
@@ -3428,7 +3430,10 @@
           "resumingTitle": "جارٍ استئناف جلسة {agent}",
           "loadingSessionTitle": "جارٍ تحميل جلسة {agent}",
           "creatingSessionTitle": "جارٍ إنشاء جلسة {agent}",
-          "configuringSessionTitle": "جارٍ تطبيق إعدادات جلسة {agent}"
+          "configuringSessionTitle": "جارٍ تطبيق إعدادات جلسة {agent}",
+          "poolWaitTitle": "بلغت جميع اشتراكات Claude حدّها",
+          "poolWaitDescription": "يتحرر الاشتراك التالي عند {time}، وستُفتح الجلسة تلقائيًا حينها",
+          "poolWaitDescriptionUnknown": "ستُفتح الجلسة تلقائيًا فور تحرر أحد الاشتراكات"
         },
         "errors": {
           "connectionFailed": "فشل الاتصال",
@@ -3529,7 +3534,11 @@
         "editItem": "تعديل",
         "deleteItem": "حذف",
         "steerItemNow": "إدراج في الدور الحالي",
-        "steerItemAsNote": "إرسال كملاحظة للفحص التالي"
+        "steerItemAsNote": "إرسال كملاحظة للفحص التالي",
+        "poolWait": "بلغت جميع اشتراكات Claude حدّها. ستُرسل الرسائل المنتظرة فور تحرر أحد الاشتراكات.",
+        "poolWaitUntil": "بلغت جميع اشتراكات Claude حدّها — يتحرر الاشتراك التالي عند {time}. ستُرسل الرسائل المنتظرة حينها.",
+        "notSent": "لم تُرسل: فشل الاتصال بـ {agent}. ستُرسل الرسائل المنتظرة فور عودته.",
+        "retry": "إعادة المحاولة"
       },
       "welcomeInputPanel": {
         "agentsSettingsPath": "الإعدادات > الوكلاء",
@@ -4292,6 +4301,8 @@
         "loading": "جارٍ تحميل جلسة {agent}",
         "creating": "جارٍ إنشاء جلسة {agent}",
         "configuring": "جارٍ تطبيق إعدادات جلسة {agent}",
+        "poolWait": "بلغت جميع اشتراكات Claude حدّها",
+        "poolWaitUntil": "بلغت جميع اشتراكات Claude حدّها — يتحرر الاشتراك التالي عند {time}",
         "elapsedSeconds": "{seconds} ث",
         "elapsedMinutes": "{minutes} د {seconds} ث",
         "withElapsed": "{step} · {elapsed}",
