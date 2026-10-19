@@ -120,7 +120,6 @@ import {
   buildSidebarLayout,
   collectAlwaysVisibleIds,
   EMPTY_SIDEBAR_LAYOUT,
-  folderIdsWithMoreRow,
   layoutFolderIds,
   layoutToEntries,
   locateEntry,
@@ -234,8 +233,6 @@ const FolderHeader = memo(function FolderHeader({
   availableAgents,
   availableAgentsFresh,
   onToggle,
-  onNameClick,
-  nameExpanded,
   onRemoveFromWorkspace,
   onNewConversation,
   onImport,
@@ -290,18 +287,13 @@ const FolderHeader = memo(function FolderHeader({
    * usable since clearing a default doesn't depend on the live list.
    */
   availableAgentsFresh: boolean
-  /** The chevron: show or hide the folder's sessions entirely. */
-  onToggle: (folderId: number) => void
   /**
-   * The folder row itself (glyph + name). For a folder the session limit is
-   * trimming, this switches between its most recent sessions and all of them;
-   * otherwise it shows / hides the folder like the chevron. Omitted = the
-   * chevron's handler, for headers that have no limited list of their own.
+   * Show or hide the folder's sessions entirely. Driven by a click anywhere on
+   * the row (glyph + name, Enter / Space when it has focus) and by its chevron.
+   * Switching a long folder between its most recent sessions and all of them
+   * is the "Show N more" / "Show less" row's job, not the header's.
    */
-  onNameClick?: (folderId: number) => void
-  /** What the row's `aria-expanded` reports: whether the name click has
-   *  already done its thing. Defaults to `expanded`. */
-  nameExpanded?: boolean
+  onToggle: (folderId: number) => void
   onRemoveFromWorkspace: (folderId: number) => void
   onNewConversation: (folderId: number) => void
   onImport: (folderId: number) => void
@@ -457,9 +449,9 @@ const FolderHeader = memo(function FolderHeader({
             >
               <button
                 data-folder-id={folderId}
-                onClick={() => (onNameClick ?? onToggle)(folderId)}
+                onClick={() => onToggle(folderId)}
                 title={folderPath}
-                aria-expanded={nameExpanded ?? expanded}
+                aria-expanded={expanded}
                 className={cn(
                   "relative flex h-full min-w-0 flex-1 items-center pr-[0.5rem] outline-none",
                   "rounded-full focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
@@ -575,15 +567,16 @@ const FolderHeader = memo(function FolderHeader({
                   )}
                 </div>
               </button>
-              {/* Disclosure chevron: shows or hides the folder's sessions
-                  entirely. Its own button (not part of the row) because on a
-                  folder the session limit trims, the row click does something
-                  else — it switches between the recent few and all of them.
-                  Hover-revealed like its ⋯ / ✎ neighbours and rotating on
-                  expand; the persistent open/closed state still reads from the
-                  folder glyph on the left, which is why it can stay hidden at
-                  rest in both states. Touch keeps it pinned on, since there is
-                  no hover to reveal it there. */}
+              {/* Disclosure chevron: the same show / hide as a click on the
+                  row, as a pointer target at the trailing edge. The row button
+                  is the keyboard and screen-reader control (it carries
+                  `aria-expanded`), so the chevron stays out of the tab order
+                  and the accessibility tree rather than being a second stop
+                  that does the same thing. Hover-revealed like its ⋯ / ✎
+                  neighbours and rotating on expand; the persistent open/closed
+                  state still reads from the folder glyph on the left, which is
+                  why it can stay hidden at rest in both states. Touch keeps it
+                  pinned on, since there is no hover to reveal it there. */}
               <button
                 type="button"
                 onClick={(e) => {
@@ -591,13 +584,13 @@ const FolderHeader = memo(function FolderHeader({
                   onToggle(folderId)
                 }}
                 title={chevronLabel}
-                aria-label={chevronLabel}
-                aria-expanded={expanded}
+                aria-hidden
+                tabIndex={-1}
                 data-folder-chevron={folderId}
                 className={cn(
                   "flex h-6 w-6 shrink-0 items-center justify-end",
                   "rounded-[0.375rem] cursor-pointer outline-none text-muted-foreground/90",
-                  "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
+                  "opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100",
                   "transition-[opacity,color] duration-150 hover:text-sidebar-foreground"
                 )}
               >
@@ -1258,8 +1251,20 @@ export function SidebarConversationList({
   useEffect(() => {
     // Hydrate from localStorage after mount to keep SSR/CSR markup consistent.
 
-    setFolderExpanded(loadFolderExpanded())
-    setFolderShowAll(loadFolderShowAll())
+    const expanded = loadFolderExpanded()
+    setFolderExpanded(expanded)
+    // A folder that is hidden opens on its short list (see `toggleFolder`).
+    // Drop any opened-up entry saved for one before hiding started folding it
+    // back, so it doesn't come back open.
+    const showAll = loadFolderShowAll()
+    const stale = Object.keys(showAll).filter(
+      (id) => expanded[Number(id)] === false
+    )
+    if (stale.length > 0) {
+      for (const id of stale) delete showAll[Number(id)]
+      saveFolderShowAll(showAll)
+    }
+    setFolderShowAll(showAll)
     setFolderGroupExpanded(loadFolderGroupExpanded())
     setSectionCollapsed(loadSectionCollapsed())
     setArchivedExpanded(loadArchivedExpanded())
@@ -1828,16 +1833,14 @@ export function SidebarConversationList({
     ]
   )
 
-  // Which folders the limit is trimming right now — their name click switches
-  // between the short list and every session. Read through a ref by the stable
-  // click handlers below, so the memoized headers never see it change.
-  const foldersWithMore = useMemo(() => folderIdsWithMoreRow(rows), [rows])
-  const foldersWithMoreRef = useRef(foldersWithMore)
-  foldersWithMoreRef.current = foldersWithMore
+  // Read by the stable toggle handlers below, so the memoized headers never see
+  // these change.
   const folderExpandedRef = useRef(folderExpanded)
   folderExpandedRef.current = folderExpanded
   const rootGroupCollapsedRef = useRef(rootGroupCollapsed)
   rootGroupCollapsedRef.current = rootGroupCollapsed
+  const containerChildrenRef = useRef(containerChildren)
+  containerChildrenRef.current = containerChildren
 
   // Latest snapshots for the imperative scroll/drag code paths, refreshed every
   // render so the window listeners and scrollToActive read current values
@@ -1904,6 +1907,13 @@ export function SidebarConversationList({
           for (const id of kids) next[id] = false
         saveFolderExpanded(next)
         return next
+      })
+      // Every folder is hidden now, so each one opens on its short list again,
+      // the same as hiding it from its own row.
+      setFolderShowAll((prev) => {
+        if (Object.keys(prev).length === 0) return prev
+        saveFolderShowAll({})
+        return {}
       })
       setAllGroupsCollapsed(true)
       setAllSectionsCollapsed(true)
@@ -2070,27 +2080,60 @@ export function SidebarConversationList({
     setArchivedSectionExpanded,
   ])
 
-  const toggleFolder = useCallback((folderId: number) => {
-    setFolderExpanded((prev) => {
-      const next = { ...prev, [folderId]: !(prev[folderId] ?? true) }
-      saveFolderExpanded(next)
+  // Fold display buckets back to their most recent sessions. Run whenever a
+  // header hides a bucket, so showing it again starts from the short list
+  // rather than wherever "Show N more" had left it.
+  const resetFolderShowAll = useCallback((bucketIds: readonly number[]) => {
+    setFolderShowAll((prev) => {
+      if (!bucketIds.some((id) => prev[id])) return prev
+      const next = { ...prev }
+      for (const id of bucketIds) delete next[id]
+      saveFolderShowAll(next)
       return next
     })
   }, [])
+
+  // Show or hide a folder's sessions: the folder row's click (and its
+  // chevron). Hiding also folds back every bucket the header hides — its own,
+  // and for a container repo the root sub-group (which shares the repo id) and
+  // each worktree under it.
+  const toggleFolder = useCallback(
+    (folderId: number) => {
+      const hiding = folderExpandedRef.current[folderId] ?? true
+      setFolderExpanded((prev) => {
+        const next = { ...prev, [folderId]: !(prev[folderId] ?? true) }
+        saveFolderExpanded(next)
+        return next
+      })
+      if (hiding) {
+        resetFolderShowAll([
+          folderId,
+          ...(containerChildrenRef.current.get(folderId) ?? []),
+        ])
+      }
+    },
+    [resetFolderShowAll]
+  )
 
   // Toggle a container repo's "root" sub-group (its own sessions). Session-only,
-  // so unlike `toggleFolder` there is no persistence write.
-  const toggleRootGroup = useCallback((repoId: number) => {
-    setRootGroupCollapsed((prev) => {
-      const next = new Set(prev)
-      if (next.has(repoId)) next.delete(repoId)
-      else next.add(repoId)
-      return next
-    })
-  }, [])
+  // so unlike `toggleFolder` there is no persistence write for the collapse
+  // itself; hiding it still folds its bucket back to the short list.
+  const toggleRootGroup = useCallback(
+    (repoId: number) => {
+      const hiding = !rootGroupCollapsedRef.current.has(repoId)
+      setRootGroupCollapsed((prev) => {
+        const next = new Set(prev)
+        if (next.has(repoId)) next.delete(repoId)
+        else next.add(repoId)
+        return next
+      })
+      if (hiding) resetFolderShowAll([repoId])
+    },
+    [resetFolderShowAll]
+  )
 
   // Switch one display bucket between its most recent sessions and all of
-  // them — the "Show N more" / "Show less" footer, and the folder name.
+  // them — the "Show N more" / "Show less" footer.
   const toggleFolderShowAll = useCallback((folderId: number) => {
     setFolderShowAll((prev) => {
       const next = { ...prev }
@@ -2100,37 +2143,6 @@ export function SidebarConversationList({
       return next
     })
   }, [])
-
-  // The folder name's click. On a folder the limit is trimming it switches
-  // between the short list and every session; anywhere else — a hidden folder,
-  // one that already fits, or every folder under the "All" setting — it shows
-  // or hides the folder exactly as it always has, so the click is never dead
-  // and "All" behaves like the sidebar did before the limit existed.
-  const handleFolderNameClick = useCallback(
-    (folderId: number) => {
-      const shown = folderExpandedRef.current[folderId] ?? true
-      if (shown && foldersWithMoreRef.current.has(folderId)) {
-        toggleFolderShowAll(folderId)
-      } else {
-        toggleFolder(folderId)
-      }
-    },
-    [toggleFolder, toggleFolderShowAll]
-  )
-
-  // The same for a container repo's "root" sub-group, whose own collapse is
-  // the session-only `rootGroupCollapsed` rather than `folderExpanded`.
-  const handleRootGroupNameClick = useCallback(
-    (repoId: number) => {
-      const shown = !rootGroupCollapsedRef.current.has(repoId)
-      if (shown && foldersWithMoreRef.current.has(repoId)) {
-        toggleFolderShowAll(repoId)
-      } else {
-        toggleRootGroup(repoId)
-      }
-    },
-    [toggleRootGroup, toggleFolderShowAll]
-  )
 
   // Lazily fetch a conversation's direct delegation children into the cache.
   // Deduped against both the cache and in-flight requests so a re-toggle or the
@@ -2341,16 +2353,6 @@ export function SidebarConversationList({
       })
     },
     [toggleFolderShowAll]
-  )
-  // The overlay's name click: same decision as the in-list row, then the same
-  // bring-the-header-back as its chevron — folding a long list back to its
-  // recent few would otherwise leave you in the middle of the next folder.
-  const handleOverlayNameClick = useCallback(
-    (folderId: number) => {
-      handleFolderNameClick(folderId)
-      scrollFolderHeaderToTop(folderId)
-    },
-    [handleFolderNameClick, scrollFolderHeaderToTop]
   )
 
   // Recompute on anything that shifts geometry without firing a scroll event:
@@ -3150,6 +3152,86 @@ export function SidebarConversationList({
     return map
   }, [layout, archivedLayout])
 
+  // Going to a session (a tab switch, a Recent row, a search hit, a new
+  // session's first turn) opens the folder it is listed under, plus the group
+  // or worktree container around that folder, so the active row is there to
+  // see. A limited folder lists it among its short list whatever its age (see
+  // `alwaysVisibleIds`). Only a CHANGE of session does this. The session this
+  // list first sees (the one restored at launch) leaves the saved state alone,
+  // and hiding the folder that holds the current session keeps it hidden until
+  // you go to another one. Section headers are left as they are; the Locate
+  // button opens those too.
+  const revealRef = useRef<{ key: string | null; pending: boolean }>({
+    key: null,
+    pending: false,
+  })
+  useEffect(() => {
+    if (!selectedConversation) return
+    const reveal = revealRef.current
+    const key = `${selectedConversation.agentType}:${selectedConversation.id}`
+    if (reveal.key !== key) {
+      reveal.pending = reveal.key !== null
+      reveal.key = key
+    }
+    if (!reveal.pending) return
+    const conv = conversations.find(
+      (c) =>
+        c.id === selectedConversation.id &&
+        c.agent_type === selectedConversation.agentType
+    )
+    // Not loaded yet (a brand-new session): stay pending for its summary.
+    if (!conv) return
+    reveal.pending = false
+    // Pinned and chat sessions are listed outside any folder.
+    if (conv.pinned_at != null || conv.kind === "chat") return
+
+    const folderIds = [
+      displayChildToParent.get(conv.folder_id) ?? conv.folder_id,
+    ]
+    let rootRepoId: number | null = null
+    if (showWorktrees) {
+      const containerId = childToParent.get(conv.folder_id)
+      if (containerId != null) folderIds.push(containerId)
+      if (containerRepoIds.has(conv.folder_id)) rootRepoId = conv.folder_id
+    }
+    const groupId = groupIdByFolder.get(
+      childToParent.get(conv.folder_id) ?? conv.folder_id
+    )
+
+    setFolderExpanded((prev) => {
+      if (folderIds.every((id) => prev[id] ?? true)) return prev
+      const next = { ...prev }
+      for (const id of folderIds) next[id] = true
+      saveFolderExpanded(next)
+      return next
+    })
+    if (rootRepoId != null) {
+      const repoId = rootRepoId
+      setRootGroupCollapsed((prev) => {
+        if (!prev.has(repoId)) return prev
+        const next = new Set(prev)
+        next.delete(repoId)
+        return next
+      })
+    }
+    if (groupId != null) {
+      setFolderGroupExpanded((prev) => {
+        if (prev[groupId] ?? true) return prev
+        const next = { ...prev, [groupId]: true }
+        saveFolderGroupExpanded(next)
+        return next
+      })
+    }
+  }, [
+    selectedConversation,
+    conversations,
+    displayChildToParent,
+    showWorktrees,
+    childToParent,
+    containerRepoIds,
+    groupIdByFolder,
+  ])
+
   // A group's members, whichever section it is in.
   const groupMembers = (groupId: number): readonly number[] =>
     layout.membersByGroup.get(groupId) ??
@@ -3234,9 +3316,8 @@ export function SidebarConversationList({
       dragging: boolean
       collapsed?: boolean
       grip: boolean
+      /** Overrides the show / hide (the sticky overlay scrolls afterwards). */
       onToggle?: (folderId: number) => void
-      /** Overrides the name click (the sticky overlay scrolls afterwards). */
-      onNameClick?: (folderId: number) => void
       suppressed?: boolean
       /** Render as the container repo's own-sessions "root" sub-group (FolderRoot
        *  glyph, indented, session-only collapse) rather than the repo header. */
@@ -3278,18 +3359,6 @@ export function SidebarConversationList({
       : opts.collapsed
         ? false
         : (folderExpanded[folderId] ?? true)
-    // A container header owns no sessions of its own (they sit in its root
-    // sub-group), so its name keeps showing / hiding the whole subtree. Every
-    // other header's name can also switch its bucket between the recent few
-    // and all of them, and reports that as its expanded state while it can.
-    const nameClick = isContainer
-      ? undefined
-      : (opts.onNameClick ??
-        (isRootGroup ? handleRootGroupNameClick : handleFolderNameClick))
-    const nameExpanded =
-      !isContainer && expanded && foldersWithMore.has(folderId)
-        ? folderShowAll[folderId] === true
-        : expanded
     return (
       <FolderHeader
         folderId={folderId}
@@ -3307,8 +3376,6 @@ export function SidebarConversationList({
         onToggle={
           opts.onToggle ?? (isRootGroup ? toggleRootGroup : toggleFolder)
         }
-        onNameClick={nameClick}
-        nameExpanded={nameExpanded}
         onRemoveFromWorkspace={handleRemoveFolder}
         onNewConversation={handleNewConversationForFolder}
         onImport={handleImportForFolder}
@@ -4004,7 +4071,6 @@ export function SidebarConversationList({
                       dragging: false,
                       grip: false,
                       onToggle: handleOverlayToggle,
-                      onNameClick: handleOverlayNameClick,
                     })}
                   </div>
                 </div>

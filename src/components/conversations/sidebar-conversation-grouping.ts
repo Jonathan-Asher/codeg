@@ -1838,21 +1838,6 @@ export function buildRows(args: {
 }
 
 /**
- * The display buckets whose body currently ends in a {@link FolderMoreRow},
- * i.e. the folders the session limit is actually trimming (or would trim, once
- * folded back). Their header's name click switches between the short list and
- * every session; every other header's name click shows / hides the folder as it
- * always has. Keyed like the row: a container's own sessions use the repo id.
- */
-export function folderIdsWithMoreRow(rows: readonly SidebarRow[]): Set<number> {
-  const ids = new Set<number>()
-  for (const row of rows) {
-    if (row.kind === "folder-more") ids.add(row.folderId)
-  }
-  return ids
-}
-
-/**
  * Flat index of the conversation row for `(id, agentType)`, or -1 if absent
  * (folder collapsed, filtered out, or unknown). Used by `scrollToActive` to
  * drive `VirtualizerHandle.scrollToIndex` — off-screen virtualized rows are not
