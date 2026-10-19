@@ -72,6 +72,9 @@ interface ChatInputProps {
   canContinue?: boolean
   /** Why the queue is held, shown above it (see `QueueNotice`). */
   queueNotice?: QueueNotice | null
+  /** While connecting: why it takes a while, when something says so (every
+   *  Claude subscription at its limit). Leads the composer's placeholder. */
+  connectingReason?: string | null
   onQueueReorder?: (items: QueuedMessage[]) => void
   onQueueEdit?: (id: string) => void
   onQueueDelete?: (id: string) => void
@@ -153,6 +156,7 @@ export const ChatInput = memo(function ChatInput({
   onDeliverNow,
   canContinue = false,
   queueNotice,
+  connectingReason,
   onQueueReorder,
   onQueueEdit,
   onQueueDelete,
@@ -282,9 +286,11 @@ export const ChatInput = memo(function ChatInput({
         onInjectConsumed={onInjectConsumed}
         placeholder={
           isConnecting
-            ? queueWhileConnecting
-              ? t("connectingQueued", { agent: agentName ?? "Agent" })
-              : t("connecting")
+            ? connectingReason
+              ? t("connectingWaiting", { reason: connectingReason })
+              : queueWhileConnecting
+                ? t("connectingQueued", { agent: agentName ?? "Agent" })
+                : t("connecting")
             : isPrompting && awaitingBackground
               ? t(
                   heldTurnReady

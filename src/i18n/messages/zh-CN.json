@@ -3454,7 +3454,8 @@
         "agentIdleBackground": "{agent} 空闲 — {count, plural, =0 {后台任务运行中} other {# 个后台任务运行中}}。随时可以发送消息。",
         "agentIdleBackgroundQueued": "{agent} 空闲 — {count, plural, =0 {后台任务运行中} other {# 个后台任务运行中}}。消息会在后台任务完成后发送。",
         "sendMessage": "发送消息...",
-        "connectingQueued": "正在连接 {agent}… 现在即可发送，消息会在队列中等待"
+        "connectingQueued": "正在连接 {agent}… 现在即可发送，消息会在队列中等待",
+        "connectingWaiting": "{reason}。现在即可发送，消息会在队列中等到那时。"
       },
       "messageInput": {
         "askAnything": "请开始输入...",

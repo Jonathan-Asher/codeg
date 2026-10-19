@@ -47,6 +47,7 @@ import { useConnectionLifecycle } from "@/hooks/use-connection-lifecycle"
 import { useMessageQueue, type QueuedMessage } from "@/hooks/use-message-queue"
 import { usePoolHold } from "@/hooks/use-pool-hold"
 import { useQueueNotice } from "@/hooks/use-queue-notice"
+import { useAttachPhaseLabel } from "@/hooks/use-attach-phase-label"
 import type { PoolHold } from "@/lib/pool-hold"
 import { MessageListView } from "@/components/message/message-list-view"
 import {
@@ -844,6 +845,15 @@ const ConversationTabView = memo(function ConversationTabView({
       // A failed reconnect publishes (and notifies) its own failure.
     })
   }, [acpActions, tabId])
+  // While the session waits for the account pool, the composer says so.
+  const poolWaitLabel = useAttachPhaseLabel(
+    getAgentLabel(selectedAgent),
+    !connIsForOtherAgent && conn.attachPhase === "pool_wait"
+      ? "pool_wait"
+      : null,
+    null,
+    conn.poolWait
+  )
   const queueNotice = useQueueNotice({
     queueLength: msgQueue.length,
     held: poolHold,
@@ -2991,6 +3001,7 @@ const ConversationTabView = memo(function ConversationTabView({
       showActiveFlow={showActiveFlow}
       queue={msgQueue}
       queueNotice={queueNotice}
+      connectingReason={poolWaitLabel?.text ?? null}
       onEnqueue={mqEnqueue}
       awaitingBackground={awaitingBackground}
       backgroundTaskCount={heldBackgroundTasks}

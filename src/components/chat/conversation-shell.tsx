@@ -128,6 +128,8 @@ interface ConversationShellProps {
   canContinue?: boolean
   /** Why the queue is held, shown above it (see `QueueNotice`). */
   queueNotice?: QueueNotice | null
+  /** Pass-through: see `ChatInputProps.connectingReason`. */
+  connectingReason?: string | null
   onQueueReorder?: (items: QueuedMessage[]) => void
   onQueueEdit?: (id: string) => void
   onQueueDelete?: (id: string) => void
@@ -215,6 +217,7 @@ export function ConversationShell({
   onDeliverNow,
   canContinue,
   queueNotice,
+  connectingReason,
   onQueueReorder,
   onQueueEdit,
   onQueueDelete,
@@ -323,6 +326,7 @@ export function ConversationShell({
               onDeliverNow={onDeliverNow}
               canContinue={canContinue}
               queueNotice={queueNotice}
+              connectingReason={connectingReason}
               onQueueReorder={onQueueReorder}
               onQueueEdit={onQueueEdit}
               onQueueDelete={onQueueDelete}

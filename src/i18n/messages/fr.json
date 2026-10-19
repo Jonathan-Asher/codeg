@@ -3454,7 +3454,8 @@
         "agentIdleBackground": "{agent} est inactif — {count, plural, =0 {travail en arrière-plan en cours} one {# tâche en arrière-plan en cours} other {# tâches en arrière-plan en cours}}. Vous pouvez envoyer un message à tout moment.",
         "agentIdleBackgroundQueued": "{agent} est inactif — {count, plural, =0 {travail en arrière-plan en cours} one {# tâche en arrière-plan en cours} other {# tâches en arrière-plan en cours}}. Les messages attendent qu'il se termine.",
         "sendMessage": "Envoyer un message...",
-        "connectingQueued": "Connexion à {agent}… vous pouvez déjà envoyer, les messages attendent dans la file"
+        "connectingQueued": "Connexion à {agent}… vous pouvez déjà envoyer, les messages attendent dans la file",
+        "connectingWaiting": "{reason}. Vous pouvez envoyer maintenant ; les messages attendent dans la file jusque-là."
       },
       "messageInput": {
         "askAnything": "Posez n'importe quelle question...",

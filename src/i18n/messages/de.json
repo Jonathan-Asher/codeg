@@ -3454,7 +3454,8 @@
         "agentIdleBackground": "{agent} ist im Leerlauf — {count, plural, =0 {Hintergrundarbeit läuft} one {# Hintergrundaufgabe läuft} other {# Hintergrundaufgaben laufen}}. Du kannst jederzeit eine Nachricht senden.",
         "agentIdleBackgroundQueued": "{agent} ist im Leerlauf — {count, plural, =0 {Hintergrundarbeit läuft} one {# Hintergrundaufgabe läuft} other {# Hintergrundaufgaben laufen}}. Nachrichten warten, bis sie fertig ist.",
         "sendMessage": "Nachricht senden...",
-        "connectingQueued": "Verbindung zu {agent}… du kannst schon senden, Nachrichten warten in der Warteschlange"
+        "connectingQueued": "Verbindung zu {agent}… du kannst schon senden, Nachrichten warten in der Warteschlange",
+        "connectingWaiting": "{reason}. Du kannst jetzt senden; Nachrichten warten bis dahin in der Warteschlange."
       },
       "messageInput": {
         "askAnything": "Fragen Sie alles...",

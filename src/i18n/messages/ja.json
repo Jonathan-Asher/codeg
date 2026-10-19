@@ -3454,7 +3454,8 @@
         "agentIdleBackground": "{agent} は待機中 — {count, plural, =0 {バックグラウンド処理を実行中} other {# 件のバックグラウンドタスクを実行中}}。いつでもメッセージを送信できます。",
         "agentIdleBackgroundQueued": "{agent} は待機中 — {count, plural, =0 {バックグラウンド処理を実行中} other {# 件のバックグラウンドタスクを実行中}}。メッセージは完了後に送信されます。",
         "sendMessage": "メッセージを送信...",
-        "connectingQueued": "{agent} に接続中… 今すぐ送信できます。メッセージはキューで待機します"
+        "connectingQueued": "{agent} に接続中… 今すぐ送信できます。メッセージはキューで待機します",
+        "connectingWaiting": "{reason}。今すぐ送信できます。メッセージはそれまでキューで待機します。"
       },
       "messageInput": {
         "askAnything": "何でも質問してください...",

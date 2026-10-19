@@ -3454,7 +3454,8 @@
         "agentIdleBackground": "{agent} is idle — {count, plural, =0 {background work running} one {# background task running} other {# background tasks running}}. Send a message anytime.",
         "agentIdleBackgroundQueued": "{agent} is idle — {count, plural, =0 {background work running} one {# background task running} other {# background tasks running}}. Messages wait until it finishes.",
         "sendMessage": "Send a message...",
-        "connectingQueued": "Connecting to {agent}… you can send now, messages wait in the queue"
+        "connectingQueued": "Connecting to {agent}… you can send now, messages wait in the queue",
+        "connectingWaiting": "{reason}. You can send now; messages wait in the queue until then."
       },
       "messageInput": {
         "askAnything": "Ask anything...",

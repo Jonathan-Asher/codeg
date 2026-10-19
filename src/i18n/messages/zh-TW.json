@@ -3454,7 +3454,8 @@
         "agentIdleBackground": "{agent} 閒置 — {count, plural, =0 {背景工作執行中} other {# 個背景工作執行中}}。隨時可以傳送訊息。",
         "agentIdleBackgroundQueued": "{agent} 閒置 — {count, plural, =0 {背景工作執行中} other {# 個背景工作執行中}}。訊息會在背景工作完成後傳送。",
         "sendMessage": "傳送訊息...",
-        "connectingQueued": "正在連線 {agent}… 現在即可傳送，訊息會在佇列中等待"
+        "connectingQueued": "正在連線 {agent}… 現在即可傳送，訊息會在佇列中等待",
+        "connectingWaiting": "{reason}。現在即可傳送，訊息會在佇列中等到那時。"
       },
       "messageInput": {
         "askAnything": "請開始輸入...",

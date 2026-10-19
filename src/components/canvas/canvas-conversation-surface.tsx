@@ -35,6 +35,7 @@ import { shouldQueueDirectSend } from "@/lib/queue-flush"
 import { getAgentLabel } from "@/lib/custom-agents"
 import { usePoolHold } from "@/hooks/use-pool-hold"
 import { useQueueNotice } from "@/hooks/use-queue-notice"
+import { useAttachPhaseLabel } from "@/hooks/use-attach-phase-label"
 import type { PoolHold } from "@/lib/pool-hold"
 import {
   extractUserImagesFromDraft,
@@ -846,6 +847,13 @@ export function CanvasConversationSurface({
       // A failed reconnect publishes (and notifies) its own failure.
     })
   }, [acpActions, contextKey])
+  // While the session waits for the account pool, the composer says so.
+  const poolWaitLabel = useAttachPhaseLabel(
+    getAgentLabel(agentType),
+    conn.attachPhase === "pool_wait" ? "pool_wait" : null,
+    null,
+    conn.poolWait
+  )
   const queueNotice = useQueueNotice({
     queueLength: msgQueue.length,
     held: poolHold,
@@ -1008,6 +1016,7 @@ export function CanvasConversationSurface({
           isActive={isActive}
           queue={msgQueue}
           queueNotice={queueNotice}
+          connectingReason={poolWaitLabel?.text ?? null}
           // A draft card's first send creates the conversation; it has no
           // queue until then (see `canSendNow` above).
           onEnqueue={isDraft ? undefined : mqEnqueue}
