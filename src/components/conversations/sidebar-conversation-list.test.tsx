@@ -7,6 +7,7 @@ import {
   useState,
 } from "react"
 import { act, fireEvent, render } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -1175,6 +1176,55 @@ describe("SidebarConversationList — worktree grouping (Show worktrees)", () =>
     expect(text).toContain("conv-21")
   })
 
+  it("folds the root sub-group back to its short list once it or its container is hidden", () => {
+    localStorage.clear()
+    render(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <SidebarConversationList
+          showCompleted
+          showWorktrees
+          sortMode="created"
+          folderSessionLimit={1}
+        />
+      </NextIntlClientProvider>
+    )
+    const ids = () =>
+      Array.from(document.querySelectorAll("[data-conversation-id]")).map(
+        (el) => Number(el.getAttribute("data-conversation-id"))
+      )
+    const showMore = () =>
+      document.querySelector('[data-folder-more="1"]') as HTMLElement
+    // [0] is the container, [1] its root sub-group.
+    const header = (i: number) =>
+      document.querySelectorAll('[data-folder-id="1"]')[i] as HTMLElement
+    expect(ids()).toEqual([12, 21])
+
+    act(() => {
+      fireEvent.click(showMore())
+    })
+    expect(ids()).toEqual([12, 11, 21])
+    act(() => {
+      fireEvent.click(header(1))
+    })
+    expect(ids()).toEqual([21])
+    act(() => {
+      fireEvent.click(header(1))
+    })
+    expect(ids()).toEqual([12, 21])
+
+    act(() => {
+      fireEvent.click(showMore())
+    })
+    act(() => {
+      fireEvent.click(header(0))
+    })
+    expect(ids()).toEqual([])
+    act(() => {
+      fireEvent.click(header(0))
+    })
+    expect(ids()).toEqual([12, 21])
+  })
+
   it("labels a worktree sub-group `branch [ directory ]`", () => {
     // What a worktree registered through `open_worktree_folder_core` looks like:
     // the alias was seeded with the branch it was created on. `git_branch` on the
@@ -1684,6 +1734,39 @@ describe("SidebarConversationList — folder groups", () => {
     ).toEqual({ 7: false })
   })
 
+  it("toggles a group from its focused heading with the keyboard", async () => {
+    localStorage.removeItem("workspace:sidebar-folder-group-expanded")
+    const folders = [
+      { ...folder(5, "Member"), sort_order: 1, group_id: 7 },
+    ] as FolderDetail[]
+    useAppWorkspaceStore.setState({
+      folders,
+      allFolders: folders,
+      folderGroups: [group(7, "Work", 1)],
+      conversations: [conv(51, 5)],
+    })
+    // user-event waits on real timers between keystrokes; nothing here reads
+    // the clock this suite pins.
+    vi.useRealTimers()
+    const user = userEvent.setup()
+    const { container } = render(tree())
+    const heading = container.querySelector(
+      '[data-folder-group-id="7"]'
+    ) as HTMLElement
+    expect(heading.getAttribute("aria-expanded")).toBe("true")
+    heading.focus()
+
+    await user.keyboard("{Enter}")
+    expect(heading.getAttribute("aria-expanded")).toBe("false")
+    expect(container.querySelector('[data-conversation-id="51"]')).toBeNull()
+
+    await user.keyboard(" ")
+    expect(heading.getAttribute("aria-expanded")).toBe("true")
+    expect(
+      container.querySelector('[data-conversation-id="51"]')
+    ).not.toBeNull()
+  })
+
   // The heading's badge counts RUNNING sessions across the whole group (the
   // folder header's badge, one level up) — not how many folders it holds.
   function groupWith(
@@ -1862,37 +1945,118 @@ describe("SidebarConversationList — sessions shown per folder", () => {
     expect(stored(SHOW_ALL_KEY)).toEqual({})
   })
 
-  it("switches between the top three and all of them from the folder name", () => {
+  it("hides the whole folder from its row, and opens it on the top three", () => {
     render(limitTree(3))
-    expect(nameButton().getAttribute("aria-expanded")).toBe("false")
-    act(() => {
-      fireEvent.click(nameButton())
-    })
-    expect(visibleIds()).toHaveLength(8)
     expect(nameButton().getAttribute("aria-expanded")).toBe("true")
+
     act(() => {
       fireEvent.click(nameButton())
     })
-    expect(visibleIds()).toEqual([8, 7, 6])
-    // The name never hid the folder: that is the chevron's job.
-    expect(stored(FOLDER_EXPANDED_KEY)).toBeNull()
-  })
-
-  it("hides the folder from the chevron, and the name brings it back", () => {
-    render(limitTree(3))
-    act(() => {
-      fireEvent.click(chevron())
-    })
+    // Entirely: no sessions and no "Show N more" row.
     expect(visibleIds()).toEqual([])
-    expect(chevron().getAttribute("aria-expanded")).toBe("false")
+    expect(document.querySelector("[data-folder-more]")).toBeNull()
+    expect(nameButton().getAttribute("aria-expanded")).toBe("false")
     expect(stored(FOLDER_EXPANDED_KEY)).toEqual({ 1: false })
 
     act(() => {
       fireEvent.click(nameButton())
     })
-    // Back to where it was — the short list, not everything.
     expect(visibleIds()).toEqual([8, 7, 6])
+    expect(buttonWithText(showMore(5))).toBeDefined()
+    expect(nameButton().getAttribute("aria-expanded")).toBe("true")
     expect(stored(FOLDER_EXPANDED_KEY)).toEqual({ 1: true })
+  })
+
+  it("folds an opened-up folder back to the top three once it is hidden", () => {
+    render(limitTree(3))
+    act(() => {
+      fireEvent.click(buttonWithText(showMore(5))!)
+    })
+    expect(visibleIds()).toHaveLength(8)
+
+    // The row hides it, whether or not the list is opened up.
+    act(() => {
+      fireEvent.click(nameButton())
+    })
+    expect(visibleIds()).toEqual([])
+    expect(stored(SHOW_ALL_KEY)).toEqual({})
+
+    act(() => {
+      fireEvent.click(nameButton())
+    })
+    expect(visibleIds()).toEqual([8, 7, 6])
+    expect(buttonWithText(showMore(5))).toBeDefined()
+  })
+
+  it("toggles from the keyboard on the focused row", async () => {
+    const user = userEvent.setup()
+    render(limitTree(3))
+    nameButton().focus()
+
+    await user.keyboard("{Enter}")
+    expect(visibleIds()).toEqual([])
+    expect(nameButton().getAttribute("aria-expanded")).toBe("false")
+
+    await user.keyboard(" ")
+    expect(visibleIds()).toEqual([8, 7, 6])
+    expect(nameButton().getAttribute("aria-expanded")).toBe("true")
+  })
+
+  it("gives the chevron the row's toggle, outside the tab order", () => {
+    render(limitTree(3))
+    // The row is the keyboard / screen-reader control; the chevron is a second
+    // pointer target for the same thing, not a second tab stop.
+    expect(chevron().getAttribute("tabindex")).toBe("-1")
+    expect(chevron().getAttribute("aria-hidden")).toBe("true")
+
+    act(() => {
+      fireEvent.click(chevron())
+    })
+    expect(visibleIds()).toEqual([])
+    expect(nameButton().getAttribute("aria-expanded")).toBe("false")
+    expect(stored(FOLDER_EXPANDED_KEY)).toEqual({ 1: false })
+
+    act(() => {
+      fireEvent.click(chevron())
+    })
+    expect(visibleIds()).toEqual([8, 7, 6])
+  })
+
+  it("opens on the top three after collapse all and expand all", () => {
+    const ref = createRef<SidebarConversationListHandle>()
+    render(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <SidebarConversationList
+          showCompleted
+          sortMode="created"
+          folderSessionLimit={3}
+          ref={ref}
+        />
+      </NextIntlClientProvider>
+    )
+    act(() => {
+      fireEvent.click(buttonWithText(showMore(5))!)
+    })
+    expect(visibleIds()).toHaveLength(8)
+
+    act(() => ref.current?.collapseAll())
+    act(() => ref.current?.expandAll())
+    expect(visibleIds()).toEqual([8, 7, 6])
+    expect(stored(SHOW_ALL_KEY)).toEqual({})
+  })
+
+  it("drops a saved opened-up list for a folder that is hidden", () => {
+    // Saved before hiding folded a folder back: it must not open on all eight.
+    localStorage.setItem(SHOW_ALL_KEY, JSON.stringify({ 1: true }))
+    localStorage.setItem(FOLDER_EXPANDED_KEY, JSON.stringify({ 1: false }))
+    render(limitTree(3))
+    expect(visibleIds()).toEqual([])
+    expect(stored(SHOW_ALL_KEY)).toEqual({})
+
+    act(() => {
+      fireEvent.click(nameButton())
+    })
+    expect(visibleIds()).toEqual([8, 7, 6])
   })
 
   it("keeps an opened-up folder open across a remount", () => {
@@ -1940,7 +2104,7 @@ describe("SidebarConversationList — sessions shown per folder", () => {
     expect(buttonWithText(showMore(3))).toBeDefined()
   })
 
-  it("lists everything under All, where the name hides the folder as before", () => {
+  it("lists everything under All, where the row hides the folder too", () => {
     render(limitTree(null))
     expect(visibleIds()).toHaveLength(8)
     expect(document.querySelector("[data-folder-more]")).toBeNull()
@@ -2061,11 +2225,148 @@ describe("SidebarConversationList — stepping through sessions with the keyboar
     )
   })
 
+  it("passes over a folder hidden from its row", () => {
+    activate(12, 1)
+    render(tree())
+    act(() => {
+      fireEvent.click(
+        document.querySelector('[data-folder-id="5"]') as HTMLElement
+      )
+    })
+    expect(document.querySelector('[data-conversation-id="51"]')).toBeNull()
+    pressDown()
+    expect(stableTabFns.openTab).toHaveBeenCalledWith(
+      9,
+      91,
+      "claude_code",
+      false
+    )
+  })
+
   it("opens nothing past the last session", () => {
     activate(91, 9)
     render(tree())
     expect(pressDown().defaultPrevented).toBe(true)
     expect(stableTabFns.openTab).not.toHaveBeenCalled()
+  })
+})
+
+describe("SidebarConversationList — opening the folder of the session you go to", () => {
+  const FOLDER_EXPANDED_KEY = "workspace:sidebar-folder-expanded"
+  const GROUP_EXPANDED_KEY = "workspace:sidebar-folder-group-expanded"
+  const stored = (key: string) =>
+    JSON.parse(localStorage.getItem(key) ?? "null") as unknown
+  const listed = (id: number) =>
+    document.querySelector(`[data-conversation-id="${id}"]`) !== null
+
+  function activate(conversationId: number, folderId: number) {
+    store.activeTabId = `tab-${conversationId}`
+    store.tabSpec = [
+      {
+        id: `tab-${conversationId}`,
+        conversationId,
+        agentType: "claude_code",
+        folderId,
+        title: `conv-${conversationId}`,
+        isPinned: false,
+      },
+    ]
+  }
+
+  function limitTree() {
+    return (
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <SidebarConversationList
+          showCompleted
+          sortMode="created"
+          folderSessionLimit={3}
+        />
+      </NextIntlClientProvider>
+    )
+  }
+
+  beforeEach(() => {
+    localStorage.clear()
+    // Folder 1, folder 2 (eight sessions, 21..28), and group 7 holding
+    // folder 3.
+    const folders = [
+      { ...folder(1, "One"), sort_order: 1, group_id: null },
+      { ...folder(2, "Two"), sort_order: 2, group_id: null },
+      { ...folder(3, "Three"), sort_order: 1, group_id: 7 },
+    ] as FolderDetail[]
+    useAppWorkspaceStore.setState({
+      folders,
+      allFolders: folders,
+      folderGroups: [{ id: 7, name: "Work", color: "inherit", sort_order: 3 }],
+      conversations: [
+        conv(11, 1),
+        ...Array.from({ length: 8 }, (_, i) => conv(21 + i, 2)),
+        conv(31, 3),
+      ],
+    })
+  })
+
+  afterEach(() => {
+    store.activeTabId = null
+    store.tabSpec = []
+    localStorage.clear()
+  })
+
+  it("leaves the saved state alone for the session restored at launch", () => {
+    localStorage.setItem(FOLDER_EXPANDED_KEY, JSON.stringify({ 2: false }))
+    activate(21, 2)
+    render(limitTree())
+    expect(listed(21)).toBe(false)
+    expect(stored(FOLDER_EXPANDED_KEY)).toEqual({ 2: false })
+  })
+
+  it("opens a hidden folder when you go to a session in it, on the top three", () => {
+    localStorage.setItem(FOLDER_EXPANDED_KEY, JSON.stringify({ 2: false }))
+    activate(11, 1)
+    const { rerender } = render(limitTree())
+    expect(listed(21)).toBe(false)
+
+    // The oldest of the eight: listed among the three anyway.
+    activate(21, 2)
+    rerender(limitTree())
+    const ids = Array.from(
+      document.querySelectorAll("[data-conversation-id]")
+    ).map((el) => Number(el.getAttribute("data-conversation-id")))
+    expect(ids).toEqual([11, 28, 27, 21, 31])
+    expect(stored(FOLDER_EXPANDED_KEY)).toEqual({ 2: true })
+  })
+
+  it("opens a collapsed group around that folder too", () => {
+    localStorage.setItem(GROUP_EXPANDED_KEY, JSON.stringify({ 7: false }))
+    activate(11, 1)
+    const { rerender } = render(limitTree())
+    expect(listed(31)).toBe(false)
+
+    activate(31, 3)
+    rerender(limitTree())
+    expect(listed(31)).toBe(true)
+    expect(stored(GROUP_EXPANDED_KEY)).toEqual({ 7: true })
+  })
+
+  it("keeps the folder you hid while on one of its sessions hidden", () => {
+    activate(21, 2)
+    const { rerender } = render(limitTree())
+    act(() => {
+      fireEvent.click(
+        document.querySelector('[data-folder-id="2"]') as HTMLElement
+      )
+    })
+    expect(listed(21)).toBe(false)
+
+    // A status event on the same session re-renders the list.
+    useAppWorkspaceStore.setState((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.id === 21 ? { ...c, title: "renamed" } : c
+      ),
+    }))
+    rerender(limitTree())
+    expect(listed(21)).toBe(false)
+    expect(stored(FOLDER_EXPANDED_KEY)).toEqual({ 2: false })
   })
 })
 

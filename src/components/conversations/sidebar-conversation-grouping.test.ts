@@ -9,7 +9,6 @@ import {
   delegationRootId,
   flatIndexOfConversation,
   folderHeaderFlatIndices,
-  folderIdsWithMoreRow,
   formatRelative,
   groupByFolderWithReuse,
   headerIndexForFolder,
@@ -2025,7 +2024,6 @@ describe("buildRows — sessions shown per folder", () => {
       },
     ])
     expect(convIds(rows)).toEqual([8, 7, 6, 24, 23, 22, 21, 20])
-    expect(folderIdsWithMoreRow(rows)).toEqual(new Set([10, 11]))
   })
 
   it("indents a grouped folder's footer with its cards", () => {
