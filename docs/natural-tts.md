@@ -68,6 +68,19 @@ downloaded.
 | Memory | ~0.9 GB resident in `codeg-tts` while loaded; the process exits after 15 minutes idle |
 | App bundle | + ~39 MB (`codeg-tts`, ONNX Runtime linked statically) + ~0.8 MB espeak-ng data |
 
+Measured on the M4 Max, Developer-ID-signed bundle, through the backend's
+`tts_speak`/`tts_poll` path (a four-sentence Hebrew/English reply, 14.3 s of
+audio), 2026-10-20:
+
+| | first audio | whole reply ready | RTF |
+|---|---|---|---|
+| first start of a new build (macOS checks the signature once, models load) | 0.9–2.7 s | 1.6–3.1 s | 0.11–0.22 |
+| warm (engine running, as between replies) | 0.13–0.21 s | 0.55–0.97 s | 0.04–0.07 |
+| restart after an idle shutdown | 0.83 s | 1.5 s | 0.10 |
+
+The 16 GB M1 box measured RTF ~0.15 and a ~1 s first chunk in BlueTTSKit's own
+benchmark; synthesis there has not been enabled.
+
 Nothing is downloaded or started until the user presses Download (and, after
 that, reads something). On a server this is the opt-in: a browser user who
 downloads puts the 549 MiB on the server's disk, and reading uses the server's
