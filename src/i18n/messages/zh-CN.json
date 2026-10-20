@@ -2363,7 +2363,6 @@
       "roleUser": "用户",
       "roleAssistant": "助手",
       "roleSystem": "系统",
-      "currentSession": "当前",
       "recentHeading": "最近",
       "archivedBadge": "已归档"
     },

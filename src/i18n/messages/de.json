@@ -2363,7 +2363,6 @@
       "roleUser": "Benutzer",
       "roleAssistant": "Assistent",
       "roleSystem": "System",
-      "currentSession": "Aktuell",
       "recentHeading": "Zuletzt",
       "archivedBadge": "Archiviert"
     },

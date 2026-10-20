@@ -73,7 +73,7 @@ interface ConversationRowProps {
   agentType: AgentType
   /** Relative time already formatted, or null when unknown. */
   time: string | null
-  /** A short label after the title (the current session's "Current"). */
+  /** A short label after the title (an archived folder's "Archived"). */
   badge?: string
 }
 
@@ -160,15 +160,13 @@ export function SearchCommandDialog({
       childToParent: repoOf,
     })
   }, [allFolders, folderGroups])
-  // With nothing typed, the Conversations tab is a session switcher: the
-  // current session first (selected), the most recently active ones below,
-  // so ↓ Enter goes back to the last session you were in.
+  // With nothing typed, the Conversations tab is a session switcher, like
+  // Alt-Tab: the conversation in front is left out and the most recently
+  // active other one comes first, selected, so Enter goes straight back to it.
   const [showRecent] = useShowRecentOnSearch()
-  const activeConversationTab = useTabStore(
+  const activeConversationId = useTabStore(
     (s) =>
-      s.tabs.find(
-        (tab) => tab.id === s.activeTabId && tab.conversationId != null
-      ) ?? null
+      s.tabs.find((tab) => tab.id === s.activeTabId)?.conversationId ?? null
   )
   const { openTab } = useTabActions()
   const { openConversations } = useWorkbenchRoute()
@@ -219,27 +217,16 @@ export function SearchCommandDialog({
   }, [open, showRecent, storeEmpty])
   const recentSource = storeEmpty ? fetchedConversations : allConversations
 
-  const currentConversation = useMemo(() => {
-    const id = activeConversationTab?.conversationId
-    if (!open || !activeConversationTab || id == null) return null
-    // A tab carries enough to show the row even when the list lacks it.
-    const known = recentSource.find((c) => c.id === id)
-    return {
-      id,
-      folderId: known?.folder_id ?? activeConversationTab.folderId,
-      agentType: known?.agent_type ?? activeConversationTab.agentType,
-      title: known ? known.title : activeConversationTab.title,
-      status: known?.status ?? activeConversationTab.status,
-      updatedAt: known?.updated_at ?? null,
-    }
-  }, [open, activeConversationTab, recentSource])
+  // The conversation in the active tab. It is never offered: picking it would
+  // only close the dialog, so it stays out of the recent list and the results.
+  const currentConversationId = open ? activeConversationId : null
 
   const recent = useMemo(
     () =>
       open && recentMode
         ? recentSessions(recentSource, {
             knownFolderIds: new Set(folderNames.keys()),
-            excludeId: currentConversation?.id ?? null,
+            excludeId: currentConversationId,
             folderId: scopedFolderId,
             agentType: agentFilter,
             excludeFolderIds: archivedIds,
@@ -251,11 +238,19 @@ export function SearchCommandDialog({
       recentMode,
       recentSource,
       folderNames,
-      currentConversation,
+      currentConversationId,
       scopedFolderId,
       agentFilter,
       archivedIds,
     ]
+  )
+
+  const shownResults = useMemo(
+    () =>
+      currentConversationId == null
+        ? results
+        : results.filter((c) => c.id !== currentConversationId),
+    [results, currentConversationId]
   )
 
   const relativeTime = useCallback(
@@ -387,13 +382,6 @@ export function SearchCommandDialog({
     },
     [openTab, onOpenChange, openConversations]
   )
-
-  // The current session is already in front: picking it only closes the
-  // dialog (and leaves a workbench route covering it, as picking any does).
-  const handleSelectCurrent = useCallback(() => {
-    openConversations()
-    onOpenChange(false)
-  }, [onOpenChange, openConversations])
 
   const handleSelectMessageHit = useCallback(
     (hit: MessageSearchHit) => {
@@ -588,27 +576,6 @@ export function SearchCommandDialog({
                   ? t("typeToSearch")
                   : t("noResults")}
             </CommandEmpty>
-            {recentMode && currentConversation && (
-              <CommandGroup>
-                <ConversationRow
-                  value={`current-${currentConversation.id}`}
-                  onSelect={handleSelectCurrent}
-                  title={
-                    formatConversationTitle(currentConversation.title) ||
-                    t("untitledConversation")
-                  }
-                  status={currentConversation.status}
-                  folderName={folderLabel(currentConversation.folderId)}
-                  agentType={currentConversation.agentType}
-                  time={
-                    currentConversation.updatedAt
-                      ? relativeTime(currentConversation.updatedAt)
-                      : null
-                  }
-                  badge={t("currentSession")}
-                />
-              </CommandGroup>
-            )}
             {recentMode && recent.length > 0 && (
               <CommandGroup heading={t("recentHeading")}>
                 {recent.map((conv) => (
@@ -628,9 +595,9 @@ export function SearchCommandDialog({
                 ))}
               </CommandGroup>
             )}
-            {!recentMode && results.length > 0 && (
+            {!recentMode && shownResults.length > 0 && (
               <CommandGroup>
-                {results.map((conv) => (
+                {shownResults.map((conv) => (
                   <ConversationRow
                     key={conv.id}
                     value={`${conv.id}-${formatConversationTitle(conv.title)}`}

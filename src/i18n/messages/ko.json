@@ -2363,7 +2363,6 @@
       "roleUser": "사용자",
       "roleAssistant": "어시스턴트",
       "roleSystem": "시스템",
-      "currentSession": "현재",
       "recentHeading": "최근",
       "archivedBadge": "보관됨"
     },
