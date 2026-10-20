@@ -1,7 +1,12 @@
 fn main() {
     #[cfg(feature = "tauri-runtime")]
     {
-        ensure_sidecar_placeholder();
+        ensure_sidecar_placeholder("codeg-mcp");
+        // macOS only: the natural-voice sidecar (`native/codeg-tts`), listed
+        // in tauri.macos.conf.json. Built by the same prepare-sidecars step.
+        if std::env::var("TARGET").unwrap_or_default().contains("apple-darwin") {
+            ensure_sidecar_placeholder("codeg-tts");
+        }
         tauri_build::build();
     }
 }
@@ -25,7 +30,7 @@ fn main() {
 /// without beforeBuildCommand) you'd ship the placeholder, so emit a
 /// cargo:warning that surfaces in any compile log to make that loud.
 #[cfg(feature = "tauri-runtime")]
-fn ensure_sidecar_placeholder() {
+fn ensure_sidecar_placeholder(name: &str) {
     use std::fs;
     use std::path::PathBuf;
 
@@ -39,7 +44,7 @@ fn ensure_sidecar_placeholder() {
         ""
     };
     let dir = PathBuf::from("binaries");
-    let path = dir.join(format!("codeg-mcp-{triple}{ext}"));
+    let path = dir.join(format!("{name}-{triple}{ext}"));
 
     println!("cargo:rerun-if-changed={}", path.display());
 
@@ -64,7 +69,7 @@ fn ensure_sidecar_placeholder() {
             let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o755));
         }
         println!(
-            "cargo:warning=codeg-mcp sidecar missing at {}; wrote 0-byte placeholder. \
+            "cargo:warning={name} sidecar missing at {}; wrote 0-byte placeholder. \
              Run `pnpm tauri:prepare-sidecars` before `tauri build` to ship a working binary.",
             path.display()
         );
