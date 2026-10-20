@@ -1,0 +1,11 @@
+.build/
+.swiftpm/
+/Packages
+*.xcodeproj
+xcuserdata/
+DerivedData/
+out/
+models/
+*.wav
+*.zip
+__pycache__/

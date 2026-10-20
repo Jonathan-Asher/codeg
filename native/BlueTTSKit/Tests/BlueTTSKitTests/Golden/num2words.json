@@ -1,0 +1,324 @@
+[
+ {
+  "value": 0,
+  "isFloat": false,
+  "he": "אפס",
+  "en": "zero"
+ },
+ {
+  "value": 1,
+  "isFloat": false,
+  "he": "אחת",
+  "en": "one"
+ },
+ {
+  "value": 2,
+  "isFloat": false,
+  "he": "שתיים",
+  "en": "two"
+ },
+ {
+  "value": 7,
+  "isFloat": false,
+  "he": "שבע",
+  "en": "seven"
+ },
+ {
+  "value": 10,
+  "isFloat": false,
+  "he": "עשר",
+  "en": "ten"
+ },
+ {
+  "value": 11,
+  "isFloat": false,
+  "he": "אחת עשרה",
+  "en": "eleven"
+ },
+ {
+  "value": 12,
+  "isFloat": false,
+  "he": "שתים עשרה",
+  "en": "twelve"
+ },
+ {
+  "value": 15,
+  "isFloat": false,
+  "he": "חמש עשרה",
+  "en": "fifteen"
+ },
+ {
+  "value": 19,
+  "isFloat": false,
+  "he": "תשע עשרה",
+  "en": "nineteen"
+ },
+ {
+  "value": 20,
+  "isFloat": false,
+  "he": "עשרים",
+  "en": "twenty"
+ },
+ {
+  "value": 21,
+  "isFloat": false,
+  "he": "עשרים ואחת",
+  "en": "twenty-one"
+ },
+ {
+  "value": 42,
+  "isFloat": false,
+  "he": "ארבעים ושתיים",
+  "en": "forty-two"
+ },
+ {
+  "value": 99,
+  "isFloat": false,
+  "he": "תשעים ותשע",
+  "en": "ninety-nine"
+ },
+ {
+  "value": 100,
+  "isFloat": false,
+  "he": "מאה",
+  "en": "one hundred"
+ },
+ {
+  "value": 101,
+  "isFloat": false,
+  "he": "מאה ואחת",
+  "en": "one hundred and one"
+ },
+ {
+  "value": 110,
+  "isFloat": false,
+  "he": "מאה ועשר",
+  "en": "one hundred and ten"
+ },
+ {
+  "value": 200,
+  "isFloat": false,
+  "he": "מאתיים",
+  "en": "two hundred"
+ },
+ {
+  "value": 315,
+  "isFloat": false,
+  "he": "שלוש מאות וחמש עשרה",
+  "en": "three hundred and fifteen"
+ },
+ {
+  "value": 999,
+  "isFloat": false,
+  "he": "תשע מאות תשעים ותשע",
+  "en": "nine hundred and ninety-nine"
+ },
+ {
+  "value": 1000,
+  "isFloat": false,
+  "he": "אלף",
+  "en": "one thousand"
+ },
+ {
+  "value": 1001,
+  "isFloat": false,
+  "he": "אלף ואחת",
+  "en": "one thousand and one"
+ },
+ {
+  "value": 1024,
+  "isFloat": false,
+  "he": "אלף עשרים וארבע",
+  "en": "one thousand and twenty-four"
+ },
+ {
+  "value": 1500,
+  "isFloat": false,
+  "he": "אלף וחמש מאות",
+  "en": "one thousand, five hundred"
+ },
+ {
+  "value": 2000,
+  "isFloat": false,
+  "he": "אלפיים",
+  "en": "two thousand"
+ },
+ {
+  "value": 2024,
+  "isFloat": false,
+  "he": "אלפיים עשרים וארבע",
+  "en": "two thousand and twenty-four"
+ },
+ {
+  "value": 2025,
+  "isFloat": false,
+  "he": "אלפיים עשרים וחמש",
+  "en": "two thousand and twenty-five"
+ },
+ {
+  "value": 3000,
+  "isFloat": false,
+  "he": "שלושת אלפים",
+  "en": "three thousand"
+ },
+ {
+  "value": 10000,
+  "isFloat": false,
+  "he": "עשרת אלפים",
+  "en": "ten thousand"
+ },
+ {
+  "value": 11000,
+  "isFloat": false,
+  "he": "אחד עשר אלף",
+  "en": "eleven thousand"
+ },
+ {
+  "value": 12345,
+  "isFloat": false,
+  "he": "שנים עשר אלף שלוש מאות ארבעים וחמש",
+  "en": "twelve thousand, three hundred and forty-five"
+ },
+ {
+  "value": 100000,
+  "isFloat": false,
+  "he": "מאה אלף",
+  "en": "one hundred thousand"
+ },
+ {
+  "value": 250000,
+  "isFloat": false,
+  "he": "מאתיים וחמישים אלף",
+  "en": "two hundred and fifty thousand"
+ },
+ {
+  "value": 999999,
+  "isFloat": false,
+  "he": "תשע מאות תשעים ותשעה אלף תשע מאות תשעים ותשע",
+  "en": "nine hundred and ninety-nine thousand, nine hundred and ninety-nine"
+ },
+ {
+  "value": 1000000,
+  "isFloat": false,
+  "he": "מיליון",
+  "en": "one million"
+ },
+ {
+  "value": 2500000,
+  "isFloat": false,
+  "he": "שני מיליון וחמש מאות אלף",
+  "en": "two million, five hundred thousand"
+ },
+ {
+  "value": -5,
+  "isFloat": false,
+  "he": "מינוס חמש",
+  "en": "minus five"
+ },
+ {
+  "value": 3.5,
+  "isFloat": true,
+  "he": "שלוש נקודה חמש",
+  "en": "three point five"
+ },
+ {
+  "value": 3.12,
+  "isFloat": true,
+  "he": "שלוש נקודה אחת שתיים",
+  "en": "three point one two"
+ },
+ {
+  "value": 49.9,
+  "isFloat": true,
+  "he": "ארבעים ותשע נקודה תשע",
+  "en": "forty-nine point nine"
+ },
+ {
+  "value": 0.25,
+  "isFloat": true,
+  "he": "אפס נקודה שתיים חמש",
+  "en": "zero point two five"
+ },
+ {
+  "value": 1.05,
+  "isFloat": true,
+  "he": "אחת נקודה אפס חמש",
+  "en": "one point zero five"
+ },
+ {
+  "value": 12.5,
+  "isFloat": true,
+  "he": "שתים עשרה נקודה חמש",
+  "en": "twelve point five"
+ },
+ {
+  "value": 1,
+  "isFloat": false,
+  "ordinalEn": "first"
+ },
+ {
+  "value": 2,
+  "isFloat": false,
+  "ordinalEn": "second"
+ },
+ {
+  "value": 3,
+  "isFloat": false,
+  "ordinalEn": "third"
+ },
+ {
+  "value": 4,
+  "isFloat": false,
+  "ordinalEn": "fourth"
+ },
+ {
+  "value": 5,
+  "isFloat": false,
+  "ordinalEn": "fifth"
+ },
+ {
+  "value": 11,
+  "isFloat": false,
+  "ordinalEn": "eleventh"
+ },
+ {
+  "value": 12,
+  "isFloat": false,
+  "ordinalEn": "twelfth"
+ },
+ {
+  "value": 13,
+  "isFloat": false,
+  "ordinalEn": "thirteenth"
+ },
+ {
+  "value": 21,
+  "isFloat": false,
+  "ordinalEn": "twenty-first"
+ },
+ {
+  "value": 22,
+  "isFloat": false,
+  "ordinalEn": "twenty-second"
+ },
+ {
+  "value": 23,
+  "isFloat": false,
+  "ordinalEn": "twenty-third"
+ },
+ {
+  "value": 31,
+  "isFloat": false,
+  "ordinalEn": "thirty-first"
+ },
+ {
+  "value": 40,
+  "isFloat": false,
+  "ordinalEn": "fortieth"
+ },
+ {
+  "value": 101,
+  "isFloat": false,
+  "ordinalEn": "one hundred and first"
+ }
+]

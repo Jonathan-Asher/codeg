@@ -1,8 +1,9 @@
 "use client"
 
 /**
- * Read-aloud preferences: the voice per language, the speaking rate, and
- * whether a finished reply is read on its own.
+ * Read-aloud preferences: the engine (the natural voice or the system
+ * voices), the voice per language, the speaking rate, and whether a finished
+ * reply is read on its own.
  *
  * Stored in localStorage, not the backend, because voices are a property of
  * the device: the Hebrew voice installed on this Mac is not the one a phone
@@ -21,7 +22,18 @@ export const MIN_RATE = 0.5
 export const MAX_RATE = 2
 export const RATE_STEP = 0.1
 
+/**
+ * `natural`: BlueTTS, the iPhone app's voice. `system`: this device's own
+ * voices (Web Speech). Unset means the natural voice once its models are
+ * downloaded, the system voices until then.
+ */
+export type ReadAloudEngine = "natural" | "system"
+
 export interface ReadAloudPrefs {
+  /** The engine the user picked, or null for the automatic choice. */
+  engine: ReadAloudEngine | null
+  /** The natural voice (`noa`, `adam`, …), or null for the default. */
+  naturalVoice: string | null
   /** `voiceURI` of the Hebrew voice, or null for the automatic choice. */
   hebrewVoice: string | null
   /** `voiceURI` of the English voice, or null for the automatic choice. */
@@ -33,6 +45,8 @@ export interface ReadAloudPrefs {
 }
 
 export const DEFAULT_READ_ALOUD_PREFS: ReadAloudPrefs = {
+  engine: null,
+  naturalVoice: null,
   hebrewVoice: null,
   englishVoice: null,
   rate: 1,
@@ -52,6 +66,15 @@ export function parseReadAloudPrefs(raw: unknown): ReadAloudPrefs {
   const voice = (value: unknown) =>
     typeof value === "string" && value.length > 0 ? value : null
   return {
+    engine:
+      source.engine === "natural" || source.engine === "system"
+        ? source.engine
+        : null,
+    naturalVoice:
+      typeof source.naturalVoice === "string" &&
+      /^[A-Za-z0-9_-]{1,64}$/.test(source.naturalVoice)
+        ? source.naturalVoice
+        : null,
     hebrewVoice: voice(source.hebrewVoice),
     englishVoice: voice(source.englishVoice),
     rate:

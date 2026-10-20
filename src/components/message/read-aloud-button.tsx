@@ -25,9 +25,10 @@ interface ReadAloudButtonProps {
 }
 
 /**
- * "Read aloud" in a reply's footer: reads the reply with the system voices,
- * and while it does turns into Stop, with Pause/Resume beside it. Reading
- * another reply stops this one, so only the reply being read shows these.
+ * "Read aloud" in a reply's footer: reads the reply (with the natural voice or
+ * the system voices, as Settings › Read aloud says), and while it does turns
+ * into Stop, with Pause/Resume beside it. Reading another reply stops this
+ * one, so only the reply being read shows these.
  * Renders nothing where the runtime has no speech synthesis.
  *
  * Must sit inside a `TooltipProvider` (the footer's).

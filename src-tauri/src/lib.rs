@@ -57,6 +57,8 @@ pub mod pty_flow;
 pub mod push;
 pub mod supervise;
 mod terminal;
+/// Natural read-aloud: BlueTTS through the macOS `codeg-tts` sidecar.
+pub mod tts;
 pub mod turn_timings;
 pub mod update;
 pub mod web;
@@ -112,6 +114,7 @@ mod tauri_app {
         custom_skills as custom_skills_commands,
         deepseek_settings as deepseek_settings_commands, delegation as delegation_commands,
         dictation_refine as dictation_refine_commands,
+        tts as tts_commands,
         experts as experts_commands, feedback as feedback_commands, file_io, folder_commands,
         folder_links, office_tools as office_tools_commands, open_in,
         folders, logging as logging_commands, mcp as mcp_commands,
@@ -1793,6 +1796,13 @@ mod tauri_app {
                 dictation_refine_commands::refine_dictation,
                 dictation_refine_commands::get_dictation_refine_settings,
                 dictation_refine_commands::update_dictation_refine_settings,
+                tts_commands::tts_status,
+                tts_commands::tts_download_models,
+                tts_commands::tts_cancel_download,
+                tts_commands::tts_delete_models,
+                tts_commands::tts_speak,
+                tts_commands::tts_poll,
+                tts_commands::tts_cancel,
                 message_search_commands::message_search,
                 conversations::get_folder_conversation_turns,
                 conversations::list_folders,

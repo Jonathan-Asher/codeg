@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "externalBin": ["binaries/codeg-mcp", "binaries/codeg-tts"],
+    "resources": {
+      "../native/BlueTTSKit/Sources/BlueTTSEspeak/Resources/espeak-ng-data": "tts/espeak-ng-data/"
+    }
+  }
+}

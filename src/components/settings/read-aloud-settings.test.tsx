@@ -10,6 +10,33 @@ vi.mock("sonner", () => ({
 const platform = vi.hoisted(() => ({ isMac: true }))
 vi.mock("@/hooks/use-is-mac", () => ({ useIsMac: () => platform.isMac }))
 
+// The natural voice's backend: what `tts_status` answers, where the voice is
+// made, and which actions were asked for (each answers `tts.next`).
+const tts = vi.hoisted(() => ({
+  status: null as unknown,
+  next: null as unknown,
+  host: "local" as "local" | "server",
+  calls: [] as string[],
+}))
+vi.mock("@/lib/read-aloud/natural-api", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/lib/read-aloud/natural-api")>()
+  const action = (name: string) => async () => {
+    tts.calls.push(name)
+    return tts.next
+  }
+  return {
+    ...actual,
+    naturalVoiceHost: () => tts.host,
+    ttsApi: {
+      status: async () => tts.status,
+      downloadModels: action("download"),
+      cancelDownload: action("cancel"),
+      deleteModels: action("delete"),
+    },
+  }
+})
+
 import {
   READ_ALOUD_SAMPLE,
   ReadAloudSettingsSection,
@@ -20,7 +47,12 @@ import {
   resetReadAloudPrefsCacheForTests,
   saveReadAloudPrefs,
 } from "@/lib/read-aloud/prefs"
-import { fakeVoice, installFakeSpeech } from "@/lib/read-aloud/testing"
+import { resetNaturalStatusForTests } from "@/lib/read-aloud/natural-status"
+import {
+  fakeTtsStatus,
+  fakeVoice,
+  installFakeSpeech,
+} from "@/lib/read-aloud/testing"
 
 const t = enMessages.ReadAloudSettings
 
@@ -47,7 +79,12 @@ let uninstall: (() => void) | null = null
 beforeEach(() => {
   localStorage.clear()
   resetReadAloudPrefsCacheForTests()
+  resetNaturalStatusForTests()
   platform.isMac = true
+  tts.status = null
+  tts.next = null
+  tts.host = "local"
+  tts.calls = []
 })
 
 afterEach(() => {
@@ -204,5 +241,164 @@ describe("ReadAloudSettingsSection", () => {
     fireEvent.click(toggle)
     expect(getReadAloudPrefs().autoRead).toBe(true)
     expect(toggle).toBeChecked()
+  })
+
+  describe("natural voice", () => {
+    const PACK = "549.0 MB"
+
+    function chooseNatural() {
+      saveReadAloudPrefs({ ...getReadAloudPrefs(), engine: "natural" })
+    }
+
+    it("is the default once its models are installed, with its own speaker", async () => {
+      tts.status = fakeTtsStatus()
+      uninstall = installFakeSpeech().uninstall
+      renderSection()
+      expandSection()
+      expect(
+        await screen.findByText(t.naturalInstalledLocal.replace("{size}", PACK))
+      ).toBeInTheDocument()
+      expect(screen.getByLabelText(t.engine)).toHaveTextContent(t.engineNatural)
+      expect(screen.getByLabelText(t.naturalSpeaker)).toHaveTextContent("Noa")
+      // The system voice pickers belong to the other engine.
+      expect(screen.queryByLabelText(t.hebrewVoice)).not.toBeInTheDocument()
+    })
+
+    it("stays on the system voices until the models are downloaded", async () => {
+      tts.status = fakeTtsStatus({ installed: false, bytesOnDisk: 0 })
+      uninstall = installFakeSpeech().uninstall
+      renderSection()
+      expandSection()
+      await act(async () => {})
+      expect(screen.getByLabelText(t.engine)).toHaveTextContent(t.engineSystem)
+      expect(screen.getByLabelText(t.hebrewVoice)).toBeInTheDocument()
+    })
+
+    it("downloads only when asked, says what it costs here, and shows progress", async () => {
+      chooseNatural()
+      tts.status = fakeTtsStatus({ installed: false, bytesOnDisk: 0 })
+      uninstall = installFakeSpeech().uninstall
+      renderSection()
+      expandSection()
+      expect(
+        await screen.findByText(
+          t.naturalDownloadHintLocal.replace("{size}", PACK)
+        )
+      ).toBeInTheDocument()
+      expect(screen.getByText(t.engineNaturalPending)).toBeInTheDocument()
+      expect(tts.calls).toEqual([])
+
+      tts.next = fakeTtsStatus({
+        installed: false,
+        download: {
+          state: "downloading",
+          bytesDone: 104_857_600,
+          bytesTotal: 575_644_743,
+        },
+      })
+      const user = userEvent.setup()
+      await user.click(
+        screen.getByRole("button", {
+          name: t.naturalDownload.replace("{size}", PACK),
+        })
+      )
+      expect(tts.calls).toEqual(["download"])
+      expect(
+        await screen.findByText(
+          t.naturalDownloading
+            .replace("{done}", "100.0 MB")
+            .replace("{total}", PACK)
+        )
+      ).toBeInTheDocument()
+      expect(screen.getByRole("progressbar")).toBeInTheDocument()
+
+      tts.next = fakeTtsStatus({ installed: false })
+      await user.click(screen.getByRole("button", { name: t.naturalCancel }))
+      expect(tts.calls).toEqual(["download", "cancel"])
+    })
+
+    it("says what the download costs the server in a browser", async () => {
+      chooseNatural()
+      tts.host = "server"
+      tts.status = fakeTtsStatus({ installed: false })
+      uninstall = installFakeSpeech().uninstall
+      renderSection()
+      expandSection()
+      expect(
+        await screen.findByText(
+          t.naturalDownloadHintServer.replace("{size}", PACK)
+        )
+      ).toBeInTheDocument()
+    })
+
+    it("offers a retry after a failed download", async () => {
+      chooseNatural()
+      tts.status = fakeTtsStatus({
+        installed: false,
+        download: { state: "failed", message: "HTTP 503" },
+      })
+      uninstall = installFakeSpeech().uninstall
+      renderSection()
+      expandSection()
+      expect(
+        await screen.findByText(
+          t.naturalDownloadFailed.replace("{message}", "HTTP 503")
+        )
+      ).toBeInTheDocument()
+      fireEvent.click(screen.getByRole("button", { name: t.naturalRetry }))
+      await act(async () => {})
+      expect(tts.calls).toEqual(["download"])
+    })
+
+    it("deletes the models on request", async () => {
+      tts.status = fakeTtsStatus()
+      uninstall = installFakeSpeech().uninstall
+      chooseNatural()
+      renderSection()
+      expandSection()
+      tts.next = fakeTtsStatus({ installed: false, bytesOnDisk: 0 })
+      fireEvent.click(
+        await screen.findByRole("button", { name: t.naturalDelete })
+      )
+      expect(
+        await screen.findByRole("button", {
+          name: t.naturalDownload.replace("{size}", PACK),
+        })
+      ).toBeInTheDocument()
+      expect(tts.calls).toEqual(["delete"])
+    })
+
+    it("explains a backend that can't make the voice", async () => {
+      chooseNatural()
+      tts.status = fakeTtsStatus({
+        supported: false,
+        unsupportedReason: "platform",
+        installed: false,
+      })
+      tts.host = "server"
+      uninstall = installFakeSpeech().uninstall
+      renderSection()
+      expandSection()
+      expect(
+        await screen.findByText(t.naturalUnsupportedPlatformServer)
+      ).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: /Download/ })).toBeNull()
+    })
+
+    it("stores the engine and the speaker the user picks", async () => {
+      tts.status = fakeTtsStatus()
+      uninstall = installFakeSpeech().uninstall
+      renderSection()
+      expandSection()
+      const user = userEvent.setup()
+      await user.click(await screen.findByLabelText(t.naturalSpeaker))
+      await user.click(screen.getByRole("option", { name: "Adam" }))
+      expect(getReadAloudPrefs().naturalVoice).toBe("adam")
+
+      await user.click(screen.getByLabelText(t.engine))
+      await user.click(screen.getByRole("option", { name: t.engineSystem }))
+      expect(getReadAloudPrefs().engine).toBe("system")
+      expect(screen.getByLabelText(t.hebrewVoice)).toBeInTheDocument()
+    })
   })
 })

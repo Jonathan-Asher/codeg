@@ -228,6 +228,19 @@ pub fn build_router(
             "/update_dictation_refine_settings",
             post(handlers::dictation_refine::update_dictation_refine_settings),
         )
+        .route("/tts_status", post(handlers::tts::tts_status))
+        .route(
+            "/tts_download_models",
+            post(handlers::tts::tts_download_models),
+        )
+        .route(
+            "/tts_cancel_download",
+            post(handlers::tts::tts_cancel_download),
+        )
+        .route("/tts_delete_models", post(handlers::tts::tts_delete_models))
+        .route("/tts_speak", post(handlers::tts::tts_speak))
+        .route("/tts_poll", post(handlers::tts::tts_poll))
+        .route("/tts_cancel", post(handlers::tts::tts_cancel))
         .route(
             "/message_search",
             post(handlers::message_search::message_search),

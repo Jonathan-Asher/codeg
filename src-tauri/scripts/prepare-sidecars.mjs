@@ -10,6 +10,14 @@
 //   3. Copies the produced binary to
 //      `src-tauri/binaries/codeg-mcp-<triple>{.exe}` so Tauri's externalBin
 //      bundler picks it up under the bare name `codeg-mcp` at install time.
+//   4. On macOS targets only: builds the natural-voice sidecar `codeg-tts`
+//      (Swift package `native/codeg-tts`, BlueTTS 2.5 + RenikudPlus) with
+//      `swift build -c release` and stages it the same way. It is listed in
+//      tauri.macos.conf.json, so other platforms never look for it. The
+//      binary links espeak-ng and is GPL-3.0-or-later; see
+//      native/codeg-tts/README.md. `CODEG_SKIP_TTS_SIDECAR=1` skips it (the
+//      app then ships build.rs's empty placeholder and reads aloud with the
+//      system voices only).
 //
 // Why a separate script (not inline in beforeBuildCommand / GitHub Actions):
 //   - Cross-compile in release.yml passes `--target <triple>` so we honour
@@ -32,6 +40,8 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
 const SRC_TAURI = resolve(SCRIPT_DIR, "..")
 const BINARIES_DIR = join(SRC_TAURI, "binaries")
 const BIN_NAME = "codeg-mcp"
+const TTS_BIN_NAME = "codeg-tts"
+const TTS_PACKAGE = resolve(SRC_TAURI, "..", "native", "codeg-tts")
 
 function log(msg) {
   console.log(`[prepare-sidecars] ${msg}`)
@@ -119,6 +129,76 @@ function main() {
     // sources that may strip the +x bit.
     chmodSync(dest, 0o755)
   }
+  log(`sidecar staged at ${dest}`)
+
+  buildTtsSidecar(target)
+}
+
+/** The Swift triple for a Rust darwin triple (`aarch64` → `arm64`). */
+function swiftTriple(rustTriple) {
+  const arch = rustTriple.split("-")[0] === "aarch64" ? "arm64" : "x86_64"
+  return `${arch}-apple-macosx15.0`
+}
+
+function swiftBuild(extraArgs) {
+  const args = [
+    "build",
+    "-c",
+    "release",
+    "--product",
+    TTS_BIN_NAME,
+    ...extraArgs,
+  ]
+  execFileSync("swift", args, { stdio: "inherit", cwd: TTS_PACKAGE })
+  const binDir = execFileSync("swift", [...args, "--show-bin-path"], {
+    encoding: "utf8",
+    cwd: TTS_PACKAGE,
+  }).trim()
+  const built = join(binDir, TTS_BIN_NAME)
+  if (!existsSync(built)) {
+    die(`expected ${built} after swift build, but it does not exist`)
+  }
+  return built
+}
+
+function buildTtsSidecar(target) {
+  if (!target.endsWith("apple-darwin")) return
+  if (process.env.CODEG_SKIP_TTS_SIDECAR === "1") {
+    log("CODEG_SKIP_TTS_SIDECAR=1 — skipping codeg-tts (natural voice off)")
+    return
+  }
+  try {
+    execFileSync("swift", ["--version"], { stdio: "ignore" })
+  } catch {
+    die(
+      "codeg-tts needs the Swift toolchain (Xcode or the Command Line " +
+        "Tools). Install it, or set CODEG_SKIP_TTS_SIDECAR=1 to build " +
+        "without the natural voice."
+    )
+  }
+
+  const hostArch = process.arch === "arm64" ? "aarch64" : "x86_64"
+  const triples =
+    target === "universal-apple-darwin"
+      ? ["aarch64-apple-darwin", "x86_64-apple-darwin"]
+      : [target]
+  log(`building ${TTS_BIN_NAME} (swift build -c release) for ${triples}`)
+  const builds = triples.map((triple) =>
+    swiftBuild(
+      triple.startsWith(`${hostArch}-`) ? [] : ["--triple", swiftTriple(triple)]
+    )
+  )
+
+  mkdirSync(BINARIES_DIR, { recursive: true })
+  const dest = join(BINARIES_DIR, `${TTS_BIN_NAME}-${target}`)
+  if (builds.length > 1) {
+    execFileSync("lipo", ["-create", "-output", dest, ...builds], {
+      stdio: "inherit",
+    })
+  } else {
+    copyFileSync(builds[0], dest)
+  }
+  chmodSync(dest, 0o755)
   log(`sidecar staged at ${dest}`)
 }
 

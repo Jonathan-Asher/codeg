@@ -21,6 +21,7 @@ pub mod custom_skills;
 pub mod delegation;
 pub mod dictation_refine;
 mod error;
+pub mod tts;
 pub mod event_metrics;
 pub mod experts;
 pub mod feedback;
