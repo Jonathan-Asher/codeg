@@ -6,7 +6,7 @@
  * user needs to know (nothing to read, no Hebrew voice installed) as toasts.
  */
 
-import { useCallback, useMemo, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
@@ -18,6 +18,7 @@ import {
   type SpeakResult,
 } from "./player"
 import type { VoiceLike } from "./voices"
+import { refreshNaturalStatus } from "./natural-status"
 
 const noop = () => () => {}
 const NO_VOICES: VoiceLike[] = []
@@ -78,8 +79,28 @@ export interface ReadAloudActions {
   stop: () => void
 }
 
+/** One toast for a fallback, however many components listen. */
+const NATURAL_FALLBACK_TOAST_ID = "read-aloud-natural-fallback"
+
 export function useReadAloudActions(): ReadAloudActions {
   const t = useTranslations("ReadAloud")
+
+  // The natural voice failing mid-reply is reported here: the system voices
+  // have taken over, and the status (models deleted elsewhere, engine gone)
+  // may have changed.
+  useEffect(() => {
+    const player = getReadAloudPlayer()
+    if (!player) return
+    return player.subscribeNotices((notice) => {
+      if (notice.kind !== "natural-fallback") return
+      void refreshNaturalStatus()
+      toast.warning(t("naturalFallback"), {
+        id: NATURAL_FALLBACK_TOAST_ID,
+        description: notice.message,
+        duration: 8_000,
+      })
+    })
+  }, [t])
 
   const report = useCallback(
     (result: SpeakResult | null) => {
