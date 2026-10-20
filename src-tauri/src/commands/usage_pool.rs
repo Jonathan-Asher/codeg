@@ -63,6 +63,12 @@ const POLL_INTERVAL: Duration = Duration::from_secs(60);
 /// A reading this fresh is reused by the poll task instead of fetched again
 /// (the screen's refresh may just have fetched one).
 const POLL_MIN_AGE: Duration = Duration::from_secs(20);
+/// While every account is held back, the poll task reads the pool this often
+/// instead: messages held for the pool, and sessions waiting for it, go out
+/// soon after an account frees up rather than up to a minute later.
+const EXHAUSTED_POLL_INTERVAL: Duration = Duration::from_secs(15);
+/// [`POLL_MIN_AGE`] while every account is held back.
+const EXHAUSTED_POLL_MIN_AGE: Duration = Duration::from_secs(10);
 /// A reading this fresh answers the screen's refresh button.
 const FORCE_MIN_AGE: Duration = Duration::from_secs(5);
 /// A reading this fresh answers limit-continue; older ones are re-read first.
@@ -1152,8 +1158,15 @@ pub async fn run_usage_pool(emitter: EventEmitter) {
     let _ = EMITTER.set(emitter);
     with_store(|store| store.polled = true);
     let mut logged: Option<Option<PoolError>> = None;
+    let mut exhausted = false;
     loop {
-        let reading = refresh(POLL_MIN_AGE).await;
+        let reading = refresh(if exhausted {
+            EXHAUSTED_POLL_MIN_AGE
+        } else {
+            POLL_MIN_AGE
+        })
+        .await;
+        exhausted = reading.as_ref().is_some_and(|p| p.exhausted && !p.stale);
         let state = log_state(reading.as_ref());
         if state != logged {
             match (&reading, state) {
@@ -1169,7 +1182,12 @@ pub async fn run_usage_pool(emitter: EventEmitter) {
             }
             logged = state;
         }
-        tokio::time::sleep(POLL_INTERVAL).await;
+        tokio::time::sleep(if exhausted {
+            EXHAUSTED_POLL_INTERVAL
+        } else {
+            POLL_INTERVAL
+        })
+        .await;
     }
 }
 
