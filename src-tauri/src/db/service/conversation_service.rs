@@ -1000,6 +1000,24 @@ pub async fn find_live_id_for_session(
     Ok(row.map(|r| r.id))
 }
 
+/// The title of the live conversation bound to agent session `external_id` of
+/// `agent_type` (newest first, like [`find_live_id_for_session`]), or `None`
+/// when no row is bound or it has no title.
+pub async fn find_live_title_for_session(
+    conn: &DatabaseConnection,
+    external_id: &str,
+    agent_type: AgentType,
+) -> Result<Option<String>, DbError> {
+    let row = conversation::Entity::find()
+        .filter(conversation::Column::ExternalId.eq(external_id))
+        .filter(conversation::Column::AgentType.eq(agent_type.as_wire().into_owned()))
+        .filter(conversation::Column::DeletedAt.is_null())
+        .order_by_desc(conversation::Column::Id)
+        .one(conn)
+        .await?;
+    Ok(row.and_then(|r| r.title))
+}
+
 /// The selector record of the live conversation bound to agent session
 /// `external_id` — what a resume of that session re-establishes.
 pub async fn find_selector_state_for_session(
@@ -2407,6 +2425,37 @@ mod tests {
     use super::*;
     use crate::acp::delegation::spawner::DelegationLink;
     use crate::db::test_helpers::{fresh_in_memory_db, seed_folder};
+
+    #[tokio::test]
+    async fn live_title_for_session_reads_the_bound_live_row() {
+        let db = fresh_in_memory_db().await;
+        let folder_id = seed_folder(&db, "/tmp/session-title").await;
+        let row = create(
+            &db.conn,
+            folder_id,
+            AgentType::ClaudeCode,
+            Some("Release prep".into()),
+            None,
+        )
+        .await
+        .unwrap();
+        bind_external_id(&db.conn, row.id, "sess-1", &[]).await.unwrap();
+
+        let title = |agent_type| {
+            let conn = db.conn.clone();
+            async move {
+                find_live_title_for_session(&conn, "sess-1", agent_type)
+                    .await
+                    .unwrap()
+            }
+        };
+        assert_eq!(title(AgentType::ClaudeCode).await.as_deref(), Some("Release prep"));
+        // Another agent's session with the same id is a different session.
+        assert_eq!(title(AgentType::Codex).await, None);
+        // A deleted row names nothing.
+        soft_delete(&db.conn, row.id).await.unwrap();
+        assert_eq!(title(AgentType::ClaudeCode).await, None);
+    }
 
     /// Build a parent + a delegation child for filter assertions.
     async fn seed_parent_with_child(conn: &DatabaseConnection, folder_id: i32) -> (i32, i32) {

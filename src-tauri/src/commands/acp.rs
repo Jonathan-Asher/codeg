@@ -10442,6 +10442,24 @@ pub(crate) async fn build_session_runtime_env(
         runtime_env.insert(OPENCLAW_RESET_SESSION_ENV.into(), "1".into());
     }
 
+    // The conversation's title as the Claude Code session's display name (see
+    // `acp::session_name`). Only when reopening a session a row is bound to: a
+    // brand-new session has no title yet and keeps the CLI's own name until
+    // its next connect.
+    if agent_type == AgentType::ClaudeCode {
+        if let Some(sid) = session_id {
+            match crate::db::service::conversation_service::find_live_title_for_session(
+                &db.conn, sid, agent_type,
+            )
+            .await
+            {
+                Ok(Some(title)) => crate::acp::session_name::stamp(&mut runtime_env, &title),
+                Ok(None) => {}
+                Err(e) => tracing::warn!("[ACP] session name lookup failed: {e}"),
+            }
+        }
+    }
+
     Ok(runtime_env)
 }
 
@@ -10453,11 +10471,13 @@ pub(crate) const OPENCLAW_RESET_SESSION_ENV: &str = "OPENCLAW_RESET_SESSION";
 /// Per-launch env keys that vary by session/run but don't represent user
 /// config, so they're excluded from the config fingerprint. Without this, a
 /// session-id-derived value would flip the fingerprint the moment a real
-/// session id is assigned and make every session look "stale". Currently only
-/// OpenClaw's reset flag (set iff `session_id` is None at spawn).
+/// session id is assigned and make every session look "stale". OpenClaw's reset
+/// flag (set iff `session_id` is None at spawn), the private-session switch, and
+/// the session name (a rename is not a configuration change).
 fn is_volatile_fingerprint_key(key: &str) -> bool {
     key == OPENCLAW_RESET_SESSION_ENV
         || key == crate::acp::session_persistence::SESSION_PERSISTENCE_ENV
+        || key == crate::acp::session_name::SESSION_NAME_ENV
 }
 
 /// Fingerprint the effective config a spawned agent process is locked to: the
