@@ -1,0 +1,9 @@
+{
+ "text": "שלום, זו בדיקה של BlueTTS על המכשיר.",
+ "referenceInput": "שלום, זו בדיקה של <en>BlueTTS</en> על המכשיר.",
+ "seed": 1234,
+ "sampleRate": 44100,
+ "samples": 125952,
+ "rms": 0.14938282232424102,
+ "note": "np.random.seed(1234); BlueTTS(noa).synthesize(referenceInput, lang='he', total_step=5); int16 little-endian"
+}

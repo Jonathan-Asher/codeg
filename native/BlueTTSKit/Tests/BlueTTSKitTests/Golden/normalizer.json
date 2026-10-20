@@ -1,0 +1,87 @@
+[
+ {
+  "lang": "he",
+  "text": "המספר הוא 7 והשעה 08:15",
+  "normalized": "המספר הוא שבע והשעה 【שמונה וחמש עשרה】"
+ },
+ {
+  "lang": "he",
+  "text": "יחס של 2:3 בין הקבוצות",
+  "normalized": "יחס של שתיים ל שלוש בין הקבוצות"
+ },
+ {
+  "lang": "he",
+  "text": "שלב 1. התקנה 2. הרצה",
+  "normalized": "שלב אחד. התקנה שתיים. הרצה"
+ },
+ {
+  "lang": "he",
+  "text": "קוד TKT-90254 נשלח",
+  "normalized": "קוד 【<en>T K T</en> תשע אפס שתיים חמש ארבע .】 נשלח"
+ },
+ {
+  "lang": "he",
+  "text": "מנכ\"ל החברה אמר...",
+  "normalized": "מנכל החברה אמר,"
+ },
+ {
+  "lang": "he",
+  "text": "ג'מיני ומנג'ר",
+  "normalized": "<en>Gemini</en> ומנג׳ר"
+ },
+ {
+  "lang": "he",
+  "text": "באז-וורד חדש!!!",
+  "normalized": "באזוורד חדש!"
+ },
+ {
+  "lang": "he",
+  "text": "(בסוגריים) וגם [מרובעים]",
+  "normalized": ", בסוגריים, וגם, מרובעים,"
+ },
+ {
+  "lang": "he",
+  "text": "כוכבית *6700 לשירות",
+  "normalized": "כוכבית 【כוכבית שש שבע אפס אפס】 לשירות"
+ },
+ {
+  "lang": "he",
+  "text": "DJ gear + laptop",
+  "normalized": "DJ gear פלוס laptop"
+ },
+ {
+  "lang": "he",
+  "text": "שלח ל-GPU מהר",
+  "normalized": "שלח אל GPU מהר"
+ },
+ {
+  "lang": "he",
+  "text": "10% הנחה ו-3.5 מעלות",
+  "normalized": "עשר אחוז הנחה ו שלוש נקודה חמש מעלות"
+ },
+ {
+  "lang": "en",
+  "text": "Meet me at 10:30 on 12/05/2024, it's 95% done.",
+  "normalized": "Meet me at 【ten thirty】 on 【twelfth of May two thousand and twenty-four】, it's ninety-five percent done."
+ },
+ {
+  "lang": "en",
+  "text": "Version 1,500.25 is out",
+  "normalized": "Version one point five.twenty-five is out"
+ },
+ {
+  "lang": "he",
+  "text": "אמר: \"שלום\" והלך",
+  "normalized": "אמר, שלום, והלך"
+ },
+ {
+  "lang": "he",
+  "text": "🎉 מסיבה 🎉",
+  "normalized": "מסיבה"
+ },
+ {
+  "lang": "he",
+  "text": "## כותרת",
+  "normalized": "כותרת"
+ }
+]

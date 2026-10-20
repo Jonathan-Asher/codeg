@@ -1,0 +1,210 @@
+[
+ {
+  "text": "session-continue.ts",
+  "phonemes": "sˈɛʃəŋkəntˈɪnjuː.tˌiːˈɛs"
+ },
+ {
+  "text": "push",
+  "phonemes": "pˈʊʃ"
+ },
+ {
+  "text": "feat/quick-ask",
+  "phonemes": "fˈiːt slˈæʃ kwˈɪkˈæsk"
+ },
+ {
+  "text": "pnpm test",
+  "phonemes": "pˌiːˌɛnpˌiːˈɛm tˈɛst"
+ },
+ {
+  "text": "ChatInput.test.tsx",
+  "phonemes": "tʃˈæt ˈɪnpʊt.tˈɛst.tˌiːˌɛsˈɛks"
+ },
+ {
+  "text": "mock",
+  "phonemes": "mˈɑːk"
+ },
+ {
+  "text": "useSessionStore",
+  "phonemes": "jˈuːs sˈɛʃən stˈɔːɹ"
+ },
+ {
+  "text": "state",
+  "phonemes": "stˈeɪt"
+ },
+ {
+  "text": "Dockerfile",
+  "phonemes": "dˈɑːkɚfˌaɪl"
+ },
+ {
+  "text": "buildx",
+  "phonemes": "bˈɪldks"
+ },
+ {
+  "text": "linux/amd64",
+  "phonemes": "lˈɪnʌks slˈæʃ ˌeɪˌɛmdˈiː sˈɪksti fˈɔːɹ"
+ },
+ {
+  "text": "registry",
+  "phonemes": "ɹˈɛdʒɪstɹi"
+ },
+ {
+  "text": "parseAgentEvent",
+  "phonemes": "pˈɑːɹs ˈeɪdʒənt ᵻvˈɛnt"
+ },
+ {
+  "text": "null",
+  "phonemes": "nˈʌl"
+ },
+ {
+  "text": "WebSocket",
+  "phonemes": "wˈɛb sˈɑːkɪt"
+ },
+ {
+  "text": "commit",
+  "phonemes": "kəmˈɪt"
+ },
+ {
+  "text": "Pull Request",
+  "phonemes": "pˈʊl ɹᵻkwˈɛst"
+ },
+ {
+  "text": "README",
+  "phonemes": "ɹˈiːdmiː"
+ },
+ {
+  "text": "CHANGELOG",
+  "phonemes": "tʃˈeɪndʒlɑːɡ"
+ },
+ {
+  "text": "CI",
+  "phonemes": "sˈaɪ"
+ },
+ {
+  "text": "merge",
+  "phonemes": "mˈɜːdʒ"
+ },
+ {
+  "text": "voice input",
+  "phonemes": "vˈɔɪs ˈɪnpʊt"
+ },
+ {
+  "text": "Whisper",
+  "phonemes": "wˈɪspɚ"
+ },
+ {
+  "text": "AudioContext",
+  "phonemes": "ˈɔːdɪˌoʊ kˈɑːntɛkst"
+ },
+ {
+  "text": "listener",
+  "phonemes": "lˈɪsənɚ"
+ },
+ {
+  "text": "visibilitychange",
+  "phonemes": "vˈɪzᵻbˌɪlɪtˌɪtʃeɪndʒ"
+ },
+ {
+  "text": "voice-recorder.test.ts",
+  "phonemes": "vˈɔɪsɹᵻkˈɔːɹdɚ.tˈɛst.tˌiːˈɛs"
+ },
+ {
+  "text": "feat/voice-input",
+  "phonemes": "fˈiːt slˈæʃ vˈɔɪsˈɪnpʊt"
+ },
+ {
+  "text": "Hello, world!",
+  "phonemes": "həlˈoʊ, wˈɜːld!"
+ },
+ {
+  "text": "Is it ready?",
+  "phonemes": "ɪz ɪt ɹˈɛdi?"
+ },
+ {
+  "text": "Wait... what",
+  "phonemes": "wˈeɪt... wˌʌt"
+ },
+ {
+  "text": "C++ and C#",
+  "phonemes": "sˈiː plˈʌsplˈʌs ænd sˈiː hˈæʃ"
+ },
+ {
+  "text": "e.g. this one",
+  "phonemes": "ˈiː.dʒˈiː. ðˈɪswˌʌn"
+ },
+ {
+  "text": "a (parenthesized) word",
+  "phonemes": "ˈeɪ (pɚɹˈɛnθəsˌaɪzd) wˈɜːd"
+ },
+ {
+  "text": "\"quoted\" text",
+  "phonemes": "\"kwˈoʊɾᵻd\" tˈɛkst"
+ },
+ {
+  "text": "1,5 and 2.75",
+  "phonemes": "wˈʌn fˈaɪv ænd tˈuː pɔɪnt sˈɛvən fˈaɪv"
+ },
+ {
+  "text": "v2.3.1",
+  "phonemes": "vˈiː tˈuː pɔɪnt θɹˈiːpɔɪnt wˈʌn"
+ },
+ {
+  "text": "localhost:3000",
+  "phonemes": "lˈoʊkɐlhˌoʊst:θɹˈiː θˈaʊzənd"
+ },
+ {
+  "text": "Kubernetes",
+  "phonemes": "kˌuːbɚnˈɛɾiːz"
+ },
+ {
+  "text": "Wi-Fi",
+  "phonemes": "wˈaɪfˌaɪ"
+ },
+ {
+  "text": "iPhone",
+  "phonemes": "ˈaɪ fˈoʊn"
+ },
+ {
+  "text": "npm run build",
+  "phonemes": "ˌɛnpˌiːˈɛm ɹˈʌn bˈɪld"
+ },
+ {
+  "text": "git rebase -i HEAD~3",
+  "phonemes": "ɡˈɪt ɹᵻbˈeɪs ˈaɪ hˈɛd tˈɪldə θɹˈiː"
+ },
+ {
+  "text": "JSON",
+  "phonemes": "dʒˈeɪsˈɑːn"
+ },
+ {
+  "text": "API",
+  "phonemes": "ˌeɪpˌiːˈaɪ"
+ },
+ {
+  "text": "OAuth 2.0",
+  "phonemes": "ˈoʊ ˈɔːθ tˈuː pɔɪnt zˈiəɹoʊ"
+ },
+ {
+  "text": "x86_64",
+  "phonemes": "ˈɛks ˈeɪɾi sˈɪks sˈɪksti fˈɔːɹ"
+ },
+ {
+  "text": "TODO",
+  "phonemes": "tədˈuː"
+ },
+ {
+  "text": "README.md",
+  "phonemes": "ɹˈiːdmiː.ˌɛmdˈiː"
+ },
+ {
+  "text": "you're ready; don't wait",
+  "phonemes": "jʊɹ ɹˈɛdi; dˈoʊnt wˈeɪt"
+ },
+ {
+  "text": "ten thirty",
+  "phonemes": "tˈɛn θˈɜːɾi"
+ },
+ {
+  "text": "ninety-five percent",
+  "phonemes": "nˈaɪntifˈaɪv pɚsˈɛnt"
+ }
+]
