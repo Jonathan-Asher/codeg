@@ -532,6 +532,9 @@ async fn real_sidecar_speaks_mixed_hebrew_and_english() {
         }
     }
 
+    // cold: the first start of this binary (macOS checks a new signature once)
+    // and the first model load; warm: the engine kept running, as between
+    // replies; restart: started again after an idle shutdown.
     let mut cold_pcm = Vec::new();
     let cold = run(&svc, &mut cold_pcm).await;
     let mut warm_pcm = Vec::new();
@@ -549,7 +552,10 @@ async fn real_sidecar_speaks_mixed_hebrew_and_english() {
             .map(|kb| kb / 1024)
     });
 
-    for (name, r) in [("cold", &cold), ("warm", &warm)] {
+    svc.stop_engine().await;
+    let restart = run(&svc, &mut Vec::new()).await;
+
+    for (name, r) in [("cold", &cold), ("warm", &warm), ("restart", &restart)] {
         let audio_s = r.samples as f64 / 44_100.0;
         eprintln!(
             "{name}: {} chunks, first chunk {} ms (sidecar {:?} ms), all audio after {} ms, \
