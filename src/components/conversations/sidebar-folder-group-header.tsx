@@ -42,7 +42,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { SubsessionAncestorRails } from "./sidebar-conversation-card"
+import {
+  SIDEBAR_HEADING_GAP,
+  SIDEBAR_HEADING_WEIGHT,
+  SubsessionAncestorRails,
+} from "./sidebar-conversation-card"
 
 /**
  * Heading row for one folder GROUP inside the sidebar's "Folders" section.
@@ -50,7 +54,7 @@ import { SubsessionAncestorRails } from "./sidebar-conversation-card"
  * Geometry is deliberately the folder header's, not the section header's: a
  * group sits at the same top-level indent as an ungrouped folder and the two
  * interleave in one list, so they have to read as siblings. Same `h-[2rem]`
- * outer box (virtua's fixed item size), same rounded-full hover pill, same
+ * outer box plus the same heading gap above it, same rounded-full hover pill, same
  * rail-axis glyph, same hover-revealed trailing `⋯` — and, past geometry, the
  * same title type (size, weight and colour) and the same running-sessions
  * badge. The one thing that sets a group apart is its glyph: Layers, not a
@@ -143,7 +147,15 @@ export const SidebarFolderGroupHeader = memo(function SidebarFolderGroupHeader({
   const titleTint = folderTitleTintVars(themeColor)
 
   const row = (
-    <div className={cn("relative h-[2rem]", isDragging && "opacity-60")}>
+    <div
+      className={cn(
+        "relative h-[2rem]",
+        // Space above, like a folder heading's — but not on the drag
+        // surface, whose row math needs every row at one fixed height.
+        !presentation && SIDEBAR_HEADING_GAP,
+        isDragging && "opacity-60"
+      )}
+    >
       <div
         onPointerDown={(e) => onGripPointerDown?.(groupId, e)}
         className={cn(
@@ -192,14 +204,16 @@ export const SidebarFolderGroupHeader = memo(function SidebarFolderGroupHeader({
           </span>
           <div className="flex min-w-0 flex-1 items-center gap-[0.5rem]">
             {/* Typographically identical to a folder title — same size, same
-                      `normal` weight, same colour (`/75`, or the chosen tint) —
-                      so the two read as siblings in one column. What marks a
-                      group as the container of the rows under it is the Layers
-                      glyph and the indent beneath it, not a heavier title. */}
+                      heading weight, same colour (`/75`, or the chosen tint) —
+                      so the two read as siblings in one column, both a step
+                      above the sessions under them. What marks a group as the
+                      container of the folders below is the Layers glyph and
+                      the indent beneath it. */}
             <span
               style={titleTint}
               className={cn(
-                "min-w-0 flex-shrink truncate text-left text-[0.875rem] font-normal",
+                "min-w-0 flex-shrink truncate text-left text-[0.875rem]",
+                SIDEBAR_HEADING_WEIGHT,
                 titleTint ? "folder-title-tint" : "text-sidebar-foreground/75"
               )}
             >
