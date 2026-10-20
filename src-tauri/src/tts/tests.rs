@@ -418,6 +418,13 @@ async fn delete_removes_the_models_and_stops_the_engine() {
     assert!(!status.engine_running);
     assert_eq!(status.bytes_on_disk, 0);
     assert!(!svc.store().unwrap().dir().exists());
+    // The fake reads its stdin on its own task.
+    for _ in 0..100 {
+        if script.ops().contains(&"shutdown".to_string()) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     assert!(script.ops().contains(&"shutdown".to_string()));
     assert!(matches!(
         svc.speak(speak("hello")).await,
