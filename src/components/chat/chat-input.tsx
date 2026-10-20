@@ -18,7 +18,10 @@ import {
   MessageInput,
   type ComposerInjectContent,
 } from "@/components/chat/message-input"
-import { MessageQueueDisplay } from "@/components/chat/message-queue-display"
+import {
+  MessageQueueDisplay,
+  type QueueNotice,
+} from "@/components/chat/message-queue-display"
 import { cn } from "@/lib/utils"
 
 interface ChatInputProps {
@@ -67,6 +70,11 @@ interface ChatInputProps {
   onDeliverNow?: (text: string, blocks?: PromptInputBlock[]) => Promise<void>
   /** Pass-through: see `MessageInput.canContinue`. */
   canContinue?: boolean
+  /** Why the queue is held, shown above it (see `QueueNotice`). */
+  queueNotice?: QueueNotice | null
+  /** While connecting: why it takes a while, when something says so (every
+   *  Claude subscription at its limit). Leads the composer's placeholder. */
+  connectingReason?: string | null
   onQueueReorder?: (items: QueuedMessage[]) => void
   onQueueEdit?: (id: string) => void
   onQueueDelete?: (id: string) => void
@@ -147,6 +155,8 @@ export const ChatInput = memo(function ChatInput({
   heldTurnReady = false,
   onDeliverNow,
   canContinue = false,
+  queueNotice,
+  connectingReason,
   onQueueReorder,
   onQueueEdit,
   onQueueDelete,
@@ -220,6 +230,7 @@ export const ChatInput = memo(function ChatInput({
         onQueueDelete && (
           <MessageQueueDisplay
             queue={queue}
+            notice={queueNotice}
             onReorder={onQueueReorder}
             onEdit={onQueueEdit}
             onDelete={onQueueDelete}
@@ -275,9 +286,11 @@ export const ChatInput = memo(function ChatInput({
         onInjectConsumed={onInjectConsumed}
         placeholder={
           isConnecting
-            ? queueWhileConnecting
-              ? t("connectingQueued", { agent: agentName ?? "Agent" })
-              : t("connecting")
+            ? connectingReason
+              ? t("connectingWaiting", { reason: connectingReason })
+              : queueWhileConnecting
+                ? t("connectingQueued", { agent: agentName ?? "Agent" })
+                : t("connecting")
             : isPrompting && awaitingBackground
               ? t(
                   heldTurnReady

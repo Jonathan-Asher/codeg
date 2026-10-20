@@ -10747,6 +10747,7 @@ pub async fn acp_prompt(
     db: State<'_, crate::db::AppDatabase>,
     manager: State<'_, ConnectionManager>,
 ) -> Result<(), AcpError> {
+    manager.check_pool_for_prompt(&connection_id).await?;
     manager
         .send_prompt_linked_with_message_id(
             &db,

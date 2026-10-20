@@ -137,6 +137,10 @@ pub enum AppErrorCode {
     /// connection (a second, concurrent send). Maps to HTTP 409 — an expected,
     /// recoverable condition in multi-client co-control, not a server fault.
     TurnInProgress,
+    /// A prompt was held back because every account of the local account
+    /// pool is at its limit. Maps to HTTP 409 like `TurnInProgress`: the
+    /// client keeps the message queued and sends it once the pool has room.
+    PoolExhausted,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]

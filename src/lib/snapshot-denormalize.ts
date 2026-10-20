@@ -112,6 +112,9 @@ export interface SnapshotPatch {
   attachPhase?: AttachPhase
   /** Milliseconds since the agent process was spawned, at snapshot time. */
   attachElapsedMs?: number
+  /** With `attachPhase === "pool_wait"`: when the account pool frees up
+   *  (epoch seconds), if known. */
+  poolResumesAt?: number | null
 }
 
 const DEFAULT_PROMPT_CAPS: PromptCapabilitiesInfo = {
@@ -181,6 +184,7 @@ export function denormalizeSnapshot(wire: LiveSessionSnapshot): SnapshotPatch {
     activeDelegations: wire.active_delegations ?? [],
     attachPhase: wire.attach_phase,
     attachElapsedMs: wire.attach_elapsed_ms,
+    poolResumesAt: wire.pool_resumes_at ?? null,
   }
 }
 

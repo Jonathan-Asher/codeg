@@ -3388,7 +3388,9 @@
           "turnFailedEmpty": "{agent} ended the turn without producing any response.",
           "turnFailedEmptyProtocol": "{agent} produced output that codeg could not parse — the agent version may not match the protocol.",
           "turnFailedEmptyMetadata": "{agent} sent only status updates this turn (plan / mode / usage) and no reply.",
-          "attachTimeout": "{agent} did not finish opening the session and was stopped."
+          "attachTimeout": "{agent} did not finish opening the session and was stopped.",
+          "poolExhausted": "All Claude subscriptions are at their limit",
+          "poolExhaustedUntil": "All Claude subscriptions are at their limit — the next one frees at {time}"
         },
         "unableReadAgentConfig": "Unable to read Agent config: {message}",
         "connectFailedTitle": "{agent} connection failed",
@@ -3428,7 +3430,10 @@
           "resumingTitle": "Resuming {agent} session",
           "loadingSessionTitle": "Loading {agent} session",
           "creatingSessionTitle": "Creating {agent} session",
-          "configuringSessionTitle": "Applying {agent} session settings"
+          "configuringSessionTitle": "Applying {agent} session settings",
+          "poolWaitTitle": "All Claude subscriptions are at their limit",
+          "poolWaitDescription": "The next one frees at {time}; the session opens by itself then",
+          "poolWaitDescriptionUnknown": "The session opens by itself once one frees up"
         },
         "errors": {
           "connectionFailed": "Connection failed",
@@ -3449,7 +3454,8 @@
         "agentIdleBackground": "{agent} is idle — {count, plural, =0 {background work running} one {# background task running} other {# background tasks running}}. Send a message anytime.",
         "agentIdleBackgroundQueued": "{agent} is idle — {count, plural, =0 {background work running} one {# background task running} other {# background tasks running}}. Messages wait until it finishes.",
         "sendMessage": "Send a message...",
-        "connectingQueued": "Connecting to {agent}… you can send now, messages wait in the queue"
+        "connectingQueued": "Connecting to {agent}… you can send now, messages wait in the queue",
+        "connectingWaiting": "{reason}. You can send now; messages wait in the queue until then."
       },
       "messageInput": {
         "askAnything": "Ask anything...",
@@ -3529,7 +3535,11 @@
         "editItem": "Edit",
         "deleteItem": "Remove",
         "steerItemNow": "Insert into current turn",
-        "steerItemAsNote": "Send as note for next check"
+        "steerItemAsNote": "Send as note for next check",
+        "poolWait": "All Claude subscriptions are at their limit. Queued messages go out once one frees up.",
+        "poolWaitUntil": "All Claude subscriptions are at their limit — the next one frees at {time}. Queued messages go out then.",
+        "notSent": "Not sent: the connection to {agent} failed. Queued messages go out once it is back.",
+        "retry": "Retry"
       },
       "welcomeInputPanel": {
         "agentsSettingsPath": "Settings > Agents",
@@ -4292,6 +4302,8 @@
         "loading": "Loading the {agent} session",
         "creating": "Creating a {agent} session",
         "configuring": "Applying {agent} session settings",
+        "poolWait": "All Claude subscriptions are at their limit",
+        "poolWaitUntil": "All Claude subscriptions are at their limit — the next one frees at {time}",
         "elapsedSeconds": "{seconds}s",
         "elapsedMinutes": "{minutes}m {seconds}s",
         "withElapsed": "{step} · {elapsed}",

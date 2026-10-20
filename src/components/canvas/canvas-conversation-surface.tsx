@@ -33,6 +33,10 @@ import {
 import { notify } from "@/lib/notify"
 import { shouldQueueDirectSend } from "@/lib/queue-flush"
 import { getAgentLabel } from "@/lib/custom-agents"
+import { usePoolHold } from "@/hooks/use-pool-hold"
+import { useQueueNotice } from "@/hooks/use-queue-notice"
+import { useAttachPhaseLabel } from "@/hooks/use-attach-phase-label"
+import type { PoolHold } from "@/lib/pool-hold"
 import {
   extractUserImagesFromDraft,
   getPromptDraftDisplayText,
@@ -584,6 +588,9 @@ export function CanvasConversationSurface({
   // (the same conversation open in a workspace tab or another window, which
   // started its turn first). The queue's retry backs off from it.
   const lastFlushBounceAtRef = useRef(0)
+  // Set while a send was held back because every Claude subscription behind
+  // the account pool is at its limit; the queue waits for the pool.
+  const { hold: poolHold, holdFor: holdForPool } = usePoolHold()
 
   const handleSend = useCallback(
     (
@@ -650,6 +657,12 @@ export function CanvasConversationSurface({
           mqEnqueue(draft, selectedModeIdArg ?? null)
         }
       }
+      // Held back for the account pool: queued the same way, then the queue
+      // waits for the pool instead of retrying.
+      const onPoolExhausted = (hold: PoolHold) => {
+        onTurnInProgress()
+        holdForPool(hold)
+      }
 
       const persistedId = dbConversationIdRef.current
       if (persistedId) {
@@ -658,6 +671,7 @@ export function CanvasConversationSurface({
           conversationId: persistedId,
           clientMessageId: optimisticTurn.id,
           onTurnInProgress,
+          onPoolExhausted,
           onSendFailed,
         })
         return
@@ -707,6 +721,7 @@ export function CanvasConversationSurface({
             conversationId: newId,
             clientMessageId: optimisticTurn.id,
             onTurnInProgress,
+            onPoolExhausted,
             onSendFailed,
           })
         } catch (e) {
@@ -740,6 +755,7 @@ export function CanvasConversationSurface({
       mqEnqueue,
       mqGetQueueLength,
       mqRequeueFront,
+      holdForPool,
       onConversationCreated,
       refreshConversations,
       removeOptimisticTurn,
@@ -815,11 +831,36 @@ export function CanvasConversationSurface({
       connStatus === "connected" &&
       runtimeSyncState !== "awaiting_persist",
     isConnectionReady: isQueueConnectionReady,
+    // The account pool has no account that could take it yet.
+    busy: poolHold != null,
     heldTurnReady,
     lastBounceAtRef: lastFlushBounceAtRef,
     sendHead: sendQueueHead,
     deliverIntoHeldTurn,
     onHeldDeliveryFailed: notifyHeldDeliveryFailed,
+  })
+
+  // Why the queue is not going out, when something says so (see
+  // `queueNoticeFor`).
+  const retryConnection = useCallback(() => {
+    void acpActions.reconnect(contextKey).catch(() => {
+      // A failed reconnect publishes (and notifies) its own failure.
+    })
+  }, [acpActions, contextKey])
+  // While the session waits for the account pool, the composer says so.
+  const poolWaitLabel = useAttachPhaseLabel(
+    getAgentLabel(agentType),
+    conn.attachPhase === "pool_wait" ? "pool_wait" : null,
+    null,
+    conn.poolWait
+  )
+  const queueNotice = useQueueNotice({
+    queueLength: msgQueue.length,
+    held: poolHold,
+    connPoolWait: conn.poolWait,
+    status: connStatus,
+    agentLabel: getAgentLabel(agentType),
+    onRetry: retryConnection,
   })
 
   const editingQueueItem = useMemo(
@@ -974,6 +1015,8 @@ export function CanvasConversationSurface({
           folderPickerOverride={folderPickerOverride}
           isActive={isActive}
           queue={msgQueue}
+          queueNotice={queueNotice}
+          connectingReason={poolWaitLabel?.text ?? null}
           // A draft card's first send creates the conversation; it has no
           // queue until then (see `canSendNow` above).
           onEnqueue={isDraft ? undefined : mqEnqueue}

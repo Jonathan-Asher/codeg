@@ -3388,7 +3388,9 @@
           "turnFailedEmpty": "{agent} 此輪沒有產生任何回覆就結束了。",
           "turnFailedEmptyProtocol": "{agent} 此輪的輸出 codeg 無法解析，可能是代理版本與協定不相符。",
           "turnFailedEmptyMetadata": "{agent} 此輪只收到狀態更新（計畫 / 模式 / 用量），沒有收到任何回覆。",
-          "attachTimeout": "{agent} 未能完成開啟工作階段，已被停止。"
+          "attachTimeout": "{agent} 未能完成開啟工作階段，已被停止。",
+          "poolExhausted": "所有 Claude 訂閱皆已達到用量上限",
+          "poolExhaustedUntil": "所有 Claude 訂閱皆已達到用量上限——下一個將於 {time} 恢復"
         },
         "unableReadAgentConfig": "無法讀取 Agent 設定：{message}",
         "connectFailedTitle": "{agent} 連線失敗",
@@ -3428,7 +3430,10 @@
           "resumingTitle": "正在恢復 {agent} 工作階段",
           "loadingSessionTitle": "正在載入 {agent} 工作階段",
           "creatingSessionTitle": "正在建立 {agent} 工作階段",
-          "configuringSessionTitle": "正在套用 {agent} 工作階段設定"
+          "configuringSessionTitle": "正在套用 {agent} 工作階段設定",
+          "poolWaitTitle": "所有 Claude 訂閱皆已達到用量上限",
+          "poolWaitDescription": "下一個將於 {time} 恢復，屆時工作階段會自動開啟",
+          "poolWaitDescriptionUnknown": "一旦有訂閱恢復，工作階段會自動開啟"
         },
         "errors": {
           "connectionFailed": "連線失敗",
@@ -3449,7 +3454,8 @@
         "agentIdleBackground": "{agent} 閒置 — {count, plural, =0 {背景工作執行中} other {# 個背景工作執行中}}。隨時可以傳送訊息。",
         "agentIdleBackgroundQueued": "{agent} 閒置 — {count, plural, =0 {背景工作執行中} other {# 個背景工作執行中}}。訊息會在背景工作完成後傳送。",
         "sendMessage": "傳送訊息...",
-        "connectingQueued": "正在連線 {agent}… 現在即可傳送，訊息會在佇列中等待"
+        "connectingQueued": "正在連線 {agent}… 現在即可傳送，訊息會在佇列中等待",
+        "connectingWaiting": "{reason}。現在即可傳送，訊息會在佇列中等到那時。"
       },
       "messageInput": {
         "askAnything": "請開始輸入...",
@@ -3529,7 +3535,11 @@
         "editItem": "編輯",
         "deleteItem": "刪除",
         "steerItemNow": "插入目前回合",
-        "steerItemAsNote": "作為留言，供下次檢查時讀取"
+        "steerItemAsNote": "作為留言，供下次檢查時讀取",
+        "poolWait": "所有 Claude 訂閱皆已達到用量上限。一旦有訂閱恢復，排隊的訊息會自動送出。",
+        "poolWaitUntil": "所有 Claude 訂閱皆已達到用量上限——下一個將於 {time} 恢復，屆時排隊的訊息會自動送出。",
+        "notSent": "未送出：與 {agent} 的連線失敗。連線恢復後，排隊的訊息會自動送出。",
+        "retry": "重試"
       },
       "welcomeInputPanel": {
         "agentsSettingsPath": "設定 > Agents",
@@ -4292,6 +4302,8 @@
         "loading": "正在載入 {agent} 工作階段",
         "creating": "正在建立 {agent} 工作階段",
         "configuring": "正在套用 {agent} 工作階段設定",
+        "poolWait": "所有 Claude 訂閱皆已達到用量上限",
+        "poolWaitUntil": "所有 Claude 訂閱皆已達到用量上限——下一個將於 {time} 恢復",
         "elapsedSeconds": "{seconds} 秒",
         "elapsedMinutes": "{minutes} 分 {seconds} 秒",
         "withElapsed": "{step} · {elapsed}",

@@ -10,6 +10,7 @@ import {
   backgroundTaskCount,
   isAwaitingBackground,
 } from "@/lib/background-idle"
+import type { PoolHold } from "@/lib/pool-hold"
 import type { AttachPhase, ConnectionStatus } from "@/lib/types"
 
 const noopUnsubscribe = () => {}
@@ -57,6 +58,8 @@ export interface ConnectionAttachInfo {
   startedAt: number | null
   /** Why it failed, readable, when `failed`. */
   error: string | null
+  /** Set while it waits for the account pool (see `ConnectionState.poolWait`). */
+  poolWait: PoolHold | null
 }
 
 const NO_ATTACH_INFO: ConnectionAttachInfo = {
@@ -64,6 +67,7 @@ const NO_ATTACH_INFO: ConnectionAttachInfo = {
   phase: null,
   startedAt: null,
   error: null,
+  poolWait: null,
 }
 
 /** Derive the attach info for one key from the store. Exported for tests. */
@@ -91,6 +95,7 @@ export function readConnectionAttachInfo(
         ? (conn?.attachStartedAt ?? null)
         : null,
       error: null,
+      poolWait: conn?.poolWait ?? null,
     }
   }
   if (conn) {
@@ -100,6 +105,7 @@ export function readConnectionAttachInfo(
         phase: attachingPhase,
         startedAt: conn.attachStartedAt ?? null,
         error: null,
+        poolWait: conn.poolWait ?? null,
       }
     }
     if (
@@ -111,6 +117,7 @@ export function readConnectionAttachInfo(
         phase: "failed",
         startedAt: conn.attachStartedAt ?? null,
         error: conn.error ?? conn.loadError ?? null,
+        poolWait: conn.poolWait ?? null,
       }
     }
     return NO_ATTACH_INFO
@@ -122,6 +129,7 @@ export function readConnectionAttachInfo(
       phase: null,
       startedAt: null,
       error: failed.detail ? `${failed.title}: ${failed.detail}` : failed.title,
+      poolWait: failed.poolWait ?? null,
     }
   }
   return NO_ATTACH_INFO
@@ -132,7 +140,9 @@ function sameAttachInfo(a: ConnectionAttachInfo, b: ConnectionAttachInfo) {
     a.state === b.state &&
     a.phase === b.phase &&
     a.startedAt === b.startedAt &&
-    a.error === b.error
+    a.error === b.error &&
+    a.poolWait?.resumesAt === b.poolWait?.resumesAt &&
+    !a.poolWait === !b.poolWait
   )
 }
 

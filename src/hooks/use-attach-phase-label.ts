@@ -8,6 +8,7 @@ import {
   isAttachingPhase,
   splitElapsed,
 } from "@/lib/attach-phase"
+import { formatPoolResumeTime, type PoolHold } from "@/lib/pool-hold"
 import type { AttachPhase } from "@/lib/types"
 
 /**
@@ -39,17 +40,25 @@ export interface AttachPhaseLabel {
 
 /**
  * The live label for a connection that is opening its session. Ticks once a
- * second; `null` when `phase` is not an attaching phase.
+ * second; `null` when `phase` is not an attaching phase. While it waits for
+ * the account pool (`pool_wait`) it says so, with when the first account
+ * frees up (`poolWait`), and no timer: the wait is the pool's, not the agent's.
  */
 export function useAttachPhaseLabel(
   agent: string,
   phase: AttachPhase | null | undefined,
-  startedAt: number | null | undefined
+  startedAt: number | null | undefined,
+  poolWait?: PoolHold | null
 ): AttachPhaseLabel | null {
   const t = useTranslations("Folder.chat.attachPhase")
   const attaching = isAttachingPhase(phase)
-  const elapsed = useElapsedMs(startedAt, attaching)
+  const elapsed = useElapsedMs(startedAt, attaching && phase !== "pool_wait")
   if (!attaching) return null
+  if (phase === "pool_wait") {
+    const time = formatPoolResumeTime(poolWait?.resumesAt)
+    const text = time ? t("poolWaitUntil", { time }) : t("poolWait")
+    return { text, step: text, slow: false }
+  }
   const step = t(ATTACH_PHASE_LABEL_KEYS[phase], { agent })
   if (elapsed == null) return { text: step, step, slow: false }
   const { minutes, seconds } = splitElapsed(elapsed)

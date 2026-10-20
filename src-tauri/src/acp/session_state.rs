@@ -489,6 +489,10 @@ pub struct SessionState {
     /// `Failed` when the connection errors or disconnects before `Ready`.
     pub attach_phase: AttachPhase,
 
+    /// While `attach_phase` is `PoolWait`: when the first held-back account of
+    /// the local account pool frees up (epoch seconds), if the pool knows.
+    pub attach_pool_resumes_at: Option<i64>,
+
     /// When the agent process was spawned. `AttachProgress.elapsed_ms` and the
     /// snapshot's `attach_elapsed_ms` are measured from here.
     pub attach_started_at: std::time::Instant,
@@ -821,6 +825,7 @@ impl SessionState {
             last_error: None,
             requested_session_id: None,
             attach_phase: AttachPhase::Starting,
+            attach_pool_resumes_at: None,
             attach_started_at: std::time::Instant::now(),
             attach_tx: tokio::sync::watch::Sender::new(AttachPhase::Starting),
             event_seq: 0,
@@ -984,8 +989,17 @@ impl SessionState {
                 self.awaiting_background =
                     *awaiting && self.status == ConnectionStatus::Prompting;
             }
-            AcpEvent::AttachProgress { phase, .. } => {
+            AcpEvent::AttachProgress {
+                phase,
+                pool_resumes_at,
+                ..
+            } => {
                 self.set_attach_phase(*phase);
+                self.attach_pool_resumes_at = if self.attach_phase == AttachPhase::PoolWait {
+                    *pool_resumes_at
+                } else {
+                    None
+                };
             }
             AcpEvent::SessionModes { modes } => {
                 self.current_mode = Some(modes.current_mode_id.clone());
@@ -2255,6 +2269,7 @@ impl SessionState {
             goal_actions: self.goal_actions.clone(),
             attach_phase: self.attach_phase,
             attach_elapsed_ms: self.attach_elapsed_ms(),
+            pool_resumes_at: self.attach_pool_resumes_at,
             event_seq: self.event_seq,
         }
     }
@@ -2416,6 +2431,10 @@ pub struct LiveSessionSnapshot {
     /// Milliseconds since the agent process was spawned, at snapshot time.
     #[serde(default)]
     pub attach_elapsed_ms: u64,
+    /// While `attach_phase` is `pool_wait`: when the account pool's first
+    /// held-back account frees up (epoch seconds), if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool_resumes_at: Option<i64>,
     pub event_seq: u64,
 }
 
@@ -3639,11 +3658,13 @@ mod tests {
         s.apply_event(&AcpEvent::AttachProgress {
             phase: AttachPhase::Resuming,
             elapsed_ms: 400,
+            pool_resumes_at: None,
         });
         assert_eq!(s.attach_phase, AttachPhase::Resuming);
         s.apply_event(&AcpEvent::AttachProgress {
             phase: AttachPhase::Ready,
             elapsed_ms: 12_000,
+            pool_resumes_at: None,
         });
         assert_eq!(s.attach_phase, AttachPhase::Ready);
 
@@ -3663,6 +3684,7 @@ mod tests {
         s.apply_event(&AcpEvent::AttachProgress {
             phase: AttachPhase::Resuming,
             elapsed_ms: 1,
+            pool_resumes_at: None,
         });
         s.apply_event(&AcpEvent::StatusChanged {
             status: ConnectionStatus::Disconnected,
@@ -3672,6 +3694,7 @@ mod tests {
         s.apply_event(&AcpEvent::AttachProgress {
             phase: AttachPhase::Ready,
             elapsed_ms: 2,
+            pool_resumes_at: None,
         });
         assert_eq!(s.attach_phase, AttachPhase::Failed);
     }
@@ -3682,6 +3705,7 @@ mod tests {
         s.apply_event(&AcpEvent::AttachProgress {
             phase: AttachPhase::Ready,
             elapsed_ms: 1,
+            pool_resumes_at: None,
         });
         s.apply_event(&AcpEvent::StatusChanged {
             status: ConnectionStatus::Disconnected,
@@ -3719,6 +3743,7 @@ mod tests {
         s.apply_event(&AcpEvent::AttachProgress {
             phase: AttachPhase::Resuming,
             elapsed_ms: 5,
+            pool_resumes_at: None,
         });
         let snap = s.to_snapshot();
         assert_eq!(snap.attach_phase, AttachPhase::Resuming);

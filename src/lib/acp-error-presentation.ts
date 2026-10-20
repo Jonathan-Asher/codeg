@@ -76,6 +76,10 @@ const ROUTES: Readonly<Record<string, AcpErrorRoute>> = {
   // (which step it was stuck in, for how long, and the likely cause) rides as
   // the detail.
   attach_timeout: { kind: "session", level: "error", rawAsDetail: true },
+  // Every Claude subscription behind the account pool is at its limit. The
+  // connection is retried by itself and waits for the pool; the localized
+  // line (with when it frees up) says all there is.
+  pool_exhausted: { kind: "session", level: "warning", rawAsDetail: false },
   // A grok compaction that failed: the transcript's compaction card shows it
   // in its failed state, with the reason.
   compaction_failed: {

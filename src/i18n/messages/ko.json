@@ -3388,7 +3388,9 @@
           "turnFailedEmpty": "{agent}이(가) 어떤 응답도 생성하지 않고 턴을 종료했습니다.",
           "turnFailedEmptyProtocol": "{agent}의 출력을 codeg가 구문 분석할 수 없습니다. 에이전트 버전이 프로토콜과 맞지 않을 수 있습니다.",
           "turnFailedEmptyMetadata": "{agent}이(가) 이번 턴에 상태 업데이트(계획 / 모드 / 사용량)만 보내고 응답은 없었습니다.",
-          "attachTimeout": "{agent}이(가) 세션 열기를 끝내지 못해 중지되었습니다."
+          "attachTimeout": "{agent}이(가) 세션 열기를 끝내지 못해 중지되었습니다.",
+          "poolExhausted": "모든 Claude 구독이 한도에 도달했습니다",
+          "poolExhaustedUntil": "모든 Claude 구독이 한도에 도달했습니다 — 다음 구독은 {time}에 풀립니다"
         },
         "unableReadAgentConfig": "에이전트 구성을 읽을 수 없습니다: {message}",
         "connectFailedTitle": "{agent} 연결 실패",
@@ -3428,7 +3430,10 @@
           "resumingTitle": "{agent} 세션 재개 중",
           "loadingSessionTitle": "{agent} 세션 불러오는 중",
           "creatingSessionTitle": "{agent} 세션 만드는 중",
-          "configuringSessionTitle": "{agent} 세션 설정 적용 중"
+          "configuringSessionTitle": "{agent} 세션 설정 적용 중",
+          "poolWaitTitle": "모든 Claude 구독이 한도에 도달했습니다",
+          "poolWaitDescription": "다음 구독은 {time}에 풀리며, 그때 세션이 자동으로 열립니다",
+          "poolWaitDescriptionUnknown": "구독이 풀리면 세션이 자동으로 열립니다"
         },
         "errors": {
           "connectionFailed": "연결 실패",
@@ -3449,7 +3454,8 @@
         "agentIdleBackground": "{agent} 대기 중 — {count, plural, =0 {백그라운드 작업 실행 중} other {백그라운드 작업 #개 실행 중}}. 언제든지 메시지를 보낼 수 있습니다.",
         "agentIdleBackgroundQueued": "{agent} 대기 중 — {count, plural, =0 {백그라운드 작업 실행 중} other {백그라운드 작업 #개 실행 중}}. 메시지는 작업이 끝난 뒤 전송됩니다.",
         "sendMessage": "메시지 보내기...",
-        "connectingQueued": "{agent}에 연결 중… 지금 보내면 메시지가 대기열에서 기다립니다"
+        "connectingQueued": "{agent}에 연결 중… 지금 보내면 메시지가 대기열에서 기다립니다",
+        "connectingWaiting": "{reason}. 지금 보낼 수 있으며, 메시지는 그때까지 대기열에서 기다립니다."
       },
       "messageInput": {
         "askAnything": "무엇이든 물어보세요...",
@@ -3529,7 +3535,11 @@
         "editItem": "편집",
         "deleteItem": "삭제",
         "steerItemNow": "현재 턴에 삽입",
-        "steerItemAsNote": "메모로 보내 다음 점검 때 읽도록 함"
+        "steerItemAsNote": "메모로 보내 다음 점검 때 읽도록 함",
+        "poolWait": "모든 Claude 구독이 한도에 도달했습니다. 구독이 풀리면 대기 중인 메시지가 전송됩니다.",
+        "poolWaitUntil": "모든 Claude 구독이 한도에 도달했습니다 — 다음 구독은 {time}에 풀립니다. 그때 대기 중인 메시지가 전송됩니다.",
+        "notSent": "전송되지 않음: {agent} 연결에 실패했습니다. 연결이 복구되면 대기 중인 메시지가 전송됩니다.",
+        "retry": "다시 시도"
       },
       "welcomeInputPanel": {
         "agentsSettingsPath": "설정 > 에이전트",
@@ -4292,6 +4302,8 @@
         "loading": "{agent} 세션 불러오는 중",
         "creating": "{agent} 세션 만드는 중",
         "configuring": "{agent} 세션 설정 적용 중",
+        "poolWait": "모든 Claude 구독이 한도에 도달했습니다",
+        "poolWaitUntil": "모든 Claude 구독이 한도에 도달했습니다 — 다음 구독은 {time}에 풀립니다",
         "elapsedSeconds": "{seconds}초",
         "elapsedMinutes": "{minutes}분 {seconds}초",
         "withElapsed": "{step} · {elapsed}",

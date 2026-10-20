@@ -3388,7 +3388,9 @@
           "turnFailedEmpty": "{agent} 本轮没有产生任何回复就结束了。",
           "turnFailedEmptyProtocol": "{agent} 本轮的输出 codeg 无法解析，可能是代理版本与协议不匹配。",
           "turnFailedEmptyMetadata": "{agent} 本轮只收到状态更新（计划 / 模式 / 用量），没有收到任何回复。",
-          "attachTimeout": "{agent} 未能完成打开会话，已被停止。"
+          "attachTimeout": "{agent} 未能完成打开会话，已被停止。",
+          "poolExhausted": "所有 Claude 订阅均已达到用量上限",
+          "poolExhaustedUntil": "所有 Claude 订阅均已达到用量上限——下一个将于 {time} 恢复"
         },
         "unableReadAgentConfig": "无法读取 Agent 配置：{message}",
         "connectFailedTitle": "{agent} 连接失败",
@@ -3428,7 +3430,10 @@
           "resumingTitle": "正在恢复 {agent} 会话",
           "loadingSessionTitle": "正在加载 {agent} 会话",
           "creatingSessionTitle": "正在创建 {agent} 会话",
-          "configuringSessionTitle": "正在应用 {agent} 会话设置"
+          "configuringSessionTitle": "正在应用 {agent} 会话设置",
+          "poolWaitTitle": "所有 Claude 订阅均已达到用量上限",
+          "poolWaitDescription": "下一个将于 {time} 恢复，届时会话会自动打开",
+          "poolWaitDescriptionUnknown": "一旦有订阅恢复，会话会自动打开"
         },
         "errors": {
           "connectionFailed": "连接失败",
@@ -3449,7 +3454,8 @@
         "agentIdleBackground": "{agent} 空闲 — {count, plural, =0 {后台任务运行中} other {# 个后台任务运行中}}。随时可以发送消息。",
         "agentIdleBackgroundQueued": "{agent} 空闲 — {count, plural, =0 {后台任务运行中} other {# 个后台任务运行中}}。消息会在后台任务完成后发送。",
         "sendMessage": "发送消息...",
-        "connectingQueued": "正在连接 {agent}… 现在即可发送，消息会在队列中等待"
+        "connectingQueued": "正在连接 {agent}… 现在即可发送，消息会在队列中等待",
+        "connectingWaiting": "{reason}。现在即可发送，消息会在队列中等到那时。"
       },
       "messageInput": {
         "askAnything": "请开始输入...",
@@ -3529,7 +3535,11 @@
         "editItem": "编辑",
         "deleteItem": "删除",
         "steerItemNow": "插入当前回合",
-        "steerItemAsNote": "作为留言，供下次检查时读取"
+        "steerItemAsNote": "作为留言，供下次检查时读取",
+        "poolWait": "所有 Claude 订阅均已达到用量上限。一旦有订阅恢复，排队的消息会自动发送。",
+        "poolWaitUntil": "所有 Claude 订阅均已达到用量上限——下一个将于 {time} 恢复，届时排队的消息会自动发送。",
+        "notSent": "未发送：与 {agent} 的连接失败。连接恢复后，排队的消息会自动发送。",
+        "retry": "重试"
       },
       "welcomeInputPanel": {
         "agentsSettingsPath": "设置 > Agents",
@@ -4292,6 +4302,8 @@
         "loading": "正在加载 {agent} 会话",
         "creating": "正在创建 {agent} 会话",
         "configuring": "正在应用 {agent} 会话设置",
+        "poolWait": "所有 Claude 订阅均已达到用量上限",
+        "poolWaitUntil": "所有 Claude 订阅均已达到用量上限——下一个将于 {time} 恢复",
         "elapsedSeconds": "{seconds} 秒",
         "elapsedMinutes": "{minutes} 分 {seconds} 秒",
         "withElapsed": "{step} · {elapsed}",

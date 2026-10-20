@@ -45,6 +45,10 @@ import {
 } from "@/lib/ask-selection-handoff"
 import { useConnectionLifecycle } from "@/hooks/use-connection-lifecycle"
 import { useMessageQueue, type QueuedMessage } from "@/hooks/use-message-queue"
+import { usePoolHold } from "@/hooks/use-pool-hold"
+import { useQueueNotice } from "@/hooks/use-queue-notice"
+import { useAttachPhaseLabel } from "@/hooks/use-attach-phase-label"
+import type { PoolHold } from "@/lib/pool-hold"
 import { MessageListView } from "@/components/message/message-list-view"
 import {
   GoalControlProvider,
@@ -776,6 +780,10 @@ const ConversationTabView = memo(function ConversationTabView({
     refetch: refetchDetail,
   })
   const messageQueue = useMessageQueue()
+  // Set while a send was held back because every Claude subscription behind
+  // the account pool is at its limit: the queue waits, saying why, and goes
+  // out once the pool has room again.
+  const { hold: poolHold, holdFor: holdForPool } = usePoolHold()
   const {
     queue: msgQueue,
     enqueue: mqEnqueue,
@@ -829,6 +837,31 @@ const ConversationTabView = memo(function ConversationTabView({
     conn.agentType,
     selectedAgent
   )
+  // Why the queue is not going out, when something says so: the account pool
+  // is out (it then goes by itself), or the connection failed (Retry; it then
+  // goes as soon as the connection is back).
+  const retryConnection = useCallback(() => {
+    void acpActions.reconnect(tabId).catch(() => {
+      // A failed reconnect publishes (and notifies) its own failure.
+    })
+  }, [acpActions, tabId])
+  // While the session waits for the account pool, the composer says so.
+  const poolWaitLabel = useAttachPhaseLabel(
+    getAgentLabel(selectedAgent),
+    !connIsForOtherAgent && conn.attachPhase === "pool_wait"
+      ? "pool_wait"
+      : null,
+    null,
+    conn.poolWait
+  )
+  const queueNotice = useQueueNotice({
+    queueLength: msgQueue.length,
+    held: poolHold,
+    connPoolWait: connIsForOtherAgent ? null : conn.poolWait,
+    status: connIsForOtherAgent ? null : connStatus,
+    agentLabel: getAgentLabel(selectedAgent),
+    onRetry: retryConnection,
+  })
   // The turn in flight is held open only for background work: the agent is
   // idle, so a message is delivered into the turn right away and the queue
   // drains into it (see `lib/background-idle.ts`). Never for a connection
@@ -1027,6 +1060,8 @@ const ConversationTabView = memo(function ConversationTabView({
     // it now would deliver it twice. See `queueSteerInFlight`.
     if (queueSteerInFlight) return
     if (heldDrainInFlight) return
+    // The account pool has no account that could take it yet.
+    if (poolHold) return
     if (msgQueue.length === 0) return
     // setTimeout (not microtask) so a COMPLETE_TURN commit settles first AND so
     // a just-bounced retry waits out the backoff window before re-sending.
@@ -1058,6 +1093,7 @@ const ConversationTabView = memo(function ConversationTabView({
     runtimeSyncState,
     msgQueue.length,
     heldDrainInFlight,
+    poolHold,
     editInFlight,
     queueSteerInFlight,
   ])
@@ -1348,6 +1384,12 @@ const ConversationTabView = memo(function ConversationTabView({
           mqEnqueue(draft, selectedModeIdArg ?? null)
         }
       }
+      // Held back for the account pool: back into the queue the same way,
+      // which then waits for the pool instead of retrying.
+      const onPoolExhausted = (hold: PoolHold) => {
+        onTurnInProgress()
+        holdForPool(hold)
+      }
 
       // Any OTHER send failure (413, image-hydration failure, network drop):
       // the lifecycle hook already toasts the error; here we roll back the
@@ -1379,6 +1421,7 @@ const ConversationTabView = memo(function ConversationTabView({
           // turn by exact id (and never suppresses a different sender's prompt).
           clientMessageId: optimisticTurn.id,
           onTurnInProgress,
+          onPoolExhausted,
           onSendFailed,
         })
         return
@@ -1480,6 +1523,7 @@ const ConversationTabView = memo(function ConversationTabView({
             conversationId: newConversationId,
             clientMessageId: optimisticTurn.id,
             onTurnInProgress,
+            onPoolExhausted,
             onSendFailed,
           })
         } catch (e) {
@@ -1517,6 +1561,7 @@ const ConversationTabView = memo(function ConversationTabView({
       mqEnqueue,
       mqRequeueFront,
       mqGetQueueLength,
+      holdForPool,
       bindConversationTab,
       canAutoConnect,
       connectionReady,
@@ -2955,6 +3000,8 @@ const ConversationTabView = memo(function ConversationTabView({
       isActive={isActive}
       showActiveFlow={showActiveFlow}
       queue={msgQueue}
+      queueNotice={queueNotice}
+      connectingReason={poolWaitLabel?.text ?? null}
       onEnqueue={mqEnqueue}
       awaitingBackground={awaitingBackground}
       backgroundTaskCount={heldBackgroundTasks}

@@ -180,7 +180,8 @@ export function ComposerConnectionStatus({ tabId }: { tabId: string | null }) {
   const phaseLabel = useAttachPhaseLabel(
     agentLabel ?? "",
     statusKey === "connecting" ? (conn?.attachPhase ?? null) : null,
-    conn?.attachStartedAt
+    conn?.attachStartedAt,
+    conn?.poolWait
   )
   const titleText = !agentLabel
     ? statusLabel
