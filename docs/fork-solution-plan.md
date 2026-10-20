@@ -225,8 +225,8 @@ codeg. A Developer ID signature makes the requirement `identifier "app.codeg"` +
 
 **What signs.** The build job on the Mac runner (`m4-build`) runs `scripts/ci-devid-sign.sh` after
 `pnpm tauri build --bundles app`. The script:
-- re-signs every Mach-O in the bundle, deepest first (`Contents/MacOS/codeg-mcp` and `codeg-server`, any
-  dylibs or nested bundles, then the app itself), with "Developer ID Application: Jonathan Ashurov
+- re-signs every Mach-O in the bundle, deepest first (`Contents/MacOS/codeg-mcp`, `codeg-tts` and
+  `codeg-server`, any dylibs or nested bundles, then the app itself), with "Developer ID Application: Jonathan Ashurov
   (3L92BZK46V)", SHA-1 `A4DFC81686CC4636EB1CCCF1E7829EF7346C21E8`;
 - verifies the result (`codesign --verify --deep --strict`), and fails the build unless the designated
   requirement names `app.codeg` and the team and every Mach-O carries the team;
@@ -292,6 +292,8 @@ Privacy & Security. In both Accessibility and Screen Recording, remove the old c
 - Anything generally useful (search indexer, tree UI, resume fallback) → PR upstream to
   `xintaofei/codeg`; keep only pi-acp patches as local carryovers.
 - Rebase often: upstream ships ~1 release every few days (0.30.5 → 0.30.9 within a week).
+- Fork-only, never upstream: the natural read-aloud voice (`native/`, `src-tauri/src/tts/`, the
+  `codeg-tts` sidecar). It links espeak-ng (GPL-3.0-or-later); see `docs/natural-tts.md`.
 - Local build: `pnpm i && pnpm tauri dev` (desktop), tests via `pnpm test` /
   `cargo test --features test-utils`.
 
