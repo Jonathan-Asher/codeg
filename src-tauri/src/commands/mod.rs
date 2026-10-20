@@ -40,6 +40,9 @@ pub mod delegation;
 /// calls it on codeg-server.
 pub mod dictation_refine;
 pub mod experts;
+/// Natural read-aloud (models, sidecar, audio streams). Both runtimes: a
+/// browser reads aloud through its server.
+pub mod tts;
 pub mod feedback;
 #[cfg(feature = "tauri-runtime")]
 pub mod file_io;
