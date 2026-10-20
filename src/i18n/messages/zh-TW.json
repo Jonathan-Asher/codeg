@@ -504,7 +504,7 @@
       },
       "close_window": {
         "title": "關閉視窗",
-        "description": "關閉目前視窗（在檔案面板中，同一快捷鍵會關閉所有檔案分頁）"
+        "description": "關閉目前視窗"
       },
       "next_tab": {
         "title": "下一個標籤頁",

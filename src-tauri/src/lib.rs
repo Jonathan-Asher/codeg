@@ -19,6 +19,7 @@ pub use acp::{
 pub use acp::scratch_dir::scratch_sweep_task;
 pub use network::proxy::init_proxy_from_db;
 mod app_error;
+pub mod app_menu;
 pub mod app_state;
 pub mod automation;
 pub mod backgrounds;
@@ -675,6 +676,12 @@ mod tauri_app {
             // same download progress; lets the upgrade UI survive navigation.
             .manage(crate::update::new_update_state_handle())
             .setup(|app| {
+                // ⌘W closes a tab, ⇧⌘W the window (see `app_menu`).
+                #[cfg(target_os = "macos")]
+                if let Err(err) = crate::app_menu::install(app.handle()) {
+                    tracing::warn!("[menu] could not install the app menu: {err}");
+                }
+
                 let app_data_dir = app.path().app_data_dir()?;
 
                 // Unify the data root across every consumer:
@@ -1483,6 +1490,11 @@ mod tauri_app {
             })
             .on_menu_event(|app, event| {
                 let id = event.id().as_ref().to_string();
+
+                // File › Close Tab (⌘W) and Close Window (⇧⌘W).
+                if crate::app_menu::handle_menu_event(app, &id) {
+                    return;
+                }
 
                 // Tray menu items act in Rust directly: showing the
                 // workspace and quitting are both pure runtime concerns

@@ -504,7 +504,7 @@
       },
       "close_window": {
         "title": "창 닫기",
-        "description": "현재 창을 닫습니다 (파일 패널에서는 같은 단축키로 모든 파일 탭을 닫습니다)"
+        "description": "현재 창을 닫습니다"
       },
       "next_tab": {
         "title": "다음 탭",

@@ -274,6 +274,10 @@ export function BrowserEventsBridge() {
           (payload) => {
             if (payload.shortcut === "find") {
               requestBrowserFind(browserWorkspaceTabId(payload.tabId))
+            } else if (payload.shortcut === "close-tab") {
+              // Cmd+W with the page focused: close this tab, as the tab
+              // strip's close button would. Only its own window holds the id.
+              closeFileTab(browserWorkspaceTabId(payload.tabId))
             }
           }
         ),

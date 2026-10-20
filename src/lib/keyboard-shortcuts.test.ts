@@ -248,7 +248,7 @@ describe("read last reply", () => {
 })
 
 describe("close window", () => {
-  it("defaults to Ctrl/Cmd+Shift+W, shared with closing all file tabs", () => {
+  it("defaults to Ctrl/Cmd+Shift+W, a chord of its own", () => {
     const ids = SHORTCUT_DEFINITIONS.map((definition) => definition.id)
     expect(ids).toContain("close_window")
     expect(DEFAULT_SHORTCUTS.close_window).toBe("mod+shift+w")
@@ -258,13 +258,55 @@ describe("close window", () => {
         DEFAULT_SHORTCUTS.close_window
       )
     ).toBe(true)
-    // The file pane keeps its own use of the chord; everywhere else it is
-    // the window's close. Sharing is allowed for exactly this pair.
-    expect(DEFAULT_SHORTCUTS.close_all_file_tabs).toBe(
-      DEFAULT_SHORTCUTS.close_window
-    )
-    expect(canShareShortcut("close_all_file_tabs", "close_window")).toBe(true)
+    // Closing every file tab moved off the window's chord to Cmd+Option+W,
+    // so the window close is the same everywhere, file pane included.
+    expect(DEFAULT_SHORTCUTS.close_all_file_tabs).toBe("mod+alt+w")
+    expect(canShareShortcut("close_all_file_tabs", "close_window")).toBe(false)
     expect(canShareShortcut("close_window", "close_current_tab")).toBe(false)
+    expect(
+      shortcutsConflict(
+        DEFAULT_SHORTCUTS.close_all_file_tabs,
+        DEFAULT_SHORTCUTS.close_window
+      )
+    ).toBe(false)
+  })
+
+  it("keeps Cmd+W for one tab and Cmd+Shift+W for the window apart", () => {
+    const cmdW = keyEvent("w", { metaKey: true })
+    const cmdShiftW = keyEvent("w", { metaKey: true, shiftKey: true })
+    expect(DEFAULT_SHORTCUTS.close_current_tab).toBe("mod+w")
+    expect(matchShortcutEvent(cmdW, DEFAULT_SHORTCUTS.close_current_tab)).toBe(
+      true
+    )
+    expect(matchShortcutEvent(cmdW, DEFAULT_SHORTCUTS.close_window)).toBe(false)
+    expect(
+      matchShortcutEvent(cmdShiftW, DEFAULT_SHORTCUTS.close_current_tab)
+    ).toBe(false)
+    expect(matchShortcutEvent(cmdShiftW, DEFAULT_SHORTCUTS.close_window)).toBe(
+      true
+    )
+    expect(
+      matchShortcutEvent(
+        keyEvent("w", { metaKey: true, altKey: true, code: "KeyW" }),
+        DEFAULT_SHORTCUTS.close_all_file_tabs
+      )
+    ).toBe(true)
+  })
+
+  it("leaves no two default chords clashing outside the shared pairs", () => {
+    const entries = Object.entries(DEFAULT_SHORTCUTS) as Array<
+      [keyof typeof DEFAULT_SHORTCUTS, string]
+    >
+    const clashes: string[] = []
+    entries.forEach(([a, chordA], i) => {
+      entries.slice(i + 1).forEach(([b, chordB]) => {
+        if (!chordA || !chordB) return
+        if (shortcutsConflict(chordA, chordB) && !canShareShortcut(a, b)) {
+          clashes.push(`${a} / ${b}`)
+        }
+      })
+    })
+    expect(clashes).toEqual([])
   })
 })
 

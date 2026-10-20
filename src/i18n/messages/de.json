@@ -504,7 +504,7 @@
       },
       "close_window": {
         "title": "Fenster schließen",
-        "description": "Schließt das aktuelle Fenster (im Dateibereich schließt dasselbe Kürzel alle Dateitabs)"
+        "description": "Schließt das aktuelle Fenster"
       },
       "next_tab": {
         "title": "Nächster Tab",
