@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { detectProviderError } from "./provider-errors"
+import { detectProviderError, subagentProviderError } from "./provider-errors"
 
 // Synthesized in the shapes Claude Code writes; not copied from any session.
 const POLICY_MESSAGE =
@@ -165,5 +165,52 @@ describe("detectProviderError: what is not one", () => {
     expect(detectProviderError(undefined)).toBeNull()
     expect(detectProviderError("")).toBeNull()
     expect(detectProviderError("   ")).toBeNull()
+  })
+})
+
+describe("subagentProviderError", () => {
+  const blocked = `API Error: 400 ${POLICY_MESSAGE}`
+
+  it("reads a settled Agent or legacy Task call's result or error result", () => {
+    for (const toolName of ["Agent", "agent", "Task", "task"]) {
+      expect(
+        subagentProviderError({
+          toolName,
+          state: "output-available",
+          output: blocked,
+        })?.kind
+      ).toBe("policy_block")
+    }
+    expect(
+      subagentProviderError({
+        toolName: "Agent",
+        state: "output-error",
+        errorText: blocked,
+      })?.kind
+    ).toBe("policy_block")
+  })
+
+  it("ignores other tools, a call still running and an ordinary result", () => {
+    expect(
+      subagentProviderError({
+        toolName: "Bash",
+        state: "output-error",
+        errorText: blocked,
+      })
+    ).toBeNull()
+    expect(
+      subagentProviderError({
+        toolName: "Agent",
+        state: "input-available",
+        output: blocked,
+      })
+    ).toBeNull()
+    expect(
+      subagentProviderError({
+        toolName: "Agent",
+        state: "output-available",
+        output: "Mapped 12 files.",
+      })
+    ).toBeNull()
   })
 })

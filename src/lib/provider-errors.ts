@@ -161,6 +161,23 @@ function firstLink(text: string): string | null {
 }
 
 /**
+ * The provider error a settled sub-agent tool call (Claude's `Agent`, or its
+ * legacy `Task`) ended with — its result, or its error result — or `null`.
+ */
+export function subagentProviderError(call: {
+  toolName: string
+  state: string
+  output?: string | null
+  errorText?: string | null
+}): ProviderError | null {
+  const name = call.toolName.toLowerCase()
+  if (name !== "agent" && name !== "task") return null
+  if (call.state === "output-error") return detectProviderError(call.errorText)
+  if (call.state === "output-available") return detectProviderError(call.output)
+  return null
+}
+
+/**
  * The provider error `text` is, or `null` when it is anything else — a reply,
  * a result, or prose that only talks about an error.
  */

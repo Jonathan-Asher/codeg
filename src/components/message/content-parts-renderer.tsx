@@ -90,7 +90,11 @@ import { PlanCard, PlanEntriesList } from "./plan-card"
 import { PlanMarkdownCard, PlanModeCard } from "./plan-mode-card"
 import { PlainTextWithBadges } from "./plain-text-with-badges"
 import { ProviderErrorNotice } from "./provider-error-notice"
-import { detectProviderError } from "@/lib/provider-errors"
+import {
+  detectProviderError,
+  subagentProviderError,
+  type ProviderError,
+} from "@/lib/provider-errors"
 import {
   FileTextIcon,
   FilePenLineIcon,
@@ -2878,16 +2882,30 @@ const ToolCallPart = memo(function ToolCallPart({
 
   const open = (isRunning && (isCommandTool || hasLiveOutput)) || manualOpen
 
+  // A sub-agent on Claude's legacy `Task` launcher whose result is a model
+  // provider's refusal or error (see `lib/provider-errors`): the compact
+  // stopped state shows under the header, and the message is not printed
+  // again as the sub-agent's reply below.
+  const taskProviderError =
+    toolNameLower === "task" ? subagentProviderError(part) : null
+
   return (
     <Tool open={open} onOpenChange={setManualOpen}>
       <ToolHeader
         type="dynamic-tool"
-        state={part.state}
+        state={taskProviderError ? "output-error" : part.state}
         toolName={normalizedToolName}
         title={title ?? undefined}
         titleSuffix={titleSuffix ?? undefined}
         icon={icon}
       />
+      {taskProviderError && (
+        <ProviderErrorNotice
+          error={taskProviderError}
+          scope="subagent"
+          className="mx-3 mb-3"
+        />
+      )}
       <ToolContent>
         {part.input && (!isCommandTool || !shouldRenderCommandTerminal) && (
           <StructuredToolInput
@@ -2915,7 +2933,7 @@ const ToolCallPart = memo(function ToolCallPart({
             {t("codexScript.outputMissing")}
           </div>
         )}
-        {toolNameLower === "task" && part.output ? (
+        {taskProviderError ? null : toolNameLower === "task" && part.output ? (
           <div className="text-sm prose prose-sm dark:prose-invert max-w-none [&_ul]:list-inside [&_ol]:list-inside">
             <MessageResponse>{part.output}</MessageResponse>
           </div>
@@ -3027,7 +3045,7 @@ const ToolGroupPart = memo(function ToolGroupPart({
   const t = useTranslations("Folder.chat.contentParts.toolGroup")
   const [open, setOpen] = useState(false)
 
-  const { phrases, errorPhrase } = useMemo(() => {
+  const { phrases, errorPhrase, stops } = useMemo(() => {
     const counts = TOOL_KIND_ORDER.reduce(
       (acc, kind) => {
         acc[kind] = 0
@@ -3036,9 +3054,14 @@ const ToolGroupPart = memo(function ToolGroupPart({
       {} as Record<ToolKindLabel, number>
     )
     let errors = 0
+    // Sub-agents the model provider stopped: a failure even when the call
+    // itself "completed", and shown below the chip while it is shut.
+    const stopped: ProviderError[] = []
     for (const item of part.items) {
       counts[classifyToolKind(item.toolName)] += 1
-      if (item.state === "output-error" || item.errorText) errors += 1
+      const stop = subagentProviderError(item)
+      if (stop) stopped.push(stop)
+      if (item.state === "output-error" || item.errorText || stop) errors += 1
     }
     const built: string[] = []
     for (const kind of TOOL_KIND_ORDER) {
@@ -3052,6 +3075,7 @@ const ToolGroupPart = memo(function ToolGroupPart({
     return {
       phrases: built,
       errorPhrase: errors > 0 ? t("errorSuffix", { count: errors }) : null,
+      stops: stopped,
     }
   }, [part, t])
 
@@ -3090,6 +3114,13 @@ const ToolGroupPart = memo(function ToolGroupPart({
           )}
         </span>
       </CollapsibleTrigger>
+      {!open && stops.length > 0 && (
+        <div data-group-stops="" className="mt-3 space-y-2">
+          {stops.map((stop, i) => (
+            <ProviderErrorNotice key={i} error={stop} scope="subagent" />
+          ))}
+        </div>
+      )}
       <CollapsibleContent
         className={cn(
           "w-full outline-none",

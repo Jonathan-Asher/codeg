@@ -106,3 +106,35 @@ describe("ContentPartsRenderer: the agent's own API-error line", () => {
     ).not.toBeInTheDocument()
   })
 })
+
+describe("ContentPartsRenderer: a legacy Task sub-agent the provider stopped", () => {
+  const stopped = P.subagentStopped.replace("{reason}", P.reason.policy_block)
+  const taskCall = {
+    type: "tool-call" as const,
+    toolCallId: "call-task",
+    toolName: "Task",
+    input: '{"subagent_type":"Explore","description":"Map the repository"}',
+    state: "output-available" as const,
+    output: BLOCKED,
+  }
+
+  it("shows the stopped state under the card's header, not the message as a reply", () => {
+    renderEn(<ContentPartsRenderer role="assistant" parts={[taskCall]} />)
+    expect(screen.getByText(stopped)).toBeInTheDocument()
+    expect(screen.queryByTestId("reply-text")).not.toBeInTheDocument()
+    expect(screen.queryByText(BLOCKED)).not.toBeInTheDocument()
+  })
+
+  it("shows it under a shut tool group, which counts it as failed", () => {
+    const { container } = renderEn(
+      <ContentPartsRenderer
+        role="assistant"
+        parts={[{ type: "tool-group", items: [taskCall], isStreaming: false }]}
+      />
+    )
+    expect(container.querySelector("[data-group-stops]")).toHaveTextContent(
+      stopped
+    )
+    expect(screen.getByText(/1 failed/)).toBeInTheDocument()
+  })
+})

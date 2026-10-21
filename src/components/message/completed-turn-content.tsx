@@ -11,6 +11,10 @@ import {
   type AdaptedHookFeedbackPart,
 } from "@/lib/adapters/ai-elements-adapter"
 import { formatElapsedLabel } from "@/lib/format-elapsed"
+import {
+  subagentProviderError,
+  type ProviderError,
+} from "@/lib/provider-errors"
 import { cn } from "@/lib/utils"
 import { Shimmer } from "@/components/ai-elements/shimmer"
 import {
@@ -20,6 +24,7 @@ import {
 } from "@/components/ui/instant-collapsible"
 import { ContentPartsRenderer } from "./content-parts-renderer"
 import { HookFeedbackMarker } from "./hook-feedback-marker"
+import { ProviderErrorNotice } from "./provider-error-notice"
 
 /**
  * One stretch of a reply between boundaries: the work the chip folds, then the
@@ -263,6 +268,44 @@ function imagesOf(parts: AdaptedContentPart[]): AdaptedContentPart[] {
 }
 
 /**
+ * A sub-agent the model provider stopped (a usage-policy block, a rate limit,
+ * … — see `lib/provider-errors`) is an outcome of the turn, not the work of
+ * getting there, so like an image a fold never hides it: with the fold shut,
+ * its compact stopped state shows under the header; opened, it is on the
+ * sub-agent's own card.
+ */
+function stoppedSubagentsOf(parts: AdaptedContentPart[]): ProviderError[] {
+  const stops: ProviderError[] = []
+  const visit = (part: AdaptedContentPart) => {
+    if (part.type === "tool-group") {
+      part.items.forEach(visit)
+      return
+    }
+    if (part.type !== "tool-call") return
+    const stop = subagentProviderError(part)
+    if (stop) stops.push(stop)
+  }
+  parts.forEach(visit)
+  return stops
+}
+
+function FoldedStops({
+  stops,
+  className,
+}: {
+  stops: ProviderError[]
+  className?: string
+}) {
+  return (
+    <div data-folded-stops="" className={cn("space-y-2", className)}>
+      {stops.map((stop, i) => (
+        <ProviderErrorNotice key={i} error={stop} scope="subagent" />
+      ))}
+    </div>
+  )
+}
+
+/**
  * Shared between the interactive trigger and the static (nothing-to-fold) row
  * so a turn's header keeps the same shape whether or not it can be folded.
  *
@@ -320,6 +363,12 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
   // Per stretch, the images its fold would otherwise hide (see `imagesOf`).
   const foldedImages = useMemo(
     () => split.segments.map((segment) => imagesOf(segment.progress)),
+    [split]
+  )
+  // Per stretch, the sub-agents the provider stopped (see
+  // `stoppedSubagentsOf`).
+  const foldedStops = useMemo(
+    () => split.segments.map((segment) => stoppedSubagentsOf(segment.progress)),
     [split]
   )
 
@@ -531,6 +580,9 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
           />
         </div>
       )}
+      {!open && foldedStops[0]!.length > 0 && (
+        <FoldedStops stops={foldedStops[0]!} />
+      )}
       {first && first.answer.length > 0 && (
         <ContentPartsRenderer
           parts={first.answer}
@@ -571,6 +623,12 @@ export const CompletedTurnContent = memo(function CompletedTurnContent({
                 isStreaming={isStreaming}
               />
             </div>
+          )}
+          {!open && foldedStops[i + 1]!.length > 0 && (
+            <FoldedStops
+              stops={foldedStops[i + 1]!}
+              className={segment.hook ? "pt-4" : undefined}
+            />
           )}
           {segment.answer.length > 0 && (
             <div
