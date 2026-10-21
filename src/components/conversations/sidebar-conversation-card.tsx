@@ -706,26 +706,34 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                           <span className="sr-only">{backgroundTitle}</span>
                         </span>
                       ) : isRunning ? (
+                        // Working; with sub-agents or tasks running beside the
+                        // turn, their count and names — the same list the
+                        // conversation's Running panel shows.
                         <span
-                          className="relative inline-flex shrink-0 items-center justify-center"
+                          className="relative inline-flex shrink-0 items-center justify-center gap-0.5"
                           title={
-                            background?.out_of_turn
-                              ? backgroundTitle
-                              : tSidebar("statusRunningBadge")
+                            backgroundTitle || tSidebar("statusRunningBadge")
                           }
                           data-testid="conversation-running-badge"
                           data-out-of-turn={
                             background?.out_of_turn ? "true" : undefined
                           }
+                          data-task-count={backgroundCount || undefined}
                         >
                           <Loader2
                             className="h-3.5 w-3.5 animate-spin text-amber-600 dark:text-amber-400"
                             aria-hidden
                           />
+                          {backgroundCount > 0 && (
+                            <span
+                              aria-hidden
+                              className="text-[0.6875rem] font-medium tabular-nums text-amber-700/80 dark:text-amber-300/80"
+                            >
+                              {backgroundCount}
+                            </span>
+                          )}
                           <span className="sr-only">
-                            {background?.out_of_turn
-                              ? backgroundTitle
-                              : tSidebar("statusRunningBadge")}
+                            {backgroundTitle || tSidebar("statusRunningBadge")}
                           </span>
                         </span>
                       ) : isLimitPaused ? (

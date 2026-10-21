@@ -988,8 +988,6 @@ export function CanvasConversationSurface({
           claudeApiRetry={conn.claudeApiRetry}
           sessionFailures={conn.sessionFailures}
           onSessionFailureDismiss={handleSessionFailureDismiss}
-          asyncTasks={conn.asyncTasks}
-          onStopAsyncTask={handleStopAsyncTask}
           pendingPermission={conn.pendingPermission}
           pendingQuestion={conn.pendingQuestion}
           pendingAskQuestion={conn.pendingAskQuestion}
@@ -1063,6 +1061,8 @@ export function CanvasConversationSurface({
             imageRoot={workingDir}
             agentType={agentType}
             connStatus={connStatus}
+            asyncTasks={conn.asyncTasks}
+            onStopAsyncTask={handleStopAsyncTask}
             isActive={isActive}
             sendSignal={sendSignal}
             detailLoading={detailLoading}

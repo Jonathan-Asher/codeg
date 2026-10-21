@@ -966,7 +966,7 @@ describe("SidebarConversationCard background activity", () => {
 
     const badge = screen.getByTestId("conversation-background-badge")
     expect(badge.getAttribute("title")).toBe(
-      "Background · 1 task\nSub-agent: Plant defects"
+      "Background · 1 task\nBackground sub-agent: Plant defects"
     )
     expect(
       screen.queryByTestId("conversation-running-badge")
@@ -978,6 +978,25 @@ describe("SidebarConversationCard background activity", () => {
     expect(screen.getByTestId("conversation-running-badge")).toHaveAttribute(
       "title",
       "Running"
+    )
+  })
+
+  it("counts and names the sub-agents a working turn runs, as the Running panel does", () => {
+    setBackground(1, {
+      task_count: 2,
+      tasks: [
+        { id: "toolu_fg", kind: "subagent", label: "Explore: Find the bug" },
+        { id: "task-1", kind: "delegation", label: "Run the tests" },
+      ],
+      out_of_turn: false,
+      held_open: false,
+    })
+    renderRow({ ...conv(1), status: "in_progress", turn_state: "running" })
+    const badge = screen.getByTestId("conversation-running-badge")
+    expect(badge).toHaveAttribute("data-task-count", "2")
+    expect(badge).toHaveTextContent("2")
+    expect(badge.getAttribute("title")).toBe(
+      "Working · 2 running\nSub-agent: Explore: Find the bug\nDelegated agent: Run the tests"
     )
   })
 
@@ -1024,7 +1043,7 @@ describe("SidebarConversationCard background activity", () => {
     renderRow({ ...conv(1), status: "pending_review", turn_state: null })
     expect(
       screen.getByTestId("conversation-background-badge").getAttribute("title")
-    ).toBe("Background · 11 tasks\nSub-agent\n+10 more")
+    ).toBe("Background · 11 tasks\nBackground sub-agent\n+10 more")
     cleanup()
 
     setBackground(2, {

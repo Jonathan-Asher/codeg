@@ -1,235 +1,253 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { SubAgentOverlay } from "./sub-agent-overlay"
-import enMessages from "@/i18n/messages/en.json"
-import type { DelegationBinding } from "@/contexts/delegation-context"
-import type { DelegationCardSource } from "@/hooks/use-delegation-card-model"
-
-// The rows resolve their model from `useDelegatedSubSession` (live binding) and
-// the connections store (child pending-permission). Stub both — the same
-// contexts DelegatedSubThread's own test stubs.
-vi.mock("@/hooks/use-delegated-sub-session", () => ({
-  useDelegatedSubSession: vi.fn(),
+const mocks = vi.hoisted(() => ({
+  open: vi.fn(),
+  openFilePreview: vi.fn(),
 }))
 
-vi.mock("@/contexts/acp-connections-context", async () => {
-  const actual = await vi.importActual<
-    typeof import("@/contexts/acp-connections-context")
-  >("@/contexts/acp-connections-context")
-  return {
-    ...actual,
-    useConnectionStore: () => ({
-      subscribeKey: () => () => {},
-      getConnection: () => undefined,
-      getConnectPending: () => undefined,
-      getActiveKey: () => null,
-      subscribeActiveKey: () => () => {},
-    }),
-  }
+vi.mock("@/components/message/session-viewer-host", () => ({
+  useSessionViewerHost: () => ({ open: mocks.open }),
+}))
+
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspaceActions: () => ({ openFilePreview: mocks.openFilePreview }),
+}))
+
+import { SubAgentOverlay, type RunningItemTarget } from "./sub-agent-overlay"
+import { useBackgroundTitle } from "@/components/conversations/session-activity"
+import enMessages from "@/i18n/messages/en.json"
+import type { DelegationCardSource } from "@/hooks/use-delegation-card-model"
+import type {
+  AsyncTaskRecord,
+  BackgroundTaskBrief,
+  ConversationBackground,
+} from "@/lib/types"
+
+const ago = (seconds: number) =>
+  new Date(Date.now() - seconds * 1000).toISOString()
+
+/** One item of every kind the server lists: a sub-agent the turn waits for,
+ *  one launched into the background, a codeg delegation, a background
+ *  shell. */
+const ITEMS: BackgroundTaskBrief[] = [
+  {
+    id: "toolu_fg",
+    kind: "subagent",
+    label: "Explore: Find the bug",
+    started_at: ago(65),
+    tool_call_id: "toolu_fg",
+  },
+  {
+    id: "a4dc31",
+    kind: "agent",
+    label: "Review the diff",
+    started_at: ago(30),
+  },
+  {
+    id: "task-1",
+    kind: "delegation",
+    label: "Run the tests",
+    started_at: ago(20),
+    tool_call_id: "toolu_d",
+    agent_type: "codex",
+    conversation_id: 77,
+  },
+  { id: "sh1", kind: "shell", label: "pnpm build", started_at: ago(5) },
+]
+
+const background = (
+  tasks: BackgroundTaskBrief[] = ITEMS
+): ConversationBackground => ({
+  task_count: tasks.length,
+  tasks,
+  out_of_turn: false,
+  held_open: false,
 })
 
-// SubAgentSessionDialog pulls in MessageListView + the runtime provider tree.
-// Stub it to a sentinel exposing the open state + target conversation id.
-vi.mock("@/components/message/sub-agent-session-dialog", () => ({
-  SubAgentSessionDialog: ({
-    open,
-    childConversationId,
-  }: {
-    open: boolean
-    childConversationId: number
-  }) =>
-    open ? (
-      <div
-        data-testid="sub-agent-session-dialog"
-        data-conversation-id={childConversationId}
-      />
-    ) : null,
-}))
-
-const { useDelegatedSubSession } =
-  await import("@/hooks/use-delegated-sub-session")
-const mockedHook = vi.mocked(useDelegatedSubSession)
-
-/** Per-parentToolUseId binding map the mocked hook reads from. */
-let bindings: Record<string, DelegationBinding | undefined> = {}
-
-function bindingOf(overrides: Partial<DelegationBinding>): DelegationBinding {
-  return {
-    parentConnectionId: "p1",
-    parentToolUseId: "pt-1",
-    childConnectionId: "c1",
-    childConversationId: 99,
-    agentType: "codex",
-    status: "running",
-    task: null,
-    taskId: null,
-    ...overrides,
-  }
+const shellTask: AsyncTaskRecord = {
+  task_id: "sh1",
+  name: "pnpm build",
+  task_type: "shell",
+  description: "pnpm build",
+  show_in_transcript: false,
+  can_stop: true,
+  state: "running",
+  output_file_path: "/tmp/sh1.output",
 }
 
-function renderWithIntl(ui: React.ReactElement) {
-  return render(
+const delegationSource: DelegationCardSource = {
+  parentToolUseId: "toolu_d",
+  input: null,
+  output: null,
+  errorText: null,
+  state: "input-available",
+  meta: null,
+}
+
+const locate = (item: BackgroundTaskBrief): RunningItemTarget => ({
+  toolCallId: item.tool_call_id ?? (item.id === "a4dc31" ? "toolu_bg" : null),
+  delegation: item.kind === "delegation" ? delegationSource : null,
+})
+
+function wrap(ui: React.ReactNode) {
+  return (
     <NextIntlClientProvider locale="en" messages={enMessages}>
       {ui}
     </NextIntlClientProvider>
   )
 }
 
-function source(
-  parentToolUseId: string,
-  args: Record<string, unknown>
-): DelegationCardSource {
-  return { parentToolUseId, input: JSON.stringify(args) }
-}
+beforeEach(() => {
+  window.localStorage.clear()
+  mocks.open.mockReset()
+  mocks.openFilePreview.mockReset()
+})
 
-describe("SubAgentOverlay", () => {
-  beforeEach(() => {
-    bindings = {}
-    mockedHook.mockReset()
-    mockedHook.mockImplementation((id: string) => ({
-      binding: bindings[id],
-      detail: null,
-      loading: false,
-      error: null,
-    }))
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+const rows = () => screen.getAllByTestId("running-item")
+
+describe("SubAgentOverlay (the Running panel)", () => {
+  it("renders nothing while nothing runs", () => {
+    const { container } = render(wrap(<SubAgentOverlay background={null} />))
+    expect(container).toBeEmptyDOMElement()
   })
 
-  it("renders nothing when there are no delegations", () => {
-    const { container } = renderWithIntl(
-      <SubAgentOverlay delegations={[]} overlayKey="k-empty" />
+  it("lists every kind in one place, with its kind, status and elapsed time", () => {
+    render(wrap(<SubAgentOverlay background={background()} />))
+    // Collapsed by default: a chip carrying the count.
+    const chip = screen.getByRole("button", { name: "4 running" })
+    fireEvent.click(chip)
+
+    expect(rows().map((row) => row.dataset.kind)).toEqual([
+      "subagent",
+      "agent",
+      "delegation",
+      "shell",
+    ])
+    const [fg, bg, deleg, shell] = rows()
+    expect(fg).toHaveTextContent("Explore: Find the bug")
+    expect(fg).toHaveTextContent("Sub-agent")
+    expect(fg).toHaveTextContent("Running")
+    expect(fg).toHaveTextContent(/1:0[5-9]/)
+    expect(bg).toHaveTextContent("Background sub-agent")
+    expect(deleg).toHaveTextContent("Delegated agent · Codex")
+    expect(shell).toHaveTextContent("Shell")
+    // The choice is remembered for the next conversation.
+    expect(window.localStorage.getItem("codeg:running-overlay-expanded")).toBe(
+      "1"
     )
-    expect(container.firstChild).toBeNull()
   })
 
-  it("collapses to a pill summarizing the count by default", () => {
-    const delegations = [
-      source("pt-1", { agent_type: "codex", task: "Investigate flaky test" }),
-      source("pt-2", { agent_type: "claude_code", task: "Write the fix" }),
-    ]
-    renderWithIntl(
-      <SubAgentOverlay delegations={delegations} overlayKey="k-1" />
+  it("jumps to a sub-agent's card, and opens a delegation's own conversation", () => {
+    window.localStorage.setItem("codeg:running-overlay-expanded", "1")
+    const onJump = vi.fn()
+    render(
+      wrap(
+        <SubAgentOverlay
+          background={background()}
+          locate={locate}
+          onJumpToToolCall={onJump}
+        />
+      )
     )
-    expect(screen.getByText("Sub-agents 2")).toBeInTheDocument()
-    // Rows are hidden while collapsed.
-    expect(screen.queryByText("Investigate flaky test")).not.toBeInTheDocument()
-  })
+    const [fg, bg, deleg] = rows()
+    fireEvent.click(within(fg).getAllByRole("button")[0])
+    expect(onJump).toHaveBeenLastCalledWith("toolu_fg")
+    // Known to the server by its agent id only: found by what launched it.
+    fireEvent.click(within(bg).getAllByRole("button")[0])
+    expect(onJump).toHaveBeenLastCalledWith("toolu_bg")
 
-  it("clicking the pill expands the list with icon/name/task per sub-agent", () => {
-    const delegations = [
-      source("pt-1", { agent_type: "codex", task: "Investigate flaky test" }),
-      source("pt-2", { agent_type: "claude_code", task: "Write the fix" }),
-    ]
-    renderWithIntl(
-      <SubAgentOverlay delegations={delegations} overlayKey="k-2" />
-    )
-    fireEvent.click(screen.getByText("Sub-agents 2").closest("button")!)
-
-    // Header title + both rows (one per delegation).
-    expect(screen.getByText("Sub-agents")).toBeInTheDocument()
-    expect(screen.getAllByTestId("sub-agent-row")).toHaveLength(2)
-    expect(screen.getByText("Investigate flaky test")).toBeInTheDocument()
-    expect(screen.getByText("Write the fix")).toBeInTheDocument()
-  })
-
-  it("opens the child session dialog when a row with a child id is clicked", () => {
-    bindings["pt-1"] = bindingOf({
-      parentToolUseId: "pt-1",
-      childConversationId: 77,
-      status: "running",
+    fireEvent.click(within(deleg).getAllByRole("button")[0])
+    expect(mocks.open).toHaveBeenCalledWith({
+      kind: "delegation",
+      source: delegationSource,
     })
-    const delegations = [
-      source("pt-1", { agent_type: "codex", task: "Investigate flaky test" }),
-    ]
-    renderWithIntl(
-      <SubAgentOverlay
-        delegations={delegations}
-        overlayKey="k-3"
-        defaultExpanded
-      />
-    )
-    expect(
-      screen.queryByTestId("sub-agent-session-dialog")
-    ).not.toBeInTheDocument()
-
-    fireEvent.click(
-      screen.getByText("Investigate flaky test").closest("button")!
-    )
-
-    const dialog = screen.getByTestId("sub-agent-session-dialog")
-    expect(dialog).toBeInTheDocument()
-    expect(dialog).toHaveAttribute("data-conversation-id", "77")
+    expect(onJump).toHaveBeenCalledTimes(2)
   })
 
-  it("renders a graceful fallback row for a delegation with unparseable input", () => {
-    const delegations = [
-      source("pt-1", { agent_type: "codex", task: "Real task" }),
-      { parentToolUseId: "pt-2", input: "not-json" } as DelegationCardSource,
-    ]
-    renderWithIntl(
-      <SubAgentOverlay
-        delegations={delegations}
-        overlayKey="k-4"
-        defaultExpanded
-      />
+  it("offers a background task's output and stop on its row", async () => {
+    window.localStorage.setItem("codeg:running-overlay-expanded", "1")
+    const onStop = vi.fn(() => Promise.resolve(true))
+    render(
+      wrap(
+        <SubAgentOverlay
+          background={background()}
+          asyncTasks={[shellTask]}
+          onStopAsyncTask={onStop}
+        />
+      )
     )
-    // The collapsed count never disagrees with the list: both rows render.
-    expect(screen.getAllByTestId("sub-agent-row")).toHaveLength(2)
-    expect(screen.getByText("Real task")).toBeInTheDocument()
-    // The unresolvable one degrades to the "Sub-agent" (unknown agent) label.
-    expect(screen.getByText("Sub-agent")).toBeInTheDocument()
+    const shell = rows()[3]
+    fireEvent.click(within(shell).getByRole("button", { name: "Output" }))
+    expect(mocks.openFilePreview).toHaveBeenCalledWith("/tmp/sh1.output")
+    await act(async () => {
+      fireEvent.click(within(shell).getByRole("button", { name: "Stop" }))
+    })
+    expect(onStop).toHaveBeenCalledWith("sh1")
+    // Only the adapter's tasks have these controls.
+    expect(within(rows()[0]).queryByRole("button", { name: "Stop" })).toBeNull()
   })
 
-  it("renders fallback rows even when every delegation is unresolvable", () => {
-    const delegations = [
-      { parentToolUseId: "pt-1", input: "not-json" } as DelegationCardSource,
-      { parentToolUseId: "pt-2", input: "also-bad" } as DelegationCardSource,
-    ]
-    renderWithIntl(
-      <SubAgentOverlay
-        delegations={delegations}
-        overlayKey="k-5"
-        defaultExpanded
-      />
+  it("says how a finished item ended for a moment, then lets it go", () => {
+    vi.useFakeTimers()
+    window.localStorage.setItem("codeg:running-overlay-expanded", "1")
+    const outcomeOf = (item: BackgroundTaskBrief) =>
+      item.id === "toolu_fg" ? ("failed" as const) : ("done" as const)
+    const { rerender } = render(
+      wrap(<SubAgentOverlay background={background()} outcomeOf={outcomeOf} />)
     )
-    expect(screen.getAllByTestId("sub-agent-row")).toHaveLength(2)
-    expect(screen.getAllByText("Sub-agent")).toHaveLength(2)
+    rerender(
+      wrap(
+        <SubAgentOverlay
+          background={background(ITEMS.slice(2))}
+          outcomeOf={outcomeOf}
+        />
+      )
+    )
+    const finished = rows().filter((row) => row.dataset.status !== "running")
+    expect(finished.map((row) => row.dataset.status)).toEqual([
+      "failed",
+      "done",
+    ])
+    expect(finished[0]).toHaveTextContent("Failed")
+    act(() => {
+      vi.advanceTimersByTime(4500)
+    })
+    expect(rows().map((row) => row.dataset.kind)).toEqual([
+      "delegation",
+      "shell",
+    ])
   })
 
-  it("shows the broker task id (short, #-prefixed) after each agent name", () => {
-    const delegations: DelegationCardSource[] = [
-      {
-        ...source("pt-1", { agent_type: "codex", task: "Investigate" }),
-        // The ack output carries the broker-minted task_id.
-        output: JSON.stringify({ task_id: "abc12345def67890" }),
-      },
-    ]
-    renderWithIntl(
-      <SubAgentOverlay
-        delegations={delegations}
-        overlayKey="k-taskid"
-        defaultExpanded
-      />
+  it("names the same items and count as the sidebar's indicator", () => {
+    window.localStorage.setItem("codeg:running-overlay-expanded", "1")
+    const bg = background()
+    function SidebarTitle() {
+      const title = useBackgroundTitle("working", bg, null)
+      return <pre data-testid="sidebar-title">{title}</pre>
+    }
+    render(
+      wrap(
+        <>
+          <SidebarTitle />
+          <SubAgentOverlay background={bg} />
+        </>
+      )
     )
-    // Truncated to 8 chars in the row, full id in the tooltip.
-    const badge = screen.getByText("#abc12345")
-    expect(badge).toBeInTheDocument()
-    expect(badge).toHaveAttribute("title", "abc12345def67890")
-  })
-
-  it("omits the task id badge when no id has been minted yet", () => {
-    const delegations = [
-      source("pt-1", { agent_type: "codex", task: "Investigate" }),
-    ]
-    renderWithIntl(
-      <SubAgentOverlay
-        delegations={delegations}
-        overlayKey="k-noid"
-        defaultExpanded
-      />
-    )
-    expect(screen.getByTestId("sub-agent-row")).toBeInTheDocument()
-    expect(screen.queryByText(/^#/)).not.toBeInTheDocument()
+    const sidebarTitle = screen.getByTestId("sidebar-title").textContent ?? ""
+    const [first, ...lines] = sidebarTitle.split("\n")
+    expect(first).toBe("Working · 4 running")
+    expect(screen.getByTestId("running-overlay").dataset.count).toBe("4")
+    expect(lines).toHaveLength(rows().length)
+    rows().forEach((row, i) => {
+      const [kind, ...label] = lines[i].split(": ")
+      expect(row).toHaveTextContent(kind)
+      expect(row).toHaveTextContent(label.join(": "))
+    })
   })
 })

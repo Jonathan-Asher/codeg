@@ -392,6 +392,11 @@ pub struct SessionState {
         Option<i32>,
         Option<crate::acp::background_status::ConversationBackground>,
     ),
+    /// When this connection first listed each item of its background status
+    /// (keyed by its kind and id), so every client shows the same elapsed time
+    /// for it. Stamped by `take_background_changes`, which runs after every
+    /// event, and pruned there once an item is gone. Backend-internal.
+    pub background_seen_at: BTreeMap<String, DateTime<Utc>>,
 
     // ACP 协商出的能力
     pub modes: Option<SessionModeStateInfo>,
@@ -815,6 +820,7 @@ impl SessionState {
             background_tasks: Vec::new(),
             background_out_of_turn: false,
             background_announced: (None, None),
+            background_seen_at: BTreeMap::new(),
             modes: None,
             current_mode: None,
             pre_plan_mode: None,
