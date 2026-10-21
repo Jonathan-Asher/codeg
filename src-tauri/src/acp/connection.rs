@@ -8326,6 +8326,8 @@ async fn try_auto_allow_codeg_ask(
 /// [`crate::acp::claude_plan_mode::planning_auto_approval`] says the terminal
 /// would not have asked: allow once, with one INFO line naming the tool (never
 /// its input). `Err(responder)` hands every other request back for its card.
+/// (`result_large_err`: see `try_auto_allow_codeg_ask`.)
+#[allow(clippy::result_large_err)]
 async fn try_auto_approve_while_planning(
     agent_type: AgentType,
     state: &Arc<RwLock<SessionState>>,
