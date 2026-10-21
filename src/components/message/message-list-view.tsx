@@ -1221,6 +1221,9 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
           completedAt={group.completed_at}
           forkDisabled={forkDisabled || forkPointUnnamed}
           forkDisabledReason={forkPointUnnamed ? "unnamed" : "busy"}
+          forkTurnId={
+            forkPoint ? (forkPoint.source_turn_id ?? forkPoint.id) : undefined
+          }
           onForkFromHere={
             // Gated on a settled turn — forking mid-stream would name a message
             // the agent is still writing.

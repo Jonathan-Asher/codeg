@@ -7,6 +7,7 @@ import { editableUserMessageText } from "@/lib/edit-message"
 import { TurnBusyError } from "@/lib/turn-busy"
 import type { AgentType, MessageTurn } from "@/lib/types"
 import { isLiveTurnId } from "@/stores/conversation-runtime-store"
+import { useForkPlaceholderStore } from "@/stores/fork-placeholder-store"
 import { useTabStore } from "@/stores/tab-store"
 
 /**
@@ -160,6 +161,21 @@ export type ForkFromTurnOutcome =
   /** Forked into a new conversation; the one on screen is untouched. */
   | { kind: "new_conversation"; result: ForkToNewConversationResult }
 
+export interface ForkFromTurnArgs {
+  agentType: AgentType
+  connectionId: string
+  /** The conversation's row, for a connection that has not linked it yet. */
+  conversationId: number | null
+  folderId: number | null
+  /** The reply to fork at (the parser's id). */
+  turnId: string
+  /** A turn is running on the connection, as far as the surface knows. */
+  turnRunning: boolean
+  /** Called once, as the fork heads into a NEW conversation and before that
+   *  request goes out, so the surface can show where the fork will open. */
+  onIntoNewConversation?: () => void
+}
+
 /**
  * Fork at `turnId` — in place when no turn runs, into a new conversation when
  * one does (or starts under the click) and the agent can.
@@ -177,21 +193,13 @@ export async function forkFromTurn({
   folderId,
   turnId,
   turnRunning,
-}: {
-  agentType: AgentType
-  connectionId: string
-  /** The conversation's row, for a connection that has not linked it yet. */
-  conversationId: number | null
-  folderId: number | null
-  /** The reply to fork at (the parser's id). */
-  turnId: string
-  /** A turn is running on the connection, as far as the surface knows. */
-  turnRunning: boolean
-}): Promise<ForkFromTurnOutcome> {
+  onIntoNewConversation,
+}: ForkFromTurnArgs): Promise<ForkFromTurnOutcome> {
   const intoNewConversation = async (): Promise<ForkFromTurnOutcome> => {
     if (!supportsForkWhileRunning(agentType)) {
       throw new ForkBetweenTurnsOnlyError()
     }
+    onIntoNewConversation?.()
     try {
       const result = await acpForkToNewConversation(
         connectionId,
@@ -217,6 +225,45 @@ export async function forkFromTurn({
   } catch (err) {
     if (err instanceof TurnBusyError) return intoNewConversation()
     throw err
+  }
+}
+
+/**
+ * {@link forkFromTurn} for a conversation shown in a tab, with a fork into a
+ * new conversation visible from the click on. As soon as the fork heads that
+ * way, a "Forking…" placeholder stands in the tab strip right after
+ * `besideTabId` (`stores/fork-placeholder-store`). Once the forked
+ * conversation is ready, `onNewConversation` runs (the caller refreshes the
+ * conversation list there) and its tab opens in the placeholder's place,
+ * focused. If the fork fails, the placeholder goes away and this rejects as
+ * `forkFromTurn` does. An in-place fork shows no placeholder: nothing opens.
+ */
+export async function forkFromTurnWithPlaceholder({
+  besideTabId,
+  onNewConversation,
+  ...fork
+}: Omit<ForkFromTurnArgs, "onIntoNewConversation"> & {
+  besideTabId: string | null
+  onNewConversation?: (result: ForkToNewConversationResult) => void
+}): Promise<ForkFromTurnOutcome> {
+  const placeholders = useForkPlaceholderStore.getState()
+  const placeholder: { id: string | null } = { id: null }
+  try {
+    const outcome = await forkFromTurn({
+      ...fork,
+      onIntoNewConversation: () => {
+        placeholder.id ??= placeholders.open(besideTabId)
+      },
+    })
+    if (outcome.kind === "new_conversation") {
+      onNewConversation?.(outcome.result)
+      openForkedConversationTab(outcome.result, fork.agentType, besideTabId)
+    }
+    return outcome
+  } finally {
+    // In the same tick as the tab opening above, so both land in one render:
+    // the placeholder turns into the forked conversation's tab.
+    if (placeholder.id !== null) placeholders.close(placeholder.id)
   }
 }
 

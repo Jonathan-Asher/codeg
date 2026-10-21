@@ -2565,7 +2565,8 @@
       "bandAwaitingReply": "بانتظار ردك",
       "bandRunning": "قيد التشغيل",
       "bandOther": "أخرى",
-      "chatGroup": "دردشة"
+      "chatGroup": "دردشة",
+      "forking": "جارٍ التفريع…"
     },
     "fileWorkspace": {
       "files": "الملفات",
@@ -3799,6 +3800,8 @@
         "forkFromHere": "تفريع من هنا",
         "forkBusy": "هذا الوكيل لا يمكنه التفريع إلا بين الأدوار",
         "forkNotReady": "لا يمكن التفريع من هذا الرد بعد، أعد المحاولة بعد قليل",
+        "forking": "جارٍ التفريع…",
+        "forkInProgress": "هناك تفريع آخر قيد التنفيذ",
         "readAloud": "قراءة بصوت عالٍ",
         "stopReading": "إيقاف القراءة",
         "pauseReading": "إيقاف القراءة مؤقتًا",
@@ -4287,6 +4290,20 @@
         "toggleDetails": "تبديل التفاصيل",
         "dismiss": "تجاهل",
         "moreIncidents": "+{count} أخرى"
+      },
+      "providerError": {
+        "subagentStopped": "توقف الوكيل الفرعي: {reason}",
+        "turnStopped": "توقف: {reason}",
+        "agentStopped": "توقف {agent}: {reason}",
+        "reason": {
+          "policy_block": "حُظر الطلب بموجب سياسة الاستخدام لدى المزوّد",
+          "rate_limit": "تم بلوغ حد المعدّل لدى المزوّد",
+          "overloaded": "المزوّد مثقل حاليًا",
+          "invalid_request": "رفض المزوّد الطلب",
+          "api_error": "أعاد المزوّد خطأً"
+        },
+        "learnMore": "اعرف المزيد:",
+        "details": "التفاصيل"
       },
       "backgroundTasks": {
         "settledFallback": "انتهت مهمة الخلفية ({status})",

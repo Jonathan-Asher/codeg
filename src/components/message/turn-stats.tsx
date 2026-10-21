@@ -8,6 +8,7 @@ import {
   Coins,
   CopyIcon,
   ListTodo,
+  Loader2,
   Split,
 } from "lucide-react"
 import { useLocale, useTranslations } from "next-intl"
@@ -17,6 +18,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { useForkingTurnId } from "@/components/message/fork-progress-context"
 import { useMessageScroll } from "@/components/message/message-scroll-context"
 import { useModelLabel } from "@/components/message/model-label-context"
 import { ReadAloudButton } from "./read-aloud-button"
@@ -47,6 +49,10 @@ interface TurnStatsProps {
    * name the backend can resolve yet (`unnamed` — the post-turn reparse fills
    * it in a moment later). Only read while `forkDisabled`. */
   forkDisabledReason?: "busy" | "unnamed"
+  /** The id this reply's button forks at. While a fork runs at it (see
+   *  `useForkingTurnId`) the button spins and says "Forking…"; while a fork
+   *  runs anywhere else in the transcript it is greyed out. */
+  forkTurnId?: string
   /** Names this reply to the read-aloud player. Undefined hides "Read
    * aloud" — the surface has no stable id for the reply. */
   readAloudId?: string
@@ -67,10 +73,16 @@ export function TurnStats({
   onForkFromHere,
   forkDisabled = false,
   forkDisabledReason = "busy",
+  forkTurnId,
   readAloudId,
 }: TurnStatsProps) {
   const locale = useLocale()
   const t = useTranslations("Folder.chat.messageList")
+  // A fork in flight in this transcript: this reply's button shows it, and no
+  // fork button starts another until it ends (the host guards it as well).
+  const forkingTurnId = useForkingTurnId()
+  const forkingHere = forkingTurnId !== null && forkingTurnId === forkTurnId
+  const forkInert = forkDisabled || forkingTurnId !== null
   const tTasks = useTranslations("Tasks")
   const scroll = useMessageScroll()
   const modelLabel = useModelLabel()
@@ -225,24 +237,44 @@ export function TurnStats({
                   open. Staying focusable also keeps it reachable by keyboard. */}
               <button
                 type="button"
-                onClick={forkDisabled ? undefined : onForkFromHere}
-                aria-disabled={forkDisabled || undefined}
+                onClick={forkInert ? undefined : onForkFromHere}
+                aria-disabled={forkInert || undefined}
+                aria-busy={forkingHere || undefined}
+                data-forking={forkingHere ? "true" : undefined}
                 className={cn(
                   iconButtonClass,
-                  forkDisabled &&
-                    "cursor-not-allowed opacity-50 hover:bg-transparent hover:text-muted-foreground"
+                  // The fork being taken from this reply says so in words, right
+                  // where the click landed: a spinner and "Forking…".
+                  forkingHere
+                    ? "w-auto cursor-progress gap-1 px-2 text-foreground hover:bg-transparent"
+                    : forkInert &&
+                        "cursor-not-allowed opacity-50 hover:bg-transparent hover:text-muted-foreground"
                 )}
-                aria-label={t("forkFromHere")}
+                aria-label={forkingHere ? t("forking") : t("forkFromHere")}
               >
-                <Split aria-hidden="true" className="h-3.5 w-3.5" />
+                {forkingHere ? (
+                  <>
+                    <Loader2
+                      aria-hidden="true"
+                      className="h-3.5 w-3.5 animate-spin"
+                    />
+                    <span aria-hidden="true">{t("forking")}</span>
+                  </>
+                ) : (
+                  <Split aria-hidden="true" className="h-3.5 w-3.5" />
+                )}
               </button>
             </TooltipTrigger>
             <TooltipContent side="top">
-              {forkDisabled
-                ? forkDisabledReason === "unnamed"
-                  ? t("forkNotReady")
-                  : t("forkBusy")
-                : t("forkFromHere")}
+              {forkingHere
+                ? t("forking")
+                : forkingTurnId !== null
+                  ? t("forkInProgress")
+                  : forkDisabled
+                    ? forkDisabledReason === "unnamed"
+                      ? t("forkNotReady")
+                      : t("forkBusy")
+                    : t("forkFromHere")}
             </TooltipContent>
           </Tooltip>
         )}

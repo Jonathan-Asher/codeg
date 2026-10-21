@@ -2565,7 +2565,8 @@
       "bandAwaitingReply": "Aguardando sua resposta",
       "bandRunning": "Em execução",
       "bandOther": "Outras",
-      "chatGroup": "Chat"
+      "chatGroup": "Chat",
+      "forking": "Bifurcando…"
     },
     "fileWorkspace": {
       "files": "Arquivos",
@@ -3799,6 +3800,8 @@
         "forkFromHere": "Bifurcar a partir daqui",
         "forkBusy": "Este agente só pode bifurcar entre turnos",
         "forkNotReady": "Ainda não é possível bifurcar a partir desta resposta; tente novamente em instantes",
+        "forking": "Bifurcando…",
+        "forkInProgress": "Já há outra bifurcação em andamento",
         "readAloud": "Ler em voz alta",
         "stopReading": "Parar a leitura",
         "pauseReading": "Pausar a leitura",
@@ -4287,6 +4290,20 @@
         "toggleDetails": "Alternar detalhes",
         "dismiss": "Dispensar",
         "moreIncidents": "+{count} mais"
+      },
+      "providerError": {
+        "subagentStopped": "Subagente parado: {reason}",
+        "turnStopped": "Parado: {reason}",
+        "agentStopped": "{agent} parou: {reason}",
+        "reason": {
+          "policy_block": "solicitação bloqueada pela política de uso do provedor",
+          "rate_limit": "o limite de requisições do provedor foi atingido",
+          "overloaded": "o provedor está sobrecarregado",
+          "invalid_request": "o provedor rejeitou a solicitação",
+          "api_error": "o provedor retornou um erro"
+        },
+        "learnMore": "Saiba mais:",
+        "details": "Detalhes"
       },
       "backgroundTasks": {
         "settledFallback": "Tarefa em segundo plano concluída ({status})",

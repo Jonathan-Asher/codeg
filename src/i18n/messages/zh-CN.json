@@ -2565,7 +2565,8 @@
       "bandAwaitingReply": "等你回复",
       "bandRunning": "进行中",
       "bandOther": "其他",
-      "chatGroup": "聊天"
+      "chatGroup": "聊天",
+      "forking": "正在分叉…"
     },
     "fileWorkspace": {
       "files": "文件",
@@ -3799,6 +3800,8 @@
         "forkFromHere": "从此处分叉",
         "forkBusy": "此智能体只能在回合之间分叉",
         "forkNotReady": "这条回复暂时还不能作为分叉点，请稍后再试",
+        "forking": "正在分叉…",
+        "forkInProgress": "另一个分叉正在进行",
         "readAloud": "朗读",
         "stopReading": "停止朗读",
         "pauseReading": "暂停朗读",
@@ -4287,6 +4290,20 @@
         "toggleDetails": "展开/收起详情",
         "dismiss": "忽略",
         "moreIncidents": "另 {count} 条"
+      },
+      "providerError": {
+        "subagentStopped": "子智能体已停止：{reason}",
+        "turnStopped": "已停止：{reason}",
+        "agentStopped": "{agent} 已停止：{reason}",
+        "reason": {
+          "policy_block": "请求被服务商的使用政策拦截",
+          "rate_limit": "已达到服务商的速率限制",
+          "overloaded": "服务商当前过载",
+          "invalid_request": "服务商拒绝了该请求",
+          "api_error": "服务商返回了错误"
+        },
+        "learnMore": "了解更多：",
+        "details": "详情"
       },
       "backgroundTasks": {
         "settledFallback": "后台任务已结束（{status}）",

@@ -59,6 +59,8 @@ import { folderTitleTintVars } from "@/lib/theme-presets"
 import { useTabArrangeStore } from "@/stores/tab-arrangement-store"
 import { useArrangedTabs } from "@/hooks/use-arranged-tabs"
 import { TabItem, type TabMoveTarget } from "./tab-item"
+import { ForkPlaceholderTab } from "./fork-placeholder-tab"
+import { useForkPlaceholderStore } from "@/stores/fork-placeholder-store"
 import { GroupDropMarker, TabGroupLabel } from "./tab-group-label"
 
 /** i18n keys (Folder.tabs) for the view menu and the status band labels.
@@ -102,6 +104,7 @@ export function TabBar({ groupId }: TabBarProps) {
   const groupLayout = useTabStore((s) => s.groupLayout)
   const groupSelection = useTabStore((s) => s.groupSelection)
   const tileByGroup = useTabStore((s) => s.tileByGroup)
+  const forkPlaceholders = useForkPlaceholderStore((s) => s.placeholders)
   const {
     switchTab,
     closeTab,
@@ -606,7 +609,8 @@ export function TabBar({ groupId }: TabBarProps) {
   type StripEntry =
     | { kind: "label"; runKey: string; count: number; collapsed: boolean }
     | { kind: "tab"; tab: TabItemData }
-  const entries: StripEntry[] = arranged.runs
+    | { kind: "fork-placeholder"; id: string }
+  const arrangedEntries: StripEntry[] = arranged.runs
     ? arranged.runs.flatMap((run): StripEntry[] => {
         const collapsed = collapsedRuns.has(run.key)
         const visible = collapsed
@@ -618,6 +622,25 @@ export function TabBar({ groupId }: TabBarProps) {
         ]
       })
     : displayTabs.map((tab) => ({ kind: "tab" as const, tab }))
+  // A fork on its way into a new tab stands right after the tab it was taken
+  // from (see `stores/fork-placeholder-store`) — in the sequence, so the
+  // active-tab adjacency below treats it as the neighbour it is.
+  const entries: StripEntry[] =
+    forkPlaceholders.length === 0
+      ? arrangedEntries
+      : arrangedEntries.flatMap((entry): StripEntry[] =>
+          entry.kind === "tab"
+            ? [
+                entry,
+                ...forkPlaceholders
+                  .filter((p) => p.sourceTabId === entry.tab.id)
+                  .map((p) => ({
+                    kind: "fork-placeholder" as const,
+                    id: p.id,
+                  })),
+              ]
+            : [entry]
+        )
   const activePos = entries.findIndex(
     (e) => e.kind === "tab" && e.tab.id === displayActiveId
   )
@@ -671,6 +694,14 @@ export function TabBar({ groupId }: TabBarProps) {
       )}
     >
       {entries.map((entry, pos) => {
+        if (entry.kind === "fork-placeholder") {
+          return (
+            <ForkPlaceholderTab
+              key={entry.id}
+              adjacentActive={adjacencyAt(pos)}
+            />
+          )
+        }
         if (entry.kind === "label") {
           const visual = runVisuals.byRun.get(entry.runKey)
           return (

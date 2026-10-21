@@ -1,4 +1,4 @@
-import { type ReactNode } from "react"
+import { type ComponentProps, type ReactNode } from "react"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
@@ -11,6 +11,7 @@ vi.mock("./use-create-task-from-message", () => ({
 }))
 
 import { TurnStats } from "./turn-stats"
+import { ForkProgressProvider } from "./fork-progress-context"
 import { MessageScrollProvider } from "./message-scroll-context"
 import { ModelLabelProvider } from "./model-label-context"
 import type { ModelLabelResolver } from "@/hooks/use-model-labels"
@@ -146,6 +147,66 @@ describe("TurnStats fork-from-here gating", () => {
     expect(await screen.findByRole("tooltip")).toHaveTextContent(
       enMessages.Folder.chat.messageList.forkNotReady
     )
+  })
+})
+
+const forkingLabel = enMessages.Folder.chat.messageList.forking
+
+describe("TurnStats while a fork runs", () => {
+  function renderForking(
+    forkingTurnId: string | null,
+    props: Partial<ComponentProps<typeof TurnStats>> = {}
+  ) {
+    const onForkFromHere = vi.fn()
+    renderStats(
+      <ForkProgressProvider value={forkingTurnId}>
+        <TurnStats
+          copyText="hello"
+          onForkFromHere={onForkFromHere}
+          forkTurnId="turn-3"
+          {...props}
+        />
+      </ForkProgressProvider>
+    )
+    return onForkFromHere
+  }
+
+  it("spins and says Forking… on the reply being forked", () => {
+    renderForking("turn-3")
+    const button = screen.getByRole("button", { name: forkingLabel })
+    expect(button).toHaveAttribute("aria-busy", "true")
+    expect(button).toHaveAttribute("aria-disabled", "true")
+    expect(button).toHaveTextContent(forkingLabel)
+    expect(button.querySelector(".animate-spin")).not.toBeNull()
+    expect(screen.queryByLabelText(forkLabel)).not.toBeInTheDocument()
+  })
+
+  it("does not start a second fork when the busy button is clicked again", async () => {
+    const onForkFromHere = renderForking("turn-3")
+    const button = screen.getByRole("button", { name: forkingLabel })
+    await userEvent.click(button)
+    await userEvent.dblClick(button)
+    expect(onForkFromHere).not.toHaveBeenCalled()
+  })
+
+  it("greys out every other reply's fork and says why", async () => {
+    const onForkFromHere = renderForking("turn-1")
+    const button = screen.getByLabelText(forkLabel)
+    expect(button).toHaveAttribute("aria-disabled", "true")
+    expect(button).not.toHaveAttribute("aria-busy")
+    await userEvent.hover(button)
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      enMessages.Folder.chat.messageList.forkInProgress
+    )
+    await userEvent.click(button)
+    expect(onForkFromHere).not.toHaveBeenCalled()
+  })
+
+  it("is back to normal once no fork runs", async () => {
+    const onForkFromHere = renderForking(null)
+    await userEvent.click(screen.getByLabelText(forkLabel))
+    expect(onForkFromHere).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText(forkingLabel)).not.toBeInTheDocument()
   })
 })
 

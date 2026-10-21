@@ -2565,7 +2565,8 @@
       "bandAwaitingReply": "Awaiting your reply",
       "bandRunning": "Running",
       "bandOther": "Other",
-      "chatGroup": "Chat"
+      "chatGroup": "Chat",
+      "forking": "Forking…"
     },
     "fileWorkspace": {
       "files": "Files",
@@ -3799,6 +3800,8 @@
         "forkFromHere": "Fork from here",
         "forkBusy": "This agent can only fork between turns",
         "forkNotReady": "Can't fork from this reply just yet — try again in a moment",
+        "forking": "Forking…",
+        "forkInProgress": "Another fork is in progress",
         "readAloud": "Read aloud",
         "stopReading": "Stop reading",
         "pauseReading": "Pause reading",
@@ -4287,6 +4290,20 @@
         "toggleDetails": "Toggle details",
         "dismiss": "Dismiss",
         "moreIncidents": "+{count} more"
+      },
+      "providerError": {
+        "subagentStopped": "Sub-agent stopped: {reason}",
+        "turnStopped": "Stopped: {reason}",
+        "agentStopped": "{agent} stopped: {reason}",
+        "reason": {
+          "policy_block": "request blocked by the provider's usage policy",
+          "rate_limit": "the provider's rate limit was reached",
+          "overloaded": "the provider is overloaded",
+          "invalid_request": "the provider rejected the request",
+          "api_error": "the provider returned an error"
+        },
+        "learnMore": "Learn more:",
+        "details": "Details"
       },
       "backgroundTasks": {
         "settledFallback": "Background task finished ({status})",

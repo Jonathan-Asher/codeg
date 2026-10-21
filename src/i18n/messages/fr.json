@@ -2565,7 +2565,8 @@
       "bandAwaitingReply": "Attend votre réponse",
       "bandRunning": "En cours",
       "bandOther": "Autres",
-      "chatGroup": "Chat"
+      "chatGroup": "Chat",
+      "forking": "Bifurcation…"
     },
     "fileWorkspace": {
       "files": "Fichiers",
@@ -3799,6 +3800,8 @@
         "forkFromHere": "Bifurquer d'ici",
         "forkBusy": "Cet agent ne peut bifurquer qu'entre deux tours",
         "forkNotReady": "Impossible de bifurquer depuis cette réponse pour le moment, réessayez dans un instant",
+        "forking": "Bifurcation…",
+        "forkInProgress": "Une autre bifurcation est en cours",
         "readAloud": "Lire à voix haute",
         "stopReading": "Arrêter la lecture",
         "pauseReading": "Mettre la lecture en pause",
@@ -4287,6 +4290,20 @@
         "toggleDetails": "Afficher/masquer les détails",
         "dismiss": "Ignorer",
         "moreIncidents": "+{count} autre(s)"
+      },
+      "providerError": {
+        "subagentStopped": "Sous-agent arrêté : {reason}",
+        "turnStopped": "Arrêté : {reason}",
+        "agentStopped": "{agent} s'est arrêté : {reason}",
+        "reason": {
+          "policy_block": "requête bloquée par la politique d'utilisation du fournisseur",
+          "rate_limit": "limite de débit du fournisseur atteinte",
+          "overloaded": "le fournisseur est surchargé",
+          "invalid_request": "le fournisseur a rejeté la requête",
+          "api_error": "le fournisseur a renvoyé une erreur"
+        },
+        "learnMore": "En savoir plus :",
+        "details": "Détails"
       },
       "backgroundTasks": {
         "settledFallback": "Tâche en arrière-plan terminée ({status})",

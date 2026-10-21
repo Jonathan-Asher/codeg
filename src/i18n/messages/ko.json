@@ -2565,7 +2565,8 @@
       "bandAwaitingReply": "답장 대기",
       "bandRunning": "실행 중",
       "bandOther": "기타",
-      "chatGroup": "채팅"
+      "chatGroup": "채팅",
+      "forking": "분기하는 중…"
     },
     "fileWorkspace": {
       "files": "파일",
@@ -3799,6 +3800,8 @@
         "forkFromHere": "여기서 분기",
         "forkBusy": "이 에이전트는 턴 사이에만 분기할 수 있습니다",
         "forkNotReady": "아직 이 응답에서 분기할 수 없습니다. 잠시 후 다시 시도하세요",
+        "forking": "분기하는 중…",
+        "forkInProgress": "다른 분기가 진행 중입니다",
         "readAloud": "소리 내어 읽기",
         "stopReading": "읽기 중지",
         "pauseReading": "읽기 일시 정지",
@@ -4287,6 +4290,20 @@
         "toggleDetails": "세부 정보 전환",
         "dismiss": "닫기",
         "moreIncidents": "외 {count}건"
+      },
+      "providerError": {
+        "subagentStopped": "서브 에이전트 중지됨: {reason}",
+        "turnStopped": "중지됨: {reason}",
+        "agentStopped": "{agent} 중지됨: {reason}",
+        "reason": {
+          "policy_block": "제공업체의 이용 정책에 따라 요청이 차단됨",
+          "rate_limit": "제공업체의 속도 제한에 도달함",
+          "overloaded": "제공업체가 과부하 상태임",
+          "invalid_request": "제공업체가 요청을 거부함",
+          "api_error": "제공업체가 오류를 반환함"
+        },
+        "learnMore": "자세히 알아보기:",
+        "details": "세부 정보"
       },
       "backgroundTasks": {
         "settledFallback": "백그라운드 작업이 종료되었습니다 ({status})",
