@@ -10925,11 +10925,12 @@ pub(crate) async fn acp_fork_to_new_conversation_core(
     conversation_id: Option<i32>,
     fork_from_turn_id: &str,
 ) -> Result<crate::acp::types::ForkToNewConversationInfo, AcpError> {
-    let agent_type = match manager.get_state(connection_id).await {
-        Some(state) => state.read().await.agent_type,
+    let adapter = match manager.get_state(connection_id).await {
+        Some(state) => crate::acp::manager::fork_adapter_of(&*state.read().await),
         None => return Err(AcpError::ConnectionNotFound(connection_id.into())),
     };
-    if !crate::acp::fork::forks_while_running(agent_type) {
+    let agent_type = adapter.agent_type;
+    if !adapter.caps.while_running {
         return Err(AcpError::ForkNeedsIdle);
     }
     // The fork runs in a new agent process, launched with what any

@@ -7372,12 +7372,25 @@ async fn run_connection(
                 }
             }
 
-            // Emit fork support capability
+            // Emit fork support capability, with what this adapter's fork can
+            // do (pi-acp says so in `_meta.forkPoint`; see
+            // `acp::fork::fork_capabilities`).
+            let fork_caps =
+                crate::acp::fork::fork_capabilities(agent_type, init_resp.meta.as_ref());
+            tracing::info!(
+                "[ACP][{}] fork: supported={}, strict_point={}, while_running={}",
+                agent_type,
+                supports_fork,
+                fork_caps.strict_point,
+                fork_caps.while_running
+            );
             emit_with_state(
                 &state,
                 &emitter_clone,
                 AcpEvent::ForkSupported {
                     supported: supports_fork,
+                    strict_point: fork_caps.strict_point,
+                    while_running: fork_caps.while_running,
                 },
             )
             .await;

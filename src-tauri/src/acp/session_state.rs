@@ -462,6 +462,13 @@ pub struct SessionState {
     pub env_pinned_config_option_ids: Vec<String>,
     pub prompt_capabilities: Option<PromptCapabilitiesInfo>,
     pub fork_supported: bool,
+    /// The adapter forks exactly at a named reply or refuses
+    /// (`acp::fork::ForkCapabilities::strict_point`) — the gate for editing a
+    /// sent message.
+    pub fork_strict_point: bool,
+    /// The adapter forks from another process while a turn runs
+    /// (`acp::fork::ForkCapabilities::while_running`).
+    pub fork_while_running: bool,
     pub available_commands: Vec<AvailableCommandInfo>,
     pub usage: Option<UsageInfo>,
     /// True once the agent's initial selectors handshake (modes +
@@ -825,6 +832,8 @@ impl SessionState {
             env_pinned_config_option_ids: Vec::new(),
             prompt_capabilities: None,
             fork_supported: false,
+            fork_strict_point: false,
+            fork_while_running: false,
             available_commands: Vec::new(),
             usage: None,
             selectors_ready: false,
@@ -1048,8 +1057,14 @@ impl SessionState {
             } => {
                 self.prompt_capabilities = Some(prompt_capabilities.clone());
             }
-            AcpEvent::ForkSupported { supported } => {
+            AcpEvent::ForkSupported {
+                supported,
+                strict_point,
+                while_running,
+            } => {
                 self.fork_supported = *supported;
+                self.fork_strict_point = *supported && *strict_point;
+                self.fork_while_running = *supported && *while_running;
             }
             AcpEvent::AvailableCommands { commands } => {
                 self.available_commands = commands.clone();
@@ -2277,6 +2292,8 @@ impl SessionState {
             prompt_capabilities: self.prompt_capabilities.clone(),
             usage: self.usage.clone(),
             fork_supported: self.fork_supported,
+            fork_strict_point: self.fork_strict_point,
+            fork_while_running: self.fork_while_running,
             available_commands: self.available_commands.clone(),
             selectors_ready: self.selectors_ready,
             config_stale: self.config_stale,
@@ -2394,6 +2411,13 @@ pub struct LiveSessionSnapshot {
     pub prompt_capabilities: Option<PromptCapabilitiesInfo>,
     pub usage: Option<UsageInfo>,
     pub fork_supported: bool,
+    /// See `SessionState.fork_strict_point`. `#[serde(default)]` so a snapshot
+    /// from an older backend reads as "cannot edit".
+    #[serde(default)]
+    pub fork_strict_point: bool,
+    /// See `SessionState.fork_while_running`.
+    #[serde(default)]
+    pub fork_while_running: bool,
     pub available_commands: Vec<AvailableCommandInfo>,
     pub selectors_ready: bool,
     /// Whether the running session is on stale (launch-time) config after a
@@ -5004,7 +5028,11 @@ mod tests {
                 embedded_context: true,
             },
         });
-        s.apply_event(&AcpEvent::ForkSupported { supported: true });
+        s.apply_event(&AcpEvent::ForkSupported {
+            supported: true,
+            strict_point: true,
+            while_running: false,
+        });
         s.apply_event(&AcpEvent::SessionConfigOptions {
             config_options: vec![SessionConfigOptionInfo {
                 id: "model".into(),
@@ -5056,6 +5084,8 @@ mod tests {
         let snapshot = s.to_snapshot();
         assert_eq!(snapshot.connection_id, "conn-test");
         assert!(snapshot.fork_supported);
+        assert!(snapshot.fork_strict_point);
+        assert!(!snapshot.fork_while_running);
         assert_eq!(
             snapshot.usage,
             Some(UsageInfo {

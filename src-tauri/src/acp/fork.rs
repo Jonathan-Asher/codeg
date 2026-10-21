@@ -144,12 +144,12 @@ pub fn resolve_fork_point(
         // fingerprint alongside an id costs nothing: both adapters stop at the
         // first id that matches and never look at it.
         //
-        // Pi (pi-acp ≥ our fork) resolves by fingerprint only: its adapter
-        // hashes the normalized text of each assistant message in the linear
-        // transcript and forks from the first user message AFTER the match
-        // (pi's fork RPC takes a user-message entryId). The id half is sent
-        // but ignored there; the empty-text guard below still matters — a
-        // textless turn would hash to the empty-string digest.
+        // Pi: `parsers::pi` names each assistant turn by its session entry
+        // id, which pi-acp 0.0.34-steering.3+ looks up directly; the
+        // fingerprint (the text of that assistant message, which is the
+        // turn's text) is what still resolves a turn parsed without an id.
+        // Older pi-acp builds read only the fingerprint and forked at the
+        // tail on a miss — see [`fork_capabilities`].
         //
         // The `text.trim().is_empty()` guard below is load-bearing on Claude,
         // not just tidiness. Every turn `parsers::claude` leaves unnamed is one
@@ -241,11 +241,80 @@ impl ForkMode {
 /// the only kind of fork an edit can be built on.
 ///
 /// The `ClaudeCode`, `Codex` and `DeepSeek` adapters all answer
-/// `invalid_params` when they cannot resolve the point. Pi's adapter matches by
-/// fingerprint too, but forks at the tail when nothing matches, so a miss there
-/// looks exactly like a hit. Every other agent has no fork point at all.
+/// `invalid_params` when they cannot resolve the point, on every version codeg
+/// runs. pi-acp does too from the build that advertises it
+/// ([`fork_capabilities`]); older builds forked at the tail when nothing
+/// matched, so a miss there looked exactly like a hit. Every other agent has
+/// no fork point at all.
 pub fn honours_fork_point_strictly(agent_type: AgentType) -> bool {
     matches!(agent_type, AgentType::ClaudeCode | AgentType::Codex | AgentType::DeepSeek)
+}
+
+/// What the adapter on a connection promises about `session/fork`, settled
+/// once at `initialize` by [`fork_capabilities`] and kept on the session state.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ForkCapabilities {
+    /// Forks exactly at a named reply or refuses: what an edit needs.
+    pub strict_point: bool,
+    /// Forks from a separate process while the session runs a turn.
+    pub while_running: bool,
+}
+
+impl ForkCapabilities {
+    /// What codeg knows of this agent's adapter without asking it.
+    pub fn built_in(agent_type: AgentType) -> Self {
+        Self {
+            strict_point: honours_fork_point_strictly(agent_type),
+            while_running: forks_while_running(agent_type),
+        }
+    }
+}
+
+/// The capabilities of the adapter that answered `initialize`, given the
+/// response's top-level `_meta`.
+///
+/// On top of [`ForkCapabilities::built_in`], pi-acp says what its own build
+/// does: from 0.0.34-steering.3 (github.com/Jonathan-Asher/pi-acp) it
+/// advertises `_meta.forkPoint = { strict: true, whileRunning: true }`. That
+/// build writes the fork from the session file itself, ending exactly at the
+/// named reply (its tool results included), refuses a point it cannot find,
+/// and never opens the source session in a pi process, so a session another
+/// process is appending to can be forked. The flag is read only for Pi: launch
+/// prefers a PATH-resolved install, so the running build is the one to ask,
+/// and no other adapter uses the key.
+pub fn fork_capabilities(
+    agent_type: AgentType,
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> ForkCapabilities {
+    let mut caps = ForkCapabilities::built_in(agent_type);
+    if matches!(agent_type, AgentType::Pi) {
+        let advertised = |key: &str| {
+            meta.and_then(|m| m.get("forkPoint"))
+                .and_then(|f| f.get(key))
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        };
+        caps.strict_point |= advertised("strict");
+        caps.while_running |= advertised("whileRunning");
+    }
+    caps
+}
+
+/// The agent a fork is settled for, with what its adapter can do. An
+/// [`AgentType`] alone converts with [`ForkCapabilities::built_in`].
+#[derive(Debug, Clone, Copy)]
+pub struct ForkAdapter {
+    pub agent_type: AgentType,
+    pub caps: ForkCapabilities,
+}
+
+impl From<AgentType> for ForkAdapter {
+    fn from(agent_type: AgentType) -> Self {
+        Self {
+            agent_type,
+            caps: ForkCapabilities::built_in(agent_type),
+        }
+    }
 }
 
 /// Settle where a fork aimed at `turn_id` lands, given the conversation's
@@ -258,11 +327,12 @@ pub fn honours_fork_point_strictly(agent_type: AgentType) -> bool {
 pub fn settle_fork_point(
     turns: Result<&[MessageTurn], &str>,
     turn_id: &str,
-    agent_type: AgentType,
+    adapter: impl Into<ForkAdapter>,
     mode: ForkMode,
 ) -> Result<Option<ForkPoint>, AcpError> {
+    let ForkAdapter { agent_type, caps } = adapter.into();
     let strict = mode.is_edit();
-    if strict && !honours_fork_point_strictly(agent_type) {
+    if strict && !caps.strict_point {
         return Err(AcpError::ForkPointUnresolved(format!(
             "{agent_type} cannot fork a session at a chosen message"
         )));
@@ -317,6 +387,12 @@ pub fn settle_fork_point(
 ///   dsh session store, which it does not ship in source. Not verified, not
 ///   enabled.
 ///
+/// * **pi-acp** from 0.0.34-steering.3 says so itself, at `initialize`
+///   ([`fork_capabilities`]): it writes the fork from the session file,
+///   skipping a half-written tail line, and never opens the source in pi. The
+///   builds before it opened the source session in a second pi process, which
+///   can append to the file on startup.
+///
 /// Every other agent forks at the tail at best, and a tail fork taken mid-turn
 /// would copy the half-written reply — never offered.
 pub fn forks_while_running(agent_type: AgentType) -> bool {
@@ -340,11 +416,12 @@ pub fn forks_while_running(agent_type: AgentType) -> bool {
 pub fn settle_mid_run_fork_point(
     turns: Result<&[MessageTurn], &str>,
     turn_id: &str,
-    agent_type: AgentType,
+    adapter: impl Into<ForkAdapter>,
     running: bool,
     in_flight_prompt_turn_id: Option<&str>,
 ) -> Result<ForkPoint, AcpError> {
-    if !forks_while_running(agent_type) {
+    let ForkAdapter { agent_type, caps } = adapter.into();
+    if !caps.while_running {
         return Err(AcpError::ForkNeedsIdle);
     }
     let turns = turns.map_err(|reason| {
@@ -909,7 +986,8 @@ mod tests {
     }
 
     /// Only adapters that refuse a point they cannot resolve can carry an
-    /// edit; pi-acp falls back to the tail, which would look like success.
+    /// edit. Without its adapter saying so, pi-acp is one of the old builds
+    /// that fall back to the tail, which would look like success.
     #[test]
     fn edit_is_limited_to_agents_that_honour_the_point_strictly() {
         for agent in [AgentType::ClaudeCode, AgentType::Codex, AgentType::DeepSeek] {
@@ -929,6 +1007,85 @@ mod tests {
         assert!(settle("turn-1", AgentType::Pi, ForkMode::Branch)
             .unwrap()
             .is_some());
+    }
+
+    fn pi_meta(value: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+        value.as_object().cloned().expect("an object")
+    }
+
+    /// pi-acp says what its build can do; nothing else reads the key.
+    #[test]
+    fn fork_capabilities_read_pi_s_advertisement_only() {
+        let both = pi_meta(serde_json::json!({
+            "steering": { "supported": true },
+            "forkPoint": { "strict": true, "whileRunning": true }
+        }));
+        assert_eq!(
+            fork_capabilities(AgentType::Pi, Some(&both)),
+            ForkCapabilities { strict_point: true, while_running: true }
+        );
+        // An older pi-acp advertises neither, and a stringly flag is not one.
+        assert_eq!(fork_capabilities(AgentType::Pi, None), ForkCapabilities::default());
+        let stringly = pi_meta(serde_json::json!({ "forkPoint": { "strict": "true" } }));
+        assert_eq!(fork_capabilities(AgentType::Pi, Some(&stringly)), ForkCapabilities::default());
+        let strict_only = pi_meta(serde_json::json!({ "forkPoint": { "strict": true } }));
+        assert_eq!(
+            fork_capabilities(AgentType::Pi, Some(&strict_only)),
+            ForkCapabilities { strict_point: true, while_running: false }
+        );
+        // Another agent's adapter cannot opt in through the same key…
+        assert_eq!(
+            fork_capabilities(AgentType::Gemini, Some(&both)),
+            ForkCapabilities::default()
+        );
+        // …and the built-in agents keep what they have regardless.
+        assert_eq!(
+            fork_capabilities(AgentType::ClaudeCode, None),
+            ForkCapabilities { strict_point: true, while_running: true }
+        );
+        assert_eq!(
+            fork_capabilities(AgentType::Codex, None),
+            ForkCapabilities { strict_point: true, while_running: false }
+        );
+    }
+
+    /// With the adapter's promise, a Pi edit forks at the reply before the
+    /// message, by the entry id the parser gave that reply.
+    #[test]
+    fn pi_edits_once_its_adapter_forks_strictly() {
+        let pi = ForkAdapter {
+            agent_type: AgentType::Pi,
+            caps: ForkCapabilities { strict_point: true, while_running: false },
+        };
+        for mode in [ForkMode::Edit, ForkMode::EditInPlace] {
+            let point = settle_fork_point(Ok(history().as_slice()), "turn-1", pi, mode)
+                .expect("a strict pi adapter settles an edit")
+                .expect("at a real point");
+            assert_eq!(point.message_id, "msg_01");
+            assert_eq!(point.message_fingerprint, Some(fingerprint_agent_message("hello")));
+            // A point it cannot name is refused, as for every strict adapter.
+            assert!(settle_fork_point(Ok(history().as_slice()), "turn-9", pi, mode).is_err());
+        }
+    }
+
+    /// Mid-run forks for Pi follow the same advertisement.
+    #[test]
+    fn pi_forks_mid_run_once_its_adapter_says_it_can() {
+        let turns = running_history();
+        let pi = |while_running| ForkAdapter {
+            agent_type: AgentType::Pi,
+            caps: ForkCapabilities { strict_point: true, while_running },
+        };
+        let settle = |turn_id, adapter| {
+            settle_mid_run_fork_point(Ok(turns.as_slice()), turn_id, adapter, true, Some("turn-2"))
+        };
+        let point = settle("turn-1", pi(true)).expect("a finished reply is a fork point mid-run");
+        assert_eq!(point.message_id, "msg_01");
+        assert!(settle("turn-3", pi(true)).is_err());
+        assert!(matches!(
+            settle_mid_run_fork_point(Ok(turns.as_slice()), "turn-1", pi(false), true, None),
+            Err(AcpError::ForkNeedsIdle)
+        ));
     }
 
     /// The wire form both transports send.
@@ -1089,8 +1246,9 @@ mod tests {
         assert!(matches!(unnamed, Err(AcpError::ForkPointUnresolved(_))));
     }
 
-    /// Only Claude Code is verified to fork from a transcript another process
-    /// is still writing; every other agent waits for the turn to end.
+    /// Only Claude Code is known to fork from a transcript another process is
+    /// still writing without asking its adapter; every other agent waits for
+    /// the turn to end unless its adapter says otherwise (pi, above).
     #[test]
     fn only_claude_code_forks_while_running() {
         assert!(forks_while_running(AgentType::ClaudeCode));
