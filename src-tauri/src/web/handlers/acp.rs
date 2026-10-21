@@ -263,27 +263,25 @@ pub struct AcpPromptParams {
     pub client_message_id: Option<String>,
 }
 
+/// Answers `{"duplicate": bool}`: `true` when a message with the same
+/// `clientMessageId` was already accepted for the conversation and was not
+/// sent again (a retry after a lost answer). An older client ignores the body.
 pub async fn acp_prompt(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<AcpPromptParams>,
-) -> Result<Json<()>, AppCommandError> {
-    let manager = &state.connection_manager;
-    let sent = match manager.check_pool_for_prompt(&params.connection_id).await {
-        Err(e) => Err(e),
-        Ok(()) => manager
-            .send_prompt_linked_with_message_id(
-                &state.db,
-                &params.connection_id,
-                params.blocks,
-                params.folder_id,
-                params.conversation_id,
-                None,
-                params.client_message_id,
-            )
-            .await
-            .map(|_| ()),
-    };
-    sent.map_err(|e| {
+) -> Result<Json<crate::acp::manager::PromptAccepted>, AppCommandError> {
+    let sent = state
+        .connection_manager
+        .send_client_prompt(
+            &state.db,
+            &params.connection_id,
+            params.blocks,
+            params.folder_id,
+            params.conversation_id,
+            params.client_message_id,
+        )
+        .await;
+    let accepted = sent.map_err(|e| {
         let message = e.to_string();
         // A concurrent send while a turn is in flight is an expected,
         // recoverable condition (409), not a server fault (500). The
@@ -300,7 +298,7 @@ pub async fn acp_prompt(
             _ => AppCommandError::task_execution_failed(message),
         }
     })?;
-    Ok(Json(()))
+    Ok(Json(accepted))
 }
 
 #[derive(Deserialize)]

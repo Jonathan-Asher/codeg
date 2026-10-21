@@ -57,6 +57,11 @@ pub struct SubmitSessionFeedbackParams {
     /// like `/acp_prompt`, and are re-hydrated server-side.
     #[serde(default)]
     pub blocks: Option<Vec<crate::acp::types::PromptInputBlock>>,
+    /// The sending client's id for this message. It becomes the note's id,
+    /// and a retry with the same id is answered with the note already
+    /// recorded instead of delivering it twice.
+    #[serde(default)]
+    pub client_id: Option<String>,
 }
 
 pub async fn submit_session_feedback(
@@ -67,7 +72,13 @@ pub async fn submit_session_feedback(
     // in `submit_feedback`; recoverable rejections map to 4xx below.
     let item = state
         .connection_manager
-        .submit_feedback(&params.connection_id, params.text, params.blocks)
+        .submit_client_feedback(
+            &state.db,
+            &params.connection_id,
+            params.text,
+            params.blocks,
+            params.client_id,
+        )
         .await
         .map_err(|e| {
             let message = e.to_string();

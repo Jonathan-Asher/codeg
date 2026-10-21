@@ -10766,20 +10766,17 @@ pub async fn acp_prompt(
     client_message_id: Option<String>,
     db: State<'_, crate::db::AppDatabase>,
     manager: State<'_, ConnectionManager>,
-) -> Result<(), AcpError> {
-    manager.check_pool_for_prompt(&connection_id).await?;
+) -> Result<crate::acp::manager::PromptAccepted, AcpError> {
     manager
-        .send_prompt_linked_with_message_id(
+        .send_client_prompt(
             &db,
             &connection_id,
             blocks,
             folder_id,
             conversation_id,
-            None,
             client_message_id,
         )
         .await
-        .map(|_| ())
 }
 
 /// Send a prompt on a private (unrecorded) session — see
