@@ -5811,6 +5811,13 @@
     "signInUaHint": "Google 拒绝在内嵌浏览器中登录。开启后，标签页只对 Google 的登录页面（accounts.google.com）呈现 Firefox 身份；其他地方一律以自身所在引擎的身份示人，不会冒充 Firefox。仅对嵌入式标签页生效，独立窗口不适用；登录页把你跳转到别的站点时，到那里的第一个请求仍带着登录身份。"
   },
   "LogsSettings": {
+    "crashReportsTitle": "iPhone 崩溃报告",
+    "crashReportsDescription": "iPhone 应用（Codeg Plus）发送到此服务器的崩溃、卡顿和已捕获的音频错误：版本、设备、出错内容和顶部调用栈。应用从不包含消息内容、文件名或令牌。",
+    "crashReportsEmpty": "还没有来自 iPhone 应用的崩溃报告。",
+    "crashReportsRefresh": "刷新",
+    "crashReportCopy": "复制报告",
+    "crashReportCopied": "已复制崩溃报告",
+    "crashReportCopyFailed": "无法复制崩溃报告",
     "loading": "加载中…",
     "sectionTitle": "运行日志",
     "sectionDescription": "查看和配置应用诊断日志。日志会写入本地文件，并保留在内存中以便实时查看。",

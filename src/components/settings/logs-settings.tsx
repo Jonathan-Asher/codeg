@@ -54,6 +54,7 @@ import type {
   TargetDirective,
 } from "@/lib/types"
 import { applyLogBatch } from "./log-buffer"
+import { ClientDiagnosticsSection } from "./client-diagnostics-section"
 
 // Capture levels offered in the level dropdown (controls what the backend
 // records). `off` disables capture entirely.
@@ -905,6 +906,8 @@ export function LogsSettings() {
             )}
           </div>
         </section>
+
+        <ClientDiagnosticsSection />
 
         {/* On-disk files (web mode: download for history beyond the buffer) */}
         {!desktop && (

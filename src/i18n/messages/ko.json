@@ -5811,6 +5811,13 @@
     "signInUaHint": "Google은 내장 브라우저에서의 로그인을 거부합니다. 켜면 탭이 Google 로그인 페이지(accounts.google.com)에만 Firefox로 표시되고, 그 밖의 곳에서는 실제로 실행 중인 엔진으로 식별되며 Firefox를 사칭하지 않습니다.내장 탭에만 적용되며 별도 창에는 적용되지 않습니다. 로그인 페이지가 다른 사이트로 리디렉션하면 그곳으로 가는 첫 요청에는 로그인 식별 정보가 그대로 남습니다."
   },
   "LogsSettings": {
+    "crashReportsTitle": "iPhone 충돌 보고서",
+    "crashReportsDescription": "iPhone 앱(Codeg Plus)이 이 서버로 보낸 충돌, 멈춤 및 포착된 오디오 오류: 빌드, 기기, 실패한 내용과 상위 스택 프레임. 앱은 메시지 내용, 파일 이름 또는 토큰을 포함하지 않습니다.",
+    "crashReportsEmpty": "아직 iPhone 앱의 충돌 보고서가 없습니다.",
+    "crashReportsRefresh": "새로 고침",
+    "crashReportCopy": "보고서 복사",
+    "crashReportCopied": "충돌 보고서를 복사했습니다",
+    "crashReportCopyFailed": "충돌 보고서를 복사할 수 없습니다",
     "loading": "불러오는 중…",
     "sectionTitle": "실행 로그",
     "sectionDescription": "애플리케이션 진단 로그를 보고 구성합니다. 로그는 로컬 파일에 기록되며 실시간 보기를 위해 메모리에도 보관됩니다.",

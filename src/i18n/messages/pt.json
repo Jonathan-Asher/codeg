@@ -5811,6 +5811,13 @@
     "signInUaHint": "O Google recusa login a partir de navegadores incorporados. Quando ativado, as abas se apresentam como Firefox apenas às páginas de login do Google (accounts.google.com); em todo o resto elas se apresentam como o mecanismo em que são executadas, nunca como Firefox. Apenas em abas incorporadas, não na janela separada; quando uma página de login redireciona para outro site, a primeira solicitação a ele ainda leva a identidade de login."
   },
   "LogsSettings": {
+    "crashReportsTitle": "Relatórios de falhas do iPhone",
+    "crashReportsDescription": "Falhas, travamentos e erros de áudio capturados que o app do iPhone (Codeg Plus) enviou a este servidor: a versão, o dispositivo, o que falhou e os primeiros quadros da pilha. O app nunca inclui texto de mensagens, nomes de arquivos ou tokens.",
+    "crashReportsEmpty": "Ainda não há relatórios de falhas do app do iPhone.",
+    "crashReportsRefresh": "Atualizar",
+    "crashReportCopy": "Copiar relatório",
+    "crashReportCopied": "Relatório de falha copiado",
+    "crashReportCopyFailed": "Não foi possível copiar o relatório de falha",
     "loading": "Carregando…",
     "sectionTitle": "Registros de execução",
     "sectionDescription": "Visualize e configure os registros de diagnóstico do aplicativo. Os registros são gravados em arquivos locais e mantidos na memória para visualização ao vivo.",

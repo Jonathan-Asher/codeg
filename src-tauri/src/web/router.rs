@@ -993,6 +993,19 @@ pub fn build_router(
             "/log_client_error",
             post(handlers::logging::log_client_error),
         )
+        // ─── iPhone crash reports ───
+        .route(
+            "/report_client_diagnostic",
+            post(handlers::client_diagnostics::report_client_diagnostic),
+        )
+        .route(
+            "/list_client_diagnostics",
+            post(handlers::client_diagnostics::list_client_diagnostics),
+        )
+        .route(
+            "/get_client_diagnostic",
+            post(handlers::client_diagnostics::get_client_diagnostic),
+        )
         // ─── ACP ───
         .route(
             "/acp_get_agent_status",

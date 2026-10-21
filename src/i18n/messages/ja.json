@@ -5811,6 +5811,13 @@
     "signInUaHint": "Google は埋め込みブラウザーからのログインを拒否します。オンにすると、タブは Google のログインページ（accounts.google.com）に対してだけ Firefox として名乗ります。それ以外では実際に動いているエンジンとして名乗り、Firefox を名乗ることはありません。埋め込みタブにのみ適用され、別ウィンドウ表示には適用されません。ログインページから別のサイトへリダイレクトされた場合、そのサイトへの最初のリクエストにはログイン時の識別情報が残ります。"
   },
   "LogsSettings": {
+    "crashReportsTitle": "iPhone のクラッシュレポート",
+    "crashReportsDescription": "iPhone アプリ（Codeg Plus）がこのサーバーに送信したクラッシュ、ハング、捕捉したオーディオエラー：ビルド、デバイス、失敗した内容、上位のスタックフレーム。メッセージ本文、ファイル名、トークンは含まれません。",
+    "crashReportsEmpty": "iPhone アプリからのクラッシュレポートはまだありません。",
+    "crashReportsRefresh": "更新",
+    "crashReportCopy": "レポートをコピー",
+    "crashReportCopied": "クラッシュレポートをコピーしました",
+    "crashReportCopyFailed": "クラッシュレポートをコピーできませんでした",
     "loading": "読み込み中…",
     "sectionTitle": "実行ログ",
     "sectionDescription": "アプリケーションの診断ログを表示・設定します。ログはローカルファイルに書き込まれ、ライブ表示のためメモリにも保持されます。",

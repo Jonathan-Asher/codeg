@@ -53,6 +53,7 @@ pub mod folder_links;
 pub mod folders;
 pub mod forge;
 pub mod logging;
+pub mod client_diagnostics;
 pub mod mcp;
 pub mod mcp_service;
 pub mod model_provider;

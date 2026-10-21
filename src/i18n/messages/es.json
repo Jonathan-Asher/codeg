@@ -5811,6 +5811,13 @@
     "signInUaHint": "Google rechaza iniciar sesión desde navegadores integrados. Si está activado, las pestañas se presentan como Firefox solo ante las páginas de inicio de sesión de Google (accounts.google.com); en el resto se presentan como el motor en el que se ejecutan, nunca como Firefox. Solo en pestañas integradas, no en la ventana separada; cuando una página de inicio de sesión te redirige a otro sitio, la primera solicitud allí aún lleva la identidad de inicio de sesión."
   },
   "LogsSettings": {
+    "crashReportsTitle": "Informes de fallos del iPhone",
+    "crashReportsDescription": "Fallos, bloqueos y errores de audio capturados que la app de iPhone (Codeg Plus) envió a este servidor: la versión, el dispositivo, qué falló y los primeros marcos de la pila. La app nunca incluye texto de mensajes, nombres de archivo ni tokens.",
+    "crashReportsEmpty": "Todavía no hay informes de fallos de la app de iPhone.",
+    "crashReportsRefresh": "Actualizar",
+    "crashReportCopy": "Copiar informe",
+    "crashReportCopied": "Informe de fallo copiado",
+    "crashReportCopyFailed": "No se pudo copiar el informe de fallo",
     "loading": "Cargando…",
     "sectionTitle": "Registros de ejecución",
     "sectionDescription": "Visualiza y configura los registros de diagnóstico de la aplicación. Los registros se escriben en archivos locales y se mantienen en memoria para la vista en vivo.",
