@@ -158,6 +158,7 @@ import {
   AntigravityConfigPanel,
 } from "./antigravity-config-panel"
 import { ClaudeCodeAuthPanel } from "./claude-code-auth-panel"
+import { ClaudeCodePlanSettingsPanel } from "./claude-code-plan-settings"
 import { CodeBuddyConfigPanel } from "./codebuddy-config-panel"
 import { CursorConfigPanel } from "./cursor-config-panel"
 import {
@@ -8027,6 +8028,9 @@ export function AcpAgentSettings() {
                     turn's "Sign in" button sends the user here for. */}
                 {selectedAgent.agent_type === "claude_code" && (
                   <ClaudeCodeAuthPanel />
+                )}
+                {selectedAgent.agent_type === "claude_code" && (
+                  <ClaudeCodePlanSettingsPanel />
                 )}
 
                 <div className="space-y-2">

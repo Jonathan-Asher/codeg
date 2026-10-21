@@ -1769,6 +1769,21 @@
       "signOutConfirmTitle": "讓 Claude Code 登出？",
       "signOutConfirmBody": "codeg 主機上所有 Claude Code 工作階段共用此登入。在有人重新登入之前，執行中的工作階段將無法運作。",
       "cancel": "取消"
+    },
+    "claudePlan": {
+      "title": "計畫模式",
+      "whilePlanningLabel": "規劃時不請求權限",
+      "whilePlanningHint": "Claude 規劃期間使用的命令與工具由 codeg 逐次核准。計畫核准、提問、檔案編輯、檔案刪除以及你自己的 ask 規則仍會詢問。",
+      "planningWhenElevated": "工作階段先前處於自動或略過模式時",
+      "planningAlways": "一律",
+      "planningOff": "關閉（每次都詢問）",
+      "afterApprovalLabel": "核准計畫後繼續使用",
+      "afterApprovalHint": "計畫卡片的主要按鈕。其他選項仍保留在卡片上。",
+      "afterPrePlan": "規劃前的模式",
+      "afterBypass": "略過權限",
+      "afterAuto": "自動",
+      "afterAsk": "每次詢問",
+      "saveFailed": "儲存失敗：{message}"
     }
   },
   "AgentVocabulary": {

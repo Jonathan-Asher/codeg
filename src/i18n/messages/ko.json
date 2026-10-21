@@ -1769,6 +1769,21 @@
       "signOutConfirmTitle": "Claude Code에서 로그아웃할까요?",
       "signOutConfirmBody": "codeg 호스트의 모든 Claude Code 세션이 이 로그인을 공유합니다. 누군가 다시 로그인할 때까지 실행 중인 세션은 작동하지 않습니다.",
       "cancel": "취소"
+    },
+    "claudePlan": {
+      "title": "계획 모드",
+      "whilePlanningLabel": "계획하는 동안 권한을 묻지 않기",
+      "whilePlanningHint": "Claude가 계획하는 동안 사용하는 명령과 도구를 codeg가 한 번씩 승인합니다. 계획 승인, 질문, 파일 편집, 파일 삭제, 직접 설정한 ask 규칙은 계속 묻습니다.",
+      "planningWhenElevated": "계획 전 세션이 자동 또는 우회 모드였을 때",
+      "planningAlways": "항상",
+      "planningOff": "끄기(매번 묻기)",
+      "afterApprovalLabel": "계획 승인 후 이어갈 모드",
+      "afterApprovalHint": "계획 카드의 기본 버튼입니다. 다른 선택지도 카드에 그대로 남습니다.",
+      "afterPrePlan": "계획 전 모드",
+      "afterBypass": "권한 우회",
+      "afterAuto": "자동",
+      "afterAsk": "매번 묻기",
+      "saveFailed": "저장하지 못했습니다: {message}"
     }
   },
   "AgentVocabulary": {

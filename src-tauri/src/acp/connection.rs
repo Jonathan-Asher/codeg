@@ -6714,6 +6714,20 @@ async fn run_connection(
                         Ok(()) => return Ok(()),
                         Err(responder) => responder,
                     };
+                    // A planning Claude Code session that was in Auto or Bypass
+                    // before planning: answer what the terminal would not ask.
+                    let responder = match try_auto_approve_while_planning(
+                        agent_type,
+                        &state_inner,
+                        &perm_cwd,
+                        &req,
+                        responder,
+                    )
+                    .await
+                    {
+                        Ok(()) => return Ok(()),
+                        Err(responder) => responder,
+                    };
                     handle_permission_request(
                         &cx,
                         &state_inner,
@@ -8308,6 +8322,73 @@ async fn try_auto_allow_codeg_ask(
     Ok(())
 }
 
+/// Answer a permission request a planning Claude Code session raises when
+/// [`crate::acp::claude_plan_mode::planning_auto_approval`] says the terminal
+/// would not have asked: allow once, with one INFO line naming the tool (never
+/// its input). `Err(responder)` hands every other request back for its card.
+/// (`result_large_err`: see `try_auto_allow_codeg_ask`.)
+#[allow(clippy::result_large_err)]
+async fn try_auto_approve_while_planning(
+    agent_type: AgentType,
+    state: &Arc<RwLock<SessionState>>,
+    cwd: &str,
+    req: &RequestPermissionRequest,
+    responder: Responder<RequestPermissionResponse>,
+) -> Result<(), Responder<RequestPermissionResponse>> {
+    use crate::acp::claude_plan_mode as plan;
+    if agent_type != AgentType::ClaudeCode {
+        return Err(responder);
+    }
+    let (current_mode, pre_plan_mode) = {
+        let s = state.read().await;
+        (s.current_mode.clone(), s.pre_plan_mode.clone())
+    };
+    if current_mode.as_deref() != Some(plan::PLAN_MODE) {
+        return Err(responder);
+    }
+    let setting = plan::current_settings().while_planning;
+    if setting == plan::PlanningPrompts::Off {
+        return Err(responder);
+    }
+    let tool_call = serde_json::to_value(&req.tool_call).unwrap_or_default();
+    let options: Vec<PermissionOptionInfo> = req
+        .options
+        .iter()
+        .map(|opt| PermissionOptionInfo {
+            option_id: opt.option_id.to_string(),
+            name: opt.name.clone(),
+            kind: match opt.kind {
+                PermissionOptionKind::AllowOnce => "allow_once".into(),
+                PermissionOptionKind::AllowAlways => "allow_always".into(),
+                PermissionOptionKind::RejectOnce => "reject_once".into(),
+                PermissionOptionKind::RejectAlways => "reject_always".into(),
+                _ => "unknown".into(),
+            },
+            meta: None,
+        })
+        .collect();
+    let ask_rules = plan::ask_rules_for(Path::new(cwd));
+    let decision = plan::planning_auto_approval(
+        plan::PlanningContext {
+            current_mode: current_mode.as_deref(),
+            pre_plan_mode: pre_plan_mode.as_deref(),
+            setting,
+        },
+        &tool_call,
+        &options,
+        ask_rules.as_deref(),
+    );
+    let plan::PlanningDecision::Approve { option_id, tool } = decision else {
+        return Err(responder);
+    };
+    let scope = permission_log_scope(state).await;
+    tracing::info!("[ACP] planning: auto-approved a {tool} permission request {scope}");
+    let _ = responder.respond(RequestPermissionResponse::new(
+        RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(option_id)),
+    ));
+    Ok(())
+}
+
 /// Bridge pi's extension-UI `select` — the way a pi extension asks the user a
 /// multiple-choice question (`ctx.ui.select`) — into codeg's interactive question
 /// card.
@@ -9017,7 +9098,7 @@ async fn handle_permission_request(
         .await;
     }
 
-    let options: Vec<PermissionOptionInfo> = req
+    let mut options: Vec<PermissionOptionInfo> = req
         .options
         .iter()
         .map(|opt| PermissionOptionInfo {
@@ -9040,6 +9121,20 @@ async fn handle_permission_request(
         .collect();
 
     let mut tool_call_value = serde_json::to_value(&req.tool_call).unwrap_or_default();
+
+    // Claude Code's plan card sorts "Yes, manually approve edits" first. Lead
+    // with the mode to continue in instead — every client renders the first
+    // option as the primary one.
+    if agent_type == AgentType::ClaudeCode
+        && crate::acp::claude_plan_mode::is_plan_approval(&tool_call_value, &options)
+    {
+        let pre_plan_mode = state.read().await.pre_plan_mode.clone();
+        crate::acp::claude_plan_mode::order_plan_approval_options(
+            &mut options,
+            pre_plan_mode.as_deref(),
+            crate::acp::claude_plan_mode::current_settings().after_approval,
+        );
+    }
 
     // Resolve line numbers in rawInput for edit tool permission requests
     if let Some(obj) = tool_call_value.as_object_mut() {

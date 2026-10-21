@@ -92,10 +92,19 @@ impl PermissionAction {
                 .or_else(|| options.iter().find(|(_, kind)| kind.starts_with(prefix)))
                 .map(|(id, _)| (*id).to_string())
         };
+        // Claude Code's plan card: its only allow-once option is "Yes,
+        // manually approve edits". The card already leads with the mode to
+        // continue in (`crate::acp::claude_plan_mode`), so APPROVE takes that.
+        let plan_lead = options
+            .iter()
+            .any(|(id, _)| id.starts_with("exit-plan-"))
+            .then(|| options.iter().find(|(_, kind)| kind.starts_with("allow")))
+            .flatten()
+            .map(|(id, _)| (*id).to_string());
         Self {
             connection_id: connection_id.to_string(),
             request_id: request_id.to_string(),
-            approve_option_id: pick("allow_once", "allow"),
+            approve_option_id: plan_lead.or_else(|| pick("allow_once", "allow")),
             deny_option_id: pick("reject_once", "reject"),
         }
     }
@@ -339,6 +348,25 @@ mod tests {
         let action = PermissionAction::from_options("c", "r", [("yes", "allow_always")]);
         assert_eq!(action.approve_option_id.as_deref(), Some("yes"));
         assert_eq!(action.deny_option_id, None);
+    }
+
+    #[test]
+    fn approving_claudes_plan_card_takes_its_lead_option_not_manual_mode() {
+        let action = PermissionAction::from_options(
+            "c",
+            "r",
+            [
+                ("exit-plan-bypass", "allow_always"),
+                ("exit-plan-default", "allow_once"),
+                ("exit-plan-auto", "allow_always"),
+                ("reject", "reject_once"),
+            ],
+        );
+        assert_eq!(
+            action.approve_option_id.as_deref(),
+            Some("exit-plan-bypass")
+        );
+        assert_eq!(action.deny_option_id.as_deref(), Some("reject"));
     }
 
     #[test]

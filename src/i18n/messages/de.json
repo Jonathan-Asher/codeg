@@ -1769,6 +1769,21 @@
       "signOutConfirmTitle": "Claude Code abmelden?",
       "signOutConfirmBody": "Alle Claude-Code-Sitzungen auf dem codeg-Host teilen sich diese Anmeldung. Laufende Sitzungen funktionieren nicht mehr, bis sich jemand wieder anmeldet.",
       "cancel": "Abbrechen"
+    },
+    "claudePlan": {
+      "title": "Planmodus",
+      "whilePlanningLabel": "Beim Planen nicht um Erlaubnis fragen",
+      "whilePlanningHint": "codeg genehmigt die Befehle und Werkzeuge, die Claude beim Planen nutzt, jeweils einmal. Die Plan-Freigabe, Fragen, Dateiänderungen, Dateilöschungen und deine eigenen Ask-Regeln fragen weiterhin nach.",
+      "planningWhenElevated": "Wenn die Sitzung vorher in Auto oder Umgehen war",
+      "planningAlways": "Immer",
+      "planningOff": "Aus (jedes Mal fragen)",
+      "afterApprovalLabel": "Nach der Plan-Freigabe weiter in",
+      "afterApprovalHint": "Die Hauptschaltfläche der Plan-Karte. Die anderen Optionen bleiben auf der Karte.",
+      "afterPrePlan": "Der Modus vor dem Planen",
+      "afterBypass": "Berechtigungen umgehen",
+      "afterAuto": "Auto",
+      "afterAsk": "Jedes Mal fragen",
+      "saveFailed": "Speichern fehlgeschlagen: {message}"
     }
   },
   "AgentVocabulary": {

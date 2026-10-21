@@ -396,6 +396,11 @@ pub struct SessionState {
     // ACP 协商出的能力
     pub modes: Option<SessionModeStateInfo>,
     pub current_mode: Option<String>,
+    /// The mode the session was in when it entered plan mode; `None` outside
+    /// plan mode, or when plan mode was the first mode seen. Drives Claude
+    /// Code's planning auto-approval and the plan card's lead option (see
+    /// `crate::acp::claude_plan_mode`).
+    pub pre_plan_mode: Option<String>,
     pub config_options: Option<Vec<SessionConfigOptionInfo>>,
     /// Grok only: per-model reasoning-effort specs, parsed from the top-level
     /// `models` of the session-establishment response (guaranteed on
@@ -812,6 +817,7 @@ impl SessionState {
             background_announced: (None, None),
             modes: None,
             current_mode: None,
+            pre_plan_mode: None,
             config_options: None,
             grok_model_specs: None,
             pi_startup_banner: None,
@@ -929,6 +935,16 @@ impl SessionState {
 
     /// 单一分发器：把一个 AcpEvent 应用到 self。注意此方法**不**自增 event_seq——
     /// seq 由 emit_with_state 在外层管理（这样 apply_event 可独立单元测试）。
+    /// Record the mode planning started from, before `current_mode` moves to
+    /// `next`.
+    fn track_pre_plan_mode(&mut self, next: &str) {
+        self.pre_plan_mode = crate::acp::claude_plan_mode::next_pre_plan_mode(
+            self.current_mode.as_deref(),
+            self.pre_plan_mode.as_deref(),
+            next,
+        );
+    }
+
     pub fn apply_event(&mut self, payload: &AcpEvent) {
         match payload {
             AcpEvent::SessionStarted { session_id } => {
@@ -1002,10 +1018,12 @@ impl SessionState {
                 };
             }
             AcpEvent::SessionModes { modes } => {
+                self.track_pre_plan_mode(&modes.current_mode_id);
                 self.current_mode = Some(modes.current_mode_id.clone());
                 self.modes = Some(modes.clone());
             }
             AcpEvent::ModeChanged { mode_id } => {
+                self.track_pre_plan_mode(mode_id);
                 self.current_mode = Some(mode_id.clone());
                 // Keep `modes.current_mode_id` consistent with the latched
                 // `current_mode`. Snapshot consumers read `modes.current_mode_id`
@@ -4919,6 +4937,29 @@ mod tests {
         let snap = s.to_snapshot();
         let snap_perm = snap.pending_permission.as_ref().unwrap();
         assert_eq!(snap_perm.tool_call, raw_tool_call);
+    }
+
+    #[test]
+    fn plan_mode_remembers_the_mode_it_was_entered_from() {
+        let mut s = fresh_state();
+        let modes = |id: &str| AcpEvent::SessionModes {
+            modes: SessionModeStateInfo {
+                current_mode_id: id.into(),
+                available_modes: vec![],
+            },
+        };
+        let change = |id: &str| AcpEvent::ModeChanged { mode_id: id.into() };
+        s.apply_event(&modes("auto"));
+        assert_eq!(s.pre_plan_mode, None);
+        s.apply_event(&change("plan"));
+        assert_eq!(s.pre_plan_mode.as_deref(), Some("auto"));
+        // A re-announced mode list while planning keeps the origin.
+        s.apply_event(&modes("plan"));
+        assert_eq!(s.pre_plan_mode.as_deref(), Some("auto"));
+        s.apply_event(&change("bypassPermissions"));
+        assert_eq!(s.pre_plan_mode, None);
+        s.apply_event(&change("plan"));
+        assert_eq!(s.pre_plan_mode.as_deref(), Some("bypassPermissions"));
     }
 
     #[test]

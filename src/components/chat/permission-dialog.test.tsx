@@ -118,6 +118,62 @@ describe("PermissionDialog", () => {
     expect(isEmphasised("Allow once")).toBe(false)
   })
 
+  it("makes only the leading option of Claude's plan card the primary button", () => {
+    // The backend orders the card so it leads with the mode to continue in
+    // (here: Bypass, the mode before planning).
+    const onRespond = vi.fn()
+    const permission: PendingPermission = {
+      request_id: "req-plan",
+      tool_call: {
+        title: "Approve Plan",
+        kind: "switch_mode",
+        rawInput: { plan: "Test plan." },
+      },
+      options: [
+        {
+          option_id: "exit-plan-bypass",
+          name: "Yes, and bypass permissions",
+          kind: "allow_always",
+        },
+        {
+          option_id: "exit-plan-default",
+          name: "Yes, manually approve edits",
+          kind: "allow_once",
+        },
+        {
+          option_id: "exit-plan-clear-bypass",
+          name: "Yes, clear context (60% used) and bypass permissions",
+          kind: "allow_always",
+        },
+        {
+          option_id: "exit-plan-auto",
+          name: "Yes, and use auto mode",
+          kind: "allow_always",
+        },
+        { option_id: "reject", name: "No, keep planning", kind: "reject_once" },
+      ],
+    }
+    renderWithIntl(
+      <PermissionDialog permission={permission} onRespond={onRespond} />
+    )
+    const buttons = screen
+      .getAllByRole("button")
+      .filter(
+        (b) =>
+          b.textContent?.startsWith("Yes") ||
+          b.textContent === "No, keep planning"
+      )
+    expect(buttons[0]).toHaveTextContent("Yes, and bypass permissions")
+    expect(isEmphasised("Yes, and bypass permissions")).toBe(true)
+    expect(isEmphasised("Yes, manually approve edits")).toBe(false)
+    expect(isEmphasised("Yes, and use auto mode")).toBe(false)
+    expect(isEmphasised("No, keep planning")).toBe(false)
+    fireEvent.click(
+      screen.getByRole("button", { name: "Yes, and bypass permissions" })
+    )
+    expect(onRespond).toHaveBeenCalledWith("req-plan", "exit-plan-bypass")
+  })
+
   it("returns nothing when permission is null", () => {
     const { container } = renderWithIntl(
       <PermissionDialog permission={null} onRespond={() => {}} />

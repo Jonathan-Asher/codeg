@@ -169,6 +169,7 @@ import type {
   AutoResumeSettings,
   AutoResumeStatus,
   LimitContinueSettings,
+  ClaudePlanSettings,
   CriticalAlertsSnapshot,
   CriticalSessionSettings,
   PushDevice,
@@ -2103,6 +2104,20 @@ export async function getAutoResumeStatus(): Promise<AutoResumeStatus> {
 /** Cancel the resumes that have not started yet. */
 export async function stopAutoResume(): Promise<AutoResumeStatus> {
   return getTransport().call("stop_auto_resume")
+}
+
+// --- Claude Code plan mode ---
+
+/** Settings → Agents → Claude Code: prompts while planning, and the mode the
+ *  plan card's primary button continues in. */
+export async function getClaudePlanSettings(): Promise<ClaudePlanSettings> {
+  return getTransport().call("get_claude_plan_settings")
+}
+
+export async function updateClaudePlanSettings(
+  settings: ClaudePlanSettings
+): Promise<ClaudePlanSettings> {
+  return getTransport().call("update_claude_plan_settings", { settings })
 }
 
 // --- Continue after the usage limit resets ---

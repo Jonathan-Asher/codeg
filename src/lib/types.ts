@@ -636,6 +636,17 @@ export interface LimitPause {
   attempts: number
 }
 
+/** Claude Code plan mode, Settings → Agents → Claude Code (Rust
+ *  `ClaudePlanSettings`). `while_planning`: "Don't ask for permission while
+ *  planning"; `after_approval`: the mode the plan card's primary button
+ *  continues in. */
+export type ClaudePlanningPrompts = "when_elevated" | "always" | "off"
+export type ClaudeAfterPlanMode = "pre_plan" | "bypass" | "auto" | "ask"
+export interface ClaudePlanSettings {
+  while_planning: ClaudePlanningPrompts
+  after_approval: ClaudeAfterPlanMode
+}
+
 /** "Continue automatically when the usage limit resets" (Rust
  *  `LimitContinueSettings`). */
 export interface LimitContinueSettings {

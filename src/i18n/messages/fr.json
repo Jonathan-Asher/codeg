@@ -1769,6 +1769,21 @@
       "signOutConfirmTitle": "Déconnecter Claude Code ?",
       "signOutConfirmBody": "Toutes les sessions Claude Code sur l'hôte codeg partagent cette connexion. Les sessions en cours cesseront de fonctionner jusqu'à ce que quelqu'un se reconnecte.",
       "cancel": "Annuler"
+    },
+    "claudePlan": {
+      "title": "Mode plan",
+      "whilePlanningLabel": "Ne pas demander d'autorisation pendant la planification",
+      "whilePlanningHint": "codeg approuve, une à une, les commandes et outils que Claude utilise pendant la planification. L'approbation du plan, les questions, les modifications de fichiers, les suppressions de fichiers et vos propres règles ask demandent toujours.",
+      "planningWhenElevated": "Quand la session était en Auto ou Contournement",
+      "planningAlways": "Toujours",
+      "planningOff": "Désactivé (toujours demander)",
+      "afterApprovalLabel": "Après l'approbation d'un plan, continuer en",
+      "afterApprovalHint": "Le bouton principal de la carte du plan. Les autres choix restent sur la carte.",
+      "afterPrePlan": "Le mode d'avant la planification",
+      "afterBypass": "Contourner les autorisations",
+      "afterAuto": "Auto",
+      "afterAsk": "Demander à chaque fois",
+      "saveFailed": "Échec de l'enregistrement : {message}"
     }
   },
   "AgentVocabulary": {

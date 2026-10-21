@@ -1769,6 +1769,21 @@
       "signOutConfirmTitle": "تسجيل خروج Claude Code؟",
       "signOutConfirmBody": "تتشارك كل جلسات Claude Code على مضيف codeg تسجيل الدخول هذا. ستتوقف الجلسات الجارية عن العمل حتى يسجّل أحد الدخول مجددًا.",
       "cancel": "إلغاء"
+    },
+    "claudePlan": {
+      "title": "وضع التخطيط",
+      "whilePlanningLabel": "عدم طلب الإذن أثناء التخطيط",
+      "whilePlanningHint": "يوافق codeg مرة واحدة على كل أمر وأداة يستخدمها Claude أثناء التخطيط. تظل الموافقة على الخطة والأسئلة وتعديلات الملفات وحذف الملفات وقواعد ask الخاصة بك تطلب الإذن.",
+      "planningWhenElevated": "عندما كانت الجلسة في الوضع التلقائي أو وضع التجاوز",
+      "planningAlways": "دائمًا",
+      "planningOff": "إيقاف (السؤال في كل مرة)",
+      "afterApprovalLabel": "بعد الموافقة على خطة، المتابعة في",
+      "afterApprovalHint": "الزر الرئيسي في بطاقة الخطة. تبقى الخيارات الأخرى على البطاقة.",
+      "afterPrePlan": "الوضع السابق للتخطيط",
+      "afterBypass": "تجاوز الأذونات",
+      "afterAuto": "تلقائي",
+      "afterAsk": "السؤال في كل مرة",
+      "saveFailed": "تعذّر الحفظ: {message}"
     }
   },
   "AgentVocabulary": {

@@ -6,6 +6,8 @@ pub mod auto_resume;
 #[cfg(feature = "tauri-runtime")]
 pub mod critical_sessions;
 #[cfg(feature = "tauri-runtime")]
+pub mod claude_plan_mode;
+#[cfg(feature = "tauri-runtime")]
 pub mod limit_continue;
 #[cfg(feature = "tauri-runtime")]
 pub mod push;

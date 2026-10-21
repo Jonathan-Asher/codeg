@@ -1769,6 +1769,21 @@
       "signOutConfirmTitle": "Sign Claude Code out?",
       "signOutConfirmBody": "Every Claude Code session on the codeg host shares this sign-in. Running sessions will stop working until someone signs in again.",
       "cancel": "Cancel"
+    },
+    "claudePlan": {
+      "title": "Plan mode",
+      "whilePlanningLabel": "Don't ask for permission while planning",
+      "whilePlanningHint": "codeg approves the commands and tools Claude uses while planning, one at a time. The plan approval, questions, file edits, file removals and your own ask rules still ask.",
+      "planningWhenElevated": "When the session was in Auto or Bypass",
+      "planningAlways": "Always",
+      "planningOff": "Off (ask every time)",
+      "afterApprovalLabel": "After approving a plan, continue in",
+      "afterApprovalHint": "The plan card's main button. The other choices stay on the card.",
+      "afterPrePlan": "The mode before planning",
+      "afterBypass": "Bypass permissions",
+      "afterAuto": "Auto",
+      "afterAsk": "Ask each time",
+      "saveFailed": "Couldn't save: {message}"
     }
   },
   "AgentVocabulary": {

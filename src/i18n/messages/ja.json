@@ -1769,6 +1769,21 @@
       "signOutConfirmTitle": "Claude Code からサインアウトしますか？",
       "signOutConfirmBody": "codeg ホスト上のすべての Claude Code セッションがこのサインインを共有しています。誰かが再度サインインするまで、実行中のセッションは動作しなくなります。",
       "cancel": "キャンセル"
+    },
+    "claudePlan": {
+      "title": "プランモード",
+      "whilePlanningLabel": "計画中は権限を確認しない",
+      "whilePlanningHint": "Claude が計画中に使うコマンドとツールを codeg が 1 回ずつ承認します。プランの承認、質問、ファイル編集、ファイル削除、ご自身の ask ルールは引き続き確認します。",
+      "planningWhenElevated": "計画前のセッションが自動またはバイパスだった場合",
+      "planningAlways": "常に",
+      "planningOff": "オフ（毎回確認）",
+      "afterApprovalLabel": "プラン承認後に続けるモード",
+      "afterApprovalHint": "プランカードのメインボタンです。ほかの選択肢もカードに残ります。",
+      "afterPrePlan": "計画前のモード",
+      "afterBypass": "権限をバイパス",
+      "afterAuto": "自動",
+      "afterAsk": "毎回確認",
+      "saveFailed": "保存できませんでした: {message}"
     }
   },
   "AgentVocabulary": {
