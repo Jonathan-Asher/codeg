@@ -107,6 +107,7 @@ mod tauri_app {
         auto_resume as auto_resume_commands,
         critical_sessions as critical_sessions_commands,
         limit_continue as limit_continue_commands,
+        claude_plan_mode as claude_plan_mode_commands,
         push as push_commands,
         conversation_export as conversation_export_commands,
         message_search as message_search_commands,
@@ -892,6 +893,19 @@ mod tauri_app {
                         crate::commands::system_settings::apply_persisted_terminal_settings(
                             &db_for_shell,
                             &shell_config,
+                        )
+                        .await;
+                    });
+                }
+
+                // Seed Claude Code's plan-mode settings before any session can
+                // raise a permission request: an unseeded cache would apply the
+                // defaults to a user who turned the auto-approval off.
+                {
+                    let db_for_plan = app.state::<db::AppDatabase>().conn.clone();
+                    tauri::async_runtime::block_on(async move {
+                        crate::acp::claude_plan_mode::apply_persisted_claude_plan_settings(
+                            &db_for_plan,
                         )
                         .await;
                     });
@@ -1780,6 +1794,8 @@ mod tauri_app {
                 critical_sessions_commands::snooze_critical_session,
                 critical_sessions_commands::get_critical_session_settings,
                 critical_sessions_commands::update_critical_session_settings,
+                claude_plan_mode_commands::get_claude_plan_settings,
+                claude_plan_mode_commands::update_claude_plan_settings,
                 limit_continue_commands::get_limit_continue_settings,
                 limit_continue_commands::update_limit_continue_settings,
                 limit_continue_commands::cancel_limit_continue,

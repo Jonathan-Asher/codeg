@@ -374,6 +374,8 @@ async fn async_main() -> ExitCode {
         &terminal_shell_config,
     )
     .await;
+    // Claude Code's plan-mode settings, read on each planning permission request.
+    codeg_lib::acp::claude_plan_mode::apply_persisted_claude_plan_settings(&state.db.conn).await;
 
     // Spawn the delegation listener so companion processes can round-trip
     // through the broker. Path is PID-scoped, so the listener owns it for

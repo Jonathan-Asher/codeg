@@ -158,6 +158,14 @@ pub fn build_router(
             post(handlers::critical_sessions::update_conversation_critical),
         )
         .route(
+            "/get_claude_plan_settings",
+            post(handlers::claude_plan_mode::get_claude_plan_settings),
+        )
+        .route(
+            "/update_claude_plan_settings",
+            post(handlers::claude_plan_mode::update_claude_plan_settings),
+        )
+        .route(
             "/get_limit_continue_settings",
             post(handlers::limit_continue::get_limit_continue_settings),
         )
