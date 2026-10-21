@@ -2963,6 +2963,11 @@ export type AcpEvent =
   | {
       type: "fork_supported"
       supported: boolean
+      /** The adapter forks exactly at a named reply or refuses — what
+       *  editing a sent message needs. Absent from older backends. */
+      strict_point?: boolean
+      /** The adapter forks into a new conversation while a turn runs. */
+      while_running?: boolean
     }
   | {
       type: "mode_changed"
@@ -3595,6 +3600,10 @@ export interface LiveSessionSnapshot {
   prompt_capabilities: PromptCapabilitiesInfo | null
   usage: SessionUsageUpdateInfo | null
   fork_supported: boolean
+  /** See the `fork_supported` event's `strict_point`. */
+  fork_strict_point?: boolean
+  /** See the `fork_supported` event's `while_running`. */
+  fork_while_running?: boolean
   available_commands: AvailableCommandInfo[]
   selectors_ready: boolean
   /** Whether the running session is on stale (launch-time) config after a later

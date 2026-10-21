@@ -65,6 +65,8 @@ export interface SnapshotPatch {
   promptCapabilities: PromptCapabilitiesInfo | null
   selectorsReady: boolean
   supportsFork: boolean
+  forkStrictPoint: boolean
+  forkWhileRunning: boolean
   /** Whether the running session is on stale (launch-time) config — recovered
    *  from the snapshot so a reconnect/refresh/new tile sees the banner state
    *  that the one-shot `session_config_stale` event won't replay. */
@@ -170,6 +172,8 @@ export function denormalizeSnapshot(wire: LiveSessionSnapshot): SnapshotPatch {
     promptCapabilities: wire.prompt_capabilities ?? DEFAULT_PROMPT_CAPS,
     selectorsReady: wire.selectors_ready,
     supportsFork: wire.fork_supported,
+    forkStrictPoint: wire.fork_strict_point ?? false,
+    forkWhileRunning: wire.fork_while_running ?? false,
     configStale: wire.config_stale ?? false,
     configStaleKind: wire.config_stale_kind ?? null,
     backgroundOutstanding: wire.background_outstanding ?? 0,

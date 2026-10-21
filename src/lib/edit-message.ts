@@ -28,11 +28,12 @@ import type {
  */
 
 /**
- * Agents whose adapter forks EXACTLY at a named reply or refuses. Pi's adapter
- * resolves a fork point too, but falls back to the tail when it misses — and a
- * tail fork still holds the message being replaced, so the edit would quietly
- * continue the original conversation. Mirrors `honours_fork_point_strictly` in
- * `acp/fork.rs`, which refuses an edit fork for any other agent anyway.
+ * Agents whose adapter forks EXACTLY at a named reply or refuses, on every
+ * version codeg runs. Mirrors `honours_fork_point_strictly` in `acp/fork.rs`,
+ * which refuses an edit fork for any other agent whose adapter has not said
+ * otherwise. A tail fork still holds the message being replaced, so an edit on
+ * an adapter that falls back to the tail would quietly continue the original
+ * conversation.
  */
 const EDITABLE_AGENTS: ReadonlySet<AgentType> = new Set<AgentType>([
   "claude_code",
@@ -40,9 +41,17 @@ const EDITABLE_AGENTS: ReadonlySet<AgentType> = new Set<AgentType>([
   "deepseek",
 ])
 
-/** Whether messages in a conversation with this agent can be edited. */
-export function supportsMessageEdit(agentType: AgentType): boolean {
-  return EDITABLE_AGENTS.has(agentType)
+/**
+ * Whether messages in a conversation with this agent can be edited.
+ * `adapterForksStrictly` is what the connection's adapter said at initialize
+ * (`ConnectionState.forkStrictPoint`) — how pi-acp, from 0.0.34-steering.3,
+ * opts in.
+ */
+export function supportsMessageEdit(
+  agentType: AgentType,
+  adapterForksStrictly = false
+): boolean {
+  return EDITABLE_AGENTS.has(agentType) || adapterForksStrictly
 }
 
 /** What the transcript asks its host to do when an edit is saved. */

@@ -32,8 +32,11 @@ const FORK_WHILE_RUNNING_AGENTS: ReadonlySet<AgentType> = new Set<AgentType>([
 ])
 
 /** Whether this agent can fork while a turn is running (into a new tab). */
-export function supportsForkWhileRunning(agentType: AgentType): boolean {
-  return FORK_WHILE_RUNNING_AGENTS.has(agentType)
+export function supportsForkWhileRunning(
+  agentType: AgentType,
+  adapterForksWhileRunning = false
+): boolean {
+  return FORK_WHILE_RUNNING_AGENTS.has(agentType) || adapterForksWhileRunning
 }
 
 /**
@@ -172,6 +175,7 @@ export type ForkFromTurnOutcome =
  */
 export async function forkFromTurn({
   agentType,
+  adapterForksWhileRunning = false,
   connectionId,
   conversationId,
   folderId,
@@ -179,6 +183,9 @@ export async function forkFromTurn({
   turnRunning,
 }: {
   agentType: AgentType
+  /** The connection's adapter said it forks mid-turn
+   *  (`ConnectionState.forkWhileRunning`). */
+  adapterForksWhileRunning?: boolean
   connectionId: string
   /** The conversation's row, for a connection that has not linked it yet. */
   conversationId: number | null
@@ -189,7 +196,7 @@ export async function forkFromTurn({
   turnRunning: boolean
 }): Promise<ForkFromTurnOutcome> {
   const intoNewConversation = async (): Promise<ForkFromTurnOutcome> => {
-    if (!supportsForkWhileRunning(agentType)) {
+    if (!supportsForkWhileRunning(agentType, adapterForksWhileRunning)) {
       throw new ForkBetweenTurnsOnlyError()
     }
     try {
