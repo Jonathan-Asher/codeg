@@ -10442,11 +10442,11 @@ pub(crate) async fn build_session_runtime_env(
         runtime_env.insert(OPENCLAW_RESET_SESSION_ENV.into(), "1".into());
     }
 
-    // The conversation's title as the Claude Code session's display name (see
-    // `acp::session_name`). Only when reopening a session a row is bound to: a
-    // brand-new session has no title yet and keeps the CLI's own name until
-    // its next connect.
-    if agent_type == AgentType::ClaudeCode {
+    // The conversation's title as the Claude Code or Pi session's display name
+    // (see `acp::session_name`). Only when reopening a session a row is bound
+    // to: a brand-new session has no title yet and keeps the agent's own name
+    // until its next connect.
+    if matches!(agent_type, AgentType::ClaudeCode | AgentType::Pi) {
         if let Some(sid) = session_id {
             match crate::db::service::conversation_service::find_live_title_for_session(
                 &db.conn, sid, agent_type,

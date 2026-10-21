@@ -5766,6 +5766,9 @@ fn build_client_capabilities(
 /// other agent) and a `None` name come back unchanged.
 trait NamedSession: Sized {
     fn named(self, name: Option<&str>) -> Self;
+    /// [`NamedSession::named`] for any agent: Pi's requests take the name as
+    /// `_meta.piAcp.sessionName`, every other agent's as `named` does.
+    fn named_for(self, agent_type: AgentType, name: Option<&str>) -> Self;
 }
 
 macro_rules! impl_named_session {
@@ -5774,6 +5777,14 @@ macro_rules! impl_named_session {
             fn named(mut self, name: Option<&str>) -> Self {
                 self.meta = crate::acp::session_name::apply_to_claude_meta(self.meta.take(), name);
                 self
+            }
+            fn named_for(mut self, agent_type: AgentType, name: Option<&str>) -> Self {
+                if agent_type == AgentType::Pi {
+                    self.meta = crate::acp::session_name::apply_to_pi_meta(self.meta.take(), name);
+                    self
+                } else {
+                    self.named(name)
+                }
             }
         }
     )*};
@@ -7430,7 +7441,7 @@ async fn run_connection(
                         &cwd,
                         mcp_servers.clone(),
                     )
-                    .named(session_name.as_deref());
+                    .named_for(agent_type, session_name.as_deref());
                     attach.enter(AttachPhase::Resuming).await;
                     let resume_result = match attach.run(send_resume_session(&cx, resume_req)).await {
                         Ok(result) => result,
@@ -7575,7 +7586,7 @@ async fn run_connection(
                         &cwd,
                         mcp_servers.clone(),
                     )
-                    .named(session_name.as_deref());
+                    .named_for(agent_type, session_name.as_deref());
                     attach.enter(AttachPhase::Loading).await;
                     match attach
                         .run(cx.send_request_to(Agent, load_req).block_task())
@@ -7903,7 +7914,7 @@ async fn run_connection(
                                     mcp_servers.clone(),
                                     session_persistence,
                                 )
-                                .named(session_name.as_deref()),
+                                .named_for(agent_type, session_name.as_deref()),
                             ))
                             .await
                         {
@@ -8020,7 +8031,7 @@ async fn run_connection(
                             mcp_servers.clone(),
                             session_persistence,
                         )
-                        .named(session_name.as_deref()),
+                        .named_for(agent_type, session_name.as_deref()),
                     ))
                     .await
                 {
@@ -24466,6 +24477,57 @@ mod tests {
         )
         .named(Some("Release prep"));
         assert!(codex.meta.is_none());
+        let codex = build_load_session_request(
+            AgentType::Codex,
+            SessionId::new("abc".to_string()),
+            &cwd,
+            Vec::new(),
+        )
+        .named_for(AgentType::Codex, Some("Release prep"));
+        assert!(codex.meta.is_none());
+    }
+
+    /// Pi takes the conversation title as `_meta.piAcp.sessionName` on every
+    /// session-establishing request, and nothing without a name.
+    #[test]
+    fn pi_session_requests_carry_the_session_name() {
+        let cwd = std::env::temp_dir();
+        let name_of = |meta: Option<&agent_client_protocol::schema::v1::Meta>| {
+            meta.and_then(|m| m.get("piAcp"))
+                .and_then(|p| p.get("sessionName"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        };
+        let new_req =
+            build_new_session_request(AgentType::Pi, &cwd, Vec::new(), SessionPersistence::Default)
+                .named_for(AgentType::Pi, Some("Release prep"));
+        assert_eq!(name_of(new_req.meta.as_ref()).as_deref(), Some("Release prep"));
+        let load_req = build_load_session_request(
+            AgentType::Pi,
+            SessionId::new("abc".to_string()),
+            &cwd,
+            Vec::new(),
+        )
+        .named_for(AgentType::Pi, Some("Release prep"));
+        assert_eq!(name_of(load_req.meta.as_ref()).as_deref(), Some("Release prep"));
+        let resume_req = build_resume_session_request(
+            AgentType::Pi,
+            SessionId::new("abc".to_string()),
+            &cwd,
+            Vec::new(),
+        )
+        .named_for(AgentType::Pi, Some("Release prep"));
+        assert_eq!(name_of(resume_req.meta.as_ref()).as_deref(), Some("Release prep"));
+        let unnamed = build_resume_session_request(
+            AgentType::Pi,
+            SessionId::new("abc".to_string()),
+            &cwd,
+            Vec::new(),
+        );
+        assert_eq!(
+            serde_json::to_value(unnamed.clone().named_for(AgentType::Pi, None)).unwrap(),
+            serde_json::to_value(unnamed).unwrap()
+        );
     }
 
     // OpenClaw rejects MCP server *entries* over the ACP wire, not the
