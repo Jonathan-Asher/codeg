@@ -504,7 +504,7 @@
       },
       "close_window": {
         "title": "关闭窗口",
-        "description": "关闭当前窗口（在文件面板中，同一快捷键会关闭所有文件标签）"
+        "description": "关闭当前窗口"
       },
       "next_tab": {
         "title": "下一个标签页",
@@ -2378,7 +2378,6 @@
       "roleUser": "用户",
       "roleAssistant": "助手",
       "roleSystem": "系统",
-      "currentSession": "当前",
       "recentHeading": "最近",
       "archivedBadge": "已归档"
     },

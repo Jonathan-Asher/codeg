@@ -3293,6 +3293,10 @@ pub async fn spawn_agent_connection(
     // as `host_tools`: it is a per-launch `runtime_env` key.
     let session_persistence = SessionPersistence::from_env(&runtime_env);
 
+    // The conversation title the Claude Code session runs under (see
+    // `acp::session_name`). Same per-launch `runtime_env` route.
+    let session_name = crate::acp::session_name::from_env(&runtime_env);
+
     // Forward only the codeg git credential helper keys into the terminal
     // runtime — not the agent's API tokens or model provider credentials.
     // This makes `git fetch`/`git push` issued through the ACP
@@ -3415,6 +3419,7 @@ pub async fn spawn_agent_connection(
                 fs_policy.clone(),
                 host_tools,
                 session_persistence,
+                session_name.clone(),
                 Arc::clone(&stderr_tail),
                 relayed_lifeline(&lifeline_gone),
                 detached_fork.take(),
@@ -5756,6 +5761,26 @@ fn build_client_capabilities(
     client_capabilities
 }
 
+/// Adds the Claude Code session name (see [`crate::acp::session_name`]) to a
+/// session-establishing request's `_meta`. Requests without Claude meta (every
+/// other agent) and a `None` name come back unchanged.
+trait NamedSession: Sized {
+    fn named(self, name: Option<&str>) -> Self;
+}
+
+macro_rules! impl_named_session {
+    ($($request:ty),*) => {$(
+        impl NamedSession for $request {
+            fn named(mut self, name: Option<&str>) -> Self {
+                self.meta = crate::acp::session_name::apply_to_claude_meta(self.meta.take(), name);
+                self
+            }
+        }
+    )*};
+}
+
+impl_named_session!(NewSessionRequest, LoadSessionRequest, ResumeSessionRequest);
+
 fn build_new_session_request(
     agent_type: AgentType,
     cwd: &Path,
@@ -6516,6 +6541,9 @@ async fn run_connection(
     fs_policy: FsAccessPolicy,
     host_tools: HostToolsPolicy,
     session_persistence: SessionPersistence,
+    // The display name for a Claude Code session, added to its
+    // `session/new`, `load` and `resume` requests. `None` leaves the CLI's own.
+    session_name: Option<String>,
     // Connection-scoped agent stderr buffer, shared with the `with_debug`
     // callback installed by `build_agent`. Read only when a turn ends without
     // agent output, to attach evidence to the synthesized error.
@@ -7388,7 +7416,8 @@ async fn run_connection(
                         SessionId::new(sid.clone()),
                         &cwd,
                         mcp_servers.clone(),
-                    );
+                    )
+                    .named(session_name.as_deref());
                     attach.enter(AttachPhase::Resuming).await;
                     let resume_result = match attach.run(send_resume_session(&cx, resume_req)).await {
                         Ok(result) => result,
@@ -7532,7 +7561,8 @@ async fn run_connection(
                         SessionId::new(sid.clone()),
                         &cwd,
                         mcp_servers.clone(),
-                    );
+                    )
+                    .named(session_name.as_deref());
                     attach.enter(AttachPhase::Loading).await;
                     match attach
                         .run(cx.send_request_to(Agent, load_req).block_task())
@@ -7859,7 +7889,8 @@ async fn run_connection(
                                     &cwd,
                                     mcp_servers.clone(),
                                     session_persistence,
-                                ),
+                                )
+                                .named(session_name.as_deref()),
                             ))
                             .await
                         {
@@ -7975,7 +8006,8 @@ async fn run_connection(
                             &cwd,
                             mcp_servers.clone(),
                             session_persistence,
-                        ),
+                        )
+                        .named(session_name.as_deref()),
                     ))
                     .await
                 {
@@ -24356,6 +24388,71 @@ mod tests {
         );
 
         assert!(req.meta.is_none());
+    }
+
+    #[test]
+    fn claude_session_requests_carry_the_session_name_as_a_cli_name() {
+        let cwd = std::path::PathBuf::from("/tmp/codeg");
+        let expect_name = |meta: Option<&serde_json::Map<String, serde_json::Value>>| {
+            let meta = serde_json::Value::Object(meta.cloned().expect("claude meta"));
+            assert_eq!(
+                meta["claudeCode"]["options"]["extraArgs"]["name"],
+                serde_json::json!("Release prep")
+            );
+            assert_eq!(meta["claudeCode"]["emitRawSDKMessages"], serde_json::json!(true));
+        };
+
+        let new_req = build_new_session_request(
+            AgentType::ClaudeCode,
+            &cwd,
+            Vec::new(),
+            SessionPersistence::Off,
+        )
+        .named(Some("Release prep"));
+        expect_name(new_req.meta.as_ref());
+        // The private-session option rides along untouched.
+        let new_json = serde_json::to_value(&new_req).unwrap();
+        assert_eq!(
+            new_json["_meta"]["claudeCode"]["options"]["persistSession"],
+            serde_json::json!(false)
+        );
+        let load_req = build_load_session_request(
+            AgentType::ClaudeCode,
+            SessionId::new("abc".to_string()),
+            &cwd,
+            Vec::new(),
+        )
+        .named(Some("Release prep"));
+        expect_name(load_req.meta.as_ref());
+        let resume_req = build_resume_session_request(
+            AgentType::ClaudeCode,
+            SessionId::new("abc".to_string()),
+            &cwd,
+            Vec::new(),
+        )
+        .named(Some("Release prep"));
+        expect_name(resume_req.meta.as_ref());
+
+        // No name: the request is exactly what it was.
+        let unnamed = build_load_session_request(
+            AgentType::ClaudeCode,
+            SessionId::new("abc".to_string()),
+            &cwd,
+            Vec::new(),
+        );
+        assert_eq!(
+            serde_json::to_value(unnamed.clone().named(None)).unwrap(),
+            serde_json::to_value(unnamed).unwrap()
+        );
+        // Other agents never get one.
+        let codex = build_load_session_request(
+            AgentType::Codex,
+            SessionId::new("abc".to_string()),
+            &cwd,
+            Vec::new(),
+        )
+        .named(Some("Release prep"));
+        assert!(codex.meta.is_none());
     }
 
     // OpenClaw rejects MCP server *entries* over the ACP wire, not the

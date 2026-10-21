@@ -146,8 +146,6 @@ export const INPUT_SHORTCUT_IDS = new Set<ShortcutActionId>([
 const SHARED_SHORTCUT_PAIRS: Array<[ShortcutActionId, ShortcutActionId]> = [
   ["new_terminal_tab", "new_conversation"],
   ["close_current_terminal_tab", "close_current_tab"],
-  // In the file pane the chord closes every file tab; anywhere else, the window.
-  ["close_all_file_tabs", "close_window"],
 ]
 
 export function canShareShortcut(
@@ -172,9 +170,12 @@ export const DEFAULT_SHORTCUTS: ShortcutSettings = {
   new_conversation: "mod+t",
   open_folder: "mod+o",
   open_settings: "mod+,",
+  // ⌘W closes one tab and never the window; ⇧⌘W closes the window — the
+  // native menu carries the same two (`app_menu.rs`). Closing every file tab
+  // takes ⌥⌘W, the platform's "close all".
   close_current_tab: "mod+w",
   reopen_last_closed_tab: "mod+shift+t",
-  close_all_file_tabs: "mod+shift+w",
+  close_all_file_tabs: "mod+alt+w",
   close_window: "mod+shift+w",
   next_tab: "mod+tab",
   prev_tab: "mod+shift+tab",

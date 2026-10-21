@@ -117,8 +117,8 @@ const AGENT_GIT_EDITOR: (&str, &str) = ("GIT_EDITOR", "true");
 ///   is on;
 /// * the static `env` of every built-in agent in the registry;
 /// * the codex launch policy and its debug log directory;
-/// * the per-launch `runtime_env` markers: private sessions and OpenClaw's
-///   fresh-session flag.
+/// * the per-launch `runtime_env` markers: private sessions, the Claude Code
+///   session name and OpenClaw's fresh-session flag.
 ///
 /// Per-agent settings rows and model-provider credentials are injected too, but
 /// they live in the database and are not knowable this early; proxy variables
@@ -144,6 +144,7 @@ fn injected_keys() -> Vec<&'static str> {
         CODEX_INITIAL_MODE_ENV,
         CODEX_APP_SERVER_LOGS_ENV,
         crate::acp::session_persistence::SESSION_PERSISTENCE_ENV,
+        crate::acp::session_name::SESSION_NAME_ENV,
         crate::commands::acp::OPENCLAW_RESET_SESSION_ENV,
     ]);
     keys
@@ -567,6 +568,7 @@ mod tests {
             "DISABLE_MCP_CONFIG_FILTERING",
             "INITIAL_AGENT_MODE",
             "CODEG_SESSION_PERSISTENCE",
+            "CODEG_SESSION_NAME",
             "OPENCLAW_RESET_SESSION",
             "PI_ACP_ENABLE_EMBEDDED_CONTEXT",
         ] {

@@ -387,6 +387,66 @@ pub fn before_edit_title(title: &str) -> String {
     format!("{base}{BEFORE_EDIT_SUFFIX}")
 }
 
+/// Split a leading fork marker off `title`: `[Fork]` is fork 1 and `[Fork-N]`
+/// fork N. Returns the number and the text after the marker (leading spaces
+/// dropped, so the no-space `[Fork]Title` form reads the same), or `None` when
+/// `title` does not start with a marker.
+fn split_fork_marker(title: &str) -> Option<(u32, &str)> {
+    let after = title.strip_prefix("[Fork")?;
+    let (number, rest) = match after.strip_prefix(']') {
+        Some(rest) => (1, rest),
+        None => {
+            let digits_and_rest = after.strip_prefix('-')?;
+            let close = digits_and_rest.find(']')?;
+            let digits = &digits_and_rest[..close];
+            if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            let number: u32 = digits.parse().ok()?;
+            if number == 0 {
+                return None;
+            }
+            (number, &digits_and_rest[close + 1..])
+        }
+    };
+    Some((number, rest.trim_start()))
+}
+
+/// The title a fork is numbered against: `title` without any leading `[Fork]`
+/// / `[Fork-N]` markers, so forking a fork never stacks them.
+pub fn fork_base_title(title: &str) -> &str {
+    let mut base = title;
+    while let Some((_, rest)) = split_fork_marker(base) {
+        base = rest;
+    }
+    base
+}
+
+/// Title for a new fork of a conversation titled `title`: `[Fork] <base>`, or
+/// `[Fork-N] <base>` with the first N ≥ 2 that no title in `existing` already
+/// uses for the same base. `existing` is every live title in the folder the
+/// fork lands in (archived ones included, deleted ones not), so forking the
+/// same conversation twice gives `[Fork] X` and then `[Fork-2] X`.
+pub fn numbered_fork_title<'a>(
+    title: &str,
+    existing: impl IntoIterator<Item = &'a str>,
+) -> String {
+    let base = fork_base_title(title).trim();
+    let taken: std::collections::HashSet<u32> = existing
+        .into_iter()
+        .filter_map(|other| {
+            let (number, rest) = split_fork_marker(other)?;
+            (fork_base_title(rest).trim() == base).then_some(number)
+        })
+        .collect();
+    let number = (1..).find(|n| !taken.contains(n)).unwrap_or(1);
+    if number == 1 {
+        format!("[Fork] {base}")
+    } else {
+        format!("[Fork-{number}] {base}")
+    }
+}
+
 impl ForkPoint {
     fn to_meta(&self) -> Meta {
         let mut fork = serde_json::Map::new();
@@ -1059,5 +1119,57 @@ mod tests {
             "editing inside a pre-edit branch must not stack the marker"
         );
         assert_eq!(before_edit_title("[Fork] Topic"), "[Fork] Topic (before edit)");
+    }
+
+    #[test]
+    fn fork_base_title_strips_every_leading_marker() {
+        assert_eq!(fork_base_title("Topic"), "Topic");
+        assert_eq!(fork_base_title("[Fork] Topic"), "Topic");
+        assert_eq!(fork_base_title("[Fork-3] Topic"), "Topic");
+        assert_eq!(fork_base_title("[Fork]Topic"), "Topic");
+        assert_eq!(fork_base_title("[Fork] [Fork-2] Topic"), "Topic");
+        // Not markers: kept as part of the title.
+        assert_eq!(fork_base_title("[Fork-0] Topic"), "[Fork-0] Topic");
+        assert_eq!(fork_base_title("[Fork-x] Topic"), "[Fork-x] Topic");
+        assert_eq!(fork_base_title("[Forked] Topic"), "[Forked] Topic");
+        assert_eq!(fork_base_title("Topic [Fork]"), "Topic [Fork]");
+    }
+
+    #[test]
+    fn numbered_fork_title_takes_the_first_free_number() {
+        assert_eq!(numbered_fork_title("Topic", []), "[Fork] Topic");
+        assert_eq!(numbered_fork_title("Topic", ["Topic"]), "[Fork] Topic");
+        assert_eq!(
+            numbered_fork_title("Topic", ["Topic", "[Fork] Topic"]),
+            "[Fork-2] Topic"
+        );
+        assert_eq!(
+            numbered_fork_title("Topic", ["[Fork] Topic", "[Fork-2] Topic", "[Fork-4] Topic"]),
+            "[Fork-3] Topic"
+        );
+        // A gap at 1 is reused.
+        assert_eq!(numbered_fork_title("Topic", ["[Fork-2] Topic"]), "[Fork] Topic");
+        // Other bases do not count.
+        assert_eq!(
+            numbered_fork_title("Topic", ["[Fork] Other", "[Fork] Topic 2"]),
+            "[Fork] Topic"
+        );
+        // The no-space and stacked legacy forms still occupy their number.
+        assert_eq!(
+            numbered_fork_title("Topic", ["[Fork]Topic", "[Fork-2] [Fork] Topic"]),
+            "[Fork-3] Topic"
+        );
+    }
+
+    #[test]
+    fn numbered_fork_title_of_a_fork_does_not_stack_prefixes() {
+        assert_eq!(
+            numbered_fork_title("[Fork] Topic", ["Topic", "[Fork] Topic"]),
+            "[Fork-2] Topic"
+        );
+        assert_eq!(
+            numbered_fork_title("[Fork-2] Topic", ["[Fork] Topic", "[Fork-2] Topic"]),
+            "[Fork-3] Topic"
+        );
     }
 }

@@ -504,7 +504,7 @@
       },
       "close_window": {
         "title": "Fechar janela",
-        "description": "Fecha a janela atual (no painel de arquivos, o mesmo atalho fecha todas as abas de arquivo)"
+        "description": "Fecha a janela atual"
       },
       "next_tab": {
         "title": "Próxima aba",
@@ -2378,7 +2378,6 @@
       "roleUser": "Usuário",
       "roleAssistant": "Assistente",
       "roleSystem": "Sistema",
-      "currentSession": "Atual",
       "recentHeading": "Recentes",
       "archivedBadge": "Arquivada"
     },

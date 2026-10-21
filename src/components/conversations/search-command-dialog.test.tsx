@@ -323,41 +323,67 @@ describe("SearchCommandDialog recent sessions", () => {
     }
   }
 
-  it("opens on the current session, selected, with recent sessions below", async () => {
+  it("leaves the current session out and selects the previous one", async () => {
     renderDialog()
 
     await waitFor(() => expect(rows().selected).toBe(0))
-    expect(rows().titles).toEqual([
-      "Release prep",
-      "Legal brief",
-      "Older codeg work",
-    ])
-    expect(screen.getByText("Current")).toBeTruthy()
+    expect(rows().titles).toEqual(["Legal brief", "Older codeg work"])
+    expect(screen.queryByText("Release prep")).toBeNull()
     expect(screen.getByText("Recent")).toBeTruthy()
     expect(screen.getByText("legalix")).toBeTruthy()
     expect(screen.queryByText("Delegated subtask")).toBeNull()
   })
 
-  it("switches to the next session with one arrow down and Enter", async () => {
+  it("switches back to the previous session with Enter alone", async () => {
     const { user, onOpenChange } = renderDialog()
     await waitFor(() => expect(rows().selected).toBe(0))
 
-    await user.keyboard("{ArrowDown}")
-    await waitFor(() => expect(rows().selected).toBe(1))
     await user.keyboard("{Enter}")
 
     expect(h.openTab).toHaveBeenCalledWith(5, 2, "codex", true)
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
-  it("only closes the dialog when the current session is picked", async () => {
-    const { user, onOpenChange } = renderDialog()
+  it("reaches the next older session with one arrow down", async () => {
+    const { user } = renderDialog()
     await waitFor(() => expect(rows().selected).toBe(0))
 
+    await user.keyboard("{ArrowDown}")
+    await waitFor(() => expect(rows().selected).toBe(1))
     await user.keyboard("{Enter}")
 
-    expect(onOpenChange).toHaveBeenCalledWith(false)
-    expect(h.openTab).not.toHaveBeenCalled()
+    expect(h.openTab).toHaveBeenCalledWith(3, 3, "claude_code", true)
+  })
+
+  it("keeps the current session out of search results too", async () => {
+    h.listAllConversations.mockResolvedValue([
+      conv(1, 3, "Release prep"),
+      conv(7, 3, "Release notes"),
+    ])
+    const { user } = renderDialog()
+
+    await user.type(
+      screen.getByPlaceholderText("Search conversations..."),
+      "release"
+    )
+
+    expect(await screen.findByText("Release notes")).toBeTruthy()
+    expect(screen.queryByText("Release prep")).toBeNull()
+    await waitFor(() => expect(rows().selected).toBe(0))
+    expect(rows().titles).toEqual(["Release notes"])
+  })
+
+  it("shows no results when the current session is the only match", async () => {
+    h.listAllConversations.mockResolvedValue([conv(1, 3, "Release prep")])
+    const { user } = renderDialog()
+
+    await user.type(
+      screen.getByPlaceholderText("Search conversations..."),
+      "release prep"
+    )
+
+    expect(await screen.findByText("No results found.")).toBeTruthy()
+    expect(screen.queryAllByRole("option")).toHaveLength(0)
   })
 
   it("shows search results while typing and the recent list once cleared", async () => {
@@ -374,7 +400,7 @@ describe("SearchCommandDialog recent sessions", () => {
     expect(await screen.findByText("Legal brief")).toBeTruthy()
     expect(screen.queryByText("Upload fixes")).toBeNull()
     await waitFor(() => expect(rows().selected).toBe(0))
-    expect(rows().titles[0]).toBe("Release prep")
+    expect(rows().titles[0]).toBe("Legal brief")
   })
 
   it("lists only the open folder's recent sessions when scoped", async () => {
@@ -383,7 +409,7 @@ describe("SearchCommandDialog recent sessions", () => {
 
     await user.click(screen.getByRole("button", { name: "Only codeg" }))
 
-    expect(rows().titles).toEqual(["Release prep", "Older codeg work"])
+    expect(rows().titles).toEqual(["Older codeg work"])
   })
 
   it("waits for a query as before when the setting is off", async () => {
@@ -405,7 +431,6 @@ describe("SearchCommandDialog recent sessions", () => {
       "Release prep",
       "Older codeg work",
     ])
-    expect(screen.queryByText("Current")).toBeNull()
   })
 })
 

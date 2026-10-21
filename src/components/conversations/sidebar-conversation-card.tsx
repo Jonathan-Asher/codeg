@@ -112,6 +112,26 @@ import { AgentIcon } from "@/components/agent-icon"
 export const CONV_RAIL_DEPTH_STEP = "1.25rem"
 
 /**
+ * Gap from a session row's rail axis to its title. A folder or group heading
+ * puts its title `0.875rem` past the same axis; a session sits `0.5rem` deeper
+ * so it reads as nested under the heading. Only the text moves: the icon and
+ * the rail stay on the axis, so the spine through a folder's sessions is
+ * unchanged.
+ */
+export const CONV_TITLE_INSET = "1.375rem"
+
+/** Weight of a heading row: a folder or a folder group, which look the same.
+ *  A clear step above a session title's normal weight. */
+export const SIDEBAR_HEADING_WEIGHT = "font-semibold"
+
+/** Weight of a worktree / root sub-group: between a heading and a session. */
+export const SIDEBAR_SUBHEADING_WEIGHT = "font-medium"
+
+/** Space above a folder or group heading, so each reads as a section start.
+ *  `box-content` adds it on top of the row's fixed `h-[2rem]`. */
+export const SIDEBAR_HEADING_GAP = "box-content pt-[0.25rem]"
+
+/**
  * Vertical guide rails for a delegation sub-session's ANCESTORS. A row at `depth`
  * draws one rail per ancestor level (axis 0 … depth−1), each a 2px line at
  * `axis(level) = 0.875rem + level·CONV_RAIL_DEPTH_STEP` from the row's left edge
@@ -467,12 +487,11 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                       "rounded-full",
                       "pr-[0.25rem]"
                     )}
-                    // Rail-axis-relative left padding (was a fixed `pl-7`): at depth 0
-                    // this resolves to 0.875rem + 0.875rem = 1.75rem (= pl-7), so root
-                    // rows are pixel-identical; deeper rows inherit the shifted var.
+                    // Rail-axis-relative left padding: at depth 0 this resolves to
+                    // 0.875rem + CONV_TITLE_INSET, half a rem past a heading's
+                    // title; deeper rows inherit the shifted var.
                     style={{
-                      paddingLeft:
-                        "calc(var(--conv-rail-axis, 0.875rem) + 0.875rem)",
+                      paddingLeft: `calc(var(--conv-rail-axis, 0.875rem) + ${CONV_TITLE_INSET})`,
                     }}
                   >
                     {/* Ancestor guide rails (depth ≥ 1): keep each parent's vertical

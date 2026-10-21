@@ -602,6 +602,6 @@ export interface BrowserNavigationBlockedPayload {
 /** A browser shortcut the page had keyboard focus for. */
 export interface BrowserShortcutPayload {
   tabId: string
-  /** A name from the host's closed set; `find` today. */
+  /** A name from the host's closed set: `find` or `close-tab`. */
   shortcut: string
 }

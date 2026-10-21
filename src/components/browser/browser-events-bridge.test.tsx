@@ -232,6 +232,16 @@ describe("BrowserEventsBridge", () => {
       shortcut: "quit",
     })
     expect(findRequestOf("browser:abc")).toBe(1)
+    expect(mocks.closeFileTab).not.toHaveBeenCalled()
+
+    // ⌘W inside the page closes that tab, never the window around it.
+    mocks.handlers.get("browser://shortcut")!({
+      tabId: "abc",
+      shortcut: "close-tab",
+    })
+    expect(mocks.closeFileTab).toHaveBeenCalledWith("browser:abc")
+    expect(findRequestOf("browser:abc")).toBe(1)
+    mocks.closeFileTab.mockClear()
 
     mocks.handlers.get("browser://open-request")!({
       url: "https://example.com/from-agent",

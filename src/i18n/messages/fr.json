@@ -504,7 +504,7 @@
       },
       "close_window": {
         "title": "Fermer la fenêtre",
-        "description": "Fermer la fenêtre actuelle (dans le panneau de fichiers, le même raccourci ferme tous les onglets de fichiers)"
+        "description": "Fermer la fenêtre actuelle"
       },
       "next_tab": {
         "title": "Onglet suivant",
@@ -2378,7 +2378,6 @@
       "roleUser": "Utilisateur",
       "roleAssistant": "Assistant",
       "roleSystem": "Système",
-      "currentSession": "Actuelle",
       "recentHeading": "Récentes",
       "archivedBadge": "Archivé"
     },

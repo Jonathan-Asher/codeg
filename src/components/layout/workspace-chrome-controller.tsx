@@ -23,6 +23,10 @@ import {
 import { popClosedTab } from "@/lib/closed-tab-stack"
 import { useArrangedTabs } from "@/hooks/use-arranged-tabs"
 import { closeCurrentWindow, isDesktop } from "@/lib/platform"
+
+/** Native File › Close Tab, addressed to one workspace window
+ *  (`app_menu::CLOSE_TAB_EVENT`). */
+const CLOSE_TAB_MENU_EVENT = "app://close-tab"
 import {
   matchShortcutEvent,
   numberedTabIndexFromEvent,
@@ -76,6 +80,60 @@ export function WorkspaceChromeController() {
   // follow-up step that links other folders into the new workspace, so the
   // native picker can't be a separate path that skips half the flow.
   const handleOpenFolder = useCallback(() => setBrowserOpen(true), [])
+
+  // Close the active tab of the pane in front: a conversation (or new-chat)
+  // tab, or a file / built-in browser tab in the file pane. Closing the last
+  // tab leaves whatever closing it with the mouse leaves; the window stays.
+  const closeActiveTab = useCallback(() => {
+    const conversationPaneActive =
+      mode === "conversation" ||
+      (mode === "fusion" && activePane === "conversation" && !filesMaximized)
+    const filesPaneActive =
+      mode === "fusion" && (activePane === "files" || filesMaximized)
+    if (conversationPaneActive) {
+      if (activeTabId) closeTab(activeTabId)
+    } else if (filesPaneActive) {
+      if (activeFileTabId) closeFileTab(activeFileTabId)
+    }
+  }, [
+    mode,
+    activePane,
+    filesMaximized,
+    activeTabId,
+    activeFileTabId,
+    closeTab,
+    closeFileTab,
+  ])
+
+  // File › Close Tab in the native menu (⌘W): reaches this window when the
+  // keystroke never got to this document — a built-in browser page has focus,
+  // or another native surface does. Scoped to this window's own label, since a
+  // global `listen()` hears events addressed to every window.
+  useEffect(() => {
+    if (!isDesktop()) return
+    let unlisten: (() => void) | null = null
+    let cancelled = false
+    import("@tauri-apps/api/webviewWindow")
+      .then(({ getCurrentWebviewWindow }) =>
+        getCurrentWebviewWindow().listen(CLOSE_TAB_MENU_EVENT, () => {
+          if (!cancelled) closeActiveTab()
+        })
+      )
+      .then((fn) => {
+        if (cancelled) {
+          fn()
+          return
+        }
+        unlisten = fn
+      })
+      .catch(() => {
+        // Not in Tauri.
+      })
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
+  }, [closeActiveTab])
 
   const handleOpenSettings = useCallback(() => {
     openSettingsWindow().catch((err) => {
@@ -194,8 +252,6 @@ export function WorkspaceChromeController() {
         return
       }
 
-      // mod+shift+w by default, shared with close_window below: in the file
-      // pane it closes every file tab, anywhere else the window.
       if (
         filesPaneActive &&
         matchShortcutEvent(e, shortcuts.close_all_file_tabs)
@@ -218,15 +274,11 @@ export function WorkspaceChromeController() {
       }
 
       if (matchShortcutEvent(e, shortcuts.close_current_tab)) {
-        if (conversationPaneActive) {
-          if (!activeTabId) return
-          e.preventDefault()
-          closeTab(activeTabId)
-        } else if (filesPaneActive) {
-          if (!activeFileTabId) return
-          e.preventDefault()
-          closeFileTab(activeFileTabId)
-        }
+        // Always claimed, even with no tab to close: a key the page leaves
+        // alone goes on to the native menu, and closing a tab must never
+        // become closing the window.
+        e.preventDefault()
+        closeActiveTab()
         return
       }
 
@@ -309,13 +361,11 @@ export function WorkspaceChromeController() {
     navTabs,
     activeTabId,
     switchTab,
-    closeTab,
+    closeActiveTab,
     mode,
     activePane,
     filesMaximized,
     fileTabs,
-    activeFileTabId,
-    closeFileTab,
     closeAllFileTabs,
     switchFileTab,
   ])

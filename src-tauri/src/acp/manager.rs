@@ -411,6 +411,25 @@ type DrainingChildren = Vec<DrainingChild>;
 /// location, while a false negative unlinks a file an agent is writing.
 const DRAIN_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// Every live (not deleted) conversation title in `folder_id`, archived ones
+/// included: what a new fork's `[Fork-N]` number is picked against.
+async fn folder_titles<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    folder_id: i32,
+) -> Result<Vec<String>, sea_orm::DbErr> {
+    use sea_orm::{ColumnTrait, QueryFilter, QuerySelect};
+
+    let titles: Vec<Option<String>> = conversation::Entity::find()
+        .select_only()
+        .column(conversation::Column::Title)
+        .filter(conversation::Column::FolderId.eq(folder_id))
+        .filter(conversation::Column::DeletedAt.is_null())
+        .into_tuple()
+        .all(db)
+        .await?;
+    Ok(titles.into_iter().flatten().collect())
+}
+
 /// Drop entries that are provably finished: pid back to zero and long enough
 /// ago that it cannot be a spawn still in flight.
 fn prune_reaped(draining: &mut DrainingChildren) {
@@ -2896,16 +2915,6 @@ impl ConnectionManager {
                             ))
                         })?;
 
-                    // Strip any `[Fork]` prefix tolerantly (matches the prior
-                    // frontend regex `/^\[Fork]\s*/g` behaviour for both spaced
-                    // and no-space variants). None title stays None.
-                    let clean_title: Option<String> = current.title.as_ref().map(|t| {
-                        t.strip_prefix("[Fork]")
-                            .map(str::trim_start)
-                            .unwrap_or(t.as_str())
-                            .to_string()
-                    });
-
                     let folder_id = current.folder_id;
                     let agent_type_str = current.agent_type.clone();
                     let git_branch = current.git_branch.clone();
@@ -2917,8 +2926,22 @@ impl ConnectionManager {
                     // forked row's name is written back under a lock (below).
                     let (forked_title, sibling_title, sibling_title_locked) = match mode {
                         ForkMode::Branch => (
-                            clean_title.as_ref().map(|clean| format!("[Fork] {clean}")),
-                            clean_title,
+                            match current.title.as_deref() {
+                                Some(title) => Some(crate::acp::fork::numbered_fork_title(
+                                    title,
+                                    folder_titles(txn, folder_id)
+                                        .await?
+                                        .iter()
+                                        .map(String::as_str),
+                                )),
+                                None => None,
+                            },
+                            // The sibling keeps the name this row had, so a
+                            // fork of a fork leaves `[Fork] X` where it was
+                            // and moves on as `[Fork-2] X`, rather than
+                            // handing the sibling a bare `X` that the
+                            // original already wears.
+                            current.title.clone(),
                             // The lock rides along with the title it protects:
                             // the sibling holds the pre-fork history of the
                             // very row the user renamed, so a hand-picked name
@@ -3423,13 +3446,18 @@ impl ConnectionManager {
                     "conversation {source_conversation_id} not found or already deleted"
                 ))
             })?;
-        let clean_title = source.title.as_deref().map(|t| {
-            t.strip_prefix("[Fork]")
-                .map(str::trim_start)
-                .unwrap_or(t)
-                .to_string()
-        });
-        let title = clean_title.map(|clean| format!("[Fork] {clean}"));
+        let title = match source.title.as_deref() {
+            Some(title) => {
+                let taken = folder_titles(db_conn, source.folder_id)
+                    .await
+                    .map_err(|e| AcpError::protocol(e.to_string()))?;
+                Some(crate::acp::fork::numbered_fork_title(
+                    title,
+                    taken.iter().map(String::as_str),
+                ))
+            }
+            None => None,
+        };
         // Same rule as the in-place fork's sibling: a forked chat stays in the
         // Chat group, and `delegate ⟺ parent_id set` wins over inheritance.
         let kind = match source.kind {
@@ -9208,13 +9236,82 @@ mod tests {
             .unwrap();
         assert_eq!(
             current.title.as_deref(),
-            Some("[Fork] Topic"),
-            "should re-stack as single [Fork] prefix, not [Fork] [Fork] ..."
+            Some("[Fork-2] Topic"),
+            "a fork of a fork is numbered on the base, not [Fork] [Fork] ..."
         );
         let sibling = conversation_service::get_by_id(&db.conn, result.sibling_conversation_id)
             .await
             .unwrap();
+        assert_eq!(
+            sibling.title.as_deref(),
+            Some("[Fork] Topic"),
+            "the sibling keeps the name the row had"
+        );
+    }
+
+    #[tokio::test]
+    async fn fork_session_numbers_past_live_forks_in_the_same_folder() {
+        use crate::db::entities::folder;
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-numbered").await;
+        let other_folder = test_helpers::seed_folder(&db, "/tmp/fork-numbered-other").await;
+        let create = |folder: i32, title: &'static str| {
+            let conn = db.conn.clone();
+            async move {
+                conversation_service::create(
+                    &conn,
+                    folder,
+                    AgentType::ClaudeCode,
+                    Some(title.into()),
+                    None,
+                )
+                .await
+                .unwrap()
+            }
+        };
+        let pre = create(folder_id, "Topic").await;
+        // Live, in an archived folder: still counts.
+        create(folder_id, "[Fork] Topic").await;
+        let mut archived: folder::ActiveModel = folder::Entity::find_by_id(folder_id)
+            .one(&db.conn)
+            .await
+            .unwrap()
+            .unwrap()
+            .into();
+        archived.archived = Set(true);
+        archived.update(&db.conn).await.unwrap();
+        // Deleted: its number is free again.
+        let deleted = create(folder_id, "[Fork-2] Topic").await;
+        conversation_service::soft_delete(&db.conn, deleted.id)
+            .await
+            .unwrap();
+        // Another folder's forks do not count.
+        create(other_folder, "[Fork-2] Topic").await;
+
+        let (mgr, join) =
+            manager_with_fake_fork("c-numbered", pre.id, "session-S2", "session-S1").await;
+        let result = mgr
+            .fork_session(&db, "c-numbered", None, None, None, ForkMode::Branch)
+            .await
+            .unwrap();
+        let _ = join.await;
+
+        let current = conversation_service::get_by_id(&db.conn, pre.id)
+            .await
+            .unwrap();
+        assert_eq!(current.title.as_deref(), Some("[Fork-2] Topic"));
+        let sibling = conversation_service::get_by_id(&db.conn, result.sibling_conversation_id)
+            .await
+            .unwrap();
         assert_eq!(sibling.title.as_deref(), Some("Topic"));
+
+        // Forking the original into a new conversation takes the next number.
+        let third =
+            ConnectionManager::record_fork_to_new_conversation(&db.conn, sibling.id, "session-S3")
+                .await
+                .unwrap();
+        assert_eq!(third.title.as_deref(), Some("[Fork-3] Topic"));
     }
 
     #[tokio::test]
@@ -9317,8 +9414,8 @@ mod tests {
             .unwrap();
         assert_eq!(
             current.title.as_deref(),
-            Some("[Fork] NoSpaceTitle"),
-            "no-space prefix must be tolerantly stripped before re-stacking"
+            Some("[Fork-2] NoSpaceTitle"),
+            "no-space prefix must be tolerantly stripped before numbering"
         );
     }
 
@@ -10923,7 +11020,8 @@ mod tests {
         assert_eq!(row.title, None);
         assert!(!row.title_locked);
 
-        // A `[Fork]` original is forked again without stacking the marker.
+        // A `[Fork]` original is forked again without stacking the marker,
+        // numbered past the `[Fork] Topic` that already exists.
         let mut active: conversation::ActiveModel = row.clone().into();
         active.title = Set(Some("[Fork] Topic".into()));
         let forked_once = active.update(&db.conn).await.unwrap();
@@ -10934,7 +11032,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(twice.title.as_deref(), Some("[Fork] Topic"));
+        assert_eq!(twice.title.as_deref(), Some("[Fork-2] Topic"));
 
         // Through the full path, the new row is announced on the source
         // connection's emitter.

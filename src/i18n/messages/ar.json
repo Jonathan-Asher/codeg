@@ -504,7 +504,7 @@
       },
       "close_window": {
         "title": "إغلاق النافذة",
-        "description": "إغلاق النافذة الحالية (في لوحة الملفات، يغلق الاختصار نفسه جميع تبويبات الملفات)"
+        "description": "إغلاق النافذة الحالية"
       },
       "next_tab": {
         "title": "علامة التبويب التالية",
@@ -2378,7 +2378,6 @@
       "roleUser": "المستخدم",
       "roleAssistant": "المساعد",
       "roleSystem": "النظام",
-      "currentSession": "الحالية",
       "recentHeading": "الأخيرة",
       "archivedBadge": "مؤرشف"
     },

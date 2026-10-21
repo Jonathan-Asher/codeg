@@ -504,7 +504,7 @@
       },
       "close_window": {
         "title": "ウィンドウを閉じる",
-        "description": "現在のウィンドウを閉じます（ファイルペインでは、同じショートカットですべてのファイルタブを閉じます）"
+        "description": "現在のウィンドウを閉じます"
       },
       "next_tab": {
         "title": "次のタブ",
@@ -2378,7 +2378,6 @@
       "roleUser": "ユーザー",
       "roleAssistant": "アシスタント",
       "roleSystem": "システム",
-      "currentSession": "現在",
       "recentHeading": "最近",
       "archivedBadge": "アーカイブ済み"
     },

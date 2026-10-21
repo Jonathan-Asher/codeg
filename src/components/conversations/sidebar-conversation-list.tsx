@@ -110,6 +110,10 @@ import {
   SidebarConversationCard,
   SubsessionAncestorRails,
   CONV_RAIL_DEPTH_STEP,
+  CONV_TITLE_INSET,
+  SIDEBAR_HEADING_GAP,
+  SIDEBAR_HEADING_WEIGHT,
+  SIDEBAR_SUBHEADING_WEIGHT,
 } from "./sidebar-conversation-card"
 import {
   applyLayoutMove,
@@ -257,6 +261,7 @@ const FolderHeader = memo(function FolderHeader({
   variant = "repo",
   worktreeBranch = null,
   rootBranch = null,
+  topGap = false,
 }: {
   folderId: number
   folderName: string
@@ -371,6 +376,10 @@ const FolderHeader = memo(function FolderHeader({
    * bare "root" this row carried before there was a branch to show.
    */
   rootBranch?: string | null
+  /** Extra space above the row ({@link SIDEBAR_HEADING_GAP}), so a folder reads
+   *  as the start of a section. Off on the drag surface, whose row math needs
+   *  every row at one fixed height. */
+  topGap?: boolean
 }) {
   // Own the translations here rather than receiving `t` as a prop: next-intl
   // returns a fresh `t` on every parent render, so passing it down would defeat
@@ -434,7 +443,11 @@ const FolderHeader = memo(function FolderHeader({
           <div
             inert={suppressed || undefined}
             aria-hidden={suppressed || undefined}
-            className={cn("relative h-[2rem]", isDragging && "opacity-60")}
+            className={cn(
+              "relative h-[2rem]",
+              topGap && SIDEBAR_HEADING_GAP,
+              isDragging && "opacity-60"
+            )}
           >
             <div
               onPointerDown={(e) => onGripPointerDown?.(folderId, e)}
@@ -501,7 +514,13 @@ const FolderHeader = memo(function FolderHeader({
                   <span
                     style={titleTint}
                     className={cn(
-                      "min-w-0 flex-shrink truncate text-left text-[0.875rem] font-normal",
+                      "min-w-0 flex-shrink truncate text-left text-[0.875rem]",
+                      // A folder is a heading over its sessions, so it carries
+                      // the group heading's weight; a worktree / root sub-group
+                      // sits a step below it and a session's normal title.
+                      variant === "repo"
+                        ? SIDEBAR_HEADING_WEIGHT
+                        : SIDEBAR_SUBHEADING_WEIGHT,
                       titleTint
                         ? "folder-title-tint"
                         : "text-sidebar-foreground/75"
@@ -3425,6 +3444,7 @@ export function SidebarConversationList({
             ? (branches.get(folderId) ?? folderEntry?.gitBranch ?? null)
             : null
         }
+        topGap={!opts.flat && variant === "repo"}
       />
     )
   }
@@ -3648,7 +3668,7 @@ export function SidebarConversationList({
               showMore && row.canReset ? "pr-[1.75rem]" : "pr-[0.25rem]"
             )}
             style={{
-              paddingLeft: "calc(var(--conv-rail-axis, 0.875rem) + 0.875rem)",
+              paddingLeft: `calc(var(--conv-rail-axis, 0.875rem) + ${CONV_TITLE_INSET})`,
             }}
           >
             <span
@@ -3723,7 +3743,7 @@ export function SidebarConversationList({
             aria-expanded={expanded}
             className="relative flex h-[1.9375rem] w-full items-center rounded-full pr-[0.25rem] text-left text-[0.75rem] text-muted-foreground/80 outline-none transition-colors duration-[120ms] group-hover/folder-more:bg-[color-mix(in_oklab,var(--sidebar-accent),var(--sidebar-foreground)_2%)] group-hover/folder-more:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
             style={{
-              paddingLeft: "calc(var(--conv-rail-axis, 0.875rem) + 0.875rem)",
+              paddingLeft: `calc(var(--conv-rail-axis, 0.875rem) + ${CONV_TITLE_INSET})`,
             }}
           >
             <SubsessionAncestorRails depth={row.depth} />

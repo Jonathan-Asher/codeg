@@ -504,7 +504,7 @@
       },
       "close_window": {
         "title": "Close Window",
-        "description": "Close the current window (in the file pane, the same shortcut closes all file tabs)"
+        "description": "Close the current window"
       },
       "next_tab": {
         "title": "Next Tab",
@@ -2378,7 +2378,6 @@
       "roleUser": "User",
       "roleAssistant": "Assistant",
       "roleSystem": "System",
-      "currentSession": "Current",
       "recentHeading": "Recent",
       "archivedBadge": "Archived"
     },

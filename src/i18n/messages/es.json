@@ -504,7 +504,7 @@
       },
       "close_window": {
         "title": "Cerrar ventana",
-        "description": "Cierra la ventana actual (en el panel de archivos, el mismo atajo cierra todas las pestañas de archivos)"
+        "description": "Cierra la ventana actual"
       },
       "next_tab": {
         "title": "Pestaña siguiente",
@@ -2378,7 +2378,6 @@
       "roleUser": "Usuario",
       "roleAssistant": "Asistente",
       "roleSystem": "Sistema",
-      "currentSession": "Actual",
       "recentHeading": "Recientes",
       "archivedBadge": "Archivada"
     },

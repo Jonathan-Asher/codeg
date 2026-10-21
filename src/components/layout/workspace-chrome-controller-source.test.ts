@@ -49,6 +49,28 @@ describe("tab close/navigation shortcuts live in the always-mounted controller",
     expect(controllerSource).toMatch(/closeAllFileTabs\(/)
   })
 
+  // mod+w with nothing to close (no active tab, an empty pane) used to return
+  // without preventDefault, so the key went on to the native menu's Close
+  // Window. It is claimed unconditionally now, and the native File › Close
+  // Tab (what a focused browser page's mod+w reaches) closes the active tab.
+  it("claims mod+w even with no tab to close and answers the native Close Tab", () => {
+    const start = controllerSource.indexOf(
+      "matchShortcutEvent(e, shortcuts.close_current_tab)"
+    )
+    expect(start).toBeGreaterThan(-1)
+    const branch = controllerSource.slice(
+      start,
+      controllerSource.indexOf("return", start)
+    )
+    expect(branch).toMatch(/e\.preventDefault\(\)/)
+    expect(branch).toMatch(/closeActiveTab\(\)/)
+    expect(branch).not.toMatch(/if \(!activeTabId\) return/)
+    expect(controllerSource).toMatch(/"app:\/\/close-tab"/)
+    expect(controllerSource).toMatch(
+      /getCurrentWebviewWindow\(\)\.listen\(CLOSE_TAB_MENU_EVENT/
+    )
+  })
+
   // A closed remote tab (an address of the remote codeg host) must reopen as
   // one: reopened as an ordinary tab it would load this machine's port.
   it("reopens a remote browser tab as remote", () => {

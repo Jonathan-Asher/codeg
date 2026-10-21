@@ -180,8 +180,8 @@ pub fn handle_message(app: &AppHandle, tab_id: &str, raw: String, main_frame: bo
         // payload, so a subframe still cannot speak for another tab.
         "shortcut" => {
             let name = envelope.payload.get("name").and_then(Value::as_str);
-            if name == Some("find") {
-                events::emit_shortcut(app, tab_id, "find");
+            if let Some(name @ ("find" | "close-tab")) = name {
+                events::emit_shortcut(app, tab_id, name);
             }
         }
         "gesture" => {
