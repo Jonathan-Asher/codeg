@@ -59,6 +59,14 @@ const CHANGE_SCOPE_LABEL_KEYS = {
   persistent: "changeScopePersistent",
 } as const satisfies Record<PermissionChangeScope, string>
 
+/** Claude Code's plan approval (ExitPlanMode): its options carry `exit-plan-*`
+ *  ids. */
+export function isClaudePlanApproval(
+  options: readonly { option_id: string }[]
+): boolean {
+  return options.some((opt) => opt.option_id.startsWith("exit-plan-"))
+}
+
 export function PermissionDialog({
   permission,
   onRespond,
@@ -97,6 +105,7 @@ export function PermissionDialog({
   // ones still behind this card has to be visible or they read as a hang.
   const queued = permission.queued ?? 0
   const hasOptionChanges = Object.keys(optionChanges).length > 0
+  const isPlanApproval = isClaudePlanApproval(options)
 
   const hasFileChanges = parsed.fileChanges.length > 0
   const hasPlan =
@@ -365,9 +374,16 @@ export function PermissionDialog({
           the single filled button on "Allow". Inverting it keeps every option
           one click away while making the decline the one the eye lands on. */}
       <div className="mt-3 flex flex-wrap gap-2">
-        {options.map((opt) => {
+        {options.map((opt, index) => {
           const isReject = opt.kind.startsWith("reject")
-          const emphasized = parsed.defaultToNo ? isReject : !isReject
+          // Claude Code's plan card offers several approvals that leave the
+          // session in different modes. The backend leads with the mode to
+          // continue in, so that one alone is the primary button.
+          const emphasized = parsed.defaultToNo
+            ? isReject
+            : isPlanApproval
+              ? index === 0 && !isReject
+              : !isReject
           return (
             <Button
               key={opt.option_id}

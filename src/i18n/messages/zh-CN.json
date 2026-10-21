@@ -1769,6 +1769,21 @@
       "signOutConfirmTitle": "让 Claude Code 退出登录？",
       "signOutConfirmBody": "codeg 主机上所有 Claude Code 会话共用此登录。在有人重新登录之前，正在运行的会话将无法工作。",
       "cancel": "取消"
+    },
+    "claudePlan": {
+      "title": "计划模式",
+      "whilePlanningLabel": "规划时不请求权限",
+      "whilePlanningHint": "Claude 规划期间使用的命令和工具由 codeg 逐次批准。计划审批、提问、文件编辑、文件删除以及你自己的 ask 规则仍会询问。",
+      "planningWhenElevated": "会话此前处于自动或绕过模式时",
+      "planningAlways": "始终",
+      "planningOff": "关闭（每次都询问）",
+      "afterApprovalLabel": "批准计划后继续使用",
+      "afterApprovalHint": "计划卡片的主按钮。其他选项仍保留在卡片上。",
+      "afterPrePlan": "规划前的模式",
+      "afterBypass": "绕过权限",
+      "afterAuto": "自动",
+      "afterAsk": "每次询问",
+      "saveFailed": "保存失败：{message}"
     }
   },
   "AgentVocabulary": {
