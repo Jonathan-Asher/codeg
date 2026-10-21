@@ -3553,6 +3553,15 @@
         "poolWait": "Tous les abonnements Claude ont atteint leur limite. Les messages en file partiront dès qu’un abonnement se libère.",
         "poolWaitUntil": "Tous les abonnements Claude ont atteint leur limite — le prochain se libère à {time}. Les messages en file partiront alors.",
         "notSent": "Non envoyé : la connexion à {agent} a échoué. Les messages en file partiront dès son retour.",
+        "notSentLabel": "Non envoyé",
+        "notSentConnectionLost": "Connexion perdue — sera renvoyé",
+        "notSentTimeout": "Pas de réponse — sera renvoyé",
+        "notSentServer": "Erreur du serveur — sera renvoyé",
+        "notSentUnauthorized": "Déconnecté — sera renvoyé après la connexion",
+        "notSentInterrupted": "Interrompu — sera renvoyé",
+        "notSentRejected": "Refusé par le serveur",
+        "notSentGaveUp": "Échec persistant — touchez Réessayer",
+        "retryItem": "Renvoyer maintenant",
         "retry": "Réessayer"
       },
       "welcomeInputPanel": {
@@ -7384,7 +7393,8 @@
       "newQuestion": "Nouvelle question",
       "openInCodeg": "Ouvrir dans codeg",
       "hide": "Masquer",
-      "unqueue": "Retirer de la file d’attente"
+      "unqueue": "Retirer de la file d’attente",
+      "retry": "Renvoyer"
     },
     "status": {
       "connecting": "Démarrage de {agent}…",

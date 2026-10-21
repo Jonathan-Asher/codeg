@@ -138,13 +138,15 @@ describe("useConnectionLifecycle send-failure surfacing", () => {
     consoleError.mockRestore()
   })
 
-  it("invokes onSendFailed (after the toast) so the caller can settle optimistic state", async () => {
+  it("invokes onSendFailed so the caller can settle optimistic state and keep the message, then toasts", async () => {
     const error = { code: "http_error", message: "HTTP 413" }
     sendPrompt.mockRejectedValue(error)
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
     const calls: string[] = []
     toastError.mockImplementation(() => calls.push("toast"))
-    const onSendFailed = vi.fn(() => calls.push("onSendFailed"))
+    const onSendFailed = vi.fn(() => {
+      calls.push("onSendFailed")
+    })
 
     const { result } = renderLifecycle()
     await act(async () => {
@@ -154,10 +156,44 @@ describe("useConnectionLifecycle send-failure surfacing", () => {
 
     expect(onSendFailed).toHaveBeenCalledTimes(1)
     expect(onSendFailed).toHaveBeenCalledWith(error)
-    // Toast first, then the state rollback — the rollback must not hide the
-    // failure from the user.
-    expect(calls).toEqual(["toast", "onSendFailed"])
+    // The caller keeps the message first; the toast still says it failed.
+    expect(calls).toEqual(["onSendFailed", "toast"])
     consoleError.mockRestore()
+  })
+
+  it("raises no toast when the caller shows the failure itself", async () => {
+    sendPrompt.mockRejectedValue(new TypeError("Load failed"))
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    const onSendFailed = vi.fn(() => true)
+
+    const { result } = renderLifecycle()
+    await act(async () => {
+      result.current.handleSend(draft(), null, { onSendFailed })
+      await flush()
+    })
+
+    expect(onSendFailed).toHaveBeenCalledTimes(1)
+    expect(toastError).not.toHaveBeenCalled()
+    consoleError.mockRestore()
+  })
+
+  it("reports the server's answer, duplicate included, to onAccepted", async () => {
+    sendPrompt.mockResolvedValue({ duplicate: true })
+    const onAccepted = vi.fn()
+
+    const { result } = renderLifecycle()
+    await act(async () => {
+      result.current.handleSend(draft(), null, {
+        clientMessageId: "optimistic-1",
+        onAccepted,
+      })
+      await flush()
+    })
+
+    expect(onAccepted).toHaveBeenCalledWith({ duplicate: true })
+    expect(sendPrompt.mock.calls[0][1]).toMatchObject({
+      clientMessageId: "optimistic-1",
+    })
   })
 
   it("routes TurnBusyError to onTurnInProgress with no toast and no onSendFailed", async () => {

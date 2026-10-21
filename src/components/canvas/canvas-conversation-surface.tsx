@@ -16,7 +16,14 @@ import { MessageListView } from "@/components/message/message-list-view"
 import { useAcpActions } from "@/contexts/acp-connections-context"
 import { useConnectionLifecycle } from "@/hooks/use-connection-lifecycle"
 import { useConversationDetail } from "@/hooks/use-conversation-detail"
-import { useMessageQueue, type QueuedMessage } from "@/hooks/use-message-queue"
+import {
+  newClientMessageId,
+  useMessageQueue,
+  type QueuedMessage,
+} from "@/hooks/use-message-queue"
+import { durableSendCallbacks } from "@/lib/durable-send"
+import { outboxStorageKey } from "@/lib/outbox-storage"
+import { nextSendFailure, type SendFailure } from "@/lib/send-failure"
 import { useQueueAutoSend } from "@/hooks/use-queue-auto-send"
 import {
   acpStopAsyncTask,
@@ -169,7 +176,12 @@ export function draftRuntimeConversationId(contextKey: string): number {
   return -(Math.abs(hash) + 1)
 }
 
-function buildOptimisticUserTurn(draft: PromptDraft, fallback: string) {
+function buildOptimisticUserTurn(
+  draft: PromptDraft,
+  fallback: string,
+  // The message's client id, which the server's echo carries back.
+  id: string = `optimistic-${randomUUID()}`
+) {
   const text = getPromptDraftDisplayText(draft, fallback)
   const blocks: ContentBlock[] = []
   for (const image of extractUserImagesFromDraft(draft)) {
@@ -182,7 +194,7 @@ function buildOptimisticUserTurn(draft: PromptDraft, fallback: string) {
   }
   blocks.push({ type: "text", text })
   return {
-    id: `optimistic-${randomUUID()}`,
+    id,
     role: "user",
     blocks,
     timestamp: new Date().toISOString(),
@@ -580,10 +592,16 @@ export function CanvasConversationSurface({
     remove: mqRemove,
     reorder: mqReorder,
     updateItem: mqUpdateItem,
+    retry: mqRetry,
+    trackSend: mqTrackSend,
+    settleSend: mqSettleSend,
     editingItemId: mqEditingItemId,
     startEditing: mqStartEditing,
     cancelEditing: mqCancelEditing,
-  } = useMessageQueue()
+    // Keyed by the card's connection key, which the pinned card that
+    // replaces a draft inherits: a message still on its way when the draft
+    // hands over is settled (or kept as "Not sent") where the user sees it.
+  } = useMessageQueue(outboxStorageKey(`canvas:${contextKey}`))
   // Stamped when the backend bounces a send because a turn is already running
   // (the same conversation open in a workspace tab or another window, which
   // started its turn first). The queue's retry backs off from it.
@@ -598,8 +616,13 @@ export function CanvasConversationSurface({
       selectedModeIdArg?: string | null,
       // `fromQueueFlush` marks the queue sending its head: that always sends
       // and, on a bounce, goes back to the FRONT. A direct send while messages
-      // wait joins the end of the line instead of overtaking them.
-      opts?: { fromQueueFlush?: boolean }
+      // wait joins the end of the line instead of overtaking them. A queued
+      // message keeps its client id and failure count across attempts.
+      opts?: {
+        fromQueueFlush?: boolean
+        clientMessageId?: string
+        failure?: SendFailure
+      }
     ) => {
       // Bail BEFORE the optimistic turn exists. A second submit while the first
       // one is still minting the conversation row cannot be sent (there is no
@@ -607,17 +630,31 @@ export function CanvasConversationSurface({
       // would leave the user looking at a message that was never delivered and
       // never rolled back.
       const alreadyPersisted = dbConversationIdRef.current != null
-      if (!alreadyPersisted && (creatingRef.current || !draftTarget)) return
-
       const fromQueueFlush = opts?.fromQueueFlush ?? false
+      const modeIdForQueue = selectedModeIdArg ?? null
+      const clientMessageId = opts?.clientMessageId ?? newClientMessageId()
+      // The composer cleared itself already: a message that cannot go out
+      // now waits in the queue rather than vanishing.
+      if (!alreadyPersisted && (creatingRef.current || !draftTarget)) {
+        mqEnqueue(draft, modeIdForQueue, {
+          clientMessageId,
+          failure: opts?.failure,
+        })
+        return
+      }
+
       if (shouldQueueDirectSend(fromQueueFlush, mqGetQueueLength())) {
-        mqEnqueue(draft, selectedModeIdArg ?? null)
+        mqEnqueue(draft, modeIdForQueue, {
+          clientMessageId,
+          failure: opts?.failure,
+        })
         return
       }
 
       const optimisticTurn = buildOptimisticUserTurn(
         draft,
-        sharedT("attachedResources")
+        sharedT("attachedResources"),
+        clientMessageId
       )
       appendOptimisticTurn(
         effectiveConversationId,
@@ -637,42 +674,52 @@ export function CanvasConversationSurface({
       // typing indicator, with `awaiting_persist` pinned so no refetch clears
       // it either. Both calls ignore a turn that isn't there, so this is
       // unconditional rather than a guess about which one won.
-      const onSendFailed = () => {
+      const rollback = () => {
         removeOptimisticTurn(effectiveConversationId, optimisticTurn.id)
         const persistedId = dbConversationIdRef.current
         if (persistedId != null && persistedId !== effectiveConversationId) {
           removeOptimisticTurn(persistedId, optimisticTurn.id)
         }
       }
+      // On its way: stored until the server answers (see `useMessageQueue`).
+      mqTrackSend({ clientMessageId, draft, modeId: modeIdForQueue })
       // The backend refused it because a turn is already running (another
       // surface on this conversation started one first, or this card had not
-      // heard of it yet). Not an error: it waits in the queue and goes out when
-      // that turn ends — back at the front if it was the queue's head.
-      const onTurnInProgress = () => {
-        lastFlushBounceAtRef.current = Date.now()
-        onSendFailed()
-        if (fromQueueFlush) {
-          mqRequeueFront(draft, selectedModeIdArg ?? null)
-        } else {
-          mqEnqueue(draft, selectedModeIdArg ?? null)
-        }
-      }
-      // Held back for the account pool: queued the same way, then the queue
-      // waits for the pool instead of retrying.
-      const onPoolExhausted = (hold: PoolHold) => {
-        onTurnInProgress()
-        holdForPool(hold)
-      }
+      // heard of it yet), or the account pool is out: not an error, it waits
+      // in the queue — back at the front if it was the queue's head. Any other
+      // failure keeps it at the front as "Not sent" with the reason; a
+      // duplicate answer means an earlier attempt had arrived. See
+      // `lib/durable-send`.
+      const { onTurnInProgress, onPoolExhausted, onSendFailed, onAccepted } =
+        durableSendCallbacks({
+          queue: {
+            enqueue: mqEnqueue,
+            requeueFront: mqRequeueFront,
+            settleSend: mqSettleSend,
+          },
+          draft,
+          modeId: modeIdForQueue,
+          clientMessageId,
+          previousFailure: opts?.failure,
+          fromQueueFlush,
+          rollback,
+          onBounce: () => {
+            lastFlushBounceAtRef.current = Date.now()
+          },
+          onPoolHold: (hold: PoolHold) => holdForPool(hold),
+          onDuplicate: rollback,
+        })
 
       const persistedId = dbConversationIdRef.current
       if (persistedId) {
         lifecycleSend(draft, selectedModeIdArg, {
           folderId: boundFolderId ?? undefined,
           conversationId: persistedId,
-          clientMessageId: optimisticTurn.id,
+          clientMessageId,
           onTurnInProgress,
           onPoolExhausted,
           onSendFailed,
+          onAccepted,
         })
         return
       }
@@ -719,18 +766,25 @@ export function CanvasConversationSurface({
           lifecycleSend(draft, selectedModeIdArg, {
             folderId: sendFolderId,
             conversationId: newId,
-            clientMessageId: optimisticTurn.id,
+            clientMessageId,
             onTurnInProgress,
             onPoolExhausted,
             onSendFailed,
+            onAccepted,
           })
         } catch (e) {
           console.error("[canvas] create conversation:", e)
-          // Restore the pre-send state whole: no ghost turn stuck in
-          // awaiting_persist, and the error visible rather than silent — as
-          // a notification, like every verdict on a click.
+          // No ghost turn stuck in awaiting_persist, the message kept at the
+          // queue's front as "Not sent" (the composer cleared it), and the
+          // error visible rather than silent — as a notification, like every
+          // verdict on a click.
+          mqSettleSend(clientMessageId)
           removeOptimisticTurn(effectiveConversationId, optimisticTurn.id)
           setSyncState(effectiveConversationId, "idle")
+          mqRequeueFront(draft, modeIdForQueue, {
+            clientMessageId,
+            failure: nextSendFailure(e, opts?.failure),
+          })
           notify({
             level: "error",
             key: `canvas-create-failed:${contextKey}`,
@@ -755,6 +809,8 @@ export function CanvasConversationSurface({
       mqEnqueue,
       mqGetQueueLength,
       mqRequeueFront,
+      mqTrackSend,
+      mqSettleSend,
       holdForPool,
       onConversationCreated,
       refreshConversations,
@@ -782,9 +838,9 @@ export function CanvasConversationSurface({
     })
   const connectionId = conn.connectionId
   const deliverIntoHeldTurn = useCallback(
-    async (text: string, blocks?: PromptInputBlock[]) => {
+    async (text: string, blocks?: PromptInputBlock[], clientId?: string) => {
       if (!connectionId) throw new Error("no connection")
-      await submitSessionFeedback(connectionId, text.trim(), blocks)
+      await submitSessionFeedback(connectionId, text.trim(), blocks, clientId)
     },
     [connectionId]
   )
@@ -800,7 +856,11 @@ export function CanvasConversationSurface({
         item.draft,
         // Queued before this card knew its modes: take the mode in effect now.
         item.adoptSendTimeMode ? selectedModeIdRef.current : item.modeId,
-        { fromQueueFlush: true }
+        {
+          fromQueueFlush: true,
+          clientMessageId: item.clientMessageId,
+          failure: item.failure,
+        }
       ),
     [handleSend]
   )
@@ -1030,6 +1090,7 @@ export function CanvasConversationSurface({
           onQueueReorder={mqReorder}
           onQueueEdit={mqStartEditing}
           onQueueDelete={mqRemove}
+          onQueueRetry={mqRetry}
           editingItemId={mqEditingItemId}
           editingDraftText={editingQueueItem?.draft.displayText ?? null}
           editingDraftBlocks={editingQueueItem?.draft.blocks ?? null}

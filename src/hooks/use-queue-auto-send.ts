@@ -6,6 +6,7 @@ import type { QueuedMessage } from "@/hooks/use-message-queue"
 import { shouldDrainIntoHeldTurn } from "@/lib/background-idle"
 import { buildSteerPayload } from "@/lib/prompt-draft"
 import { flushRetryDelayMs } from "@/lib/queue-flush"
+import { headSendDelayMs } from "@/lib/durable-send"
 import { isNoActiveTurnRejection } from "@/lib/turn-busy"
 import type { PromptInputBlock } from "@/lib/types"
 
@@ -42,7 +43,8 @@ export interface UseQueueAutoSendArgs {
    *  once that turn has ended. */
   deliverIntoHeldTurn: (
     text: string,
-    blocks?: PromptInputBlock[]
+    blocks?: PromptInputBlock[],
+    clientId?: string
   ) => Promise<unknown>
   /** A held-turn delivery failed for another reason; the message now waits
    *  for the end of the turn. */
@@ -95,12 +97,20 @@ export function useQueueAutoSend(args: UseQueueAutoSendArgs): void {
   // straight back to the front leaves the queue length where it was.
   const [flushAttempts, setFlushAttempts] = useState(0)
   const queueLength = queue.length
+  const head = queue[0]
   useEffect(() => {
     if (!canSendNow || busy || heldDrainInFlightRef.current) return
     if (queueLength === 0) return
+    // A "Not sent" head that waits for Retry holds the queue; one that
+    // resends by itself waits out its backoff.
+    const headDelay = headSendDelayMs(head)
+    if (headDelay == null) return
     // A timer, not a microtask: the commit that completed the previous turn
     // settles first, and a just-bounced retry waits out its backoff.
-    const wait = flushRetryDelayMs(Date.now(), lastBounceAtRef.current ?? 0)
+    const wait = Math.max(
+      headDelay,
+      flushRetryDelayMs(Date.now(), lastBounceAtRef.current ?? 0)
+    )
     const timer = setTimeout(() => {
       const current = argsRef.current
       if (heldDrainInFlightRef.current || !current.isConnectionReady()) return
@@ -115,11 +125,11 @@ export function useQueueAutoSend(args: UseQueueAutoSendArgs): void {
     busy,
     heldDrainsSettled,
     queueLength,
+    head,
     lastBounceAtRef,
     flushAttempts,
   ])
 
-  const head = queue[0]
   useEffect(() => {
     if (
       !shouldDrainIntoHeldTurn({
@@ -142,7 +152,7 @@ export function useQueueAutoSend(args: UseQueueAutoSendArgs): void {
     }
     heldDrainInFlightRef.current = true
     void current
-      .deliverIntoHeldTurn(payload.text, payload.blocks)
+      .deliverIntoHeldTurn(payload.text, payload.blocks, head.clientMessageId)
       .then(() => argsRef.current.remove(head.id))
       .catch((error: unknown) => {
         // Either way it now goes out as an ordinary prompt once the turn is

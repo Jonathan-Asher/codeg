@@ -3553,6 +3553,15 @@
         "poolWait": "All Claude subscriptions are at their limit. Queued messages go out once one frees up.",
         "poolWaitUntil": "All Claude subscriptions are at their limit — the next one frees at {time}. Queued messages go out then.",
         "notSent": "Not sent: the connection to {agent} failed. Queued messages go out once it is back.",
+        "notSentLabel": "Not sent",
+        "notSentConnectionLost": "Connection lost — will resend",
+        "notSentTimeout": "No answer — will resend",
+        "notSentServer": "Server error — will resend",
+        "notSentUnauthorized": "Signed out — will resend after you sign in",
+        "notSentInterrupted": "Interrupted — will resend",
+        "notSentRejected": "Refused by the server",
+        "notSentGaveUp": "Still failing — tap Retry",
+        "retryItem": "Send again now",
         "retry": "Retry"
       },
       "welcomeInputPanel": {
@@ -7384,7 +7393,8 @@
       "newQuestion": "New question",
       "openInCodeg": "Open in codeg",
       "hide": "Hide",
-      "unqueue": "Remove from queue"
+      "unqueue": "Remove from queue",
+      "retry": "Send again"
     },
     "status": {
       "connecting": "Starting {agent}…",

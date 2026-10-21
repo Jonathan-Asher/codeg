@@ -3553,6 +3553,15 @@
         "poolWait": "Todas as assinaturas do Claude atingiram o limite. As mensagens na fila serão enviadas assim que uma liberar.",
         "poolWaitUntil": "Todas as assinaturas do Claude atingiram o limite — a próxima libera às {time}. As mensagens na fila serão enviadas nessa hora.",
         "notSent": "Não enviado: a conexão com {agent} falhou. As mensagens na fila serão enviadas quando ela voltar.",
+        "notSentLabel": "Não enviado",
+        "notSentConnectionLost": "Conexão perdida — será reenviado",
+        "notSentTimeout": "Sem resposta — será reenviado",
+        "notSentServer": "Erro do servidor — será reenviado",
+        "notSentUnauthorized": "Sessão encerrada — será reenviado após o login",
+        "notSentInterrupted": "Interrompido — será reenviado",
+        "notSentRejected": "Recusado pelo servidor",
+        "notSentGaveUp": "Continua falhando — toque em Tentar novamente",
+        "retryItem": "Enviar de novo agora",
         "retry": "Tentar novamente"
       },
       "welcomeInputPanel": {
@@ -7384,7 +7393,8 @@
       "newQuestion": "Nova pergunta",
       "openInCodeg": "Abrir no codeg",
       "hide": "Ocultar",
-      "unqueue": "Remover da fila"
+      "unqueue": "Remover da fila",
+      "retry": "Enviar de novo"
     },
     "status": {
       "connecting": "Iniciando {agent}…",

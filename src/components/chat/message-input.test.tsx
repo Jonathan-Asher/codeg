@@ -1669,7 +1669,11 @@ describe("MessageInput mid-turn send (live-feedback channel)", () => {
     await user.click(item)
     // A plain-text draft steers as text alone — no blocks payload.
     await waitFor(() =>
-      expect(onSteer).toHaveBeenCalledWith("go left", undefined)
+      expect(onSteer).toHaveBeenCalledWith(
+        "go left",
+        undefined,
+        expect.stringMatching(/^optimistic-/)
+      )
     )
     // Unsettled: the draft must survive until the backend confirms.
     expect(serializeDocToText(editor.state.doc)).toContain("go left")
@@ -1710,7 +1714,7 @@ describe("MessageInput mid-turn send (live-feedback channel)", () => {
     )
   })
 
-  it("keeps the draft on a non-turn-end failure", async () => {
+  it("moves a draft whose insert failed into the queue as not sent", async () => {
     const user = userEvent.setup()
     const { isNoActiveTurnRejection } = await import("@/lib/turn-busy")
     vi.mocked(isNoActiveTurnRejection).mockReturnValue(false)
@@ -1728,9 +1732,19 @@ describe("MessageInput mid-turn send (live-feedback channel)", () => {
     )
 
     await waitFor(() => expect(onSteer).toHaveBeenCalled())
-    // Real failure: nothing queued, draft intact for retry.
-    expect(onEnqueue).not.toHaveBeenCalled()
-    expect(serializeDocToText(editor.state.doc)).toContain("keep me")
+    // Real failure: the queue keeps it as "Not sent", under the insert's
+    // client id (so the prompt it becomes is a no-op if the insert did
+    // arrive), and the editor is cleared — it is never in both places.
+    await waitFor(() => expect(onEnqueue).toHaveBeenCalledTimes(1))
+    const opts = onEnqueue.mock.calls[0][2]
+    expect(opts).toMatchObject({
+      holdUntilTurnEnd: true,
+      clientMessageId: onSteer.mock.calls[0][2],
+    })
+    expect(opts.failure).toMatchObject({ autoRetry: true, attempts: 1 })
+    await waitFor(() =>
+      expect(serializeDocToText(editor.state.doc)).not.toContain("keep me")
+    )
   })
 
   it("labels the mid-turn action honestly on the pull channel", async () => {
@@ -1757,7 +1771,11 @@ describe("MessageInput mid-turn send (live-feedback channel)", () => {
     expect(pullItem.querySelector(".lucide-zap")).toBeNull()
     await user.click(pullItem)
     await waitFor(() =>
-      expect(onSteer).toHaveBeenCalledWith("check the tests", undefined)
+      expect(onSteer).toHaveBeenCalledWith(
+        "check the tests",
+        undefined,
+        expect.stringMatching(/^optimistic-/)
+      )
     )
     await waitFor(() =>
       expect(serializeDocToText(editor.state.doc)).not.toContain(
@@ -1804,10 +1822,11 @@ describe("MessageInput mid-turn send (live-feedback channel)", () => {
     expect(item).not.toHaveAttribute("aria-disabled", "true")
     await user.click(item)
     await waitFor(() =>
-      expect(onSteer).toHaveBeenCalledWith("match this mock", [
-        { type: "text", text: "match this mock" },
-        stagedImageBlock,
-      ])
+      expect(onSteer).toHaveBeenCalledWith(
+        "match this mock",
+        [{ type: "text", text: "match this mock" }, stagedImageBlock],
+        expect.stringMatching(/^optimistic-/)
+      )
     )
     // Confirmed: the draft clears like any successful steer.
     await waitFor(() =>
@@ -1848,7 +1867,11 @@ describe("MessageInput mid-turn send (live-feedback channel)", () => {
     const user = userEvent.setup()
     const { isNoActiveTurnRejection } = await import("@/lib/turn-busy")
     vi.mocked(isNoActiveTurnRejection).mockReturnValue(false)
-    const onSteer = vi.fn().mockRejectedValue(new Error("boom"))
+    // A refusal (not a lost connection): it waits for the user, so the
+    // failure is raised as a toast as well as on the queued row.
+    const onSteer = vi
+      .fn()
+      .mockRejectedValue({ code: "invalid_input", message: "refused" })
     const editor = await mountPrompting({ onSteer, steerChannel: "pull" })
     typeDraft(editor, "keep me")
     await waitFor(() =>
@@ -1869,8 +1892,10 @@ describe("MessageInput mid-turn send (live-feedback channel)", () => {
     // Exactly one toast: raising the insert copy alongside the note copy is
     // the same overpromise, just louder.
     expect(vi.mocked(toast.error)).toHaveBeenCalledTimes(1)
-    // Same draft policy as native: a real failure keeps the text for retry.
-    expect(serializeDocToText(editor.state.doc)).toContain("keep me")
+    // Same draft policy as native: a real failure moves it to the queue.
+    await waitFor(() =>
+      expect(serializeDocToText(editor.state.doc)).not.toContain("keep me")
+    )
   })
 
   it("steers an image-only draft with the attachment summary as the note", async () => {
@@ -1893,9 +1918,11 @@ describe("MessageInput mid-turn send (live-feedback channel)", () => {
       await screen.findByRole("menuitem", { name: MI.steerIntoTurn })
     )
     await waitFor(() =>
-      expect(onSteer).toHaveBeenCalledWith("Attached 1 attachment", [
-        stagedImageBlock,
-      ])
+      expect(onSteer).toHaveBeenCalledWith(
+        "Attached 1 attachment",
+        [stagedImageBlock],
+        expect.stringMatching(/^optimistic-/)
+      )
     )
   })
 
@@ -1984,7 +2011,11 @@ describe("MessageInput mid-turn send (live-feedback channel)", () => {
       await screen.findByRole("menuitem", { name: MI.steerAsNote })
     )
     await waitFor(() =>
-      expect(onSteer).toHaveBeenCalledWith("check the tests", undefined)
+      expect(onSteer).toHaveBeenCalledWith(
+        "check the tests",
+        undefined,
+        expect.stringMatching(/^optimistic-/)
+      )
     )
     await waitFor(() =>
       expect(serializeDocToText(editor.state.doc)).not.toContain(
@@ -2017,7 +2048,8 @@ describe("MessageInput mid-turn send (live-feedback channel)", () => {
       await waitFor(() =>
         expect(onDeliverNow).toHaveBeenCalledWith(
           "what did the tests say?",
-          undefined
+          undefined,
+          expect.stringMatching(/^optimistic-/)
         )
       )
       expect(onEnqueue).not.toHaveBeenCalled()
@@ -2072,7 +2104,10 @@ describe("MessageInput mid-turn send (live-feedback channel)", () => {
       await user.click(screen.getByTitle(MI.heldTurnSend))
       // An ordinary queue entry: the session is idle now, so it sends next.
       await waitFor(() => expect(onEnqueue).toHaveBeenCalledTimes(1))
-      expect(onEnqueue.mock.calls[0]).toHaveLength(2)
+      // Under the delivery's client id, unmarked: it is waiting, not failed.
+      expect(onEnqueue.mock.calls[0][2]).toEqual({
+        clientMessageId: onDeliverNow.mock.calls[0][2],
+      })
       await waitFor(() =>
         expect(serializeDocToText(editor.state.doc)).not.toContain(
           "just in time"
@@ -2098,7 +2133,11 @@ describe("MessageInput mid-turn send (live-feedback channel)", () => {
 
       await user.click(screen.getByTitle(MI.heldTurnSend))
       await waitFor(() => expect(onEnqueue).toHaveBeenCalledTimes(1))
-      expect(onEnqueue.mock.calls[0][2]).toEqual({ holdUntilTurnEnd: true })
+      expect(onEnqueue.mock.calls[0][2]).toMatchObject({
+        holdUntilTurnEnd: true,
+        clientMessageId: onDeliverNow.mock.calls[0][2],
+        failure: expect.objectContaining({ reason: "server" }),
+      })
     })
 
     it("queues as before when the session cannot deliver now", async () => {

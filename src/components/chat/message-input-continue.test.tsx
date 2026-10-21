@@ -256,7 +256,8 @@ describe("MessageInput Continue: what it sends", () => {
     await waitFor(() =>
       expect(props.onDeliverNow).toHaveBeenCalledWith(
         CONTINUE_PROMPT,
-        undefined
+        undefined,
+        expect.stringMatching(/^optimistic-/)
       )
     )
     expect(onSend).not.toHaveBeenCalled()

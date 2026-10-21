@@ -8,6 +8,7 @@ import {
   GripVertical,
   Hourglass,
   Pencil,
+  RotateCw,
   X,
   Zap,
 } from "lucide-react"
@@ -15,6 +16,7 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { draftRidesBlocks } from "@/lib/prompt-draft"
+import { sendFailureLabelKey } from "@/lib/send-failure"
 import type { QueuedMessage } from "@/hooks/use-message-queue"
 
 /**
@@ -36,6 +38,8 @@ interface MessageQueueDisplayProps {
   onReorder: (items: QueuedMessage[]) => void
   onEdit: (id: string) => void
   onDelete: (id: string) => void
+  /** Send a "Not sent" message again now (see `QueuedMessage.failure`). */
+  onRetry?: (id: string) => void
   editingItemId: string | null
   /**
    * Send one queued item straight into the RUNNING turn over the session's
@@ -57,6 +61,7 @@ interface QueueItemProps {
   isEditing: boolean
   onEdit: (id: string) => void
   onDelete: (id: string) => void
+  onRetry?: (id: string) => void
   onSteerItem?: (id: string) => Promise<void> | void
   steerChannel: "native" | "pull"
   /** Whether an insert from ANY row is in flight — every row's button is
@@ -71,6 +76,7 @@ function QueueItem({
   isEditing,
   onEdit,
   onDelete,
+  onRetry,
   onSteerItem,
   steerChannel,
   steering,
@@ -78,6 +84,7 @@ function QueueItem({
 }: QueueItemProps) {
   const t = useTranslations("Folder.chat.messageQueue")
   const dragControls = useDragControls()
+  const failure = item.failure
 
   // Which rows may offer the insert at all. Two rows can't, and offering a
   // click that provably does nothing is worse than offering none:
@@ -109,9 +116,14 @@ function QueueItem({
       value={item}
       dragListener={false}
       dragControls={dragControls}
+      data-testid="queue-item"
+      data-not-sent={
+        failure ? (failure.autoRetry ? "retrying" : "held") : undefined
+      }
       className={cn(
         "flex items-center gap-1 rounded-md border px-1.5 py-1 text-3xs leading-none select-none [text-box-trim:both] [text-box-edge:cap_alphabetic]",
         "bg-muted/40 border-border/70",
+        failure && "border-red-500/40",
         isEditing && "border-primary/50 bg-primary/5"
       )}
     >
@@ -125,9 +137,31 @@ function QueueItem({
       <span className="shrink-0 font-mono text-3xs text-muted-foreground/70">
         #{index + 1}
       </span>
+      {failure && (
+        <span
+          data-testid="queue-item-not-sent"
+          className="flex shrink-0 items-center gap-0.5 text-3xs text-red-600 dark:text-red-400"
+          title={failure.detail}
+        >
+          <CircleAlert className="h-2.5 w-2.5" aria-hidden />
+          {t("notSentLabel")} · {t(sendFailureLabelKey(failure))}
+        </span>
+      )}
       <span className="min-w-0 flex-1 truncate text-3xs text-foreground/80">
         {item.draft.displayText}
       </span>
+      {failure && onRetry && (
+        <button
+          type="button"
+          data-testid="queue-item-retry"
+          onClick={() => onRetry(item.id)}
+          className="shrink-0 rounded-sm px-1 py-0.5 text-3xs font-medium text-red-600 hover:bg-red-500/10 dark:text-red-400"
+          title={t("retryItem")}
+        >
+          <RotateCw className="mr-0.5 inline h-2.5 w-2.5" aria-hidden />
+          {t("retry")}
+        </button>
+      )}
       {canSteer && (
         <button
           type="button"
@@ -203,6 +237,7 @@ export function MessageQueueDisplay({
   onReorder,
   onEdit,
   onDelete,
+  onRetry,
   editingItemId,
   onSteerItem,
   steerChannel = "pull",
@@ -250,6 +285,7 @@ export function MessageQueueDisplay({
             isEditing={editingItemId === item.id}
             onEdit={onEdit}
             onDelete={onDelete}
+            onRetry={onRetry}
             onSteerItem={onSteerItem}
             steerChannel={steerChannel}
             steering={steeringId !== null}

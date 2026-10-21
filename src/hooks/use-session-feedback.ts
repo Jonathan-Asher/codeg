@@ -124,7 +124,11 @@ export interface UseSessionFeedback {
    *  `NoActiveTurn` rejection on the pull path reroutes it to the queue
    *  whole, so an attachment is never silently dropped); `text` stays the
    *  recorded/display form. */
-  steer: (text: string, blocks?: PromptInputBlock[]) => Promise<FeedbackItem>
+  steer: (
+    text: string,
+    blocks?: PromptInputBlock[],
+    clientId?: string
+  ) => Promise<FeedbackItem>
 }
 
 export function useSessionFeedback({
@@ -432,13 +436,20 @@ export function useSessionFeedback({
   const steer = useCallback(
     async (
       rawText: string,
-      blocks?: PromptInputBlock[]
+      blocks?: PromptInputBlock[],
+      // The message's client id (see `submitSessionFeedback`).
+      clientId?: string
     ): Promise<FeedbackItem> => {
       const text = rawText.trim()
       if (!text || !connectionId) {
         throw new Error("nothing to steer")
       }
-      const item = await submitSessionFeedback(connectionId, text, blocks)
+      const item = await submitSessionFeedback(
+        connectionId,
+        text,
+        blocks,
+        clientId
+      )
       // A resolution that landed after a connection switch must not touch the
       // new connection's channel state or note list (reconcileChannel guards
       // itself too; the append needs the same protection).

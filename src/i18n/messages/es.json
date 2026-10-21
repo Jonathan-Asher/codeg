@@ -3553,6 +3553,15 @@
         "poolWait": "Todas las suscripciones de Claude han alcanzado su límite. Los mensajes en cola se enviarán en cuanto se libere una.",
         "poolWaitUntil": "Todas las suscripciones de Claude han alcanzado su límite: la próxima se libera a las {time}. Los mensajes en cola se enviarán entonces.",
         "notSent": "No enviado: la conexión con {agent} falló. Los mensajes en cola se enviarán cuando vuelva.",
+        "notSentLabel": "No enviado",
+        "notSentConnectionLost": "Conexión perdida — se reenviará",
+        "notSentTimeout": "Sin respuesta — se reenviará",
+        "notSentServer": "Error del servidor — se reenviará",
+        "notSentUnauthorized": "Sesión cerrada — se reenviará al iniciar sesión",
+        "notSentInterrupted": "Interrumpido — se reenviará",
+        "notSentRejected": "Rechazado por el servidor",
+        "notSentGaveUp": "Sigue fallando — pulsa Reintentar",
+        "retryItem": "Enviar de nuevo ahora",
         "retry": "Reintentar"
       },
       "welcomeInputPanel": {
@@ -7384,7 +7393,8 @@
       "newQuestion": "Nueva pregunta",
       "openInCodeg": "Abrir en codeg",
       "hide": "Ocultar",
-      "unqueue": "Quitar de la cola"
+      "unqueue": "Quitar de la cola",
+      "retry": "Enviar de nuevo"
     },
     "status": {
       "connecting": "Iniciando {agent}…",

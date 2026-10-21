@@ -23,7 +23,7 @@ import type {
   PendingQuestion,
   ClaudeApiRetryState,
 } from "@/contexts/acp-connections-context"
-import type { QueuedMessage } from "@/hooks/use-message-queue"
+import type { QueuedMessage, RequeueOptions } from "@/hooks/use-message-queue"
 import type { QueueNotice } from "@/components/chat/message-queue-display"
 import { ChatInput } from "@/components/chat/chat-input"
 import type { ComposerInjectContent } from "@/components/chat/message-input"
@@ -114,7 +114,7 @@ interface ConversationShellProps {
   onEnqueue?: (
     draft: PromptDraft,
     modeId: string | null,
-    opts?: { holdUntilTurnEnd?: boolean }
+    opts?: RequeueOptions
   ) => void
   /** Pass-through: see `ChatInput.awaitingBackground`. */
   awaitingBackground?: boolean
@@ -123,7 +123,11 @@ interface ConversationShellProps {
   /** Pass-through: see `MessageInput.heldTurnReady`. */
   heldTurnReady?: boolean
   /** Pass-through: see `MessageInput.onDeliverNow`. */
-  onDeliverNow?: (text: string, blocks?: PromptInputBlock[]) => Promise<void>
+  onDeliverNow?: (
+    text: string,
+    blocks?: PromptInputBlock[],
+    clientId?: string
+  ) => Promise<void>
   /** Pass-through: see `MessageInput.canContinue`. */
   canContinue?: boolean
   /** Why the queue is held, shown above it (see `QueueNotice`). */
@@ -133,6 +137,8 @@ interface ConversationShellProps {
   onQueueReorder?: (items: QueuedMessage[]) => void
   onQueueEdit?: (id: string) => void
   onQueueDelete?: (id: string) => void
+  /** Pass-through: see `ChatInput.onQueueRetry`. */
+  onQueueRetry?: (id: string) => void
   /** Insert one queued item into the RUNNING turn over the session's
    *  live-feedback channel; threaded straight through to the composer's
    *  queue list. See `ChatInputProps.onQueueSteer`. */
@@ -151,7 +157,11 @@ interface ConversationShellProps {
    *  `MessageInputProps.onSteer` — the optional second parameter makes a
    *  stale one-arg declaration here assignable, so tsc would NOT catch a
    *  wrapper that silently drops the blocks. */
-  onSteer?: (text: string, blocks?: PromptInputBlock[]) => Promise<void>
+  onSteer?: (
+    text: string,
+    blocks?: PromptInputBlock[],
+    clientId?: string
+  ) => Promise<void>
   /** Which channel `onSteer` rides (picks the composer's honest copy);
    *  threaded straight through. See `MessageInput`. */
   steerChannel?: "native" | "pull"
@@ -221,6 +231,7 @@ export function ConversationShell({
   onQueueReorder,
   onQueueEdit,
   onQueueDelete,
+  onQueueRetry,
   onQueueSteer,
   editingItemId,
   editingDraftText,
@@ -330,6 +341,7 @@ export function ConversationShell({
               onQueueReorder={onQueueReorder}
               onQueueEdit={onQueueEdit}
               onQueueDelete={onQueueDelete}
+              onQueueRetry={onQueueRetry}
               onQueueSteer={onQueueSteer}
               editingItemId={editingItemId}
               editingDraftText={editingDraftText}

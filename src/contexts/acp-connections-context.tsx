@@ -21,6 +21,7 @@ import {
   acpConnect,
   acpGetAgentStatus,
   acpPrompt,
+  type PromptAccepted,
   acpPromptUnlinked,
   acpSetMode,
   acpSetConfigOption,
@@ -3249,7 +3250,7 @@ export interface AcpActionsValue {
        *  conversation row. The backend refuses it on a linked connection. */
       unlinked?: boolean
     }
-  ): Promise<void>
+  ): Promise<PromptAccepted>
   setMode(contextKey: string, modeId: string): Promise<void>
   setConfigOption(
     contextKey: string,
@@ -7621,20 +7622,23 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       }
     ) => {
       const conn = storeRef.current.connections.get(contextKey)
-      if (!conn) return
+      // No connection any more (it went away between the composer's check and
+      // this call): a failure the caller keeps the message for, never a
+      // silent success.
+      if (!conn) throw new Error("connection not found: no live connection")
       lastActivityRef.current.set(contextKey, Date.now())
       try {
         if (opts?.unlinked) {
           await acpPromptUnlinked(conn.connectionId, blocks)
-        } else {
-          await acpPrompt(
-            conn.connectionId,
-            blocks,
-            opts?.folderId ?? null,
-            opts?.conversationId ?? null,
-            opts?.clientMessageId ?? null
-          )
+          return { duplicate: false }
         }
+        return await acpPrompt(
+          conn.connectionId,
+          blocks,
+          opts?.folderId ?? null,
+          opts?.conversationId ?? null,
+          opts?.clientMessageId ?? null
+        )
       } catch (e) {
         // Same reasoning as `cancel`: the backend disowning this id proves the
         // local state is stale. Settle it (the caller still gets the error and

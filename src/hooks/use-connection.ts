@@ -13,6 +13,7 @@ import {
   type PendingQuestion,
 } from "@/contexts/acp-connections-context"
 import type { PoolHold } from "@/lib/pool-hold"
+import type { PromptAccepted } from "@/lib/api"
 import type {
   AgentType,
   AttachPhase,
@@ -153,7 +154,7 @@ export interface UseConnectionReturn {
       clientMessageId?: string | null
       unlinked?: boolean
     }
-  ) => Promise<void>
+  ) => Promise<PromptAccepted>
   setMode: (modeId: string) => Promise<void>
   setConfigOption: (
     configId: string,

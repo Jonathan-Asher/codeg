@@ -591,6 +591,7 @@ export function QuickAskWindow() {
           streaming={streaming}
           heldForBackground={streaming && conn.awaitingBackground}
           onUnqueue={unqueue}
+          onRetry={qa.retryQuestion}
           footer={footer}
         />
       )}

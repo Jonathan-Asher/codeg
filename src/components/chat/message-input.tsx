@@ -54,6 +54,11 @@ import {
 import { imageFilesFromClipboardApi } from "@/lib/clipboard-images"
 import { toErrorMessage } from "@/lib/app-error"
 import { isNoActiveTurnRejection } from "@/lib/turn-busy"
+import { nextSendFailure } from "@/lib/send-failure"
+import {
+  newClientMessageId,
+  type RequeueOptions,
+} from "@/hooks/use-message-queue"
 import { routeComposerSend } from "@/lib/background-idle"
 import { CONTINUE_SHORTCUT, continuePromptDraft } from "@/lib/continue-turn"
 import { buildSteerPayload } from "@/lib/prompt-draft"
@@ -239,7 +244,7 @@ interface MessageInputProps {
   onEnqueue?: (
     draft: PromptDraft,
     modeId: string | null,
-    opts?: { holdUntilTurnEnd?: boolean }
+    opts?: RequeueOptions
   ) => void
   /**
    * The turn in flight is held open only for background work and a message
@@ -254,7 +259,11 @@ interface MessageInputProps {
    *  resolve = delivered (clear the draft); a `NoActiveTurn` rejection means
    *  the turn ended in the meantime and the draft goes to the queue, which
    *  sends it right away; any other failure queues it for the turn's end. */
-  onDeliverNow?: (text: string, blocks?: PromptInputBlock[]) => Promise<void>
+  onDeliverNow?: (
+    text: string,
+    blocks?: PromptInputBlock[],
+    clientId?: string
+  ) => Promise<void>
   /**
    * The conversation can take a Continue (`canOfferContinue`): the agent has
    * replied and the session is idle, or idle with background work holding its
@@ -286,7 +295,11 @@ interface MessageInputProps {
    *  resolve = recorded (clear the draft); reject = failure, where a turn-end
    *  `NoActiveTurn` race falls back to the queue and anything else keeps the
    *  draft. */
-  onSteer?: (text: string, blocks?: PromptInputBlock[]) => Promise<void>
+  onSteer?: (
+    text: string,
+    blocks?: PromptInputBlock[],
+    clientId?: string
+  ) => Promise<void>
   /** Which channel {@link onSteer} rides (`useSessionFeedback().channel`).
    *  Picks the honest copy for the mid-turn action: `native` = inserted into
    *  the turn immediately, `pull` = recorded as a note the agent reads on its
@@ -1608,9 +1621,13 @@ export function MessageInput({
         }
         resetComposer()
       }
+      // One id for this message on every path it may take: the delivery,
+      // and the queued prompt it becomes if the delivery looks failed — so a
+      // delivery that did arrive is not delivered again as that prompt.
+      const clientId = newClientMessageId()
       setDelivering(true)
       try {
-        await onDeliverNow(payload.text, payload.blocks)
+        await onDeliverNow(payload.text, payload.blocks, clientId)
         clearComposer()
       } catch (err) {
         if (!onEnqueue) {
@@ -1620,14 +1637,25 @@ export function MessageInput({
           return
         }
         if (isNoActiveTurnRejection(err)) {
-          onEnqueue(draft, modeId)
+          onEnqueue(draft, modeId, { clientMessageId: clientId })
         } else {
-          onEnqueue(draft, modeId, { holdUntilTurnEnd: true })
-          toast.error(t("heldTurnSendFailed"), {
-            description: toErrorMessage(err),
+          // Kept in the queue as "Not sent" for the turn's end (never
+          // retried into the same failure); the row says why.
+          const failure = nextSendFailure(err, undefined)
+          onEnqueue(draft, modeId, {
+            holdUntilTurnEnd: true,
+            clientMessageId: clientId,
+            failure,
           })
+          if (!failure.autoRetry) {
+            toast.error(t("heldTurnSendFailed"), {
+              description: toErrorMessage(err),
+            })
+          }
         }
-        if (fromComposer) resetComposer()
+        // The queue has it now: clear the stored draft too, so a reload
+        // does not bring it back a second time in the editor.
+        clearComposer()
       } finally {
         setDelivering(false)
       }
@@ -1764,27 +1792,43 @@ export function MessageInput({
     }
     const draft = buildDraft()
     if (!draft) return
-    const enqueueInstead = () => {
-      if (!onEnqueue) return
-      onEnqueue(draft, showModeSelector ? effectiveModeId : null)
+    // One id for the insert and for the queued prompt it may become (see
+    // `deliverIntoHeldTurn`).
+    const clientId = newClientMessageId()
+    const enqueueInstead = (opts?: RequeueOptions) => {
+      if (!onEnqueue) return false
+      onEnqueue(draft, showModeSelector ? effectiveModeId : null, {
+        clientMessageId: clientId,
+        ...opts,
+      })
+      if (effectiveDraftStorageKey) {
+        clearMessageInputDraftV2(effectiveDraftStorageKey)
+      }
       resetComposer()
-      toast.info(t("steerQueuedInstead"))
+      return true
     }
     const payload = buildSteerPayload(draft)
     if (!payload) return
     setSteering(true)
     try {
-      await onSteer(payload.text, payload.blocks)
+      await onSteer(payload.text, payload.blocks, clientId)
       resetComposer()
     } catch (err) {
       if (isNoActiveTurnRejection(err)) {
         // The turn ended in the race window — reroute through the queue.
-        enqueueInstead()
+        if (enqueueInstead()) toast.info(t("steerQueuedInstead"))
       } else {
-        toast.error(
-          t(steerChannel === "pull" ? "steerNoteFailed" : "steerFailed"),
-          { description: toErrorMessage(err) }
-        )
+        // Not delivered as far as this client knows: into the queue as "Not
+        // sent", for the turn's end (its insert button retries the insert).
+        // Without a queue the draft stays in the editor.
+        const failure = nextSendFailure(err, undefined)
+        const queued = enqueueInstead({ holdUntilTurnEnd: true, failure })
+        if (!queued || !failure.autoRetry) {
+          toast.error(
+            t(steerChannel === "pull" ? "steerNoteFailed" : "steerFailed"),
+            { description: toErrorMessage(err) }
+          )
+        }
       }
     } finally {
       setSteering(false)
@@ -1798,6 +1842,7 @@ export function MessageInput({
     onEnqueue,
     showModeSelector,
     effectiveModeId,
+    effectiveDraftStorageKey,
     resetComposer,
     steerChannel,
     t,
