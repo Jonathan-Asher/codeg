@@ -23,7 +23,9 @@ import {
 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { AgentCapsule } from "./agent-capsule"
+import { ProviderErrorNotice } from "./provider-error-notice"
 import { SubagentSessionButton } from "./subagent-session-button"
+import { detectProviderError } from "@/lib/provider-errors"
 import {
   isAsyncLaunchAckText,
   parseBackgroundTaskMarker,
@@ -259,6 +261,7 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
   const t = useTranslations("Folder.chat.contentParts")
   const tTool = useTranslations("Folder.chat.tool")
   const tBg = useTranslations("Folder.chat.backgroundTasks")
+  const tProvider = useTranslations("Folder.chat.providerError")
 
   const isRunning =
     part.state === "input-available" || part.state === "input-streaming"
@@ -295,6 +298,18 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
   const backgroundSettled = backgroundLifecycle?.status != null
   const backgroundFailed =
     backgroundSettled && backgroundLifecycle?.status !== "completed"
+  // The sub-agent's request was refused or failed at the model provider
+  // (a usage-policy block, a rate limit, …): its "result" is the provider's
+  // message, whichever way it arrived — the result text, an error result, a
+  // background task's folded result or a task-outcome error. Shown as a
+  // compact stopped state on this card instead of as a reply.
+  const providerError = useMemo(
+    () =>
+      detectProviderError(isError ? part.errorText : part.output) ??
+      detectProviderError(backgroundLifecycle?.result) ??
+      detectProviderError(outcomeError),
+    [isError, part.errorText, part.output, backgroundLifecycle, outcomeError]
+  )
 
   const [promptOpen, setPromptOpen] = useState(false)
 
@@ -376,31 +391,35 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
     return description || t("agentFallbackTitle")
   }, [subagentType, description, t])
 
-  const statusLabel = backgroundLifecycle
-    ? backgroundFailed
-      ? tBg("cardFinishedWithStatus", {
-          status: backgroundLifecycle.status ?? "",
-        })
-      : backgroundSettled
-        ? tBg("cardCompleted")
-        : tBg("cardLaunchedPending")
-    : isLiveBackgroundLaunch
-      ? tBg("cardRunning")
-      : outcomeError
-        ? // Cursor reports a failed task with wire status "completed"; the
-          // error envelope is the only failure signal.
-          tTool("status.outputError")
-        : outcomeBackground
-          ? // A background task's completion envelope only acknowledges the
-            // launch — the sub-agent is still running.
-            tBg("cardRunning")
-          : part.state === "input-available"
-            ? tTool("status.inputAvailable")
-            : part.state === "input-streaming"
-              ? tTool("status.inputStreaming")
-              : part.state === "output-available"
-                ? tTool("status.outputAvailable")
-                : tTool("status.outputError")
+  const statusLabel = providerError
+    ? tProvider("subagentStopped", {
+        reason: tProvider(`reason.${providerError.kind}`),
+      })
+    : backgroundLifecycle
+      ? backgroundFailed
+        ? tBg("cardFinishedWithStatus", {
+            status: backgroundLifecycle.status ?? "",
+          })
+        : backgroundSettled
+          ? tBg("cardCompleted")
+          : tBg("cardLaunchedPending")
+      : isLiveBackgroundLaunch
+        ? tBg("cardRunning")
+        : outcomeError
+          ? // Cursor reports a failed task with wire status "completed"; the
+            // error envelope is the only failure signal.
+            tTool("status.outputError")
+          : outcomeBackground
+            ? // A background task's completion envelope only acknowledges the
+              // launch — the sub-agent is still running.
+              tBg("cardRunning")
+            : part.state === "input-available"
+              ? tTool("status.inputAvailable")
+              : part.state === "input-streaming"
+                ? tTool("status.inputStreaming")
+                : part.state === "output-available"
+                  ? tTool("status.outputAvailable")
+                  : tTool("status.outputError")
 
   const agentStats = part.agentStats ?? null
   const adaptedToolCalls = useMemo(
@@ -504,7 +523,12 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
       <AgentCapsule
         title={title}
         isRunning={isRunning || isLiveBackgroundLaunch || outcomeBackground}
-        isError={isError || backgroundFailed || outcomeError != null}
+        isError={
+          isError ||
+          backgroundFailed ||
+          outcomeError != null ||
+          providerError != null
+        }
         rightSuffix={durationSuffix}
         idBadge={agentId ? shortAgentId(agentId) : null}
         // codex only: the launch capsule's own state describes the spawn, so the
@@ -637,8 +661,15 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
           </div>
         )}
 
+        {/* Stopped at the model provider: one compact line, the provider's
+          link, and its message under "Details" — in place of every result
+          section below, which would otherwise print that message as a reply. */}
+        {providerError && (
+          <ProviderErrorNotice error={providerError} scope="subagent" />
+        )}
+
         {/* Error output */}
-        {isError && part.errorText && (
+        {isError && part.errorText && !providerError && (
           <div className="rounded-md bg-destructive/10 p-3">
             <pre className="whitespace-pre-wrap break-words text-xs text-destructive">
               {part.errorText}
@@ -648,7 +679,7 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
 
         {/* Cursor task failure envelope ({error}) — the wire marks the call
           "completed", so this renders where the error styling belongs. */}
-        {outcomeError && !isError && (
+        {outcomeError && !isError && !providerError && (
           <div className="rounded-md bg-destructive/10 p-3">
             <pre className="whitespace-pre-wrap break-words text-xs text-destructive">
               {outcomeError}
@@ -659,7 +690,7 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
         {/* Background lifecycle: settled summary + folded result markdown, or a
           neutral "result pending" line for an unsettled launch. Never dumps
           the marker/ack text. */}
-        {backgroundLifecycle && !isError && (
+        {backgroundLifecycle && !isError && !providerError && (
           <div className="space-y-2">
             {backgroundLifecycle.summary && (
               <div className="text-xs text-muted-foreground">
@@ -683,6 +714,7 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
           capsule chrome above (duration suffix / error box), never as body. */}
         {part.output &&
           !isError &&
+          !providerError &&
           !taskOutcome &&
           !backgroundLifecycle &&
           !isLiveBackgroundLaunch && (

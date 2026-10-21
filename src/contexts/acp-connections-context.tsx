@@ -89,6 +89,7 @@ import {
   type SessionFailureAction,
   type SessionFailureSettleScope,
 } from "@/lib/session-failures"
+import { detectProviderError } from "@/lib/provider-errors"
 import {
   adoptUnknownAsyncTasks,
   liveAsyncTasks,
@@ -5358,20 +5359,37 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           const noticeKind = sessionFailureNotice(stored, e.record)
           if (noticeKind === null) break
           const connKey = failureConn.connectionId
-          // Adapter-authored English, shown verbatim like a notice's text —
-          // first line as the headline, the rest (a passed-through upstream
-          // body, the record's details) below it. A blank title falls back to
-          // the localized category.
-          const headline = splitHeadline(e.record.title, e.record.details)
-          const title = t("noticeTitle", {
-            agent: getAgentLabel(failureConn.agentType),
-            title:
-              headline?.title ??
-              tFailure(sessionFailureCategoryLabelKey(e.record.category)),
-          })
-          const description = headline
-            ? headline.description
-            : e.record.details?.trim() || undefined
+          // The model provider refused or failed the request (a usage-policy
+          // block, a rate limit, …) and the adapter titled the failure with
+          // the client's "API Error: …" text: say it compactly, as the
+          // transcript's sub-agent cards do, with the provider's own message
+          // — verbatim, link included — below it.
+          const providerError =
+            detectProviderError(e.record.title) ??
+            detectProviderError(e.record.details)
+          // Otherwise adapter-authored English, shown verbatim like a notice's
+          // text — first line as the headline, the rest (a passed-through
+          // upstream body, the record's details) below it. A blank title
+          // falls back to the localized category.
+          const headline = providerError
+            ? null
+            : splitHeadline(e.record.title, e.record.details)
+          const title = providerError
+            ? tChat("providerError.agentStopped", {
+                agent: getAgentLabel(failureConn.agentType),
+                reason: tChat(`providerError.reason.${providerError.kind}`),
+              })
+            : t("noticeTitle", {
+                agent: getAgentLabel(failureConn.agentType),
+                title:
+                  headline?.title ??
+                  tFailure(sessionFailureCategoryLabelKey(e.record.category)),
+              })
+          const description = providerError
+            ? providerError.raw
+            : headline
+              ? headline.description
+              : e.record.details?.trim() || undefined
           if (noticeKind === "advisory") {
             notify({
               level: "warning",

@@ -570,3 +570,70 @@ describe("AgentToolCallPart child session action", () => {
     ).not.toBeInTheDocument()
   })
 })
+
+describe("AgentToolCallPart stopped at the model provider", () => {
+  // Synthesized in the shape Claude Code hands back for a blocked sub-agent;
+  // not copied from any session.
+  const blocked =
+    "API Error: 400 This request was blocked as it seems to violate the provider's terms of service on example misuse. To learn more, visit https://example.com/legal/terms."
+  const P = enMessages.Folder.chat.providerError
+  const stopped = (reason: string) =>
+    P.subagentStopped.replace("{reason}", reason)
+  const agentInput = JSON.stringify({
+    subagent_type: "Explore",
+    description: "map the repo",
+    prompt: "look around",
+  })
+
+  it("shows a compact stopped state for a result that is a policy block", () => {
+    renderCard({ ...basePart(agentInput, "output-available"), output: blocked })
+    // Error styling on the pill, which says what happened, and the short
+    // title on the opened card.
+    expect(
+      screen.getByRole("button", { name: stopped(P.reason.policy_block) })
+    ).toBeInTheDocument()
+    expect(screen.getByText(stopped(P.reason.policy_block))).toBeInTheDocument()
+    // The provider's link is a link.
+    expect(
+      screen.getByRole("link", { name: "https://example.com/legal/terms" })
+    ).toHaveAttribute("href", "https://example.com/legal/terms")
+    // The raw message waits behind "Details" instead of filling the card.
+    expect(screen.queryByText(blocked)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: P.details }))
+    expect(screen.getByText(blocked)).toBeInTheDocument()
+  })
+
+  it("reads an error result the same way", () => {
+    renderCard({ ...basePart(agentInput, "output-error"), errorText: blocked })
+    expect(screen.getByText(stopped(P.reason.policy_block))).toBeInTheDocument()
+    expect(screen.queryByText(blocked)).not.toBeInTheDocument()
+  })
+
+  it("names a rate limit and an overloaded provider for what they are", () => {
+    const { unmount } = renderCard({
+      ...basePart(agentInput, "output-available"),
+      output: "API Error: 429 Too many requests",
+    })
+    expect(screen.getByText(stopped(P.reason.rate_limit))).toBeInTheDocument()
+    unmount()
+    renderCard({
+      ...basePart(agentInput, "output-available"),
+      output:
+        'API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}',
+    })
+    expect(screen.getByText(stopped(P.reason.overloaded))).toBeInTheDocument()
+  })
+
+  it("leaves an ordinary result that quotes such a message alone", () => {
+    renderCard({
+      ...basePart(agentInput, "output-available"),
+      output: `I searched the logs. One line read: ${blocked.slice(15)} Nothing else stood out.`,
+    })
+    expect(
+      screen.queryByText(stopped(P.reason.policy_block))
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Completed" })
+    ).toBeInTheDocument()
+  })
+})

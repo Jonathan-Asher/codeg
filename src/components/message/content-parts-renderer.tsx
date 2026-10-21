@@ -89,6 +89,8 @@ import { HookFeedbackMarker } from "./hook-feedback-marker"
 import { PlanCard, PlanEntriesList } from "./plan-card"
 import { PlanMarkdownCard, PlanModeCard } from "./plan-mode-card"
 import { PlainTextWithBadges } from "./plain-text-with-badges"
+import { ProviderErrorNotice } from "./provider-error-notice"
+import { detectProviderError } from "@/lib/provider-errors"
 import {
   FileTextIcon,
   FilePenLineIcon,
@@ -3130,6 +3132,20 @@ export const ContentPartsRenderer = memo(function ContentPartsRenderer({
       // never a stream that has not produced its first token yet, which is why
       // this is scoped to `user` and assistant text is left to render as-is.
       if (role === "user" && part.text.trim().length === 0) return null
+      // The agent's own API-error line (a client that gets it as transcript
+      // text rather than as a typed failure): a compact stopped state, the
+      // provider's message under "Details" — not a reply-sized blob.
+      const providerError =
+        role === "user" ? null : detectProviderError(part.text)
+      if (providerError) {
+        return (
+          <ProviderErrorNotice
+            key={`provider-error-${keyId}`}
+            error={providerError}
+            scope="turn"
+          />
+        )
+      }
       return (
         <TextPart
           key={`text-${keyId}`}
