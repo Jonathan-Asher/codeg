@@ -2303,7 +2303,9 @@
       "workingOutOfTurnHint": "에이전트가 스스로 턴을 실행하고 있습니다. 백그라운드 작업이 계기가 되었습니다(작업 완료 또는 모니터 알림).",
       "moreTasks": "외 {count}개",
       "taskKind": {
-        "agent": "하위 에이전트",
+        "subagent": "하위 에이전트",
+        "agent": "백그라운드 하위 에이전트",
+        "delegation": "위임된 에이전트",
         "shell": "셸",
         "monitor": "모니터",
         "workflow": "워크플로",
@@ -2335,7 +2337,8 @@
       "limitPoolPausedHint": "계정 풀의 모든 Claude 계정이 한도에 도달했습니다. 하나라도 여유가 생기면 이 세션이 자동으로 계속됩니다.",
       "limitPoolBannerTitle": "사용량 한도로 일시 중지됨",
       "limitStopped": "사용량 한도로 중지됨",
-      "limitStoppedHint": "마지막 턴이 사용량 한도로 중지되었고 더 이상 자동으로 계속되지 않습니다. 한도가 허용되면 계속하세요."
+      "limitStoppedHint": "마지막 턴이 사용량 한도로 중지되었고 더 이상 자동으로 계속되지 않습니다. 한도가 허용되면 계속하세요.",
+      "workingWithItems": "작업 중 · {count}개 실행 중"
     },
     "conversationCard": {
       "untitledConversation": "제목 없는 대화",
@@ -3690,9 +3693,18 @@
         "moreAgents": "에이전트 더 보기 ({count})"
       },
       "subAgentOverlay": {
-        "title": "서브 에이전트",
-        "collapsedSummary": "서브 에이전트 {count}",
-        "collapseAria": "서브 에이전트 접기"
+        "title": "실행 중",
+        "collapsedSummary": "{count}개 실행 중",
+        "collapseAria": "실행 목록 접기",
+        "more": "외 {count}개",
+        "openCard": "대화에서 카드 보기",
+        "openTranscript": "해당 대화 열기",
+        "status": {
+          "running": "실행 중",
+          "paused": "일시 중지됨",
+          "done": "완료",
+          "failed": "실패"
+        }
       },
       "agentPlanOverlay": {
         "title": "에이전트 계획",
@@ -6780,8 +6792,19 @@
         "failed": "작업에 실패했습니다: {message}",
         "reloadWaiting": "계정 변경은 실행 중인 요청이 없을 때 풀이 다시 시작하면 반영됩니다.",
         "reloadNeedsRestart": "계정 변경은 다음에 maxpool이 다시 시작할 때 반영됩니다. codeg는 이 풀을 다시 시작할 수 없습니다.",
-        "restartNow": "지금 다시 시작"
-      }
+        "restartNow": "지금 다시 시작",
+        "makePreferred": "우선 계정으로 지정",
+        "useAutomatic": "자동 라우팅 사용",
+        "preferNeedsEnabled": "켜져 있는 Claude 계정만 우선 계정으로 지정할 수 있습니다",
+        "preferredToast": "이제 새 요청이 먼저 {name}(으)로 갑니다",
+        "automaticToast": "이제 새 요청을 여러 계정에 나눕니다",
+        "preferTitle": "{name}을(를) 우선 계정으로 지정할까요?",
+        "preferBody": "현재 풀의 라우팅은 \"{mode}\"입니다. {name}을(를) 우선 계정으로 지정하면 \"preferred\"로 바뀌어, 새 요청은 먼저 {name}(으)로 가고 제한될 때만 다른 계정으로 갑니다. 이미 실행 중인 요청은 그대로입니다.",
+        "preferConfirm": "{name} 우선 지정"
+      },
+      "routingPreferred": "라우팅: 새 요청은 먼저 <b>{name}</b>(으)로 갑니다. 제한되면 다른 계정이 이어받습니다",
+      "routingAutomatic": "라우팅: 자동 — 새 요청을 여러 계정에 나눕니다",
+      "routingOther": "라우팅: {mode}"
     }
   },
   "Forge": {

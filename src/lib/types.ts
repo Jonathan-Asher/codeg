@@ -572,16 +572,26 @@ export interface DbConversationSummary {
   background?: ConversationBackground | null
 }
 
-/** One background task of a live session (Rust
- *  `acp::background_status::BackgroundTaskBrief`). */
+/** One item running for a live session (Rust
+ *  `acp::background_status::BackgroundTaskBrief`): a background task, a codeg
+ *  delegation, or a sub-agent the running turn waits for. */
 export interface BackgroundTaskBrief {
-  /** The agent's own task id. */
+  /** The agent's own task id (a delegation's broker task id, a foreground
+   *  sub-agent's tool call id). */
   id: string
-  /** `agent` (async sub-agent), `shell`, `monitor`, `workflow`, or `task`;
-   *  a kind added later arrives as itself. */
+  /** `subagent` (a sub-agent the turn waits for), `agent` (async sub-agent),
+   *  `delegation` (codeg's `delegate_to_agent`), `shell`, `monitor`,
+   *  `workflow`, or `task`; a kind added later arrives as itself. */
   kind: string
   /** The description the agent gave it; absent when it gave none. */
   label?: string
+  /** When the server first listed it (RFC 3339): the elapsed time's start. */
+  started_at?: string
+  /** The tool call that started it, when known: its card in the thread. */
+  tool_call_id?: string
+  /** A delegation's child agent and conversation. */
+  agent_type?: AgentType
+  conversation_id?: number
 }
 
 /** What a live session is doing in the background (Rust
@@ -2682,6 +2692,9 @@ export interface PlanUsagePoolAccount {
   /** The account's sign-in can no longer be refreshed. */
   refresh_failed: boolean
   observed_at: number | null
+  /** An API provider the pool also routes to (GLM, Kimi), not a Claude
+   *  subscription: it can't be the preferred account. Absent = false. */
+  provider?: boolean
 }
 
 export interface PlanUsagePool {

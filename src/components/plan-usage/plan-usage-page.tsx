@@ -47,6 +47,7 @@ import {
 import {
   PoolAccountList,
   PoolNotices,
+  PoolRoutingLine,
   PoolSummaryLine,
   UnansweredPoolNotice,
 } from "./plan-usage-pool"
@@ -318,6 +319,7 @@ function PoolProviderCard({
         {managed && <PoolAddAccountButton onChanged={managed} />}
       </header>
       <PoolSummaryLine pool={pool} now={now} className="mt-1.5" />
+      <PoolRoutingLine pool={pool} className="mt-0.5" />
       <div className="mt-3 space-y-2 empty:hidden">
         <PoolNotices pool={pool} now={now} />
         {manage?.available && managed && (

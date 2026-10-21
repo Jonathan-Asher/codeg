@@ -2303,7 +2303,9 @@
       "workingOutOfTurnHint": "El agente ejecuta un turno por su cuenta: lo despertó su trabajo en segundo plano (terminó una tarea o un monitor avisó).",
       "moreTasks": "+{count} más",
       "taskKind": {
-        "agent": "Subagente",
+        "subagent": "Subagente",
+        "agent": "Subagente en segundo plano",
+        "delegation": "Agente delegado",
         "shell": "Shell",
         "monitor": "Monitor",
         "workflow": "Flujo de trabajo",
@@ -2335,7 +2337,8 @@
       "limitPoolPausedHint": "Todas las cuentas de Claude del grupo de cuentas están en su límite. Esta sesión continúa sola en cuanto una quede libre.",
       "limitPoolBannerTitle": "En pausa por límites de uso",
       "limitStopped": "Detenida por límites de uso",
-      "limitStoppedHint": "El último turno se detuvo por un límite de uso y ya no continúa solo. Continúalo cuando el límite lo permita."
+      "limitStoppedHint": "El último turno se detuvo por un límite de uso y ya no continúa solo. Continúalo cuando el límite lo permita.",
+      "workingWithItems": "Trabajando · {count} en ejecución"
     },
     "conversationCard": {
       "untitledConversation": "Conversación sin título",
@@ -3690,9 +3693,18 @@
         "moreAgents": "Más agentes ({count})"
       },
       "subAgentOverlay": {
-        "title": "Subagentes",
-        "collapsedSummary": "Subagentes {count}",
-        "collapseAria": "Contraer subagentes"
+        "title": "En ejecución",
+        "collapsedSummary": "{count} en ejecución",
+        "collapseAria": "Contraer la lista en ejecución",
+        "more": "+{count} más",
+        "openCard": "Mostrar su tarjeta en la conversación",
+        "openTranscript": "Abrir su conversación",
+        "status": {
+          "running": "En ejecución",
+          "paused": "En pausa",
+          "done": "Hecho",
+          "failed": "Falló"
+        }
       },
       "agentPlanOverlay": {
         "title": "Plan del agente",
@@ -6780,8 +6792,19 @@
         "failed": "No funcionó: {message}",
         "reloadWaiting": "Un cambio de cuenta se aplica cuando el grupo se reinicia, en cuanto no haya solicitudes en curso.",
         "reloadNeedsRestart": "Un cambio de cuenta se aplica la próxima vez que se reinicie maxpool. codeg no puede reiniciar este grupo.",
-        "restartNow": "Reiniciar ahora"
-      }
+        "restartNow": "Reiniciar ahora",
+        "makePreferred": "Hacer preferida",
+        "useAutomatic": "Usar enrutamiento automático",
+        "preferNeedsEnabled": "Solo una cuenta de Claude activada puede ser la preferida",
+        "preferredToast": "Las solicitudes nuevas van ahora primero a {name}",
+        "automaticToast": "Las solicitudes nuevas se reparten ahora entre las cuentas",
+        "preferTitle": "¿Preferir {name}?",
+        "preferBody": "El enrutamiento del grupo es ahora \"{mode}\". Preferir {name} lo cambia a \"preferred\": las solicitudes nuevas van primero a {name} y a las demás cuentas solo cuando está limitada. Las solicitudes en curso se quedan donde están.",
+        "preferConfirm": "Preferir {name}"
+      },
+      "routingPreferred": "Enrutamiento: las solicitudes nuevas van primero a <b>{name}</b>; las demás cuentas toman el relevo cuando está limitada",
+      "routingAutomatic": "Enrutamiento: automático — las solicitudes nuevas se reparten entre las cuentas",
+      "routingOther": "Enrutamiento: {mode}"
     }
   },
   "Forge": {

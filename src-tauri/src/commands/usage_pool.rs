@@ -261,6 +261,10 @@ struct PoolConfig {
 /// The status endpoint on the proxy's own address. A wildcard bind address
 /// is reached on loopback; anything that isn't a plain host name or address
 /// falls back to loopback too, so the key never goes somewhere unexpected.
+/// maxpool's routing mode that sends new requests to one account first.
+/// Its only other mode is `automatic`.
+pub(crate) const PREFERRED_ROUTING: &str = "preferred";
+
 fn status_url(host: Option<&str>, port: Option<u16>) -> String {
     let host = host.map(str::trim).unwrap_or_default();
     let plain = host
@@ -374,6 +378,9 @@ struct RawAccount {
     quota: Option<RawQuota>,
     #[serde(deserialize_with = "lenient")]
     weekly: Option<RawWeekly>,
+    /// `provider` for an API provider the pool also routes to (GLM, Kimi).
+    #[serde(rename = "type", deserialize_with = "lenient")]
+    account_type: Option<String>,
 }
 
 #[derive(Default, Deserialize)]
@@ -548,6 +555,14 @@ pub struct PoolAccount {
     pub refresh_failed: bool,
     /// The newest of the account's usage readings (epoch seconds).
     pub observed_at: Option<i64>,
+    /// An API provider the pool also routes to (GLM, Kimi), not a Claude
+    /// subscription: the pool can't prefer it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub provider: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -838,6 +853,7 @@ impl PoolAccount {
             probe_error_status: quota.last_probe_error_status,
             refresh_failed: raw.refresh_dead.unwrap_or(false),
             observed_at,
+            provider: raw.account_type.as_deref() == Some("provider"),
         };
         account.state = account.state_at(now, threshold);
         account.blocked_until = match account.availability(now, threshold, None) {
@@ -881,13 +897,29 @@ pub(crate) fn pool_limit(pool: &PlanUsagePool, now: i64, scope: Option<&str>) ->
 }
 
 fn build_pool(raw: RawStatus, config: &PoolConfig, now: i64) -> PlanUsagePool {
-    let routing = raw.routing.unwrap_or_default();
     let threshold = threshold_percent(raw.switch_threshold)
         .or(config.switch_threshold)
         .unwrap_or(DEFAULT_SWITCH_THRESHOLD * 100.0);
-    let preferred_account =
-        clean_label(routing.preferred_account).or_else(|| config.preferred_account.clone());
-    let routing_mode = clean_word(routing.mode).or_else(|| config.routing_mode.clone());
+    // The running server's routing when it reports one: it falls back to
+    // automatic by itself (the preferred account switched off or removed)
+    // while its config still names the account. The config only stands in
+    // for a server too old to report it.
+    let (preferred_account, routing_mode) = match raw.routing {
+        Some(routing) => (
+            clean_label(routing.preferred_account),
+            clean_word(routing.mode),
+        ),
+        None => (
+            config.preferred_account.clone(),
+            config.routing_mode.clone(),
+        ),
+    };
+    // An account is only preferred while the routing prefers one.
+    let preferred_account = preferred_account.filter(|_| {
+        routing_mode
+            .as_deref()
+            .is_none_or(|mode| mode == PREFERRED_ROUTING)
+    });
     let current_account = clean_label(raw.current_account);
     let accounts: Vec<PoolAccount> = raw
         .accounts

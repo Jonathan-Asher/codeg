@@ -2250,6 +2250,7 @@ mod tauri_app {
                 crate::commands::usage_pool::manage::usage_pool_login_cancel,
                 crate::commands::usage_pool::manage::usage_pool_rename,
                 crate::commands::usage_pool::manage::usage_pool_set_enabled,
+                crate::commands::usage_pool::manage::usage_pool_set_preferred,
                 crate::commands::usage_pool::manage::usage_pool_remove,
                 crate::commands::usage_pool::manage::usage_pool_restart_now,
                 crate::commands::claude_auth::claude_auth_status,

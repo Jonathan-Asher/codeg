@@ -2303,7 +2303,9 @@
       "workingOutOfTurnHint": "The agent is running a turn of its own: its background work woke it (a task finished or a monitor fired).",
       "moreTasks": "+{count} more",
       "taskKind": {
-        "agent": "Sub-agent",
+        "subagent": "Sub-agent",
+        "agent": "Background sub-agent",
+        "delegation": "Delegated agent",
         "shell": "Shell",
         "monitor": "Monitor",
         "workflow": "Workflow",
@@ -2335,7 +2337,8 @@
       "limitPoolPausedHint": "Every Claude account behind the account pool is at its limit. This session continues by itself once one frees up.",
       "limitPoolBannerTitle": "Paused by usage limits",
       "limitStopped": "Stopped by usage limits",
-      "limitStoppedHint": "The last turn stopped on a usage limit and no longer continues by itself. Continue it once the limit allows."
+      "limitStoppedHint": "The last turn stopped on a usage limit and no longer continues by itself. Continue it once the limit allows.",
+      "workingWithItems": "Working · {count} running"
     },
     "conversationCard": {
       "untitledConversation": "Untitled conversation",
@@ -3690,9 +3693,18 @@
         "moreAgents": "More agents ({count})"
       },
       "subAgentOverlay": {
-        "title": "Sub-agents",
-        "collapsedSummary": "Sub-agents {count}",
-        "collapseAria": "Collapse sub-agents"
+        "title": "Running",
+        "collapsedSummary": "{count} running",
+        "collapseAria": "Collapse the running list",
+        "more": "+{count} more",
+        "openCard": "Show its card in the conversation",
+        "openTranscript": "Open its conversation",
+        "status": {
+          "running": "Running",
+          "paused": "Paused",
+          "done": "Done",
+          "failed": "Failed"
+        }
       },
       "agentPlanOverlay": {
         "title": "Agent Plan",
@@ -6780,8 +6792,19 @@
         "failed": "That didn't work: {message}",
         "reloadWaiting": "An account change applies when the pool restarts, once no request is running.",
         "reloadNeedsRestart": "An account change applies the next time maxpool restarts. codeg cannot restart this pool.",
-        "restartNow": "Restart now"
-      }
+        "restartNow": "Restart now",
+        "makePreferred": "Make preferred",
+        "useAutomatic": "Use automatic routing",
+        "preferNeedsEnabled": "Only an enabled Claude account can be preferred",
+        "preferredToast": "New requests now go to {name} first",
+        "automaticToast": "New requests are now spread across the accounts",
+        "preferTitle": "Prefer {name}?",
+        "preferBody": "The pool's routing is \"{mode}\" now. Preferring {name} switches it to \"preferred\": new requests go to {name} first, and to the other accounts only when it's held back. Requests already running stay where they are.",
+        "preferConfirm": "Prefer {name}"
+      },
+      "routingPreferred": "Routing: new requests go to <b>{name}</b> first; the other accounts take over when it's held back",
+      "routingAutomatic": "Routing: automatic — new requests are spread across the accounts",
+      "routingOther": "Routing: {mode}"
     }
   },
   "Forge": {

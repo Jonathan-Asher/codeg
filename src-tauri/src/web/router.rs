@@ -1753,6 +1753,10 @@ pub fn build_router(
             post(handlers::plan_usage::usage_pool_set_enabled),
         )
         .route(
+            "/usage_pool_set_preferred",
+            post(handlers::plan_usage::usage_pool_set_preferred),
+        )
+        .route(
             "/usage_pool_remove",
             post(handlers::plan_usage::usage_pool_remove),
         )

@@ -2303,7 +2303,9 @@
       "workingOutOfTurnHint": "智能体正在自行运行一轮：由它的后台任务唤起（某个任务完成或监视器触发）。",
       "moreTasks": "另有 {count} 个",
       "taskKind": {
-        "agent": "子智能体",
+        "subagent": "子智能体",
+        "agent": "后台子智能体",
+        "delegation": "委托的智能体",
         "shell": "Shell",
         "monitor": "监视器",
         "workflow": "工作流",
@@ -2335,7 +2337,8 @@
       "limitPoolPausedHint": "账号池中的所有 Claude 账号都已达到上限。一旦有账号空出，此会话会自动继续。",
       "limitPoolBannerTitle": "因用量上限暂停",
       "limitStopped": "因用量上限停止",
-      "limitStoppedHint": "上一轮因用量上限而停止，且不会再自动继续。待额度允许时请手动继续。"
+      "limitStoppedHint": "上一轮因用量上限而停止，且不会再自动继续。待额度允许时请手动继续。",
+      "workingWithItems": "工作中 · {count} 个运行中"
     },
     "conversationCard": {
       "untitledConversation": "未命名会话",
@@ -3690,9 +3693,18 @@
         "moreAgents": "更多 Agent（{count}）"
       },
       "subAgentOverlay": {
-        "title": "子智能体",
-        "collapsedSummary": "子智能体 {count}",
-        "collapseAria": "折叠子智能体"
+        "title": "运行中",
+        "collapsedSummary": "{count} 个运行中",
+        "collapseAria": "折叠运行列表",
+        "more": "另有 {count} 个",
+        "openCard": "在对话中显示其卡片",
+        "openTranscript": "打开其对话",
+        "status": {
+          "running": "运行中",
+          "paused": "已暂停",
+          "done": "已完成",
+          "failed": "失败"
+        }
       },
       "agentPlanOverlay": {
         "title": "计划任务",
@@ -6780,8 +6792,19 @@
         "failed": "操作失败：{message}",
         "reloadWaiting": "账号更改将在账号池重启时生效，重启会等到没有请求运行时进行。",
         "reloadNeedsRestart": "账号更改将在 maxpool 下次重启时生效。codeg 无法重启此账号池。",
-        "restartNow": "立即重启"
-      }
+        "restartNow": "立即重启",
+        "makePreferred": "设为首选",
+        "useAutomatic": "改用自动路由",
+        "preferNeedsEnabled": "只有已启用的 Claude 账号才能设为首选",
+        "preferredToast": "新请求现在优先发往 {name}",
+        "automaticToast": "新请求现在分散到各个账号",
+        "preferTitle": "首选 {name}？",
+        "preferBody": "账号池当前的路由为“{mode}”。首选 {name} 会将其切换为“preferred”：新请求优先发往 {name}，仅在它受限时才发往其他账号。正在运行的请求保持不变。",
+        "preferConfirm": "首选 {name}"
+      },
+      "routingPreferred": "路由：新请求优先发往 <b>{name}</b>；它受限时由其他账号接手",
+      "routingAutomatic": "路由：自动 — 新请求分散到各个账号",
+      "routingOther": "路由：{mode}"
     }
   },
   "Forge": {

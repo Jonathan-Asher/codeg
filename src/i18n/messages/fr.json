@@ -2303,7 +2303,9 @@
       "workingOutOfTurnHint": "L'agent exécute un tour de lui-même : son travail en arrière-plan l'a réveillé (une tâche s'est terminée ou un moniteur s'est déclenché).",
       "moreTasks": "+{count} de plus",
       "taskKind": {
-        "agent": "Sous-agent",
+        "subagent": "Sous-agent",
+        "agent": "Sous-agent en arrière-plan",
+        "delegation": "Agent délégué",
         "shell": "Shell",
         "monitor": "Moniteur",
         "workflow": "Workflow",
@@ -2335,7 +2337,8 @@
       "limitPoolPausedHint": "Tous les comptes Claude du pool de comptes ont atteint leur limite. Cette session reprend d'elle-même dès qu'un compte se libère.",
       "limitPoolBannerTitle": "En pause à cause des limites d'utilisation",
       "limitStopped": "Arrêtée par les limites d'utilisation",
-      "limitStoppedHint": "Le dernier tour s'est arrêté sur une limite d'utilisation et ne reprend plus de lui-même. Reprenez-le quand la limite le permet."
+      "limitStoppedHint": "Le dernier tour s'est arrêté sur une limite d'utilisation et ne reprend plus de lui-même. Reprenez-le quand la limite le permet.",
+      "workingWithItems": "En cours · {count} en cours d'exécution"
     },
     "conversationCard": {
       "untitledConversation": "Conversation sans titre",
@@ -3690,9 +3693,18 @@
         "moreAgents": "Plus d'agents ({count})"
       },
       "subAgentOverlay": {
-        "title": "Sous-agents",
-        "collapsedSummary": "Sous-agents {count}",
-        "collapseAria": "Réduire les sous-agents"
+        "title": "En cours",
+        "collapsedSummary": "{count} en cours",
+        "collapseAria": "Replier la liste en cours",
+        "more": "+{count} de plus",
+        "openCard": "Afficher sa carte dans la conversation",
+        "openTranscript": "Ouvrir sa conversation",
+        "status": {
+          "running": "En cours",
+          "paused": "En pause",
+          "done": "Terminé",
+          "failed": "Échec"
+        }
       },
       "agentPlanOverlay": {
         "title": "Plan de l'agent",
@@ -6780,8 +6792,19 @@
         "failed": "Cela n'a pas fonctionné : {message}",
         "reloadWaiting": "Un changement de compte s'applique au redémarrage du pool, dès qu'aucune requête n'est en cours.",
         "reloadNeedsRestart": "Un changement de compte s'applique au prochain redémarrage de maxpool. codeg ne peut pas redémarrer ce pool.",
-        "restartNow": "Redémarrer maintenant"
-      }
+        "restartNow": "Redémarrer maintenant",
+        "makePreferred": "Définir comme préféré",
+        "useAutomatic": "Utiliser le routage automatique",
+        "preferNeedsEnabled": "Seul un compte Claude activé peut être préféré",
+        "preferredToast": "Les nouvelles requêtes vont désormais d'abord à {name}",
+        "automaticToast": "Les nouvelles requêtes sont désormais réparties entre les comptes",
+        "preferTitle": "Préférer {name} ?",
+        "preferBody": "Le routage du pool est actuellement « {mode} ». Préférer {name} le fait passer à « preferred » : les nouvelles requêtes vont d'abord à {name}, et aux autres comptes seulement quand il est limité. Les requêtes déjà en cours restent où elles sont.",
+        "preferConfirm": "Préférer {name}"
+      },
+      "routingPreferred": "Routage : les nouvelles requêtes vont d'abord à <b>{name}</b> ; les autres comptes prennent le relais quand il est limité",
+      "routingAutomatic": "Routage : automatique — les nouvelles requêtes sont réparties entre les comptes",
+      "routingOther": "Routage : {mode}"
     }
   },
   "Forge": {

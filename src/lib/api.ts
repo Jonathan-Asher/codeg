@@ -4084,6 +4084,14 @@ export async function usagePoolSetEnabled(
   return getTransport().call("usage_pool_set_enabled", { name, enabled })
 }
 
+/** Make `name` the pool's preferred account, or (`null`) go back to its
+ *  automatic balancing. */
+export async function usagePoolSetPreferred(
+  name: string | null
+): Promise<PoolChange> {
+  return getTransport().call("usage_pool_set_preferred", { name })
+}
+
 export async function usagePoolRemove(name: string): Promise<PoolChange> {
   return getTransport().call("usage_pool_remove", { name })
 }

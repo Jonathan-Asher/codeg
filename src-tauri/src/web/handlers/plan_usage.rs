@@ -108,6 +108,21 @@ pub async fn usage_pool_set_enabled(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PoolSetPreferredParams {
+    /// `None` goes back to automatic balancing.
+    pub name: Option<String>,
+}
+
+pub async fn usage_pool_set_preferred(
+    Json(params): Json<PoolSetPreferredParams>,
+) -> Result<Json<PoolChange>, AppCommandError> {
+    manage::set_preferred(params.name.as_deref())
+        .await
+        .map(Json)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PoolAccountParams {
     pub name: String,
 }
