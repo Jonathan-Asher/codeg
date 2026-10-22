@@ -1,4 +1,8 @@
-import type { DbConversationSummary, LimitPause } from "@/lib/types"
+import type {
+  DbConversationSummary,
+  LimitPause,
+  LimitReason,
+} from "@/lib/types"
 
 /**
  * Continue after the usage limit resets: when a turn stops because the
@@ -32,6 +36,33 @@ export function waitingLimitPause(
   const pause = summary?.limit_pause
   if (!pause) return null
   return pause.state === "scheduled" || pause.state === "claimed" ? pause : null
+}
+
+/** Why a waiting pause waits: the account's own usage limit, or the account
+ *  pool with no account that can take the request. A pause from a server
+ *  that predates the reason reads as the account's own limit. */
+export function limitPauseReason(
+  summary: Pick<DbConversationSummary, "limit_reason"> | null | undefined
+): LimitReason {
+  return summary?.limit_reason ?? "usage_limit"
+}
+
+/**
+ * Why the last turn stopped, when it stopped on a usage limit and no longer
+ * continues by itself — the continuations kept meeting the limit and gave
+ * up, or the user cancelled them. The turn then reads `interrupted`, with
+ * the manual Continue. `null` for any other turn, and while a pause still
+ * waits or its continuation runs.
+ */
+export function limitStopReason(
+  summary:
+    | Pick<DbConversationSummary, "turn_state" | "limit_pause" | "limit_reason">
+    | null
+    | undefined
+): LimitReason | null {
+  if (!summary || summary.turn_state !== "interrupted") return null
+  if (summary.limit_pause) return null
+  return summary.limit_reason ?? null
 }
 
 /** The words a paused session shows: when the limit resets, as a clock time

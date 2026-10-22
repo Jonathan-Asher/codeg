@@ -17,6 +17,9 @@ use crate::db::service::conversation_service::{
 };
 use crate::db::test_helpers::{fresh_in_memory_db, seed_folder};
 
+const USAGE: ConversationLimitReason = ConversationLimitReason::UsageLimit;
+const POOL: ConversationLimitReason = ConversationLimitReason::PoolCapacity;
+
 fn utc(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(y, mo, d, h, mi, 0).unwrap()
 }
@@ -368,6 +371,16 @@ async fn row(db: &AppDatabase, id: i32) -> conversation::Model {
 
 /// Run a turn on `id` that ends on the usage limit, resetting at `resets_at`.
 async fn hit_limit(db: &AppDatabase, id: i32, resets_at: DateTime<Utc>) -> UsageLimitTurnEnd {
+    hit_limit_for(db, id, resets_at, USAGE).await
+}
+
+/// [`hit_limit`], for a stop of `reason`.
+async fn hit_limit_for(
+    db: &AppDatabase,
+    id: i32,
+    resets_at: DateTime<Utc>,
+    reason: ConversationLimitReason,
+) -> UsageLimitTurnEnd {
     assert!(mark_turn_running(&db.conn, id).await.unwrap());
     finish_turn_on_usage_limit(
         &db.conn,
@@ -376,6 +389,7 @@ async fn hit_limit(db: &AppDatabase, id: i32, resets_at: DateTime<Utc>) -> Usage
         resets_at,
         MAX_ATTEMPTS,
         true,
+        reason,
     )
     .await
     .unwrap()
@@ -431,7 +445,7 @@ async fn with_the_feature_off_the_turn_ends_as_before() {
     // The global setting off.
     let a = session(&db, folder, "global-off").await;
     mark_turn_running(&db.conn, a).await.unwrap();
-    let end = finish_turn_on_usage_limit(&db.conn, a, None, reset, MAX_ATTEMPTS, false)
+    let end = finish_turn_on_usage_limit(&db.conn, a, None, reset, MAX_ATTEMPTS, false, USAGE)
         .await
         .unwrap();
     assert_eq!(end, UsageLimitTurnEnd::NotPaused);
@@ -487,7 +501,7 @@ async fn a_continuation_that_hits_the_limit_again_is_rescheduled_up_to_the_cap()
         // The limit is back: rescheduled from its new reset.
         reset += ChronoDuration::hours(5);
         assert_eq!(
-            finish_turn_on_usage_limit(&db.conn, id, None, reset, MAX_ATTEMPTS, true)
+            finish_turn_on_usage_limit(&db.conn, id, None, reset, MAX_ATTEMPTS, true, USAGE)
                 .await
                 .unwrap(),
             UsageLimitTurnEnd::Paused { attempts: attempt }
@@ -507,7 +521,7 @@ async fn a_continuation_that_hits_the_limit_again_is_rescheduled_up_to_the_cap()
     assert!(claim_limit_resume(&db.conn, id).await.unwrap());
     assert!(mark_turn_running(&db.conn, id).await.unwrap());
     assert_eq!(
-        finish_turn_on_usage_limit(&db.conn, id, None, reset, MAX_ATTEMPTS, true)
+        finish_turn_on_usage_limit(&db.conn, id, None, reset, MAX_ATTEMPTS, true, USAGE)
             .await
             .unwrap(),
         UsageLimitTurnEnd::GaveUp
@@ -754,4 +768,362 @@ fn the_frontend_matches_the_same_prompt() {
         source.contains(&format!("\"{LIMIT_CONTINUE_PROMPT}\"")),
         "src/lib/limit-continue.ts must carry LIMIT_CONTINUE_PROMPT verbatim"
     );
+}
+
+// ─── The account pool's stop ────────────────────────────────────────────
+
+/// The proxy's refusal as Claude Code ends the turn on it (synthetic text,
+/// shaped like the real one).
+const POOL_STOP: &str = "API Error: Server is temporarily limiting requests (not your usage \
+     limit) · No account can take this request right now — all 2 Claude accounts are at their \
+     limit. Retry in ~3h.";
+
+#[test]
+fn the_pool_refusal_is_recognized_as_a_limit_stop() {
+    // The AIR failure the adapter settles the turn with (`rate_limited` is
+    // filed under `limit`).
+    let text = usage_limit_text_from_failure(&record("limit", "error", POOL_STOP));
+    assert_eq!(text.as_deref(), Some(POOL_STOP));
+    assert_eq!(limit_reason_of(POOL_STOP), POOL);
+
+    // With the CLI's error-type suffix, and the plain 429 wording.
+    let suffixed = format!("{POOL_STOP} (error type rate_limit, HTTP 429, request id req_x)");
+    assert!(usage_limit_text_from_failure(&record("limit", "error", &suffixed)).is_some());
+    let rejected = "API Error: Request rejected (429) · No account can take this request — all 1 \
+                    Claude accounts are at their limit. Soonest reset in ~2d, beyond the hold \
+                    window. Add another Claude account or wait for a quota reset.";
+    assert!(is_pool_capacity_text(rejected));
+    // The proxy's words in the details, the adapter's own title in front.
+    let mut detailed = record("limit", "error", "Claude is temporarily rate limited.");
+    detailed.details = Some(
+        "No account can take this request right now — all 2 Claude accounts are momentarily at \
+         their limit. Retry in ~45s."
+            .into(),
+    );
+    let text = usage_limit_text_from_failure(&detailed).expect("recognized from the details");
+    assert_eq!(limit_reason_of(&text), POOL);
+    assert_eq!(pool_retry_hint_secs(&text), Some(45));
+
+    // An agent without AIR rejects the prompt with the same words.
+    assert_eq!(
+        usage_limit_text_from_error(&format!("Internal error: {suffixed}\"}}")).as_deref(),
+        Some(suffixed.as_str())
+    );
+
+    // The plain usage limit is still that.
+    let weekly = "You've hit your weekly limit · resets 10pm (Asia/Jerusalem)";
+    assert_eq!(
+        usage_limit_text_from_failure(&record("limit", "error", weekly)).as_deref(),
+        Some(weekly)
+    );
+    assert_eq!(limit_reason_of(weekly), USAGE);
+
+    // Not a limit stop: the proxy's short busy spell, a 429 with no pool
+    // words, a retry warning, and codeg's own pool gate.
+    let busy = "API Error: Server is temporarily limiting requests (not your usage limit) · No \
+                account can take this request right now — all 2 Claude accounts are momentarily \
+                busy, not out of quota. Retry in ~30s; it clears on its own.";
+    assert!(usage_limit_text_from_failure(&record("limit", "error", busy)).is_none());
+    let throttled = "API Error: Server is temporarily limiting requests (not your usage limit) \
+                     · this may be a temporary capacity issue.";
+    assert!(usage_limit_text_from_failure(&record("limit", "error", throttled)).is_none());
+    assert!(usage_limit_text_from_failure(&record("limit", "warning", POOL_STOP)).is_none());
+    assert!(!is_pool_capacity_text(
+        "All Claude subscriptions behind the account pool are at their limit, so Claude Code \
+         cannot take a request yet. [pool_exhausted resumes_at=1800429000]"
+    ));
+    assert!(usage_limit_text_from_error("Internal error: overloaded").is_none());
+}
+
+#[test]
+fn the_proxy_names_its_wait() {
+    assert_eq!(pool_retry_hint_secs(POOL_STOP), Some(3 * 3600));
+    assert_eq!(pool_retry_hint_secs("… Retry in ~45m."), Some(45 * 60));
+    assert_eq!(pool_retry_hint_secs("… Retry in 30s."), Some(30));
+    assert_eq!(
+        pool_retry_hint_secs("… at their limit. Soonest reset in ~2d, beyond the hold window."),
+        Some(2 * 86_400)
+    );
+    assert_eq!(pool_retry_hint_secs("… are at their limit."), None);
+}
+
+#[test]
+fn a_pool_stop_takes_the_pool_reading_then_the_hint_then_a_backoff() {
+    let now = utc(2026, 10, 22, 12, 0);
+    let three_hours = Some(3 * 3600);
+    let held_back = |at: DateTime<Utc>| {
+        Some(PoolLimit::Exhausted {
+            resumes_at: Some(at.timestamp()),
+        })
+    };
+
+    // The pool's reading, every account held back: its first reset wins.
+    let in_40m = now + ChronoDuration::minutes(40);
+    assert_eq!(
+        choose_pool_reset(held_back(in_40m), three_hours, now, now, false),
+        (in_40m, PoolResetSource::Pool)
+    );
+    // No reading, one with no reset or one already past, or a reading with
+    // headroom right after the refusal: the proxy's hint.
+    let readings = [
+        None,
+        Some(PoolLimit::Exhausted { resumes_at: None }),
+        held_back(now - ChronoDuration::minutes(5)),
+        Some(PoolLimit::Headroom),
+    ];
+    for pool in readings {
+        assert_eq!(
+            choose_pool_reset(pool, three_hours, now, now, false),
+            (now + ChronoDuration::hours(3), PoolResetSource::Hint)
+        );
+    }
+    // Nothing says when: the backoff.
+    assert_eq!(
+        choose_pool_reset(None, None, now, now, false),
+        (
+            now + ChronoDuration::seconds(POOL_STOP_BACKOFF_SECS),
+            PoolResetSource::Backoff
+        )
+    );
+
+    // Caught up later: a wait already over continues at the next
+    // opportunity, not in the past …
+    let stopped = now - ChronoDuration::hours(5);
+    assert_eq!(
+        choose_pool_reset(None, three_hours, stopped, now, true),
+        (now, PoolResetSource::Hint)
+    );
+    // … one mid-wait keeps the rest of it …
+    let stopped = now - ChronoDuration::hours(1);
+    assert_eq!(
+        choose_pool_reset(None, three_hours, stopped, now, true).0,
+        now + ChronoDuration::hours(2)
+    );
+    // … unless the pool has room now, which is newer than the hint.
+    assert_eq!(
+        choose_pool_reset(Some(PoolLimit::Headroom), three_hours, stopped, now, true),
+        (now, PoolResetSource::Pool)
+    );
+}
+
+#[test]
+fn a_due_continuation_waits_while_the_pool_has_no_room() {
+    let now = utc(2026, 10, 22, 12, 0);
+    // No pool, or one with headroom: it goes out.
+    assert_eq!(pool_defer_until(None, now), None);
+    // Every account held back: until the first one frees up …
+    let frees = now + ChronoDuration::minutes(25);
+    let block = |at: Option<DateTime<Utc>>| {
+        Some(PoolBlock {
+            resumes_at: at.map(|t| t.timestamp()),
+        })
+    };
+    assert_eq!(pool_defer_until(block(Some(frees)), now), Some(frees));
+    // … or a recheck when the reading does not say when (or names a time
+    // already past).
+    let recheck = now + ChronoDuration::seconds(POOL_RECHECK_SECS);
+    assert_eq!(pool_defer_until(block(None), now), Some(recheck));
+    let past = now - ChronoDuration::minutes(1);
+    assert_eq!(pool_defer_until(block(Some(past)), now), Some(recheck));
+}
+
+#[tokio::test]
+async fn a_pool_stop_that_keeps_coming_back_gives_up_and_keeps_its_reason() {
+    let db = fresh_in_memory_db().await;
+    let folder = seed_folder(&db, "/tmp/limit-pool-cap").await;
+    let id = session(&db, folder, "pool-cap").await;
+    let mut reset = Utc::now() + ChronoDuration::hours(3);
+
+    assert_eq!(
+        hit_limit_for(&db, id, reset, POOL).await,
+        UsageLimitTurnEnd::Paused { attempts: 0 }
+    );
+    let summary = conversation_service::get_by_id(&db.conn, id).await.unwrap();
+    assert_eq!(summary.limit_reason, Some(POOL));
+    assert!(summary.limit_pause.is_some());
+
+    // Waiting for the pool moves the time, only while it waits.
+    let later = reset + ChronoDuration::minutes(20);
+    assert!(
+        conversation_service::defer_limit_resume(&db.conn, id, later)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        row(&db, id).await.limit_resume_at.map(|t| t.timestamp()),
+        Some(later.timestamp())
+    );
+
+    for attempt in 1..MAX_ATTEMPTS {
+        assert!(claim_limit_resume(&db.conn, id).await.unwrap());
+        assert!(
+            !conversation_service::defer_limit_resume(&db.conn, id, later)
+                .await
+                .unwrap()
+        );
+        reset += ChronoDuration::hours(1);
+        assert_eq!(
+            hit_limit_for(&db, id, reset, POOL).await,
+            UsageLimitTurnEnd::Paused { attempts: attempt }
+        );
+    }
+    assert!(claim_limit_resume(&db.conn, id).await.unwrap());
+    assert_eq!(
+        hit_limit_for(&db, id, reset, POOL).await,
+        UsageLimitTurnEnd::GaveUp
+    );
+    let gave_up = row(&db, id).await;
+    assert_eq!(gave_up.turn_state, Some(ConversationTurnState::Interrupted));
+    assert_eq!(gave_up.limit_resume_state, None);
+    let summary = conversation_service::get_by_id(&db.conn, id).await.unwrap();
+    assert!(summary.limit_pause.is_none(), "no longer waiting");
+    assert_eq!(
+        summary.limit_reason,
+        Some(POOL),
+        "still says why it stopped"
+    );
+
+    // The next turn starts clean.
+    assert!(mark_turn_running(&db.conn, id).await.unwrap());
+    assert_eq!(row(&db, id).await.limit_resume_reason, None);
+    finish_turn(&db.conn, id, Some(ConversationStatus::PendingReview))
+        .await
+        .unwrap();
+    assert_eq!(row(&db, id).await.limit_resume_reason, None);
+}
+
+/// One transcript line, Claude Code's shape (synthetic content).
+fn transcript_line(kind: &str, at: DateTime<Utc>, text: &str, api_error: bool) -> String {
+    let mut value = serde_json::json!({
+        "type": kind,
+        "uuid": format!("u-{}", at.timestamp()),
+        "timestamp": at.to_rfc3339(),
+        "isSidechain": false,
+        "message": {"role": kind, "content": [{"type": "text", "text": text}]},
+    });
+    if api_error {
+        value["isApiErrorMessage"] = serde_json::Value::Bool(true);
+        value["error"] = serde_json::Value::String("rate_limit".into());
+        value["message"]["model"] = serde_json::Value::String("<synthetic>".into());
+    } else if kind == "assistant" {
+        value["message"]["model"] = serde_json::Value::String("claude-test".into());
+    }
+    value.to_string()
+}
+
+#[test]
+fn the_transcript_tells_a_turn_that_ended_on_an_api_error() {
+    let at = utc(2026, 10, 22, 9, 0);
+    let prompt = transcript_line("user", at - ChronoDuration::minutes(1), "do it", false);
+    let error = transcript_line("assistant", at, POOL_STOP, true);
+    let bookkeeping =
+        r#"{"type":"system","subtype":"api_error","timestamp":"2026-10-22T09:00:01Z"}"#;
+    let tail = format!("{prompt}\n{error}\n{bookkeeping}\n");
+    assert_eq!(
+        catch_up::last_turn_api_error(&tail),
+        Some((POOL_STOP.to_string(), at))
+    );
+
+    // A prompt sent after it, or a real answer: the turn went on.
+    let later = transcript_line("user", at + ChronoDuration::minutes(1), "again", false);
+    assert_eq!(
+        catch_up::last_turn_api_error(&format!("{tail}{later}\n")),
+        None
+    );
+    let answer = transcript_line("assistant", at, "Done.", false);
+    assert_eq!(
+        catch_up::last_turn_api_error(&format!("{prompt}\n{answer}\n")),
+        None
+    );
+    // A cut first line is skipped.
+    assert_eq!(
+        catch_up::last_turn_api_error(&format!("e\":1}}\n{error}\n")).map(|(_, t)| t),
+        Some(at)
+    );
+}
+
+/// A session bound to `sess-<title>`, whose transcript is `lines`, under
+/// `dir`.
+async fn transcript_session(
+    db: &AppDatabase,
+    folder: i32,
+    dir: &std::path::Path,
+    title: &str,
+    lines: &[String],
+) -> i32 {
+    let id = session(db, folder, title).await;
+    std::fs::write(
+        dir.join(format!("sess-{title}.jsonl")),
+        lines.join("\n") + "\n",
+    )
+    .unwrap();
+    id
+}
+
+#[tokio::test]
+async fn sessions_the_pool_stopped_before_the_update_are_paused_once() {
+    let db = fresh_in_memory_db().await;
+    let folder = seed_folder(&db, "/tmp/limit-catch-up").await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path();
+    let now = Utc::now();
+    let ask = |at: DateTime<Utc>| transcript_line("user", at, "go on", false);
+    let stop = |at: DateTime<Utc>, text: &str| transcript_line("assistant", at, text, true);
+
+    let two_h = now - ChronoDuration::hours(2);
+    let five_h = now - ChronoDuration::hours(5);
+    let day_ago = now - ChronoDuration::hours(30);
+    let session_limit = "You've hit your session limit · resets 5:30pm (UTC)";
+    let recent = [ask(two_h), stop(two_h, POOL_STOP)];
+    let recent = transcript_session(&db, folder, path, "recent", &recent).await;
+    let overdue = [ask(five_h), stop(five_h, POOL_STOP)];
+    let overdue = transcript_session(&db, folder, path, "overdue", &overdue).await;
+    let stale = [ask(day_ago), stop(day_ago, POOL_STOP)];
+    let stale = transcript_session(&db, folder, path, "stale", &stale).await;
+    let moved_on = [ask(two_h), stop(two_h, POOL_STOP), ask(now)];
+    let moved_on = transcript_session(&db, folder, path, "moved-on", &moved_on).await;
+    let usage = [ask(two_h), stop(two_h, session_limit)];
+    let usage = transcript_session(&db, folder, path, "usage", &usage).await;
+    let running = [ask(two_h), stop(two_h, POOL_STOP)];
+    let running = transcript_session(&db, folder, path, "running", &running).await;
+    mark_turn_running(&db.conn, running).await.unwrap();
+
+    let base = path.to_path_buf();
+    let locate = move |sid: &str| Some(base.join(format!("{sid}.jsonl")));
+    let noop = EventEmitter::Noop;
+    let paused = catch_up::catch_up_pool_stops_with(&db.conn, &noop, now, locate.clone()).await;
+    assert_eq!(paused, 2);
+
+    let recent_row = row(&db, recent).await;
+    assert_eq!(
+        recent_row.limit_resume_state,
+        Some(ConversationLimitResume::Scheduled)
+    );
+    assert_eq!(recent_row.limit_resume_reason, Some(POOL));
+    assert_eq!(recent_row.limit_resume_attempts, 0);
+    // No pool here: the proxy's "~3h", counted from the stop.
+    assert_eq!(
+        recent_row.limit_resume_at.map(|t| t.timestamp()),
+        Some((two_h + ChronoDuration::hours(3)).timestamp())
+    );
+    // Its wait is over: at the next opportunity.
+    assert_eq!(
+        row(&db, overdue)
+            .await
+            .limit_resume_at
+            .map(|t| t.timestamp()),
+        Some(now.timestamp())
+    );
+    for id in [stale, moved_on, usage, running] {
+        assert_eq!(row(&db, id).await.limit_resume_state, None, "row {id}");
+    }
+
+    // Once: a later start leaves everything alone.
+    let fresh = [ask(two_h), stop(two_h, POOL_STOP)];
+    let fresh = transcript_session(&db, folder, path, "fresh", &fresh).await;
+    assert_eq!(
+        catch_up::catch_up_pool_stops_with(&db.conn, &noop, now, locate).await,
+        0
+    );
+    assert_eq!(row(&db, fresh).await.limit_resume_state, None);
 }

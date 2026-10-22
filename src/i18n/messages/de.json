@@ -2330,7 +2330,12 @@
       "continueNow": "Jetzt fortsetzen",
       "continueNowTitle": "Die Fortsetzung jetzt senden — das Limit kann erneut greifen",
       "limitActionFailed": "Die pausierte Sitzung konnte nicht aktualisiert werden: {message}",
-      "limitPausedBadge": "Pausiert, bis das Nutzungslimit um {time} zurückgesetzt wird"
+      "limitPausedBadge": "Pausiert, bis das Nutzungslimit um {time} zurückgesetzt wird",
+      "limitPoolPaused": "Wegen Nutzungslimits pausiert – geht um {time} weiter",
+      "limitPoolPausedHint": "Alle Claude-Konten im Konten-Pool haben ihr Limit erreicht. Diese Sitzung geht von selbst weiter, sobald eines frei wird.",
+      "limitPoolBannerTitle": "Wegen Nutzungslimits pausiert",
+      "limitStopped": "Wegen Nutzungslimits angehalten",
+      "limitStoppedHint": "Die letzte Runde wurde wegen eines Nutzungslimits angehalten und geht nicht mehr von selbst weiter. Setze sie fort, sobald das Limit es zulässt."
     },
     "conversationCard": {
       "untitledConversation": "Unbenannte Konversation",
@@ -3552,6 +3557,7 @@
         "steerItemAsNote": "Als Notiz für die nächste Abfrage senden",
         "poolWait": "Alle Claude-Abonnements haben ihr Limit erreicht. Wartende Nachrichten werden gesendet, sobald eines frei wird.",
         "poolWaitUntil": "Alle Claude-Abonnements haben ihr Limit erreicht – das nächste wird um {time} frei. Wartende Nachrichten werden dann gesendet.",
+        "limitPaused": "Wegen Nutzungslimits pausiert – wartende Nachrichten werden gesendet, sobald es um {time} weitergeht.",
         "notSent": "Nicht gesendet: Die Verbindung zu {agent} ist fehlgeschlagen. Wartende Nachrichten werden gesendet, sobald sie wieder steht.",
         "retry": "Erneut versuchen"
       },

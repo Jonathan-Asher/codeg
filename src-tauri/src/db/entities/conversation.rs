@@ -80,6 +80,23 @@ pub enum ConversationLimitResume {
     Continuing,
 }
 
+/// What stopped the turn behind a usage-limit pause (`acp::limit_continue`).
+/// Kept on the row once the pause ends without continuing, so the session
+/// still says why its last turn stopped. `None` on the row: no limit stop
+/// (or one recorded before the reason was).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::None)")]
+#[serde(rename_all = "snake_case")]
+pub enum ConversationLimitReason {
+    /// The account's own usage limit ("You've hit your weekly limit").
+    #[sea_orm(string_value = "usage_limit")]
+    UsageLimit,
+    /// The local account pool answered 429: no account behind it could take
+    /// the request ("all 2 Claude accounts are at their limit").
+    #[sea_orm(string_value = "pool_capacity")]
+    PoolCapacity,
+}
+
 /// What kind of row this conversation is — drives sidebar visibility and
 /// grouping. `regular` renders under its folder group; `chat` renders in the
 /// flat "Chat" section; `loop` belongs to the Loop Engineering workbench and is
@@ -178,6 +195,10 @@ pub struct Model {
     /// Per-session switch for the continuation after the usage limit resets.
     /// On by default; the global setting has to be on too.
     pub limit_auto_continue: bool,
+    /// What stopped the turn behind the pause; see [`ConversationLimitReason`].
+    /// Set with the pause, kept once it ends without continuing, cleared when
+    /// the next turn starts.
+    pub limit_resume_reason: Option<ConversationLimitReason>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

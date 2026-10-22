@@ -554,6 +554,12 @@ export interface DbConversationSummary {
   /** Whether this session continues by itself once the usage limit resets
    *  (with the global setting on). On unless turned off for this session. */
   limit_auto_continue?: boolean
+  /** What stopped the last turn on a usage limit (Rust
+   *  `ConversationLimitReason`): with `limit_pause` while it waits, and kept
+   *  once the pause ended without continuing (the turn then reads
+   *  `interrupted`). `null` when there is none; absent from an older server,
+   *  whose pauses read as the account's own limit. */
+  limit_reason?: LimitReason | null
   /** The mode / model / effort this conversation's session last had in
    *  effect, as the backend records it per conversation. A tab whose session
    *  is not attached yet shows these until the agent reports its own (see
@@ -626,6 +632,12 @@ export type ConversationTurnState = "running" | "interrupted"
  *  waiting for the reset, its continuation being sent, or that continuation's
  *  turn running. */
 export type LimitResumeState = "scheduled" | "claimed" | "continuing"
+
+/** What stopped a turn on a usage limit (Rust `ConversationLimitReason`):
+ *  the account's own usage limit, or the local account pool answering that
+ *  no account behind it can take the request ("all 2 Claude accounts are at
+ *  their limit"). */
+export type LimitReason = "usage_limit" | "pool_capacity"
 
 /** A conversation paused by the account's usage limit (Rust `LimitPause`). */
 export interface LimitPause {

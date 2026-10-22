@@ -13,21 +13,28 @@ import { Button } from "@/components/ui/button"
  */
 export function SessionInterruptedBanner({
   onContinue,
+  limitStopped = false,
 }: {
   onContinue: () => void
+  /** The turn stopped on a usage limit and no longer continues by itself
+   *  (`limitStopReason`): say that instead of "interrupted". */
+  limitStopped?: boolean
 }) {
   const t = useTranslations("Folder.sessionActivity")
   return (
     <div
       role="status"
       data-testid="session-interrupted-banner"
+      data-limit-stopped={limitStopped || undefined}
       className="flex w-full flex-wrap items-center gap-2 rounded-lg border border-orange-500/30 bg-orange-500/5 px-3 py-2 text-xs text-orange-700 dark:text-orange-300"
     >
       <CirclePause aria-hidden className="h-4 w-4 shrink-0" />
       <span className="min-w-40 flex-1 leading-snug">
-        <span className="font-medium">{t("bannerTitle")}</span>{" "}
+        <span className="font-medium">
+          {limitStopped ? t("limitStopped") : t("bannerTitle")}
+        </span>{" "}
         <span className="text-orange-700/80 dark:text-orange-300/80">
-          {t("bannerDescription")}
+          {limitStopped ? t("limitStoppedHint") : t("bannerDescription")}
         </span>
       </span>
       <Button

@@ -4,7 +4,9 @@ import {
   formatRemaining,
   isLimitContinuePrompt,
   LIMIT_CONTINUE_PROMPT,
+  limitPauseReason,
   limitResetParts,
+  limitStopReason,
   waitingLimitPause,
 } from "./limit-continue"
 import { deriveSessionActivity, summaryActivity } from "./session-activity"
@@ -135,5 +137,36 @@ describe("the paused activity state", () => {
     expect(
       deriveSessionActivity({ turnState: "interrupted", limitPause: null })
     ).toBe("interrupted")
+  })
+})
+
+describe("why the turn stopped on a limit", () => {
+  it("reads a pause's reason, the account's own limit by default", () => {
+    expect(limitPauseReason({ limit_reason: "pool_capacity" })).toBe(
+      "pool_capacity"
+    )
+    expect(limitPauseReason({ limit_reason: null })).toBe("usage_limit")
+    // An older server sends no reason at all.
+    expect(limitPauseReason({})).toBe("usage_limit")
+  })
+
+  it("names a limit stop only once nothing continues by itself", () => {
+    const stopped = {
+      turn_state: "interrupted" as const,
+      limit_pause: null,
+      limit_reason: "pool_capacity" as const,
+    }
+    expect(limitStopReason(stopped)).toBe("pool_capacity")
+    // Still waiting, or its continuation running: not stopped.
+    expect(
+      limitStopReason({ ...stopped, limit_pause: pause("scheduled") })
+    ).toBeNull()
+    expect(
+      limitStopReason({ ...stopped, limit_pause: pause("continuing") })
+    ).toBeNull()
+    // A plain interruption, a finished turn, or no summary.
+    expect(limitStopReason({ ...stopped, limit_reason: null })).toBeNull()
+    expect(limitStopReason({ ...stopped, turn_state: null })).toBeNull()
+    expect(limitStopReason(null)).toBeNull()
   })
 })

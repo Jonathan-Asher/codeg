@@ -2330,7 +2330,12 @@
       "continueNow": "지금 계속",
       "continueNowTitle": "지금 계속 요청을 보냅니다 — 다시 한도에 걸릴 수 있습니다",
       "limitActionFailed": "일시 중지된 세션을 업데이트하지 못했습니다: {message}",
-      "limitPausedBadge": "사용량 한도가 {time}에 초기화될 때까지 일시 중지됨"
+      "limitPausedBadge": "사용량 한도가 {time}에 초기화될 때까지 일시 중지됨",
+      "limitPoolPaused": "사용량 한도로 일시 중지됨 — {time}에 계속",
+      "limitPoolPausedHint": "계정 풀의 모든 Claude 계정이 한도에 도달했습니다. 하나라도 여유가 생기면 이 세션이 자동으로 계속됩니다.",
+      "limitPoolBannerTitle": "사용량 한도로 일시 중지됨",
+      "limitStopped": "사용량 한도로 중지됨",
+      "limitStoppedHint": "마지막 턴이 사용량 한도로 중지되었고 더 이상 자동으로 계속되지 않습니다. 한도가 허용되면 계속하세요."
     },
     "conversationCard": {
       "untitledConversation": "제목 없는 대화",
@@ -3552,6 +3557,7 @@
         "steerItemAsNote": "메모로 보내 다음 점검 때 읽도록 함",
         "poolWait": "모든 Claude 구독이 한도에 도달했습니다. 구독이 풀리면 대기 중인 메시지가 전송됩니다.",
         "poolWaitUntil": "모든 Claude 구독이 한도에 도달했습니다 — 다음 구독은 {time}에 풀립니다. 그때 대기 중인 메시지가 전송됩니다.",
+        "limitPaused": "사용량 한도로 일시 중지됨 — 대기 중인 메시지는 {time}에 계속된 뒤 전송됩니다.",
         "notSent": "전송되지 않음: {agent} 연결에 실패했습니다. 연결이 복구되면 대기 중인 메시지가 전송됩니다.",
         "retry": "다시 시도"
       },

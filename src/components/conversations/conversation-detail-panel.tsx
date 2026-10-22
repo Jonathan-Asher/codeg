@@ -59,7 +59,7 @@ import { ConversationShell } from "@/components/chat/conversation-shell"
 import { SessionConfigStaleBanner } from "@/components/chat/session-config-stale-banner"
 import { SessionInterruptedBanner } from "@/components/chat/session-interrupted-banner"
 import { LimitPausedBanner } from "@/components/conversations/limit-pause"
-import { waitingLimitPause } from "@/lib/limit-continue"
+import { limitStopReason, waitingLimitPause } from "@/lib/limit-continue"
 import { deriveSessionActivity } from "@/lib/session-activity"
 import {
   canOfferContinue,
@@ -449,6 +449,18 @@ const ConversationTabView = memo(function ConversationTabView({
       ? s.conversations.find((c) => c.id === dbConversationId)?.limit_pause
       : undefined
   )
+  // What stopped the turn on a usage limit: the account's own limit, or the
+  // account pool with no account left that can take the request.
+  const persistedLimitReason = useAppWorkspaceStore((s) =>
+    dbConversationId != null
+      ? s.conversations.find((c) => c.id === dbConversationId)?.limit_reason
+      : undefined
+  )
+  // While the pause waits, queued messages wait with it: sent now they would
+  // only meet the limit again. They go out after the continuation.
+  const limitPauseHold =
+    persistedTurnState !== "running" &&
+    waitingLimitPause({ limit_pause: persistedLimitPause }) != null
 
   // A folderless chat draft before its first send (chat tab, not yet persisted).
   // Used to trigger the eager scratch-dir prepare below, which gives the draft a
@@ -859,6 +871,7 @@ const ConversationTabView = memo(function ConversationTabView({
     held: poolHold,
     connPoolWait: connIsForOtherAgent ? null : conn.poolWait,
     status: connIsForOtherAgent ? null : connStatus,
+    limitPause: limitPauseHold ? persistedLimitPause : null,
     agentLabel: getAgentLabel(selectedAgent),
     onRetry: retryConnection,
   })
@@ -1062,6 +1075,8 @@ const ConversationTabView = memo(function ConversationTabView({
     if (heldDrainInFlight) return
     // The account pool has no account that could take it yet.
     if (poolHold) return
+    // Paused on a usage limit: the continuation goes first.
+    if (limitPauseHold) return
     if (msgQueue.length === 0) return
     // setTimeout (not microtask) so a COMPLETE_TURN commit settles first AND so
     // a just-bounced retry waits out the backoff window before re-sending.
@@ -1094,6 +1109,7 @@ const ConversationTabView = memo(function ConversationTabView({
     msgQueue.length,
     heldDrainInFlight,
     poolHold,
+    limitPauseHold,
     editInFlight,
     queueSteerInFlight,
   ])
@@ -2519,7 +2535,16 @@ const ConversationTabView = memo(function ConversationTabView({
     persistedTurnState === "interrupted" &&
     connStatus !== "prompting" &&
     msgQueue.length === 0 ? (
-      <SessionInterruptedBanner onContinue={handleContinueInterrupted} />
+      <SessionInterruptedBanner
+        onContinue={handleContinueInterrupted}
+        limitStopped={
+          limitStopReason({
+            turn_state: persistedTurnState,
+            limit_pause: persistedLimitPause,
+            limit_reason: persistedLimitReason,
+          }) != null
+        }
+      />
     ) : null
 
   // The last turn stopped on the account's usage limit: say when the session
@@ -2535,6 +2560,7 @@ const ConversationTabView = memo(function ConversationTabView({
       <LimitPausedBanner
         conversationId={dbConversationId}
         pause={waitingPause}
+        reason={persistedLimitReason ?? "usage_limit"}
       />
     ) : null
 

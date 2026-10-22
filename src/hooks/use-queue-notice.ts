@@ -4,6 +4,7 @@ import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 
 import type { QueueNotice } from "@/components/chat/message-queue-display"
+import { useLimitResetParts } from "@/components/conversations/limit-pause"
 import { formatPoolResumeTime } from "@/lib/pool-hold"
 import { queueNoticeFor, type QueueNoticeInput } from "@/lib/queue-notice"
 
@@ -16,11 +17,31 @@ export function useQueueNotice(
   input: QueueNoticeInput & { agentLabel: string; onRetry: () => void }
 ): QueueNotice | null {
   const t = useTranslations("Folder.chat.messageQueue")
-  const { queueLength, held, connPoolWait, status, agentLabel, onRetry } = input
-  const kind = queueNoticeFor({ queueLength, held, connPoolWait, status })
+  const {
+    queueLength,
+    held,
+    connPoolWait,
+    status,
+    limitPause,
+    agentLabel,
+    onRetry,
+  } = input
+  const kind = queueNoticeFor({
+    queueLength,
+    held,
+    connPoolWait,
+    status,
+    limitPause,
+  })
   const resumesAt = kind?.kind === "pool" ? kind.resumesAt : null
+  const resetsAt = kind?.kind === "limit" ? kind.resetsAt : null
+  // When the paused session continues, kept current while it shows.
+  const resetTime = useLimitResetParts(resetsAt)?.time ?? null
   const kindName = kind?.kind ?? null
   return useMemo(() => {
+    if (kindName === "limit" && resetTime) {
+      return { tone: "waiting", text: t("limitPaused", { time: resetTime }) }
+    }
     if (kindName === "pool") {
       const time = formatPoolResumeTime(resumesAt)
       return {
@@ -36,5 +57,5 @@ export function useQueueNotice(
       }
     }
     return null
-  }, [kindName, resumesAt, agentLabel, onRetry, t])
+  }, [kindName, resumesAt, resetTime, agentLabel, onRetry, t])
 }

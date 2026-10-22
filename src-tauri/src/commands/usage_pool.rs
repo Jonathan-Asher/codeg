@@ -1263,6 +1263,18 @@ pub(crate) async fn claude_pool_block() -> Option<PoolBlock> {
     block_from(&reading, now_secs())
 }
 
+/// The pool's verdict on a fresh reading, for the continuation after the
+/// pool refused a turn (`acp::limit_continue`): some account with headroom,
+/// or every one held back. `None` without a polled pool, or on a reading
+/// that can't tell.
+pub(crate) async fn claude_pool_limit() -> Option<PoolLimit> {
+    let reading = recent_reading(GATE_MAX_AGE).await?;
+    if reading.stale || reading.accounts.is_empty() {
+        return None;
+    }
+    pool_limit(&reading, now_secs(), None)
+}
+
 /// Wait for the next pool reading, or `max`, whichever comes first.
 pub(crate) async fn reading_changed_or(max: Duration) {
     let _ = tokio::time::timeout(max, READING_CHANGED.notified()).await;

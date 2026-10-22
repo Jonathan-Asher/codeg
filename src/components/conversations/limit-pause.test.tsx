@@ -22,7 +22,9 @@ vi.mock("@/lib/api", () => ({
   continueLimitNow: h.continueLimitNow,
 }))
 
-import { LimitPausedBanner } from "./limit-pause"
+import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
+
+import { LimitPauseHeaderBadge, LimitPausedBanner } from "./limit-pause"
 import { SessionActivityRow } from "./session-activity"
 
 const L = enMessages.Folder.sessionActivity
@@ -137,5 +139,119 @@ describe("SessionActivityRow while paused on the usage limit", () => {
       "working"
     )
     expect(screen.queryByTestId("limit-continue-now")).toBeNull()
+  })
+})
+
+describe("a pause on the account pool", () => {
+  const pool = { limit_reason: "pool_capacity" as const }
+
+  it("names the pool in the composer banner", () => {
+    wrap(
+      <LimitPausedBanner
+        conversationId={7}
+        pause={pause()}
+        reason="pool_capacity"
+      />
+    )
+    const banner = screen.getByTestId("limit-paused-banner")
+    expect(banner).toHaveAttribute("data-limit-reason", "pool_capacity")
+    expect(banner).toHaveTextContent(L.limitPoolBannerTitle)
+    expect(banner).toHaveTextContent(/resets at .+\(in 3h 1[12]m\)/)
+    expect(screen.getByTestId("limit-continue-now")).toBeInTheDocument()
+  })
+
+  it("says when it continues on the activity line", () => {
+    wrap(<SessionActivityRow summary={summary(pool)} />)
+    const row = screen.getByTestId("session-activity")
+    expect(row).toHaveAttribute("data-activity", "limit_paused")
+    expect(row).toHaveTextContent(/Paused by usage limits — continues at \S+/)
+    expect(screen.getByTestId("session-activity-hint")).toHaveTextContent(
+      L.limitPoolPausedHint
+    )
+    expect(screen.getByTestId("limit-cancel-auto-continue")).toBeInTheDocument()
+  })
+
+  it("says it stopped once the continuations gave up", () => {
+    wrap(
+      <SessionActivityRow
+        summary={summary({
+          ...pool,
+          turn_state: "interrupted",
+          limit_pause: null,
+        })}
+      />
+    )
+    const row = screen.getByTestId("session-activity")
+    expect(row).toHaveAttribute("data-activity", "interrupted")
+    expect(row).toHaveTextContent(L.limitStopped)
+    expect(screen.getByTestId("session-activity-hint")).toHaveTextContent(
+      L.limitStoppedHint
+    )
+    // The manual Continue stays.
+    expect(screen.getByText(L.continue)).toBeInTheDocument()
+  })
+})
+
+describe("LimitPauseHeaderBadge", () => {
+  afterEach(() => {
+    // Unmount first, so the reset is not an update to a mounted badge.
+    cleanup()
+    useAppWorkspaceStore.setState({ conversations: [] })
+  })
+
+  it("shows a pool pause in the session header", () => {
+    useAppWorkspaceStore.setState({
+      conversations: [summary({ limit_reason: "pool_capacity" })],
+    })
+    wrap(<LimitPauseHeaderBadge conversationId={7} />)
+    const badge = screen.getByTestId("header-limit-paused")
+    expect(badge).toHaveAttribute("data-limit-reason", "pool_capacity")
+    expect(badge).toHaveTextContent(/Paused by usage limits — continues at \S+/)
+    expect(badge).toHaveAttribute("title", L.limitPoolPausedHint)
+  })
+
+  it("shows the account's own limit in its words", () => {
+    useAppWorkspaceStore.setState({ conversations: [summary()] })
+    wrap(<LimitPauseHeaderBadge conversationId={7} />)
+    expect(screen.getByTestId("header-limit-paused")).toHaveTextContent(
+      /Paused until the usage limit resets at \S+/
+    )
+  })
+
+  it("says the session stopped once nothing continues by itself", () => {
+    useAppWorkspaceStore.setState({
+      conversations: [
+        summary({
+          limit_reason: "pool_capacity",
+          turn_state: "interrupted",
+          limit_pause: null,
+        }),
+      ],
+    })
+    wrap(<LimitPauseHeaderBadge conversationId={7} />)
+    expect(screen.queryByTestId("header-limit-paused")).toBeNull()
+    expect(screen.getByTestId("header-limit-stopped")).toHaveTextContent(
+      L.limitStopped
+    )
+  })
+
+  it("shows nothing while the continuation runs, or with no pause", () => {
+    useAppWorkspaceStore.setState({
+      conversations: [
+        summary({
+          limit_reason: "pool_capacity",
+          turn_state: "running",
+          limit_pause: pause({ state: "continuing", attempts: 1 }),
+        }),
+        summary({ id: 8, limit_pause: null }),
+      ],
+    })
+    const { container } = wrap(
+      <>
+        <LimitPauseHeaderBadge conversationId={7} />
+        <LimitPauseHeaderBadge conversationId={8} />
+      </>
+    )
+    expect(container).toBeEmptyDOMElement()
   })
 })

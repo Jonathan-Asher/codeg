@@ -545,6 +545,7 @@ async fn import_one(
         limit_resume_state: Set(None),
         limit_resume_attempts: Set(0),
         limit_auto_continue: Set(true),
+        limit_resume_reason: Set(None),
     };
     conv.insert(conn).await?;
     Ok(ImportOutcome::Imported)
@@ -1040,6 +1041,7 @@ mod tests {
             limit_resume_state: Set(None),
             limit_resume_attempts: Set(0),
             limit_auto_continue: Set(true),
+            limit_resume_reason: Set(None),
         }
         .insert(&db.conn)
         .await
@@ -1337,6 +1339,7 @@ mod tests {
             limit_resume_state: Set(None),
             limit_resume_attempts: Set(0),
             limit_auto_continue: Set(true),
+            limit_resume_reason: Set(None),
         }
         .insert(&db.conn)
         .await
