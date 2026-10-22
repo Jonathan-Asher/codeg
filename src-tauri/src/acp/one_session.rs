@@ -908,17 +908,22 @@ mod tests {
                 )
                 .connect_to(agent_end),
         );
-        let outcome = Client
+        let (outcome, cancelled) = Client
             .builder()
             .connect_with(client_end, async |cx: ConnectionTo<Agent>| {
                 l.retire("parent", Some("fork"), Instant::now());
-                Ok(close_retired_session(&cx, &l, "conn-test", "parent", Some("fork")).await)
+                let outcome =
+                    close_retired_session(&cx, &l, "conn-test", "parent", Some("fork")).await;
+                // Stay connected until the agent has the cancel: a notification
+                // is only queued when `send_notification_to` returns, and
+                // leaving here closes the connection.
+                let cancelled = tokio::time::timeout(Duration::from_secs(5), rx).await;
+                Ok((outcome, cancelled))
             })
             .await
             .expect("client connection");
         assert_eq!(outcome, CloseOutcome::CancelOnly);
-        let cancelled = tokio::time::timeout(Duration::from_secs(5), rx)
-            .await
+        let cancelled = cancelled
             .expect("the agent got a cancel")
             .expect("cancel sender");
         assert_eq!(cancelled, "parent");
