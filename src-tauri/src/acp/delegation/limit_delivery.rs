@@ -561,7 +561,7 @@ async fn deliver_one(
     {
         Ok(parent) => parent,
         Err(e) => {
-            tracing::warn!(task_id, "[delegation][delivery] parent lookup failed: {e}");
+            tracing::warn!(task_id = %task_id, "[delegation][delivery] parent lookup failed: {e}");
             return;
         }
     };
@@ -576,7 +576,7 @@ async fn deliver_one(
             )
             .await;
             tracing::info!(
-                task_id,
+                task_id = %task_id,
                 "[delegation][delivery] the parent conversation is gone; dropping the result"
             );
             return;
@@ -619,7 +619,7 @@ async fn deliver_one(
     .await;
     match sent {
         Ok(Sent::Prompted) => tracing::info!(
-            task_id,
+            task_id = %task_id,
             parent = parent.id,
             "[delegation][delivery] delivered the continued child's result to the parent"
         ),
@@ -635,7 +635,7 @@ async fn deliver_one(
         }
         Err(reason) => {
             tracing::warn!(
-                task_id,
+                task_id = %task_id,
                 parent = parent.id,
                 "[delegation][delivery] could not deliver the result: {reason}"
             );
