@@ -4,6 +4,10 @@ import {
   getTransport,
 } from "./transport"
 import type { EventStream, UnsubscribeFn } from "./transport/types"
+import {
+  registerResyncTask,
+  type ResyncTaskOptions,
+} from "./resync-coordinator"
 
 /**
  * Platform-aware API wrappers for features that differ between
@@ -59,11 +63,17 @@ export async function subscribe<T>(
  * Use this alongside `subscribe()` for state that must be re-synced after
  * a network blip: the broadcaster drops events while `receiver_count == 0`,
  * so anything fired during the disconnect window is lost.
+ *
+ * Callbacks run as one prioritised, rate-limited pass per reconnect (see
+ * `resync-coordinator.ts`); return the refetch's promise so the pass knows
+ * when it is done, and give a `priority` (and a shared `key` for work that
+ * several views register) where the default "rest" does not fit.
  */
 export function onTransportReconnect(
-  callback: () => void
+  callback: () => unknown,
+  options?: ResyncTaskOptions
 ): UnsubscribeFn | null {
-  return getTransport().onReconnect?.(callback) ?? null
+  return registerResyncTask(getTransport(), callback, options)
 }
 
 /**

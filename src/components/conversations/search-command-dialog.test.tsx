@@ -145,6 +145,21 @@ describe("SearchCommandDialog messages tab", () => {
     expect(marks.map((mark) => mark.textContent)).toEqual(["retry", "loop"])
   })
 
+  it("says the search failed instead of showing no results", async () => {
+    h.searchMessages.mockRejectedValue(new Error("boom"))
+    const { user, input } = await openMessagesTab()
+    await user.type(input, "retry loop")
+    expect(await screen.findByText("Search failed. Try again.")).toBeTruthy()
+
+    // A request that never got an answer reads as offline.
+    h.searchMessages.mockRejectedValue(new TypeError("Failed to fetch"))
+    await user.type(input, "s")
+    expect(
+      await screen.findByText("Offline — search needs the server")
+    ).toBeTruthy()
+    expect(screen.queryByText("No results found.")).toBeNull()
+  })
+
   it("keeps the cursor in the search box when the tab changes", async () => {
     h.searchMessages.mockResolvedValue([hit()])
     const { user, input } = await openMessagesTab()

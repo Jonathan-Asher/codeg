@@ -34,9 +34,10 @@ export function useConversationAttentionSync(): void {
     })()
 
     // Returns null on desktop IPC (no disconnect window) → no-op there.
-    const offReconnect = onTransportReconnect(() => {
-      void refreshConversationAttention()
-    })
+    const offReconnect = onTransportReconnect(
+      () => refreshConversationAttention(),
+      { priority: "status", key: "attention" }
+    )
 
     return () => {
       disposed = true

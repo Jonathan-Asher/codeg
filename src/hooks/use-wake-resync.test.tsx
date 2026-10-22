@@ -18,6 +18,18 @@ vi.mock("@/lib/platform", () => ({
   onTransportReconnect: (cb: () => void) => onTransportReconnect(cb),
 }))
 
+// Whether the window's link is known to be down at the moment of a trigger.
+let linkDown = false
+vi.mock("@/lib/transport/web-connection-store", () => ({
+  isWebLinkDown: () => linkDown,
+}))
+
+// The reconnect passes the window has run (see the resync coordinator).
+let resyncGeneration = 0
+vi.mock("@/lib/resync-coordinator", () => ({
+  getResyncGeneration: () => resyncGeneration,
+}))
+
 function fireVisibility(state: "visible" | "hidden") {
   Object.defineProperty(document, "visibilityState", {
     configurable: true,
@@ -74,6 +86,8 @@ describe("useWakeResync", () => {
     vi.useFakeTimers()
     hasReconnectLifecycle = true
     turnReachedView = false
+    linkDown = false
+    resyncGeneration = 0
     onReconnectCallbacks.clear()
     onTransportReconnect.mockClear()
     Object.defineProperty(document, "visibilityState", {
@@ -112,6 +126,28 @@ describe("useWakeResync", () => {
     const { refetch } = setup()
     expect(onTransportReconnect).toHaveBeenCalledTimes(1)
     fireReconnect()
+    expect(refetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("leaves a wake on a link known to be down to the reconnect that follows", () => {
+    const { refetch } = setup()
+    linkDown = true
+    fireWake()
+    expect(refetch).not.toHaveBeenCalled()
+    linkDown = false
+    fireReconnect()
+    expect(refetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("catches up on a reconnect it missed while in the background", () => {
+    const { refetch, rerender } = setup({ enabled: false })
+    resyncGeneration = 1 // a reconnect pass ran while the panel was hidden
+    rerender({ enabled: true })
+    expect(refetch).toHaveBeenCalledTimes(1)
+    // Seen now: activating again does not repeat it.
+    rerender({ enabled: false })
+    vi.advanceTimersByTime(5_000)
+    rerender({ enabled: true })
     expect(refetch).toHaveBeenCalledTimes(1)
   })
 

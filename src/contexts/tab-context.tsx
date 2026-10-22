@@ -139,8 +139,9 @@ export function TabProvider({ children }: TabProviderProps) {
       if (disposed) dispose()
       else unlisten = dispose
     })()
-    const offReconnect = onTransportReconnect(() =>
-      useTabStore.getState().handleChildReconnect()
+    const offReconnect = onTransportReconnect(
+      () => useTabStore.getState().handleChildReconnect(),
+      { key: "child-tabs" }
     )
     return () => {
       disposed = true
@@ -168,8 +169,9 @@ export function TabProvider({ children }: TabProviderProps) {
       // broadcaster). One reconcile after subscribe is ready catches it.
       void useTabStore.getState().refetchTabs()
     })()
-    const offReconnect = onTransportReconnect(() =>
-      useTabStore.getState().refetchTabs()
+    const offReconnect = onTransportReconnect(
+      () => useTabStore.getState().refetchTabs(),
+      { priority: "lists", key: "tabs" }
     )
     return () => {
       disposed = true

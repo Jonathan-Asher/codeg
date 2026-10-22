@@ -2387,7 +2387,9 @@
       "roleAssistant": "Assistent",
       "roleSystem": "System",
       "recentHeading": "Zuletzt",
-      "archivedBadge": "Archiviert"
+      "archivedBadge": "Archiviert",
+      "offline": "Offline – die Suche braucht den Server",
+      "failed": "Die Suche ist fehlgeschlagen. Bitte erneut versuchen."
     },
     "folderTitleBar": {
       "showSidebar": "Seitenleiste anzeigen",
@@ -5423,14 +5425,17 @@
     }
   },
   "WebConnection": {
-    "disconnectedTitle": "Verbindung getrennt",
-    "reconnectingDescription": "Verbindung zum Server wird wiederhergestellt. Das geschieht normalerweise innerhalb weniger Sekunden automatisch.",
-    "reconnectNow": "Jetzt neu verbinden",
-    "connectingTitle": "Verbindung zum Server wird hergestellt",
-    "connectingDescription": "Der Server antwortet noch nicht. Dieses Fenster verbindet sich automatisch, sobald er antwortet.",
     "sessionExpiredTitle": "Sitzung abgelaufen",
     "sessionExpiredDescription": "Deine Sitzung ist nicht mehr gültig. Bitte melde dich erneut an, um fortzufahren.",
-    "goToLogin": "Zur Anmeldung"
+    "goToLogin": "Zur Anmeldung",
+    "connectingPill": "Verbinde…",
+    "reconnectingPill": "Verbindung wird wiederhergestellt…",
+    "updatingPill": "Wird aktualisiert…",
+    "backOnlinePill": "Wieder online",
+    "offlineTitle": "Offline",
+    "offlineDescription": "Angezeigt wird bereits Geladenes · aktualisiert {age}",
+    "offlineWaiting": "Warte auf Antwort des Servers",
+    "retry": "Erneut versuchen"
   },
   "LiveFeedback": {
     "placeholder": "Sende {agent} eine Notiz, während er arbeitet…",

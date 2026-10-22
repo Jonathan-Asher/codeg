@@ -2387,7 +2387,9 @@
       "roleAssistant": "アシスタント",
       "roleSystem": "システム",
       "recentHeading": "最近",
-      "archivedBadge": "アーカイブ済み"
+      "archivedBadge": "アーカイブ済み",
+      "offline": "オフライン — 検索にはサーバーへの接続が必要です",
+      "failed": "検索に失敗しました。もう一度お試しください。"
     },
     "folderTitleBar": {
       "showSidebar": "サイドバーを表示",
@@ -5423,14 +5425,17 @@
     }
   },
   "WebConnection": {
-    "disconnectedTitle": "接続が切断されました",
-    "reconnectingDescription": "サーバーへの再接続を試みています。通常は数秒で自動的に復旧します。",
-    "reconnectNow": "今すぐ再接続",
-    "connectingTitle": "サーバーに接続しています",
-    "connectingDescription": "サーバーがまだ応答していません。応答があり次第、このウィンドウは自動的に接続します。",
     "sessionExpiredTitle": "セッションの有効期限が切れました",
     "sessionExpiredDescription": "セッションが無効になりました。続行するには再度サインインしてください。",
-    "goToLogin": "ログインへ移動"
+    "goToLogin": "ログインへ移動",
+    "connectingPill": "接続中…",
+    "reconnectingPill": "再接続中…",
+    "updatingPill": "更新中…",
+    "backOnlinePill": "オンラインに復帰しました",
+    "offlineTitle": "オフライン",
+    "offlineDescription": "読み込み済みの内容を表示中 · {age}に更新",
+    "offlineWaiting": "サーバーの応答を待っています",
+    "retry": "再試行"
   },
   "LiveFeedback": {
     "placeholder": "{agent} の作業中にメモを送る…",
