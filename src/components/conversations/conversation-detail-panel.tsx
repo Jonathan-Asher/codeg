@@ -49,6 +49,7 @@ import { usePoolHold } from "@/hooks/use-pool-hold"
 import { useQueueNotice } from "@/hooks/use-queue-notice"
 import { useAttachPhaseLabel } from "@/hooks/use-attach-phase-label"
 import type { PoolHold } from "@/lib/pool-hold"
+import { ForkProgressProvider } from "@/components/message/fork-progress-context"
 import { MessageListView } from "@/components/message/message-list-view"
 import {
   GoalControlProvider,
@@ -116,8 +117,7 @@ import {
 import { TurnBusyError, isNoActiveTurnRejection } from "@/lib/turn-busy"
 import {
   ForkBetweenTurnsOnlyError,
-  forkFromTurn,
-  openForkedConversationTab,
+  forkFromTurnWithPlaceholder,
   resolveForkFromHereTurnId,
   supportsForkWhileRunning,
 } from "@/lib/fork-from-turn"
@@ -1042,6 +1042,12 @@ const ConversationTabView = memo(function ConversationTabView({
   // edit in the order the user wrote them. The ref is the synchronous read.
   const [editInFlight, setEditInFlight] = useState(false)
   const editInFlightRef = useRef(false)
+  // "Fork from here" in flight: the reply it was taken from (its footer spins
+  // and says "Forking…", every other fork button greys out) and the
+  // synchronous guard that keeps a double click from starting a second fork
+  // before that state renders. See `handleForkFromTurn`.
+  const [forkingTurnId, setForkingTurnId] = useState<string | null>(null)
+  const forkInFlightRef = useRef(false)
 
   // Flush queued messages whenever the agent is idle. This is the queue's send
   // engine, covering BOTH:
@@ -1650,6 +1656,12 @@ const ConversationTabView = memo(function ConversationTabView({
       if (!connectionId || (status !== "connected" && status !== "prompting")) {
         return
       }
+      // One fork at a time: a second click (or a click on another reply)
+      // while one runs does nothing — the buttons say "Forking…" meanwhile.
+      // An edit's Save is a fork too, with progress of its own.
+      if (forkInFlightRef.current || editInFlightRef.current) return
+      forkInFlightRef.current = true
+      setForkingTurnId(turnId)
       // Snapshot which live turns belong to the PRE-fork session, before the
       // await. The fork RPC is a window in which a send can still start — a
       // queued auto-flush, a fast typist, another client — and such a turn
@@ -1696,21 +1708,21 @@ const ConversationTabView = memo(function ConversationTabView({
           })
           return
         }
-        const outcome = await forkFromTurn({
+        const outcome = await forkFromTurnWithPlaceholder({
           agentType: selectedAgent,
           connectionId,
           conversationId: dbConvIdRef.current,
           folderId,
           turnId: forkPointId,
           turnRunning,
+          // A fork into a new conversation stands beside this tab as a
+          // "Forking…" placeholder until its own tab takes that place.
+          besideTabId: tabId,
+          onNewConversation: () => refreshConversations(),
         })
-        if (outcome.kind === "new_conversation") {
-          // Nothing on THIS tab changes: the running turn keeps streaming
-          // here, and the fork opens beside it.
-          refreshConversations()
-          openForkedConversationTab(outcome.result, selectedAgent, tabId)
-          return
-        }
+        // Nothing on THIS tab changes for a fork into a new conversation: the
+        // running turn keeps streaming here, and the fork opened beside it.
+        if (outcome.kind === "new_conversation") return
         const { forkedSessionId } = outcome
         sessionIdRef.current = forkedSessionId
         setExternalId(effectiveConversationId, forkedSessionId)
@@ -1753,6 +1765,9 @@ const ConversationTabView = memo(function ConversationTabView({
                         : String(err),
                 }),
         })
+      } finally {
+        forkInFlightRef.current = false
+        setForkingTurnId(null)
       }
     },
     [
@@ -2806,6 +2821,13 @@ const ConversationTabView = memo(function ConversationTabView({
       />
     </GoalControlProvider>
   )
+  // A "Fork from here" in flight reaches the reply footers by context, so the
+  // transcript's memoized message groups don't re-render for it.
+  const transcriptNode = (
+    <ForkProgressProvider value={forkingTurnId}>
+      {messageListNode}
+    </ForkProgressProvider>
+  )
 
   // Live-feedback bar gating + the "agent never read your note" resend fallback.
   // Enqueue rather than `handleSend`: this fallback fires on a turn-end race
@@ -3205,10 +3227,10 @@ const ConversationTabView = memo(function ConversationTabView({
               </div>
             ) : null}
           </div>
-          <div className="min-h-0 flex-1">{messageListNode}</div>
+          <div className="min-h-0 flex-1">{transcriptNode}</div>
         </div>
       ) : (
-        messageListNode
+        transcriptNode
       )}
       <FeedbackDialog
         open={feedback.dialogOpen}

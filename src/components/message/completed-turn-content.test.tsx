@@ -789,3 +789,66 @@ describe("a reply the reader opened", () => {
     expect(screen.getByAltText("placement.png")).toBeInTheDocument()
   })
 })
+
+describe("CompletedTurnContent: a sub-agent the provider stopped", () => {
+  // Synthesized in the shape Claude Code hands back; not from any session.
+  const BLOCKED =
+    "API Error: 400 This request was blocked as it seems to violate the provider's terms of service on example misuse. To learn more, visit https://example.com/legal/terms."
+  const P = enMessages.Folder.chat.providerError
+  const stopped = P.subagentStopped.replace("{reason}", P.reason.policy_block)
+
+  const turnWithAgent = (output: string): AdaptedContentPart[] => [
+    { type: "text", text: "I'll have a sub-agent map the repository." },
+    {
+      type: "tool-call",
+      toolCallId: "call-agent",
+      toolName: "Agent",
+      input: '{"subagent_type":"Explore","description":"Map the repository"}',
+      state: "output-available",
+      output,
+    },
+    { type: "text", text: "The sub-agent could not finish." },
+  ]
+
+  it("shows its stopped state under a shut fold, not only on the folded card", () => {
+    const { container } = renderWithIntl(
+      <CompletedTurnContent
+        parts={turnWithAgent(BLOCKED)}
+        durationMs={12_000}
+        completed
+      />
+    )
+    expect(
+      screen.getByRole("button", { name: "Worked for 12s" })
+    ).toHaveAttribute("aria-expanded", "false")
+    const surfaced = container.querySelector("[data-folded-stops]")
+    expect(surfaced).not.toBeNull()
+    expect(surfaced).toHaveTextContent(stopped)
+    // The provider's own message stays behind Details.
+    expect(screen.queryByText(BLOCKED)).not.toBeInTheDocument()
+  })
+
+  it("leaves it to the card once the fold is opened", () => {
+    const { container } = renderWithIntl(
+      <CompletedTurnContent
+        parts={turnWithAgent(BLOCKED)}
+        durationMs={12_000}
+        completed
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Worked for 12s" }))
+    expect(container.querySelector("[data-folded-stops]")).toBeNull()
+    expect(screen.getAllByText(stopped)).toHaveLength(1)
+  })
+
+  it("surfaces nothing for a sub-agent that finished normally", () => {
+    const { container } = renderWithIntl(
+      <CompletedTurnContent
+        parts={turnWithAgent("Mapped 12 files.")}
+        durationMs={12_000}
+        completed
+      />
+    )
+    expect(container.querySelector("[data-folded-stops]")).toBeNull()
+  })
+})

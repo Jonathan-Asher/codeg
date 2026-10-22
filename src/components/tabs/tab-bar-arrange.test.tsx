@@ -69,6 +69,10 @@ import { TabBar } from "./tab-bar"
 import { useTabStore } from "@/stores/tab-store"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { useTabArrangeStore } from "@/stores/tab-arrangement-store"
+import {
+  resetForkPlaceholderStore,
+  useForkPlaceholderStore,
+} from "@/stores/fork-placeholder-store"
 
 function tab(
   id: string,
@@ -324,5 +328,53 @@ describe("TabBar reorder write-back", () => {
     const [a1, b1, a2] = useTabStore.getState().tabs
     act(() => h.onReorder!([a2, a1, b1]))
     expect(ids(reorderTabs.mock.calls[0][0])).toEqual(["a2", "a1", "b1"])
+  })
+})
+
+describe("TabBar: a fork on its way into a new tab", () => {
+  const strip = (container: HTMLElement) =>
+    Array.from(
+      container.querySelectorAll("[data-tab-id], [data-fork-placeholder]")
+    ).map((el) => el.getAttribute("data-tab-id") ?? "forking")
+
+  afterEach(() => resetForkPlaceholderStore())
+
+  it("stands a Forking… tab right after the tab it was forked from", () => {
+    seed(TABS, "b1")
+    const { container } = renderBar()
+    act(() => {
+      useForkPlaceholderStore.getState().open("b1")
+    })
+    expect(strip(container)).toEqual(["a1", "b1", "forking", "a2", "c1", "b2"])
+    const placeholder = container.querySelector("[data-fork-placeholder]")!
+    expect(placeholder).toHaveTextContent(enMessages.Folder.tabs.forking)
+    const tabRole = placeholder.querySelector('[role="tab"]')!
+    expect(tabRole).toHaveAttribute("aria-busy", "true")
+    expect(tabRole).toHaveAttribute("aria-selected", "false")
+    // It is the active tab's neighbour now, and the tab after it is not.
+    expect(placeholder).toHaveAttribute("data-adjacent-active", "after")
+    expect(container.querySelector('[data-tab-id="a2"]')).not.toHaveAttribute(
+      "data-adjacent-active"
+    )
+  })
+
+  it("goes away when the fork settles", () => {
+    seed(TABS, "b1")
+    const { container } = renderBar()
+    let id = ""
+    act(() => {
+      id = useForkPlaceholderStore.getState().open("b1")
+    })
+    expect(strip(container)).toContain("forking")
+    act(() => useForkPlaceholderStore.getState().close(id))
+    expect(strip(container)).toEqual(["a1", "b1", "a2", "c1", "b2"])
+  })
+
+  it("shows nowhere when the tab it came from is not on the strip", () => {
+    const { container } = renderBar()
+    act(() => {
+      useForkPlaceholderStore.getState().open("closed-meanwhile")
+    })
+    expect(strip(container)).toEqual(["a1", "b1", "a2", "c1", "b2"])
   })
 })

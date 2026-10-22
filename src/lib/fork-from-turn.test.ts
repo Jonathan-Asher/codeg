@@ -27,8 +27,13 @@ import {
 } from "@/stores/tab-store"
 import type { MessageTurn } from "@/lib/types"
 import {
+  resetForkPlaceholderStore,
+  useForkPlaceholderStore,
+} from "@/stores/fork-placeholder-store"
+import {
   ForkBetweenTurnsOnlyError,
   forkFromTurn,
+  forkFromTurnWithPlaceholder,
   isForkNeedsIdleRejection,
   openForkedConversationTab,
   resolveForkFromHereTurnId,
@@ -209,6 +214,133 @@ describe("openForkedConversationTab", () => {
       tab(9).id,
       "conv-1-claude_code-42",
     ])
+  })
+})
+
+describe("forkFromTurnWithPlaceholder", () => {
+  const folder = { id: 1, name: "repo", path: "/repo" } as FolderDetail
+  const source: TabItemInternal = {
+    id: "conv-1-claude_code-7",
+    kind: "conversation",
+    folderId: 1,
+    conversationId: 7,
+    agentType: "claude_code",
+    title: "t7",
+    isPinned: true,
+  }
+
+  /** A fork into a new conversation the test settles by hand. */
+  function slowFork() {
+    let settle!: {
+      resolve: (r: ForkToNewConversationResult) => void
+      reject: (e: unknown) => void
+    }
+    vi.mocked(acpForkToNewConversation).mockReturnValueOnce(
+      new Promise<ForkToNewConversationResult>((resolve, reject) => {
+        settle = { resolve, reject }
+      })
+    )
+    return settle
+  }
+
+  const placeholders = () => useForkPlaceholderStore.getState().placeholders
+
+  beforeEach(() => {
+    resetForkPlaceholderStore()
+    resetTabStore()
+    resetAppWorkspaceStore()
+    useAppWorkspaceStore.setState({ folders: [folder], allFolders: [folder] })
+    useTabStore.setState({ rawTabs: [source], activeTabId: source.id })
+  })
+
+  it("stands a placeholder beside the source tab until the fork's tab replaces it", async () => {
+    const settle = slowFork()
+    const onNewConversation = vi.fn()
+    const forking = forkFromTurnWithPlaceholder({
+      ...base,
+      agentType: "claude_code",
+      turnRunning: true,
+      besideTabId: source.id,
+      onNewConversation,
+    })
+    // From the click on, before the backend answers.
+    expect(placeholders()).toEqual([
+      { id: expect.any(String), sourceTabId: source.id },
+    ])
+    expect(useTabStore.getState().rawTabs).toHaveLength(1)
+    expect(useTabStore.getState().activeTabId).toBe(source.id)
+
+    settle.resolve(FORKED)
+    const outcome = await forking
+    expect(outcome).toEqual({ kind: "new_conversation", result: FORKED })
+    expect(placeholders()).toEqual([])
+    const { rawTabs, activeTabId } = useTabStore.getState()
+    expect(rawTabs.map((t) => t.id)).toEqual([
+      source.id,
+      "conv-1-claude_code-42",
+    ])
+    expect(activeTabId).toBe("conv-1-claude_code-42")
+    expect(onNewConversation).toHaveBeenCalledWith(FORKED)
+  })
+
+  it("takes the placeholder away when the fork fails, and rejects", async () => {
+    const settle = slowFork()
+    const failure = new Error("the transcript could not be read")
+    const forking = forkFromTurnWithPlaceholder({
+      ...base,
+      agentType: "claude_code",
+      turnRunning: true,
+      besideTabId: source.id,
+    })
+    expect(placeholders()).toHaveLength(1)
+    settle.reject(failure)
+    await expect(forking).rejects.toBe(failure)
+    expect(placeholders()).toEqual([])
+    expect(useTabStore.getState().rawTabs.map((t) => t.id)).toEqual([source.id])
+  })
+
+  it("shows one when an in-place fork bounces into a new conversation", async () => {
+    vi.mocked(acpFork).mockRejectedValueOnce(new TurnBusyError())
+    const settle = slowFork()
+    const forking = forkFromTurnWithPlaceholder({
+      ...base,
+      agentType: "claude_code",
+      turnRunning: false,
+      besideTabId: source.id,
+    })
+    await vi.waitFor(() => expect(placeholders()).toHaveLength(1))
+    settle.resolve(FORKED)
+    await forking
+    expect(placeholders()).toEqual([])
+  })
+
+  it("shows none for an in-place fork, which opens nothing", async () => {
+    let seen = 0
+    const unsubscribe = useForkPlaceholderStore.subscribe((state) => {
+      seen = Math.max(seen, state.placeholders.length)
+    })
+    const outcome = await forkFromTurnWithPlaceholder({
+      ...base,
+      agentType: "claude_code",
+      turnRunning: false,
+      besideTabId: source.id,
+    })
+    unsubscribe()
+    expect(outcome.kind).toBe("in_place")
+    expect(seen).toBe(0)
+    expect(useTabStore.getState().rawTabs).toHaveLength(1)
+  })
+
+  it("shows none for an agent that has to wait for the turn", async () => {
+    await expect(
+      forkFromTurnWithPlaceholder({
+        ...base,
+        agentType: "codex",
+        turnRunning: true,
+        besideTabId: source.id,
+      })
+    ).rejects.toBeInstanceOf(ForkBetweenTurnsOnlyError)
+    expect(placeholders()).toEqual([])
   })
 })
 

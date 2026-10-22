@@ -2570,7 +2570,8 @@
       "bandAwaitingReply": "Wartet auf deine Antwort",
       "bandRunning": "Läuft",
       "bandOther": "Sonstige",
-      "chatGroup": "Chat"
+      "chatGroup": "Chat",
+      "forking": "Wird verzweigt…"
     },
     "fileWorkspace": {
       "files": "Dateien",
@@ -3805,6 +3806,8 @@
         "forkFromHere": "Ab hier verzweigen",
         "forkBusy": "Dieser Agent kann nur zwischen Zügen verzweigen",
         "forkNotReady": "Von dieser Antwort kann noch nicht verzweigt werden – bitte gleich erneut versuchen",
+        "forking": "Wird verzweigt…",
+        "forkInProgress": "Eine andere Verzweigung läuft bereits",
         "readAloud": "Vorlesen",
         "stopReading": "Vorlesen beenden",
         "pauseReading": "Vorlesen pausieren",
@@ -4293,6 +4296,20 @@
         "toggleDetails": "Details umschalten",
         "dismiss": "Schließen",
         "moreIncidents": "+{count} weitere"
+      },
+      "providerError": {
+        "subagentStopped": "Sub-Agent gestoppt: {reason}",
+        "turnStopped": "Gestoppt: {reason}",
+        "agentStopped": "{agent} gestoppt: {reason}",
+        "reason": {
+          "policy_block": "Anfrage durch die Nutzungsrichtlinie des Anbieters blockiert",
+          "rate_limit": "Ratenlimit des Anbieters erreicht",
+          "overloaded": "der Anbieter ist überlastet",
+          "invalid_request": "der Anbieter hat die Anfrage abgelehnt",
+          "api_error": "der Anbieter hat einen Fehler gemeldet"
+        },
+        "learnMore": "Mehr erfahren:",
+        "details": "Details"
       },
       "backgroundTasks": {
         "settledFallback": "Hintergrundaufgabe beendet ({status})",

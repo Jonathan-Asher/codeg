@@ -2570,7 +2570,8 @@
       "bandAwaitingReply": "返信待ち",
       "bandRunning": "実行中",
       "bandOther": "その他",
-      "chatGroup": "チャット"
+      "chatGroup": "チャット",
+      "forking": "分岐中…"
     },
     "fileWorkspace": {
       "files": "ファイル",
@@ -3805,6 +3806,8 @@
         "forkFromHere": "ここから分岐",
         "forkBusy": "このエージェントはターンの合間にしか分岐できません",
         "forkNotReady": "この返信からはまだ分岐できません。少し待ってからお試しください",
+        "forking": "分岐中…",
+        "forkInProgress": "別の分岐を実行中です",
         "readAloud": "読み上げ",
         "stopReading": "読み上げを停止",
         "pauseReading": "読み上げを一時停止",
@@ -4293,6 +4296,20 @@
         "toggleDetails": "詳細の切り替え",
         "dismiss": "閉じる",
         "moreIncidents": "他 {count} 件"
+      },
+      "providerError": {
+        "subagentStopped": "サブエージェントが停止しました：{reason}",
+        "turnStopped": "停止しました：{reason}",
+        "agentStopped": "{agent} が停止しました：{reason}",
+        "reason": {
+          "policy_block": "プロバイダーの利用ポリシーによりリクエストがブロックされました",
+          "rate_limit": "プロバイダーのレート制限に達しました",
+          "overloaded": "プロバイダーが過負荷状態です",
+          "invalid_request": "プロバイダーがリクエストを拒否しました",
+          "api_error": "プロバイダーがエラーを返しました"
+        },
+        "learnMore": "詳細：",
+        "details": "詳細"
       },
       "backgroundTasks": {
         "settledFallback": "バックグラウンドタスクが終了しました（{status}）",
