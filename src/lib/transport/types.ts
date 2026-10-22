@@ -194,6 +194,12 @@ export interface Transport {
    * `report_client_presence` command instead.
    */
   reportPresence?(presence: ClientPresence): void
+  /**
+   * Whether a turn is streaming in a view the user is looking at. The
+   * link's dead-socket detection tightens while it is (see `liveness.ts`).
+   * Absent on transports with no link to watch (local IPC).
+   */
+  setStreamingOnScreen?(streaming: boolean): void
 
   /**
    * Resolves when the server-side broadcaster receiver is currently

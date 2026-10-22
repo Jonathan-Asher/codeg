@@ -1988,6 +1988,7 @@ mod tauri_app {
                 remote_proxy_commands::remote_ws_unsubscribe,
                 remote_proxy_commands::remote_ws_send_text,
                 remote_proxy_commands::remote_ws_probe,
+                remote_proxy_commands::remote_ws_set_streaming,
                 crate::commands::workspace_media::workspace_media_capability,
                 crate::commands::workspace_media::workspace_media_revoke,
                 windows::open_pet_window,

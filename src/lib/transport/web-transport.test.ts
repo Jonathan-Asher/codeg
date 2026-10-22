@@ -316,6 +316,9 @@ describe("WebTransport heartbeat (dead-socket detection)", () => {
     )
   const pong = (ws: MockWebSocket) =>
     ws.onmessage?.({ data: JSON.stringify({ type: "pong" }) })
+  const healthCalls = () =>
+    fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/api/health"))
+      .length
 
   it("pings after 15s of silence and stays put when the pong comes back", () => {
     const { t, ws } = connectReady()
@@ -330,20 +333,24 @@ describe("WebTransport heartbeat (dead-socket detection)", () => {
     expect(MockWebSocket.instances).toHaveLength(1)
   })
 
-  it("replaces a socket whose pong never comes back", async () => {
+  it("replaces a socket whose pong never comes back once the server does not answer either", async () => {
     // The sleep/wake case: the browser still reports the socket OPEN, the
     // server streams into the void, no close frame ever arrives.
-    fetchMock.mockResolvedValue(ok200())
+    fetchMock
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValue(ok200())
     const { t, ws } = connectReady()
     vi.advanceTimersByTime(15_000)
     expect(pings(ws)).toHaveLength(1)
     vi.advanceTimersByTime(9_999)
-    expect(t.getConnectionSnapshot()).toBe("connected")
+    expect(fetchMock).not.toHaveBeenCalled()
+    // Pong overdue: the health check goes first, and fails.
     await vi.advanceTimersByTimeAsync(1)
     expect(t.getConnectionSnapshot()).toBe("reconnecting")
     expect(ws.readyState).toBe(MockWebSocket.CLOSED)
-    // Straight to the health probe: no backoff for a socket we know is dead.
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    // Then straight to the reconnect's own probe: no backoff for a socket we
+    // know is dead.
+    expect(healthCalls()).toBe(2)
     const ws2 = lastWs()
     expect(ws2).not.toBe(ws)
     ws2.open()
@@ -351,10 +358,71 @@ describe("WebTransport heartbeat (dead-socket detection)", () => {
     expect(t.getConnectionSnapshot()).toBe("connected")
   })
 
-  it("makes waitForReady() wait for the socket that replaces a dead one", async () => {
+  it("keeps a socket whose pong is late while the server answers (a slow server, not a dead link)", async () => {
+    fetchMock.mockResolvedValue(ok200())
+    const onReconnect = vi.fn()
+    const { t, ws } = connectReady()
+    t.onReconnect(onReconnect)
+    await vi.advanceTimersByTimeAsync(25_000)
+    expect(healthCalls()).toBe(1)
+    // Kept, and pinged again: a write is what makes a dead link fail fast.
+    expect(pings(ws)).toHaveLength(2)
+    await vi.advanceTimersByTimeAsync(4_000)
+    pong(ws) // 14 s after the first ping
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(t.getConnectionSnapshot()).toBe("connected")
+    expect(MockWebSocket.instances).toHaveLength(1)
+    expect(onReconnect).not.toHaveBeenCalled()
+  })
+
+  it("learns a slow round trip: the next pong gets 3 × p95, up to 30s", async () => {
+    fetchMock.mockResolvedValue(ok200())
+    const { ws } = connectReady()
+    await vi.advanceTimersByTimeAsync(25_000) // ping at 15s, probe at 25s
+    await vi.advanceTimersByTimeAsync(4_000)
+    pong(ws) // at 29s: a 14 s round trip
+    expect(healthCalls()).toBe(1)
+    await vi.advanceTimersByTimeAsync(15_000) // next ping at 44s
+    expect(pings(ws)).toHaveLength(3)
+    // 10s would have been the old deadline: now nothing happens until 74s.
+    await vi.advanceTimersByTimeAsync(29_999)
+    expect(healthCalls()).toBe(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(healthCalls()).toBe(2)
+  })
+
+  it("gives up on a socket that stays silent through two answered health checks", async () => {
     fetchMock.mockResolvedValue(ok200())
     const { t, ws } = connectReady()
-    await vi.advanceTimersByTimeAsync(25_000) // pinged at 15s, overdue at 25s
+    await vi.advanceTimersByTimeAsync(44_999) // probes at 25s and 35s
+    expect(healthCalls()).toBe(2)
+    expect(lastWs()).toBe(ws)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(t.getConnectionSnapshot()).toBe("reconnecting")
+    expect(lastWs()).not.toBe(ws)
+  })
+
+  it("watches closer while a turn streams on screen", async () => {
+    fetchMock
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValue(ok200())
+    const { t, ws } = connectReady()
+    t.setStreamingOnScreen(true)
+    vi.advanceTimersByTime(4_999)
+    expect(pings(ws)).toHaveLength(0)
+    vi.advanceTimersByTime(1)
+    expect(pings(ws)).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(t.getConnectionSnapshot()).toBe("reconnecting")
+    t.setStreamingOnScreen(false)
+  })
+
+  it("makes waitForReady() wait for the socket that replaces a dead one", async () => {
+    fetchMock
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValue(ok200())
+    const { t, ws } = connectReady()
+    await vi.advanceTimersByTimeAsync(25_000) // pinged at 15s, dead at 25s
     const ws2 = lastWs()
     expect(ws2).not.toBe(ws)
     let ready = false
@@ -381,8 +449,10 @@ describe("WebTransport heartbeat (dead-socket detection)", () => {
     expect(pings(ws)).toHaveLength(0)
   })
 
-  it("probeLiveness() pings at once and replaces the socket when nothing answers within 4s", async () => {
-    fetchMock.mockResolvedValue(ok200())
+  it("probeLiveness() pings at once and replaces the socket when neither the pong nor the server answers within 4s", async () => {
+    fetchMock
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValue(ok200())
     const { t, ws } = connectReady()
     t.probeLiveness()
     expect(pings(ws)).toHaveLength(1)
@@ -390,7 +460,7 @@ describe("WebTransport heartbeat (dead-socket detection)", () => {
     expect(t.getConnectionSnapshot()).toBe("connected")
     await vi.advanceTimersByTimeAsync(1)
     expect(t.getConnectionSnapshot()).toBe("reconnecting")
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(healthCalls()).toBe(2)
     expect(lastWs()).not.toBe(ws)
   })
 
@@ -481,5 +551,41 @@ describe("WebTransport heartbeat (dead-socket detection)", () => {
     t.destroy()
     vi.advanceTimersByTime(60_000)
     expect(pings(ws)).toHaveLength(0)
+  })
+})
+
+describe("WebTransport calls", () => {
+  it("checks the link when a call fails while the socket looks open", async () => {
+    const { t, ws } = connectReady()
+    fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"))
+    await expect(t.call("list_folders")).rejects.toThrow("Failed to fetch")
+    // A wake-style ping, at once.
+    expect(
+      ws.sent.filter((s) => (JSON.parse(s) as { action?: string }).action)
+    ).toHaveLength(1)
+  })
+
+  it("gives a read up after 8s while the link is down, a write keeps its full timeout", async () => {
+    const { t, ws } = connectReady()
+    ws.drop()
+    fetchMock.mockImplementation(
+      (_url: string, init: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          init.signal.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError"))
+          )
+        })
+    )
+    const read = t.call("list_folders")
+    const write = t.call("rename_conversation", { id: 1 })
+    let writeSettled = false
+    write.catch(() => {
+      writeSettled = true
+    })
+    const readResult = expect(read).rejects.toThrow("Request timed out")
+    await vi.advanceTimersByTimeAsync(8_000)
+    await readResult
+    expect(writeSettled).toBe(false)
+    t.destroy()
   })
 })

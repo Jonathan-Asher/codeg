@@ -21,6 +21,10 @@ import { perfMark } from "../perf-marks"
 const READY_TIMEOUT_MS = 5_000
 /// Shortest gap between two liveness probes triggered by failed calls.
 const CALL_FAILURE_PROBE_GAP_MS = 5_000
+/// Reads while the link is known to be down give up after this long instead
+/// of the proxy's 30 s request timeout (see `WebTransport`).
+const DOWN_READ_TIMEOUT_MS = 8_000
+const READ_COMMAND = /^(get|list|search|read|load|count|find|describe)_/
 
 /// Internal lifecycle channels emitted by the Rust-side proxy
 /// (`src-tauri/src/commands/remote_proxy.rs`). Keep these in sync with
@@ -210,11 +214,16 @@ export class RemoteDesktopTransport
       // the Rust client's 30s default fires before the backend can answer
       // — long-running commands (the 60s ACP probe in particular) would
       // surface "Request timed out" before reaching their own deadline.
+      const linkDown = this.connState !== "connected"
       const result = await invoke<T>("remote_http_call", {
         connectionId: this.config.id,
         command,
         args: args ?? {},
-        timeoutMs: options?.timeoutMs,
+        timeoutMs:
+          options?.timeoutMs ??
+          (linkDown && READ_COMMAND.test(command)
+            ? DOWN_READ_TIMEOUT_MS
+            : undefined),
       })
       return result
     } catch (err) {
@@ -296,6 +305,34 @@ export class RemoteDesktopTransport
 
   /** When `probeLiveness` last asked; 0 = never. */
   private lastProbeAt = 0
+
+  /** Last value passed to `setStreamingOnScreen`. */
+  private streamingOnScreen = false
+
+  /**
+   * Tell the Rust proxy whether a turn streams on screen in this window: its
+   * heartbeat then pings sooner (see `Heartbeat` in `remote_proxy.rs`). Per
+   * subscription, so one window's stream does not depend on another's.
+   * Re-sent on every `__ready__` in case the proxy's task was replaced.
+   */
+  setStreamingOnScreen(streaming: boolean): void {
+    if (this.streamingOnScreen === streaming) return
+    this.streamingOnScreen = streaming
+    this.sendStreamingFlag()
+  }
+
+  private sendStreamingFlag(): void {
+    if (this.destroyed || !this.wsStarted) return
+    void invoke("remote_ws_set_streaming", {
+      connectionId: this.config.id,
+      subscriptionId: this.subscriptionId,
+      streaming: this.streamingOnScreen,
+    }).catch((err) => {
+      // An older desktop build without the command: the proxy keeps its
+      // idle cadence, which is what it did before.
+      console.debug("[RemoteDesktopTransport] remote_ws_set_streaming:", err)
+    })
+  }
 
   /**
    * `probeLiveness` for failed calls, at most once per
@@ -505,6 +542,7 @@ export class RemoteDesktopTransport
       }
       // A new socket starts as "not looking" on the server.
       if (this.presence) this.sendWsFrame(presenceFrame(this.presence))
+      if (this.streamingOnScreen) this.sendStreamingFlag()
       if (this.hasReadiedOnce || this.missedWhileDown) {
         // Reconnect path: server-side receiver_count was 0 during the
         // disconnect window, so any event fired in that gap was dropped.
