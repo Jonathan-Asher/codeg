@@ -250,12 +250,13 @@ impl WsTaskEntry {
 
     /// Drop the streaming flags of subscriptions that are gone.
     fn forget_streaming<'a>(&self, subscription_ids: impl IntoIterator<Item = &'a String>) {
-        let changed = match self.streaming.lock() {
-            Ok(mut subs) => subscription_ids
-                .into_iter()
-                .fold(false, |changed, id| subs.remove(id) || changed),
-            Err(_) => false,
-        };
+        let mut changed = false;
+        if let Ok(mut subs) = self.streaming.lock() {
+            // Every id is removed: no short-circuit.
+            for id in subscription_ids {
+                changed |= subs.remove(id);
+            }
+        }
         if changed {
             self.streaming_changed.notify_one();
         }
