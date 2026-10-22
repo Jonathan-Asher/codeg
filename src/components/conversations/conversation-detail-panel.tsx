@@ -874,18 +874,17 @@ const ConversationTabView = memo(function ConversationTabView({
       // A failed reconnect publishes (and notifies) its own failure.
     })
   }, [acpActions, tabId])
-  // Messages wait in the queue (queued, or "Not sent" for a reason that goes
-  // again by itself) while the session's connection has failed or gone (the
-  // server restarted under it): reconnect by itself, backing off, so they go
-  // as soon as the server can take them instead of waiting for Retry. Stops
-  // once the connection is up, or nothing is left to send but a message the
-  // server refused.
+  // A message waits as "Not sent" for a reason that goes again by itself
+  // while the session's connection has failed or gone (the server restarted
+  // under it): reconnect by itself, backing off, so it goes as soon as the
+  // server can take it instead of waiting for Retry. Stops once the
+  // connection is up or the message is sent, edited or removed.
   const autoReconnectsRef = useRef(0)
-  // Bumped after each attempt, so a reconnect that fails without moving the
-  // status (the server is still down) is followed by the next one.
+  // Bumped once each attempt has settled, so a reconnect that fails without
+  // moving the status (the server is still down) is followed by the next
+  // one, and two attempts never overlap.
   const [autoReconnectTick, setAutoReconnectTick] = useState(0)
-  const unsentHeadRetries =
-    queueHead != null && queueHead.failure?.autoRetry !== false
+  const unsentHeadRetries = queueHead?.failure?.autoRetry === true
   useEffect(() => {
     if (connectionReady) {
       autoReconnectsRef.current = 0
@@ -896,16 +895,19 @@ const ConversationTabView = memo(function ConversationTabView({
     const wait = autoReconnectDelayMs(autoReconnectsRef.current)
     const timer = setTimeout(() => {
       autoReconnectsRef.current += 1
-      retryConnection()
-      setAutoReconnectTick((n) => n + 1)
+      void acpActions
+        .reconnect(tabId)
+        .catch(() => false)
+        .finally(() => setAutoReconnectTick((n) => n + 1))
     }, wait)
     return () => clearTimeout(timer)
   }, [
+    acpActions,
+    tabId,
     connectionReady,
     connStatus,
     connIsForOtherAgent,
     unsentHeadRetries,
-    retryConnection,
     autoReconnectTick,
   ])
   // While the session waits for the account pool, the composer says so.
