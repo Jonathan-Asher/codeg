@@ -1,15 +1,21 @@
 "use client"
 
+import { useRef, useState, type ReactNode, type Ref } from "react"
+import { flushSync } from "react-dom"
 import { useLocale, useTranslations } from "next-intl"
+import { ChevronDown, ChevronUp, GripVertical } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   formatCompactDuration,
+  formatHoldEnd,
   hasWindowReset,
   isPoolStale,
   poolAccountProbeWarning,
   poolAccountState,
   poolExhaustion,
   poolNextReset,
+  poolOrder,
   poolUsageLevel,
   servingAccount,
   splitPercent,
@@ -27,7 +33,12 @@ import {
   WindowResetText,
   WindowUsageBar,
 } from "./plan-usage-parts"
-import { PoolAccountActions, PREFERRED_ROUTING } from "./plan-usage-pool-manage"
+import {
+  PoolAccountActions,
+  PoolPauseButton,
+  PoolReserveButton,
+  usePoolOrder,
+} from "./plan-usage-pool-manage"
 
 /**
  * The account pool's reading — every account the agent's requests are spread
@@ -43,6 +54,7 @@ const STATE_BADGE: Record<HeldState, string> = {
   disabled: "text-muted-foreground",
   failing: "border-destructive/50 text-destructive",
   exhausted: "border-destructive/50 text-destructive",
+  reserved: "border-amber-500/40 text-amber-700 dark:text-amber-400",
   at_threshold: "border-amber-500/40 text-amber-700 dark:text-amber-400",
   cooling_down: "border-amber-500/40 text-amber-700 dark:text-amber-400",
 }
@@ -117,9 +129,9 @@ export function PoolSummaryLine({
   )
 }
 
-/** How the pool picks an account for a new request: "prefers X, the others
- *  take over", automatic balancing, or a mode this client doesn't know by
- *  name. Nothing when the pool doesn't say. */
+/** How the pool picks an account for a new request: in order from the top,
+ *  automatic balancing, or a mode this client doesn't know by name. Nothing
+ *  when the pool doesn't say. */
 export function PoolRoutingLine({
   pool,
   className,
@@ -129,20 +141,17 @@ export function PoolRoutingLine({
 }) {
   const t = useTranslations("PlanUsage.pool")
   const mode = pool.routing_mode
-  if (!mode) return null
-  const text =
-    mode === PREFERRED_ROUTING && pool.preferred_account
-      ? t.rich("routingPreferred", {
-          name: pool.preferred_account,
-          b: (chunks) => <bdi className="font-medium">{chunks}</bdi>,
-        })
-      : mode === "automatic"
-        ? t("routingAutomatic")
-        : t("routingOther", { mode })
+  const { ordered } = poolOrder(pool)
+  if (!mode && !ordered) return null
+  const text = ordered
+    ? t("routingOrdered")
+    : mode === "automatic"
+      ? t("routingAutomatic")
+      : t("routingOther", { mode: mode ?? "" })
   return (
     <p
       data-slot="pool-routing"
-      data-routing={mode}
+      data-routing={ordered ? "ordered" : (mode ?? undefined)}
       className={cn("text-xs text-muted-foreground", className)}
     >
       {text}
@@ -243,123 +252,323 @@ export function PoolAccountList({
   pool: PlanUsagePool
   now: number
   compact?: boolean
-  /** Offer each account's actions (sign in again, rename, switch, remove);
-   *  called after one changed the pool. Only where the host can run them. */
+  /** Offer each account's controls (order, pause, reserve, sign in again,
+   *  rename, remove); called after one changed the pool. Only where the host
+   *  can run them. */
   onManaged?: () => void
 }) {
+  const t = useTranslations("PlanUsage.pool.manage")
   const stale = isPoolStale(pool, now)
+  const order = usePoolOrder(pool, onManaged)
+  const managed = onManaged != null && !compact
+  const inOrder = order.accounts.filter((a) => !a.provider).length
+  const rows = useRef<(HTMLLIElement | null)[]>([])
+  const handles = useRef(new Map<string, HTMLButtonElement>())
+  const [drag, setDrag] = useState<{ from: number; over: number } | null>(null)
+
+  /** The row in the order under the pointer. */
+  const rowAt = (clientY: number) => {
+    let over = 0
+    rows.current.slice(0, inOrder).forEach((row, index) => {
+      if (row && row.getBoundingClientRect().top <= clientY) over = index
+    })
+    return over
+  }
+  const move = (from: number, to: number) => {
+    if (from === to || to < 0 || to >= inOrder) return
+    order.move(from, to)
+  }
+
   return (
     <ul
       data-slot="pool-accounts"
+      data-ordered={order.ordered ? "true" : undefined}
       className={cn(
         compact ? "space-y-2.5" : "space-y-3",
         stale && "opacity-70"
       )}
     >
-      {pool.accounts.map((account) => (
-        <PoolAccountRow
-          key={account.name}
-          account={account}
-          pool={pool}
-          now={now}
-          compact={compact}
-          onManaged={onManaged}
-        />
-      ))}
+      {order.accounts.map((account, index) => {
+        const ordering =
+          managed && !account.provider && inOrder > 1
+            ? {
+                index,
+                last: inOrder - 1,
+                handle: (
+                  <button
+                    type="button"
+                    ref={(el) => {
+                      if (el) handles.current.set(account.name, el)
+                      else handles.current.delete(account.name)
+                    }}
+                    data-slot="pool-order-handle"
+                    aria-label={t("dragHandle", { name: account.name })}
+                    className="mt-0.5 flex h-5 w-4 shrink-0 cursor-grab touch-none items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none active:cursor-grabbing"
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return
+                      e.preventDefault()
+                      e.currentTarget.setPointerCapture?.(e.pointerId)
+                      setDrag({ from: index, over: index })
+                    }}
+                    onPointerMove={(e) => {
+                      if (!drag) return
+                      const over = rowAt(e.clientY)
+                      if (over !== drag.over) setDrag({ ...drag, over })
+                    }}
+                    onPointerUp={() => {
+                      if (drag && drag.over !== drag.from) {
+                        move(drag.from, drag.over)
+                      }
+                      setDrag(null)
+                    }}
+                    onPointerCancel={() => setDrag(null)}
+                    onKeyDown={(e) => {
+                      const to =
+                        e.key === "ArrowUp"
+                          ? index - 1
+                          : e.key === "ArrowDown"
+                            ? index + 1
+                            : e.key === "Home"
+                              ? 0
+                              : e.key === "End"
+                                ? inOrder - 1
+                                : null
+                      if (to == null) return
+                      e.preventDefault()
+                      // The handle keeps the focus as its row moves.
+                      flushSync(() => move(index, to))
+                      handles.current.get(account.name)?.focus()
+                    }}
+                  >
+                    <GripVertical className="size-3.5" aria-hidden="true" />
+                  </button>
+                ),
+                dragging: drag?.from === index,
+                dropTarget:
+                  drag != null && drag.from !== index && drag.over === index,
+                move: (to: number) => move(index, to),
+              }
+            : undefined
+        return (
+          <PoolAccountRow
+            key={account.name}
+            ref={(el) => {
+              rows.current[index] = el
+            }}
+            account={account}
+            position={order.ordered && !account.provider ? index + 1 : null}
+            pool={pool}
+            now={now}
+            compact={compact}
+            onManaged={managed ? onManaged : undefined}
+            ordering={ordering}
+            onMoveToTop={
+              ordering && index > 0 ? () => move(index, 0) : undefined
+            }
+            onAutomatic={
+              managed && order.ordered && index === 0 ? order.clear : undefined
+            }
+          />
+        )
+      })}
     </ul>
   )
 }
 
+interface RowOrdering {
+  index: number
+  last: number
+  handle: ReactNode
+  dragging: boolean
+  dropTarget: boolean
+  move: (to: number) => void
+}
+
 function PoolAccountRow({
+  ref,
   account,
+  position,
   pool,
   now,
   compact,
   onManaged,
+  ordering,
+  onMoveToTop,
+  onAutomatic,
 }: {
+  ref?: Ref<HTMLLIElement>
   account: PlanUsagePoolAccount
+  /** Its place in the pool's order, shown when the pool has one. */
+  position: number | null
   pool: PlanUsagePool
   now: number
   compact: boolean
   onManaged?: () => void
+  ordering?: RowOrdering
+  onMoveToTop?: () => void
+  onAutomatic?: () => void
 }) {
   const t = useTranslations("PlanUsage.pool")
+  const tm = useTranslations("PlanUsage.pool.manage")
   const locale = useLocale()
   const state = poolAccountState(account, now)
   const held = state !== "available" ? state : null
-  const backIn =
+  const until =
     held != null &&
     held !== "disabled" &&
     account.blocked_until != null &&
     account.blocked_until > now
-      ? account.blocked_until - now
+      ? account.blocked_until
       : null
+  const reserve = account.reserve ?? null
   const stateHint =
     held === "at_threshold"
       ? t("stateHint.at_threshold", {
           threshold: Math.round(pool.switch_threshold),
         })
-      : held
-        ? t(`stateHint.${held}`)
-        : undefined
+      : held === "reserved"
+        ? t("stateHint.reserved", { percent: reserve?.percent ?? 0 })
+        : held
+          ? t(`stateHint.${held}`)
+          : undefined
   const badge = compact ? "h-4 px-1.5 text-[0.625rem]" : undefined
   const muted = state === "disabled"
   const probeText = useProbeWarningText(account, now)
+  // The reserve's line on the windows it holds the account to.
+  const reserveAt = reserve ? 100 - reserve.percent : null
 
   return (
     <li
+      ref={ref}
       data-account={account.name}
       data-state={state}
       data-serving={account.serving ? "true" : undefined}
+      data-position={position ?? undefined}
+      data-dragging={ordering?.dragging ? "true" : undefined}
       className={cn(
         !compact && "rounded-lg border border-border px-3 py-2.5",
-        !compact && account.serving && "border-primary/40 bg-primary/[0.03]"
+        !compact && account.serving && "border-primary/40 bg-primary/[0.03]",
+        ordering?.dragging && "opacity-60",
+        ordering?.dropTarget && "ring-2 ring-primary/50"
       )}
     >
-      <div className="flex flex-wrap items-center gap-1.5">
-        <bdi
-          className={cn(
-            "min-w-0 truncate font-medium",
-            compact ? "text-xs" : "text-sm",
-            muted && "text-muted-foreground"
-          )}
-        >
-          {account.name}
-        </bdi>
-        {account.serving && (
-          <Badge variant="default" className={badge}>
-            {t("servingBadge")}
-          </Badge>
-        )}
-        {account.preferred && (
-          <Badge variant="secondary" className={badge}>
-            {t("preferredBadge")}
-          </Badge>
-        )}
-        {held && (
-          <Badge
-            variant="outline"
-            title={stateHint}
-            className={cn(badge, STATE_BADGE[held])}
-          >
-            {t(`state.${held}`)}
-          </Badge>
-        )}
-        {backIn != null && (
-          <span className="ms-auto text-[0.6875rem] text-muted-foreground tabular-nums">
-            {t("backIn", { duration: formatCompactDuration(backIn, locale) })}
+      <div className="flex items-start gap-1.5">
+        {ordering?.handle}
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+          {/* The position and the name stay on one line; a long name
+              truncates there, whole in its tooltip. */}
+          <span className="flex max-w-full min-w-0 items-baseline gap-1.5">
+            {position != null && !compact && (
+              <span
+                data-slot="pool-position"
+                aria-label={t("position", { position })}
+                className="text-xs text-muted-foreground tabular-nums"
+              >
+                {position}
+              </span>
+            )}
+            <bdi
+              title={account.name}
+              className={cn(
+                "min-w-0 truncate font-medium",
+                compact ? "text-xs" : "text-sm",
+                muted && "text-muted-foreground"
+              )}
+            >
+              {account.name}
+            </bdi>
           </span>
-        )}
-        {onManaged && !compact && (
-          <span className={cn(backIn == null && "ms-auto")}>
+          {account.serving && (
+            <Badge variant="default" className={badge}>
+              {t("servingBadge")}
+            </Badge>
+          )}
+          {compact && account.preferred && (
+            <Badge variant="secondary" className={badge}>
+              {t("preferredBadge")}
+            </Badge>
+          )}
+          {held && (
+            <Badge
+              variant="outline"
+              title={stateHint}
+              className={cn(badge, STATE_BADGE[held])}
+            >
+              {t(`state.${held}`)}
+            </Badge>
+          )}
+          {until != null && (
+            <span
+              data-slot="pool-hold-end"
+              className="text-[0.6875rem] text-muted-foreground tabular-nums"
+            >
+              {held === "exhausted"
+                ? t("atLimitUntil", {
+                    time: formatHoldEnd(until, locale, now),
+                  })
+                : t("backIn", {
+                    duration: formatCompactDuration(until - now, locale),
+                  })}
+            </span>
+          )}
+        </div>
+        {onManaged && (
+          <div className="flex shrink-0 items-center gap-0.5">
+            {ordering && (
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 w-6 p-0"
+                  data-slot="pool-move-up"
+                  aria-label={tm("moveUp", { name: account.name })}
+                  disabled={ordering.index === 0}
+                  onClick={() => ordering.move(ordering.index - 1)}
+                >
+                  <ChevronUp className="size-3.5" aria-hidden="true" />
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 w-6 p-0"
+                  data-slot="pool-move-down"
+                  aria-label={tm("moveDown", { name: account.name })}
+                  disabled={ordering.index === ordering.last}
+                  onClick={() => ordering.move(ordering.index + 1)}
+                >
+                  <ChevronDown className="size-3.5" aria-hidden="true" />
+                </Button>
+              </>
+            )}
+            <PoolPauseButton account={account} onChanged={onManaged} />
             <PoolAccountActions
               account={account}
-              pool={pool}
               onChanged={onManaged}
+              onMoveToTop={onMoveToTop}
+              onAutomatic={onAutomatic}
             />
-          </span>
+          </div>
         )}
       </div>
+      {onManaged ? (
+        <div className={cn("mt-1.5", ordering && "ps-5")}>
+          <PoolReserveButton account={account} onChanged={onManaged} />
+        </div>
+      ) : (
+        reserve &&
+        !compact && (
+          <p className="mt-1 text-[0.6875rem] text-muted-foreground">
+            {t(
+              reserve.mode === "dynamic"
+                ? "reserveSummaryDynamic"
+                : "reserveSummary",
+              { percent: reserve.percent }
+            )}
+          </p>
+        )
+      )}
       {account.refresh_failed && (
         <p className="mt-1 text-[0.6875rem] text-destructive">
           {t("signInFailed")}
@@ -385,6 +594,11 @@ function PoolAccountRow({
               key={limit.id}
               limit={limit}
               threshold={pool.switch_threshold}
+              reserveAt={
+                limit.id === "five_hour" || limit.id === "seven_day"
+                  ? reserveAt
+                  : null
+              }
               now={now}
               compact={compact}
             />
@@ -425,11 +639,14 @@ function useProbeWarningText(
 function PoolWindowRow({
   limit,
   threshold,
+  reserveAt,
   now,
   compact,
 }: {
   limit: PlanUsageWindow
   threshold: number
+  /** Percent used where the account's reserve starts, drawn on the bar. */
+  reserveAt: number | null
   now: number
   compact: boolean
 }) {
@@ -456,13 +673,25 @@ function PoolWindowRow({
           {t("used", { percent: used })}
         </span>
       </div>
-      <WindowUsageBar
-        limit={limit}
-        title={title}
-        now={now}
-        level={level}
-        className={compact ? "mt-1 h-1" : "mt-1 h-1.5"}
-      />
+      <div className="relative">
+        <WindowUsageBar
+          limit={limit}
+          title={title}
+          now={now}
+          level={level}
+          className={compact ? "mt-1 h-1" : "mt-1 h-1.5"}
+        />
+        {reserveAt != null && (
+          <span
+            data-slot="reserve-line"
+            data-at={reserveAt}
+            aria-hidden="true"
+            className="pointer-events-none absolute -top-0.5 -bottom-0.5 w-0.5 -translate-x-1/2 rounded-full bg-foreground/70"
+            // The bar fills from the left in every direction.
+            style={{ left: `${reserveAt}%` }}
+          />
+        )}
+      </div>
       <div className="mt-1 flex items-baseline justify-between gap-2 text-[0.6875rem] text-muted-foreground">
         {compact ? (
           <span />

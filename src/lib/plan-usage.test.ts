@@ -5,10 +5,12 @@ import {
   findSnapshot,
   formatAbsoluteTime,
   formatCompactDuration,
+  formatHoldEnd,
   hasWindowReset,
   isPoolStale,
   isSnapshotStale,
   mergeFetchedReport,
+  moveInList,
   PLAN_USAGE_POOL_STALE_AFTER_SECONDS,
   PLAN_USAGE_STALE_AFTER_SECONDS,
   planUsagePreview,
@@ -16,6 +18,7 @@ import {
   poolAccountState,
   poolExhaustion,
   poolNextReset,
+  poolOrder,
   poolUsageLevel,
   replacePool,
   replaceSnapshot,
@@ -466,6 +469,64 @@ describe("account pool", () => {
       ...overrides,
     }
   }
+
+  it("orders the accounts by priority, else from the preferred one, providers last", () => {
+    const glm = account({ name: "glm", provider: true })
+    const three = pool({
+      accounts: [
+        account({ name: "alpha", priority: 2 }),
+        glm,
+        account({ name: "beta", priority: 0 }),
+        account({ name: "carol@example.com", priority: 1 }),
+      ],
+    })
+    expect(poolOrder(three).accounts.map((a) => a.name)).toEqual([
+      "beta",
+      "carol@example.com",
+      "alpha",
+      "glm",
+    ])
+    expect(poolOrder(three).ordered).toBe(true)
+
+    // No priorities: the preferred account first, the rest as listed.
+    const preferring = pool({
+      accounts: [
+        account({ name: "alpha" }),
+        account({ name: "beta", preferred: true }),
+        account({ name: "carol" }),
+      ],
+    })
+    expect(poolOrder(preferring).accounts.map((a) => a.name)).toEqual([
+      "beta",
+      "alpha",
+      "carol",
+    ])
+    // Neither: automatic balancing, no order.
+    const automatic = pool({ routing_mode: "automatic" })
+    automatic.accounts = automatic.accounts.map((a) => ({
+      ...a,
+      preferred: false,
+    }))
+    expect(poolOrder(automatic).ordered).toBe(false)
+  })
+
+  it("moves an item within a list", () => {
+    expect(moveInList(["a", "b", "c"], 2, 0)).toEqual(["c", "a", "b"])
+    expect(moveInList(["a", "b", "c"], 0, 1)).toEqual(["b", "a", "c"])
+    expect(moveInList(["a", "b", "c"], 0, 9)).toEqual(["b", "c", "a"])
+  })
+
+  it("says the end of a hold as a clock time, with the weekday past a day", () => {
+    const at = Date.UTC(2026, 9, 22, 12, 0, 0) / 1000
+    expect(formatHoldEnd(at + 3 * 3_600, "en", at)).not.toMatch(/Thu|Fri/)
+    expect(formatHoldEnd(at + 2 * 86_400, "en", at)).toMatch(/^Sat/)
+  })
+
+  it("counts an account held by its reserve as held until its window frees", () => {
+    const held = account({ state: "reserved", blocked_until: now + 60 })
+    expect(poolAccountState(held, now)).toBe("reserved")
+    expect(poolAccountState(held, now + 61)).toBe("available")
+  })
 
   function withPool(
     p: PlanUsagePool | null,

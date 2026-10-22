@@ -2643,12 +2643,14 @@ export type PlanUsagePoolAccountStatus =
   | "unknown"
 
 /** Where an account stands for taking requests, most severe first.
- *  `at_threshold` — past the pool's switch threshold, so requests go to
- *  another account until the window resets. */
+ *  `reserved` — held by its own reserve; `at_threshold` — past the pool's
+ *  switch threshold. Either way requests go to another account until the
+ *  window resets. */
 export type PlanUsagePoolAccountState =
   | "disabled"
   | "failing"
   | "exhausted"
+  | "reserved"
   | "at_threshold"
   | "cooling_down"
   | "available"
@@ -2695,6 +2697,19 @@ export interface PlanUsagePoolAccount {
   /** An API provider the pool also routes to (GLM, Kimi), not a Claude
    *  subscription: it can't be the preferred account. Absent = false. */
   provider?: boolean
+  /** Its place in the pool's order as configured (lower serves first);
+   *  absent or null when the pool has no order. */
+  priority?: number | null
+  /** The part of each window (5h and weekly) it keeps back, if any. */
+  reserve?: PlanUsagePoolReserve | null
+}
+
+/** An account's reserve: the pool stops sending it new requests at
+ *  `100 - percent` used of either window. `fixed` never spends the reserve;
+ *  `dynamic` releases it over the second half of each window. */
+export interface PlanUsagePoolReserve {
+  percent: number
+  mode: "fixed" | "dynamic"
 }
 
 export interface PlanUsagePool {

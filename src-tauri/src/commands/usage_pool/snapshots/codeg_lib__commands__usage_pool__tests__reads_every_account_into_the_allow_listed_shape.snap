@@ -42,7 +42,9 @@ expression: fixture_pool()
       "probe_failures": 4,
       "probe_error_status": 429,
       "refresh_failed": false,
-      "observed_at": 1799999700
+      "observed_at": 1799999700,
+      "priority": null,
+      "reserve": null
     },
     {
       "name": "beta",
@@ -88,7 +90,9 @@ expression: fixture_pool()
       "probe_failures": 0,
       "probe_error_status": null,
       "refresh_failed": false,
-      "observed_at": 1799999880
+      "observed_at": 1799999880,
+      "priority": null,
+      "reserve": null
     },
     {
       "name": "gamma",
@@ -116,7 +120,9 @@ expression: fixture_pool()
       "probe_failures": 0,
       "probe_error_status": null,
       "refresh_failed": false,
-      "observed_at": null
+      "observed_at": null,
+      "priority": null,
+      "reserve": null
     }
   ],
   "current_account": "beta",

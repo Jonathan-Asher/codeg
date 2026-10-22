@@ -49,9 +49,12 @@ const manage = vi.hoisted(() => {
     usagePoolSetEnabled: vi.fn<(name: string, enabled: boolean) => Change>(() =>
       Promise.resolve({ applied: "live" })
     ),
-    usagePoolSetPreferred: vi.fn<(name: string | null) => Change>(() =>
-      Promise.resolve({ applied: "live" })
+    usagePoolSetOrder: vi.fn<(names: string[] | null) => Change>(() =>
+      Promise.resolve({ applied: "restarting" })
     ),
+    usagePoolSetReserve: vi.fn<
+      (name: string, percent: number | null, mode: string) => Change
+    >(() => Promise.resolve({ applied: "live" })),
     usagePoolRemove: vi.fn<(name: string) => Change>(() =>
       Promise.resolve({ applied: "restarting" })
     ),
@@ -507,9 +510,10 @@ describe("PlanUsagePage account pool", () => {
     ])
 
     const primary = within(accountRow("primary"))
-    expect(primary.getByText("Preferred")).toBeInTheDocument()
+    // The pool prefers it: it heads the order.
+    expect(accountRow("primary")).toHaveAttribute("data-position", "1")
     expect(primary.getByText("Exhausted")).toBeInTheDocument()
-    expect(primary.getByText(/^Back in 2h 3[01]m$/)).toBeInTheDocument()
+    expect(primary.getByText(/^At limit until /)).toBeInTheDocument()
     // Its usage check is failing, but its reading is a minute old.
     expect(
       accountRow("primary").querySelector('[data-slot="probe-failing"]')
@@ -532,9 +536,7 @@ describe("PlanUsagePage account pool", () => {
 
     // Switched off, still listed.
     expect(accountRow("spare")).toHaveAttribute("data-state", "disabled")
-    expect(
-      within(accountRow("spare")).getByText("Disabled")
-    ).toBeInTheDocument()
+    expect(within(accountRow("spare")).getByText("Paused")).toBeInTheDocument()
 
     // The agent's own reading is folded away and its badge is not shown.
     const live = claude.querySelector<HTMLDetailsElement>(
@@ -771,32 +773,86 @@ describe("PlanUsagePage account pool management", () => {
     expect(manage.usagePoolRemove).toHaveBeenCalledWith("spare")
   })
 
-  it("renames and switches accounts through the pool's own tools", async () => {
+  it("renames an account through the pool's own tools", async () => {
     await mountManaged()
-    let user = await openActions("backup")
+    const user = await openActions("backup")
     await user.click(screen.getByRole("menuitem", { name: "Rename" }))
     const input = await screen.findByDisplayValue("backup")
     fireEvent.change(input, { target: { value: "personal" } })
     await user.click(screen.getByRole("button", { name: "Save" }))
     expect(manage.usagePoolRename).toHaveBeenCalledWith("backup", "personal")
-
-    user = await openActions("spare")
-    await user.click(screen.getByRole("menuitem", { name: "Turn on" }))
-    expect(manage.usagePoolSetEnabled).toHaveBeenCalledWith("spare", true)
   })
 
-  it("prefers another account in one tap while the pool prefers one", async () => {
+  it("orders the accounts from the top and moves them with buttons, keys and the menu", async () => {
     await mountManaged()
+    const list = card("Claude Code").querySelector(
+      '[data-slot="pool-accounts"]'
+    )!
+    const names = () =>
+      Array.from(list.querySelectorAll<HTMLElement>("[data-account]")).map(
+        (r) => r.dataset.account
+      )
+    // The pool prefers primary: the order starts there.
     expect(
       card("Claude Code").querySelector('[data-slot="pool-routing"]')
-    ).toHaveTextContent("Routing: new requests go to primary first")
-    const user = await openActions("backup")
-    await user.click(screen.getByRole("menuitem", { name: "Make preferred" }))
-    expect(manage.usagePoolSetPreferred).toHaveBeenCalledWith("backup")
-    expect(screen.queryByRole("alertdialog")).toBeNull()
+    ).toHaveTextContent(
+      "Order: new requests go to the first account that can take them, from the top"
+    )
+    expect(names()).toEqual(["primary", "backup", "spare"])
+    expect(accountRow("primary")).toHaveAttribute("data-position", "1")
+    expect(
+      within(accountRow("primary")).getByRole("button", {
+        name: "Move primary up",
+      })
+    ).toBeDisabled()
+
+    const user = userEvent.setup()
+    await user.click(
+      within(accountRow("backup")).getByRole("button", {
+        name: "Move backup up",
+      })
+    )
+    expect(manage.usagePoolSetOrder).toHaveBeenLastCalledWith([
+      "backup",
+      "primary",
+      "spare",
+    ])
+    expect(names()).toEqual(["backup", "primary", "spare"])
+
+    // The handle moves its account with the arrow keys and keeps the focus.
+    const handle = within(accountRow("spare")).getByRole("button", {
+      name: "Reorder spare: drag, or use the arrow keys",
+    })
+    handle.focus()
+    await user.keyboard("{ArrowUp}")
+    expect(manage.usagePoolSetOrder).toHaveBeenLastCalledWith([
+      "backup",
+      "spare",
+      "primary",
+    ])
+    expect(names()).toEqual(["backup", "spare", "primary"])
+    expect(handle).toHaveFocus()
+
+    await openActions("primary")
+    await user.click(screen.getByRole("menuitem", { name: "Move to top" }))
+    expect(manage.usagePoolSetOrder).toHaveBeenLastCalledWith([
+      "primary",
+      "backup",
+      "spare",
+    ])
   })
 
-  it("asks before switching an automatic pool to a preferred account", async () => {
+  it("goes back to automatic balancing from the first account's menu", async () => {
+    await mountManaged()
+    const user = await openActions("primary")
+    expect(screen.queryByRole("menuitem", { name: "Move to top" })).toBeNull()
+    await user.click(
+      screen.getByRole("menuitem", { name: "Use automatic routing" })
+    )
+    expect(manage.usagePoolSetOrder).toHaveBeenCalledWith(null)
+  })
+
+  it("lists an automatic pool without an order until one is set", async () => {
     manage.usagePoolManageInfo.mockImplementation(() =>
       Promise.resolve({ available: true, reload: "idle" })
     )
@@ -816,33 +872,163 @@ describe("PlanUsagePage account pool management", () => {
     expect(
       card("Claude Code").querySelector('[data-slot="pool-routing"]')
     ).toHaveTextContent("Routing: automatic")
-
-    const user = await openActions("backup")
-    await user.click(screen.getByRole("menuitem", { name: "Make preferred" }))
-    const dialog = await screen.findByRole("alertdialog")
-    expect(dialog).toHaveTextContent('routing is "automatic" now')
-    expect(manage.usagePoolSetPreferred).not.toHaveBeenCalled()
-    await user.click(
-      within(dialog).getByRole("button", { name: "Prefer backup" })
-    )
-    expect(manage.usagePoolSetPreferred).toHaveBeenCalledWith("backup")
+    expect(accountRow("primary")).not.toHaveAttribute("data-position")
+    const user = await openActions("spare")
+    await user.click(screen.getByRole("menuitem", { name: "Move to top" }))
+    expect(manage.usagePoolSetOrder).toHaveBeenCalledWith([
+      "spare",
+      "primary",
+      "backup",
+    ])
   })
 
-  it("goes back to automatic, and won't prefer an account that is off", async () => {
+  it("pauses and resumes an account from its row", async () => {
     await mountManaged()
-    let user = await openActions("primary")
-    expect(
-      screen.queryByRole("menuitem", { name: "Make preferred" })
-    ).toBeNull()
+    expect(accountRow("spare")).toHaveAttribute("data-state", "disabled")
+    expect(within(accountRow("spare")).getByText("Paused")).toBeInTheDocument()
+    const user = userEvent.setup()
     await user.click(
-      screen.getByRole("menuitem", { name: "Use automatic routing" })
+      within(accountRow("backup")).getByRole("button", { name: "Pause" })
     )
-    expect(manage.usagePoolSetPreferred).toHaveBeenCalledWith(null)
+    expect(manage.usagePoolSetEnabled).toHaveBeenCalledWith("backup", false)
+    await user.click(
+      within(accountRow("spare")).getByRole("button", { name: "Resume" })
+    )
+    expect(manage.usagePoolSetEnabled).toHaveBeenCalledWith("spare", true)
+  })
 
-    user = await openActions("spare")
+  it("keeps a reserve: a preset that is never used by default, a custom one, none", async () => {
+    await mountManaged()
+    const user = userEvent.setup()
+    await user.click(
+      within(accountRow("backup")).getByRole("button", { name: "No reserve" })
+    )
+    let dialog = await screen.findByRole("dialog")
+    expect(dialog).toHaveTextContent("Reserve for backup")
+    expect(within(dialog).getByRole("radio", { name: "None" })).toBeChecked()
+    await user.click(within(dialog).getByRole("radio", { name: "10%" }))
     expect(
-      screen.getByRole("menuitem", { name: "Make preferred" })
-    ).toHaveAttribute("aria-disabled", "true")
+      within(dialog).getByRole("radio", { name: /Never use it/ })
+    ).toBeChecked()
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+    expect(manage.usagePoolSetReserve).toHaveBeenLastCalledWith(
+      "backup",
+      10,
+      "fixed"
+    )
+
+    await user.click(
+      within(accountRow("primary")).getByRole("button", { name: "No reserve" })
+    )
+    dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("radio", { name: "Custom" }))
+    const custom = within(dialog).getByRole("spinbutton", {
+      name: "Custom reserve, in percent",
+    })
+    await user.type(custom, "150")
+    expect(
+      within(dialog).getByText("Enter a whole percent from 1 to 99.")
+    ).toBeInTheDocument()
+    expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled()
+    await user.clear(custom)
+    await user.type(custom, "7")
+    await user.click(
+      within(dialog).getByRole("radio", { name: /Release it near the reset/ })
+    )
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+    expect(manage.usagePoolSetReserve).toHaveBeenLastCalledWith(
+      "primary",
+      7,
+      "dynamic"
+    )
+  })
+
+  it("shows a reserve on the bars, the hold it causes, and clears it", async () => {
+    manage.usagePoolManageInfo.mockImplementation(() =>
+      Promise.resolve({ available: true, reload: "idle" })
+    )
+    const reserved = pool()
+    reserved.accounts = reserved.accounts.map((a) =>
+      a.name === "backup"
+        ? {
+            ...a,
+            state: "reserved" as const,
+            blocked_until: now() + 72 * 60 + 30,
+            reserve: { percent: 15, mode: "dynamic" as const },
+          }
+        : a
+    )
+    getPlanUsage.mockResolvedValue(
+      report([claudeSnapshot()], { pool: reserved })
+    )
+    await mount()
+    await screen.findByRole("button", { name: "Add account" })
+    const backup = accountRow("backup")
+    expect(backup).toHaveAttribute("data-state", "reserved")
+    expect(within(backup).getByText("Reserve reached")).toHaveAttribute(
+      "title",
+      "Its 15% reserve is reached. New requests go to the next account until the window resets."
+    )
+    expect(within(backup).getByText(/^Back in 1h 1[23]m$/)).toBeInTheDocument()
+    const lines = Array.from(
+      backup.querySelectorAll<HTMLElement>('[data-slot="reserve-line"]')
+    )
+    // On the 5-hour and weekly bars; not on the model's own window.
+    expect(
+      lines.map((l) => l.closest("[data-window]")?.getAttribute("data-window"))
+    ).toEqual(["five_hour", "seven_day"])
+    expect(lines[0].style.left).toBe("85%")
+
+    const user = userEvent.setup()
+    await user.click(
+      within(backup).getByRole("button", {
+        name: "Reserve 15%, released near the reset",
+      })
+    )
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByRole("radio", { name: "15%" })).toBeChecked()
+    expect(
+      within(dialog).getByRole("radio", { name: /Release it near the reset/ })
+    ).toBeChecked()
+    await user.click(within(dialog).getByRole("radio", { name: "None" }))
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+    expect(manage.usagePoolSetReserve).toHaveBeenLastCalledWith(
+      "backup",
+      null,
+      "dynamic"
+    )
+  })
+
+  it("says until when an exhausted account is at its limit", async () => {
+    await mountManaged()
+    expect(
+      within(accountRow("primary")).getByText(/^At limit until /)
+    ).toBeInTheDocument()
+  })
+
+  it("truncates a long account name and keeps it whole in a tooltip", async () => {
+    manage.usagePoolManageInfo.mockImplementation(() =>
+      Promise.resolve({ available: true, reload: "idle" })
+    )
+    const email = "someone.with.a.really.long.address@example-company.co.il"
+    const named = pool()
+    named.accounts = named.accounts.map((a) =>
+      a.name === "spare" ? { ...a, name: email } : a
+    )
+    getPlanUsage.mockResolvedValue(report([claudeSnapshot()], { pool: named }))
+    await mount()
+    await screen.findByRole("button", { name: "Add account" })
+    const name = within(accountRow(email)).getByText(email)
+    expect(name).toHaveAttribute("title", email)
+    expect(name).toHaveClass("truncate", "min-w-0")
+    expect(card("Claude Code").querySelectorAll("[data-account]")).toHaveLength(
+      3
+    )
+    expect(
+      within(accountRow(email)).getByRole("button", {
+        name: `Actions for ${email}`,
+      })
+    ).toBeInTheDocument()
   })
 
   it("says when a change waits for the pool to restart", async () => {

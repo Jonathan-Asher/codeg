@@ -525,23 +525,56 @@ pub(crate) async fn remove(name: &str) -> Result<PoolChange, AppCommandError> {
     })
 }
 
-/// maxpool has no command for the switch; its own config module does it,
-/// the way its TUI does. Name and value travel in the environment, never in
-/// the script.
-const SET_ENABLED_SCRIPT: &str = r#"
+/// What every config script starts with: maxpool's own config module, and
+/// the order helpers. An ordered pool (a Claude account has a `priority`)
+/// also names its first switched-on Claude account as the preferred one:
+/// the running server re-reads `routing` within seconds but `priority` only
+/// when it restarts, so the head of a new order serves at once.
+const SCRIPT_PRELUDE: &str = r#"
 const { pathToFileURL } = await import('node:url');
 const mod = await import(pathToFileURL(process.env.CODEG_MAXPOOL_CONFIG_MODULE).href);
 if (typeof mod.atomicConfigUpdate !== 'function') process.exit(3);
+class Refused extends Error {
+  constructor(code) { super('refused'); this.code = code; }
+}
+const isClaude = (a) => a.type !== 'provider';
+const rank = (a) => (Number.isFinite(a.priority) ? a.priority : Infinity);
+const isOrdered = (config) => (config.accounts || []).some((a) => isClaude(a) && Number.isFinite(a.priority));
+const followOrder = (config) => {
+  const head = (config.accounts || [])
+    .map((account, index) => ({ account, index }))
+    .filter(({ account }) => isClaude(account) && account.enabled !== false)
+    .sort((x, y) => rank(x.account) - rank(y.account) || x.index - y.index)[0];
+  config.routing = head
+    ? { ...(config.routing || {}), mode: 'preferred', preferredAccount: head.account.name }
+    : { ...(config.routing || {}), mode: 'automatic', preferredAccount: null };
+};
+const update = async (change) => {
+  try {
+    await mod.atomicConfigUpdate(change);
+  } catch (error) {
+    process.exit(error instanceof Refused ? error.code : 1);
+  }
+  process.exit(0);
+};
+"#;
+
+fn config_script(body: &str) -> String {
+    format!("{SCRIPT_PRELUDE}{body}")
+}
+
+/// maxpool has no command for the switch; its own config module does it,
+/// the way its TUI does. Name and value travel in the environment, never in
+/// the script. A paused account is skipped in the order.
+const SET_ENABLED_SCRIPT: &str = r#"
 const name = process.env.CODEG_MAXPOOL_ACCOUNT;
 const enabled = process.env.CODEG_MAXPOOL_ENABLED === '1';
-let found = false;
-await mod.atomicConfigUpdate((config) => {
+await update((config) => {
   const account = (config.accounts || []).find((a) => a.name === name);
-  if (!account) return;
-  found = true;
+  if (!account) throw new Refused(4);
   if (enabled) delete account.enabled; else account.enabled = false;
+  if (isOrdered(config)) followOrder(config);
 });
-process.exit(found ? 0 : 4);
 "#;
 
 /// maxpool's `config.js`, next to the entry point the `maxpool` command
@@ -591,26 +624,29 @@ async fn config_update(
 pub(crate) async fn set_enabled(name: &str, enabled: bool) -> Result<PoolChange, AppCommandError> {
     let pool = Maxpool::locate()?;
     let name = existing_account(name).await?;
+    set_enabled_with(&pool, &name, enabled).await?;
+    tracing::info!(
+        "[usage-pool] switched a pool account {} from codeg",
+        if enabled { "on" } else { "off" }
+    );
+    refresh_after_sync();
+    Ok(PoolChange {
+        applied: PoolApply::Live,
+    })
+}
+
+async fn set_enabled_with(pool: &Maxpool, name: &str, enabled: bool) -> Result<(), AppCommandError> {
     let code = config_update(
-        &pool,
-        SET_ENABLED_SCRIPT,
+        pool,
+        &config_script(SET_ENABLED_SCRIPT),
         &[
-            ("CODEG_MAXPOOL_ACCOUNT", name.as_str()),
+            ("CODEG_MAXPOOL_ACCOUNT", name),
             ("CODEG_MAXPOOL_ENABLED", if enabled { "1" } else { "0" }),
         ],
     )
     .await?;
     match code {
-        Some(0) => {
-            tracing::info!(
-                "[usage-pool] switched a pool account {} from codeg",
-                if enabled { "on" } else { "off" }
-            );
-            refresh_after_sync();
-            Ok(PoolChange {
-                applied: PoolApply::Live,
-            })
-        }
+        Some(0) => Ok(()),
         Some(3) => Err(AppCommandError::dependency_missing(
             "This maxpool version can't be updated from codeg.",
         )),
@@ -629,28 +665,17 @@ pub(crate) async fn set_enabled(name: &str, enabled: bool) -> Result<PoolChange,
 /// next re-read. maxpool prefers only an enabled Claude account; the script
 /// refuses any other rather than leave a choice the server would drop.
 const SET_PREFERRED_SCRIPT: &str = r#"
-const { pathToFileURL } = await import('node:url');
-const mod = await import(pathToFileURL(process.env.CODEG_MAXPOOL_CONFIG_MODULE).href);
-if (typeof mod.atomicConfigUpdate !== 'function') process.exit(3);
 const name = process.env.CODEG_MAXPOOL_ACCOUNT || '';
-class Refused extends Error {
-  constructor(code) { super('refused'); this.code = code; }
-}
-try {
-  await mod.atomicConfigUpdate((config) => {
-    if (!name) {
-      config.routing = { ...(config.routing || {}), mode: 'automatic', preferredAccount: null };
-      return;
-    }
-    const account = (config.accounts || []).find((a) => a.name === name);
-    if (!account) throw new Refused(4);
-    if (account.enabled === false || account.type === 'provider') throw new Refused(5);
-    config.routing = { ...(config.routing || {}), mode: 'preferred', preferredAccount: name };
-  });
-} catch (error) {
-  process.exit(error instanceof Refused ? error.code : 1);
-}
-process.exit(0);
+await update((config) => {
+  if (!name) {
+    config.routing = { ...(config.routing || {}), mode: 'automatic', preferredAccount: null };
+    return;
+  }
+  const account = (config.accounts || []).find((a) => a.name === name);
+  if (!account) throw new Refused(4);
+  if (account.enabled === false || account.type === 'provider') throw new Refused(5);
+  config.routing = { ...(config.routing || {}), mode: 'preferred', preferredAccount: name };
+});
 "#;
 
 /// Make `name` the account the pool sends new requests to first, or (`None`)
@@ -702,7 +727,7 @@ async fn set_preferred_with(
 ) -> Result<PoolChange, AppCommandError> {
     let code = config_update(
         pool,
-        SET_PREFERRED_SCRIPT,
+        &config_script(SET_PREFERRED_SCRIPT),
         &[("CODEG_MAXPOOL_ACCOUNT", name.unwrap_or(""))],
     )
     .await?;
@@ -719,6 +744,193 @@ async fn set_preferred_with(
         ))),
         Some(5) => Err(AppCommandError::invalid_input(
             "The pool can only prefer an enabled Claude subscription account.",
+        )),
+        _ => Err(AppCommandError::task_execution_failed(
+            "maxpool's config update failed.",
+        )),
+    }
+}
+
+/// The pool's order: each Claude account's `priority` (0 first), every one
+/// of them listed exactly once; `null` clears the order and goes back to
+/// automatic balancing. maxpool's `balance` and `prefer-claude` scheduler
+/// modes rank every Claude account alike, so an order moves such a pool to
+/// `sticky`, maxpool's default, where priorities rank them.
+const SET_ORDER_SCRIPT: &str = r#"
+const order = JSON.parse(process.env.CODEG_MAXPOOL_ORDER || 'null');
+await update((config) => {
+  const claude = (config.accounts || []).filter(isClaude);
+  if (order === null) {
+    for (const account of claude) delete account.priority;
+    config.routing = { ...(config.routing || {}), mode: 'automatic', preferredAccount: null };
+    return;
+  }
+  const names = claude.map((a) => a.name);
+  if (
+    !Array.isArray(order) ||
+    order.length !== names.length ||
+    new Set(order).size !== order.length ||
+    !order.every((name) => names.includes(name))
+  ) {
+    throw new Refused(4);
+  }
+  order.forEach((name, index) => {
+    claude.find((a) => a.name === name).priority = index;
+  });
+  followOrder(config);
+  const scheduler = config.scheduler || {};
+  const legacy = scheduler.crossProviderFallbackPolicy;
+  const mode =
+    scheduler.routingMode ||
+    (legacy === 'always' ? 'balance' : legacy === 'when-exhausted' ? 'prefer-claude' : 'sticky');
+  if (mode === 'balance' || mode === 'prefer-claude') {
+    config.scheduler = { ...scheduler, routingMode: 'sticky' };
+  }
+});
+"#;
+
+/// Set the order new requests take through the pool's Claude accounts
+/// (`None` = back to automatic balancing). The head of the order applies
+/// within seconds; maxpool reads priorities only when its server starts, so
+/// the rest waits for the same restart a rename does.
+pub(crate) async fn set_order(names: Option<Vec<String>>) -> Result<PoolChange, AppCommandError> {
+    let pool = Maxpool::locate()?;
+    if let Some(names) = &names {
+        let unique: std::collections::HashSet<&String> = names.iter().collect();
+        if names.is_empty() || unique.len() != names.len() || names.len() > super::MAX_ACCOUNTS {
+            return Err(AppCommandError::invalid_input(
+                "An order lists each of the pool's accounts once.",
+            ));
+        }
+    }
+    set_order_with(&pool, names.as_deref()).await?;
+    tracing::info!(
+        "[usage-pool] {} from codeg",
+        if names.is_some() {
+            "set the order of the pool's accounts"
+        } else {
+            "cleared the order of the pool's accounts"
+        }
+    );
+    refresh_after_sync();
+    Ok(PoolChange {
+        applied: schedule_restart(pool).await,
+    })
+}
+
+async fn set_order_with(pool: &Maxpool, names: Option<&[String]>) -> Result<(), AppCommandError> {
+    let order = serde_json::to_string(&names).map_err(|_| {
+        AppCommandError::invalid_input("An order lists each of the pool's accounts once.")
+    })?;
+    let code = config_update(
+        pool,
+        &config_script(SET_ORDER_SCRIPT),
+        &[("CODEG_MAXPOOL_ORDER", order.as_str())],
+    )
+    .await?;
+    match code {
+        Some(0) => Ok(()),
+        Some(3) => Err(AppCommandError::dependency_missing(
+            "This maxpool version can't be updated from codeg.",
+        )),
+        Some(4) => Err(AppCommandError::invalid_input(
+            "The pool's accounts changed while you were ordering them. Try again.",
+        )),
+        _ => Err(AppCommandError::task_execution_failed(
+            "maxpool's config update failed.",
+        )),
+    }
+}
+
+/// An account's reserve: maxpool's `capUtilization` (`1 - percent/100`) and
+/// `capMode`; an empty cap removes every cap field.
+const SET_RESERVE_SCRIPT: &str = r#"
+const name = process.env.CODEG_MAXPOOL_ACCOUNT;
+const cap = process.env.CODEG_MAXPOOL_CAP || '';
+const capMode = process.env.CODEG_MAXPOOL_CAP_MODE === 'dynamic' ? 'dynamic' : 'fixed';
+await update((config) => {
+  const account = (config.accounts || []).find((a) => a.name === name);
+  if (!account) throw new Refused(4);
+  if (!cap) {
+    delete account.capUtilization;
+    delete account.capMode;
+    delete account.capCeiling;
+    delete account.capRampStart;
+    return;
+  }
+  const value = Number(cap);
+  if (!(value > 0 && value < 1)) throw new Refused(5);
+  account.capUtilization = value;
+  account.capMode = capMode;
+});
+"#;
+
+/// maxpool's cap for keeping `percent` of each window in reserve, strictly
+/// inside (0, 1) as maxpool requires.
+fn reserve_cap(percent: f64) -> Result<f64, AppCommandError> {
+    let cap = ((1.0 - percent / 100.0) * 10_000.0).round() / 10_000.0;
+    if percent.is_finite() && cap > 0.0 && cap < 1.0 {
+        Ok(cap)
+    } else {
+        Err(AppCommandError::invalid_input(
+            "A reserve is a percent between 0 and 100.",
+        ))
+    }
+}
+
+/// Keep `percent` of each of the account's windows (5-hour and weekly) in
+/// reserve (`None` = no reserve). The running server applies it on its next
+/// config read.
+pub(crate) async fn set_reserve(
+    name: &str,
+    percent: Option<f64>,
+    mode: super::PoolReserveMode,
+) -> Result<PoolChange, AppCommandError> {
+    let pool = Maxpool::locate()?;
+    let name = existing_account(name).await?;
+    let cap = percent.map(reserve_cap).transpose()?;
+    set_reserve_with(&pool, &name, cap, mode).await?;
+    tracing::info!(
+        "[usage-pool] {} a pool account's reserve from codeg",
+        if cap.is_some() { "set" } else { "removed" }
+    );
+    refresh_after_sync();
+    Ok(PoolChange {
+        applied: PoolApply::Live,
+    })
+}
+
+async fn set_reserve_with(
+    pool: &Maxpool,
+    name: &str,
+    cap: Option<f64>,
+    mode: super::PoolReserveMode,
+) -> Result<(), AppCommandError> {
+    let cap = cap.map(|c| c.to_string()).unwrap_or_default();
+    let mode = match mode {
+        super::PoolReserveMode::Fixed => "fixed",
+        super::PoolReserveMode::Dynamic => "dynamic",
+    };
+    let code = config_update(
+        pool,
+        &config_script(SET_RESERVE_SCRIPT),
+        &[
+            ("CODEG_MAXPOOL_ACCOUNT", name),
+            ("CODEG_MAXPOOL_CAP", cap.as_str()),
+            ("CODEG_MAXPOOL_CAP_MODE", mode),
+        ],
+    )
+    .await?;
+    match code {
+        Some(0) => Ok(()),
+        Some(3) => Err(AppCommandError::dependency_missing(
+            "This maxpool version can't be updated from codeg.",
+        )),
+        Some(4) => Err(AppCommandError::not_found(format!(
+            "The pool's config has no account named \"{name}\"."
+        ))),
+        Some(5) => Err(AppCommandError::invalid_input(
+            "A reserve is a percent between 0 and 100.",
         )),
         _ => Err(AppCommandError::task_execution_failed(
             "maxpool's config update failed.",
@@ -961,6 +1173,22 @@ pub async fn usage_pool_set_enabled(
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn usage_pool_set_preferred(name: Option<String>) -> Result<PoolChange, AppCommandError> {
     set_preferred(name.as_deref()).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn usage_pool_set_order(names: Option<Vec<String>>) -> Result<PoolChange, AppCommandError> {
+    set_order(names).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn usage_pool_set_reserve(
+    name: String,
+    percent: Option<f64>,
+    mode: Option<super::PoolReserveMode>,
+) -> Result<PoolChange, AppCommandError> {
+    set_reserve(&name, percent, mode.unwrap_or(super::PoolReserveMode::Fixed)).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -1301,6 +1529,342 @@ export async function atomicConfigUpdate(updater) {
         assert_eq!(value["routing"]["mode"], "preferred");
         // New requests route to it from here: the pool serves from it now.
         assert_eq!(value["currentAccount"], "backup");
+        let _ = server.kill().await;
+    }
+
+    fn config_of(pool: &Maxpool) -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(&pool.config).unwrap()).unwrap()
+    }
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|n| n.to_string()).collect()
+    }
+
+    #[tokio::test]
+    async fn an_order_ranks_the_claude_accounts_and_its_first_switched_on_one_serves() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(pool) = fake_config_pool(dir.path()) else {
+            eprintln!("node isn't on PATH; skipping");
+            return;
+        };
+        set_order_with(&pool, Some(&names(&["beta", "alpha"])))
+            .await
+            .unwrap();
+        let config = config_of(&pool);
+        assert_eq!(config["accounts"][0]["priority"], 1);
+        assert_eq!(config["accounts"][1]["priority"], 0);
+        assert!(
+            config["accounts"][2].get("priority").is_none(),
+            "a provider keeps its own priority"
+        );
+        // beta leads but is paused: the order skips it.
+        assert_eq!(routing_of(&pool), ("preferred".into(), "alpha".into()));
+
+        // Resuming beta puts it back in front at once; pausing it again
+        // hands new requests to the next account.
+        set_enabled_with(&pool, "beta", true).await.unwrap();
+        assert_eq!(routing_of(&pool), ("preferred".into(), "beta".into()));
+        set_enabled_with(&pool, "beta", false).await.unwrap();
+        assert_eq!(routing_of(&pool), ("preferred".into(), "alpha".into()));
+        assert_eq!(config_of(&pool)["accounts"][1]["enabled"], false);
+
+        // No order: back to automatic balancing.
+        set_order_with(&pool, None).await.unwrap();
+        let config = config_of(&pool);
+        assert!(config["accounts"][0].get("priority").is_none());
+        assert!(config["accounts"][1].get("priority").is_none());
+        assert_eq!(
+            routing_of(&pool),
+            ("automatic".into(), serde_json::Value::Null)
+        );
+    }
+
+    #[tokio::test]
+    async fn an_order_names_every_claude_account_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(pool) = fake_config_pool(dir.path()) else {
+            eprintln!("node isn't on PATH; skipping");
+            return;
+        };
+        for order in [
+            names(&["alpha"]),
+            names(&["alpha", "alpha"]),
+            names(&["alpha", "beta", "glm"]),
+            names(&["alpha", "nobody"]),
+        ] {
+            assert!(set_order_with(&pool, Some(&order)).await.is_err(), "{order:?}");
+        }
+        assert!(config_of(&pool).get("_generation").is_none(), "nothing written");
+        // Switching an account in a pool with no order leaves its routing be.
+        set_enabled_with(&pool, "beta", true).await.unwrap();
+        assert_eq!(
+            routing_of(&pool),
+            ("automatic".into(), serde_json::Value::Null)
+        );
+    }
+
+    #[tokio::test]
+    async fn an_order_moves_a_scheduler_that_ranks_claude_accounts_alike_to_sticky() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(pool) = fake_config_pool(dir.path()) else {
+            eprintln!("node isn't on PATH; skipping");
+            return;
+        };
+        let mut config = config_of(&pool);
+        config["scheduler"] = serde_json::json!({ "crossProviderFallbackPolicy": "when-exhausted" });
+        std::fs::write(&pool.config, config.to_string()).unwrap();
+        set_order_with(&pool, Some(&names(&["alpha", "beta"])))
+            .await
+            .unwrap();
+        let scheduler = &config_of(&pool)["scheduler"];
+        assert_eq!(scheduler["routingMode"], "sticky");
+        assert_eq!(scheduler["crossProviderFallbackPolicy"], "when-exhausted");
+
+        // A mode that already ranks Claude accounts by priority stays.
+        let mut config = config_of(&pool);
+        config["scheduler"] = serde_json::json!({ "routingMode": "prefer-zai" });
+        std::fs::write(&pool.config, config.to_string()).unwrap();
+        set_order_with(&pool, Some(&names(&["beta", "alpha"])))
+            .await
+            .unwrap();
+        assert_eq!(config_of(&pool)["scheduler"]["routingMode"], "prefer-zai");
+    }
+
+    #[tokio::test]
+    async fn a_reserve_writes_maxpools_cap_and_removing_it_clears_every_cap_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(pool) = fake_config_pool(dir.path()) else {
+            eprintln!("node isn't on PATH; skipping");
+            return;
+        };
+        let cap = reserve_cap(10.0).unwrap();
+        set_reserve_with(&pool, "alpha", Some(cap), super::super::PoolReserveMode::Fixed)
+            .await
+            .unwrap();
+        let alpha = &config_of(&pool)["accounts"][0];
+        assert_eq!(alpha["capUtilization"], 0.9);
+        assert_eq!(alpha["capMode"], "fixed");
+
+        let mut config = config_of(&pool);
+        config["accounts"][0]["capCeiling"] = serde_json::json!(0.95);
+        config["accounts"][0]["capRampStart"] = serde_json::json!(0.6);
+        std::fs::write(&pool.config, config.to_string()).unwrap();
+        set_reserve_with(
+            &pool,
+            "alpha",
+            Some(reserve_cap(15.0).unwrap()),
+            super::super::PoolReserveMode::Dynamic,
+        )
+        .await
+        .unwrap();
+        let alpha = &config_of(&pool)["accounts"][0];
+        assert_eq!(alpha["capUtilization"], 0.85);
+        assert_eq!(alpha["capMode"], "dynamic");
+
+        set_reserve_with(&pool, "alpha", None, super::super::PoolReserveMode::Fixed)
+            .await
+            .unwrap();
+        let alpha = config_of(&pool)["accounts"][0].clone();
+        for field in ["capUtilization", "capMode", "capCeiling", "capRampStart"] {
+            assert!(alpha.get(field).is_none(), "{field}");
+        }
+        assert_eq!(alpha["refreshToken"], "fake-r1");
+        assert!(
+            set_reserve_with(&pool, "nobody", Some(0.9), super::super::PoolReserveMode::Fixed)
+                .await
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_reserve_is_a_cap_strictly_inside_zero_and_one() {
+        assert_eq!(reserve_cap(10.0).unwrap(), 0.9);
+        assert_eq!(reserve_cap(7.0).unwrap(), 0.93);
+        assert_eq!(reserve_cap(12.5).unwrap(), 0.875);
+        for bad in [0.0, 100.0, -5.0, 120.0, f64::NAN] {
+            assert!(reserve_cap(bad).is_err(), "{bad}");
+        }
+    }
+
+    /// A running maxpool (its own config and port, an upstream that is this
+    /// test) follows the order codeg writes: new requests go to the first
+    /// account, skip a paused one, and leave one held by its reserve.
+    /// Opt-in like the test above.
+    #[tokio::test]
+    async fn a_running_maxpool_serves_in_order_skipping_paused_and_reserved_accounts() {
+        use std::collections::HashMap;
+        use std::sync::Arc;
+        let Some(src) = std::env::var_os("CODEG_TEST_MAXPOOL_SRC").map(PathBuf::from) else {
+            return;
+        };
+        let Some(node) = crate::commands::acp::resolve_command_on_path("node") else {
+            return;
+        };
+        let now = chrono::Utc::now().timestamp();
+        // The upstream: records which account each request came in as and
+        // reports the 5-hour usage set for it.
+        let served: Arc<Mutex<Vec<String>>> = Arc::default();
+        let usage: Arc<Mutex<HashMap<String, f64>>> = Arc::default();
+        let upstream = {
+            let (served, usage) = (served.clone(), usage.clone());
+            axum::Router::new().fallback(move |headers: axum::http::HeaderMap| {
+                let (served, usage) = (served.clone(), usage.clone());
+                async move {
+                    let name = headers
+                        .get("authorization")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|v| v.strip_prefix("Bearer fake-a-"))
+                        .unwrap_or("?")
+                        .to_string();
+                    let five_hour = usage.lock().unwrap().get(&name).copied().unwrap_or(0.1);
+                    served.lock().unwrap().push(name);
+                    axum::http::Response::builder()
+                        .status(200)
+                        .header("content-type", "application/json")
+                        .header("anthropic-ratelimit-unified-status", "allowed")
+                        .header("anthropic-ratelimit-unified-5h-utilization", five_hour.to_string())
+                        .header("anthropic-ratelimit-unified-5h-reset", (now + 7_200).to_string())
+                        .header("anthropic-ratelimit-unified-7d-utilization", "0.1")
+                        .header("anthropic-ratelimit-unified-7d-reset", (now + 3 * 86_400).to_string())
+                        .body(axum::body::Body::from(
+                            r#"{"id":"msg_test","type":"message","role":"assistant","model":"claude-test","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}"#,
+                        ))
+                        .unwrap()
+                }
+            })
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let upstream_url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, upstream).await;
+        });
+
+        let dir = tempfile::tempdir().unwrap();
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let far = (now + 365 * 86_400) * 1000;
+        let account = |name: &str| {
+            serde_json::json!({
+                "name": name, "type": "oauth", "source": "login",
+                "accountUuid": uuid::Uuid::new_v4().to_string(),
+                "accessToken": format!("fake-a-{name}"),
+                "refreshToken": format!("fake-r-{name}"),
+                "expiresAt": far
+            })
+        };
+        let email = "someone.with.a.long.address@example.com";
+        let config = dir.path().join("maxpool.json");
+        std::fs::write(
+            &config,
+            serde_json::json!({
+                "proxy": { "port": port, "host": "127.0.0.1", "apiKey": "mp-test-key-not-secret" },
+                "upstream": upstream_url,
+                "preventSleep": false, "updateCheck": false, "autoUpdate": false,
+                "quotaProbeSeconds": 0,
+                "sync": { "accountsIntervalMs": 1000 },
+                "routing": { "mode": "automatic", "preferredAccount": null },
+                "accounts": [account("primary"), account("backup"), account(email)]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let pool = Maxpool {
+            bin: src.join("index.js"),
+            config: config.clone(),
+        };
+        // The order is on disk before the server starts, as after the
+        // restart that applies one.
+        set_order_with(&pool, Some(&names(&["backup", email, "primary"])))
+            .await
+            .unwrap();
+        let mut server = crate::process::tokio_command(&node)
+            .arg(src.join("index.js"))
+            .arg("server")
+            .env("MAXPOOL_CONFIG", &config)
+            .env("MAXPOOL_DISABLE_QUOTA_PROBE", "1")
+            .env("MAXPOOL_DISABLE_SLEEP_GUARD", "1")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let client = reqwest::Client::new();
+        let status = || async {
+            let response = client
+                .get(format!("http://127.0.0.1:{port}/maxpool/status"))
+                .header("x-api-key", "mp-test-key-not-secret")
+                .send()
+                .await
+                .ok()?;
+            response.json::<serde_json::Value>().await.ok()
+        };
+        let account_field = |value: &serde_json::Value, name: &str, field: &str| {
+            value["accounts"]
+                .as_array()
+                .and_then(|accounts| accounts.iter().find(|a| a["name"] == name))
+                .map(|a| a[field].clone())
+                .unwrap_or_default()
+        };
+        // Until the running server reports `field` of `name` as `want`.
+        let wait_for = |name: &'static str, field: &'static str, want: serde_json::Value| {
+            let status = &status;
+            async move {
+                for _ in 0..60 {
+                    if let Some(value) = status().await {
+                        if account_field(&value, name, field) == want {
+                            return true;
+                        }
+                    }
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+                false
+            }
+        };
+        let send = || async {
+            let response = client
+                .post(format!("http://127.0.0.1:{port}/v1/messages"))
+                .header("anthropic-version", "2023-06-01")
+                .json(&serde_json::json!({
+                    "model": "claude-sonnet-4-5", "max_tokens": 16,
+                    "messages": [{ "role": "user", "content": "hi" }]
+                }))
+                .send()
+                .await
+                .unwrap();
+            assert!(response.status().is_success(), "{}", response.status());
+            served.lock().unwrap().last().cloned().unwrap_or_default()
+        };
+        assert!(wait_for("backup", "priority", 0.into()).await, "the test pool came up");
+
+        // First in the order, first served.
+        assert_eq!(send().await, "backup");
+        assert_eq!(send().await, "backup");
+
+        // Held by its reserve (10% kept back, 95% used): the next account in
+        // the order takes every new request, ahead of one listed before it
+        // in the config.
+        set_reserve_with(&pool, "backup", Some(0.9), super::super::PoolReserveMode::Fixed)
+            .await
+            .unwrap();
+        assert!(wait_for("backup", "capUtilization", 0.9.into()).await);
+        usage.lock().unwrap().insert("backup".to_string(), 0.95);
+        assert_eq!(send().await, "backup", "its usage is read from this answer");
+        assert_eq!(send().await, email);
+        assert_eq!(send().await, email);
+
+        // Paused: skipped for the next account in the order.
+        set_enabled_with(&pool, email, false).await.unwrap();
+        assert!(wait_for(email, "enabled", false.into()).await);
+        assert_eq!(send().await, "primary");
+
+        // Back on: work returns to it, ahead of the account after it.
+        set_enabled_with(&pool, email, true).await.unwrap();
+        assert!(wait_for(email, "enabled", true.into()).await);
+        assert_eq!(send().await, email);
         let _ = server.kill().await;
     }
 

@@ -1757,6 +1757,14 @@ pub fn build_router(
             post(handlers::plan_usage::usage_pool_set_preferred),
         )
         .route(
+            "/usage_pool_set_order",
+            post(handlers::plan_usage::usage_pool_set_order),
+        )
+        .route(
+            "/usage_pool_set_reserve",
+            post(handlers::plan_usage::usage_pool_set_reserve),
+        )
+        .route(
             "/usage_pool_remove",
             post(handlers::plan_usage::usage_pool_remove),
         )
