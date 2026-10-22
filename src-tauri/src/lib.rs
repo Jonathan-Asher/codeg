@@ -28,6 +28,7 @@ pub mod backgrounds;
 pub mod browser;
 pub mod chat_channel;
 pub mod commands;
+pub mod data_dir_owner;
 pub mod db;
 pub mod deep_link;
 /// Dictation clean-up and translation for clients that transcribe speech
@@ -531,13 +532,30 @@ mod tauri_app {
             unsafe { std::env::set_var("CODEG_DATA_DIR", &dir) };
         }
 
+        // One codeg process per data dir (`data_dir_owner`): claim it before
+        // the file logger, the first thing that writes there. A launch that
+        // finds it taken starts no logger, so it writes nothing, and goes on
+        // only so far that the single-instance plugin can hand it to the
+        // running app; setup settles the rest before the database opens.
+        let data_dir_taken = crate::paths::desktop_database_dir().is_some_and(|dir| {
+            matches!(
+                crate::data_dir_owner::claim(&dir),
+                Err(crate::data_dir_owner::ClaimError::InUse { .. })
+            )
+        });
+
         // Install the logging subscriber next so it captures everything from
         // here on. The file appender's logs dir is resolved from env (no DB
         // needed); hold the guard for the whole process so buffered file lines
-        // flush on a graceful exit.
-        let _log_guard = crate::logging::init::init_desktop();
-        if let Some(sanitized) = &inherited_session_env {
-            sanitized.log();
+        // flush on a graceful exit. Left to setup while the data dir is taken.
+        let log_guard = (!data_dir_taken).then(crate::logging::init::init_desktop);
+        let logging_started = log_guard.is_some();
+        // Reported through the logger: now, or by setup once it starts one.
+        let mut unreported_session_env = inherited_session_env;
+        if logging_started {
+            if let Some(sanitized) = unreported_session_env.take() {
+                sanitized.log();
+            }
         }
         // A Finder/Dock launch starts at 256 descriptors; see `fd_limit`.
         crate::fd_limit::raise_open_file_limit_logged();
@@ -677,7 +695,7 @@ mod tauri_app {
             // embedded web server's AppState so HTTP and webview clients see the
             // same download progress; lets the upgrade UI survive navigation.
             .manage(crate::update::new_update_state_handle())
-            .setup(|app| {
+            .setup(move |app| {
                 // ⌘W closes a tab, ⇧⌘W the window (see `app_menu`).
                 #[cfg(target_os = "macos")]
                 if let Err(err) = crate::app_menu::install(app.handle()) {
@@ -726,6 +744,36 @@ mod tauri_app {
                 // override.
                 unsafe {
                     std::env::set_var("CODEG_DATA_DIR", &effective_data_dir);
+                }
+
+                // One codeg process per data dir (`data_dir_owner`). `run()`
+                // claimed it ahead of the logger when it could. A launch that
+                // found it taken reaches this point only when it is not a
+                // second copy of a release app (the single-instance plugin
+                // hands that one to the running app and exits it): the owner is
+                // a codeg-server, or an app still on its way out of a restart.
+                // Wait the latter out, then give up before the database opens.
+                let claim = crate::data_dir_owner::claim_with_grace(
+                    &effective_data_dir,
+                    crate::data_dir_owner::HANDOFF_GRACE,
+                );
+                if let Err(err @ crate::data_dir_owner::ClaimError::InUse { .. }) = &claim {
+                    eprintln!(
+                        "codeg: {err}; stop that process or set CODEG_DATA_DIR to another \
+                         directory"
+                    );
+                    std::process::exit(i32::from(crate::data_dir_owner::EXIT_IN_USE));
+                }
+                if !logging_started {
+                    // Kept for the life of the process, as `run()` keeps the
+                    // guard of a logger it starts itself.
+                    std::mem::forget(crate::logging::init::init_desktop());
+                    if let Some(sanitized) = &unreported_session_env {
+                        sanitized.log();
+                    }
+                }
+                if let Err(err) = claim {
+                    tracing::warn!("[startup] {err}; starting without the data dir owner lock");
                 }
 
                 // `CODEG_HOME` overrides `CODEG_DATA_DIR` inside

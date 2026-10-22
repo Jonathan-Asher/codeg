@@ -3,11 +3,63 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use codeg_lib::app_state::AppState;
+use codeg_lib::data_dir_owner::{self, ClaimError};
 use codeg_lib::web::event_bridge::{EventEmitter, WebEventBroadcaster};
 use codeg_lib::web::{
     addresses_for_bind, advertise_host, find_static_dir_standalone, resolve_persisted_server_token,
     WebServerState,
 };
+
+/// `--help`. The server is configured by environment variables; these flags
+/// are its whole command line.
+const USAGE: &str = "\
+Usage: codeg-server [--supervise]
+
+Serves codeg over HTTP. Configured by environment variables:
+  CODEG_DATA_DIR    data directory: database, logs, uploads
+                    (default: <user data dir>/codeg)
+  CODEG_PORT        port to listen on (default: 3080)
+  CODEG_HOST        address to bind (default: 0.0.0.0)
+  CODEG_TOKEN       access token (default: generated once, then kept)
+  CODEG_STATIC_DIR  the web app's static files
+
+Options:
+  --supervise       run under a supervisor that relaunches the server after
+                    an in-place upgrade
+  -h, --help        print this help and exit
+  -V, --version     print the version and exit
+";
+
+/// The command line, parsed. Flags only: configuration is the environment.
+#[derive(Debug, PartialEq, Eq)]
+enum Cli {
+    Run { supervise: bool },
+    Help,
+    Version,
+    /// The first argument that is not one of the flags above.
+    Unknown(String),
+}
+
+/// `--help` and `--version` win wherever they appear; otherwise an argument
+/// that is not a known flag stops the server before it starts.
+fn parse_cli(args: &[String]) -> Cli {
+    let mut supervise = false;
+    let mut unknown = None;
+    for arg in args {
+        match arg.as_str() {
+            "-h" | "--help" => return Cli::Help,
+            "-V" | "--version" => return Cli::Version,
+            "--supervise" => supervise = true,
+            other => {
+                unknown.get_or_insert_with(|| other.to_string());
+            }
+        }
+    }
+    match unknown {
+        Some(arg) => Cli::Unknown(arg),
+        None => Cli::Run { supervise },
+    }
+}
 
 fn main() -> ExitCode {
     // Capture our own executable path before anything can rename it (an
@@ -15,28 +67,15 @@ fn main() -> ExitCode {
     // resolve to a `" (deleted)"` path on Linux). Cheap, single-shot.
     codeg_lib::update::runtime::prime_self_exe();
 
-    // Support --version flag
     let args: Vec<String> = std::env::args().collect();
-    if args.iter().any(|a| a == "--version" || a == "-V") {
-        println!("{}", env!("CARGO_PKG_VERSION"));
-        return ExitCode::SUCCESS;
-    }
-
-    // `--supervise`: run as the process supervisor that owns the worker's
-    // lifecycle (PID 1 in Docker). It spawns `codeg-server` without this
-    // flag and relaunches it after an in-place upgrade. Never returns.
-    if args.iter().any(|a| a == "--supervise") {
-        // This mode never reaches init_server(); install a stderr-only
-        // subscriber so the supervisor's diagnostics still reach Docker logs.
-        let _log_guard = codeg_lib::logging::init::init_stderr_only();
-        codeg_lib::supervise::run();
-    }
 
     // When invoked as a git credential helper (by the script written via
     // `git_credential::create_credential_helper_script`), respond to git's
     // credential protocol on stdin and exit. Mirrors the desktop binary's
     // early-exit in `main.rs` so server deployments don't accidentally try
     // to start a second server instance per `git credential` invocation.
+    // Recognised ahead of the flags below: the rest of this command line is
+    // the helper's own (`--data-dir`) and git's (`get`, `store`, `erase`).
     if args.iter().any(|a| a == "--credential-helper") {
         // Subprocess mode, before init_server(): stderr-only subscriber so
         // helper diagnostics aren't dropped, while stdout stays the git
@@ -44,6 +83,36 @@ fn main() -> ExitCode {
         let _log_guard = codeg_lib::logging::init::init_stderr_only();
         codeg_lib::git_credential::run_credential_helper();
         return ExitCode::SUCCESS;
+    }
+
+    // Nothing has been created or opened yet, and nothing will be for these:
+    // a server that only answers `--help`, or did not understand its command
+    // line, must never go on to start against whatever data dir its
+    // environment names.
+    let supervise = match parse_cli(args.get(1..).unwrap_or_default()) {
+        Cli::Run { supervise } => supervise,
+        Cli::Help => {
+            print!("{USAGE}");
+            return ExitCode::SUCCESS;
+        }
+        Cli::Version => {
+            println!("{}", env!("CARGO_PKG_VERSION"));
+            return ExitCode::SUCCESS;
+        }
+        Cli::Unknown(arg) => {
+            eprint!("codeg-server: unknown option '{arg}'\n\n{USAGE}");
+            return ExitCode::from(2);
+        }
+    };
+
+    // `--supervise`: run as the process supervisor that owns the worker's
+    // lifecycle (PID 1 in Docker). It spawns `codeg-server` without this
+    // flag and relaunches it after an in-place upgrade. Never returns.
+    if supervise {
+        // This mode never reaches init_server(); install a stderr-only
+        // subscriber so the supervisor's diagnostics still reach Docker logs.
+        let _log_guard = codeg_lib::logging::init::init_stderr_only();
+        codeg_lib::supervise::run();
     }
 
     // Before anything reads the environment, and while still single-threaded:
@@ -94,6 +163,31 @@ fn main() -> ExitCode {
     let resolved_data_dir = codeg_lib::git_credential::absolutize(&resolved_data_dir);
     std::env::set_var("CODEG_DATA_DIR", &resolved_data_dir);
 
+    // One codeg process per data dir (`data_dir_owner`). Claimed before the
+    // file logger, the first thing that writes there, and so before the
+    // database's restore, migrations and startup sweeps: a server started
+    // against a dir another codeg is using — the desktop app's included, which
+    // is what an agent session's inherited `CODEG_DATA_DIR` names — leaves it
+    // exactly as it found it. The grace lets an owner on its way out (a restart,
+    // an upgrade's re-spawn) finish exiting first.
+    let owner_lock_unavailable = match data_dir_owner::claim_with_grace(
+        &resolved_data_dir,
+        data_dir_owner::HANDOFF_GRACE,
+    ) {
+        Ok(()) => None,
+        Err(err @ ClaimError::InUse { .. }) => {
+            eprintln!(
+                "codeg-server: {err}; stop that process or set CODEG_DATA_DIR to another \
+                 directory"
+            );
+            return ExitCode::from(data_dir_owner::EXIT_IN_USE);
+        }
+        // No lock support at all, not contention: start as before the lock
+        // existed, with the engines off (they still refuse to run without it).
+        // Reported once the logger is up.
+        Err(err) => Some(err),
+    };
+
     // Install the logging subscriber now that CODEG_DATA_DIR is pinned (the logs
     // dir resolves from it). Doing it here — before the first server diagnostic
     // below — captures even the CODEG_HOME warning and the FATAL upload-quota
@@ -102,6 +196,9 @@ fn main() -> ExitCode {
     let _log_guard = codeg_lib::logging::init::init_server();
     if let Some(sanitized) = &inherited_session_env {
         sanitized.log();
+    }
+    if let Some(err) = &owner_lock_unavailable {
+        tracing::warn!("[SERVER] {err}; starting without the data dir owner lock");
     }
     // Many hosts start a service at 1024 descriptors, macOS at 256; see
     // `fd_limit`.
@@ -148,6 +245,34 @@ fn main() -> ExitCode {
 }
 
 async fn async_main() -> ExitCode {
+    let port: u16 = std::env::var("CODEG_PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(3080);
+    let host = std::env::var("CODEG_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
+
+    // Bind before anything below runs. The data dir is this process's alone by
+    // now (claimed in `main`), which leaves the port as the one shared thing
+    // another process can hold — and a server that cannot listen must stop
+    // before its first write (the database's migrations and startup sweeps, the
+    // automatic resume they queue, the cleanups), not after it. Connections
+    // that arrive meanwhile wait in the backlog until `serve` below.
+    let addr = format!("{}:{}", host, port);
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
+        Ok(listener) => listener,
+        Err(e) => {
+            tracing::error!("[SERVER] Failed to bind {}: {}", addr, e);
+            return ExitCode::from(1);
+        }
+    };
+
+    if let Err(e) = codeg_lib::web::socket_inherit::mark_listener_non_inheritable(&listener) {
+        tracing::warn!(
+            "[SERVER][WARN] failed to mark listener non-inheritable: {}",
+            e
+        );
+    }
+
     // Sweep stale ACP binary cache trash (rename-aside fallback artifacts).
     // Detached OS thread: cannot block startup, panics are caught and dropped,
     // errors are silenced, no subprocesses spawned.
@@ -159,11 +284,6 @@ async fn async_main() -> ExitCode {
         });
     });
 
-    let port: u16 = std::env::var("CODEG_PORT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(3080);
-    let host = std::env::var("CODEG_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
     // CODEG_DATA_DIR was already resolved and absolutized in `main()` so
     // all path resolvers across the process see the same root. Read it
     // back rather than re-deriving the default.
@@ -659,23 +779,7 @@ async fn async_main() -> ExitCode {
         shutdown_signal,
     );
 
-    // Bind
-    let addr = format!("{}:{}", host, port);
-    let listener = match tokio::net::TcpListener::bind(&addr).await {
-        Ok(listener) => listener,
-        Err(e) => {
-            tracing::error!("[SERVER] Failed to bind {}: {}", addr, e);
-            return ExitCode::from(1);
-        }
-    };
-
-    if let Err(e) = codeg_lib::web::socket_inherit::mark_listener_non_inheritable(&listener) {
-        tracing::warn!(
-            "[SERVER][WARN] failed to mark listener non-inheritable: {}",
-            e
-        );
-    }
-
+    // Bound at the top of this function.
     let local_addr = listener.local_addr().ok();
     let actual_port = local_addr.map(|a| a.port()).unwrap_or(port);
     // `CODEG_HOST` may be `localhost` or a bracketed IPv6 (`[::1]`); advertise
@@ -730,4 +834,60 @@ fn default_data_dir() -> PathBuf {
     dirs::data_dir()
         .map(|d| d.join("codeg"))
         .unwrap_or_else(|| PathBuf::from(".codeg-data"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Cli {
+        let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+        parse_cli(&args)
+    }
+
+    #[test]
+    fn no_arguments_start_the_server() {
+        assert_eq!(parse(&[]), Cli::Run { supervise: false });
+        assert_eq!(parse(&["--supervise"]), Cli::Run { supervise: true });
+    }
+
+    #[test]
+    fn help_and_version_win_wherever_they_appear() {
+        for help in ["-h", "--help"] {
+            assert_eq!(parse(&[help]), Cli::Help);
+            assert_eq!(parse(&["--supervise", help]), Cli::Help);
+            assert_eq!(parse(&["--port", help]), Cli::Help);
+        }
+        for version in ["-V", "--version"] {
+            assert_eq!(parse(&[version]), Cli::Version);
+            assert_eq!(parse(&["--supervise", version]), Cli::Version);
+        }
+    }
+
+    #[test]
+    fn anything_else_is_refused_by_name() {
+        assert_eq!(parse(&["--port"]), Cli::Unknown("--port".into()));
+        assert_eq!(
+            parse(&["--supervise", "serve", "--bogus"]),
+            Cli::Unknown("serve".into())
+        );
+        assert_eq!(parse(&["-v"]), Cli::Unknown("-v".into()));
+        assert_eq!(parse(&[""]), Cli::Unknown(String::new()));
+    }
+
+    #[test]
+    fn the_usage_documents_every_flag_and_variable() {
+        for needle in [
+            "--supervise",
+            "--help",
+            "--version",
+            "CODEG_DATA_DIR",
+            "CODEG_PORT",
+            "CODEG_HOST",
+            "CODEG_TOKEN",
+            "CODEG_STATIC_DIR",
+        ] {
+            assert!(USAGE.contains(needle), "usage is missing {needle}");
+        }
+    }
 }

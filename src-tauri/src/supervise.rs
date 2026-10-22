@@ -30,6 +30,13 @@ fn worker_args() -> Vec<String> {
         .collect()
 }
 
+/// Whether the worker exited because another process owns its data dir
+/// ([`crate::data_dir_owner::EXIT_IN_USE`]): not a failure of the version it
+/// runs.
+fn is_data_dir_in_use(code: i32) -> bool {
+    code == i32::from(crate::data_dir_owner::EXIT_IN_USE)
+}
+
 /// Restore the previous bundle from its `.bak` artifacts after a freshly
 /// upgraded worker failed to stay up. Returns `true` if a rollback was
 /// performed (caller should relaunch the restored, previous version).
@@ -225,9 +232,12 @@ pub fn run() -> ! {
             }
             // A freshly-upgraded worker that dies fast can't boot — restore
             // the previous version and relaunch it (once; the restored worker
-            // is no longer on_trial, so a second failure propagates).
+            // is no longer on_trial, so a second failure propagates). Not one
+            // that found its data dir in use: that is another process's doing,
+            // and the previous version would stop for the same reason.
             if on_trial
                 && elapsed < trial
+                && !is_data_dir_in_use(code)
                 && attempt_rollback(&format!(
                     "new version exited (code {code}) after {:.1}s",
                     elapsed.as_secs_f64()
@@ -321,9 +331,11 @@ pub fn run() -> ! {
             }
             Some(code) => {
                 // A freshly-upgraded worker that dies fast can't boot —
-                // restore the previous version and relaunch it once.
+                // restore the previous version and relaunch it once. Not for
+                // a data dir in use (see the unix path).
                 if on_trial
                     && elapsed < trial
+                    && !is_data_dir_in_use(code)
                     && attempt_rollback(&format!(
                         "new version exited (code {code}) after {:.1}s",
                         elapsed.as_secs_f64()
@@ -347,5 +359,19 @@ pub fn run() -> ! {
                 std::process::exit(1);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_data_dir_in_use_has_an_exit_status_of_its_own() {
+        assert!(is_data_dir_in_use(75));
+        assert!(!is_data_dir_in_use(runtime::EXIT_RESTART));
+        assert!(!is_data_dir_in_use(0));
+        assert!(!is_data_dir_in_use(1));
+        assert!(!is_data_dir_in_use(2));
     }
 }

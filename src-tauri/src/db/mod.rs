@@ -21,7 +21,9 @@ pub struct AppDatabase {
     pub conn: DatabaseConnection,
 }
 
-pub(crate) fn database_file_name() -> &'static str {
+/// The database's file name inside the data dir: a debug desktop build keeps
+/// its own beside a release one.
+pub fn database_file_name() -> &'static str {
     if cfg!(all(debug_assertions, feature = "tauri-runtime")) {
         "codeg-dev.db"
     } else {
@@ -35,6 +37,22 @@ pub async fn init_database(
 ) -> Result<AppDatabase, DbError> {
     let app_data_dir = app_data_dir.as_ref();
     std::fs::create_dir_all(app_data_dir)?;
+
+    // Nothing below may run in a process that does not own the data dir: the
+    // restore swaps the database file, and the migrations and sweeps rewrite
+    // rows its owner is using — the interrupted-turn sweep would cut off a live
+    // owner's running turns and queue them for an automatic resume. Both
+    // binaries claim the dir at startup, before their first write; this is the
+    // backstop for any other way in.
+    match crate::data_dir_owner::claim(app_data_dir) {
+        Ok(()) => {}
+        Err(err @ crate::data_dir_owner::ClaimError::InUse { .. }) => {
+            return Err(DbError::InUse(err.to_string()));
+        }
+        // No lock support at all, not contention: open as before the lock
+        // existed. The engines still refuse to start without it.
+        Err(err) => tracing::warn!("[db] {err}; opening without the data dir owner lock"),
+    }
 
     // Apply any pending restore BEFORE opening a connection — swapping
     // `codeg.db` under a live SQLite handle would corrupt it. A failure here
@@ -142,4 +160,103 @@ async fn apply_sqlite_pragmas(conn: &DatabaseConnection) -> Result<(), DbError> 
             .await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod owner_tests {
+    use super::*;
+    use crate::db::entities::conversation::{
+        self, ConversationAutoResume, ConversationTurnState,
+    };
+    use crate::db::service::{app_metadata_service, conversation_service, folder_service};
+    use crate::models::agent::AgentType;
+    use sea_orm::EntityTrait;
+
+    fn db_url(dir: &Path) -> String {
+        format!(
+            "sqlite:{}?mode=rwc",
+            urlencoding::encode(&dir.join(database_file_name()).to_string_lossy())
+        )
+    }
+
+    /// A data dir whose database holds one conversation with a running turn, as
+    /// its owner leaves it mid-turn. Written without claiming the dir. Returns
+    /// the conversation's id.
+    async fn seed_running_turn(dir: &Path) -> i32 {
+        let conn = Database::connect(db_url(dir).as_str()).await.expect("open");
+        apply_sqlite_pragmas(&conn).await.expect("pragmas");
+        Migrator::up(&conn, None).await.expect("migrate");
+        app_metadata_service::update_app_version(&conn, "1.0.0")
+            .await
+            .expect("version");
+        let folder = folder_service::add_folder(&conn, "/tmp/single-owner")
+            .await
+            .expect("folder")
+            .id;
+        let id = conversation_service::create(&conn, folder, AgentType::ClaudeCode, None, None)
+            .await
+            .expect("conversation")
+            .id;
+        assert!(conversation_service::mark_turn_running(&conn, id)
+            .await
+            .expect("mark running"));
+        conn.close().await.expect("close");
+        id
+    }
+
+    /// The row and the recorded app version as they stand, read without
+    /// anything that sweeps.
+    async fn stored(dir: &Path, id: i32) -> (conversation::Model, Option<String>) {
+        let conn = Database::connect(db_url(dir).as_str()).await.expect("open");
+        let row = conversation::Entity::find_by_id(id)
+            .one(&conn)
+            .await
+            .expect("query")
+            .expect("row");
+        let version = app_metadata_service::get_value(&conn, "app_version")
+            .await
+            .expect("version");
+        conn.close().await.expect("close");
+        (row, version)
+    }
+
+    #[tokio::test]
+    async fn a_dir_another_process_owns_is_left_as_it_was_and_its_owner_still_sweeps() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let id = seed_running_turn(tmp.path()).await;
+        let before = stored(tmp.path(), id).await;
+
+        let owner = crate::data_dir_owner::hold_as_other_process(tmp.path());
+        let refused = init_database(tmp.path(), "2.0.0").await;
+        assert!(
+            matches!(refused, Err(DbError::InUse(_))),
+            "a dir another process owns is refused"
+        );
+        assert_eq!(
+            stored(tmp.path(), id).await,
+            before,
+            "the refused start wrote nothing: the turn still runs, the version is the owner's"
+        );
+
+        // Once the owner is gone, the next start sweeps as it always has. The
+        // lock can outlive `drop` for a moment (see `hold_as_other_process`).
+        drop(owner);
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let db = loop {
+            match init_database(tmp.path(), "2.0.0").await {
+                Ok(db) => break db,
+                Err(DbError::InUse(_)) if std::time::Instant::now() < deadline => {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+                Err(e) => panic!("the owner's start failed: {e}"),
+            }
+        };
+        let swept = conversation::Entity::find_by_id(id)
+            .one(&db.conn)
+            .await
+            .expect("query")
+            .expect("row");
+        assert_eq!(swept.turn_state, Some(ConversationTurnState::Interrupted));
+        assert_eq!(swept.auto_resume, Some(ConversationAutoResume::Pending));
+    }
 }

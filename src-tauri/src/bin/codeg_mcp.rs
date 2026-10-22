@@ -71,6 +71,8 @@ struct Args {
     disabled_agents: Option<String>,
 }
 
+const USAGE: &str = "Usage: codeg-mcp --parent-connection-id <uuid> --socket-path <path> --token <secret> [--parent-pid <pid>] [--features delegation,feedback,ask,sessions,tasks] [--custom-agents custom:<id>,...] [--disabled-agents <agent>,...]";
+
 fn parse_args() -> Result<Args, String> {
     let mut parent_connection_id = None;
     let mut socket_path = None;
@@ -129,9 +131,11 @@ fn parse_args() -> Result<Args, String> {
                 );
             }
             "--help" | "-h" => {
-                println!(
-                    "codeg-mcp --parent-connection-id <uuid> --socket-path <path> --token <secret> [--parent-pid <pid>] [--features delegation,feedback,ask,sessions,tasks] [--custom-agents custom:<id>,...] [--disabled-agents <agent>,...]"
-                );
+                println!("{USAGE}");
+                std::process::exit(0);
+            }
+            "--version" | "-V" => {
+                println!("{}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
             }
             other => return Err(format!("unknown arg: {other}")),
@@ -186,7 +190,7 @@ async fn main() -> ExitCode {
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
-            let _ = writeln!(std::io::stderr(), "codeg-mcp: {e}");
+            let _ = writeln!(std::io::stderr(), "codeg-mcp: {e}\n{USAGE}");
             return ExitCode::from(2);
         }
     };

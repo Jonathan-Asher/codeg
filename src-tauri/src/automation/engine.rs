@@ -82,14 +82,6 @@ pub struct AutomationEngine {
     automation_locks: Arc<Mutex<HashMap<i32, Arc<Mutex<()>>>>>,
     /// Serializes git checkout for `shared_in_root` runs on the same root folder.
     root_locks: Arc<Mutex<HashMap<i32, Arc<Mutex<()>>>>>,
-    /// Held for the engine's lifetime: an exclusive advisory lock on the DB's
-    /// sidecar lock file. The engine is only ever built while holding this lock
-    /// (see [`build_engine`]), so its mere existence proves this process is the
-    /// sole automation engine on the DB — which is exactly the precondition that
-    /// makes the destructive boot reconcile safe. Kept open purely for its Drop:
-    /// the OS releases the lock on exit/crash, so the next boot reconciles
-    /// correctly.
-    _engine_lock: std::fs::File,
 }
 
 struct ResolvedCwd {
@@ -101,15 +93,16 @@ struct ResolvedCwd {
 /// Build the engine and publish it to the process global, then return the handle
 /// the caller spawns via [`run_automation_engine`].
 ///
-/// Fails closed: returns `None` unless this process can take the data dir's
-/// exclusive engine lock. So the engine runs *only* while provably the sole
-/// engine on the DB (`engine()` stays unset otherwise, and manual run/cancel
-/// return a clean "engine not running" error). `None` happens when another live
-/// codeg process already holds the lock (e.g. a desktop app and a server pointed
-/// at the same `CODEG_DATA_DIR`), or — rarely — when the lock can't be
-/// established at all (a real IO error on the lock file, e.g. a filesystem
-/// without lock support): we never start a lockless engine, since its other
-/// guards (`automation_locks`, `root_locks`) are process-local, not cross-process.
+/// Fails closed: returns `None` unless this process owns the data dir
+/// (`data_dir_owner`), whose lock it holds for its whole life. So the engine
+/// runs *only* while provably the sole engine on the DB (`engine()` stays unset
+/// otherwise, and manual run/cancel return a clean "engine not running" error).
+/// `None` happens when another live codeg process owns the dir — which both
+/// binaries now refuse at startup, so in practice only a process older than the
+/// startup claim — or, rarely, when the lock can't be established at all (a
+/// real IO error on the lock file, e.g. a filesystem without lock support): we
+/// never start a lockless engine, since its other guards (`automation_locks`,
+/// `root_locks`) are process-local, not cross-process.
 pub fn build_engine(
     db: AppDatabase,
     manager: ConnectionManager,
@@ -117,8 +110,8 @@ pub fn build_engine(
     bus: Arc<InternalEventBus>,
     data_dir: PathBuf,
 ) -> Option<Arc<AutomationEngine>> {
-    let engine_lock = match acquire_engine_ownership(&data_dir) {
-        Ownership::Exclusive(file) => file,
+    match acquire_engine_ownership(&data_dir) {
+        Ownership::Exclusive => {}
         Ownership::Taken => {
             tracing::info!(
                 "[automation] another codeg process owns the automation engine for {}; \
@@ -135,7 +128,7 @@ pub fn build_engine(
             );
             return None;
         }
-    };
+    }
     let engine = Arc::new(AutomationEngine {
         db,
         manager,
@@ -145,7 +138,6 @@ pub fn build_engine(
         index: Arc::new(Mutex::new(HashMap::new())),
         automation_locks: Arc::new(Mutex::new(HashMap::new())),
         root_locks: Arc::new(Mutex::new(HashMap::new())),
-        _engine_lock: engine_lock,
     });
     let _ = ENGINE.set(engine.clone());
     Some(engine)
@@ -153,11 +145,11 @@ pub fn build_engine(
 
 /// Outcome of trying to become the sole automation engine for a data dir.
 enum Ownership {
-    /// Exclusive advisory lock held (file kept open for the process lifetime).
-    /// This process is provably the sole engine, so the destructive boot
-    /// reconcile is safe.
-    Exclusive(std::fs::File),
-    /// Another live process holds the lock; this process must not run an engine.
+    /// This process owns the data dir and holds its lock until it exits, so it
+    /// is provably the sole engine and the destructive boot reconcile is safe.
+    Exclusive,
+    /// Another live process owns the data dir; this process must not run an
+    /// engine.
     Taken,
     /// The lock couldn't be established at all — a real IO error on the lock file
     /// (e.g. a filesystem without lock support), not contention. Rare, and we fail
@@ -165,47 +157,22 @@ enum Ownership {
     Unavailable,
 }
 
-/// Path of the per-DB engine lock: the DB filename plus a `.lock` suffix, so it
-/// contends exactly when the `automation_run` table is shared — a debug desktop's
-/// isolated `codeg-dev.db` never blocks a release `codeg.db`, and vice versa.
-fn engine_lock_path(data_dir: &Path) -> PathBuf {
-    data_dir.join(format!("{}.lock", crate::db::database_file_name()))
-}
-
-/// Take an exclusive, non-blocking advisory lock on the engine lock file, held
-/// for the process lifetime. Uses the std cross-platform file lock (`flock` on
-/// Unix, `LockFileEx` on Windows), so the single-engine invariant is enforced on
-/// every platform. The aggressive boot reconcile (every `running` row is treated
-/// as interrupted) is only sound when this process is the sole engine on the DB;
-/// the held lock is the proof of that. The OS releases it on exit/crash, so the
-/// next boot reconciles correctly.
+/// The engine runs in the data dir's owner. Its lock (`<db>.lock`, per database
+/// file, so a debug desktop's isolated `codeg-dev.db` never blocks a release
+/// `codeg.db`) is the one this engine always took; both binaries now claim it at
+/// startup through `data_dir_owner`, before their first write, so here it is
+/// normally already held. Locking the file again from here would fail even in
+/// the owner: the std file lock (`flock` on Unix, `LockFileEx` on Windows)
+/// treats every open as a separate holder. The aggressive boot reconcile (every
+/// `running` row is treated as interrupted) is only sound in the sole engine on
+/// the DB; the held lock is the proof of that, and the OS releases it however
+/// the process exits, so the next boot reconciles correctly.
 fn acquire_engine_ownership(data_dir: &Path) -> Ownership {
-    let path = engine_lock_path(data_dir);
-    let file = match std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        // The file is a pure lock handle — we never write its contents, so
-        // leaving any existing bytes is fine (and avoids a needless truncate).
-        .truncate(false)
-        .open(&path)
-    {
-        Ok(f) => f,
-        Err(e) => {
-            // Nearly unreachable: the SQLite DB lives in this same dir, so it is
-            // writable. If it really can't open, fail closed rather than run a
-            // lockless engine.
-            tracing::warn!("[automation] engine lock open failed: {e}");
-            return Ownership::Unavailable;
-        }
-    };
-    match file.try_lock() {
-        Ok(()) => Ownership::Exclusive(file),
-        Err(std::fs::TryLockError::WouldBlock) => Ownership::Taken,
-        Err(std::fs::TryLockError::Error(e)) => {
-            // A real IO error (never `WouldBlock`) — e.g. a filesystem without
-            // lock support. Fail closed: we won't run an engine we can't prove is
-            // the only one.
-            tracing::warn!("[automation] engine lock failed: {e}");
+    match crate::data_dir_owner::claim(data_dir) {
+        Ok(()) => Ownership::Exclusive,
+        Err(crate::data_dir_owner::ClaimError::InUse { .. }) => Ownership::Taken,
+        Err(err) => {
+            tracing::warn!("[automation] {err}");
             Ownership::Unavailable
         }
     }
@@ -1216,53 +1183,29 @@ mod tests {
         assert_eq!(first_chars("日本語テスト", 3), "日本語");
     }
 
-    // The std file lock treats independent `open()`s as separate holders even
-    // within one process, so a second acquisition stands in for another process.
+    // The engine runs only in the process that owns the data dir. A handle of
+    // the test's own on the lock file stands in for another process (the std
+    // file lock counts every open as a holder, even within one process).
     #[test]
-    fn engine_lock_is_exclusive_per_data_dir() {
-        let dir = tempfile::tempdir().expect("temp dir");
-
-        // First acquisition takes the exclusive lock and holds the file open.
-        let guard = match acquire_engine_ownership(dir.path()) {
-            Ownership::Exclusive(f) => f,
-            _ => panic!("first acquisition should take the exclusive lock"),
-        };
-
-        // A second acquisition on the same dir is refused while the guard lives.
+    fn engine_runs_only_in_the_data_dir_owner() {
+        let taken = tempfile::tempdir().expect("temp dir");
+        let _other = crate::data_dir_owner::hold_as_other_process(taken.path());
         assert!(matches!(
-            acquire_engine_ownership(dir.path()),
+            acquire_engine_ownership(taken.path()),
             Ownership::Taken
         ));
 
-        // A different data dir is independent.
-        let other = tempfile::tempdir().expect("temp dir");
+        // A dir nobody owns is claimed, and the owner asking again (as each
+        // binary does after its startup claim) is still the owner.
+        let owned = tempfile::tempdir().expect("temp dir");
         assert!(matches!(
-            acquire_engine_ownership(other.path()),
-            Ownership::Exclusive(_)
+            acquire_engine_ownership(owned.path()),
+            Ownership::Exclusive
         ));
-
-        // Releasing the guard frees the dir for the next owner. The reacquire can
-        // momentarily still observe `Taken`: this binary runs tests in parallel,
-        // and when a sibling test spawns a subprocess, `fork` duplicates our open
-        // lock fd into the child. The child keeps the underlying open file
-        // description — and thus the advisory lock — alive until it reaches `exec`
-        // and `O_CLOEXEC` drops the inherited fd, so `drop(guard)` doesn't release
-        // the lock until that brief window closes. Retry until it clears; a genuine
-        // regression (the lock never released on drop) still fails at the deadline.
-        drop(guard);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        loop {
-            match acquire_engine_ownership(dir.path()) {
-                Ownership::Exclusive(_) => break,
-                Ownership::Taken | Ownership::Unavailable => {
-                    assert!(
-                        std::time::Instant::now() < deadline,
-                        "lock not reacquirable after the guard was dropped"
-                    );
-                    std::thread::sleep(std::time::Duration::from_millis(5));
-                }
-            }
-        }
+        assert!(matches!(
+            acquire_engine_ownership(owned.path()),
+            Ownership::Exclusive
+        ));
     }
 
     // Fail closed: if the lock file can't even be opened, ownership is
