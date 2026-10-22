@@ -460,17 +460,57 @@ async fn with_the_feature_off_the_turn_ends_as_before() {
         .unwrap();
     assert_eq!(hit_limit(&db, b, reset).await, UsageLimitTurnEnd::NotPaused);
 
-    // A delegation child is driven by its parent.
+    // A child row that is not a delegated session (an agent's own
+    // sub-agent, read from its transcript) is not a session to continue.
     let parent = session(&db, folder, "parent").await;
-    let child = session(&db, folder, "child").await;
-    let mut active: conversation::ActiveModel = row(&db, child).await.into();
-    active.parent_id = Set(Some(parent));
-    active.kind = Set(ConversationKind::Delegate);
-    active.update(&db.conn).await.unwrap();
+    let child = child_of(&db, folder, parent, "child", None).await;
     assert_eq!(
         hit_limit(&db, child, reset).await,
         UsageLimitTurnEnd::NotPaused
     );
+}
+
+/// A session under `parent`: one it delegated to when `call` names the
+/// delegation, else a plain child row.
+async fn child_of(
+    db: &AppDatabase,
+    folder: i32,
+    parent: i32,
+    title: &str,
+    call: Option<&str>,
+) -> i32 {
+    let child = session(db, folder, title).await;
+    let mut active: conversation::ActiveModel = row(db, child).await.into();
+    active.parent_id = Set(Some(parent));
+    if let Some(call) = call {
+        active.kind = Set(ConversationKind::Delegate);
+        active.delegation_call_id = Set(Some(call.to_string()));
+    }
+    active.update(&db.conn).await.unwrap();
+    child
+}
+
+#[tokio::test]
+async fn a_session_another_delegated_to_is_continued_too() {
+    let db = fresh_in_memory_db().await;
+    let folder = seed_folder(&db, "/tmp/limit-delegated").await;
+    let reset = Utc::now() + ChronoDuration::hours(1);
+    let parent = session(&db, folder, "parent").await;
+    let child = child_of(&db, folder, parent, "delegated", Some("call-1")).await;
+
+    // The same outage stops both; each is paused on its own.
+    for id in [parent, child] {
+        assert_eq!(
+            hit_limit_for(&db, id, reset, POOL).await,
+            UsageLimitTurnEnd::Paused { attempts: 0 }
+        );
+    }
+    let due = list_due_limit_resumes(&db.conn, reset + ChronoDuration::seconds(1))
+        .await
+        .unwrap();
+    let mut ids: Vec<i32> = due.iter().map(|row| row.id).collect();
+    ids.sort();
+    assert_eq!(ids, vec![parent, child]);
 }
 
 #[tokio::test]
@@ -836,6 +876,42 @@ fn the_pool_refusal_is_recognized_as_a_limit_stop() {
 }
 
 #[test]
+fn the_stop_as_it_reached_a_session_is_recognized() {
+    // Verbatim as the CLI ended a turn on it.
+    let seen = "API Error: Server is temporarily limiting requests (not your usage limit) · No \
+                account can take this request right now — all 2 Claude accounts are at their \
+                limit. Retry in ~47m.";
+    let text = usage_limit_text_from_failure(&record("limit", "error", seen));
+    assert_eq!(text.as_deref(), Some(seen));
+    assert_eq!(limit_reason_of(seen), POOL);
+    assert_eq!(pool_retry_hint_secs(seen), Some(47 * 60));
+    assert_eq!(
+        usage_limit_text_from_error(&format!("Internal error: {seen}")).as_deref(),
+        Some(seen)
+    );
+
+    // The same with three accounts, and the pool's words when no account is
+    // eligible at all (no reset in sight: its "~1m" is a stand-in).
+    let three = seen.replace("all 2 Claude", "all 3 Claude");
+    assert_eq!(limit_reason_of(&three), POOL);
+    for none_eligible in [
+        "API Error: Request rejected (429) · No account can take this request — all 3 Claude \
+         accounts are at their limit. Soonest reset in ~1m, beyond the hold window. Add another \
+         Claude account or wait for a quota reset.",
+        "API Error: Server is temporarily limiting requests (not your usage limit) · No account \
+         can take this request — all 3 Claude accounts are at their limit. Add another Claude \
+         account or wait for a quota reset.",
+    ] {
+        assert_eq!(
+            usage_limit_text_from_failure(&record("limit", "error", none_eligible)).as_deref(),
+            Some(none_eligible)
+        );
+        assert_eq!(limit_reason_of(none_eligible), POOL);
+        assert_eq!(pool_retry_hint_secs(none_eligible), None, "{none_eligible}");
+    }
+}
+
+#[test]
 fn the_proxy_names_its_wait() {
     assert_eq!(pool_retry_hint_secs(POOL_STOP), Some(3 * 3600));
     assert_eq!(pool_retry_hint_secs("… Retry in ~45m."), Some(45 * 60));
@@ -848,7 +924,7 @@ fn the_proxy_names_its_wait() {
 }
 
 #[test]
-fn a_pool_stop_takes_the_pool_reading_then_the_hint_then_a_backoff() {
+fn a_pool_stop_takes_the_proxys_wait_then_the_pool_reading_then_a_backoff() {
     let now = utc(2026, 10, 22, 12, 0);
     let three_hours = Some(3 * 3600);
     let held_back = |at: DateTime<Utc>| {
@@ -857,14 +933,18 @@ fn a_pool_stop_takes_the_pool_reading_then_the_hint_then_a_backoff() {
         })
     };
 
-    // The pool's reading, every account held back: its first reset wins.
+    // The proxy's own answer wins over the reading's arithmetic …
     let in_40m = now + ChronoDuration::minutes(40);
     assert_eq!(
         choose_pool_reset(held_back(in_40m), three_hours, now, now, false),
+        (now + ChronoDuration::hours(3), PoolResetSource::Hint)
+    );
+    // … and with none, the reading's first account to free up.
+    assert_eq!(
+        choose_pool_reset(held_back(in_40m), None, now, now, false),
         (in_40m, PoolResetSource::Pool)
     );
-    // No reading, one with no reset or one already past, or a reading with
-    // headroom right after the refusal: the proxy's hint.
+    // Whatever the reading says, the proxy's wait stands.
     let readings = [
         None,
         Some(PoolLimit::Exhausted { resumes_at: None }),
@@ -904,6 +984,30 @@ fn a_pool_stop_takes_the_pool_reading_then_the_hint_then_a_backoff() {
         choose_pool_reset(Some(PoolLimit::Headroom), three_hours, stopped, now, true),
         (now, PoolResetSource::Pool)
     );
+    // A wait over while the pool is still out: its first account to free up.
+    let stopped = now - ChronoDuration::hours(5);
+    assert_eq!(
+        choose_pool_reset(held_back(in_40m), three_hours, stopped, now, true),
+        (in_40m, PoolResetSource::Pool)
+    );
+}
+
+#[test]
+fn a_continuation_waits_for_the_pool_only_so_many_times() {
+    let mut defers = PoolDefers::default();
+    for _ in 0..MAX_POOL_DEFERS {
+        assert!(defers.may_wait(7));
+    }
+    assert!(!defers.may_wait(7), "then it goes out regardless");
+    assert!(defers.may_wait(8), "counted per conversation");
+    // Once it went out, a later pause counts afresh.
+    defers.forget(7);
+    assert!(defers.may_wait(7));
+    // A conversation no longer waiting loses its count.
+    defers.keep_only(&HashSet::from([8]));
+    for _ in 0..MAX_POOL_DEFERS {
+        assert!(defers.may_wait(7));
+    }
 }
 
 #[test]
@@ -1087,12 +1191,23 @@ async fn sessions_the_pool_stopped_before_the_update_are_paused_once() {
     let running = [ask(two_h), stop(two_h, POOL_STOP)];
     let running = transcript_session(&db, folder, path, "running", &running).await;
     mark_turn_running(&db.conn, running).await.unwrap();
+    // A session `recent` delegated to, stopped by the same outage.
+    std::fs::write(
+        path.join("sess-delegated.jsonl"),
+        [ask(two_h), stop(two_h, POOL_STOP)].join("\n") + "\n",
+    )
+    .unwrap();
+    let delegated = child_of(&db, folder, recent, "delegated", Some("call-7")).await;
 
     let base = path.to_path_buf();
     let locate = move |sid: &str| Some(base.join(format!("{sid}.jsonl")));
     let noop = EventEmitter::Noop;
     let paused = catch_up::catch_up_pool_stops_with(&db.conn, &noop, now, locate.clone()).await;
-    assert_eq!(paused, 2);
+    assert_eq!(paused, 3);
+    assert_eq!(
+        row(&db, delegated).await.limit_resume_state,
+        Some(ConversationLimitResume::Scheduled)
+    );
 
     let recent_row = row(&db, recent).await;
     assert_eq!(

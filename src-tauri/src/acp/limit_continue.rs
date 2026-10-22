@@ -46,13 +46,18 @@
 //! ~3h." — and Claude Code ends the turn on that ("API Error: Server is
 //! temporarily limiting requests (not your usage limit) · …").
 //! [`is_pool_capacity_text`] recognizes it, and the pause records its reason
-//! (`pool_capacity`). Its reset comes from the pool's reading when that shows
-//! every account held back, else from the proxy's "Retry in ~N" hint, else a
-//! fixed backoff ([`choose_pool_reset`]). For every Claude Code pause, a
-//! continuation falling due while the pool's reading still shows no account
-//! with headroom waits for the first one to free up instead of going out
-//! ([`pool_defer_until`]). Sessions the pool stopped before codeg knew the
-//! stop are paused once, on the first start that does (`catch_up`).
+//! (`pool_capacity`). Its reset is the proxy's own answer, the "Retry in ~N"
+//! it names; else the pool's reading, when that shows every account held
+//! back — the first account that can serve again (switched-off accounts
+//! skipped, reserves honoured); else a fixed backoff ([`choose_pool_reset`]).
+//! For every Claude Code pause, the pool is read again just before a
+//! continuation goes out, and one that would only meet another refusal waits
+//! for the first account to free up instead ([`pool_defer_until`]), up to
+//! [`MAX_POOL_DEFERS`] times in a row. Sessions the pool stopped before codeg
+//! knew the stop are paused once, on the first start that does (`catch_up`).
+//! Every session a limit stopped is continued on its own — one another
+//! session delegated to as well — and the prompt has the agent pick its
+//! stopped sub-agents up where they stopped.
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
@@ -88,8 +93,12 @@ use crate::web::event_bridge::EventEmitter;
 /// The prompt a continuation starts with. It goes to the agent, so it is not
 /// localized; the transcript recognizes it by its exact text and draws it as
 /// a "Continued after limit reset" divider. The frontend keeps the same text
-/// in `src/lib/limit-continue.ts` — a test below fails if the two drift.
-pub const LIMIT_CONTINUE_PROMPT: &str = "Your usage limit has reset. Continue the task you were working on when the usage limit was reached; do not repeat work that is already complete.";
+/// in `src/lib/limit-continue.ts` (with the earlier wording, for transcripts
+/// that carry it) — a test below fails if the two drift.
+///
+/// A limit stops the agent's own sub-agents mid-task too; they are picked up
+/// where they stopped, not started over, before the task goes on.
+pub const LIMIT_CONTINUE_PROMPT: &str = "Your usage limit has reset. First resume any sub-agents the limit stopped, each from where it stopped with its context intact rather than starting it over; then continue the task you were working on when the usage limit was reached. Do not repeat work that is already complete.";
 
 /// `app_metadata` key of [`LimitContinueSettings`]. Per data directory, like
 /// the automatic resume's setting.
@@ -104,9 +113,10 @@ const DEFAULT_SAFETY_DELAY_SECS: u64 = 60;
 /// Most extra delay one session adds on top, so sessions paused on the same
 /// reset do not all fire on the same tick. `CODEG_LIMIT_CONTINUE_JITTER_SECS`.
 const DEFAULT_JITTER_SECS: u64 = 30;
-/// Least time between two continuations starting.
-/// `CODEG_LIMIT_CONTINUE_STAGGER_SECS`.
-const DEFAULT_STAGGER_SECS: u64 = 30;
+/// Least time between two continuations starting, so sessions stopped by
+/// the same limit do not all reach the account (or the pool) at the same
+/// instant. `CODEG_LIMIT_CONTINUE_STAGGER_SECS`.
+const DEFAULT_STAGGER_SECS: u64 = 5;
 /// How long after a failed continuation (the session would not reopen) the
 /// next attempt goes out.
 const RETRY_AFTER_FAILURE_SECS: i64 = 120;
@@ -128,6 +138,10 @@ pub const POOL_STOP_BACKOFF_SECS: i64 = 30 * 60;
 /// How long a due continuation waits for the pool when its reading shows no
 /// account with headroom but not when one frees up.
 pub const POOL_RECHECK_SECS: i64 = 2 * 60;
+/// How many times in a row a due continuation waits for the pool before it
+/// goes out regardless — then a pool that still refuses it stops it again,
+/// and the attempt cap ([`MAX_ATTEMPTS`]) ends it.
+pub const MAX_POOL_DEFERS: u32 = 12;
 
 /// "Continue automatically when the usage limit resets" (General settings).
 /// On unless the user turned it off.
@@ -606,6 +620,10 @@ static POOL_RETRY_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 /// The wait the proxy names in its message — "Retry in ~3h", "Soonest reset
 /// in ~2d" — in seconds. It rounds to the one unit it names.
+///
+/// With no reset in sight at all (no account it could route to) the proxy
+/// still says "Soonest reset in ~1m, beyond the hold window" — a stand-in, as
+/// a wait beyond its hold window is never that short — so that names none.
 pub fn pool_retry_hint_secs(text: &str) -> Option<i64> {
     let caps = POOL_RETRY_RE.captures(text)?;
     let n: i64 = caps[1].parse().ok()?;
@@ -615,20 +633,26 @@ pub fn pool_retry_hint_secs(text: &str) -> Option<i64> {
         "m" => 60,
         _ => 1,
     };
-    n.checked_mul(unit)
+    let secs = n.checked_mul(unit)?;
+    if secs <= 60 && text.to_lowercase().contains("beyond the hold window") {
+        return None;
+    }
+    Some(secs)
 }
 
-/// When a turn the account pool stopped at `stopped_at` continues, most exact
-/// first: the pool's reading (`pool`) when it shows every account held back
-/// (the first account's reset), else the proxy's hint (`hint_secs`, counted
-/// from the stop), else [`POOL_STOP_BACKOFF_SECS`] from the stop. Never
+/// When a turn the account pool stopped at `stopped_at` continues. First
+/// the proxy's own answer, the wait it named (`hint_secs`, counted from the
+/// stop): its routing knows what the reading does not — when a rising
+/// reserve lets an account go, its own cooldowns. Then the pool's reading
+/// (`pool`) when it shows every account held back: the first account that
+/// can serve again. Else [`POOL_STOP_BACKOFF_SECS`] from the stop. Never
 /// before `now`: a stop whose wait is already over continues at the next
 /// opportunity.
 ///
 /// A reading with headroom right after the refusal contradicts the proxy
 /// (it lags, or the refusal was for one model's limit), so a live stop keeps
-/// to the hint. A stop `caught_up` hours later continues now when the
-/// reading has room: it is newer than the hint.
+/// to the hint or the backoff. A stop `caught_up` hours later continues now
+/// when the reading has room: it is newer than the hint.
 pub(crate) fn choose_pool_reset(
     pool: Option<PoolLimit>,
     hint_secs: Option<i64>,
@@ -636,31 +660,36 @@ pub(crate) fn choose_pool_reset(
     now: DateTime<Utc>,
     caught_up: bool,
 ) -> (DateTime<Utc>, PoolResetSource) {
-    let horizon = now + chrono::Duration::days(MAX_AHEAD_DAYS);
-    match pool {
-        Some(PoolLimit::Exhausted {
-            resumes_at: Some(secs),
-        }) => {
-            if let Some(at) = Utc
-                .timestamp_opt(secs, 0)
-                .single()
-                .filter(|at| *at > now && *at <= horizon)
-            {
-                return (at, PoolResetSource::Pool);
-            }
-        }
-        Some(PoolLimit::Headroom) if caught_up => return (now, PoolResetSource::Pool),
-        _ => {}
+    if caught_up && pool == Some(PoolLimit::Headroom) {
+        return (now, PoolResetSource::Pool);
     }
-    let hint = hint_secs.filter(|secs| (0..=MAX_AHEAD_DAYS * 86_400).contains(secs));
-    let (wait, source) = match hint {
-        Some(secs) => (secs, PoolResetSource::Hint),
-        None => (POOL_STOP_BACKOFF_SECS, PoolResetSource::Backoff),
-    };
-    (
-        (stopped_at + chrono::Duration::seconds(wait)).max(now),
-        source,
-    )
+    let hinted = hint_secs
+        .filter(|secs| (0..=MAX_AHEAD_DAYS * 86_400).contains(secs))
+        .map(|secs| stopped_at + chrono::Duration::seconds(secs));
+    if let Some(at) = hinted.filter(|at| *at > now) {
+        return (at, PoolResetSource::Hint);
+    }
+    let horizon = now + chrono::Duration::days(MAX_AHEAD_DAYS);
+    if let Some(PoolLimit::Exhausted {
+        resumes_at: Some(secs),
+    }) = pool
+    {
+        if let Some(at) = Utc
+            .timestamp_opt(secs, 0)
+            .single()
+            .filter(|at| *at > now && *at <= horizon)
+        {
+            return (at, PoolResetSource::Pool);
+        }
+    }
+    match hinted {
+        // The wait it named is over.
+        Some(_) => (now, PoolResetSource::Hint),
+        None => (
+            (stopped_at + chrono::Duration::seconds(POOL_STOP_BACKOFF_SECS)).max(now),
+            PoolResetSource::Backoff,
+        ),
+    }
 }
 
 /// [`choose_pool_reset`] with the pool's current reading.
@@ -672,6 +701,32 @@ pub async fn resolve_pool_stop_reset(
 ) -> (DateTime<Utc>, PoolResetSource) {
     let pool = crate::commands::usage_pool::claude_pool_limit().await;
     choose_pool_reset(pool, pool_retry_hint_secs(text), stopped_at, now, caught_up)
+}
+
+/// A due continuation's waits for the account pool, counted so it cannot
+/// wait forever: past [`MAX_POOL_DEFERS`] in a row it goes out regardless.
+/// Kept by the scheduler for its own run.
+#[derive(Debug, Default)]
+pub(crate) struct PoolDefers(std::collections::HashMap<i32, u32>);
+
+impl PoolDefers {
+    /// Count one more wait; `false` once the continuation has waited enough.
+    pub(crate) fn may_wait(&mut self, conversation_id: i32) -> bool {
+        let waits = self.0.entry(conversation_id).or_insert(0);
+        *waits += 1;
+        *waits <= MAX_POOL_DEFERS
+    }
+
+    /// The continuation went out (or the pause is gone): a later pause
+    /// counts afresh.
+    pub(crate) fn forget(&mut self, conversation_id: i32) {
+        self.0.remove(&conversation_id);
+    }
+
+    /// Drop the counts of conversations no longer waiting.
+    pub(crate) fn keep_only(&mut self, waiting: &HashSet<i32>) {
+        self.0.retain(|id, _| waiting.contains(id));
+    }
 }
 
 /// Whether a due continuation of a Claude Code session waits for the
@@ -892,6 +947,7 @@ pub async fn run_limit_continue(
         },
     ));
     let mut last_start: Option<tokio::time::Instant> = None;
+    let mut pool_defers = PoolDefers::default();
     loop {
         let rows = match conversation_service::list_scheduled_limit_resumes(&db.conn).await {
             Ok(rows) => rows,
@@ -900,6 +956,7 @@ pub async fn run_limit_continue(
                 Vec::new()
             }
         };
+        pool_defers.keep_only(&rows.iter().map(|row| row.id).collect());
         let forced: HashSet<i32> =
             std::mem::take(&mut *FORCED.lock().unwrap_or_else(|e| e.into_inner()));
         let (due, next) = plan_due(rows, &forced, Utc::now(), &timing);
@@ -908,9 +965,6 @@ pub async fn run_limit_continue(
         } else {
             load_limit_continue_settings(&db.conn).await
         };
-        // The pool's verdict, read once per pass and only when a Claude Code
-        // continuation is due.
-        let mut pool_block: Option<Option<PoolBlock>> = None;
         for row in due {
             if !settings.enabled || !row.limit_auto_continue {
                 // Turned off while it waited (the switches end their pauses
@@ -918,26 +972,8 @@ pub async fn run_limit_continue(
                 end_pause(&db.conn, &emitter, row.id).await;
                 continue;
             }
-            // Behind an account pool whose reading still shows no account
-            // with headroom, the continuation would only meet the pool's
-            // 429 and use up an attempt: it waits for the pool instead. A
-            // "Continue now" goes out regardless.
-            let agent = conversation_service::parse_agent_type(&row.agent_type);
-            if !forced.contains(&row.id) && agent == AgentType::ClaudeCode {
-                let block = match pool_block {
-                    Some(block) => block,
-                    None => {
-                        let block = crate::commands::usage_pool::claude_pool_block().await;
-                        pool_block = Some(block);
-                        block
-                    }
-                };
-                if let Some(at) = pool_defer_until(block, Utc::now()) {
-                    defer_for_pool(&db.conn, &emitter, row.id, at).await;
-                    continue;
-                }
-            }
-            if !forced.contains(&row.id) {
+            let forced_now = forced.contains(&row.id);
+            if !forced_now {
                 if let Some(last) = last_start {
                     let wait = timing.stagger.saturating_sub(last.elapsed());
                     if !wait.is_zero() {
@@ -945,6 +981,27 @@ pub async fn run_limit_continue(
                     }
                 }
             }
+            // Behind an account pool whose reading, taken just before this
+            // continuation would go out, shows no account that can serve, it
+            // would only meet the pool's 429 and use up an attempt: it waits
+            // for the pool instead — a bounded number of times. A "Continue
+            // now" goes out regardless.
+            let agent = conversation_service::parse_agent_type(&row.agent_type);
+            if !forced_now && agent == AgentType::ClaudeCode {
+                let block = crate::commands::usage_pool::claude_pool_block().await;
+                if let Some(at) = pool_defer_until(block, Utc::now()) {
+                    if pool_defers.may_wait(row.id) {
+                        defer_for_pool(&db.conn, &emitter, row.id, at).await;
+                        continue;
+                    }
+                    tracing::info!(
+                        conversation_id = row.id,
+                        "[limit-continue] waited for the account pool {MAX_POOL_DEFERS} times; \
+                         continuing regardless"
+                    );
+                }
+            }
+            pool_defers.forget(row.id);
             match conversation_service::claim_limit_resume(&db.conn, row.id).await {
                 Ok(true) => {}
                 Ok(false) => continue,

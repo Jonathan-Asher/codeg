@@ -510,6 +510,127 @@ fn a_disabled_account_with_headroom_does_not_count() {
     assert_eq!(pool.resumes_at, Some(NOW + 2 * HOUR));
 }
 
+/// One Claude account in maxpool's status shape, its 5-hour window `used`
+/// (a fraction) until `reset`, with a reserve (`capUtilization`, `capMode`)
+/// when given.
+fn plain_account(
+    name: &str,
+    enabled: bool,
+    used: f64,
+    reset: i64,
+    cap: Option<(f64, &str)>,
+) -> Value {
+    let mut account = json!({
+        "name": name,
+        "type": "oauth",
+        "enabled": enabled,
+        "status": "active",
+        "priority": 1,
+        "capUtilization": null,
+        "capMode": null,
+        "quota": {
+            "unified5h": used,
+            "unified7d": 0.2,
+            "unified5hReset": ms(reset),
+            "unified7dReset": ms(NOW + 4 * DAY),
+            "lastProbeOkAt": ms(NOW - MIN)
+        },
+        "weekly": { "state": "normal", "rawState": "normal" }
+    });
+    if let Some((utilization, mode)) = cap {
+        account["capUtilization"] = json!(utilization);
+        account["capMode"] = json!(mode);
+    }
+    account
+}
+
+fn pool_of(accounts: Vec<Value>) -> PlanUsagePool {
+    pool_from(json!({ "switchThreshold": 0.9, "accounts": accounts }))
+}
+
+#[test]
+fn the_pool_resumes_with_the_first_account_that_can_really_serve() {
+    // `paused` resets first but is switched off; `reserved` is under the
+    // switch threshold but past its fixed reserve, so it is held until its
+    // window resets; `spent` is at its limit until later still.
+    let accounts = |reserve: Option<(f64, &str)>| {
+        vec![
+            plain_account("paused", false, 1.0, NOW + 10 * MIN, None),
+            plain_account("reserved", true, 0.7, NOW + 40 * MIN, reserve),
+            plain_account("spent", true, 1.0, NOW + 90 * MIN, None),
+        ]
+    };
+    let pool = pool_of(accounts(Some((0.5, "fixed"))));
+    let reserved = account(&pool, "reserved");
+    assert_eq!(reserved.state, PoolAccountState::AtThreshold);
+    assert_eq!(reserved.blocked_until, Some(NOW + 40 * MIN));
+    assert_eq!(account(&pool, "paused").state, PoolAccountState::Disabled);
+    let limit = pool_limit(&pool, NOW, None);
+    assert_eq!(
+        limit,
+        Some(PoolLimit::Exhausted {
+            resumes_at: Some(NOW + 40 * MIN)
+        })
+    );
+    assert_eq!(
+        (pool.exhausted, pool.resumes_at),
+        (true, Some(NOW + 40 * MIN))
+    );
+    // A pool stop with no wait named continues then.
+    let now = chrono::DateTime::from_timestamp(NOW, 0).unwrap();
+    let (at, _) = crate::acp::limit_continue::choose_pool_reset(limit, None, now, now, false);
+    assert_eq!(at.timestamp(), NOW + 40 * MIN);
+    // Once the reset has let it go, it serves.
+    assert_eq!(
+        pool_limit(&pool, NOW + 40 * MIN, None),
+        Some(PoolLimit::Headroom)
+    );
+
+    // Without the reserve the same account has room now.
+    let pool = pool_of(accounts(None));
+    assert_eq!(pool_limit(&pool, NOW, None), Some(PoolLimit::Headroom));
+}
+
+#[test]
+fn a_rising_reserve_lets_the_account_go_before_the_reset() {
+    // 70% used, two hours left of the 5-hour window: the reserve has risen
+    // from 50% to 58% and reaches 70% three quarters of the way through,
+    // 45 minutes from now.
+    let pool = pool_of(vec![plain_account(
+        "rising",
+        true,
+        0.7,
+        NOW + 2 * HOUR,
+        Some((0.5, "dynamic")),
+    )]);
+    let rising = account(&pool, "rising");
+    assert_eq!(rising.state, PoolAccountState::AtThreshold);
+    assert_eq!(rising.blocked_until, Some(NOW + 45 * MIN));
+    assert_eq!(
+        rising.availability(NOW + 45 * MIN + 1, 90.0, None),
+        Availability::Available
+    );
+
+    // The weekly the pool reports held by a rising reserve: let go before
+    // its reset too (70 hours left of the week, 70% used).
+    let mut weekly = plain_account("weekly", true, 0.1, NOW + HOUR, Some((0.5, "dynamic")));
+    weekly["quota"]["unified7d"] = json!(0.7);
+    weekly["quota"]["unified7dReset"] = json!(ms(NOW + 70 * HOUR));
+    weekly["weekly"] = json!({ "state": "capped", "rawState": "capped" });
+    let pool = pool_of(vec![weekly.clone()]);
+    assert_eq!(
+        account(&pool, "weekly").blocked_until,
+        Some(NOW + 28 * HOUR)
+    );
+    // A fixed one holds it until the weekly reset.
+    weekly["capMode"] = json!("fixed");
+    let pool = pool_of(vec![weekly]);
+    assert_eq!(
+        account(&pool, "weekly").blocked_until,
+        Some(NOW + 70 * HOUR)
+    );
+}
+
 #[test]
 fn no_enabled_account_leaves_the_decision_elsewhere() {
     let mut pool = fixture_pool();
@@ -822,7 +943,11 @@ fn new_work_waits_only_while_no_account_has_headroom() {
 fn a_reading_that_cannot_tell_holds_nothing_back() {
     let mut stale = every_account_out();
     stale.stale = true;
-    assert_eq!(block_from(&stale, NOW), None, "a stale reading decides nothing");
+    assert_eq!(
+        block_from(&stale, NOW),
+        None,
+        "a stale reading decides nothing"
+    );
     let mut empty = every_account_out();
     empty.accounts.clear();
     assert_eq!(block_from(&empty, NOW), None, "no accounts, no verdict");
@@ -830,7 +955,11 @@ fn a_reading_that_cannot_tell_holds_nothing_back() {
     for account in &mut off.accounts {
         account.enabled = false;
     }
-    assert_eq!(block_from(&off, NOW), None, "no enabled account, no verdict");
+    assert_eq!(
+        block_from(&off, NOW),
+        None,
+        "no enabled account, no verdict"
+    );
 }
 
 #[test]
@@ -849,5 +978,8 @@ async fn a_waiter_wakes_as_soon_as_a_reading_lands() {
     tokio::task::yield_now().await;
     READING_CHANGED.notify_waiters();
     waiter.await.unwrap();
-    assert!(start.elapsed() < Duration::from_secs(1), "woken by the reading");
+    assert!(
+        start.elapsed() < Duration::from_secs(1),
+        "woken by the reading"
+    );
 }

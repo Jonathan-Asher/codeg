@@ -27,6 +27,19 @@ describe("the continuation prompt", () => {
     )
     expect(isLimitContinuePrompt("continue")).toBe(false)
   })
+
+  it("asks for stopped sub-agents to be picked up where they stopped", () => {
+    expect(LIMIT_CONTINUE_PROMPT).toMatch(/resume any sub-agents/)
+    expect(LIMIT_CONTINUE_PROMPT).toMatch(/rather than starting it over/)
+  })
+
+  it("still recognizes the earlier wording in older transcripts", () => {
+    expect(
+      isLimitContinuePrompt(
+        "Your usage limit has reset. Continue the task you were working on when the usage limit was reached; do not repeat work that is already complete."
+      )
+    ).toBe(true)
+  })
 })
 
 describe("waitingLimitPause", () => {

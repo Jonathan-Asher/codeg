@@ -50,6 +50,12 @@ const DEFAULT_SWITCH_THRESHOLD: f64 = 0.9;
 /// maxpool's weekly bench: an account (or one model's weekly window) this
 /// full takes no more requests until the window resets.
 const WEEKLY_EXHAUSTED_PERCENT: f64 = 99.9;
+/// Where maxpool's rising reserve starts to rise: this share of the way
+/// through the window (its `capRampStart` default).
+const RESERVE_RAMP_START: f64 = 0.5;
+/// The windows' nominal spans, which a rising reserve is timed against.
+const FIVE_HOUR_SPAN_SECS: i64 = 5 * 3_600;
+const SEVEN_DAY_SPAN_SECS: i64 = 7 * 86_400;
 
 const CONFIG_MAX_BYTES: u64 = 1024 * 1024;
 const STATUS_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -374,6 +380,10 @@ struct RawAccount {
     quota: Option<RawQuota>,
     #[serde(deserialize_with = "lenient")]
     weekly: Option<RawWeekly>,
+    #[serde(deserialize_with = "lenient")]
+    cap_utilization: Option<f64>,
+    #[serde(deserialize_with = "lenient")]
+    cap_mode: Option<String>,
 }
 
 #[derive(Default, Deserialize)]
@@ -548,6 +558,70 @@ pub struct PoolAccount {
     pub refresh_failed: bool,
     /// The newest of the account's usage readings (epoch seconds).
     pub observed_at: Option<i64>,
+    /// The reserve the pool keeps on the account, if any. Only the gate
+    /// below reads it.
+    #[serde(skip)]
+    pub(crate) reserve: Option<PoolReserve>,
+}
+
+/// The share of an account's windows the pool keeps in reserve
+/// (`capUtilization`, `capMode` in its status): once a window's use reaches
+/// it, the pool routes nothing to the account until it lets the account go
+/// again. A fixed reserve lets go at the window's reset; a rising one
+/// (`dynamic`) climbs from `floor` toward the switch threshold over the
+/// window's second half and lets go once it has climbed past the use — the
+/// pool's own arithmetic, with its default ramp.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PoolReserve {
+    /// Percent of the window.
+    pub floor: f64,
+    pub dynamic: bool,
+}
+
+impl PoolReserve {
+    fn from_raw(utilization: Option<f64>, mode: Option<&str>) -> Option<Self> {
+        let fraction = utilization.filter(|u| u.is_finite() && (0.0..=1.0).contains(u))?;
+        Some(Self {
+            floor: fraction * 100.0,
+            dynamic: mode == Some("dynamic"),
+        })
+    }
+
+    /// The share it holds a window to at `now` (percent), for a window that
+    /// resets at `reset` and spans `span` seconds. A rising reserve whose
+    /// place in the window is unknown holds at its floor, as the pool's does.
+    fn cap_at(&self, ceiling: f64, reset: Option<i64>, span: i64, now: i64) -> f64 {
+        if !self.dynamic || self.floor >= ceiling {
+            return self.floor;
+        }
+        let Some(reset) = reset.filter(|r| *r > now) else {
+            return self.floor;
+        };
+        let elapsed = (1.0 - (reset - now) as f64 / span as f64).clamp(0.0, 1.0);
+        let ramp = ((elapsed - RESERVE_RAMP_START) / (1.0 - RESERVE_RAMP_START)).clamp(0.0, 1.0);
+        self.floor + (ceiling - self.floor) * ramp
+    }
+
+    /// When a rising reserve has climbed past `used` (percent), before the
+    /// window resets. `None` for a fixed reserve, or one that never gets
+    /// there in time: then the reset lets the account go.
+    fn lets_go_at(
+        &self,
+        used: f64,
+        ceiling: f64,
+        reset: Option<i64>,
+        span: i64,
+        now: i64,
+    ) -> Option<i64> {
+        if !self.dynamic || self.floor >= ceiling || used >= ceiling || used < self.floor {
+            return None;
+        }
+        let reset = reset.filter(|r| *r > now)?;
+        let ramp = (used - self.floor) / (ceiling - self.floor);
+        let elapsed = RESERVE_RAMP_START + ramp * (1.0 - RESERVE_RAMP_START);
+        let at = reset - (span as f64 * (1.0 - elapsed)).round() as i64;
+        (at > now).then_some(at)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -657,15 +731,57 @@ impl PoolAccount {
         self.windows.iter().find(|w| w.id == id)
     }
 
-    /// The account-wide quota blockers: the 5-hour window past `threshold`,
-    /// a full or capped weekly, a provider rejection.
+    /// Whether the account's reserve holds `window` (spanning `span`) at
+    /// `now`.
+    fn reserve_holds(
+        &self,
+        window: Option<&PlanUsageWindow>,
+        ceiling: f64,
+        span: i64,
+        now: i64,
+    ) -> bool {
+        match (self.reserve, window) {
+            (Some(reserve), Some(w)) => {
+                w.used_percent >= reserve.cap_at(ceiling, w.resets_at, span, now)
+            }
+            _ => false,
+        }
+    }
+
+    /// When the account's rising reserve lets `window` go, ahead of its reset.
+    fn reserve_lets_go(
+        &self,
+        window: Option<&PlanUsageWindow>,
+        ceiling: f64,
+        span: i64,
+        now: i64,
+    ) -> Option<i64> {
+        let window = window?;
+        self.reserve?
+            .lets_go_at(window.used_percent, ceiling, window.resets_at, span, now)
+    }
+
+    /// The account-wide quota blockers: the 5-hour window past `threshold`
+    /// (or the account's reserve), a full or capped weekly, a provider
+    /// rejection.
     fn quota_blockers(&self, now: i64, threshold: f64) -> (Vec<Option<i64>>, bool) {
         let mut blockers = Vec::new();
         let mut full = false;
         let five_hour = self.window("five_hour");
         let seven_day = self.window("seven_day");
-        if let Some(until) = window_blocker(five_hour, threshold, now) {
-            blockers.push(until);
+        // The 5-hour window is benched at the switch threshold, or at the
+        // account's reserve when that is lower.
+        let session_cap = match (self.reserve, five_hour) {
+            (Some(reserve), Some(w)) => reserve
+                .cap_at(threshold, w.resets_at, FIVE_HOUR_SPAN_SECS, now)
+                .min(threshold),
+            _ => threshold,
+        };
+        if let Some(until) = window_blocker(five_hour, session_cap, now) {
+            blockers.push(
+                self.reserve_lets_go(five_hour, threshold, FIVE_HOUR_SPAN_SECS, now)
+                    .or(until),
+            );
             full |= five_hour.is_some_and(|w| w.used_percent >= 100.0);
         }
         let weekly_full = seven_day.is_some_and(|w| w.used_percent >= WEEKLY_EXHAUSTED_PERCENT);
@@ -676,19 +792,26 @@ impl PoolAccount {
             // 5-hour window, counted above.
             Some(PoolWeeklyState::Exhausted) => weekly_full,
             Some(_) => false,
+            // A pool that gives no weekly verdict: the full window, or the
+            // account's reserve, read here.
             None => {
-                weekly_full
+                (weekly_full
                     && !matches!(
                         self.limit_status,
                         Some(PoolLimitStatus::Allowed | PoolLimitStatus::AllowedWarning)
-                    )
+                    ))
+                    || self.reserve_holds(seven_day, threshold, SEVEN_DAY_SPAN_SECS, now)
             }
         };
         if weekly_blocks {
             match seven_day.and_then(|w| w.resets_at) {
                 Some(reset) if reset <= now => {}
                 reset => {
-                    blockers.push(reset);
+                    // A rising reserve lets the account go before the reset.
+                    blockers.push(
+                        self.reserve_lets_go(seven_day, threshold, SEVEN_DAY_SPAN_SECS, now)
+                            .or(reset),
+                    );
                     full = true;
                 }
             }
@@ -711,9 +834,11 @@ impl PoolAccount {
     }
 
     /// Mirrors the pool's own routing gate: switched off, failed, cooling
-    /// down, its 5-hour window past `threshold` (percent), its weekly full or
-    /// capped, or — for a request to the model family `scope` — that model's
-    /// weekly window full.
+    /// down, its 5-hour window past `threshold` (percent) or its reserve, its
+    /// weekly full or held by the reserve, or — for a request to the model
+    /// family `scope` — that model's weekly window full. A held account is
+    /// free again once every blocker has let go: a reserve at its window's
+    /// reset, a rising one when it has climbed past the use.
     pub(crate) fn availability(
         &self,
         now: i64,
@@ -838,6 +963,7 @@ impl PoolAccount {
             probe_error_status: quota.last_probe_error_status,
             refresh_failed: raw.refresh_dead.unwrap_or(false),
             observed_at,
+            reserve: PoolReserve::from_raw(raw.cap_utilization, raw.cap_mode.as_deref()),
         };
         account.state = account.state_at(now, threshold);
         account.blocked_until = match account.availability(now, threshold, None) {
