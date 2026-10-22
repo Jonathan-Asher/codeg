@@ -307,3 +307,12 @@ describe("exactly once", () => {
     expect(server.delivered).toEqual(["before reload"])
   })
 })
+
+describe("autoReconnectDelayMs", () => {
+  it("backs off from 5 s to every 30 s", async () => {
+    const { autoReconnectDelayMs } = await import("./durable-send")
+    expect([0, 1, 2, 3, 9].map(autoReconnectDelayMs)).toEqual([
+      5_000, 10_000, 20_000, 30_000, 30_000,
+    ])
+  })
+})

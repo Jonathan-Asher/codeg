@@ -49,7 +49,11 @@ import {
   useMessageQueue,
   type QueuedMessage,
 } from "@/hooks/use-message-queue"
-import { durableSendCallbacks, headSendDelayMs } from "@/lib/durable-send"
+import {
+  autoReconnectDelayMs,
+  durableSendCallbacks,
+  headSendDelayMs,
+} from "@/lib/durable-send"
 import { outboxStorageKey } from "@/lib/outbox-storage"
 import { nextSendFailure, type SendFailure } from "@/lib/send-failure"
 import { usePoolHold } from "@/hooks/use-pool-hold"
@@ -870,6 +874,33 @@ const ConversationTabView = memo(function ConversationTabView({
       // A failed reconnect publishes (and notifies) its own failure.
     })
   }, [acpActions, tabId])
+  // A message waits as "Not sent" for a reason that goes again by itself
+  // while the session's connection has failed or gone (the server restarted
+  // under it): reconnect by itself, backing off, so the message goes as soon
+  // as the server can take it instead of waiting for Retry. Stops once the
+  // connection is up or the message is sent, edited or removed.
+  const autoReconnectsRef = useRef(0)
+  const unsentHeadRetries = queueHead?.failure?.autoRetry === true
+  useEffect(() => {
+    if (connectionReady) {
+      autoReconnectsRef.current = 0
+      return
+    }
+    if (!unsentHeadRetries || connIsForOtherAgent) return
+    if (connStatus !== "error" && connStatus !== "disconnected") return
+    const wait = autoReconnectDelayMs(autoReconnectsRef.current)
+    const timer = setTimeout(() => {
+      autoReconnectsRef.current += 1
+      retryConnection()
+    }, wait)
+    return () => clearTimeout(timer)
+  }, [
+    connectionReady,
+    connStatus,
+    connIsForOtherAgent,
+    unsentHeadRetries,
+    retryConnection,
+  ])
   // While the session waits for the account pool, the composer says so.
   const poolWaitLabel = useAttachPhaseLabel(
     getAgentLabel(selectedAgent),

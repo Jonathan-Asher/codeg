@@ -127,3 +127,12 @@ export function headSendDelayMs(
   if (!failure.autoRetry) return null
   return Math.max(0, failure.nextAttemptAt - now)
 }
+
+/**
+ * Delay before reconnecting a failed session by itself, for the
+ * `attempts + 1`-th time, while a message waits on it as "Not sent" for a
+ * reason that goes again by itself: 5 s, 10 s, 20 s, then every 30 s.
+ */
+export function autoReconnectDelayMs(attempts: number): number {
+  return Math.min(30_000, 5_000 * 2 ** Math.max(0, attempts))
+}
