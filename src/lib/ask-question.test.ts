@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  askQuestionRecordState,
   matchSelections,
   parseAskQuestionInput,
   parseAskQuestionOutcome,
@@ -485,5 +486,64 @@ describe("matchSelections", () => {
       selected: [],
       other: ["foo", "bar"],
     })
+  })
+})
+
+describe("askQuestionRecordState", () => {
+  const base = { output: null, errorText: null, answered: false }
+
+  it("waits while the turn runs and nothing came back", () => {
+    expect(askQuestionRecordState({ ...base, running: true })).toBe("in-flight")
+  })
+
+  it("is answered once a result envelope parsed", () => {
+    expect(
+      askQuestionRecordState({
+        ...base,
+        output: '{"answers":[],"declined":true}',
+        answered: true,
+        running: false,
+      })
+    ).toBe("answered")
+  })
+
+  it("expires when the call ended with no result", () => {
+    expect(askQuestionRecordState({ ...base, running: false })).toBe("expired")
+    expect(
+      askQuestionRecordState({ ...base, output: "  ", running: false })
+    ).toBe("expired")
+  })
+
+  it("expires when the agent aborted or cancelled the call", () => {
+    for (const errorText of [
+      "[Request interrupted by user for tool use]",
+      "MCP error -32000: Connection closed",
+      'MCP server "codeg-mcp" tool "ask_user_question" sent no response or progress for 1800s; aborting.',
+    ]) {
+      expect(
+        askQuestionRecordState({ ...base, errorText, running: false })
+      ).toBe("expired")
+    }
+  })
+
+  it("keeps a rejected call an error: the user never saw it", () => {
+    for (const errorText of [
+      "ask_user_question requires at least one question",
+      "MCP error -32602: questions[0] is missing an `options` array",
+    ]) {
+      expect(
+        askQuestionRecordState({ ...base, errorText, running: false })
+      ).toBe("error")
+    }
+  })
+
+  it("keeps an unparsed result as answered rather than expiring it", () => {
+    expect(
+      askQuestionRecordState({
+        ...base,
+        output: "some agent-specific result text",
+        running: false,
+      })
+    ).toBe("answered")
   })
 })

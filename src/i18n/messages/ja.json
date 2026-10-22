@@ -3955,6 +3955,7 @@
           "running": "実行中",
           "checked": "確認済み",
           "waiting": "承認待ち",
+          "paused": "一時停止 · 使用量上限",
           "ok": "完了",
           "err": {
             "default": "失敗",
@@ -4231,7 +4232,9 @@
         "answeredLabel": "質問と回答：",
         "awaiting": "回答をお待ちしています…",
         "declined": "この質問をスキップしました — エージェントが独自に判断して進めました。",
-        "noSelection": "選択なし"
+        "noSelection": "選択なし",
+        "expired": "この質問は期限切れです",
+        "expiredHint": "回答される前にエージェントが待機を終了しました。"
       },
       "configStale": {
         "agentConfigTitle": "エージェント設定が更新されました",

@@ -999,6 +999,37 @@ pub(crate) const CODEX_MCP_FILTERING_ENV: &str = "DISABLE_MCP_CONFIG_FILTERING";
 pub(crate) const CODEX_INITIAL_MODE_ENV: &str = "INITIAL_AGENT_MODE";
 pub(crate) const CODEX_APP_SERVER_LOGS_ENV: &str = "APP_SERVER_LOGS";
 
+/// Claude Code's wall-clock limit on a single MCP tool call, in milliseconds.
+pub(crate) const CLAUDE_MCP_TOOL_TIMEOUT_ENV: &str = "MCP_TOOL_TIMEOUT";
+
+/// The longest limit Claude Code accepts (its cap, the 2^31-1 ms a JS timer
+/// can hold — about 24.8 days).
+pub(crate) const CLAUDE_MCP_TOOL_TIMEOUT_MAX_MS: &str = "2147483647";
+
+/// Claude Code launch policy: lift the wall-clock limit on an MCP tool call to
+/// its maximum, so a codeg-mcp `ask_user_question` stays open until the user
+/// answers rather than failing after Claude Code's default (~27.8 hours). The
+/// separate 30-minute silence limit is met by codeg-mcp's progress heartbeat
+/// (`companion::drive_with_heartbeat`), not here: it keeps guarding every other
+/// MCP server against a hang. A value the user set, in the agent's env or in
+/// codeg's own (`inherited`), is left alone.
+fn apply_claude_mcp_timeout_policy(
+    agent_type: AgentType,
+    merged: &mut Vec<(String, String)>,
+    inherited: Option<std::ffi::OsString>,
+) {
+    if agent_type != AgentType::ClaudeCode || inherited.is_some() {
+        return;
+    }
+    if merged.iter().any(|(k, _)| k == CLAUDE_MCP_TOOL_TIMEOUT_ENV) {
+        return;
+    }
+    merged.push((
+        CLAUDE_MCP_TOOL_TIMEOUT_ENV.to_string(),
+        CLAUDE_MCP_TOOL_TIMEOUT_MAX_MS.to_string(),
+    ));
+}
+
 /// Codex-only launch policy: force codex-acp's MCP name-conflict de-duplication
 /// OFF. codeg injects its companion server (`codeg-mcp`) over ACP
 /// `session/new.mcpServers`; codex-acp otherwise drops any ACP-passed server
@@ -2616,6 +2647,11 @@ async fn build_agent(
                 None
             };
             apply_codex_env_policy(agent_type, &mut merged_env, codex_initial_mode.as_deref());
+            apply_claude_mcp_timeout_policy(
+                agent_type,
+                &mut merged_env,
+                std::env::var_os(CLAUDE_MCP_TOOL_TIMEOUT_ENV),
+            );
             // codex-acp 1.0.0 honors APP_SERVER_LOGS as a directory for its
             // adapter-side logs. Surface it only under CODEG_ACP_DEBUG so
             // default runs are unchanged; a directory-creation failure silently
@@ -21363,6 +21399,39 @@ mod tests {
                 !env.iter().any(|(k, _)| k == "INITIAL_AGENT_MODE"),
                 "{agent:?} must not receive codex's approval preset"
             );
+        }
+    }
+
+    #[test]
+    fn claude_launch_lifts_the_mcp_tool_wall_clock_unless_the_user_set_one() {
+        let timeout = |env: &[(String, String)]| {
+            env.iter()
+                .filter(|(k, _)| k == CLAUDE_MCP_TOOL_TIMEOUT_ENV)
+                .map(|(_, v)| v.clone())
+                .collect::<Vec<_>>()
+        };
+        let mut env = vec![("PATH".to_string(), "/usr/bin".to_string())];
+        apply_claude_mcp_timeout_policy(AgentType::ClaudeCode, &mut env, None);
+        assert_eq!(timeout(&env), vec![CLAUDE_MCP_TOOL_TIMEOUT_MAX_MS.to_string()]);
+
+        // The agent's own env row wins.
+        let mut user = vec![(CLAUDE_MCP_TOOL_TIMEOUT_ENV.to_string(), "60000".to_string())];
+        apply_claude_mcp_timeout_policy(AgentType::ClaudeCode, &mut user, None);
+        assert_eq!(timeout(&user), vec!["60000".to_string()]);
+
+        // So does one codeg itself was started with.
+        let mut inherited = Vec::new();
+        apply_claude_mcp_timeout_policy(
+            AgentType::ClaudeCode,
+            &mut inherited,
+            Some(std::ffi::OsString::from("90000")),
+        );
+        assert!(timeout(&inherited).is_empty());
+
+        for agent in [AgentType::Codex, AgentType::Gemini, AgentType::Grok] {
+            let mut env = Vec::new();
+            apply_claude_mcp_timeout_policy(agent, &mut env, None);
+            assert!(env.is_empty(), "{agent:?} must not get Claude's MCP timeout");
         }
     }
 

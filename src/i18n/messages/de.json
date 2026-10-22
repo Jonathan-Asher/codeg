@@ -3955,6 +3955,7 @@
           "running": "läuft",
           "checked": "geprüft",
           "waiting": "Genehmigung ausstehend",
+          "paused": "pausiert · Nutzungslimit",
           "ok": "fertig",
           "err": {
             "default": "fehlgeschlagen",
@@ -4231,7 +4232,9 @@
         "answeredLabel": "Frage & Antwort:",
         "awaiting": "Warten auf deine Antwort…",
         "declined": "Du hast dies verworfen – der Agent hat nach eigenem Ermessen entschieden.",
-        "noSelection": "Keine Auswahl"
+        "noSelection": "Keine Auswahl",
+        "expired": "Diese Frage ist abgelaufen",
+        "expiredHint": "Der Agent hat aufgehört zu warten, bevor die Frage beantwortet wurde."
       },
       "configStale": {
         "agentConfigTitle": "Agent-Einstellungen aktualisiert",

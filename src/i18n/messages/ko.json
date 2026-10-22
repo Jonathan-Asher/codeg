@@ -3955,6 +3955,7 @@
           "running": "실행 중",
           "checked": "확인됨",
           "waiting": "승인 대기 중",
+          "paused": "일시 중지 · 사용량 한도",
           "ok": "완료",
           "err": {
             "default": "실패",
@@ -4231,7 +4232,9 @@
         "answeredLabel": "질문과 답변:",
         "awaiting": "답변을 기다리는 중…",
         "declined": "이 질문을 건너뛰었습니다 — 에이전트가 자체 판단으로 진행했습니다.",
-        "noSelection": "선택 없음"
+        "noSelection": "선택 없음",
+        "expired": "이 질문은 만료되었습니다",
+        "expiredHint": "답변하기 전에 에이전트가 대기를 멈췄습니다."
       },
       "configStale": {
         "agentConfigTitle": "에이전트 설정이 업데이트되었습니다",

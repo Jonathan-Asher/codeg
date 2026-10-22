@@ -1416,6 +1416,11 @@ impl ConnectionManager {
                 if state.pending_permission.is_some() {
                     continue;
                 }
+                // Likewise a question waiting for the user: it stays open
+                // until they answer it, however long that takes.
+                if state.pending_question.is_some() {
+                    continue;
+                }
                 if state.has_active_background_work(now) {
                     continue;
                 }
@@ -9199,6 +9204,32 @@ mod tests {
             "Connection with pending permission must not be swept (user is mid-decision)"
         );
         assert!(mgr.connections.lock().await.contains_key("permission"));
+    }
+
+    #[tokio::test]
+    async fn sweep_idle_skips_a_pending_question() {
+        use crate::acp::question::PendingQuestionState;
+        let mgr = ConnectionManager::new();
+        insert_fake_connection(
+            &mgr,
+            "asking",
+            AgentType::ClaudeCode,
+            None,
+            EventEmitter::Noop,
+        )
+        .await;
+        backdate_last_activity(&mgr, "asking", 6 * 3600).await;
+        {
+            let state = mgr.get_state("asking").await.unwrap();
+            state.write().await.pending_question = Some(PendingQuestionState {
+                question_id: "q-1".into(),
+                questions: vec![],
+                created_at: chrono::Utc::now(),
+            });
+        }
+        let n = mgr.sweep_idle(Duration::from_secs(300)).await;
+        assert_eq!(n, 0, "a question waiting for the user is never swept");
+        assert!(mgr.connections.lock().await.contains_key("asking"));
     }
 
     #[tokio::test]

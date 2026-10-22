@@ -3955,6 +3955,7 @@
           "running": "running",
           "checked": "checked",
           "waiting": "awaiting approval",
+          "paused": "paused · usage limit",
           "ok": "done",
           "err": {
             "default": "failed",
@@ -4231,7 +4232,9 @@
         "answeredLabel": "Q&A:",
         "awaiting": "Waiting for your answer…",
         "declined": "You dismissed this — the agent used its own judgment.",
-        "noSelection": "No selection"
+        "noSelection": "No selection",
+        "expired": "This question expired",
+        "expiredHint": "The agent stopped waiting before it was answered."
       },
       "configStale": {
         "agentConfigTitle": "Agent settings updated",
