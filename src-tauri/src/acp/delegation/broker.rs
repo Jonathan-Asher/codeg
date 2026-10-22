@@ -296,6 +296,12 @@ pub struct SettledDelegation {
 }
 
 struct CompletedTask {
+    /// Set for a delegation a usage limit paused (and, once its continued
+    /// child finished, for the result that replaced the pause). The parent
+    /// usually reconnects in the hours such a pause lasts, so ownership of
+    /// these entries is decided per conversation (the DB fallback), not per
+    /// connection — see `classify_locked`.
+    after_pause: bool,
     parent_connection_id: String,
     child_conversation_id: i32,
     agent_type: AgentType,
@@ -751,6 +757,7 @@ fn build_completed(
 ) -> CompletedTask {
     let (status, text, error_code, message) = terminal_fields(outcome);
     CompletedTask {
+        after_pause: error_code.as_deref() == Some(PAUSED_USAGE_LIMIT_CODE),
         parent_connection_id: parent_connection_id.to_string(),
         child_conversation_id,
         agent_type,
@@ -1129,6 +1136,23 @@ fn db_report(task_id: &str, rec: &ChildStatusRecord) -> DelegationTaskReport {
             None,
         );
     }
+    if crate::acp::delegation::limit_delivery::result_waiting(task_id) {
+        // Continued after a pause and finished; the result is delivered to the
+        // parent as a message at its next idle moment.
+        return DelegationTaskReport {
+            task_id: Some(task_id.to_string()),
+            status: TaskStatus::Completed,
+            child_conversation_id: Some(rec.child_conversation_id),
+            agent_type: Some(rec.agent_type),
+            text: None,
+            error_code: None,
+            message: Some(
+                crate::acp::delegation::limit_delivery::RESULT_WAITING_NOTE.to_string(),
+            ),
+            duration_ms: None,
+            blocked_on: None,
+        };
+    }
     DelegationTaskReport {
         task_id: Some(task_id.to_string()),
         status: rec.status,
@@ -1188,6 +1212,13 @@ fn classify_locked(inner: &PendingInner, parent_connection_id: &str, task_id: &s
     if let Some(c) = inner.completed.get(task_id) {
         if c.parent_connection_id == parent_connection_id {
             return StatusClass::Settled(completed_report(task_id, c));
+        }
+        if c.after_pause {
+            // Asked from another connection than the one that delegated it —
+            // the parent reconnected during a usage-limit pause. The child
+            // row answers, scoped to the caller's conversation like any DB
+            // fallback, so no other conversation can read it.
+            return StatusClass::NotInMemory;
         }
         return StatusClass::Settled(unknown_report(task_id));
     }
@@ -3054,16 +3085,15 @@ impl DelegationBroker {
             let paused = inner
                 .remove_completed(call_id)
                 .expect("entry observed under the same lock");
-            inner.insert_completed(
-                call_id,
-                build_completed(
-                    &paused.parent_connection_id,
-                    paused.child_conversation_id,
-                    paused.agent_type,
-                    paused.duration_ms,
-                    outcome,
-                ),
+            let mut settled = build_completed(
+                &paused.parent_connection_id,
+                paused.child_conversation_id,
+                paused.agent_type,
+                paused.duration_ms,
+                outcome,
             );
+            settled.after_pause = true;
+            inner.insert_completed(call_id, settled);
             paused
         };
         let meta = match outcome {
@@ -3983,7 +4013,12 @@ impl DelegationBroker {
         let gate = {
             let mut inner = self.pending.inner.lock().await;
             if let Some(c) = inner.completed.get(&req.task_id) {
-                if c.parent_connection_id != req.parent_connection_id {
+                if c.parent_connection_id != req.parent_connection_id && c.after_pause {
+                    // The parent reconnected during a usage-limit pause: the
+                    // DB gate decides, scoped to the caller's conversation.
+                    let claimed = inner.resuming.insert(req.task_id.clone());
+                    MemGate::Proceed { claimed }
+                } else if c.parent_connection_id != req.parent_connection_id {
                     MemGate::Refuse(Box::new(unknown_report(&req.task_id)))
                 } else if is_paused_entry(c) {
                     // A usage limit paused it and codeg continues it by itself:
@@ -4127,6 +4162,17 @@ impl DelegationBroker {
                 Some(ctx.child_conversation_id),
                 Some(ctx.agent_type),
                 PAUSED_RESUME_REFUSAL,
+            );
+        }
+        if crate::acp::delegation::limit_delivery::result_waiting(&req.task_id) {
+            // Continued after a pause and finished: its result is on its way.
+            self.drop_inflight(inflight_id).await;
+            return not_resumable_report(
+                &req.task_id,
+                TaskStatus::Completed,
+                Some(ctx.child_conversation_id),
+                Some(ctx.agent_type),
+                crate::acp::delegation::limit_delivery::RESULT_WAITING_NOTE,
             );
         }
         match ctx.status {
@@ -9515,6 +9561,7 @@ mod tests {
 
     fn completed_with_text(parent: &str, text_len: usize) -> CompletedTask {
         CompletedTask {
+            after_pause: false,
             parent_connection_id: parent.to_string(),
             child_conversation_id: 1,
             agent_type: AgentType::ClaudeCode,
@@ -9729,6 +9776,40 @@ mod tests {
         .with_status_lookup(lookup.clone() as Arc<dyn ChildStatusLookup>);
         enable_delegation(&broker).await;
         (mock, lookup, broker)
+    }
+
+    /// The parent reconnects during a usage-limit pause (its old connection
+    /// was swept, codeg restarted its tab): asked from the new connection, the
+    /// paused task still reads "running, continues by itself" — never
+    /// `unknown`, which would invite a re-delegation — and resuming it is still
+    /// refused. Another conversation still learns nothing.
+    #[tokio::test]
+    async fn a_reconnected_parent_still_sees_its_paused_task() {
+        let mut ctx = resume_ctx(TaskStatus::Canceled);
+        ctx.paused_until = Some(chrono::Utc::now() + chrono::Duration::hours(1));
+        let (mock, _lookup, broker) = resume_harness(Some(ctx)).await;
+        mock.queue_spawn(Ok("child-conn-1".into())).await;
+        mock.queue_send(Ok(42)).await;
+        let ack = broker.start_delegation(request(1, "pt-1")).await;
+        let task_id = ack.task_id.clone().unwrap();
+        broker.complete_call(&task_id, paused_outcome()).await;
+
+        let report = broker
+            .get_task_status("parent-conn-2", Some(1), &task_id, StatusWait::Immediate)
+            .await;
+        assert_eq!(report.status, TaskStatus::Running);
+        assert_eq!(report.error_code.as_deref(), Some(PAUSED_USAGE_LIMIT_CODE));
+
+        let mut req = resume_request(&task_id);
+        req.parent_connection_id = "parent-conn-2".into();
+        let refused = broker.resume_delegation(req).await;
+        assert_eq!(refused.error_code.as_deref(), Some(NOT_RESUMABLE_CODE));
+        assert_eq!(refused.status, TaskStatus::Running);
+
+        let foreign = broker
+            .get_task_status("other-conn", Some(99), &task_id, StatusWait::Immediate)
+            .await;
+        assert_eq!(foreign.status, TaskStatus::Unknown);
     }
 
     #[test]

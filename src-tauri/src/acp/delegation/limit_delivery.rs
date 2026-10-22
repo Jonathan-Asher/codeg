@@ -129,6 +129,25 @@ static DB: OnceLock<DatabaseConnection> = OnceLock::new();
 static ANY_READY: AtomicBool = AtomicBool::new(false);
 /// One delivery pass at a time.
 static PASS_RUNNING: AtomicBool = AtomicBool::new(false);
+/// Task ids whose result is `Ready` — read synchronously by the broker's
+/// status and resume answers.
+static READY_TASKS: LazyLock<std::sync::Mutex<HashSet<String>>> =
+    LazyLock::new(|| std::sync::Mutex::new(HashSet::new()));
+
+/// What `get_delegation_status` / `resume_delegation` say about a task whose
+/// continued child finished and whose result waits for delivery.
+pub const RESULT_WAITING_NOTE: &str = "this task finished after a usage-limit pause; its \
+     result is delivered to this conversation as a message right after the current turn. \
+     Do not delegate, resume or retry it.";
+
+/// Whether `task_id`'s result is ready and waiting for its parent's next idle
+/// moment.
+pub fn result_waiting(task_id: &str) -> bool {
+    READY_TASKS
+        .lock()
+        .map(|ready| ready.contains(task_id))
+        .unwrap_or(false)
+}
 
 /// `Err` only when the store could not be read at all (an unreadable value
 /// starts over instead: there is nothing to keep in it).
@@ -158,10 +177,15 @@ async fn update<R>(conn: &DatabaseConnection, f: impl FnOnce(&mut Vec<PendingDel
     let out = f(&mut records);
     prune(&mut records, Utc::now());
     if readable {
-        ANY_READY.store(
-            records.iter().any(|r| r.state == DeliveryState::Ready),
-            Ordering::SeqCst,
-        );
+        let ready: HashSet<String> = records
+            .iter()
+            .filter(|r| r.state == DeliveryState::Ready)
+            .map(|r| r.task_id.clone())
+            .collect();
+        ANY_READY.store(!ready.is_empty(), Ordering::SeqCst);
+        if let Ok(mut slot) = READY_TASKS.lock() {
+            *slot = ready;
+        }
     }
     if readable && records != before {
         match serde_json::to_string(&records) {
