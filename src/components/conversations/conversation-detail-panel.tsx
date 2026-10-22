@@ -874,13 +874,15 @@ const ConversationTabView = memo(function ConversationTabView({
       // A failed reconnect publishes (and notifies) its own failure.
     })
   }, [acpActions, tabId])
-  // A message waits as "Not sent" for a reason that goes again by itself
-  // while the session's connection has failed or gone (the server restarted
-  // under it): reconnect by itself, backing off, so the message goes as soon
-  // as the server can take it instead of waiting for Retry. Stops once the
-  // connection is up or the message is sent, edited or removed.
+  // Messages wait in the queue (queued, or "Not sent" for a reason that goes
+  // again by itself) while the session's connection has failed or gone (the
+  // server restarted under it): reconnect by itself, backing off, so they go
+  // as soon as the server can take them instead of waiting for Retry. Stops
+  // once the connection is up, or nothing is left to send but a message the
+  // server refused.
   const autoReconnectsRef = useRef(0)
-  const unsentHeadRetries = queueHead?.failure?.autoRetry === true
+  const unsentHeadRetries =
+    queueHead != null && queueHead.failure?.autoRetry !== false
   useEffect(() => {
     if (connectionReady) {
       autoReconnectsRef.current = 0
