@@ -1353,8 +1353,14 @@ const ConversationTabView = memo(function ConversationTabView({
       // dropped. The head goes back to the front, a new message to the tail.
       const keepQueued = (failure?: SendFailure) => {
         const keep = { clientMessageId, failure: failure ?? opts?.failure }
-        if (fromQueueFlush) mqRequeueFront(draft, modeIdForQueue, keep)
-        else mqEnqueue(draft, modeIdForQueue, keep)
+        if (fromQueueFlush) {
+          // Handed back like a bounce, so the flush backs off before it
+          // looks at the head again.
+          lastFlushBounceAtRef.current = Date.now()
+          mqRequeueFront(draft, modeIdForQueue, keep)
+        } else {
+          mqEnqueue(draft, modeIdForQueue, keep)
+        }
       }
 
       if (!hasPersistedConversation && !canAutoConnect) {

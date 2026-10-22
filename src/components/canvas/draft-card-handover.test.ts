@@ -102,7 +102,7 @@ describe("a draft card's runtime session", () => {
     // on the card that took over, dimmed under a typing indicator with
     // `awaiting_persist` pinned so no refetch clears it.
     const surface = read(SURFACE)
-    const start = surface.indexOf("const onSendFailed = () => {")
+    const start = surface.indexOf("const rollback = () => {")
     expect(start).toBeGreaterThan(-1)
     const body = surface.slice(start, surface.indexOf("\n      }", start))
     expect(body).toContain(
