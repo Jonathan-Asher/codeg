@@ -198,6 +198,8 @@ function makeConnState(overrides: Partial<ConnectionState>): ConnectionState {
     status: "connected",
     promptCapabilities: { image: false, audio: false, embedded_context: false },
     supportsFork: false,
+    forkStrictPoint: false,
+    forkWhileRunning: false,
     selectorsReady: true,
     sessionId: null,
     modes: null,

@@ -41,11 +41,18 @@ describe("supportsMessageEdit", () => {
   })
 
   it("withholds it everywhere else", () => {
-    // pi-acp forks at the tail when it can't find the reply — which would
-    // silently continue the original conversation, message and all.
+    // An older pi-acp forks at the tail when it can't find the reply — which
+    // would silently continue the original conversation, message and all.
     for (const agent of ["pi", "gemini", "open_code", "custom:acme"]) {
       expect(supportsMessageEdit(agent)).toBe(false)
     }
+  })
+
+  it("offers it for pi once its adapter says it forks strictly", () => {
+    expect(supportsMessageEdit("pi", true)).toBe(true)
+    expect(supportsMessageEdit("pi", false)).toBe(false)
+    // The built-in agents keep it whatever the connection reported.
+    expect(supportsMessageEdit("claude_code", false)).toBe(true)
   })
 })
 

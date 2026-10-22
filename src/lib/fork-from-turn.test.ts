@@ -73,6 +73,11 @@ describe("which agents fork while a turn runs", () => {
       expect(supportsForkWhileRunning(agent)).toBe(false)
     }
   })
+
+  it("adds an agent whose adapter says it can (pi-acp)", () => {
+    expect(supportsForkWhileRunning("pi", true)).toBe(true)
+    expect(supportsForkWhileRunning("claude_code", false)).toBe(true)
+  })
 })
 
 describe("forkFromTurn", () => {
@@ -96,6 +101,18 @@ describe("forkFromTurn", () => {
     expect(outcome).toEqual({ kind: "new_conversation", result: FORKED })
     expect(acpForkToNewConversation).toHaveBeenCalledWith("conn-1", 7, "turn-1")
     // The in-place fork would have to wait for the turn — never tried.
+    expect(acpFork).not.toHaveBeenCalled()
+  })
+
+  it("forks a running pi session into a new conversation when its adapter can", async () => {
+    const outcome = await forkFromTurn({
+      ...base,
+      agentType: "pi",
+      adapterForksWhileRunning: true,
+      turnRunning: true,
+    })
+    expect(outcome).toEqual({ kind: "new_conversation", result: FORKED })
+    expect(acpForkToNewConversation).toHaveBeenCalledWith("conn-1", 7, "turn-1")
     expect(acpFork).not.toHaveBeenCalled()
   })
 

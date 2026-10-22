@@ -72,6 +72,10 @@ export interface UseConnectionReturn {
   poolWait: PoolHold | null
   promptCapabilities: PromptCapabilitiesInfo
   supportsFork: boolean
+  /** See `ConnectionState.forkStrictPoint`. */
+  forkStrictPoint: boolean
+  /** See `ConnectionState.forkWhileRunning`. */
+  forkWhileRunning: boolean
   selectorsReady: boolean
   hasCachedSelectors: boolean
   sessionId: string | null
@@ -289,6 +293,8 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   const promptCapabilities =
     connection?.promptCapabilities ?? DEFAULT_PROMPT_CAPABILITIES
   const supportsFork = connection?.supportsFork ?? false
+  const forkStrictPoint = connection?.forkStrictPoint ?? false
+  const forkWhileRunning = connection?.forkWhileRunning ?? false
   const selectorsReady = connection?.selectorsReady ?? false
   const sessionId = connection?.sessionId ?? null
   const cached = connection?.agentType
@@ -430,6 +436,8 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       poolWait,
       promptCapabilities,
       supportsFork,
+      forkStrictPoint,
+      forkWhileRunning,
       selectorsReady,
       hasCachedSelectors,
       sessionId,
@@ -478,6 +486,8 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       poolWait,
       promptCapabilities,
       supportsFork,
+      forkStrictPoint,
+      forkWhileRunning,
       selectorsReady,
       hasCachedSelectors,
       sessionId,

@@ -1827,6 +1827,7 @@ const ConversationTabView = memo(function ConversationTabView({
         }
         const outcome = await forkFromTurnWithPlaceholder({
           agentType: selectedAgent,
+          adapterForksWhileRunning: conn.forkWhileRunning,
           connectionId,
           conversationId: dbConvIdRef.current,
           folderId,
@@ -1889,6 +1890,7 @@ const ConversationTabView = memo(function ConversationTabView({
     },
     [
       conn.connectionId,
+      conn.forkWhileRunning,
       effectiveConversationId,
       folderId,
       readTranscriptForEdit,
@@ -2959,7 +2961,10 @@ const ConversationTabView = memo(function ConversationTabView({
             ? handleForkFromTurn
             : undefined
         }
-        forkWhileRunning={supportsForkWhileRunning(selectedAgent)}
+        forkWhileRunning={supportsForkWhileRunning(
+          selectedAgent,
+          conn.forkWhileRunning
+        )}
         // Editing is a fork too, so it takes the fork's gate — plus an agent
         // whose fork lands exactly on the named reply or refuses (see
         // `supportsMessageEdit`). A turn in flight and a non-empty queue grey
@@ -2968,7 +2973,7 @@ const ConversationTabView = memo(function ConversationTabView({
           (connStatus === "connected" || connStatus === "prompting") &&
           hasPersistedConversation &&
           conn.supportsFork &&
-          supportsMessageEdit(selectedAgent)
+          supportsMessageEdit(selectedAgent, conn.forkStrictPoint)
             ? handleEditUserMessage
             : undefined
         }

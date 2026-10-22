@@ -308,6 +308,12 @@ export interface ConnectionState {
   status: ConnectionStatus
   promptCapabilities: PromptCapabilitiesInfo
   supportsFork: boolean
+  /** The adapter forks exactly at a named reply or refuses: editing a sent
+   *  message is offered (see `supportsMessageEdit`). */
+  forkStrictPoint: boolean
+  /** The adapter forks into a new conversation mid-turn (see
+   *  `supportsForkWhileRunning`). */
+  forkWhileRunning: boolean
   selectorsReady: boolean
   sessionId: string | null
   modes: SessionModeStateInfo | null
@@ -795,6 +801,8 @@ type Action =
       type: "FORK_SUPPORTED"
       contextKey: string
       supported: boolean
+      strictPoint: boolean
+      whileRunning: boolean
     }
   | { type: "MODE_CHANGED"; contextKey: string; modeId: string }
   | {
@@ -1736,6 +1744,8 @@ function connectionsReducer(
           embedded_context: false,
         },
         supportsFork: false,
+        forkStrictPoint: false,
+        forkWhileRunning: false,
         selectorsReady: false,
         sessionId: null,
         modes: null,
@@ -1799,6 +1809,8 @@ function connectionsReducer(
           embedded_context: false,
         },
         supportsFork: false,
+        forkStrictPoint: false,
+        forkWhileRunning: false,
         selectorsReady: true,
         sessionId: null,
         modes: null,
@@ -1868,6 +1880,10 @@ function connectionsReducer(
         action.patch.selectorsReady || current.selectorsReady
       const mergedSupportsFork =
         action.patch.supportsFork || current.supportsFork
+      const mergedForkStrictPoint =
+        action.patch.forkStrictPoint || current.forkStrictPoint
+      const mergedForkWhileRunning =
+        action.patch.forkWhileRunning || current.forkWhileRunning
       const mergedModes = current.modes ?? action.patch.modes
       const mergedConfigOptions =
         current.configOptions ?? action.patch.configOptions
@@ -1927,6 +1943,8 @@ function connectionsReducer(
         if (
           mergedSelectorsReady === current.selectorsReady &&
           mergedSupportsFork === current.supportsFork &&
+          mergedForkStrictPoint === current.forkStrictPoint &&
+          mergedForkWhileRunning === current.forkWhileRunning &&
           mergedModes === current.modes &&
           mergedConfigOptions === current.configOptions &&
           mergedAvailableCommands === current.availableCommands &&
@@ -1945,6 +1963,8 @@ function connectionsReducer(
           promptCapabilities: mergedPromptCapabilities,
           selectorsReady: mergedSelectorsReady,
           supportsFork: mergedSupportsFork,
+          forkStrictPoint: mergedForkStrictPoint,
+          forkWhileRunning: mergedForkWhileRunning,
           sessionFailures: mergedSessionFailures,
           asyncTasks: mergedAsyncTasks,
         })
@@ -2006,6 +2026,8 @@ function connectionsReducer(
         promptCapabilities: mergedPromptCapabilities,
         selectorsReady: mergedSelectorsReady,
         supportsFork: mergedSupportsFork,
+        forkStrictPoint: mergedForkStrictPoint,
+        forkWhileRunning: mergedForkWhileRunning,
         // Staleness is a current-state field (like status): apply the snapshot's
         // value on the fresh path. `configStaleDismissed` is client-local and
         // preserved via `...current`.
@@ -2826,11 +2848,20 @@ function connectionsReducer(
     case "FORK_SUPPORTED": {
       const conn = state.get(action.contextKey)
       if (!conn) return state
-      if (conn.supportsFork === action.supported) return state
+      const strictPoint = action.supported && action.strictPoint
+      const whileRunning = action.supported && action.whileRunning
+      if (
+        conn.supportsFork === action.supported &&
+        conn.forkStrictPoint === strictPoint &&
+        conn.forkWhileRunning === whileRunning
+      )
+        return state
       const next = new Map(state)
       next.set(action.contextKey, {
         ...conn,
         supportsFork: action.supported,
+        forkStrictPoint: strictPoint,
+        forkWhileRunning: whileRunning,
       })
       return next
     }
@@ -5321,6 +5352,8 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             type: "FORK_SUPPORTED",
             contextKey,
             supported: e.supported,
+            strictPoint: e.strict_point ?? false,
+            whileRunning: e.while_running ?? false,
           })
           break
         case "mode_changed":

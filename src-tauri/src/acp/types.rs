@@ -497,8 +497,17 @@ pub enum AcpEvent {
     PromptCapabilities {
         prompt_capabilities: PromptCapabilitiesInfo,
     },
-    /// Whether the agent supports session/fork
-    ForkSupported { supported: bool },
+    /// Whether the agent supports session/fork, and what its fork can do
+    /// (`acp::fork::ForkCapabilities`): `strict_point` — lands exactly on a
+    /// named reply or refuses, which message editing needs; `while_running` —
+    /// forks into a new conversation while a turn runs.
+    ForkSupported {
+        supported: bool,
+        #[serde(default)]
+        strict_point: bool,
+        #[serde(default)]
+        while_running: bool,
+    },
     /// Current session mode changed
     ModeChanged { mode_id: String },
     /// Agent reported plan update for current turn

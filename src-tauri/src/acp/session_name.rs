@@ -16,10 +16,17 @@
 //! restarts that session's process at the next connect, and an unchanged one
 //! keeps it.
 //!
+//! Pi names its sessions too (`session_info` entries, `/name`), and its session
+//! lists and `/resume` show that name. pi-acp from 0.0.34-steering.3 reads
+//! `_meta.piAcp.sessionName` on the same three requests and renames the session
+//! (`set_session_name`) when the name differs; an older pi-acp ignores the key.
+//! [`parsers::pi`](crate::parsers::pi) reads that name back as the title, so
+//! the two stay the same.
+//!
 //! Like [`SessionPersistence`](crate::acp::session_persistence), the name rides
 //! the per-launch `runtime_env`: the connect command stamps it from the
 //! conversation row bound to the session being opened, `spawn_agent_connection`
-//! reads it back, and `run_connection` adds it to the Claude requests.
+//! reads it back, and `run_connection` adds it to the Claude and Pi requests.
 
 use std::collections::BTreeMap;
 
@@ -127,10 +134,49 @@ pub fn apply_to_claude_meta(meta: Option<Meta>, name: Option<&str>) -> Option<Me
     Some(meta)
 }
 
+/// Add `name` to a Pi request's `_meta` as `piAcp.sessionName`, keeping
+/// whatever meta is already there. A missing name leaves the meta untouched.
+pub fn apply_to_pi_meta(meta: Option<Meta>, name: Option<&str>) -> Option<Meta> {
+    let Some(name) = name else {
+        return meta;
+    };
+    let mut meta = meta.unwrap_or_default();
+    let pi_acp = meta
+        .entry("piAcp")
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+    if let Some(pi_acp) = pi_acp.as_object_mut() {
+        pi_acp.insert(
+            "sessionName".to_string(),
+            serde_json::Value::String(name.to_string()),
+        );
+    }
+    Some(meta)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn pi_requests_carry_the_name_under_pi_acp() {
+        let named = apply_to_pi_meta(None, Some("Release prep")).expect("meta");
+        assert_eq!(
+            serde_json::Value::Object(named),
+            json!({ "piAcp": { "sessionName": "Release prep" } })
+        );
+        // Existing meta, including other piAcp keys, rides along.
+        let mut existing = Meta::new();
+        existing.insert("piAcp".into(), json!({ "other": 1 }));
+        existing.insert("x".into(), json!(true));
+        let named = apply_to_pi_meta(Some(existing), Some("T")).expect("meta");
+        assert_eq!(
+            serde_json::Value::Object(named),
+            json!({ "piAcp": { "other": 1, "sessionName": "T" }, "x": true })
+        );
+        // No name: untouched, including no meta at all.
+        assert!(apply_to_pi_meta(None, None).is_none());
+    }
 
     #[test]
     fn plain_titles_pass_through() {

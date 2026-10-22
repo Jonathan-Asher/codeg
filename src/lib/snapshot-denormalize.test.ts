@@ -137,6 +137,27 @@ describe("denormalizeSnapshot — config staleness", () => {
   })
 })
 
+describe("denormalizeSnapshot — fork capabilities", () => {
+  it("carries what the adapter's fork can do into the patch", () => {
+    const patch = denormalizeSnapshot(
+      baseSnapshot({
+        fork_supported: true,
+        fork_strict_point: true,
+        fork_while_running: true,
+      })
+    )
+    expect(patch.supportsFork).toBe(true)
+    expect(patch.forkStrictPoint).toBe(true)
+    expect(patch.forkWhileRunning).toBe(true)
+  })
+
+  it("defaults to neither when the fields are absent (older server payload)", () => {
+    const patch = denormalizeSnapshot(baseSnapshot({ fork_supported: true }))
+    expect(patch.forkStrictPoint).toBe(false)
+    expect(patch.forkWhileRunning).toBe(false)
+  })
+})
+
 describe("denormalizeSnapshot — tool call raw output", () => {
   function snapshotWithOutput(
     output: ToolCallState["output"]

@@ -10442,11 +10442,11 @@ pub(crate) async fn build_session_runtime_env(
         runtime_env.insert(OPENCLAW_RESET_SESSION_ENV.into(), "1".into());
     }
 
-    // The conversation's title as the Claude Code session's display name (see
-    // `acp::session_name`). Only when reopening a session a row is bound to: a
-    // brand-new session has no title yet and keeps the CLI's own name until
-    // its next connect.
-    if agent_type == AgentType::ClaudeCode {
+    // The conversation's title as the Claude Code or Pi session's display name
+    // (see `acp::session_name`). Only when reopening a session a row is bound
+    // to: a brand-new session has no title yet and keeps the agent's own name
+    // until its next connect.
+    if matches!(agent_type, AgentType::ClaudeCode | AgentType::Pi) {
         if let Some(sid) = session_id {
             match crate::db::service::conversation_service::find_live_title_for_session(
                 &db.conn, sid, agent_type,
@@ -10922,11 +10922,12 @@ pub(crate) async fn acp_fork_to_new_conversation_core(
     conversation_id: Option<i32>,
     fork_from_turn_id: &str,
 ) -> Result<crate::acp::types::ForkToNewConversationInfo, AcpError> {
-    let agent_type = match manager.get_state(connection_id).await {
-        Some(state) => state.read().await.agent_type,
+    let adapter = match manager.get_state(connection_id).await {
+        Some(state) => crate::acp::manager::fork_adapter_of(&*state.read().await),
         None => return Err(AcpError::ConnectionNotFound(connection_id.into())),
     };
-    if !crate::acp::fork::forks_while_running(agent_type) {
+    let agent_type = adapter.agent_type;
+    if !adapter.caps.while_running {
         return Err(AcpError::ForkNeedsIdle);
     }
     // The fork runs in a new agent process, launched with what any

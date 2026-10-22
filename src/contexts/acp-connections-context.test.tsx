@@ -194,6 +194,8 @@ beforeEach(() => {
     promptCapabilities: null,
     selectorsReady: false,
     supportsFork: false,
+    forkStrictPoint: false,
+    forkWhileRunning: false,
     configStale: false,
     configStaleKind: null,
     lastError: null,
@@ -275,6 +277,8 @@ function snapshotBase() {
     promptCapabilities: null,
     selectorsReady: false,
     supportsFork: false,
+    forkStrictPoint: false,
+    forkWhileRunning: false,
     configStale: false,
     configStaleKind: null,
     backgroundOutstanding: 0,
@@ -1626,6 +1630,8 @@ describe("AcpConnectionsProvider reconnect (status-icon button)", () => {
       promptCapabilities: null,
       selectorsReady: false,
       supportsFork: false,
+      forkStrictPoint: false,
+      forkWhileRunning: false,
       configStale: false,
       configStaleKind: null,
       lastError: null,
@@ -2012,6 +2018,8 @@ describe("AcpConnectionsProvider permission request details", () => {
       promptCapabilities: null,
       selectorsReady: true,
       supportsFork: false,
+      forkStrictPoint: false,
+      forkWhileRunning: false,
       configStale: false,
       configStaleKind: null,
       lastError: null,
@@ -2929,6 +2937,8 @@ describe("streaming flush window widens with the run it re-renders", () => {
         promptCapabilities: null,
         selectorsReady: false,
         supportsFork: false,
+        forkStrictPoint: false,
+        forkWhileRunning: false,
         configStale: false,
         configStaleKind: null,
         lastError: null,
@@ -2984,6 +2994,8 @@ describe("streaming flush window widens with the run it re-renders", () => {
         promptCapabilities: null,
         selectorsReady: true,
         supportsFork: false,
+        forkStrictPoint: false,
+        forkWhileRunning: false,
         configStale: false,
         configStaleKind: null,
         lastError: null,
@@ -4450,6 +4462,8 @@ describe("delegation-child attach: mid-turn hydration", () => {
       promptCapabilities: null,
       selectorsReady: false,
       supportsFork: false,
+      forkStrictPoint: false,
+      forkWhileRunning: false,
       configStale: false,
       configStaleKind: null,
       lastError: null,
@@ -4522,6 +4536,8 @@ describe("delegation-child attach: mid-turn hydration", () => {
       promptCapabilities: null,
       selectorsReady: false,
       supportsFork: false,
+      forkStrictPoint: false,
+      forkWhileRunning: false,
       configStale: false,
       configStaleKind: null,
       lastError: null,
@@ -4675,6 +4691,8 @@ describe("routing survives every surface watching one connection", () => {
       promptCapabilities: null,
       selectorsReady: false,
       supportsFork: false,
+      forkStrictPoint: false,
+      forkWhileRunning: false,
       configStale: false,
       configStaleKind: null,
       lastError: null,
@@ -5172,6 +5190,8 @@ describe("connect() teardown races", () => {
       promptCapabilities: null,
       selectorsReady: false,
       supportsFork: false,
+      forkStrictPoint: false,
+      forkWhileRunning: false,
       configStale: false,
       configStaleKind: null,
       lastError: null,
@@ -5976,6 +5996,8 @@ describe("AcpConnectionsProvider mid-turn steering messages", () => {
       promptCapabilities: null,
       selectorsReady: false,
       supportsFork: false,
+      forkStrictPoint: false,
+      forkWhileRunning: false,
       configStale: false,
       configStaleKind: null,
       backgroundOutstanding: 0,
@@ -6225,6 +6247,52 @@ describe("connect failures land on the surface that asked", () => {
       stale()
     })
     expect(h.acpConnect).not.toHaveBeenCalled()
+  })
+})
+
+// What the adapter's fork can do rides on `fork_supported`; it is what gates
+// editing a sent message (pi-acp opts in this way).
+describe("fork capabilities", () => {
+  it("keeps strict and mid-run fork support from fork_supported", async () => {
+    h.acpFindConnectionForConversation.mockResolvedValue(null)
+    await mountProvider()
+    await act(async () => {
+      await h.actions!.connect(TAB, "pi", "/tmp/x", "sess-1", 42)
+    })
+    const handlers = latestAttachHandlers()
+    const emit = (seq: number, event: Record<string, unknown>) =>
+      act(async () => {
+        emitAcpEvent(handlers, {
+          seq,
+          connection_id: "spawned-conn",
+          ...event,
+        } as unknown as EventEnvelope)
+      })
+
+    // An older backend sends only `supported`.
+    await emit(1, { type: "fork_supported", supported: true })
+    expect(h.store!.getConnection(TAB)?.supportsFork).toBe(true)
+    expect(h.store!.getConnection(TAB)?.forkStrictPoint).toBe(false)
+    expect(h.store!.getConnection(TAB)?.forkWhileRunning).toBe(false)
+
+    await emit(2, {
+      type: "fork_supported",
+      supported: true,
+      strict_point: true,
+      while_running: true,
+    })
+    expect(h.store!.getConnection(TAB)?.forkStrictPoint).toBe(true)
+    expect(h.store!.getConnection(TAB)?.forkWhileRunning).toBe(true)
+
+    // No fork at all means neither, whatever else was claimed.
+    await emit(3, {
+      type: "fork_supported",
+      supported: false,
+      strict_point: true,
+      while_running: true,
+    })
+    expect(h.store!.getConnection(TAB)?.forkStrictPoint).toBe(false)
+    expect(h.store!.getConnection(TAB)?.forkWhileRunning).toBe(false)
   })
 })
 

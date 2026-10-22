@@ -211,6 +211,23 @@ fn kill_tree_and_wait(cell: &std::sync::atomic::AtomicU32) -> bool {
     true
 }
 
+/// The agent a fork on this connection is settled for, with what its adapter
+/// said at `initialize` it can do (`acp::fork::fork_capabilities`) on top of
+/// what codeg knows of the agent anyway, which holds before `initialize`
+/// answers too.
+pub(crate) fn fork_adapter_of(
+    state: &crate::acp::session_state::SessionState,
+) -> crate::acp::fork::ForkAdapter {
+    let built_in = crate::acp::fork::ForkCapabilities::built_in(state.agent_type);
+    crate::acp::fork::ForkAdapter {
+        agent_type: state.agent_type,
+        caps: crate::acp::fork::ForkCapabilities {
+            strict_point: built_in.strict_point || state.fork_strict_point,
+            while_running: built_in.while_running || state.fork_while_running,
+        },
+    }
+}
+
 /// True for ids in the parsers' turn-id namespace (`turn-<digits>`), which every
 /// parser assigns via `format!("turn-{}", n)`. A broadcast `message_id` must
 /// never land here: it would collide with a persisted transcript turn id and let
@@ -2875,7 +2892,8 @@ impl ConnectionManager {
             }
             None => None,
             Some(turn_id) => {
-                let agent_type = state_arc.read().await.agent_type;
+                let adapter = fork_adapter_of(&*state_arc.read().await);
+                let agent_type = adapter.agent_type;
                 let turns = crate::commands::conversations::get_folder_conversation_core(
                     &db.conn,
                     conversation_id,
@@ -2894,7 +2912,7 @@ impl ConnectionManager {
                 let point = crate::acp::fork::settle_fork_point(
                     turns.as_deref().map_err(String::as_str),
                     &turn_id,
-                    agent_type,
+                    adapter,
                     mode,
                 )?;
                 if point.is_none() {
@@ -3463,7 +3481,8 @@ impl ConnectionManager {
                 conn.agent_type,
             )
         };
-        if !crate::acp::fork::forks_while_running(agent_type) {
+        let adapter = fork_adapter_of(&*state_arc.read().await);
+        if !adapter.caps.while_running {
             return Err(AcpError::ForkNeedsIdle);
         }
 
@@ -3511,7 +3530,7 @@ impl ConnectionManager {
         let fork_point = crate::acp::fork::settle_mid_run_fork_point(
             turns.as_deref().map_err(String::as_str),
             fork_from_turn_id,
-            agent_type,
+            adapter,
             running,
             in_flight_prompt.as_deref(),
         )?;

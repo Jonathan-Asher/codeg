@@ -814,14 +814,18 @@ fn parse_message_record(sp: &mut SessionParse, value: &Value, ts: DateTime<Utc>,
             }
             sp.content_events += 1;
             sp.message_count += 1;
-            sp.messages.push(text_message(
+            let mut assistant = text_message(
                 format!("pi-assistant-{idx}"),
                 MessageRole::Assistant,
                 blocks,
                 ts,
                 usage_from_object(message.get("usage")),
                 model,
-            ));
+            );
+            // The entry id pi-acp forks at (see `acp::fork::resolve_fork_point`):
+            // the turn this message opens is a fork point named by it.
+            assistant.agent_message_id = entry_id(value).map(String::from);
+            sp.messages.push(assistant);
         }
         "toolResult" => {
             let tool_call_id = message
@@ -1451,6 +1455,9 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
             let mut turn_model = msg.model.clone();
             let timestamp = msg.timestamp;
             let mut completed_at = msg.completed_at;
+            // Named by the assistant message that opens it; a group a tool
+            // result opens on its own names nothing.
+            let agent_message_id = msg.agent_message_id.clone();
             i += 1;
 
             while i < messages.len() && matches!(messages[i].role, MessageRole::Tool) {
@@ -1479,7 +1486,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 duration_ms,
                 model: turn_model,
                 completed_at,
-            agent_message_id: None,
+                agent_message_id,
             });
         }
     }
@@ -1797,6 +1804,43 @@ mod tests {
                    "message":{"role":"assistant","provider":"anthropic","model":"claude-sonnet-4-6","stopReason":"end_turn",
                      "content":[{"type":"text","text":"Build succeeded."}]}}),
         ]
+    }
+
+    /// Each assistant turn is named by the entry id of the message that opens
+    /// it — the id pi-acp forks at — and nothing else is named.
+    #[test]
+    fn assistant_turns_carry_their_entry_id_as_the_fork_point() {
+        let dir = tempdir().expect("tempdir");
+        let id = "0f3c1d2e-1111-2222-3333-444455556667";
+        write_session(
+            dir.path(),
+            "--Users-demo-my-app--",
+            "2026-06-27T10-00-00_0f3c1d2f.jsonl",
+            &sample_records(id),
+        );
+        let detail = PiParser::with_base_dir(dir.path().to_path_buf())
+            .get_conversation(id)
+            .expect("detail");
+        // (is an assistant turn, its fork-point id)
+        let named: Vec<(bool, Option<&str>)> = detail
+            .turns
+            .iter()
+            .map(|t| {
+                (
+                    matches!(t.role, TurnRole::Assistant),
+                    t.agent_message_id.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            named,
+            vec![
+                (false, None),
+                // m2 opens the turn that absorbs its tool result m3.
+                (true, Some("m2")),
+                (true, Some("m4")),
+            ]
+        );
     }
 
     #[test]
