@@ -122,11 +122,23 @@ fn config() -> PoolConfig {
         switch_threshold: Some(90.0),
         preferred_account: None,
         routing_mode: None,
+        accounts: BTreeMap::new(),
     }
 }
 
 fn pool_from(value: Value) -> PlanUsagePool {
     build_pool(raw_status(value), &config(), NOW)
+}
+
+/// The pool built with these accounts' settings from the config (name,
+/// priority, capUtilization, capMode — what maxpool's config holds).
+fn pool_with_config(value: Value, accounts: Value) -> PlanUsagePool {
+    let raw: RawConfig = serde_json::from_value(json!({ "accounts": accounts })).unwrap();
+    let config = PoolConfig {
+        accounts: PoolConfig::from_raw(raw).accounts,
+        ..config()
+    };
+    build_pool(raw_status(value), &config, NOW)
 }
 
 fn fixture_pool() -> PlanUsagePool {
@@ -481,6 +493,115 @@ fn past_the_switch_threshold_is_held_back_but_not_exhausted() {
 }
 
 #[test]
+fn the_order_and_reserves_come_from_the_config_without_its_credentials() {
+    let pool = pool_with_config(
+        status_fixture(),
+        json!([
+            { "name": "beta", "priority": 0, "capUtilization": 0.9, "capMode": "fixed",
+              "accessToken": FAKE_ACCESS, "refreshToken": FAKE_REFRESH },
+            { "name": "alpha", "priority": 1, "capUtilization": 0.85 },
+            { "name": "gamma", "priority": "high", "capUtilization": 1.5 }
+        ]),
+    );
+    let beta = account(&pool, "beta");
+    assert_eq!(beta.priority, Some(0.0));
+    assert_eq!(
+        beta.reserve_setting,
+        Some(PoolReserveSetting {
+            percent: 10.0,
+            mode: PoolReserveMode::Fixed
+        })
+    );
+    // A cap with no mode is dynamic, as maxpool reads it.
+    let alpha = account(&pool, "alpha");
+    assert_eq!(alpha.priority, Some(1.0));
+    assert_eq!(
+        alpha.reserve_setting,
+        Some(PoolReserveSetting {
+            percent: 15.0,
+            mode: PoolReserveMode::Dynamic
+        })
+    );
+    // Values maxpool ignores are no order and no reserve.
+    let gamma = account(&pool, "gamma");
+    assert_eq!((gamma.priority, gamma.reserve_setting), (None, None));
+    assert_clean(&serde_json::to_string(&pool).unwrap());
+}
+
+#[test]
+fn a_fixed_reserve_holds_the_account_before_the_switch_threshold() {
+    // beta at 86% of its 5-hour window, keeping 15% back: held until the
+    // window resets, by its reserve rather than the pool's threshold.
+    let held = |cap: f64| {
+        pool_from(with_account(
+            "beta",
+            json!({ "capUtilization": cap, "capMode": "fixed", "quota": { "unified5h": 0.86 } }),
+        ))
+    };
+    let pool = held(0.85);
+    let beta = account(&pool, "beta");
+    assert_eq!(beta.state, PoolAccountState::Reserved);
+    assert_eq!(beta.blocked_until, Some(NOW + 72 * MIN));
+    assert!(pool.exhausted, "alpha is out too");
+
+    // Under the reserve it serves as before.
+    assert_eq!(account(&held(0.9), "beta").state, PoolAccountState::Available);
+}
+
+#[test]
+fn a_weekly_held_by_its_reserve_reads_as_reserved_not_exhausted() {
+    let status = with_account(
+        "beta",
+        json!({
+            "quota": { "unified7d": 0.91 },
+            "weekly": { "state": "capped", "rawState": "capped" }
+        }),
+    );
+    let pool = pool_from(status.clone());
+    let beta = account(&pool, "beta");
+    assert_eq!(beta.state, PoolAccountState::Reserved);
+    assert_eq!(beta.blocked_until, Some(NOW + 6 * DAY));
+
+    // A pool that gives no weekly verdict: its reserve, read here.
+    let status = with_account(
+        "beta",
+        json!({
+            "capUtilization": 0.9,
+            "capMode": "fixed",
+            "weekly": null,
+            "quota": { "unified7d": 0.91 }
+        }),
+    );
+    assert_eq!(account(&pool_from(status), "beta").state, PoolAccountState::Reserved);
+}
+
+#[test]
+fn a_dynamic_reserve_is_released_over_the_second_half_of_the_window() {
+    // 86% used, keeping 15% back (cap 85%), the 5-hour window resetting in
+    // 72 minutes: 76% of it has passed, so the cap has risen past 86%.
+    let dynamic = |reset: i64| {
+        pool_from(with_account(
+            "beta",
+            json!({
+                "capUtilization": 0.85,
+                "capMode": "dynamic",
+                "quota": { "unified5h": 0.86, "unified5hReset": ms(reset) }
+            }),
+        ))
+    };
+    assert_eq!(
+        account(&dynamic(NOW + 72 * MIN), "beta").state,
+        PoolAccountState::Available
+    );
+
+    // Early in the window the whole reserve holds.
+    assert_eq!(
+        account(&dynamic(NOW + 4 * HOUR), "beta").state,
+        PoolAccountState::Reserved
+    );
+}
+
+#[test]
 fn every_account_out_resumes_at_the_earliest_reset() {
     let pool = pool_from(with_account(
         "beta",
@@ -562,7 +683,7 @@ fn the_pool_resumes_with_the_first_account_that_can_really_serve() {
     };
     let pool = pool_of(accounts(Some((0.5, "fixed"))));
     let reserved = account(&pool, "reserved");
-    assert_eq!(reserved.state, PoolAccountState::AtThreshold);
+    assert_eq!(reserved.state, PoolAccountState::Reserved);
     assert_eq!(reserved.blocked_until, Some(NOW + 40 * MIN));
     assert_eq!(account(&pool, "paused").state, PoolAccountState::Disabled);
     let limit = pool_limit(&pool, NOW, None);
@@ -604,7 +725,7 @@ fn a_rising_reserve_lets_the_account_go_before_the_reset() {
         Some((0.5, "dynamic")),
     )]);
     let rising = account(&pool, "rising");
-    assert_eq!(rising.state, PoolAccountState::AtThreshold);
+    assert_eq!(rising.state, PoolAccountState::Reserved);
     assert_eq!(rising.blocked_until, Some(NOW + 45 * MIN));
     assert_eq!(
         rising.availability(NOW + 45 * MIN + 1, 90.0, None),

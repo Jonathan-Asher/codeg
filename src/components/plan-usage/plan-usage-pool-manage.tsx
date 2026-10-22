@@ -3,15 +3,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
+  ArrowUpToLine,
   Loader2,
   MoreHorizontal,
+  Pause,
   Pencil,
+  Play,
   Plus,
-  Power,
-  PowerOff,
   RefreshCw,
-  Star,
-  StarOff,
+  Shield,
+  Shuffle,
   Trash2,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -42,6 +43,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import {
   PasteSignIn,
   type PasteSignInFlow,
@@ -56,12 +58,15 @@ import {
   usagePoolRename,
   usagePoolRestartNow,
   usagePoolSetEnabled,
-  usagePoolSetPreferred,
+  usagePoolSetOrder,
+  usagePoolSetReserve,
 } from "@/lib/api"
 import { toErrorMessage } from "@/lib/app-error"
+import { moveInList, poolOrder } from "@/lib/plan-usage"
 import type {
   PlanUsagePool,
   PlanUsagePoolAccount,
+  PlanUsagePoolReserve,
   PoolApply,
   PoolManageInfo,
 } from "@/lib/types"
@@ -233,54 +238,342 @@ function PoolSignInDialog({
   )
 }
 
-/** maxpool's routing mode that sends new requests to one account first; its
- *  only other mode is `automatic`. */
-export const PREFERRED_ROUTING = "preferred"
-
-/** Per-account actions: sign in again, rename, switch off/on, make
- *  preferred, remove. */
-export function PoolAccountActions({
-  account,
-  pool,
-  onChanged,
-}: {
-  account: PlanUsagePoolAccount
-  /** The pool's routing, which decides what "make preferred" does. */
-  pool: Pick<PlanUsagePool, "routing_mode">
-  onChanged: () => void
-}) {
+/** Run one change to the pool: a toast saying how it applies, the page read
+ *  again, or the error. Resolves whether it went through. */
+function useRunChange(onChanged?: () => void) {
   const t = useTranslations("PlanUsage.pool.manage")
   const applyToast = useApplyToast()
-  const [dialog, setDialog] = useState<
-    "reconnect" | "rename" | "remove" | "prefer" | null
-  >(null)
-  const preferring = pool.routing_mode === PREFERRED_ROUTING
-  const isPreferred = preferring && account.preferred
-  // maxpool prefers only a Claude account that is switched on.
-  const canPrefer = account.enabled && !account.provider
   const [busy, setBusy] = useState(false)
-  const [newName, setNewName] = useState(account.name)
-
   const run = useCallback(
-    async (action: () => Promise<{ applied: PoolApply }>, done: string) => {
+    async (
+      action: () => Promise<{ applied: PoolApply }>,
+      done: string
+    ): Promise<boolean> => {
       setBusy(true)
       try {
         const change = await action()
         applyToast(change.applied, done)
-        onChanged()
-        setDialog(null)
+        onChanged?.()
+        return true
       } catch (err) {
         toast.error(t("failed", { message: toErrorMessage(err) }))
+        return false
       } finally {
         setBusy(false)
       }
     },
     [applyToast, onChanged, t]
   )
-  const prefer = () =>
+  return { busy, run }
+}
+
+/** The pool's accounts in their order, with a new order shown at once while
+ *  it is written through maxpool's config: `move` reorders the Claude
+ *  accounts, `clear` drops the order for automatic balancing. */
+export function usePoolOrder(
+  pool: PlanUsagePool,
+  onChanged?: () => void
+): {
+  accounts: PlanUsagePoolAccount[]
+  ordered: boolean
+  move: (from: number, to: number) => void
+  clear: () => void
+} {
+  const t = useTranslations("PlanUsage.pool.manage")
+  const { run } = useRunChange(onChanged)
+  const base = useMemo(() => poolOrder(pool), [pool])
+  // The order just asked for, until the next reading of the pool shows it.
+  const [asked, setAsked] = useState<{ at: number; names: string[] } | null>(
+    null
+  )
+  const pending = asked?.at === pool.checked_at ? asked.names : null
+  const accounts = useMemo(() => {
+    if (!pending) return base.accounts
+    const byName = new Map(base.accounts.map((a) => [a.name, a]))
+    const claude = pending.flatMap((name) => byName.get(name) ?? [])
+    return [...claude, ...base.accounts.filter((a) => a.provider)]
+  }, [base.accounts, pending])
+  const move = useCallback(
+    (from: number, to: number) => {
+      const names = accounts.filter((a) => !a.provider).map((a) => a.name)
+      if (from === to || to < 0 || to >= names.length) return
+      const next = moveInList(names, from, to)
+      setAsked({ at: pool.checked_at, names: next })
+      void run(() => usagePoolSetOrder(next), t("orderSaved")).then((ok) => {
+        if (!ok) setAsked(null)
+      })
+    },
+    [accounts, pool.checked_at, run, t]
+  )
+  const clear = useCallback(() => {
+    setAsked(null)
+    void run(() => usagePoolSetOrder(null), t("automaticToast"))
+  }, [run, t])
+  return { accounts, ordered: base.ordered || pending != null, move, clear }
+}
+
+/** Pause or resume an account. A paused account is skipped in the order. */
+export function PoolPauseButton({
+  account,
+  onChanged,
+}: {
+  account: PlanUsagePoolAccount
+  onChanged: () => void
+}) {
+  const t = useTranslations("PlanUsage.pool.manage")
+  const { busy, run } = useRunChange(onChanged)
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="ghost"
+      className="h-6 gap-1 px-1.5 text-[0.6875rem]"
+      data-slot="pool-pause"
+      disabled={busy}
+      onClick={() =>
+        void run(
+          () => usagePoolSetEnabled(account.name, !account.enabled),
+          account.enabled
+            ? t("disabledToast", { name: account.name })
+            : t("enabledToast", { name: account.name })
+        )
+      }
+    >
+      {account.enabled ? (
+        <Pause className="size-3" aria-hidden="true" />
+      ) : (
+        <Play className="size-3" aria-hidden="true" />
+      )}
+      {account.enabled ? t("disable") : t("enable")}
+    </Button>
+  )
+}
+
+const RESERVE_PRESETS = [5, 10, 15, 20, 25]
+
+/** "Reserve 10%": the account's reserve, and the place to change it. */
+export function PoolReserveButton({
+  account,
+  onChanged,
+}: {
+  account: PlanUsagePoolAccount
+  onChanged: () => void
+}) {
+  const t = useTranslations("PlanUsage.pool")
+  const [open, setOpen] = useState(false)
+  const reserve = account.reserve ?? null
+  return (
+    <>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        data-slot="pool-reserve"
+        className="h-5 gap-1 rounded-full px-2 text-[0.6875rem] font-normal text-muted-foreground"
+        onClick={() => setOpen(true)}
+      >
+        <Shield className="size-3" aria-hidden="true" />
+        {reserve
+          ? t(
+              reserve.mode === "dynamic"
+                ? "reserveSummaryDynamic"
+                : "reserveSummary",
+              { percent: reserve.percent }
+            )
+          : t("manage.reserveNone")}
+      </Button>
+      {open && (
+        <PoolReserveDialog
+          account={account}
+          onClose={() => setOpen(false)}
+          onChanged={onChanged}
+        />
+      )}
+    </>
+  )
+}
+
+function PoolReserveDialog({
+  account,
+  onClose,
+  onChanged,
+}: {
+  account: PlanUsagePoolAccount
+  onClose: () => void
+  onChanged: () => void
+}) {
+  const t = useTranslations("PlanUsage.pool.manage")
+  const { busy, run } = useRunChange(onChanged)
+  const current = account.reserve ?? null
+  const [choice, setChoice] = useState(() =>
+    current == null
+      ? "none"
+      : RESERVE_PRESETS.includes(current.percent)
+        ? String(current.percent)
+        : "custom"
+  )
+  const [custom, setCustom] = useState(
+    current && !RESERVE_PRESETS.includes(current.percent)
+      ? String(current.percent)
+      : ""
+  )
+  const [mode, setMode] = useState<PlanUsagePoolReserve["mode"]>(
+    current?.mode ?? "fixed"
+  )
+  const percent =
+    choice === "none"
+      ? null
+      : Number(choice === "custom" ? custom.trim() : choice)
+  const invalid =
+    percent != null &&
+    !(Number.isInteger(percent) && percent >= 1 && percent <= 99)
+  const save = async () => {
+    const ok = await run(
+      () => usagePoolSetReserve(account.name, percent, mode),
+      percent == null
+        ? t("reserveClearedToast", { name: account.name })
+        : t("reserveToast", { name: account.name, percent })
+    )
+    if (ok) onClose()
+  }
+  return (
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogContent data-slot="pool-reserve-dialog" className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="leading-snug [overflow-wrap:anywhere]">
+            {t("reserveTitle", { name: account.name })}
+          </DialogTitle>
+          <DialogDescription>{t("reserveBody")}</DialogDescription>
+        </DialogHeader>
+        <fieldset className="space-y-2">
+          <legend className="mb-2 text-xs font-medium">
+            {t("reserveAmount")}
+          </legend>
+          <RadioGroup
+            value={choice}
+            onValueChange={setChoice}
+            className="grid grid-cols-4 gap-2"
+          >
+            {["none", ...RESERVE_PRESETS.map(String), "custom"].map((value) => (
+              <label
+                key={value}
+                className="flex cursor-pointer items-center gap-1.5 text-xs"
+              >
+                <RadioGroupItem value={value} />
+                {value === "none"
+                  ? t("reserveOff")
+                  : value === "custom"
+                    ? t("reserveCustom")
+                    : `${value}%`}
+              </label>
+            ))}
+          </RadioGroup>
+          {choice === "custom" && (
+            <Input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={99}
+              step={1}
+              autoFocus
+              data-slot="pool-reserve-custom"
+              aria-label={t("reserveCustomLabel")}
+              aria-invalid={invalid && custom !== ""}
+              value={custom}
+              onChange={(e) => setCustom(e.target.value)}
+              className="h-8 w-24 text-xs"
+            />
+          )}
+          {choice === "custom" && invalid && custom !== "" && (
+            <p className="text-[0.6875rem] text-destructive">
+              {t("reserveInvalid")}
+            </p>
+          )}
+        </fieldset>
+        <fieldset disabled={percent == null} className="space-y-2">
+          <legend className="mb-2 text-xs font-medium">
+            {t("reserveMode")}
+          </legend>
+          <RadioGroup
+            value={mode}
+            onValueChange={(value) =>
+              setMode(value === "dynamic" ? "dynamic" : "fixed")
+            }
+            className="gap-2"
+          >
+            {(["fixed", "dynamic"] as const).map((value) => (
+              <label
+                key={value}
+                className="flex cursor-pointer items-start gap-2 has-[:disabled]:cursor-default has-[:disabled]:opacity-60"
+              >
+                <RadioGroupItem value={value} className="mt-0.5" />
+                <span className="text-xs">
+                  <span className="font-medium">
+                    {value === "fixed"
+                      ? t("reserveFixed")
+                      : t("reserveDynamic")}
+                  </span>
+                  <span className="block text-[0.6875rem] text-muted-foreground">
+                    {value === "fixed"
+                      ? t("reserveFixedHint")
+                      : t("reserveDynamicHint")}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </RadioGroup>
+        </fieldset>
+        <DialogFooter>
+          <Button size="sm" variant="ghost" onClick={onClose}>
+            {t("cancel")}
+          </Button>
+          <Button
+            size="sm"
+            data-slot="pool-reserve-save"
+            disabled={busy || (choice === "custom" && invalid)}
+            onClick={() => void save()}
+          >
+            {t("save")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** Per-account actions: sign in again, rename, move to the top of the
+ *  order, go back to automatic balancing, remove. */
+export function PoolAccountActions({
+  account,
+  onChanged,
+  onMoveToTop,
+  onAutomatic,
+}: {
+  account: PlanUsagePoolAccount
+  onChanged: () => void
+  /** Put it first in the order; absent where it already is first or is not
+   *  part of the order. */
+  onMoveToTop?: () => void
+  /** Drop the order for automatic balancing; offered on the first account
+   *  of an ordered pool. */
+  onAutomatic?: () => void
+}) {
+  const t = useTranslations("PlanUsage.pool.manage")
+  const [dialog, setDialog] = useState<
+    "reconnect" | "rename" | "remove" | null
+  >(null)
+  const { busy, run: runChange } = useRunChange(onChanged)
+  const [newName, setNewName] = useState(account.name)
+  const run = async (
+    action: () => Promise<{ applied: PoolApply }>,
+    done: string
+  ) => {
+    if (await runChange(action, done)) setDialog(null)
+  }
+  const rename = () =>
     void run(
-      () => usagePoolSetPreferred(account.name),
-      t("preferredToast", { name: account.name })
+      () => usagePoolRename(account.name, newName),
+      t("renamedToast", { name: newName.trim() })
     )
 
   return (
@@ -321,45 +614,22 @@ export function PoolAccountActions({
             <Pencil className="size-3.5" aria-hidden="true" />
             {t("rename")}
           </DropdownMenuItem>
-          <DropdownMenuItem
-            data-slot="pool-action-toggle"
-            onSelect={() =>
-              void run(
-                () => usagePoolSetEnabled(account.name, !account.enabled),
-                account.enabled
-                  ? t("disabledToast", { name: account.name })
-                  : t("enabledToast", { name: account.name })
-              )
-            }
-          >
-            {account.enabled ? (
-              <PowerOff className="size-3.5" aria-hidden="true" />
-            ) : (
-              <Power className="size-3.5" aria-hidden="true" />
-            )}
-            {account.enabled ? t("disable") : t("enable")}
-          </DropdownMenuItem>
-          {isPreferred ? (
+          {onMoveToTop && (
+            <DropdownMenuItem
+              data-slot="pool-action-top"
+              onSelect={onMoveToTop}
+            >
+              <ArrowUpToLine className="size-3.5" aria-hidden="true" />
+              {t("moveToTop")}
+            </DropdownMenuItem>
+          )}
+          {onAutomatic && (
             <DropdownMenuItem
               data-slot="pool-action-automatic"
-              onSelect={() =>
-                void run(() => usagePoolSetPreferred(null), t("automaticToast"))
-              }
+              onSelect={onAutomatic}
             >
-              <StarOff className="size-3.5" aria-hidden="true" />
+              <Shuffle className="size-3.5" aria-hidden="true" />
               {t("useAutomatic")}
-            </DropdownMenuItem>
-          ) : (
-            <DropdownMenuItem
-              data-slot="pool-action-prefer"
-              disabled={!canPrefer}
-              title={canPrefer ? undefined : t("preferNeedsEnabled")}
-              // Switching the routing mode itself is said first; changing
-              // which account a preferring pool prefers is one tap.
-              onSelect={() => (preferring ? prefer() : setDialog("prefer"))}
-            >
-              <Star className="size-3.5" aria-hidden="true" />
-              {t("makePreferred")}
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
@@ -388,7 +658,7 @@ export function PoolAccountActions({
       >
         <DialogContent data-slot="pool-rename-dialog" className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>
+            <DialogTitle className="leading-snug [overflow-wrap:anywhere]">
               {t("renameTitle", { name: account.name })}
             </DialogTitle>
             <DialogDescription>{t("renameHint")}</DialogDescription>
@@ -400,12 +670,7 @@ export function PoolAccountActions({
             autoFocus
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && newName.trim() && !busy) {
-                void run(
-                  () => usagePoolRename(account.name, newName),
-                  t("renamedToast", { name: newName.trim() })
-                )
-              }
+              if (e.key === "Enter" && newName.trim() && !busy) rename()
             }}
             className="h-8 text-xs"
           />
@@ -417,12 +682,7 @@ export function PoolAccountActions({
               size="sm"
               data-slot="pool-rename-save"
               disabled={busy || !newName.trim()}
-              onClick={() =>
-                void run(
-                  () => usagePoolRename(account.name, newName),
-                  t("renamedToast", { name: newName.trim() })
-                )
-              }
+              onClick={rename}
             >
               {t("save")}
             </Button>
@@ -431,44 +691,12 @@ export function PoolAccountActions({
       </Dialog>
 
       <AlertDialog
-        open={dialog === "prefer"}
-        onOpenChange={(next) => !next && setDialog(null)}
-      >
-        <AlertDialogContent data-slot="pool-prefer-confirm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t("preferTitle", { name: account.name })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("preferBody", {
-                name: account.name,
-                mode: pool.routing_mode ?? "automatic",
-              })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              data-slot="pool-prefer-confirm-action"
-              disabled={busy}
-              onClick={(e) => {
-                e.preventDefault()
-                prefer()
-              }}
-            >
-              {t("preferConfirm", { name: account.name })}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog
         open={dialog === "remove"}
         onOpenChange={(next) => !next && setDialog(null)}
       >
         <AlertDialogContent data-slot="pool-remove-confirm">
           <AlertDialogHeader>
-            <AlertDialogTitle>
+            <AlertDialogTitle className="leading-snug [overflow-wrap:anywhere]">
               {t("removeTitle", { name: account.name })}
             </AlertDialogTitle>
             <AlertDialogDescription>{t("removeBody")}</AlertDialogDescription>

@@ -218,6 +218,7 @@ import type {
   OfficecliSkill,
   SkillSyncReport,
   PlanUsagePool,
+  PlanUsagePoolReserve,
   PlanUsageReport,
   PlanUsageSnapshot,
   ClaudeAuthStatus,
@@ -4103,6 +4104,28 @@ export async function usagePoolSetPreferred(
   name: string | null
 ): Promise<PoolChange> {
   return getTransport().call("usage_pool_set_preferred", { name })
+}
+
+/** Set the order new requests take through the pool's Claude accounts,
+ *  first to last (every one of them, once); `null` clears it for automatic
+ *  balancing. */
+export async function usagePoolSetOrder(
+  names: string[] | null
+): Promise<PoolChange> {
+  return getTransport().call("usage_pool_set_order", { names })
+}
+
+/** Keep `percent` of each of `name`'s windows in reserve (`null` = none). */
+export async function usagePoolSetReserve(
+  name: string,
+  percent: number | null,
+  mode: PlanUsagePoolReserve["mode"]
+): Promise<PoolChange> {
+  return getTransport().call("usage_pool_set_reserve", {
+    name,
+    percent,
+    mode,
+  })
 }
 
 export async function usagePoolRemove(name: string): Promise<PoolChange> {

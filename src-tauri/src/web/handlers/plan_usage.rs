@@ -21,6 +21,7 @@ pub async fn get_plan_usage(
 
 // ─── Managing the account pool ──────────────────────────────────────────
 
+use crate::commands::usage_pool::PoolReserveMode;
 use crate::commands::usage_pool::manage::{
     self, LoginOutcome, LoginState, PoolChange, PoolLoginStart, PoolManageInfo,
 };
@@ -119,6 +120,40 @@ pub async fn usage_pool_set_preferred(
     manage::set_preferred(params.name.as_deref())
         .await
         .map(Json)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PoolSetOrderParams {
+    /// Every Claude account, first to last; `None` clears the order.
+    pub names: Option<Vec<String>>,
+}
+
+pub async fn usage_pool_set_order(
+    Json(params): Json<PoolSetOrderParams>,
+) -> Result<Json<PoolChange>, AppCommandError> {
+    manage::set_order(params.names).await.map(Json)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PoolSetReserveParams {
+    pub name: String,
+    /// Percent of each window kept back; `None` removes the reserve.
+    pub percent: Option<f64>,
+    pub mode: Option<PoolReserveMode>,
+}
+
+pub async fn usage_pool_set_reserve(
+    Json(params): Json<PoolSetReserveParams>,
+) -> Result<Json<PoolChange>, AppCommandError> {
+    manage::set_reserve(
+        &params.name,
+        params.percent,
+        params.mode.unwrap_or(PoolReserveMode::Fixed),
+    )
+    .await
+    .map(Json)
 }
 
 #[derive(Deserialize)]

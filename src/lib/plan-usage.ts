@@ -314,6 +314,7 @@ export function poolUsageLevel(
 
 const HELD_STATES: readonly PlanUsagePoolAccountState[] = [
   "exhausted",
+  "reserved",
   "at_threshold",
   "cooling_down",
 ]
@@ -332,6 +333,67 @@ export function poolAccountState(
     return "available"
   }
   return account.state
+}
+
+/** The pool's accounts in the order new requests take them, and whether
+ *  the pool has an order at all (else it balances across them). The order is
+ *  the accounts' configured priorities; a pool that only prefers one account
+ *  starts from that account, then the rest as listed. API providers follow
+ *  the Claude accounts and are not part of the order. */
+export function poolOrder(pool: PlanUsagePool): {
+  accounts: PlanUsagePoolAccount[]
+  ordered: boolean
+} {
+  const claude = pool.accounts.filter((a) => !a.provider)
+  const providers = pool.accounts.filter((a) => a.provider)
+  const rank = (a: PlanUsagePoolAccount) =>
+    typeof a.priority === "number" ? a.priority : Number.POSITIVE_INFINITY
+  if (claude.some((a) => typeof a.priority === "number")) {
+    const sorted = claude
+      .map((account, index) => ({ account, index }))
+      .sort((x, y) => rank(x.account) - rank(y.account) || x.index - y.index)
+      .map(({ account }) => account)
+    return { accounts: [...sorted, ...providers], ordered: true }
+  }
+  const preferred = claude.find((a) => a.preferred)
+  if (preferred) {
+    return {
+      accounts: [
+        preferred,
+        ...claude.filter((a) => a !== preferred),
+        ...providers,
+      ],
+      ordered: true,
+    }
+  }
+  return { accounts: [...claude, ...providers], ordered: false }
+}
+
+/** `list` with the item at `from` moved to `to`. */
+export function moveInList<T>(
+  list: readonly T[],
+  from: number,
+  to: number
+): T[] {
+  const next = [...list]
+  const [item] = next.splice(from, 1)
+  next.splice(Math.max(0, Math.min(to, next.length)), 0, item)
+  return next
+}
+
+/** A time a hold ends: the clock time when it is within a day, else the
+ *  weekday and time. */
+export function formatHoldEnd(
+  epochSeconds: number,
+  locale: string,
+  now: number
+): string {
+  const soon = epochSeconds - now < 20 * 3600
+  return new Intl.DateTimeFormat(locale, {
+    ...(soon ? {} : { weekday: "short" }),
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(epochSeconds * 1000))
 }
 
 /** The account the pool serves from now: the one it names, else the first

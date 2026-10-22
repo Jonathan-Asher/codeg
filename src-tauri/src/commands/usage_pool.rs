@@ -232,6 +232,31 @@ struct RawConfig {
     switch_threshold: Option<f64>,
     #[serde(deserialize_with = "lenient")]
     routing: Option<RawRouting>,
+    #[serde(deserialize_with = "lenient_list")]
+    accounts: Vec<RawConfigAccount>,
+}
+
+/// An account's place in the pool's order and its reserve, as configured;
+/// its credentials are never read.
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct RawConfigAccount {
+    #[serde(deserialize_with = "lenient")]
+    name: Option<String>,
+    #[serde(deserialize_with = "lenient")]
+    priority: Option<f64>,
+    #[serde(deserialize_with = "lenient")]
+    cap_utilization: Option<f64>,
+    #[serde(deserialize_with = "lenient")]
+    cap_mode: Option<String>,
+}
+
+/// How an account is configured to take part in the pool: its priority
+/// (lower serves first) and its reserve.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct ConfigAccount {
+    priority: Option<f64>,
+    reserve: Option<PoolReserveSetting>,
 }
 
 #[derive(Default, Deserialize)]
@@ -262,6 +287,10 @@ struct PoolConfig {
     switch_threshold: Option<f64>,
     preferred_account: Option<String>,
     routing_mode: Option<String>,
+    /// By account name. The config, not the running server, is read for
+    /// these: the server applies a new order only when it restarts, and the
+    /// page shows the order the pool is set to.
+    accounts: BTreeMap<String, ConfigAccount>,
 }
 
 /// The status endpoint on the proxy's own address. A wildcard bind address
@@ -296,6 +325,21 @@ impl PoolConfig {
             switch_threshold: threshold_percent(raw.switch_threshold),
             preferred_account: clean_label(routing.preferred_account),
             routing_mode: clean_word(routing.mode),
+            accounts: raw
+                .accounts
+                .into_iter()
+                .filter_map(|account| {
+                    let name = clean_label(account.name)?;
+                    let settings = ConfigAccount {
+                        priority: account.priority.filter(|p| p.is_finite()),
+                        reserve: PoolReserveSetting::from_cap(
+                            account.cap_utilization,
+                            account.cap_mode.as_deref(),
+                        ),
+                    };
+                    Some((name, settings))
+                })
+                .collect(),
         }
     }
 }
@@ -517,6 +561,44 @@ impl PoolWeeklyState {
     }
 }
 
+/// What an account's reserve does once reached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PoolReserveMode {
+    /// The reserve is never used: the account stops at the cap until the
+    /// window resets (maxpool's `capMode: "fixed"`).
+    Fixed,
+    /// The reserve is released as the window nears its reset, so it is
+    /// spent rather than lost (maxpool's `capMode: "dynamic"`).
+    Dynamic,
+}
+
+/// The part of each window (5-hour and weekly) an account keeps back: the
+/// pool stops sending it new requests at `100 - percent` used. maxpool's
+/// `capUtilization` is `1 - percent / 100`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PoolReserveSetting {
+    pub percent: f64,
+    pub mode: PoolReserveMode,
+}
+
+impl PoolReserveSetting {
+    /// maxpool's cap fields, read the way maxpool reads them: a cap is only
+    /// a number strictly inside (0, 1), and a cap with no known mode is
+    /// dynamic.
+    fn from_cap(cap: Option<f64>, mode: Option<&str>) -> Option<Self> {
+        let cap = cap.filter(|c| c.is_finite() && *c > 0.0 && *c < 1.0)?;
+        Some(PoolReserveSetting {
+            percent: ((1.0 - cap) * 10_000.0).round() / 100.0,
+            mode: if mode == Some("fixed") {
+                PoolReserveMode::Fixed
+            } else {
+                PoolReserveMode::Dynamic
+            },
+        })
+    }
+}
+
 /// Where an account stands for taking requests, most severe first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -529,6 +611,9 @@ pub enum PoolAccountState {
     /// At a limit: the 5-hour or weekly window is full, or the provider is
     /// rejecting it.
     Exhausted,
+    /// Held by its own reserve: requests go elsewhere until the window
+    /// resets (or, for a reserve released near the reset, until then).
+    Reserved,
     /// Past the pool's switch threshold: requests go elsewhere until the
     /// window resets.
     AtThreshold,
@@ -573,6 +658,14 @@ pub struct PoolAccount {
     /// below reads it.
     #[serde(skip)]
     pub(crate) reserve: Option<PoolReserve>,
+    /// Its place in the pool's order as configured: lower serves first.
+    /// `None` when the pool has no order for it.
+    #[serde(default)]
+    pub priority: Option<f64>,
+    /// The reserve as configured, for the page (the gate above reads the one
+    /// the running pool applies, which follows within seconds).
+    #[serde(default, rename = "reserve")]
+    pub reserve_setting: Option<PoolReserveSetting>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -741,6 +834,16 @@ fn window_blocker(window: Option<&PlanUsageWindow>, full_at: f64, now: i64) -> O
     }
 }
 
+/// What holds an account back on its quota.
+struct QuotaHold {
+    /// When each blocker clears; `None` = no known end.
+    blockers: Vec<Option<i64>>,
+    /// A window is full.
+    full: bool,
+    /// The account's own reserve is what holds it.
+    reserved: bool,
+}
+
 impl PoolAccount {
     fn window(&self, id: &str) -> Option<&PlanUsageWindow> {
         self.windows.iter().find(|w| w.id == id)
@@ -779,9 +882,10 @@ impl PoolAccount {
     /// The account-wide quota blockers: the 5-hour window past `threshold`
     /// (or the account's reserve), a full or capped weekly, a provider
     /// rejection.
-    fn quota_blockers(&self, now: i64, threshold: f64) -> (Vec<Option<i64>>, bool) {
+    fn quota_blockers(&self, now: i64, threshold: f64) -> QuotaHold {
         let mut blockers = Vec::new();
         let mut full = false;
+        let mut reserved = false;
         let five_hour = self.window("five_hour");
         let seven_day = self.window("seven_day");
         // The 5-hour window is benched at the switch threshold, or at the
@@ -798,26 +902,32 @@ impl PoolAccount {
                     .or(until),
             );
             full |= five_hour.is_some_and(|w| w.used_percent >= 100.0);
+            reserved |= five_hour.is_some_and(|w| w.used_percent < threshold);
         }
         let weekly_full = seven_day.is_some_and(|w| w.used_percent >= WEEKLY_EXHAUSTED_PERCENT);
-        let weekly_blocks = match self.weekly_state {
+        // Held by its reserve: the pool says "capped", or, where it gives no
+        // weekly verdict, the account's reserve reads so here.
+        let weekly_reserve = match self.weekly_state {
             Some(PoolWeeklyState::Capped) => true,
-            // The pool also says "exhausted" when the provider rejects an
-            // account whose 5-hour window is full; that clears with the
-            // 5-hour window, counted above.
-            Some(PoolWeeklyState::Exhausted) => weekly_full,
             Some(_) => false,
-            // A pool that gives no weekly verdict: the full window, or the
-            // account's reserve, read here.
-            None => {
-                (weekly_full
-                    && !matches!(
-                        self.limit_status,
-                        Some(PoolLimitStatus::Allowed | PoolLimitStatus::AllowedWarning)
-                    ))
-                    || self.reserve_holds(seven_day, threshold, SEVEN_DAY_SPAN_SECS, now)
-            }
+            None => self.reserve_holds(seven_day, threshold, SEVEN_DAY_SPAN_SECS, now),
         };
+        let weekly_blocks = weekly_reserve
+            || match self.weekly_state {
+                // The pool also says "exhausted" when the provider rejects an
+                // account whose 5-hour window is full; that clears with the
+                // 5-hour window, counted above.
+                Some(PoolWeeklyState::Exhausted) => weekly_full,
+                Some(_) => false,
+                // A pool that gives no weekly verdict: the full window.
+                None => {
+                    weekly_full
+                        && !matches!(
+                            self.limit_status,
+                            Some(PoolLimitStatus::Allowed | PoolLimitStatus::AllowedWarning)
+                        )
+                }
+            };
         if weekly_blocks {
             match seven_day.and_then(|w| w.resets_at) {
                 Some(reset) if reset <= now => {}
@@ -827,7 +937,11 @@ impl PoolAccount {
                         self.reserve_lets_go(seven_day, threshold, SEVEN_DAY_SPAN_SECS, now)
                             .or(reset),
                     );
-                    full = true;
+                    if weekly_reserve && !weekly_full {
+                        reserved = true;
+                    } else {
+                        full = true;
+                    }
                 }
             }
         }
@@ -845,7 +959,11 @@ impl PoolAccount {
             blockers.push(None);
             full = true;
         }
-        (blockers, full)
+        QuotaHold {
+            blockers,
+            full,
+            reserved,
+        }
     }
 
     /// Mirrors the pool's own routing gate: switched off, failed, cooling
@@ -872,7 +990,7 @@ impl PoolAccount {
         ) {
             return Availability::Blocked { until: None };
         }
-        let (mut blockers, _) = self.quota_blockers(now, threshold);
+        let mut blockers = self.quota_blockers(now, threshold).blockers;
         if let Some(until) = self.cooling_until.filter(|t| *t > now) {
             blockers.push(Some(until));
         }
@@ -899,12 +1017,16 @@ impl PoolAccount {
         if self.status == PoolAccountStatus::Error {
             return PoolAccountState::Failing;
         }
-        let (blockers, full) = self.quota_blockers(now, threshold);
-        if self.status == PoolAccountStatus::Exhausted || full {
+        let hold = self.quota_blockers(now, threshold);
+        if self.status == PoolAccountStatus::Exhausted || hold.full {
             return PoolAccountState::Exhausted;
         }
-        if !blockers.is_empty() {
-            return PoolAccountState::AtThreshold;
+        if !hold.blockers.is_empty() {
+            return if hold.reserved {
+                PoolAccountState::Reserved
+            } else {
+                PoolAccountState::AtThreshold
+            };
         }
         if self.cooling_until.is_some_and(|t| t > now) {
             return PoolAccountState::CoolingDown;
@@ -916,10 +1038,12 @@ impl PoolAccount {
         raw: RawAccount,
         current: Option<&str>,
         preferred: Option<&str>,
+        configured: &BTreeMap<String, ConfigAccount>,
         threshold: f64,
         now: i64,
     ) -> Option<Self> {
         let name = clean_label(raw.name)?;
+        let settings = configured.get(&name).cloned();
         let quota = raw.quota.unwrap_or_default();
         let weekly = raw.weekly.unwrap_or_default();
         let observed_at = quota.last_probe_ok_at.max(quota.last_header_quota_at);
@@ -980,6 +1104,11 @@ impl PoolAccount {
             observed_at,
             provider: raw.account_type.as_deref() == Some("provider"),
             reserve: PoolReserve::from_raw(raw.cap_utilization, raw.cap_mode.as_deref()),
+            priority: settings.as_ref().and_then(|s| s.priority),
+            reserve_setting: match &settings {
+                Some(settings) => settings.reserve,
+                None => PoolReserveSetting::from_cap(raw.cap_utilization, raw.cap_mode.as_deref()),
+            },
         };
         account.state = account.state_at(now, threshold);
         account.blocked_until = match account.availability(now, threshold, None) {
@@ -1055,6 +1184,7 @@ fn build_pool(raw: RawStatus, config: &PoolConfig, now: i64) -> PlanUsagePool {
                 account,
                 current_account.as_deref(),
                 preferred_account.as_deref(),
+                &config.accounts,
                 threshold,
                 now,
             )
