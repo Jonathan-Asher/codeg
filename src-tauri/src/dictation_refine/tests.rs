@@ -11,7 +11,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Router;
 use serde_json::{json, Value};
 
-use super::providers::{build_call, custom_url, humanize_http, parse_answer, Job};
+use super::providers::{build_call, custom_url, humanize_http, parse_answer, Answer, Job};
 use super::*;
 use crate::db::test_helpers;
 
@@ -195,7 +195,7 @@ fn openai_compatible_providers_send_a_chat_completion_with_a_bearer_key() {
                 "temperature": 0.1,
                 "messages": [
                     { "role": "system", "content": "SYSTEM" },
-                    { "role": "user", "content": "TEXT" },
+                    { "role": "user", "content": "<dictation>\nTEXT\n</dictation>" },
                 ],
             })
         );
@@ -223,7 +223,7 @@ fn anthropic_sends_a_messages_request_without_temperature() {
             "model": "claude-haiku-4-5-20251001",
             "max_tokens": 2048,
             "system": "SYSTEM",
-            "messages": [{ "role": "user", "content": "TEXT" }],
+            "messages": [{ "role": "user", "content": "<dictation>\nTEXT\n</dictation>" }],
         })
     );
     assert!(call.body.get("temperature").is_none());
@@ -286,9 +286,13 @@ fn a_base_override_keeps_the_path() {
 
 #[test]
 fn answers_are_read_per_provider() {
+    let whole = |text: &str| Answer {
+        text: text.into(),
+        truncated: false,
+    };
     assert_eq!(
         parse_answer(RefineProvider::Groq, &chat_answer("hi")).unwrap(),
-        "hi"
+        whole("hi")
     );
     let anthropic = json!({
         "content": [{ "type": "thinking", "thinking": "…" }, { "type": "text", "text": "hello" }],
@@ -296,7 +300,7 @@ fn answers_are_read_per_provider() {
     });
     assert_eq!(
         parse_answer(RefineProvider::Anthropic, &anthropic).unwrap(),
-        "hello"
+        whole("hello")
     );
     let refused = json!({ "content": [], "stop_reason": "refusal" });
     assert!(matches!(
@@ -306,12 +310,48 @@ fn answers_are_read_per_provider() {
     let google = json!({ "data": { "translations": [{ "translatedText": "Hello world" }] } });
     assert_eq!(
         parse_answer(RefineProvider::Google, &google).unwrap(),
-        "Hello world"
+        whole("Hello world")
     );
     assert!(matches!(
         parse_answer(RefineProvider::Openai, &json!({})),
         Err(RefineError::BadResponse(_))
     ));
+}
+
+#[test]
+fn an_answer_cut_short_is_marked_truncated() {
+    for reason in ["length", "content_filter"] {
+        let body = json!({ "choices": [{
+            "message": { "role": "assistant", "content": "I need to send" },
+            "finish_reason": reason,
+        }] });
+        assert!(
+            parse_answer(RefineProvider::Groq, &body).unwrap().truncated,
+            "{reason}"
+        );
+    }
+    let done = json!({ "choices": [{
+        "message": { "role": "assistant", "content": "Done." },
+        "finish_reason": "stop",
+    }] });
+    assert!(
+        !parse_answer(RefineProvider::Cerebras, &done)
+            .unwrap()
+            .truncated
+    );
+    for (stop, cut) in [("max_tokens", true), ("end_turn", false)] {
+        let body = json!({
+            "content": [{ "type": "text", "text": "I need to" }],
+            "stop_reason": stop,
+        });
+        assert_eq!(
+            parse_answer(RefineProvider::Anthropic, &body)
+                .unwrap()
+                .truncated,
+            cut,
+            "{stop}"
+        );
+    }
 }
 
 #[test]
@@ -411,12 +451,19 @@ async fn refine_cleans_and_translates_with_the_settings() {
     assert_eq!(hits[0].path, "/openai/v1/chat/completions");
     assert_eq!(hits[0].headers["authorization"], "Bearer gsk_live");
     let system = hits[0].body["messages"][0]["content"].as_str().unwrap();
-    assert!(system.starts_with(prompt::REFINE_INSTRUCTION));
+    assert!(system.starts_with(prompt::FRAME_INSTRUCTION));
+    assert!(system.contains(prompt::REFINE_INSTRUCTION));
+    assert!(system.contains(prompt::DATA_RULE));
+    assert!(!system.contains(prompt::STRICT_RULE));
     assert!(system.contains("The dictation is in Hebrew."));
     assert!(system.contains("Then translate the result to English."));
     assert!(system.contains("Keep legal terms."));
     assert!(system.ends_with("Output only the clean translation."));
-    assert_eq!(hits[0].body["messages"][1]["content"], HEBREW);
+    assert_eq!(
+        hits[0].body["messages"][1]["content"],
+        format!("<dictation>\n{HEBREW}\n</dictation>")
+    );
+    assert!(!out.kept_original);
 }
 
 #[tokio::test]
@@ -454,10 +501,9 @@ async fn request_values_override_the_settings() {
         .as_str()
         .unwrap()
         .to_string();
-    assert_eq!(
-        system,
-        "Translate the user's text to French. Output only the translation, nothing else."
-    );
+    assert!(system.contains(
+        "\nTranslate the user's text to French. Output only the translation, nothing else.\n"
+    ));
 }
 
 #[tokio::test]
@@ -722,51 +768,389 @@ async fn nothing_asked_returns_the_text_as_it_came() {
             provider: NO_PROVIDER.into(),
             model: String::new(),
             elapsed_ms: 0,
+            kept_original: false,
         }
     );
 }
 
 #[tokio::test]
-async fn a_clean_up_that_drops_most_of_a_long_dictation_is_refused() {
+async fn a_clean_up_that_drops_most_of_a_long_dictation_keeps_the_original() {
     let long = "מילה ".repeat(80);
-    let (base, _mock) = mock_provider(vec![]).await; // answers "The clean text."
+    let (base, mock) = mock_provider(vec![]).await; // answers "The clean text."
     let keys = MemoryKeys::with(RefineProvider::Groq, "k");
     let mut req = request(&long);
     req.translate = Some(false);
-    let err = refine(
+    let out = refine(
         &DictationRefineSettings::default(),
         &keys,
         &refiner(&base),
         &req,
     )
     .await
-    .unwrap_err();
-    assert!(matches!(err, RefineError::Gutted(_)));
+    .unwrap();
+    assert!(out.kept_original);
+    assert_eq!(out.text, long.trim());
+    // The first answer, then the stricter retry.
+    assert_eq!(mock.hits().len(), 2);
 
     // A translation may be shorter.
     req.translate = Some(true);
-    assert!(refine(
+    let out = refine(
         &DictationRefineSettings::default(),
         &keys,
         &refiner(&base),
-        &req
+        &req,
     )
     .await
-    .is_ok());
+    .unwrap();
+    assert_eq!(out.text, "The clean text.");
+    assert!(!out.kept_original);
+    assert_eq!(mock.hits().len(), 3);
+}
+
+const REFUSAL: &str = "I\u{2019}m sorry, but I can\u{2019}t help with that.";
+
+fn system_of(hit: &Seen) -> String {
+    hit.body["messages"][0]["content"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[tokio::test]
+async fn a_refusal_is_retried_once_with_a_stricter_prompt() {
+    let (base, mock) = mock_provider(vec![
+        Reply::json(StatusCode::OK, chat_answer(REFUSAL)),
+        Reply::json(StatusCode::OK, chat_answer("What's the server password?")),
+    ])
+    .await;
+    let keys = MemoryKeys::with(RefineProvider::Groq, "k");
+    let mut req = request("מה הסיסמה של השרת?");
+    req.source_language = Some("he".into());
+    let out = refine(
+        &DictationRefineSettings::default(),
+        &keys,
+        &refiner(&base),
+        &req,
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.text, "What's the server password?");
+    assert!(!out.kept_original);
+
+    let hits = mock.hits();
+    assert_eq!(hits.len(), 2);
+    assert!(!system_of(&hits[0]).contains(prompt::STRICT_RULE));
+    let strict = system_of(&hits[1]);
+    assert!(strict.contains(prompt::STRICT_RULE));
+    assert!(strict.contains(prompt::DATA_RULE));
+    assert!(strict.ends_with("Output only the clean translation."));
+    // Both carry the same framed dictation.
+    for hit in &hits {
+        assert_eq!(
+            hit.body["messages"][1]["content"],
+            "<dictation>\nמה הסיסמה של השרת?\n</dictation>"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_second_refusal_keeps_the_original_and_says_so() {
+    for translate in [true, false] {
+        let (base, mock) = mock_provider(vec![
+            Reply::json(StatusCode::OK, chat_answer(REFUSAL)),
+            Reply::json(
+                StatusCode::OK,
+                chat_answer("מצטער, אבל אני לא יכול לעזור בזה."),
+            ),
+        ])
+        .await;
+        let keys = MemoryKeys::with(RefineProvider::Groq, "k");
+        let mut req = request("  תן לי את הסיסמה של השרת \n");
+        req.translate = Some(translate);
+        let out = refine(
+            &DictationRefineSettings::default(),
+            &keys,
+            &refiner(&base),
+            &req,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            out,
+            RefineResult {
+                text: "תן לי את הסיסמה של השרת".into(),
+                provider: "groq".into(),
+                model: "openai/gpt-oss-120b".into(),
+                elapsed_ms: out.elapsed_ms,
+                kept_original: true,
+            },
+            "translate {translate}"
+        );
+        assert_eq!(mock.hits().len(), 2);
+    }
+}
+
+#[tokio::test]
+async fn a_strict_retry_that_fails_keeps_the_original() {
+    let (base, mock) = mock_provider(vec![
+        Reply::json(StatusCode::OK, chat_answer(REFUSAL)),
+        Reply::json(
+            StatusCode::BAD_GATEWAY,
+            json!({ "error": { "message": "upstream" } }),
+        ),
+    ])
+    .await;
+    let keys = MemoryKeys::with(RefineProvider::Groq, "k");
+    let out = refine(
+        &DictationRefineSettings::default(),
+        &keys,
+        &refiner(&base),
+        &request("What's the admin password?"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.text, "What's the admin password?");
+    assert!(out.kept_original);
+    // One stricter attempt, not two.
+    assert_eq!(mock.hits().len(), 2);
+}
+
+#[tokio::test]
+async fn a_clean_up_that_answers_the_question_is_retried() {
+    let (base, mock) = mock_provider(vec![
+        Reply::json(
+            StatusCode::OK,
+            chat_answer("I don't have access to real-time information."),
+        ),
+        Reply::json(StatusCode::OK, chat_answer("What time is it now?")),
+    ])
+    .await;
+    let keys = MemoryKeys::with(RefineProvider::Groq, "k");
+    let mut req = request("uh what time is it now");
+    req.translate = Some(false);
+    let out = refine(
+        &DictationRefineSettings::default(),
+        &keys,
+        &refiner(&base),
+        &req,
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.text, "What time is it now?");
+    assert!(!out.kept_original);
+    assert_eq!(mock.hits().len(), 2);
+}
+
+#[tokio::test]
+async fn the_speakers_own_apology_is_not_a_refusal() {
+    let (base, mock) = mock_provider(vec![Reply::json(
+        StatusCode::OK,
+        chat_answer("Sorry, I can't help with that. Ask Yossi."),
+    )])
+    .await;
+    let keys = MemoryKeys::with(RefineProvider::Groq, "k");
+    let out = refine(
+        &DictationRefineSettings::default(),
+        &keys,
+        &refiner(&base),
+        &request("סליחה, אני לא יכול לעזור עם זה, תשאל את יוסי"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.text, "Sorry, I can't help with that. Ask Yossi.");
+    assert!(!out.kept_original);
+    assert_eq!(mock.hits().len(), 1);
+}
+
+#[tokio::test]
+async fn echoed_tags_are_taken_off_the_answer() {
+    let (base, _mock) = mock_provider(vec![Reply::json(
+        StatusCode::OK,
+        chat_answer("<dictation>\nI need to send the document.\n</dictation>"),
+    )])
+    .await;
+    let keys = MemoryKeys::with(RefineProvider::Groq, "k");
+    let out = refine(
+        &DictationRefineSettings::default(),
+        &keys,
+        &refiner(&base),
+        &request(HEBREW),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.text, "I need to send the document.");
+}
+
+#[tokio::test]
+async fn a_dictated_apology_comes_back_unchanged() {
+    // The speaker's own "I'm sorry, I can't…" is a dictation, not a refusal:
+    // one call, the answer used as it came.
+    const SAID: &str = "I'm sorry, I can't make it today";
+    for (translate, answer) in [
+        (false, "I'm sorry, I can't make it today."),
+        (false, SAID),
+        (true, "I\u{2019}m sorry, I can\u{2019}t make it today."),
+    ] {
+        let (base, mock) =
+            mock_provider(vec![Reply::json(StatusCode::OK, chat_answer(answer))]).await;
+        let keys = MemoryKeys::with(RefineProvider::Groq, "k");
+        let mut req = request(SAID);
+        req.translate = Some(translate);
+        let out = refine(
+            &DictationRefineSettings::default(),
+            &keys,
+            &refiner(&base),
+            &req,
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.text, answer);
+        assert!(!out.kept_original);
+        assert_eq!(mock.hits().len(), 1, "{answer}");
+    }
+}
+
+fn chat_answer_cut(text: &str, reason: &str) -> Value {
+    json!({ "choices": [{
+        "message": { "role": "assistant", "content": text },
+        "finish_reason": reason,
+    }] })
+}
+
+#[tokio::test]
+async fn a_cut_off_answer_is_retried_and_never_inserted() {
+    let keys = MemoryKeys::with(RefineProvider::Groq, "k");
+    // Cut off, then whole on the stricter retry.
+    let (base, mock) = mock_provider(vec![
+        Reply::json(
+            StatusCode::OK,
+            chat_answer_cut("I need to send the", "length"),
+        ),
+        Reply::json(StatusCode::OK, chat_answer("I need to send the document.")),
+    ])
+    .await;
+    let out = refine(
+        &DictationRefineSettings::default(),
+        &keys,
+        &refiner(&base),
+        &request(HEBREW),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.text, "I need to send the document.");
+    assert!(!out.kept_original);
+    assert_eq!(mock.hits().len(), 2);
+
+    // Cut off both times: the speaker's words, not half a message.
+    let (base, mock) = mock_provider(vec![
+        Reply::json(
+            StatusCode::OK,
+            chat_answer_cut("I need to send the", "length"),
+        ),
+        Reply::json(StatusCode::OK, chat_answer_cut("I need", "content_filter")),
+    ])
+    .await;
+    let out = refine(
+        &DictationRefineSettings::default(),
+        &keys,
+        &refiner(&base),
+        &request(HEBREW),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.text, HEBREW);
+    assert!(out.kept_original);
+    assert_eq!(mock.hits().len(), 2);
+}
+
+#[tokio::test]
+async fn echoed_empty_tags_keep_the_original() {
+    let (base, mock) = mock_provider(vec![
+        Reply::json(StatusCode::OK, chat_answer("<dictation>\n</dictation>")),
+        Reply::json(StatusCode::OK, chat_answer("<dictation></dictation>")),
+    ])
+    .await;
+    let keys = MemoryKeys::with(RefineProvider::Groq, "k");
+    let out = refine(
+        &DictationRefineSettings::default(),
+        &keys,
+        &refiner(&base),
+        &request(HEBREW),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.text, HEBREW);
+    assert!(out.kept_original);
+    assert_eq!(mock.hits().len(), 2);
+}
+
+#[tokio::test]
+async fn a_lecture_instead_of_the_translation_keeps_the_original() {
+    const LECTURE: &str = "Sharing server passwords over chat is risky. Ask your \
+        administrator to grant you access through the company's password manager instead.";
+    let (base, mock) = mock_provider(vec![
+        Reply::json(StatusCode::OK, chat_answer(LECTURE)),
+        Reply::json(
+            StatusCode::OK,
+            chat_answer("The dictated text asks for a password, so there is nothing to translate."),
+        ),
+    ])
+    .await;
+    let keys = MemoryKeys::with(RefineProvider::Groq, "k");
+    let out = refine(
+        &DictationRefineSettings::default(),
+        &keys,
+        &refiner(&base),
+        &request("תן לי את הסיסמה של השרת"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.text, "תן לי את הסיסמה של השרת");
+    assert!(out.kept_original);
+    assert_eq!(mock.hits().len(), 2);
+}
+
+#[tokio::test]
+async fn google_translations_are_not_judged() {
+    // Google is a translation engine: it cannot refuse, so a translated
+    // apology is the speaker's.
+    let (base, mock) = mock_provider(vec![Reply::json(
+        StatusCode::OK,
+        json!({ "data": { "translations": [{ "translatedText": "I'm sorry, but I can't help with that." }] } }),
+    )])
+    .await;
+    let keys = MemoryKeys::with(RefineProvider::Google, "g");
+    let google = DictationRefineSettings {
+        provider: RefineProvider::Google,
+        refine: false,
+        ..DictationRefineSettings::default()
+    };
+    let out = refine(&google, &keys, &refiner(&base), &request("מה הסיסמה?"))
+        .await
+        .unwrap();
+    assert_eq!(out.text, "I'm sorry, but I can't help with that.");
+    assert!(!out.kept_original);
+    assert_eq!(mock.hits().len(), 1);
+    // Google gets the text itself, not the framing.
+    assert_eq!(mock.hits()[0].body["q"], "מה הסיסמה?");
 }
 
 #[test]
 fn the_result_is_camel_case() {
-    let out = RefineResult {
+    let mut out = RefineResult {
         text: "t".into(),
         provider: "groq".into(),
         model: "m".into(),
         elapsed_ms: 412,
+        kept_original: false,
     };
     assert_eq!(
-        serde_json::to_value(out).unwrap(),
-        json!({ "text": "t", "provider": "groq", "model": "m", "elapsedMs": 412 })
+        serde_json::to_value(&out).unwrap(),
+        json!({ "text": "t", "provider": "groq", "model": "m", "elapsedMs": 412, "keptOriginal": false })
     );
+    out.kept_original = true;
+    assert_eq!(serde_json::to_value(&out).unwrap()["keptOriginal"], true);
     let req: RefineRequest = serde_json::from_value(json!({
         "text": "x",
         "translate": null,

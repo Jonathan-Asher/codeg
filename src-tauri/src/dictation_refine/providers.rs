@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{RefineError, SETTINGS_LOCATION};
-use crate::dictation_refine::prompt::google_lang_code;
+use crate::dictation_refine::prompt::{google_lang_code, user_message};
 
 /// Per attempt.
 pub(crate) const TIMEOUT: Duration = Duration::from_secs(10);
@@ -115,6 +115,7 @@ pub(crate) struct Job<'a> {
     /// The custom provider's endpoint.
     pub endpoint: &'a str,
     pub system: &'a str,
+    /// The dictation. LLMs get it framed by [`user_message`]; Google as is.
     pub text: &'a str,
     /// For Google, which takes a code rather than a prompt.
     pub target_language: &'a str,
@@ -162,7 +163,7 @@ pub(crate) fn build_call(job: &Job<'_>, api_key: &str, base: Option<&str>) -> Ca
                 "model": job.model,
                 "max_tokens": 2048,
                 "system": job.system,
-                "messages": [{ "role": "user", "content": job.text }],
+                "messages": [{ "role": "user", "content": user_message(job.text) }],
             }),
         },
         // Google Cloud Translation v2 (API key): translation only, by code.
@@ -198,7 +199,7 @@ pub(crate) fn build_call(job: &Job<'_>, api_key: &str, base: Option<&str>) -> Ca
                 "temperature": 0.1,
                 "messages": [
                     { "role": "system", "content": job.system },
-                    { "role": "user", "content": job.text },
+                    { "role": "user", "content": user_message(job.text) },
                 ],
             }),
         },
@@ -215,28 +216,53 @@ fn rebase(url: &str, base: Option<&str>) -> String {
     format!("{}{path}", base.trim_end_matches('/'))
 }
 
+/// What a provider answered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Answer {
+    pub text: String,
+    /// The provider stopped early (its output limit, or a content filter):
+    /// the text is only the start of the result.
+    pub truncated: bool,
+}
+
 /// The text out of a successful answer.
-pub(crate) fn parse_answer(provider: RefineProvider, body: &Value) -> Result<String, RefineError> {
+pub(crate) fn parse_answer(provider: RefineProvider, body: &Value) -> Result<Answer, RefineError> {
     let label = provider.label();
-    let text = match provider {
+    let (text, truncated) = match provider {
         RefineProvider::Anthropic => {
-            if body["stop_reason"].as_str() == Some("refusal") {
+            let stop = body["stop_reason"].as_str();
+            if stop == Some("refusal") {
                 return Err(RefineError::BadResponse(format!(
                     "{label}: the request was refused"
                 )));
             }
-            body["content"].as_array().and_then(|blocks| {
+            let text = body["content"].as_array().and_then(|blocks| {
                 blocks
                     .iter()
                     .find(|b| b["type"].as_str() == Some("text"))
                     .and_then(|b| b["text"].as_str())
-            })
+            });
+            let cut = matches!(stop, Some("max_tokens" | "model_context_window_exceeded"));
+            (text, cut)
         }
-        RefineProvider::Google => body["data"]["translations"][0]["translatedText"].as_str(),
-        _ => body["choices"][0]["message"]["content"].as_str(),
+        RefineProvider::Google => (
+            body["data"]["translations"][0]["translatedText"].as_str(),
+            false,
+        ),
+        _ => {
+            let choice = &body["choices"][0];
+            let cut = matches!(
+                choice["finish_reason"].as_str(),
+                Some("length" | "content_filter")
+            );
+            (choice["message"]["content"].as_str(), cut)
+        }
     };
-    text.map(str::to_string)
-        .ok_or_else(|| RefineError::BadResponse(format!("{label}: no text in the answer")))
+    text.map(|text| Answer {
+        text: text.to_string(),
+        truncated,
+    })
+    .ok_or_else(|| RefineError::BadResponse(format!("{label}: no text in the answer")))
 }
 
 /// Turn provider HTTP failures into messages a user can act on. The raw
@@ -308,25 +334,47 @@ impl Refiner {
 
     /// One attempt, then one more after [`RETRY_DELAY`]. Returns the answer,
     /// trimmed; an empty one counts as a failure.
-    pub(crate) async fn run(&self, job: &Job<'_>, api_key: &str) -> Result<String, RefineError> {
+    pub(crate) async fn run(&self, job: &Job<'_>, api_key: &str) -> Result<Answer, RefineError> {
         let mut last = RefineError::Empty(job.provider.label().to_string());
         for attempt in 0..2 {
             if attempt > 0 {
                 tokio::time::sleep(RETRY_DELAY).await;
             }
-            match self.once(job, api_key).await {
-                Ok(text) if !text.trim().is_empty() => return Ok(text.trim().to_string()),
-                Ok(_) => last = RefineError::Empty(job.provider.label().to_string()),
+            match self.once(job, api_key, None).await {
+                Ok(answer) => match trimmed(answer) {
+                    Some(answer) => return Ok(answer),
+                    None => last = RefineError::Empty(job.provider.label().to_string()),
+                },
                 Err(e) => last = e,
             }
         }
         Err(last)
     }
 
-    async fn once(&self, job: &Job<'_>, api_key: &str) -> Result<String, RefineError> {
+    /// One attempt within `timeout`, no retry: the stricter second try after
+    /// a rejected answer, which must fit in what is left of the budget.
+    pub(crate) async fn attempt(
+        &self,
+        job: &Job<'_>,
+        api_key: &str,
+        timeout: Duration,
+    ) -> Result<Answer, RefineError> {
+        let answer = self.once(job, api_key, Some(timeout)).await?;
+        trimmed(answer).ok_or_else(|| RefineError::Empty(job.provider.label().to_string()))
+    }
+
+    async fn once(
+        &self,
+        job: &Job<'_>,
+        api_key: &str,
+        timeout: Option<Duration>,
+    ) -> Result<Answer, RefineError> {
         let call = build_call(job, api_key, self.base.as_deref());
         let label = job.provider.label();
         let mut request = self.client.post(&call.url).json(&call.body);
+        if let Some(timeout) = timeout {
+            request = request.timeout(timeout);
+        }
         if !call.query.is_empty() {
             request = request.query(&call.query);
         }
@@ -365,4 +413,16 @@ impl Refiner {
             .ok_or_else(|| RefineError::BadResponse(format!("{label}: the answer is not JSON")))?;
         parse_answer(job.provider, &body)
     }
+}
+
+/// The answer with its text trimmed, or `None` when nothing is left.
+fn trimmed(answer: Answer) -> Option<Answer> {
+    let text = answer.text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    Some(Answer {
+        text: text.to_string(),
+        truncated: answer.truncated,
+    })
 }

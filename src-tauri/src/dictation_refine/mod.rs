@@ -5,9 +5,15 @@
 //! and/or translates it with a fast cloud model and returns the text. The
 //! provider keys stay in codeg and never reach a client.
 //!
-//! * [`prompt`] — the system prompt (refine, translate, or both).
+//! * [`prompt`] — the system prompt (refine, translate, or both), with the
+//!   dictation framed as data.
 //! * [`providers`] — the request each provider takes, the retry loop and the
 //!   error wording.
+//! * `guard` — rejects an answer that is not a transformation of the
+//!   dictation (a refusal, a reply or a note about it, nothing, most of it
+//!   dropped); a cut-off answer is rejected too. [`refine`] then retries
+//!   once with a stricter prompt and otherwise keeps the speaker's words,
+//!   saying so in [`RefineResult::kept_original`].
 //!
 //! Settings are an `app_metadata` row (`dictation_refine_settings`). Each
 //! provider's key is a named secret (`secret:dictation-refine-<provider>`):
@@ -15,12 +21,13 @@
 //! settings API reports only whether a key is stored. `docs/dictation-refine.md`
 //! is the client contract.
 
+mod guard;
 pub mod prompt;
 pub mod providers;
 #[cfg(test)]
 mod tests;
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
@@ -29,8 +36,9 @@ use crate::app_error::{AppCommandError, AppErrorCode};
 use crate::db::service::app_metadata_service;
 use crate::keyring_store;
 
-use prompt::{language_name, stage_prompt, Stage};
-use providers::Job;
+use guard::Rejection;
+use prompt::{language_name, stage_prompt, unwrap_answer, Stage};
+use providers::{Answer, Job, TIMEOUT};
 pub use providers::{RefineProvider, Refiner, GOOGLE_MODEL};
 
 /// `app_metadata` key of [`DictationRefineSettings`].
@@ -40,6 +48,12 @@ pub const SETTINGS_LOCATION: &str = "Settings › General › Dictation clean-up
 /// `provider` in a result when there was nothing to do.
 pub const NO_PROVIDER: &str = "none";
 const DEFAULT_TARGET_LANGUAGE: &str = "English";
+/// The stricter retry after a rejected answer only runs while a call is
+/// younger than this, and must finish within it: the phone gives a whole
+/// refine about 12 s before it keeps the words as spoken.
+const STRICT_RETRY_BUDGET: Duration = Duration::from_secs(10);
+/// Not worth a retry with less time than this left.
+const STRICT_RETRY_MIN: Duration = Duration::from_secs(1);
 
 /// The secret a provider's key is stored under (`secret:` is added by the
 /// store).
@@ -71,9 +85,19 @@ pub enum RefineError {
     BadResponse(String),
     #[error("{0} returned an empty result")]
     Empty(String),
-    /// Clean-up dropped most of a long dictation.
-    #[error("{0}")]
-    Gutted(String),
+}
+
+impl RefineError {
+    /// What went wrong, without any provider text: for the log.
+    fn kind(&self) -> String {
+        match self {
+            RefineError::Http { status, .. } => format!("HTTP {status}"),
+            RefineError::Unreachable(_) => "unreachable".into(),
+            RefineError::BadResponse(_) => "unreadable answer".into(),
+            RefineError::Empty(_) => "empty answer".into(),
+            _ => "failed".into(),
+        }
+    }
 }
 
 impl From<RefineError> for AppCommandError {
@@ -88,7 +112,7 @@ impl From<RefineError> for AppCommandError {
             } => AppErrorCode::AuthenticationFailed,
             RefineError::Http { status: 404, .. } => AppErrorCode::ConfigurationInvalid,
             RefineError::Unreachable(_) | RefineError::Http { .. } => AppErrorCode::NetworkError,
-            RefineError::BadResponse(_) | RefineError::Empty(_) | RefineError::Gutted(_) => {
+            RefineError::BadResponse(_) | RefineError::Empty(_) => {
                 AppErrorCode::TaskExecutionFailed
             }
         };
@@ -426,6 +450,12 @@ pub struct RefineResult {
     pub provider: String,
     pub model: String,
     pub elapsed_ms: u64,
+    /// The model's answer was rejected (it refused, replied to or commented
+    /// on the dictation, came back empty or cut off, or dropped most of it)
+    /// and the one stricter retry gave no usable answer either, so `text` is
+    /// the dictation as it came, trimmed. A client that knows the field can
+    /// say so; an older one simply inserts the speaker's words.
+    pub kept_original: bool,
 }
 
 fn non_blank(value: Option<&str>) -> Option<&str> {
@@ -453,6 +483,7 @@ pub async fn refine(
             provider: NO_PROVIDER.to_string(),
             model: String::new(),
             elapsed_ms: 0,
+            kept_original: false,
         });
     }
     let provider = settings.provider;
@@ -490,13 +521,15 @@ pub async fn refine(
         .to_string();
     let source = non_blank(request.source_language.as_deref()).map(language_name);
     let target_name = language_name(&target);
-    let system = stage_prompt(&Stage {
+    let mut stage = Stage {
         refine: do_refine,
         translate: do_translate,
         target_language: &target_name,
         source_language: source.as_deref(),
         instructions: &settings.instructions,
-    });
+        strict: false,
+    };
+    let system = stage_prompt(&stage);
     let model = settings.effective_model().to_string();
     let job = Job {
         provider,
@@ -509,44 +542,109 @@ pub async fn refine(
     };
 
     let started = Instant::now();
-    let out = refiner.run(&job, &key).await;
-    let elapsed_ms = started.elapsed().as_millis() as u64;
-    let out = match out {
-        Ok(out) => out,
+    let first = match refiner.run(&job, &key).await {
+        Ok(answer) => answer,
         Err(e) => {
             tracing::warn!(
-                "[dictation] {} failed after {elapsed_ms} ms: {e}",
-                provider.id()
+                "[dictation] {} failed after {} ms: {e}",
+                provider.id(),
+                started.elapsed().as_millis()
             );
             return Err(e);
         }
     };
 
-    // Clean-up must never swallow the message: losing half of a long
-    // dictation is a provider failure, not an edit. (A translation can
-    // legitimately be shorter, so that only logs.)
     let before = text.chars().count();
+    let mut kept_original = false;
+    // Only a model can answer or refuse instead of translating; Google's
+    // answer is a translation by construction.
+    let out = if !provider.can_refine() {
+        first.text
+    } else {
+        match judge(text, &first, do_translate) {
+            Ok(out) => out,
+            Err(rejected) => {
+                let first_chars = first.text.chars().count();
+                stage.strict = true;
+                let strict_system = stage_prompt(&stage);
+                let strict_job = Job {
+                    system: &strict_system,
+                    ..job
+                };
+                let left = STRICT_RETRY_BUDGET.saturating_sub(started.elapsed());
+                let retry = if left < STRICT_RETRY_MIN {
+                    Err("skipped, no time left".to_string())
+                } else {
+                    match refiner.attempt(&strict_job, &key, left.min(TIMEOUT)).await {
+                        Ok(answer) => judge(text, &answer, do_translate).map_err(|again| {
+                            format!(
+                                "rejected too ({again}, {} chars)",
+                                answer.text.chars().count()
+                            )
+                        }),
+                        Err(e) => Err(e.kind()),
+                    }
+                };
+                // Counts and reasons only: never the dictation or an answer.
+                match retry {
+                    Ok(answer) => {
+                        tracing::warn!(
+                            "[dictation] {} answer rejected ({rejected}): {before} → \
+                             {first_chars} chars; the stricter retry passed with {} chars",
+                            provider.id(),
+                            answer.chars().count()
+                        );
+                        answer
+                    }
+                    Err(why) => {
+                        tracing::warn!(
+                            "[dictation] {} answer rejected ({rejected}): {before} → \
+                             {first_chars} chars; stricter retry {why}; kept the original",
+                            provider.id()
+                        );
+                        kept_original = true;
+                        text.to_string()
+                    }
+                }
+            }
+        }
+    };
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+
     let after = out.chars().count();
-    let gutted = before > 200 && after * 2 < before;
-    if gutted && !do_translate {
-        tracing::warn!("[dictation] clean-up returned {after} chars for {before}; refusing it");
-        return Err(RefineError::Gutted(
-            "Clean-up returned far less text than was dictated — keep the original.".into(),
-        ));
-    }
-    if gutted {
+    if do_translate && !kept_original && before > 200 && after * 2 < before {
+        // A translation can legitimately be shorter, so this only logs.
         tracing::warn!("[dictation] translation returned {after} chars for {before}");
     }
     tracing::info!(
-        "[dictation] {}{} via {} ({model}): {before} → {after} chars in {elapsed_ms} ms",
+        "[dictation] {}{} via {} ({model}): {before} → {after} chars in {elapsed_ms} ms{}",
         if do_refine { "refine" } else { "" },
         if do_translate { "+translate" } else { "" },
         provider.id(),
+        if kept_original {
+            ", kept the original"
+        } else {
+            ""
+        },
     );
     Ok(RefineResult {
         text: out,
         provider: provider.id().to_string(),
         model,
         elapsed_ms,
+        kept_original,
     })
+}
+
+/// The model's answer, without echoed tags, when it may replace the
+/// dictation; otherwise why not.
+fn judge(text: &str, answer: &Answer, translate: bool) -> Result<String, Rejection> {
+    if answer.truncated {
+        return Err(Rejection::Truncated);
+    }
+    let out = unwrap_answer(&answer.text);
+    match guard::check(text, &out, translate) {
+        Some(rejected) => Err(rejected),
+        None => Ok(out),
+    }
 }
