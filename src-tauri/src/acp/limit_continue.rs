@@ -936,6 +936,7 @@ pub async fn run_limit_continue(
         ),
         Err(e) => tracing::warn!("[limit-continue] failed to requeue claimed continuations: {e}"),
     }
+    crate::acp::delegation::limit_delivery::install_db(db.conn.clone());
     tokio::time::sleep(START_DELAY).await;
     catch_up::catch_up_pool_stops(&db.conn, &emitter).await;
 
@@ -1030,6 +1031,11 @@ pub async fn run_limit_continue(
                 continue_one(&db, &manager, &emitter, &data_dir, row).await;
             });
         }
+        // Results of continued delegation children owed to their parents
+        // (`delegation::limit_delivery`), each at its parent's idle moment.
+        crate::acp::delegation::limit_delivery::spawn_deliveries(
+            &db, &manager, &emitter, &data_dir,
+        );
         let wait = next
             .map(|at| (at - Utc::now()).to_std().unwrap_or_default())
             .unwrap_or(POLL)

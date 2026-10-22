@@ -293,6 +293,65 @@ pub struct DelegationTaskReport {
     pub blocked_on: Option<BlockedOn>,
 }
 
+/// `error_code` of a delegation a usage limit stopped and codeg paused (see
+/// `acp::limit_continue`): the sub-agent is continued by itself once the limit
+/// resets, and its final result reaches the parent then. NOT a failure — the
+/// report carries it with status `running`, so the parent neither retries nor
+/// re-delegates the task. Wire-stable: the frontend badge keys on it.
+pub const PAUSED_USAGE_LIMIT_CODE: &str = "paused_usage_limit";
+
+/// The outcome a delegation gets when a usage limit paused its child until
+/// `resets_at`. The message is what the parent's LLM reads: when the child
+/// goes on ("about HH:MM" in `tz`, the user's time) and that the result will
+/// arrive by itself.
+pub fn paused_usage_limit_outcome<Tz>(
+    child_conversation_id: i32,
+    resets_at: chrono::DateTime<chrono::Utc>,
+    now: chrono::DateTime<chrono::Utc>,
+    tz: &Tz,
+) -> DelegationOutcome
+where
+    Tz: chrono::TimeZone,
+    Tz::Offset: std::fmt::Display,
+{
+    DelegationOutcome::Err {
+        code: PAUSED_USAGE_LIMIT_CODE.to_string(),
+        message: paused_usage_limit_message(resets_at, now, tz),
+        child_conversation_id: Some(child_conversation_id),
+    }
+}
+
+/// See [`paused_usage_limit_outcome`]. The continuation goes out a minute or so
+/// after the reset (safety delay plus jitter), hence "about".
+pub fn paused_usage_limit_message<Tz>(
+    resets_at: chrono::DateTime<chrono::Utc>,
+    now: chrono::DateTime<chrono::Utc>,
+    tz: &Tz,
+) -> String
+where
+    Tz: chrono::TimeZone,
+    Tz::Offset: std::fmt::Display,
+{
+    let local = resets_at.with_timezone(tz);
+    let at = if local.date_naive() == now.with_timezone(tz).date_naive() {
+        local.format("%H:%M").to_string()
+    } else {
+        local.format("%a %b %-d, %H:%M").to_string()
+    };
+    let minutes = (resets_at - now).num_minutes().max(0);
+    let wait = match minutes {
+        0 => "in under a minute".to_string(),
+        m if m < 60 => format!("in about {m} min"),
+        m => format!("in about {}h {:02}m", m / 60, m % 60),
+    };
+    format!(
+        "Paused by a usage limit (not a failure). codeg continues this sub-agent by \
+         itself at about {at} ({wait}) and delivers its final result to this \
+         conversation when it finishes. Do not delegate, resume or retry this task; \
+         nothing is needed from you until the result arrives."
+    )
+}
+
 impl DelegationOutcome {
     /// Project a `DelegationError` onto the wire-stable `code` string used by
     /// the frontend and MCP companion. Keep these strings stable — they ship
@@ -325,6 +384,40 @@ impl DelegationOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paused_message_names_the_time_and_promises_delivery() {
+        use chrono::TimeZone;
+        let now = chrono::Utc.with_ymd_and_hms(2026, 10, 22, 18, 0, 0).unwrap();
+        let resets = chrono::Utc.with_ymd_and_hms(2026, 10, 22, 20, 15, 0).unwrap();
+        let msg = paused_usage_limit_message(resets, now, &chrono::Utc);
+        assert!(msg.contains("about 20:15"), "{msg}");
+        assert!(msg.contains("in about 2h 15m"), "{msg}");
+        assert!(msg.contains("not a failure"), "{msg}");
+        assert!(msg.contains("delivers its final result"), "{msg}");
+        assert!(msg.contains("Do not delegate"), "{msg}");
+
+        // In the user's zone, and with the day when it is not today there.
+        let jerusalem = chrono::FixedOffset::east_opt(3 * 3600).unwrap();
+        let tomorrow = chrono::Utc.with_ymd_and_hms(2026, 10, 23, 7, 5, 0).unwrap();
+        let msg = paused_usage_limit_message(tomorrow, now, &jerusalem);
+        assert!(msg.contains("Fri Oct 23, 10:05"), "{msg}");
+
+        let soon = paused_usage_limit_message(now, now, &chrono::Utc);
+        assert!(soon.contains("in under a minute"), "{soon}");
+
+        match paused_usage_limit_outcome(7, resets, now, &chrono::Utc) {
+            DelegationOutcome::Err {
+                code,
+                child_conversation_id,
+                ..
+            } => {
+                assert_eq!(code, PAUSED_USAGE_LIMIT_CODE);
+                assert_eq!(child_conversation_id, Some(7));
+            }
+            other => panic!("expected the paused error shape, got {other:?}"),
+        }
+    }
 
     /// The `code` strings ship to the parent LLM and to the status badge's
     /// i18n switch, and `from_err`'s comment declares them stable — so pin

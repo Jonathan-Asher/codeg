@@ -3,6 +3,7 @@
 import {
   CheckCircleIcon,
   CircleDashed,
+  CirclePause,
   Clock,
   Loader2,
   ShieldAlert,
@@ -11,6 +12,10 @@ import {
 import { useTranslations } from "next-intl"
 
 import { Badge } from "@/components/ui/badge"
+
+/** The `error_code` codeg gives a delegation a usage limit paused (see
+ *  `PAUSED_USAGE_LIMIT_CODE` in the backend's delegation types). */
+export const DELEGATION_PAUSED_CODE = "paused_usage_limit"
 
 export function StatusBadge({
   status,
@@ -59,6 +64,16 @@ export function StatusBadge({
       <Badge className="gap-1.5 rounded-full text-xs" variant="secondary">
         <CheckCircleIcon className="text-green-600" />
         {t("ok")}
+      </Badge>
+    )
+  }
+  if (errorCode === DELEGATION_PAUSED_CODE) {
+    // A usage limit stopped the sub-agent: codeg continues it by itself once
+    // the limit resets, and its result reaches the parent then. Not a failure.
+    return (
+      <Badge className="gap-1.5 rounded-full text-xs" variant="secondary">
+        <CirclePause className="text-amber-500" />
+        {t("paused")}
       </Badge>
     )
   }
