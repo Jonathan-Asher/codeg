@@ -57,7 +57,8 @@ Response `200`:
   "text": "I need to send the document to the client.",
   "provider": "groq",
   "model": "openai/gpt-oss-120b",
-  "elapsedMs": 412
+  "elapsedMs": 412,
+  "keptOriginal": false
 }
 ```
 
@@ -66,7 +67,8 @@ Response `200`:
 | `text` | string | The result, trimmed. Never empty. |
 | `provider` | string | `groq`, `cerebras`, `openai`, `anthropic`, `google`, `custom`, or `none` when both `refine` and `translate` are off (then `text` is the input, trimmed, and nothing is called). |
 | `model` | string | The model used. `cloud-translation-v2` for Google, `""` for `none`. |
-| `elapsedMs` | number | Time spent on the provider, retry included. |
+| `elapsedMs` | number | Time spent on the provider, retries included. |
+| `keptOriginal` | bool | The model's answer could not replace the dictation (see below), so `text` is the input, trimmed. A client may say so ("kept as spoken"); one that ignores the field still inserts the speaker's words. |
 
 Behaviour:
 
@@ -74,9 +76,28 @@ Behaviour:
   case is about 20.3 s, so give the request a client timeout of at least
   25 s.
 - An empty answer counts as a failure, and is retried.
-- If clean-up alone (no translation) returns less than half of a dictation
-  longer than 200 characters, the call fails rather than lose the message.
-- Google only translates: `refine: true` with Google selected is an error.
+- LLM providers get the transcript between `<dictation>` and `</dictation>`,
+  and the prompt says it is a message for someone else: never a request to
+  answer, follow or refuse. Tags the model echoes are taken off its answer.
+- The answer is then checked before it may replace the transcript. It is
+  rejected when it is empty, cut off (the provider's output limit or content
+  filter), a refusal or the model speaking as itself ("I'm sorry, but I can't
+  help with that.", in English, Hebrew and other common languages), far
+  longer than the dictation (an answer, a lecture, a note about it), or, for
+  a clean-up without translation, when it shares almost none of the
+  dictation's words or drops more than half of a dictation longer than 200
+  characters.
+- A refusal phrase only counts when the dictation does not account for it: a
+  clean-up that keeps the speaker's own "I'm sorry, I can't make it today",
+  or a translation of a dictation that itself apologises or says it can't (in
+  any of those languages), is used as it came.
+- A rejected answer gets one more try with a stricter prompt, if less than
+  9 s have passed, within what is left of 10 s. If that answer is rejected
+  too, or the try fails, the call still succeeds: `text` is the transcript as
+  it came (trimmed) and `keptOriginal` is `true`. The dictation is never
+  replaced by anything but a transformation of it.
+- Google only translates, so its answers are not checked; `refine: true`
+  with Google selected is an error.
 
 ## Errors
 
@@ -99,7 +120,7 @@ that could echo part of a key are not included.
 | Clean-up asked of Google; the provider says the model does not exist (404) | `configuration_invalid` | 422 |
 | The provider rejected the key (401/403) | `authentication_failed` | 422 |
 | Offline, timeout, rate limit (429), provider 5xx or other HTTP error | `network_error` | 500 |
-| Empty answer twice, unreadable answer, clean-up dropped most of the text | `task_execution_failed` | 500 |
+| Empty answer twice, unreadable answer, a refusal the provider reports itself (a `refusal` stop reason) | `task_execution_failed` | 500 |
 | The server's key store would not open | `io_error` | 500 |
 
 In every case the client keeps the original transcript.
@@ -184,7 +205,7 @@ its value. Returns the same view as `get_dictation_refine_settings`.
 | `custom` | Any OpenAI-compatible endpoint; endpoint and model required, key optional | none |
 
 OpenAI-compatible requests send `temperature: 0.1`, the system prompt and the
-transcript as the user message.
+transcript, between `<dictation>` tags, as the user message.
 
 ## Keys
 
