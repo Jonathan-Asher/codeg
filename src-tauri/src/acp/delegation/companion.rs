@@ -5065,13 +5065,11 @@ mod tests {
         assert!(PROGRESS_HEARTBEAT_INTERVAL <= Duration::from_secs(5 * 60));
     }
 
-    fn resolved_after(delay: Duration) -> impl std::future::Future<Output = SpawnResult> {
-        async move {
-            tokio::time::sleep(delay).await;
-            SpawnResult {
-                response: Some(ok(json!(1), json!({ "done": true }))),
-                after_relay: None,
-            }
+    async fn resolved_after(delay: Duration) -> SpawnResult {
+        tokio::time::sleep(delay).await;
+        SpawnResult {
+            response: Some(ok(json!(1), json!({ "done": true }))),
+            after_relay: None,
         }
     }
 
