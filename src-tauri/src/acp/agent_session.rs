@@ -131,7 +131,7 @@ impl HandleDispatchFrom<Agent> for SessionRouter {
 /// runtime's own router errors on it instead, which is why codeg claims the
 /// `null` ones, the shape agents actually send, before they get this far
 /// (`ClaimNullSessionIds`).
-fn dispatch_session_id(dispatch: &Dispatch) -> Option<&str> {
+pub(crate) fn dispatch_session_id(dispatch: &Dispatch) -> Option<&str> {
     let message = match dispatch {
         Dispatch::Request(message, _) | Dispatch::Notification(message) => message,
         Dispatch::Response(..) => return None,

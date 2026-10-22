@@ -72,6 +72,10 @@ const CONFIRM_GONE_POLL: Duration = Duration::from_millis(50);
 /// exited but that nobody has reaped yet never zeroes its cell.
 const SIGKILL_SETTLE: Duration = Duration::from_millis(200);
 
+/// How long a connection closed as a duplicate (`close_other_holders`) gets
+/// for its agent process to exit after the disconnect, before it is ended.
+const HOLDER_EXIT_GRACE: Duration = Duration::from_secs(3);
+
 /// What one pass of [`kill_tree_pass`] established about the target itself.
 #[derive(Debug, PartialEq, Eq)]
 enum KillPass {
@@ -1001,6 +1005,21 @@ impl ConnectionManager {
                 if speculative { " (speculative)" } else { "" }
             );
 
+            // One live process per agent session. Reuse above only matches a
+            // connection in the same working directory, so one somewhere else
+            // can still hold this session: close it — and wait until its
+            // process is gone — before a second one resumes it.
+            if let Some(sid) = session_id.as_deref() {
+                self.close_other_holders(
+                    agent_type,
+                    Some(sid),
+                    None,
+                    None,
+                    "another connection is about to resume it",
+                )
+                .await;
+            }
+
             // `spawn_agent_connection` inserts the entry into
             // `self.connections` (stamped with the session id it is reopening)
             // and registers a cleanup hook. Any spawn failure short-circuits
@@ -1538,6 +1557,98 @@ impl ConnectionManager {
             return Some(id.clone());
         }
         None
+    }
+
+    /// Keep "one conversation, one live agent session, one agent process":
+    /// close every OTHER live connection that runs agent session `session_id`
+    /// (same agent type, any working directory) or is linked to
+    /// `conversation_id`, and wait until each one's process tree is gone —
+    /// ending it if it does not exit by itself. `keep` is the connection that
+    /// stays (`None` when the caller is about to spawn one). Each one closed is
+    /// logged as a duplicate, with both sides' ids. Returns the ids it closed.
+    ///
+    /// Inside one agent process the same rule is kept by `one_session`: a
+    /// session a connection hands over is closed there.
+    pub(crate) async fn close_other_holders(
+        &self,
+        agent_type: AgentType,
+        session_id: Option<&str>,
+        conversation_id: Option<i32>,
+        keep: Option<&str>,
+        reason: &str,
+    ) -> Vec<String> {
+        if session_id.is_none() && conversation_id.is_none() {
+            return Vec::new();
+        }
+        struct Holder {
+            id: String,
+            session: Option<String>,
+            conversation: Option<i32>,
+            pid: Arc<std::sync::atomic::AtomicU32>,
+        }
+        let holders: Vec<Holder> = {
+            let connections = self.connections.lock().await;
+            let mut out = Vec::new();
+            for (id, conn) in connections.iter() {
+                if Some(id.as_str()) == keep {
+                    continue;
+                }
+                let state = conn.state.read().await;
+                if !matches!(
+                    state.status,
+                    ConnectionStatus::Connecting
+                        | ConnectionStatus::Connected
+                        | ConnectionStatus::Prompting
+                ) {
+                    continue;
+                }
+                let same_session = conn.agent_type == agent_type
+                    && session_id.is_some_and(|sid| state.represents_session(sid));
+                let same_conversation =
+                    conversation_id.is_some() && state.conversation_id == conversation_id;
+                if same_session || same_conversation {
+                    out.push(Holder {
+                        id: id.clone(),
+                        session: state
+                            .external_id
+                            .clone()
+                            .or_else(|| state.requested_session_id.clone()),
+                        conversation: state.conversation_id,
+                        pid: Arc::clone(&conn.child_pid),
+                    });
+                }
+            }
+            out
+        };
+        let show = |v: Option<&str>| v.unwrap_or("-").to_string();
+        let mut closed = Vec::new();
+        for holder in holders {
+            tracing::warn!(
+                "[ACP] duplicate session: connection {} (session {}, conversation {}) and {} \
+                 (session {}, conversation {}) hold the same conversation; closing {} so one \
+                 agent process runs it ({reason})",
+                holder.id,
+                show(holder.session.as_deref()),
+                show(holder.conversation.map(|c| c.to_string()).as_deref()),
+                keep.unwrap_or("the connection about to start"),
+                show(session_id),
+                show(conversation_id.map(|c| c.to_string()).as_deref()),
+                holder.id,
+            );
+            if self.disconnect(&holder.id).await.is_err() {
+                // Someone else removed it meanwhile; its own teardown runs.
+                continue;
+            }
+            let pid = holder.pid;
+            let _ = tokio::task::spawn_blocking(move || {
+                if !wait_for_reap(&pid, HOLDER_EXIT_GRACE) {
+                    kill_tree_and_wait(&pid);
+                }
+            })
+            .await;
+            closed.push(holder.id);
+        }
+        closed
     }
 
     /// Forwards a prompt to the connection's command channel without
@@ -5945,6 +6056,141 @@ mod tests {
         assert!(
             wait_until_dead(gpid).await,
             "grandchild {gpid} survived — the quit backstop did not kill the tree"
+        );
+        let _ = child.wait();
+    }
+
+    async fn insert_session_holder(
+        mgr: &ConnectionManager,
+        id: &str,
+        agent_type: AgentType,
+        working_dir: &str,
+        external_id: &str,
+        conversation_id: Option<i32>,
+        status: ConnectionStatus,
+    ) -> Arc<std::sync::atomic::AtomicU32> {
+        let mut conn = fake_connection(id, conversation_id);
+        conn.agent_type = agent_type;
+        {
+            let mut s = conn.state.write().await;
+            s.agent_type = agent_type;
+            s.working_dir = Some(PathBuf::from(working_dir));
+            s.external_id = Some(external_id.to_string());
+            s.status = status;
+        }
+        let pid = Arc::clone(&conn.child_pid);
+        mgr.connections.lock().await.insert(id.to_string(), conn);
+        pid
+    }
+
+    /// One agent session, one live connection: a second live connection for
+    /// the same session (reuse only matches the same working directory, so one
+    /// elsewhere can exist) is closed, the caller's stays. Session ids are per
+    /// agent type, and a connection that is already going is left to its own
+    /// teardown.
+    #[tokio::test]
+    async fn a_second_connection_for_the_same_session_is_closed_and_the_keeper_stays() {
+        let mgr = ConnectionManager::new();
+        let live = || ConnectionStatus::Connected;
+        for (id, agent, wd, ext) in [
+            ("keep", AgentType::ClaudeCode, "/a", "S"),
+            ("dup", AgentType::ClaudeCode, "/b", "S"),
+            ("other", AgentType::ClaudeCode, "/a", "T"),
+            ("codex", AgentType::Codex, "/a", "S"),
+        ] {
+            insert_session_holder(&mgr, id, agent, wd, ext, None, live()).await;
+        }
+        insert_session_holder(
+            &mgr,
+            "going",
+            AgentType::ClaudeCode,
+            "/c",
+            "S",
+            None,
+            ConnectionStatus::Disconnected,
+        )
+        .await;
+
+        let closed = mgr
+            .close_other_holders(AgentType::ClaudeCode, Some("S"), None, Some("keep"), "test")
+            .await;
+        assert_eq!(closed, vec!["dup".to_string()]);
+        let left = live_ids(&mgr).await;
+        assert_eq!(left, vec!["codex", "going", "keep", "other"]);
+    }
+
+    /// The handover shape: the conversation moved on to a new session, and a
+    /// connection still running it under its old session id is a duplicate.
+    #[tokio::test]
+    async fn a_connection_still_running_the_conversation_under_an_old_session_is_closed() {
+        let mgr = ConnectionManager::new();
+        let live = || ConnectionStatus::Prompting;
+        let claude = AgentType::ClaudeCode;
+        for (id, ext, conversation) in [("new", "F", 7), ("stale", "P", 7), ("elsewhere", "Q", 8)] {
+            insert_session_holder(&mgr, id, claude, "/a", ext, Some(conversation), live()).await;
+        }
+
+        let closed = mgr
+            .close_other_holders(claude, Some("F"), Some(7), Some("new"), "test")
+            .await;
+        assert_eq!(closed, vec!["stale".to_string()]);
+        assert_eq!(live_ids(&mgr).await, vec!["elsewhere", "new"]);
+    }
+
+    /// Before a spawn there is no keeper: every live holder of the session goes.
+    #[tokio::test]
+    async fn before_a_resume_every_live_holder_of_the_session_is_closed() {
+        let mgr = ConnectionManager::new();
+        insert_session_holder(
+            &mgr,
+            "x",
+            AgentType::ClaudeCode,
+            "/b",
+            "S",
+            None,
+            ConnectionStatus::Connected,
+        )
+        .await;
+        let closed = mgr
+            .close_other_holders(AgentType::ClaudeCode, Some("S"), None, None, "test")
+            .await;
+        assert_eq!(closed, vec!["x".to_string()]);
+        assert!(live_ids(&mgr).await.is_empty());
+        // Nothing to match on: nothing happens.
+        assert!(mgr
+            .close_other_holders(AgentType::ClaudeCode, None, None, None, "test")
+            .await
+            .is_empty());
+    }
+
+    /// A duplicate whose agent process does not exit after the disconnect (its
+    /// command channel is dead here, so nothing graceful can reach it) is
+    /// ended, its whole tree with it, before `close_other_holders` returns.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_duplicate_whose_process_does_not_exit_is_ended() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (mut child, gpid) = spawn_process_tree(&dir.path().join("g.pid")).await;
+        let mgr = ConnectionManager::new();
+        let pid = insert_session_holder(
+            &mgr,
+            "dup",
+            AgentType::ClaudeCode,
+            "/b",
+            "S",
+            None,
+            ConnectionStatus::Connected,
+        )
+        .await;
+        pid.store(child.id(), std::sync::atomic::Ordering::SeqCst);
+
+        let closed = mgr
+            .close_other_holders(AgentType::ClaudeCode, Some("S"), None, None, "test")
+            .await;
+        assert_eq!(closed, vec!["dup".to_string()]);
+        assert!(
+            wait_until_dead(gpid).await,
+            "grandchild {gpid} survived — the duplicate's tree was not ended"
         );
         let _ = child.wait();
     }
