@@ -279,12 +279,6 @@ struct SurfacedBlock {
     at: Instant,
 }
 
-/// A terminal delegation result retained so `get_delegation_status` /
-/// `cancel_delegation` can answer after the lifecycle resolved the task.
-/// Parent-scoped, FIFO-evicted once the parent's retained result text exceeds
-/// `PendingInner::completed_cap_bytes`, and dropped wholesale when the parent
-/// connection tears down.
-#[derive(Clone)]
 /// What [`DelegationBroker::complete_call`] settled: enough of the running task
 /// for a caller that keeps track of it past the broker (the usage-limit pause,
 /// `limit_delivery`) to label the parent's card later.
@@ -295,6 +289,12 @@ pub struct SettledDelegation {
     pub task_preview: String,
 }
 
+/// A terminal delegation result retained so `get_delegation_status` /
+/// `cancel_delegation` can answer after the lifecycle resolved the task.
+/// Parent-scoped, FIFO-evicted once the parent's retained result text exceeds
+/// `PendingInner::completed_cap_bytes`, and dropped wholesale when the parent
+/// connection tears down.
+#[derive(Clone)]
 struct CompletedTask {
     /// Set for a delegation a usage limit paused (and, once its continued
     /// child finished, for the result that replaced the pause). The parent
@@ -4819,6 +4819,7 @@ impl ChildStatusLookup for DbChildStatusLookup {
                 .ok()
                 .flatten()
                 .map(|f| f.path);
+        let paused_until = paused_until_of(&summary);
         Some(ChildResumeContext {
             child_conversation_id: summary.id,
             status: task_status_from_row(&summary.status),
@@ -4828,7 +4829,7 @@ impl ChildStatusLookup for DbChildStatusLookup {
             external_id: summary.external_id,
             folder_id: summary.folder_id,
             working_dir,
-            paused_until: paused_until_of(&summary),
+            paused_until,
             title: summary.title,
         })
     }
