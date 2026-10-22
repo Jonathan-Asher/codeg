@@ -26,6 +26,7 @@ import {
   SESSION_ACTIVITY_LABEL_KEYS,
   type SessionActivity,
 } from "@/lib/session-activity"
+import { runningKindKey } from "@/lib/running-work"
 import { useConversationBackground } from "@/stores/conversation-background-store"
 import { continueInterruptedSession } from "@/lib/session-continue"
 import {
@@ -49,29 +50,13 @@ const ATTENTION_HINT_KEYS = {
   plan_approval: "attentionPlanApproval",
 } as const satisfies Record<AttentionKind, string>
 
-/** The i18n key (under `Folder.sessionActivity`) naming each background task
- *  kind. A kind this client doesn't know reads as a plain "Task". */
-const TASK_KIND_KEYS = {
-  agent: "taskKind.agent",
-  shell: "taskKind.shell",
-  monitor: "taskKind.monitor",
-  workflow: "taskKind.workflow",
-  task: "taskKind.task",
-} as const
-
-function taskKindKey(kind: string) {
-  return (
-    TASK_KIND_KEYS[kind as keyof typeof TASK_KIND_KEYS] ?? TASK_KIND_KEYS.task
-  )
-}
-
 /**
- * What a session runs in the background, as tooltip text: the state on the
- * first line ("Background · 2 tasks", or "Working — woken by its background
- * work" while the agent runs a turn of its own), then one line per running
- * task the way the session's task strip names it ("Shell: Wait for runs…"),
- * and "+N more" for tasks past the listed few. Empty when there is nothing
- * in the background to describe.
+ * What a session has running, as tooltip text: the state on the first line
+ * ("Background · 2 tasks", "Working · 3 running", or "Working — woken by its
+ * background work" while the agent runs a turn of its own), then one line per
+ * running item named the way the conversation's Running panel names it
+ * ("Shell: Wait for runs…", "Sub-agent: Explore: find the bug"), and "+N
+ * more" past the listed few. Empty when nothing is running beside the turn.
  */
 export function useBackgroundTitle(
   activity: SessionActivity,
@@ -79,16 +64,24 @@ export function useBackgroundTitle(
   heldBackgroundTasks: number | null | undefined
 ): string {
   const t = useTranslations("Folder.sessionActivity")
-  if (activity !== "background" && !background?.out_of_turn) return ""
   const count = backgroundTaskTotal(heldBackgroundTasks, background)
+  const workingWithItems = activity === "working" && count > 0
+  if (
+    activity !== "background" &&
+    !background?.out_of_turn &&
+    !workingWithItems
+  )
+    return ""
   const lines: string[] = [
     activity === "background"
       ? t("backgroundBadge", { count })
-      : t("workingOutOfTurn"),
+      : background?.out_of_turn
+        ? t("workingOutOfTurn")
+        : t("workingWithItems", { count }),
   ]
   const tasks = background?.tasks ?? []
   for (const task of tasks) {
-    const kind = t(taskKindKey(task.kind))
+    const kind = t(runningKindKey(task.kind))
     lines.push(task.label ? `${kind}: ${task.label}` : kind)
   }
   const unlisted = (background?.task_count ?? 0) - tasks.length

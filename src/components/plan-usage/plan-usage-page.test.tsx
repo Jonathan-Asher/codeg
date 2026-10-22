@@ -49,6 +49,9 @@ const manage = vi.hoisted(() => {
     usagePoolSetEnabled: vi.fn<(name: string, enabled: boolean) => Change>(() =>
       Promise.resolve({ applied: "live" })
     ),
+    usagePoolSetPreferred: vi.fn<(name: string | null) => Change>(() =>
+      Promise.resolve({ applied: "live" })
+    ),
     usagePoolRemove: vi.fn<(name: string) => Change>(() =>
       Promise.resolve({ applied: "restarting" })
     ),
@@ -780,6 +783,66 @@ describe("PlanUsagePage account pool management", () => {
     user = await openActions("spare")
     await user.click(screen.getByRole("menuitem", { name: "Turn on" }))
     expect(manage.usagePoolSetEnabled).toHaveBeenCalledWith("spare", true)
+  })
+
+  it("prefers another account in one tap while the pool prefers one", async () => {
+    await mountManaged()
+    expect(
+      card("Claude Code").querySelector('[data-slot="pool-routing"]')
+    ).toHaveTextContent("Routing: new requests go to primary first")
+    const user = await openActions("backup")
+    await user.click(screen.getByRole("menuitem", { name: "Make preferred" }))
+    expect(manage.usagePoolSetPreferred).toHaveBeenCalledWith("backup")
+    expect(screen.queryByRole("alertdialog")).toBeNull()
+  })
+
+  it("asks before switching an automatic pool to a preferred account", async () => {
+    manage.usagePoolManageInfo.mockImplementation(() =>
+      Promise.resolve({ available: true, reload: "idle" })
+    )
+    const automatic = pool({
+      routing_mode: "automatic",
+      preferred_account: null,
+    })
+    automatic.accounts = automatic.accounts.map((a) => ({
+      ...a,
+      preferred: false,
+    }))
+    getPlanUsage.mockResolvedValue(
+      report([claudeSnapshot()], { pool: automatic })
+    )
+    await mount()
+    await screen.findByRole("button", { name: "Add account" })
+    expect(
+      card("Claude Code").querySelector('[data-slot="pool-routing"]')
+    ).toHaveTextContent("Routing: automatic")
+
+    const user = await openActions("backup")
+    await user.click(screen.getByRole("menuitem", { name: "Make preferred" }))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(dialog).toHaveTextContent('routing is "automatic" now')
+    expect(manage.usagePoolSetPreferred).not.toHaveBeenCalled()
+    await user.click(
+      within(dialog).getByRole("button", { name: "Prefer backup" })
+    )
+    expect(manage.usagePoolSetPreferred).toHaveBeenCalledWith("backup")
+  })
+
+  it("goes back to automatic, and won't prefer an account that is off", async () => {
+    await mountManaged()
+    let user = await openActions("primary")
+    expect(
+      screen.queryByRole("menuitem", { name: "Make preferred" })
+    ).toBeNull()
+    await user.click(
+      screen.getByRole("menuitem", { name: "Use automatic routing" })
+    )
+    expect(manage.usagePoolSetPreferred).toHaveBeenCalledWith(null)
+
+    user = await openActions("spare")
+    expect(
+      screen.getByRole("menuitem", { name: "Make preferred" })
+    ).toHaveAttribute("aria-disabled", "true")
   })
 
   it("says when a change waits for the pool to restart", async () => {

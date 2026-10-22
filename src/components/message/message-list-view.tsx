@@ -45,7 +45,18 @@ import { ReplyArtifacts } from "./reply-artifacts"
 import { UserResourceLinks } from "./user-resource-links"
 import { UserImageAttachments } from "./user-image-attachments"
 import { AgentPlanOverlay } from "@/components/chat/agent-plan-overlay"
-import { SubAgentOverlay } from "@/components/chat/sub-agent-overlay"
+import {
+  SubAgentOverlay,
+  type RunningItemTarget,
+  type RunningOutcome,
+} from "@/components/chat/sub-agent-overlay"
+import { useConversationBackground } from "@/stores/conversation-background-store"
+import {
+  findToolCall,
+  findToolCallMentioning,
+  partsContainToolCall,
+  revealToolCallCard,
+} from "@/lib/running-work"
 import { SessionViewerHost } from "@/components/message/session-viewer-host"
 import { normalizeToolName } from "@/lib/tool-call-normalization"
 import { parseResumeTaskId } from "@/lib/codeg-mcp-tool"
@@ -94,7 +105,13 @@ import {
   buildPlanKey,
   extractLatestPlanEntriesFromMessages,
 } from "@/lib/agent-plan"
-import type { AgentType, ConnectionStatus, MessageTurn } from "@/lib/types"
+import type {
+  AgentType,
+  AsyncTaskRecord,
+  BackgroundTaskBrief,
+  ConnectionStatus,
+  MessageTurn,
+} from "@/lib/types"
 import { copyTextToClipboard, cn } from "@/lib/utils"
 import { VirtualizedMessageThread } from "@/components/message/virtualized-message-thread"
 import { SelectionActionBubble } from "@/components/message/selection-action-bubble"
@@ -143,6 +160,10 @@ interface MessageListViewProps {
    *  way (see `lib/background-idle.ts`). The live stats row then says so
    *  instead of "Streaming". */
   heldBackgroundTasks?: number | null
+  /** The adapter's background tasks (shells, monitors, workflows): the
+   *  Running panel offers their output and stop. */
+  asyncTasks?: AsyncTaskRecord[]
+  onStopAsyncTask?: (taskId: string) => Promise<boolean>
   isActive?: boolean
   sendSignal?: number
   detailLoading?: boolean
@@ -454,10 +475,6 @@ export function advanceReplyFold(
 // Module-scope so the reference is stable across renders — lets the memoized
 // VirtualizedMessageThread bail out when `items` is unchanged.
 const getThreadItemKey = (item: ThreadRenderItem) => item.key
-
-// Stable empty reference so the SubAgentOverlay memo can bail out when there
-// are no delegations in the last reply.
-const EMPTY_DELEGATIONS: DelegationCardSource[] = []
 
 // Stable empty reference so the navigator memo / equality checks don't churn
 // when a conversation has no user messages.
@@ -1290,6 +1307,8 @@ export function MessageListView({
   agentType,
   connStatus,
   heldBackgroundTasks = null,
+  asyncTasks,
+  onStopAsyncTask,
   isActive = true,
   sendSignal = 0,
   detailLoading = false,
@@ -2161,32 +2180,76 @@ export function MessageListView({
       ? `plan-${liveMessage.id}`
       : `plan-history-${conversationId}`
 
-  // Sub-agents delegated in the LAST agent reply. Scan the merged timeline
-  // backward for the most recent assistant turn (the live streaming turn is
-  // merged in too, so this covers both live and historical), and pull its
-  // `delegate_to_agent` tool calls. The overlay shows only while the last reply
-  // carries delegation cards — a newer non-delegating reply clears it.
-  const lastAssistantGroup = useMemo(() => {
-    let group: ResolvedMessageGroup | null = null
-    for (let i = threadItems.length - 1; i >= 0; i -= 1) {
-      const item = threadItems[i]
-      if (item.kind === "turn" && item.group.role === "assistant") {
-        group = item.group
-        break
+  // Everything running for the session — sub-agents of every kind and
+  // background tasks — from the server's list, the one the sidebar's
+  // indicator reads (`acp::background_status`). The panel finds each item in
+  // the thread on click, against the newest thread (it changes every token).
+  const background = useConversationBackground(
+    session?.dbConversationId ?? (conversationId > 0 ? conversationId : null)
+  )
+  const locateRunningItem = useCallback(
+    (item: BackgroundTaskBrief): RunningItemTarget => {
+      const items = threadItemsRef.current
+      let toolCallId = item.tool_call_id ?? null
+      for (let i = items.length - 1; i >= 0 && toolCallId == null; i -= 1) {
+        const entry = items[i]
+        if (entry.kind === "turn") {
+          toolCallId = findToolCallMentioning(entry.group.parts, item.id)
+        }
+      }
+      let delegation: DelegationCardSource | null = null
+      if (item.kind === "delegation" && toolCallId) {
+        for (let i = items.length - 1; i >= 0 && !delegation; i -= 1) {
+          const entry = items[i]
+          if (entry.kind !== "turn") continue
+          delegation =
+            extractDelegationSources(entry.group.parts).find(
+              (source) => source.parentToolUseId === toolCallId
+            ) ?? null
+        }
+        // Not in the loaded thread (an older page): the live binding alone
+        // still resolves the child conversation.
+        delegation ??= {
+          parentToolUseId: toolCallId,
+          taskIdHint: item.id,
+          input: null,
+          output: null,
+          errorText: null,
+          state: "input-available",
+          meta: null,
+        }
+      }
+      return { toolCallId, delegation }
+    },
+    []
+  )
+  const runningOutcome = useCallback(
+    (item: BackgroundTaskBrief): RunningOutcome => {
+      const target = item.tool_call_id
+      if (!target) return "done"
+      for (const entry of threadItemsRef.current) {
+        if (entry.kind !== "turn") continue
+        const call = findToolCall(entry.group.parts, target)
+        if (call) return call.state === "output-error" ? "failed" : "done"
+      }
+      return "done"
+    },
+    []
+  )
+  const jumpToToolCall = useCallback((toolCallId: string) => {
+    const items = threadItemsRef.current
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      const entry = items[i]
+      if (
+        entry.kind === "turn" &&
+        partsContainToolCall(entry.group.parts, toolCallId)
+      ) {
+        scrollApiRef.current?.scrollToIndex(i, { align: "start" })
+        revealToolCallCard(selectionBoxRef.current, toolCallId)
+        return
       }
     }
-    return group
-  }, [threadItems])
-  const lastAssistantDelegations = useMemo(
-    () =>
-      lastAssistantGroup
-        ? extractDelegationSources(lastAssistantGroup.parts)
-        : EMPTY_DELEGATIONS,
-    [lastAssistantGroup]
-  )
-  const subAgentOverlayKey = lastAssistantGroup
-    ? `subagents-${lastAssistantGroup.id}`
-    : `subagents-history-${conversationId}`
+  }, [])
 
   // --- Message navigator panel ------------------------------------------------
   // Collapse state is owned here (not in the panel) so the expensive per-file
@@ -2459,9 +2522,13 @@ export function MessageListView({
             isStreaming={connStatus === "prompting"}
           />
           <SubAgentOverlay
-            key={subAgentOverlayKey}
-            delegations={lastAssistantDelegations}
-            overlayKey={subAgentOverlayKey}
+            key={`running-${conversationId}`}
+            background={background}
+            asyncTasks={asyncTasks}
+            onStopAsyncTask={onStopAsyncTask}
+            locate={locateRunningItem}
+            onJumpToToolCall={jumpToToolCall}
+            outcomeOf={runningOutcome}
           />
         </div>
         <SelectionActionBubble

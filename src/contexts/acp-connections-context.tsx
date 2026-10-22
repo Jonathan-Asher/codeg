@@ -5455,7 +5455,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         case "async_task": {
           // JetBrains AIR async-task delta (claude only) — Claude's background
           // shells / workflows / monitors. Merged into the connection's task
-          // table; the live rows render in `AsyncTaskStrip` under the composer.
+          // table; the live rows render in the transcript's Running panel.
           dispatch({
             type: "ASYNC_TASK",
             contextKey,

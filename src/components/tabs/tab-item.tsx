@@ -183,9 +183,14 @@ export const TabItem = memo(function TabItem({
   // Live background activity the review-status dot can't show: the agent
   // running a turn of its own, or idle while its background tasks run.
   const background = useConversationBackground(conversationId)
+  // A sub-agent the turn waits for is part of the turn, not background work.
+  const besideTurn = background
+    ? background.task_count -
+      (background.tasks ?? []).filter((task) => task.kind === "subagent").length
+    : 0
   const dotActivity = background?.out_of_turn
     ? "working"
-    : background && (background.task_count > 0 || background.held_open)
+    : background && (besideTurn > 0 || background.held_open)
       ? "background"
       : null
   const dotTitle = useBackgroundTitle(dotActivity ?? "idle", background, null)

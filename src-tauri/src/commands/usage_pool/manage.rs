@@ -1,9 +1,11 @@
 //! Managing the account pool's accounts from codeg: add one, sign a failed
-//! one in again, rename, switch off and on, and remove.
+//! one in again, rename, switch off and on, choose the preferred one, and
+//! remove.
 //!
 //! Everything goes through maxpool's own tools — its CLI (`login`, `rename`,
-//! `remove`) and, for the on/off switch it has no command for, its own config
-//! module's `atomicConfigUpdate` — always pointed at the config codeg reads
+//! `remove`) and, for the on/off switch and the routing it has no command
+//! for, its own config module's `atomicConfigUpdate` (the writer its TUI
+//! uses) — always pointed at the config codeg reads
 //! (`MAXPOOL_CONFIG`). codeg never parses and rewrites `maxpool.json` itself:
 //! the file holds every account's single-use refresh token, and maxpool's
 //! writers are the ones that know how not to lose one.
@@ -20,8 +22,10 @@
 //! # When the running pool sees a change
 //!
 //! The server re-reads its config every 15 s and picks up new accounts, new
-//! credentials (which also revive one whose refresh had died) and the
-//! enabled flag live. It does NOT drop a removed account or rename one: those
+//! credentials (which also revive one whose refresh had died), the enabled
+//! flag and the routing live. A new preferred account takes every request
+//! routed after that re-read; requests already running finish where they
+//! are. It does NOT drop a removed account or rename one: those
 //! need the server restarted, which its service manager does after `SIGHUP`
 //! (maxpool's reload trigger when it runs headless: it drains in-flight token
 //! refreshes, persists, and exits for a fresh start). codeg sends it only when
@@ -548,12 +552,16 @@ fn config_module(bin: &Path) -> Option<PathBuf> {
     module.is_file().then_some(module)
 }
 
-pub(crate) async fn set_enabled(name: &str, enabled: bool) -> Result<PoolChange, AppCommandError> {
-    let pool = Maxpool::locate()?;
-    let name = existing_account(name).await?;
+/// Run one of the scripts above against maxpool's config module; its exit
+/// code.
+async fn config_update(
+    pool: &Maxpool,
+    script: &str,
+    env: &[(&str, &str)],
+) -> Result<Option<i32>, AppCommandError> {
     let module = config_module(&pool.bin).ok_or_else(|| {
         AppCommandError::dependency_missing(
-            "This maxpool install doesn't expose the config module codeg switches accounts with.",
+            "This maxpool install doesn't expose the config module codeg changes the pool with.",
         )
     })?;
     let node = crate::commands::acp::resolve_command_on_path("node").ok_or_else(|| {
@@ -561,11 +569,10 @@ pub(crate) async fn set_enabled(name: &str, enabled: bool) -> Result<PoolChange,
     })?;
     let mut command = crate::process::tokio_command(node);
     command
-        .args(["--input-type=module", "-e", SET_ENABLED_SCRIPT])
+        .args(["--input-type=module", "-e", script])
         .envs(pool.env())
         .env("CODEG_MAXPOOL_CONFIG_MODULE", &module)
-        .env("CODEG_MAXPOOL_ACCOUNT", &name)
-        .env("CODEG_MAXPOOL_ENABLED", if enabled { "1" } else { "0" })
+        .envs(env.iter().copied())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -578,7 +585,22 @@ pub(crate) async fn set_enabled(name: &str, enabled: bool) -> Result<PoolChange,
             )
         })?
         .map_err(AppCommandError::io)?;
-    match status.code() {
+    Ok(status.code())
+}
+
+pub(crate) async fn set_enabled(name: &str, enabled: bool) -> Result<PoolChange, AppCommandError> {
+    let pool = Maxpool::locate()?;
+    let name = existing_account(name).await?;
+    let code = config_update(
+        &pool,
+        SET_ENABLED_SCRIPT,
+        &[
+            ("CODEG_MAXPOOL_ACCOUNT", name.as_str()),
+            ("CODEG_MAXPOOL_ENABLED", if enabled { "1" } else { "0" }),
+        ],
+    )
+    .await?;
+    match code {
         Some(0) => {
             tracing::info!(
                 "[usage-pool] switched a pool account {} from codeg",
@@ -595,6 +617,109 @@ pub(crate) async fn set_enabled(name: &str, enabled: bool) -> Result<PoolChange,
         Some(4) => Err(AppCommandError::not_found(format!(
             "The pool's config has no account named \"{name}\"."
         ))),
+        _ => Err(AppCommandError::task_execution_failed(
+            "maxpool's config update failed.",
+        )),
+    }
+}
+
+/// Point the pool's routing at `name` (`routing.mode = "preferred"`), or back
+/// to automatic balancing (`None`), the way maxpool's TUI does: the one
+/// `routing` object in its config, which the running server applies on its
+/// next re-read. maxpool prefers only an enabled Claude account; the script
+/// refuses any other rather than leave a choice the server would drop.
+const SET_PREFERRED_SCRIPT: &str = r#"
+const { pathToFileURL } = await import('node:url');
+const mod = await import(pathToFileURL(process.env.CODEG_MAXPOOL_CONFIG_MODULE).href);
+if (typeof mod.atomicConfigUpdate !== 'function') process.exit(3);
+const name = process.env.CODEG_MAXPOOL_ACCOUNT || '';
+class Refused extends Error {
+  constructor(code) { super('refused'); this.code = code; }
+}
+try {
+  await mod.atomicConfigUpdate((config) => {
+    if (!name) {
+      config.routing = { ...(config.routing || {}), mode: 'automatic', preferredAccount: null };
+      return;
+    }
+    const account = (config.accounts || []).find((a) => a.name === name);
+    if (!account) throw new Refused(4);
+    if (account.enabled === false || account.type === 'provider') throw new Refused(5);
+    config.routing = { ...(config.routing || {}), mode: 'preferred', preferredAccount: name };
+  });
+} catch (error) {
+  process.exit(error instanceof Refused ? error.code : 1);
+}
+process.exit(0);
+"#;
+
+/// Make `name` the account the pool sends new requests to first, or (`None`)
+/// go back to automatic balancing.
+pub(crate) async fn set_preferred(name: Option<&str>) -> Result<PoolChange, AppCommandError> {
+    let pool = Maxpool::locate()?;
+    let name = match name.map(str::trim).filter(|n| !n.is_empty()) {
+        Some(name) => {
+            let reading = super::refresh(Duration::from_secs(5))
+                .await
+                .ok_or_else(no_pool)?;
+            let account = reading
+                .accounts
+                .iter()
+                .find(|a| a.name == name)
+                .ok_or_else(|| {
+                    AppCommandError::not_found(format!("The pool has no account named \"{name}\"."))
+                })?;
+            if account.provider {
+                return Err(AppCommandError::invalid_input(
+                    "The pool can only prefer a Claude subscription account.",
+                ));
+            }
+            if !account.enabled {
+                return Err(AppCommandError::invalid_input(format!(
+                    "Switch \"{name}\" on before making it the preferred account."
+                )));
+            }
+            Some(account.name.clone())
+        }
+        None => None,
+    };
+    let change = set_preferred_with(&pool, name.as_deref()).await?;
+    tracing::info!(
+        "[usage-pool] {} from codeg",
+        if name.is_some() {
+            "set the pool's preferred account"
+        } else {
+            "set the pool's routing to automatic"
+        }
+    );
+    refresh_after_sync();
+    Ok(change)
+}
+
+async fn set_preferred_with(
+    pool: &Maxpool,
+    name: Option<&str>,
+) -> Result<PoolChange, AppCommandError> {
+    let code = config_update(
+        pool,
+        SET_PREFERRED_SCRIPT,
+        &[("CODEG_MAXPOOL_ACCOUNT", name.unwrap_or(""))],
+    )
+    .await?;
+    match code {
+        Some(0) => Ok(PoolChange {
+            applied: PoolApply::Live,
+        }),
+        Some(3) => Err(AppCommandError::dependency_missing(
+            "This maxpool version can't be updated from codeg.",
+        )),
+        Some(4) => Err(AppCommandError::not_found(format!(
+            "The pool's config has no account named \"{}\".",
+            name.unwrap_or_default()
+        ))),
+        Some(5) => Err(AppCommandError::invalid_input(
+            "The pool can only prefer an enabled Claude subscription account.",
+        )),
         _ => Err(AppCommandError::task_execution_failed(
             "maxpool's config update failed.",
         )),
@@ -834,6 +959,12 @@ pub async fn usage_pool_set_enabled(
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn usage_pool_set_preferred(name: Option<String>) -> Result<PoolChange, AppCommandError> {
+    set_preferred(name.as_deref()).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn usage_pool_remove(name: String) -> Result<PoolChange, AppCommandError> {
     remove(&name).await
 }
@@ -980,6 +1111,197 @@ esac"#;
             config: dir.path().join("maxpool.json"),
         };
         assert!(login_start_with(&pool, None).await.is_err());
+    }
+
+    /// A config module with maxpool's `atomicConfigUpdate` contract: load the
+    /// JSON at `MAXPOOL_CONFIG`, hand it to the updater, write it back with
+    /// the generation bumped — and write nothing when the updater throws.
+    const FAKE_CONFIG_MODULE: &str = r#"
+import { readFileSync, writeFileSync } from 'node:fs';
+export async function atomicConfigUpdate(updater) {
+  const path = process.env.MAXPOOL_CONFIG;
+  const config = JSON.parse(readFileSync(path, 'utf8'));
+  const result = await updater(config);
+  config._generation = (Number(config._generation) || 0) + 1;
+  writeFileSync(path, JSON.stringify(config, null, 2));
+  return result === undefined ? config : result;
+}
+"#;
+
+    /// A maxpool install whose `config.js` is the fake module above, and its
+    /// config with `alpha` (on), `beta` (switched off) and a GLM provider.
+    fn fake_config_pool(dir: &Path) -> Option<Maxpool> {
+        crate::commands::acp::resolve_command_on_path("node")?;
+        let src = dir.join("src");
+        std::fs::create_dir(&src).unwrap();
+        std::fs::write(src.join("index.js"), "").unwrap();
+        std::fs::write(src.join("config.js"), FAKE_CONFIG_MODULE).unwrap();
+        std::fs::write(src.join("package.json"), r#"{"type":"module"}"#).unwrap();
+        let config = dir.join("maxpool.json");
+        std::fs::write(
+            &config,
+            serde_json::json!({
+                "proxy": { "port": 3466, "apiKey": "not-a-real-key" },
+                "routing": { "mode": "automatic", "preferredAccount": null },
+                "accounts": [
+                    { "name": "alpha", "type": "oauth", "refreshToken": "fake-r1" },
+                    { "name": "beta", "type": "oauth", "enabled": false, "refreshToken": "fake-r2" },
+                    { "name": "glm", "type": "provider" }
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        Some(Maxpool {
+            bin: src.join("index.js"),
+            config,
+        })
+    }
+
+    fn routing_of(pool: &Maxpool) -> (serde_json::Value, serde_json::Value) {
+        let config: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&pool.config).unwrap()).unwrap();
+        // Every account's credentials stay as they were.
+        assert_eq!(config["accounts"][0]["refreshToken"], "fake-r1");
+        assert_eq!(config["accounts"][1]["refreshToken"], "fake-r2");
+        (
+            config["routing"]["mode"].clone(),
+            config["routing"]["preferredAccount"].clone(),
+        )
+    }
+
+    #[tokio::test]
+    async fn preferring_an_account_writes_maxpools_routing() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(pool) = fake_config_pool(dir.path()) else {
+            eprintln!("node isn't on PATH; skipping");
+            return;
+        };
+        let change = set_preferred_with(&pool, Some("alpha")).await.unwrap();
+        assert_eq!(change.applied, PoolApply::Live);
+        assert_eq!(routing_of(&pool), ("preferred".into(), "alpha".into()));
+
+        // Back to automatic balancing.
+        set_preferred_with(&pool, None).await.unwrap();
+        assert_eq!(
+            routing_of(&pool),
+            ("automatic".into(), serde_json::Value::Null)
+        );
+    }
+
+    #[tokio::test]
+    async fn only_an_enabled_claude_account_can_be_preferred() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(pool) = fake_config_pool(dir.path()) else {
+            eprintln!("node isn't on PATH; skipping");
+            return;
+        };
+        for name in ["beta", "glm", "nobody"] {
+            assert!(
+                set_preferred_with(&pool, Some(name)).await.is_err(),
+                "{name}"
+            );
+        }
+        // Nothing was written for a refused choice.
+        let config: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&pool.config).unwrap()).unwrap();
+        assert!(config.get("_generation").is_none());
+        assert_eq!(
+            routing_of(&pool),
+            ("automatic".into(), serde_json::Value::Null)
+        );
+    }
+
+    /// The live pickup against a REAL maxpool server with its own config and
+    /// port: after the routing change its next config re-read reports the new
+    /// preferred account as the one serving. Opt-in: point
+    /// `CODEG_TEST_MAXPOOL_SRC` at a maxpool `src/` directory.
+    #[tokio::test]
+    async fn a_running_maxpool_picks_the_preferred_account_up_live() {
+        let Some(src) = std::env::var_os("CODEG_TEST_MAXPOOL_SRC").map(PathBuf::from) else {
+            return;
+        };
+        let Some(node) = crate::commands::acp::resolve_command_on_path("node") else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let far = (chrono::Utc::now().timestamp() + 365 * 86_400) * 1000;
+        let account = |name: &str| {
+            serde_json::json!({
+                "name": name, "type": "oauth", "source": "login",
+                "accountUuid": uuid::Uuid::new_v4().to_string(),
+                "accessToken": format!("fake-a-{name}"),
+                "refreshToken": format!("fake-r-{name}"),
+                "expiresAt": far
+            })
+        };
+        let config = dir.path().join("maxpool.json");
+        std::fs::write(
+            &config,
+            serde_json::json!({
+                "proxy": { "port": port, "host": "127.0.0.1", "apiKey": "mp-test-key-not-secret" },
+                "upstream": "http://127.0.0.1:9",
+                "preventSleep": false, "updateCheck": false, "autoUpdate": false,
+                "quotaProbeSeconds": 0,
+                "sync": { "accountsIntervalMs": 1000 },
+                "routing": { "mode": "preferred", "preferredAccount": "primary" },
+                "accounts": [account("primary"), account("backup")]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let mut server = crate::process::tokio_command(&node)
+            .arg(src.join("index.js"))
+            .arg("server")
+            .env("MAXPOOL_CONFIG", &config)
+            .env("MAXPOOL_DISABLE_QUOTA_PROBE", "1")
+            .env("MAXPOOL_DISABLE_SLEEP_GUARD", "1")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let client = reqwest::Client::new();
+        let status = || async {
+            let response = client
+                .get(format!("http://127.0.0.1:{port}/maxpool/status"))
+                .header("x-api-key", "mp-test-key-not-secret")
+                .send()
+                .await
+                .ok()?;
+            response.json::<serde_json::Value>().await.ok()
+        };
+        let wait_for = |want: &'static str| async move {
+            for _ in 0..60 {
+                if let Some(value) = status().await {
+                    if value["routing"]["preferredAccount"] == want {
+                        return Some(value);
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            None
+        };
+        assert!(wait_for("primary").await.is_some(), "the test pool came up");
+
+        let pool = Maxpool {
+            bin: src.join("index.js"),
+            config: config.clone(),
+        };
+        set_preferred_with(&pool, Some("backup")).await.unwrap();
+        let value = wait_for("backup")
+            .await
+            .expect("picked up without a restart");
+        assert_eq!(value["routing"]["mode"], "preferred");
+        // New requests route to it from here: the pool serves from it now.
+        assert_eq!(value["currentAccount"], "backup");
+        let _ = server.kill().await;
     }
 
     #[test]

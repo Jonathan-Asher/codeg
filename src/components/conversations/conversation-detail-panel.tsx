@@ -2757,6 +2757,14 @@ const ConversationTabView = memo(function ConversationTabView({
         agentType={selectedAgent}
         connStatus={connStatus}
         heldBackgroundTasks={awaitingBackground ? heldBackgroundTasks : null}
+        asyncTasks={conn.asyncTasks}
+        onStopAsyncTask={
+          // Owners of a live connection only — same gate as the failure
+          // actions: a viewer has no connection to send the stop on.
+          conn.connectionId !== null && !conn.isViewer
+            ? handleStopAsyncTask
+            : undefined
+        }
         isActive={isActive}
         sendSignal={sendSignal}
         detailLoading={detailLoading}
@@ -2993,14 +3001,6 @@ const ConversationTabView = memo(function ConversationTabView({
       claudeApiRetry={conn.claudeApiRetry}
       sessionFailures={conn.sessionFailures}
       onSessionFailureDismiss={handleSessionFailureDismiss}
-      asyncTasks={conn.asyncTasks}
-      onStopAsyncTask={
-        // Owners of a live connection only — same gate as the failure actions:
-        // a viewer has no connection to send the stop on.
-        conn.connectionId !== null && !conn.isViewer
-          ? handleStopAsyncTask
-          : undefined
-      }
       pendingPermission={conn.pendingPermission}
       pendingQuestion={conn.pendingQuestion}
       pendingAskQuestion={conn.pendingAskQuestion}

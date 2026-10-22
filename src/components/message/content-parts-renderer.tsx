@@ -2276,6 +2276,19 @@ const TextPart = memo(function TextPart({
   )
 })
 
+const JUMP_TARGET_CLASS =
+  "rounded-lg transition-shadow duration-300 data-[jump-highlight=true]:ring-2 data-[jump-highlight=true]:ring-primary/50"
+
+/** The ids of the calls a tool group folds together, space-separated. */
+function toolGroupIds(
+  part: Extract<AdaptedContentPart, { type: "tool-group" }>
+): string | undefined {
+  const ids = part.items
+    .map((item) => (item.type === "tool-call" ? item.toolCallId : null))
+    .filter((id): id is string => Boolean(id))
+  return ids.length > 0 ? ids.join(" ") : undefined
+}
+
 const ToolCallPart = memo(function ToolCallPart({
   part,
 }: {
@@ -3187,12 +3200,31 @@ export const ContentPartsRenderer = memo(function ContentPartsRenderer({
       )
     }
 
+    // `data-tool-call-id(s)` is where the Running panel's "show in the
+    // conversation" lands (`lib/running-work.ts`); the ring marks the card it
+    // scrolled to for a moment.
     if (part.type === "tool-call") {
-      return <ToolCallPart key={`tc-${part.toolCallId ?? keyId}`} part={part} />
+      return (
+        <div
+          key={`tc-${part.toolCallId ?? keyId}`}
+          data-tool-call-id={part.toolCallId ?? undefined}
+          className={JUMP_TARGET_CLASS}
+        >
+          <ToolCallPart part={part} />
+        </div>
+      )
     }
 
     if (part.type === "tool-group") {
-      return <ToolGroupPart key={`tg-${keyId}`} part={part} />
+      return (
+        <div
+          key={`tg-${keyId}`}
+          data-tool-call-ids={toolGroupIds(part)}
+          className={JUMP_TARGET_CLASS}
+        >
+          <ToolGroupPart part={part} />
+        </div>
+      )
     }
 
     if (part.type === "goal-run") {

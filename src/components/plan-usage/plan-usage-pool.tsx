@@ -27,7 +27,7 @@ import {
   WindowResetText,
   WindowUsageBar,
 } from "./plan-usage-parts"
-import { PoolAccountActions } from "./plan-usage-pool-manage"
+import { PoolAccountActions, PREFERRED_ROUTING } from "./plan-usage-pool-manage"
 
 /**
  * The account pool's reading — every account the agent's requests are spread
@@ -113,6 +113,39 @@ export function PoolSummaryLine({
           {part}
         </span>
       ))}
+    </p>
+  )
+}
+
+/** How the pool picks an account for a new request: "prefers X, the others
+ *  take over", automatic balancing, or a mode this client doesn't know by
+ *  name. Nothing when the pool doesn't say. */
+export function PoolRoutingLine({
+  pool,
+  className,
+}: {
+  pool: PlanUsagePool
+  className?: string
+}) {
+  const t = useTranslations("PlanUsage.pool")
+  const mode = pool.routing_mode
+  if (!mode) return null
+  const text =
+    mode === PREFERRED_ROUTING && pool.preferred_account
+      ? t.rich("routingPreferred", {
+          name: pool.preferred_account,
+          b: (chunks) => <bdi className="font-medium">{chunks}</bdi>,
+        })
+      : mode === "automatic"
+        ? t("routingAutomatic")
+        : t("routingOther", { mode })
+  return (
+    <p
+      data-slot="pool-routing"
+      data-routing={mode}
+      className={cn("text-xs text-muted-foreground", className)}
+    >
+      {text}
     </p>
   )
 }
@@ -319,7 +352,11 @@ function PoolAccountRow({
         )}
         {onManaged && !compact && (
           <span className={cn(backIn == null && "ms-auto")}>
-            <PoolAccountActions account={account} onChanged={onManaged} />
+            <PoolAccountActions
+              account={account}
+              pool={pool}
+              onChanged={onManaged}
+            />
           </span>
         )}
       </div>

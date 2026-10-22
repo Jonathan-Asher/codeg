@@ -2303,7 +2303,9 @@
       "workingOutOfTurnHint": "Der Agent führt eine eigene Runde aus: Seine Hintergrundarbeit hat ihn geweckt (eine Aufgabe ist fertig oder ein Monitor hat gemeldet).",
       "moreTasks": "+{count} weitere",
       "taskKind": {
-        "agent": "Sub-Agent",
+        "subagent": "Sub-Agent",
+        "agent": "Sub-Agent im Hintergrund",
+        "delegation": "Delegierter Agent",
         "shell": "Shell",
         "monitor": "Monitor",
         "workflow": "Workflow",
@@ -2335,7 +2337,8 @@
       "limitPoolPausedHint": "Alle Claude-Konten im Konten-Pool haben ihr Limit erreicht. Diese Sitzung geht von selbst weiter, sobald eines frei wird.",
       "limitPoolBannerTitle": "Wegen Nutzungslimits pausiert",
       "limitStopped": "Wegen Nutzungslimits angehalten",
-      "limitStoppedHint": "Die letzte Runde wurde wegen eines Nutzungslimits angehalten und geht nicht mehr von selbst weiter. Setze sie fort, sobald das Limit es zulässt."
+      "limitStoppedHint": "Die letzte Runde wurde wegen eines Nutzungslimits angehalten und geht nicht mehr von selbst weiter. Setze sie fort, sobald das Limit es zulässt.",
+      "workingWithItems": "Arbeitet · {count} laufen"
     },
     "conversationCard": {
       "untitledConversation": "Unbenannte Konversation",
@@ -3690,9 +3693,18 @@
         "moreAgents": "Weitere Agenten ({count})"
       },
       "subAgentOverlay": {
-        "title": "Subagenten",
-        "collapsedSummary": "Subagenten {count}",
-        "collapseAria": "Subagenten einklappen"
+        "title": "Läuft",
+        "collapsedSummary": "{count} laufen",
+        "collapseAria": "Liste der laufenden Arbeiten einklappen",
+        "more": "+{count} weitere",
+        "openCard": "Karte im Gespräch zeigen",
+        "openTranscript": "Gespräch öffnen",
+        "status": {
+          "running": "Läuft",
+          "paused": "Pausiert",
+          "done": "Fertig",
+          "failed": "Fehlgeschlagen"
+        }
       },
       "agentPlanOverlay": {
         "title": "Agentenplan",
@@ -6780,8 +6792,19 @@
         "failed": "Das hat nicht funktioniert: {message}",
         "reloadWaiting": "Eine Kontoänderung wird übernommen, wenn der Pool neu startet, sobald keine Anfrage läuft.",
         "reloadNeedsRestart": "Eine Kontoänderung wird beim nächsten Neustart von maxpool übernommen. codeg kann diesen Pool nicht neu starten.",
-        "restartNow": "Jetzt neu starten"
-      }
+        "restartNow": "Jetzt neu starten",
+        "makePreferred": "Als bevorzugt festlegen",
+        "useAutomatic": "Automatisches Routing verwenden",
+        "preferNeedsEnabled": "Nur ein eingeschaltetes Claude-Konto kann bevorzugt werden",
+        "preferredToast": "Neue Anfragen gehen jetzt zuerst an {name}",
+        "automaticToast": "Neue Anfragen werden jetzt auf die Konten verteilt",
+        "preferTitle": "{name} bevorzugen?",
+        "preferBody": "Das Routing des Pools ist jetzt „{mode}“. Wenn du {name} bevorzugst, wechselt es zu „preferred“: Neue Anfragen gehen zuerst an {name} und nur dann an die anderen Konten, wenn es gebremst ist. Laufende Anfragen bleiben, wo sie sind.",
+        "preferConfirm": "{name} bevorzugen"
+      },
+      "routingPreferred": "Routing: Neue Anfragen gehen zuerst an <b>{name}</b>; die anderen Konten übernehmen, wenn es gebremst ist",
+      "routingAutomatic": "Routing: automatisch — neue Anfragen werden auf die Konten verteilt",
+      "routingOther": "Routing: {mode}"
     }
   },
   "Forge": {

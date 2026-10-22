@@ -10,6 +10,8 @@ import {
   Power,
   PowerOff,
   RefreshCw,
+  Star,
+  StarOff,
   Trash2,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -54,6 +56,7 @@ import {
   usagePoolRename,
   usagePoolRestartNow,
   usagePoolSetEnabled,
+  usagePoolSetPreferred,
 } from "@/lib/api"
 import { toErrorMessage } from "@/lib/app-error"
 import type {
@@ -230,19 +233,31 @@ function PoolSignInDialog({
   )
 }
 
-/** Per-account actions: sign in again, rename, switch off/on, remove. */
+/** maxpool's routing mode that sends new requests to one account first; its
+ *  only other mode is `automatic`. */
+export const PREFERRED_ROUTING = "preferred"
+
+/** Per-account actions: sign in again, rename, switch off/on, make
+ *  preferred, remove. */
 export function PoolAccountActions({
   account,
+  pool,
   onChanged,
 }: {
   account: PlanUsagePoolAccount
+  /** The pool's routing, which decides what "make preferred" does. */
+  pool: Pick<PlanUsagePool, "routing_mode">
   onChanged: () => void
 }) {
   const t = useTranslations("PlanUsage.pool.manage")
   const applyToast = useApplyToast()
   const [dialog, setDialog] = useState<
-    "reconnect" | "rename" | "remove" | null
+    "reconnect" | "rename" | "remove" | "prefer" | null
   >(null)
+  const preferring = pool.routing_mode === PREFERRED_ROUTING
+  const isPreferred = preferring && account.preferred
+  // maxpool prefers only a Claude account that is switched on.
+  const canPrefer = account.enabled && !account.provider
   const [busy, setBusy] = useState(false)
   const [newName, setNewName] = useState(account.name)
 
@@ -262,6 +277,11 @@ export function PoolAccountActions({
     },
     [applyToast, onChanged, t]
   )
+  const prefer = () =>
+    void run(
+      () => usagePoolSetPreferred(account.name),
+      t("preferredToast", { name: account.name })
+    )
 
   return (
     <>
@@ -319,6 +339,29 @@ export function PoolAccountActions({
             )}
             {account.enabled ? t("disable") : t("enable")}
           </DropdownMenuItem>
+          {isPreferred ? (
+            <DropdownMenuItem
+              data-slot="pool-action-automatic"
+              onSelect={() =>
+                void run(() => usagePoolSetPreferred(null), t("automaticToast"))
+              }
+            >
+              <StarOff className="size-3.5" aria-hidden="true" />
+              {t("useAutomatic")}
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem
+              data-slot="pool-action-prefer"
+              disabled={!canPrefer}
+              title={canPrefer ? undefined : t("preferNeedsEnabled")}
+              // Switching the routing mode itself is said first; changing
+              // which account a preferring pool prefers is one tap.
+              onSelect={() => (preferring ? prefer() : setDialog("prefer"))}
+            >
+              <Star className="size-3.5" aria-hidden="true" />
+              {t("makePreferred")}
+            </DropdownMenuItem>
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem
             data-slot="pool-action-remove"
@@ -386,6 +429,38 @@ export function PoolAccountActions({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={dialog === "prefer"}
+        onOpenChange={(next) => !next && setDialog(null)}
+      >
+        <AlertDialogContent data-slot="pool-prefer-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("preferTitle", { name: account.name })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("preferBody", {
+                name: account.name,
+                mode: pool.routing_mode ?? "automatic",
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              data-slot="pool-prefer-confirm-action"
+              disabled={busy}
+              onClick={(e) => {
+                e.preventDefault()
+                prefer()
+              }}
+            >
+              {t("preferConfirm", { name: account.name })}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={dialog === "remove"}

@@ -2303,7 +2303,9 @@
       "workingOutOfTurnHint": "エージェントが自らターンを実行しています。バックグラウンド処理がきっかけです（タスクの完了やモニターの通知）。",
       "moreTasks": "ほか {count} 件",
       "taskKind": {
-        "agent": "サブエージェント",
+        "subagent": "サブエージェント",
+        "agent": "バックグラウンドのサブエージェント",
+        "delegation": "委任したエージェント",
         "shell": "シェル",
         "monitor": "モニター",
         "workflow": "ワークフロー",
@@ -2335,7 +2337,8 @@
       "limitPoolPausedHint": "アカウントプールのすべての Claude アカウントが上限に達しています。いずれかが空くと、このセッションは自動で再開します。",
       "limitPoolBannerTitle": "使用量の上限で一時停止中",
       "limitStopped": "使用量の上限で停止",
-      "limitStoppedHint": "前回のターンは使用量の上限で停止し、自動では再開しません。上限が許すようになったら続行してください。"
+      "limitStoppedHint": "前回のターンは使用量の上限で停止し、自動では再開しません。上限が許すようになったら続行してください。",
+      "workingWithItems": "作業中 · {count} 件実行中"
     },
     "conversationCard": {
       "untitledConversation": "無題の会話",
@@ -3690,9 +3693,18 @@
         "moreAgents": "他のエージェント（{count}）"
       },
       "subAgentOverlay": {
-        "title": "サブエージェント",
-        "collapsedSummary": "サブエージェント {count}",
-        "collapseAria": "サブエージェントを折りたたむ"
+        "title": "実行中",
+        "collapsedSummary": "{count} 件実行中",
+        "collapseAria": "実行中リストを折りたたむ",
+        "more": "ほか {count} 件",
+        "openCard": "会話内のカードを表示",
+        "openTranscript": "その会話を開く",
+        "status": {
+          "running": "実行中",
+          "paused": "一時停止",
+          "done": "完了",
+          "failed": "失敗"
+        }
       },
       "agentPlanOverlay": {
         "title": "エージェントプラン",
@@ -6780,8 +6792,19 @@
         "failed": "うまくいきませんでした: {message}",
         "reloadWaiting": "アカウントの変更は、リクエストが実行されていないときにプールが再起動すると反映されます。",
         "reloadNeedsRestart": "アカウントの変更は、次に maxpool が再起動したときに反映されます。codeg はこのプールを再起動できません。",
-        "restartNow": "今すぐ再起動"
-      }
+        "restartNow": "今すぐ再起動",
+        "makePreferred": "優先に設定",
+        "useAutomatic": "自動ルーティングに戻す",
+        "preferNeedsEnabled": "優先にできるのは有効な Claude アカウントだけです",
+        "preferredToast": "新しいリクエストはまず {name} に送られます",
+        "automaticToast": "新しいリクエストを各アカウントに分散します",
+        "preferTitle": "{name} を優先しますか？",
+        "preferBody": "プールのルーティングは現在「{mode}」です。{name} を優先すると「preferred」に切り替わり、新しいリクエストはまず {name} に、制限中のときだけほかのアカウントに送られます。実行中のリクエストはそのままです。",
+        "preferConfirm": "{name} を優先"
+      },
+      "routingPreferred": "ルーティング：新しいリクエストはまず <b>{name}</b> へ。制限中はほかのアカウントが引き継ぎます",
+      "routingAutomatic": "ルーティング：自動 — 新しいリクエストを各アカウントに分散します",
+      "routingOther": "ルーティング：{mode}"
     }
   },
   "Forge": {

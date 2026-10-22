@@ -2303,7 +2303,9 @@
       "workingOutOfTurnHint": "代理程式正在自行執行一輪：由它的背景工作喚起（某個工作完成或監視器觸發）。",
       "moreTasks": "另有 {count} 個",
       "taskKind": {
-        "agent": "子代理程式",
+        "subagent": "子代理程式",
+        "agent": "背景子代理程式",
+        "delegation": "委派的代理程式",
         "shell": "Shell",
         "monitor": "監視器",
         "workflow": "工作流程",
@@ -2335,7 +2337,8 @@
       "limitPoolPausedHint": "帳號池中的所有 Claude 帳號都已達到上限。一旦有帳號空出，此工作階段會自動繼續。",
       "limitPoolBannerTitle": "因用量上限暫停",
       "limitStopped": "因用量上限停止",
-      "limitStoppedHint": "上一輪因用量上限而停止，且不會再自動繼續。待額度允許時請手動繼續。"
+      "limitStoppedHint": "上一輪因用量上限而停止，且不會再自動繼續。待額度允許時請手動繼續。",
+      "workingWithItems": "執行中 · {count} 個進行中"
     },
     "conversationCard": {
       "untitledConversation": "未命名會話",
@@ -3690,9 +3693,18 @@
         "moreAgents": "更多 Agent（{count}）"
       },
       "subAgentOverlay": {
-        "title": "子智能體",
-        "collapsedSummary": "子智能體 {count}",
-        "collapseAria": "摺疊子智能體"
+        "title": "執行中",
+        "collapsedSummary": "{count} 個執行中",
+        "collapseAria": "收合執行清單",
+        "more": "另有 {count} 個",
+        "openCard": "在對話中顯示其卡片",
+        "openTranscript": "開啟其對話",
+        "status": {
+          "running": "執行中",
+          "paused": "已暫停",
+          "done": "已完成",
+          "failed": "失敗"
+        }
       },
       "agentPlanOverlay": {
         "title": "計畫任務",
@@ -6780,8 +6792,19 @@
         "failed": "操作失敗：{message}",
         "reloadWaiting": "帳號變更將在帳號池重新啟動時套用，重新啟動會等到沒有請求執行時進行。",
         "reloadNeedsRestart": "帳號變更將在 maxpool 下次重新啟動時套用。codeg 無法重新啟動此帳號池。",
-        "restartNow": "立即重新啟動"
-      }
+        "restartNow": "立即重新啟動",
+        "makePreferred": "設為優先",
+        "useAutomatic": "改用自動路由",
+        "preferNeedsEnabled": "只有已啟用的 Claude 帳號才能設為優先",
+        "preferredToast": "新請求現在優先送往 {name}",
+        "automaticToast": "新請求現在分散到各個帳號",
+        "preferTitle": "優先使用 {name}？",
+        "preferBody": "帳號池目前的路由為「{mode}」。優先使用 {name} 會將其切換為「preferred」：新請求優先送往 {name}，只有在它受限時才送往其他帳號。正在執行的請求維持不變。",
+        "preferConfirm": "優先使用 {name}"
+      },
+      "routingPreferred": "路由：新請求優先送往 <b>{name}</b>；它受限時由其他帳號接手",
+      "routingAutomatic": "路由：自動 — 新請求分散到各個帳號",
+      "routingOther": "路由：{mode}"
     }
   },
   "Forge": {
