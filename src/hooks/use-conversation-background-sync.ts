@@ -33,9 +33,10 @@ export function useConversationBackgroundSync(): void {
     })()
 
     // Returns null on desktop IPC (no disconnect window) → no-op there.
-    const offReconnect = onTransportReconnect(() => {
-      void refreshConversationBackground()
-    })
+    const offReconnect = onTransportReconnect(
+      () => refreshConversationBackground(),
+      { priority: "status", key: "background" }
+    )
 
     return () => {
       disposed = true

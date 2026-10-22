@@ -40,6 +40,7 @@ import { toErrorMessage } from "@/lib/app-error"
 import { BACKGROUND_TASK_MARKER } from "@/lib/background-agent"
 import { imageCardLabel } from "@/lib/image-tool-label"
 import { perfMark } from "@/lib/perf-marks"
+import { leftDetailCache } from "@/stores/left-detail-cache"
 
 /**
  * Conversation-runtime shared state as a Zustand store — the per-conversation
@@ -297,6 +298,16 @@ type Action =
       conversationId: number
     }
   | {
+      /**
+       * Put a detail kept from earlier (see `leftDetailCache`) on screen at
+       * once — no spinner, no FETCH_DETAIL_START — ahead of the background
+       * refresh that brings it up to date.
+       */
+      type: "HYDRATE_DETAIL"
+      conversationId: number
+      detail: DbConversationDetail
+    }
+  | {
       type: "FETCH_DETAIL_SUCCESS"
       conversationId: number
       detail: DbConversationDetail
@@ -310,6 +321,13 @@ type Action =
        * it, and a late-resolving partial could momentarily replace it).
        */
       preserveLive?: boolean
+      /**
+       * A background refresh of what is already on screen (a wake resync,
+       * the refresh after a kept detail was hydrated): turns that came back
+       * unchanged keep their objects, so their rows neither re-render nor
+       * reflow (see `keepUnchangedTurns`).
+       */
+      keepUnchanged?: boolean
       /**
        * Live turns this response supersedes, by id. Set only by a fork: it
        * re-points the row at a session whose history stops at the chosen turn,
@@ -1867,6 +1885,41 @@ function applyBackgroundSettlementToTurns(
   return { turns: changed ? nextTurns : turns, matched, changed }
 }
 
+/**
+ * `next` with every turn that came back unchanged from `prev` replaced by
+ * `prev`'s own object, so a background refresh of what is already on screen
+ * neither re-renders nor reflows the rows it did not change. Only within the
+ * same window (offset and prefix fingerprint); a different window is taken
+ * as is.
+ */
+export function keepUnchangedTurns(
+  prev: DbConversationDetail | null,
+  next: DbConversationDetail
+): DbConversationDetail {
+  if (!prev || prev === next || prev.turns.length === 0) return next
+  if (
+    (prev.turns_offset ?? null) !== (next.turns_offset ?? null) ||
+    (prev.prefix_hash ?? null) !== (next.prefix_hash ?? null)
+  ) {
+    return next
+  }
+  const before = new Map(prev.turns.map((turn) => [turn.id, turn]))
+  let kept = 0
+  const turns = next.turns.map((turn) => {
+    const old = before.get(turn.id)
+    if (!old || old === turn) return turn
+    if (
+      old.blocks.length !== turn.blocks.length ||
+      JSON.stringify(old) !== JSON.stringify(turn)
+    ) {
+      return turn
+    }
+    kept++
+    return old
+  })
+  return kept === 0 ? next : { ...next, turns }
+}
+
 function reducer(
   state: ConversationRuntimeState,
   action: Action
@@ -1939,7 +1992,9 @@ function reducer(
 
       const nextSession: ConversationRuntimeSession = {
         ...current,
-        detail: action.detail,
+        detail: action.keepUnchanged
+          ? keepUnchangedTurns(current.detail, action.detail)
+          : action.detail,
         detailLoading: false,
         detailError: null,
         // This response re-parsed the transcript, so any out-of-turn content
@@ -1983,6 +2038,16 @@ function reducer(
         conversationIdByExternalId: nextExternalIndex,
       }
     }
+
+    case "HYDRATE_DETAIL":
+      // Exactly what a fetch that just returned this detail would do: the
+      // kept copy holds server turns only (never optimistic or local ones),
+      // so it is applied like one.
+      return reducer(state, {
+        type: "FETCH_DETAIL_SUCCESS",
+        conversationId: action.conversationId,
+        detail: action.detail,
+      })
 
     case "FETCH_DETAIL_ERROR":
       return updateSessionInState(state, action.conversationId, (current) => ({
@@ -2714,7 +2779,15 @@ export interface RuntimeActions {
    */
   refetchDetail: (
     conversationId: number,
-    options?: { preserveLive?: boolean; dropLiveTurnIds?: string[] }
+    options?: {
+      preserveLive?: boolean
+      dropLiveTurnIds?: string[]
+      /**
+       * A background refresh of what is on screen: no loading state, unchanged
+       * turns keep their objects, and a failure leaves the content as it was.
+       */
+      quiet?: boolean
+    }
   ) => Promise<boolean>
   /**
    * Load one page of older history above the current window and prepend it
@@ -3747,6 +3820,17 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
       return
     }
 
+    // Left recently and kept (see `leftDetailCache`): on screen at once, then
+    // brought up to date in the background — a quiet refetch, so the content
+    // stays while it runs, and a failure keeps what is shown.
+    const kept = leftDetailCache.take(conversationId)
+    if (kept) {
+      dispatch({ type: "HYDRATE_DETAIL", conversationId, detail: kept })
+      perfMark("detail:hydrate", { conversationId, turns: kept.turns.length })
+      void refetchDetail(conversationId, { quiet: true })
+      return
+    }
+
     const generation = bumpFetchGeneration(conversationId)
     dispatch({ type: "FETCH_DETAIL_START", conversationId })
     const startedAt = Date.now()
@@ -3780,7 +3864,11 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
 
   const refetchDetail = (
     conversationId: number,
-    options?: { preserveLive?: boolean; dropLiveTurnIds?: string[] }
+    options?: {
+      preserveLive?: boolean
+      dropLiveTurnIds?: string[]
+      quiet?: boolean
+    }
   ): Promise<boolean> => {
     // The session key is not always a fetchable DB id: a conversation started
     // as a new-chat draft keeps its virtual (negative) key for the tab's whole
@@ -3793,9 +3881,15 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
     const session = get().byConversationId.get(conversationId)
     const fetchId = session?.dbConversationId ?? conversationId
     const generation = bumpFetchGeneration(conversationId)
-    dispatch({ type: "FETCH_DETAIL_START", conversationId })
+    // Quiet: a background refresh of what is on screen. No loading state, and
+    // a failure leaves the content (and any earlier error) as it was.
+    const quiet = options?.quiet === true
+    if (!quiet) dispatch({ type: "FETCH_DETAIL_START", conversationId })
     const startedAt = Date.now()
-    perfMark("detail:fetch:start", { conversationId, kind: "refetch" })
+    perfMark("detail:fetch:start", {
+      conversationId,
+      kind: quiet ? "quiet" : "refetch",
+    })
     // Never rejects: failure is reported as `false` (and as FETCH_DETAIL_ERROR
     // in the store), so the many callers that fire and forget cannot leak an
     // unhandled rejection.
@@ -3814,11 +3908,13 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
           detail,
           preserveLive: options?.preserveLive ?? false,
           dropLiveTurnIds: options?.dropLiveTurnIds,
+          keepUnchanged: quiet,
         })
         return true
       })
       .catch((error: unknown) => {
         if (!isLatestGeneration(conversationId, generation)) return false
+        if (quiet) return false
         dispatch({
           type: "FETCH_DETAIL_ERROR",
           conversationId,
@@ -4365,6 +4461,15 @@ export function releaseRuntimeSession(conversationId: number): void {
     conversationId,
     setTimeout(() => {
       pendingSessionReleases.delete(conversationId)
+      // Keep what the server served, so coming back is instant (see
+      // `leftDetailCache`). Keyed by the DB row: that is what a reopen asks for.
+      const session = useConversationRuntimeStore
+        .getState()
+        .byConversationId.get(conversationId)
+      const keepAs = session?.dbConversationId ?? conversationId
+      if (session?.detail && keepAs > 0) {
+        leftDetailCache.put(keepAs, session.detail)
+      }
       useConversationRuntimeStore
         .getState()
         .actions.removeConversation(conversationId)
@@ -4431,6 +4536,7 @@ export function resetConversationRuntimeStore(): void {
   // have no concurrent fetches — but a real in-place backend switch would need a
   // backend epoch here. See `RemoteConnectionGate`.
   fetchGeneration.clear()
+  leftDetailCache.clear()
   for (const cancel of viewerDetailSyncCancels.values()) cancel()
   viewerDetailSyncCancels.clear()
   for (const pending of pendingSessionReleases.values()) clearTimeout(pending)

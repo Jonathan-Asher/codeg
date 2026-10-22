@@ -151,6 +151,7 @@ import {
 import { useShallow } from "zustand/react/shallow"
 import { useConversationDetail } from "@/hooks/use-conversation-detail"
 import { useWakeResync } from "@/hooks/use-wake-resync"
+import { setStreamingOnScreen } from "@/lib/transport/streaming-on-screen"
 import { RETRY_NUDGE_TEXT } from "@/lib/retry-nudge"
 import {
   buildSteerPayload,
@@ -798,7 +799,8 @@ const ConversationTabView = memo(function ConversationTabView({
   // transcript, and nothing else re-reads it (the view would stay stale until
   // the conversation is reopened). Held while a turn streams, and never run
   // over a reply the stream delivered; debounced; background tabs gate
-  // themselves off. See `useWakeResync`.
+  // themselves off. See `useWakeResync`. Quiet: the transcript stays on
+  // screen while it refreshes, and a refresh that fails keeps it.
   useWakeResync({
     enabled: isActive && hasPersistedConversation,
     conversationId: effectiveConversationId,
@@ -808,8 +810,21 @@ const ConversationTabView = memo(function ConversationTabView({
       () => connectionStore.getConnection(tabId)?.liveMessage != null,
       [connectionStore, tabId]
     ),
-    refetch: refetchDetail,
+    refetch: useCallback(
+      (conversationId: number) =>
+        refetchDetail(conversationId, { quiet: true }),
+      [refetchDetail]
+    ),
   })
+  // A turn streaming in the tab in front of the user: the link is watched
+  // more closely meanwhile, so a socket that died mid-turn is replaced in
+  // seconds (see `liveness.ts`).
+  const streamingOnScreen = isActive && connStatus === "prompting"
+  useEffect(() => {
+    const key = `panel:${tabId}`
+    setStreamingOnScreen(key, streamingOnScreen)
+    return () => setStreamingOnScreen(key, false)
+  }, [tabId, streamingOnScreen])
   // The queue doubles as this conversation's local outbox: every message the
   // user sent stays stored until the server has it (see `useMessageQueue`).
   const outboxKey = useMemo(

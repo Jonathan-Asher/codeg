@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react"
 import { onTransportReconnect } from "@/lib/platform"
 import { perfMark } from "@/lib/perf-marks"
+import { getResyncGeneration } from "@/lib/resync-coordinator"
 
 /**
  * One resync per window. A wake shows the page again and, once the dead
@@ -129,6 +130,9 @@ export function useWakeResync(options: {
   // When the stream last went from streaming to settled.
   const settledAt = useRef(0)
   const wasStreaming = useRef(isStreaming)
+  // The reconnect pass this panel last caught up with (see the coordinator):
+  // a panel shown again after a reconnect it missed resyncs on activation.
+  const seenGeneration = useRef(getResyncGeneration())
 
   // A held trigger belongs to the conversation it fired for. Declared before
   // the main effect so a conversation switch clears it in the same commit,
@@ -147,10 +151,10 @@ export function useWakeResync(options: {
   useEffect(() => {
     if (!enabled || conversationId == null) return
 
-    const runResync = () => {
+    const runResync = (): Promise<void> | undefined => {
       if (Date.now() - landedAt.current < RESYNC_DEBOUNCE_MS) return
       perfMark("resync:detail:start", { conversationId })
-      void refetch(conversationId).then((landed) => {
+      return refetch(conversationId).then((landed) => {
         perfMark("resync:detail:end", { conversationId, landed })
         if (landed) landedAt.current = Date.now()
       })
@@ -165,21 +169,30 @@ export function useWakeResync(options: {
     if (!isStreaming && heldSince.current !== null) {
       const settledPromptly = Date.now() - heldSince.current <= RESYNC_HOLD_MS
       heldSince.current = null
-      if (settledPromptly && !turnReachedView()) runResync()
+      if (settledPromptly && !turnReachedView()) void runResync()
     }
 
-    const resync = () => {
+    const resync = (): Promise<void> | undefined => {
+      seenGeneration.current = getResyncGeneration()
       if (isStreaming) {
         heldSince.current = Date.now()
         return
       }
       if (Date.now() - settledAt.current < RESYNC_AFTER_SETTLE_MS) return
-      runResync()
+      return runResync()
     }
 
     // Null on a transport with no reconnect lifecycle: nothing to recover.
-    const offReconnect = onTransportReconnect(resync)
+    // The open transcript goes first in the reconnect's refetch pass.
+    const offReconnect = onTransportReconnect(resync, {
+      priority: "visible",
+      key: "detail:" + conversationId,
+    })
     if (!offReconnect) return
+
+    // A reconnect while this panel was in the background (kept alive, its
+    // listener unbound) was not this panel's to answer then; it is now.
+    if (getResyncGeneration() !== seenGeneration.current) void resync()
 
     const onVisibility = () => {
       if (document.visibilityState !== "visible") {
@@ -189,7 +202,7 @@ export function useWakeResync(options: {
       const since = hiddenAt.current
       hiddenAt.current = null
       if (since !== null && Date.now() - since >= RESYNC_MIN_HIDDEN_MS) {
-        resync()
+        void resync()
       }
     }
 
