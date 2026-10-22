@@ -191,6 +191,7 @@ import type {
   LogSettingsView,
   LogRecord,
   LogFileInfo,
+  ClientDiagnosticSummary,
   GitCredentials,
   GitDetectResult,
   PackageManagerInfo,
@@ -2368,6 +2369,18 @@ export async function readLogFile(
   maxBytes?: number
 ): Promise<string> {
   return getTransport().call("read_log_file", { name, maxBytes })
+}
+
+/** Crash reports the iPhone app sent to this server, newest first. */
+export async function listClientDiagnostics(
+  limit?: number
+): Promise<ClientDiagnosticSummary[]> {
+  return getTransport().call("list_client_diagnostics", { limit })
+}
+
+/** One crash report as received: `{ receivedAtMs, report }`. */
+export async function getClientDiagnostic(id: string): Promise<unknown> {
+  return getTransport().call("get_client_diagnostic", { id })
 }
 
 export async function subscribeLogAppended(

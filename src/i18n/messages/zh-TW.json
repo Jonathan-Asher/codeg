@@ -5811,6 +5811,13 @@
     "signInUaHint": "Google 拒絕在內嵌瀏覽器中登入。開啟後，分頁只對 Google 的登入頁面（accounts.google.com）呈現 Firefox 身分；其他地方一律以自身所在引擎的身分示人，不會冒充 Firefox。僅對嵌入式分頁生效，獨立視窗不適用；登入頁把你跳轉到別的網站時，到那裡的第一個請求仍帶著登入身分。"
   },
   "LogsSettings": {
+    "crashReportsTitle": "iPhone 當機報告",
+    "crashReportsDescription": "iPhone App（Codeg Plus）傳送到此伺服器的當機、卡頓和已攔截的音訊錯誤：版本、裝置、出錯內容和頂部呼叫堆疊。App 絕不包含訊息內容、檔案名稱或權杖。",
+    "crashReportsEmpty": "尚無來自 iPhone App 的當機報告。",
+    "crashReportsRefresh": "重新整理",
+    "crashReportCopy": "複製報告",
+    "crashReportCopied": "已複製當機報告",
+    "crashReportCopyFailed": "無法複製當機報告",
     "loading": "載入中…",
     "sectionTitle": "執行日誌",
     "sectionDescription": "檢視與設定應用程式診斷日誌。日誌會寫入本機檔案，並保留在記憶體中以便即時檢視。",

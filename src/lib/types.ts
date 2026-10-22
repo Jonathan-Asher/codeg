@@ -4528,6 +4528,29 @@ export interface LogFileInfo {
   modified_ms: number
 }
 
+/** One crash report from the iPhone app (Rust `ClientDiagnosticSummary`). */
+export interface ClientDiagnosticSummary {
+  id: string
+  receivedAtMs: number
+  /** `crash`, `hang`, `cpu_exception`, `disk_write_exception`,
+   * `app_launch`, `uncaught_exception` or `caught_exception`. */
+  kind: string
+  source: string | null
+  occurredAt: string | null
+  appVersion: string | null
+  appBuild: string | null
+  deviceModel: string | null
+  os: string | null
+  exceptionType: string | null
+  signal: string | null
+  exceptionName: string | null
+  reason: string | null
+  context: string | null
+  topFrames: string[]
+  breadcrumbCount: number
+  sizeBytes: number
+}
+
 // --- Version Control ---
 
 export interface GitCredentials {

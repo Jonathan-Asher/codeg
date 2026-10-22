@@ -5811,6 +5811,13 @@
     "signInUaHint": "Google refuses to sign in from embedded browsers. When on, tabs present a Firefox identity to Google's sign-in pages only (accounts.google.com); everywhere else they identify as the engine they run in, never as Firefox. Embedded tabs only, not the separate-window surface; when a sign-in page redirects you to another site, the first request there still carries the sign-in identity."
   },
   "LogsSettings": {
+    "crashReportsTitle": "iPhone crash reports",
+    "crashReportsDescription": "Crashes, hangs and caught audio errors the iPhone app (Codeg Plus) sent to this server: the build, the device, what broke and the top stack frames. The app never includes message text, file names or tokens.",
+    "crashReportsEmpty": "No crash reports from the iPhone app yet.",
+    "crashReportsRefresh": "Refresh",
+    "crashReportCopy": "Copy report",
+    "crashReportCopied": "Crash report copied",
+    "crashReportCopyFailed": "Couldn't copy the crash report",
     "loading": "Loading…",
     "sectionTitle": "Runtime Logs",
     "sectionDescription": "View and configure application diagnostic logs. Logs are written to local files and kept in memory for live viewing.",

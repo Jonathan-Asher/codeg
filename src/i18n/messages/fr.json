@@ -5811,6 +5811,13 @@
     "signInUaHint": "Google refuse la connexion depuis les navigateurs intégrés. Si activé, les onglets se présentent comme Firefox uniquement aux pages de connexion de Google (accounts.google.com) ; partout ailleurs, ils se présentent comme le moteur dans lequel ils s'exécutent, jamais comme Firefox. Onglets intégrés uniquement, pas la fenêtre séparée ; lorsqu'une page de connexion vous redirige vers un autre site, la première requête vers celui-ci porte encore l'identité de connexion."
   },
   "LogsSettings": {
+    "crashReportsTitle": "Rapports de plantage de l'iPhone",
+    "crashReportsDescription": "Plantages, blocages et erreurs audio interceptées que l'app iPhone (Codeg Plus) a envoyés à ce serveur : la version, l'appareil, ce qui a échoué et les premières trames de la pile. L'app n'inclut jamais le texte des messages, les noms de fichiers ni les jetons.",
+    "crashReportsEmpty": "Aucun rapport de plantage de l'app iPhone pour l'instant.",
+    "crashReportsRefresh": "Actualiser",
+    "crashReportCopy": "Copier le rapport",
+    "crashReportCopied": "Rapport de plantage copié",
+    "crashReportCopyFailed": "Impossible de copier le rapport de plantage",
     "loading": "Chargement…",
     "sectionTitle": "Journaux d'exécution",
     "sectionDescription": "Consultez et configurez les journaux de diagnostic de l'application. Les journaux sont écrits dans des fichiers locaux et conservés en mémoire pour l'affichage en direct.",

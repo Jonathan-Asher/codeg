@@ -12,6 +12,8 @@ vi.mock("@/lib/api", () => ({
   setLogSettings: vi.fn(),
   subscribeLogAppended: vi.fn(),
   subscribeLogSettingsChanged: vi.fn(),
+  listClientDiagnostics: vi.fn(async () => []),
+  getClientDiagnostic: vi.fn(),
 }))
 
 vi.mock("@/lib/platform", () => ({

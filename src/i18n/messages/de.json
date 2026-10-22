@@ -5811,6 +5811,13 @@
     "signInUaHint": "Google verweigert die Anmeldung aus eingebetteten Browsern. Wenn eingeschaltet, geben sich Tabs nur gegenüber Googles Anmeldeseiten (accounts.google.com) als Firefox aus; überall sonst geben sie sich als die Engine aus, in der sie laufen, nie als Firefox. Nur in eingebetteten Tabs, nicht im separaten Fenster; leitet eine Anmeldeseite auf eine andere Website weiter, trägt die erste Anfrage dort noch die Anmeldekennung."
   },
   "LogsSettings": {
+    "crashReportsTitle": "iPhone-Absturzberichte",
+    "crashReportsDescription": "Abstürze, Hänger und abgefangene Audiofehler, die die iPhone-App (Codeg Plus) an diesen Server gesendet hat: Build, Gerät, was fehlschlug und die obersten Stack-Frames. Die App sendet nie Nachrichtentext, Dateinamen oder Tokens.",
+    "crashReportsEmpty": "Noch keine Absturzberichte von der iPhone-App.",
+    "crashReportsRefresh": "Aktualisieren",
+    "crashReportCopy": "Bericht kopieren",
+    "crashReportCopied": "Absturzbericht kopiert",
+    "crashReportCopyFailed": "Absturzbericht konnte nicht kopiert werden",
     "loading": "Wird geladen…",
     "sectionTitle": "Laufzeitprotokolle",
     "sectionDescription": "Diagnoseprotokolle der Anwendung anzeigen und konfigurieren. Protokolle werden in lokale Dateien geschrieben und für die Live-Ansicht im Speicher gehalten.",

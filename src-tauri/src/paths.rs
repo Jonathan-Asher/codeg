@@ -12,6 +12,7 @@ const PETS_DIR_NAME: &str = "pets";
 const BROWSER_PROFILES_DIR_NAME: &str = "browser-profiles";
 const UPLOADS_DIR_NAME: &str = "uploads";
 const LOGS_DIR_NAME: &str = "logs";
+const CLIENT_DIAGNOSTICS_DIR_NAME: &str = "client-diagnostics";
 const TURN_TIMINGS_DIR_NAME: &str = "turn-timings";
 const ACP_TRANSCRIPTS_DIR_NAME: &str = "acp-transcripts";
 const BACKGROUNDS_DIR_NAME: &str = "backgrounds";
@@ -142,6 +143,25 @@ pub fn codeg_logs_root() -> PathBuf {
     dirs::home_dir()
         .map(|h| h.join(CODEG_DIR_NAME).join(LOGS_DIR_NAME))
         .unwrap_or_else(|| PathBuf::from(CODEG_DIR_NAME).join(LOGS_DIR_NAME))
+}
+
+/// Root directory for the crash reports the iPhone app sends (see
+/// `crate::commands::client_diagnostics`).
+///
+/// Resolution mirrors [`codeg_logs_root`]:
+/// 1. `$CODEG_HOME/client-diagnostics`
+/// 2. `$CODEG_DATA_DIR/client-diagnostics` (server-mode data directory)
+/// 3. `~/.codeg/client-diagnostics` (desktop default)
+pub fn codeg_client_diagnostics_root() -> PathBuf {
+    if let Some(custom) = std::env::var_os("CODEG_HOME").filter(|s| !s.is_empty()) {
+        return PathBuf::from(custom).join(CLIENT_DIAGNOSTICS_DIR_NAME);
+    }
+    if let Some(data) = std::env::var_os("CODEG_DATA_DIR").filter(|s| !s.is_empty()) {
+        return PathBuf::from(data).join(CLIENT_DIAGNOSTICS_DIR_NAME);
+    }
+    dirs::home_dir()
+        .map(|h| h.join(CODEG_DIR_NAME).join(CLIENT_DIAGNOSTICS_DIR_NAME))
+        .unwrap_or_else(|| PathBuf::from(CODEG_DIR_NAME).join(CLIENT_DIAGNOSTICS_DIR_NAME))
 }
 
 /// The desktop app's bundle identifier (`tauri.conf.json`). Tauri's app data
