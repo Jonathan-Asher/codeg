@@ -18,11 +18,20 @@ import type {
  * text alone and draws it as a slim "Continued after limit reset" divider.
  */
 export const LIMIT_CONTINUE_PROMPT =
-  "Your usage limit has reset. Continue the task you were working on when the usage limit was reached; do not repeat work that is already complete."
+  "Your usage limit has reset. First resume any sub-agents the limit stopped, each from where it stopped with its context intact rather than starting it over; then continue the task you were working on when the usage limit was reached. Do not repeat work that is already complete."
 
-/** Whether a user turn's text is exactly the continuation prompt. */
+/** The continuation's earlier wording, still in older transcripts. */
+const EARLIER_LIMIT_CONTINUE_PROMPTS = [
+  "Your usage limit has reset. Continue the task you were working on when the usage limit was reached; do not repeat work that is already complete.",
+]
+
+/** Whether a user turn's text is exactly a continuation prompt. */
 export function isLimitContinuePrompt(text: string): boolean {
-  return text.trim() === LIMIT_CONTINUE_PROMPT
+  const trimmed = text.trim()
+  return (
+    trimmed === LIMIT_CONTINUE_PROMPT ||
+    EARLIER_LIMIT_CONTINUE_PROMPTS.includes(trimmed)
+  )
 }
 
 /**

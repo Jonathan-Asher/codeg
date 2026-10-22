@@ -3,8 +3,9 @@
 //!
 //! A turn that ended on the pool's 429 under an older codeg was recorded as
 //! an ordinary end, so its session simply stayed stopped. On the first start
-//! of a codeg that knows the stop, each recent top-level Claude Code session
-//! with no turn running and no pause (the database narrows it to those) has
+//! of a codeg that knows the stop, each recent Claude Code session —
+//! top-level, or one another session delegated to — with no turn running
+//! and no pause (the database narrows it to those) has
 //! the end of its own transcript read — the same file the history view reads
 //! — and one whose last turn ended on the pool's refusal within the last
 //! [`CATCH_UP_WINDOW_HOURS`] is paused like a live stop would have been. It

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use chrono::Utc;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::NotSet, ColumnTrait, DatabaseConnection, EntityTrait,
+    ActiveModelTrait, ActiveValue::NotSet, ColumnTrait, Condition, DatabaseConnection, EntityTrait,
     QueryFilter, QueryOrder, QuerySelect, Set,
 };
 
@@ -661,15 +661,19 @@ async fn is_engine_driven(
 }
 
 /// Whether the backend may continue this conversation on its own after the
-/// usage limit resets: a live top-level session bound to an agent session,
-/// not driven by an engine, with its per-session switch on.
+/// usage limit resets: a live session bound to an agent session, not driven
+/// by an engine, with its per-session switch on — a top-level one, or one
+/// another session delegated to (the limit stopped it mid-task too, and its
+/// parent's delegation call has already ended with that stop).
 async fn limit_continue_eligible(
     conn: &DatabaseConnection,
     row: &conversation::Model,
 ) -> Result<bool, DbError> {
+    let top_level = row.parent_id.is_none()
+        && matches!(row.kind, ConversationKind::Regular | ConversationKind::Chat);
+    let delegated = row.kind == ConversationKind::Delegate && row.delegation_call_id.is_some();
     if row.deleted_at.is_some()
-        || row.parent_id.is_some()
-        || !matches!(row.kind, ConversationKind::Regular | ConversationKind::Chat)
+        || !(top_level || delegated)
         || row.external_id.is_none()
         || !row.limit_auto_continue
     {
@@ -791,8 +795,9 @@ pub async fn defer_limit_resume(
 }
 
 /// The conversations whose last turn may have stopped on the account pool's
-/// 429 before codeg recognized that stop: top-level Claude Code sessions
-/// bound to an agent session, with the per-session switch on, no turn
+/// 429 before codeg recognized that stop: Claude Code sessions — top-level,
+/// or one another session delegated to — bound to an agent session, with
+/// the per-session switch on, no turn
 /// running or cut off, no pause, and activity since `since`. At most `limit`
 /// rows, most recently active first. The caller reads each one's transcript
 /// to tell (`acp::limit_continue`).
@@ -809,9 +814,21 @@ pub async fn list_limit_catch_up_candidates(
     Ok(conversation::Entity::find()
         .filter(conversation::Column::AgentType.eq(agent))
         .filter(conversation::Column::DeletedAt.is_null())
-        .filter(conversation::Column::ParentId.is_null())
         .filter(
-            conversation::Column::Kind.is_in([ConversationKind::Regular, ConversationKind::Chat]),
+            Condition::any()
+                .add(
+                    Condition::all()
+                        .add(conversation::Column::ParentId.is_null())
+                        .add(
+                            conversation::Column::Kind
+                                .is_in([ConversationKind::Regular, ConversationKind::Chat]),
+                        ),
+                )
+                .add(
+                    Condition::all()
+                        .add(conversation::Column::Kind.eq(ConversationKind::Delegate))
+                        .add(conversation::Column::DelegationCallId.is_not_null()),
+                ),
         )
         .filter(conversation::Column::ExternalId.is_not_null())
         .filter(conversation::Column::LimitAutoContinue.eq(true))
