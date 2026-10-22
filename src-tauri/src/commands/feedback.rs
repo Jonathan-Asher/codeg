@@ -145,9 +145,13 @@ pub async fn submit_session_feedback(
     connection_id: String,
     text: String,
     blocks: Option<Vec<crate::acp::types::PromptInputBlock>>,
+    client_id: Option<String>,
+    db: tauri::State<'_, crate::db::AppDatabase>,
     manager: tauri::State<'_, crate::acp::manager::ConnectionManager>,
 ) -> Result<crate::acp::feedback::FeedbackItem, crate::acp::error::AcpError> {
-    manager.submit_feedback(&connection_id, text, blocks).await
+    manager
+        .submit_client_feedback(&db, &connection_id, text, blocks, client_id)
+        .await
 }
 
 #[cfg(test)]

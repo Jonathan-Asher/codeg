@@ -272,7 +272,7 @@ describe("useQuickAskSession", () => {
       expect(h.actions.sendPrompt).toHaveBeenCalledWith(
         QUICK_ASK_CONTEXT_KEY,
         [{ type: "text", text: "What does main.rs do?" }],
-        { folderId: 5, conversationId: 77 }
+        expect.objectContaining({ folderId: 5, conversationId: 77 })
       )
       expect(args.onFolderUsed).toHaveBeenCalledWith(5)
       expect(result.current.binding).toMatchObject({
@@ -299,7 +299,7 @@ describe("useQuickAskSession", () => {
       expect(h.actions.sendPrompt).toHaveBeenLastCalledWith(
         QUICK_ASK_CONTEXT_KEY,
         [{ type: "text", text: "second" }],
-        { folderId: 5, conversationId: 77 }
+        expect.objectContaining({ folderId: 5, conversationId: 77 })
       )
       // The finished reply was kept in the thread.
       expect(result.current.thread.map((t) => t.role)).toEqual([
@@ -397,7 +397,7 @@ describe("useQuickAskSession", () => {
       expect(h.actions.sendPrompt).toHaveBeenCalledWith(
         QUICK_ASK_CONTEXT_KEY,
         [{ type: "text", text: "status?" }],
-        { folderId: 4, conversationId: 12 }
+        expect.objectContaining({ folderId: 4, conversationId: 12 })
       )
       expect(h.api.createConversation).not.toHaveBeenCalled()
       expect(args.onSessionUsed).toHaveBeenCalledWith(12)
@@ -421,7 +421,9 @@ describe("useQuickAskSession", () => {
       })
       expect(h.api.submitSessionFeedback).toHaveBeenCalledWith(
         "conn-1",
-        "also check tests"
+        "also check tests",
+        null,
+        expect.stringMatching(/^optimistic-/)
       )
       expect(h.actions.sendPrompt).not.toHaveBeenCalled()
       expect(result.current.thread[0]).toMatchObject({ state: "steered" })
@@ -456,7 +458,7 @@ describe("useQuickAskSession", () => {
         expect(h.actions.sendPrompt).toHaveBeenCalledWith(
           QUICK_ASK_CONTEXT_KEY,
           [{ type: "text", text: "later please" }],
-          { folderId: 4, conversationId: 12 }
+          expect.objectContaining({ folderId: 4, conversationId: 12 })
         )
       )
       await waitFor(() =>
@@ -502,7 +504,7 @@ describe("useQuickAskSession", () => {
       expect(h.actions.sendPrompt).toHaveBeenCalledWith(
         QUICK_ASK_CONTEXT_KEY,
         [{ type: "text", text: "what color is this square?" }, SQUARE_BLOCK],
-        { folderId: 5, conversationId: 77 }
+        expect.objectContaining({ folderId: 5, conversationId: 77 })
       )
       // The thread keeps them for the question's thumbnails.
       expect(result.current.thread[0]).toMatchObject({
@@ -519,7 +521,7 @@ describe("useQuickAskSession", () => {
       expect(h.actions.sendPrompt).toHaveBeenCalledWith(
         QUICK_ASK_CONTEXT_KEY,
         [{ type: "text", text: "and this?" }, SQUARE_BLOCK],
-        { folderId: 4, conversationId: 12 }
+        expect.objectContaining({ folderId: 4, conversationId: 12 })
       )
     })
 
@@ -537,7 +539,8 @@ describe("useQuickAskSession", () => {
       expect(h.api.submitSessionFeedback).toHaveBeenCalledWith(
         "conn-1",
         "look at this too",
-        [{ type: "text", text: "look at this too" }, SQUARE_BLOCK]
+        [{ type: "text", text: "look at this too" }, SQUARE_BLOCK],
+        expect.stringMatching(/^optimistic-/)
       )
       expect(result.current.thread[0]).toMatchObject({ state: "steered" })
     })
@@ -558,7 +561,7 @@ describe("useQuickAskSession", () => {
         expect(h.actions.sendPrompt).toHaveBeenLastCalledWith(
           QUICK_ASK_CONTEXT_KEY,
           [{ type: "text", text: "now this" }, SQUARE_BLOCK],
-          { folderId: 5, conversationId: 77 }
+          expect.objectContaining({ folderId: 5, conversationId: 77 })
         )
       )
     })
@@ -576,7 +579,7 @@ describe("useQuickAskSession", () => {
       expect(h.actions.sendPrompt).toHaveBeenCalledWith(
         QUICK_ASK_CONTEXT_KEY,
         [SQUARE_BLOCK],
-        { folderId: 5, conversationId: 77 }
+        expect.objectContaining({ folderId: 5, conversationId: 77 })
       )
     })
 
@@ -598,7 +601,7 @@ describe("useQuickAskSession", () => {
             blob: SQUARE.data,
           },
         ],
-        { unlinked: true }
+        expect.objectContaining({ unlinked: true })
       )
     })
 
@@ -629,7 +632,7 @@ describe("useQuickAskSession", () => {
       expect(h.actions.sendPrompt).toHaveBeenCalledWith(
         QUICK_ASK_CONTEXT_KEY,
         [{ type: "text", text: "what color?" }, SQUARE_BLOCK],
-        { folderId: 5, conversationId: 77 }
+        expect.objectContaining({ folderId: 5, conversationId: 77 })
       )
     })
 
@@ -659,7 +662,7 @@ describe("useQuickAskSession", () => {
       expect(h.actions.sendPrompt).toHaveBeenCalledWith(
         QUICK_ASK_CONTEXT_KEY,
         [{ type: "text", text: "what color?" }],
-        { folderId: 5, conversationId: 77 }
+        expect.objectContaining({ folderId: 5, conversationId: 77 })
       )
     })
   })
@@ -690,7 +693,7 @@ describe("useQuickAskSession", () => {
       expect(h.actions.sendPrompt).toHaveBeenCalledWith(
         QUICK_ASK_CONTEXT_KEY,
         [{ type: "text", text: "secret question" }],
-        { unlinked: true }
+        expect.objectContaining({ unlinked: true })
       )
       expect(result.current.isPrivate).toBe(true)
     })
@@ -779,7 +782,7 @@ describe("useQuickAskSession", () => {
             uri: `file:///uploads/${bucket}/square.png`,
           },
         ],
-        { unlinked: true }
+        expect.objectContaining({ unlinked: true })
       )
       moveTo(rerender, args, "prompting", reply("red"))
       moveTo(rerender, args, "connected")
@@ -1077,7 +1080,9 @@ describe("useQuickAskSession", () => {
       expect(h.api.submitSessionFeedback).toHaveBeenCalledTimes(1)
       expect(h.api.submitSessionFeedback).toHaveBeenLastCalledWith(
         "conn-1",
-        "two"
+        "two",
+        null,
+        expect.stringMatching(/^optimistic-/)
       )
       expect(states(result.current.thread)).toEqual([
         "start the sub-agents:sent",
@@ -1101,7 +1106,9 @@ describe("useQuickAskSession", () => {
       expect(h.api.submitSessionFeedback).toHaveBeenCalledTimes(2)
       expect(h.api.submitSessionFeedback).toHaveBeenLastCalledWith(
         "conn-1",
-        "three"
+        "three",
+        null,
+        expect.stringMatching(/^optimistic-/)
       )
 
       // A new question goes straight in, live feedback off or not.
@@ -1114,7 +1121,9 @@ describe("useQuickAskSession", () => {
       })
       expect(h.api.submitSessionFeedback).toHaveBeenLastCalledWith(
         "conn-1",
-        "four"
+        "four",
+        null,
+        expect.stringMatching(/^optimistic-/)
       )
       expect(gate.accepted).toEqual(["start the sub-agents"])
       expect(states(result.current.thread)).toEqual([
@@ -1218,7 +1227,7 @@ describe("useQuickAskSession", () => {
       expect(h.actions.sendPrompt).toHaveBeenLastCalledWith(
         QUICK_ASK_CONTEXT_KEY,
         [{ type: "text", text: "two" }],
-        { unlinked: true }
+        expect.objectContaining({ unlinked: true })
       )
     })
 

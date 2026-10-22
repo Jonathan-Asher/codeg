@@ -15,6 +15,7 @@ function item(id: string, text: string): QueuedMessage {
     id,
     draft: { blocks: [{ type: "text", text }], displayText: text },
     modeId: null,
+    clientMessageId: `optimistic-${id}`,
   }
 }
 
@@ -22,6 +23,7 @@ function item(id: string, text: string): QueuedMessage {
 function itemWithAttachment(id: string, text: string): QueuedMessage {
   return {
     id,
+    clientMessageId: `optimistic-${id}`,
     draft: {
       blocks: [
         { type: "text", text },

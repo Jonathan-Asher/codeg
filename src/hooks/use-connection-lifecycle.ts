@@ -16,6 +16,7 @@ import {
   type SelectorValues,
 } from "@/lib/selector-display"
 import { TurnBusyError } from "@/lib/turn-busy"
+import type { PromptAccepted } from "@/lib/api"
 import {
   PoolExhaustedError,
   formatPoolResumeTime,
@@ -106,14 +107,19 @@ export interface UseConnectionLifecycleReturn {
       onPoolExhausted?: (hold: PoolHold) => void
       /**
        * Called for every OTHER send failure (413, hydration failure, network
-       * drop) after the error toast is shown. The caller must settle any
-       * optimistic state it created for this send — roll back the optimistic
-       * user turn so the conversation doesn't stay `awaiting_persist` (which
-       * would block queue auto-flush) and doesn't display the failed prompt
-       * as though it were sent. The draft is deliberately NOT re-queued: a
-       * deterministic failure would otherwise retry forever.
+       * drop). The caller must settle any optimistic state it created for
+       * this send — roll back the optimistic user turn so the conversation
+       * doesn't stay `awaiting_persist` (which would block queue auto-flush)
+       * and doesn't display the failed prompt as though it were sent — and
+       * keep the message (the composers put it in their queue as "Not sent").
+       * Returning `true` says the caller shows the failure itself, so no
+       * toast is raised for it.
        */
-      onSendFailed?: (error: unknown) => void
+      onSendFailed?: (error: unknown) => boolean | void
+      /** The server accepted the prompt. `duplicate`: it had already
+       *  accepted this message (same client message id) and did not send it
+       *  again. */
+      onAccepted?: (accepted: PromptAccepted) => void
     }
   ) => void
   handleSetConfigOption: (configId: string, valueId: string) => void
@@ -599,13 +605,15 @@ export function useConnectionLifecycle({
          *  held it back. The caller keeps it queued and waits for the pool;
          *  without this, it is re-queued like a busy bounce. */
         onPoolExhausted?: (hold: PoolHold) => void
-        onSendFailed?: (error: unknown) => void
+        onSendFailed?: (error: unknown) => boolean | void
+        onAccepted?: (accepted: PromptAccepted) => void
       }
     ) => {
       touchActivity(contextKey)
       const onTurnInProgress = opts?.onTurnInProgress
       const onPoolExhausted = opts?.onPoolExhausted
       const onSendFailed = opts?.onSendFailed
+      const onAccepted = opts?.onAccepted
       void (async () => {
         const currentModeId = modeIdRef.current
         if (modeId && modeId !== currentModeId) {
@@ -614,7 +622,12 @@ export function useConnectionLifecycle({
           // calls before CurrentModeUpdate arrives from the agent.
           modeIdRef.current = modeId
         }
-        await sendPrompt(draft.blocks, opts)
+        const accepted = await sendPrompt(draft.blocks, {
+          folderId: opts?.folderId,
+          conversationId: opts?.conversationId,
+          clientMessageId: opts?.clientMessageId,
+        })
+        onAccepted?.(accepted)
       })().catch((e: unknown) => {
         if (e instanceof PoolExhaustedError) {
           // Not an error either: the message waits in the queue, saying why,
@@ -632,6 +645,11 @@ export function useConnectionLifecycle({
           return
         }
         console.error("[ConnLifecycle] sendPrompt:", e)
+        // Let the caller settle its optimistic state (roll back the phantom
+        // user turn, drop out of awaiting_persist so the queue keeps
+        // flushing) and keep the message.
+        const shownByCaller = onSendFailed?.(e) === true
+        if (shownByCaller) return
         // The composer already cleared itself (sends are fire-and-forget), so
         // without a toast a failed send — an oversized body 413'd by the
         // server, a hydration failure, a network drop — looks like the message
@@ -644,11 +662,6 @@ export function useConnectionLifecycle({
           key: `send-failed:${contextKey}`,
           title: t("errors.sendPromptFailed", { error: message }),
         })
-        // Let the caller settle its optimistic state (roll back the phantom
-        // user turn, drop out of awaiting_persist so the queue keeps
-        // flushing). Runs after the toast so the state rollback can't hide
-        // the failure.
-        onSendFailed?.(e)
       })
     },
     [connSetMode, sendPrompt, contextKey, touchActivity, t]

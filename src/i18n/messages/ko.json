@@ -3563,6 +3563,15 @@
         "poolWaitUntil": "모든 Claude 구독이 한도에 도달했습니다 — 다음 구독은 {time}에 풀립니다. 그때 대기 중인 메시지가 전송됩니다.",
         "limitPaused": "사용량 한도로 일시 중지됨 — 대기 중인 메시지는 {time}에 계속된 뒤 전송됩니다.",
         "notSent": "전송되지 않음: {agent} 연결에 실패했습니다. 연결이 복구되면 대기 중인 메시지가 전송됩니다.",
+        "notSentLabel": "전송 안 됨",
+        "notSentConnectionLost": "연결이 끊어짐 — 다시 보냅니다",
+        "notSentTimeout": "응답 없음 — 다시 보냅니다",
+        "notSentServer": "서버 오류 — 다시 보냅니다",
+        "notSentUnauthorized": "로그아웃됨 — 로그인하면 다시 보냅니다",
+        "notSentInterrupted": "중단됨 — 다시 보냅니다",
+        "notSentRejected": "서버가 거부함",
+        "notSentGaveUp": "계속 실패함 — 다시 시도를 누르세요",
+        "retryItem": "지금 다시 보내기",
         "retry": "다시 시도"
       },
       "welcomeInputPanel": {
@@ -7437,7 +7446,8 @@
       "newQuestion": "새 질문",
       "openInCodeg": "codeg에서 열기",
       "hide": "숨기기",
-      "unqueue": "대기열에서 제거"
+      "unqueue": "대기열에서 제거",
+      "retry": "다시 보내기"
     },
     "status": {
       "connecting": "{agent} 시작 중…",

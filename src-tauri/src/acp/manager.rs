@@ -534,6 +534,14 @@ pub(crate) fn plan_speculative_open(
     )
 }
 
+/// The answer to a client prompt (`acp_prompt`). `duplicate` is true when the
+/// message was already accepted under the same client message id and was not
+/// sent again (see [`ConnectionManager::send_client_prompt`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct PromptAccepted {
+    pub duplicate: bool,
+}
+
 pub struct ConnectionManager {
     pub(crate) connections: Arc<Mutex<HashMap<String, AgentConnection>>>,
     /// Connections whose teardown was requested but whose child process has
@@ -611,6 +619,10 @@ pub struct ConnectionManager {
     /// touch the same map. At most one per connection (the agent is blocked in
     /// its `exit_plan_mode` call) — no cap, no cumulative growth.
     pending_plan_approvals: Arc<Mutex<HashMap<String, PendingPlanApprovalEntry>>>,
+    /// Receipts for user messages already accepted, by the client's message
+    /// id, so a retry of a send whose answer was lost is not delivered twice.
+    /// Shared across `clone_ref` clones. See [`crate::acp::message_receipts`].
+    message_receipts: Arc<crate::acp::message_receipts::MessageReceipts>,
 }
 
 /// A parked `ask_user_question` awaiting its answer. The `sender` resolves the
@@ -650,6 +662,7 @@ impl ConnectionManager {
             probe_locks: Arc::new(Mutex::new(HashMap::new())),
             pending_questions: Arc::new(Mutex::new(HashMap::new())),
             pending_plan_approvals: Arc::new(Mutex::new(HashMap::new())),
+            message_receipts: Arc::new(crate::acp::message_receipts::MessageReceipts::new()),
         }
     }
 
@@ -667,6 +680,7 @@ impl ConnectionManager {
             probe_locks: self.probe_locks.clone(),
             pending_questions: self.pending_questions.clone(),
             pending_plan_approvals: self.pending_plan_approvals.clone(),
+            message_receipts: self.message_receipts.clone(),
         }
     }
 
@@ -720,6 +734,7 @@ impl ConnectionManager {
             probe_locks: Arc::new(Mutex::new(HashMap::new())),
             pending_questions: Arc::new(Mutex::new(HashMap::new())),
             pending_plan_approvals: Arc::new(Mutex::new(HashMap::new())),
+            message_receipts: Arc::new(crate::acp::message_receipts::MessageReceipts::new()),
         }
     }
 
@@ -1730,6 +1745,219 @@ impl ConnectionManager {
             None,
         )
         .await
+    }
+
+    /// The conversation a connection is linked to, if any.
+    async fn linked_conversation_id(&self, conn_id: &str) -> Option<i32> {
+        let state = self.get_state(conn_id).await?;
+        let guard = state.read().await;
+        guard.conversation_id
+    }
+
+    /// A user prompt from a client (`acp_prompt`), sent at most once per
+    /// `client_message_id`.
+    ///
+    /// A client that lost the answer to a send resends the same message with
+    /// the same id. When the conversation already holds a receipt for that id
+    /// the prompt is NOT sent again: the answer is `duplicate: true`, and the
+    /// client takes the message as delivered. Checked before the account-pool
+    /// gate and the busy gate, so a retry that arrives while the original's
+    /// turn still runs is recognised rather than bounced.
+    ///
+    /// Runs detached from the caller, like the first link: a client that
+    /// disconnects mid-request (the very failure a retry recovers from) must
+    /// not leave a prompt sent but unrecorded, which its retry would then
+    /// deliver a second time. Without an id this is a plain
+    /// [`Self::send_prompt_linked_with_message_id`] behind the pool gate.
+    pub async fn send_client_prompt(
+        &self,
+        db: &AppDatabase,
+        conn_id: &str,
+        blocks: Vec<PromptInputBlock>,
+        folder_id: Option<i32>,
+        conversation_id: Option<i32>,
+        client_message_id: Option<String>,
+    ) -> Result<PromptAccepted, AcpError> {
+        let mgr = self.clone_ref();
+        let db = AppDatabase {
+            conn: db.conn.clone(),
+        };
+        let conn_id = conn_id.to_string();
+        let task = tokio::spawn(async move {
+            mgr.client_prompt_detached(
+                &db,
+                &conn_id,
+                blocks,
+                folder_id,
+                conversation_id,
+                client_message_id,
+            )
+            .await
+        });
+        match task.await {
+            Ok(result) => result,
+            Err(join_err) => Err(AcpError::protocol(format!(
+                "prompt task did not complete: {join_err}"
+            ))),
+        }
+    }
+
+    /// The body of [`Self::send_client_prompt`], run detached.
+    async fn client_prompt_detached(
+        &self,
+        db: &AppDatabase,
+        conn_id: &str,
+        blocks: Vec<PromptInputBlock>,
+        folder_id: Option<i32>,
+        conversation_id: Option<i32>,
+        client_message_id: Option<String>,
+    ) -> Result<PromptAccepted, AcpError> {
+        let id = client_message_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| crate::acp::message_receipts::is_valid_id(id))
+            .map(str::to_string);
+        let Some(id) = id else {
+            self.check_pool_for_prompt(conn_id).await?;
+            self.send_prompt_linked_with_message_id(
+                db,
+                conn_id,
+                blocks,
+                folder_id,
+                conversation_id,
+                None,
+                client_message_id,
+            )
+            .await?;
+            return Ok(PromptAccepted { duplicate: false });
+        };
+        let _same_id = self.message_receipts.lock_id(&id).await;
+        // A connection this server does not have (it restarted) is reported
+        // as such even for a repeat: the client then opens a fresh one,
+        // instead of taking the answer as a sign its old one still works.
+        if self.get_state(conn_id).await.is_none() {
+            return Err(AcpError::ConnectionNotFound(conn_id.to_string()));
+        }
+        let known_conversation = match conversation_id {
+            Some(cid) => Some(cid),
+            None => self.linked_conversation_id(conn_id).await,
+        };
+        if let Some(cid) = known_conversation {
+            if self.message_receipts.contains(db, cid, &id).await {
+                tracing::info!(
+                    connection_id = %conn_id,
+                    conversation_id = cid,
+                    "[ACP] prompt already accepted under this client message id; not sending it again"
+                );
+                return Ok(PromptAccepted { duplicate: true });
+            }
+        }
+        self.check_pool_for_prompt(conn_id).await?;
+        let linked = self
+            .send_prompt_linked_with_message_id(
+                db,
+                conn_id,
+                blocks,
+                folder_id,
+                conversation_id,
+                None,
+                Some(id.clone()),
+            )
+            .await?;
+        if let Some(cid) = linked.or(known_conversation) {
+            self.message_receipts.record(db, cid, &id).await;
+        }
+        Ok(PromptAccepted { duplicate: false })
+    }
+
+    /// A message delivered into the running turn (`submit_session_feedback`),
+    /// at most once per `client_id`.
+    ///
+    /// The id becomes the note's id. A retry finds the note this turn already
+    /// recorded, or the conversation's receipt for the id (left by this insert
+    /// or by a prompt that carried the same message), and answers with that
+    /// instead of delivering it again — in particular it never answers
+    /// "no active turn" for a message the agent already has, which would send
+    /// it once more as the next prompt. Detached from the caller for the same
+    /// reason as [`Self::send_client_prompt`].
+    pub async fn submit_client_feedback(
+        &self,
+        db: &AppDatabase,
+        conn_id: &str,
+        text: String,
+        blocks: Option<Vec<PromptInputBlock>>,
+        client_id: Option<String>,
+    ) -> Result<FeedbackItem, AcpError> {
+        let id = client_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| crate::acp::message_receipts::is_valid_id(id))
+            .map(str::to_string);
+        let Some(id) = id else {
+            return self.submit_feedback(conn_id, text, blocks).await;
+        };
+        let mgr = self.clone_ref();
+        let db = AppDatabase {
+            conn: db.conn.clone(),
+        };
+        let conn_id = conn_id.to_string();
+        let task = tokio::spawn(async move {
+            mgr.client_feedback_detached(&db, &conn_id, text, blocks, id)
+                .await
+        });
+        match task.await {
+            Ok(result) => result,
+            Err(join_err) => Err(AcpError::protocol(format!(
+                "feedback task did not complete: {join_err}"
+            ))),
+        }
+    }
+
+    /// The body of [`Self::submit_client_feedback`], run detached.
+    async fn client_feedback_detached(
+        &self,
+        db: &AppDatabase,
+        conn_id: &str,
+        text: String,
+        blocks: Option<Vec<PromptInputBlock>>,
+        id: String,
+    ) -> Result<FeedbackItem, AcpError> {
+        let _same_id = self.message_receipts.lock_id(&id).await;
+        if let Some(state) = self.get_state(conn_id).await {
+            let existing = state
+                .read()
+                .await
+                .feedback
+                .iter()
+                .find(|item| item.id == id)
+                .cloned();
+            if let Some(item) = existing {
+                return Ok(item);
+            }
+        }
+        let conversation = self.linked_conversation_id(conn_id).await;
+        if let Some(cid) = conversation {
+            if self.message_receipts.contains(db, cid, &id).await {
+                tracing::info!(
+                    connection_id = %conn_id,
+                    conversation_id = cid,
+                    "[ACP] message already delivered under this client id; not delivering it again"
+                );
+                return Ok(FeedbackItem::new_delivered(
+                    id.clone(),
+                    text.trim().to_string(),
+                    chrono::Utc::now(),
+                    None,
+                ));
+            }
+        }
+        let item = self
+            .submit_feedback_with_id(conn_id, text, blocks, Some(id.clone()))
+            .await?;
+        if let Some(cid) = conversation {
+            self.message_receipts.record(db, cid, &id).await;
+        }
+        Ok(item)
     }
 
     /// As [`send_prompt_linked`], plus an optional `client_message_id`: the
@@ -4230,6 +4458,20 @@ impl ConnectionManager {
         text: String,
         blocks: Option<Vec<PromptInputBlock>>,
     ) -> Result<FeedbackItem, AcpError> {
+        self.submit_feedback_with_id(conn_id, text, blocks, None)
+            .await
+    }
+
+    /// As [`Self::submit_feedback`], recording the note under `note_id` (the
+    /// sending client's message id) instead of a fresh one.
+    pub async fn submit_feedback_with_id(
+        &self,
+        conn_id: &str,
+        text: String,
+        blocks: Option<Vec<PromptInputBlock>>,
+        note_id: Option<String>,
+    ) -> Result<FeedbackItem, AcpError> {
+        let note_id = note_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let trimmed = text.trim();
         if trimmed.is_empty() {
             return Err(AcpError::InvalidFeedback("empty note".into()));
@@ -4269,8 +4511,10 @@ impl ConnectionManager {
         }
 
         if native {
-            return Self::submit_feedback_native(conn_id, state, cmd_tx, emitter, text, blocks)
-                .await;
+            return Self::submit_feedback_native(
+                conn_id, state, cmd_tx, emitter, note_id, text, blocks,
+            )
+            .await;
         }
 
         // The pull tool delivers plain text (`PendingFeedback`), so a draft
@@ -4287,11 +4531,7 @@ impl ConnectionManager {
             return Err(AcpError::NoActiveTurn);
         }
 
-        let item = FeedbackItem::new_pending(
-            uuid::Uuid::new_v4().to_string(),
-            text,
-            chrono::Utc::now(),
-        );
+        let item = FeedbackItem::new_pending(note_id, text, chrono::Utc::now());
         // Gate on `turn_in_flight` and append in ONE critical section (via the
         // gated emit): a `TurnComplete` (flips the flag) or `UserMessage`
         // (clears `feedback`) can't slip between the gate and the append+seq, so
@@ -4343,6 +4583,7 @@ impl ConnectionManager {
         state: Arc<tokio::sync::RwLock<crate::acp::session_state::SessionState>>,
         cmd_tx: tokio::sync::mpsc::Sender<ConnectionCommand>,
         emitter: EventEmitter,
+        note_id: String,
         text: String,
         blocks: Option<Vec<PromptInputBlock>>,
     ) -> Result<FeedbackItem, AcpError> {
@@ -4473,12 +4714,7 @@ impl ConnectionManager {
                         state.write().await.native_steering_available = false;
                     }
                 }
-                let item = FeedbackItem::new_delivered(
-                    uuid::Uuid::new_v4().to_string(),
-                    text,
-                    created_at,
-                    record_blocks,
-                );
+                let item = FeedbackItem::new_delivered(note_id, text, created_at, record_blocks);
                 // Ungated on purpose — see the invariant on this fn's doc.
                 emit_with_state(
                     &state,
@@ -7239,6 +7475,298 @@ mod tests {
             Some("optimistic-abc"),
             "Prompt's user_message must carry the client-supplied message_id verbatim"
         );
+    }
+
+    /// Bind a test connection to a conversation row, as a resumed session is.
+    async fn link_to_conversation(mgr: &ConnectionManager, conn_id: &str, conversation_id: i32) {
+        let state = mgr.get_state(conn_id).await.unwrap();
+        state.write().await.conversation_id = Some(conversation_id);
+    }
+
+    async fn seeded_conversation(db: &AppDatabase, dir: &str) -> i32 {
+        use crate::db::test_helpers;
+        let folder_id = test_helpers::seed_folder(db, dir).await;
+        test_helpers::seed_conversation(db, folder_id, AgentType::Codex).await
+    }
+
+    fn text_blocks(text: &str) -> Vec<PromptInputBlock> {
+        vec![PromptInputBlock::Text { text: text.into() }]
+    }
+
+    #[tokio::test]
+    async fn client_prompt_resent_with_the_same_id_reaches_the_agent_once() {
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
+        let cid = seeded_conversation(&db, "/tmp/cp-once").await;
+        let mgr = ConnectionManager::new();
+        let conn_id = "conn-cp-once";
+        let mut cmd_rx = insert_live_connection(&mgr, conn_id, AgentType::Codex, None).await;
+        link_to_conversation(&mgr, conn_id, cid).await;
+
+        let first = mgr
+            .send_client_prompt(
+                &db,
+                conn_id,
+                text_blocks("hi"),
+                None,
+                None,
+                Some("optimistic-1".into()),
+            )
+            .await
+            .expect("first send");
+        assert!(!first.duplicate);
+        // The answer was lost and the client sends the same message again
+        // while its turn still runs: recognised, not bounced as busy.
+        let retry = mgr
+            .send_client_prompt(
+                &db,
+                conn_id,
+                text_blocks("hi"),
+                None,
+                Some(cid),
+                Some("optimistic-1".into()),
+            )
+            .await
+            .expect("the retry is answered");
+        assert!(retry.duplicate);
+        assert_eq!(
+            drain_prompt_user_messages(&mut cmd_rx).len(),
+            1,
+            "the agent got it once"
+        );
+
+        // Another message is not a duplicate: it meets the busy gate.
+        let other = mgr
+            .send_client_prompt(
+                &db,
+                conn_id,
+                text_blocks("next"),
+                None,
+                None,
+                Some("optimistic-2".into()),
+            )
+            .await;
+        assert!(matches!(other, Err(AcpError::TurnInProgress)));
+    }
+
+    #[tokio::test]
+    async fn client_prompt_receipt_outlives_a_restart() {
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
+        let cid = seeded_conversation(&db, "/tmp/cp-restart").await;
+        let before = ConnectionManager::new();
+        let _rx = insert_live_connection(&before, "conn-a", AgentType::Codex, None).await;
+        link_to_conversation(&before, "conn-a", cid).await;
+        before
+            .send_client_prompt(
+                &db,
+                "conn-a",
+                text_blocks("hi"),
+                None,
+                None,
+                Some("optimistic-r".into()),
+            )
+            .await
+            .expect("send");
+
+        // The server restarted before the client heard back; the client
+        // reconnects (a new connection) and sends the message again.
+        let after = ConnectionManager::new();
+        let mut rx = insert_live_connection(&after, "conn-b", AgentType::Codex, None).await;
+        link_to_conversation(&after, "conn-b", cid).await;
+        // Sent first on the connection the old process had: reported gone,
+        // so the client opens a fresh one, not answered as a duplicate.
+        let stale = after
+            .send_client_prompt(
+                &db,
+                "conn-a",
+                text_blocks("hi"),
+                None,
+                Some(cid),
+                Some("optimistic-r".into()),
+            )
+            .await;
+        assert!(matches!(stale, Err(AcpError::ConnectionNotFound(_))));
+        let retry = after
+            .send_client_prompt(
+                &db,
+                "conn-b",
+                text_blocks("hi"),
+                None,
+                None,
+                Some("optimistic-r".into()),
+            )
+            .await
+            .expect("retry");
+        assert!(retry.duplicate);
+        assert!(drain_prompt_user_messages(&mut rx).is_empty());
+    }
+
+    #[tokio::test]
+    async fn client_prompt_that_failed_leaves_no_receipt() {
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
+        let cid = seeded_conversation(&db, "/tmp/cp-fail").await;
+        let mgr = ConnectionManager::new();
+        // The agent's command channel is gone: the send fails.
+        insert_fake_connection(
+            &mgr,
+            "conn-dead",
+            AgentType::Codex,
+            None,
+            EventEmitter::Noop,
+        )
+        .await;
+        link_to_conversation(&mgr, "conn-dead", cid).await;
+        assert!(mgr
+            .send_client_prompt(
+                &db,
+                "conn-dead",
+                text_blocks("hi"),
+                None,
+                None,
+                Some("optimistic-f".into())
+            )
+            .await
+            .is_err());
+        assert!(
+            !mgr.message_receipts
+                .contains(&db, cid, "optimistic-f")
+                .await
+        );
+
+        // The retry on a working connection is sent.
+        let mut rx = insert_live_connection(&mgr, "conn-ok", AgentType::Codex, None).await;
+        link_to_conversation(&mgr, "conn-ok", cid).await;
+        let retry = mgr
+            .send_client_prompt(
+                &db,
+                "conn-ok",
+                text_blocks("hi"),
+                None,
+                None,
+                Some("optimistic-f".into()),
+            )
+            .await
+            .expect("retry");
+        assert!(!retry.duplicate);
+        assert_eq!(drain_prompt_user_messages(&mut rx).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn client_prompts_racing_with_the_same_id_send_once() {
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
+        let cid = seeded_conversation(&db, "/tmp/cp-race").await;
+        let mgr = ConnectionManager::new();
+        let mut rx = insert_live_connection(&mgr, "conn-race", AgentType::Codex, None).await;
+        link_to_conversation(&mgr, "conn-race", cid).await;
+        let (a, b) = tokio::join!(
+            mgr.send_client_prompt(
+                &db,
+                "conn-race",
+                text_blocks("hi"),
+                None,
+                None,
+                Some("optimistic-x".into())
+            ),
+            mgr.send_client_prompt(
+                &db,
+                "conn-race",
+                text_blocks("hi"),
+                None,
+                None,
+                Some("optimistic-x".into())
+            ),
+        );
+        let (a, b) = (a.expect("a"), b.expect("b"));
+        assert!(
+            a.duplicate != b.duplicate,
+            "exactly one of the two was sent"
+        );
+        assert_eq!(drain_prompt_user_messages(&mut rx).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn client_feedback_retry_returns_the_recorded_note() {
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
+        let cid = seeded_conversation(&db, "/tmp/cf-retry").await;
+        let mgr = ConnectionManager::new();
+        mgr.insert_test_connection("c1", AgentType::ClaudeCode, None, EventEmitter::Noop)
+            .await;
+        mark_feedback_ready(&mgr, "c1").await;
+        link_to_conversation(&mgr, "c1", cid).await;
+
+        let first = mgr
+            .submit_client_feedback(
+                &db,
+                "c1",
+                "use the cache".into(),
+                None,
+                Some("optimistic-n".into()),
+            )
+            .await
+            .expect("insert");
+        assert_eq!(first.id, "optimistic-n", "the client's id names the note");
+        let retry = mgr
+            .submit_client_feedback(
+                &db,
+                "c1",
+                "use the cache".into(),
+                None,
+                Some("optimistic-n".into()),
+            )
+            .await
+            .expect("retry");
+        assert_eq!(retry, first);
+        let state = mgr.get_state("c1").await.unwrap();
+        assert_eq!(state.read().await.feedback.len(), 1, "recorded once");
+
+        // The same message sent as a prompt afterwards (the client's fallback
+        // when it thought the insert failed) is a duplicate, not a new turn.
+        let as_prompt = mgr
+            .send_client_prompt(
+                &db,
+                "c1",
+                text_blocks("use the cache"),
+                None,
+                None,
+                Some("optimistic-n".into()),
+            )
+            .await
+            .expect("prompt");
+        assert!(as_prompt.duplicate);
+    }
+
+    #[tokio::test]
+    async fn client_feedback_after_its_turn_ended_is_not_rerouted_as_a_prompt() {
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
+        let cid = seeded_conversation(&db, "/tmp/cf-ended").await;
+        let mgr = ConnectionManager::new();
+        mgr.insert_test_connection("c1", AgentType::ClaudeCode, None, EventEmitter::Noop)
+            .await;
+        mark_feedback_ready(&mgr, "c1").await;
+        link_to_conversation(&mgr, "c1", cid).await;
+        mgr.submit_client_feedback(&db, "c1", "note".into(), None, Some("optimistic-e".into()))
+            .await
+            .expect("insert");
+
+        // The turn ends and the next one clears the notes; then the retry of
+        // the insert arrives (after a restart, on a new connection).
+        let after = ConnectionManager::new();
+        after
+            .insert_test_connection("c2", AgentType::ClaudeCode, None, EventEmitter::Noop)
+            .await;
+        set_feedback_tool_available(&after, "c2").await;
+        link_to_conversation(&after, "c2", cid).await;
+        let retry = after
+            .submit_client_feedback(&db, "c2", "note".into(), None, Some("optimistic-e".into()))
+            .await
+            .expect("answered as delivered, not NoActiveTurn");
+        assert_eq!(retry.id, "optimistic-e");
+        assert_eq!(retry.status, FeedbackStatus::Delivered);
+
+        // Without an id nothing changes: no turn, so the usual rejection.
+        let plain = after
+            .submit_client_feedback(&db, "c2", "note".into(), None, None)
+            .await;
+        assert!(matches!(plain, Err(AcpError::NoActiveTurn)));
     }
 
     #[tokio::test]

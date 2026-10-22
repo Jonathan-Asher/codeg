@@ -359,15 +359,22 @@ export function stripUploadedImagePayloads(
   })
 }
 
+/** The server's answer to `acp_prompt`. `duplicate`: a message with the same
+ *  `clientMessageId` was already accepted for the conversation and was not
+ *  sent again (this was a resend after a lost answer). */
+export interface PromptAccepted {
+  duplicate: boolean
+}
+
 export async function acpPrompt(
   connectionId: string,
   blocks: PromptInputBlock[],
   folderId: number | null = null,
   conversationId: number | null = null,
   clientMessageId: string | null = null
-): Promise<void> {
+): Promise<PromptAccepted> {
   try {
-    await getTransport().call("acp_prompt", {
+    const answer = await getTransport().call<unknown>("acp_prompt", {
       connectionId,
       // Strip in every mode where the prompt leaves through an HTTP body:
       // pure web (`!isDesktop`) and desktop-attached-to-remote-workspace.
@@ -379,6 +386,12 @@ export async function acpPrompt(
       conversationId,
       clientMessageId,
     })
+    // An older server answers with no body.
+    const duplicate =
+      !!answer &&
+      typeof answer === "object" &&
+      (answer as { duplicate?: unknown }).duplicate === true
+    return { duplicate }
   } catch (e) {
     if (isTurnInProgressRejection(e)) throw new TurnBusyError()
     // Every Claude subscription behind the account pool is at its limit: the
@@ -6030,11 +6043,15 @@ export async function setFeedbackSettings(
 export async function submitSessionFeedback(
   connectionId: string,
   text: string,
-  blocks?: PromptInputBlock[] | null
+  blocks?: PromptInputBlock[] | null,
+  // The message's client id: the note is recorded under it, and a resend
+  // with the same id is answered with that note instead of a second delivery.
+  clientId?: string | null
 ): Promise<FeedbackItem> {
   return getTransport().call("submit_session_feedback", {
     connectionId,
     text,
+    clientId: clientId ?? null,
     blocks:
       blocks && blocks.length > 0
         ? stripUploadedImagePayloads(

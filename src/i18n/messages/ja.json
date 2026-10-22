@@ -3563,6 +3563,15 @@
         "poolWaitUntil": "すべての Claude サブスクリプションが上限に達しています — 次は {time} に空きます。そのときキューのメッセージが送信されます。",
         "limitPaused": "使用量の上限で一時停止中 — キューのメッセージは {time} の再開後に送信されます。",
         "notSent": "未送信：{agent} への接続に失敗しました。接続が戻ると、キューのメッセージが送信されます。",
+        "notSentLabel": "未送信",
+        "notSentConnectionLost": "接続が切れました — 再送信します",
+        "notSentTimeout": "応答がありません — 再送信します",
+        "notSentServer": "サーバーエラー — 再送信します",
+        "notSentUnauthorized": "サインアウトしました — サインイン後に再送信します",
+        "notSentInterrupted": "中断されました — 再送信します",
+        "notSentRejected": "サーバーに拒否されました",
+        "notSentGaveUp": "失敗が続いています — 再試行をタップしてください",
+        "retryItem": "今すぐ再送信",
         "retry": "再試行"
       },
       "welcomeInputPanel": {
@@ -7437,7 +7446,8 @@
       "newQuestion": "新しい質問",
       "openInCodeg": "codeg で開く",
       "hide": "隠す",
-      "unqueue": "キューから削除"
+      "unqueue": "キューから削除",
+      "retry": "再送信"
     },
     "status": {
       "connecting": "{agent} を起動中…",

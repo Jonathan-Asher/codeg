@@ -571,17 +571,23 @@ describe("ConversationDetailPanel send-path hardening", () => {
     expect(optimisticIdx).toBeGreaterThan(guardIdx)
   })
 
-  it("fully restores pre-send state when the create fails", () => {
-    // A failed create must not strand the user behind a blank panel: drop the
-    // optimistic turn, return to welcome mode, re-seed the draft, surface error.
+  it("keeps the message, marked not sent, when the create fails", () => {
+    // A failed create must not strand the user behind a blank panel nor lose
+    // the message: drop the optimistic turn, settle to idle, keep the message
+    // at the queue's front as "Not sent" (never back in the input box), and
+    // surface the error.
     const catchIdx = source.indexOf(
       '"[ConversationTabView] create conversation:"'
     )
     expect(catchIdx).toBeGreaterThan(-1)
-    const catchBlock = source.slice(catchIdx, catchIdx + 1500)
+    const catchBlock = source.slice(catchIdx, catchIdx + 1800)
     expect(catchBlock).toContain("removeOptimisticTurn(")
-    expect(catchBlock).toContain("setHasSentMessage(false)")
-    expect(catchBlock).toContain("saveMessageInputDraft(")
+    expect(catchBlock).toContain(
+      'setSyncState(effectiveConversationId, "idle")'
+    )
+    expect(catchBlock).toContain("mqRequeueFront(draft, modeIdForQueue, {")
+    expect(catchBlock).toContain("failure: nextSendFailure(e, opts?.failure)")
+    expect(catchBlock).not.toContain("saveMessageInputDraft(")
     expect(catchBlock).toContain(
       'setAgentConnectError(tWelcome("createConversationFailed"))'
     )

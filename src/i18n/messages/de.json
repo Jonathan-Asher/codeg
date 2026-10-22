@@ -3563,6 +3563,15 @@
         "poolWaitUntil": "Alle Claude-Abonnements haben ihr Limit erreicht – das nächste wird um {time} frei. Wartende Nachrichten werden dann gesendet.",
         "limitPaused": "Wegen Nutzungslimits pausiert – wartende Nachrichten werden gesendet, sobald es um {time} weitergeht.",
         "notSent": "Nicht gesendet: Die Verbindung zu {agent} ist fehlgeschlagen. Wartende Nachrichten werden gesendet, sobald sie wieder steht.",
+        "notSentLabel": "Nicht gesendet",
+        "notSentConnectionLost": "Verbindung verloren — wird erneut gesendet",
+        "notSentTimeout": "Keine Antwort — wird erneut gesendet",
+        "notSentServer": "Serverfehler — wird erneut gesendet",
+        "notSentUnauthorized": "Abgemeldet — wird nach der Anmeldung erneut gesendet",
+        "notSentInterrupted": "Unterbrochen — wird erneut gesendet",
+        "notSentRejected": "Vom Server abgelehnt",
+        "notSentGaveUp": "Schlägt weiter fehl — tippe auf Wiederholen",
+        "retryItem": "Jetzt erneut senden",
         "retry": "Erneut versuchen"
       },
       "welcomeInputPanel": {
@@ -7437,7 +7446,8 @@
       "newQuestion": "Neue Frage",
       "openInCodeg": "In codeg öffnen",
       "hide": "Ausblenden",
-      "unqueue": "Aus der Warteschlange entfernen"
+      "unqueue": "Aus der Warteschlange entfernen",
+      "retry": "Erneut senden"
     },
     "status": {
       "connecting": "{agent} wird gestartet…",

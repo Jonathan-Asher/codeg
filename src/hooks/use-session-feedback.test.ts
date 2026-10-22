@@ -542,7 +542,12 @@ describe("useSessionFeedback", () => {
     await act(async () => {
       await result.current.steer("go left")
     })
-    expect(mockSubmit).toHaveBeenCalledWith("c1", "go left", undefined)
+    expect(mockSubmit).toHaveBeenCalledWith(
+      "c1",
+      "go left",
+      undefined,
+      undefined
+    )
     expect(result.current.notes.map((n) => n.id)).toContain("st1")
 
     // A draft with attachments hands its full block list through untouched —
@@ -560,7 +565,12 @@ describe("useSessionFeedback", () => {
     await act(async () => {
       await result.current.steer("match this", blocks)
     })
-    expect(mockSubmit).toHaveBeenCalledWith("c1", "match this", blocks)
+    expect(mockSubmit).toHaveBeenCalledWith(
+      "c1",
+      "match this",
+      blocks,
+      undefined
+    )
 
     const noTurn = new Error("no turn")
     mockSubmit.mockRejectedValueOnce(noTurn)

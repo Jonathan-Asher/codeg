@@ -3563,6 +3563,15 @@
         "poolWaitUntil": "所有 Claude 訂閱皆已達到用量上限——下一個將於 {time} 恢復，屆時排隊的訊息會自動送出。",
         "limitPaused": "因用量上限暫停——排隊的訊息將在 {time} 繼續後送出。",
         "notSent": "未送出：與 {agent} 的連線失敗。連線恢復後，排隊的訊息會自動送出。",
+        "notSentLabel": "未傳送",
+        "notSentConnectionLost": "連線中斷 — 將重新傳送",
+        "notSentTimeout": "沒有回應 — 將重新傳送",
+        "notSentServer": "伺服器錯誤 — 將重新傳送",
+        "notSentUnauthorized": "已登出 — 登入後重新傳送",
+        "notSentInterrupted": "已中斷 — 將重新傳送",
+        "notSentRejected": "伺服器拒絕了此訊息",
+        "notSentGaveUp": "仍然失敗 — 請點選重試",
+        "retryItem": "立即重新傳送",
         "retry": "重試"
       },
       "welcomeInputPanel": {
@@ -7437,7 +7446,8 @@
       "newQuestion": "新問題",
       "openInCodeg": "在 codeg 中開啟",
       "hide": "隱藏",
-      "unqueue": "從佇列中移除"
+      "unqueue": "從佇列中移除",
+      "retry": "重新傳送"
     },
     "status": {
       "connecting": "正在啟動 {agent}…",

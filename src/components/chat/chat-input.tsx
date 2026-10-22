@@ -13,7 +13,7 @@ import type {
   SessionModeInfo,
   AvailableCommandInfo,
 } from "@/lib/types"
-import type { QueuedMessage } from "@/hooks/use-message-queue"
+import type { QueuedMessage, RequeueOptions } from "@/hooks/use-message-queue"
 import {
   MessageInput,
   type ComposerInjectContent,
@@ -56,7 +56,7 @@ interface ChatInputProps {
   onEnqueue?: (
     draft: PromptDraft,
     modeId: string | null,
-    opts?: { holdUntilTurnEnd?: boolean }
+    opts?: RequeueOptions
   ) => void
   /** The prompting turn is held open only for background work — the agent is
    *  idle (see `lib/background-idle.ts`). Swaps "responding" for "idle,
@@ -67,7 +67,11 @@ interface ChatInputProps {
   /** Pass-through: see `MessageInput.heldTurnReady`. */
   heldTurnReady?: boolean
   /** Pass-through: see `MessageInput.onDeliverNow`. */
-  onDeliverNow?: (text: string, blocks?: PromptInputBlock[]) => Promise<void>
+  onDeliverNow?: (
+    text: string,
+    blocks?: PromptInputBlock[],
+    clientId?: string
+  ) => Promise<void>
   /** Pass-through: see `MessageInput.canContinue`. */
   canContinue?: boolean
   /** Why the queue is held, shown above it (see `QueueNotice`). */
@@ -78,6 +82,8 @@ interface ChatInputProps {
   onQueueReorder?: (items: QueuedMessage[]) => void
   onQueueEdit?: (id: string) => void
   onQueueDelete?: (id: string) => void
+  /** Retry a queued message marked "Not sent". */
+  onQueueRetry?: (id: string) => void
   /** Insert one queued item into the RUNNING turn over the session's
    *  live-feedback channel (see `MessageQueueDisplayProps.onSteerItem`).
    *  Threaded straight through; present only while a turn is in flight and
@@ -99,7 +105,11 @@ interface ChatInputProps {
    *  `MessageInputProps.onSteer` — the optional second parameter makes a
    *  stale one-arg declaration here assignable, so tsc would NOT catch a
    *  wrapper that silently drops the blocks. */
-  onSteer?: (text: string, blocks?: PromptInputBlock[]) => Promise<void>
+  onSteer?: (
+    text: string,
+    blocks?: PromptInputBlock[],
+    clientId?: string
+  ) => Promise<void>
   /** Which channel `onSteer` rides (`useSessionFeedback().channel`); picks
    *  the composer's honest copy. See `MessageInput`. */
   steerChannel?: "native" | "pull"
@@ -160,6 +170,7 @@ export const ChatInput = memo(function ChatInput({
   onQueueReorder,
   onQueueEdit,
   onQueueDelete,
+  onQueueRetry,
   onQueueSteer,
   editingItemId,
   editingDraftText,
@@ -234,6 +245,7 @@ export const ChatInput = memo(function ChatInput({
             onReorder={onQueueReorder}
             onEdit={onQueueEdit}
             onDelete={onQueueDelete}
+            onRetry={onQueueRetry}
             editingItemId={editingItemId ?? null}
             onSteerItem={onQueueSteer}
             steerChannel={steerChannel}

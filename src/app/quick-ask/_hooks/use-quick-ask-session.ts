@@ -52,6 +52,7 @@ import {
   shouldDrainIntoHeldTurn,
 } from "@/lib/background-idle"
 import { flushRetryDelayMs } from "@/lib/queue-flush"
+import { classifySendError, nextSendFailure } from "@/lib/send-failure"
 import {
   promptOptionsFor,
   routeQuickAskSend,
@@ -141,6 +142,16 @@ export interface QueuedQuestion {
    */
   holdUntilTurnEnd?: boolean
 }
+
+/** The client message id a question is sent under, on every attempt: the
+ *  server answers a repeat of it as a duplicate instead of a second turn. */
+export function questionClientId(turnId: string): string {
+  return `optimistic-${turnId}`
+}
+
+/** Automatic resends of one question after failures that only mean "the
+ *  server could not be reached", before it waits for Retry. */
+const MAX_QUESTION_AUTO_RESENDS = 5
 
 /** What the window is talking to once the first question went out. */
 export interface QuickAskBinding {
@@ -329,6 +340,10 @@ export function useQuickAskSession({
   const conn = useConnection(contextKey)
 
   const [thread, setThread] = useState<QuickAskTurn[]>([])
+  const threadRef = useRef(thread)
+  useEffect(() => {
+    threadRef.current = thread
+  }, [thread])
   const [binding, setBinding] = useState<QuickAskBinding | null>(null)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<QuickAskError | null>(null)
@@ -422,6 +437,27 @@ export function useQuickAskSession({
     },
     []
   )
+
+  // Failed questions on a recorded session that go out again by themselves
+  // once the session is connected (turn id -> automatic resends so far). Only
+  // reachability failures qualify, and only where the question carries an id
+  // the server dedupes (not a private question): a resend after a lost answer
+  // is then never a second turn. Everything else waits for Retry.
+  const autoResendAttemptsRef = useRef(new Map<string, number>())
+  const autoResendDueRef = useRef(new Set<string>())
+  const [autoResendVersion, setAutoResendVersion] = useState(0)
+  const noteFailedQuestion = useCallback((turnId: string, error: unknown) => {
+    if (bindingRef.current?.target === "private") return
+    const failure = nextSendFailure(error, undefined)
+    if (!failure.autoRetry || classifySendError(error).reason === "server") {
+      return
+    }
+    const attempts = autoResendAttemptsRef.current.get(turnId) ?? 0
+    if (attempts >= MAX_QUESTION_AUTO_RESENDS) return
+    autoResendAttemptsRef.current.set(turnId, attempts + 1)
+    autoResendDueRef.current.add(turnId)
+    setAutoResendVersion((v) => v + 1)
+  }, [])
 
   const promptTargetOf = useCallback(
     (b: QuickAskBinding): QuickAskPromptTarget =>
@@ -538,16 +574,18 @@ export function useQuickAskSession({
       connectionId: string,
       text: string,
       images: ImageInputAttachment[],
-      caps: PromptCapabilitiesInfo | undefined
+      caps: PromptCapabilitiesInfo | undefined,
+      clientId?: string
     ) => {
       if (images.length > 0) {
         await submitSessionFeedback(
           connectionId,
           text,
-          questionBlocks(text, images, caps)
+          questionBlocks(text, images, caps),
+          clientId
         )
       } else {
-        await submitSessionFeedback(connectionId, text)
+        await submitSessionFeedback(connectionId, text, null, clientId)
       }
     },
     []
@@ -573,7 +611,8 @@ export function useQuickAskSession({
             live.connectionId,
             text,
             images,
-            live.promptCapabilities
+            live.promptCapabilities,
+            questionClientId(turnId)
           )
           updateTurn(turnId, "steered")
           return
@@ -590,7 +629,10 @@ export function useQuickAskSession({
         await actions.sendPrompt(
           keyRef.current,
           questionBlocks(text, images, live?.promptCapabilities),
-          promptOptionsFor(promptTargetOf(b))
+          {
+            ...promptOptionsFor(promptTargetOf(b)),
+            clientMessageId: questionClientId(turnId),
+          }
         )
         updateTurn(turnId, "sent")
       } catch (e) {
@@ -698,6 +740,7 @@ export function useQuickAskSession({
           )
         } catch (e) {
           updateTurn(turnId, "failed")
+          noteFailedQuestion(turnId, e)
           setError({ code: "send_failed", detail: describeError(e) })
         }
         return true
@@ -784,6 +827,7 @@ export function useQuickAskSession({
     [
       actions,
       deliver,
+      noteFailedQuestion,
       onFolderUsed,
       onSessionUsed,
       prepare,
@@ -851,7 +895,10 @@ export function useQuickAskSession({
         await actions.sendPrompt(
           key,
           questionBlocks(next.text, next.images, live.promptCapabilities),
-          promptOptionsFor(promptTargetOf(b))
+          {
+            ...promptOptionsFor(promptTargetOf(b)),
+            clientMessageId: questionClientId(next.turnId),
+          }
         )
         updateTurn(next.turnId, "sent")
       } catch (e) {
@@ -865,12 +912,21 @@ export function useQuickAskSession({
           return
         }
         updateTurn(next.turnId, "failed")
+        noteFailedQuestion(next.turnId, e)
         setError({ code: "send_failed", detail: describeError(e) })
       } finally {
         settleDrain(token)
       }
     })()
-  }, [actions, promptTargetOf, setQueue, settleDrain, store, updateTurn])
+  }, [
+    actions,
+    noteFailedQuestion,
+    promptTargetOf,
+    setQueue,
+    settleDrain,
+    store,
+    updateTurn,
+  ])
 
   /**
    * Deliver the oldest waiting question into a turn held open only for
@@ -891,7 +947,8 @@ export function useQuickAskSession({
       live.connectionId,
       head.text,
       head.images,
-      live.promptCapabilities
+      live.promptCapabilities,
+      questionClientId(head.turnId)
     )
       .then(() => {
         if (generationRef.current !== generation) return
@@ -920,6 +977,11 @@ export function useQuickAskSession({
     (detail: string | null) => {
       const waiting = new Set(queueRef.current.map((q) => q.turnId))
       if (waiting.size === 0) return
+      // Lost with the connection, not refused: sent again by themselves
+      // once the session is back (see `noteFailedQuestion`).
+      for (const turnId of waiting) {
+        noteFailedQuestion(turnId, new Error("connection not found: lost"))
+      }
       setQueue([])
       setThread((prev) =>
         prev.map((turn) =>
@@ -930,7 +992,7 @@ export function useQuickAskSession({
       )
       setError({ code: "send_failed", detail })
     },
-    [setQueue]
+    [noteFailedQuestion, setQueue]
   )
 
   const heldTurnReady = canDeliverIntoHeldTurn({
@@ -938,6 +1000,48 @@ export function useQuickAskSession({
     awaitingBackground: conn.awaitingBackground,
     nativeSteering: conn.nativeSteering,
   })
+
+  /** Send a failed question again: it joins the queue (same turn, same
+   *  client id), which sends it as soon as the session takes one. */
+  const retryQuestion = useCallback(
+    (turnId: string) => {
+      if (queueRef.current.some((q) => q.turnId === turnId)) return
+      const turn = threadRef.current.find((t) => t.id === turnId)
+      if (!turn || turn.role !== "user" || turn.state !== "failed") return
+      setError(null)
+      setQueue([
+        ...queueRef.current,
+        { turnId, text: turn.text, images: turn.images ?? [] },
+      ])
+      updateTurn(turnId, "queued")
+    },
+    [setQueue, updateTurn]
+  )
+
+  // Resend the failed questions marked above once the session is connected
+  // again (and the window still talks to it).
+  useEffect(() => {
+    if (!binding || binding.target === "private") return
+    if (conn.status !== "connected") return
+    if (autoResendDueRef.current.size === 0) return
+    const due = threadRef.current.filter(
+      (turn) =>
+        turn.role === "user" &&
+        turn.state === "failed" &&
+        autoResendDueRef.current.has(turn.id)
+    )
+    if (due.length === 0) return
+    const timer = setTimeout(
+      () => {
+        for (const turn of due) {
+          autoResendDueRef.current.delete(turn.id)
+          retryQuestion(turn.id)
+        }
+      },
+      flushRetryDelayMs(Date.now(), lastDrainAttemptAtRef.current)
+    )
+    return () => clearTimeout(timer)
+  }, [autoResendVersion, binding, conn.status, retryQuestion, thread])
 
   /**
    * The queue's send engine — level-triggered, like the composer's: whenever
@@ -1145,6 +1249,7 @@ export function useQuickAskSession({
       send,
       cancel,
       unqueue,
+      retryQuestion,
       clear,
       setConfigOption,
       dismissError: () => setError(null),
@@ -1164,6 +1269,7 @@ export function useQuickAskSession({
       send,
       cancel,
       unqueue,
+      retryQuestion,
       clear,
       setConfigOption,
     ]

@@ -19,7 +19,7 @@ import {
 import Image from "next/image"
 import { useStickToBottomContext } from "use-stick-to-bottom"
 import { useTranslations } from "next-intl"
-import { AlertCircle, Clock, CornerDownRight, X } from "lucide-react"
+import { AlertCircle, Clock, CornerDownRight, RotateCw, X } from "lucide-react"
 
 import {
   useConnectionStore,
@@ -135,6 +135,7 @@ function UserBubble({
   state,
   heldForBackground = false,
   onUnqueue,
+  onRetry,
 }: {
   text: string
   images?: ImageInputAttachment[]
@@ -143,6 +144,8 @@ function UserBubble({
   heldForBackground?: boolean
   /** Take a queued question back out (shown on queued questions only). */
   onUnqueue?: () => void
+  /** Send a failed question again. */
+  onRetry?: () => void
 }) {
   const t = useTranslations("QuickAsk")
   // A turn held for background work has no reply being written: say what the
@@ -206,6 +209,18 @@ function UserBubble({
           {state === "steered" && <CornerDownRight className="size-3" />}
           {state === "failed" && <AlertCircle className="size-3" />}
           {label && t(label)}
+          {state === "failed" && onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="-my-0.5 inline-flex items-center gap-0.5 rounded-sm px-1 py-0.5 font-medium hover:bg-destructive/10"
+              title={t("actions.retry")}
+              data-testid="qa-retry"
+            >
+              <RotateCw className="size-3" />
+              {t("actions.retry")}
+            </button>
+          )}
           {state === "queued" && onUnqueue && (
             <button
               type="button"
@@ -230,6 +245,7 @@ export function QuickAskThread({
   streaming,
   heldForBackground = false,
   onUnqueue,
+  onRetry,
   footer,
 }: {
   /** The connection the live reply streams from. */
@@ -241,6 +257,7 @@ export function QuickAskThread({
   heldForBackground?: boolean
   /** Take a queued question back out of the queue. */
   onUnqueue?: (turnId: string) => void
+  onRetry?: (turnId: string) => void
   footer?: React.ReactNode
 }) {
   const isQueued = (turn: QuickAskTurn) =>
@@ -291,6 +308,7 @@ export function QuickAskThread({
               state={turn.state}
               heldForBackground={heldForBackground}
               onUnqueue={onUnqueue ? () => onUnqueue(turn.id) : undefined}
+              onRetry={onRetry ? () => onRetry(turn.id) : undefined}
             />
           ) : null
         )}
