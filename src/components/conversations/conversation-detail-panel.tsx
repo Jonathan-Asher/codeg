@@ -1462,8 +1462,9 @@ const ConversationTabView = memo(function ConversationTabView({
         onPoolHold: holdForPool,
         onDuplicate: () => {
           removeOptimisticTurn(effectiveConversationId, optimisticTurn.id)
-          const persisted = dbConvIdRef.current
-          if (persisted != null) refetchDetail(persisted)
+          // On the runtime key the tab renders (a tab started as a draft
+          // keeps its virtual key); its binding fetches the row.
+          refetchDetail(effectiveConversationId)
         },
       })
       const { onTurnInProgress, onPoolExhausted, onSendFailed, onAccepted } =

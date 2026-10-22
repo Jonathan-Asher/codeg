@@ -1832,6 +1832,12 @@ impl ConnectionManager {
             return Ok(PromptAccepted { duplicate: false });
         };
         let _same_id = self.message_receipts.lock_id(&id).await;
+        // A connection this server does not have (it restarted) is reported
+        // as such even for a repeat: the client then opens a fresh one,
+        // instead of taking the answer as a sign its old one still works.
+        if self.get_state(conn_id).await.is_none() {
+            return Err(AcpError::ConnectionNotFound(conn_id.to_string()));
+        }
         let known_conversation = match conversation_id {
             Some(cid) => Some(cid),
             None => self.linked_conversation_id(conn_id).await,
@@ -7564,6 +7570,19 @@ mod tests {
         let after = ConnectionManager::new();
         let mut rx = insert_live_connection(&after, "conn-b", AgentType::Codex, None).await;
         link_to_conversation(&after, "conn-b", cid).await;
+        // Sent first on the connection the old process had: reported gone,
+        // so the client opens a fresh one, not answered as a duplicate.
+        let stale = after
+            .send_client_prompt(
+                &db,
+                "conn-a",
+                text_blocks("hi"),
+                None,
+                Some(cid),
+                Some("optimistic-r".into()),
+            )
+            .await;
+        assert!(matches!(stale, Err(AcpError::ConnectionNotFound(_))));
         let retry = after
             .send_client_prompt(
                 &db,
