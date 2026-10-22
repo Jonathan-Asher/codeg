@@ -1008,8 +1008,11 @@ impl ConnectionManager {
             // One live process per agent session. Reuse above only matches a
             // connection in the same working directory, so one somewhere else
             // can still hold this session: close it — and wait until its
-            // process is gone — before a second one resumes it.
-            if let Some(sid) = session_id.as_deref() {
+            // process is gone — before a second one resumes it. A pre-open
+            // never closes anything (`preconnect` does not start one next to a
+            // live holder; should one race in, the lifecycle check closes the
+            // pre-open, not the connection in use).
+            if let Some(sid) = session_id.as_deref().filter(|_| !speculative) {
                 self.close_other_holders(
                     agent_type,
                     Some(sid),
@@ -1328,6 +1331,15 @@ impl ConnectionManager {
                 connection_id: existing,
             });
         }
+        // One agent process per session: a pre-open never starts a second one
+        // next to a live connection elsewhere (another working directory) —
+        // and never closes that one either, which someone may be using.
+        if let Some(holder) = self.live_holder_of_session(agent_type, &session_id).await {
+            tracing::debug!(
+                "[ACP] preconnect session={session_id} skipped: connection={holder} already runs it"
+            );
+            return Ok(PreconnectOutcome::Skipped);
+        }
         let (opening, open_unclaimed) = self.speculative_census().await;
         let Some(evict) = plan_speculative_open(opening, open_unclaimed, max_speculative) else {
             tracing::debug!(
@@ -1584,16 +1596,29 @@ impl ConnectionManager {
             id: String,
             session: Option<String>,
             conversation: Option<i32>,
+            speculative: bool,
             pid: Arc<std::sync::atomic::AtomicU32>,
         }
-        let holders: Vec<Holder> = {
+        let (mut holders, keeper): (Vec<Holder>, Option<Holder>) = {
             let connections = self.connections.lock().await;
             let mut out = Vec::new();
+            let mut keeper = None;
             for (id, conn) in connections.iter() {
+                let state = conn.state.read().await;
+                let holder = || Holder {
+                    id: id.clone(),
+                    session: state
+                        .external_id
+                        .clone()
+                        .or_else(|| state.requested_session_id.clone()),
+                    conversation: state.conversation_id,
+                    speculative: state.speculative,
+                    pid: Arc::clone(&conn.child_pid),
+                };
                 if Some(id.as_str()) == keep {
+                    keeper = Some(holder());
                     continue;
                 }
-                let state = conn.state.read().await;
                 if !matches!(
                     state.status,
                     ConnectionStatus::Connecting
@@ -1607,19 +1632,30 @@ impl ConnectionManager {
                 let same_conversation =
                     conversation_id.is_some() && state.conversation_id == conversation_id;
                 if same_session || same_conversation {
-                    out.push(Holder {
-                        id: id.clone(),
-                        session: state
-                            .external_id
-                            .clone()
-                            .or_else(|| state.requested_session_id.clone()),
-                        conversation: state.conversation_id,
-                        pid: Arc::clone(&conn.child_pid),
-                    });
+                    out.push(holder());
                 }
             }
-            out
+            (out, keeper)
         };
+        // Who stays, for the log: the caller's connection, or the one about to
+        // be spawned for `session_id`.
+        let mut stays = (
+            keep.unwrap_or("the connection about to start").to_string(),
+            session_id.map(str::to_string),
+            conversation_id,
+        );
+        // A pre-open nobody has claimed yet never evicts a connection that is
+        // in use: when it turns out to duplicate one, the pre-open goes.
+        if let Some(keeper) = keeper.filter(|k| k.speculative) {
+            if let Some(in_use) = holders.iter().find(|h| !h.speculative) {
+                stays = (
+                    in_use.id.clone(),
+                    in_use.session.clone(),
+                    in_use.conversation,
+                );
+                holders = vec![keeper];
+            }
+        }
         let show = |v: Option<&str>| v.unwrap_or("-").to_string();
         let mut closed = Vec::new();
         for holder in holders {
@@ -1630,9 +1666,9 @@ impl ConnectionManager {
                 holder.id,
                 show(holder.session.as_deref()),
                 show(holder.conversation.map(|c| c.to_string()).as_deref()),
-                keep.unwrap_or("the connection about to start"),
-                show(session_id),
-                show(conversation_id.map(|c| c.to_string()).as_deref()),
+                stays.0,
+                show(stays.1.as_deref()),
+                show(stays.2.map(|c| c.to_string()).as_deref()),
                 holder.id,
             );
             if self.disconnect(&holder.id).await.is_err() {
@@ -1649,6 +1685,33 @@ impl ConnectionManager {
             closed.push(holder.id);
         }
         closed
+    }
+
+    /// A live connection (any working directory) that runs agent session
+    /// `session_id`, if there is one.
+    async fn live_holder_of_session(
+        &self,
+        agent_type: AgentType,
+        session_id: &str,
+    ) -> Option<String> {
+        let connections = self.connections.lock().await;
+        for (id, conn) in connections.iter() {
+            if conn.agent_type != agent_type {
+                continue;
+            }
+            let state = conn.state.read().await;
+            if state.represents_session(session_id)
+                && matches!(
+                    state.status,
+                    ConnectionStatus::Connecting
+                        | ConnectionStatus::Connected
+                        | ConnectionStatus::Prompting
+                )
+            {
+                return Some(id.clone());
+            }
+        }
+        None
     }
 
     /// Forwards a prompt to the connection's command channel without
@@ -6135,6 +6198,51 @@ mod tests {
             .await;
         assert_eq!(closed, vec!["stale".to_string()]);
         assert_eq!(live_ids(&mgr).await, vec!["elsewhere", "new"]);
+    }
+
+    /// A pre-open (hover pre-connect) that turns out to duplicate a connection
+    /// in use is the one that goes — a hover never closes the user's session.
+    #[tokio::test]
+    async fn a_pre_open_never_evicts_a_connection_in_use() {
+        let mgr = ConnectionManager::new();
+        let live = || ConnectionStatus::Connected;
+        let claude = AgentType::ClaudeCode;
+        insert_session_holder(&mgr, "in-use", claude, "/a", "S", Some(3), live()).await;
+        insert_session_holder(&mgr, "pre", claude, "/b", "S", None, live()).await;
+        {
+            let map = mgr.connections.lock().await;
+            map.get("pre").unwrap().state.write().await.speculative = true;
+        }
+        let closed = mgr
+            .close_other_holders(claude, Some("S"), None, Some("pre"), "test")
+            .await;
+        assert_eq!(closed, vec!["pre".to_string()]);
+        assert_eq!(live_ids(&mgr).await, vec!["in-use"]);
+    }
+
+    /// Nor does a pre-connect start a second process next to a live
+    /// connection that runs the session from another working directory.
+    #[tokio::test]
+    async fn preconnect_starts_nothing_next_to_a_live_holder_elsewhere() {
+        let mgr = ConnectionManager::new();
+        let claude = AgentType::ClaudeCode;
+        let live = ConnectionStatus::Connected;
+        insert_session_holder(&mgr, "live", claude, "/a", "session-x", Some(1), live).await;
+        let outcome = mgr
+            .preconnect(
+                claude,
+                Some("/b".to_string()),
+                "session-x".to_string(),
+                BTreeMap::new(),
+                "test-window".to_string(),
+                EventEmitter::Noop,
+                None,
+                BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(outcome, PreconnectOutcome::Skipped);
+        assert_eq!(live_ids(&mgr).await, vec!["live"]);
     }
 
     /// Before a spawn there is no keeper: every live holder of the session goes.
