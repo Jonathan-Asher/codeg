@@ -31,7 +31,9 @@ fn at(h: u32, m: u32) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 10, 22, h, m, 0).unwrap()
 }
 
-/// A parent conversation and a delegation child of it (task `task-1`).
+/// A parent conversation and a delegation child of it (task `ld-task-1`).
+/// The ready-task set is process-wide, so these tests use task ids no other
+/// test in the crate uses (a broker test asking about `task-1` would see it).
 async fn parent_and_child(db: &AppDatabase) -> (i32, DbConversationSummary) {
     let folder = seed_folder(db, "/tmp/limit-delivery").await;
     let parent = seed_conversation(db, folder, AgentType::ClaudeCode).await;
@@ -44,7 +46,7 @@ async fn parent_and_child(db: &AppDatabase) -> (i32, DbConversationSummary) {
         .into();
     row.parent_id = Set(Some(parent));
     row.parent_tool_use_id = Set(Some("toolu_1".into()));
-    row.delegation_call_id = Set(Some("task-1".into()));
+    row.delegation_call_id = Set(Some("ld-task-1".into()));
     row.title = Set(Some("compute the answer".into()));
     row.update(&db.conn).await.unwrap();
     let summary = conversation_service::get_by_id(&db.conn, child)
@@ -74,7 +76,7 @@ async fn a_paused_child_owes_its_parent_exactly_one_result() {
     let (parent, child) = parent_and_child(&db).await;
     let broker = broker();
 
-    record_pause(&db.conn, &child, "task-1", at(21, 0), None).await;
+    record_pause(&db.conn, &child, "ld-task-1", at(21, 0), None).await;
     let records = stored(&db).await;
     assert_eq!(records.len(), 1);
     let rec = &records[0];
@@ -85,7 +87,7 @@ async fn a_paused_child_owes_its_parent_exactly_one_result() {
     assert_eq!(rec.task_preview, "compute the answer");
 
     // Stopped by the limit again after a continuation: same record, new reset.
-    record_pause(&db.conn, &child, "task-1", at(23, 30), None).await;
+    record_pause(&db.conn, &child, "ld-task-1", at(23, 30), None).await;
     let records = stored(&db).await;
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].resets_at, at(23, 30));
@@ -95,7 +97,7 @@ async fn a_paused_child_owes_its_parent_exactly_one_result() {
         &db.conn,
         &broker,
         &child,
-        "task-1",
+        "ld-task-1",
         "end_turn",
         &finished("The answer is 42."),
     )
@@ -111,7 +113,7 @@ async fn a_paused_child_owes_its_parent_exactly_one_result() {
         &db.conn,
         &broker,
         &child,
-        "task-1",
+        "ld-task-1",
         "end_turn",
         &finished("something else"),
     )
@@ -124,14 +126,14 @@ async fn a_paused_child_owes_its_parent_exactly_one_result() {
     );
 
     // A pause recorded while the result still waits does not reopen it.
-    record_pause(&db.conn, &child, "task-1", at(23, 59), None).await;
+    record_pause(&db.conn, &child, "ld-task-1", at(23, 59), None).await;
     assert_eq!(stored(&db).await[0].state, DeliveryState::Ready);
 
     // Claimed once: the second claim finds nothing to send.
     assert!(
         set_state(
             &db.conn,
-            "task-1",
+            "ld-task-1",
             DeliveryState::Ready,
             DeliveryState::Delivered
         )
@@ -140,7 +142,7 @@ async fn a_paused_child_owes_its_parent_exactly_one_result() {
     assert!(
         !set_state(
             &db.conn,
-            "task-1",
+            "ld-task-1",
             DeliveryState::Ready,
             DeliveryState::Delivered
         )
@@ -152,7 +154,7 @@ async fn a_paused_child_owes_its_parent_exactly_one_result() {
 async fn a_child_stopped_by_hand_is_not_delivered() {
     let db = fresh_in_memory_db().await;
     let (_, child) = parent_and_child(&db).await;
-    record_pause(&db.conn, &child, "task-1", at(21, 0), None).await;
+    record_pause(&db.conn, &child, "ld-task-1", at(21, 0), None).await;
     let canceled = DelegationOutcome::Err {
         code: "canceled".into(),
         message: "child session was cancelled".into(),
@@ -162,7 +164,7 @@ async fn a_child_stopped_by_hand_is_not_delivered() {
         &db.conn,
         &broker(),
         &child,
-        "task-1",
+        "ld-task-1",
         "cancelled",
         &canceled,
     )
@@ -178,7 +180,7 @@ async fn a_turn_of_a_child_nobody_paused_owes_nothing() {
         &db.conn,
         &broker(),
         &child,
-        "task-1",
+        "ld-task-1",
         "end_turn",
         &finished("x"),
     )
