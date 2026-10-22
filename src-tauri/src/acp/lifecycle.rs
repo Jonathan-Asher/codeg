@@ -298,9 +298,9 @@ pub(crate) async fn handle_event(
             manager
                 .close_other_holders(
                     agent_type,
-                    Some(session_id),
+                    Some(session_id.as_str()),
                     conversation_id,
-                    Some(&envelope.connection_id),
+                    Some(envelope.connection_id.as_str()),
                     "found when the session started",
                 )
                 .await;
@@ -568,7 +568,7 @@ pub(crate) async fn handle_event(
                             agent_type,
                             session_id.as_deref(),
                             Some(*conversation_id),
-                            Some(&envelope.connection_id),
+                            Some(envelope.connection_id.as_str()),
                             "found when the conversation was linked",
                         )
                         .await;
