@@ -21,6 +21,7 @@ import {
 } from "@/lib/transport/web-connection-store"
 import { redirectToCodegLogin } from "@/lib/transport/web-auth"
 import { probeTransportLiveness } from "@/lib/platform"
+import { perfMark } from "@/lib/perf-marks"
 
 // Debounce before the "reconnecting" dialog is shown. Server restarts, brief
 // network blips, and laptop sleep/wake usually recover within a few seconds —
@@ -101,6 +102,10 @@ export function WebConnectionGuard() {
   const showUnauthorized = state === "unauthorized"
   const neverConnected = state === "connecting"
   const open = showReconnecting || showUnauthorized
+
+  useEffect(() => {
+    perfMark("ui:dialog", { open, unauthorized: showUnauthorized })
+  }, [open, showUnauthorized])
 
   if (!open) return null
 

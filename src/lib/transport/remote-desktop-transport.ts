@@ -14,6 +14,7 @@ import type {
   UnsubscribeFn,
 } from "./types"
 import { presenceFrame } from "./types"
+import { perfMark } from "../perf-marks"
 
 // See WebTransport for rationale. Bounded so an older remote codeg-server
 // (no `__ready__` support) can't permanently hang the desktop UI.
@@ -344,6 +345,7 @@ export class RemoteDesktopTransport
   private setConnState(next: ConnectionHealth) {
     if (this.connState === next) return
     this.connState = next
+    perfMark("link:state", { state: next })
     for (const callback of this.connListeners) {
       try {
         callback()
@@ -488,6 +490,7 @@ export class RemoteDesktopTransport
     if (typeof channel !== "string") return
 
     if (channel === WS_READY_CHANNEL) {
+      perfMark("ws:ready", { reconnect: this.hasReadiedOnce })
       this.wsOpen = true
       this.readyResolve()
       this.setConnState("connected")
@@ -511,6 +514,7 @@ export class RemoteDesktopTransport
         // Errors in user callbacks must not break sibling callbacks.
         this.missedWhileDown = false
         this.hasReadiedOnce = true
+        perfMark("reconnect:fire", { callbacks: this.reconnectCallbacks.size })
         for (const cb of this.reconnectCallbacks) {
           try {
             cb()
@@ -527,6 +531,7 @@ export class RemoteDesktopTransport
       return
     }
     if (channel === WS_DISCONNECTED_CHANNEL) {
+      perfMark("ws:close")
       this.wsOpen = false
       this.setConnState("reconnecting")
       // New subscribers (and any concurrent subscribe() calls in flight)

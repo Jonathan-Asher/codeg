@@ -12,6 +12,7 @@ import { presenceFrame } from "./types"
 import { buildCodegWebSocketProtocols } from "./ws-auth"
 import { parseJsonOrThrow } from "../json-parse-error"
 import { getCodegToken } from "./web-auth"
+import { perfMark } from "../perf-marks"
 
 // 60s covers the worst-case ACP probe path: some agents (Gemini in
 // particular) burn 8–10s on the Initialize handshake before session/new
@@ -355,6 +356,7 @@ export class WebTransport implements Transport {
   private setConnState(next: WebConnState) {
     if (this.connState === next) return
     this.connState = next
+    perfMark("link:state", { state: next })
     for (const cb of this.connListeners) {
       try {
         cb()
@@ -419,6 +421,7 @@ export class WebTransport implements Transport {
     this.teardownWs()
 
     const wsUrl = this.baseUrl.replace(/^http/, "ws") + "/ws/events"
+    perfMark("ws:connect")
     this.ws = new WebSocket(wsUrl, buildCodegWebSocketProtocols(token))
     this.openStartedAt = Date.now()
     this.openTimer = setTimeout(() => {
@@ -429,6 +432,7 @@ export class WebTransport implements Transport {
     this.ws.onopen = () => {
       this.clearOpenTimer()
       this.wsOpen = true
+      perfMark("ws:open")
       this.startHeartbeat()
       // NB: connection health is NOT flipped to "connected" here. `onopen`
       // only means the socket is physically up; the application-level
@@ -471,6 +475,7 @@ export class WebTransport implements Transport {
         }
         const event = parsed as WebEvent
         if (event.channel === WS_READY_CHANNEL) {
+          perfMark("ws:ready", { reconnect: this.hasReadiedOnce })
           this.readyResolve()
           // Application-level ready: the link is fully usable again. Reset the
           // backoff counter and clear the reconnect dialog. Reset happens here
@@ -483,6 +488,9 @@ export class WebTransport implements Transport {
             // disconnect window, so any event fired in that gap was dropped.
             // Notify consumers to recover state (e.g. refetch snapshots).
             // Errors in user callbacks must not break sibling callbacks.
+            perfMark("reconnect:fire", {
+              callbacks: this.reconnectCallbacks.size,
+            })
             for (const cb of this.reconnectCallbacks) {
               try {
                 cb()
@@ -520,6 +528,7 @@ export class WebTransport implements Transport {
       // recovery. We never log out here — only a definitive 401 from the
       // health probe can do that (see probeHealth).
       if (this.destroyed) return
+      perfMark("ws:close")
       this.setConnState("reconnecting")
       this.scheduleReconnect()
     }
@@ -580,6 +589,7 @@ export class WebTransport implements Transport {
       // Bail if the machine moved on while awaiting (unauthorized / teardown):
       // a stale completion must not reopen the socket or re-arm the backoff.
       if (this.destroyed || epoch !== this.probeEpoch) return
+      perfMark("health:probe", { status: res.status })
       if (res.status === 401) {
         // Server is up and rejected the token → session genuinely expired.
         this.markUnauthorized()
@@ -598,6 +608,7 @@ export class WebTransport implements Transport {
       this.scheduleReconnect()
     } catch {
       if (this.destroyed || epoch !== this.probeEpoch) return
+      perfMark("health:probe", { status: 0 })
       // Network error / probe timeout → unreachable. Stay "reconnecting" and
       // keep backing off. Never give up, never discard the token.
       this.scheduleReconnect()
@@ -678,6 +689,11 @@ export class WebTransport implements Transport {
   // proves the link is alive and settles any outstanding ping.
   private noteInbound() {
     this.lastInboundAt = Date.now()
+    if (this.pingSentAt !== null) {
+      perfMark("ws:alive", {
+        afterPingMs: this.lastInboundAt - this.pingSentAt,
+      })
+    }
     this.pingSentAt = null
   }
 
@@ -702,6 +718,7 @@ export class WebTransport implements Transport {
   // not double up on it.
   private sendPing(now: number): boolean {
     if (!this.sendWsFrame({ action: "ping" })) return false
+    perfMark("ws:ping")
     this.pingSentAt = now
     return true
   }
@@ -715,6 +732,7 @@ export class WebTransport implements Transport {
   // so reset the ready gate here as `onclose` would: `waitForReady()` callers
   // must wait for the replacement, not pass on the dead socket's `__ready__`.
   private onSocketDead(reason: string) {
+    perfMark("ws:dead", { reason })
     console.warn(
       `[WebTransport] socket presumed dead (${reason}); reconnecting`
     )

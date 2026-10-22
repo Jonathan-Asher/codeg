@@ -39,6 +39,7 @@ import { kimiTodoWriteEntries } from "@/lib/plan-parse"
 import { toErrorMessage } from "@/lib/app-error"
 import { BACKGROUND_TASK_MARKER } from "@/lib/background-agent"
 import { imageCardLabel } from "@/lib/image-tool-label"
+import { perfMark } from "@/lib/perf-marks"
 
 /**
  * Conversation-runtime shared state as a Zustand store — the per-conversation
@@ -3748,12 +3749,26 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
 
     const generation = bumpFetchGeneration(conversationId)
     dispatch({ type: "FETCH_DETAIL_START", conversationId })
+    const startedAt = Date.now()
+    perfMark("detail:fetch:start", { conversationId, kind: "open" })
     getFolderConversation(conversationId, { tailTurns: TAIL_TURNS_DEFAULT })
       .then((detail) => {
+        perfMark("detail:fetch:end", {
+          conversationId,
+          kind: "open",
+          ok: true,
+          ms: Date.now() - startedAt,
+        })
         if (!isLatestGeneration(conversationId, generation)) return
         dispatch({ type: "FETCH_DETAIL_SUCCESS", conversationId, detail })
       })
       .catch((error: unknown) => {
+        perfMark("detail:fetch:end", {
+          conversationId,
+          kind: "open",
+          ok: false,
+          ms: Date.now() - startedAt,
+        })
         if (!isLatestGeneration(conversationId, generation)) return
         dispatch({
           type: "FETCH_DETAIL_ERROR",
@@ -3779,11 +3794,19 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
     const fetchId = session?.dbConversationId ?? conversationId
     const generation = bumpFetchGeneration(conversationId)
     dispatch({ type: "FETCH_DETAIL_START", conversationId })
+    const startedAt = Date.now()
+    perfMark("detail:fetch:start", { conversationId, kind: "refetch" })
     // Never rejects: failure is reported as `false` (and as FETCH_DETAIL_ERROR
     // in the store), so the many callers that fire and forget cannot leak an
     // unhandled rejection.
     return fetchDetailWindowed(fetchId, session?.detail ?? null)
       .then((detail) => {
+        perfMark("detail:fetch:end", {
+          conversationId,
+          kind: "refetch",
+          ok: true,
+          ms: Date.now() - startedAt,
+        })
         if (!isLatestGeneration(conversationId, generation)) return false
         dispatch({
           type: "FETCH_DETAIL_SUCCESS",

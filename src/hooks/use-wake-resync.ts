@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react"
 import { onTransportReconnect } from "@/lib/platform"
+import { perfMark } from "@/lib/perf-marks"
 
 /**
  * One resync per window. A wake shows the page again and, once the dead
@@ -148,7 +149,9 @@ export function useWakeResync(options: {
 
     const runResync = () => {
       if (Date.now() - landedAt.current < RESYNC_DEBOUNCE_MS) return
+      perfMark("resync:detail:start", { conversationId })
       void refetch(conversationId).then((landed) => {
+        perfMark("resync:detail:end", { conversationId, landed })
         if (landed) landedAt.current = Date.now()
       })
     }
