@@ -881,6 +881,9 @@ const ConversationTabView = memo(function ConversationTabView({
   // once the connection is up, or nothing is left to send but a message the
   // server refused.
   const autoReconnectsRef = useRef(0)
+  // Bumped after each attempt, so a reconnect that fails without moving the
+  // status (the server is still down) is followed by the next one.
+  const [autoReconnectTick, setAutoReconnectTick] = useState(0)
   const unsentHeadRetries =
     queueHead != null && queueHead.failure?.autoRetry !== false
   useEffect(() => {
@@ -894,6 +897,7 @@ const ConversationTabView = memo(function ConversationTabView({
     const timer = setTimeout(() => {
       autoReconnectsRef.current += 1
       retryConnection()
+      setAutoReconnectTick((n) => n + 1)
     }, wait)
     return () => clearTimeout(timer)
   }, [
@@ -902,6 +906,7 @@ const ConversationTabView = memo(function ConversationTabView({
     connIsForOtherAgent,
     unsentHeadRetries,
     retryConnection,
+    autoReconnectTick,
   ])
   // While the session waits for the account pool, the composer says so.
   const poolWaitLabel = useAttachPhaseLabel(
