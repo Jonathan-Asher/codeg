@@ -8,6 +8,7 @@ import { StatusBarMcp } from "@/components/layout/status-bar-mcp"
 import { StatusBarUpdate } from "@/components/layout/status-bar-update"
 import { StatusBarTransfers } from "@/components/layout/workspace-transfers"
 import { CommandDropdown } from "@/components/layout/command-dropdown"
+import { ConnectionStatusPill } from "@/components/connection/connection-banner"
 import { QuickActionsDropdown } from "@/components/layout/quick-actions-dropdown"
 import { useIsMobile } from "@/hooks/use-mobile"
 
@@ -27,6 +28,7 @@ export function StatusBar() {
           <StatusBarPlanUsage compact />
         </div>
         <div className="flex items-center gap-3">
+          <ConnectionStatusPill />
           <StatusBarTransfers />
           <StatusBarUpdate />
           <StatusBarUpdate target="local" />
@@ -65,6 +67,9 @@ export function StatusBar() {
         <StatusBarPlanUsage />
       </div>
       <div className="flex items-center gap-4">
+        {/* The link to the server: "Reconnecting…", "Updating…", "Back
+            online". Renders nothing while all is well. */}
+        <ConnectionStatusPill />
         {/* Remote-workspace downloads: live progress, and the way back to a
             download whose toast was closed. Renders nothing when idle. */}
         <StatusBarTransfers />

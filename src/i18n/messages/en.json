@@ -2387,7 +2387,9 @@
       "roleAssistant": "Assistant",
       "roleSystem": "System",
       "recentHeading": "Recent",
-      "archivedBadge": "Archived"
+      "archivedBadge": "Archived",
+      "offline": "Offline — search needs the server",
+      "failed": "Search failed. Try again."
     },
     "folderTitleBar": {
       "showSidebar": "Show Sidebar",
@@ -5423,14 +5425,17 @@
     }
   },
   "WebConnection": {
-    "disconnectedTitle": "Connection lost",
-    "reconnectingDescription": "Trying to reconnect to the server. This usually recovers on its own within a few seconds.",
-    "reconnectNow": "Reconnect now",
-    "connectingTitle": "Connecting to the server",
-    "connectingDescription": "The server isn't answering yet. This window connects on its own as soon as it does.",
     "sessionExpiredTitle": "Session expired",
     "sessionExpiredDescription": "Your session is no longer valid. Please sign in again to continue.",
-    "goToLogin": "Go to login"
+    "goToLogin": "Go to login",
+    "connectingPill": "Connecting…",
+    "reconnectingPill": "Reconnecting…",
+    "updatingPill": "Updating…",
+    "backOnlinePill": "Back online",
+    "offlineTitle": "Offline",
+    "offlineDescription": "Showing what was already loaded · updated {age}",
+    "offlineWaiting": "Waiting for the server to answer",
+    "retry": "Retry"
   },
   "LiveFeedback": {
     "placeholder": "Send a note to {agent} while it works…",

@@ -48,6 +48,10 @@ vi.mock("@/lib/platform", () => ({
 }))
 
 import { WebConnectionGuard } from "./web-connection-guard"
+import {
+  ConnectionStatusPill,
+  __resetConnectionDisplayForTests,
+} from "./connection-banner"
 import enMessages from "@/i18n/messages/en.json"
 
 function renderGuard() {
@@ -60,6 +64,11 @@ function renderGuard() {
 
 beforeEach(() => {
   vi.useFakeTimers()
+  __resetConnectionDisplayForTests()
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    get: () => "visible",
+  })
   store.reset()
   store.reconnectWebNow.mockClear()
   store.redirectToCodegLogin.mockClear()
@@ -71,62 +80,52 @@ afterEach(() => {
 })
 
 describe("WebConnectionGuard", () => {
+  const advance = (ms: number) =>
+    act(() => {
+      vi.advanceTimersByTime(ms)
+    })
+
   it("renders nothing while connected", () => {
-    const { container } = renderGuard()
-    expect(container.firstChild).toBeNull()
-    expect(screen.queryByText("Connection lost")).not.toBeInTheDocument()
+    renderGuard()
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
   })
 
-  it("stays hidden during the grace window, then shows the reconnecting dialog", () => {
+  it("never blocks the window for a lost link: a pill after a second, a banner after ten", () => {
     renderGuard()
     act(() => store.setState("reconnecting"))
-    // Within the grace window — a brief blip must not flash a modal.
-    expect(screen.queryByText("Connection lost")).not.toBeInTheDocument()
+    // A brief blip shows nothing at all.
+    expect(screen.queryByTestId("connection-pill")).not.toBeInTheDocument()
+    advance(1_000)
+    expect(screen.getByTestId("connection-pill")).toHaveTextContent(
+      "Reconnecting…"
+    )
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
 
-    act(() => {
-      vi.advanceTimersByTime(4000)
-    })
-    expect(screen.getByText("Connection lost")).toBeInTheDocument()
-    expect(
-      screen.getByRole("button", { name: "Reconnect now" })
-    ).toBeInTheDocument()
+    advance(9_000)
+    const banner = screen.getByTestId("connection-offline-banner")
+    expect(banner).toHaveTextContent("Offline")
+    expect(banner).toHaveTextContent("Showing what was already loaded")
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(store.reconnectWebNow).toHaveBeenCalledTimes(1)
   })
 
   it("says it is still connecting when the link never came up", () => {
     renderGuard()
     act(() => store.setState("connecting"))
-    act(() => {
-      vi.advanceTimersByTime(4000)
-    })
-    expect(screen.getByText("Connecting to the server")).toBeInTheDocument()
-    expect(screen.queryByText("Connection lost")).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole("button", { name: "Reconnect now" }))
-    expect(store.reconnectWebNow).toHaveBeenCalledTimes(1)
+    advance(1_000)
+    expect(screen.getByTestId("connection-pill")).toHaveTextContent(
+      "Connecting…"
+    )
+    advance(9_000)
+    expect(screen.getByTestId("connection-offline-banner")).toHaveTextContent(
+      "Waiting for the server to answer"
+    )
   })
 
-  it("keeps the dialog up, as a lost link, when connecting turns into reconnecting", () => {
-    renderGuard()
-    act(() => store.setState("connecting"))
-    act(() => {
-      vi.advanceTimersByTime(4000)
-    })
-    act(() => store.setState("reconnecting"))
-    // No second grace window: the link has been down all along.
-    expect(screen.getByText("Connection lost")).toBeInTheDocument()
-  })
-
-  it("fires reconnectWebNow when the reconnect button is clicked", () => {
-    renderGuard()
-    act(() => store.setState("reconnecting"))
-    act(() => {
-      vi.advanceTimersByTime(4000)
-    })
-    fireEvent.click(screen.getByRole("button", { name: "Reconnect now" }))
-    expect(store.reconnectWebNow).toHaveBeenCalledTimes(1)
-  })
-
-  it("shows the session-expired dialog immediately (no grace) for unauthorized", () => {
+  it("shows the session-expired dialog immediately for unauthorized", () => {
     renderGuard()
     act(() => store.setState("unauthorized"))
     // No timer advance: a rejected token is surfaced at once.
@@ -136,16 +135,33 @@ describe("WebConnectionGuard", () => {
     expect(store.redirectToCodegLogin).toHaveBeenCalledTimes(1)
   })
 
-  it("dismisses automatically once the connection recovers", () => {
+  it("clears once the connection recovers, saying so for two seconds", () => {
     renderGuard()
     act(() => store.setState("reconnecting"))
-    act(() => {
-      vi.advanceTimersByTime(4000)
-    })
-    expect(screen.getByText("Connection lost")).toBeInTheDocument()
+    advance(10_000)
+    expect(screen.getByTestId("connection-offline-banner")).toBeInTheDocument()
 
     act(() => store.setState("connected"))
-    expect(screen.queryByText("Connection lost")).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId("connection-offline-banner")
+    ).not.toBeInTheDocument()
+    expect(screen.getByTestId("connection-pill")).toHaveTextContent(
+      "Back online"
+    )
+    advance(2_100)
+    expect(screen.queryByTestId("connection-pill")).not.toBeInTheDocument()
+  })
+
+  it("leaves the pill to the status bar when one is on screen", () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <WebConnectionGuard />
+        <ConnectionStatusPill />
+      </NextIntlClientProvider>
+    )
+    act(() => store.setState("reconnecting"))
+    advance(1_000)
+    expect(screen.getAllByTestId("connection-pill")).toHaveLength(1)
   })
 
   it("probes transport liveness on network restore while reconnecting", () => {
