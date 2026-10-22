@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react"
 import { onTransportReconnect } from "@/lib/platform"
 import { perfMark } from "@/lib/perf-marks"
 import { getResyncGeneration } from "@/lib/resync-coordinator"
+import { isWebLinkDown } from "@/lib/transport/web-connection-store"
 
 /**
  * One resync per window. A wake shows the page again and, once the dead
@@ -54,11 +55,17 @@ const RESYNC_AFTER_SETTLE_MS = 10_000
  * conversation is reopened. This hook runs the canonical `refetchDetail` path
  * on:
  *
- * - transport reconnect (the socket was replaced after a drop);
+ * - transport reconnect (the socket was replaced after a drop), as the first
+ *   task of the reconnect's refetch pass (see `resync-coordinator`);
  * - the page becoming visible after RESYNC_MIN_HIDDEN_MS or more hidden, i.e.
  *   a wake. This also covers a socket that survived the sleep but fell
  *   behind: its lagged re-attach settles a turn exactly like a reconnect's,
- *   with no reconnect to announce it.
+ *   with no reconnect to announce it. A wake on a link already known to be
+ *   down is left to the reconnect that follows;
+ * - the panel becoming active after a reconnect it missed in the background.
+ *
+ * The caller's `refetch` is expected to be quiet (the content stays on screen
+ * while it runs, and a failure keeps it).
  *
  * Guards:
  * - inert on transports with no reconnect lifecycle (the local desktop app):
@@ -201,6 +208,9 @@ export function useWakeResync(options: {
       }
       const since = hiddenAt.current
       hiddenAt.current = null
+      // A link already known down will reconnect, and the reconnect resyncs:
+      // a refetch now would only queue behind the outage, then repeat.
+      if (isWebLinkDown()) return
       if (since !== null && Date.now() - since >= RESYNC_MIN_HIDDEN_MS) {
         void resync()
       }
