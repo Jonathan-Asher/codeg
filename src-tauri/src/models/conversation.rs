@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use super::agent::AgentType;
 use super::message::{MessageTurn, TurnUsage};
 use crate::db::entities::conversation::{
-    ConversationKind, ConversationLimitResume, ConversationTurnState,
+    ConversationKind, ConversationLimitReason, ConversationLimitResume, ConversationTurnState,
 };
 use crate::db::service::conversation_service::ConversationSelectorState;
 
@@ -108,6 +108,15 @@ pub struct DbConversationSummary {
     /// Mirror of `conversation.limit_auto_continue`: this session continues
     /// by itself once the usage limit resets (with the global setting on).
     pub limit_auto_continue: bool,
+    /// Mirror of `conversation.limit_resume_reason`: what stopped the last
+    /// turn on a usage limit — `usage_limit` (the account's own limit) or
+    /// `pool_capacity` (no account behind the local account pool could take
+    /// the request). Present with `limit_pause`, and kept once the pause
+    /// ended without continuing (the turn then reads `interrupted`), so the
+    /// session still says why it stopped. Always serialized; `null` when
+    /// there is none.
+    #[serde(default)]
+    pub limit_reason: Option<ConversationLimitReason>,
     /// Mirror of `conversation.selector_state`: the mode/model/effort this
     /// conversation's session last had in effect. A tab whose session is not
     /// attached yet (idle-swept, reopened after a restart, another window)

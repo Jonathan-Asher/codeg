@@ -61,6 +61,7 @@ import {
   resolveActiveSessionDetails,
   type ActiveSessionDetails,
 } from "./active-session-details"
+import { LimitPauseHeaderBadge } from "./limit-pause"
 import { SessionDetailsDialog } from "./session-details-dialog"
 
 interface ConversationDetailHeaderProps {
@@ -260,6 +261,9 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
         >
           {displayTitle}
         </span>
+        {/* Paused (or stopped) on a usage limit: said here too, so the
+            state shows whichever surface the user looks at. */}
+        <LimitPauseHeaderBadge conversationId={conversationId} />
       </div>
       <div className="flex shrink-0 items-center">
         <DropdownMenu>

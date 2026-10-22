@@ -1364,6 +1364,7 @@ mod tests {
                 critical_stall: true,
                 limit_pause: None,
                 limit_auto_continue: true,
+                limit_reason: None,
                 selector_state: None,
                 background: None,
             },

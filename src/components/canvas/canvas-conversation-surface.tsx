@@ -35,6 +35,7 @@ import { shouldQueueDirectSend } from "@/lib/queue-flush"
 import { getAgentLabel } from "@/lib/custom-agents"
 import { usePoolHold } from "@/hooks/use-pool-hold"
 import { useQueueNotice } from "@/hooks/use-queue-notice"
+import { useWaitingLimitPause } from "@/components/conversations/limit-pause"
 import { useAttachPhaseLabel } from "@/hooks/use-attach-phase-label"
 import type { PoolHold } from "@/lib/pool-hold"
 import {
@@ -591,6 +592,8 @@ export function CanvasConversationSurface({
   // Set while a send was held back because every Claude subscription behind
   // the account pool is at its limit; the queue waits for the pool.
   const { hold: poolHold, holdFor: holdForPool } = usePoolHold()
+  // Paused on a usage limit: the queue waits for the continuation.
+  const limitPause = useWaitingLimitPause(dbConversationId)
 
   const handleSend = useCallback(
     (
@@ -831,8 +834,9 @@ export function CanvasConversationSurface({
       connStatus === "connected" &&
       runtimeSyncState !== "awaiting_persist",
     isConnectionReady: isQueueConnectionReady,
-    // The account pool has no account that could take it yet.
-    busy: poolHold != null,
+    // The account pool has no account that could take it yet, or the
+    // session is paused on a usage limit (the continuation goes first).
+    busy: poolHold != null || limitPause != null,
     heldTurnReady,
     lastBounceAtRef: lastFlushBounceAtRef,
     sendHead: sendQueueHead,
@@ -859,6 +863,7 @@ export function CanvasConversationSurface({
     held: poolHold,
     connPoolWait: conn.poolWait,
     status: connStatus,
+    limitPause: limitPause?.pause ?? null,
     agentLabel: getAgentLabel(agentType),
     onRetry: retryConnection,
   })

@@ -3132,6 +3132,7 @@ impl ConnectionManager {
                         limit_resume_state: Set(None),
                         limit_resume_attempts: Set(0),
                         limit_auto_continue: Set(true),
+                        limit_resume_reason: Set(None),
                     };
                     let inserted = sibling.insert(txn).await?;
                     Ok(inserted.id)
@@ -3499,6 +3500,7 @@ impl ConnectionManager {
             limit_resume_state: Set(None),
             limit_resume_attempts: Set(0),
             limit_auto_continue: Set(true),
+            limit_resume_reason: Set(None),
         };
         row.insert(db_conn)
             .await

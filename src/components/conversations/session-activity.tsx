@@ -28,7 +28,11 @@ import {
 } from "@/lib/session-activity"
 import { useConversationBackground } from "@/stores/conversation-background-store"
 import { continueInterruptedSession } from "@/lib/session-continue"
-import { waitingLimitPause } from "@/lib/limit-continue"
+import {
+  limitPauseReason,
+  limitStopReason,
+  waitingLimitPause,
+} from "@/lib/limit-continue"
 import { getAgentLabel } from "@/lib/custom-agents"
 import type { ConnectionAttachInfo } from "@/hooks/use-connection-status"
 import { useAttachPhaseLabel } from "@/hooks/use-attach-phase-label"
@@ -217,6 +221,13 @@ export function SessionActivityRow({
     background,
   })
   const pause = activity === "limit_paused" ? waitingLimitPause(summary) : null
+  // Paused because no account behind the account pool can take a request,
+  // rather than on the account's own limit.
+  const poolPause =
+    pause != null && limitPauseReason(summary) === "pool_capacity"
+  // Interrupted on a usage limit that no longer continues by itself.
+  const limitStopped =
+    activity === "interrupted" && limitStopReason(summary) != null
   const reset = useLimitResetParts(pause?.resets_at)
   const count = backgroundTaskTotal(heldBackgroundTasks, background)
   // Working on a turn of its own: say what woke it, not "a turn is running".
@@ -251,7 +262,11 @@ export function SessionActivityRow({
         ? connection.error
         : outOfTurn
           ? t("workingOutOfTurnHint")
-          : t(SESSION_ACTIVITY_HINT_KEYS[activity], labelValues)
+          : poolPause
+            ? t("limitPoolPausedHint")
+            : limitStopped
+              ? t("limitStoppedHint")
+              : t(SESSION_ACTIVITY_HINT_KEYS[activity], labelValues)
 
   return (
     <div
@@ -265,7 +280,11 @@ export function SessionActivityRow({
           <p className="text-sm font-medium leading-snug">
             {pause?.state === "claimed"
               ? t("limitClaimed")
-              : t(SESSION_ACTIVITY_LABEL_KEYS[activity], labelValues)}
+              : poolPause
+                ? t("limitPoolPaused", labelValues)
+                : limitStopped
+                  ? t("limitStopped")
+                  : t(SESSION_ACTIVITY_LABEL_KEYS[activity], labelValues)}
           </p>
           {phaseLabel && (
             <p

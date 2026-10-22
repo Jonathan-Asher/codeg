@@ -97,6 +97,7 @@ import { ConversationStatusDot } from "./conversation-status-dot"
 import { SessionDetailsDialog } from "./session-details-dialog"
 import { SidebarConversationHoverDetails } from "./sidebar-conversation-hover-details"
 import { SessionActivityIcon, useBackgroundTitle } from "./session-activity"
+import { limitPauseReason, limitStopReason } from "@/lib/limit-continue"
 import { useLimitResetParts } from "./limit-pause"
 import { AgentIcon } from "@/components/agent-icon"
 
@@ -382,6 +383,16 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   const limitReset = useLimitResetParts(
     isLimitPaused ? conversation.limit_pause?.resets_at : null
   )
+  // The badge's words: paused because no account behind the account pool can
+  // take a request, on the account's own limit, or stopped on one for good.
+  const limitPausedLabel =
+    limitPauseReason(conversation) === "pool_capacity"
+      ? tActivity("limitPoolPaused", { time: limitReset?.time ?? "" })
+      : tActivity("limitPausedBadge", { time: limitReset?.time ?? "" })
+  const interruptedLabel =
+    limitStopReason(conversation) != null
+      ? tActivity("limitStopped")
+      : tActivity("interruptedBadge")
   // When this conversation is open in a tab here, that tab's connection says
   // whether the agent can be reached right now: still opening the session, or
   // failed to. The selector yields a primitive, so the row re-renders only
@@ -717,6 +728,19 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                               : tSidebar("statusRunningBadge")}
                           </span>
                         </span>
+                      ) : isLimitPaused ? (
+                        // Ahead of this client's connect state: a session
+                        // paused on a limit (its tab perhaps waiting for the
+                        // pool) is first of all waiting for its reset.
+                        <span
+                          className="relative inline-flex shrink-0 items-center justify-center"
+                          title={limitPausedLabel}
+                          data-testid="conversation-limit-paused-badge"
+                          data-limit-reason={limitPauseReason(conversation)}
+                        >
+                          <SessionActivityIcon activity="limit_paused" />
+                          <span className="sr-only">{limitPausedLabel}</span>
+                        </span>
                       ) : isConnecting ? (
                         <span
                           className="relative inline-flex shrink-0 items-center justify-center"
@@ -743,31 +767,17 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                             {tActivity("connectFailed")}
                           </span>
                         </span>
-                      ) : isLimitPaused ? (
-                        <span
-                          className="relative inline-flex shrink-0 items-center justify-center"
-                          title={tActivity("limitPausedBadge", {
-                            time: limitReset?.time ?? "",
-                          })}
-                          data-testid="conversation-limit-paused-badge"
-                        >
-                          <SessionActivityIcon activity="limit_paused" />
-                          <span className="sr-only">
-                            {tActivity("limitPausedBadge", {
-                              time: limitReset?.time ?? "",
-                            })}
-                          </span>
-                        </span>
                       ) : isInterrupted ? (
                         <span
                           className="relative inline-flex shrink-0 items-center justify-center"
-                          title={tActivity("interruptedBadge")}
+                          title={interruptedLabel}
                           data-testid="conversation-interrupted-badge"
+                          data-limit-stopped={
+                            limitStopReason(conversation) != null || undefined
+                          }
                         >
                           <SessionActivityIcon activity="interrupted" />
-                          <span className="sr-only">
-                            {tActivity("interruptedBadge")}
-                          </span>
+                          <span className="sr-only">{interruptedLabel}</span>
                         </span>
                       ) : isCancelled ? (
                         <span

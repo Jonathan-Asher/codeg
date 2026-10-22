@@ -820,6 +820,37 @@ describe("SidebarConversationCard activity indicator", () => {
     expect(screen.getByText("5m")).toBeInTheDocument()
   })
 
+  it("says a session waits for the account pool, and until when", () => {
+    renderRow({
+      ...conv(7),
+      turn_state: null,
+      limit_reason: "pool_capacity",
+      limit_pause: {
+        resets_at: new Date(Date.now() + 40 * 60_000).toISOString(),
+        state: "scheduled",
+        attempts: 0,
+      },
+    })
+    const badge = screen.getByTestId("conversation-limit-paused-badge")
+    expect(badge).toHaveAttribute("data-limit-reason", "pool_capacity")
+    expect(badge.getAttribute("title")).toMatch(
+      /^Paused by usage limits — continues at \S+/
+    )
+  })
+
+  it("says a session stopped on a limit once nothing continues it", () => {
+    renderRow({
+      ...conv(7),
+      status: "pending_review",
+      turn_state: "interrupted",
+      limit_reason: "pool_capacity",
+      limit_pause: null,
+    })
+    const badge = screen.getByTestId("conversation-interrupted-badge")
+    expect(badge).toHaveAttribute("title", "Stopped by usage limits")
+    expect(badge).toHaveAttribute("data-limit-stopped", "true")
+  })
+
   it("flags an interrupted turn and offers to continue it", () => {
     const interrupted: DbConversationSummary = {
       ...conv(7),

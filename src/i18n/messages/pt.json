@@ -2330,7 +2330,12 @@
       "continueNow": "Continuar agora",
       "continueNowTitle": "Enviar a continuação agora — pode atingir o limite de novo",
       "limitActionFailed": "Não foi possível atualizar a sessão pausada: {message}",
-      "limitPausedBadge": "Pausado até o limite de uso ser redefinido às {time}"
+      "limitPausedBadge": "Pausado até o limite de uso ser redefinido às {time}",
+      "limitPoolPaused": "Pausada por limites de uso — continua às {time}",
+      "limitPoolPausedHint": "Todas as contas Claude do pool de contas atingiram o limite. Esta sessão continua sozinha assim que uma ficar livre.",
+      "limitPoolBannerTitle": "Pausada por limites de uso",
+      "limitStopped": "Parada por limites de uso",
+      "limitStoppedHint": "O último turno parou num limite de uso e não continua mais sozinho. Continue quando o limite permitir."
     },
     "conversationCard": {
       "untitledConversation": "Conversa sem título",
@@ -3552,6 +3557,7 @@
         "steerItemAsNote": "Enviar como nota para a próxima verificação",
         "poolWait": "Todas as assinaturas do Claude atingiram o limite. As mensagens na fila serão enviadas assim que uma liberar.",
         "poolWaitUntil": "Todas as assinaturas do Claude atingiram o limite — a próxima libera às {time}. As mensagens na fila serão enviadas nessa hora.",
+        "limitPaused": "Pausada por limites de uso — as mensagens na fila são enviadas depois que continuar às {time}.",
         "notSent": "Não enviado: a conexão com {agent} falhou. As mensagens na fila serão enviadas quando ela voltar.",
         "retry": "Tentar novamente"
       },

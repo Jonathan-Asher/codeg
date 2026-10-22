@@ -205,7 +205,9 @@ mod tests {
         let rows = conn
             .query_all(Statement::from_string(
                 DbBackend::Sqlite,
-                "SELECT name FROM pragma_table_info('conversation') WHERE name LIKE 'limit_%'"
+                "SELECT name FROM pragma_table_info('conversation') WHERE name IN \
+                 ('limit_resume_at', 'limit_resume_state', 'limit_resume_attempts', \
+                 'limit_auto_continue')"
                     .to_owned(),
             ))
             .await

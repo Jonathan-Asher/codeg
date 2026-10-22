@@ -2330,7 +2330,12 @@
       "continueNow": "Continue now",
       "continueNowTitle": "Send the continuation now — it may hit the limit again",
       "limitActionFailed": "Couldn't update the paused session: {message}",
-      "limitPausedBadge": "Paused until the usage limit resets at {time}"
+      "limitPausedBadge": "Paused until the usage limit resets at {time}",
+      "limitPoolPaused": "Paused by usage limits — continues at {time}",
+      "limitPoolPausedHint": "Every Claude account behind the account pool is at its limit. This session continues by itself once one frees up.",
+      "limitPoolBannerTitle": "Paused by usage limits",
+      "limitStopped": "Stopped by usage limits",
+      "limitStoppedHint": "The last turn stopped on a usage limit and no longer continues by itself. Continue it once the limit allows."
     },
     "conversationCard": {
       "untitledConversation": "Untitled conversation",
@@ -3552,6 +3557,7 @@
         "steerItemAsNote": "Send as note for next check",
         "poolWait": "All Claude subscriptions are at their limit. Queued messages go out once one frees up.",
         "poolWaitUntil": "All Claude subscriptions are at their limit — the next one frees at {time}. Queued messages go out then.",
+        "limitPaused": "Paused by usage limits — queued messages go out after it continues at {time}.",
         "notSent": "Not sent: the connection to {agent} failed. Queued messages go out once it is back.",
         "retry": "Retry"
       },

@@ -2330,7 +2330,12 @@
       "continueNow": "立即繼續",
       "continueNowTitle": "立即送出繼續指令 — 可能再次觸及上限",
       "limitActionFailed": "無法更新已暫停的對話：{message}",
-      "limitPausedBadge": "已暫停，直到用量額度於 {time} 重置"
+      "limitPausedBadge": "已暫停，直到用量額度於 {time} 重置",
+      "limitPoolPaused": "因用量上限暫停——將於 {time} 繼續",
+      "limitPoolPausedHint": "帳號池中的所有 Claude 帳號都已達到上限。一旦有帳號空出，此工作階段會自動繼續。",
+      "limitPoolBannerTitle": "因用量上限暫停",
+      "limitStopped": "因用量上限停止",
+      "limitStoppedHint": "上一輪因用量上限而停止，且不會再自動繼續。待額度允許時請手動繼續。"
     },
     "conversationCard": {
       "untitledConversation": "未命名會話",
@@ -3552,6 +3557,7 @@
         "steerItemAsNote": "作為留言，供下次檢查時讀取",
         "poolWait": "所有 Claude 訂閱皆已達到用量上限。一旦有訂閱恢復，排隊的訊息會自動送出。",
         "poolWaitUntil": "所有 Claude 訂閱皆已達到用量上限——下一個將於 {time} 恢復，屆時排隊的訊息會自動送出。",
+        "limitPaused": "因用量上限暫停——排隊的訊息將在 {time} 繼續後送出。",
         "notSent": "未送出：與 {agent} 的連線失敗。連線恢復後，排隊的訊息會自動送出。",
         "retry": "重試"
       },
