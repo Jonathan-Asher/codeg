@@ -891,7 +891,15 @@ const ConversationTabView = memo(function ConversationTabView({
       return
     }
     if (!unsentHeadRetries || connIsForOtherAgent) return
-    if (connStatus !== "error" && connStatus !== "disconnected") return
+    // No connection at all (dropped when the transport reconnected to a
+    // server that no longer has it) counts as gone too.
+    if (
+      connStatus != null &&
+      connStatus !== "error" &&
+      connStatus !== "disconnected"
+    ) {
+      return
+    }
     const wait = autoReconnectDelayMs(autoReconnectsRef.current)
     const timer = setTimeout(() => {
       autoReconnectsRef.current += 1
