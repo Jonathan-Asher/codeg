@@ -17,6 +17,10 @@ pub enum DbError {
     /// treat it as a benign no-op.
     #[error("conflict: {0}")]
     Conflict(String),
+    /// Another codeg process owns the data dir (`data_dir_owner`), so this one
+    /// must not open its database at all.
+    #[error("{0}")]
+    InUse(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }

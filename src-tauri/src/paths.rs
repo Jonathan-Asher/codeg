@@ -199,6 +199,26 @@ fn desktop_data_dir_to_pin_from(
     platform_data_dir.map(|dir| dir.join(DESKTOP_APP_IDENTIFIER))
 }
 
+/// The dir the desktop's setup will open its database in, resolved the same
+/// way before Tauri exists, so the app can claim it (`data_dir_owner`) ahead of
+/// its first write: a non-empty `CODEG_DATA_DIR`, else the platform data dir
+/// joined with the bundle identifier, which is Tauri's app data dir.
+/// `CODEG_HOME` moves uploads and logs, never the database. `None` only on a
+/// platform without a data dir; setup then claims on its own.
+pub fn desktop_database_dir() -> Option<PathBuf> {
+    desktop_database_dir_from(std::env::var_os("CODEG_DATA_DIR"), dirs::data_dir())
+}
+
+fn desktop_database_dir_from(
+    codeg_data_dir: Option<std::ffi::OsString>,
+    platform_data_dir: Option<PathBuf>,
+) -> Option<PathBuf> {
+    match codeg_data_dir.filter(|s| !s.is_empty()) {
+        Some(dir) => Some(crate::git_credential::absolutize(Path::new(&dir))),
+        None => platform_data_dir.map(|dir| dir.join(DESKTOP_APP_IDENTIFIER)),
+    }
+}
+
 /// Root directory for codeg's own per-turn timing observations (see
 /// `crate::turn_timings`) — wall-clock turn spans the ACP connection layer
 /// records for agents whose native session store carries no per-turn
@@ -384,6 +404,27 @@ mod tests {
             None
         );
         assert_eq!(desktop_data_dir_to_pin_from(None, None, None), None);
+    }
+
+    #[test]
+    fn the_desktop_database_dir_is_the_one_setup_opens() {
+        let platform = Some(PathBuf::from("/Users/u/Library/Application Support"));
+        let app_data_dir = PathBuf::from("/Users/u/Library/Application Support/app.codeg");
+        assert_eq!(
+            desktop_database_dir_from(None, platform.clone()),
+            Some(app_data_dir.clone())
+        );
+        assert_eq!(
+            desktop_database_dir_from(Some("".into()), platform.clone()),
+            Some(app_data_dir),
+            "an empty value is unset"
+        );
+        let custom = std::env::temp_dir().join("codeg-data");
+        assert_eq!(
+            desktop_database_dir_from(Some(custom.clone().into_os_string()), platform),
+            Some(custom)
+        );
+        assert_eq!(desktop_database_dir_from(None, None), None);
     }
 
     /// The shape `fs::canonicalize` hands back on Windows, and the one that
