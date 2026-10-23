@@ -384,3 +384,46 @@ export function matchSelections(
   }
   return { selected, other }
 }
+
+/**
+ * Where an ask's in-stream record stands, from what the transcript holds.
+ *
+ * - `in-flight` — no result yet and the turn is still running: the pinned card
+ *   is (or is about to be) waiting for an answer.
+ * - `answered` — a result came back (an answer, or the user dismissed it).
+ * - `expired` — the tool call ended without one: the turn was cancelled, the
+ *   agent's process went away (a codeg restart, a crash), or the agent gave up
+ *   on the call. The question can no longer be answered.
+ * - `error` — the call was rejected before the user ever saw it (malformed
+ *   arguments), so it never was a question that could expire.
+ */
+export type AskQuestionRecordState =
+  | "in-flight"
+  | "answered"
+  | "expired"
+  | "error"
+
+// codeg-mcp's argument validation (`parse_questions`, a -32602 reply).
+const ASK_VALIDATION_ERROR =
+  /ask_user_question (requires|supports)|questions\[\d+\]|-32602/i
+
+export function askQuestionRecordState({
+  output,
+  errorText,
+  answered,
+  running,
+}: {
+  output?: string | null
+  errorText?: string | null
+  /** A result envelope parsed out of `output`. */
+  answered: boolean
+  /** The tool call is still live in a running turn. */
+  running: boolean
+}): AskQuestionRecordState {
+  const error = errorText?.trim()
+  if (error) return ASK_VALIDATION_ERROR.test(error) ? "error" : "expired"
+  if (answered) return "answered"
+  if (running) return "in-flight"
+  // A result that didn't parse is still a result: keep showing what it holds.
+  return output?.trim() ? "answered" : "expired"
+}

@@ -382,6 +382,89 @@ pub struct SpawnedCall {
     /// The future that performs the UDS round-trip racing the cancel channel
     /// and resolves to the [`SpawnResult`] to relay (and optionally commit).
     pub future: futures_util::future::BoxFuture<'static, SpawnResult>,
+    /// The `_meta.progressToken` the agent attached to this `tools/call`, if
+    /// any. While the call is pending the binary sends a
+    /// `notifications/progress` on it every [`progress_heartbeat_interval`]
+    /// (see [`drive_with_heartbeat`]).
+    pub progress_token: Option<Value>,
+}
+
+/// How often a pending `tools/call` reports progress when the agent asked for
+/// it. A blocking call — `ask_user_question` waiting hours for the user, a
+/// `get_delegation_status` wait on a long sub-agent — sends nothing else
+/// until it resolves, and an agent CLI may give up on a call that stays
+/// silent: Claude Code aborts a stdio MCP call after 30 minutes without a
+/// response or a progress notification (`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`).
+/// One notification a minute keeps such a call alive for as long as it
+/// takes, at no cost worth measuring.
+pub const PROGRESS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Overrides [`PROGRESS_HEARTBEAT_INTERVAL`] (whole seconds, `> 0`). For
+/// tests that need a heartbeat well inside a shortened agent-side timeout.
+pub const PROGRESS_INTERVAL_ENV: &str = "CODEG_MCP_PROGRESS_INTERVAL_SECS";
+
+/// The heartbeat interval this process uses: [`PROGRESS_INTERVAL_ENV`] when it
+/// holds a positive whole number of seconds, else the default.
+pub fn progress_heartbeat_interval() -> Duration {
+    parse_progress_interval(std::env::var(PROGRESS_INTERVAL_ENV).ok().as_deref())
+}
+
+fn parse_progress_interval(raw: Option<&str>) -> Duration {
+    raw.and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
+        .map(Duration::from_secs)
+        .unwrap_or(PROGRESS_HEARTBEAT_INTERVAL)
+}
+
+/// The progress token an MCP client attaches to a request it wants progress
+/// for (`params._meta.progressToken`, a string or a number per the spec).
+pub fn progress_token_of(params: &Value) -> Option<Value> {
+    let token = params.get("_meta")?.get("progressToken")?;
+    (token.is_string() || token.is_number()).then(|| token.clone())
+}
+
+/// A `notifications/progress` for `token`. `progress` has to grow with every
+/// notification of one request; no `total`, the wait has no known end.
+pub fn progress_notification(token: &Value, progress: u64) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/progress",
+        "params": { "progressToken": token, "progress": progress },
+    })
+}
+
+/// Await a spawned call and, when the agent gave a progress token, hand
+/// `emit` a progress notification every `interval` until it resolves. The
+/// first one goes out one interval in, so a call that answers quickly sends
+/// none; none goes out after the call resolved.
+pub async fn drive_with_heartbeat<F, E, EFut>(
+    future: F,
+    progress_token: Option<Value>,
+    interval: Duration,
+    mut emit: E,
+) -> SpawnResult
+where
+    F: std::future::Future<Output = SpawnResult>,
+    E: FnMut(Value) -> EFut,
+    EFut: std::future::Future<Output = ()>,
+{
+    let Some(token) = progress_token else {
+        return future.await;
+    };
+    tokio::pin!(future);
+    let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut beats: u64 = 0;
+    loop {
+        tokio::select! {
+            biased;
+            result = &mut future => return result,
+            _ = ticker.tick() => {
+                beats += 1;
+                emit(progress_notification(&token, beats)).await;
+            }
+        }
+    }
 }
 
 /// Parse a stdin line and produce a [`LineAction`]. The binary handles the
@@ -453,7 +536,16 @@ pub async fn dispatch_line(
             append_custom_agents_to_delegate_enum(&mut tools, &ctx.custom_agents);
             LineAction::Respond(ok(id, json!({ "tools": tools })))
         }
-        "tools/call" => build_tools_call_spawn(ctx.clone(), inflight, id, req.params).await,
+        "tools/call" => {
+            let progress_token = progress_token_of(&req.params);
+            match build_tools_call_spawn(ctx.clone(), inflight, id, req.params).await {
+                LineAction::Spawn(mut call) => {
+                    call.progress_token = progress_token;
+                    LineAction::Spawn(call)
+                }
+                other => other,
+            }
+        }
         _ => LineAction::Respond(err(id, -32601, format!("method not found: {}", req.method))),
     }
 }
@@ -1015,6 +1107,7 @@ async fn register_and_spawn(
         request_id: id,
         request_id_key: id_key,
         future,
+        progress_token: None,
     })
 }
 
@@ -1104,6 +1197,7 @@ async fn register_and_spawn_feedback(
         request_id: id,
         request_id_key: id_key,
         future,
+        progress_token: None,
     })
 }
 
@@ -4907,4 +5001,138 @@ mod tests {
         assert_eq!(refused["isError"], false);
     }
 
+    // -- progress heartbeat for long-blocking calls ------------------------
+
+    #[tokio::test]
+    async fn ask_user_question_spawn_carries_the_progress_token() {
+        let line = json!({
+            "jsonrpc": "2.0", "id": 41, "method": "tools/call",
+            "params": {
+                "name": "ask_user_question",
+                "arguments": ask_args(),
+                "_meta": { "progressToken": 41 }
+            }
+        })
+        .to_string();
+        match dispatch_with_features(ASK_ONLY, &line).await {
+            LineAction::Spawn(call) => assert_eq!(call.progress_token, Some(json!(41))),
+            _ => panic!("expected Spawn"),
+        }
+        // No token, no heartbeat.
+        let bare = json!({
+            "jsonrpc": "2.0", "id": 42, "method": "tools/call",
+            "params": { "name": "ask_user_question", "arguments": ask_args() }
+        })
+        .to_string();
+        match dispatch_with_features(ASK_ONLY, &bare).await {
+            LineAction::Spawn(call) => assert_eq!(call.progress_token, None),
+            _ => panic!("expected Spawn"),
+        }
+    }
+
+    #[test]
+    fn progress_token_accepts_strings_and_numbers_only() {
+        assert_eq!(
+            progress_token_of(&json!({ "_meta": { "progressToken": "t-1" } })),
+            Some(json!("t-1"))
+        );
+        assert_eq!(
+            progress_token_of(&json!({ "_meta": { "progressToken": 7 } })),
+            Some(json!(7))
+        );
+        assert_eq!(
+            progress_token_of(&json!({ "_meta": { "progressToken": null } })),
+            None
+        );
+        assert_eq!(progress_token_of(&json!({ "_meta": {} })), None);
+        assert_eq!(progress_token_of(&json!({})), None);
+    }
+
+    #[test]
+    fn progress_interval_override_must_be_a_positive_whole_number() {
+        assert_eq!(parse_progress_interval(None), PROGRESS_HEARTBEAT_INTERVAL);
+        assert_eq!(parse_progress_interval(Some("2")), Duration::from_secs(2));
+        assert_eq!(parse_progress_interval(Some(" 5 ")), Duration::from_secs(5));
+        assert_eq!(
+            parse_progress_interval(Some("0")),
+            PROGRESS_HEARTBEAT_INTERVAL
+        );
+        assert_eq!(
+            parse_progress_interval(Some("soon")),
+            PROGRESS_HEARTBEAT_INTERVAL
+        );
+        // The default stays far inside Claude Code's 30-minute idle abort.
+        assert!(PROGRESS_HEARTBEAT_INTERVAL <= Duration::from_secs(5 * 60));
+    }
+
+    async fn resolved_after(delay: Duration) -> SpawnResult {
+        tokio::time::sleep(delay).await;
+        SpawnResult {
+            response: Some(ok(json!(1), json!({ "done": true }))),
+            after_relay: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn heartbeat_reports_progress_while_the_call_is_pending() {
+        let beats = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let sink = beats.clone();
+        let result = drive_with_heartbeat(
+            resolved_after(Duration::from_millis(230)),
+            Some(json!("tok")),
+            Duration::from_millis(50),
+            move |note| {
+                let sink = sink.clone();
+                async move { sink.lock().await.push(note) }
+            },
+        )
+        .await;
+        assert!(result.response.is_some(), "the call's own result is relayed");
+        let beats = beats.lock().await;
+        assert!(
+            (2..=5).contains(&beats.len()),
+            "one beat per interval while pending, got {}",
+            beats.len()
+        );
+        for (i, note) in beats.iter().enumerate() {
+            assert_eq!(note["method"], "notifications/progress");
+            assert_eq!(note["params"]["progressToken"], "tok");
+            // Progress strictly increases, as the spec requires.
+            assert_eq!(note["params"]["progress"], json!(i as u64 + 1));
+        }
+    }
+
+    #[tokio::test]
+    async fn heartbeat_stays_silent_without_a_token_or_for_a_quick_call() {
+        let beats = Arc::new(Mutex::new(0usize));
+        let sink = beats.clone();
+        drive_with_heartbeat(
+            resolved_after(Duration::from_millis(120)),
+            None,
+            Duration::from_millis(20),
+            move |_| {
+                let sink = sink.clone();
+                async move {
+                    let mut n = sink.lock().await;
+                    *n += 1;
+                }
+            },
+        )
+        .await;
+        let sink = beats.clone();
+        drive_with_heartbeat(
+            resolved_after(Duration::from_millis(5)),
+            Some(json!(3)),
+            Duration::from_millis(200),
+            move |_| {
+                let sink = sink.clone();
+                async move {
+                    let mut n = sink.lock().await;
+                    *n += 1;
+                }
+            },
+        )
+        .await;
+        assert_eq!(*beats.lock().await, 0);
+    }
 }

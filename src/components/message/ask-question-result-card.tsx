@@ -10,8 +10,10 @@
  * to the interactive card the user actually answered — it just renders the
  * selection as disabled and drops the footer. The Q&A is reconstructed from the
  * tool's raw input JSON + the persisted `{ answers, declined }` result envelope
- * (see `@/lib/ask-question`). Error and in-flight states fall back to a compact
- * header card, since there is no answered selection to show yet.
+ * (see `@/lib/ask-question`). Error, in-flight and expired states fall back to
+ * a compact header card, since there is no answered selection to show. Expired
+ * is a call that ended without an answer — a cancelled turn, the agent's
+ * process gone (a codeg restart), the agent giving up on it.
  */
 
 import { useMemo, useState, type ReactNode } from "react"
@@ -27,6 +29,7 @@ import { AskQuestionCard } from "@/components/chat/ask-question-card"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import {
+  askQuestionRecordState,
   matchSelections,
   parseAskQuestionInput,
   parseAskQuestionOutcome,
@@ -58,9 +61,16 @@ export function AskQuestionResultCard({
   const questions = useMemo(() => parseAskQuestionInput(input), [input])
   const outcome = useMemo(() => parseAskQuestionOutcome(output), [output])
 
-  const isError = !!errorText?.trim()
   const isRunning = state === "input-available" || state === "input-streaming"
-  const isInFlight = !isError && !outcome && isRunning
+  const recordState = askQuestionRecordState({
+    output,
+    errorText,
+    answered: !!outcome,
+    running: isRunning,
+  })
+  const isError = recordState === "error"
+  const isExpired = recordState === "expired"
+  const isInFlight = recordState === "in-flight"
 
   // The question set, shaped for AskQuestionCard (synthetic ids: the persisted
   // input carries none — the backend mints them server-side).
@@ -128,7 +138,11 @@ export function AskQuestionResultCard({
       data-testid="ask-question-result-card"
       className={cn(
         "mb-2 overflow-hidden rounded-xl border bg-card ws-msg-card",
-        isError ? "border-destructive/30" : "border-primary/30"
+        isError
+          ? "border-destructive/30"
+          : isExpired
+            ? "border-border"
+            : "border-primary/30"
       )}
     >
       <div className="flex flex-col gap-2 p-3">
@@ -157,6 +171,33 @@ export function AskQuestionResultCard({
       <p className="whitespace-pre-wrap text-xs text-destructive">
         {errorText?.trim()}
       </p>
+    )
+  }
+
+  if (isExpired) {
+    // The call ended without an answer (cancelled turn, the agent's process
+    // gone, the agent gave up): say so, rather than leaving a card that looks
+    // like it still waits — or reads as answered with "no selection".
+    const reason = errorText?.trim()
+    return shell(
+      t("expired"),
+      <div data-testid="ask-question-expired" className="space-y-1.5">
+        <p className="text-xs text-muted-foreground">{t("expiredHint")}</p>
+        {questions.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {questions.map((q, i) => (
+              <Badge key={i} variant="outline" className="text-3xs">
+                {q.header || q.question}
+              </Badge>
+            ))}
+          </div>
+        )}
+        {reason && (
+          <p className="line-clamp-2 whitespace-pre-wrap text-3xs text-muted-foreground/80">
+            {reason}
+          </p>
+        )}
+      </div>
     )
   }
 

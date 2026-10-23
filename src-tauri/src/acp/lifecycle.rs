@@ -383,6 +383,7 @@ pub(crate) async fn handle_event(
             // A turn that stopped on the account's usage limit is paused until
             // the limit resets instead (`acp::limit_continue`), in the same
             // write.
+            let usage_limited = usage_limit.is_some();
             let wrote = match usage_limit {
                 Some(text) => {
                     crate::acp::limit_continue::finish_limited_turn(
@@ -429,9 +430,13 @@ pub(crate) async fn handle_event(
                     cid,
                     stop_reason.as_str(),
                     last_text,
+                    usage_limited,
                 )
                 .await;
             }
+            // This conversation just went idle: a delegated result a usage
+            // limit held back may be waiting for exactly that.
+            crate::acp::delegation::limit_delivery::turn_ended();
             Ok(())
         }
         AcpEvent::StatusChanged {
@@ -651,6 +656,7 @@ async fn forward_turn_complete_to_broker(
     conversation_id: i32,
     stop_reason: &str,
     last_text: Option<String>,
+    usage_limited: bool,
 ) {
     let row = match conversation_service::get_by_id(db_conn, conversation_id).await {
         Ok(r) => r,
@@ -674,6 +680,39 @@ async fn forward_turn_complete_to_broker(
         return;
     }
     let agent_type = row.agent_type;
+    // A usage limit stopped the child and limit-continue paused it: codeg
+    // continues it by itself at the reset. Tell the parent exactly that — a
+    // failure here would invite it to retry or re-delegate the task — and
+    // remember to hand it the result once the continued child finishes.
+    if usage_limited {
+        if let Some(pause) = crate::acp::delegation::limit_delivery::active_pause(&row) {
+            let outcome = crate::acp::delegation::types::paused_usage_limit_outcome(
+                conversation_id,
+                pause,
+                chrono::Utc::now(),
+                &chrono::Local,
+            );
+            let settled = broker.complete_call(&call_id, outcome.clone()).await;
+            if settled.is_none() {
+                // Already out of the broker's hands (paused before, continued,
+                // and stopped by the limit again): refresh the paused report.
+                let preview = row.title.clone().unwrap_or_default();
+                let tool_use_id = row.parent_tool_use_id.clone().unwrap_or_default();
+                broker
+                    .settle_paused_call(&call_id, &outcome, &tool_use_id, &preview)
+                    .await;
+            }
+            crate::acp::delegation::limit_delivery::record_pause(
+                db_conn,
+                &row,
+                &call_id,
+                pause,
+                settled.as_ref(),
+            )
+            .await;
+            return;
+        }
+    }
     let outcome = match stop_reason {
         "end_turn" => DelegationOutcome::Ok(DelegationSuccess {
             text: last_text.unwrap_or_default(),
@@ -715,7 +754,19 @@ async fn forward_turn_complete_to_broker(
             Some(conversation_id),
         ),
     };
-    broker.complete_call(&call_id, outcome).await;
+    if broker.complete_call(&call_id, outcome.clone()).await.is_none() {
+        // No running task: the turn may be the end of a child a usage limit
+        // paused, which codeg continued — its result is owed to the parent.
+        crate::acp::delegation::limit_delivery::child_finished(
+            db_conn,
+            broker,
+            &row,
+            &call_id,
+            stop_reason,
+            &outcome,
+        )
+        .await;
+    }
 }
 
 /// Snapshot the connection's `(state, emitter)` into the lifecycle cache when

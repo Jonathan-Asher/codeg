@@ -449,6 +449,11 @@ impl DelegationListener {
                     reports = &mut status_fut => reports,
                     _ = conn.read(&mut probe) => return Ok(()),
                 };
+                // A result a usage-limit pause owed the parent, pulled here
+                // with its text, needs no separate delivery.
+                crate::acp::delegation::limit_delivery::note_collected(
+                    collected_task_ids(&reports),
+                );
                 reports_response(reports)?
             }
             BrokerMessage::CancelTask(req) => report_response(self.process_cancel_task(req).await)?,
@@ -1104,6 +1109,21 @@ fn report_response(report: DelegationTaskReport) -> std::io::Result<BrokerRespon
 /// envelope for the `Status` arm. The companion reads this back and renders it
 /// uniformly as a `{ "tasks": [..] }` result — one entry per requested id,
 /// whether the poll asked for a single id or a whole fan-out.
+/// The tasks whose final result these reports hand the parent in full: a
+/// completed task with its text, or a failure. (A status-only report — the
+/// result aged out of memory — hands over nothing.)
+fn collected_task_ids(reports: &[DelegationTaskReport]) -> Vec<String> {
+    reports
+        .iter()
+        .filter(|r| match r.status {
+            crate::acp::delegation::types::TaskStatus::Completed => r.text.is_some(),
+            crate::acp::delegation::types::TaskStatus::Failed => true,
+            _ => false,
+        })
+        .filter_map(|r| r.task_id.clone())
+        .collect()
+}
+
 fn reports_response(reports: Vec<DelegationTaskReport>) -> std::io::Result<BrokerResponse> {
     Ok(BrokerResponse {
         outcome: serde_json::json!({
@@ -1464,6 +1484,34 @@ mod tests {
     use serde_json::json;
     use std::time::Duration;
     use tokio::io::duplex;
+
+    #[test]
+    fn only_reports_that_hand_over_a_final_result_count_as_collected() {
+        use crate::acp::delegation::types::TaskStatus as Ts;
+        let report = |id: &str, status: Ts, text: Option<&str>| DelegationTaskReport {
+            task_id: Some(id.into()),
+            status,
+            child_conversation_id: Some(2),
+            agent_type: None,
+            text: text.map(str::to_string),
+            error_code: None,
+            message: None,
+            duration_ms: None,
+            blocked_on: None,
+        };
+        let reports = vec![
+            report("done", Ts::Completed, Some("42")),
+            // Status only: the result aged out of memory, nothing handed over.
+            report("aged", Ts::Completed, None),
+            report("failed", Ts::Failed, None),
+            report("running", Ts::Running, None),
+            report("canceled", Ts::Canceled, None),
+        ];
+        assert_eq!(
+            collected_task_ids(&reports),
+            vec!["done".to_string(), "failed".to_string()]
+        );
+    }
 
     struct AlwaysRootLookup;
     #[async_trait]
@@ -2472,6 +2520,7 @@ mod tests {
                     folder_id: 7,
                     working_dir: Some("/work".into()),
                     title: Some("do x".into()),
+                    paused_until: None,
                 })
             }
         }

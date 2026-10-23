@@ -3957,6 +3957,7 @@
           "running": "em execução",
           "checked": "verificado",
           "waiting": "aguardando aprovação",
+          "paused": "pausado · limite de uso",
           "ok": "concluído",
           "err": {
             "default": "falhou",
@@ -4233,7 +4234,9 @@
         "answeredLabel": "Pergunta e resposta:",
         "awaiting": "Aguardando sua resposta…",
         "declined": "Você ignorou isto — o agente usou o próprio julgamento.",
-        "noSelection": "Sem seleção"
+        "noSelection": "Sem seleção",
+        "expired": "Esta pergunta expirou",
+        "expiredHint": "O agente parou de esperar antes de a pergunta ser respondida."
       },
       "configStale": {
         "agentConfigTitle": "Configurações do agente atualizadas",

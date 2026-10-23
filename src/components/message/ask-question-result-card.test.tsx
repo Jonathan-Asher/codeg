@@ -471,4 +471,76 @@ describe("AskQuestionResultCard", () => {
     expect(chosen).toBeDisabled()
     expect(screen.getByRole("radio", { name: /茶/ })).not.toBeChecked()
   })
+
+  it("shows an expired question when the call ended without an answer", () => {
+    // A turn that ended (cancelled, the agent's process gone) leaves the call
+    // with no result: it must not read as answered with "No selection".
+    renderWithIntl(
+      <AskQuestionResultCard input={SINGLE_INPUT} state="output-available" />
+    )
+    expect(screen.getByText(result.expired)).toBeInTheDocument()
+    expect(screen.getByText(result.expiredHint)).toBeInTheDocument()
+    expect(screen.getByText("Approach")).toBeInTheDocument()
+    expect(screen.queryByText(result.noSelection)).toBeNull()
+    expect(screen.queryByText(result.awaiting)).toBeNull()
+  })
+
+  it("shows an aborted call as expired, keeping the agent's reason", () => {
+    const reason =
+      'MCP server "codeg-mcp" tool "ask_user_question" sent no response or progress for 1800s; aborting.'
+    renderWithIntl(
+      <AskQuestionResultCard
+        input={SINGLE_INPUT}
+        errorText={reason}
+        state="output-error"
+      />
+    )
+    expect(screen.getByText(result.expired)).toBeInTheDocument()
+    expect(screen.getByText(reason)).toBeInTheDocument()
+  })
+
+  it("keeps a rejected (malformed) call as an error, not an expired question", () => {
+    const reason =
+      "MCP error -32602: ask_user_question requires at least one question"
+    renderWithIntl(
+      <AskQuestionResultCard
+        input={SINGLE_INPUT}
+        errorText={reason}
+        state="output-error"
+      />
+    )
+    expect(screen.getByText(reason)).toBeInTheDocument()
+    expect(screen.queryByText(result.expired)).toBeNull()
+  })
+
+  it("still waits while the turn runs, and expires once it has ended", () => {
+    const view = renderWithIntl(
+      <AskQuestionResultCard input={SINGLE_INPUT} state="input-available" />
+    )
+    expect(screen.getByText(result.awaiting)).toBeInTheDocument()
+    view.rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <AskQuestionResultCard input={SINGLE_INPUT} state="output-available" />
+      </NextIntlClientProvider>
+    )
+    expect(screen.queryByText(result.awaiting)).toBeNull()
+    expect(screen.getByText(result.expired)).toBeInTheDocument()
+  })
+
+  it("renders a late answer as answered, not expired", () => {
+    const view = renderWithIntl(
+      <AskQuestionResultCard input={SINGLE_INPUT} state="input-available" />
+    )
+    view.rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <AskQuestionResultCard
+          input={SINGLE_INPUT}
+          output={SINGLE_OUTPUT}
+          state="output-available"
+        />
+      </NextIntlClientProvider>
+    )
+    expect(screen.queryByText(result.expired)).toBeNull()
+    expect(screen.getByText("Incremental (Recommended)")).toBeInTheDocument()
+  })
 })

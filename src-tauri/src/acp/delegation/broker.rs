@@ -68,6 +68,7 @@ use crate::acp::delegation::spawner::{ConnectionSpawner, DelegationLink};
 use crate::acp::delegation::types::{
     AgentDelegationDefaults, BlockedKind, BlockedOn, DelegationError, DelegationOutcome,
     DelegationRequest, DelegationTaskReport, ResumeDelegationRequest, TaskStatus,
+    PAUSED_USAGE_LIMIT_CODE,
 };
 use crate::acp::types::DelegationResultSummary;
 use crate::models::AgentType;
@@ -122,6 +123,10 @@ pub struct ChildStatusRecord {
     /// the DB fallback to the calling parent so one parent can't read another's
     /// task by guessing a UUID.
     pub parent_id: Option<i32>,
+    /// When a usage limit paused the child and codeg continues it by itself:
+    /// the limit's reset. Such a task is reported as running (paused), never
+    /// as finished or failed.
+    pub paused_until: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Everything `resume_delegation` needs to know about an interrupted child
@@ -156,6 +161,9 @@ pub struct ChildResumeContext {
     /// The child row's title (originally seeded from the delegated task text) —
     /// bounded and reused as the resumed task's `task_preview` label.
     pub title: Option<String>,
+    /// See [`ChildStatusRecord::paused_until`]: a paused child is continued by
+    /// codeg itself, so it is never resumable.
+    pub paused_until: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// DB fallback for `get_delegation_status` / `cancel_delegation` once a task's
@@ -271,6 +279,16 @@ struct SurfacedBlock {
     at: Instant,
 }
 
+/// What [`DelegationBroker::complete_call`] settled: enough of the running task
+/// for a caller that keeps track of it past the broker (the usage-limit pause,
+/// `limit_delivery`) to label the parent's card later.
+#[derive(Debug, Clone)]
+pub struct SettledDelegation {
+    pub parent_connection_id: String,
+    pub parent_tool_use_id: String,
+    pub task_preview: String,
+}
+
 /// A terminal delegation result retained so `get_delegation_status` /
 /// `cancel_delegation` can answer after the lifecycle resolved the task.
 /// Parent-scoped, FIFO-evicted once the parent's retained result text exceeds
@@ -278,6 +296,12 @@ struct SurfacedBlock {
 /// connection tears down.
 #[derive(Clone)]
 struct CompletedTask {
+    /// Set for a delegation a usage limit paused (and, once its continued
+    /// child finished, for the result that replaced the pause). The parent
+    /// usually reconnects in the hours such a pause lasts, so ownership of
+    /// these entries is decided per conversation (the DB fallback), not per
+    /// connection — see `classify_locked`.
+    after_pause: bool,
     parent_connection_id: String,
     child_conversation_id: i32,
     agent_type: AgentType,
@@ -704,12 +728,23 @@ fn terminal_fields(
         DelegationOutcome::Err { code, message, .. } => {
             let status = if code == "canceled" {
                 TaskStatus::Canceled
+            } else if code == PAUSED_USAGE_LIMIT_CODE {
+                // Paused by a usage limit: the child goes on by itself and its
+                // result is delivered later. Reported as running, so the parent
+                // waits for it instead of retrying a "failure".
+                TaskStatus::Running
             } else {
                 TaskStatus::Failed
             };
             (status, None, Some(code.clone()), Some(message.clone()))
         }
     }
+}
+
+/// Whether a completed-cache entry is a delegation a usage limit paused (its
+/// child continues later), rather than a settled one.
+fn is_paused_entry(task: &CompletedTask) -> bool {
+    task.error_code.as_deref() == Some(PAUSED_USAGE_LIMIT_CODE)
 }
 
 /// Build a [`CompletedTask`] from a resolved outcome for the completed-cache.
@@ -722,6 +757,7 @@ fn build_completed(
 ) -> CompletedTask {
     let (status, text, error_code, message) = terminal_fields(outcome);
     CompletedTask {
+        after_pause: error_code.as_deref() == Some(PAUSED_USAGE_LIMIT_CODE),
         parent_connection_id: parent_connection_id.to_string(),
         child_conversation_id,
         agent_type,
@@ -939,6 +975,12 @@ fn resume_ack(
 /// `src/lib/delegation-card.ts` falls back to it wherever `error_code` did not
 /// survive, and without it a refusal renders as a resumed sub-agent card. Keep
 /// the two spellings in step.
+/// `resume_delegation`'s refusal for a task a usage limit paused, when its
+/// paused report's own wording (with the continuation time) is not at hand.
+const PAUSED_RESUME_REFUSAL: &str = "a usage limit paused this task and codeg continues it by \
+     itself once the limit resets; its result is delivered to this conversation when it \
+     finishes. Do not resume or re-delegate it.";
+
 fn not_resumable_report(
     task_id: &str,
     status: TaskStatus,
@@ -1078,6 +1120,39 @@ fn unknown_report(task_id: &str) -> DelegationTaskReport {
 /// Status report recovered from the DB after the in-memory result was evicted.
 /// Carries status only — the full output lives in the child session.
 fn db_report(task_id: &str, rec: &ChildStatusRecord) -> DelegationTaskReport {
+    if let Some(resets_at) = rec.paused_until {
+        // Paused by a usage limit (the in-memory report is gone — a restart
+        // since): still the same "running, continues by itself" answer.
+        let outcome = crate::acp::delegation::types::paused_usage_limit_outcome(
+            rec.child_conversation_id,
+            resets_at,
+            chrono::Utc::now(),
+            &chrono::Local,
+        );
+        return report_from_outcome(
+            Some(task_id.to_string()),
+            Some(rec.agent_type),
+            &outcome,
+            None,
+        );
+    }
+    if crate::acp::delegation::limit_delivery::result_waiting(task_id) {
+        // Continued after a pause and finished; the result is delivered to the
+        // parent as a message at its next idle moment.
+        return DelegationTaskReport {
+            task_id: Some(task_id.to_string()),
+            status: TaskStatus::Completed,
+            child_conversation_id: Some(rec.child_conversation_id),
+            agent_type: Some(rec.agent_type),
+            text: None,
+            error_code: None,
+            message: Some(
+                crate::acp::delegation::limit_delivery::RESULT_WAITING_NOTE.to_string(),
+            ),
+            duration_ms: None,
+            blocked_on: None,
+        };
+    }
     DelegationTaskReport {
         task_id: Some(task_id.to_string()),
         status: rec.status,
@@ -1137,6 +1212,13 @@ fn classify_locked(inner: &PendingInner, parent_connection_id: &str, task_id: &s
     if let Some(c) = inner.completed.get(task_id) {
         if c.parent_connection_id == parent_connection_id {
             return StatusClass::Settled(completed_report(task_id, c));
+        }
+        if c.after_pause {
+            // Asked from another connection than the one that delegated it —
+            // the parent reconnected during a usage-limit pause. The child
+            // row answers, scoped to the caller's conversation like any DB
+            // fallback, so no other conversation can read it.
+            return StatusClass::NotInMemory;
         }
         return StatusClass::Settled(unknown_report(task_id));
     }
@@ -2624,6 +2706,13 @@ impl DelegationBroker {
         )
         .await;
 
+        // The parent may be re-delegating a task a usage limit paused: the new
+        // run supersedes the paused one, whose result is then not delivered.
+        crate::acp::delegation::limit_delivery::note_delegation_started(
+            req.parent_conversation_id,
+            &task_preview,
+        );
+
         // --- Register pending, or resolve a terminal that beat us -------------
         // Under a single lock, decide this delegation's fate atomically against
         // everything a concurrent resolver may have recorded while we were
@@ -2915,7 +3004,14 @@ impl DelegationBroker {
     /// loop emits `TurnComplete` independently, so a completion CAN beat it. When
     /// the `call_id` is no longer reserved the call was already resolved by
     /// another terminal path, so the buffer is skipped (silent no-op).
-    pub async fn complete_call(&self, call_id: &str, outcome: DelegationOutcome) {
+    ///
+    /// Returns what it settled — `None` when no running task matched (the
+    /// buffered/no-op cases above).
+    pub async fn complete_call(
+        &self,
+        call_id: &str,
+        outcome: DelegationOutcome,
+    ) -> Option<SettledDelegation> {
         let task = {
             let mut inner = self.pending.inner.lock().await;
             match inner.running.remove(call_id) {
@@ -2944,21 +3040,97 @@ impl DelegationBroker {
                 }
             }
         };
-        if let Some((task, duration_ms)) = task {
-            self.finalize_delegation(
-                &task.parent_connection_id,
-                &task.parent_tool_use_id,
-                &task.child_connection_id,
-                task.child_conversation_id,
-                task.agent_type,
-                duration_ms,
-                &outcome,
-                &task.task_preview,
-                &task.task_id,
-            )
+        let (task, duration_ms) = task?;
+        self.finalize_delegation(
+            &task.parent_connection_id,
+            &task.parent_tool_use_id,
+            &task.child_connection_id,
+            task.child_conversation_id,
+            task.agent_type,
+            duration_ms,
+            &outcome,
+            &task.task_preview,
+            &task.task_id,
+        )
+        .await;
+        self.result_notify.notify_waiters();
+        Some(SettledDelegation {
+            parent_connection_id: task.parent_connection_id,
+            parent_tool_use_id: task.parent_tool_use_id,
+            task_preview: task.task_preview,
+        })
+    }
+
+    /// A delegation a usage limit paused ([`PAUSED_USAGE_LIMIT_CODE`]) finished
+    /// after codeg continued its child: put the final outcome in place of the
+    /// paused entry, so `get_delegation_status` returns the result, show it on
+    /// the parent's card, and wake any long-poll. The continued child's
+    /// connection is left alone — it belongs to the continuation, not to this
+    /// task. `false` when there was no paused entry to settle (evicted, or the
+    /// process restarted since the pause); the result then reaches the parent
+    /// only through `limit_delivery`.
+    pub async fn settle_paused_call(
+        &self,
+        call_id: &str,
+        outcome: &DelegationOutcome,
+        parent_tool_use_id: &str,
+        task_preview: &str,
+    ) -> bool {
+        let settled = {
+            let mut inner = self.pending.inner.lock().await;
+            match inner.completed.get(call_id) {
+                Some(entry) if is_paused_entry(entry) => {}
+                _ => return false,
+            }
+            let paused = inner
+                .remove_completed(call_id)
+                .expect("entry observed under the same lock");
+            let mut settled = build_completed(
+                &paused.parent_connection_id,
+                paused.child_conversation_id,
+                paused.agent_type,
+                paused.duration_ms,
+                outcome,
+            );
+            settled.after_pause = true;
+            inner.insert_completed(call_id, settled);
+            paused
+        };
+        let meta = match outcome {
+            DelegationOutcome::Ok(ok) => build_delegation_meta(
+                "completed",
+                None,
+                Some(settled.child_conversation_id),
+                None,
+                build_text_preview(&ok.text).as_deref(),
+                Some(settled.duration_ms),
+                Some(task_preview),
+                Some(call_id),
+            ),
+            DelegationOutcome::Err { code, .. } => build_delegation_meta(
+                "failed",
+                None,
+                Some(settled.child_conversation_id),
+                Some(code),
+                None,
+                Some(settled.duration_ms),
+                Some(task_preview),
+                Some(call_id),
+            ),
+        };
+        self.write_meta_if_real(&settled.parent_connection_id, parent_tool_use_id, meta)
             .await;
-            self.result_notify.notify_waiters();
-        }
+        self.emit_completed_if_real(
+            &settled.parent_connection_id,
+            parent_tool_use_id,
+            "",
+            settled.child_conversation_id,
+            settled.agent_type,
+            outcome_to_summary(outcome, settled.duration_ms),
+        )
+        .await;
+        self.result_notify.notify_waiters();
+        true
     }
 
     /// Write the terminal meta, emit `DelegationCompleted`, and tear down the
@@ -3841,8 +4013,23 @@ impl DelegationBroker {
         let gate = {
             let mut inner = self.pending.inner.lock().await;
             if let Some(c) = inner.completed.get(&req.task_id) {
-                if c.parent_connection_id != req.parent_connection_id {
+                if c.parent_connection_id != req.parent_connection_id && c.after_pause {
+                    // The parent reconnected during a usage-limit pause: the
+                    // DB gate decides, scoped to the caller's conversation.
+                    let claimed = inner.resuming.insert(req.task_id.clone());
+                    MemGate::Proceed { claimed }
+                } else if c.parent_connection_id != req.parent_connection_id {
                     MemGate::Refuse(Box::new(unknown_report(&req.task_id)))
+                } else if is_paused_entry(c) {
+                    // A usage limit paused it and codeg continues it by itself:
+                    // resuming it too would run the same task twice.
+                    MemGate::Refuse(Box::new(not_resumable_report(
+                        &req.task_id,
+                        TaskStatus::Running,
+                        Some(c.child_conversation_id),
+                        Some(c.agent_type),
+                        c.message.as_deref().unwrap_or(PAUSED_RESUME_REFUSAL),
+                    )))
                 } else {
                     // Copy the report fields out so the `completed` borrow ends
                     // before the Canceled arm's mutable `resuming` claim.
@@ -3964,6 +4151,28 @@ impl DelegationBroker {
                 Some(ctx.child_conversation_id),
                 Some(ctx.agent_type),
                 "a resume of this task is already in progress.",
+            );
+        }
+        if ctx.paused_until.is_some() {
+            // codeg continues it by itself once the usage limit resets.
+            self.drop_inflight(inflight_id).await;
+            return not_resumable_report(
+                &req.task_id,
+                TaskStatus::Running,
+                Some(ctx.child_conversation_id),
+                Some(ctx.agent_type),
+                PAUSED_RESUME_REFUSAL,
+            );
+        }
+        if crate::acp::delegation::limit_delivery::result_waiting(&req.task_id) {
+            // Continued after a pause and finished: its result is on its way.
+            self.drop_inflight(inflight_id).await;
+            return not_resumable_report(
+                &req.task_id,
+                TaskStatus::Completed,
+                Some(ctx.child_conversation_id),
+                Some(ctx.agent_type),
+                crate::acp::delegation::limit_delivery::RESULT_WAITING_NOTE,
             );
         }
         match ctx.status {
@@ -4589,6 +4798,7 @@ impl ChildStatusLookup for DbChildStatusLookup {
             status: task_status_from_row(&summary.status),
             agent_type: summary.agent_type,
             parent_id: summary.parent_id,
+            paused_until: paused_until_of(&summary),
         })
     }
 
@@ -4609,6 +4819,7 @@ impl ChildStatusLookup for DbChildStatusLookup {
                 .ok()
                 .flatten()
                 .map(|f| f.path);
+        let paused_until = paused_until_of(&summary);
         Some(ChildResumeContext {
             child_conversation_id: summary.id,
             status: task_status_from_row(&summary.status),
@@ -4618,9 +4829,18 @@ impl ChildStatusLookup for DbChildStatusLookup {
             external_id: summary.external_id,
             folder_id: summary.folder_id,
             working_dir,
+            paused_until,
             title: summary.title,
         })
     }
+}
+
+/// The reset a usage-limit pause waits for, while codeg is going to continue
+/// the child by itself (see `limit_delivery::active_pause`).
+fn paused_until_of(
+    summary: &crate::models::DbConversationSummary,
+) -> Option<chrono::DateTime<chrono::Utc>> {
+    crate::acp::delegation::limit_delivery::active_pause(summary)
 }
 
 #[cfg(test)]
@@ -4831,6 +5051,116 @@ mod tests {
         let report = waiter.await.unwrap();
         assert_eq!(report.status, TaskStatus::Completed);
         assert_eq!(report.text.as_deref(), Some("done"));
+    }
+
+    fn paused_outcome() -> DelegationOutcome {
+        use chrono::TimeZone;
+        let now = chrono::Utc.with_ymd_and_hms(2026, 10, 22, 18, 0, 0).unwrap();
+        let resets = chrono::Utc.with_ymd_and_hms(2026, 10, 22, 21, 0, 0).unwrap();
+        crate::acp::delegation::types::paused_usage_limit_outcome(42, resets, now, &chrono::Utc)
+    }
+
+    /// A child a usage limit paused is not a failure: the parent's wait wakes
+    /// with a RUNNING report that says when it goes on and that the result will
+    /// be delivered — and once codeg continued the child and it finished, the
+    /// same task id answers with the final result.
+    #[tokio::test]
+    async fn a_paused_child_reports_running_then_settles_with_its_result() {
+        let mock = Arc::new(MockSpawner::new());
+        mock.queue_spawn(Ok("child-conn-1".into())).await;
+        mock.queue_send(Ok(42)).await;
+        let broker =
+            DelegationBroker::new(mock.clone() as Arc<dyn ConnectionSpawner>, shallow_lookup());
+        enable_delegation(&broker).await;
+        let ack = broker.start_delegation(request(1, "pt-1")).await;
+        let task_id = ack.task_id.clone().expect("running task carries an id");
+
+        let waiter = {
+            let broker = broker.clone();
+            let task_id = task_id.clone();
+            tokio::spawn(async move {
+                broker
+                    .get_task_status("parent-conn", Some(1), &task_id, StatusWait::Infinite)
+                    .await
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let settled = broker
+            .complete_call(&task_id, paused_outcome())
+            .await
+            .expect("the running task is settled as paused");
+        assert_eq!(settled.parent_tool_use_id, "pt-1");
+        assert_eq!(settled.task_preview, "do x");
+
+        let report = waiter.await.unwrap();
+        assert_eq!(report.status, TaskStatus::Running, "paused is not a failure");
+        assert_eq!(report.error_code.as_deref(), Some(PAUSED_USAGE_LIMIT_CODE));
+        let message = report.message.clone().unwrap_or_default();
+        assert!(message.contains("about 21:00"), "{message}");
+        assert!(message.contains("delivers its final result"), "{message}");
+
+        // Resuming it would run the same task twice.
+        let refused = broker
+            .resume_delegation(ResumeDelegationRequest {
+                parent_connection_id: "parent-conn".into(),
+                parent_conversation_id: 1,
+                task_id: task_id.clone(),
+                reason: None,
+                external_handle: None,
+            })
+            .await;
+        assert_eq!(refused.error_code.as_deref(), Some(NOT_RESUMABLE_CODE));
+        assert_eq!(refused.status, TaskStatus::Running);
+
+        // The continued child finished: the same id now carries its result.
+        let done = DelegationOutcome::Ok(DelegationSuccess {
+            text: "42 is the answer".into(),
+            child_conversation_id: 42,
+            child_agent_type: AgentType::ClaudeCode,
+            turn_count: 1,
+            duration_ms: 5,
+            token_usage: None,
+        });
+        assert!(
+            broker
+                .settle_paused_call(&task_id, &done, "pt-1", "do x")
+                .await
+        );
+        let report = broker
+            .get_task_status("parent-conn", Some(1), &task_id, StatusWait::Immediate)
+            .await;
+        assert_eq!(report.status, TaskStatus::Completed);
+        assert_eq!(report.text.as_deref(), Some("42 is the answer"));
+        // Settled once: a second settle finds no paused entry.
+        assert!(
+            !broker
+                .settle_paused_call(&task_id, &done, "pt-1", "do x")
+                .await
+        );
+    }
+
+    /// After a restart the paused report is gone from memory; the child row's
+    /// pause still answers "running, continues by itself".
+    #[test]
+    fn db_report_of_a_paused_child_is_running_not_finished() {
+        let rec = ChildStatusRecord {
+            child_conversation_id: 42,
+            status: TaskStatus::Completed,
+            agent_type: AgentType::ClaudeCode,
+            parent_id: Some(1),
+            paused_until: Some(chrono::Utc::now() + chrono::Duration::hours(2)),
+        };
+        let report = db_report("t-1", &rec);
+        assert_eq!(report.status, TaskStatus::Running);
+        assert_eq!(report.error_code.as_deref(), Some(PAUSED_USAGE_LIMIT_CODE));
+        let unpaused = db_report(
+            "t-1",
+            &ChildStatusRecord {
+                paused_until: None,
+                ..rec
+            },
+        );
+        assert_eq!(unpaused.status, TaskStatus::Completed);
     }
 
     /// A running snapshot upgrades its bare `"Running."` message with the child's
@@ -9232,6 +9562,7 @@ mod tests {
 
     fn completed_with_text(parent: &str, text_len: usize) -> CompletedTask {
         CompletedTask {
+            after_pause: false,
             parent_connection_id: parent.to_string(),
             child_conversation_id: 1,
             agent_type: AgentType::ClaudeCode,
@@ -9396,6 +9727,7 @@ mod tests {
                 status: c.status,
                 agent_type: c.agent_type,
                 parent_id: c.parent_id,
+                paused_until: c.paused_until,
             })
         }
         async fn find_resume_context_by_call_id(
@@ -9417,6 +9749,7 @@ mod tests {
             folder_id: 7,
             working_dir: Some("/work".into()),
             title: Some("do x".into()),
+            paused_until: None,
         }
     }
 
@@ -9444,6 +9777,40 @@ mod tests {
         .with_status_lookup(lookup.clone() as Arc<dyn ChildStatusLookup>);
         enable_delegation(&broker).await;
         (mock, lookup, broker)
+    }
+
+    /// The parent reconnects during a usage-limit pause (its old connection
+    /// was swept, codeg restarted its tab): asked from the new connection, the
+    /// paused task still reads "running, continues by itself" — never
+    /// `unknown`, which would invite a re-delegation — and resuming it is still
+    /// refused. Another conversation still learns nothing.
+    #[tokio::test]
+    async fn a_reconnected_parent_still_sees_its_paused_task() {
+        let mut ctx = resume_ctx(TaskStatus::Canceled);
+        ctx.paused_until = Some(chrono::Utc::now() + chrono::Duration::hours(1));
+        let (mock, _lookup, broker) = resume_harness(Some(ctx)).await;
+        mock.queue_spawn(Ok("child-conn-1".into())).await;
+        mock.queue_send(Ok(42)).await;
+        let ack = broker.start_delegation(request(1, "pt-1")).await;
+        let task_id = ack.task_id.clone().unwrap();
+        broker.complete_call(&task_id, paused_outcome()).await;
+
+        let report = broker
+            .get_task_status("parent-conn-2", Some(1), &task_id, StatusWait::Immediate)
+            .await;
+        assert_eq!(report.status, TaskStatus::Running);
+        assert_eq!(report.error_code.as_deref(), Some(PAUSED_USAGE_LIMIT_CODE));
+
+        let mut req = resume_request(&task_id);
+        req.parent_connection_id = "parent-conn-2".into();
+        let refused = broker.resume_delegation(req).await;
+        assert_eq!(refused.error_code.as_deref(), Some(NOT_RESUMABLE_CODE));
+        assert_eq!(refused.status, TaskStatus::Running);
+
+        let foreign = broker
+            .get_task_status("other-conn", Some(99), &task_id, StatusWait::Immediate)
+            .await;
+        assert_eq!(foreign.status, TaskStatus::Unknown);
     }
 
     #[test]

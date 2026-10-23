@@ -37,8 +37,8 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use codeg_lib::acp::delegation::companion::{
-    dispatch_line, drain_and_cancel_all, CompanionContext, CompanionFeatures, InflightCalls,
-    JsonRpcResponse, LineAction, SpawnResult,
+    dispatch_line, drain_and_cancel_all, drive_with_heartbeat, progress_heartbeat_interval,
+    CompanionContext, CompanionFeatures, InflightCalls, JsonRpcResponse, LineAction, SpawnResult,
 };
 use codeg_lib::acp::delegation::parent_watcher::{wait_for_parent_exit, DEFAULT_POLL_INTERVAL};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Stdout};
@@ -174,6 +174,12 @@ async fn write_response(
     let serialized = serde_json::to_string(resp).map_err(|e| {
         std::io::Error::new(std::io::ErrorKind::InvalidData, format!("encode: {e}"))
     })?;
+    write_line(stdout, &serialized).await
+}
+
+/// Write one already-serialized JSON-RPC message (a response or a
+/// notification) as a line, under the stdout mutex.
+async fn write_line(stdout: &Arc<Mutex<Stdout>>, serialized: &str) -> std::io::Result<()> {
     let mut guard = stdout.lock().await;
     guard.write_all(serialized.as_bytes()).await?;
     guard.write_all(b"\n").await?;
@@ -280,11 +286,27 @@ async fn main() -> ExitCode {
                         // stdin reader stays responsive — the next line may
                         // be a `notifications/cancelled` for THIS request.
                         let stdout = stdout.clone();
+                        let heartbeat_out = stdout.clone();
                         tokio::spawn(async move {
+                            // A call the agent asked progress for reports it
+                            // while it waits, so a long block (a question the
+                            // user answers hours later) is not given up on as
+                            // a silent server.
                             let SpawnResult {
                                 response,
                                 after_relay,
-                            } = spawned.future.await;
+                            } = drive_with_heartbeat(
+                                spawned.future,
+                                spawned.progress_token,
+                                progress_heartbeat_interval(),
+                                move |note| {
+                                    let out = heartbeat_out.clone();
+                                    async move {
+                                        let _ = write_line(&out, &note.to_string()).await;
+                                    }
+                                },
+                            )
+                            .await;
                             // `None` → cancellation won; suppress per MCP spec.
                             let Some(resp) = response else {
                                 return;

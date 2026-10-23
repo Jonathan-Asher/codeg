@@ -3957,6 +3957,7 @@
           "running": "运行中",
           "checked": "已查询",
           "waiting": "待批准",
+          "paused": "已暂停 · 用量限制",
           "ok": "完成",
           "err": {
             "default": "失败",
@@ -4233,7 +4234,9 @@
         "answeredLabel": "提问回答：",
         "awaiting": "等待你的回答…",
         "declined": "你已忽略此问题 — 代理已自行判断。",
-        "noSelection": "未选择"
+        "noSelection": "未选择",
+        "expired": "此问题已过期",
+        "expiredHint": "代理在你回答之前已停止等待。"
       },
       "configStale": {
         "agentConfigTitle": "智能体配置已更新",

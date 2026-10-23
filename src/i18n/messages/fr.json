@@ -3957,6 +3957,7 @@
           "running": "en cours",
           "checked": "vérifié",
           "waiting": "en attente d'approbation",
+          "paused": "en pause · limite d'utilisation",
           "ok": "terminé",
           "err": {
             "default": "échec",
@@ -4233,7 +4234,9 @@
         "answeredLabel": "Question et réponse :",
         "awaiting": "En attente de ta réponse…",
         "declined": "Tu as ignoré cette question — l’agent a utilisé son propre jugement.",
-        "noSelection": "Aucune sélection"
+        "noSelection": "Aucune sélection",
+        "expired": "Cette question a expiré",
+        "expiredHint": "L'agent a cessé d'attendre avant qu'on y réponde."
       },
       "configStale": {
         "agentConfigTitle": "Paramètres de l'agent mis à jour",
