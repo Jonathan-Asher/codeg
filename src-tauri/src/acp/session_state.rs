@@ -501,6 +501,15 @@ pub struct SessionState {
     /// session and share it, instead of starting a duplicate agent process.
     pub requested_session_id: Option<String>,
 
+    /// The transcript ids this live session rolled over to
+    /// (`AcpEvent::TranscriptRolledOver`, a Claude Code `/clear`). The
+    /// conversation row now names the newest of them, while `external_id`
+    /// stays the live ACP session. Reopening the conversation by its row's id
+    /// must find THIS connection rather than start a second process on the
+    /// same transcript, so [`Self::represents_session`] counts them too.
+    /// Cleared when the connection moves to another session.
+    pub transcript_aliases: Vec<String>,
+
     /// Where this connection is on its way to a usable session (see
     /// [`AttachPhase`]). Driven by `AcpEvent::AttachProgress`, forced to
     /// `Failed` when the connection errors or disconnects before `Ready`.
@@ -845,6 +854,7 @@ impl SessionState {
             selectors_ready: false,
             last_error: None,
             requested_session_id: None,
+            transcript_aliases: Vec::new(),
             attach_phase: AttachPhase::Starting,
             attach_pool_resumes_at: None,
             attach_started_at: std::time::Instant::now(),
@@ -936,11 +946,14 @@ impl SessionState {
 
     /// Whether this connection is (or is on its way to being) the live
     /// connection for agent session `session_id`: either the agent confirmed
-    /// that id, or the connection was spawned to reopen it and has not
-    /// confirmed anything yet.
+    /// that id (or a transcript it rolled over to, see
+    /// [`Self::transcript_aliases`]), or the connection was spawned to reopen
+    /// it and has not confirmed anything yet.
     pub fn represents_session(&self, session_id: &str) -> bool {
         match self.external_id.as_deref() {
-            Some(confirmed) => confirmed == session_id,
+            Some(confirmed) => {
+                confirmed == session_id || self.transcript_aliases.iter().any(|t| t == session_id)
+            }
             None => {
                 self.attach_phase.is_attaching()
                     && self.requested_session_id.as_deref() == Some(session_id)
@@ -965,6 +978,9 @@ impl SessionState {
             AcpEvent::SessionStarted { session_id } => {
                 if self.external_id.as_deref() != Some(session_id.as_str()) {
                     self.external_id_changed_at = Some(std::time::SystemTime::now());
+                    // Another session: the transcripts the old one rolled
+                    // over to are that session's, not this one's.
+                    self.transcript_aliases.clear();
                     // The AIR task table is keyed to the session we just left.
                     // Its rows can never settle here again: the adapter
                     // publishes their terminal frames on the OLD session id, and
@@ -1658,12 +1674,16 @@ impl SessionState {
                 // window asks.
                 self.async_task_activity_at = Some(Utc::now());
             }
+            AcpEvent::TranscriptRolledOver { transcript_id } => {
+                if !self.transcript_aliases.contains(transcript_id) {
+                    self.transcript_aliases.push(transcript_id.clone());
+                }
+            }
             AcpEvent::ClaudeSdkMessage { .. }
             | AcpEvent::ConfigOptionRejected { .. }
             | AcpEvent::SessionLoadFailed { .. }
             | AcpEvent::TurnRetrying { .. }
             | AcpEvent::NativeSessionTitle { .. }
-            | AcpEvent::TranscriptRolledOver { .. }
             | AcpEvent::UserPromptSent { .. } => {
                 // 这些事件不直接修改 SessionState 的可见字段。
                 // UserPromptSent 是纯通知事件，仅供 chat-channel 推送消费。
@@ -3783,6 +3803,31 @@ mod tests {
             status: ConnectionStatus::Error,
         });
         assert!(!failed.represents_session("ext-1"));
+    }
+
+    /// After a `/clear` the conversation row names the new transcript while
+    /// the live ACP session keeps its id. Reopening the conversation by the
+    /// row's id must find this connection, not start a second process on the
+    /// same transcript — until the connection moves to another session.
+    #[test]
+    fn represents_session_follows_a_transcript_rollover_until_the_session_changes() {
+        let mut s = fresh_state();
+        s.apply_event(&AcpEvent::SessionStarted {
+            session_id: "live".into(),
+        });
+        s.apply_event(&AcpEvent::TranscriptRolledOver {
+            transcript_id: "after-clear".into(),
+        });
+        assert!(s.represents_session("live"));
+        assert!(s.represents_session("after-clear"));
+        assert!(!s.represents_session("other"));
+
+        s.apply_event(&AcpEvent::SessionStarted {
+            session_id: "forked".into(),
+        });
+        assert!(s.represents_session("forked"));
+        assert!(!s.represents_session("after-clear"));
+        assert!(!s.represents_session("live"));
     }
 
     #[test]

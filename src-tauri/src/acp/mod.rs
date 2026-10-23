@@ -31,6 +31,7 @@ pub mod lifecycle;
 pub mod limit_continue;
 pub mod manager;
 pub mod message_receipts;
+pub mod one_session;
 pub mod opencode_catalog;
 pub mod opencode_plugins;
 pub mod plan_approval;

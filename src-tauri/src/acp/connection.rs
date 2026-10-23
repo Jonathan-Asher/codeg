@@ -36,6 +36,7 @@ use agent_client_protocol::{
 };
 use crate::acp::agent_process::AcpAgent;
 use crate::acp::agent_session::AgentSession;
+use crate::acp::one_session::{self, RetiredSessionGuard, SessionLedger};
 use tokio::sync::{mpsc, oneshot, RwLock};
 
 use crate::acp::agent_mentions::append_agent_routes;
@@ -3459,6 +3460,7 @@ pub async fn spawn_agent_connection(
                 Arc::clone(&stderr_tail),
                 relayed_lifeline(&lifeline_gone),
                 detached_fork.take(),
+                Arc::clone(&restart_child_pid),
             )
             .await;
             let restart = if result.is_ok() {
@@ -6600,9 +6602,15 @@ async fn run_connection(
     lifeline: tokio::sync::oneshot::Receiver<()>,
     // Fork another process's session and end; see `DetachedForkRequest`.
     detached_fork: Option<DetachedForkRequest>,
+    // The agent process's pid cell: a session this connection retires must not
+    // leave a process of its own behind (`one_session`).
+    agent_pid: Arc<std::sync::atomic::AtomicU32>,
 ) -> Result<(), AcpError> {
     let pending_perms: PendingPermissions =
         Arc::new(tokio::sync::Mutex::new(PermissionQueue::default()));
+    // The sessions this agent process hosts that codeg handed over and closed;
+    // anything they still send is refused (see `one_session`).
+    let session_ledger = SessionLedger::new(agent_pid);
     // `terminal_base_env` already filtered to just the credential helper
     // keys upstream — see `spawn_agent_connection` for the rationale and
     // why we don't forward the full agent runtime_env here.
@@ -6747,6 +6755,12 @@ async fn run_connection(
         // First in the chain on purpose: it has to claim a null-`sessionId`
         // message before the runtime can park it for retry. See the type docs.
         .with_handler(ClaimNullSessionIds)
+        // Next, before any handler that would serve it: a session codeg handed
+        // over and closed gets nothing more from this connection.
+        .with_handler(RetiredSessionGuard::new(
+            Arc::clone(&session_ledger),
+            connection_id.clone(),
+        ))
         .on_receive_request(
             {
                 let emitter_inner = emitter_clone.clone();
@@ -7196,9 +7210,18 @@ async fn run_connection(
                 .session_capabilities
                 .resume
                 .is_some();
+            let supports_close = init_resp
+                .agent_capabilities
+                .session_capabilities
+                .close
+                .is_some();
+            session_ledger.set_supports_close(supports_close);
             tracing::info!(
-                "[ACP] Agent capabilities: load_session={}, fork={}, resume={}",
-                init_resp.agent_capabilities.load_session, supports_fork, supports_resume
+                "[ACP] Agent capabilities: load_session={}, fork={}, resume={}, close={}",
+                init_resp.agent_capabilities.load_session,
+                supports_fork,
+                supports_resume,
+                supports_close
             );
 
             // A connection opened only to fork another process's session: fork
@@ -7247,6 +7270,21 @@ async fn run_connection(
                 });
                 if let Err(e) = &outcome {
                     tracing::warn!("[ACP] detached fork failed: {e}");
+                }
+                // The fork now lives on disk; its own conversation opens it in
+                // a process of its own. The copy the fork loaded here (an
+                // adapter loads what it forks — claude-agent-acp with a Claude
+                // Code process of its own) must be gone before that happens.
+                if let Ok(forked_session_id) = &outcome {
+                    session_ledger.retire(forked_session_id, None, std::time::Instant::now());
+                    one_session::close_retired_session(
+                        &cx,
+                        &session_ledger,
+                        &conn_id,
+                        forked_session_id,
+                        None,
+                    )
+                    .await;
                 }
                 let _ = reply.send(outcome);
                 return Ok(());
@@ -7575,6 +7613,7 @@ async fn run_connection(
                                 &prompt_ledger,
                                 delegation_injection.as_ref(),
                                 &stderr_tail,
+                                &session_ledger,
                             )
                             .await;
                         }
@@ -7844,6 +7883,7 @@ async fn run_connection(
                             &prompt_ledger,
                             delegation_injection.as_ref(),
                             &stderr_tail,
+                            &session_ledger,
                         )
                         .await
                     }
@@ -8051,6 +8091,7 @@ async fn run_connection(
                             &prompt_ledger,
                             delegation_injection.as_ref(),
                             &stderr_tail,
+                            &session_ledger,
                         )
                         .await
                     }
@@ -8153,6 +8194,7 @@ async fn run_connection(
                     &prompt_ledger,
                     delegation_injection.as_ref(),
                     &stderr_tail,
+                    &session_ledger,
                 )
                 .await
             }
@@ -10801,6 +10843,9 @@ async fn handle_fork_or_exit(
     // the SAME connection-scoped stderr buffer — the agent process is unchanged
     // across a fork, so its stderr history stays relevant.
     stderr_tail: &Arc<StderrTail>,
+    // The sessions this agent process hosts that codeg retired: the parent is
+    // added here, and closed on the agent (see `one_session`).
+    session_ledger: &Arc<SessionLedger>,
 ) -> Result<(), agent_client_protocol::Error> {
     let fork_info = match loop_result {
         Ok(Some(info)) => info,
@@ -10812,6 +10857,22 @@ async fn handle_fork_or_exit(
     let fork_resp = fork_info.fork_response;
     let fork_models_raw = fork_info.fork_models_raw;
     let new_sid = fork_resp.session_id.0.to_string();
+
+    // The conversation now continues on the fork, in this same agent process.
+    // The parent is still loaded here: an adapter keeps every session it was
+    // asked to open until the client closes it, and claude-agent-acp keeps its
+    // Claude Code process running too. Left alone, the parent runs on as an
+    // invisible second copy of the conversation — a scheduled prompt or a
+    // finishing background task restarts it, with codeg's terminal and file
+    // channels still answering it. Retire it now (from here on, everything it
+    // sends is refused) and close it on the agent.
+    one_session::hand_over(
+        &cx,
+        session_ledger,
+        conn_id,
+        &fork_info.original_session_id,
+        &new_sid,
+    );
 
     // Carry the parent session's selectors across the fork, read BEFORE any
     // emit below replaces them with the new session's.
@@ -11014,6 +11075,7 @@ async fn handle_fork_or_exit(
         prompt_ledger,
         delegation_injection,
         stderr_tail,
+        session_ledger,
     ))
     .await
 }

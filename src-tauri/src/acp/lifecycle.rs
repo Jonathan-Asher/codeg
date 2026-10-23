@@ -292,6 +292,18 @@ pub(crate) async fn handle_event(
                 let snap = state_arc.read().await;
                 (snap.conversation_id, snap.agent_type)
             };
+            // One conversation, one live agent session: a second connection
+            // that holds this session or this conversation is a duplicate that
+            // slipped past the spawn-time check — close it.
+            manager
+                .close_other_holders(
+                    agent_type,
+                    Some(session_id.as_str()),
+                    conversation_id,
+                    Some(envelope.connection_id.as_str()),
+                    "found when the session started",
+                )
+                .await;
             if let Some(cid) = conversation_id {
                 // Guarded bind: the row may already be bound to a DIFFERENT
                 // session. That is legitimate for a fork (which has already
@@ -545,6 +557,28 @@ pub(crate) async fn handle_event(
         | AcpEvent::ModeChanged { .. }
         | AcpEvent::SessionConfigOptions { .. }
         | AcpEvent::ConversationLinked { .. } => {
+            if let AcpEvent::ConversationLinked {
+                conversation_id, ..
+            } = &envelope.payload
+            {
+                // The other moment a connection takes a conversation: any
+                // other live connection still running it is a duplicate.
+                if let Some(state) = manager.get_state(&envelope.connection_id).await {
+                    let (agent_type, session_id) = {
+                        let snap = state.read().await;
+                        (snap.agent_type, snap.external_id.clone())
+                    };
+                    manager
+                        .close_other_holders(
+                            agent_type,
+                            session_id.as_deref(),
+                            Some(*conversation_id),
+                            Some(envelope.connection_id.as_str()),
+                            "found when the conversation was linked",
+                        )
+                        .await;
+                }
+            }
             record_selector_state(db_conn, manager, &envelope.connection_id).await?;
             Ok(())
         }
