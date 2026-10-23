@@ -149,7 +149,10 @@ function startSharedSubscription(): void {
   // Web/remote transports lose events emitted during a WS disconnect window
   // (the broadcaster drops them while `receiver_count == 0`). Re-fetching on
   // reconnect is the recovery path; no-op on Tauri IPC.
-  const offReconnect = onTransportReconnect(reload)
+  const offReconnect = onTransportReconnect(reload, {
+    priority: "status",
+    key: "agents",
+  })
   disposers.push(() => {
     if (offReconnect) {
       try {

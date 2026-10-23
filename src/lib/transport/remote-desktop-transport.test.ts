@@ -217,3 +217,51 @@ describe("RemoteDesktopTransport recovery after calls failed", () => {
     expect(recovered).toHaveBeenCalledTimes(1)
   })
 })
+
+describe("RemoteDesktopTransport liveness hints", () => {
+  const streamingCalls = () =>
+    tauri.invoke.mock.calls.filter(
+      ([name]) => name === "remote_ws_set_streaming"
+    )
+
+  it("tells the proxy when a turn streams on screen, and again after a reconnect", async () => {
+    const transport = makeTransport()
+    await startLink(transport)
+    frame("__ready__")
+
+    transport.setStreamingOnScreen(true)
+    transport.setStreamingOnScreen(true)
+    expect(streamingCalls()).toHaveLength(1)
+    expect(streamingCalls()[0][1]).toMatchObject({
+      connectionId: 7,
+      streaming: true,
+    })
+
+    // The proxy's task may have been replaced while the link was down.
+    frame("__disconnected__")
+    frame("__ready__")
+    expect(streamingCalls()).toHaveLength(2)
+
+    transport.setStreamingOnScreen(false)
+    expect(streamingCalls()[2][1]).toMatchObject({ streaming: false })
+  })
+
+  it("gives reads a short timeout while the link is down, never writes", async () => {
+    const transport = makeTransport()
+    await startLink(transport)
+    frame("__ready__")
+    frame("__disconnected__")
+    const timeouts = () =>
+      tauri.invoke.mock.calls
+        .filter(([name]) => name === "remote_http_call")
+        .map(([, args]) => (args as { timeoutMs?: number }).timeoutMs)
+
+    await transport.call("list_folders")
+    await transport.call("rename_conversation", { id: 1 })
+    await transport.call("list_folders", {}, { timeoutMs: 60_000 })
+    frame("__ready__")
+    await transport.call("list_folders")
+
+    expect(timeouts()).toEqual([8_000, undefined, 60_000, undefined])
+  })
+})

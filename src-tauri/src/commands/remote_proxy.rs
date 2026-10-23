@@ -137,12 +137,30 @@ const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// while the remote server streams a whole turn into the void — the
 /// "stale transcript after wake" bug. The heartbeat pings after
 /// `WS_HEARTBEAT_INTERVAL` of silence (any inbound frame is proof of life,
-/// so a busy stream never pays for it) and treats a pong overdue by
-/// `WS_PONG_TIMEOUT` as a dead socket: leave the read loop, emit
-/// `__disconnected__`, reconnect. The remote axum server answers
-/// protocol-level pings on its own.
+/// so a busy stream never pays for it) and gives the pong an adaptive
+/// deadline whose floor is `WS_PONG_TIMEOUT`; a pong past it costs the
+/// socket only once a health probe also fails (see `Heartbeat`): leave the
+/// read loop, emit `__disconnected__`, reconnect. The remote axum server
+/// answers protocol-level pings on its own.
 const WS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 const WS_PONG_TIMEOUT: Duration = Duration::from_secs(10);
+/// The same pair while a turn streams on screen in a subscribed window
+/// (`remote_ws_set_streaming`): silence mid-turn is suspicious sooner.
+const WS_STREAM_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+const WS_STREAM_PONG_TIMEOUT: Duration = Duration::from_secs(5);
+/// Upper bound of the adaptive pong deadline.
+const WS_PONG_CEILING: Duration = Duration::from_secs(30);
+/// Floors and ceiling of the health probe's adaptive timeout (idle, and
+/// while streaming), and the slack after which a probe that never settled
+/// is given up on regardless.
+const WS_HEALTH_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
+const WS_HEALTH_PROBE_STREAM_TIMEOUT: Duration = Duration::from_secs(5);
+const WS_HEALTH_PROBE_CEILING: Duration = Duration::from_secs(20);
+const WS_HEALTH_PROBE_SLACK: Duration = Duration::from_secs(1);
+/// Deadline extensions one ping may earn from successful health probes.
+const WS_MAX_DEADLINE_EXTENSIONS: u32 = 2;
+/// Round-trip samples the heartbeat keeps.
+const WS_RTT_SAMPLES: usize = 16;
 /// Pong deadline for a frontend-requested probe (`remote_ws_probe`, sent on
 /// tab-visible / lid-open). Tight on purpose: the user is looking at the
 /// screen, and a false positive only costs one reconnect + re-attach.
@@ -204,6 +222,45 @@ struct WsTaskEntry {
     /// of the backoff wait. A `Notify` so a request landing between two loop
     /// iterations is kept as a permit, not lost.
     probe: Notify,
+    /// Subscriptions whose window has a turn streaming on screen
+    /// (`remote_ws_set_streaming`). While any does, the heartbeat watches the
+    /// socket more closely; `streaming_changed` tells the read loop.
+    streaming: std::sync::Mutex<HashSet<String>>,
+    streaming_changed: Notify,
+}
+
+impl WsTaskEntry {
+    fn is_streaming(&self) -> bool {
+        self.streaming
+            .lock()
+            .map(|subs| !subs.is_empty())
+            .unwrap_or(false)
+    }
+
+    fn set_subscription_streaming(&self, subscription_id: &str, streaming: bool) {
+        let changed = match self.streaming.lock() {
+            Ok(mut subs) if streaming => subs.insert(subscription_id.to_string()),
+            Ok(mut subs) => subs.remove(subscription_id),
+            Err(_) => false,
+        };
+        if changed {
+            self.streaming_changed.notify_one();
+        }
+    }
+
+    /// Drop the streaming flags of subscriptions that are gone.
+    fn forget_streaming<'a>(&self, subscription_ids: impl IntoIterator<Item = &'a String>) {
+        let mut changed = false;
+        if let Ok(mut subs) = self.streaming.lock() {
+            // Every id is removed: no short-circuit.
+            for id in subscription_ids {
+                changed |= subs.remove(id);
+            }
+        }
+        if changed {
+            self.streaming_changed.notify_one();
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -371,6 +428,7 @@ impl RemoteProxyState {
             };
             let mut subs = entry.subscribers.lock().await;
             subs.remove(subscription_id);
+            entry.forget_streaming([&subscription_id.to_string()]);
             if subs.is_empty() {
                 tasks.remove(&connection_id);
                 Some(entry.shutdown_tx.clone())
@@ -406,9 +464,17 @@ impl RemoteProxyState {
                     None => continue,
                 };
                 let mut subs = entry.subscribers.lock().await;
-                subs.retain(|_, sub| {
-                    sub.label != label || sub.window_instance_id != window_instance_id
-                });
+                let gone: Vec<String> = subs
+                    .iter()
+                    .filter(|(_, sub)| {
+                        sub.label == label && sub.window_instance_id == window_instance_id
+                    })
+                    .map(|(id, _)| id.clone())
+                    .collect();
+                for id in &gone {
+                    subs.remove(id);
+                }
+                entry.forget_streaming(&gone);
                 let is_empty = subs.is_empty();
                 drop(subs);
                 if is_empty {
@@ -1751,6 +1817,8 @@ pub async fn remote_ws_subscribe(
         shutdown_tx,
         outbound_tx,
         probe: Notify::new(),
+        streaming: std::sync::Mutex::new(HashSet::new()),
+        streaming_changed: Notify::new(),
     });
 
     // Insert under the proxy lock. If a concurrent subscribe raced us, fold
@@ -1895,6 +1963,29 @@ pub async fn remote_ws_probe(
     Ok(())
 }
 
+/// Tell the WS task for `connection_id` whether a turn streams on screen in
+/// the window behind `subscription_id`. While any subscribed window has one,
+/// the heartbeat pings after `WS_STREAM_HEARTBEAT_INTERVAL` of silence with a
+/// `WS_STREAM_PONG_TIMEOUT` floor (see `Heartbeat`), so a link that died
+/// mid-turn is noticed in seconds — behind the same health-probe guard, so a
+/// slow server is not mistaken for a dead link. No entry: nothing to watch.
+#[tauri::command]
+pub async fn remote_ws_set_streaming(
+    proxy: State<'_, Arc<RemoteProxyState>>,
+    connection_id: i32,
+    subscription_id: String,
+    streaming: bool,
+) -> Result<(), AppCommandError> {
+    let entry = {
+        let tasks = proxy.tasks.lock().await;
+        tasks.get(&connection_id).cloned()
+    };
+    if let Some(entry) = entry {
+        entry.set_subscription_streaming(&subscription_id, streaming);
+    }
+    Ok(())
+}
+
 // ─── Heartbeat ────────────────────────────────────────────────────────
 
 /// What the heartbeat wants done when its deadline fires.
@@ -1902,74 +1993,315 @@ pub async fn remote_ws_probe(
 enum HeartbeatAction {
     /// Quiet for a full interval: send a ping.
     Ping,
-    /// The outstanding ping's pong is overdue: the socket is dead.
+    /// The outstanding ping's pong is overdue: ask the server over HTTP
+    /// whether it is there at all before giving up on the socket.
+    Probe,
+    /// The socket is dead.
     Dead,
     /// Deadline moved (a frame arrived meanwhile); keep waiting.
     Wait,
 }
 
-/// Pure liveness state machine for one socket (see `WS_HEARTBEAT_INTERVAL`).
+/// What a health probe (`probe_remote_health`) found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProbeOutcome {
+    /// Answered 2xx: the server is up.
+    Alive,
+    /// A network error or a non-2xx answer (a 401 included: the reconnect's
+    /// handshake is what classifies a rejected token).
+    Unreachable,
+    /// No answer within the probe's timeout.
+    TimedOut,
+}
+
+/// What the heartbeat makes of a probe's outcome.
+#[derive(Debug, PartialEq, Eq)]
+enum ProbeVerdict {
+    /// The server answered: keep the socket, ping it again (a write is what
+    /// makes a connection that died quietly fail fast) and wait out the
+    /// extended deadline.
+    Extend,
+    /// The link is down: drop the socket and reconnect.
+    Dead,
+    /// The ping was settled while the probe ran.
+    Ignored,
+}
+
+/// Rolling window of round-trip samples, newest last: pong delays and
+/// health-probe durations. Kept across reconnects, so a socket that replaces
+/// one lost to a slow server starts out patient with it.
+#[derive(Debug, Default)]
+struct RttWindow {
+    samples: std::collections::VecDeque<Duration>,
+}
+
+impl RttWindow {
+    fn add(&mut self, sample: Duration) {
+        self.samples.push_back(sample);
+        while self.samples.len() > WS_RTT_SAMPLES {
+            self.samples.pop_front();
+        }
+    }
+
+    /// 95th percentile by nearest rank, or `None` with no samples yet.
+    fn p95(&self) -> Option<Duration> {
+        if self.samples.is_empty() {
+            return None;
+        }
+        let mut sorted: Vec<Duration> = self.samples.iter().copied().collect();
+        sorted.sort();
+        let rank = (sorted.len() * 95).div_ceil(100).max(1) - 1;
+        Some(sorted[rank])
+    }
+}
+
+/// `clamp(3 × p95, floor, ceiling)`; the floor alone with no samples.
+fn adaptive_deadline(p95: Option<Duration>, floor: Duration, ceiling: Duration) -> Duration {
+    match p95 {
+        None => floor,
+        Some(p95) => p95.saturating_mul(3).clamp(floor, ceiling.max(floor)),
+    }
+}
+
+/// The ping waiting for its pong.
+#[derive(Debug)]
+struct PendingPing {
+    sent_at: Instant,
+    due: Instant,
+    /// When the health probe for this ping started, while it runs.
+    probe_started: Option<Instant>,
+    probe_timeout: Duration,
+    /// Deadline extensions granted by successful probes so far.
+    extensions: u32,
+}
+
+/// Pure liveness state machine for the proxied socket, with the same rules
+/// as the web client's `LivenessMonitor` (`src/lib/transport/liveness.ts`):
+///
+/// - ping after `WS_HEARTBEAT_INTERVAL` of silence (`WS_STREAM_HEARTBEAT_INTERVAL`
+///   while a turn streams on screen in a subscribed window); any inbound
+///   frame is proof of life, so a busy stream never pays for it;
+/// - the pong deadline adapts to the measured round trip:
+///   `clamp(3 × p95, floor, WS_PONG_CEILING)`, the floor being
+///   `WS_PONG_TIMEOUT` (idle), `WS_STREAM_PONG_TIMEOUT` (streaming) or
+///   `WS_PROBE_PONG_TIMEOUT` (a frontend wake probe);
+/// - a pong past its deadline triggers a health probe over plain HTTP: if
+///   the server answers, it is alive but slow, and the socket is kept with
+///   an extended deadline (at most `WS_MAX_DEADLINE_EXTENSIONS` times); if
+///   not, the socket is dead. A timed-out probe counts as a sample of its
+///   own length, so the next socket waits longer instead of looping through
+///   reconnects against a slow server.
+///
 /// Free of I/O so the timing rules are unit-testable; `run_ws_task` feeds it
 /// `Instant`s and acts on what it returns.
+#[derive(Debug)]
 struct Heartbeat {
     last_inbound: Instant,
-    /// Deadline of the outstanding ping, if one is out.
-    pong_due: Option<Instant>,
+    ping: Option<PendingPing>,
+    rtt: RttWindow,
+    streaming: bool,
 }
 
 impl Heartbeat {
     fn new(now: Instant) -> Self {
         Self {
             last_inbound: now,
-            pong_due: None,
+            ping: None,
+            rtt: RttWindow::default(),
+            streaming: false,
+        }
+    }
+
+    /// A fresh socket: restart the clock, keep the round-trip history.
+    fn reset(&mut self, now: Instant) {
+        self.last_inbound = now;
+        self.ping = None;
+    }
+
+    fn set_streaming(&mut self, streaming: bool) {
+        self.streaming = streaming;
+    }
+
+    fn quiet_interval(&self) -> Duration {
+        if self.streaming {
+            WS_STREAM_HEARTBEAT_INTERVAL
+        } else {
+            WS_HEARTBEAT_INTERVAL
+        }
+    }
+
+    fn deadline_floor(&self) -> Duration {
+        if self.streaming {
+            WS_STREAM_PONG_TIMEOUT
+        } else {
+            WS_PONG_TIMEOUT
+        }
+    }
+
+    fn pong_deadline(&self, floor: Duration) -> Duration {
+        adaptive_deadline(self.rtt.p95(), floor, WS_PONG_CEILING)
+    }
+
+    /// How long the next health probe may take.
+    fn probe_timeout(&self) -> Duration {
+        let floor = if self.streaming {
+            WS_HEALTH_PROBE_STREAM_TIMEOUT
+        } else {
+            WS_HEALTH_PROBE_TIMEOUT
+        };
+        adaptive_deadline(self.rtt.p95(), floor, WS_HEALTH_PROBE_CEILING)
+    }
+
+    fn new_ping(&self, now: Instant, floor: Duration) -> PendingPing {
+        PendingPing {
+            sent_at: now,
+            due: now + self.pong_deadline(floor),
+            probe_started: None,
+            probe_timeout: Duration::ZERO,
+            extensions: 0,
         }
     }
 
     /// Any inbound frame — text, pong, even a ping from the server — proves
-    /// the link is alive and settles an outstanding ping.
-    fn on_inbound(&mut self, now: Instant) {
+    /// the link is alive and settles an outstanding ping. A pong is also a
+    /// round-trip sample.
+    fn on_inbound(&mut self, now: Instant, is_pong: bool) {
+        if is_pong {
+            if let Some(ping) = &self.ping {
+                self.rtt.add(now.saturating_duration_since(ping.sent_at));
+            }
+        }
         self.last_inbound = now;
-        self.pong_due = None;
+        self.ping = None;
     }
 
     /// The next moment `on_deadline` should be consulted.
     fn next_deadline(&self) -> Instant {
-        self.pong_due
-            .unwrap_or(self.last_inbound + WS_HEARTBEAT_INTERVAL)
+        match &self.ping {
+            None => self.last_inbound + self.quiet_interval(),
+            Some(ping) => match ping.probe_started {
+                Some(started) => started + ping.probe_timeout + WS_HEALTH_PROBE_SLACK,
+                None => ping.due,
+            },
+        }
     }
 
     fn on_deadline(&mut self, now: Instant) -> HeartbeatAction {
-        if let Some(due) = self.pong_due {
-            return if now >= due {
-                HeartbeatAction::Dead
-            } else {
-                HeartbeatAction::Wait
-            };
+        let probe_timeout = self.probe_timeout();
+        if let Some(ping) = &mut self.ping {
+            if let Some(started) = ping.probe_started {
+                // The probe has its own timeout; this only catches one that
+                // never settled at all.
+                return if now >= started + ping.probe_timeout + WS_HEALTH_PROBE_SLACK {
+                    HeartbeatAction::Dead
+                } else {
+                    HeartbeatAction::Wait
+                };
+            }
+            if now < ping.due {
+                return HeartbeatAction::Wait;
+            }
+            if ping.extensions >= WS_MAX_DEADLINE_EXTENSIONS {
+                return HeartbeatAction::Dead;
+            }
+            ping.probe_started = Some(now);
+            ping.probe_timeout = probe_timeout;
+            return HeartbeatAction::Probe;
         }
-        if now >= self.last_inbound + WS_HEARTBEAT_INTERVAL {
-            self.pong_due = Some(now + WS_PONG_TIMEOUT);
+        if now >= self.last_inbound + self.quiet_interval() {
+            self.ping = Some(self.new_ping(now, self.deadline_floor()));
             HeartbeatAction::Ping
         } else {
             HeartbeatAction::Wait
         }
     }
 
-    /// Frontend-requested probe: answer within `WS_PROBE_PONG_TIMEOUT` or be
-    /// presumed dead. Returns whether a ping must go out — an outstanding
-    /// ping is not resent, its deadline is just pulled in to the probe's
-    /// (never pushed out) so the answer comes as fast as the probe promised.
-    fn on_probe(&mut self, now: Instant) -> bool {
-        let probe_due = now + WS_PROBE_PONG_TIMEOUT;
-        match self.pong_due {
-            Some(due) => {
-                self.pong_due = Some(due.min(probe_due));
-                false
+    /// The health probe for the outstanding ping settled after `elapsed`.
+    fn on_probe_result(
+        &mut self,
+        now: Instant,
+        outcome: ProbeOutcome,
+        elapsed: Duration,
+    ) -> ProbeVerdict {
+        match self.ping.as_mut() {
+            Some(ping) if ping.probe_started.is_some() => ping.probe_started = None,
+            _ => return ProbeVerdict::Ignored,
+        }
+        match outcome {
+            ProbeOutcome::Alive => {
+                self.rtt.add(elapsed);
+                let deadline = self.pong_deadline(self.deadline_floor());
+                if let Some(ping) = self.ping.as_mut() {
+                    ping.extensions += 1;
+                    ping.due = now + deadline;
+                }
+                ProbeVerdict::Extend
             }
-            None => {
-                self.pong_due = Some(probe_due);
-                true
+            ProbeOutcome::TimedOut => {
+                self.rtt.add(elapsed);
+                ProbeVerdict::Dead
+            }
+            ProbeOutcome::Unreachable => ProbeVerdict::Dead,
+        }
+    }
+
+    /// Frontend-requested probe (tab visible, lid open, network back): answer
+    /// within the wake deadline (`WS_PROBE_PONG_TIMEOUT` floor) or go through
+    /// the health check. Returns whether a ping must go out. A recent
+    /// outstanding ping is not resent, its deadline is just pulled in (never
+    /// pushed out); one older than the wake deadline — sent before a sleep —
+    /// is replaced, since a write is what makes a dead connection fail fast.
+    /// A probe already in flight is left to decide.
+    fn on_probe(&mut self, now: Instant) -> bool {
+        let deadline = self.pong_deadline(WS_PROBE_PONG_TIMEOUT);
+        if let Some(ping) = &mut self.ping {
+            if ping.probe_started.is_some() {
+                return false;
+            }
+            if now.saturating_duration_since(ping.sent_at) < deadline {
+                ping.due = ping.due.min(now + deadline);
+                return false;
             }
         }
+        self.ping = Some(self.new_ping(now, WS_PROBE_PONG_TIMEOUT));
+        true
+    }
+}
+
+/// A health probe in flight: its outcome and how long it took.
+type HealthProbe =
+    std::pin::Pin<Box<dyn std::future::Future<Output = (ProbeOutcome, Duration)> + Send>>;
+
+/// Ask the remote over plain HTTP whether it is up: `POST /api/health`,
+/// authenticated like every proxied call, bounded by `timeout`.
+async fn probe_remote_health(
+    client: reqwest::Client,
+    base_url: String,
+    token: String,
+    headers: HeaderMap,
+    timeout: Duration,
+) -> ProbeOutcome {
+    let url = format!("{}/api/health", base_url.trim_end_matches('/'));
+    let request = client
+        .post(&url)
+        .bearer_auth(token.trim())
+        .headers(headers)
+        .json(&serde_json::json!({}))
+        .timeout(timeout);
+    match request.send().await {
+        Ok(response) if response.status().is_success() => ProbeOutcome::Alive,
+        Ok(_) => ProbeOutcome::Unreachable,
+        Err(err) if err.is_timeout() => ProbeOutcome::TimedOut,
+        Err(_) => ProbeOutcome::Unreachable,
+    }
+}
+
+/// Resolves with the probe's outcome; never, while there is none, so it can
+/// sit in a `select!` unconditionally.
+async fn await_health_probe(probe: &mut Option<HealthProbe>) -> (ProbeOutcome, Duration) {
+    match probe {
+        Some(fut) => fut.await,
+        None => std::future::pending().await,
     }
 }
 
@@ -2036,6 +2368,11 @@ async fn run_ws_task(
     let mut backoff_step: u32 = 0;
     // Consecutive terminal handshake failures (see WS_RECONNECT_FAIL_THRESHOLD).
     let mut terminal_failures: u32 = 0;
+    // One heartbeat for the task's life: its round-trip history outlives a
+    // socket, so the one that replaces a socket lost to a slow server starts
+    // out patient with it.
+    let mut heartbeat = Heartbeat::new(Instant::now());
+    let probe_client = proxy.http.clone();
 
     'reconnect: loop {
         if *shutdown_rx.borrow() {
@@ -2087,7 +2424,10 @@ async fn run_ws_task(
         // readiness contract the frontend relies on.
         backoff_step = 0;
         terminal_failures = 0;
-        let mut heartbeat = Heartbeat::new(Instant::now());
+        heartbeat.reset(Instant::now());
+        heartbeat.set_streaming(entry.is_streaming());
+        // The health probe in flight for an overdue pong, if any.
+        let mut health_probe: Option<HealthProbe> = None;
 
         // Read loop. Exits on shutdown, error, remote close, or a socket the
         // heartbeat presumes dead.
@@ -2120,8 +2460,10 @@ async fn run_ws_task(
                 // already arrived must count as proof of life before an
                 // overdue deadline is judged.
                 msg = socket.next() => {
-                    if let Some(Ok(_)) = &msg {
-                        heartbeat.on_inbound(Instant::now());
+                    if let Some(Ok(frame)) = &msg {
+                        heartbeat.on_inbound(Instant::now(), matches!(frame, Message::Pong(_)));
+                        // Whatever a probe in flight would say is moot now.
+                        health_probe = None;
                     }
                     match msg {
                         Some(Ok(Message::Text(text))) => {
@@ -2162,6 +2504,38 @@ async fn run_ws_task(
                         }
                     }
                 }
+                _ = entry.streaming_changed.notified() => {
+                    heartbeat.set_streaming(entry.is_streaming());
+                }
+                // The pong is overdue and the health probe answered.
+                outcome = await_health_probe(&mut health_probe) => {
+                    health_probe = None;
+                    match heartbeat.on_probe_result(Instant::now(), outcome.0, outcome.1) {
+                        ProbeVerdict::Extend => {
+                            tracing::info!(
+                                "[RemoteProxy] connection {connection_id}: pong overdue, but the \
+                                 server answered its health check in {}ms; keeping the socket",
+                                outcome.1.as_millis()
+                            );
+                            if let Err(err) = send_heartbeat_ping(&mut socket).await {
+                                tracing::warn!(
+                                    "[RemoteProxy] heartbeat ping failed on connection {connection_id}: {err}"
+                                );
+                                break;
+                            }
+                        }
+                        ProbeVerdict::Dead => {
+                            tracing::warn!(
+                                "[RemoteProxy] WS on connection {connection_id} stopped answering \
+                                 pings and its health check found {:?} after {}ms; reconnecting",
+                                outcome.0,
+                                outcome.1.as_millis()
+                            );
+                            break;
+                        }
+                        ProbeVerdict::Ignored => {}
+                    }
+                }
                 _ = tokio::time::sleep_until(heartbeat.next_deadline()) => {
                     match heartbeat.on_deadline(Instant::now()) {
                         HeartbeatAction::Ping => {
@@ -2171,6 +2545,21 @@ async fn run_ws_task(
                                 );
                                 break;
                             }
+                        }
+                        HeartbeatAction::Probe => {
+                            let timeout = heartbeat.probe_timeout();
+                            let probe = probe_remote_health(
+                                probe_client.clone(),
+                                base_url.clone(),
+                                token.clone(),
+                                custom_headers.clone(),
+                                timeout,
+                            );
+                            health_probe = Some(Box::pin(async move {
+                                let started = Instant::now();
+                                let outcome = probe.await;
+                                (outcome, started.elapsed())
+                            }));
                         }
                         HeartbeatAction::Dead => {
                             tracing::warn!(
@@ -2470,32 +2859,129 @@ mod tests {
             shutdown_tx,
             outbound_tx,
             probe: Notify::new(),
+            streaming: std::sync::Mutex::new(HashSet::new()),
+            streaming_changed: Notify::new(),
         })
     }
 
     // ─── Heartbeat (dead-socket detection) ──────────────────────────────
 
+    fn secs(n: u64) -> Duration {
+        Duration::from_secs(n)
+    }
+
+    /// Drive a fresh heartbeat to its first ping; returns when it went out.
+    fn pinged(hb: &mut Heartbeat, t0: Instant) -> Instant {
+        let sent = t0 + hb.quiet_interval();
+        assert_eq!(hb.on_deadline(sent), HeartbeatAction::Ping);
+        sent
+    }
+
     #[test]
-    fn heartbeat_pings_after_a_quiet_interval_then_dies_when_the_pong_is_overdue() {
+    fn heartbeat_pings_after_a_quiet_interval_then_probes_when_the_pong_is_overdue() {
         let t0 = Instant::now();
         let mut hb = Heartbeat::new(t0);
         assert_eq!(hb.next_deadline(), t0 + WS_HEARTBEAT_INTERVAL);
         // Consulted early (spurious wake): nothing to do yet.
-        assert_eq!(
-            hb.on_deadline(t0 + Duration::from_secs(1)),
-            HeartbeatAction::Wait
-        );
-        let sent = t0 + WS_HEARTBEAT_INTERVAL;
-        assert_eq!(hb.on_deadline(sent), HeartbeatAction::Ping);
+        assert_eq!(hb.on_deadline(t0 + secs(1)), HeartbeatAction::Wait);
+        let sent = pinged(&mut hb, t0);
         assert_eq!(hb.next_deadline(), sent + WS_PONG_TIMEOUT);
-        assert_eq!(
-            hb.on_deadline(sent + Duration::from_secs(1)),
-            HeartbeatAction::Wait
-        );
+        assert_eq!(hb.on_deadline(sent + secs(1)), HeartbeatAction::Wait);
+        // Overdue: ask the server before giving up on the socket.
         assert_eq!(
             hb.on_deadline(sent + WS_PONG_TIMEOUT),
-            HeartbeatAction::Dead
+            HeartbeatAction::Probe
         );
+        let probe_at = sent + WS_PONG_TIMEOUT;
+        assert_eq!(
+            hb.next_deadline(),
+            probe_at + WS_HEALTH_PROBE_TIMEOUT + WS_HEALTH_PROBE_SLACK
+        );
+        // Unreachable: the link is down.
+        assert_eq!(
+            hb.on_probe_result(probe_at + secs(1), ProbeOutcome::Unreachable, secs(1)),
+            ProbeVerdict::Dead
+        );
+    }
+
+    #[test]
+    fn heartbeat_keeps_a_socket_whose_server_answers_and_extends_its_deadline() {
+        let t0 = Instant::now();
+        let mut hb = Heartbeat::new(t0);
+        let sent = pinged(&mut hb, t0);
+        let probe_at = sent + WS_PONG_TIMEOUT;
+        assert_eq!(hb.on_deadline(probe_at), HeartbeatAction::Probe);
+        let answered = probe_at + Duration::from_millis(40);
+        assert_eq!(
+            hb.on_probe_result(answered, ProbeOutcome::Alive, Duration::from_millis(40)),
+            ProbeVerdict::Extend
+        );
+        assert_eq!(hb.next_deadline(), answered + WS_PONG_TIMEOUT);
+        // The pong finally lands: settled, and its delay is remembered.
+        let pong = sent + secs(14);
+        hb.on_inbound(pong, true);
+        assert_eq!(hb.next_deadline(), pong + WS_HEARTBEAT_INTERVAL);
+        // The next ping gets 3 × 14 s, capped at the ceiling.
+        let sent2 = pong + WS_HEARTBEAT_INTERVAL;
+        assert_eq!(hb.on_deadline(sent2), HeartbeatAction::Ping);
+        assert_eq!(hb.next_deadline(), sent2 + WS_PONG_CEILING);
+    }
+
+    #[test]
+    fn heartbeat_gives_up_after_the_last_extension() {
+        let t0 = Instant::now();
+        let mut hb = Heartbeat::new(t0);
+        pinged(&mut hb, t0);
+        for _ in 0..WS_MAX_DEADLINE_EXTENSIONS {
+            let now = hb.next_deadline();
+            assert_eq!(hb.on_deadline(now), HeartbeatAction::Probe);
+            assert_eq!(
+                hb.on_probe_result(now, ProbeOutcome::Alive, Duration::ZERO),
+                ProbeVerdict::Extend
+            );
+        }
+        let now = hb.next_deadline();
+        assert_eq!(hb.on_deadline(now), HeartbeatAction::Dead);
+    }
+
+    #[test]
+    fn heartbeat_counts_a_timed_out_probe_so_the_next_socket_is_more_patient() {
+        let t0 = Instant::now();
+        let mut hb = Heartbeat::new(t0);
+        let sent = pinged(&mut hb, t0);
+        let probe_at = sent + WS_PONG_TIMEOUT;
+        assert_eq!(hb.on_deadline(probe_at), HeartbeatAction::Probe);
+        assert_eq!(
+            hb.on_probe_result(
+                probe_at + WS_HEALTH_PROBE_TIMEOUT,
+                ProbeOutcome::TimedOut,
+                WS_HEALTH_PROBE_TIMEOUT
+            ),
+            ProbeVerdict::Dead
+        );
+        // Reconnected: 3 × 8 s now, for the pong and for the next probe.
+        let t1 = probe_at + secs(20);
+        hb.reset(t1);
+        let sent = pinged(&mut hb, t1);
+        assert_eq!(hb.next_deadline(), sent + secs(24));
+        assert_eq!(hb.probe_timeout(), WS_HEALTH_PROBE_CEILING);
+    }
+
+    #[test]
+    fn heartbeat_ignores_a_probe_result_once_a_frame_settled_the_ping() {
+        let t0 = Instant::now();
+        let mut hb = Heartbeat::new(t0);
+        let sent = pinged(&mut hb, t0);
+        assert_eq!(
+            hb.on_deadline(sent + WS_PONG_TIMEOUT),
+            HeartbeatAction::Probe
+        );
+        hb.on_inbound(sent + secs(11), false);
+        assert_eq!(
+            hb.on_probe_result(sent + secs(12), ProbeOutcome::Unreachable, secs(2)),
+            ProbeVerdict::Ignored
+        );
+        assert_eq!(hb.next_deadline(), sent + secs(11) + WS_HEARTBEAT_INTERVAL);
     }
 
     #[test]
@@ -2504,18 +2990,17 @@ mod tests {
         let mut hb = Heartbeat::new(t0);
         // A busy stream is never pinged: each frame restarts the quiet interval.
         for i in 1..=5 {
-            let now = t0 + Duration::from_secs(10 * i);
-            hb.on_inbound(now);
+            let now = t0 + secs(10 * i);
+            hb.on_inbound(now, false);
             assert_eq!(hb.next_deadline(), now + WS_HEARTBEAT_INTERVAL);
-            assert_eq!(
-                hb.on_deadline(now + Duration::from_secs(5)),
-                HeartbeatAction::Wait
-            );
+            assert_eq!(hb.on_deadline(now + secs(5)), HeartbeatAction::Wait);
         }
-        // An outstanding ping is settled by whatever arrives — no pong needed.
-        let quiet = t0 + Duration::from_secs(50) + WS_HEARTBEAT_INTERVAL;
+        // An outstanding ping is settled by whatever arrives — no pong needed,
+        // but only a pong is a round-trip sample.
+        let quiet = t0 + secs(50) + WS_HEARTBEAT_INTERVAL;
         assert_eq!(hb.on_deadline(quiet), HeartbeatAction::Ping);
-        hb.on_inbound(quiet + Duration::from_secs(1));
+        hb.on_inbound(quiet + secs(9), false);
+        assert_eq!(hb.rtt.p95(), None);
         assert_eq!(
             hb.on_deadline(quiet + WS_PONG_TIMEOUT),
             HeartbeatAction::Wait
@@ -2523,10 +3008,27 @@ mod tests {
     }
 
     #[test]
+    fn heartbeat_watches_closer_while_a_turn_streams_on_screen() {
+        let t0 = Instant::now();
+        let mut hb = Heartbeat::new(t0);
+        hb.set_streaming(true);
+        assert_eq!(hb.next_deadline(), t0 + WS_STREAM_HEARTBEAT_INTERVAL);
+        let sent = pinged(&mut hb, t0);
+        assert_eq!(sent, t0 + WS_STREAM_HEARTBEAT_INTERVAL);
+        assert_eq!(hb.next_deadline(), sent + WS_STREAM_PONG_TIMEOUT);
+        let probe_at = sent + WS_STREAM_PONG_TIMEOUT;
+        assert_eq!(hb.on_deadline(probe_at), HeartbeatAction::Probe);
+        assert_eq!(
+            hb.next_deadline(),
+            probe_at + WS_HEALTH_PROBE_STREAM_TIMEOUT + WS_HEALTH_PROBE_SLACK
+        );
+    }
+
+    #[test]
     fn heartbeat_probe_pings_at_once_under_the_short_deadline() {
         let t0 = Instant::now();
         let mut hb = Heartbeat::new(t0);
-        let now = t0 + Duration::from_secs(3);
+        let now = t0 + secs(3);
         assert!(
             hb.on_probe(now),
             "no ping outstanding: the probe must send one"
@@ -2534,26 +3036,119 @@ mod tests {
         assert_eq!(hb.next_deadline(), now + WS_PROBE_PONG_TIMEOUT);
         assert_eq!(
             hb.on_deadline(now + WS_PROBE_PONG_TIMEOUT),
-            HeartbeatAction::Dead
+            HeartbeatAction::Probe
         );
     }
 
     #[test]
-    fn heartbeat_probe_pulls_in_an_outstanding_deadline_instead_of_resending() {
+    fn heartbeat_probe_pulls_in_a_recent_ping_and_replaces_a_stale_one() {
         let t0 = Instant::now();
-        let sent = t0 + WS_HEARTBEAT_INTERVAL;
-        // Probe 1s after a ping: 1s + 4s beats the ping's own 10s; no resend.
+        // Probe 1 s after a ping: 1 s + 4 s beats the ping's own 10 s; no resend.
         let mut hb = Heartbeat::new(t0);
-        assert_eq!(hb.on_deadline(sent), HeartbeatAction::Ping);
-        let probe_at = sent + Duration::from_secs(1);
+        let sent = pinged(&mut hb, t0);
+        let probe_at = sent + secs(1);
         assert!(!hb.on_probe(probe_at));
         assert_eq!(hb.next_deadline(), probe_at + WS_PROBE_PONG_TIMEOUT);
-        // Probe when the ping's own deadline is already closer: it stays.
+        // A ping older than the wake deadline (sent before a sleep): a fresh
+        // one goes out, since a write is what makes a dead socket fail fast.
         let mut hb = Heartbeat::new(t0);
-        assert_eq!(hb.on_deadline(sent), HeartbeatAction::Ping);
-        let late_probe = sent + WS_PONG_TIMEOUT - Duration::from_secs(1);
-        assert!(!hb.on_probe(late_probe));
-        assert_eq!(hb.next_deadline(), sent + WS_PONG_TIMEOUT);
+        let sent = pinged(&mut hb, t0);
+        let late_probe = sent + secs(9);
+        assert!(hb.on_probe(late_probe));
+        assert_eq!(hb.next_deadline(), late_probe + WS_PROBE_PONG_TIMEOUT);
+        // A probe in flight is left to decide.
+        assert_eq!(
+            hb.on_deadline(late_probe + WS_PROBE_PONG_TIMEOUT),
+            HeartbeatAction::Probe
+        );
+        assert!(!hb.on_probe(late_probe + secs(5)));
+    }
+
+    #[test]
+    fn rtt_window_reports_the_nearest_rank_95th_percentile() {
+        let mut window = RttWindow::default();
+        assert_eq!(window.p95(), None);
+        for ms in 1..=20u64 {
+            window.add(Duration::from_millis(ms * 10));
+        }
+        // 16 kept (50..=200 ms); rank ceil(0.95 × 16) = 16 → the largest.
+        assert_eq!(window.p95(), Some(Duration::from_millis(200)));
+        assert_eq!(adaptive_deadline(None, secs(10), secs(30)), secs(10));
+        assert_eq!(
+            adaptive_deadline(Some(Duration::from_millis(200)), secs(10), secs(30)),
+            secs(10)
+        );
+        assert_eq!(adaptive_deadline(Some(secs(5)), secs(10), secs(30)), secs(15));
+        assert_eq!(adaptive_deadline(Some(secs(20)), secs(10), secs(30)), secs(30));
+    }
+
+    /// Accept connections and answer each health probe with `response`, or
+    /// never answer when `None` (a server too busy to respond).
+    async fn serve_health(listener: tokio::net::TcpListener, response: Option<&'static str>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        loop {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 4096];
+                let _ = stream.read(&mut buf).await;
+                match response {
+                    Some(text) => {
+                        let _ = stream.write_all(text.as_bytes()).await;
+                        let _ = stream.flush().await;
+                    }
+                    None => std::future::pending::<()>().await,
+                }
+            });
+        }
+    }
+
+    async fn probe_against(response: Option<&'static str>, timeout: Duration) -> ProbeOutcome {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(serve_health(listener, response));
+        let outcome = probe_remote_health(
+            proxy_http_client_builder().build().unwrap(),
+            format!("http://{addr}/"),
+            "token".into(),
+            HeaderMap::new(),
+            timeout,
+        )
+        .await;
+        server.abort();
+        outcome
+    }
+
+    #[tokio::test]
+    async fn health_probe_tells_a_live_server_from_a_failing_or_silent_one() {
+        let ok = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+        let down = "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        let expired = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        assert_eq!(probe_against(Some(ok), secs(5)).await, ProbeOutcome::Alive);
+        assert_eq!(
+            probe_against(Some(down), secs(5)).await,
+            ProbeOutcome::Unreachable
+        );
+        assert_eq!(
+            probe_against(Some(expired), secs(5)).await,
+            ProbeOutcome::Unreachable
+        );
+        assert_eq!(
+            probe_against(None, Duration::from_millis(300)).await,
+            ProbeOutcome::TimedOut
+        );
+        // Nothing listening at all.
+        let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = closed.local_addr().unwrap();
+        drop(closed);
+        let outcome = probe_remote_health(
+            proxy_http_client_builder().build().unwrap(),
+            format!("http://{addr}"),
+            "token".into(),
+            HeaderMap::new(),
+            secs(5),
+        )
+        .await;
+        assert_eq!(outcome, ProbeOutcome::Unreachable);
     }
 
     // ─── Handshake failure classification ───────────────────────────────
@@ -2985,6 +3580,8 @@ mod tests {
             shutdown_tx,
             outbound_tx,
             probe: Notify::new(),
+            streaming: std::sync::Mutex::new(HashSet::new()),
+            streaming_changed: Notify::new(),
         });
         proxy.tasks.lock().await.insert(1, entry);
 
@@ -3020,6 +3617,8 @@ mod tests {
             shutdown_tx,
             outbound_tx,
             probe: Notify::new(),
+            streaming: std::sync::Mutex::new(HashSet::new()),
+            streaming_changed: Notify::new(),
         });
         (entry, outbound_rx)
     }

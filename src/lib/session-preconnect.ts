@@ -13,6 +13,8 @@
  */
 
 import { acpPreconnect } from "@/lib/api"
+import { isResyncing } from "@/lib/resync-coordinator"
+import { isWebLinkDown } from "@/lib/transport/web-connection-store"
 import type { AgentType } from "@/lib/types"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 
@@ -164,6 +166,9 @@ function sharedScheduler(): PreconnectScheduler {
  * again on the backend.
  */
 export function requestSessionPreconnect(target: PreconnectTarget): void {
+  // Speculative work waits while the link is down or a reconnect's refetches
+  // are still running: it would only queue behind them, or fail.
+  if (isWebLinkDown() || isResyncing()) return
   sharedScheduler().intend(target)
 }
 

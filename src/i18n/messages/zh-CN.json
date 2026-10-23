@@ -2387,7 +2387,9 @@
       "roleAssistant": "助手",
       "roleSystem": "系统",
       "recentHeading": "最近",
-      "archivedBadge": "已归档"
+      "archivedBadge": "已归档",
+      "offline": "离线 — 搜索需要连接服务器",
+      "failed": "搜索失败，请重试。"
     },
     "folderTitleBar": {
       "showSidebar": "显示侧边栏",
@@ -5426,14 +5428,17 @@
     }
   },
   "WebConnection": {
-    "disconnectedTitle": "连接已断开",
-    "reconnectingDescription": "正在尝试重新连接服务器，通常会在几秒内自动恢复。",
-    "reconnectNow": "立即重连",
-    "connectingTitle": "正在连接服务器",
-    "connectingDescription": "服务器尚未响应。一旦响应，此窗口会自动连接。",
     "sessionExpiredTitle": "会话已过期",
     "sessionExpiredDescription": "登录状态已失效，请重新登录以继续。",
-    "goToLogin": "前往登录"
+    "goToLogin": "前往登录",
+    "connectingPill": "正在连接…",
+    "reconnectingPill": "正在重新连接…",
+    "updatingPill": "正在更新…",
+    "backOnlinePill": "已恢复连接",
+    "offlineTitle": "离线",
+    "offlineDescription": "显示的是已加载的内容 · 更新于{age}",
+    "offlineWaiting": "正在等待服务器响应",
+    "retry": "重试"
   },
   "LiveFeedback": {
     "placeholder": "在 {agent} 工作时给它留言…",

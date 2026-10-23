@@ -94,6 +94,15 @@ export function getTransport(): Transport {
   return _remoteTransport ?? getShellTransport()
 }
 
+/**
+ * The active transport if one exists yet, without creating one — for checks
+ * that must not have side effects (a window with no transport yet has no
+ * link to report on).
+ */
+export function peekTransport(): Transport | null {
+  return _remoteTransport ?? _shellTransport
+}
+
 export function isDesktop(): boolean {
   return detectEnvironment() === "tauri"
 }

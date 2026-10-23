@@ -2,6 +2,9 @@
 
 import { useEffect, useRef } from "react"
 import { onTransportReconnect } from "@/lib/platform"
+import { perfMark } from "@/lib/perf-marks"
+import { getResyncGeneration } from "@/lib/resync-coordinator"
+import { isWebLinkDown } from "@/lib/transport/web-connection-store"
 
 /**
  * One resync per window. A wake shows the page again and, once the dead
@@ -52,11 +55,17 @@ const RESYNC_AFTER_SETTLE_MS = 10_000
  * conversation is reopened. This hook runs the canonical `refetchDetail` path
  * on:
  *
- * - transport reconnect (the socket was replaced after a drop);
+ * - transport reconnect (the socket was replaced after a drop), as the first
+ *   task of the reconnect's refetch pass (see `resync-coordinator`);
  * - the page becoming visible after RESYNC_MIN_HIDDEN_MS or more hidden, i.e.
  *   a wake. This also covers a socket that survived the sleep but fell
  *   behind: its lagged re-attach settles a turn exactly like a reconnect's,
- *   with no reconnect to announce it.
+ *   with no reconnect to announce it. A wake on a link already known to be
+ *   down is left to the reconnect that follows;
+ * - the panel becoming active after a reconnect it missed in the background.
+ *
+ * The caller's `refetch` is expected to be quiet (the content stays on screen
+ * while it runs, and a failure keeps it).
  *
  * Guards:
  * - inert on transports with no reconnect lifecycle (the local desktop app):
@@ -128,6 +137,9 @@ export function useWakeResync(options: {
   // When the stream last went from streaming to settled.
   const settledAt = useRef(0)
   const wasStreaming = useRef(isStreaming)
+  // The reconnect pass this panel last caught up with (see the coordinator):
+  // a panel shown again after a reconnect it missed resyncs on activation.
+  const seenGeneration = useRef(getResyncGeneration())
 
   // A held trigger belongs to the conversation it fired for. Declared before
   // the main effect so a conversation switch clears it in the same commit,
@@ -146,9 +158,11 @@ export function useWakeResync(options: {
   useEffect(() => {
     if (!enabled || conversationId == null) return
 
-    const runResync = () => {
+    const runResync = (): Promise<void> | undefined => {
       if (Date.now() - landedAt.current < RESYNC_DEBOUNCE_MS) return
-      void refetch(conversationId).then((landed) => {
+      perfMark("resync:detail:start", { conversationId })
+      return refetch(conversationId).then((landed) => {
+        perfMark("resync:detail:end", { conversationId, landed })
         if (landed) landedAt.current = Date.now()
       })
     }
@@ -162,21 +176,30 @@ export function useWakeResync(options: {
     if (!isStreaming && heldSince.current !== null) {
       const settledPromptly = Date.now() - heldSince.current <= RESYNC_HOLD_MS
       heldSince.current = null
-      if (settledPromptly && !turnReachedView()) runResync()
+      if (settledPromptly && !turnReachedView()) void runResync()
     }
 
-    const resync = () => {
+    const resync = (): Promise<void> | undefined => {
+      seenGeneration.current = getResyncGeneration()
       if (isStreaming) {
         heldSince.current = Date.now()
         return
       }
       if (Date.now() - settledAt.current < RESYNC_AFTER_SETTLE_MS) return
-      runResync()
+      return runResync()
     }
 
     // Null on a transport with no reconnect lifecycle: nothing to recover.
-    const offReconnect = onTransportReconnect(resync)
+    // The open transcript goes first in the reconnect's refetch pass.
+    const offReconnect = onTransportReconnect(resync, {
+      priority: "visible",
+      key: "detail:" + conversationId,
+    })
     if (!offReconnect) return
+
+    // A reconnect while this panel was in the background (kept alive, its
+    // listener unbound) was not this panel's to answer then; it is now.
+    if (getResyncGeneration() !== seenGeneration.current) void resync()
 
     const onVisibility = () => {
       if (document.visibilityState !== "visible") {
@@ -185,8 +208,11 @@ export function useWakeResync(options: {
       }
       const since = hiddenAt.current
       hiddenAt.current = null
+      // A link already known down will reconnect, and the reconnect resyncs:
+      // a refetch now would only queue behind the outage, then repeat.
+      if (isWebLinkDown()) return
       if (since !== null && Date.now() - since >= RESYNC_MIN_HIDDEN_MS) {
-        resync()
+        void resync()
       }
     }
 

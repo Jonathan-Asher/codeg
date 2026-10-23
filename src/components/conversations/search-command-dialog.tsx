@@ -43,6 +43,29 @@ import {
 } from "@/components/ui/command"
 import { cn } from "@/lib/utils"
 import { formatConversationTitle } from "@/lib/conversation-title"
+import { isWebLinkDown } from "@/lib/transport/web-connection-store"
+
+/** Why a search came back with nothing to show, when it is not "no match". */
+type SearchFailure = "offline" | "failed"
+
+/**
+ * A failed search must not read as "no results". Offline when the link is
+ * known down or the request never got an answer; otherwise the server
+ * answered with an error.
+ */
+function searchFailure(err: unknown): SearchFailure {
+  if (isWebLinkDown()) return "offline"
+  if (err instanceof TypeError) return "offline"
+  const message =
+    err instanceof Error
+      ? err.message
+      : err && typeof err === "object" && "message" in err
+        ? String((err as { message: unknown }).message)
+        : ""
+  return /timed out|Remote HTTP request failed/.test(message)
+    ? "offline"
+    : "failed"
+}
 
 type SearchTab = "conversations" | "messages" | "files"
 
@@ -185,9 +208,12 @@ export function SearchCommandDialog({
   const [agentFilter, setAgentFilter] = useState<AgentType | null>(null)
   const [results, setResults] = useState<DbConversationSummary[]>([])
   const [searching, setSearching] = useState(false)
+  const [searchFailed, setSearchFailed] = useState<SearchFailure | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [messageHits, setMessageHits] = useState<MessageSearchHit[]>([])
   const [messageSearching, setMessageSearching] = useState(false)
+  const [messageSearchFailed, setMessageSearchFailed] =
+    useState<SearchFailure | null>(null)
 
   const folderPath = folder?.path ?? ""
 
@@ -292,6 +318,7 @@ export function SearchCommandDialog({
       // stands in for results — unless it is turned off.
       if (!q.trim() && (!agent || showRecent)) {
         setResults([])
+        setSearchFailed(null)
         setSearching(false)
         return
       }
@@ -303,8 +330,10 @@ export function SearchCommandDialog({
           agent_type: agent,
         })
         setResults(data)
-      } catch {
+        setSearchFailed(null)
+      } catch (err) {
         setResults([])
+        setSearchFailed(searchFailure(err))
       } finally {
         setSearching(false)
       }
@@ -334,16 +363,21 @@ export function SearchCommandDialog({
     const timer = setTimeout(() => {
       if (!q) {
         setMessageHits([])
+        setMessageSearchFailed(null)
         setMessageSearching(false)
         return
       }
       setMessageSearching(true)
       searchMessages(q, MESSAGE_SEARCH_LIMIT)
         .then((hits) => {
-          if (!stale) setMessageHits(hits)
+          if (stale) return
+          setMessageHits(hits)
+          setMessageSearchFailed(null)
         })
-        .catch(() => {
-          if (!stale) setMessageHits([])
+        .catch((err: unknown) => {
+          if (stale) return
+          setMessageHits([])
+          setMessageSearchFailed(searchFailure(err))
         })
         .finally(() => {
           if (!stale) setMessageSearching(false)
@@ -365,6 +399,8 @@ export function SearchCommandDialog({
       setThisFolderOnly(false)
       setResults([])
       setMessageHits([])
+      setSearchFailed(null)
+      setMessageSearchFailed(null)
       setMessageSearching(false)
       setActiveTab("conversations")
       resetFileTree()
@@ -574,7 +610,9 @@ export function SearchCommandDialog({
                 ? t("searching")
                 : !query.trim() && (!agentFilter || showRecent)
                   ? t("typeToSearch")
-                  : t("noResults")}
+                  : searchFailed
+                    ? t(searchFailed)
+                    : t("noResults")}
             </CommandEmpty>
             {recentMode && recent.length > 0 && (
               <CommandGroup heading={t("recentHeading")}>
@@ -630,7 +668,9 @@ export function SearchCommandDialog({
                 ? t("searching")
                 : !query.trim()
                   ? t("typeToSearchMessages")
-                  : t("noResults")}
+                  : messageSearchFailed
+                    ? t(messageSearchFailed)
+                    : t("noResults")}
             </CommandEmpty>
             {messageHits.length > 0 && (
               <CommandGroup heading={t("messagesHeading")}>

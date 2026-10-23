@@ -96,9 +96,10 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
     // Events fired while the WS was disconnected are dropped by the broadcaster
     // (receiver_count == 0). A full re-fetch on reconnect reconciles. Returns
     // null on desktop IPC (no disconnect window) → no-op there.
-    const offReconnect = onTransportReconnect(() => {
-      void useAppWorkspaceStore.getState().refreshConversations()
-    })
+    const offReconnect = onTransportReconnect(
+      () => useAppWorkspaceStore.getState().refreshConversations(),
+      { priority: "lists", key: "conversations" }
+    )
 
     return () => {
       disposed = true
@@ -180,9 +181,10 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
     // A folder created while the WS was disconnected is dropped by the
     // broadcaster (receiver_count == 0); a full folder re-fetch on reconnect
     // reconciles. Returns null on desktop IPC (no disconnect window) → no-op.
-    const offReconnect = onTransportReconnect(() => {
-      void useAppWorkspaceStore.getState().fetchFolders()
-    })
+    const offReconnect = onTransportReconnect(
+      () => useAppWorkspaceStore.getState().fetchFolders(),
+      { priority: "lists", key: "folders" }
+    )
 
     return () => {
       disposed = true

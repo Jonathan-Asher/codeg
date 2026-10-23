@@ -24,6 +24,7 @@ import {
   getTransport,
   isRemoteDesktopMode,
   onActiveTransportChange,
+  peekTransport,
 } from "./index"
 import type {
   ConnectionHealth,
@@ -87,6 +88,18 @@ export function getWebConnectionSnapshot(): ConnectionHealth {
 
 export function getWebConnectionServerSnapshot(): ConnectionHealth {
   return CONNECTED
+}
+
+/**
+ * True while the window's link is known to be down (reconnecting, or never
+ * up yet). Never creates a transport: a window without one, or one on local
+ * IPC, has no link to be down.
+ */
+export function isWebLinkDown(): boolean {
+  const transport = peekTransport()
+  if (!transport || !hasHealthSurface(transport)) return false
+  const state = transport.getConnectionSnapshot()
+  return state === "reconnecting" || state === "connecting"
 }
 
 /** Manual "Reconnect now" from the dialog: retry at once. */

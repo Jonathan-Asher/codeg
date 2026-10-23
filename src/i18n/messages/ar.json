@@ -2387,7 +2387,9 @@
       "roleAssistant": "المساعد",
       "roleSystem": "النظام",
       "recentHeading": "الأخيرة",
-      "archivedBadge": "مؤرشف"
+      "archivedBadge": "مؤرشف",
+      "offline": "غير متصل — يحتاج البحث إلى الخادم",
+      "failed": "فشل البحث. حاول مرة أخرى."
     },
     "folderTitleBar": {
       "showSidebar": "إظهار الشريط الجانبي",
@@ -5426,14 +5428,17 @@
     }
   },
   "WebConnection": {
-    "disconnectedTitle": "انقطع الاتصال",
-    "reconnectingDescription": "تتم محاولة إعادة الاتصال بالخادم. عادةً ما يُستعاد الاتصال تلقائيًا خلال ثوانٍ قليلة.",
-    "reconnectNow": "إعادة الاتصال الآن",
-    "connectingTitle": "جارٍ الاتصال بالخادم",
-    "connectingDescription": "لا يستجيب الخادم بعد. ستتصل هذه النافذة تلقائيًا بمجرد أن يستجيب.",
     "sessionExpiredTitle": "انتهت الجلسة",
     "sessionExpiredDescription": "لم تعد جلستك صالحة. يُرجى تسجيل الدخول مرة أخرى للمتابعة.",
-    "goToLogin": "الانتقال إلى تسجيل الدخول"
+    "goToLogin": "الانتقال إلى تسجيل الدخول",
+    "connectingPill": "جارٍ الاتصال…",
+    "reconnectingPill": "جارٍ إعادة الاتصال…",
+    "updatingPill": "جارٍ التحديث…",
+    "backOnlinePill": "عاد الاتصال",
+    "offlineTitle": "غير متصل",
+    "offlineDescription": "يُعرض ما تم تحميله مسبقًا · آخر تحديث {age}",
+    "offlineWaiting": "في انتظار رد الخادم",
+    "retry": "إعادة المحاولة"
   },
   "LiveFeedback": {
     "placeholder": "أرسل ملاحظة إلى {agent} أثناء عمله…",
