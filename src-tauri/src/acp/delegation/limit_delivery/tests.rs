@@ -288,6 +288,7 @@ fn the_delivery_message_carries_the_result_once_and_what_not_to_do() {
     assert!(prompt.contains("The answer is 42."), "{prompt}");
     assert!(prompt.contains("task_id=\"t-compute\""), "{prompt}");
     assert!(prompt.contains("status=\"completed\""), "{prompt}");
+    assert!(prompt.contains("agent=\"claude_code\""), "{prompt}");
     assert!(prompt.contains("delivered once"), "{prompt}");
     assert!(
         prompt.contains("do not delegate, resume or retry"),

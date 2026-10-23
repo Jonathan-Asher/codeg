@@ -738,7 +738,7 @@ pub fn delivery_prompt(delivery: &PendingDelivery) -> String {
          <delegation-result task_id=\"{task_id}\" agent=\"{agent}\" status=\"{status}\"{code} \
          child_session=\"{child}\">\n{body}\n</delegation-result>",
         task_id = delivery.task_id,
-        agent = delivery.agent_type,
+        agent = delivery.agent_type.as_wire(),
         child = delivery.child_conversation_id,
     )
 }

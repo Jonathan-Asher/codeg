@@ -338,7 +338,8 @@ where
     } else {
         local.format("%a %b %-d, %H:%M").to_string()
     };
-    let minutes = (resets_at - now).num_minutes().max(0);
+    // Rounded up: "in about 1 min" for a reset 59 s away, not "under a minute".
+    let minutes = ((resets_at - now).num_seconds().max(0) + 59) / 60;
     let wait = match minutes {
         0 => "in under a minute".to_string(),
         m if m < 60 => format!("in about {m} min"),
@@ -405,6 +406,8 @@ mod tests {
 
         let soon = paused_usage_limit_message(now, now, &chrono::Utc);
         assert!(soon.contains("in under a minute"), "{soon}");
+        let a_minute = paused_usage_limit_message(now + chrono::Duration::seconds(59), now, &chrono::Utc);
+        assert!(a_minute.contains("in about 1 min"), "{a_minute}");
 
         match paused_usage_limit_outcome(7, resets, now, &chrono::Utc) {
             DelegationOutcome::Err {
