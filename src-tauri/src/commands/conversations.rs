@@ -1190,6 +1190,17 @@ fn build_historical_delegation_meta(child: &DbConversationSummary) -> serde_json
     };
     let mut obj = serde_json::Map::new();
     obj.insert("status".into(), serde_json::Value::String(status.into()));
+    // A usage limit paused the child and codeg continues it by itself: the
+    // same shape the live broker writes, which the card shows as paused.
+    if crate::acp::delegation::limit_delivery::active_pause(child).is_some() {
+        obj.insert("status".into(), serde_json::Value::String("failed".into()));
+        obj.insert(
+            "error_code".into(),
+            serde_json::Value::String(
+                crate::acp::delegation::types::PAUSED_USAGE_LIMIT_CODE.into(),
+            ),
+        );
+    }
     obj.insert(
         "child_conversation_id".into(),
         serde_json::Value::Number(child.id.into()),
@@ -3672,6 +3683,24 @@ mod tests {
             inner.get("error_code").is_none(),
             "DB cannot distinguish cancel from other failures, must not claim 'canceled'"
         );
+    }
+
+    #[test]
+    fn inject_delegation_meta_shows_a_limit_paused_child_as_paused() {
+        let mut turns = vec![tool_use_turn(Some("tu-1"), "delegate_to_agent")];
+        let mut child = summary_child(9, "tu-1", "cancelled");
+        child.limit_pause = Some(crate::models::LimitPause {
+            resets_at: chrono::Utc::now() + chrono::Duration::hours(2),
+            state: crate::db::entities::conversation::ConversationLimitResume::Scheduled,
+            attempts: 0,
+        });
+        inject_delegation_meta(&mut turns, &[child]);
+        let inner = first_block_meta(&turns[0])
+            .unwrap()
+            .get("codeg.delegation")
+            .unwrap();
+        assert_eq!(inner["status"], "failed");
+        assert_eq!(inner["error_code"], "paused_usage_limit");
     }
 
     #[test]
