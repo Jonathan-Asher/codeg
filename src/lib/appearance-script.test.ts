@@ -14,6 +14,10 @@ import {
   STORAGE_KEY_CHAT_TEXT_SCALE,
 } from "./chat-text-scale"
 import { CUSTOM_CSS_ELEMENT_ID } from "./custom-style"
+import {
+  SESSION_COLUMN_MAX_WIDTH_PROPERTY,
+  STORAGE_KEY_SESSION_COLUMN_WIDTH,
+} from "./session-column-width"
 
 /**
  * 这段脚本跑在第一帧渲染之前、任何模块加载之前，是整个外观体系里最脆弱的一环：
@@ -257,5 +261,48 @@ describe("APPEARANCE_INIT_SCRIPT — chat text size", () => {
     runInitScript()
     expect(chatScale()).toBe("2")
     expect(document.documentElement.style.fontSize).toBe("17.6px")
+  })
+})
+
+describe("APPEARANCE_INIT_SCRIPT — session width", () => {
+  const sessionWidth = () =>
+    document.documentElement.style.getPropertyValue(
+      SESSION_COLUMN_MAX_WIDTH_PROPERTY
+    )
+
+  it("applies a stored preset before first paint", () => {
+    for (const [stored, css] of [
+      ["wide", "64rem"],
+      ["extra-wide", "80rem"],
+      ["full", "calc(100% - 2rem)"],
+    ]) {
+      resetDocument()
+      localStorage.setItem(STORAGE_KEY_SESSION_COLUMN_WIDTH, stored)
+      runInitScript()
+      expect(sessionWidth(), stored).toBe(css)
+    }
+  })
+
+  it("applies a custom width, clamped to the range", () => {
+    localStorage.setItem(STORAGE_KEY_SESSION_COLUMN_WIDTH, "1100")
+    runInitScript()
+    expect(sessionWidth()).toBe("68.75rem")
+
+    resetDocument()
+    localStorage.setItem(STORAGE_KEY_SESSION_COLUMN_WIDTH, "99999")
+    runInitScript()
+    expect(sessionWidth()).toBe("160rem")
+  })
+
+  it("writes nothing for Standard, a fresh profile or junk", () => {
+    for (const stored of ["standard", "768", null, "constructor", "-5", "x"]) {
+      resetDocument()
+      localStorage.clear()
+      if (stored !== null) {
+        localStorage.setItem(STORAGE_KEY_SESSION_COLUMN_WIDTH, stored)
+      }
+      runInitScript()
+      expect(sessionWidth(), String(stored)).toBe("")
+    }
   })
 })

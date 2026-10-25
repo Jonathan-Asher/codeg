@@ -975,3 +975,11 @@ describe("a new default never steals a stored binding", () => {
     }
   })
 })
+
+describe("session width cycle shortcut", () => {
+  it("is registered but ships unassigned, taking no key from anyone", () => {
+    const ids = SHORTCUT_DEFINITIONS.map((definition) => definition.id)
+    expect(ids).toContain("cycle_session_width")
+    expect(DEFAULT_SHORTCUTS.cycle_session_width).toBe("")
+  })
+})
