@@ -200,7 +200,7 @@ describe("SuggestionPopup", () => {
   })
 
   it("follows an anchor that moves without resizing", async () => {
-    // The sidebar animating open slides the centred (max-w-3xl) composer
+    // The sidebar animating open slides the centred (session-width) composer
     // sideways at a constant width: no `resize`, no `scroll`, nothing for a
     // ResizeObserver to see, and no event marking the end of the animation.
     const frames: FrameRequestCallback[] = []

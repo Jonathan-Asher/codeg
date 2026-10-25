@@ -162,6 +162,25 @@
       "reset": "Réinitialiser",
       "toast": "Texte du chat {percent}%"
     },
+    "sessionWidth": {
+      "sectionTitle": "Largeur de la session",
+      "sectionDescription": "Jusqu’où la colonne de la conversation (messages, zone de saisie et cartes au-dessus) peut s’élargir. Standard est la largeur de lecture classique ; les réglages plus larges donnent plus de place au code, aux diffs et aux tableaux, et Pleine largeur remplit le panneau. S’applique à toutes les conversations et est enregistré par appareil. Aussi dans le menu ⋯ d’une conversation.",
+      "placeholder": "Choisir la largeur de la session",
+      "default": "Par défaut",
+      "presets": {
+        "standard": "Standard",
+        "wide": "Large",
+        "extraWide": "Très large",
+        "full": "Pleine largeur"
+      },
+      "presetWidth": "{px} px",
+      "fillsPanel": "remplit le panneau",
+      "customValue": "Personnalisée ({px} px)",
+      "customWidth": "Largeur personnalisée",
+      "customHint": "Faites glisser pour choisir une largeur de {min} à {max} px. Les largeurs sont mesurées à 100 % de zoom de la fenêtre et suivent ce zoom.",
+      "reset": "Réinitialiser",
+      "toast": "Largeur de la session : {label}"
+    },
     "fonts": {
       "sectionTitle": "Polices",
       "sectionDescription": "Choisissez les polices pour l’interface, l’éditeur de code et le terminal. Les polices intégrées sont chargées à la demande ; sélectionnez « Personnalisée… » pour utiliser n’importe quelle police installée sur votre système.",
@@ -593,6 +612,10 @@
       "chat_text_zoom_reset": {
         "title": "Réinitialiser la taille du texte du chat",
         "description": "Remet le texte de la conversation à 100%"
+      },
+      "cycle_session_width": {
+        "title": "Changer la largeur de la session",
+        "description": "Fait passer la colonne de la conversation par Standard, Large, Très large et Pleine largeur"
       },
       "read_last_reply": {
         "title": "Lire la dernière réponse",

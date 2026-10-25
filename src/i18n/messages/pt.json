@@ -162,6 +162,25 @@
       "reset": "Redefinir",
       "toast": "Texto do chat {percent}%"
     },
+    "sessionWidth": {
+      "sectionTitle": "Largura da sessão",
+      "sectionDescription": "Até que largura a coluna da conversa (mensagens, o editor e os cartões acima dele) pode crescer. Normal é a largura de leitura clássica; as opções mais largas dão mais espaço a código, diffs e tabelas, e Largura total preenche o painel. Vale para todas as conversas e é salva por dispositivo. Também no menu ⋯ de uma conversa.",
+      "placeholder": "Selecione a largura da sessão",
+      "default": "Padrão",
+      "presets": {
+        "standard": "Normal",
+        "wide": "Larga",
+        "extraWide": "Extra larga",
+        "full": "Largura total"
+      },
+      "presetWidth": "{px} px",
+      "fillsPanel": "preenche o painel",
+      "customValue": "Personalizada ({px} px)",
+      "customWidth": "Largura personalizada",
+      "customHint": "Arraste para definir qualquer largura entre {min} e {max} px. As larguras valem para zoom da janela em 100% e crescem com ele.",
+      "reset": "Redefinir",
+      "toast": "Largura da sessão: {label}"
+    },
     "fonts": {
       "sectionTitle": "Fontes",
       "sectionDescription": "Escolha as fontes para a interface, o editor de código e o terminal. As fontes incluídas são carregadas sob demanda; selecione “Personalizada…” para usar qualquer fonte instalada no seu sistema.",
@@ -593,6 +612,10 @@
       "chat_text_zoom_reset": {
         "title": "Redefinir o tamanho do texto do chat",
         "description": "Restaura o texto da conversa para 100%"
+      },
+      "cycle_session_width": {
+        "title": "Alternar largura da sessão",
+        "description": "Alterna a coluna da conversa entre Normal, Larga, Extra larga e Largura total"
       },
       "read_last_reply": {
         "title": "Ler a última resposta",

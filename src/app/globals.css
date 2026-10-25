@@ -1088,6 +1088,24 @@
   }
 }
 
+/* Session width (Settings → Appearance → Session width, and the conversation
+   ⋯ menu). Every wrapper of the conversation column — message rows, composer,
+   docked cards and banners, the welcome screen — reads this as its max-width
+   (`max-w-(--session-column-max-width)`), so they line up at any width. A
+   non-standard width is written inline on <html> by the pre-hydration script
+   and AppearanceProvider, which outranks this default (= the old max-w-3xl). */
+:root {
+  --session-column-max-width: 48rem;
+}
+
+/* In a transcript, a Markdown table keeps today's full-column width up to the
+   standard column (48rem less the rows' 2rem padding), then grows with its
+   content instead of stretching a two-column table across a wide session. */
+.chat-text-scope [data-streamdown="table"] {
+  width: auto;
+  min-width: min(100%, 46rem);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

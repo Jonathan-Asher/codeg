@@ -6,6 +6,7 @@ import {
   Circle,
   EllipsisVertical,
   Info,
+  MoveHorizontal,
   Pencil,
   Pin,
   PinOff,
@@ -28,10 +29,18 @@ import { getRuntimeSession } from "@/stores/conversation-runtime-store"
 import type { ConversationStatus } from "@/lib/types"
 import { STATUS_ORDER } from "@/lib/types"
 import { ConversationStatusDot } from "@/components/conversations/conversation-status-dot"
+import { useSessionColumnWidth } from "@/hooks/use-appearance"
+import { useSessionColumnWidthLabel } from "@/hooks/use-session-column-width-label"
+import {
+  SESSION_COLUMN_WIDTH_PRESETS,
+  isSessionColumnWidthPreset,
+} from "@/lib/session-column-width"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -87,7 +96,9 @@ interface ConversationDetailHeaderProps {
  *
  * The ⋯ menu mirrors the sidebar conversation card's right-click menu (new /
  * rename / pin / details / status / delete) so the two entry points stay
- * consistent, wired to the same APIs. Subscriptions are kept narrow — a
+ * consistent, wired to the same APIs. It also carries Session width, the
+ * device-wide column width from Settings → Appearance, so it can be switched
+ * from the conversation it is seen in. Subscriptions are kept narrow — a
  * primitive `pinned_at != null` boolean — so the header never re-renders on
  * streaming tokens; details data is read on demand at click time via
  * `getRuntimeSession` / store `getState`.
@@ -106,6 +117,10 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
   const tConv = useTranslations("Folder.conversation")
   const tStatus = useTranslations("Folder.statusLabels")
   const tDetails = useTranslations("Folder.sessionDetails")
+  const tWidth = useTranslations("AppearanceSettings.sessionWidth")
+  // Device-wide, not per conversation: the same width as Settings → Appearance.
+  const { sessionColumnWidth, setSessionColumnWidth } = useSessionColumnWidth()
+  const sessionWidthLabel = useSessionColumnWidthLabel()
   const { closeTab, openNewConversationTab } = useTabActions()
   const updateConversationLocal = useAppWorkspaceStore(
     (s) => s.updateConversationLocal
@@ -305,6 +320,40 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
               <Info className="h-4 w-4" />
               {tDetails("menuLabel")}
             </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <MoveHorizontal className="h-4 w-4" />
+                {tWidth("sectionTitle")}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                <DropdownMenuRadioGroup
+                  value={
+                    typeof sessionColumnWidth === "number"
+                      ? "custom"
+                      : sessionColumnWidth
+                  }
+                  onValueChange={(value) => {
+                    if (isSessionColumnWidthPreset(value)) {
+                      setSessionColumnWidth(value)
+                    }
+                  }}
+                >
+                  {SESSION_COLUMN_WIDTH_PRESETS.map((preset) => (
+                    <DropdownMenuRadioItem key={preset} value={preset}>
+                      {sessionWidthLabel(preset)}
+                    </DropdownMenuRadioItem>
+                  ))}
+                  {/* A custom width is set in Settings; shown so the current
+                      choice is still marked. */}
+                  {typeof sessionColumnWidth === "number" && (
+                    <DropdownMenuRadioItem value="custom" disabled>
+                      {sessionWidthLabel(sessionColumnWidth)}
+                    </DropdownMenuRadioItem>
+                  )}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
             <DropdownMenuSeparator />
             <DropdownMenuSub>
               <DropdownMenuSubTrigger disabled={!persisted}>

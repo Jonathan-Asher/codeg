@@ -2,7 +2,11 @@ import { act, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AppearanceProvider } from "./appearance-provider"
-import { useChatTextScale, useCustomStyle } from "@/hooks/use-appearance"
+import {
+  useChatTextScale,
+  useCustomStyle,
+  useSessionColumnWidth,
+} from "@/hooks/use-appearance"
 import {
   STORAGE_KEY_CUSTOM_THEME,
   STORAGE_KEY_ZOOM_LEVEL,
@@ -12,6 +16,11 @@ import {
   CHAT_TEXT_SCALE_WILL_CHANGE_EVENT,
   STORAGE_KEY_CHAT_TEXT_SCALE,
 } from "@/lib/chat-text-scale"
+import { SHORTCUTS_STORAGE_KEY } from "@/lib/keyboard-shortcuts"
+import {
+  SESSION_COLUMN_MAX_WIDTH_PROPERTY,
+  STORAGE_KEY_SESSION_COLUMN_WIDTH,
+} from "@/lib/session-column-width"
 
 function Probe() {
   const { setCustomThemeToken } = useCustomStyle()
@@ -417,5 +426,177 @@ describe("chat text size keys", () => {
     renderChat()
     expect(scaleProperty()).toBe("1.25")
     expect(screen.getByTestId("notice").textContent).toBe("125:-:0")
+  })
+})
+
+describe("session width", () => {
+  function widthProperty(): string {
+    return document.documentElement.style.getPropertyValue(
+      SESSION_COLUMN_MAX_WIDTH_PROPERTY
+    )
+  }
+
+  function WidthProbe() {
+    const {
+      sessionColumnWidth,
+      setSessionColumnWidth,
+      sessionColumnWidthNotice,
+    } = useSessionColumnWidth()
+    return (
+      <>
+        <span data-testid="width">
+          {`${sessionColumnWidth}:${sessionColumnWidthNotice?.width ?? "-"}:${sessionColumnWidthNotice?.seq ?? 0}`}
+        </span>
+        <button onClick={() => setSessionColumnWidth("wide")}>wide</button>
+        <button onClick={() => setSessionColumnWidth("standard")}>
+          standard
+        </button>
+        <button onClick={() => setSessionColumnWidth(5000)}>huge</button>
+        <button onClick={() => setSessionColumnWidth(1100)}>custom</button>
+      </>
+    )
+  }
+
+  function renderWidth() {
+    render(
+      <AppearanceProvider>
+        <WidthProbe />
+      </AppearanceProvider>
+    )
+  }
+
+  const shown = () => screen.getByTestId("width").textContent
+
+  it("starts at Standard and writes nothing", () => {
+    renderWidth()
+    expect(shown()).toBe("standard:-:0")
+    expect(widthProperty()).toBe("")
+    expect(localStorage.getItem(STORAGE_KEY_SESSION_COLUMN_WIDTH)).toBeNull()
+  })
+
+  it("applies and persists a preset, and removes the variable for Standard", () => {
+    renderWidth()
+
+    fireEvent.click(screen.getByText("wide"))
+    expect(shown()).toBe("wide:-:0")
+    expect(widthProperty()).toBe("64rem")
+    expect(localStorage.getItem(STORAGE_KEY_SESSION_COLUMN_WIDTH)).toBe("wide")
+
+    fireEvent.click(screen.getByText("standard"))
+    expect(widthProperty()).toBe("")
+    expect(localStorage.getItem(STORAGE_KEY_SESSION_COLUMN_WIDTH)).toBe(
+      "standard"
+    )
+  })
+
+  it("clamps a custom width and keeps one inside the range", () => {
+    renderWidth()
+
+    fireEvent.click(screen.getByText("huge"))
+    expect(shown()).toBe("2560:-:0")
+    expect(widthProperty()).toBe("160rem")
+
+    fireEvent.click(screen.getByText("custom"))
+    expect(widthProperty()).toBe("68.75rem")
+    expect(localStorage.getItem(STORAGE_KEY_SESSION_COLUMN_WIDTH)).toBe("1100")
+  })
+
+  it("restores a stored width on mount", () => {
+    localStorage.setItem(STORAGE_KEY_SESSION_COLUMN_WIDTH, "full")
+    renderWidth()
+    expect(shown()).toBe("full:-:0")
+    expect(widthProperty()).toBe("calc(100% - 2rem)")
+  })
+
+  it("tells transcripts before it reflows them", () => {
+    renderWidth()
+    const seen: string[] = []
+    const onWillChange = () => seen.push(widthProperty())
+    window.addEventListener(CHAT_TEXT_SCALE_WILL_CHANGE_EVENT, onWillChange)
+
+    fireEvent.click(screen.getByText("wide"))
+    fireEvent.click(screen.getByText("wide"))
+    window.removeEventListener(CHAT_TEXT_SCALE_WILL_CHANGE_EVENT, onWillChange)
+
+    // Once, seeing the width from before; the repeat is a no-op.
+    expect(seen).toEqual([""])
+  })
+
+  it("follows a change made in another window", () => {
+    renderWidth()
+    act(() => {
+      localStorage.setItem(STORAGE_KEY_SESSION_COLUMN_WIDTH, "extra-wide")
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: STORAGE_KEY_SESSION_COLUMN_WIDTH,
+          newValue: "extra-wide",
+        })
+      )
+    })
+    expect(shown()).toBe("extra-wide:-:0")
+    expect(widthProperty()).toBe("80rem")
+
+    act(() => {
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: STORAGE_KEY_SESSION_COLUMN_WIDTH,
+          newValue: null,
+        })
+      )
+    })
+    expect(shown()).toBe("standard:-:0")
+    expect(widthProperty()).toBe("")
+  })
+
+  function cycle() {
+    const event = new KeyboardEvent("keydown", {
+      key: "y",
+      code: "KeyY",
+      metaKey: true,
+      altKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    window.dispatchEvent(event)
+    return event
+  }
+
+  it("has no cycle key until one is assigned", () => {
+    renderWidth()
+    let event!: KeyboardEvent
+    act(() => {
+      event = cycle()
+    })
+    expect(event.defaultPrevented).toBe(false)
+    expect(shown()).toBe("standard:-:0")
+  })
+
+  it("cycles the presets on an assigned key and announces each step", () => {
+    localStorage.setItem(
+      SHORTCUTS_STORAGE_KEY,
+      JSON.stringify({ cycle_session_width: "mod+alt+shift+y" })
+    )
+    renderWidth()
+
+    let event!: KeyboardEvent
+    act(() => {
+      event = cycle()
+    })
+    expect(event.defaultPrevented).toBe(true)
+    expect(shown()).toBe("wide:wide:1")
+
+    act(() => {
+      cycle()
+      cycle()
+    })
+    expect(shown()).toBe("full:full:3")
+    expect(widthProperty()).toBe("calc(100% - 2rem)")
+
+    act(() => {
+      cycle()
+    })
+    expect(shown()).toBe("standard:standard:4")
+    expect(widthProperty()).toBe("")
   })
 })

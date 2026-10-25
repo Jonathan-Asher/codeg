@@ -162,6 +162,25 @@
       "reset": "Reset",
       "toast": "Chat text {percent}%"
     },
+    "sessionWidth": {
+      "sectionTitle": "Session width",
+      "sectionDescription": "How wide the conversation column (messages, the composer and the cards above it) may grow. Standard is the classic reading width; wider settings give code, diffs and tables more room, and Full width fills the panel. Applies to every conversation and persists per device. Also in a conversation's ⋯ menu.",
+      "placeholder": "Select session width",
+      "default": "Default",
+      "presets": {
+        "standard": "Standard",
+        "wide": "Wide",
+        "extraWide": "Extra wide",
+        "full": "Full width"
+      },
+      "presetWidth": "{px} px",
+      "fillsPanel": "fills the panel",
+      "customValue": "Custom ({px} px)",
+      "customWidth": "Custom width",
+      "customHint": "Drag to set any width from {min} to {max} px. Widths are measured at 100% window zoom and grow with it.",
+      "reset": "Reset",
+      "toast": "Session width: {label}"
+    },
     "fonts": {
       "sectionTitle": "Fonts",
       "sectionDescription": "Choose fonts for the interface, code editor, and terminal. Bundled fonts load on demand; pick “Custom…” to use any font installed on your system.",
@@ -593,6 +612,10 @@
       "chat_text_zoom_reset": {
         "title": "Reset chat text size",
         "description": "Set the conversation text back to 100%"
+      },
+      "cycle_session_width": {
+        "title": "Cycle session width",
+        "description": "Step the conversation column through Standard, Wide, Extra wide and Full width"
       },
       "read_last_reply": {
         "title": "Read last reply",

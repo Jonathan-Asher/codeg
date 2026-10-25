@@ -7,6 +7,14 @@ import {
   STORAGE_KEY_CHAT_TEXT_SCALE,
 } from "./chat-text-scale"
 import {
+  MAX_CUSTOM_SESSION_COLUMN_WIDTH,
+  MIN_CUSTOM_SESSION_COLUMN_WIDTH,
+  SESSION_COLUMN_MAX_WIDTH_PROPERTY,
+  SESSION_COLUMN_PRESET_PX,
+  STORAGE_KEY_SESSION_COLUMN_WIDTH,
+  sessionColumnMaxWidthCss,
+} from "./session-column-width"
+import {
   CUSTOM_CSS_ELEMENT_ID,
   CUSTOM_THEME_TOKENS,
   SAFE_STYLE_QUERY_PARAM,
@@ -115,6 +123,25 @@ const SCRIPT = `
     var storedChatScale = parseInt(localStorage.getItem("${STORAGE_KEY_CHAT_TEXT_SCALE}") || "", 10);
     if (VALID_CHAT_SCALES.indexOf(storedChatScale) >= 0 && storedChatScale !== ${DEFAULT_CHAT_TEXT_SCALE}) {
       document.documentElement.style.setProperty("${CHAT_TEXT_SCALE_PROPERTY}", String(storedChatScale / 100));
+    }
+
+    // Session width: a preset name or a custom px width. Standard writes
+    // nothing (globals.css holds it); AppearanceProvider normalizes the rest.
+    var SESSION_WIDTHS = ${JSON.stringify({
+      wide: sessionColumnMaxWidthCss("wide"),
+      "extra-wide": sessionColumnMaxWidthCss("extra-wide"),
+      full: sessionColumnMaxWidthCss("full"),
+    })};
+    var storedSessionWidth = localStorage.getItem("${STORAGE_KEY_SESSION_COLUMN_WIDTH}") || "";
+    var sessionWidthCss = "";
+    if (Object.prototype.hasOwnProperty.call(SESSION_WIDTHS, storedSessionWidth)) {
+      sessionWidthCss = SESSION_WIDTHS[storedSessionWidth];
+    } else if (/^[0-9]+$/.test(storedSessionWidth)) {
+      var sessionWidthPx = Math.min(${MAX_CUSTOM_SESSION_COLUMN_WIDTH}, Math.max(${MIN_CUSTOM_SESSION_COLUMN_WIDTH}, parseInt(storedSessionWidth, 10)));
+      if (sessionWidthPx !== ${SESSION_COLUMN_PRESET_PX.standard}) sessionWidthCss = (sessionWidthPx / 16) + "rem";
+    }
+    if (sessionWidthCss) {
+      document.documentElement.style.setProperty("${SESSION_COLUMN_MAX_WIDTH_PROPERTY}", sessionWidthCss);
     }
 
     // 界面字体：预水合写入 --font-sans（普通组件与会话消息区都跟随它）。

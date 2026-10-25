@@ -162,6 +162,25 @@
       "reset": "重設",
       "toast": "聊天文字 {percent}%"
     },
+    "sessionWidth": {
+      "sectionTitle": "對話寬度",
+      "sectionDescription": "對話欄（訊息、輸入框及其上方的卡片）最多可以多寬。標準為經典閱讀寬度；更寬的設定讓程式碼、差異與表格有更多空間，全寬則填滿面板。套用於所有對話，並依裝置保存。也可在對話的 ⋯ 選單中切換。",
+      "placeholder": "選擇對話寬度",
+      "default": "預設",
+      "presets": {
+        "standard": "標準",
+        "wide": "寬",
+        "extraWide": "超寬",
+        "full": "全寬"
+      },
+      "presetWidth": "{px} px",
+      "fillsPanel": "填滿面板",
+      "customValue": "自訂（{px} px）",
+      "customWidth": "自訂寬度",
+      "customHint": "拖曳可設定 {min} 到 {max} px 之間的任意寬度。寬度以 100% 視窗縮放計算，並隨縮放變化。",
+      "reset": "重設",
+      "toast": "對話寬度：{label}"
+    },
     "fonts": {
       "sectionTitle": "字型",
       "sectionDescription": "為介面、程式碼編輯器與終端機分別選擇字型。內建字型會按需載入；選擇「自訂…」可使用系統已安裝的任意字型。",
@@ -593,6 +612,10 @@
       "chat_text_zoom_reset": {
         "title": "重設聊天文字大小",
         "description": "把對話文字恢復為 100%"
+      },
+      "cycle_session_width": {
+        "title": "切換對話寬度",
+        "description": "在標準、寬、超寬與全寬之間依序切換對話欄寬度"
       },
       "read_last_reply": {
         "title": "朗讀最新回覆",

@@ -34,6 +34,7 @@ export type ShortcutActionId =
   | "chat_text_zoom_in"
   | "chat_text_zoom_out"
   | "chat_text_zoom_reset"
+  | "cycle_session_width"
   | "read_last_reply"
 
 export interface ShortcutDefinition {
@@ -129,6 +130,9 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     id: "chat_text_zoom_reset",
   },
   {
+    id: "cycle_session_width",
+  },
+  {
     id: "read_last_reply",
   },
 ]
@@ -210,6 +214,11 @@ export const DEFAULT_SHORTCUTS: ShortcutSettings = {
   chat_text_zoom_in: "mod+shift+=",
   chat_text_zoom_out: "mod+shift+-",
   chat_text_zoom_reset: "mod+shift+0",
+  // Step the conversation column through Standard / Wide / Extra wide / Full
+  // (Settings → Appearance → Session width). Unassigned: every natural chord
+  // here is already some app's or the browser's, and the conversation ⋯ menu
+  // switches the width without one.
+  cycle_session_width: "",
   // Read the active conversation's newest reply aloud, or stop it. "L" for
   // listen: Cmd/Ctrl+Shift+R is the browsers' hard reload, which the web
   // build must leave alone.

@@ -162,6 +162,25 @@
       "reset": "Zurücksetzen",
       "toast": "Chat-Text {percent}%"
     },
+    "sessionWidth": {
+      "sectionTitle": "Sitzungsbreite",
+      "sectionDescription": "Wie breit die Gesprächsspalte (Nachrichten, Eingabefeld und die Karten darüber) werden darf. Normal ist die klassische Lesebreite; breitere Einstellungen geben Code, Diffs und Tabellen mehr Platz, und Volle Breite füllt das Panel. Gilt für alle Gespräche und wird pro Gerät gespeichert. Auch im ⋯-Menü eines Gesprächs.",
+      "placeholder": "Sitzungsbreite wählen",
+      "default": "Standard",
+      "presets": {
+        "standard": "Normal",
+        "wide": "Breit",
+        "extraWide": "Extra breit",
+        "full": "Volle Breite"
+      },
+      "presetWidth": "{px} px",
+      "fillsPanel": "füllt das Panel",
+      "customValue": "Benutzerdefiniert ({px} px)",
+      "customWidth": "Eigene Breite",
+      "customHint": "Ziehen, um eine beliebige Breite von {min} bis {max} px festzulegen. Breiten gelten bei 100 % Fensterzoom und wachsen mit ihm.",
+      "reset": "Zurücksetzen",
+      "toast": "Sitzungsbreite: {label}"
+    },
     "fonts": {
       "sectionTitle": "Schriftarten",
       "sectionDescription": "Wähle Schriftarten für Oberfläche, Code-Editor und Terminal. Mitgelieferte Schriftarten werden bei Bedarf geladen; wähle „Benutzerdefiniert…“, um eine beliebige auf deinem System installierte Schriftart zu verwenden.",
@@ -593,6 +612,10 @@
       "chat_text_zoom_reset": {
         "title": "Chat-Textgröße zurücksetzen",
         "description": "Den Gesprächstext auf 100% zurücksetzen"
+      },
+      "cycle_session_width": {
+        "title": "Sitzungsbreite wechseln",
+        "description": "Die Gesprächsspalte zwischen Normal, Breit, Extra breit und Volle Breite durchschalten"
       },
       "read_last_reply": {
         "title": "Letzte Antwort vorlesen",

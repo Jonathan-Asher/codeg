@@ -162,6 +162,25 @@
       "reset": "重置",
       "toast": "聊天文字 {percent}%"
     },
+    "sessionWidth": {
+      "sectionTitle": "会话宽度",
+      "sectionDescription": "会话栏（消息、输入框及其上方的卡片）最多可以有多宽。标准为经典阅读宽度；更宽的设置让代码、差异和表格有更多空间，全宽则铺满面板。对所有会话生效，并按设备保存。也可在会话的 ⋯ 菜单中切换。",
+      "placeholder": "选择会话宽度",
+      "default": "默认",
+      "presets": {
+        "standard": "标准",
+        "wide": "宽",
+        "extraWide": "超宽",
+        "full": "全宽"
+      },
+      "presetWidth": "{px} px",
+      "fillsPanel": "铺满面板",
+      "customValue": "自定义（{px} px）",
+      "customWidth": "自定义宽度",
+      "customHint": "拖动可设置 {min} 到 {max} px 之间的任意宽度。宽度以 100% 窗口缩放计算，并随缩放变化。",
+      "reset": "重置",
+      "toast": "会话宽度：{label}"
+    },
     "fonts": {
       "sectionTitle": "字体",
       "sectionDescription": "为界面、代码编辑器和终端分别选择字体。内置字体按需加载；选择“自定义…”可使用系统已安装的任意字体。",
@@ -593,6 +612,10 @@
       "chat_text_zoom_reset": {
         "title": "重置聊天文字大小",
         "description": "把会话文字恢复为 100%"
+      },
+      "cycle_session_width": {
+        "title": "切换会话宽度",
+        "description": "在标准、宽、超宽和全宽之间依次切换会话栏宽度"
       },
       "read_last_reply": {
         "title": "朗读最新回复",

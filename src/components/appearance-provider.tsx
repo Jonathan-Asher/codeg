@@ -86,6 +86,18 @@ import {
   type ChatTextScaleLevel,
 } from "@/lib/chat-text-scale"
 import {
+  DEFAULT_SESSION_COLUMN_WIDTH,
+  SESSION_COLUMN_MAX_WIDTH_PROPERTY,
+  STORAGE_KEY_SESSION_COLUMN_WIDTH,
+  applySessionColumnWidth,
+  nextSessionColumnWidth,
+  normalizeSessionColumnWidth,
+  persistSessionColumnWidth,
+  readStoredSessionColumnWidth,
+  sessionColumnMaxWidthCss,
+  type SessionColumnWidth,
+} from "@/lib/session-column-width"
+import {
   DEFAULT_WORKSPACE_BG_ENABLED,
   DEFAULT_WORKSPACE_BG_MASK_OPACITY,
   DEFAULT_WORKSPACE_BG_IMAGE_BLUR,
@@ -136,6 +148,15 @@ type AppearanceContextValue = {
    * the first press. Changes from Settings or another window do not bump it.
    */
   chatTextScaleNotice: { level: ChatTextScaleLevel; seq: number } | null
+  /** Max width of the conversation column (see lib/session-column-width). */
+  sessionColumnWidth: SessionColumnWidth
+  setSessionColumnWidth: (width: SessionColumnWidth) => void
+  /**
+   * Bumped each time the cycle shortcut is pressed in THIS window, so the
+   * announcer can show the new width; null until the first press. Changes
+   * from Settings, the menu or another window do not bump it.
+   */
+  sessionColumnWidthNotice: { width: SessionColumnWidth; seq: number } | null
   /** 新会话欢迎页是否显示「模式选择区域」（QuickActions 快捷卡片），默认开启 */
   showWelcomeQuickActions: boolean
   setShowWelcomeQuickActions: (on: boolean) => void
@@ -596,6 +617,59 @@ export function AppearanceProvider({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Session width. Same shape as the chat text size: the pre-hydration script
+  // already wrote the property for a stored width; the state mirrors it.
+  const [sessionColumnWidth, setSessionColumnWidthState] =
+    useState<SessionColumnWidth>(() => readStoredSessionColumnWidth())
+  const sessionColumnWidthRef = useRef(sessionColumnWidth)
+  const [sessionColumnWidthNotice, setSessionColumnWidthNotice] = useState<{
+    width: SessionColumnWidth
+    seq: number
+  } | null>(null)
+
+  /**
+   * Write a width to the DOM. Every transcript row reflows at once, as on a
+   * chat text size change, so the same notice lets a scrolled transcript keep
+   * the reader's place.
+   */
+  const applySessionColumnWidthToDom = useCallback(
+    (width: SessionColumnWidth) => {
+      window.dispatchEvent(new Event(CHAT_TEXT_SCALE_WILL_CHANGE_EVENT))
+      applySessionColumnWidth(document.documentElement, width)
+    },
+    []
+  )
+
+  const setSessionColumnWidth = useCallback(
+    (width: SessionColumnWidth) => {
+      const next = normalizeSessionColumnWidth(width)
+      if (sessionColumnWidthRef.current === next) return
+      sessionColumnWidthRef.current = next
+      setSessionColumnWidthState(next)
+      applySessionColumnWidthToDom(next)
+      persistSessionColumnWidth(next)
+    },
+    [applySessionColumnWidthToDom]
+  )
+
+  // A stored width the script skipped or clamped differently (junk, a custom
+  // value equal to a preset) is normalized here, once, on mount.
+  useEffect(() => {
+    const root = document.documentElement
+    const expected =
+      sessionColumnWidth === DEFAULT_SESSION_COLUMN_WIDTH
+        ? ""
+        : sessionColumnMaxWidthCss(sessionColumnWidth)
+    if (
+      root.style.getPropertyValue(SESSION_COLUMN_MAX_WIDTH_PROPERTY) !==
+      expected
+    ) {
+      applySessionColumnWidth(root, sessionColumnWidth)
+    }
+    // Mount only: later changes go through the setter / storage sync.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const setShowWelcomeQuickActions = useCallback((on: boolean) => {
     setShowWelcomeQuickActionsState(on)
     persist(STORAGE_KEY_WELCOME_QUICK_ACTIONS, on ? "1" : "0")
@@ -916,6 +990,28 @@ export function AppearanceProvider({
     return () => window.removeEventListener("keydown", onKeyDown, true)
   }, [toggleCustomStyleShortcut, customStyleSuspended, setCustomStyleSuspended])
 
+  // Session width cycle. Unbound by default (Settings → Shortcuts assigns
+  // it), so it takes no key from anyone; the conversation ⋯ menu is the
+  // built-in way to switch.
+  const cycleSessionWidthShortcut = shortcuts.cycle_session_width
+  useEffect(() => {
+    if (!cycleSessionWidthShortcut) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat || event.isComposing) return
+      if (isShortcutRecorderArmed()) return
+      if (!matchShortcutEvent(event, cycleSessionWidthShortcut)) return
+      event.preventDefault()
+      const next = nextSessionColumnWidth(sessionColumnWidthRef.current)
+      setSessionColumnWidth(next)
+      setSessionColumnWidthNotice((previous) => ({
+        width: next,
+        seq: (previous?.seq ?? 0) + 1,
+      }))
+    }
+    window.addEventListener("keydown", onKeyDown, true)
+    return () => window.removeEventListener("keydown", onKeyDown, true)
+  }, [cycleSessionWidthShortcut, setSessionColumnWidth])
+
   // Same levels as Settings → Window zoom (and Chat text size, with Shift).
   // Capture-phase so the webview does not eat Ctrl/Cmd +/- as its own page
   // zoom. One listener for both families: the matcher already hands a press to
@@ -1066,6 +1162,15 @@ export function AppearanceProvider({
           applyChatTextScaleToDom(level)
         }
       }
+      // Another window changed the session width. A removed key is Standard.
+      if (e.key === STORAGE_KEY_SESSION_COLUMN_WIDTH) {
+        const width = normalizeSessionColumnWidth(e.newValue)
+        if (sessionColumnWidthRef.current !== width) {
+          sessionColumnWidthRef.current = width
+          setSessionColumnWidthState(width)
+          applySessionColumnWidthToDom(width)
+        }
+      }
       // "0" 是合法值，故不做 newValue 真值判断，交给 readBool 处理 null→默认。
       if (e.key === STORAGE_KEY_WELCOME_QUICK_ACTIONS) {
         setShowWelcomeQuickActionsState(
@@ -1166,6 +1271,7 @@ export function AppearanceProvider({
     resetCustomThemeBaseline,
     resetCustomCssBaseline,
     applyChatTextScaleToDom,
+    applySessionColumnWidthToDom,
   ])
 
   return (
@@ -1178,6 +1284,9 @@ export function AppearanceProvider({
         chatTextScale,
         setChatTextScale,
         chatTextScaleNotice,
+        sessionColumnWidth,
+        setSessionColumnWidth,
+        sessionColumnWidthNotice,
         showWelcomeQuickActions,
         setShowWelcomeQuickActions,
         uiFont,

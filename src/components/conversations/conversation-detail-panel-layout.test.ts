@@ -227,7 +227,7 @@ describe("ConversationDetailPanel new conversation layout", () => {
 
   it("keeps ordinary chat input constrained to the message column width", () => {
     expect(conversationShellSource).toContain(
-      'className="mx-auto w-full max-w-3xl"'
+      'className="mx-auto w-full max-w-(--session-column-max-width)"'
     )
     // Ordinary (active/historical) chat input keeps its own px-4 gutter to align
     // with the sibling cards in conversation-shell AND a tight bottom gap (pb-1)
@@ -248,7 +248,9 @@ describe("ConversationDetailPanel new conversation layout", () => {
     expect(chatInputSource).not.toContain("containerClassName")
     expect(source).not.toContain("containerClassName")
     expect(conversationShellSource).not.toContain("containerClassName")
-    expect(source).toContain("mx-auto flex w-full max-w-3xl")
+    expect(source).toContain(
+      "mx-auto flex w-full max-w-(--session-column-max-width)"
+    )
   })
 })
 
@@ -645,7 +647,7 @@ describe("ConversationDetailPanel session-load failure surface", () => {
     const dockIdx = conversationShellSource.indexOf("{composerBanner && (")
     expect(dockIdx).toBeGreaterThan(-1)
     const dock = conversationShellSource.slice(dockIdx, dockIdx + 200)
-    expect(dock).toContain("mx-auto w-full max-w-3xl")
+    expect(dock).toContain("mx-auto w-full max-w-(--session-column-max-width)")
   })
 
   it("offers Continue for an interrupted turn through the normal send queue", () => {
