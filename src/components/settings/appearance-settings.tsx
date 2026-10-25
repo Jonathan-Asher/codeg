@@ -5,6 +5,7 @@ import {
   MessageSquareText,
   Monitor,
   Moon,
+  MoveHorizontal,
   RotateCcw,
   Sun,
   Type,
@@ -20,9 +21,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import {
   useChatTextScale,
+  useSessionColumnWidth,
   useThemeColor,
   useZoomLevel,
   useWelcomeQuickActions,
@@ -32,6 +35,16 @@ import {
   DEFAULT_CHAT_TEXT_SCALE,
   normalizeChatTextScale,
 } from "@/lib/chat-text-scale"
+import {
+  CUSTOM_SESSION_COLUMN_WIDTH_STEP,
+  DEFAULT_SESSION_COLUMN_WIDTH,
+  MAX_CUSTOM_SESSION_COLUMN_WIDTH,
+  MIN_CUSTOM_SESSION_COLUMN_WIDTH,
+  SESSION_COLUMN_WIDTH_PRESETS,
+  isSessionColumnWidthPreset,
+  sessionColumnWidthPx,
+} from "@/lib/session-column-width"
+import { useSessionColumnWidthLabel } from "@/hooks/use-session-column-width-label"
 import { cn } from "@/lib/utils"
 import {
   DEFAULT_ZOOM_LEVEL,
@@ -54,6 +67,13 @@ export function AppearanceSettings() {
   const { themeColor, setThemeColor } = useThemeColor()
   const { zoomLevel, setZoomLevel } = useZoomLevel()
   const { chatTextScale, setChatTextScale } = useChatTextScale()
+  const { sessionColumnWidth, setSessionColumnWidth } = useSessionColumnWidth()
+  const sessionWidthLabel = useSessionColumnWidthLabel()
+  const sessionWidthPx = sessionColumnWidthPx(sessionColumnWidth)
+  const sessionWidthSize = (px: number | null) =>
+    px === null
+      ? t("sessionWidth.fillsPanel")
+      : t("sessionWidth.presetWidth", { px })
   const { showWelcomeQuickActions, setShowWelcomeQuickActions } =
     useWelcomeQuickActions()
 
@@ -278,6 +298,102 @@ export function AppearanceSettings() {
             <p className="text-2xs text-muted-foreground">
               {t("chatTextSize.current", { percent: chatTextScale })}
             </p>
+          </div>
+        </section>
+
+        {/* ===== Session width ===== */}
+        <section
+          className="rounded-xl border bg-card p-4 space-y-4"
+          data-testid="session-width-section"
+        >
+          <div className="flex items-center gap-2">
+            <MoveHorizontal className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold">
+              {t("sessionWidth.sectionTitle")}
+            </h2>
+          </div>
+
+          <p className="text-xs text-muted-foreground leading-5">
+            {t("sessionWidth.sectionDescription")}
+          </p>
+
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Select
+                value={
+                  typeof sessionColumnWidth === "number"
+                    ? "custom"
+                    : sessionColumnWidth
+                }
+                onValueChange={(value) => {
+                  if (isSessionColumnWidthPreset(value)) {
+                    setSessionColumnWidth(value)
+                  }
+                }}
+              >
+                <SelectTrigger
+                  className="w-64"
+                  aria-label={t("sessionWidth.sectionTitle")}
+                >
+                  <SelectValue placeholder={t("sessionWidth.placeholder")} />
+                </SelectTrigger>
+                <SelectContent align="start">
+                  {SESSION_COLUMN_WIDTH_PRESETS.map((preset) => (
+                    <SelectItem key={preset} value={preset}>
+                      {sessionWidthLabel(preset)}
+                      {` · ${sessionWidthSize(sessionColumnWidthPx(preset))}`}
+                      {preset === DEFAULT_SESSION_COLUMN_WIDTH
+                        ? ` (${t("sessionWidth.default")})`
+                        : ""}
+                    </SelectItem>
+                  ))}
+                  {/* Only a custom width reached with the slider shows here;
+                      the slider is how to pick one. */}
+                  {typeof sessionColumnWidth === "number" && (
+                    <SelectItem value="custom">
+                      {sessionWidthLabel(sessionColumnWidth)}
+                    </SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setSessionColumnWidth(DEFAULT_SESSION_COLUMN_WIDTH)
+                }
+                disabled={sessionColumnWidth === DEFAULT_SESSION_COLUMN_WIDTH}
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                {t("sessionWidth.reset")}
+              </Button>
+            </div>
+
+            <div className="max-w-md space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">
+                  {t("sessionWidth.customWidth")}
+                </span>
+                <span className="text-2xs tabular-nums text-muted-foreground">
+                  {sessionWidthSize(sessionWidthPx)}
+                </span>
+              </div>
+              {/* Full has no px width; it sits past the slider's top end. */}
+              <Slider
+                value={[sessionWidthPx ?? MAX_CUSTOM_SESSION_COLUMN_WIDTH]}
+                min={MIN_CUSTOM_SESSION_COLUMN_WIDTH}
+                max={MAX_CUSTOM_SESSION_COLUMN_WIDTH}
+                step={CUSTOM_SESSION_COLUMN_WIDTH_STEP}
+                onValueChange={([px]) => setSessionColumnWidth(px)}
+                aria-label={t("sessionWidth.customWidth")}
+              />
+              <p className="text-2xs text-muted-foreground leading-4">
+                {t("sessionWidth.customHint", {
+                  min: MIN_CUSTOM_SESSION_COLUMN_WIDTH,
+                  max: MAX_CUSTOM_SESSION_COLUMN_WIDTH,
+                })}
+              </p>
+            </div>
           </div>
         </section>
 

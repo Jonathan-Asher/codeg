@@ -162,6 +162,25 @@
       "reset": "リセット",
       "toast": "チャットの文字 {percent}%"
     },
+    "sessionWidth": {
+      "sectionTitle": "セッションの幅",
+      "sectionDescription": "会話カラム（メッセージ、入力欄とその上のカード）の最大幅です。標準は従来の読みやすい幅で、広い設定ではコード・差分・表により多くのスペースを使い、全幅ではパネル全体に広がります。すべての会話に適用され、デバイスごとに保存されます。会話の ⋯ メニューからも変更できます。",
+      "placeholder": "セッションの幅を選択",
+      "default": "デフォルト",
+      "presets": {
+        "standard": "標準",
+        "wide": "広め",
+        "extraWide": "さらに広め",
+        "full": "全幅"
+      },
+      "presetWidth": "{px} px",
+      "fillsPanel": "パネル全体",
+      "customValue": "カスタム（{px} px）",
+      "customWidth": "カスタム幅",
+      "customHint": "ドラッグで {min}〜{max} px の任意の幅に設定できます。幅はウィンドウズーム 100% 時の値で、ズームに合わせて変わります。",
+      "reset": "リセット",
+      "toast": "セッションの幅: {label}"
+    },
     "fonts": {
       "sectionTitle": "フォント",
       "sectionDescription": "インターフェース、コードエディター、ターミナルのフォントをそれぞれ選択します。内蔵フォントは必要に応じて読み込まれます。「カスタム…」を選ぶと、システムにインストールされた任意のフォントを使用できます。",
@@ -593,6 +612,10 @@
       "chat_text_zoom_reset": {
         "title": "チャットの文字サイズをリセット",
         "description": "会話の文字を 100% に戻します"
+      },
+      "cycle_session_width": {
+        "title": "セッションの幅を切り替え",
+        "description": "会話カラムの幅を標準・広め・さらに広め・全幅の順に切り替えます"
       },
       "read_last_reply": {
         "title": "最新の返信を読み上げ",

@@ -50,7 +50,7 @@ interface VirtualizedMessageThreadProps<T> {
   gap?: number
   /** Vertical padding before the first / after the last item. @default 16 */
   padding?: number
-  /** Extra className on every item's inner wrapper (the `max-w-3xl` div). */
+  /** Extra className on every item's inner wrapper (the session-column div). */
   className?: string
   /** Extra className on the MessageThreadContent shell. */
   contentClassName?: string
@@ -392,7 +392,12 @@ function VirtualizedMessageThreadImpl<T>({
           >
             {hasOlder ? (
               <div key="load-older-row" style={styles.first}>
-                <div className={cn("mx-auto max-w-3xl px-4", className)}>
+                <div
+                  className={cn(
+                    "mx-auto max-w-(--session-column-max-width) px-4",
+                    className
+                  )}
+                >
                   <button
                     type="button"
                     onClick={isLoadingOlder ? undefined : onLoadOlder}
@@ -416,7 +421,12 @@ function VirtualizedMessageThreadImpl<T>({
                 key={getItemKey(item, index)}
                 style={itemStyle(index, items.length)}
               >
-                <div className={cn("mx-auto max-w-3xl px-4", className)}>
+                <div
+                  className={cn(
+                    "mx-auto max-w-(--session-column-max-width) px-4",
+                    className
+                  )}
+                >
                   {renderItem(item, index)}
                 </div>
               </div>

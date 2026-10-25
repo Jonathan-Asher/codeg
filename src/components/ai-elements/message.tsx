@@ -51,10 +51,13 @@ export const Message = ({ className, from, ...props }: MessageProps) => (
       "group flex flex-col gap-2",
       from === "user"
         ? // Outer user capsule hugs its content (`w-fit`) instead of always
-          // reserving the full `max-w-[88%]` box — the inner bubble
+          // reserving the full 88% box — the inner bubble
           // (`MessageContent`) is already `w-fit`, so this just drops the
-          // phantom full-width wrapper. Assistant keeps `w-full`.
-          "is-user ml-auto justify-end w-fit max-w-[88%]"
+          // phantom full-width wrapper. Assistant keeps `w-full`. The 60rem
+          // cap only bites in a wide session column (Settings → Appearance →
+          // Session width), where 88% would run a long message out to lines
+          // too long to read; at the standard width 88% is the smaller.
+          "is-user ml-auto justify-end w-fit max-w-[min(88%,60rem)]"
         : "is-assistant w-full",
       className
     )}

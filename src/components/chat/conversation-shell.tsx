@@ -255,7 +255,7 @@ export function ConversationShell({
           to the input width. */}
       <div>
         {pendingAskQuestion && pendingAskQuestion.questions.length > 0 && (
-          <div className="mx-auto w-full max-w-3xl px-4">
+          <div className="mx-auto w-full max-w-(--session-column-max-width) px-4">
             <AskQuestionCard
               question={pendingAskQuestion}
               onAnswer={onAnswerAskQuestion}
@@ -263,7 +263,7 @@ export function ConversationShell({
           </div>
         )}
         {pendingPlanApproval && (
-          <div className="mx-auto w-full max-w-3xl px-4">
+          <div className="mx-auto w-full max-w-(--session-column-max-width) px-4">
             {/* key on approval_id so the card always remounts (fresh in-flight /
                 feedback state) if the slot is ever reused for a new approval. */}
             <PlanApprovalCard
@@ -275,17 +275,19 @@ export function ConversationShell({
         )}
 
         {composerBanner && (
-          <div className="mx-auto w-full max-w-3xl px-4 pb-2">
+          <div className="mx-auto w-full max-w-(--session-column-max-width) px-4 pb-2">
             {composerBanner}
           </div>
         )}
 
         {!hideInput && feedbackList && (
-          <div className="mx-auto w-full max-w-3xl px-4">{feedbackList}</div>
+          <div className="mx-auto w-full max-w-(--session-column-max-width) px-4">
+            {feedbackList}
+          </div>
         )}
 
         {!hideInput && (
-          <div className="mx-auto w-full max-w-3xl">
+          <div className="mx-auto w-full max-w-(--session-column-max-width)">
             <ChatInput
               status={status}
               promptCapabilities={promptCapabilities}

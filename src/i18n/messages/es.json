@@ -162,6 +162,25 @@
       "reset": "Restablecer",
       "toast": "Texto del chat {percent}%"
     },
+    "sessionWidth": {
+      "sectionTitle": "Ancho de la sesión",
+      "sectionDescription": "Hasta qué ancho puede crecer la columna de la conversación (mensajes, el editor y las tarjetas sobre él). Estándar es el ancho de lectura clásico; los ajustes más anchos dan más espacio al código, los diffs y las tablas, y Ancho completo ocupa todo el panel. Se aplica a todas las conversaciones y se guarda por dispositivo. También en el menú ⋯ de una conversación.",
+      "placeholder": "Selecciona el ancho de la sesión",
+      "default": "Predeterminado",
+      "presets": {
+        "standard": "Estándar",
+        "wide": "Ancho",
+        "extraWide": "Extra ancho",
+        "full": "Ancho completo"
+      },
+      "presetWidth": "{px} px",
+      "fillsPanel": "ocupa el panel",
+      "customValue": "Personalizado ({px} px)",
+      "customWidth": "Ancho personalizado",
+      "customHint": "Arrastra para elegir cualquier ancho entre {min} y {max} px. Los anchos se miden con el zoom de la ventana al 100 % y crecen con él.",
+      "reset": "Restablecer",
+      "toast": "Ancho de la sesión: {label}"
+    },
     "fonts": {
       "sectionTitle": "Fuentes",
       "sectionDescription": "Elige las fuentes para la interfaz, el editor de código y el terminal. Las fuentes incluidas se cargan cuando se necesitan; selecciona «Personalizada…» para usar cualquier fuente instalada en tu sistema.",
@@ -593,6 +612,10 @@
       "chat_text_zoom_reset": {
         "title": "Restablecer el tamaño del texto del chat",
         "description": "Devuelve el texto de la conversación al 100%"
+      },
+      "cycle_session_width": {
+        "title": "Cambiar ancho de la sesión",
+        "description": "Alterna la columna de la conversación entre Estándar, Ancho, Extra ancho y Ancho completo"
       },
       "read_last_reply": {
         "title": "Leer la última respuesta",

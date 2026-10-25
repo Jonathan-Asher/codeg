@@ -103,7 +103,7 @@ export function UserMessageEditor({
       role="group"
       aria-label={t("editMessage")}
       data-user-message-editor=""
-      className="ms-auto flex w-full max-w-[88%] flex-col gap-2 rounded-lg bg-secondary px-3 py-3"
+      className="ms-auto flex w-full max-w-[min(88%,60rem)] flex-col gap-2 rounded-lg bg-secondary px-3 py-3"
     >
       {images.length > 0 && (
         <ul

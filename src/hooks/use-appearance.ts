@@ -4,6 +4,7 @@ import { useContext } from "react"
 import { AppearanceContext } from "@/components/appearance-provider"
 import { DEFAULT_CHAT_TEXT_SCALE } from "@/lib/chat-text-scale"
 import { resolveFontStack } from "@/lib/font-presets"
+import { DEFAULT_SESSION_COLUMN_WIDTH } from "@/lib/session-column-width"
 
 export function useAppearance() {
   const ctx = useContext(AppearanceContext)
@@ -38,6 +39,23 @@ export function useChatTextScale() {
     chatTextScale: ctx?.chatTextScale ?? DEFAULT_CHAT_TEXT_SCALE,
     setChatTextScale: ctx?.setChatTextScale ?? noopSetChatTextScale,
     chatTextScaleNotice: ctx?.chatTextScaleNotice ?? null,
+  }
+}
+
+const noopSetSessionColumnWidth = () => {}
+
+/**
+ * Max width of the conversation column (Settings → Appearance → Session
+ * width). Tolerates a missing provider (Standard, read-only), like the chat
+ * text size: the CSS variable carries the width either way.
+ */
+export function useSessionColumnWidth() {
+  const ctx = useContext(AppearanceContext)
+  return {
+    sessionColumnWidth: ctx?.sessionColumnWidth ?? DEFAULT_SESSION_COLUMN_WIDTH,
+    setSessionColumnWidth:
+      ctx?.setSessionColumnWidth ?? noopSetSessionColumnWidth,
+    sessionColumnWidthNotice: ctx?.sessionColumnWidthNotice ?? null,
   }
 }
 

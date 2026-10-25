@@ -10,6 +10,7 @@ import { toIntlLocale } from "@/lib/i18n"
 import { APPEARANCE_INIT_SCRIPT } from "@/lib/appearance-script"
 import { AppearanceProvider } from "@/components/appearance-provider"
 import { ChatTextScaleAnnouncer } from "@/components/chat-text-scale-announcer"
+import { SessionColumnWidthAnnouncer } from "@/components/session-column-width-announcer"
 import { OverlayScrollbarsInit } from "@/components/overlay-scrollbars-init"
 import { ClipboardFallbackInit } from "@/components/clipboard-fallback-init"
 import { WebConnectionGuard } from "@/components/connection/web-connection-guard"
@@ -90,6 +91,7 @@ export default async function RootLayout({
                   <PresenceReporter />
                   <WindowResizeGrips />
                   <ChatTextScaleAnnouncer />
+                  <SessionColumnWidthAnnouncer />
                 </AppErrorBoundary>
                 <AppErrorBoundary scope="close-request" variant="silent">
                   {/* Self-gated to the main window: every route it can show
