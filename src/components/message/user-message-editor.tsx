@@ -42,6 +42,15 @@ export interface UserMessageEditorProps {
   startsNewConversation: boolean
   /** The save is under way: the text locks and the button says so. */
   saving: boolean
+  /**
+   * The save was taken before the session was ready and waits for it (see
+   * `lib/pending-actions`): the button spins and says so, and a second click
+   * on it, or Esc, takes the save back — the text stays for another try.
+   * Only read while `saving`.
+   */
+  waiting?: boolean
+  /** Take back a save that is {@link waiting}. */
+  onCancelWaiting?: () => void
   /** Saving can't run right now, and why. The text stays editable. */
   blocked: UserEditBlock | null
   onCancel: () => void
@@ -68,6 +77,8 @@ export function UserMessageEditor({
   images,
   startsNewConversation,
   saving,
+  waiting = false,
+  onCancelWaiting,
   blocked,
   onCancel,
   onSave,
@@ -94,7 +105,12 @@ export function UserMessageEditor({
 
   const hasContent = text.trim().length > 0 || images.length > 0
   const canSave = !saving && blocked === null && hasContent
+  const isWaiting = saving && waiting
   const save = () => {
+    if (isWaiting) {
+      onCancelWaiting?.()
+      return
+    }
     if (canSave) onSave(text)
   }
 
@@ -150,7 +166,10 @@ export function UserMessageEditor({
             // as their own dismissal.
             event.preventDefault()
             event.stopPropagation()
-            if (!saving) onCancel()
+            // A save waiting for the session goes back first; the editor
+            // closes on the next Esc.
+            if (isWaiting) onCancelWaiting?.()
+            else if (!saving) onCancel()
             return
           }
           if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) {
@@ -181,7 +200,7 @@ export function UserMessageEditor({
           variant="ghost"
           size="sm"
           onClick={onCancel}
-          disabled={saving}
+          disabled={saving && !isWaiting}
         >
           {t("editCancel")}
         </Button>
@@ -189,18 +208,22 @@ export function UserMessageEditor({
           type="button"
           size="sm"
           onClick={save}
-          disabled={!canSave}
+          disabled={!canSave && !isWaiting}
           aria-busy={saving || undefined}
           aria-keyshortcuts="Meta+Enter Control+Enter"
+          title={isWaiting ? t("waitingForConnection") : undefined}
+          data-waiting={isWaiting ? "true" : undefined}
         >
           {saving && <Loader2 aria-hidden="true" className="animate-spin" />}
-          {saving
-            ? startsNewConversation
-              ? t("editSavingNewConversation")
-              : keepOriginal
-                ? t("editSaving")
-                : t("editSavingInPlace")
-            : t("editSave")}
+          {isWaiting
+            ? t("editWaiting")
+            : saving
+              ? startsNewConversation
+                ? t("editSavingNewConversation")
+                : keepOriginal
+                  ? t("editSaving")
+                  : t("editSavingInPlace")
+              : t("editSave")}
           {!saving && (
             <kbd
               aria-hidden="true"

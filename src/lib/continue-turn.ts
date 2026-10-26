@@ -116,6 +116,12 @@ export interface ContinueGateInputs {
   /** This tab's connection can take a prompt right now: connected, bound to
    *  this tab's agent and working directory, selectors loaded. */
   connectionReady: boolean
+  /**
+   * The connection is not ready yet but is on its way — opening, resuming,
+   * or idle and started by a click — so Continue is offered anyway and waits
+   * for it (see `lib/pending-actions`). Defaults to `false`.
+   */
+  connectionOpening?: boolean
   /** The docked composer is shown (not the welcome screen, not replaced by a
    *  load-error banner). */
   composerAvailable: boolean
@@ -131,9 +137,10 @@ export interface ContinueGateInputs {
  *   the queue when the session has no way in until the turn ends.
  *
  * Never while a turn runs, while the session waits on the user, while it is
- * connecting or unreachable, for an interrupted turn (its banner carries its
- * own Continue), before the agent has replied, or while something is queued
- * (that message starts the next turn on its own).
+ * unreachable, for an interrupted turn (its banner carries its own Continue),
+ * before the agent has replied, or while something is queued (that message
+ * starts the next turn on its own). While the session is still opening it is
+ * offered when `connectionOpening` says so, and a click waits for the session.
  */
 export function canOfferContinue({
   activity,
@@ -141,10 +148,11 @@ export function canOfferContinue({
   pendingInteraction,
   queuedCount,
   connectionReady,
+  connectionOpening = false,
   composerAvailable,
 }: ContinueGateInputs): boolean {
   if (!composerAvailable || !endsWithAgentReply) return false
   if (pendingInteraction || queuedCount > 0) return false
-  if (activity === "idle") return connectionReady
+  if (activity === "idle") return connectionReady || connectionOpening
   return activity === "background"
 }

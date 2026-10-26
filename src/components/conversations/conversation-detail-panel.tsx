@@ -154,6 +154,22 @@ import { useWakeResync } from "@/hooks/use-wake-resync"
 import { setStreamingOnScreen } from "@/lib/transport/streaming-on-screen"
 import { RETRY_NUDGE_TEXT } from "@/lib/retry-nudge"
 import {
+  rememberCapabilities,
+  useExpectedCapabilities,
+  type AgentCapabilities,
+} from "@/lib/agent-capabilities"
+import {
+  actionGate,
+  CONTINUE_ACTION_TARGET,
+  editActionTarget,
+  forkActionTarget,
+  RETRY_ACTION_TARGET,
+  type PendingAction,
+  type PendingActionKind,
+} from "@/lib/pending-actions"
+import { usePendingActions } from "@/hooks/use-pending-actions"
+import { PendingActionsProvider } from "@/components/message/pending-actions-context"
+import {
   buildSteerPayload,
   extractUserImagesFromDraft,
   getPromptDraftDisplayText,
@@ -239,6 +255,19 @@ interface ConversationTabViewProps {
    *  reparent (the tab moved to another group — remount, keep the connection)
    *  apart from a real teardown (pane switch / route change — disconnect). */
   groupId: string
+}
+
+/** What a queued action needs to run (see `lib/pending-actions`). */
+type PendingActionPayload =
+  | { kind: "fork"; turnId: string }
+  | { kind: "edit"; request: UserMessageEditRequest }
+  | { kind: "continue" }
+  | { kind: "retry" }
+
+/** Retry's answer to a message the agent already has (see `lib/retry-nudge`). */
+const RETRY_NUDGE_DRAFT: PromptDraft = {
+  blocks: [{ type: "text", text: RETRY_NUDGE_TEXT }],
+  displayText: RETRY_NUDGE_TEXT,
 }
 
 /** How a message reaches `handleSend` (see there). */
@@ -1002,6 +1031,69 @@ const ConversationTabView = memo(function ConversationTabView({
     : connStatus === "connected" && !connectionReady
       ? "connecting"
       : connStatus
+
+  // What this agent's session can do, for the transcript's actions (Fork from
+  // here, Edit message). A connection says so at `initialize`, before it
+  // reports `connected`; until then the last answer any session of the agent
+  // gave stands in for it (see `lib/agent-capabilities`), so the buttons are
+  // there from the first frame. The connection's own answer replaces it on
+  // screen and is remembered for the next session: a button it rules out
+  // goes, and an action waiting on it is dropped with a notice.
+  const capabilitiesConfirmed =
+    !connIsForOtherAgent &&
+    conn.agentType === selectedAgent &&
+    (connStatus === "connected" || connStatus === "prompting")
+  const expectedAgentCapabilities = useExpectedCapabilities(selectedAgent)
+  const liveSupportsFork = conn.supportsFork
+  const liveForkStrictPoint = conn.forkStrictPoint
+  const liveForkWhileRunning = conn.forkWhileRunning
+  const confirmedCapabilities = useMemo<AgentCapabilities | null>(
+    () =>
+      capabilitiesConfirmed
+        ? {
+            supportsFork: liveSupportsFork,
+            forkStrictPoint: liveForkStrictPoint,
+            forkWhileRunning: liveForkWhileRunning,
+          }
+        : null,
+    [
+      capabilitiesConfirmed,
+      liveSupportsFork,
+      liveForkStrictPoint,
+      liveForkWhileRunning,
+    ]
+  )
+  useEffect(() => {
+    if (confirmedCapabilities) {
+      rememberCapabilities(selectedAgent, confirmedCapabilities)
+    }
+  }, [confirmedCapabilities, selectedAgent])
+  const capabilities = confirmedCapabilities ?? expectedAgentCapabilities
+  // The session can take an action now: connected (or mid-turn) to this tab's
+  // agent and working directory, and set up — what the queue's flush waits
+  // for, a running turn included: an action decides for itself whether the
+  // turn is in its way (see `actionGate`).
+  const actionsLive =
+    !selectorsLoading &&
+    (connectionReady ||
+      (connStatus === "prompting" &&
+        !connIsForOtherAgent &&
+        (conn.connectedWorkingDir ?? null) ===
+          (workingDirForConnection ?? null)))
+  // Not live, but the session is opening, or a click can open it: the actions
+  // are offered all the same and wait for it. Not while it cannot be reached
+  // at all — a session that failed to load, an agent that isn't installed —
+  // nor while the connection still belongs to another agent.
+  const actionsUnreachable =
+    !actionsLive &&
+    (Boolean(acpLoadError) || Boolean(detailError) || selectedAgentNotInstalled)
+  const actionsCanWait =
+    !actionsLive &&
+    hasPersistedConversation &&
+    !connIsForOtherAgent &&
+    !actionsUnreachable
+  const actionsOffered =
+    hasPersistedConversation && (actionsLive || actionsCanWait)
   const connectionModes = useMemo(
     () => effectiveModes?.available_modes ?? [],
     [effectiveModes]
@@ -1133,6 +1225,216 @@ const ConversationTabView = memo(function ConversationTabView({
   const [forkingTurnId, setForkingTurnId] = useState<string | null>(null)
   const forkInFlightRef = useRef(false)
 
+  // Actions taken before the session was ready, waiting for it (see
+  // `lib/pending-actions`). The handlers they run are declared further down
+  // and reached through these refs.
+  const handleForkFromTurnRef = useRef<(turnId: string) => Promise<void>>(
+    async () => {}
+  )
+  const handleEditUserMessageRef = useRef<
+    (
+      request: UserMessageEditRequest,
+      opts?: { queued?: boolean }
+    ) => Promise<boolean>
+  >(async () => false)
+  const msgQueueRef = useRef(msgQueue)
+  useEffect(() => {
+    msgQueueRef.current = msgQueue
+  }, [msgQueue])
+  const waitingMessageIds = useMemo(
+    () => new Set(msgQueue.map((item) => item.id)),
+    [msgQueue]
+  )
+  const turnRunning = connStatus === "prompting"
+  // Something an action must not run under: a fork or an edit under way, a
+  // message on its way to becoming a turn, a queued row being delivered.
+  const actionsBusy =
+    editInFlight ||
+    forkingTurnId !== null ||
+    runtimeSyncState === "awaiting_persist" ||
+    queueSteerInFlight ||
+    heldDrainInFlight
+  const gatePendingAction = useCallback(
+    (action: PendingAction<PendingActionPayload>) =>
+      actionGate(action, {
+        ready: actionsLive,
+        capabilities: confirmedCapabilities,
+        agentType: selectedAgent,
+        turnRunning,
+        waitingMessageIds,
+        busy: actionsBusy,
+      }),
+    [
+      actionsLive,
+      confirmedCapabilities,
+      selectedAgent,
+      turnRunning,
+      waitingMessageIds,
+      actionsBusy,
+    ]
+  )
+  const runPendingAction = useCallback(
+    async (action: PendingAction<PendingActionPayload>): Promise<unknown> => {
+      const payload = action.payload
+      switch (payload.kind) {
+        case "fork":
+          await handleForkFromTurnRef.current(payload.turnId)
+          return true
+        case "edit":
+          return handleEditUserMessageRef.current(payload.request, {
+            queued: true,
+          })
+        case "continue":
+          // Into the message queue, at its head — anything typed after the
+          // click is behind it — and out from there the way a typed message
+          // goes: now, or into a turn held open for background work.
+          mqRequeueFront(continuePromptDraft(), selectedModeIdRef.current, {
+            adoptSendTimeMode: true,
+          })
+          return true
+        case "retry":
+          lifecycleSend(RETRY_NUDGE_DRAFT, null)
+          return true
+      }
+    },
+    [lifecycleSend, mqRequeueFront]
+  )
+  const pendingActionLabel = useCallback(
+    (kind: PendingActionKind) => {
+      switch (kind) {
+        case "fork":
+          return tMessageList("forkFromHere")
+        case "edit":
+          return tMessageList("editMessage")
+        case "continue":
+          return tCmp("continue")
+        case "retry":
+          return tMessageList("retry")
+      }
+    },
+    [tCmp, tMessageList]
+  )
+  const notifyUnsupportedAction = useCallback(
+    (action: PendingAction<PendingActionPayload>) => {
+      notify({
+        level: "warning",
+        key: `pending-action-unsupported:${tabId}`,
+        title: t("pendingActionUnsupported", {
+          agent: getAgentLabel(selectedAgent),
+          action: pendingActionLabel(action.kind),
+        }),
+      })
+    },
+    [pendingActionLabel, selectedAgent, t, tabId]
+  )
+  const pendingActions = usePendingActions<PendingActionPayload>({
+    gate: gatePendingAction,
+    run: runPendingAction,
+    onUnsupported: notifyUnsupportedAction,
+  })
+  const {
+    toggle: togglePendingAction,
+    enqueue: enqueuePendingAction,
+    cancel: cancelPendingAction,
+    cancelLast: cancelLastPendingAction,
+    dropAll: dropPendingActions,
+    pendingTargets: pendingActionTargets,
+    holdsSends: actionsHoldSends,
+  } = pendingActions
+  const hasPendingActions = pendingActions.queue.length > 0
+  // A click runs its action right away only while the session is ready and no
+  // earlier action still waits (it would overtake it). Read through a ref, so
+  // the handlers handed to every reply keep their identity across connection
+  // changes.
+  const actionsDirect =
+    actionsLive && !hasPendingActions && pendingActions.running === null
+  const actionsDirectRef = useRef(actionsDirect)
+  useEffect(() => {
+    actionsDirectRef.current = actionsDirect
+  }, [actionsDirect])
+
+  // Actions waiting on a session nobody is opening — the connection failed or
+  // dropped, or never started — open it, once. If that fails too, or the
+  // session cannot be reached at all, what waits on it is dropped and a
+  // notice says so: nothing is lost silently.
+  const pendingConnectTriedRef = useRef(false)
+  const [pendingConnectInFlight, setPendingConnectInFlight] = useState(false)
+  const connectionIdleForActions =
+    !actionsLive &&
+    (connStatus == null ||
+      connStatus === "disconnected" ||
+      connStatus === "error")
+  useEffect(() => {
+    if (!hasPendingActions) {
+      pendingConnectTriedRef.current = false
+      return
+    }
+    if (pendingConnectInFlight) return
+    if (!actionsUnreachable) {
+      if (!connectionIdleForActions) {
+        // Opening (or open): that attempt is the one they wait on.
+        if (!actionsLive) pendingConnectTriedRef.current = true
+        return
+      }
+      // The auto-connect starts by itself once these clear.
+      if (awaitingHistoricalSessionId || connectHeld) return
+      if (!pendingConnectTriedRef.current) {
+        pendingConnectTriedRef.current = true
+        setPendingConnectInFlight(true)
+        void acpActions
+          .reconnect(tabId)
+          .then((reconnected) => {
+            // Nothing to reconnect — this tab never connected: connect it.
+            if (!reconnected) handleFocus()
+          })
+          .catch(() => {
+            // A failed connect publishes (and notifies) its own failure.
+          })
+          .finally(() => setPendingConnectInFlight(false))
+        return
+      }
+    }
+    const dropped = dropPendingActions()
+    if (dropped.length === 0) return
+    notify({
+      level: "error",
+      key: `pending-actions-dropped:${tabId}`,
+      title: t("pendingActionsConnectFailed", {
+        actions: [
+          ...new Set(dropped.map((action) => pendingActionLabel(action.kind))),
+        ].join(", "),
+      }),
+    })
+  }, [
+    acpActions,
+    actionsLive,
+    actionsUnreachable,
+    awaitingHistoricalSessionId,
+    connectHeld,
+    connectionIdleForActions,
+    dropPendingActions,
+    handleFocus,
+    hasPendingActions,
+    pendingActionLabel,
+    pendingConnectInFlight,
+    t,
+    tabId,
+  ])
+
+  // Esc takes back the action taken last. Only in the tab in front, and only
+  // when nothing else claimed the key: an open menu or dialog closes on it
+  // (and marks it handled), an editor's own Esc stops it on the way.
+  useEffect(() => {
+    if (!isActive || !hasPendingActions) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return
+      if (event.isComposing) return
+      if (cancelLastPendingAction()) event.preventDefault()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [cancelLastPendingAction, hasPendingActions, isActive])
+
   // Flush queued messages whenever the agent is idle. This is the queue's send
   // engine, covering BOTH:
   //   - the normal case: a message queued while the agent was prompting, sent
@@ -1159,6 +1461,9 @@ const ConversationTabView = memo(function ConversationTabView({
     // An edit is forking the session its message goes into; anything queued
     // meanwhile follows it rather than racing ahead. See `editInFlight`.
     if (editInFlight) return
+    // An action taken before the session was ready goes first: a message
+    // queued after it follows it (see `lib/pending-actions`).
+    if (actionsHoldSends) return
     // A row being inserted into the (just-ended) turn is still queued; sending
     // it now would deliver it twice. See `queueSteerInFlight`.
     if (queueSteerInFlight) return
@@ -1212,6 +1517,7 @@ const ConversationTabView = memo(function ConversationTabView({
     heldDrainInFlight,
     poolHold,
     limitPauseHold,
+    actionsHoldSends,
     editInFlight,
     queueSteerInFlight,
   ])
@@ -1918,6 +2224,26 @@ const ConversationTabView = memo(function ConversationTabView({
       tabId,
     ]
   )
+  useEffect(() => {
+    handleForkFromTurnRef.current = handleForkFromTurn
+  }, [handleForkFromTurn])
+  // A reply's "Fork from here". Before the session is ready the fork waits
+  // for it, and a second click takes it back (see `lib/pending-actions`).
+  const handleForkRequest = useCallback(
+    (turnId: string) => {
+      if (actionsDirectRef.current) {
+        void handleForkFromTurn(turnId)
+        return
+      }
+      togglePendingAction(
+        "fork",
+        forkActionTarget(turnId),
+        { kind: "fork", turnId },
+        msgQueueRef.current.map((item) => item.id)
+      )
+    },
+    [handleForkFromTurn, togglePendingAction]
+  )
 
   /** Stop one AIR async task. Returns the adapter's verdict so the strip can
    *  release its button; `false` (the adapter declined) is reported, because
@@ -2345,7 +2671,12 @@ const ConversationTabView = memo(function ConversationTabView({
    * not, which keeps the transcript's editor open with the text.
    */
   const handleEditUserMessage = useCallback(
-    async (request: UserMessageEditRequest): Promise<boolean> => {
+    async (
+      request: UserMessageEditRequest,
+      // Run from the action queue: messages typed while it waited are queued
+      // BEHIND it (the queue's flush holds for it), so they don't block it.
+      opts?: { queued?: boolean }
+    ): Promise<boolean> => {
       const draft = buildEditedMessageDraft(
         request.text,
         request.sourceTurn,
@@ -2393,7 +2724,7 @@ const ConversationTabView = memo(function ConversationTabView({
         notify({ level: "error", key: failKey, title: t("editMessageBusy") })
         return false
       }
-      if (mqGetQueueLength() > 0) {
+      if (!opts?.queued && mqGetQueueLength() > 0) {
         notify({ level: "error", key: failKey, title: t("editMessageQueued") })
         return false
       }
@@ -2530,6 +2861,29 @@ const ConversationTabView = memo(function ConversationTabView({
       tabId,
       workingDirForConnection,
     ]
+  )
+  useEffect(() => {
+    handleEditUserMessageRef.current = handleEditUserMessage
+  }, [handleEditUserMessage])
+  // An editor's Save. Before the session is ready the edit waits for it: the
+  // editor says so, and its Save (a second click) or Esc takes it back (see
+  // `lib/pending-actions`). Resolves like `handleEditUserMessage` once it ran,
+  // and `false` — the text stays in the editor — when it was taken back or
+  // dropped. A first message needs no session: it opens a new conversation.
+  const handleEditRequest = useCallback(
+    async (request: UserMessageEditRequest): Promise<boolean> => {
+      if (request.forkFromTurnId === null || actionsDirectRef.current) {
+        return handleEditUserMessage(request)
+      }
+      const outcome = await enqueuePendingAction(
+        "edit",
+        editActionTarget(request.sourceTurn.id),
+        { kind: "edit", request },
+        msgQueueRef.current.map((item) => item.id)
+      )
+      return outcome.status === "ran" && outcome.result === true
+    },
+    [enqueuePendingAction, handleEditUserMessage]
   )
 
   // Receiving end of the hand-off above, for asks aimed at THIS tab. Draining on
@@ -2761,6 +3115,25 @@ const ConversationTabView = memo(function ConversationTabView({
   const endsWithAgentReply = useConversationRuntimeStore((s) =>
     threadEndsWithAgentReply(selectTimelineTurns(s, effectiveConversationId))
   )
+  // A Continue taken before the session was ready waits for it (see
+  // `lib/pending-actions`): the composer keeps the button, spinning, until it
+  // goes out or is taken back.
+  const continuePending = pendingActionTargets.has(CONTINUE_ACTION_TARGET)
+  const handleContinueToggle = useCallback(() => {
+    togglePendingAction(
+      "continue",
+      CONTINUE_ACTION_TARGET,
+      { kind: "continue" },
+      msgQueueRef.current.map((item) => item.id)
+    )
+  }, [togglePendingAction])
+  const continueBeforeReady = useMemo(
+    () =>
+      continuePending || (actionsOffered && !actionsDirect)
+        ? { pending: continuePending, onToggle: handleContinueToggle }
+        : null,
+    [actionsDirect, actionsOffered, continuePending, handleContinueToggle]
+  )
   const canContinue = canOfferContinue({
     activity: deriveSessionActivity({
       attention: attentionKind,
@@ -2779,6 +3152,8 @@ const ConversationTabView = memo(function ConversationTabView({
     ),
     queuedCount: msgQueue.length,
     connectionReady: composerConnStatus === "connected" && !selectorsLoading,
+    // Still opening: offered anyway, and a click waits for the session.
+    connectionOpening: actionsCanWait,
     composerAvailable: !isWelcomeMode && !acpLoadError,
   })
 
@@ -2903,6 +3278,31 @@ const ConversationTabView = memo(function ConversationTabView({
   // and the action would silently do nothing.
   const composerAvailable = !isWelcomeMode && !acpLoadError
 
+  // Retry under an unanswered last message: answer the message the agent
+  // already has — never re-send it (that duplicated it in the session and on
+  // screen). Before the session is ready it waits for it, and a second click
+  // takes it back (see `lib/pending-actions`).
+  const handleRetryRequest = useCallback(() => {
+    if (actionsDirectRef.current) {
+      lifecycleSend(RETRY_NUDGE_DRAFT, null)
+      return
+    }
+    togglePendingAction(
+      "retry",
+      RETRY_ACTION_TARGET,
+      { kind: "retry" },
+      msgQueueRef.current.map((item) => item.id)
+    )
+  }, [lifecycleSend, togglePendingAction])
+  // The transcript's controls read which of them wait, and take one back.
+  const pendingActionsValue = useMemo(
+    () => ({
+      pendingTargets: pendingActionTargets,
+      cancel: cancelPendingAction,
+    }),
+    [pendingActionTargets, cancelPendingAction]
+  )
+
   // Arrow-key history source: read lazily when the user actually steps into
   // history, so streaming tokens neither recompute it nor re-render the panel.
   const getSentHistory = useCallback(
@@ -2939,21 +3339,7 @@ const ConversationTabView = memo(function ConversationTabView({
         onNewSession={
           canShowDetailErrorActions ? handleOpenNewSession : undefined
         }
-        onRetryTurn={
-          composerAvailable
-            ? () => {
-                // Answer the message the agent already has — never re-send
-                // it (that duplicated it in the session and on screen).
-                lifecycleSend(
-                  {
-                    blocks: [{ type: "text", text: RETRY_NUDGE_TEXT }],
-                    displayText: RETRY_NUDGE_TEXT,
-                  },
-                  null
-                )
-              }
-            : undefined
-        }
+        onRetryTurn={composerAvailable ? handleRetryRequest : undefined}
         onQuoteSelection={composerAvailable ? handleQuoteSelection : undefined}
         // Asking opens its own conversation, so it needs a folder to open it in
         // rather than a usable composer here — a transcript whose composer is
@@ -2969,27 +3355,28 @@ const ConversationTabView = memo(function ConversationTabView({
         // passing "not right now". Dropping the handler instead made every
         // reply's fork icon disappear for the length of each reply.
         // `handleForkFromTurn` re-checks liveness at click time.
+        //
+        // Before the session is ready the buttons are there all the same, on
+        // what the agent's sessions last said they can do: a click waits for
+        // the session (see `handleForkRequest`).
         onForkFromTurn={
-          (connStatus === "connected" || connStatus === "prompting") &&
-          hasPersistedConversation &&
-          conn.supportsFork
-            ? handleForkFromTurn
+          actionsOffered && capabilities.supportsFork
+            ? handleForkRequest
             : undefined
         }
         forkWhileRunning={supportsForkWhileRunning(
           selectedAgent,
-          conn.forkWhileRunning
+          capabilities.forkWhileRunning
         )}
         // Editing is a fork too, so it takes the fork's gate — plus an agent
         // whose fork lands exactly on the named reply or refuses (see
         // `supportsMessageEdit`). A turn in flight and a non-empty queue grey
         // the buttons out in the view instead of taking them away.
         onEditUserMessage={
-          (connStatus === "connected" || connStatus === "prompting") &&
-          hasPersistedConversation &&
-          conn.supportsFork &&
-          supportsMessageEdit(selectedAgent, conn.forkStrictPoint)
-            ? handleEditUserMessage
+          actionsOffered &&
+          capabilities.supportsFork &&
+          supportsMessageEdit(selectedAgent, capabilities.forkStrictPoint)
+            ? handleEditRequest
             : undefined
         }
         hasQueuedMessages={msgQueue.length > 0}
@@ -3000,7 +3387,9 @@ const ConversationTabView = memo(function ConversationTabView({
   // transcript's memoized message groups don't re-render for it.
   const transcriptNode = (
     <ForkProgressProvider value={forkingTurnId}>
-      {messageListNode}
+      <PendingActionsProvider value={pendingActionsValue}>
+        {messageListNode}
+      </PendingActionsProvider>
     </ForkProgressProvider>
   )
 
@@ -3225,6 +3614,7 @@ const ConversationTabView = memo(function ConversationTabView({
       heldTurnReady={heldTurnReady}
       onDeliverNow={heldTurnReady ? handleSteer : undefined}
       canContinue={canContinue}
+      continueBeforeReady={continueBeforeReady}
       onQueueReorder={mqReorder}
       onQueueEdit={handleQueueEdit}
       onQueueDelete={mqRemove}

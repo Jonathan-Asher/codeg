@@ -24,7 +24,10 @@ import type {
 import type { QueuedMessage, RequeueOptions } from "@/hooks/use-message-queue"
 import type { QueueNotice } from "@/components/chat/message-queue-display"
 import { ChatInput } from "@/components/chat/chat-input"
-import type { ComposerInjectContent } from "@/components/chat/message-input"
+import type {
+  ComposerInjectContent,
+  ContinueBeforeReady,
+} from "@/components/chat/message-input"
 import { PermissionDialog } from "@/components/chat/permission-dialog"
 import { QuestionDialog } from "@/components/chat/question-dialog"
 import { AskQuestionCard } from "@/components/chat/ask-question-card"
@@ -122,6 +125,8 @@ interface ConversationShellProps {
   ) => Promise<void>
   /** Pass-through: see `MessageInput.canContinue`. */
   canContinue?: boolean
+  /** Pass-through: see `MessageInput.continueBeforeReady`. */
+  continueBeforeReady?: ContinueBeforeReady | null
   /** Why the queue is held, shown above it (see `QueueNotice`). */
   queueNotice?: QueueNotice | null
   /** Pass-through: see `ChatInputProps.connectingReason`. */
@@ -216,6 +221,7 @@ export function ConversationShell({
   heldTurnReady,
   onDeliverNow,
   canContinue,
+  continueBeforeReady,
   queueNotice,
   connectingReason,
   onQueueReorder,
@@ -319,6 +325,7 @@ export function ConversationShell({
               heldTurnReady={heldTurnReady}
               onDeliverNow={onDeliverNow}
               canContinue={canContinue}
+              continueBeforeReady={continueBeforeReady}
               queueNotice={queueNotice}
               connectingReason={connectingReason}
               onQueueReorder={onQueueReorder}
