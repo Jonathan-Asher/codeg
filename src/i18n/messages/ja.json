@@ -7575,5 +7575,48 @@
       "expired": "このサインインはもう待機していません。最初からやり直してください。",
       "failed": "サインインが完了しませんでした。最初からやり直してください。"
     }
+  },
+  "PendingItems": {
+    "indicator": "対応待ち（{count}）",
+    "listTitle": "対応待ち",
+    "listHint": "セッションが回答を待っている質問・許可・計画です。回答するまで Codeg がリマインドし続けます。",
+    "untitled": "無題のセッション",
+    "kind": {
+      "permission": "許可",
+      "question": "質問",
+      "plan": "計画"
+    },
+    "waiting": "{elapsed} 待機中",
+    "reminders": "{count, plural, other {リマインド # 回}}",
+    "notificationRedacted": "セッションがまだあなたを待っています",
+    "duration": {
+      "seconds": "{count} 秒",
+      "minutes": "{count} 分",
+      "hours": "{count} 時間",
+      "days": "{count} 日"
+    },
+    "reminder": {
+      "permission": "{agent} がまだ許可を待っています（{elapsed}）",
+      "question": "{agent} がまだ回答を待っています（{elapsed}）",
+      "plan": "{agent} がまだ計画の確認を待っています（{elapsed}）"
+    },
+    "settings": {
+      "title": "リマインダー",
+      "description": "セッションがあなたを待っているとき（質問、許可、承認待ちの計画）、回答するまで Codeg が iPhone とデスクトップでリマインドします。パソコンの前にいても同じです。表示中のセッションについてはリマインドしません。",
+      "enabledTitle": "リマインドする",
+      "enabledHint": "回答待ちのものがある限りリマインドし続けます。",
+      "scheduleTitle": "リマインドのタイミング",
+      "scheduleHint": "セッションが待ち始めた時点から数えます。",
+      "repeatTitle": "その後の間隔",
+      "repeatHint": "回答されるまでこの間隔でリマインドします。",
+      "repeatOff": "しない",
+      "quietTitle": "おやすみ時間",
+      "quietHint": "この時間帯はリマインドしません。終了時にまだ待っているものがあれば、1 回だけリマインドします。",
+      "quietRangeTitle": "おやすみ時間の範囲",
+      "quietRangeHint": "このデバイスのタイムゾーンで指定します。",
+      "quietFrom": "おやすみ時間の開始",
+      "quietTo": "おやすみ時間の終了",
+      "saveFailed": "保存できませんでした：{message}"
+    }
   }
 }

@@ -82,6 +82,7 @@ import { AppToaster } from "@/components/ui/app-toaster"
 import { WorkspaceTransfersToasts } from "@/components/layout/workspace-transfers"
 import { AutoResumeToasts } from "@/components/layout/auto-resume-toasts"
 import { CriticalAlerts } from "@/components/layout/critical-alerts"
+import { PendingItemsBridge } from "@/components/layout/pending-items-bridge"
 import { ShownSessionPresence } from "@/components/workspace/shown-session-presence"
 import {
   DeepLinkBootstrap,
@@ -1319,6 +1320,11 @@ function FolderLayoutShell({ children }: { children: React.ReactNode }) {
           notification and tone (the backend decides when). */}
       <AppErrorBoundary scope="critical-alerts" variant="silent">
         <CriticalAlerts />
+      </AppErrorBoundary>
+      {/* What waits on the user: the "Waiting for you" list and the
+          reminders' notifications (the backend decides when). */}
+      <AppErrorBoundary scope="pending-items" variant="silent">
+        <PendingItemsBridge />
       </AppErrorBoundary>
       {/* The active tab's session, for the presence reports. */}
       <AppErrorBoundary scope="shown-session-presence" variant="silent">

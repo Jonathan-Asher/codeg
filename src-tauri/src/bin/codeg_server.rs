@@ -724,6 +724,15 @@ async fn async_main() -> ExitCode {
         state.db.conn.clone(),
     ));
 
+    // What waits on the user: needs-you pushes, reminders, badges and the
+    // list (mirrors lib.rs setup).
+    tokio::spawn(codeg_lib::pending::watch::pending_watch_task(
+        state.acp_event_bus.clone(),
+        state.connection_manager.clone_ref(),
+        state.db.conn.clone(),
+        state.emitter.clone(),
+    ));
+
     // Config-sync uploader (mirrors lib.rs setup): sleeps a minute, then
     // compares the configuration's hash every interval and uploads only when
     // it changed. Does nothing at all until a WebDAV endpoint is configured.

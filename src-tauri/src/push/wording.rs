@@ -3,10 +3,13 @@
 //! `Folder.chat.acpConnections.notification*`, `permissionDialog.subtitle`
 //! and `planApproval.title` messages, copied here per language — a test keeps
 //! the copies in step with the message files); critical alerts use the
-//! chat-channel wording the watchdog already sends.
+//! chat-channel wording the watchdog already sends. Reminders use the
+//! desktop's reminder notification (`PendingItems.reminder.*` and
+//! `PendingItems.duration.*`), copied the same way.
 
 use crate::acp::critical_watch::CriticalAlertKind;
 use crate::chat_channel::i18n::{self as channel_i18n, Lang};
+use crate::pending::PendingKind;
 
 /// One language's message templates.
 struct Templates {
@@ -101,6 +104,142 @@ fn templates(lang: Lang) -> Templates {
             test_body: "Test notification: iPhone alerts are working.",
         },
     }
+}
+
+/// One language's reminder templates.
+struct ReminderTemplates {
+    permission: &'static str,
+    question: &'static str,
+    plan: &'static str,
+    seconds: &'static str,
+    minutes: &'static str,
+    hours: &'static str,
+    days: &'static str,
+}
+
+fn reminder_templates(lang: Lang) -> ReminderTemplates {
+    match lang {
+        Lang::ZhCn => ReminderTemplates {
+            permission: "{agent} 仍在等待你的授权（{elapsed}）",
+            question: "{agent} 仍在等你回答（{elapsed}）",
+            plan: "{agent} 仍在等你审阅计划（{elapsed}）",
+            seconds: "{count} 秒",
+            minutes: "{count} 分钟",
+            hours: "{count} 小时",
+            days: "{count} 天",
+        },
+        Lang::ZhTw => ReminderTemplates {
+            permission: "{agent} 仍在等待你的授權（{elapsed}）",
+            question: "{agent} 仍在等你回答（{elapsed}）",
+            plan: "{agent} 仍在等你審閱計畫（{elapsed}）",
+            seconds: "{count} 秒",
+            minutes: "{count} 分鐘",
+            hours: "{count} 小時",
+            days: "{count} 天",
+        },
+        Lang::Ja => ReminderTemplates {
+            permission: "{agent} がまだ許可を待っています（{elapsed}）",
+            question: "{agent} がまだ回答を待っています（{elapsed}）",
+            plan: "{agent} がまだ計画の確認を待っています（{elapsed}）",
+            seconds: "{count} 秒",
+            minutes: "{count} 分",
+            hours: "{count} 時間",
+            days: "{count} 日",
+        },
+        Lang::Ko => ReminderTemplates {
+            permission: "{agent}이(가) 아직 권한 승인을 기다리고 있습니다 ({elapsed})",
+            question: "{agent}이(가) 아직 답변을 기다리고 있습니다 ({elapsed})",
+            plan: "{agent}이(가) 아직 계획 검토를 기다리고 있습니다 ({elapsed})",
+            seconds: "{count}초",
+            minutes: "{count}분",
+            hours: "{count}시간",
+            days: "{count}일",
+        },
+        Lang::Es => ReminderTemplates {
+            permission: "{agent} sigue esperando tu permiso ({elapsed})",
+            question: "{agent} sigue esperando tu respuesta ({elapsed})",
+            plan: "{agent} sigue esperando que revises su plan ({elapsed})",
+            seconds: "{count} s",
+            minutes: "{count} min",
+            hours: "{count} h",
+            days: "{count} d",
+        },
+        Lang::De => ReminderTemplates {
+            permission: "{agent} wartet noch auf deine Erlaubnis ({elapsed})",
+            question: "{agent} wartet noch auf deine Antwort ({elapsed})",
+            plan: "{agent} wartet noch darauf, dass du den Plan prüfst ({elapsed})",
+            seconds: "{count} s",
+            minutes: "{count} Min.",
+            hours: "{count} Std.",
+            days: "{count} T.",
+        },
+        Lang::Fr => ReminderTemplates {
+            permission: "{agent} attend toujours votre autorisation ({elapsed})",
+            question: "{agent} attend toujours votre réponse ({elapsed})",
+            plan: "{agent} attend toujours que vous examiniez son plan ({elapsed})",
+            seconds: "{count} s",
+            minutes: "{count} min",
+            hours: "{count} h",
+            days: "{count} j",
+        },
+        Lang::Pt => ReminderTemplates {
+            permission: "{agent} ainda aguarda sua permissão ({elapsed})",
+            question: "{agent} ainda aguarda sua resposta ({elapsed})",
+            plan: "{agent} ainda aguarda a revisão do plano ({elapsed})",
+            seconds: "{count} s",
+            minutes: "{count} min",
+            hours: "{count} h",
+            days: "{count} d",
+        },
+        Lang::Ar => ReminderTemplates {
+            permission: "{agent} لا يزال ينتظر إذنك ({elapsed})",
+            question: "{agent} لا يزال ينتظر إجابتك ({elapsed})",
+            plan: "{agent} لا يزال ينتظر مراجعتك للخطة ({elapsed})",
+            seconds: "{count} ث",
+            minutes: "{count} د",
+            hours: "{count} س",
+            days: "{count} يوم",
+        },
+        Lang::En => ReminderTemplates {
+            permission: "{agent} is still waiting for your permission ({elapsed})",
+            question: "{agent} is still waiting for your answer ({elapsed})",
+            plan: "{agent} is still waiting for you to review its plan ({elapsed})",
+            seconds: "{count} s",
+            minutes: "{count} min",
+            hours: "{count} h",
+            days: "{count} d",
+        },
+    }
+}
+
+/// How long something has waited, in its largest whole unit: 45 s, 5 min,
+/// 2 h, 3 d.
+pub fn waited(lang: Lang, secs: i64) -> String {
+    let secs = secs.max(0);
+    let t = reminder_templates(lang);
+    let (template, count) = if secs < 60 {
+        (t.seconds, secs)
+    } else if secs < 3600 {
+        (t.minutes, secs / 60)
+    } else if secs < 86_400 {
+        (t.hours, secs / 3600)
+    } else {
+        (t.days, secs / 86_400)
+    };
+    template.replace("{count}", &count.to_string())
+}
+
+/// A reminder's line: the agent is still waiting, and for how long.
+pub fn reminder(lang: Lang, kind: PendingKind, agent: &str, elapsed: &str) -> String {
+    let t = reminder_templates(lang);
+    let template = match kind {
+        PendingKind::Permission => t.permission,
+        PendingKind::Question => t.question,
+        PendingKind::Plan => t.plan,
+    };
+    template
+        .replace("{agent}", agent)
+        .replace("{elapsed}", elapsed)
 }
 
 fn fill(template: &str, agent: &str, message: &str) -> String {
@@ -254,6 +393,36 @@ mod tests {
             );
             assert_eq!(chat["planApproval"]["title"], t.plan_title, "{name}");
         }
+    }
+
+    /// The reminder pushes say what the desktop's reminder notification says.
+    #[test]
+    fn the_reminder_wording_matches_the_desktop_messages() {
+        for (lang, name, raw) in LANGS {
+            let messages: serde_json::Value = serde_json::from_str(raw).unwrap();
+            let pending = &messages["PendingItems"];
+            let t = reminder_templates(lang);
+            assert_eq!(pending["reminder"]["permission"], t.permission, "{name}");
+            assert_eq!(pending["reminder"]["question"], t.question, "{name}");
+            assert_eq!(pending["reminder"]["plan"], t.plan, "{name}");
+            assert_eq!(pending["duration"]["seconds"], t.seconds, "{name}");
+            assert_eq!(pending["duration"]["minutes"], t.minutes, "{name}");
+            assert_eq!(pending["duration"]["hours"], t.hours, "{name}");
+            assert_eq!(pending["duration"]["days"], t.days, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_reminder_says_how_long_it_has_waited() {
+        assert_eq!(waited(Lang::En, 42), "42 s");
+        assert_eq!(waited(Lang::En, 5 * 60 + 59), "5 min");
+        assert_eq!(waited(Lang::En, 2 * 3600 + 10), "2 h");
+        assert_eq!(waited(Lang::En, 3 * 86_400), "3 d");
+        assert_eq!(waited(Lang::De, 30 * 60), "30 Min.");
+        assert_eq!(
+            reminder(Lang::En, PendingKind::Question, "Codex CLI", "30 min"),
+            "Codex CLI is still waiting for your answer (30 min)"
+        );
     }
 
     #[test]

@@ -4559,6 +4559,16 @@ impl ConnectionManager {
         out
     }
 
+    /// Every live connection's state, cloned out from under the connections
+    /// mutex so the caller reads each without holding it (the pending
+    /// registry's once-a-second pass, `crate::pending::watch`).
+    pub async fn session_states(
+        &self,
+    ) -> Vec<std::sync::Arc<tokio::sync::RwLock<crate::acp::SessionState>>> {
+        let connections = self.connections.lock().await;
+        connections.values().map(|conn| conn.state.clone()).collect()
+    }
+
     /// Clone the `Arc<RwLock<SessionState>>` for a given connection id so the
     /// caller can read/write state without holding the connections mutex.
     /// Returns `None` if no such connection is registered.

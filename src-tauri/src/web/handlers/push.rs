@@ -20,6 +20,36 @@ pub async fn get_push_settings(
     Ok(Json(push::push_settings_view(&state.db.conn).await))
 }
 
+/// Everything waiting on the user (`crate::pending`).
+pub async fn list_pending_items() -> Result<Json<crate::pending::PendingSnapshot>, AppCommandError>
+{
+    Ok(Json(crate::pending::snapshot()))
+}
+
+pub async fn get_pending_reminder_settings(
+    Extension(state): Extension<Arc<AppState>>,
+) -> Result<Json<crate::pending::ReminderSettings>, AppCommandError> {
+    Ok(Json(
+        crate::pending::load_reminder_settings(&state.db.conn).await,
+    ))
+}
+
+/// Frontend sends `{ settings: <T> }`, which Tauri `invoke()` unwraps; in web
+/// mode the whole body arrives as-is.
+#[derive(Deserialize)]
+pub struct UpdatePendingReminderSettingsParams {
+    pub settings: crate::pending::ReminderSettings,
+}
+
+pub async fn update_pending_reminder_settings(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<UpdatePendingReminderSettingsParams>,
+) -> Result<Json<crate::pending::ReminderSettings>, AppCommandError> {
+    crate::pending::save_reminder_settings(&state.db.conn, params.settings)
+        .await
+        .map(Json)
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdatePushSettingsParams {

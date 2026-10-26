@@ -53,6 +53,7 @@ pub mod pet_state_mapper;
 pub mod pets;
 #[cfg(feature = "tauri-runtime")]
 pub mod preferences;
+pub mod pending;
 pub mod presence;
 pub mod process;
 pub mod pty_flow;
@@ -1419,6 +1420,18 @@ mod tauri_app {
                     app.state::<crate::db::AppDatabase>().conn.clone(),
                 ));
 
+                // What waits on the user: the "needs you" pushes, the
+                // reminders, the badges and the list. Mirrored in
+                // `bin/codeg_server.rs`.
+                tauri::async_runtime::spawn(crate::pending::watch::pending_watch_task(
+                    app.state::<std::sync::Arc<crate::acp::InternalEventBus>>()
+                        .inner()
+                        .clone(),
+                    app.state::<ConnectionManager>().clone_ref(),
+                    app.state::<crate::db::AppDatabase>().conn.clone(),
+                    crate::web::event_bridge::EventEmitter::Tauri(app.handle().clone()),
+                ));
+
                 // OS `codeg://` URLs. Register the listener after the DB is
                 // live so a warm-start click can look the conversation up.
                 // Cold-start URLs are also read here and baked into the main
@@ -1870,6 +1883,9 @@ mod tauri_app {
                 push_commands::update_push_device_prefs,
                 push_commands::send_test_push,
                 push_commands::report_client_presence,
+                push_commands::list_pending_items,
+                push_commands::get_pending_reminder_settings,
+                push_commands::update_pending_reminder_settings,
                 dictation_refine_commands::refine_dictation,
                 dictation_refine_commands::get_dictation_refine_settings,
                 dictation_refine_commands::update_dictation_refine_settings,

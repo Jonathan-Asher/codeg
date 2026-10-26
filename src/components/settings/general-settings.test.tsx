@@ -70,6 +70,8 @@ vi.mock("@/lib/api", () => ({
   listPushDevices: vi.fn(async () => []),
   // So does the dictation section.
   getDictationRefineSettings: vi.fn(() => new Promise(() => {})),
+  // And the reminders section.
+  getPendingReminderSettings: vi.fn(() => new Promise(() => {})),
 }))
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))

@@ -7575,5 +7575,48 @@
       "expired": "Este inicio de sesión ya no está esperando. Empieza de nuevo.",
       "failed": "El inicio de sesión no se completó. Empieza de nuevo."
     }
+  },
+  "PendingItems": {
+    "indicator": "Esperándote ({count})",
+    "listTitle": "Esperándote",
+    "listHint": "Preguntas, permisos y planes que tus sesiones esperan. Codeg te lo recuerda hasta que respondas.",
+    "untitled": "Sesión sin título",
+    "kind": {
+      "permission": "Permiso",
+      "question": "Pregunta",
+      "plan": "Plan"
+    },
+    "waiting": "esperando {elapsed}",
+    "reminders": "{count, plural, one {# recordatorio} other {# recordatorios}}",
+    "notificationRedacted": "Una sesión sigue esperándote",
+    "duration": {
+      "seconds": "{count} s",
+      "minutes": "{count} min",
+      "hours": "{count} h",
+      "days": "{count} d"
+    },
+    "reminder": {
+      "permission": "{agent} sigue esperando tu permiso ({elapsed})",
+      "question": "{agent} sigue esperando tu respuesta ({elapsed})",
+      "plan": "{agent} sigue esperando que revises su plan ({elapsed})"
+    },
+    "settings": {
+      "title": "Recordatorios",
+      "description": "Cuando una sesión te espera —una pregunta, un permiso, un plan por aprobar—, Codeg te lo recuerda en el iPhone y en el escritorio hasta que respondas, aunque estés en el ordenador. Nunca sobre la sesión que estás mirando.",
+      "enabledTitle": "Recordármelo",
+      "enabledHint": "Seguir recordándome lo que aún espera mi respuesta.",
+      "scheduleTitle": "Recordar tras",
+      "scheduleHint": "Contado desde que la sesión empezó a esperar.",
+      "repeatTitle": "Después, cada",
+      "repeatHint": "Seguir recordando con este intervalo hasta que se responda.",
+      "repeatOff": "Nunca",
+      "quietTitle": "Horas de silencio",
+      "quietHint": "Sin recordatorios en estas horas. Si algo sigue esperando al terminar, llega un recordatorio entonces.",
+      "quietRangeTitle": "Silencio de – a",
+      "quietRangeHint": "En la zona horaria de este dispositivo.",
+      "quietFrom": "Inicio del silencio",
+      "quietTo": "Fin del silencio",
+      "saveFailed": "No se pudo guardar: {message}"
+    }
   }
 }

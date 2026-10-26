@@ -7575,5 +7575,48 @@
       "expired": "此登录已不再等待。请重新开始。",
       "failed": "登录未完成。请重新开始。"
     }
+  },
+  "PendingItems": {
+    "indicator": "等你处理（{count}）",
+    "listTitle": "等你处理",
+    "listHint": "会话在等你回答的问题、授权和计划。在你回答之前，Codeg 会一直提醒你。",
+    "untitled": "未命名会话",
+    "kind": {
+      "permission": "授权",
+      "question": "问题",
+      "plan": "计划"
+    },
+    "waiting": "已等待 {elapsed}",
+    "reminders": "{count, plural, other {已提醒 # 次}}",
+    "notificationRedacted": "有会话仍在等你",
+    "duration": {
+      "seconds": "{count} 秒",
+      "minutes": "{count} 分钟",
+      "hours": "{count} 小时",
+      "days": "{count} 天"
+    },
+    "reminder": {
+      "permission": "{agent} 仍在等待你的授权（{elapsed}）",
+      "question": "{agent} 仍在等你回答（{elapsed}）",
+      "plan": "{agent} 仍在等你审阅计划（{elapsed}）"
+    },
+    "settings": {
+      "title": "提醒",
+      "description": "当会话在等你——一个问题、一次授权、一个待批准的计划——Codeg 会在 iPhone 和桌面上提醒你，直到你回答为止，即使你就在电脑前。你正在查看的会话不会提醒。",
+      "enabledTitle": "提醒我",
+      "enabledHint": "对仍在等我回答的内容持续提醒。",
+      "scheduleTitle": "提醒时间",
+      "scheduleHint": "从会话开始等待时算起。",
+      "repeatTitle": "之后每隔",
+      "repeatHint": "按此间隔持续提醒，直到得到回答。",
+      "repeatOff": "不再提醒",
+      "quietTitle": "免打扰时段",
+      "quietHint": "这段时间内不提醒。结束时如果仍有内容在等待，会提醒一次。",
+      "quietRangeTitle": "免打扰时间",
+      "quietRangeHint": "按本设备的时区。",
+      "quietFrom": "免打扰开始",
+      "quietTo": "免打扰结束",
+      "saveFailed": "无法保存：{message}"
+    }
   }
 }

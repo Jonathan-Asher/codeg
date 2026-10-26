@@ -7575,5 +7575,48 @@
       "expired": "Cette connexion n'est plus en attente. Recommencez.",
       "failed": "La connexion n'a pas abouti. Recommencez."
     }
+  },
+  "PendingItems": {
+    "indicator": "En attente de vous ({count})",
+    "listTitle": "En attente de vous",
+    "listHint": "Questions, autorisations et plans qu'attendent vos sessions. Codeg vous le rappelle jusqu'à ce que vous répondiez.",
+    "untitled": "Session sans titre",
+    "kind": {
+      "permission": "Autorisation",
+      "question": "Question",
+      "plan": "Plan"
+    },
+    "waiting": "attend depuis {elapsed}",
+    "reminders": "{count, plural, one {# rappel} other {# rappels}}",
+    "notificationRedacted": "Une session vous attend toujours",
+    "duration": {
+      "seconds": "{count} s",
+      "minutes": "{count} min",
+      "hours": "{count} h",
+      "days": "{count} j"
+    },
+    "reminder": {
+      "permission": "{agent} attend toujours votre autorisation ({elapsed})",
+      "question": "{agent} attend toujours votre réponse ({elapsed})",
+      "plan": "{agent} attend toujours que vous examiniez son plan ({elapsed})"
+    },
+    "settings": {
+      "title": "Rappels",
+      "description": "Quand une session vous attend — une question, une autorisation, un plan à approuver —, Codeg vous le rappelle sur l'iPhone et sur l'ordinateur jusqu'à ce que vous répondiez, même si vous êtes devant l'écran. Jamais pour la session que vous regardez.",
+      "enabledTitle": "Me le rappeler",
+      "enabledHint": "Continuer à me rappeler ce qui attend encore ma réponse.",
+      "scheduleTitle": "Rappeler après",
+      "scheduleHint": "Compté depuis le moment où la session a commencé à attendre.",
+      "repeatTitle": "Puis toutes les",
+      "repeatHint": "Continuer à rappeler à cet intervalle jusqu'à la réponse.",
+      "repeatOff": "Jamais",
+      "quietTitle": "Heures calmes",
+      "quietHint": "Aucun rappel pendant ces heures. Si quelque chose attend encore à la fin, un rappel arrive alors.",
+      "quietRangeTitle": "Calme de – à",
+      "quietRangeHint": "Dans le fuseau horaire de cet appareil.",
+      "quietFrom": "Début des heures calmes",
+      "quietTo": "Fin des heures calmes",
+      "saveFailed": "Enregistrement impossible : {message}"
+    }
   }
 }

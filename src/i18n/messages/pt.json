@@ -7575,5 +7575,48 @@
       "expired": "Este login não está mais aguardando. Comece de novo.",
       "failed": "O login não foi concluído. Comece de novo."
     }
+  },
+  "PendingItems": {
+    "indicator": "Aguardando você ({count})",
+    "listTitle": "Aguardando você",
+    "listHint": "Perguntas, permissões e planos que suas sessões aguardam. O Codeg lembra você até que responda.",
+    "untitled": "Sessão sem título",
+    "kind": {
+      "permission": "Permissão",
+      "question": "Pergunta",
+      "plan": "Plano"
+    },
+    "waiting": "aguardando há {elapsed}",
+    "reminders": "{count, plural, one {# lembrete} other {# lembretes}}",
+    "notificationRedacted": "Uma sessão ainda aguarda você",
+    "duration": {
+      "seconds": "{count} s",
+      "minutes": "{count} min",
+      "hours": "{count} h",
+      "days": "{count} d"
+    },
+    "reminder": {
+      "permission": "{agent} ainda aguarda sua permissão ({elapsed})",
+      "question": "{agent} ainda aguarda sua resposta ({elapsed})",
+      "plan": "{agent} ainda aguarda a revisão do plano ({elapsed})"
+    },
+    "settings": {
+      "title": "Lembretes",
+      "description": "Quando uma sessão aguarda você — uma pergunta, uma permissão, um plano para aprovar —, o Codeg lembra você no iPhone e no desktop até que responda, mesmo quando está no computador. Nunca sobre a sessão que você está vendo.",
+      "enabledTitle": "Lembrar-me",
+      "enabledHint": "Continuar lembrando o que ainda aguarda minha resposta.",
+      "scheduleTitle": "Lembrar após",
+      "scheduleHint": "Contado desde que a sessão começou a aguardar.",
+      "repeatTitle": "Depois, a cada",
+      "repeatHint": "Continuar lembrando neste intervalo até ser respondido.",
+      "repeatOff": "Nunca",
+      "quietTitle": "Horário silencioso",
+      "quietHint": "Sem lembretes nesse horário. Se algo ainda aguardar quando terminar, chega um lembrete então.",
+      "quietRangeTitle": "Silêncio de – até",
+      "quietRangeHint": "No fuso horário deste dispositivo.",
+      "quietFrom": "Início do silêncio",
+      "quietTo": "Fim do silêncio",
+      "saveFailed": "Não foi possível salvar: {message}"
+    }
   }
 }

@@ -11,6 +11,10 @@
 //! "Away" is `crate::presence`'s: no desktop or web window is visible,
 //! focused and recently used. Whatever the prefs say, nothing is pushed about
 //! a session some client is showing to a user who is looking at it.
+//!
+//! Reminders of a pending item (`crate::pending`) are "needs you" pushes that
+//! treat "only when away" as "always": they are the alerts for when the first
+//! one went unanswered. "Off" still means off.
 
 use serde::{Deserialize, Serialize};
 
@@ -76,7 +80,9 @@ impl DevicePrefs {
             PushKind::NeedsYou => self.needs_you.allows(away),
             PushKind::Critical => self.critical,
             PushKind::Error => self.errors,
-            PushKind::Test => true,
+            // A silent badge update tells nothing; every device keeps its
+            // count right.
+            PushKind::Test | PushKind::Badge => true,
         }
     }
 }

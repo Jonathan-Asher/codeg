@@ -14,6 +14,7 @@ This page covers:
 6. [Notification actions (iOS client)](#6-notification-actions)
 7. [Presence: who counts as "looking"](#7-presence)
 8. [Testing against a mock APNs](#8-testing-without-apple)
+9. [What waits on the user: the pending list and reminders](#9-pending-items)
 
 ## 1. The APNs key
 
@@ -81,6 +82,12 @@ Under the settings:
   focused and in use (see [presence](#7-presence)). Whatever the preferences
   say, nothing is pushed about a session that someone is looking at right now.
 
+  **Reminders** of something still waiting for an answer (see
+  [pending items](#9-pending-items)) are "needs you" pushes that read "Only
+  when away" as "Always": they go to the phone while you sit at the desk on
+  another session. "Off" still means off. The silent badge updates go to
+  every device.
+
 The notifications are worded in the app language in use when the settings were
 last saved, the same wording as the desktop notifications.
 
@@ -115,8 +122,23 @@ When the title is the session's, the body starts with the folder name.
 
 Bursts collapse: one push per kind per session every 3 s. A turn that ends
 within 10 s of an error pushed for its session is not also reported as
-finished. Sessions of delegated sub-agents don't push; their parent session
-does.
+finished. Sessions of delegated sub-agents don't push their turns; their
+parent session does.
+
+The three "needs you" rows come from the pending list (section 9), which also
+sends:
+
+| When | Push |
+|---|---|
+| A delegated sub-agent asks (a question, a permission, a plan) | `needs_you`, filed under the parent session (`conversation_id` is the parent, `asking_conversation_id` the sub-agent) |
+| The user leaves the desk (presence flips to away) with items the phone never heard of (asked while they were at the desk) | `needs_you`, `attempt: 0`, at once |
+| An item still waits at a reminder time (5 min, 30 min, 2 h after the ask, then every 4 h, by default) | `needs_you`, `reminder: true`, `attempt: n` |
+| The number of waiting items changes and a device did not get the new count with a push | badge-only (`kind: "badge"`), silent |
+
+The body of a "needs you" push ends with what is asked, on its own line: the
+question, the tool call's title (a permission), or the plan's first line.
+A reminder says how long the agent has waited: "Claude Code is still waiting
+for your answer (30 min)".
 
 Critical alerts are de-duplicated with the chat channels. An alert that reached
 an iPhone is not also sent to Telegram (or another channel), unless "Also send
@@ -198,8 +220,10 @@ Body:
 | `alert.title`, `alert.body` | Already localized. Title ≤ 120 characters, body ≤ 600. |
 | `sound` | `"default"`. Absent for a critical alert when the critical-session tone is off. |
 | `thread-id` | `<server_id>-<conversation_id>`: one group per session in Notification Center. |
-| `category` | `CODEG_CRITICAL`, `CODEG_PERMISSION` or `CODEG_SESSION` (see actions). |
-| `interruption-level` | `time-sensitive` for `critical` and `needs_you`, else `active`. The app needs the **Time Sensitive Notifications** capability for it to break through Focus. |
+| `category` | `CODEG_CRITICAL`, `CODEG_PERMISSION`, `CODEG_QUESTION` or `CODEG_SESSION` (see actions). |
+| `interruption-level` | `time-sensitive` for `critical` and `needs_you` (reminders included), else `active`. The app needs the **Time Sensitive Notifications** capability for it to break through Focus. |
+| `badge` | On every push: how many items wait on the user across all sessions (`0` clears the icon badge). |
+| `mutable-content` | `1` on `CODEG_QUESTION` pushes, so a Notification Service Extension can add the answer buttons (see actions). |
 
 Custom fields (top level):
 
@@ -216,6 +240,66 @@ Custom fields (top level):
 | `connection_id`, `request_id` | `needs: permission` | The pending permission request. |
 | `approve_option_id` | `needs: permission`, when the request has one | Its "allow once" option (else the first "allow" option). |
 | `deny_option_id` | `needs: permission`, when the request has one | Its "reject once" option. |
+| `pending_id` | `needs_you` | The item's id in `list_pending_items`: deep-link to it. |
+| `pending_kind` | `needs_you` | `permission`, `question` or `plan`. A plan gate that arrives as a permission request (Claude Code's ExitPlanMode, Codex's plan review) is `pending_kind: "plan"` with `needs: "permission"` and the permission fields. |
+| `pending_since` | `needs_you` | When the session started waiting (RFC 3339, UTC). |
+| `reminder` | `needs_you` | `false` for the first push and the catch-up, `true` for a reminder. |
+| `attempt` | `needs_you` | `0` for the first push and the catch-up; `n` for the n-th reminder. |
+| `connection_id` | `needs_you` | The connection the item is on (questions and plans too). |
+| `asking_conversation_id` | a delegated sub-agent's item | The sub-agent's session; `conversation_id` is the parent to open. |
+| `question` | `needs: question` | The first question of the set: `{question_id, item_id, text, header, multi_select, options, count, answerable}`. `options` are the full labels. `answerable` is true for one single-choice question whose labels all fit a button (60 characters). |
+| `approval_id` | `needs: plan` (Grok) | The plan approval waiting for a decision. |
+
+A question reminder, for example:
+
+```json
+{
+  "aps": {
+    "alert": {
+      "title": "Fix the login bug",
+      "body": "codeg · Claude Code is still waiting for your answer (30 min)\nWhich database should we use?"
+    },
+    "sound": "default",
+    "thread-id": "<server_id>-42",
+    "category": "CODEG_QUESTION",
+    "interruption-level": "time-sensitive",
+    "badge": 2,
+    "mutable-content": 1
+  },
+  "server_id": "3f9c0a1b2c4d",
+  "kind": "needs_you",
+  "alert_id": "9a8b…",
+  "conversation_id": 42,
+  "folder_id": 7,
+  "agent_type": "claude_code",
+  "needs": "question",
+  "pending_id": "question:5e0f…",
+  "pending_kind": "question",
+  "pending_since": "2026-10-26T09:00:00Z",
+  "reminder": true,
+  "attempt": 2,
+  "connection_id": "c41d…",
+  "question": {
+    "question_id": "5e0f…",
+    "item_id": "a17c…",
+    "text": "Which database should we use?",
+    "header": "Storage",
+    "multi_select": false,
+    "options": ["SQLite", "Postgres"],
+    "count": 1,
+    "answerable": true
+  }
+}
+```
+
+A badge-only update is silent: no alert, no sound, no category.
+
+```json
+{ "aps": { "badge": 1 }, "server_id": "3f9c0a1b2c4d", "kind": "badge", "alert_id": "…" }
+```
+
+Its `apns-collapse-id` is `<server_id>-badge`, so it never replaces a
+notification on screen.
 
 ## 6. Notification actions
 
@@ -225,6 +309,7 @@ The app registers these `UNNotificationCategory`s. The server only names them.
 |---|---|
 | `CODEG_CRITICAL` | `ACK`, `SNOOZE`, `OPEN` |
 | `CODEG_PERMISSION` | `APPROVE`, `OPEN` |
+| `CODEG_QUESTION` | `OPEN`, plus `ANSWER_<i>` per option (see below) |
 | `CODEG_SESSION` | `OPEN` |
 
 Each action calls an existing endpoint with fields from the payload. Mark
@@ -240,6 +325,32 @@ without `.foreground`), and mark `APPROVE` `.authenticationRequired`:
 
 If the permission was already answered elsewhere, or its connection is gone,
 `acp_respond_permission` fails. Show "already handled" and open the session.
+
+**Answering a question from the notification.** Action titles are fixed when
+a category is registered, so the buttons come from a Notification Service
+Extension: for a push with `question.answerable`, it registers (or reuses) a
+category such as `CODEG_QUESTION.<hash of the labels>` with one action per
+option (`ANSWER_0`, `ANSWER_1`, …, titled with the labels, background,
+`.authenticationRequired`), adds it with `setNotificationCategories`, and sets
+the content's `categoryIdentifier` to it. Without the extension, or when the
+question is not `answerable`, the push keeps `CODEG_QUESTION` and a tap opens
+the session. `ANSWER_<i>` calls:
+
+```http
+POST /api/acp_answer_question
+{"connectionId": connection_id,
+ "questionId": question.question_id,
+ "answer": {"answers": [{"questionId": question.item_id, "labels": [question.options[i]]}], "declined": false}}
+```
+
+A question already answered (on the desktop, or by another device) fails the
+same way a handled permission does.
+
+**Deep links.** `pending_id` names the item; open `conversation_id` (the
+parent of a delegated sub-agent) in `folder_id`, where the waiting card sits
+above the composer. The app can read the whole list with `list_pending_items`
+(section 9), and refresh its icon badge from `count` when it comes to the
+foreground.
 
 ## 7. Presence
 
@@ -283,3 +394,70 @@ small echo server is enough to see the exact requests: the path is
 Every send is logged under `[push]` with the device id, the token's last 8
 characters, Apple's status and reason, and the `apns-id`. The key and the
 provider token are never logged.
+
+`CODEG_REMINDER_SCHEDULE` shortens the reminder schedule for a test run:
+`5,10,20/30` reminds 5, 10 and 20 seconds after the ask, then every 30 s. It
+is not saved and not shown in the settings. Reminders are logged under
+`[pending]`.
+
+## 9. Pending items
+
+The backend keeps one list of everything waiting on the user, across all
+sessions:
+
+- a permission request (a tool call parked on allow / reject);
+- a question: codeg's `ask_user_question` (codeg-mcp), an agent's own ask
+  (Codex `request_user_input`, Pi's select, an MCP elicitation);
+- a plan waiting for approval: Claude Code's ExitPlanMode and Codex's plan
+  review (both permission requests), Grok's `exit_plan_mode`;
+- the same from a delegated sub-agent, filed under its parent session.
+
+An item is on the list exactly while its session holds it: answering it on
+any device, cancelling the turn, the agent giving up or its process ending
+all take it off, and its reminders stop with it. The bookkeeping (when it was
+asked, whether a phone heard of it, which reminders went out) is stored, so
+when an agent asks the same thing again after codeg restarts (an
+auto-resumed turn), the item keeps its age and its reminders, and the phone is
+not told twice.
+
+**Reminders** (Settings › General › Reminders, stored by the backend):
+
+| Setting | Default |
+|---|---|
+| Remind me | on |
+| Remind after | 5 min, 30 min, 2 h (counted from the ask) |
+| Then every | 4 h |
+| Quiet hours | off (22:00 to 07:00 in the time zone of the device that saved them) |
+
+Each reminder is an iPhone push and a desktop notification (one per machine,
+honouring the desktop notifications' switch, permission and "hide contents").
+A reminder due while someone looks at that session is skipped; one due in the
+quiet hours waits for their end; several due at once (the machine slept) go
+out as one, the latest.
+
+The desktop shows the count on the dock icon and as "Waiting for you (N)" in
+the sidebar header; its list gives each item's age, and a click opens the
+session. A browser shows the same list (and the count on the app badge of an
+installed web app).
+
+API (token auth; `POST /api/<name>` on a server, a command on desktop):
+
+| Command | Body | Returns |
+|---|---|---|
+| `list_pending_items` | none | `{items: [item], count}`, oldest first |
+| `get_pending_reminder_settings` | none | `{enabled, steps_secs, repeat_secs, quiet_hours, quiet_start_min, quiet_end_min, timezone}` |
+| `update_pending_reminder_settings` | `{settings: {…}}` | the stored settings |
+
+An item: `{id, kind, source, conversation_id, root_conversation_id,
+folder_id, folder_name, title, agent_type, agent_label, connection_id,
+request_id, asked_at, text, options: [{id, label, kind?}], question?:
+{item_id, header, multi_select, count}, queued, reminders_sent,
+last_reminded_at, next_reminder_at, phone_notified}`. `source` says how to
+answer it: `permission` (`acp_respond_permission`, `requestId`, an option's
+`id`), `question` (`acp_answer_question`, `questionId` = `request_id`, a
+label), `plan_approval` (`acp_answer_plan_approval`, `approvalId` =
+`request_id`). Open `root_conversation_id`.
+
+Events on the event WebSocket: `app://pending-items` (the list changed; the
+whole `{items, count}`) and `app://pending-reminder` (`{id, attempt, item}`:
+a reminder is due; `id` is unique per firing).
