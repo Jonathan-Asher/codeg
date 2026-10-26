@@ -70,7 +70,7 @@ pub enum Job {
     /// Push one item to the iPhones. `attempt` 0 is the first push (and the
     /// catch-up), `n` the n-th reminder.
     Push {
-        item: PendingItem,
+        item: Box<PendingItem>,
         attempt: u32,
         reminder: bool,
     },
@@ -350,7 +350,7 @@ impl Engine {
             self.last_first_push.insert(root, now);
             t.in_flight = true;
             pass.jobs.push(Job::Push {
-                item: view(&self.settings, t),
+                item: Box::new(view(&self.settings, t)),
                 attempt: 0,
                 reminder: false,
             });
@@ -363,7 +363,7 @@ impl Engine {
                 if t.first_push_done && !t.phone_notified && !t.in_flight && !t.seen(looking) {
                     t.in_flight = true;
                     pass.jobs.push(Job::Push {
-                        item: view(&self.settings, t),
+                        item: Box::new(view(&self.settings, t)),
                         attempt: 0,
                         reminder: false,
                     });
@@ -403,7 +403,7 @@ impl Engine {
                     item: item.clone(),
                 });
                 pass.jobs.push(Job::Push {
-                    item,
+                    item: Box::new(item),
                     attempt: k,
                     reminder: true,
                 });

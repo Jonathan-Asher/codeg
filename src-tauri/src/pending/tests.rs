@@ -582,8 +582,11 @@ async fn quiet_hours_hold_the_reminders_and_send_the_latest_after() {
 #[tokio::test]
 async fn a_burst_in_one_session_buzzes_once() {
     let mut h = Harness::new(ReminderSettings::default());
-    let mut live = vec![item("q1", 7, 7, t0()), item("q2", 7, 7, t0())];
-    live.push(item("q3", 8, 8, t0()));
+    let live = [
+        item("q1", 7, 7, t0()),
+        item("q2", 7, 7, t0()),
+        item("q3", 8, 8, t0()),
+    ];
     let step = h.step(0, &live, &away()).await;
     assert_eq!(step.pushes, vec![push("q1", 0, false), push("q3", 0, false)]);
     assert!(h.step(2, &live, &away()).await.pushes.is_empty());
