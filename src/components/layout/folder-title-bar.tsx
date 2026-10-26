@@ -16,7 +16,7 @@ import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useIsActiveChatMode } from "@/hooks/use-is-active-chat-mode"
 import { usePlatform } from "@/hooks/use-platform"
 import { Button } from "@/components/ui/button"
-import { useSearchDialog } from "@/contexts/search-dialog-context"
+import { useSearchDialogSetter } from "@/contexts/search-dialog-context"
 import { useSidebarContext } from "@/contexts/sidebar-context"
 import { useAuxPanelContext } from "@/contexts/aux-panel-context"
 import { useTerminalContext } from "@/contexts/terminal-context"
@@ -50,7 +50,7 @@ export function FolderTitleBar() {
   const { isOpen: sidebarOpen, toggle } = useSidebarContext()
   const { isOpen: auxPanelOpen, toggle: toggleAuxPanel } = useAuxPanelContext()
   const { isOpen: terminalOpen, toggle: toggleTerminal } = useTerminalContext()
-  const { setOpen: setSearchOpen } = useSearchDialog()
+  const setSearchOpen = useSearchDialogSetter()
   const { activeFolder } = useActiveFolder()
   const isChatMode = useIsActiveChatMode()
   const { openNewConversationTab, openChatModeTab } = useTabActions()

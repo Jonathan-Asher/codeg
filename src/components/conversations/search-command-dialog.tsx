@@ -1,13 +1,26 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback, useMemo } from "react"
-import { formatDistanceToNow } from "date-fns"
+import {
+  memo,
+  startTransition,
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useCallback,
+  useDeferredValue,
+  useMemo,
+  type ReactNode,
+} from "react"
+import { flushSync } from "react-dom"
+import { formatDistance } from "date-fns"
 import { enUS, zhCN, zhTW } from "date-fns/locale"
 import { File, Folder } from "lucide-react"
 import { useLocale, useTranslations } from "next-intl"
 import { useAuxPanelContext } from "@/contexts/aux-panel-context"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
+import { prefetchConversationDetail } from "@/stores/conversation-runtime-store"
 import { useTabActions, useTabStore } from "@/contexts/tab-context"
 import { useWorkbenchRoute } from "@/contexts/workbench-route-context"
 import { useWorkspaceActions } from "@/contexts/workspace-context"
@@ -20,6 +33,19 @@ import { setPendingFind } from "@/lib/pending-find"
 import { recentSessions } from "@/lib/recent-sessions"
 import { archivedFolderIds } from "@/components/conversations/sidebar-conversation-grouping"
 import { useShowRecentOnSearch } from "@/lib/search-recent-prefs"
+import {
+  cancelConversationPreconnect,
+  preconnectConversation,
+} from "@/lib/session-preconnect"
+import {
+  cancelQuickSwitchTypeahead,
+  setQuickSwitchTypeaheadOwner,
+  takeQuickSwitchTypeahead,
+} from "@/lib/quick-switch-typeahead"
+import {
+  markQuickSwitchPick,
+  markQuickSwitchShown,
+} from "@/lib/quick-switch-perf"
 import type {
   AgentType,
   ConversationStatus,
@@ -41,6 +67,7 @@ import {
   CommandGroup,
   CommandItem,
 } from "@/components/ui/command"
+import { InstantCommandDialog } from "@/components/ui/instant-command-dialog"
 import { cn } from "@/lib/utils"
 import { formatConversationTitle } from "@/lib/conversation-title"
 import { isWebLinkDown } from "@/lib/transport/web-connection-store"
@@ -75,11 +102,47 @@ const MESSAGE_SEARCH_LIMIT = 40
 /** Most sessions the recent list shows with nothing typed. */
 const RECENT_SESSION_LIMIT = 30
 
+/** How long the selection rests on a row before its transcript is fetched. */
+const PREFETCH_DWELL_MS = 300
+
 const MESSAGE_ROLE_KEYS = {
   user: "roleUser",
   assistant: "roleAssistant",
   system: "roleSystem",
 } as const
+
+// Shared empties, so resetting an already-empty list changes nothing.
+const NO_CONVERSATIONS: DbConversationSummary[] = []
+const NO_MESSAGE_HITS: MessageSearchHit[] = []
+
+/**
+ * Another layer holds focus captive (a modal dialog, an open menu or
+ * popover): Radix and Base UI mark one with focus guards while it is up.
+ */
+function focusHeldElsewhere(): boolean {
+  if (typeof document === "undefined") return false
+  return (
+    document.querySelector(
+      "[data-radix-focus-guard], [data-base-ui-focus-guard]"
+    ) !== null
+  )
+}
+
+/** After the frame that follows has been painted. */
+function afterNextPaint(fn: () => void): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const frame = requestAnimationFrame(() => {
+    timer = setTimeout(fn, 0)
+  })
+  return () => {
+    cancelAnimationFrame(frame)
+    if (timer != null) clearTimeout(timer)
+  }
+}
+
+const recentValue = (conv: DbConversationSummary) => `recent-${conv.id}`
+const resultValue = (conv: DbConversationSummary) =>
+  `${conv.id}-${formatConversationTitle(conv.title)}`
 
 interface SearchCommandDialogProps {
   open: boolean
@@ -88,7 +151,8 @@ interface SearchCommandDialogProps {
 
 interface ConversationRowProps {
   value: string
-  onSelect: () => void
+  conversation: DbConversationSummary
+  onPick: (conversation: DbConversationSummary) => void
   title: string
   status: string | undefined
   /** Shown when the list spans folders; null hides it. */
@@ -100,10 +164,15 @@ interface ConversationRowProps {
   badge?: string
 }
 
-/** One conversation in the Conversations tab — a result or a recent one. */
-function ConversationRow({
+/**
+ * One conversation in the Conversations tab — a result or a recent one.
+ * Memoized: the list stays rendered while the dialog is hidden, and a row
+ * only re-renders when something it shows changed.
+ */
+const ConversationRow = memo(function ConversationRow({
   value,
-  onSelect,
+  conversation,
+  onPick,
   title,
   status,
   folderName,
@@ -112,7 +181,7 @@ function ConversationRow({
   badge,
 }: ConversationRowProps) {
   return (
-    <CommandItem value={value} onSelect={onSelect}>
+    <CommandItem value={value} onSelect={() => onPick(conversation)}>
       <ConversationStatusDot status={status as ConversationStatus} />
       <span className="flex-1 truncate">{title}</span>
       {badge && (
@@ -134,8 +203,22 @@ function ConversationRow({
       )}
     </CommandItem>
   )
-}
+})
 
+/**
+ * The search dialog (⌘K), which with nothing typed is also the session
+ * switcher: ⌘K then Enter goes back to the previous session, like Alt-Tab.
+ *
+ * It stays mounted and rendered between uses (`InstantCommandDialog`): the
+ * recent list is kept current in the background — the session in front left
+ * out, the next one first and selected — so opening only reveals it and puts
+ * the caret in the search box, within the frame of the key press. Whatever is
+ * typed after the shortcut, even before that, is the dialog's (see
+ * `quick-switch-typeahead`). Each close resets the search once the frame that
+ * hid it has been painted, so the next open starts fresh at no cost of its
+ * own. While a session not open in a tab is selected, its transcript is
+ * fetched and its agent pre-connected, so picking it does not wait on either.
+ */
 export function SearchCommandDialog({
   open,
   onOpenChange,
@@ -164,6 +247,10 @@ export function SearchCommandDialog({
     () => new Map(allFolders.map((f) => [f.id, f.name])),
     [allFolders]
   )
+  const knownFolderIds = useMemo(
+    () => new Set(folderNames.keys()),
+    [folderNames]
+  )
   // Archived folders (on their own, through their group, or through the repo
   // a worktree folder belongs to). With nothing typed, their sessions stay out
   // of the recent list, like the sidebar's Recent; a search still finds them,
@@ -191,6 +278,21 @@ export function SearchCommandDialog({
     (s) =>
       s.tabs.find((tab) => tab.id === s.activeTabId)?.conversationId ?? null
   )
+  // Which sessions have a tab, as one string so a tab switch (a new `tabs`
+  // array, the same sessions) does not re-render the dialog.
+  const openConversationKey = useTabStore((s) =>
+    s.tabs
+      .map((tab) => tab.conversationId)
+      .filter((id) => id != null)
+      .join(",")
+  )
+  const openConversationIds = useMemo(
+    () =>
+      new Set(
+        openConversationKey ? openConversationKey.split(",").map(Number) : []
+      ),
+    [openConversationKey]
+  )
   const { openTab } = useTabActions()
   const { openConversations } = useWorkbenchRoute()
   const { openFilePreview } = useWorkspaceActions()
@@ -206,14 +308,30 @@ export function SearchCommandDialog({
   }, [])
   const [query, setQuery] = useState("")
   const [agentFilter, setAgentFilter] = useState<AgentType | null>(null)
-  const [results, setResults] = useState<DbConversationSummary[]>([])
+  const [results, setResults] =
+    useState<DbConversationSummary[]>(NO_CONVERSATIONS)
   const [searching, setSearching] = useState(false)
   const [searchFailed, setSearchFailed] = useState<SearchFailure | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
-  const [messageHits, setMessageHits] = useState<MessageSearchHit[]>([])
+  const [messageHits, setMessageHits] =
+    useState<MessageSearchHit[]>(NO_MESSAGE_HITS)
   const [messageSearching, setMessageSearching] = useState(false)
   const [messageSearchFailed, setMessageSearchFailed] =
     useState<SearchFailure | null>(null)
+  // The row the user moved the selection to; until then, the first one.
+  const [pickedValue, setPickedValue] = useState<string | null>(null)
+  // Relative times are reckoned from here; brought up to date on each open.
+  const [now, setNow] = useState(() => Date.now())
+
+  // A layer that holds focus (a modal, an open menu) cannot have this dialog
+  // stealing focus from under it: opened over one, it uses the modal dialog
+  // as before, which stacks with it. Decided as each open starts, without a
+  // second render pass on the hot path.
+  const shellRef = useRef({ open, legacy: false })
+  if (shellRef.current.open !== open) {
+    shellRef.current = { open, legacy: open && focusHeldElsewhere() }
+  }
+  const legacyShell = shellRef.current.legacy
 
   const folderPath = folder?.path ?? ""
 
@@ -223,9 +341,8 @@ export function SearchCommandDialog({
   // The workspace store holds every sidebar row; only when it has none yet
   // (not loaded) does the recent list ask the backend itself.
   const storeEmpty = allConversations.length === 0
-  const [fetchedConversations, setFetchedConversations] = useState<
-    DbConversationSummary[]
-  >([])
+  const [fetchedConversations, setFetchedConversations] =
+    useState<DbConversationSummary[]>(NO_CONVERSATIONS)
   useEffect(() => {
     if (!open || !showRecent || !storeEmpty) return
     let stale = false
@@ -245,25 +362,31 @@ export function SearchCommandDialog({
 
   // The conversation in the active tab. It is never offered: picking it would
   // only close the dialog, so it stays out of the recent list and the results.
-  const currentConversationId = open ? activeConversationId : null
+  // Tracked while the dialog is hidden too, so it opens already right — but
+  // deferred then: a switch must not wait on redrawing a list nobody sees.
+  // An open reads it directly, so even a hidden update still pending is
+  // never shown stale.
+  const deferredActiveConversationId = useDeferredValue(activeConversationId)
+  const currentConversationId = open
+    ? activeConversationId
+    : deferredActiveConversationId
 
   const recent = useMemo(
     () =>
-      open && recentMode
+      recentMode
         ? recentSessions(recentSource, {
-            knownFolderIds: new Set(folderNames.keys()),
+            knownFolderIds,
             excludeId: currentConversationId,
             folderId: scopedFolderId,
             agentType: agentFilter,
             excludeFolderIds: archivedIds,
             limit: RECENT_SESSION_LIMIT,
           })
-        : [],
+        : NO_CONVERSATIONS,
     [
-      open,
       recentMode,
       recentSource,
-      folderNames,
+      knownFolderIds,
       currentConversationId,
       scopedFolderId,
       agentFilter,
@@ -279,13 +402,20 @@ export function SearchCommandDialog({
     [results, currentConversationId]
   )
 
+  // The selection: the row the user moved to, else the first recent row.
+  // Held here rather than left to cmdk so the hidden list is always opened
+  // with its first row selected, without cmdk having to settle it on open.
+  const firstRecentValue =
+    recentMode && recent.length > 0 ? recentValue(recent[0]) : ""
+  const selectedValue = pickedValue ?? firstRecentValue
+
   const relativeTime = useCallback(
     (iso: string) =>
-      formatDistanceToNow(new Date(iso), {
+      formatDistance(new Date(iso), now, {
         addSuffix: true,
         locale: dateFnsLocale,
       }),
-    [dateFnsLocale]
+    [dateFnsLocale, now]
   )
   const folderLabel = (folderId: number) =>
     scopedFolderId == null ? (folderNames.get(folderId) ?? null) : null
@@ -301,9 +431,13 @@ export function SearchCommandDialog({
   })
 
   // Compute which agent types exist in current folder
-  const availableAgents = Array.from(
-    new Set(conversations.map((c) => c.agent_type))
-  ).sort(compareAgentType)
+  const availableAgents = useMemo(
+    () =>
+      Array.from(new Set(conversations.map((c) => c.agent_type))).sort(
+        compareAgentType
+      ),
+    [conversations]
+  )
 
   // Rank files by relevance (name/path tiers + fuzzy subsequence), scanning the
   // full list so a deeply nested match isn't crowded out by shallower ones.
@@ -317,7 +451,7 @@ export function SearchCommandDialog({
       // With nothing typed, the recent list (narrowed by the agent filter)
       // stands in for results — unless it is turned off.
       if (!q.trim() && (!agent || showRecent)) {
-        setResults([])
+        setResults(NO_CONVERSATIONS)
         setSearchFailed(null)
         setSearching(false)
         return
@@ -332,7 +466,7 @@ export function SearchCommandDialog({
         setResults(data)
         setSearchFailed(null)
       } catch (err) {
-        setResults([])
+        setResults(NO_CONVERSATIONS)
         setSearchFailed(searchFailure(err))
       } finally {
         setSearching(false)
@@ -362,7 +496,7 @@ export function SearchCommandDialog({
     let stale = false
     const timer = setTimeout(() => {
       if (!q) {
-        setMessageHits([])
+        setMessageHits(NO_MESSAGE_HITS)
         setMessageSearchFailed(null)
         setMessageSearching(false)
         return
@@ -376,7 +510,7 @@ export function SearchCommandDialog({
         })
         .catch((err: unknown) => {
           if (stale) return
-          setMessageHits([])
+          setMessageHits(NO_MESSAGE_HITS)
           setMessageSearchFailed(searchFailure(err))
         })
         .finally(() => {
@@ -391,24 +525,73 @@ export function SearchCommandDialog({
     }
   }, [query, activeTab])
 
-  // Reset state when dialog closes
-  useEffect(() => {
-    if (!open) {
-      setQuery("")
-      setAgentFilter(null)
-      setThisFolderOnly(false)
-      setResults([])
-      setMessageHits([])
-      setSearchFailed(null)
-      setMessageSearchFailed(null)
-      setMessageSearching(false)
-      setActiveTab("conversations")
-      resetFileTree()
+  const listRef = useRef<HTMLDivElement>(null)
+  const resetSearchState = useCallback(() => {
+    setQuery("")
+    setAgentFilter(null)
+    setThisFolderOnly(false)
+    setResults(NO_CONVERSATIONS)
+    setMessageHits(NO_MESSAGE_HITS)
+    setSearchFailed(null)
+    setMessageSearchFailed(null)
+    setMessageSearching(false)
+    setActiveTab("conversations")
+    setPickedValue(null)
+    resetFileTree()
+  }, [resetFileTree])
+
+  // Each close resets the search, but only after the frame that hid the
+  // dialog: a pick switches sessions in that frame, and redrawing the hidden
+  // list must not hold it up. Opened again before then, the reset runs right
+  // away, inside the open, so nothing stale is ever shown.
+  const resetPendingRef = useRef(false)
+  const cancelResetRef = useRef<(() => void) | null>(null)
+  const wasOpenRef = useRef(open)
+  useLayoutEffect(() => {
+    const wasOpen = wasOpenRef.current
+    wasOpenRef.current = open
+    if (open && !wasOpen) {
+      if (resetPendingRef.current) {
+        cancelResetRef.current?.()
+        cancelResetRef.current = null
+        resetPendingRef.current = false
+        resetSearchState()
+      }
+      // The modal fallback focuses its own search box as it mounts; nothing
+      // was held back for it.
+      if (legacyShell) cancelQuickSwitchTypeahead()
+      // Times shown as they stood at the last open; the fresh ones follow a
+      // frame later rather than delay this one.
+      startTransition(() => setNow(Date.now()))
+    } else if (!open && wasOpen) {
+      cancelQuickSwitchTypeahead()
+      resetPendingRef.current = true
+      cancelResetRef.current = afterNextPaint(() => {
+        cancelResetRef.current = null
+        if (!resetPendingRef.current) return
+        resetPendingRef.current = false
+        resetSearchState()
+      })
     }
-  }, [open, resetFileTree])
+  }, [open, legacyShell, resetSearchState])
+  useEffect(() => () => cancelResetRef.current?.(), [])
+
+  // A pick that opens a session hands the caret to that session's composer
+  // (it focuses itself as its tab comes to the front), so the search box lets
+  // go of it first; every other close (Escape, a click outside, a file) gives
+  // focus back where it was. Letting go before the switch, not after, also
+  // keeps the restyle it costs off the switch's own frame.
+  const releaseFocus = useCallback(() => {
+    const active = document.activeElement
+    if (active instanceof HTMLElement && active === inputRef.current) {
+      active.blur()
+    }
+  }, [])
 
   const handleSelectConversation = useCallback(
     (conv: DbConversationSummary) => {
+      markQuickSwitchPick(conv.id)
+      releaseFocus()
       // Leave any workbench route (e.g. Automations) so the picked conversation
       // isn't stranded behind the route overlay — covers re-selecting the
       // already-active tab, which doesn't change activeTabId.
@@ -416,11 +599,12 @@ export function SearchCommandDialog({
       openTab(conv.folder_id, conv.id, conv.agent_type, true)
       onOpenChange(false)
     },
-    [openTab, onOpenChange, openConversations]
+    [openTab, onOpenChange, openConversations, releaseFocus]
   )
 
   const handleSelectMessageHit = useCallback(
     (hit: MessageSearchHit) => {
+      releaseFocus()
       // Open the conversation (as picking it above does) and hand the query to
       // its find bar, so the matched turn is highlighted in context even when
       // it sits pages deep — also in a conversation that is already open.
@@ -429,7 +613,7 @@ export function SearchCommandDialog({
       setPendingFind(hit.conversation_id, query.trim())
       onOpenChange(false)
     },
-    [openTab, onOpenChange, openConversations, query]
+    [openTab, onOpenChange, openConversations, query, releaseFocus]
   )
 
   const handleSelectFile = useCallback(
@@ -449,6 +633,92 @@ export function SearchCommandDialog({
     [revealInFileTree, openFilePreview, onOpenChange]
   )
 
+  // The session the selection rests on, while the dialog shows. One that is
+  // not open in a tab has its transcript fetched and its agent pre-connected
+  // (after the usual short dwell), so picking it does not wait on either. An
+  // open tab is live already.
+  const selectedConversation = useMemo(() => {
+    if (!open || legacyShell || activeTab !== "conversations") return null
+    if (!selectedValue) return null
+    if (recentMode) {
+      return recent.find((c) => recentValue(c) === selectedValue) ?? null
+    }
+    return shownResults.find((c) => resultValue(c) === selectedValue) ?? null
+  }, [
+    open,
+    legacyShell,
+    activeTab,
+    selectedValue,
+    recentMode,
+    recent,
+    shownResults,
+  ])
+  // The preselected row is fetched at once (⌘K then Enter is quick); a row
+  // the selection only passes over on the way down the list is not, until it
+  // rests there.
+  const preselected = pickedValue == null
+  useEffect(() => {
+    const conv = selectedConversation
+    if (!conv || openConversationIds.has(conv.id)) return
+    const timer = setTimeout(
+      () => prefetchConversationDetail(conv.id),
+      preselected ? 0 : PREFETCH_DWELL_MS
+    )
+    preconnectConversation(conv)
+    return () => {
+      clearTimeout(timer)
+      cancelConversationPreconnect(conv)
+    }
+  }, [selectedConversation, openConversationIds, preselected])
+
+  // Keys typed after the shortcut but before the search box had focus: replay
+  // them here, in order, once it has (text into the box, keys to the list).
+  const replayTypeahead = useCallback(() => {
+    const keys = takeQuickSwitchTypeahead()
+    if (keys.length === 0) return
+    // After the commit that opened the dialog, so state updates flush.
+    queueMicrotask(() => {
+      const input = inputRef.current
+      if (!input) return
+      for (const key of keys) {
+        if (key.key === "Escape") {
+          onOpenChange(false)
+          return
+        }
+        if (key.key === "Backspace") {
+          flushSync(() => setQuery((q) => q.slice(0, -1)))
+        } else if (key.key.length === 1) {
+          flushSync(() => setQuery((q) => q + key.key))
+        } else {
+          input.dispatchEvent(
+            new KeyboardEvent("keydown", {
+              key: key.key,
+              code: key.code,
+              shiftKey: key.shiftKey,
+              bubbles: true,
+              cancelable: true,
+            })
+          )
+        }
+      }
+    })
+  }, [onOpenChange])
+
+  const handleOpened = useCallback(() => {
+    // A list scrolled down last time comes back scrolled (the engine keeps a
+    // hidden box's offset); the first row is the one to see.
+    const list = listRef.current
+    if (list && list.scrollTop !== 0) list.scrollTop = 0
+    replayTypeahead()
+    markQuickSwitchShown(list?.querySelectorAll("[cmdk-item]").length ?? 0)
+  }, [replayTypeahead])
+
+  // Keys aimed at the dialog are its own: the typeahead buffer lets them
+  // through untouched.
+  const commandRootRef = useCallback((node: HTMLDivElement | null) => {
+    setQuickSwitchTypeaheadOwner(node)
+  }, [])
+
   const placeholder =
     activeTab === "conversations"
       ? t("placeholder")
@@ -456,17 +726,12 @@ export function SearchCommandDialog({
         ? t("messagePlaceholder")
         : t("filePlaceholder")
 
-  return (
-    <CommandDialog
-      title={
-        folder
-          ? t("dialogTitleWithFolder", { name: folder.name })
-          : t("dialogTitle")
-      }
-      open={open}
-      onOpenChange={onOpenChange}
-      shouldFilter={activeTab === "conversations"}
-    >
+  const title = folder
+    ? t("dialogTitleWithFolder", { name: folder.name })
+    : t("dialogTitle")
+
+  const content: ReactNode = (
+    <>
       {/* Folder context header */}
       {folder && (
         <div className="flex items-center gap-2 border-b px-4 py-2.5">
@@ -528,7 +793,7 @@ export function SearchCommandDialog({
 
       <CommandInput
         ref={inputRef}
-        autoFocus
+        autoFocus={legacyShell}
         placeholder={placeholder}
         value={query}
         onValueChange={setQuery}
@@ -601,7 +866,7 @@ export function SearchCommandDialog({
         </div>
       )}
 
-      <CommandList className="min-h-96">
+      <CommandList ref={listRef} className="min-h-96">
         {/* Conversations tab */}
         {activeTab === "conversations" && (
           <>
@@ -619,8 +884,9 @@ export function SearchCommandDialog({
                 {recent.map((conv) => (
                   <ConversationRow
                     key={conv.id}
-                    value={`recent-${conv.id}`}
-                    onSelect={() => handleSelectConversation(conv)}
+                    value={recentValue(conv)}
+                    conversation={conv}
+                    onPick={handleSelectConversation}
                     title={
                       formatConversationTitle(conv.title) ||
                       t("untitledConversation")
@@ -638,8 +904,9 @@ export function SearchCommandDialog({
                 {shownResults.map((conv) => (
                   <ConversationRow
                     key={conv.id}
-                    value={`${conv.id}-${formatConversationTitle(conv.title)}`}
-                    onSelect={() => handleSelectConversation(conv)}
+                    value={resultValue(conv)}
+                    conversation={conv}
+                    onPick={handleSelectConversation}
                     title={
                       formatConversationTitle(conv.title) ||
                       t("untitledConversation")
@@ -759,6 +1026,37 @@ export function SearchCommandDialog({
           </>
         )}
       </CommandList>
-    </CommandDialog>
+    </>
+  )
+
+  if (legacyShell) {
+    return (
+      <CommandDialog
+        title={title}
+        open={open}
+        onOpenChange={onOpenChange}
+        shouldFilter={activeTab === "conversations"}
+        value={selectedValue}
+        onValueChange={setPickedValue}
+      >
+        {content}
+      </CommandDialog>
+    )
+  }
+
+  return (
+    <InstantCommandDialog
+      ref={commandRootRef}
+      title={title}
+      open={open}
+      onOpenChange={onOpenChange}
+      initialFocusRef={inputRef}
+      onOpened={handleOpened}
+      shouldFilter={activeTab === "conversations"}
+      value={selectedValue}
+      onValueChange={setPickedValue}
+    >
+      {content}
+    </InstantCommandDialog>
   )
 }

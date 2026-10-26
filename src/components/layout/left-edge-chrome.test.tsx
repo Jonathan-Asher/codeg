@@ -15,6 +15,7 @@ vi.mock("@/contexts/sidebar-context", () => ({
 }))
 vi.mock("@/contexts/search-dialog-context", () => ({
   useSearchDialog: () => ({ open: false, setOpen: spies.setSearchOpen }),
+  useSearchDialogSetter: () => spies.setSearchOpen,
 }))
 vi.mock("@/hooks/use-is-mac", () => ({ useIsMac: () => false }))
 vi.mock("@/hooks/use-platform", () => ({

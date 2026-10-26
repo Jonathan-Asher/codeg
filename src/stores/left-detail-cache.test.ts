@@ -8,6 +8,7 @@ import type { DbConversationDetail, MessageTurn } from "@/lib/types"
 import {
   claimRuntimeSession,
   keepUnchangedTurns,
+  prefetchConversationDetail,
   releaseRuntimeSession,
   resetConversationRuntimeStore,
   useConversationRuntimeStore,
@@ -166,6 +167,59 @@ describe("leaving and coming back to a session", () => {
     await flush()
     expect(state().byConversationId.has(7)).toBe(true)
     expect(leftDetailCache.size).toBe(0)
+  })
+})
+
+describe("fetching a session ahead of its view", () => {
+  it("has the transcript on screen the moment its view opens", async () => {
+    mockGetFolderConversation.mockResolvedValueOnce(
+      detail(9, [turn("1u", "hello"), turn("2a", "hi")])
+    )
+    prefetchConversationDetail(9)
+    await flush()
+    expect(state().byConversationId.has(9)).toBe(false)
+    expect(leftDetailCache.has(9)).toBe(true)
+
+    mockGetFolderConversation.mockImplementationOnce(
+      () => new Promise(() => {})
+    )
+    actions().fetchDetail(9)
+    const session = state().byConversationId.get(9)!
+    expect(session.detailLoading).toBe(false)
+    expect(session.detail?.turns.map((t) => t.id)).toEqual(["1u", "2a"])
+  })
+
+  it("lets a view that opens meanwhile take the request over", async () => {
+    let answer!: (d: DbConversationDetail) => void
+    mockGetFolderConversation.mockImplementationOnce(
+      () => new Promise((resolve) => (answer = resolve))
+    )
+    prefetchConversationDetail(10)
+    actions().fetchDetail(10)
+    expect(mockGetFolderConversation).toHaveBeenCalledTimes(1)
+    expect(state().byConversationId.get(10)?.detailLoading).toBe(true)
+
+    answer(detail(10, [turn("1u", "hello")]))
+    await flush()
+    const session = state().byConversationId.get(10)!
+    expect(session.detail?.turns).toHaveLength(1)
+    expect(session.detailLoading).toBe(false)
+    expect(leftDetailCache.has(10)).toBe(false)
+  })
+
+  it("leaves alone a session a view holds, or one already on its way", async () => {
+    mockGetFolderConversation.mockResolvedValue(detail(11, [turn("1u", "hi")]))
+    actions().fetchDetail(11)
+    await flush()
+    prefetchConversationDetail(11)
+    expect(mockGetFolderConversation).toHaveBeenCalledTimes(1)
+
+    mockGetFolderConversation.mockImplementationOnce(
+      () => new Promise(() => {})
+    )
+    prefetchConversationDetail(12)
+    prefetchConversationDetail(12)
+    expect(mockGetFolderConversation).toHaveBeenCalledTimes(2)
   })
 })
 

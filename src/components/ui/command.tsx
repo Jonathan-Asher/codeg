@@ -23,19 +23,31 @@ function Command({
   )
 }
 
+/** The command dialog's content box, on top of `DialogContent`'s own. */
+const COMMAND_DIALOG_CONTENT_CLASS =
+  "overflow-hidden p-0 rounded-2xl max-w-lg md:max-w-xl lg:max-w-2xl"
+
+/** Spacing of the command list inside a command dialog. */
+const COMMAND_DIALOG_COMMAND_CLASS =
+  "[&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group]]:px-2 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3"
+
 function CommandDialog({
   title = "Command",
   children,
   shouldFilter,
+  value,
+  onValueChange,
   ...props
 }: React.ComponentProps<typeof Dialog> & {
   title?: string
   shouldFilter?: boolean
+  value?: string
+  onValueChange?: (value: string) => void
 }) {
   return (
     <Dialog {...props}>
       <DialogContent
-        className="overflow-hidden p-0 rounded-2xl max-w-lg md:max-w-xl lg:max-w-2xl"
+        className={COMMAND_DIALOG_CONTENT_CLASS}
         closeButtonClassName="top-1.5 z-10"
       >
         <VisuallyHidden.Root>
@@ -43,7 +55,9 @@ function CommandDialog({
         </VisuallyHidden.Root>
         <Command
           shouldFilter={shouldFilter}
-          className="[&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group]]:px-2 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3"
+          value={value}
+          onValueChange={onValueChange}
+          className={COMMAND_DIALOG_COMMAND_CLASS}
         >
           {children}
         </Command>
@@ -145,6 +159,8 @@ function CommandItem({
 }
 
 export {
+  COMMAND_DIALOG_COMMAND_CLASS,
+  COMMAND_DIALOG_CONTENT_CLASS,
   Command,
   CommandDialog,
   CommandInput,

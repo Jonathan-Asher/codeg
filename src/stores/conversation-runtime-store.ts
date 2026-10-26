@@ -3834,8 +3834,18 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
     const generation = bumpFetchGeneration(conversationId)
     dispatch({ type: "FETCH_DETAIL_START", conversationId })
     const startedAt = Date.now()
-    perfMark("detail:fetch:start", { conversationId, kind: "open" })
-    getFolderConversation(conversationId, { tailTurns: TAIL_TURNS_DEFAULT })
+    // Asked for ahead of this view (`prefetchConversationDetail`) and still on
+    // its way: take that request over rather than send a second one.
+    const prefetched = takeDetailPrefetch(conversationId)
+    perfMark("detail:fetch:start", {
+      conversationId,
+      kind: "open",
+      ...(prefetched ? { prefetched: true } : {}),
+    })
+    ;(
+      prefetched ??
+      getFolderConversation(conversationId, { tailTurns: TAIL_TURNS_DEFAULT })
+    )
       .then((detail) => {
         perfMark("detail:fetch:end", {
           conversationId,
@@ -4438,6 +4448,65 @@ export function getRuntimeSession(
   )
 }
 
+// Detail requests sent ahead of any view (`prefetchConversationDetail`), by
+// DB id, until they land or a view takes them over.
+const detailPrefetches = new Map<number, Promise<DbConversationDetail>>()
+
+/**
+ * Fetch a session's stored transcript before a view opens it, so the view
+ * paints from memory rather than waiting on the request (the quick switcher
+ * asks for the session it has preselected, while the user is still deciding).
+ *
+ * The answer is kept like a recently left session's (`leftDetailCache`),
+ * which `fetchDetail` serves at once and then refreshes quietly. A view that
+ * opens while the request is still out takes it over instead of sending a
+ * second. Does nothing for a session a view already holds or that is already
+ * kept or on its way.
+ */
+export function prefetchConversationDetail(conversationId: number): void {
+  if (conversationId <= 0 || detailPrefetches.has(conversationId)) return
+  if (leftDetailCache.has(conversationId)) return
+  const sessions = useConversationRuntimeStore.getState().byConversationId
+  if (sessions.has(conversationId)) return
+  perfMark("detail:prefetch:start", { conversationId })
+  const request = getFolderConversation(conversationId, {
+    tailTurns: TAIL_TURNS_DEFAULT,
+  })
+  detailPrefetches.set(conversationId, request)
+  request.then(
+    (detail) => {
+      // Taken over by a view: it is that view's answer now.
+      if (detailPrefetches.get(conversationId) !== request) return
+      detailPrefetches.delete(conversationId)
+      perfMark("detail:prefetch:end", { conversationId, ok: true })
+      if (
+        useConversationRuntimeStore
+          .getState()
+          .byConversationId.has(conversationId)
+      ) {
+        return
+      }
+      leftDetailCache.put(conversationId, detail)
+    },
+    () => {
+      if (detailPrefetches.get(conversationId) === request) {
+        detailPrefetches.delete(conversationId)
+      }
+      perfMark("detail:prefetch:end", { conversationId, ok: false })
+    }
+  )
+}
+
+/** A prefetch still on its way for `conversationId`, now the caller's. */
+function takeDetailPrefetch(
+  conversationId: number
+): Promise<DbConversationDetail> | null {
+  const request = detailPrefetches.get(conversationId)
+  if (!request) return null
+  detailPrefetches.delete(conversationId)
+  return request
+}
+
 // Sessions a view released on unmount, each waiting one task for its removal.
 const pendingSessionReleases = new Map<number, ReturnType<typeof setTimeout>>()
 
@@ -4537,6 +4606,7 @@ export function resetConversationRuntimeStore(): void {
   // backend epoch here. See `RemoteConnectionGate`.
   fetchGeneration.clear()
   leftDetailCache.clear()
+  detailPrefetches.clear()
   for (const cancel of viewerDetailSyncCancels.values()) cancel()
   viewerDetailSyncCancels.clear()
   for (const pending of pendingSessionReleases.values()) clearTimeout(pending)

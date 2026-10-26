@@ -14,7 +14,10 @@ import {
   useWorkspaceView,
 } from "@/contexts/workspace-context"
 import { useWorkbenchRoute } from "@/contexts/workbench-route-context"
-import { useSearchDialog } from "@/contexts/search-dialog-context"
+import {
+  useSearchDialog,
+  useSearchDialogSetter,
+} from "@/contexts/search-dialog-context"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import {
   isConversationDeleted,
@@ -34,6 +37,14 @@ import {
 } from "@/lib/keyboard-shortcuts"
 import { SearchCommandDialog } from "@/components/conversations/search-command-dialog"
 import { WorkspaceFolderDialog } from "@/components/layout/workspace-folder-dialog"
+import { armQuickSwitchTypeahead } from "@/lib/quick-switch-typeahead"
+import { markQuickSwitchKey } from "@/lib/quick-switch-perf"
+
+/** The search dialog, bound to the shared open-state. */
+function SearchDialogHost() {
+  const { open, setOpen } = useSearchDialog()
+  return <SearchCommandDialog open={open} onOpenChange={setOpen} />
+}
 
 /**
  * Headless owner of the workspace's global keyboard shortcuts and the two
@@ -72,8 +83,10 @@ export function WorkspaceChromeController() {
   const { shortcuts } = useShortcutSettings()
   // Search open-state is shared (see search-dialog-context): the trigger lives
   // in the sidebar, but this always-mounted controller owns the dialog and the
-  // ⌘K shortcut so search works even when the sidebar is collapsed.
-  const { open: searchOpen, setOpen: setSearchOpen } = useSearchDialog()
+  // ⌘K shortcut so search works even when the sidebar is collapsed. Only the
+  // setter here: opening must not re-render this controller (the dialog host
+  // below is the one place that reads the state).
+  const setSearchOpen = useSearchDialogSetter()
   const [browserOpen, setBrowserOpen] = useState(false)
 
   // One dialog on every platform: it owns directory selection *and* the
@@ -145,6 +158,10 @@ export function WorkspaceChromeController() {
     function handleKeyDown(e: KeyboardEvent) {
       if (matchShortcutEvent(e, shortcuts.toggle_search)) {
         e.preventDefault()
+        markQuickSwitchKey()
+        // ⌘K then Enter is one gesture: keys that follow belong to the
+        // switcher even if they beat its search box to focus.
+        armQuickSwitchTypeahead()
         setSearchOpen((prev) => !prev)
         return
       }
@@ -372,7 +389,7 @@ export function WorkspaceChromeController() {
 
   return (
     <>
-      <SearchCommandDialog open={searchOpen} onOpenChange={setSearchOpen} />
+      <SearchDialogHost />
       <WorkspaceFolderDialog open={browserOpen} onOpenChange={setBrowserOpen} />
     </>
   )
