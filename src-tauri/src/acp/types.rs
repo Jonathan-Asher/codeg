@@ -716,6 +716,14 @@ pub enum AcpEvent {
         /// shows it: set when such a turn starts, cleared when it ends.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         out_of_turn: bool,
+        /// The transcript time of the newest turn in `turns` that this batch
+        /// reports for the first time (a growing turn re-emitted is not new).
+        /// The lifecycle worker moves the conversation's `updated_at` to it,
+        /// so a turn codeg did not send orders the session lists like one it
+        /// did. Server-side only: clients get the row through
+        /// `conversation://changed`.
+        #[serde(skip)]
+        activity_at: Option<chrono::DateTime<chrono::Utc>>,
     },
     /// A `delegate_to_agent` MCP tool call from the parent agent has spawned a
     /// child sub-session and the child's prompt is in flight. Emitted as soon

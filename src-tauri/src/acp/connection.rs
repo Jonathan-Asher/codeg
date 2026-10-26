@@ -16138,6 +16138,7 @@ fn map_grok_subagent_notification_inner(
                     watermark: 0,
                     tasks: Vec::new(),
                     out_of_turn: false,
+                    activity_at: None,
                 });
             }
             Some(events)
@@ -16221,6 +16222,7 @@ fn map_grok_subagent_notification_inner(
                 watermark: 0,
                 tasks: Vec::new(),
                 out_of_turn: false,
+                activity_at: None,
             }])
         }
         _ => None,

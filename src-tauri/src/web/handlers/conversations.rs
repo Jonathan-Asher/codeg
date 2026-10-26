@@ -368,6 +368,21 @@ pub async fn update_conversation_title(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct MarkConversationsViewedParams {
+    pub views: Vec<conv_commands::ConversationViewReport>,
+}
+
+pub async fn mark_conversations_viewed(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<MarkConversationsViewedParams>,
+) -> Result<Json<()>, AppCommandError> {
+    conv_commands::mark_conversations_viewed_core(&state.db.conn, &state.emitter, &params.views)
+        .await?;
+    Ok(Json(()))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateConversationPinnedParams {
     pub conversation_id: i32,
     pub pinned: bool,

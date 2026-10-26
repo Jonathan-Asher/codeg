@@ -155,6 +155,12 @@ fn is_lifecycle_relevant(event: &AcpEvent) -> bool {
             | AcpEvent::SelectorsReady
             | AcpEvent::ModeChanged { .. }
             | AcpEvent::SessionConfigOptions { .. }
+            // A turn codeg did not send showed up in the transcript: once per
+            // new turn (the watcher reports each one once), never per poll.
+            | AcpEvent::BackgroundActivity {
+                activity_at: Some(_),
+                ..
+            }
     )
 }
 
@@ -580,6 +586,29 @@ pub(crate) async fn handle_event(
                 }
             }
             record_selector_state(db_conn, manager, &envelope.connection_id).await?;
+            Ok(())
+        }
+        AcpEvent::BackgroundActivity {
+            activity_at: Some(at),
+            ..
+        } => {
+            // A turn codeg did not send (a cron or `/loop` prompt, a task
+            // notification, a message from another session, the agent's reply
+            // to one): it is activity like any other turn, so the row moves to
+            // the turn's own time and every client re-sorts its lists.
+            let Some((state_arc, emitter)) =
+                manager.get_state_and_emitter(&envelope.connection_id).await
+            else {
+                return Ok(());
+            };
+            let conversation_id = { state_arc.read().await.conversation_id };
+            let Some(cid) = conversation_id else {
+                return Ok(());
+            };
+            if conversation_service::record_out_of_turn_activity(db_conn, cid, *at).await? {
+                crate::commands::conversations::emit_conversation_upsert(&emitter, db_conn, cid)
+                    .await;
+            }
             Ok(())
         }
         // Other events don't need cross-connection DB persistence today; extend
@@ -3352,6 +3381,21 @@ mod tests {
             text: "x".into(),
             parent_tool_use_id: None,
         }));
+        // Transcript-watch batches reach the worker only when they carry a
+        // turn seen for the first time — not for a growing one, a settlement
+        // or an accounting change.
+        let background = |activity_at| AcpEvent::BackgroundActivity {
+            session_id: "s".into(),
+            turns: Vec::new(),
+            outstanding: 0,
+            settled: Vec::new(),
+            watermark: 0,
+            tasks: Vec::new(),
+            out_of_turn: true,
+            activity_at,
+        };
+        assert!(is_lifecycle_relevant(&background(Some(chrono::Utc::now()))));
+        assert!(!is_lifecycle_relevant(&background(None)));
         // A turn start records the turn as running (the interrupted-turn mark
         // is derived from it), so it must reach the worker.
         assert!(is_lifecycle_relevant(&AcpEvent::StatusChanged {

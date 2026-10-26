@@ -1076,6 +1076,7 @@ mod tests {
                     crate::acp::background_status::BackgroundTaskBrief::new("a4", "agent", ""),
                 ],
                 out_of_turn: true,
+                activity_at: None,
             },
         });
         assert_ge_serialized(&env);
@@ -1092,6 +1093,7 @@ mod tests {
                 watermark: 0,
                 tasks: vec![],
                 out_of_turn: false,
+                activity_at: None,
             },
         });
         assert_ge_serialized(&env);

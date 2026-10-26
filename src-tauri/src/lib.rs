@@ -1891,6 +1891,7 @@ mod tauri_app {
                 conversations::update_conversation_status,
                 conversations::update_conversation_title,
                 conversations::update_conversation_pinned,
+                conversations::mark_conversations_viewed,
                 conversations::reorder_conversation_pins,
                 conversations::delete_conversation,
                 folders::load_folder_history,

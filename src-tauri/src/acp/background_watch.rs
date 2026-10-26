@@ -707,6 +707,19 @@ pub(crate) struct WatchState {
     /// Drained by the suppression filter at the end of `tick()` — entries
     /// never outlive the tick that created them.
     turn_origin_task_ids: HashMap<String, Option<String>>,
+    /// Ids of the turns `collect_changed_turns` emitted for the FIRST time
+    /// this tick (a growing turn re-emitted is not in here). The newest one
+    /// that survives the suppression filter becomes the event's
+    /// `activity_at`: one activity bump per turn, never one per streamed
+    /// chunk. Drained at the end of `tick()`, like `turn_origin_task_ids`.
+    first_emitted_turn_ids: HashSet<String>,
+    /// Transcript time of the newest out-of-turn initiator read this tick: a
+    /// message from another session, a cron or `/loop` prompt, a task
+    /// notification. Activity in its own right, though the overlay renders
+    /// none of them as a turn (they are meta records), so the conversation
+    /// moves up when the message lands rather than when the reply's first
+    /// block is written. Taken by `tick()` into the event's `activity_at`.
+    initiator_activity_at: Option<chrono::DateTime<chrono::Utc>>,
     last_disk_activity: Option<Instant>,
     last_emitted_outstanding: Option<u32>,
     /// Task ids (sorted) and the out-of-turn flag as last emitted. The task
@@ -785,6 +798,8 @@ impl WatchState {
             foreground_submission_id: None,
             currently_prompting: false,
             turn_origin_task_ids: HashMap::new(),
+            first_emitted_turn_ids: HashSet::new(),
+            initiator_activity_at: None,
             last_disk_activity: None,
             // Some(0), not None: consumers assume zero until told otherwise,
             // so the first tick must not emit an accounting-only event for a
@@ -1225,6 +1240,18 @@ impl WatchState {
             !matches!(origin, Some(task_id) if self.current_turn_launched_ids.contains(&task_id))
         });
 
+        // A turn shown here for the first time is new activity in the
+        // conversation (a held turn's follow-up, dropped above, belongs to the
+        // wire-rendered turn, whose own heartbeat covers it), and so is the
+        // message that started one.
+        let activity_at = changed_turns
+            .iter()
+            .filter(|t| self.first_emitted_turn_ids.contains(&t.id))
+            .map(|t| t.timestamp)
+            .max()
+            .max(self.initiator_activity_at.take());
+        self.first_emitted_turn_ids.clear();
+
         // A turn whose end never reached the transcript (the CLI died, the
         // request hung) must not read as working for good.
         if self.out_of_turn
@@ -1247,7 +1274,11 @@ impl WatchState {
             || self.last_emitted_outstanding != Some(outstanding)
             || self.last_emitted_task_ids != task_ids
             || self.last_emitted_out_of_turn != self.out_of_turn;
-        if changed_turns.is_empty() && settled.is_empty() && !accounting_changed {
+        if changed_turns.is_empty()
+            && settled.is_empty()
+            && !accounting_changed
+            && activity_at.is_none()
+        {
             return None;
         }
         if self.last_emitted_out_of_turn != self.out_of_turn {
@@ -1267,6 +1298,7 @@ impl WatchState {
             watermark: self.committed,
             tasks,
             out_of_turn: self.out_of_turn,
+            activity_at,
         })
     }
 
@@ -1659,6 +1691,19 @@ impl WatchState {
                 initiator_text.chars().take(60).collect::<String>()
             );
             let origin_task_id = task_notification_origin_id(initiator_text);
+            // A notification for a task the held turn launched belongs to
+            // that wire-rendered turn (see the suppression filter in `tick`).
+            let held = matches!(
+                &origin_task_id,
+                Some(task_id) if self.current_turn_launched_ids.contains(task_id)
+            );
+            if !held {
+                let at = value
+                    .get("timestamp")
+                    .and_then(|t| t.as_str())
+                    .and_then(|t| t.parse::<chrono::DateTime<chrono::Utc>>().ok());
+                self.initiator_activity_at = self.initiator_activity_at.max(at);
+            }
             let rotate = self
                 .episode
                 .as_ref()
@@ -1764,7 +1809,13 @@ impl WatchState {
             if episode.emitted_hashes.get(&turn.id) == Some(&hash) {
                 continue;
             }
-            episode.emitted_hashes.insert(turn.id.clone(), hash);
+            if episode
+                .emitted_hashes
+                .insert(turn.id.clone(), hash)
+                .is_none()
+            {
+                self.first_emitted_turn_ids.insert(turn.id.clone());
+            }
             // Recorded for `tick()`'s held-turn suppression filter, drained
             // there the same tick it's populated — never outlives one tick.
             self.turn_origin_task_ids
@@ -3594,6 +3645,64 @@ mod tests {
         assert_eq!(turns2.len(), 1);
         assert_ne!(turns2[0].id, id1);
         assert!(turns2[0].id.starts_with("bg-"));
+    }
+
+    /// A message from another session (the shape of a real one) and the
+    /// agent's answer: each turn the overlay shows for the FIRST time reports
+    /// its transcript time as `activity_at`, once. A turn that only grew (its
+    /// tool result landed) is not new activity, so a long answer costs one
+    /// activity write per turn, never one per poll.
+    #[test]
+    fn each_new_out_of_turn_turn_reports_its_activity_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_lines(&path, &[]);
+        let ledger = PromptLedger::shared();
+        let mut ws = WatchState::with_file_for_test("s1", path.clone());
+        let activity = |event: Option<AcpEvent>| match event {
+            Some(AcpEvent::BackgroundActivity { activity_at, .. }) => activity_at,
+            _ => None,
+        };
+        let at = |ts: &str| ts.parse::<chrono::DateTime<chrono::Utc>>().unwrap();
+
+        let peer = r#"{"type":"user","timestamp":"2026-10-26T11:35:13.669Z","uuid":"u-peer","isMeta":true,"promptSource":"system","turnOrigin":"peer","message":{"role":"user","content":"Another Claude session sent a message:\n<cross-session-message from=\"uds:/tmp/cc-socks/1.sock\" from-name=\"Orchestrator\">Run the next step</cross-session-message>"}}"#;
+        write_lines(&path, &[peer]);
+        // A meta record the overlay does not render, yet activity: the
+        // conversation moves up when the message lands, not 80 s later when
+        // the reply's first block is written.
+        assert_eq!(
+            activity(tick_now(&mut ws, &ledger)),
+            Some(at("2026-10-26T11:35:13.669Z")),
+            "the message itself is activity"
+        );
+
+        let reply = r#"{"type":"assistant","timestamp":"2026-10-26T11:36:39.676Z","uuid":"a-1","message":{"id":"msg_1","role":"assistant","model":"claude-sonnet-5","content":[{"type":"text","text":"On it"},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]}}"#;
+        write_lines(&path, &[reply]);
+        assert_eq!(
+            activity(tick_now(&mut ws, &ledger)),
+            Some(at("2026-10-26T11:36:39.676Z")),
+            "the reply is a new turn"
+        );
+
+        let result = r#"{"type":"user","timestamp":"2026-10-26T11:36:43.767Z","uuid":"u-r1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"}]}}"#;
+        write_lines(&path, &[result]);
+        assert_eq!(
+            activity(tick_now(&mut ws, &ledger)),
+            None,
+            "a turn that only grew is not new activity"
+        );
+
+        let next = r#"{"type":"assistant","timestamp":"2026-10-26T11:37:04.974Z","uuid":"a-2","message":{"id":"msg_2","role":"assistant","model":"claude-sonnet-5","content":[{"type":"text","text":"Done"}]}}"#;
+        write_lines(&path, &[next]);
+        assert_eq!(
+            activity(tick_now(&mut ws, &ledger)),
+            Some(at("2026-10-26T11:37:04.974Z")),
+            "the next answer is a new turn again"
+        );
+        assert!(
+            tick_now(&mut ws, &ledger).is_none(),
+            "nothing new, nothing reported"
+        );
     }
 
     #[test]

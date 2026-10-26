@@ -933,6 +933,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             pinned_at: None,
+            last_viewed_at: None,
             pin_order: None,
             parent_id: None,
             parent_tool_use_id: None,

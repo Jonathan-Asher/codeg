@@ -980,6 +980,7 @@ mod tests {
                     watermark: 79_991_152,
                     tasks: vec![],
                     out_of_turn: false,
+                    activity_at: None,
                 },
             }),
         };

@@ -131,6 +131,7 @@ async fn create_inner(
         limit_resume_attempts: Set(0),
         limit_auto_continue: Set(true),
         limit_resume_reason: Set(None),
+        last_viewed_at: Set(None),
     };
     Ok(model.insert(conn).await?)
 }
@@ -1576,6 +1577,61 @@ pub async fn refresh_external_activity(
     Ok(res.rows_affected > 0)
 }
 
+/// A turn codeg did not send, seen by a live connection's transcript watcher
+/// (`acp::background_watch`): a cron or `/loop` prompt, a task notification,
+/// a message from another session, or the agent's reply to one. Moves
+/// `updated_at` to `at`, the transcript's own time for that turn, so the
+/// conversation takes its place in the activity ordering exactly as a turn
+/// codeg sent would. The watcher reports each new turn once, so this is one
+/// write per turn, never one per streamed chunk. Returns `true` when a row
+/// was written, so the caller can broadcast a sidebar upsert.
+///
+/// The guards of [`refresh_external_activity`]: strictly forward (a turn a
+/// later one or the running turn's heartbeat already covered is a no-op), not
+/// on a deleted row, not on a delegation child.
+pub async fn record_out_of_turn_activity(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    at: chrono::DateTime<Utc>,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::Expr;
+    let res = conversation::Entity::update_many()
+        .col_expr(conversation::Column::UpdatedAt, Expr::value(at))
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .filter(conversation::Column::DeletedAt.is_null())
+        .filter(conversation::Column::ParentId.is_null())
+        .filter(conversation::Column::UpdatedAt.lt(at))
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected > 0)
+}
+
+/// The user opened this conversation (made it the active tab) at `at`, on
+/// any client. Writes `last_viewed_at` only: a view is not activity, so
+/// `updated_at` stays put (same reasoning as [`refresh_auto_title`]).
+/// Strictly forward, so a late or repeated report never moves a view back,
+/// and a deleted row is left alone. Returns `true` when a row was written, so
+/// the caller can broadcast a sidebar upsert.
+pub async fn mark_viewed(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    at: chrono::DateTime<Utc>,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::{Condition, Expr};
+    let res = conversation::Entity::update_many()
+        .col_expr(conversation::Column::LastViewedAt, Expr::value(at))
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .filter(conversation::Column::DeletedAt.is_null())
+        .filter(
+            Condition::any()
+                .add(conversation::Column::LastViewedAt.is_null())
+                .add(conversation::Column::LastViewedAt.lt(at)),
+        )
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected > 0)
+}
+
 /// Pin or unpin a conversation. Sets `pinned_at = now()` when pinning, `NULL`
 /// when unpinning, and clears `pin_order` either way. Nothing else is written —
 /// `updated_at` is deliberately left untouched (SeaORM updates only the `Set`
@@ -2085,6 +2141,7 @@ impl CarriedOverRow {
             limit_resume_attempts: Set(0),
             limit_auto_continue: Set(true),
             limit_resume_reason: Set(None),
+            last_viewed_at: Set(None),
         }
     }
 }
@@ -2255,6 +2312,7 @@ fn conv_to_summary(r: conversation::Model) -> DbConversationSummary {
         child_count: 0,
         created_at: r.created_at,
         updated_at: r.updated_at,
+        last_viewed_at: r.last_viewed_at,
         pinned_at: r.pinned_at,
         pin_order: r.pin_order,
         parent_id: r.parent_id,
@@ -4472,6 +4530,127 @@ mod tests {
                 .title
                 .as_deref(),
             Some("old loop")
+        );
+    }
+
+    #[tokio::test]
+    async fn out_of_turn_activity_moves_forward_once_per_turn() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/codeg-out-of-turn").await;
+        let parent = create(
+            &db.conn,
+            folder,
+            AgentType::ClaudeCode,
+            Some("t".into()),
+            None,
+        )
+        .await
+        .expect("parent");
+        let before = parent.updated_at;
+
+        // A message from another session lands: the row moves to its time.
+        let turn = before + chrono::Duration::minutes(5);
+        assert!(record_out_of_turn_activity(&db.conn, parent.id, turn)
+            .await
+            .expect("bump"));
+        let summary = get_by_id(&db.conn, parent.id).await.expect("get");
+        assert_eq!(summary.updated_at, turn);
+        assert_eq!(summary.created_at, parent.created_at);
+
+        // The same turn reported again, or an older one, writes nothing.
+        for at in [turn, before] {
+            assert!(!record_out_of_turn_activity(&db.conn, parent.id, at)
+                .await
+                .expect("no-op"));
+        }
+
+        // The agent's reply is the next turn: it moves the row again.
+        let reply = turn + chrono::Duration::seconds(40);
+        assert!(record_out_of_turn_activity(&db.conn, parent.id, reply)
+            .await
+            .expect("reply"));
+        assert_eq!(
+            get_by_id(&db.conn, parent.id).await.unwrap().updated_at,
+            reply
+        );
+
+        // A delegation child and a deleted row are left alone.
+        let child = create_with_delegation(
+            &db.conn,
+            folder,
+            AgentType::ClaudeCode,
+            None,
+            None,
+            Some(DelegationLink {
+                parent_conversation_id: parent.id,
+                parent_tool_use_id: "tu-out-of-turn".into(),
+                delegation_call_id: "call-out-of-turn".into(),
+            }),
+        )
+        .await
+        .expect("child");
+        let later = reply + chrono::Duration::hours(1);
+        assert!(!record_out_of_turn_activity(&db.conn, child.id, later)
+            .await
+            .expect("child"));
+        soft_delete(&db.conn, parent.id).await.expect("delete");
+        assert!(!record_out_of_turn_activity(&db.conn, parent.id, later)
+            .await
+            .expect("deleted"));
+    }
+
+    #[tokio::test]
+    async fn mark_viewed_moves_forward_and_leaves_activity_alone() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/codeg-viewed").await;
+        let row = create(
+            &db.conn,
+            folder,
+            AgentType::ClaudeCode,
+            Some("v".into()),
+            None,
+        )
+        .await
+        .expect("create");
+        assert_eq!(row.last_viewed_at, None, "a new row was never viewed");
+        let updated_before = row.updated_at;
+
+        let first = updated_before + chrono::Duration::minutes(1);
+        assert!(mark_viewed(&db.conn, row.id, first).await.expect("view"));
+        let summary = get_by_id(&db.conn, row.id).await.expect("get");
+        assert_eq!(summary.last_viewed_at, Some(first));
+        assert_eq!(
+            summary.updated_at, updated_before,
+            "a view is not activity: updated_at must not move"
+        );
+
+        // A late or repeated report never moves the view back.
+        for at in [first, updated_before] {
+            assert!(!mark_viewed(&db.conn, row.id, at).await.expect("no-op"));
+        }
+        let second = first + chrono::Duration::minutes(3);
+        assert!(mark_viewed(&db.conn, row.id, second).await.expect("again"));
+        assert_eq!(
+            get_by_id(&db.conn, row.id).await.unwrap().last_viewed_at,
+            Some(second)
+        );
+
+        // Activity does not touch the view either.
+        let turn = second + chrono::Duration::minutes(1);
+        assert!(record_out_of_turn_activity(&db.conn, row.id, turn)
+            .await
+            .expect("bump"));
+        let summary = get_by_id(&db.conn, row.id).await.expect("get");
+        assert_eq!(
+            (summary.updated_at, summary.last_viewed_at),
+            (turn, Some(second))
+        );
+
+        soft_delete(&db.conn, row.id).await.expect("delete");
+        assert!(
+            !mark_viewed(&db.conn, row.id, turn + chrono::Duration::minutes(1))
+                .await
+                .expect("deleted")
         );
     }
 
