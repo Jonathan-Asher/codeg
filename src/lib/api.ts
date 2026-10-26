@@ -172,6 +172,8 @@ import type {
   ClaudePlanSettings,
   CriticalAlertsSnapshot,
   CriticalSessionSettings,
+  PendingItemsSnapshot,
+  PendingReminderSettings,
   PushDevice,
   PushDevicePrefs,
   PushSettings,
@@ -2274,6 +2276,23 @@ export async function sendTestPush(
     "send_test_push",
     deviceId === undefined ? {} : { deviceId }
   )
+}
+
+// --- Pending items and reminders (`src-tauri/src/pending`) ---
+
+/** Everything waiting on the user, across every session. */
+export async function listPendingItems(): Promise<PendingItemsSnapshot> {
+  return getTransport().call("list_pending_items")
+}
+
+export async function getPendingReminderSettings(): Promise<PendingReminderSettings> {
+  return getTransport().call("get_pending_reminder_settings")
+}
+
+export async function updatePendingReminderSettings(
+  settings: PendingReminderSettings
+): Promise<PendingReminderSettings> {
+  return getTransport().call("update_pending_reminder_settings", { settings })
 }
 
 // --- Dictation clean-up and translation ---

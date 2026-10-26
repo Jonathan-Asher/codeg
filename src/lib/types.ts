@@ -4473,6 +4473,95 @@ export interface RefineDictationResult {
   elapsedMs: number
 }
 
+// --- Pending items (what waits on the user) ---
+
+/** What a pending item waits on (Rust `pending::PendingKind`). */
+export type PendingKind = "permission" | "question" | "plan"
+
+/** Where the session holds it, which is also how it is answered:
+ *  `acp_respond_permission`, `acp_answer_question`, `acp_answer_plan_approval`. */
+export type PendingSource = "permission" | "question" | "plan_approval"
+
+export interface PendingOption {
+  /** A permission option's id; a question option's label. */
+  id: string
+  label: string
+  /** A permission option's ACP kind (`allow_once`, `reject_once`, …). */
+  kind?: string | null
+}
+
+export interface PendingQuestionDetail {
+  /** The first question's own id (`answers[].questionId`). */
+  item_id: string
+  header: string
+  multi_select: boolean
+  /** How many questions the set asks. */
+  count: number
+}
+
+/** One thing waiting on the user (Rust `pending::PendingItem`). */
+export interface PendingItem {
+  id: string
+  kind: PendingKind
+  source: PendingSource
+  /** The session that asks (a sub-agent's own row for a delegated one). */
+  conversation_id: number
+  /** The session to open: itself, or the top of its delegation chain. */
+  root_conversation_id: number
+  folder_id: number | null
+  folder_name: string | null
+  /** The title of the session to open. */
+  title: string | null
+  /** The stored agent id of the session to open. */
+  agent_type: AgentType | null
+  /** The asking agent's display name. */
+  agent_label: string
+  connection_id: string
+  request_id: string
+  /** When the session started waiting (RFC 3339). */
+  asked_at: string
+  text: string
+  options: PendingOption[]
+  question?: PendingQuestionDetail | null
+  queued: number
+  reminders_sent: number
+  last_reminded_at: string | null
+  next_reminder_at: string | null
+  phone_notified: boolean
+}
+
+/** `list_pending_items` and the `app://pending-items` event: the whole list,
+ *  oldest first. */
+export interface PendingItemsSnapshot {
+  items: PendingItem[]
+  count: number
+}
+
+/** `app://pending-reminder`: post a desktop notification now. `id` is unique
+ *  per firing. */
+export interface PendingReminder {
+  id: string
+  /** 1 for the first reminder. */
+  attempt: number
+  item: PendingItem
+}
+
+/** "Reminders" (Rust `pending::ReminderSettings`). Stored by the backend
+ *  that owns the sessions. */
+export interface PendingReminderSettings {
+  enabled: boolean
+  /** When to remind, in seconds after the ask, ascending. */
+  steps_secs: number[]
+  /** After the last step, remind again this often (seconds); 0 = stop. */
+  repeat_secs: number
+  quiet_hours: boolean
+  /** Minutes after midnight, in `timezone`. */
+  quiet_start_min: number
+  quiet_end_min: number
+  /** IANA zone of the quiet hours; empty = the backend machine's. */
+  timezone: string
+}
+
 // --- Critical sessions ---
 
 /** "Critical sessions" (Rust `CriticalSessionSettings`). Stored by the

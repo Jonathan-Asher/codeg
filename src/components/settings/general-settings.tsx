@@ -48,6 +48,7 @@ import { DesktopNotificationSettingsSection } from "@/components/settings/deskto
 import { NotificationSoundSettingsSection } from "@/components/settings/notification-sound-settings"
 import { ReadAloudSettingsSection } from "@/components/settings/read-aloud-settings"
 import { CriticalSessionSettingsSection } from "@/components/settings/critical-session-settings"
+import { PendingReminderSettingsSection } from "@/components/settings/pending-reminder-settings"
 import { IphonePushSettingsSection } from "@/components/settings/iphone-push-settings"
 import { DictationRefineSettingsSection } from "@/components/settings/dictation-refine-settings"
 import { ResumeAfterRestartSettingsSection } from "@/components/settings/resume-after-restart-settings"
@@ -546,6 +547,9 @@ export function GeneralSettings() {
 
         {/* Replies read with this device's system voices. */}
         <ReadAloudSettingsSection />
+
+        {/* Reminders about whatever still waits for an answer, any session. */}
+        <PendingReminderSettingsSection />
 
         {/* The alerts for sessions marked critical (the backend's watchdog). */}
         <CriticalSessionSettingsSection />

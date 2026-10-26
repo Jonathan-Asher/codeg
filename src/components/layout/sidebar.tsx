@@ -48,6 +48,7 @@ import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import { formatShortcutLabel } from "@/lib/keyboard-shortcuts"
 import { isDesktop } from "@/lib/platform"
 import { leftChromeReserve } from "@/lib/window-chrome"
+import { PendingItemsIndicator } from "@/components/layout/pending-items-indicator"
 import {
   folderSessionLimitValue,
   isNavItemVisible,
@@ -344,6 +345,8 @@ export function Sidebar() {
             window's top edge, so its empty space must move the window. */}
         <div data-tauri-drag-region className="h-full min-w-0 flex-1" />
         <div className="flex items-center gap-0.5">
+          {/* "Waiting for you (N)": what any session waits on me for. */}
+          <PendingItemsIndicator />
           {/* Locate the active conversation in the list below (moved here from
               the conversation detail header). Always shown, leading the header
               cluster. The sidebar is unmounted while collapsed, so `listRef` is

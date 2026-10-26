@@ -124,17 +124,17 @@ export async function setConversationCritical(
 const CLAIM_PREFIX = "codeg:critical-alert-notified:"
 const CLAIM_TTL_MS = 24 * 60 * 60 * 1000
 
-function claimInStorage(alertId: string): boolean {
+function claimInStorage(prefix: string, id: string): boolean {
   try {
     const storage = window.localStorage
-    const key = CLAIM_PREFIX + alertId
+    const key = prefix + id
     if (storage.getItem(key) != null) return false
     const now = Date.now()
     storage.setItem(key, String(now))
     // Old claims are dead weight: an alert id never comes back.
     for (let i = storage.length - 1; i >= 0; i -= 1) {
       const k = storage.key(i)
-      if (!k || !k.startsWith(CLAIM_PREFIX) || k === key) continue
+      if (!k || !k.startsWith(prefix) || k === key) continue
       const at = Number(storage.getItem(k))
       if (!Number.isFinite(at) || now - at > CLAIM_TTL_MS) storage.removeItem(k)
     }
@@ -153,18 +153,33 @@ function claimInStorage(alertId: string): boolean {
  * `localStorage`, serialized by a Web Lock where the engine has them.
  */
 export async function claimCriticalAlert(alertId: string): Promise<boolean> {
+  return claimOncePerMachine(
+    "codeg-critical-alert-claim",
+    CLAIM_PREFIX,
+    alertId
+  )
+}
+
+/**
+ * The first window of this machine to claim `id` (under `prefix`) wins; the
+ * rest get `false`. What {@link claimCriticalAlert} does for critical alerts,
+ * for any notification every window hears (a pending item's reminder).
+ */
+export async function claimOncePerMachine(
+  lockName: string,
+  prefix: string,
+  id: string
+): Promise<boolean> {
   if (typeof window === "undefined") return false
   const locks = typeof navigator !== "undefined" ? navigator.locks : undefined
   if (locks && typeof locks.request === "function") {
     try {
-      return await locks.request("codeg-critical-alert-claim", () =>
-        claimInStorage(alertId)
-      )
+      return await locks.request(lockName, () => claimInStorage(prefix, id))
     } catch {
-      return claimInStorage(alertId)
+      return claimInStorage(prefix, id)
     }
   }
-  return claimInStorage(alertId)
+  return claimInStorage(prefix, id)
 }
 
 /** The session an alert is about, as a notification click target. */
