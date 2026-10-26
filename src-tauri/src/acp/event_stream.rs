@@ -446,6 +446,8 @@ fn estimate_envelope_size(envelope: &EventEnvelope) -> usize {
             watermark: _,
             tasks,
             out_of_turn: _,
+            // Server-side only (`serde(skip)`): never on the wire.
+            activity_at: _,
         } => {
             json_str_len(session_id)
                 + turns.len().saturating_sub(1)

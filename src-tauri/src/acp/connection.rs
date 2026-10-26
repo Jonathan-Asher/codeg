@@ -17623,6 +17623,7 @@ async fn emit_conversation_update(
                             watermark: 0,
                             tasks: Vec::new(),
                             out_of_turn: false,
+                            activity_at: None,
                         },
                     )
                     .await;
