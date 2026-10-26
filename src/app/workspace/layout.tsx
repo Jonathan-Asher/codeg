@@ -83,6 +83,7 @@ import { WorkspaceTransfersToasts } from "@/components/layout/workspace-transfer
 import { AutoResumeToasts } from "@/components/layout/auto-resume-toasts"
 import { CriticalAlerts } from "@/components/layout/critical-alerts"
 import { ShownSessionPresence } from "@/components/workspace/shown-session-presence"
+import { ConversationViewTracker } from "@/components/workspace/conversation-view-tracker"
 import {
   DeepLinkBootstrap,
   PetFocusBridge,
@@ -1323,6 +1324,7 @@ function FolderLayoutShell({ children }: { children: React.ReactNode }) {
       {/* The active tab's session, for the presence reports. */}
       <AppErrorBoundary scope="shown-session-presence" variant="silent">
         <ShownSessionPresence />
+        <ConversationViewTracker />
       </AppErrorBoundary>
     </div>
   )

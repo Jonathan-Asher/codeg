@@ -106,6 +106,7 @@ export interface AppWorkspaceStoreState {
         | "critical"
         | "critical_stall"
         | "limit_auto_continue"
+        | "last_viewed_at"
       >
     >
   ) => void
@@ -224,6 +225,16 @@ const deletedIds = new Set<number>()
  * gets recorded afterwards, when the user closes it by hand. Consulting the
  * tombstone at restore time means a deletion seen at any point wins.
  */
+/** The later of two `last_viewed_at` values (absent counts as never). */
+function laterViewedAt(
+  a: string | null | undefined,
+  b: string | null | undefined
+): string | null | undefined {
+  if (!a) return b
+  if (!b) return a
+  return Date.parse(a) > Date.parse(b) ? a : b
+}
+
 export function isConversationDeleted(id: number): boolean {
   return deletedIds.has(id)
 }
@@ -442,13 +453,15 @@ export const useAppWorkspaceStore = create<AppWorkspaceStoreState>()(
       // `updated_at` untouched so an updated-sorted folder doesn't briefly
       // float the row. Status/title patches still bump.
       // Marking a session critical is the same kind of preference, and so is
-      // its continue-after-the-usage-limit switch.
+      // its continue-after-the-usage-limit switch. Opening a session is not
+      // activity either (`mark_conversations_viewed`).
       const bumpUpdatedAt =
         !("pinned_at" in patch) &&
         !("pin_order" in patch) &&
         !("critical" in patch) &&
         !("critical_stall" in patch) &&
-        !("limit_auto_continue" in patch)
+        !("limit_auto_continue" in patch) &&
+        !("last_viewed_at" in patch)
       next[idx] = {
         ...next[idx],
         ...patch,
@@ -487,7 +500,17 @@ export const useAppWorkspaceStore = create<AppWorkspaceStoreState>()(
         return
       }
       const next = prev.slice()
-      next[idx] = summary
+      // A view only moves forward. The row can be a beat behind a view this
+      // client recorded locally and has not reported yet (the report is
+      // debounced), so keep the later one: the lists must not jump back.
+      const viewedAt = laterViewedAt(
+        prev[idx].last_viewed_at,
+        summary.last_viewed_at
+      )
+      next[idx] =
+        viewedAt === summary.last_viewed_at
+          ? summary
+          : { ...summary, last_viewed_at: viewedAt }
       set(withConversations(next))
     },
 

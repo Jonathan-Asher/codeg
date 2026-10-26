@@ -18,15 +18,65 @@ export interface RecentSessionOptions {
   limit: number
 }
 
-function activityTime(conv: DbConversationSummary): number {
-  const time = Date.parse(conv.updated_at)
+function parseTime(value: string | null | undefined): number {
+  if (!value) return 0
+  const time = Date.parse(value)
   return Number.isNaN(time) ? 0 : time
 }
 
+/** The last activity in the session (ms): a turn, whoever started it. */
+export function activityTime(conv: DbConversationSummary): number {
+  return parseTime(conv.updated_at)
+}
+
+/** When the user last opened the session (ms), or 0 if never. */
+export function viewedTime(conv: DbConversationSummary): number {
+  return parseTime(conv.last_viewed_at)
+}
+
+/** The later of the session's last activity and the user's last view. */
+export function recencyTime(conv: DbConversationSummary): number {
+  return Math.max(activityTime(conv), viewedTime(conv))
+}
+
 /**
- * The sessions worth switching to, most recently active first: the rows the
- * sidebar lists (top-level, not deleted — delegation children and loop runs
- * are reached through their parent and the loops workbench instead).
+ * Like a browser's history: a session moves up when something happens in it
+ * AND when the user opens it. The sidebar's Recent section reads this order.
+ */
+export function compareByRecencyDesc(
+  a: DbConversationSummary,
+  b: DbConversationSummary
+): number {
+  return (
+    recencyTime(b) - recencyTime(a) ||
+    activityTime(b) - activityTime(a) ||
+    b.id - a.id
+  )
+}
+
+/**
+ * The session switcher's order, like Alt-Tab: most recently opened first, so
+ * opening the switcher and pressing Enter goes back to the session viewed just
+ * before the current one, whatever a background agent did elsewhere since.
+ * Sessions never opened follow, most recently active first.
+ */
+export function compareBySwitchOrder(
+  a: DbConversationSummary,
+  b: DbConversationSummary
+): number {
+  // Never opened reads as 0, so every opened session sorts above them all.
+  return (
+    viewedTime(b) - viewedTime(a) ||
+    activityTime(b) - activityTime(a) ||
+    b.id - a.id
+  )
+}
+
+/**
+ * The sessions worth switching to, in switcher order
+ * ({@link compareBySwitchOrder}): the rows the sidebar lists (top-level, not
+ * deleted — delegation children and loop runs are reached through their
+ * parent and the loops workbench instead).
  */
 export function recentSessions(
   conversations: readonly DbConversationSummary[],
@@ -54,6 +104,6 @@ export function recentSessions(
           !excludeFolderIds.has(c.folder_id)) &&
         (agentType == null || c.agent_type === agentType)
     )
-    .sort((a, b) => activityTime(b) - activityTime(a) || b.id - a.id)
+    .sort(compareBySwitchOrder)
     .slice(0, limit)
 }
