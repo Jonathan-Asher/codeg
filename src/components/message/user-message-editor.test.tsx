@@ -259,3 +259,45 @@ describe("UserMessageEditor", () => {
     })
   })
 })
+
+describe("UserMessageEditor while its save waits for the session", () => {
+  function renderWaiting() {
+    const onCancelWaiting = vi.fn()
+    const rendered = renderEditor({
+      saving: true,
+      waiting: true,
+      onCancelWaiting,
+    })
+    return { ...rendered, onCancelWaiting }
+  }
+
+  it("spins and says it is waiting, not that it is saving", () => {
+    renderWaiting()
+    const save = screen.getByRole("button", { name: L.editWaiting })
+    expect(save).toHaveAttribute("title", L.waitingForConnection)
+    expect(save).toHaveAttribute("aria-busy", "true")
+    expect(save.querySelector(".animate-spin")).not.toBeNull()
+    expect(screen.queryByText(L.editSavingInPlace)).not.toBeInTheDocument()
+  })
+
+  it("takes the save back on a second click, keeping the editor open", async () => {
+    const { onCancelWaiting, onSave, onCancel } = renderWaiting()
+    await userEvent.click(screen.getByRole("button", { name: L.editWaiting }))
+    expect(onCancelWaiting).toHaveBeenCalledTimes(1)
+    expect(onSave).not.toHaveBeenCalled()
+    expect(onCancel).not.toHaveBeenCalled()
+  })
+
+  it("takes the save back on Esc first", () => {
+    const { field, onCancelWaiting, onCancel } = renderWaiting()
+    fireEvent.keyDown(field, { key: "Escape" })
+    expect(onCancelWaiting).toHaveBeenCalledTimes(1)
+    expect(onCancel).not.toHaveBeenCalled()
+  })
+
+  it("lets Cancel close the editor while it waits", async () => {
+    const { onCancel } = renderWaiting()
+    await userEvent.click(screen.getByRole("button", { name: L.editCancel }))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+})

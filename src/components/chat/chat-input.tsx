@@ -17,6 +17,7 @@ import type { QueuedMessage, RequeueOptions } from "@/hooks/use-message-queue"
 import {
   MessageInput,
   type ComposerInjectContent,
+  type ContinueBeforeReady,
 } from "@/components/chat/message-input"
 import {
   MessageQueueDisplay,
@@ -74,6 +75,8 @@ interface ChatInputProps {
   ) => Promise<void>
   /** Pass-through: see `MessageInput.canContinue`. */
   canContinue?: boolean
+  /** Pass-through: see `MessageInput.continueBeforeReady`. */
+  continueBeforeReady?: ContinueBeforeReady | null
   /** Why the queue is held, shown above it (see `QueueNotice`). */
   queueNotice?: QueueNotice | null
   /** While connecting: why it takes a while, when something says so (every
@@ -165,6 +168,7 @@ export const ChatInput = memo(function ChatInput({
   heldTurnReady = false,
   onDeliverNow,
   canContinue = false,
+  continueBeforeReady = null,
   queueNotice,
   connectingReason,
   onQueueReorder,
@@ -284,6 +288,7 @@ export const ChatInput = memo(function ChatInput({
         heldTurnReady={isPrompting && heldTurnReady}
         onDeliverNow={onDeliverNow}
         canContinue={canContinue}
+        continueBeforeReady={continueBeforeReady}
         editingItemId={editingItemId}
         editingDraftText={editingDraftText}
         editingDraftBlocks={editingDraftBlocks}

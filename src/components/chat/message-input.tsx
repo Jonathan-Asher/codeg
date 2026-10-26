@@ -14,6 +14,7 @@ import {
   Cog,
   Copy,
   MessageSquareText,
+  Loader2,
   Play,
   Scissors,
   Send,
@@ -273,6 +274,14 @@ interface MessageInputProps {
    * this state: a normal send, a delivery into the held turn, or the queue.
    */
   canContinue?: boolean
+  /**
+   * Continue offered before the session is ready (see `lib/pending-actions`):
+   * a click hands it to `onToggle`, which queues it to run once the session
+   * is, instead of sending; while it waits (`pending`) the button spins and
+   * says so, and a second click — or Esc, which the host handles — takes it
+   * back. Absent once the session is ready.
+   */
+  continueBeforeReady?: ContinueBeforeReady | null
   /** Id of the queue item being edited — the stable key for (re)hydration, so
    *  switching between two items with identical display text still reloads. */
   editingItemId?: string | null
@@ -372,6 +381,14 @@ function stripEmbeddedReferences(doc: JSONContent): JSONContent {
   return { ...doc, content }
 }
 
+/** See `MessageInputProps.continueBeforeReady`. */
+export interface ContinueBeforeReady {
+  /** A Continue is waiting for the session. */
+  pending: boolean
+  /** Queue a Continue, or take back the waiting one. */
+  onToggle: () => void
+}
+
 /** How long after a Continue a second press is ignored (see `handleContinue`). */
 const CONTINUE_REPEAT_GUARD_MS = 1500
 
@@ -454,6 +471,7 @@ export function MessageInput({
   heldTurnReady = false,
   onDeliverNow,
   canContinue = false,
+  continueBeforeReady = null,
   editingItemId,
   editingDraftText,
   editingDraftBlocks,
@@ -1856,17 +1874,29 @@ export function MessageInput({
   // takes right now, so an idle session gets a normal turn and a turn held
   // for background work gets it delivered (or queued) the way a typed message
   // would be. The editor is left alone: the draft never was in it.
+  // Before the session is ready the composer may still be disabled (the
+  // session is being prepared); Continue waits for the session instead of
+  // sending, so it is offered all the same — and stays, spinning, while it
+  // waits, so the click that takes it back always has a button to land on.
+  const continuePending = continueBeforeReady?.pending === true
   const showContinue =
-    canContinue &&
-    !hasSendableContent &&
-    !isEditingQueueItem &&
-    !delivering &&
-    !(disabled && !isPrompting)
+    continuePending ||
+    (canContinue &&
+      !hasSendableContent &&
+      !isEditingQueueItem &&
+      !delivering &&
+      (continueBeforeReady != null || !(disabled && !isPrompting)))
   // A double click, or ⌘/Ctrl+Enter held down, lands a second press before
   // the first send has re-rendered the button away; the backend would bounce
   // that one into the queue and the agent would get "continue" twice.
   const lastContinueAtRef = useRef(0)
   const handleContinue = useCallback(() => {
+    // Not ready yet: queue it, or take a waiting one back. The host's queue
+    // tells a double click from a second click.
+    if (continueBeforeReady) {
+      continueBeforeReady.onToggle()
+      return
+    }
     const now = Date.now()
     if (now - lastContinueAtRef.current < CONTINUE_REPEAT_GUARD_MS) return
     lastContinueAtRef.current = now
@@ -1889,6 +1919,7 @@ export function MessageInput({
     }
     onSend(draft, modeId)
   }, [
+    continueBeforeReady,
     showModeSelector,
     effectiveModeId,
     isPrompting,
@@ -1911,11 +1942,13 @@ export function MessageInput({
   const continueShortcutBound =
     !shortcutsConflict(shortcuts.send_message, CONTINUE_SHORTCUT) &&
     !shortcutsConflict(shortcuts.newline_in_message, CONTINUE_SHORTCUT)
-  const continueTitle = continueShortcutBound
-    ? t("continueHintShortcut", {
-        shortcut: formatShortcutLabel(CONTINUE_SHORTCUT, isMac),
-      })
-    : t("continueHint")
+  const continueTitle = continuePending
+    ? t("continueWaiting")
+    : continueShortcutBound
+      ? t("continueHintShortcut", {
+          shortcut: formatShortcutLabel(CONTINUE_SHORTCUT, isMac),
+        })
+      : t("continueHint")
 
   // Navigation/confirm/escape keys for the `/` (commands) and `$` (Codex skills)
   // runtime menu, routed from inside the editor (RichComposer.onExternalMenuKeyDown)
@@ -2651,11 +2684,22 @@ export function MessageInput({
                       size="sm"
                       onClick={handleContinue}
                       title={continueTitle}
-                      aria-label={t("continue")}
+                      aria-label={
+                        continuePending ? t("continueWaiting") : t("continue")
+                      }
+                      aria-busy={continuePending || undefined}
                       data-testid="composer-continue"
+                      data-waiting={continuePending ? "true" : undefined}
                       className="h-8 px-2.5"
                     >
-                      <Play aria-hidden className="size-3.5" />
+                      {continuePending ? (
+                        <Loader2
+                          aria-hidden
+                          className="size-3.5 animate-spin"
+                        />
+                      ) : (
+                        <Play aria-hidden className="size-3.5" />
+                      )}
                       {/* Icon-only in a narrow composer, where the selector
                           chips need the row more than the word does. */}
                       <span className="hidden @[20rem]:inline">

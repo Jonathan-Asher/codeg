@@ -98,6 +98,8 @@ import {
   type UserMessageEditRequest,
 } from "@/lib/edit-message"
 import { isRetryNudge } from "@/lib/retry-nudge"
+import { editActionTarget, RETRY_ACTION_TARGET } from "@/lib/pending-actions"
+import { usePendingActionsContext } from "@/components/message/pending-actions-context"
 import { continuationVariant } from "@/lib/continue-turn"
 import { Button } from "@/components/ui/button"
 import { useTranslations } from "next-intl"
@@ -1331,6 +1333,9 @@ export function MessageListView({
   const t = useTranslations("Folder.chat.messageList")
   const sharedT = useTranslations("Folder.chat.shared")
   const pageHandoffName = usePageHandoffName()
+  // Actions taken before the session was ready wait for it (see
+  // `lib/pending-actions`): an editor's save and Retry say so here.
+  const pendingActions = usePendingActionsContext()
   // Resolved once for the whole thread rather than per reply: the labels are a
   // property of the agent, not of any one turn.
   const modelLabel = useModelLabels(agentType)
@@ -1872,11 +1877,23 @@ export function MessageListView({
     setEditing({ key, saving: false })
   }, [])
 
-  const handleCancelEdit = useCallback((key: string) => {
-    if (editSavingRef.current) return
-    editDraftsRef.current.delete(key)
-    setEditing((prev) => (prev?.key === key ? null : prev))
-  }, [])
+  // Cancel on an editor whose save is still waiting for the session takes the
+  // save back first; the editor closes once `handleSaveEdit` has let go of it.
+  const closeAfterCancelRef = useRef<string | null>(null)
+  const cancelPendingAction = pendingActions.cancel
+  const handleCancelEdit = useCallback(
+    (key: string, waitingTarget?: string) => {
+      if (editSavingRef.current) {
+        if (waitingTarget === undefined) return
+        closeAfterCancelRef.current = key
+        cancelPendingAction(waitingTarget)
+        return
+      }
+      editDraftsRef.current.delete(key)
+      setEditing((prev) => (prev?.key === key ? null : prev))
+    },
+    [cancelPendingAction]
+  )
 
   const handleSaveEdit = useCallback(
     async (key: string, request: UserMessageEditRequest) => {
@@ -1895,10 +1912,18 @@ export function MessageListView({
       }
       // Sent: the message this editor stood on has usually left the thread
       // already (the forked history ends before it). Not sent: the host said
-      // why, and the text stays for another try.
-      if (sent) editDraftsRef.current.delete(key)
+      // why, and the text stays for another try — unless Cancel took back a
+      // save that was waiting for the session, which closes the editor.
+      const closing = !sent && closeAfterCancelRef.current === key
+      if (closeAfterCancelRef.current === key)
+        closeAfterCancelRef.current = null
+      if (sent || closing) editDraftsRef.current.delete(key)
       setEditing((prev) =>
-        prev?.key !== key ? prev : sent ? null : { key, saving: false }
+        prev?.key !== key
+          ? prev
+          : sent || closing
+            ? null
+            : { key, saving: false }
       )
     },
     [onEditUserMessage]
@@ -1964,6 +1989,17 @@ export function MessageListView({
                   : null
           const isEditing =
             editTarget !== undefined && editing?.key === item.key
+          // This editor's save was taken before the session was ready and
+          // is waiting for it.
+          const editWaitTarget = isEditing
+            ? editActionTarget(item.sourceTurns[0].id)
+            : null
+          const editWaiting =
+            editWaitTarget !== null &&
+            editing?.saving === true &&
+            pendingActions.pendingTargets.has(editWaitTarget)
+          const retryWaiting =
+            canRetry && pendingActions.pendingTargets.has(RETRY_ACTION_TARGET)
           return (
             <div
               style={pt > 0 ? { paddingTop: pt } : undefined}
@@ -2052,8 +2088,21 @@ export function MessageListView({
                   images={item.group.images}
                   startsNewConversation={editTarget.kind === "first"}
                   saving={editing?.saving ?? false}
+                  waiting={editWaiting}
+                  onCancelWaiting={
+                    editWaitTarget !== null
+                      ? () => pendingActions.cancel(editWaitTarget)
+                      : undefined
+                  }
                   blocked={editBlocked}
-                  onCancel={() => handleCancelEdit(item.key)}
+                  onCancel={() =>
+                    handleCancelEdit(
+                      item.key,
+                      editWaiting && editWaitTarget !== null
+                        ? editWaitTarget
+                        : undefined
+                    )
+                  }
                   onSave={(text) => {
                     void handleSaveEdit(item.key, {
                       // The parser's name for the reply where it has one, as
@@ -2098,12 +2147,24 @@ export function MessageListView({
                 <div className="flex justify-end pe-1 pt-1">
                   <button
                     type="button"
+                    // Before the session is ready the host queues it; a
+                    // second click takes it back (see `lib/pending-actions`).
                     onClick={() => onRetryTurn()}
-                    title={t("retry")}
-                    aria-label={t("retry")}
+                    title={
+                      retryWaiting ? t("waitingForConnection") : t("retry")
+                    }
+                    aria-label={
+                      retryWaiting ? t("waitingForConnection") : t("retry")
+                    }
+                    aria-busy={retryWaiting || undefined}
+                    data-waiting={retryWaiting ? "true" : undefined}
                     className="flex items-center gap-1 rounded-full border border-border bg-background/90 px-2 py-[0.125rem] text-[0.6875rem] text-muted-foreground shadow-sm transition-colors hover:bg-muted/90 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
-                    <RotateCcw className="h-3 w-3" aria-hidden />
+                    {retryWaiting ? (
+                      <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                    ) : (
+                      <RotateCcw className="h-3 w-3" aria-hidden />
+                    )}
                     {t("retry")}
                   </button>
                 </div>
@@ -2154,6 +2215,7 @@ export function MessageListView({
       handleCancelEdit,
       handleSaveEdit,
       readAloudScope,
+      pendingActions,
     ]
   )
 
