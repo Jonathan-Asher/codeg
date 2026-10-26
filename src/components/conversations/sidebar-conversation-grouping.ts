@@ -6,7 +6,7 @@ import type {
   FolderGroupDetail,
   SidebarLayoutEntry,
 } from "@/lib/types"
-import { compareByRecencyDesc } from "@/lib/recent-sessions"
+import { sortByRecencyDesc } from "@/lib/recent-sessions"
 import { summaryActivity, type SessionActivity } from "@/lib/session-activity"
 import {
   DEFAULT_SECTION_ORDER,
@@ -441,7 +441,7 @@ export function selectChatConversationsWithReuse(
  *   by `kind` instead.
  * - Sorted by `sortMode`. "created" keeps creation order, matching the time
  *   each card shows then. "updated" is a browser-history order
- *   ({@link compareByRecencyDesc}): the later of the last activity and the
+ *   (`sortByRecencyDesc` in `lib/recent-sessions`): the later of the last activity and the
  *   user's last view of the session, so a session moves up when something
  *   happens in it AND when the user opens it. The card still shows the
  *   activity time, so a session just opened can sit above a fresher one.
@@ -470,10 +470,11 @@ export function selectRecentConversationsWithReuse(
       continue
     next.push(conv)
   }
-  next.sort(
-    sortMode === "updated" ? compareByRecencyDesc : compareByCreatedAtDesc
-  )
-  return arraysShallowEqual(prev, next) ? prev : next
+  const sorted =
+    sortMode === "updated"
+      ? sortByRecencyDesc(next)
+      : next.sort(compareByCreatedAtDesc)
+  return arraysShallowEqual(prev, sorted) ? prev : sorted
 }
 
 // ── Archive ─────────────────────────────────────────────────────────────────

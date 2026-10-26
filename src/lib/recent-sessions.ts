@@ -72,6 +72,36 @@ export function compareBySwitchOrder(
   )
 }
 
+/** Sorts newest first by `first`, then `second`, then id, reading each
+ *  row's times once (the lists re-sort on every row update). */
+function sortedBy(
+  list: readonly DbConversationSummary[],
+  first: (conv: DbConversationSummary) => number,
+  second: (conv: DbConversationSummary) => number
+): DbConversationSummary[] {
+  return list
+    .map((conv) => ({ conv, first: first(conv), second: second(conv) }))
+    .sort(
+      (a, b) =>
+        b.first - a.first || b.second - a.second || b.conv.id - a.conv.id
+    )
+    .map((keyed) => keyed.conv)
+}
+
+/** `list` in {@link compareByRecencyDesc} order, as a new array. */
+export function sortByRecencyDesc(
+  list: readonly DbConversationSummary[]
+): DbConversationSummary[] {
+  return sortedBy(list, recencyTime, activityTime)
+}
+
+/** `list` in {@link compareBySwitchOrder} order, as a new array. */
+export function sortBySwitchOrder(
+  list: readonly DbConversationSummary[]
+): DbConversationSummary[] {
+  return sortedBy(list, viewedTime, activityTime)
+}
+
 /**
  * The sessions worth switching to, in switcher order
  * ({@link compareBySwitchOrder}): the rows the sidebar lists (top-level, not
@@ -90,20 +120,18 @@ export function recentSessions(
     excludeFolderIds,
     limit,
   } = options
-  return conversations
-    .filter(
-      (c) =>
-        c.parent_id == null &&
-        c.kind !== "delegate" &&
-        c.kind !== "loop" &&
-        c.id !== excludeId &&
-        knownFolderIds.has(c.folder_id) &&
-        (folderId == null || c.folder_id === folderId) &&
-        (folderId != null ||
-          excludeFolderIds == null ||
-          !excludeFolderIds.has(c.folder_id)) &&
-        (agentType == null || c.agent_type === agentType)
-    )
-    .sort(compareBySwitchOrder)
-    .slice(0, limit)
+  const listed = conversations.filter(
+    (c) =>
+      c.parent_id == null &&
+      c.kind !== "delegate" &&
+      c.kind !== "loop" &&
+      c.id !== excludeId &&
+      knownFolderIds.has(c.folder_id) &&
+      (folderId == null || c.folder_id === folderId) &&
+      (folderId != null ||
+        excludeFolderIds == null ||
+        !excludeFolderIds.has(c.folder_id)) &&
+      (agentType == null || c.agent_type === agentType)
+  )
+  return sortBySwitchOrder(listed).slice(0, limit)
 }
