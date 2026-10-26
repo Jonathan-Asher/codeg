@@ -25,10 +25,12 @@ use crate::acp::InternalEventBus;
 use crate::chat_channel::i18n::Lang;
 use crate::db::service::app_metadata_service;
 use crate::presence;
+use crate::presence::Looking;
+use crate::push::apns::ApnsSender;
 use crate::push::payload::{
     NeedsKind, PendingPush, PermissionAction, PushKind, PushMessage, QuestionPush,
 };
-use crate::push::{self, fanout, wording};
+use crate::push::{self, fanout, wording, DeliveryReport, SendSetup};
 use crate::web::event_bridge::{emit_event, EventEmitter};
 
 /// How often the watch reads the sessions when no event wakes it.
@@ -152,6 +154,20 @@ pub fn pending_message(
     }
 }
 
+/// Push one item through `sender`, worded in the push language.
+pub async fn push_item(
+    sender: &ApnsSender,
+    db: &DatabaseConnection,
+    setup: &SendSetup,
+    what: (&PendingItem, u32, bool),
+    looking: &Looking,
+) -> DeliveryReport {
+    let (item, attempt, reminder) = what;
+    let lang = push::push_lang(db, &setup.settings).await;
+    let message = pending_message(lang, item, attempt, reminder, Utc::now());
+    push::deliver_with(sender, db, setup, &message, looking).await
+}
+
 /// The iPhones, through APNs with the stored settings.
 pub struct ApnsSink {
     pub db: DatabaseConnection,
@@ -163,10 +179,17 @@ impl PushSink for ApnsSink {
         if !push::has_devices(&self.db).await {
             return false;
         }
-        let settings = push::load_push_settings(&self.db).await;
-        let lang = push::push_lang(&self.db, &settings).await;
-        let message = pending_message(lang, item, attempt, reminder, Utc::now());
-        let report = push::deliver(&self.db, &message, &presence::snapshot()).await;
+        let Ok(setup) = push::load_send_setup(&self.db).await else {
+            return false;
+        };
+        let report = push_item(
+            push::apns::sender(),
+            &self.db,
+            &setup,
+            (item, attempt, reminder),
+            &presence::snapshot(),
+        )
+        .await;
         if report.delivered > 0 || report.removed > 0 || !report.failed.is_empty() {
             tracing::info!(
                 "[pending] {} {} (attempt {attempt}) for conversation {}: {} delivered, {} removed, {} failed",
@@ -304,7 +327,8 @@ fn set_dock_badge(emitter: &EventEmitter, count: u32) {
 #[cfg(not(feature = "tauri-runtime"))]
 fn set_dock_badge(_emitter: &EventEmitter, _count: u32) {}
 
-struct Watch {
+/// One pass at a time over the live sessions, into the process-wide engine.
+pub(crate) struct Watch {
     manager: ConnectionManager,
     db: DatabaseConnection,
     emitter: EventEmitter,
@@ -315,7 +339,28 @@ struct Watch {
 }
 
 impl Watch {
+    pub(crate) fn new(
+        manager: ConnectionManager,
+        db: DatabaseConnection,
+        emitter: EventEmitter,
+        jobs: mpsc::UnboundedSender<Vec<Job>>,
+    ) -> Self {
+        Self {
+            manager,
+            db,
+            emitter,
+            jobs,
+            metas: MetaCache::default(),
+            published: None,
+        }
+    }
+
     async fn pass(&mut self) {
+        self.pass_at(Utc::now(), &presence::snapshot()).await;
+    }
+
+    /// One pass, at `now`, with `looking` (the tests' clock and presence).
+    pub(crate) async fn pass_at(&mut self, now: DateTime<Utc>, looking: &Looking) {
         let mut live = Vec::new();
         for state in self.manager.session_states().await {
             let asks = {
@@ -329,11 +374,9 @@ impl Watch {
         }
         self.metas
             .keep(live.iter().map(|(ask, _)| ask.conversation_id).collect());
-        let looking = presence::snapshot();
-        let now = Utc::now();
         let first = self.published.is_none();
         let (pass, snapshot, stored) = with_engine(|e| {
-            let pass = e.observe(live, &looking, now);
+            let pass = e.observe(live, looking, now);
             let snapshot = (pass.list_changed || first).then(|| e.snapshot());
             (pass, snapshot, e.take_dirty())
         });
@@ -382,14 +425,7 @@ pub fn pending_watch_task(
         });
         let (jobs, jobs_rx) = mpsc::unbounded_channel();
         tokio::spawn(deliver_jobs(ApnsSink { db: db.clone() }, jobs_rx));
-        let mut watch = Watch {
-            manager,
-            db,
-            emitter,
-            jobs,
-            metas: MetaCache::default(),
-            published: None,
-        };
+        let mut watch = Watch::new(manager, db, emitter, jobs);
         let mut tick = tokio::time::interval(TICK);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {

@@ -828,4 +828,4 @@ pub async fn sync_badges(conn: &DatabaseConnection, count: u32) -> DeliveryRepor
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

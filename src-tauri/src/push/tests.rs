@@ -16,15 +16,15 @@ use crate::db::test_helpers;
 use crate::presence::Looking;
 
 #[derive(Debug, Clone)]
-struct Seen {
-    token: String,
-    headers: HeaderMap,
-    body: Value,
+pub(crate) struct Seen {
+    pub(crate) token: String,
+    pub(crate) headers: HeaderMap,
+    pub(crate) body: Value,
 }
 
 #[derive(Clone, Default)]
-struct Mock {
-    seen: Arc<Mutex<Vec<Seen>>>,
+pub(crate) struct Mock {
+    pub(crate) seen: Arc<Mutex<Vec<Seen>>>,
 }
 
 /// Answers by token prefix: `dead…` 410 Unregistered, `bad…` 400
@@ -58,7 +58,7 @@ async fn apns(
     }
 }
 
-async fn mock_apns() -> (ApnsSender, Mock) {
+pub(crate) async fn mock_apns() -> (ApnsSender, Mock) {
     let mock = Mock::default();
     let app = Router::new()
         .route("/3/device/{token}", post(apns))
@@ -71,7 +71,7 @@ async fn mock_apns() -> (ApnsSender, Mock) {
     (ApnsSender::with_base_url(format!("http://{addr}")), mock)
 }
 
-fn setup() -> SendSetup {
+pub(crate) fn setup() -> SendSetup {
     SendSetup {
         settings: PushSettings {
             team_id: "TEAM123456".into(),
@@ -88,7 +88,7 @@ fn setup() -> SendSetup {
     }
 }
 
-async fn add_device(
+pub(crate) async fn add_device(
     conn: &DatabaseConnection,
     token: &str,
     name: &str,

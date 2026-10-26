@@ -766,3 +766,162 @@ fn a_permission_push_keeps_its_approve_button() {
         "Claude Code is still waiting for your permission (5 min)\nRun cargo test"
     );
 }
+
+// ── The runtime, end to end ──
+
+/// The watch's own delivery, against a mock APNs.
+struct MockApnsSink {
+    sender: crate::push::apns::ApnsSender,
+    db: sea_orm::DatabaseConnection,
+    setup: crate::push::SendSetup,
+}
+
+#[async_trait]
+impl PushSink for MockApnsSink {
+    async fn push(&self, item: &PendingItem, attempt: u32, reminder: bool) -> bool {
+        let report = super::watch::push_item(
+            &self.sender,
+            &self.db,
+            &self.setup,
+            (item, attempt, reminder),
+            &Looking::default(),
+        )
+        .await;
+        report.delivered > 0
+    }
+
+    async fn badge(&self, count: u32) {
+        crate::push::sync_badges_with(&self.sender, &self.db, &self.setup, count).await;
+    }
+}
+
+async fn deliver_all(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<Vec<super::engine::Job>>,
+    sink: &MockApnsSink,
+) {
+    while let Ok(jobs) = rx.try_recv() {
+        run_jobs(sink, jobs, |id, ok| with_engine(|e| e.note_delivery(id, ok))).await;
+    }
+}
+
+/// A live session's question, through the real watch, the database and the
+/// APNs client: the first push, a reminder, then the badge drop once it is
+/// answered. The one test that uses the process-wide registry.
+#[tokio::test]
+async fn the_watch_pushes_reminds_and_clears_through_apns() {
+    use crate::acp::manager::ConnectionManager;
+    use crate::db::test_helpers;
+    use crate::push::prefs::DevicePrefs;
+    use crate::push::tests::{add_device, mock_apns, setup};
+    use crate::web::event_bridge::EventEmitter;
+
+    let db = test_helpers::fresh_in_memory_db().await;
+    let folder = test_helpers::seed_folder(&db, "/tmp/pending-watch").await;
+    let conversation = test_helpers::seed_conversation(&db, folder, AgentType::ClaudeCode).await;
+    let (sender, mock) = mock_apns().await;
+    add_device(&db.conn, "abcd0001", "Phone", DevicePrefs::default()).await;
+
+    let manager = ConnectionManager::new();
+    manager
+        .insert_test_connection("conn-w", AgentType::ClaudeCode, None, EventEmitter::Noop)
+        .await;
+    let state = manager.get_state("conn-w").await.unwrap();
+    let asked = Utc::now();
+    {
+        let mut s = state.write().await;
+        s.conversation_id = Some(conversation);
+        s.pending_question = Some(PendingQuestionState {
+            question_id: "q-w".into(),
+            questions: vec![QuestionSpec {
+                id: "q-w-a".into(),
+                question: "Which database?".into(),
+                header: "Storage".into(),
+                multi_select: false,
+                options: vec![
+                    QuestionOption {
+                        label: "SQLite".into(),
+                        description: String::new(),
+                    },
+                    QuestionOption {
+                        label: "Postgres".into(),
+                        description: String::new(),
+                    },
+                ],
+                is_secret: false,
+            }],
+            created_at: asked,
+        });
+    }
+
+    with_engine(|e| {
+        *e = Engine::new(ReminderSettings {
+            steps_secs: vec![60],
+            repeat_secs: 0,
+            ..ReminderSettings::default()
+        })
+    });
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut watch =
+        super::watch::Watch::new(manager.clone_ref(), db.conn.clone(), EventEmitter::Noop, tx);
+    let sink = MockApnsSink {
+        sender,
+        db: db.conn.clone(),
+        setup: setup(),
+    };
+    let away = Looking::default();
+    let after = |n: i64| asked + chrono::Duration::seconds(n);
+
+    // Asked: on the list, and pushed with the badge.
+    watch.pass_at(after(0), &away).await;
+    deliver_all(&mut rx, &sink).await;
+    let listed = snapshot();
+    assert_eq!(listed.count, 1);
+    assert_eq!(listed.items[0].id, "question:q-w");
+    assert_eq!(listed.items[0].root_conversation_id, conversation);
+    assert_eq!(pending_count(), 1);
+    assert!(snapshot().items[0].phone_notified);
+    let seen = mock.seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].body["kind"], "needs_you");
+    assert_eq!(seen[0].body["pending_id"], "question:q-w");
+    assert_eq!(seen[0].body["attempt"], 0);
+    assert_eq!(seen[0].body["aps"]["badge"], 1);
+    assert_eq!(seen[0].body["aps"]["category"], "CODEG_QUESTION");
+    assert_eq!(
+        seen[0].body["question"]["options"],
+        serde_json::json!(["SQLite", "Postgres"])
+    );
+
+    // A minute on: the reminder (the badge sync finds the phone up to date).
+    watch.pass_at(after(60), &away).await;
+    deliver_all(&mut rx, &sink).await;
+    let seen = mock.seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 2);
+    assert_eq!(seen[1].body["reminder"], true);
+    assert_eq!(seen[1].body["attempt"], 1);
+    let alert = seen[1].body["aps"]["alert"]["body"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        alert.contains("is still waiting for your answer") && alert.ends_with("Which database?"),
+        "{alert}"
+    );
+
+    // Answered on another device: off the list, and the badge drops to 0.
+    state.write().await.pending_question = None;
+    watch.pass_at(after(61), &away).await;
+    assert_eq!(snapshot().count, 0);
+    assert_eq!(pending_count(), 0);
+    watch.pass_at(after(64), &away).await;
+    deliver_all(&mut rx, &sink).await;
+    let seen = mock.seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 3);
+    assert_eq!(seen[2].body["kind"], "badge");
+    assert_eq!(seen[2].body["aps"], serde_json::json!({ "badge": 0 }));
+
+    // Nothing more after that.
+    watch.pass_at(after(600), &away).await;
+    deliver_all(&mut rx, &sink).await;
+    assert_eq!(mock.seen.lock().unwrap().len(), 3);
+}
