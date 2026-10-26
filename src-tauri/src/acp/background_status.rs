@@ -503,6 +503,7 @@ mod tests {
             watermark: 0,
             tasks,
             out_of_turn,
+            activity_at: None,
         }
     }
 
@@ -933,6 +934,7 @@ mod tests {
             watermark: 0,
             tasks: Vec::new(),
             out_of_turn: false,
+            activity_at: None,
         });
         let bg = s.background_status(Utc::now()).unwrap();
         assert_eq!(bg.task_count, 2);

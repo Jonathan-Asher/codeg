@@ -446,6 +446,8 @@ fn estimate_envelope_size(envelope: &EventEnvelope) -> usize {
             watermark: _,
             tasks,
             out_of_turn: _,
+            // Server-side only (`serde(skip)`): never on the wire.
+            activity_at: _,
         } => {
             json_str_len(session_id)
                 + turns.len().saturating_sub(1)
@@ -1076,6 +1078,7 @@ mod tests {
                     crate::acp::background_status::BackgroundTaskBrief::new("a4", "agent", ""),
                 ],
                 out_of_turn: true,
+                activity_at: None,
             },
         });
         assert_ge_serialized(&env);
@@ -1092,6 +1095,7 @@ mod tests {
                 watermark: 0,
                 tasks: vec![],
                 out_of_turn: false,
+                activity_at: None,
             },
         });
         assert_ge_serialized(&env);

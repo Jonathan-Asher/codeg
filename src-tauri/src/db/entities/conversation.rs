@@ -199,6 +199,10 @@ pub struct Model {
     /// Set with the pause, kept once it ends without continuing, cleared when
     /// the next turn starts.
     pub limit_resume_reason: Option<ConversationLimitReason>,
+    /// When the user last opened this conversation (made it the active tab)
+    /// on any client. A view is not activity: written only through
+    /// `conversation_service::mark_viewed`, never with `updated_at`.
+    pub last_viewed_at: Option<DateTimeUtc>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

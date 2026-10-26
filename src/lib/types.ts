@@ -514,7 +514,15 @@ export interface DbConversationSummary {
    *  expandable into its sub-session subtree — drives the sidebar chevron. */
   child_count: number
   created_at: string
+  /** The last activity: a turn starting, streaming or ending, whoever started
+   *  it (this app, a cron or `/loop` prompt, a task notification, a message
+   *  from another session). Metadata changes never move it. */
   updated_at: string
+  /** When the user last opened this conversation (made it the active tab) on
+   *  any client, or null if never. Absent from older servers. The sidebar's
+   *  Recent section sorts by the later of this and `updated_at`; the session
+   *  switcher by this first (see `lib/recent-sessions`). */
+  last_viewed_at?: string | null
   /** When the user pinned this conversation (ISO string), or null if not pinned.
    *  Drives the sidebar's "Pinned" section (sorted by this descending, except
    *  for rows placed by hand — see `pin_order`); a pinned conversation is shown

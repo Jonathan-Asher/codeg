@@ -3874,6 +3874,21 @@ export async function updateConversationTitle(
   })
 }
 
+/** One view report: the session the user opened, and how many ms ago. */
+export interface ConversationViewReport {
+  conversationId: number
+  ageMs: number
+}
+
+/** Record that the user opened these sessions. The server stamps
+ *  `last_viewed_at` (now minus each age, so this client's clock does not
+ *  matter) and broadcasts every moved row through `conversation://changed`. */
+export async function markConversationsViewed(
+  views: ConversationViewReport[]
+): Promise<void> {
+  return getTransport().call("mark_conversations_viewed", { views })
+}
+
 export async function updateConversationPinned(
   conversationId: number,
   pinned: boolean

@@ -2733,6 +2733,53 @@ pub async fn update_conversation_pinned(
     Ok(())
 }
 
+/// One view report: the conversation the user opened, and how long ago by
+/// the reporting client's clock. An age rather than a timestamp, so a client
+/// whose clock is off still records its views in the right order.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationViewReport {
+    pub conversation_id: i32,
+    #[serde(default)]
+    pub age_ms: u64,
+}
+
+/// A view queued longer than this (a client that was offline) is recorded as
+/// this old rather than dropped.
+const MAX_VIEW_REPORT_AGE_MS: u64 = 24 * 60 * 60 * 1000;
+/// Reports beyond this many in one call are ignored. A client batches the
+/// views of a burst of switches, so a real call carries a handful.
+const MAX_VIEW_REPORTS: usize = 64;
+
+/// Record that the user opened these conversations (made each the active tab)
+/// and broadcast every row that moved, so all clients re-sort their session
+/// lists. A view is not activity: `updated_at` stays put.
+pub async fn mark_conversations_viewed_core(
+    conn: &sea_orm::DatabaseConnection,
+    emitter: &EventEmitter,
+    views: &[ConversationViewReport],
+) -> Result<(), AppCommandError> {
+    let now = chrono::Utc::now();
+    for view in views.iter().take(MAX_VIEW_REPORTS) {
+        let age_ms = view.age_ms.min(MAX_VIEW_REPORT_AGE_MS) as i64;
+        let at = now - chrono::Duration::milliseconds(age_ms);
+        if conversation_service::mark_viewed(conn, view.conversation_id, at).await? {
+            emit_conversation_upsert(emitter, conn, view.conversation_id).await;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn mark_conversations_viewed(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, AppDatabase>,
+    views: Vec<ConversationViewReport>,
+) -> Result<(), AppCommandError> {
+    mark_conversations_viewed_core(&db.conn, &EventEmitter::Tauri(app), &views).await
+}
+
 pub async fn reorder_conversation_pins_core(
     conn: &sea_orm::DatabaseConnection,
     ordered_ids: &[i32],
@@ -2907,6 +2954,76 @@ mod tests {
     use super::*;
     use crate::db::test_helpers::{fresh_in_memory_db, seed_folder};
 
+    /// A batch of view reports lands in the order the client saw the views
+    /// (by age, so the client's clock does not matter), an absurd age is
+    /// clamped rather than trusted, and activity is never touched.
+    #[tokio::test]
+    async fn mark_conversations_viewed_orders_by_age_and_leaves_activity() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/codeg-mark-viewed").await;
+        let mut ids = Vec::new();
+        for _ in 0..3 {
+            let row =
+                conversation_service::create(&db.conn, folder, AgentType::ClaudeCode, None, None)
+                    .await
+                    .expect("create");
+            ids.push(row.id);
+        }
+        let before: Vec<_> = {
+            let mut v = Vec::new();
+            for id in &ids {
+                v.push(
+                    conversation_service::get_by_id(&db.conn, *id)
+                        .await
+                        .unwrap(),
+                );
+            }
+            v
+        };
+
+        let started = chrono::Utc::now();
+        mark_conversations_viewed_core(
+            &db.conn,
+            &EventEmitter::Noop,
+            &[
+                ConversationViewReport {
+                    conversation_id: ids[0],
+                    age_ms: 3_000,
+                },
+                ConversationViewReport {
+                    conversation_id: ids[1],
+                    age_ms: 1_000,
+                },
+                ConversationViewReport {
+                    conversation_id: ids[2],
+                    age_ms: u64::MAX,
+                },
+            ],
+        )
+        .await
+        .expect("mark viewed");
+
+        let mut viewed = Vec::new();
+        for (id, old) in ids.iter().zip(&before) {
+            let row = conversation_service::get_by_id(&db.conn, *id)
+                .await
+                .unwrap();
+            assert_eq!(row.updated_at, old.updated_at, "a view is not activity");
+            viewed.push(row.last_viewed_at.expect("viewed"));
+        }
+        assert!(viewed[1] > viewed[0], "the later view sorts first");
+        assert!(
+            viewed[1] <= chrono::Utc::now(),
+            "a view never lands in the future"
+        );
+        let floor = started - chrono::Duration::milliseconds(MAX_VIEW_REPORT_AGE_MS as i64);
+        assert!(
+            viewed[2] >= floor - chrono::Duration::seconds(5),
+            "an absurd age is clamped, not trusted: {}",
+            viewed[2]
+        );
+    }
+
     /// Serializes every test that touches the process-global [`IMPORT_GUARD`].
     ///
     /// The harness runs `#[tokio::test]`s on parallel threads of one process, so
@@ -2945,6 +3062,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             pinned_at: None,
+            last_viewed_at: None,
             pin_order: None,
             parent_id: Some(1),
             parent_tool_use_id: Some(parent_tool_use_id.into()),
@@ -6815,6 +6933,7 @@ mod tests {
                 created_at: at(-100),
                 updated_at: at(0),
                 pinned_at: None,
+                last_viewed_at: None,
                 pin_order: None,
                 parent_id: None,
                 parent_tool_use_id: None,

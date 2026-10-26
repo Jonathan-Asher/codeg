@@ -772,6 +772,7 @@ mod tests {
             watermark: 0,
             tasks,
             out_of_turn,
+            activity_at: None,
         }
     }
 

@@ -3245,6 +3245,7 @@ mod tests {
             watermark: 42,
             tasks: vec![],
             out_of_turn: false,
+            activity_at: None,
         });
         assert_eq!(s.background_outstanding, 2);
         let now = Utc::now();
@@ -3264,6 +3265,7 @@ mod tests {
             watermark: 43,
             tasks: vec![],
             out_of_turn: false,
+            activity_at: None,
         });
         assert!(!s.has_active_background_work(Utc::now()));
     }
@@ -3279,6 +3281,7 @@ mod tests {
             watermark: 0,
             tasks: vec![],
             out_of_turn: false,
+            activity_at: None,
         });
         assert_eq!(s.to_snapshot().background_outstanding, 3);
         let json = serde_json::to_value(s.to_snapshot()).unwrap();

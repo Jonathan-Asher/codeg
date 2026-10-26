@@ -65,7 +65,16 @@ pub struct DbConversationSummary {
     /// `child_count` to decide chevron visibility).
     pub child_count: u32,
     pub created_at: DateTime<Utc>,
+    /// The conversation's last activity: a turn starting, streaming and
+    /// ending, whoever started it (codeg, a cron or `/loop` prompt, a task
+    /// notification, a message from another session), plus a few explicit
+    /// edits. Metadata (titles, pins, selectors) never moves it.
     pub updated_at: DateTime<Utc>,
+    /// Mirror of `conversation.last_viewed_at`: when the user last opened
+    /// this conversation on any client. The sidebar's Recent section orders
+    /// by the later of this and `updated_at`; the session switcher by this
+    /// first. Serialized as `null` when the row was never viewed.
+    pub last_viewed_at: Option<DateTime<Utc>>,
     /// Mirror of `conversation.pinned_at`: when set, the sidebar shows this row in
     /// its "Pinned" section (sorted by this timestamp descending) instead of its
     /// folder group. Serialized as `null` when absent so the frontend's
