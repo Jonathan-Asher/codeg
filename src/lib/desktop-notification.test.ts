@@ -7,14 +7,18 @@ const permission = vi.fn<() => string>(() => "managed_by_os")
 /** The session each delivery was about — kept apart from `deliver`'s own
  *  arguments so the title/body assertions stay two-argument. */
 const deliveredTargets: unknown[] = []
+/** The waiting item each delivery carried, when it carried one. */
+const deliveredPending: unknown[] = []
 
 vi.mock("./notification", () => ({
   deliverSystemNotification: (
     title: string,
     body: string,
-    target?: unknown
+    target?: unknown,
+    pending?: unknown
   ) => {
     deliveredTargets.push(target)
+    if (pending !== undefined) deliveredPending.push(pending)
     return deliver(title, body)
   },
   getNotificationPermission: () => permission(),
@@ -64,6 +68,7 @@ beforeEach(() => {
   resetDesktopNotificationStateForTests()
   deliver.mockClear()
   deliveredTargets.length = 0
+  deliveredPending.length = 0
   deliver.mockResolvedValue(undefined)
   permission.mockReturnValue("managed_by_os")
   // The default gate is `hidden`, so every test that doesn't care about the
@@ -198,6 +203,32 @@ describe("hidden contents", () => {
     await notifyDesktop("permission_request", { ...SESSION_PAYLOAD, target })
 
     expect(deliveredTargets).toEqual([target])
+  })
+
+  it("drops the answer buttons with the contents, and keeps the item", async () => {
+    // Option labels are the agent's words; without them a click opens the
+    // session. The item stays named, so the notification is withdrawn once
+    // it clears.
+    const pending = {
+      pendingId: "question:q1",
+      source: "question" as const,
+      connectionId: "conn",
+      requestId: "q1",
+      itemId: "q1-0",
+      buttons: [{ id: "b0", title: "Postgres", value: "Postgres" }],
+      reply: { placeholder: "Type your answer…" },
+    }
+    await notifyDesktop("question_request", { ...SESSION_PAYLOAD, pending })
+    expect(deliveredPending).toEqual([pending])
+
+    resetDesktopNotificationStateForTests()
+    withPrefs({ hideBody: true })
+    await notifyDesktop("question_request", { ...SESSION_PAYLOAD, pending })
+    expect(deliveredPending[1]).toEqual({
+      ...pending,
+      buttons: [],
+      reply: null,
+    })
   })
 })
 

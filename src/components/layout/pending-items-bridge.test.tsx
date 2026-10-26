@@ -9,6 +9,7 @@ const h = vi.hoisted(() => ({
   handlers: new Map<string, (payload: unknown) => void>(),
   listPendingItems: vi.fn(),
   deliverSystemNotification: vi.fn(),
+  syncPendingNotifications: vi.fn(),
 }))
 
 vi.mock("@/lib/api", () => ({
@@ -26,6 +27,7 @@ vi.mock("@/lib/platform", () => ({
 vi.mock("@/lib/notification", () => ({
   deliverSystemNotification: h.deliverSystemNotification,
   getNotificationPermission: () => "granted",
+  syncPendingNotifications: h.syncPendingNotifications,
 }))
 
 import { PendingItemsBridge } from "./pending-items-bridge"
@@ -96,6 +98,7 @@ beforeEach(() => {
   h.handlers.clear()
   h.listPendingItems.mockReset().mockResolvedValue(snapshot([item()]))
   h.deliverSystemNotification.mockReset().mockResolvedValue(undefined)
+  h.syncPendingNotifications.mockReset().mockResolvedValue(undefined)
   usePendingItemsStore.getState().reset()
 })
 
@@ -117,6 +120,22 @@ describe("PendingItemsBridge", () => {
     expect(usePendingItemsStore.getState().items).toEqual([])
   })
 
+  it("withdraws the notifications of items that cleared", async () => {
+    renderBridge()
+    // The loaded list: nothing cleared yet.
+    await waitFor(() =>
+      expect(h.syncPendingNotifications).toHaveBeenCalledWith(
+        ["question:q1"],
+        []
+      )
+    )
+    await emit(PENDING_ITEMS_EVENT, snapshot([item({ id: "permission:r1" })]))
+    expect(h.syncPendingNotifications).toHaveBeenLastCalledWith(
+      ["permission:r1"],
+      ["question:q1"]
+    )
+  })
+
   it("posts each reminder once per machine, with the wait and the question", async () => {
     renderBridge()
     const reminder = { id: "question:q1#2", attempt: 2, item: item() }
@@ -132,6 +151,16 @@ describe("PendingItemsBridge", () => {
         folderId: 3,
         conversationId: 7,
         agentType: "claude_code",
+      },
+      // No question detail: nothing to answer with, the click opens it.
+      {
+        pendingId: "question:q1",
+        source: "question",
+        connectionId: "conn-7",
+        requestId: "q1",
+        itemId: null,
+        buttons: [],
+        reply: null,
       }
     )
     // Another window of this machine hears the same reminder: claimed.
@@ -174,5 +203,48 @@ describe("PendingItemsBridge", () => {
     expect(h.deliverSystemNotification.mock.calls[0][1]).toBe(
       "Codex CLI is still waiting for your permission (5 min)"
     )
+    // No buttons: they would carry the agent's words. Still names the item,
+    // to be withdrawn once it clears.
+    expect(h.deliverSystemNotification.mock.calls[0][3]).toMatchObject({
+      pendingId: "permission:r1",
+      buttons: [],
+      reply: null,
+    })
+  })
+
+  it("puts the answer buttons of a question on its reminder", async () => {
+    renderBridge()
+    await emit(PENDING_REMINDER_EVENT, {
+      id: "question:q1#1",
+      attempt: 1,
+      item: item({
+        options: [
+          { id: "Postgres", label: "Postgres" },
+          { id: "SQLite", label: "SQLite" },
+        ],
+        question: {
+          item_id: "q1-0",
+          header: "Storage",
+          multi_select: false,
+          count: 1,
+        },
+      }),
+    })
+    await waitFor(() =>
+      expect(h.deliverSystemNotification).toHaveBeenCalledTimes(1)
+    )
+    expect(h.deliverSystemNotification.mock.calls[0][3]).toEqual({
+      pendingId: "question:q1",
+      source: "question",
+      connectionId: "conn-7",
+      requestId: "q1",
+      itemId: "q1-0",
+      buttons: [
+        { id: "b0", title: "Postgres", value: "Postgres" },
+        { id: "b1", title: "SQLite", value: "SQLite" },
+        { id: "open", title: "Open", value: "" },
+      ],
+      reply: { placeholder: "Type your answer…" },
+    })
   })
 })

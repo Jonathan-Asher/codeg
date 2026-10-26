@@ -123,6 +123,24 @@ describe("NotificationClickBridge", () => {
     expect(h.toastInfo).not.toHaveBeenCalled()
   })
 
+  // A notification's button could not answer: the backend opened the
+  // session instead, with the reason.
+  it("says why a session opened instead of taking an answer", async () => {
+    hydrate()
+    h.takePending.mockResolvedValueOnce([
+      { ...TARGET, notice: "already_answered" },
+      { ...TARGET, notice: "not_answered" },
+    ])
+    render(<NotificationClickBridge />)
+    await waitFor(() =>
+      expect(h.toastInfo).toHaveBeenCalledWith("notification.alreadyAnswered")
+    )
+    expect(h.toastInfo).toHaveBeenCalledWith("notification.notAnswered")
+    await waitFor(() =>
+      expect(openTab).toHaveBeenCalledWith(4, 17, "claude_code", true)
+    )
+  })
+
   it("takes a click poked at a window that is already running", async () => {
     hydrate()
     useTabStore.setState({

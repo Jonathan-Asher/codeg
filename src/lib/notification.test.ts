@@ -21,6 +21,7 @@ import {
   getNotificationPermission,
   openSystemNotificationSettings,
   requestNotificationPermission,
+  syncPendingNotifications,
   takePendingNotificationOpens,
 } from "./notification"
 import {
@@ -204,6 +205,35 @@ describe("a notification about a session", () => {
     expect(remoteCall).not.toHaveBeenCalled()
   })
 
+  it("carries a waiting item's answer buttons to the LOCAL backend", async () => {
+    // The answer itself goes to the window's own backend: the shell stamps
+    // the window, as for the click.
+    const pending = {
+      pendingId: "permission:r1",
+      source: "permission" as const,
+      connectionId: "conn",
+      requestId: "r1",
+      itemId: null,
+      buttons: [{ id: "b0", title: "Allow", value: "yes" }],
+      reply: null,
+    }
+    await deliverSystemNotification("t", "b", TARGET, pending)
+    expect(shellCall).toHaveBeenCalledWith("send_notification", {
+      title: "t",
+      body: "b",
+      target: TARGET,
+      pending,
+    })
+    // Without a session to route to there is nothing to answer.
+    shellCall.mockClear()
+    await deliverSystemNotification("t", "b", null, pending)
+    expect(shellCall).toHaveBeenCalledWith("send_notification", {
+      title: "t",
+      body: "b",
+    })
+    expect(remoteCall).not.toHaveBeenCalled()
+  })
+
   it("tags a browser notification per session and opens it on a click", async () => {
     desktop.mockReturnValue(false)
     const instances: Array<{
@@ -276,6 +306,53 @@ describe("takePendingNotificationOpens", () => {
   it("has nothing to take in a browser", async () => {
     desktop.mockReturnValue(false)
     await expect(takePendingNotificationOpens()).resolves.toEqual([])
+    expect(shellCall).not.toHaveBeenCalled()
+  })
+
+  it("keeps the notice of an answer that did not go through", async () => {
+    shellCall.mockResolvedValueOnce([
+      { folderId: 4, conversationId: 17, notice: "already_answered" },
+      { conversationId: 18, notice: "not_answered" },
+      { conversationId: 19, notice: "something else" },
+    ])
+    await expect(takePendingNotificationOpens()).resolves.toEqual([
+      {
+        contextKey: null,
+        folderId: 4,
+        conversationId: 17,
+        agentType: null,
+        notice: "already_answered",
+      },
+      {
+        contextKey: null,
+        folderId: null,
+        conversationId: 18,
+        agentType: null,
+        notice: "not_answered",
+      },
+      {
+        contextKey: null,
+        folderId: null,
+        conversationId: 19,
+        agentType: null,
+      },
+    ])
+  })
+})
+
+describe("syncPendingNotifications", () => {
+  it("asks the LOCAL backend to withdraw what cleared", async () => {
+    await syncPendingNotifications(["question:q1"], ["permission:r1"])
+    expect(shellCall).toHaveBeenCalledWith("notification_sync_pending", {
+      live: ["question:q1"],
+      gone: ["permission:r1"],
+    })
+    expect(remoteCall).not.toHaveBeenCalled()
+  })
+
+  it("does nothing in a browser", async () => {
+    desktop.mockReturnValue(false)
+    await syncPendingNotifications([], ["permission:r1"])
     expect(shellCall).not.toHaveBeenCalled()
   })
 })
