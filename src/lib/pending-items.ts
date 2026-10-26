@@ -14,6 +14,12 @@ import {
   deliverSystemNotification,
   getNotificationPermission,
 } from "@/lib/notification"
+import {
+  askOfPendingItem,
+  pendingNotificationFor,
+  withoutContents,
+  type NotificationActionLabels,
+} from "@/lib/notification-actions"
 import type { NotificationTarget } from "@/lib/notification-target"
 import type { PendingItem } from "@/lib/types"
 
@@ -80,11 +86,13 @@ export function claimPendingReminder(id: string): Promise<boolean> {
  * master switch, permission and "hide contents" (the session's name and the
  * agent's question stay out of the notification centre), but not their
  * "when" rule: a reminder is for the moment the first notification did not
- * work. Resolves to whether one was posted.
+ * work. On macOS it carries the item's answer buttons (`labels`), and with
+ * contents hidden none. Resolves to whether one was posted.
  */
 export async function postPendingReminder(
   item: PendingItem,
-  text: { title: string; redactedTitle: string; line: string }
+  text: { title: string; redactedTitle: string; line: string },
+  labels: NotificationActionLabels
 ): Promise<boolean> {
   const prefs = getDesktopNotificationPrefs()
   if (!prefs.enabled) return false
@@ -93,14 +101,35 @@ export async function postPendingReminder(
   const question = item.text.trim()
   const body =
     prefs.hideBody || !question ? text.line : `${text.line}\n${question}`
+  const pending = pendingNotificationFor(askOfPendingItem(item), labels)
   try {
     await deliverSystemNotification(
       prefs.hideBody ? text.redactedTitle : text.title,
       body,
-      pendingItemTarget(item)
+      pendingItemTarget(item),
+      prefs.hideBody ? withoutContents(pending) : pending
     )
     return true
   } catch {
     return false
+  }
+}
+
+/**
+ * Keeps Notification Center in step with the list: hand it each snapshot of
+ * the list and it reports the whole list and what cleared since the last
+ * one, for `syncPendingNotifications` to withdraw. The first snapshot clears
+ * nothing it did not see.
+ */
+export function createPendingNotificationSync(
+  sync: (live: string[], gone: string[]) => void
+): (items: readonly PendingItem[]) => void {
+  let previous: ReadonlySet<string> | null = null
+  return (items) => {
+    const live = items.map((item) => item.id)
+    const now = new Set(live)
+    const gone = previous ? [...previous].filter((id) => !now.has(id)) : []
+    previous = now
+    sync(live, gone)
   }
 }

@@ -7617,6 +7617,17 @@
       "quietFrom": "Début des heures calmes",
       "quietTo": "Fin des heures calmes",
       "saveFailed": "Enregistrement impossible : {message}"
+    },
+    "notification": {
+      "allow": "Autoriser",
+      "allowAlways": "Toujours autoriser",
+      "deny": "Refuser",
+      "denyAlways": "Toujours refuser",
+      "approve": "Approuver",
+      "open": "Ouvrir",
+      "replyPlaceholder": "Saisissez votre réponse…",
+      "alreadyAnswered": "Déjà répondu, ou n'attend plus.",
+      "notAnswered": "Impossible d'envoyer votre réponse depuis la notification. Répondez ici."
     }
   }
 }

@@ -15,6 +15,7 @@
  *     and only requestable from inside a user gesture.
  */
 
+import type { PendingNotification } from "./notification-actions"
 import {
   notificationGroupKey,
   openNotificationTargetFromClick,
@@ -105,13 +106,18 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
  * lands in this very page. It also groups: a newer notification about the
  * same session replaces the older one.
  *
+ * `pending` names the waiting item the notification is about and the buttons
+ * that answer it (see `notification-actions`). Only the macOS desktop app
+ * shows them, and only with a `target`; elsewhere the click opens the session.
+ *
  * Callers that are on an event path should go through `notifyDesktop` instead —
  * this bypasses every preference and gate.
  */
 export async function deliverSystemNotification(
   title: string,
   body: string,
-  target?: NotificationTarget | null
+  target?: NotificationTarget | null,
+  pending?: PendingNotification | null
 ): Promise<void> {
   if (isDesktop()) {
     // Deliberately the SHELL transport, not `getTransport()`. In a
@@ -123,7 +129,11 @@ export async function deliverSystemNotification(
     // the screen in front of the user, which is always the local shell.
     await getShellTransport().call(
       "send_notification",
-      target ? { title, body, target } : { title, body }
+      target
+        ? pending
+          ? { title, body, target, pending }
+          : { title, body, target }
+        : { title, body }
     )
     return
   }
@@ -164,22 +174,59 @@ export async function deliverSystemNotification(
  *  this window in {@link takePendingNotificationOpens}. */
 export const NOTIFICATION_OPEN_PENDING_EVENT = "notification://open-pending"
 
+/** Why a notification opened its session instead of answering from its
+ *  button (Rust `NotificationNotice`). */
+export type NotificationNotice = "already_answered" | "not_answered"
+
+/** A session a notification click handed to this window, with the notice to
+ *  show there, if any. */
+export type PendingNotificationOpen = NotificationTarget & {
+  notice?: NotificationNotice
+}
+
+function parseNotice(raw: unknown): NotificationNotice | null {
+  if (!raw || typeof raw !== "object") return null
+  const notice = (raw as Record<string, unknown>).notice
+  return notice === "already_answered" || notice === "not_answered"
+    ? notice
+    : null
+}
+
 /**
  * Take the sessions notification clicks handed to this window. Desktop only,
  * and over the shell transport: the clicks, and the window they target,
  * belong to this machine even when the window drives a remote workspace.
  */
 export async function takePendingNotificationOpens(): Promise<
-  NotificationTarget[]
+  PendingNotificationOpen[]
 > {
   if (!isDesktop()) return []
   const raw = await getShellTransport().call<unknown>(
     "notification_take_pending_open"
   )
   if (!Array.isArray(raw)) return []
-  return raw
-    .map(parseNotificationTarget)
-    .filter((target): target is NotificationTarget => target !== null)
+  const opens: PendingNotificationOpen[] = []
+  for (const entry of raw) {
+    const target = parseNotificationTarget(entry)
+    if (!target) continue
+    const notice = parseNotice(entry)
+    opens.push(notice ? { ...target, notice } : target)
+  }
+  return opens
+}
+
+/**
+ * Withdraw this window's backend's notifications about items that stopped
+ * waiting, so their answer buttons do not linger in Notification Center:
+ * `gone` cleared since the last list, `live` is the whole list now (desktop
+ * only; the backend acts on macOS alone).
+ */
+export async function syncPendingNotifications(
+  live: string[],
+  gone: string[]
+): Promise<void> {
+  if (!isDesktop()) return
+  await getShellTransport().call("notification_sync_pending", { live, gone })
 }
 
 /** Subscribe to {@link NOTIFICATION_OPEN_PENDING_EVENT} (desktop only). */

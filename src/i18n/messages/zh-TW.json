@@ -7617,6 +7617,17 @@
       "quietFrom": "勿擾開始",
       "quietTo": "勿擾結束",
       "saveFailed": "無法儲存：{message}"
+    },
+    "notification": {
+      "allow": "允許",
+      "allowAlways": "一律允許",
+      "deny": "拒絕",
+      "denyAlways": "一律拒絕",
+      "approve": "核准",
+      "open": "開啟",
+      "replyPlaceholder": "輸入你的回答…",
+      "alreadyAnswered": "已回答，或已不再等待。",
+      "notAnswered": "無法從通知送出你的回答，請在此處回答。"
     }
   }
 }

@@ -31,15 +31,17 @@ export const usePendingItemsStore = create<PendingItemsState>((set) => ({
 let generation = 0
 
 /** Load the list. Resolves either way: a server that predates it leaves the
- *  list empty. */
-export async function refreshPendingItems(): Promise<void> {
+ *  list empty. Resolves to the snapshot applied, or `null` when none was. */
+export async function refreshPendingItems(): Promise<PendingItemsSnapshot | null> {
   const mine = ++generation
   try {
     const snapshot = await listPendingItems()
-    if (mine !== generation) return
+    if (mine !== generation) return null
     usePendingItemsStore.getState().applySnapshot(snapshot)
+    return snapshot
   } catch {
     // Older server (no such command) or a transient failure — keep what we have.
+    return null
   }
 }
 

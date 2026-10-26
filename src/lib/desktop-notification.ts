@@ -23,6 +23,10 @@ import {
   getDesktopNotificationPrefs,
   type NotifyEventId,
 } from "./desktop-notification-prefs"
+import {
+  withoutContents,
+  type PendingNotification,
+} from "./notification-actions"
 import type { NotificationTarget } from "./notification-target"
 
 /**
@@ -70,6 +74,12 @@ export interface NotifyPayload {
    * the same with contents hidden.
    */
   target?: NotificationTarget | null
+  /**
+   * The waiting item this is about, and the buttons that answer it from the
+   * notification (macOS). With contents hidden the buttons are dropped — they
+   * carry the agent's option labels — and a click opens the session.
+   */
+  pending?: PendingNotification | null
 }
 
 // ── Gating ──
@@ -163,7 +173,16 @@ export async function notifyDesktop(
   lastAnyNotifiedAt = now
 
   try {
-    await deliverSystemNotification(title, body, payload.target)
+    if (payload.pending) {
+      await deliverSystemNotification(
+        title,
+        body,
+        payload.target,
+        prefs.hideBody ? withoutContents(payload.pending) : payload.pending
+      )
+    } else {
+      await deliverSystemNotification(title, body, payload.target)
+    }
     return true
   } catch {
     return false

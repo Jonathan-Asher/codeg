@@ -2391,6 +2391,7 @@ mod tauri_app {
                 mcp_commands::mcp_remove_server,
                 notification::send_notification,
                 notification::notification_take_pending_open,
+                notification::notification_sync_pending,
                 notification::notification_identity,
                 notification::open_system_notification_settings,
                 file_io::save_binary_file,

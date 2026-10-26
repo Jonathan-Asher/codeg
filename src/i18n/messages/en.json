@@ -7617,6 +7617,17 @@
       "quietFrom": "Quiet hours start",
       "quietTo": "Quiet hours end",
       "saveFailed": "Could not save: {message}"
+    },
+    "notification": {
+      "allow": "Allow",
+      "allowAlways": "Always allow",
+      "deny": "Deny",
+      "denyAlways": "Always deny",
+      "approve": "Approve",
+      "open": "Open",
+      "replyPlaceholder": "Type your answer…",
+      "alreadyAnswered": "Already answered, or no longer waiting.",
+      "notAnswered": "Couldn't send your answer from the notification. Answer it here."
     }
   }
 }

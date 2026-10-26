@@ -142,6 +142,10 @@ pub struct QuestionDetail {
     pub multi_select: bool,
     /// How many questions the set asks (the card asks them together).
     pub count: u32,
+    /// The answer is a secret the card masks: no notification asks for it
+    /// as text.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub secret: bool,
 }
 
 /// One item as a live session holds it.
@@ -602,6 +606,7 @@ pub fn asks_of(state: &SessionState) -> Vec<Ask> {
                 header: spec.header.clone(),
                 multi_select: spec.multi_select,
                 count: q.questions.len() as u32,
+                secret: spec.is_secret,
             }),
             queued: 0,
             agent_label: agent_label.clone(),

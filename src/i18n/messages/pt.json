@@ -7617,6 +7617,17 @@
       "quietFrom": "Início do silêncio",
       "quietTo": "Fim do silêncio",
       "saveFailed": "Não foi possível salvar: {message}"
+    },
+    "notification": {
+      "allow": "Permitir",
+      "allowAlways": "Sempre permitir",
+      "deny": "Negar",
+      "denyAlways": "Sempre negar",
+      "approve": "Aprovar",
+      "open": "Abrir",
+      "replyPlaceholder": "Digite sua resposta…",
+      "alreadyAnswered": "Já respondido, ou não está mais aguardando.",
+      "notAnswered": "Não foi possível enviar sua resposta pela notificação. Responda aqui."
     }
   }
 }

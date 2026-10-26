@@ -7617,6 +7617,17 @@
       "quietFrom": "免打扰开始",
       "quietTo": "免打扰结束",
       "saveFailed": "无法保存：{message}"
+    },
+    "notification": {
+      "allow": "允许",
+      "allowAlways": "始终允许",
+      "deny": "拒绝",
+      "denyAlways": "始终拒绝",
+      "approve": "批准",
+      "open": "打开",
+      "replyPlaceholder": "输入你的回答…",
+      "alreadyAnswered": "已回答，或已不再等待。",
+      "notAnswered": "无法从通知发送你的回答，请在此处回答。"
     }
   }
 }

@@ -63,6 +63,9 @@ pub mod open_in;
 pub mod path_stat;
 #[cfg(feature = "tauri-runtime")]
 pub mod notification;
+/// What a pending item's macOS notification answers, and when it is stale.
+#[cfg(feature = "tauri-runtime")]
+pub mod notification_answers;
 pub mod pet;
 pub mod plan_usage;
 pub mod project_boot;

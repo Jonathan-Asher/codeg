@@ -127,6 +127,12 @@ import {
   withDesktopNotificationsSuppressed,
 } from "@/lib/desktop-notification"
 import {
+  askOfPermissionRequest,
+  askOfQuestionRequest,
+  notificationActionLabels,
+  pendingNotificationFor,
+} from "@/lib/notification-actions"
+import {
   notificationTargetFor,
   sessionNotificationPayload,
 } from "@/lib/notification-session"
@@ -3585,6 +3591,8 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
   const vocabularyT = useTranslations("AgentVocabulary")
   const tChat = useTranslations("Folder.chat")
   const tFailure = useTranslations("Folder.chat.sessionFailure")
+  // The answer buttons of a permission's or a question's notification.
+  const tPending = useTranslations("PendingItems")
   const { activeFolder: folder } = useActiveFolder()
   const folderNameRef = useRef(folder?.name)
   /** The session a toast raised for `contextKey` is about — its title then
@@ -4987,14 +4995,25 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
               ? null
               : storeRef.current.connections.get(contextKey)
             if (nc) {
-              void notifyDesktop(
-                "question_request",
-                sessionNotificationPayload(contextKey, folderNameRef.current, {
-                  body: t("notificationQuestion", {
-                    agent: getAgentLabel(nc.agentType),
-                  }),
-                })
-              )
+              void notifyDesktop("question_request", {
+                ...sessionNotificationPayload(
+                  contextKey,
+                  folderNameRef.current,
+                  {
+                    body: t("notificationQuestion", {
+                      agent: getAgentLabel(nc.agentType),
+                    }),
+                  }
+                ),
+                pending: pendingNotificationFor(
+                  askOfQuestionRequest(
+                    nc.connectionId,
+                    e.question_id,
+                    e.questions
+                  ),
+                  notificationActionLabels(tPending)
+                ),
+              })
             }
           }
           break
@@ -5192,12 +5211,25 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
               // No redacted body: it is a fixed localized string plus the
               // agent's name, and names nothing of the user's. (The TITLE now
               // does — the session's own — and carries its own redaction.)
-              void notifyDesktop(
-                "permission_request",
-                sessionNotificationPayload(contextKey, folderNameRef.current, {
-                  body: `${agentLabel}: ${tChat("permissionDialog.subtitle")}`,
-                })
-              )
+              void notifyDesktop("permission_request", {
+                ...sessionNotificationPayload(
+                  contextKey,
+                  folderNameRef.current,
+                  {
+                    body: `${agentLabel}: ${tChat("permissionDialog.subtitle")}`,
+                  }
+                ),
+                // Allow / Deny (or a plan's Approve) on the notification.
+                pending: pendingNotificationFor(
+                  askOfPermissionRequest(
+                    nc.connectionId,
+                    e.request_id,
+                    e.options,
+                    e.tool_call
+                  ),
+                  notificationActionLabels(tPending)
+                ),
+              })
             }
           }
           break
@@ -5869,6 +5901,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       t,
       tChat,
       tFailure,
+      tPending,
       toastSession,
     ]
   )

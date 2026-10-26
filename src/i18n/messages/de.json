@@ -7617,6 +7617,17 @@
       "quietFrom": "Beginn der Ruhezeit",
       "quietTo": "Ende der Ruhezeit",
       "saveFailed": "Speichern fehlgeschlagen: {message}"
+    },
+    "notification": {
+      "allow": "Erlauben",
+      "allowAlways": "Immer erlauben",
+      "deny": "Ablehnen",
+      "denyAlways": "Immer ablehnen",
+      "approve": "Genehmigen",
+      "open": "Öffnen",
+      "replyPlaceholder": "Antwort eingeben…",
+      "alreadyAnswered": "Bereits beantwortet oder wartet nicht mehr.",
+      "notAnswered": "Deine Antwort konnte nicht aus der Mitteilung gesendet werden. Beantworte sie hier."
     }
   }
 }

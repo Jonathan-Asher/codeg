@@ -451,12 +451,21 @@ API (token auth; `POST /api/<name>` on a server, a command on desktop):
 An item: `{id, kind, source, conversation_id, root_conversation_id,
 folder_id, folder_name, title, agent_type, agent_label, connection_id,
 request_id, asked_at, text, options: [{id, label, kind?}], question?:
-{item_id, header, multi_select, count}, queued, reminders_sent,
-last_reminded_at, next_reminder_at, phone_notified}`. `source` says how to
-answer it: `permission` (`acp_respond_permission`, `requestId`, an option's
-`id`), `question` (`acp_answer_question`, `questionId` = `request_id`, a
-label), `plan_approval` (`acp_answer_plan_approval`, `approvalId` =
-`request_id`). Open `root_conversation_id`.
+{item_id, header, multi_select, count, secret?}, queued, reminders_sent,
+last_reminded_at, next_reminder_at, phone_notified}`. `secret` (present only
+when true) marks an answer the card masks; never ask for it as plain text.
+`source` says how to answer it: `permission` (`acp_respond_permission`,
+`requestId`, an option's `id`), `question` (`acp_answer_question`,
+`questionId` = `request_id`, a label), `plan_approval`
+(`acp_answer_plan_approval`, `approvalId` = `request_id`). Open
+`root_conversation_id`.
+
+The macOS desktop app answers the same way from its own notifications
+(first notification and reminders): Allow / Deny (plus the "always" variants
+a request offers), a plan's Approve, one button per option of a single
+single-choice question and a typed reply, each sent to the backend of the
+window that raised the notification. It checks the item is still listed
+first, and opens the session with a notice when it is not.
 
 Events on the event WebSocket: `app://pending-items` (the list changed; the
 whole `{items, count}`) and `app://pending-reminder` (`{id, attempt, item}`:

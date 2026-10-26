@@ -4505,6 +4505,8 @@ export interface PendingQuestionDetail {
   multi_select: boolean
   /** How many questions the set asks. */
   count: number
+  /** The answer is a secret the card masks (absent when not). */
+  secret?: boolean
 }
 
 /** One thing waiting on the user (Rust `pending::PendingItem`). */

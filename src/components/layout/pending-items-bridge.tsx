@@ -15,9 +15,12 @@
 import { useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
 
+import { syncPendingNotifications } from "@/lib/notification"
+import { notificationActionLabels } from "@/lib/notification-actions"
 import { isDesktop, onTransportReconnect, subscribe } from "@/lib/platform"
 import {
   claimPendingReminder,
+  createPendingNotificationSync,
   PENDING_ITEMS_EVENT,
   PENDING_REMINDER_EVENT,
   postPendingReminder,
@@ -73,10 +76,22 @@ export function PendingItemsBridge() {
       if (disposed) dispose()
       else disposers.push(dispose)
     }
-    void refreshPendingItems()
-    subscribe<PendingItemsSnapshot>(PENDING_ITEMS_EVENT, (snapshot) =>
+    // Notifications about items that cleared (answered on the phone or in
+    // another window, cancelled) are withdrawn, buttons and all.
+    const observe = createPendingNotificationSync((live, gone) => {
+      syncPendingNotifications(live, gone).catch(() => {
+        // A shell without the command: nothing to withdraw.
+      })
+    })
+    const refresh = async () => {
+      const snapshot = await refreshPendingItems()
+      if (snapshot && !disposed) observe(snapshot.items)
+    }
+    void refresh()
+    subscribe<PendingItemsSnapshot>(PENDING_ITEMS_EVENT, (snapshot) => {
       applyLivePendingItems(snapshot)
-    )
+      observe(snapshot.items)
+    })
       .then(keep)
       .catch((err) => console.error("[pending] subscribe failed:", err))
     subscribe<PendingReminder>(PENDING_REMINDER_EVENT, (reminder) => {
@@ -89,13 +104,14 @@ export function PendingItemsBridge() {
           )?.title
         await postPendingReminder(
           reminder.item,
-          pendingReminderText(tRef.current, reminder.item, live)
+          pendingReminderText(tRef.current, reminder.item, live),
+          notificationActionLabels(tRef.current)
         )
       })()
     })
       .then(keep)
       .catch((err) => console.error("[pending] subscribe failed:", err))
-    const offReconnect = onTransportReconnect(() => refreshPendingItems(), {
+    const offReconnect = onTransportReconnect(() => refresh(), {
       priority: "status",
       key: "pending-items",
     })

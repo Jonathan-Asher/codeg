@@ -57,6 +57,7 @@ fn item(id: &str, conversation_id: i32, root: i32, asked_at: DateTime<Utc>) -> (
                 header: "Storage".into(),
                 multi_select: false,
                 count: 1,
+                secret: false,
             }),
             queued: 0,
             agent_label: "Claude Code".into(),

@@ -78,13 +78,22 @@ async function conversationExists(conversationId: number): Promise<boolean> {
  */
 export function NotificationClickBridge() {
   const t = useTranslations("Folder.chat.acpConnections")
+  const tPending = useTranslations("PendingItems")
   const route = useOptionalWorkbenchRoute()
 
   // Read at click time, without re-registering on every render.
-  const latest = useRef({ t, openConversations: route?.openConversations })
+  const latest = useRef({
+    t,
+    tPending,
+    openConversations: route?.openConversations,
+  })
   useEffect(() => {
-    latest.current = { t, openConversations: route?.openConversations }
-  }, [t, route?.openConversations])
+    latest.current = {
+      t,
+      tPending,
+      openConversations: route?.openConversations,
+    }
+  }, [t, tPending, route?.openConversations])
 
   // Clicks open one after another, in the order they came.
   const chain = useRef<Promise<void>>(Promise.resolve())
@@ -142,7 +151,16 @@ export function NotificationClickBridge() {
         const pending = await takePendingNotificationOpens()
         // Nothing to re-park on unmount: the window is going away.
         if (cancelled) return
-        for (const target of pending) open(target)
+        for (const { notice, ...target } of pending) {
+          open(target)
+          // An answer from the notification's button did not go through:
+          // say why the session opened instead.
+          if (notice === "already_answered") {
+            toast.info(latest.current.tPending("notification.alreadyAnswered"))
+          } else if (notice === "not_answered") {
+            toast.info(latest.current.tPending("notification.notAnswered"))
+          }
+        }
       } catch (err) {
         console.warn("[NotificationClickBridge] take pending failed:", err)
       }

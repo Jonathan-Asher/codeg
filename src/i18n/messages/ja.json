@@ -7617,6 +7617,17 @@
       "quietFrom": "おやすみ時間の開始",
       "quietTo": "おやすみ時間の終了",
       "saveFailed": "保存できませんでした：{message}"
+    },
+    "notification": {
+      "allow": "許可",
+      "allowAlways": "常に許可",
+      "deny": "拒否",
+      "denyAlways": "常に拒否",
+      "approve": "承認",
+      "open": "開く",
+      "replyPlaceholder": "回答を入力…",
+      "alreadyAnswered": "回答済みか、もう待機していません。",
+      "notAnswered": "通知から回答を送信できませんでした。ここで回答してください。"
     }
   }
 }

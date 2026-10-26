@@ -24,7 +24,9 @@
 //! A notification about a session also carries the way back to it (see
 //! "Click-to-open" below): clicking it brings the workspace window that owns
 //! the session forward — the local one or a remote one — and opens the
-//! session's tab there.
+//! session's tab there. On macOS a notification about something waiting on
+//! the user can also answer it from Notification Center (see
+//! `notification_answers`).
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -42,6 +44,10 @@ use tauri::{Emitter, Manager};
 
 #[cfg(feature = "tauri-runtime")]
 use crate::app_error::{AppCommandError, AppErrorCode};
+use crate::commands::notification_answers::{
+    answer_for, run_answer, snapshot_lists, Activation, AnswerBackend, AnswerCall,
+    NotificationNotice, PendingNotification,
+};
 use crate::commands::quick_ask::{workspace_backend_of, workspace_label_for};
 
 /// Where `mac-notification-sys` lands when the bundle id we ask for cannot be
@@ -169,6 +175,10 @@ pub async fn notification_identity(app: AppHandle) -> Option<NotificationIdentit
 /// to — is stamped here from the invoking webview rather than taken from the
 /// renderer, so a click can only ever route back to a window that really
 /// raised it.
+///
+/// `pending` names the item waiting on the user that the notification is
+/// about, with the buttons that answer it (macOS only; ignored elsewhere and
+/// without a `target`). Its answers go to the same backend as the click.
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn send_notification(
@@ -177,13 +187,15 @@ pub async fn send_notification(
     title: String,
     body: String,
     target: Option<NotificationTarget>,
+    pending: Option<PendingNotification>,
 ) -> Result<(), AppCommandError> {
     let route = target.map(|target| NotificationRoute {
         window: window.label().to_string(),
         remote_connection_id: backend_of_window(window.label(), window.url().ok().as_ref()),
         target,
     });
-    deliver(&app, title, body, route).await
+    let pending = pending.filter(|_| route.is_some());
+    deliver(&app, title, body, route, pending).await
 }
 
 /// Post a notification the backend raises on its own (no window asked, so no
@@ -194,7 +206,7 @@ pub(crate) async fn send_app_notification(
     title: String,
     body: String,
 ) -> Result<(), AppCommandError> {
-    deliver(app, title, body, None).await
+    deliver(app, title, body, None, None).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -212,6 +224,7 @@ async fn deliver(
     title: String,
     body: String,
     #[allow(unused_variables)] route: Option<NotificationRoute>,
+    #[allow(unused_variables)] pending: Option<PendingNotification>,
 ) -> Result<(), AppCommandError> {
     #[cfg(target_os = "macos")]
     {
@@ -228,7 +241,12 @@ async fn deliver(
         // backend's own sends run on the async runtime.
         let (tx, rx) = tokio::sync::oneshot::channel();
         app.run_on_main_thread(move || {
-            let _ = tx.send(macos::deliver_on_main_thread(&title, &body, route.as_ref()));
+            let _ = tx.send(macos::deliver_on_main_thread(
+                &title,
+                &body,
+                route.as_ref(),
+                pending.as_ref(),
+            ));
         })
         .map_err(|err| delivery_failed(err.to_string()))?;
         rx.await
@@ -238,9 +256,10 @@ async fn deliver(
 
     #[cfg(not(target_os = "macos"))]
     {
-        // `tauri-plugin-notification` has no click events on desktop, so a
-        // notification here carries no route and a click only raises the app
-        // the way the platform does on its own.
+        // `tauri-plugin-notification` has no click events or buttons on
+        // desktop, so a notification here carries no route and no answers,
+        // and a click only raises the app the way the platform does on its
+        // own.
         use tauri_plugin_notification::NotificationExt;
         app.notification()
             .builder()
@@ -374,6 +393,13 @@ pub struct ClickPlan {
     pub open: Option<NotificationTarget>,
 }
 
+/// The backend that owns a notification's session, and answers its buttons:
+/// the raising workspace window's own, else (Quick Ask) the one its route
+/// names. `None` is the local workspace.
+pub fn route_backend(route: &NotificationRoute) -> Option<i32> {
+    workspace_backend_of(&route.window).unwrap_or(route.remote_connection_id)
+}
+
 /// Decide where a click goes.
 ///
 /// The session belongs to the backend of the window that raised it, and only
@@ -383,7 +409,7 @@ pub struct ClickPlan {
 /// window, where its tab key means nothing — only the conversation can travel.
 pub fn plan_click(route: &NotificationRoute, is_open: impl Fn(&str) -> bool) -> ClickPlan {
     let origin_backend = workspace_backend_of(&route.window);
-    let backend = origin_backend.unwrap_or(route.remote_connection_id);
+    let backend = route_backend(route);
     let label = workspace_label_for(backend);
     let show = match backend {
         None => ShowWindow::Local,
@@ -402,20 +428,31 @@ pub fn plan_click(route: &NotificationRoute, is_open: impl Fn(&str) -> bool) -> 
 /// [`notification_take_pending_open`].
 pub const NOTIFICATION_OPEN_PENDING_EVENT: &str = "notification://open-pending";
 
+/// A session a click handed to a workspace window: the target's own fields,
+/// plus `notice` when an answer from the notification did not go through.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParkedOpen {
+    #[serde(flatten)]
+    pub target: NotificationTarget,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<NotificationNotice>,
+}
+
 /// Sessions a click handed to a workspace window, keyed by that window's
 /// label, until its bridge takes them.
-static PENDING_OPEN: Mutex<Option<HashMap<String, Vec<NotificationTarget>>>> = Mutex::new(None);
+static PENDING_OPEN: Mutex<Option<HashMap<String, Vec<ParkedOpen>>>> = Mutex::new(None);
 
-fn park_open(label: &str, target: NotificationTarget) {
+fn park_open(label: &str, target: NotificationTarget, notice: Option<NotificationNotice>) {
     let mut pending = PENDING_OPEN.lock().unwrap_or_else(|e| e.into_inner());
     pending
         .get_or_insert_with(HashMap::new)
         .entry(label.to_string())
         .or_default()
-        .push(target);
+        .push(ParkedOpen { target, notice });
 }
 
-fn take_parked(label: &str) -> Vec<NotificationTarget> {
+fn take_parked(label: &str) -> Vec<ParkedOpen> {
     let mut pending = PENDING_OPEN.lock().unwrap_or_else(|e| e.into_inner());
     pending
         .as_mut()
@@ -428,7 +465,7 @@ fn take_parked(label: &str) -> Vec<NotificationTarget> {
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn notification_take_pending_open(
     window: tauri::WebviewWindow,
-) -> Result<Vec<NotificationTarget>, AppCommandError> {
+) -> Result<Vec<ParkedOpen>, AppCommandError> {
     Ok(take_parked(window.label()))
 }
 
@@ -437,9 +474,19 @@ pub async fn notification_take_pending_open(
 /// platforms, which have no caller yet, do not flag it as dead code.
 #[cfg(feature = "tauri-runtime")]
 pub async fn open_notification_route(app: &AppHandle, route: NotificationRoute) {
+    open_notification_route_with(app, route, None).await;
+}
+
+/// [`open_notification_route`], with `notice` for the window to show.
+#[cfg(feature = "tauri-runtime")]
+async fn open_notification_route_with(
+    app: &AppHandle,
+    route: NotificationRoute,
+    notice: Option<NotificationNotice>,
+) {
     let plan = plan_click(&route, |label| app.get_webview_window(label).is_some());
     if let Some(target) = plan.open.clone() {
-        park_open(&plan.label, target);
+        park_open(&plan.label, target, notice);
     }
     match &plan.show {
         ShowWindow::Local => crate::commands::workspace_windows::show_local_workspace_window(app),
@@ -474,6 +521,195 @@ pub async fn open_notification_route(app: &AppHandle, route: NotificationRoute) 
     let _ = app.emit_to(plan.label.as_str(), NOTIFICATION_OPEN_PENDING_EVENT, ());
 }
 
+// ─── Answering from the notification ────────────────────────────────────────
+//
+// A notification about a pending item carries its buttons (see
+// `notification_answers`). A button or a typed reply is answered by the
+// backend that owns the session — `route_backend`, the one a click opens the
+// session in — over the transport its windows use: the local connection
+// manager, or the remote proxy a remote workspace window calls through.
+
+/// The backend a notification's answers go to.
+#[cfg(feature = "tauri-runtime")]
+struct WindowBackend<'a> {
+    app: &'a AppHandle,
+    /// `None` is the local workspace.
+    remote: Option<i32>,
+}
+
+#[cfg(feature = "tauri-runtime")]
+impl WindowBackend<'_> {
+    /// One API call to a remote server, as its windows make it.
+    async fn remote_call(
+        &self,
+        connection_id: i32,
+        command: &str,
+        args: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value, String> {
+        crate::commands::remote_proxy::remote_http_call(
+            self.app.state(),
+            self.app.state(),
+            connection_id,
+            command.to_string(),
+            args,
+            None,
+        )
+        .await
+        .map_err(|err| err.to_string())
+    }
+
+    /// One answer to the local connection manager, as the local window's
+    /// commands send it.
+    async fn send_local(&self, call: &AnswerCall) -> Result<(), String> {
+        use crate::acp::plan_approval::{PlanApprovalAnswer, PlanApprovalDecision};
+        use crate::acp::question::{QuestionAnswer, QuestionAnswerItem};
+
+        let manager = self.app.state::<crate::acp::manager::ConnectionManager>();
+        let result = match call {
+            AnswerCall::Permission {
+                connection_id,
+                request_id,
+                option_id,
+            } => {
+                manager
+                    .respond_permission(connection_id, request_id, option_id)
+                    .await
+            }
+            AnswerCall::Question {
+                connection_id,
+                question_id,
+                item_id,
+                label,
+            } => {
+                let answer = QuestionAnswer {
+                    answers: vec![QuestionAnswerItem {
+                        question_id: item_id.clone(),
+                        labels: vec![label.clone()],
+                    }],
+                    declined: false,
+                };
+                manager
+                    .answer_question(connection_id, question_id, answer)
+                    .await
+            }
+            AnswerCall::ApprovePlan {
+                connection_id,
+                approval_id,
+            } => {
+                let answer = PlanApprovalAnswer {
+                    decision: PlanApprovalDecision::Approve,
+                    feedback: None,
+                };
+                manager
+                    .answer_plan_approval(connection_id, approval_id, answer)
+                    .await
+            }
+        };
+        result.map_err(|err| err.to_string())
+    }
+}
+
+#[cfg(feature = "tauri-runtime")]
+impl AnswerBackend for WindowBackend<'_> {
+    async fn is_pending(&self, pending_id: &str) -> Result<bool, String> {
+        match self.remote {
+            None => Ok(crate::pending::snapshot()
+                .items
+                .iter()
+                .any(|item| item.id == pending_id)),
+            Some(id) => self
+                .remote_call(id, "list_pending_items", None)
+                .await
+                .map(|snapshot| snapshot_lists(&snapshot, pending_id)),
+        }
+    }
+
+    async fn send(&self, call: &AnswerCall) -> Result<(), String> {
+        match self.remote {
+            None => self.send_local(call).await,
+            Some(id) => self
+                .remote_call(id, call.command(), Some(call.args()))
+                .await
+                .map(|_| ()),
+        }
+    }
+}
+
+/// Carry out a button or a reply on a pending item's notification: answer
+/// the item on its backend and withdraw its notifications, or — when it is
+/// no longer waiting, or the answer did not go through — open its session
+/// with a notice. Anything that does not answer (a click, "Open") opens the
+/// session. Only macOS reports these; public for the same reason as
+/// [`open_notification_route`].
+#[cfg(feature = "tauri-runtime")]
+pub async fn answer_from_notification(
+    app: &AppHandle,
+    route: NotificationRoute,
+    pending: PendingNotification,
+    activation: Activation,
+) {
+    let Some(call) = answer_for(&pending, &activation) else {
+        open_notification_route(app, route).await;
+        return;
+    };
+    let backend = route_backend(&route);
+    let outcome = run_answer(
+        &WindowBackend {
+            app,
+            remote: backend,
+        },
+        &pending.pending_id,
+        &call,
+    )
+    .await;
+    match outcome.notice() {
+        None => withdraw_pending_notifications(app, backend, None, vec![pending.pending_id]),
+        Some(notice) => open_notification_route_with(app, route, Some(notice)).await,
+    }
+}
+
+/// Withdraw the calling window's backend's notifications about items that
+/// stopped waiting — answered on the phone or in another window, cancelled —
+/// so their buttons do not linger in Notification Center: `gone` cleared
+/// since the window's last list, and whatever `live` (the whole list) leaves
+/// out once past a grace period, which also catches items that cleared while
+/// no window of this backend was open. A no-op off macOS.
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn notification_sync_pending(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    live: Vec<String>,
+    gone: Vec<String>,
+) -> Result<(), AppCommandError> {
+    let backend = backend_of_window(window.label(), window.url().ok().as_ref());
+    withdraw_pending_notifications(&app, backend, Some(live), gone);
+    Ok(())
+}
+
+/// Withdraw `backend`'s notifications about the items in `gone` and, given
+/// the whole list, the stale ones (`notification_answers::is_stale`).
+/// Fire-and-forget, on the main thread.
+#[cfg(feature = "tauri-runtime")]
+fn withdraw_pending_notifications(
+    #[allow(unused_variables)] app: &AppHandle,
+    #[allow(unused_variables)] backend: Option<i32>,
+    #[allow(unused_variables)] live: Option<Vec<String>>,
+    #[allow(unused_variables)] gone: Vec<String>,
+) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app.run_on_main_thread(move || {
+            macos::withdraw_on_main_thread(backend, |pending_id, age_secs| match &live {
+                Some(live) => crate::commands::notification_answers::is_stale(
+                    pending_id, age_secs, live, &gone,
+                ),
+                None => gone.iter().any(|id| id == pending_id),
+            });
+        });
+    }
+}
+
 /// Install the macOS click handler for notifications posted before this
 /// process started (the app updated or restarted since). Notifications posted
 /// by this process install it on their own.
@@ -495,6 +731,18 @@ mod macos {
     //! done here: the same API, permission and identity as before, plus an
     //! `identifier` (a session's newer notification replaces its older one)
     //! and a `userInfo` route that a click hands to `open_notification_route`.
+    //!
+    //! A pending item's notification also carries its answers: the first
+    //! button on the action button, every button in its menu
+    //! (`additionalActions`, so a presentation that shows only the menu still
+    //! offers them all), and a reply field where the card takes free text.
+    //! This API rather than `UNUserNotificationCenter`: it is the center every
+    //! other codeg notification already goes through, so the permission, the
+    //! claimed identity (dev builds included, which the newer API refuses
+    //! outright) and click-to-open stay exactly as they are, with no new
+    //! authorization prompt; and it offers what is needed — buttons with
+    //! titles set per notification (the newer API fixes them per registered
+    //! category) and an inline reply.
     #![allow(deprecated)]
 
     use std::cell::OnceCell;
@@ -504,14 +752,18 @@ mod macos {
     use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
     use objc2::{class, define_class, msg_send, MainThreadMarker, MainThreadOnly};
     use objc2_foundation::{
-        NSDictionary, NSString, NSUserNotification, NSUserNotificationCenter,
+        NSArray, NSDictionary, NSString, NSUserNotification, NSUserNotificationAction,
+        NSUserNotificationActivationType, NSUserNotificationCenter,
         NSUserNotificationCenterDelegate,
     };
     use tauri::AppHandle;
 
     use super::{
-        decode_route, encode_route, notification_group_id, open_notification_route,
-        NotificationRoute, ROUTE_USER_INFO_KEY,
+        answer_from_notification, decode_route, encode_route, notification_group_id,
+        open_notification_route, route_backend, NotificationRoute, ROUTE_USER_INFO_KEY,
+    };
+    use crate::commands::notification_answers::{
+        decode_pending, encode_pending, Activation, PendingNotification, PENDING_USER_INFO_KEY,
     };
 
     /// The app a click is routed through. Set by the first install or send.
@@ -543,10 +795,18 @@ mod macos {
                 let Some(app) = APP.get().cloned() else {
                     return;
                 };
+                let activation = activation_of(notification);
+                let pending = pending_of(notification);
                 match route_of(notification) {
                     Some(route) => {
                         tauri::async_runtime::spawn(async move {
-                            open_notification_route(&app, route).await;
+                            match pending {
+                                Some(pending) if activation != Activation::Clicked => {
+                                    answer_from_notification(&app, route, pending, activation)
+                                        .await
+                                }
+                                _ => open_notification_route(&app, route).await,
+                            }
                         });
                     }
                     // No session named (a test send, a notice from the app
@@ -581,11 +841,107 @@ mod macos {
         }
     }
 
-    fn route_of(notification: &NSUserNotification) -> Option<NotificationRoute> {
+    fn user_info_string(notification: &NSUserNotification, key: &str) -> Option<String> {
         let info = notification.userInfo()?;
-        let value = info.objectForKey(&NSString::from_str(ROUTE_USER_INFO_KEY))?;
+        let value = info.objectForKey(&NSString::from_str(key))?;
         let raw = value.downcast_ref::<NSString>()?;
-        decode_route(&raw.to_string())
+        Some(raw.to_string())
+    }
+
+    fn route_of(notification: &NSUserNotification) -> Option<NotificationRoute> {
+        decode_route(&user_info_string(notification, ROUTE_USER_INFO_KEY)?)
+    }
+
+    fn pending_of(notification: &NSUserNotification) -> Option<PendingNotification> {
+        decode_pending(&user_info_string(notification, PENDING_USER_INFO_KEY)?)
+    }
+
+    /// What the user did: the notification, its action button, a button of
+    /// its menu, or a typed reply.
+    fn activation_of(notification: &NSUserNotification) -> Activation {
+        let kind = notification.activationType();
+        if kind == NSUserNotificationActivationType::ActionButtonClicked {
+            Activation::Primary
+        } else if kind == NSUserNotificationActivationType::AdditionalActionClicked {
+            notification
+                .additionalActivationAction()
+                .and_then(|action| action.identifier())
+                .map(|id| Activation::Button(id.to_string()))
+                .unwrap_or(Activation::Clicked)
+        } else if kind == NSUserNotificationActivationType::Replied {
+            Activation::Reply(reply_text(notification).unwrap_or_default())
+        } else {
+            Activation::Clicked
+        }
+    }
+
+    /// The typed reply's plain text. Messaged directly: the binding's
+    /// `response` needs a Foundation feature for `NSAttributedString` that
+    /// nothing else here uses.
+    fn reply_text(notification: &NSUserNotification) -> Option<String> {
+        // SAFETY: `-response` returns an `NSAttributedString` or nil, and
+        // `-string` its plain `NSString`; neither takes arguments.
+        unsafe {
+            let response: Option<Retained<AnyObject>> = msg_send![notification, response];
+            let response = response?;
+            let text: Option<Retained<NSString>> = msg_send![&*response, string];
+            text.map(|text| text.to_string())
+        }
+    }
+
+    /// Put a pending item's buttons and reply on a notification.
+    fn set_answers(notification: &NSUserNotification, pending: &PendingNotification) {
+        if let Some(first) = pending.buttons.first() {
+            let actions: Vec<Retained<NSUserNotificationAction>> = pending
+                .buttons
+                .iter()
+                .map(|button| {
+                    NSUserNotificationAction::actionWithIdentifier_title(
+                        Some(&*NSString::from_str(&button.id)),
+                        Some(&*NSString::from_str(&button.title)),
+                    )
+                })
+                .collect();
+            notification.setHasActionButton(true);
+            notification.setActionButtonTitle(&NSString::from_str(&first.title));
+            notification.setAdditionalActions(Some(&*NSArray::from_retained_slice(&actions)));
+        }
+        if let Some(reply) = &pending.reply {
+            notification.setHasReplyButton(true);
+            if !reply.placeholder.is_empty() {
+                notification.setResponsePlaceholder(Some(&*NSString::from_str(&reply.placeholder)));
+            }
+        }
+    }
+
+    /// Withdraw the delivered pending-item notifications of `backend` that
+    /// `stale(pending id, age in seconds)` picks. Runs on the main thread.
+    pub(super) fn withdraw_on_main_thread(
+        backend: Option<i32>,
+        stale: impl Fn(&str, f64) -> bool,
+    ) {
+        if MainThreadMarker::new().is_none() || !has_bundle_identifier() {
+            return;
+        }
+        let Some(center) = default_center() else {
+            return;
+        };
+        for notification in center.deliveredNotifications().to_vec() {
+            let (Some(route), Some(pending)) = (route_of(&notification), pending_of(&notification))
+            else {
+                continue;
+            };
+            if route_backend(&route) != backend {
+                continue;
+            }
+            let age_secs = notification
+                .actualDeliveryDate()
+                .map(|date| -date.timeIntervalSinceNow())
+                .unwrap_or(0.0);
+            if stale(&pending.pending_id, age_secs) {
+                center.removeDeliveredNotification(&notification);
+            }
+        }
     }
 
     /// The process's notification center, or `None` for a process without a
@@ -646,6 +1002,7 @@ mod macos {
         title: &str,
         body: &str,
         route: Option<&NotificationRoute>,
+        pending: Option<&PendingNotification>,
     ) -> Result<(), String> {
         let mtm = MainThreadMarker::new().ok_or("not on the main thread")?;
         let center = default_center().ok_or("this process has no notification center")?;
@@ -662,10 +1019,20 @@ mod macos {
                 let id = NSString::from_str(&id);
                 notification.setIdentifier(Some(&*id));
             }
-            let key = NSString::from_str(ROUTE_USER_INFO_KEY);
-            let value = NSString::from_str(&encode_route(route));
-            let object: &AnyObject = &value;
-            let user_info = NSDictionary::<NSString, AnyObject>::from_slices(&[&*key], &[object]);
+            let route_key = NSString::from_str(ROUTE_USER_INFO_KEY);
+            let route_value = NSString::from_str(&encode_route(route));
+            let pending_key = NSString::from_str(PENDING_USER_INFO_KEY);
+            let pending_value = pending.map(|pending| NSString::from_str(&encode_pending(pending)));
+            let mut keys: Vec<&NSString> = Vec::new();
+            let mut objects: Vec<&AnyObject> = Vec::new();
+            keys.push(&route_key);
+            objects.push(&route_value);
+            if let (Some(pending), Some(value)) = (pending, &pending_value) {
+                keys.push(&pending_key);
+                objects.push(value);
+                set_answers(&notification, pending);
+            }
+            let user_info = NSDictionary::<NSString, AnyObject>::from_slices(&keys, &objects);
             // SAFETY: the dictionary holds only NSString values, which is what
             // `userInfo` requires (property-list types).
             unsafe { notification.setUserInfo(Some(&*user_info)) };
@@ -1037,11 +1404,69 @@ mod tests {
     fn parked_sessions_are_taken_once_per_window() {
         let a = target(Some("a"), Some(1));
         let b = target(Some("b"), Some(2));
-        park_open("test-window-x", a.clone());
-        park_open("test-window-x", b.clone());
-        park_open("test-window-y", a.clone());
-        assert_eq!(take_parked("test-window-x"), vec![a.clone(), b]);
+        let parked = |target: &NotificationTarget, notice| ParkedOpen {
+            target: target.clone(),
+            notice,
+        };
+        park_open("test-window-x", a.clone(), None);
+        park_open(
+            "test-window-x",
+            b.clone(),
+            Some(NotificationNotice::AlreadyAnswered),
+        );
+        park_open("test-window-y", a.clone(), None);
+        assert_eq!(
+            take_parked("test-window-x"),
+            vec![
+                parked(&a, None),
+                parked(&b, Some(NotificationNotice::AlreadyAnswered))
+            ]
+        );
         assert!(take_parked("test-window-x").is_empty());
-        assert_eq!(take_parked("test-window-y"), vec![a]);
+        assert_eq!(take_parked("test-window-y"), vec![parked(&a, None)]);
+    }
+
+    #[test]
+    fn a_parked_session_is_the_target_plus_its_notice() {
+        let open = ParkedOpen {
+            target: target(Some("t1"), Some(17)),
+            notice: Some(NotificationNotice::NotAnswered),
+        };
+        assert_eq!(
+            serde_json::to_value(&open).unwrap(),
+            serde_json::json!({
+                "contextKey": "t1",
+                "folderId": 4,
+                "conversationId": 17,
+                "agentType": "claude_code",
+                "notice": "not_answered",
+            })
+        );
+        // No notice: exactly the target, as before.
+        let plain = ParkedOpen {
+            notice: None,
+            ..open
+        };
+        assert!(serde_json::to_value(&plain).unwrap().get("notice").is_none());
+    }
+
+    #[test]
+    fn answers_go_to_the_backend_that_opens_the_session() {
+        let session = target(None, Some(5));
+        assert_eq!(route_backend(&route("main", None, session.clone())), None);
+        assert_eq!(
+            route_backend(&route("remote-workspace-3", Some(3), session.clone())),
+            Some(3)
+        );
+        // A Quick Ask window names its backend in its route.
+        assert_eq!(
+            route_backend(&route("quick-ask", Some(8), session.clone())),
+            Some(8)
+        );
+        // The raising window's label wins over a route that disagrees.
+        assert_eq!(
+            route_backend(&route("remote-workspace-3", Some(9), session)),
+            Some(3)
+        );
     }
 }

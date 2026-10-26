@@ -7617,6 +7617,17 @@
       "quietFrom": "방해 금지 시작",
       "quietTo": "방해 금지 종료",
       "saveFailed": "저장하지 못했습니다: {message}"
+    },
+    "notification": {
+      "allow": "허용",
+      "allowAlways": "항상 허용",
+      "deny": "거부",
+      "denyAlways": "항상 거부",
+      "approve": "승인",
+      "open": "열기",
+      "replyPlaceholder": "답변 입력…",
+      "alreadyAnswered": "이미 답변했거나 더 이상 기다리지 않습니다.",
+      "notAnswered": "알림에서 답변을 보내지 못했습니다. 여기에서 답변하세요."
     }
   }
 }

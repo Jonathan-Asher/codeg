@@ -7617,6 +7617,17 @@
       "quietFrom": "بداية ساعات الهدوء",
       "quietTo": "نهاية ساعات الهدوء",
       "saveFailed": "تعذّر الحفظ: {message}"
+    },
+    "notification": {
+      "allow": "السماح",
+      "allowAlways": "السماح دائمًا",
+      "deny": "الرفض",
+      "denyAlways": "الرفض دائمًا",
+      "approve": "الموافقة",
+      "open": "فتح",
+      "replyPlaceholder": "اكتب إجابتك…",
+      "alreadyAnswered": "تمت الإجابة بالفعل، أو لم يعد بانتظارك.",
+      "notAnswered": "تعذّر إرسال إجابتك من الإشعار. أجب هنا."
     }
   }
 }
