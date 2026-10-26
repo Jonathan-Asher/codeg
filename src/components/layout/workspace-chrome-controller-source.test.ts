@@ -114,3 +114,28 @@ describe("tab close/navigation shortcuts live in the always-mounted controller",
     expect(fileTabBarSource).not.toContain("matchShortcutEvent")
   })
 })
+
+describe("the search shortcut is the session switcher's hot path", () => {
+  // ⌘K then Enter is one gesture: the keys after the shortcut belong to the
+  // switcher even if they beat its search box to focus, so the buffer is
+  // armed before the dialog is asked to open.
+  it("arms the switcher's typeahead before toggling the dialog", () => {
+    const start = controllerSource.indexOf(
+      "matchShortcutEvent(e, shortcuts.toggle_search)"
+    )
+    expect(start).toBeGreaterThan(-1)
+    const branch = controllerSource.slice(
+      start,
+      controllerSource.indexOf("return", start)
+    )
+    expect(branch).toMatch(/armQuickSwitchTypeahead\(\)[\s\S]*setSearchOpen\(/)
+  })
+
+  // Opening must not re-render this controller (and everything it reads):
+  // only the small host that renders the dialog reads the open state.
+  it("reads only the setter of the shared open-state", () => {
+    expect(controllerSource).toMatch(/useSearchDialogSetter\(\)/)
+    expect(controllerSource).not.toMatch(/open: searchOpen/)
+    expect(controllerSource).toMatch(/<SearchDialogHost \/>/)
+  })
+})

@@ -7,6 +7,11 @@ import { SearchCommandDialog } from "./search-command-dialog"
 import enMessages from "@/i18n/messages/en.json"
 import type { MessageSearchHit } from "@/lib/api"
 import { takePendingFind } from "@/lib/pending-find"
+import {
+  __resetQuickSwitchTypeaheadForTests,
+  armQuickSwitchTypeahead,
+  cancelQuickSwitchTypeahead,
+} from "@/lib/quick-switch-typeahead"
 
 const h = vi.hoisted(() => ({
   searchMessages: vi.fn(),
@@ -17,6 +22,25 @@ const h = vi.hoisted(() => ({
 }))
 
 vi.mock("@/components/agent-icon", () => ({ AgentIcon: () => null }))
+
+const warm = vi.hoisted(() => ({
+  prefetchConversationDetail: vi.fn(),
+  preconnectConversation: vi.fn(),
+  cancelConversationPreconnect: vi.fn(),
+}))
+
+vi.mock("@/stores/conversation-runtime-store", () => ({
+  prefetchConversationDetail: warm.prefetchConversationDetail,
+  useConversationRuntimeStore: {
+    getState: () => ({ byConversationId: new Map() }),
+    subscribe: () => () => {},
+  },
+}))
+
+vi.mock("@/lib/session-preconnect", () => ({
+  preconnectConversation: warm.preconnectConversation,
+  cancelConversationPreconnect: warm.cancelConversationPreconnect,
+}))
 
 vi.mock("@/lib/api", () => ({
   listAllConversations: h.listAllConversations,
@@ -516,5 +540,273 @@ describe("SearchCommandDialog archived folders", () => {
     expect(liveRow?.textContent).not.toContain(
       enMessages.Folder.search.archivedBadge
     )
+  })
+})
+
+describe("SearchCommandDialog as an instant session switcher", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    __resetQuickSwitchTypeaheadForTests()
+    folders.active = folders.all[0]
+    h.listAllConversations.mockResolvedValue([])
+    store.conversations = [
+      conv(1, 3, "Release prep", { updated_at: "2026-09-30T10:00:00Z" }),
+      conv(2, 5, "Legal brief", {
+        agent_type: "codex",
+        external_id: "session-2",
+        updated_at: "2026-09-30T11:00:00Z",
+      }),
+      conv(3, 3, "Older codeg work", { updated_at: "2026-09-30T09:00:00Z" }),
+    ]
+    tabState.tabs = [
+      {
+        id: "tab-1",
+        kind: "conversation",
+        folderId: 3,
+        conversationId: 1,
+        agentType: "claude_code",
+        title: "Release prep",
+        isPinned: true,
+      },
+    ]
+    tabState.activeTabId = "tab-1"
+  })
+
+  function dialog(open: boolean, onOpenChange = vi.fn()) {
+    return (
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <SearchCommandDialog open={open} onOpenChange={onOpenChange} />
+      </NextIntlClientProvider>
+    )
+  }
+
+  /** The listed rows (hidden or not), top to bottom, and the selected one. */
+  function listed() {
+    const items = Array.from(document.querySelectorAll("[cmdk-item]"))
+    return {
+      items,
+      titles: items.map((o) => o.querySelector("span.flex-1")?.textContent),
+      selected: items.findIndex(
+        (o) => o.getAttribute("aria-selected") === "true"
+      ),
+    }
+  }
+
+  /** A composer that held focus when the shortcut was pressed. */
+  function focusedComposer() {
+    const composer = document.createElement("textarea")
+    document.body.appendChild(composer)
+    composer.focus()
+    const keys = vi.fn()
+    composer.addEventListener("keydown", keys)
+    return { composer, keys }
+  }
+
+  function keydown(target: EventTarget, key: string) {
+    const event = new KeyboardEvent("keydown", {
+      key,
+      bubbles: true,
+      cancelable: true,
+    })
+    target.dispatchEvent(event)
+    return event
+  }
+
+  it("keeps the switcher rendered while hidden, so opening only reveals it", async () => {
+    const { rerender } = render(dialog(false))
+    await waitFor(() => expect(listed().titles).toHaveLength(2))
+    // Hidden: rendered, the previous session first and selected, but out of
+    // sight and out of the accessibility tree.
+    expect(listed().titles).toEqual(["Legal brief", "Older codeg work"])
+    expect(listed().selected).toBe(0)
+    expect(screen.queryAllByRole("option")).toHaveLength(0)
+    const firstRow = listed().items[0]
+
+    rerender(dialog(true))
+
+    // Shown at once, the same rows (nothing remounted), the caret in the box.
+    expect(screen.getAllByRole("option")[0]).toBe(firstRow)
+    expect(listed().selected).toBe(0)
+    expect(screen.getByPlaceholderText("Search conversations...")).toHaveFocus()
+    expect(
+      document.querySelector('[role="dialog"][data-state="open"]')
+    ).not.toBeNull()
+  })
+
+  it("tracks the session in front while hidden", async () => {
+    const { rerender } = render(dialog(false))
+    await waitFor(() => expect(listed().titles).toHaveLength(2))
+
+    // Another tab comes to the front while the switcher is closed.
+    tabState.tabs = [
+      ...tabState.tabs,
+      {
+        id: "tab-2",
+        kind: "conversation",
+        folderId: 5,
+        conversationId: 2,
+        agentType: "codex",
+        title: "Legal brief",
+        isPinned: true,
+      },
+    ]
+    tabState.activeTabId = "tab-2"
+    rerender(dialog(false))
+    rerender(dialog(true))
+
+    expect(listed().titles).toEqual(["Release prep", "Older codeg work"])
+    expect(listed().selected).toBe(0)
+  })
+
+  it("takes an Enter typed before its search box had focus, never the composer", async () => {
+    const onOpenChange = vi.fn()
+    const { rerender } = render(dialog(false, onOpenChange))
+    await waitFor(() => expect(listed().titles).toHaveLength(2))
+    const { composer, keys } = focusedComposer()
+
+    // ⌘K arms the buffer; Enter arrives before the dialog has opened.
+    armQuickSwitchTypeahead()
+    const enter = keydown(composer, "Enter")
+    expect(enter.defaultPrevented).toBe(true)
+    expect(keys).not.toHaveBeenCalled()
+
+    rerender(dialog(true, onOpenChange))
+
+    await waitFor(() =>
+      expect(h.openTab).toHaveBeenCalledWith(5, 2, "codex", true)
+    )
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+    expect(keys).not.toHaveBeenCalled()
+    composer.remove()
+  })
+
+  it("puts letters typed before its search box had focus into the box", async () => {
+    const { rerender } = render(dialog(false))
+    await waitFor(() => expect(listed().titles).toHaveLength(2))
+    const { composer, keys } = focusedComposer()
+
+    armQuickSwitchTypeahead()
+    for (const key of ["u", "p", "x", "Backspace"]) keydown(composer, key)
+    rerender(dialog(true))
+
+    const input = screen.getByPlaceholderText("Search conversations...")
+    await waitFor(() => expect(input).toHaveValue("up"))
+    expect(input).toHaveFocus()
+    expect(keys).not.toHaveBeenCalled()
+    expect(composer.value).toBe("")
+    composer.remove()
+  })
+
+  it("leaves shortcuts and keys typed into the switcher alone", async () => {
+    render(dialog(true))
+    const input = screen.getByPlaceholderText("Search conversations...")
+    const { composer, keys } = focusedComposer()
+    armQuickSwitchTypeahead()
+
+    // A chord is another shortcut's (a second ⌘K closes the switcher).
+    const chord = new KeyboardEvent("keydown", {
+      key: "k",
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    composer.dispatchEvent(chord)
+    expect(keys).toHaveBeenCalledTimes(1)
+    expect(chord.defaultPrevented).toBe(false)
+
+    // Its own search box is not held back.
+    const typed = keydown(input, "a")
+    expect(typed.defaultPrevented).toBe(false)
+    cancelQuickSwitchTypeahead()
+    composer.remove()
+  })
+
+  it("starts the next open fresh: query cleared, the first session selected", async () => {
+    h.listAllConversations.mockResolvedValue([conv(7, 3, "Upload fixes")])
+    const { rerender } = render(dialog(true))
+    const user = userEvent.setup()
+    const input = screen.getByPlaceholderText("Search conversations...")
+    await user.type(input, "upload")
+    expect(await screen.findByText("Upload fixes")).toBeTruthy()
+
+    rerender(dialog(false))
+    rerender(dialog(true))
+
+    expect(input).toHaveValue("")
+    expect(listed().titles).toEqual(["Legal brief", "Older codeg work"])
+    expect(listed().selected).toBe(0)
+    expect(input).toHaveFocus()
+  })
+
+  it("gives focus back on Escape", async () => {
+    const before = document.createElement("button")
+    document.body.appendChild(before)
+    before.focus()
+    const onOpenChange = vi.fn()
+    const { rerender } = render(dialog(false, onOpenChange))
+    rerender(dialog(true, onOpenChange))
+    expect(screen.getByPlaceholderText("Search conversations...")).toHaveFocus()
+
+    const escape = keydown(document.activeElement!, "Escape")
+    expect(escape.defaultPrevented).toBe(true)
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+
+    rerender(dialog(false, onOpenChange))
+    expect(before).toHaveFocus()
+    before.remove()
+  })
+
+  it("warms the preselected session when it is not open in a tab", async () => {
+    render(dialog(true))
+    await waitFor(() =>
+      expect(warm.prefetchConversationDetail).toHaveBeenCalledWith(2)
+    )
+    expect(warm.preconnectConversation).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 2, external_id: "session-2" })
+    )
+  })
+
+  it("does not warm a session that is open in a tab already", async () => {
+    tabState.tabs = [
+      ...tabState.tabs,
+      {
+        id: "tab-2",
+        kind: "conversation",
+        folderId: 5,
+        conversationId: 2,
+        agentType: "codex",
+        title: "Legal brief",
+        isPinned: false,
+      },
+    ]
+    render(dialog(true))
+    await waitFor(() => expect(listed().selected).toBe(0))
+    expect(warm.prefetchConversationDetail).not.toHaveBeenCalled()
+    expect(warm.preconnectConversation).not.toHaveBeenCalled()
+  })
+
+  it("does not warm anything while hidden", async () => {
+    render(dialog(false))
+    await waitFor(() => expect(listed().titles).toHaveLength(2))
+    expect(warm.prefetchConversationDetail).not.toHaveBeenCalled()
+    expect(warm.preconnectConversation).not.toHaveBeenCalled()
+  })
+
+  it("opens as the modal dialog over a layer that holds focus", async () => {
+    const guard = document.createElement("span")
+    guard.setAttribute("data-radix-focus-guard", "")
+    document.body.appendChild(guard)
+    const { rerender } = render(dialog(false))
+    rerender(dialog(true))
+
+    expect(
+      document.querySelector('[data-slot="dialog-content"]')
+    ).not.toBeNull()
+    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(2))
+    const user = userEvent.setup()
+    await user.keyboard("{Enter}")
+    expect(h.openTab).toHaveBeenCalledWith(5, 2, "codex", true)
+    guard.remove()
   })
 })
