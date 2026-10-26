@@ -117,6 +117,22 @@ describe("canOfferContinue", () => {
     ).toBe(false)
   })
 
+  it("offers it while the session opens, when a click can wait for it", () => {
+    const opening = { connectionReady: false, connectionOpening: true }
+    // The session is still being resumed, or not started yet: the click
+    // waits for it (see `lib/pending-actions`).
+    expect(
+      gate({ connectionStatus: "connecting", turnState: null }, opening)
+    ).toBe(true)
+    expect(gate({ turnState: null }, opening)).toBe(true)
+    // Never over a running turn, an interruption or a queued message.
+    expect(gate({ turnState: "running" }, opening)).toBe(false)
+    expect(gate({ turnState: "interrupted" }, opening)).toBe(false)
+    expect(gate({ turnState: null }, { ...opening, queuedCount: 1 })).toBe(
+      false
+    )
+  })
+
   it("leaves an interrupted turn to its banner's Continue", () => {
     expect(
       gate({ connectionStatus: "connected", turnState: "interrupted" })

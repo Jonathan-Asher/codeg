@@ -12,6 +12,8 @@ vi.mock("./use-create-task-from-message", () => ({
 
 import { TurnStats } from "./turn-stats"
 import { ForkProgressProvider } from "./fork-progress-context"
+import { PendingActionsProvider } from "./pending-actions-context"
+import { forkActionTarget } from "@/lib/pending-actions"
 import { MessageScrollProvider } from "./message-scroll-context"
 import { ModelLabelProvider } from "./model-label-context"
 import type { ModelLabelResolver } from "@/hooks/use-model-labels"
@@ -207,6 +209,52 @@ describe("TurnStats while a fork runs", () => {
     await userEvent.click(screen.getByLabelText(forkLabel))
     expect(onForkFromHere).toHaveBeenCalledTimes(1)
     expect(screen.queryByText(forkingLabel)).not.toBeInTheDocument()
+  })
+})
+
+const waitingLabel = enMessages.Folder.chat.messageList.waitingForConnection
+
+describe("TurnStats while a fork waits for the session", () => {
+  function renderWaiting(targets: string[]) {
+    const onForkFromHere = vi.fn()
+    const cancel = vi.fn()
+    renderStats(
+      <PendingActionsProvider
+        value={{ pendingTargets: new Set(targets), cancel }}
+      >
+        <TurnStats
+          copyText="hello"
+          onForkFromHere={onForkFromHere}
+          forkTurnId="turn-3"
+        />
+      </PendingActionsProvider>
+    )
+    return { onForkFromHere, cancel }
+  }
+
+  it("spins and says it is waiting, on the reply it was taken from", async () => {
+    renderWaiting([forkActionTarget("turn-3")])
+    const button = screen.getByRole("button", { name: waitingLabel })
+    expect(button).toHaveAttribute("aria-busy", "true")
+    expect(button).not.toHaveAttribute("aria-disabled")
+    expect(button.querySelector(".animate-spin")).not.toBeNull()
+    await userEvent.hover(button)
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(waitingLabel)
+  })
+
+  it("takes the fork back on a second click", async () => {
+    const { onForkFromHere, cancel } = renderWaiting([
+      forkActionTarget("turn-3"),
+    ])
+    await userEvent.click(screen.getByRole("button", { name: waitingLabel }))
+    expect(cancel).toHaveBeenCalledWith(forkActionTarget("turn-3"))
+    expect(onForkFromHere).not.toHaveBeenCalled()
+  })
+
+  it("leaves the other replies' buttons alone", async () => {
+    const { onForkFromHere } = renderWaiting([forkActionTarget("turn-1")])
+    await userEvent.click(screen.getByLabelText(forkLabel))
+    expect(onForkFromHere).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -751,3 +751,60 @@ describe("ConversationDetailPanel session-load failure surface", () => {
     )
   })
 })
+
+describe("ConversationDetailPanel actions before the session is ready", () => {
+  it("offers Fork and Edit on what the agent's sessions last said, not on the live status", () => {
+    // The buttons used to wait for `connected` AND the adapter's
+    // `fork_supported`; they now stand on the remembered capabilities until
+    // the connection answers (see `lib/agent-capabilities`).
+    expect(source).toContain("useExpectedCapabilities(selectedAgent)")
+    expect(source).toContain(
+      "const capabilities = confirmedCapabilities ?? expectedAgentCapabilities"
+    )
+    expect(source).toContain(
+      "actionsOffered && capabilities.supportsFork\n            ? handleForkRequest"
+    )
+    expect(source).toContain(
+      "supportsMessageEdit(selectedAgent, capabilities.forkStrictPoint)"
+    )
+    expect(source).not.toMatch(
+      /onForkFromTurn=\{\s*\(connStatus === "connected" \|\| connStatus === "prompting"\)/
+    )
+  })
+
+  it("remembers the connection's answer for the next session", () => {
+    const start = source.indexOf(
+      "useEffect(() => {\n    if (confirmedCapabilities)"
+    )
+    expect(start).toBeGreaterThan(-1)
+    expect(source.slice(start, start + 200)).toContain(
+      "rememberCapabilities(selectedAgent, confirmedCapabilities)"
+    )
+  })
+
+  it("holds the message queue while an action taken earlier goes first", () => {
+    const start = source.indexOf("// Flush queued messages whenever the agent")
+    const end = source.indexOf("clearTimeout(timer)", start)
+    const effect = source.slice(start, source.indexOf("])", end) + 2)
+    expect(effect).toContain("if (actionsHoldSends) return")
+    expect(effect).toMatch(/\bactionsHoldSends,/)
+  })
+
+  it("lets a queued edit past the queue check that a direct one keeps", () => {
+    expect(source).toContain("if (!opts?.queued && mqGetQueueLength() > 0) {")
+    expect(source).toMatch(
+      /handleEditUserMessageRef\.current\(payload\.request, \{\s*queued: true,\s*\}\)/
+    )
+  })
+
+  it("hands the composer Continue's waiting state", () => {
+    expect(source).toContain("continueBeforeReady={continueBeforeReady}")
+    expect(source).toContain("connectionOpening: actionsCanWait")
+    expect(chatInputSource).toContain(
+      "continueBeforeReady={continueBeforeReady}"
+    )
+    expect(conversationShellSource).toContain(
+      "continueBeforeReady={continueBeforeReady}"
+    )
+  })
+})
