@@ -16,6 +16,8 @@ export interface DetailCache {
   put(conversationId: number, detail: DbConversationDetail): void
   /** Hand the kept detail back and forget it (it is live again). */
   take(conversationId: number): DbConversationDetail | null
+  /** Whether a detail is kept for `conversationId` (without taking it). */
+  has(conversationId: number): boolean
   delete(conversationId: number): void
   clear(): void
   readonly size: number
@@ -75,6 +77,9 @@ export function createMemoryDetailCache(options?: {
     },
     take(conversationId) {
       return remove(conversationId)?.detail ?? null
+    },
+    has(conversationId) {
+      return entries.has(conversationId)
     },
     delete(conversationId) {
       remove(conversationId)

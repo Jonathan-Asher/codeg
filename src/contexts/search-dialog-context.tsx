@@ -15,7 +15,10 @@ interface SearchDialogContextValue {
   setOpen: Dispatch<SetStateAction<boolean>>
 }
 
-const SearchDialogContext = createContext<SearchDialogContextValue | null>(null)
+const SearchDialogOpenContext = createContext<boolean | null>(null)
+const SearchDialogSetterContext = createContext<Dispatch<
+  SetStateAction<boolean>
+> | null>(null)
 
 /**
  * Shared open-state for the conversation search command dialog.
@@ -29,25 +32,39 @@ const SearchDialogContext = createContext<SearchDialogContextValue | null>(null)
  *
  * `setOpen` is the raw state setter so callers can use the functional updater
  * form (the shortcut handler does `setOpen((prev) => !prev)`).
+ *
+ * The boolean and the setter travel in separate contexts: opening the dialog
+ * is the session switcher's hot path, and a trigger that only ever calls
+ * `setOpen` (`useSearchDialogSetter`) must not re-render when it flips.
  */
-export function useSearchDialog() {
-  const ctx = useContext(SearchDialogContext)
-  if (!ctx) {
+export function useSearchDialog(): SearchDialogContextValue {
+  const open = useContext(SearchDialogOpenContext)
+  const setOpen = useContext(SearchDialogSetterContext)
+  if (open === null || !setOpen) {
     throw new Error("useSearchDialog must be used within SearchDialogProvider")
   }
-  return ctx
+  return useMemo(() => ({ open, setOpen }), [open, setOpen])
+}
+
+/** Just the setter: never re-renders when the dialog opens or closes. */
+export function useSearchDialogSetter(): Dispatch<SetStateAction<boolean>> {
+  const setOpen = useContext(SearchDialogSetterContext)
+  if (!setOpen) {
+    throw new Error(
+      "useSearchDialogSetter must be used within SearchDialogProvider"
+    )
+  }
+  return setOpen
 }
 
 export function SearchDialogProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false)
-  const value = useMemo<SearchDialogContextValue>(
-    () => ({ open, setOpen }),
-    [open]
-  )
 
   return (
-    <SearchDialogContext.Provider value={value}>
-      {children}
-    </SearchDialogContext.Provider>
+    <SearchDialogSetterContext.Provider value={setOpen}>
+      <SearchDialogOpenContext.Provider value={open}>
+        {children}
+      </SearchDialogOpenContext.Provider>
+    </SearchDialogSetterContext.Provider>
   )
 }

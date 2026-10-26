@@ -4,7 +4,7 @@ import { PanelLeft, Search } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { isDesktop } from "@/lib/platform"
 import { Button } from "@/components/ui/button"
-import { useSearchDialog } from "@/contexts/search-dialog-context"
+import { useSearchDialogSetter } from "@/contexts/search-dialog-context"
 import { useSidebarContext } from "@/contexts/sidebar-context"
 import { useIsMac } from "@/hooks/use-is-mac"
 import { usePlatform } from "@/hooks/use-platform"
@@ -37,7 +37,7 @@ import { MAC_TRAFFIC_LIGHT_INSET, leftChromeReserve } from "@/lib/window-chrome"
 export function LeftEdgeChrome() {
   const tTitleBar = useTranslations("Folder.folderTitleBar")
   const { isOpen, toggle } = useSidebarContext()
-  const { setOpen: setSearchOpen } = useSearchDialog()
+  const setSearchOpen = useSearchDialogSetter()
   const isMac = useIsMac()
   const { shortcuts } = useShortcutSettings()
   const { isMac: platformIsMac } = usePlatform()
