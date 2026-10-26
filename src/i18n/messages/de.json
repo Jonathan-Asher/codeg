@@ -7575,5 +7575,48 @@
       "expired": "Diese Anmeldung wartet nicht mehr. Starte neu.",
       "failed": "Die Anmeldung wurde nicht abgeschlossen. Starte neu."
     }
+  },
+  "PendingItems": {
+    "indicator": "Wartet auf dich ({count})",
+    "listTitle": "Wartet auf dich",
+    "listHint": "Fragen, Berechtigungen und Pläne, auf die deine Sitzungen warten. Codeg erinnert dich, bis du antwortest.",
+    "untitled": "Unbenannte Sitzung",
+    "kind": {
+      "permission": "Berechtigung",
+      "question": "Frage",
+      "plan": "Plan"
+    },
+    "waiting": "wartet seit {elapsed}",
+    "reminders": "{count, plural, one {# Erinnerung} other {# Erinnerungen}}",
+    "notificationRedacted": "Eine Sitzung wartet noch auf dich",
+    "duration": {
+      "seconds": "{count} s",
+      "minutes": "{count} Min.",
+      "hours": "{count} Std.",
+      "days": "{count} T."
+    },
+    "reminder": {
+      "permission": "{agent} wartet noch auf deine Erlaubnis ({elapsed})",
+      "question": "{agent} wartet noch auf deine Antwort ({elapsed})",
+      "plan": "{agent} wartet noch darauf, dass du den Plan prüfst ({elapsed})"
+    },
+    "settings": {
+      "title": "Erinnerungen",
+      "description": "Wartet eine Sitzung auf dich – eine Frage, eine Berechtigung, ein Plan zur Freigabe –, erinnert dich Codeg auf dem iPhone und am Desktop, bis du antwortest, auch wenn du am Computer sitzt. Nie an die Sitzung, die du gerade ansiehst.",
+      "enabledTitle": "Erinnern",
+      "enabledHint": "Mich weiter an alles erinnern, was noch auf meine Antwort wartet.",
+      "scheduleTitle": "Erinnern nach",
+      "scheduleHint": "Gezählt ab dem Moment, in dem die Sitzung zu warten begann.",
+      "repeatTitle": "Danach alle",
+      "repeatHint": "In diesem Abstand weiter erinnern, bis geantwortet ist.",
+      "repeatOff": "Nie",
+      "quietTitle": "Ruhezeit",
+      "quietHint": "Keine Erinnerungen in dieser Zeit. Wartet am Ende noch etwas, kommt dann eine Erinnerung.",
+      "quietRangeTitle": "Ruhezeit von – bis",
+      "quietRangeHint": "In der Zeitzone dieses Geräts.",
+      "quietFrom": "Beginn der Ruhezeit",
+      "quietTo": "Ende der Ruhezeit",
+      "saveFailed": "Speichern fehlgeschlagen: {message}"
+    }
   }
 }

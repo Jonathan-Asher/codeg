@@ -7575,5 +7575,48 @@
       "expired": "This sign-in is no longer waiting. Start again.",
       "failed": "The sign-in didn't complete. Start again."
     }
+  },
+  "PendingItems": {
+    "indicator": "Waiting for you ({count})",
+    "listTitle": "Waiting for you",
+    "listHint": "Questions, permissions and plans your sessions wait on. Codeg keeps reminding you until you answer.",
+    "untitled": "Untitled session",
+    "kind": {
+      "permission": "Permission",
+      "question": "Question",
+      "plan": "Plan"
+    },
+    "waiting": "waiting {elapsed}",
+    "reminders": "{count, plural, one {# reminder} other {# reminders}}",
+    "notificationRedacted": "A session is still waiting for you",
+    "duration": {
+      "seconds": "{count} s",
+      "minutes": "{count} min",
+      "hours": "{count} h",
+      "days": "{count} d"
+    },
+    "reminder": {
+      "permission": "{agent} is still waiting for your permission ({elapsed})",
+      "question": "{agent} is still waiting for your answer ({elapsed})",
+      "plan": "{agent} is still waiting for you to review its plan ({elapsed})"
+    },
+    "settings": {
+      "title": "Reminders",
+      "description": "When a session waits on you — a question, a permission, a plan to approve — Codeg reminds you on the iPhone and on the desktop until you answer, even while you are at the computer. Never about the session you are looking at.",
+      "enabledTitle": "Remind me",
+      "enabledHint": "Keep reminding me about anything still waiting for my answer.",
+      "scheduleTitle": "Remind after",
+      "scheduleHint": "Counted from when the session started waiting.",
+      "repeatTitle": "Then every",
+      "repeatHint": "Keep reminding at this interval until it is answered.",
+      "repeatOff": "Never",
+      "quietTitle": "Quiet hours",
+      "quietHint": "No reminders in these hours. If something still waits when they end, one reminder comes then.",
+      "quietRangeTitle": "Quiet from – to",
+      "quietRangeHint": "In this device's time zone.",
+      "quietFrom": "Quiet hours start",
+      "quietTo": "Quiet hours end",
+      "saveFailed": "Could not save: {message}"
+    }
   }
 }

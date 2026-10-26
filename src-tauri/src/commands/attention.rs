@@ -104,8 +104,9 @@ pub async fn fill_conversation_background(
 
 /// Walk `parent_id` up to the top-level row. A row that can't be read ends the
 /// walk where it stands: flagging the nearest known ancestor beats dropping
-/// the signal over a missing title.
-async fn root_of(db: &DatabaseConnection, conversation_id: i32) -> i32 {
+/// the signal over a missing title. The pending registry
+/// (`crate::pending`) files a sub-agent's question under the same row.
+pub(crate) async fn root_of(db: &DatabaseConnection, conversation_id: i32) -> i32 {
     let mut current = conversation_id;
     for _ in 0..MAX_PARENT_DEPTH {
         match conversation_service::get_by_id(db, current).await {

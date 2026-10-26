@@ -122,6 +122,37 @@ fn turn_finished(conversation_id: i32) -> PushMessage {
         needs: None,
         permission: None,
         sound: true,
+        badge: None,
+        pending: None,
+    }
+}
+
+/// A question's reminder (or, with `reminder: false`, its first push).
+fn question_push(conversation_id: i32, reminder: bool) -> PushMessage {
+    PushMessage {
+        kind: PushKind::NeedsYou,
+        title: "Fix login".into(),
+        body: "codeg · Claude Code is still waiting for your answer (5 min)".into(),
+        conversation_id: Some(conversation_id),
+        folder_id: Some(3),
+        agent_type: Some("claude_code".into()),
+        alert_id: "alert-2".into(),
+        critical_kind: None,
+        needs: Some(payload::NeedsKind::Question),
+        permission: None,
+        sound: true,
+        badge: Some(2),
+        pending: Some(payload::PendingPush {
+            id: "question:q1".into(),
+            kind: crate::pending::PendingKind::Question,
+            since: chrono::Utc::now(),
+            reminder,
+            attempt: u32::from(reminder),
+            connection_id: "conn-1".into(),
+            asking_conversation_id: conversation_id,
+            question: None,
+            approval_id: None,
+        }),
     }
 }
 
@@ -217,6 +248,88 @@ async fn fan_out_reaches_the_devices_that_want_it_and_drops_dead_tokens() {
     .await;
     assert_eq!(report, DeliveryReport::default());
     assert!(mock.seen.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_reminder_reaches_the_desk_but_not_the_session_on_screen_nor_off() {
+    let db = test_helpers::fresh_in_memory_db().await;
+    let conn = &db.conn;
+    let (sender, mock) = mock_apns().await;
+    let off = DevicePrefs {
+        needs_you: prefs::Delivery::Off,
+        ..DevicePrefs::default()
+    };
+    add_device(conn, "aaaa0001", "Phone", DevicePrefs::default()).await;
+    add_device(conn, "cccc0003", "Quiet", off).await;
+
+    // At the desk, on another session: the first push waits for "away"...
+    let at_desk = looking(true, &[2]);
+    let report = deliver_with(&sender, conn, &setup(), &question_push(1, false), &at_desk).await;
+    assert_eq!(report, DeliveryReport::default());
+    // ...a reminder does not, but "off" stays off.
+    let report = deliver_with(&sender, conn, &setup(), &question_push(1, true), &at_desk).await;
+    assert_eq!(report.delivered, 1);
+    let seen = mock.seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].token, "aaaa0001");
+    assert_eq!(seen[0].body["reminder"], true);
+    assert_eq!(seen[0].body["attempt"], 1);
+    assert_eq!(seen[0].body["aps"]["badge"], 2);
+
+    // Looking at that very session: nothing.
+    let report = deliver_with(
+        &sender,
+        conn,
+        &setup(),
+        &question_push(1, true),
+        &looking(true, &[1]),
+    )
+    .await;
+    assert_eq!(report, DeliveryReport::default());
+}
+
+#[tokio::test]
+async fn every_push_carries_the_badge_and_the_sync_tops_up_the_rest() {
+    let db = test_helpers::fresh_in_memory_db().await;
+    let conn = &db.conn;
+    let (sender, mock) = mock_apns().await;
+    add_device(conn, "dddd0001", "Phone", DevicePrefs::default()).await;
+    add_device(
+        conn,
+        "eeee0002",
+        "iPad",
+        DevicePrefs {
+            needs_you: prefs::Delivery::Off,
+            ..DevicePrefs::default()
+        },
+    )
+    .await;
+
+    // The reminder reaches the phone with badge 2; the iPad wants none.
+    deliver_with(&sender, conn, &setup(), &question_push(1, true), &looking(false, &[])).await;
+    assert_eq!(mock.seen.lock().unwrap().len(), 1);
+
+    // Syncing to 2 only tells the iPad, silently.
+    mock.seen.lock().unwrap().clear();
+    let report = sync_badges_with(&sender, conn, &setup(), 2).await;
+    assert_eq!(report.delivered, 1);
+    let seen = mock.seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].token, "eeee0002");
+    assert_eq!(seen[0].body["aps"], json!({ "badge": 2 }));
+    assert_eq!(seen[0].body["kind"], "badge");
+
+    // Nothing more to say at the same count; an answered item drops both.
+    mock.seen.lock().unwrap().clear();
+    assert_eq!(
+        sync_badges_with(&sender, conn, &setup(), 2).await,
+        DeliveryReport::default()
+    );
+    assert_eq!(sync_badges_with(&sender, conn, &setup(), 1).await.delivered, 2);
+    let seen = mock.seen.lock().unwrap().clone();
+    assert!(seen.iter().all(|s| s.body["aps"] == json!({ "badge": 1 })));
+    let header = seen[0].headers.get("apns-push-type").unwrap();
+    assert_eq!(header, "alert");
 }
 
 #[tokio::test]

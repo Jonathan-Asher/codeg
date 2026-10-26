@@ -13,6 +13,12 @@
 //!   session alert.
 //! * [`wording`] — what the notifications say.
 //!
+//! The "needs you" pushes — the first one for each pending permission,
+//! question or plan, the catch-up when the user leaves the desk, and the
+//! reminders — come from `crate::pending`, which keeps the list of what waits
+//! on the user. Every push carries that list's length as the app badge, and
+//! [`sync_badges`] brings a device that missed a change back in step.
+//!
 //! Settings (team id, key id, bundle id, environment) are an `app_metadata`
 //! row; the `.p8` key itself lives in the keyring (`secret:apns-auth-key`) and
 //! is never logged or sent back to a client. Devices are `push_device` rows.
@@ -24,6 +30,9 @@ pub mod jwt;
 pub mod payload;
 pub mod prefs;
 pub mod wording;
+
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
 
 use chrono::{DateTime, Utc};
 use sea_orm::DatabaseConnection;
@@ -496,6 +505,17 @@ pub struct DeliveryReport {
     pub failed: Vec<(i32, String)>,
 }
 
+/// The badge each device last accepted, by token: what [`sync_badges`]
+/// compares against. Empty after a restart, so the first sync reaches every
+/// device.
+static LAST_BADGE: LazyLock<Mutex<HashMap<String, u32>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn with_last_badge<R>(f: impl FnOnce(&mut HashMap<String, u32>) -> R) -> R {
+    let mut guard = LAST_BADGE.lock().unwrap_or_else(|e| e.into_inner());
+    f(&mut guard)
+}
+
 /// The outcome for one device, after acting on it (a dead token's row is
 /// deleted).
 async fn send_to_device(
@@ -521,6 +541,15 @@ async fn send_to_device(
     let outcome = sender
         .send(&setup.credentials, &target, message, server_id)
         .await;
+    match (&outcome, message.badge) {
+        (SendOutcome::Delivered { .. }, Some(badge)) => {
+            with_last_badge(|m| m.insert(device.token.clone(), badge));
+        }
+        (SendOutcome::DeviceGone { .. }, _) => {
+            with_last_badge(|m| m.remove(&device.token));
+        }
+        _ => {}
+    }
     if let SendOutcome::DeviceGone { reason } = &outcome {
         tracing::info!(
             "[push] device {} ({}) is gone ({reason}); removing it",
@@ -534,7 +563,8 @@ async fn send_to_device(
     outcome
 }
 
-/// Send `message` to the devices that want it, given who is looking.
+/// Send `message` to the devices that want it, given who is looking. It
+/// carries the pending count as its badge unless it names one.
 pub async fn deliver_with(
     sender: &ApnsSender,
     conn: &DatabaseConnection,
@@ -542,6 +572,23 @@ pub async fn deliver_with(
     message: &PushMessage,
     looking: &Looking,
 ) -> DeliveryReport {
+    let mut message = message.clone();
+    if message.badge.is_none() {
+        message.badge = Some(crate::pending::pending_count());
+    }
+    let message = &message;
+    // A reminder ignores "only when away": to the prefs the user is away.
+    // Who looks at which session still counts.
+    let as_away;
+    let looking = if message.is_reminder() {
+        as_away = Looking {
+            anyone: false,
+            conversations: looking.conversations.clone(),
+        };
+        &as_away
+    } else {
+        looking
+    };
     let devices = match push_device_service::list(conn).await {
         Ok(devices) => devices,
         Err(e) => {
@@ -704,6 +751,8 @@ pub async fn send_test_with(
         needs: None,
         permission: None,
         sound: true,
+        badge: Some(crate::pending::pending_count()),
+        pending: None,
     };
     let server_id = server_id(conn).await;
     let mut results = Vec::with_capacity(devices.len());
@@ -720,6 +769,62 @@ pub async fn send_test(
 ) -> Result<Vec<TestPushResult>, AppCommandError> {
     let setup = load_send_setup(conn).await?;
     send_test_with(apns::sender(), conn, &setup, device_id).await
+}
+
+/// Bring every device's app badge to `count`: a silent badge-only push to
+/// each device whose last accepted badge differs (an item was answered, or
+/// it never heard of one). Devices already there get nothing.
+pub async fn sync_badges_with(
+    sender: &ApnsSender,
+    conn: &DatabaseConnection,
+    setup: &SendSetup,
+    count: u32,
+) -> DeliveryReport {
+    let devices = match push_device_service::list(conn).await {
+        Ok(devices) => devices,
+        Err(e) => {
+            tracing::warn!("[push] failed to list devices: {e}");
+            return DeliveryReport::default();
+        }
+    };
+    let stale: Vec<push_device::Model> = with_last_badge(|last| {
+        devices
+            .into_iter()
+            .filter(|d| last.get(&d.token) != Some(&count))
+            .collect()
+    });
+    let mut report = DeliveryReport::default();
+    if stale.is_empty() {
+        return report;
+    }
+    let message = PushMessage::badge_only(count);
+    let server_id = server_id(conn).await;
+    for device in &stale {
+        match send_to_device(sender, conn, setup, device, &message, &server_id).await {
+            SendOutcome::Delivered { .. } => report.delivered += 1,
+            SendOutcome::DeviceGone { .. } => report.removed += 1,
+            SendOutcome::Failed { reason, .. } => report.failed.push((device.id, reason)),
+        }
+    }
+    tracing::info!(
+        "[push] badge {count}: {} delivered, {} removed, {} failed",
+        report.delivered,
+        report.removed,
+        report.failed.len()
+    );
+    report
+}
+
+/// [`sync_badges_with`] with the stored credentials. Not set up: nothing
+/// happens.
+pub async fn sync_badges(conn: &DatabaseConnection, count: u32) -> DeliveryReport {
+    if !has_devices(conn).await {
+        return DeliveryReport::default();
+    }
+    match load_send_setup(conn).await {
+        Ok(setup) => sync_badges_with(apns::sender(), conn, &setup, count).await,
+        Err(_) => DeliveryReport::default(),
+    }
 }
 
 #[cfg(test)]

@@ -225,6 +225,18 @@ pub fn build_router(
         )
         .route("/send_test_push", post(handlers::push::send_test_push))
         .route(
+            "/list_pending_items",
+            post(handlers::push::list_pending_items),
+        )
+        .route(
+            "/get_pending_reminder_settings",
+            post(handlers::push::get_pending_reminder_settings),
+        )
+        .route(
+            "/update_pending_reminder_settings",
+            post(handlers::push::update_pending_reminder_settings),
+        )
+        .route(
             "/refine_dictation",
             post(handlers::dictation_refine::refine_dictation),
         )

@@ -87,6 +87,27 @@ pub async fn send_test_push(
 /// A window of this app reports whether the user is looking at it (see
 /// `crate::presence`). Remote and browser windows report over their event
 /// WebSocket instead.
+/// Everything waiting on the user (`crate::pending`).
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn list_pending_items() -> Result<crate::pending::PendingSnapshot, AppCommandError> {
+    Ok(crate::pending::snapshot())
+}
+
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn get_pending_reminder_settings(
+    db: State<'_, AppDatabase>,
+) -> Result<crate::pending::ReminderSettings, AppCommandError> {
+    Ok(crate::pending::load_reminder_settings(&db.conn).await)
+}
+
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn update_pending_reminder_settings(
+    settings: crate::pending::ReminderSettings,
+    db: State<'_, AppDatabase>,
+) -> Result<crate::pending::ReminderSettings, AppCommandError> {
+    crate::pending::save_reminder_settings(&db.conn, settings).await
+}
+
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn report_client_presence(
     window: tauri::Window,

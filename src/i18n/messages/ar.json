@@ -7575,5 +7575,48 @@
       "expired": "لم يعد تسجيل الدخول هذا قيد الانتظار. ابدأ من جديد.",
       "failed": "لم يكتمل تسجيل الدخول. ابدأ من جديد."
     }
+  },
+  "PendingItems": {
+    "indicator": "بانتظارك ({count})",
+    "listTitle": "بانتظارك",
+    "listHint": "أسئلة وأذونات وخطط تنتظرها جلساتك. يواصل Codeg تذكيرك حتى تجيب.",
+    "untitled": "جلسة بلا عنوان",
+    "kind": {
+      "permission": "إذن",
+      "question": "سؤال",
+      "plan": "خطة"
+    },
+    "waiting": "ينتظر منذ {elapsed}",
+    "reminders": "{count, plural, one {تذكير واحد} other {# تذكيرات}}",
+    "notificationRedacted": "لا تزال جلسة بانتظارك",
+    "duration": {
+      "seconds": "{count} ث",
+      "minutes": "{count} د",
+      "hours": "{count} س",
+      "days": "{count} يوم"
+    },
+    "reminder": {
+      "permission": "{agent} لا يزال ينتظر إذنك ({elapsed})",
+      "question": "{agent} لا يزال ينتظر إجابتك ({elapsed})",
+      "plan": "{agent} لا يزال ينتظر مراجعتك للخطة ({elapsed})"
+    },
+    "settings": {
+      "title": "التذكيرات",
+      "description": "عندما تنتظرك جلسة — سؤال أو إذن أو خطة للموافقة — يذكّرك Codeg على iPhone وعلى سطح المكتب حتى تجيب، حتى وأنت أمام الحاسوب. لا تذكير بالجلسة التي تنظر إليها.",
+      "enabledTitle": "ذكّرني",
+      "enabledHint": "واصل تذكيري بكل ما لا يزال ينتظر إجابتي.",
+      "scheduleTitle": "التذكير بعد",
+      "scheduleHint": "يُحسب منذ أن بدأت الجلسة الانتظار.",
+      "repeatTitle": "ثم كل",
+      "repeatHint": "واصل التذكير بهذه الفترة حتى تتم الإجابة.",
+      "repeatOff": "أبدًا",
+      "quietTitle": "ساعات الهدوء",
+      "quietHint": "لا تذكيرات في هذه الساعات. إن بقي شيء ينتظر عند انتهائها، يصل تذكير واحد حينها.",
+      "quietRangeTitle": "الهدوء من – إلى",
+      "quietRangeHint": "حسب المنطقة الزمنية لهذا الجهاز.",
+      "quietFrom": "بداية ساعات الهدوء",
+      "quietTo": "نهاية ساعات الهدوء",
+      "saveFailed": "تعذّر الحفظ: {message}"
+    }
   }
 }

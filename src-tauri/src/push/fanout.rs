@@ -12,6 +12,10 @@
 //! | `error` that breaks the session         | error                       |
 //! | critical alert                          | critical (Ack, Snooze)      |
 //!
+//! The "needs you" rows are pushed by `crate::pending`, which owns what waits
+//! on the user: the first push, the catch-up when the user leaves the desk,
+//! the reminders and the badge. This subscriber sends the rest.
+//!
 //! Like the desktop's cooldowns, a burst of one kind for one session within
 //! [`COOLDOWN`] collapses into one push, and a turn that ends right after an
 //! error pushed for it is not also reported as finished.
@@ -236,6 +240,8 @@ pub fn session_message(
         needs,
         permission,
         sound: true,
+        badge: None,
+        pending: None,
     }
 }
 
@@ -258,6 +264,8 @@ pub fn critical_message(
         needs: None,
         permission: None,
         sound: alert.sound,
+        badge: None,
+        pending: None,
     }
 }
 
@@ -372,6 +380,11 @@ pub fn push_event_task(
             let Some(trigger) = trigger_for(&envelope.payload) else {
                 continue;
             };
+            // The pending registry pushes what waits on the user, with its
+            // reminders (`crate::pending::watch`).
+            if trigger.kind() == PushKind::NeedsYou {
+                continue;
+            }
             let Some(conversation_id) =
                 conversation_of(&manager, &mut links, &envelope.connection_id).await
             else {
