@@ -1409,6 +1409,29 @@ describe("selectRecentConversationsWithReuse", () => {
     ).toEqual([1, 2])
   })
 
+  it("in updated mode, moves a session up when opened as well as when active", () => {
+    const active = conv(1, 10, {
+      updated_at: new Date(5_000_000).toISOString(),
+    })
+    const opened = conv(2, 10, {
+      updated_at: new Date(1_000).toISOString(),
+      last_viewed_at: new Date(9_000_000).toISOString(),
+    })
+    const quiet = conv(3, 10, { updated_at: new Date(2_000).toISOString() })
+    const rows = [active, opened, quiet]
+    expect(
+      selectRecentConversationsWithReuse(rows, true, "updated", open, []).map(
+        (c) => c.id
+      )
+    ).toEqual([2, 1, 3])
+    // Created mode keeps creation order: views and activity don't move it.
+    expect(
+      selectRecentConversationsWithReuse(rows, true, "created", open, []).map(
+        (c) => c.id
+      )
+    ).toEqual([3, 2, 1])
+  })
+
   it("returns the prev array when membership is referentially unchanged", () => {
     const a = conv(1, 10)
     const first = selectRecentConversationsWithReuse(
