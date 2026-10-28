@@ -1,0 +1,193 @@
+---
+source: tests/parsers_snapshot.rs
+expression: detail.turns
+---
+[
+  {
+    "id": "turn-0",
+    "role": "assistant",
+    "blocks": [
+      {
+        "type": "tool_use",
+        "tool_use_id": "toolu_013Koy83En226YFTtNDVBNz1",
+        "tool_name": "Bash",
+        "input_preview": "{\"command\":\"python3 - <<'EOF'\\nimport pathlib\\np = pathlib.Path('README.md'); s = p.read_text()\\nadd = (\\\"**Front phrase and longer back copy (October 29):** final box now uses the bottom-centre fade with the phrase in \\\"\\n       \\\"SemiBold at the earlier size (`PHRASE_POS = \\\\\\\"fade_center\\\\\\\"`). Six catchphrases compared in \\\"\\n       \\\"`out/DEMO-phrase-options.png` (`phrases.py`); `build.PHRASE` holds the chosen one (cu…\",\"description\":\"Record the changes and deliver the files\",\"timeout\":400000}"
+      },
+      {
+        "type": "tool_result",
+        "tool_use_id": "toolu_013Koy83En226YFTtNDVBNz1",
+        "output_preview": "Command was moved to the background (ID: btyrggmty) so that a message that arrived while it was running can reach you; it was not interrupted. Output is being written to: /private/tmp/claude-501/-work-demo/55361c2c-d146-48e2-8b54-fb516c5979b1/tasks/btyrggmty.output. You will be notified when it completes. If it is still running after 30m in the background, it will be stopped and you will be notifi…",
+        "is_error": false
+      }
+    ],
+    "timestamp": "[ts]",
+    "usage": {
+      "input_tokens": 2,
+      "output_tokens": 825,
+      "cache_creation_input_tokens": 515782,
+      "cache_read_input_tokens": 106268
+    },
+    "model": "claude-opus-5-5",
+    "completed_at": "[ts]",
+    "agent_message_id": "msg_011CgUS3qPjjwhKn22vfRCDL"
+  },
+  {
+    "id": "turn-1",
+    "role": "user",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Do we have to write the info in red? postal adress website and all? cause it’s still fluent"
+      },
+      {
+        "type": "image",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+        "mime_type": "image/png"
+      }
+    ],
+    "timestamp": "[ts]",
+    "completed_at": "[ts]"
+  },
+  {
+    "id": "turn-2",
+    "role": "assistant",
+    "blocks": [
+      {
+        "type": "thinking",
+        "text": ""
+      }
+    ],
+    "timestamp": "[ts]",
+    "usage": {
+      "input_tokens": 4,
+      "output_tokens": 958,
+      "cache_creation_input_tokens": 1711,
+      "cache_read_input_tokens": 622050
+    },
+    "duration_ms": 13432,
+    "model": "claude-opus-5-5",
+    "completed_at": "[ts]",
+    "agent_message_id": "msg_011CgUS5x1f1bype1m5RmhgF"
+  },
+  {
+    "id": "turn-3",
+    "role": "assistant",
+    "blocks": [
+      {
+        "type": "tool_use",
+        "tool_use_id": "toolu_011EsJTczgzUuPgFwUReQ7Gh",
+        "tool_name": "Bash",
+        "input_preview": "{\"command\":\"cat /private/tmp/claude-501/-work-demo/55361c2c-d146-48e2-8b54-fb516c5979b1/tasks/btyrggmty.output\",\"description\":\"Check whether the file delivery finished\"}"
+      },
+      {
+        "type": "tool_result",
+        "tool_use_id": "toolu_011EsJTczgzUuPgFwUReQ7Gh",
+        "output_preview": "(Bash completed with no output)",
+        "is_error": false
+      }
+    ],
+    "timestamp": "[ts]",
+    "duration_ms": 1529,
+    "model": "claude-opus-5-5",
+    "completed_at": "[ts]",
+    "agent_message_id": "msg_011CgUS5x1f1bype1m5RmhgF"
+  },
+  {
+    "id": "turn-4",
+    "role": "assistant",
+    "blocks": [
+      {
+        "type": "tool_use",
+        "tool_use_id": "toolu_012uBooo7qYFHWgrAAPPhWHY",
+        "tool_name": "Bash",
+        "input_preview": "{\"command\":\"until grep -q DELIVERED /private/tmp/claude-501/-work-demo/55361c2c-d146-48e2-8b54-fb516c5979b1/tasks/btyrggmty.output || ! pgrep -f \\\"scp -o BatchMode=yes -o ConnectTimeout=10 /tmp/DEMO-final\\\" >/dev/null && ! pgrep -f \\\"sleep 15\\\" >/dev/null; do sleep 3; done; cat /private/tmp/claude-501/-work-demo/55361c2c-d146-48e2-8b54-fb516c5979b1/tasks/btyrggmty.output\",\"description\":\"Wait for the delivery to finish\",\"timeout\":400000}"
+      },
+      {
+        "type": "tool_result",
+        "tool_use_id": "toolu_012uBooo7qYFHWgrAAPPhWHY",
+        "output_preview": "DELIVERED\n\n[exited with code 0]",
+        "is_error": false
+      }
+    ],
+    "timestamp": "[ts]",
+    "usage": {
+      "input_tokens": 2,
+      "output_tokens": 341,
+      "cache_creation_input_tokens": 975,
+      "cache_read_input_tokens": 623761
+    },
+    "duration_ms": 96103,
+    "model": "claude-opus-5-5",
+    "completed_at": "[ts]",
+    "agent_message_id": "msg_011CgUS742qMtvdMd6Ubp8E3"
+  },
+  {
+    "id": "turn-5",
+    "role": "assistant",
+    "blocks": [
+      {
+        "type": "thinking",
+        "text": ""
+      }
+    ],
+    "timestamp": "[ts]",
+    "usage": {
+      "input_tokens": 2,
+      "output_tokens": 565,
+      "cache_creation_input_tokens": 894,
+      "cache_read_input_tokens": 624736
+    },
+    "duration_ms": 9532,
+    "model": "claude-opus-5-5",
+    "completed_at": "[ts]",
+    "agent_message_id": "msg_011CgUSE8uiXmkezkey8rnFE"
+  },
+  {
+    "id": "turn-6",
+    "role": "assistant",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "The updated box files are on your Mac in **`~/Downloads/DEMO-packaging-2026-10-21/`**:\n\n- **Front:** the board fades into black, with the catchphrase at the bottom centre. It's the same size as before, in a bolder weight.\n- **`DEMO-phrase-options.png`:** six catchphrases to choose from:\n  1. Built for life.\n  2. Made to outlast.\n  3. One board. For life.\n  4. Nothing soaks in.\n  5. The last board …"
+      }
+    ],
+    "timestamp": "[ts]",
+    "duration_ms": 12,
+    "model": "claude-opus-5-5",
+    "completed_at": "[ts]",
+    "agent_message_id": "msg_011CgUSE8uiXmkezkey8rnFE"
+  },
+  {
+    "id": "turn-7",
+    "role": "user",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "continue"
+      }
+    ],
+    "timestamp": "[ts]",
+    "completed_at": "[ts]"
+  },
+  {
+    "id": "turn-8",
+    "role": "assistant",
+    "blocks": [
+      {
+        "type": "thinking",
+        "text": ""
+      }
+    ],
+    "timestamp": "[ts]",
+    "usage": {
+      "input_tokens": 4,
+      "output_tokens": 888,
+      "cache_creation_input_tokens": 4,
+      "cache_read_input_tokens": 626195
+    },
+    "duration_ms": 10168,
+    "model": "claude-opus-5-5",
+    "completed_at": "[ts]",
+    "agent_message_id": "msg_011CgUSPhnARfNguicQSLtAE"
+  }
+]
