@@ -85,6 +85,34 @@ fn claude_minimal_session_snapshot() {
     });
 }
 
+/// A message the user sent while a turn ran, then a background task's
+/// notification, then the reply to both. Cut from a real transcript (Claude
+/// Code 2.1.303) and sanitized: the picture is a 1x1 PNG, paths and long
+/// strings are shortened. The message must come back as a user turn between
+/// the two halves of the reply, the notification must not, and the reply that
+/// closes the turn must be there.
+#[test]
+fn claude_mid_turn_insert_snapshot() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    let base = temp.path().to_path_buf();
+    let session_id = "55361c2c-d146-48e2-8b54-fb516c5979b1";
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/claude/mid_turn_insert.jsonl");
+    let jsonl = fs::read_to_string(&fixture).expect("read fixture");
+    write(
+        &base.join("-work-demo").join(format!("{session_id}.jsonl")),
+        &jsonl,
+    );
+
+    let parser = ClaudeParser::with_base_dir(base);
+    let detail = parser.get_conversation(session_id).expect("detail claude");
+
+    assert_json_snapshot!("claude_mid_turn_insert_detail", detail.turns, {
+        ".**.timestamp" => "[ts]",
+        ".**.completed_at" => "[ts]",
+    });
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Codex
 // ────────────────────────────────────────────────────────────────────────────
