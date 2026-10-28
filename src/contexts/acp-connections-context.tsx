@@ -2058,6 +2058,7 @@ function connectionsReducer(
         // Current state, like `status`: the session's error as the backend
         // holds it. Never a notification — that fired when it happened.
         error: action.patch.lastError,
+        errorCode: action.patch.lastErrorCode,
         errorLevel: action.patch.lastErrorLevel,
         lastAppliedSeq: action.patch.eventSeq,
       })
