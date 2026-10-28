@@ -216,6 +216,18 @@ describe("RemoteDesktopTransport recovery after calls failed", () => {
     frame("__ready__")
     expect(recovered).toHaveBeenCalledTimes(1)
   })
+
+  it("resyncs on the server's hint without dropping the link", async () => {
+    const transport = makeTransport()
+    const recovered = vi.fn()
+    transport.onReconnect(recovered)
+    await startLink(transport)
+    frame("__ready__")
+
+    frame("__resync__")
+    expect(recovered).toHaveBeenCalledTimes(1)
+    expect(transport.getConnectionSnapshot()).toBe("connected")
+  })
 })
 
 describe("RemoteDesktopTransport liveness hints", () => {

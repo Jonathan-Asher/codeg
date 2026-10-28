@@ -310,6 +310,19 @@ async fn handle_ws_connection(
                                 LAG_LOG_WINDOW.as_secs()
                             );
                         }
+                        // The skipped events are gone (a status change among
+                        // them would leave this client showing the session as
+                        // it was): tell it to resync, as after a reconnect.
+                        let resync = serde_json::json!({
+                            "channel": crate::web::event_bridge::RESYNC_EVENT,
+                            "payload": { "reason": "lagged", "skipped": n },
+                        });
+                        if send_bounded(socket.send(Message::Text(resync.to_string().into())))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         break;

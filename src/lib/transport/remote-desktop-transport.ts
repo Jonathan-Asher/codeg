@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
-import { WS_READY_CHANNEL } from "./constants"
+import { WS_READY_CHANNEL, WS_RESYNC_CHANNEL } from "./constants"
 import type { AttachTransportHost } from "./web-event-stream"
 import { WebEventStream } from "./web-event-stream"
 import type {
@@ -565,6 +565,20 @@ export class RemoteDesktopTransport
         }
       } else {
         this.hasReadiedOnce = true
+      }
+      return
+    }
+    if (channel === WS_RESYNC_CHANNEL) {
+      // Events were skipped on a live link (this window fell behind the
+      // server's broadcast, or the server could not announce a change):
+      // recover exactly as after a reconnect.
+      perfMark("resync:hint", { callbacks: this.reconnectCallbacks.size })
+      for (const cb of this.reconnectCallbacks) {
+        try {
+          cb()
+        } catch (err) {
+          console.error("[RemoteDesktopTransport] resync callback threw:", err)
+        }
       }
       return
     }

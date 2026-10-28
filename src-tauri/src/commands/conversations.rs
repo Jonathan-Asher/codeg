@@ -20,6 +20,7 @@ use crate::parsers::{
 };
 use crate::web::event_bridge::{
     emit_event, ConversationChange, ConversationsBulkChanged, EventEmitter, ImportScanProgress,
+    ResyncHint, RESYNC_EVENT,
     TabsChanged, CONVERSATIONS_BULK_CHANGED_EVENT, CONVERSATION_CHANGED_EVENT,
     IMPORT_SCAN_PROGRESS_EVENT, TABS_CHANGED_EVENT,
 };
@@ -2093,8 +2094,13 @@ pub async fn get_folder_conversation_turns(
 /// client's sidebar inserts-or-replaces the row in real time. Re-fetches the
 /// fresh summary via `get_by_id`, which filters out soft-deleted rows — so an
 /// upsert racing a delete is silently dropped (no row resurrection).
-/// Best-effort: the DB write already succeeded; on fetch failure clients
-/// reconcile on the next refresh / WS reconnect.
+///
+/// The DB write this announces already succeeded, so the announcement must
+/// not be lost to a busy database: a read that fails for a database error
+/// (pool timeout, "database is locked") is retried in the background, and if
+/// it still cannot be read, every client is told to resync
+/// ([`RESYNC_EVENT`]) rather than left showing the row as it was — a turn
+/// still "running" after it ended.
 ///
 /// Lives at the wrapper layer (not inside the `_core` fns) so the many
 /// internal/test callers of `create_conversation_core` don't fire sidebar
@@ -2105,26 +2111,73 @@ pub(crate) async fn emit_conversation_upsert(
     conversation_id: i32,
 ) {
     match conversation_service::get_by_id(conn, conversation_id).await {
-        Ok(summary) => {
-            // Broadcast EVERY conversation, root or delegation child. The
-            // sidebar's root list still drops children (the frontend keeps
-            // `parent_id != null` out of its root array via `applyConversationUpsert`);
-            // a separate subscriber routes child upserts into the expanded
-            // sub-session subtree by `parent_id`. The summary carries `parent_id`
-            // (serialized for children only) and a fresh `child_count`, so a
-            // newly-spawned child can appear live and bump its parent's chevron.
-            emit_event(
-                emitter,
-                CONVERSATION_CHANGED_EVENT,
-                ConversationChange::Upsert {
-                    summary: Box::new(summary),
-                },
-            )
+        Ok(summary) => emit_upsert(emitter, summary),
+        Err(crate::db::error::DbError::Database(e)) => {
+            tracing::warn!(
+                "[conversations] upsert for {conversation_id} not read yet ({e}); retrying"
+            );
+            let (emitter, conn) = (emitter.clone(), conn.clone());
+            tokio::spawn(async move {
+                retry_conversation_upsert(&emitter, &conn, conversation_id, &UPSERT_RETRY_DELAYS)
+                    .await
+            });
         }
-        Err(e) => tracing::warn!(
-            "[conversations] upsert emit skipped (get_by_id {conversation_id} failed): {e}"
-        ),
+        // Deleted (or never existed): nothing to announce.
+        Err(e) => tracing::debug!("[conversations] no upsert for {conversation_id}: {e}"),
     }
+}
+
+/// Waits before each re-read of a row whose upsert could not be read.
+const UPSERT_RETRY_DELAYS: [std::time::Duration; 4] = [
+    std::time::Duration::from_millis(250),
+    std::time::Duration::from_secs(1),
+    std::time::Duration::from_secs(4),
+    std::time::Duration::from_secs(15),
+];
+
+/// Re-read and announce a row after `delays`, one read after each; when every
+/// read fails for a database error, tell the clients to resync instead.
+async fn retry_conversation_upsert(
+    emitter: &EventEmitter,
+    conn: &sea_orm::DatabaseConnection,
+    conversation_id: i32,
+    delays: &[std::time::Duration],
+) {
+    for delay in delays {
+        tokio::time::sleep(*delay).await;
+        match conversation_service::get_by_id(conn, conversation_id).await {
+            Ok(summary) => return emit_upsert(emitter, summary),
+            Err(crate::db::error::DbError::Database(_)) => continue,
+            Err(_) => return,
+        }
+    }
+    tracing::warn!(
+        "[conversations] upsert for {conversation_id} could not be read; asking clients to resync"
+    );
+    emit_event(
+        emitter,
+        RESYNC_EVENT,
+        ResyncHint {
+            reason: "conversation_upsert",
+        },
+    );
+}
+
+fn emit_upsert(emitter: &EventEmitter, summary: DbConversationSummary) {
+    // Broadcast EVERY conversation, root or delegation child. The
+    // sidebar's root list still drops children (the frontend keeps
+    // `parent_id != null` out of its root array via `applyConversationUpsert`);
+    // a separate subscriber routes child upserts into the expanded
+    // sub-session subtree by `parent_id`. The summary carries `parent_id`
+    // (serialized for children only) and a fresh `child_count`, so a
+    // newly-spawned child can appear live and bump its parent's chevron.
+    emit_event(
+        emitter,
+        CONVERSATION_CHANGED_EVENT,
+        ConversationChange::Upsert {
+            summary: Box::new(summary),
+        },
+    )
 }
 
 /// Broadcast the row [`conversation_service::bind_external_id`] created to
@@ -2983,6 +3036,50 @@ fn parse_error_to_app_error(error: ParseError) -> AppCommandError {
 mod tests {
     use super::*;
     use crate::db::test_helpers::{fresh_in_memory_db, seed_folder};
+
+    fn capture() -> (
+        EventEmitter,
+        tokio::sync::broadcast::Receiver<crate::web::event_bridge::WebEvent>,
+    ) {
+        let broadcaster =
+            std::sync::Arc::new(crate::web::event_bridge::WebEventBroadcaster::new());
+        let rx = broadcaster.subscribe();
+        (EventEmitter::test_web_only(broadcaster), rx)
+    }
+
+    /// A row that can be read again is announced late rather than never.
+    #[tokio::test]
+    async fn an_upsert_that_could_not_be_read_is_retried() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/codeg-upsert-retry").await;
+        let id = conversation_service::create(&db.conn, folder, AgentType::ClaudeCode, None, None)
+            .await
+            .expect("create")
+            .id;
+        let (emitter, mut rx) = capture();
+        let delays = [std::time::Duration::ZERO; 2];
+        retry_conversation_upsert(&emitter, &db.conn, id, &delays).await;
+        let event = rx.try_recv().expect("an event");
+        assert_eq!(event.channel, CONVERSATION_CHANGED_EVENT);
+        assert_eq!(event.payload["summary"]["id"], id);
+        assert!(rx.try_recv().is_err(), "announced once");
+    }
+
+    /// When the row cannot be read at all, the clients are told to resync
+    /// instead of being left with the row as it was.
+    #[tokio::test]
+    async fn an_upsert_that_never_reads_asks_the_clients_to_resync() {
+        let db = fresh_in_memory_db().await;
+        sea_orm::ConnectionTrait::execute_unprepared(&db.conn, "DROP TABLE conversation")
+            .await
+            .expect("drop");
+        let (emitter, mut rx) = capture();
+        let delays = [std::time::Duration::ZERO; 3];
+        retry_conversation_upsert(&emitter, &db.conn, 7, &delays).await;
+        let event = rx.try_recv().expect("an event");
+        assert_eq!(event.channel, RESYNC_EVENT);
+        assert_eq!(event.payload["reason"], "conversation_upsert");
+    }
 
     /// A batch of view reports lands in the order the client saw the views
     /// (by age, so the client's clock does not matter), an absurd age is

@@ -150,6 +150,20 @@ impl EventEmitter {
 /// Global side-channel for cross-client conversation list/status sync.
 pub const CONVERSATION_CHANGED_EVENT: &str = "conversation://changed";
 
+/// "You may have missed events: refetch." A client answers it exactly as it
+/// answers a reconnect (its resync pass). Sent to every client when the server
+/// could not announce a change it made, and to one client by its WebSocket
+/// when that client fell behind the broadcast and events were skipped. Keep in
+/// sync with `WS_RESYNC_CHANNEL` in `src/lib/transport/constants.ts`.
+pub const RESYNC_EVENT: &str = "__resync__";
+
+/// Payload of [`RESYNC_EVENT`].
+#[derive(Debug, Clone, Serialize)]
+pub struct ResyncHint {
+    /// What was missed, for logs.
+    pub reason: &'static str,
+}
+
 /// Global side-channel for "this session is waiting on the user" (a parked
 /// permission, a blocking question, a plan approval) and its clearing. Emitted
 /// centrally from [`emit_with_state_gated`] whenever an event changes a

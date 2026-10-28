@@ -117,6 +117,25 @@ describe("WebTransport connection state machine", () => {
     expect(onReconnect).not.toHaveBeenCalled()
   })
 
+  it("answers a server resync hint on a live link like a reconnect", () => {
+    const { t, ws } = connectReady()
+    const onReconnect = vi.fn()
+    const onOther = vi.fn()
+    t.onReconnect(onReconnect)
+    void t.subscribe("__resync__", onOther)
+
+    ws.onmessage?.({
+      data: JSON.stringify({
+        channel: "__resync__",
+        payload: { reason: "lagged", skipped: 12 },
+      }),
+    })
+
+    expect(onReconnect).toHaveBeenCalledTimes(1)
+    expect(onOther).not.toHaveBeenCalled()
+    expect(t.getConnectionSnapshot()).toBe("connected")
+  })
+
   it("treats a dropped socket as reconnecting — never logs out or wipes the token", () => {
     const { t, ws } = connectReady()
 

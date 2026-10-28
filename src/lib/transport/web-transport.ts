@@ -1,4 +1,4 @@
-import { WS_READY_CHANNEL } from "./constants"
+import { WS_READY_CHANNEL, WS_RESYNC_CHANNEL } from "./constants"
 import type { AttachTransportHost } from "./web-event-stream"
 import { WebEventStream } from "./web-event-stream"
 import type {
@@ -518,6 +518,22 @@ export class WebTransport implements Transport {
             }
           } else {
             this.hasReadiedOnce = true
+          }
+          return
+        }
+        if (event.channel === WS_RESYNC_CHANNEL) {
+          // Events were skipped on a live link (this client fell behind the
+          // broadcast, or the server could not announce a change): recover
+          // exactly as after a reconnect.
+          perfMark("resync:hint", {
+            callbacks: this.reconnectCallbacks.size,
+          })
+          for (const cb of this.reconnectCallbacks) {
+            try {
+              cb()
+            } catch (err) {
+              console.error("[WebTransport] resync callback threw:", err)
+            }
           }
           return
         }
