@@ -1999,6 +1999,65 @@ mod tests {
     }
 
     #[test]
+    fn a_fork_moves_the_watch_to_the_row_that_keeps_the_original() {
+        let mut r = CriticalRegistry::new("test");
+        let t0 = Instant::now();
+        let wall = Utc::now();
+        r.sync_rows([row_at(1, wall), row_at(2, wall)]);
+        assert!(r.step(1, ENDED, t0, wall).is_none());
+        assert!(r.step(2, ENDED, t0, wall).is_none());
+        r.finish_pass();
+        // 1 alerted and nobody saw it; 2 alerted and was acknowledged.
+        assert!(r.step(1, ENDED, t0 + IDLE, wall).is_some());
+        assert!(r.step(2, ENDED, t0 + IDLE, wall).is_some());
+        r.ack(2, wall);
+        assert!(r.take_dirty_acks().is_some());
+
+        // A fork whose write failed moves nothing.
+        r.begin_move();
+        r.end_move(None);
+        assert!(r.watch(1).is_some() && r.watch(2).is_some());
+
+        // Both are branched: 1's original goes to row 11, 2's to row 12. No
+        // pass applies rows read before or during the writes.
+        let read_before = r.generation();
+        r.begin_move();
+        assert!(!r.may_apply(r.generation()), "not while a fork writes");
+        r.begin_move();
+        r.end_move(Some((1, 11)));
+        assert!(!r.may_apply(r.generation()), "the other fork still writes");
+        r.end_move(Some((2, 12)));
+        assert!(!r.may_apply(read_before), "read across the writes");
+        assert!(r.may_apply(r.generation()));
+
+        // The waiting alert is the same one, now for the original's row.
+        let active = r.active_alerts();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].conversation_id, 11);
+        assert_eq!(active[0].id, "test-c1-e0-n1");
+        assert!(r.watch(1).is_none() && r.watch(2).is_none());
+        assert_eq!(
+            r.take_dirty_acks()
+                .map(|a| a.into_keys().collect::<Vec<_>>()),
+            Some(vec![12])
+        );
+
+        // The next pass reads the rows as the forks left them, and the
+        // watches go on where they were: the repeat keeps its interval, the
+        // acknowledged one stays quiet.
+        r.sync_rows([row_at(11, wall), row_at(12, wall)]);
+        assert!(r.step(11, ENDED, t0 + IDLE + secs(299), wall).is_none());
+        let repeat = r
+            .step(11, ENDED, t0 + IDLE + REPEAT, wall)
+            .expect("the repeat comes on time");
+        assert_eq!((repeat.conversation_id, repeat.count), (11, 2));
+        assert!(
+            r.step(12, ENDED, t0 + secs(3600), wall).is_none(),
+            "acknowledged before the fork"
+        );
+    }
+
+    #[test]
     fn settings_sanitize_and_default() {
         let d = CriticalSessionSettings::default();
         assert_eq!((d.idle_secs, d.repeat_secs, d.stall_secs), (60, 300, 300));

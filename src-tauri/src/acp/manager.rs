@@ -10162,6 +10162,11 @@ mod tests {
         conversation_service::bind_external_id(&db.conn, pre.id, "session-S1", &[])
             .await
             .unwrap();
+        // Marked critical, with stall detection off: both stay with the
+        // original.
+        conversation_service::update_critical(&db.conn, pre.id, true, Some(false))
+            .await
+            .unwrap();
 
         let (mgr, join) =
             manager_with_fake_fork("c-fork", pre.id, "session-S2", "session-S1").await;
@@ -10182,6 +10187,10 @@ mod tests {
             .unwrap();
         assert_eq!(current.external_id.as_deref(), Some("session-S2"));
         assert_eq!(current.title.as_deref(), Some("[Fork] Original Topic"));
+        assert!(
+            !current.critical && current.critical_stall,
+            "the fork starts unmarked, with the default stall switch"
+        );
 
         // Sibling row: external_id=S1, clean title, PendingReview, same folder/git_branch.
         let sibling = conversation_service::get_by_id(&db.conn, sibling_id)
@@ -10192,6 +10201,87 @@ mod tests {
         assert_eq!(sibling.status, "pending_review");
         assert_eq!(sibling.folder_id, folder_id);
         assert_eq!(sibling.git_branch.as_deref(), Some("feature/x"));
+        assert!(
+            sibling.critical && !sibling.critical_stall,
+            "the original keeps its critical mark and stall switch"
+        );
+    }
+
+    /// `(critical, critical_stall)` of a row, deleted or not.
+    async fn critical_of(db: &AppDatabase, id: i32) -> (bool, bool) {
+        let row = conversation::Entity::find_by_id(id)
+            .one(&db.conn)
+            .await
+            .unwrap()
+            .expect("row exists");
+        (row.critical, row.critical_stall)
+    }
+
+    #[tokio::test]
+    async fn fork_session_leaves_the_critical_mark_with_the_original_only_on_a_branch() {
+        // A branch is an exploration: the critical mark — stall switch and
+        // all — stays with the original, which the sibling now holds, and the
+        // fork starts unmarked. An edit continues the very conversation the
+        // user marked: the mark stays on that row and the branch it leaves
+        // behind is born unmarked. The same whether the fork inserts the
+        // sibling or adopts the one the lifecycle subscriber made first; and
+        // an unmarked conversation leaves both rows unmarked.
+        use crate::db::test_helpers;
+        const MARKED: (bool, bool) = (true, false);
+        const UNMARKED: (bool, bool) = (false, true);
+        for mode in [ForkMode::Branch, ForkMode::Edit, ForkMode::EditInPlace] {
+            for (critical, raced) in [(true, false), (true, true), (false, false)] {
+                let db = test_helpers::fresh_in_memory_db().await;
+                let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-critical").await;
+                let pre = conversation_service::create(
+                    &db.conn,
+                    folder_id,
+                    AgentType::ClaudeCode,
+                    Some("Topic".into()),
+                    None,
+                )
+                .await
+                .unwrap();
+                conversation_service::bind_external_id(&db.conn, pre.id, "session-S1", &[])
+                    .await
+                    .unwrap();
+                if critical {
+                    conversation_service::update_critical(&db.conn, pre.id, true, Some(false))
+                        .await
+                        .unwrap();
+                }
+                if raced {
+                    conversation_service::bind_external_id(&db.conn, pre.id, "session-S2", &[])
+                        .await
+                        .unwrap()
+                        .expect("the lifecycle bind preserves S1");
+                }
+
+                let sibling_id = ConnectionManager::persist_fork_outcome(
+                    &db.conn,
+                    pre.id,
+                    "session-S2".into(),
+                    "session-S1".into(),
+                    mode,
+                )
+                .await
+                .expect("the fork persists");
+
+                let expected = match (critical, mode) {
+                    (false, _) => (UNMARKED, UNMARKED),
+                    (true, ForkMode::Branch) => (UNMARKED, MARKED),
+                    (true, ForkMode::Edit | ForkMode::EditInPlace) => (MARKED, UNMARKED),
+                };
+                assert_eq!(
+                    (
+                        critical_of(&db, pre.id).await,
+                        critical_of(&db, sibling_id).await
+                    ),
+                    expected,
+                    "(forked row, sibling) under {mode:?}, critical: {critical}, raced: {raced}"
+                );
+            }
+        }
     }
 
     #[tokio::test]
