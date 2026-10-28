@@ -104,6 +104,8 @@ export interface UseConnectionReturn {
    *  to the live ones. `[]` when the connection has none. */
   asyncTasks: AsyncTaskRecord[]
   error: string | null
+  /** The stable code of `error` (e.g. `turn_failed_empty`), when it had one. */
+  errorCode: string | null
   loadError: string | null
   /** Runnable recovery for `loadError` (today `codex unarchive <id>`), or
    *  null when the failure has none. Carried separately from the localized
@@ -322,6 +324,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   const sessionFailures = connection?.sessionFailures ?? EMPTY_SESSION_FAILURES
   const asyncTasks = connection?.asyncTasks ?? EMPTY_ASYNC_TASKS
   const error = connection?.error ?? null
+  const errorCode = connection?.errorCode ?? null
   const loadError = connection?.loadError ?? null
   const loadErrorCommand = connection?.loadErrorCommand ?? null
   const configStale = connection?.configStale ?? false
@@ -455,6 +458,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       sessionFailures,
       asyncTasks,
       error,
+      errorCode,
       loadError,
       loadErrorCommand,
       configStale,
@@ -505,6 +509,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       sessionFailures,
       asyncTasks,
       error,
+      errorCode,
       loadError,
       loadErrorCommand,
       configStale,

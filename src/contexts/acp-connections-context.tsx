@@ -374,6 +374,9 @@ export interface ConnectionState {
    * Cleared when the next prompt starts.
    */
   error: string | null
+  /** The stable code of `error` (e.g. `turn_failed_empty`), when it had one.
+   *  Cleared with it. */
+  errorCode?: string | null
   /** `error` (red) or `warning` (amber) — how the popover tints `error`. */
   errorLevel: AcpErrorLevel
   /**
@@ -843,6 +846,7 @@ type Action =
       type: "ERROR"
       contextKey: string
       message: string
+      code?: string | null
       level: AcpErrorLevel
       /** A `pool_exhausted` error: when the account pool frees up. */
       poolWait?: PoolHold | null
@@ -2147,6 +2151,7 @@ function connectionsReducer(
         updated.pendingQuestion = null
         updated.claudeApiRetry = null
         updated.error = null
+        updated.errorCode = null
         // Steering adoptions belong to the turn whose stream they split.
         updated.steeredMessageIds = EMPTY_STEERED_MESSAGE_IDS
         // Starting a prompt past an active AIR failure acknowledges it —
@@ -3054,6 +3059,7 @@ function connectionsReducer(
         ...conn,
         claudeApiRetry: null,
         error: action.message,
+        errorCode: action.code ?? null,
         errorLevel: action.level,
         poolWait: action.poolWait ?? null,
       })
@@ -5717,6 +5723,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
               type: "ERROR",
               contextKey,
               message: e.code === "attach_timeout" && reason ? reason : text,
+              code: e.code || null,
               level: route.level,
               poolWait:
                 e.code === "pool_exhausted"

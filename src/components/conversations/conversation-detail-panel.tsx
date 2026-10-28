@@ -69,6 +69,7 @@ import { useAdvertisedGoalActions } from "@/hooks/use-goal-actions"
 import { ConversationShell } from "@/components/chat/conversation-shell"
 import { SessionConfigStaleBanner } from "@/components/chat/session-config-stale-banner"
 import { SessionInterruptedBanner } from "@/components/chat/session-interrupted-banner"
+import { EmptyTurnBanner } from "@/components/chat/empty-turn-banner"
 import { LimitPausedBanner } from "@/components/conversations/limit-pause"
 import { limitStopReason, waitingLimitPause } from "@/lib/limit-continue"
 import { deriveSessionActivity } from "@/lib/session-activity"
@@ -3254,6 +3255,20 @@ const ConversationTabView = memo(function ConversationTabView({
   // live connection only — mirrors the goal-control gate: a viewer watches the
   // session, and recovering it is the owner's call.
   const canRecoverSession = conn.connectionId !== null && !conn.isViewer
+
+  // The last turn ended without a reply (see `EmptyTurnBanner`): say so where
+  // the reply should be, with Retry, instead of a turn that silently stops.
+  // Gone once a turn runs (the error clears) or anything is queued.
+  const emptyTurnBanner =
+    canRecoverSession &&
+    conn.errorCode?.startsWith("turn_failed_empty") &&
+    connStatus !== "prompting" &&
+    msgQueue.length === 0 ? (
+      <EmptyTurnBanner
+        agent={getAgentLabel(selectedAgent)}
+        onRetry={() => handleSessionFailureAction("retry")}
+      />
+    ) : null
   useEffect(() => {
     if (!canRecoverSession) return
     return acpActions.registerSessionFailureActions(
@@ -3586,7 +3601,10 @@ const ConversationTabView = memo(function ConversationTabView({
       injectContent={composerInject}
       onInjectConsumed={handleComposerInjectConsumed}
       composerBanner={
-        acpLoadErrorBanner ?? limitPausedBanner ?? interruptedBanner
+        acpLoadErrorBanner ??
+        limitPausedBanner ??
+        interruptedBanner ??
+        emptyTurnBanner
       }
       feedbackList={
         feedback.showList ? (
