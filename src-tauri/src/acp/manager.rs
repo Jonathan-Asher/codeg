@@ -3160,6 +3160,14 @@ impl ConnectionManager {
                 let forked_session_id = protocol_result.forked_session_id;
                 let original_session_id = protocol_result.original_session_id;
 
+                // A branch hands the critical mark to the sibling, and the
+                // watchdog's state for this row — an alert waiting for an
+                // acknowledgement, the acknowledgement, the timing — goes with
+                // it. Held from before the write, so no watchdog pass applies
+                // a read of the critical rows that straddles it; a failed
+                // write releases it with nothing moved.
+                let critical_move =
+                    (mode == ForkMode::Branch).then(crate::acp::critical_watch::hold_for_move);
                 let sibling_id = Self::persist_fork_outcome(
                     &db_conn,
                     conversation_id,
@@ -3168,6 +3176,9 @@ impl ConnectionManager {
                     mode,
                 )
                 .await?;
+                if let Some(hold) = critical_move {
+                    hold.moved(&emitter, conversation_id, sibling_id);
+                }
 
                 Self::broadcast_fork_rows(&emitter, &db_conn, conversation_id, sibling_id, mode)
                     .await;
@@ -3248,6 +3259,13 @@ impl ConnectionManager {
     /// in the same transaction — whether it inserted it or adopted the one the
     /// lifecycle subscriber made — so the only conversation left visible is
     /// the one being edited.
+    ///
+    /// The critical mark (with its stall switch) splits the same way. A
+    /// branch hands it to the sibling — the original's work is what the user
+    /// marked, and an idle fork must not alert — and resets the forked row; an
+    /// edit leaves it on the row being edited, with the sibling unmarked.
+    /// [`Self::fork_session`] moves the watchdog's state for the row along
+    /// with it.
     ///
     /// Whatever the mode, the current row's message-search rows go too: they
     /// were read from the session it just left, so search would keep finding
@@ -3426,6 +3444,17 @@ impl ConnectionManager {
                     // had. (A branch may fork at the tail, and keep that turn.)
                     let clear_interruption = mode.is_edit()
                         && current.turn_state == Some(ConversationTurnState::Interrupted);
+                    // The critical mark and its stall switch, as the sibling
+                    // gets them. A branch is an exploration: the work the user
+                    // marked is the original's, so the mark goes with it to the
+                    // sibling and the forked row drops back to the defaults (an
+                    // idle fork must not alert). An edit continues the very
+                    // conversation the user marked, so the mark stays on this
+                    // row and the branch it leaves behind is born unmarked.
+                    let sibling_critical = match mode {
+                        ForkMode::Branch => (current.critical, current.critical_stall),
+                        ForkMode::Edit | ForkMode::EditInPlace => (false, true),
+                    };
 
                     // UPDATE current row → S2. Writing external_id explicitly
                     // here closes the race against `refreshConversations()`
@@ -3461,6 +3490,10 @@ impl ConnectionManager {
                     active.updated_at = Set(now);
                     if clear_interruption {
                         active.turn_state = Set(None);
+                    }
+                    if mode == ForkMode::Branch {
+                        active.critical = Set(false);
+                        active.critical_stall = Set(true);
                     }
                     active.update(txn).await?;
 
@@ -3509,9 +3542,13 @@ impl ConnectionManager {
                         // own name, so left alone both rows would wear it. An
                         // in-place edit hides it as well — the lifecycle side
                         // made it visible, not knowing what the fork was for.
+                        // A branch's sibling takes over the critical mark, which
+                        // the lifecycle side never carries over.
                         let adopted_id = existing.id;
                         let retitle = mode.is_edit() && sibling_title.is_some();
-                        if retitle || hidden {
+                        let recritical =
+                            (existing.critical, existing.critical_stall) != sibling_critical;
+                        if retitle || hidden || recritical {
                             let mut adopted: conversation::ActiveModel = existing.into();
                             if retitle {
                                 adopted.title = Set(sibling_title);
@@ -3519,6 +3556,10 @@ impl ConnectionManager {
                             }
                             if hidden {
                                 adopted.deleted_at = Set(Some(now));
+                            }
+                            if recritical {
+                                adopted.critical = Set(sibling_critical.0);
+                                adopted.critical_stall = Set(sibling_critical.1);
                             }
                             adopted.update(txn).await?;
                         }
@@ -3551,8 +3592,8 @@ impl ConnectionManager {
                         turn_state: Set(None),
                         selector_state: Set(None),
                         auto_resume: Set(None),
-                        critical: Set(false),
-                        critical_stall: Set(true),
+                        critical: Set(sibling_critical.0),
+                        critical_stall: Set(sibling_critical.1),
                         limit_resume_at: Set(None),
                         limit_resume_state: Set(None),
                         limit_resume_attempts: Set(0),

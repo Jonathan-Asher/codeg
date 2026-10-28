@@ -661,6 +661,12 @@ pub struct CriticalRegistry {
     acks: HashMap<i32, DateTime<Utc>>,
     /// `acks` changed since it was last stored.
     acks_dirty: bool,
+    /// Forks writing their rows right now (see [`MoveHold`]): while one is,
+    /// no pass applies what it read.
+    moves_in_flight: u32,
+    /// Bumped as each move begins and as it ends, so a pass can tell its read
+    /// of the critical rows straddled one.
+    generation: u64,
 }
 
 impl CriticalRegistry {
@@ -672,6 +678,55 @@ impl CriticalRegistry {
             sessions: HashMap::new(),
             acks: HashMap::new(),
             acks_dirty: false,
+            moves_in_flight: 0,
+            generation: 0,
+        }
+    }
+
+    /// Noted by a pass before it reads the critical rows.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Whether rows read at `generation` may be applied: no move is under
+    /// way, and none began or ended since. Rows read across a move may still
+    /// name the row the mark left, or miss the one it went to — applying them
+    /// would drop the moved watch and start a fresh one — so the pass is
+    /// dropped and the next one reads again.
+    pub fn may_apply(&self, generation: u64) -> bool {
+        self.moves_in_flight == 0 && self.generation == generation
+    }
+
+    /// A fork is about to move a critical mark to another row.
+    pub fn begin_move(&mut self) {
+        self.moves_in_flight += 1;
+        self.generation += 1;
+    }
+
+    /// The fork is done: `moved` names the row the mark left and the row it
+    /// went to, once both are written; `None` when the write failed.
+    pub fn end_move(&mut self, moved: Option<(i32, i32)>) {
+        if let Some((from, to)) = moved {
+            self.move_session(from, to);
+        }
+        self.moves_in_flight = self.moves_in_flight.saturating_sub(1);
+        self.generation += 1;
+    }
+
+    /// Hand `from`'s watch to `to`: the alert waiting for an acknowledgement
+    /// (now naming `to`), the acknowledgement, the stretch and its timing.
+    /// `to` is a row the fork just made, so it has nothing of its own to lose.
+    fn move_session(&mut self, from: i32, to: i32) {
+        if let Some(mut entry) = self.sessions.remove(&from) {
+            entry.row.conversation_id = to;
+            if let Some(last) = entry.last.as_mut() {
+                last.conversation_id = to;
+            }
+            self.sessions.insert(to, entry);
+        }
+        if let Some(at) = self.acks.remove(&from) {
+            self.acks.insert(to, at);
+            self.acks_dirty = true;
         }
     }
 
@@ -1002,6 +1057,38 @@ pub async fn set_conversation_critical_core(
     Ok(())
 }
 
+/// A fork moving a critical mark from one row to another (a branch hands it
+/// to the row that keeps the original — see `ConnectionManager::fork_session`).
+/// Take it before the rows are written: until it is released, no pass applies
+/// the critical rows it read (see [`CriticalRegistry::may_apply`]). Dropped
+/// without [`MoveHold::moved`] — the write failed — it moves nothing.
+#[must_use = "dropping the hold at once moves nothing"]
+pub struct MoveHold {
+    released: bool,
+}
+
+pub fn hold_for_move() -> MoveHold {
+    with_registry(CriticalRegistry::begin_move);
+    MoveHold { released: false }
+}
+
+impl MoveHold {
+    /// Both rows are written: the watch of `from` now belongs to `to`, and an
+    /// alert waiting for an acknowledgement goes on showing, for `to`.
+    pub fn moved(mut self, emitter: &EventEmitter, from: i32, to: i32) {
+        self.released = true;
+        mutate_and_publish(emitter, |r| r.end_move(Some((from, to))));
+    }
+}
+
+impl Drop for MoveHold {
+    fn drop(&mut self) {
+        if !self.released {
+            with_registry(|r| r.end_move(None));
+        }
+    }
+}
+
 // ── Runtime ──
 
 /// Whether a fired alert also goes to the chat channels: always with "also
@@ -1210,6 +1297,9 @@ async fn deliver_fired(
 
 /// One evaluation pass over every critical session.
 async fn evaluate(manager: &ConnectionManager, db: &DatabaseConnection, emitter: &EventEmitter) {
+    // Noted before the read: a fork moving a critical mark meanwhile makes
+    // this pass's rows unsafe to apply (see `MoveHold`).
+    let generation = with_registry(|r| r.generation());
     let rows = match conversation_service::list_critical(db).await {
         Ok(rows) => rows,
         Err(e) => {
@@ -1243,7 +1333,10 @@ async fn evaluate(manager: &ConnectionManager, db: &DatabaseConnection, emitter:
 
     let now = Instant::now();
     let wall_now = Utc::now();
-    let (fired, changed, active, settings, acks) = with_registry(|r| {
+    let applied = with_registry(|r| {
+        if !r.may_apply(generation) {
+            return None;
+        }
         let before = r.active_key();
         r.sync_rows(rows.iter().map(WatchedRow::from));
         let fired: Vec<CriticalAlert> = observed
@@ -1258,14 +1351,17 @@ async fn evaluate(manager: &ConnectionManager, db: &DatabaseConnection, emitter:
             })
             .collect();
         r.finish_pass();
-        (
+        Some((
             fired,
             before != r.active_key(),
             r.active_alerts(),
             r.settings,
             r.take_dirty_acks(),
-        )
+        ))
     });
+    let Some((fired, changed, active, settings, acks)) = applied else {
+        return;
+    };
     if let Some(acks) = acks {
         store_acks(db, &acks).await;
     }

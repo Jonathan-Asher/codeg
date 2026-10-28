@@ -190,13 +190,16 @@ pub fn resolve_fork_point(
 }
 
 /// What a fork is for. Decides what happens when the chosen fork point cannot
-/// be named, and how the two rows the fork leaves behind are titled.
+/// be named, how the two rows the fork leaves behind are titled, and which of
+/// them keeps the critical mark.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ForkMode {
     /// "Fork from here": branch the conversation at a reply. A point the agent
     /// cannot name degrades to a tail fork rather than refusing the click, and
-    /// the forked row is marked `[Fork]`.
+    /// the forked row is marked `[Fork]`. The fork is an exploration, so a
+    /// critical mark stays with the original — on the sibling that now holds
+    /// it — and the forked row starts unmarked.
     #[default]
     Branch,
     /// "Edit message", keeping the original as a separate conversation: fork
@@ -207,7 +210,8 @@ pub enum ForkMode {
     /// error, never a fallback. The forked row keeps its title (it IS the
     /// conversation being edited), locked so a title the forked transcript
     /// carries can't replace it, and the sibling that preserves the original
-    /// branch is named `<title> (before edit)`.
+    /// branch is named `<title> (before edit)`. The forked row keeps a
+    /// critical mark too, for the same reason; the sibling starts unmarked.
     Edit,
     /// "Edit message", continuing in place — the default. Everything
     /// [`ForkMode::Edit`] does, except that the sibling holding the original
