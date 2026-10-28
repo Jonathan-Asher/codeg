@@ -1,6 +1,6 @@
 use chrono::Utc;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::NotSet, ColumnTrait, ConnectionTrait, DatabaseConnection,
+    ActiveValue::NotSet, ColumnTrait, ConnectionTrait, DatabaseConnection,
     EntityTrait, QueryFilter, QueryOrder, Set, TransactionTrait,
 };
 use std::sync::OnceLock;
@@ -103,6 +103,10 @@ pub async fn save_all_tabs<C: ConnectionTrait>(
 
     let now = Utc::now();
     let mut active_seen = false;
+    // One INSERT for all the rows: each statement is a round trip while the
+    // caller's transaction holds the write lock (one row at a time was two:
+    // the insert and a read-back of the row).
+    let mut rows = Vec::with_capacity(items.len());
 
     for item in items {
         // Skip drafts — never persist a conversation-less tab.
@@ -133,7 +137,10 @@ pub async fn save_all_tabs<C: ConnectionTrait>(
             created_at: Set(now),
             updated_at: Set(now),
         };
-        active.insert(conn).await?;
+        rows.push(active);
+    }
+    if !rows.is_empty() {
+        opened_tab::Entity::insert_many(rows).exec(conn).await?;
     }
 
     Ok(())
