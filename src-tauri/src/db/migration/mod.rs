@@ -58,6 +58,7 @@ mod m20261002_000001_push_devices;
 mod m20261012_000001_folder_archived;
 mod m20261022_000001_conversation_limit_reason;
 mod m20261026_000001_conversation_last_viewed_at;
+mod m20261028_000001_message_fts_state_turns;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -122,6 +123,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261012_000001_folder_archived::Migration),
             Box::new(m20261022_000001_conversation_limit_reason::Migration),
             Box::new(m20261026_000001_conversation_last_viewed_at::Migration),
+            Box::new(m20261028_000001_message_fts_state_turns::Migration),
         ]
     }
 }

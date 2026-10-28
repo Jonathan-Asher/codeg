@@ -99,71 +99,182 @@ fn role_name(role: &TurnRole) -> &'static str {
     }
 }
 
+/// Rows inserted per statement: each statement is a round trip to the
+/// connection's worker while the transaction holds the write lock.
+const INSERT_BATCH: usize = 64;
+
+/// What one turn contributes to the index: its role and text, or `None` for a
+/// turn the index skips (no text, or more than [`MAX_TURN_TEXT_BYTES`]).
+type TurnRow = Option<(&'static str, String)>;
+
+fn turn_rows(turns: &[MessageTurn]) -> Vec<TurnRow> {
+    turns
+        .iter()
+        .map(|turn| {
+            let text = turn_text(turn);
+            (!text.is_empty() && text.len() <= MAX_TURN_TEXT_BYTES)
+                .then(|| (role_name(&turn.role), text))
+        })
+        .collect()
+}
+
+/// A fingerprint of what `rows` put in the index, in order. Stored, so it is a
+/// fixed function (FNV-1a), not the std hasher; a collision costs nothing worse
+/// than keeping rows a full rewrite would also have written.
+fn fingerprint(rows: &[TurnRow]) -> String {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = OFFSET;
+    let mut feed = |bytes: &[u8]| {
+        for byte in bytes {
+            hash = (hash ^ u64::from(*byte)).wrapping_mul(PRIME);
+        }
+    };
+    for row in rows {
+        match row {
+            Some((role, text)) => {
+                feed(role.as_bytes());
+                feed(&[0]);
+                feed(&(text.len() as u64).to_le_bytes());
+                feed(text.as_bytes());
+            }
+            None => feed(&[1]),
+        }
+    }
+    format!("{:016x}:{}", hash, rows.len())
+}
+
+/// How many turns the index held of this conversation, and the fingerprint of
+/// all but the last of them. `None` when it was never indexed, or indexed
+/// before the index kept this.
+async fn indexed_prefix(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+) -> Result<Option<(usize, String)>, DbError> {
+    let row = conn
+        .query_one(Statement::from_sql_and_values(
+            conn.get_database_backend(),
+            "SELECT indexed_turns, prefix_fp FROM message_fts_state WHERE conversation_id = ?",
+            [conversation_id.into()],
+        ))
+        .await?;
+    Ok(row.and_then(|row| {
+        let turns = row.try_get_by_index::<Option<i64>>(0).ok()??;
+        let fp = row.try_get_by_index::<Option<String>>(1).ok()??;
+        Some((usize::try_from(turns).ok()?, fp))
+    }))
+}
+
+/// How many leading turns of a re-parse are already in the index, as the rows
+/// `rows` would write: all but the last turn indexed before (the last could
+/// have grown since), when the turns before it are unchanged. 0 when anything
+/// before it changed (an edit, a fork, a compaction): everything is rewritten.
+fn kept_turns(previous: Option<&(usize, String)>, rows: &[TurnRow]) -> usize {
+    match previous {
+        Some((count, fp)) if *count > 0 && rows.len() >= *count => {
+            let kept = count - 1;
+            if fingerprint(&rows[..kept]) == *fp {
+                kept
+            } else {
+                0
+            }
+        }
+        _ => 0,
+    }
+}
+
 async fn stamp<C: ConnectionTrait>(
     conn: &C,
     conversation_id: i32,
     source_updated_at: DateTime<Utc>,
+    rows: &[TurnRow],
 ) -> Result<(), DbError> {
+    let prefix = &rows[..rows.len().saturating_sub(1)];
     conn.execute(Statement::from_sql_and_values(
         conn.get_database_backend(),
-        "INSERT INTO message_fts_state (conversation_id, indexed_updated_at, indexed_at) \
-         VALUES (?, ?, ?) \
+        "INSERT INTO message_fts_state \
+           (conversation_id, indexed_updated_at, indexed_at, indexed_turns, prefix_fp) \
+         VALUES (?, ?, ?, ?, ?) \
          ON CONFLICT(conversation_id) DO UPDATE SET \
            indexed_updated_at = excluded.indexed_updated_at, \
-           indexed_at = excluded.indexed_at",
+           indexed_at = excluded.indexed_at, \
+           indexed_turns = excluded.indexed_turns, \
+           prefix_fp = excluded.prefix_fp",
         [
             conversation_id.into(),
             source_updated_at.to_rfc3339().into(),
             Utc::now().to_rfc3339().into(),
+            (rows.len() as i64).into(),
+            fingerprint(prefix).into(),
         ],
     ))
     .await?;
     Ok(())
 }
 
-/// Replace one conversation's rows with `turns` and stamp the
+/// Bring one conversation's rows up to `turns` and stamp the
 /// `conversation.updated_at` they were parsed at, in one transaction: a search
 /// never sees the conversation half-written, and the stamp never claims rows
-/// that did not land. Returns how many turns were indexed.
+/// that did not land.
+///
+/// A conversation that only grew since it was last indexed keeps its rows:
+/// only the turns from its previous last one on are written (see
+/// [`kept_turns`]), so a long session re-indexed after every turn costs a few
+/// rows, not a rewrite of its whole history. Returns how many rows were
+/// written.
 pub async fn index_conversation(
     conn: &DatabaseConnection,
     conversation_id: i32,
     source_updated_at: DateTime<Utc>,
     turns: &[MessageTurn],
 ) -> Result<u32, DbError> {
+    let rows = turn_rows(turns);
+    let previous = indexed_prefix(conn, conversation_id).await?;
+    let kept = kept_turns(previous.as_ref(), &rows);
+
     let backend = conn.get_database_backend();
     let txn = conn.begin().await?;
-    txn.execute(Statement::from_sql_and_values(
-        backend,
-        "DELETE FROM message_fts WHERE conversation_id = ?",
-        [conversation_id.into()],
-    ))
-    .await?;
-
-    let mut indexed = 0;
-    for (idx, turn) in turns.iter().enumerate() {
-        let text = turn_text(turn);
-        if text.is_empty() || text.len() > MAX_TURN_TEXT_BYTES {
-            continue;
-        }
+    if kept == 0 {
         txn.execute(Statement::from_sql_and_values(
             backend,
-            "INSERT INTO message_fts (content, conversation_id, turn_idx, role) \
-             VALUES (?, ?, ?, ?)",
-            [
-                text.into(),
-                conversation_id.into(),
-                (idx as i32).into(),
-                role_name(&turn.role).into(),
-            ],
+            "DELETE FROM message_fts WHERE conversation_id = ?",
+            [conversation_id.into()],
         ))
         .await?;
-        indexed += 1;
+    } else {
+        txn.execute(Statement::from_sql_and_values(
+            backend,
+            "DELETE FROM message_fts WHERE conversation_id = ? AND turn_idx >= ?",
+            [conversation_id.into(), (kept as i64).into()],
+        ))
+        .await?;
     }
 
-    stamp(&txn, conversation_id, source_updated_at).await?;
+    let fresh: Vec<(usize, &(&'static str, String))> = rows
+        .iter()
+        .enumerate()
+        .skip(kept)
+        .filter_map(|(idx, row)| row.as_ref().map(|row| (idx, row)))
+        .collect();
+    for chunk in fresh.chunks(INSERT_BATCH) {
+        let mut sql = String::from(
+            "INSERT INTO message_fts (content, conversation_id, turn_idx, role) VALUES ",
+        );
+        let mut values: Vec<Value> = Vec::with_capacity(chunk.len() * 4);
+        for (n, (idx, (role, text))) in chunk.iter().enumerate() {
+            sql.push_str(if n == 0 { "(?, ?, ?, ?)" } else { ", (?, ?, ?, ?)" });
+            values.push(text.as_str().into());
+            values.push(conversation_id.into());
+            values.push((*idx as i32).into());
+            values.push((*role).into());
+        }
+        txn.execute(Statement::from_sql_and_values(backend, sql, values))
+            .await?;
+    }
+
+    stamp(&txn, conversation_id, source_updated_at, &rows).await?;
     txn.commit().await?;
-    Ok(indexed)
+    Ok(fresh.len() as u32)
 }
 
 /// Stamp a conversation as indexed at `source_updated_at` with no rows — for
@@ -716,6 +827,106 @@ mod tests {
 
         assert!(search(&db.conn, "first").await.is_empty());
         assert_eq!(search(&db.conn, "draft").await.len(), 1);
+    }
+
+    async fn row_texts(conn: &DatabaseConnection, id: i32) -> Vec<(i32, String)> {
+        conn.query_all(Statement::from_sql_and_values(
+            conn.get_database_backend(),
+            "SELECT turn_idx, content FROM message_fts WHERE conversation_id = ? \
+             ORDER BY turn_idx",
+            [id.into()],
+        ))
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| {
+            (
+                row.try_get_by_index::<i32>(0).unwrap(),
+                row.try_get_by_index::<String>(1).unwrap(),
+            )
+        })
+        .collect()
+    }
+
+    /// A conversation that only grew is indexed by writing its previous last
+    /// turn (it may have grown) and the new ones; the rest stay as they were.
+    #[tokio::test]
+    async fn a_grown_conversation_is_indexed_by_appending() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/fts-proj").await;
+        let id = seed_conversation(&db, folder, AgentType::ClaudeCode).await;
+        let first = [
+            turn("user", "deploy the parser"),
+            turn("assistant", "on it"),
+            turn("user", "and the docs"),
+        ];
+        assert_eq!(index_conversation(&db.conn, id, Utc::now(), &first).await.unwrap(), 3);
+
+        let mut grown = first.to_vec();
+        grown[2] = turn("user", "and the docs too");
+        grown.push(turn("assistant", "both shipped"));
+        assert_eq!(
+            index_conversation(&db.conn, id, Utc::now(), &grown).await.unwrap(),
+            2,
+            "the previous last turn and the new one"
+        );
+        assert_eq!(
+            row_texts(&db.conn, id).await,
+            [
+                (0, "deploy the parser".to_string()),
+                (1, "on it".to_string()),
+                (2, "and the docs too".to_string()),
+                (3, "both shipped".to_string()),
+            ]
+        );
+
+        // Unchanged: only the last turn is rewritten.
+        assert_eq!(index_conversation(&db.conn, id, Utc::now(), &grown).await.unwrap(), 1);
+        assert_eq!(row_texts(&db.conn, id).await.len(), 4);
+    }
+
+    /// History that changed before the last turn (an edit, a fork, a
+    /// compaction) or shrank is rewritten in full.
+    #[tokio::test]
+    async fn changed_history_is_rewritten() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/fts-proj").await;
+        let id = seed_conversation(&db, folder, AgentType::ClaudeCode).await;
+        let first = [
+            turn("user", "rename the module"),
+            turn("assistant", "renamed"),
+            turn("user", "thanks"),
+        ];
+        index_conversation(&db.conn, id, Utc::now(), &first).await.unwrap();
+
+        let edited = [
+            turn("user", "rename the crate"),
+            turn("assistant", "renamed"),
+            turn("user", "thanks"),
+        ];
+        assert_eq!(index_conversation(&db.conn, id, Utc::now(), &edited).await.unwrap(), 3);
+        assert!(search(&db.conn, "module").await.is_empty());
+        assert_eq!(search(&db.conn, "crate").await.len(), 1);
+
+        let shrunk = [turn("user", "rename the crate")];
+        assert_eq!(index_conversation(&db.conn, id, Utc::now(), &shrunk).await.unwrap(), 1);
+        assert_eq!(row_texts(&db.conn, id).await, [(0, "rename the crate".to_string())]);
+    }
+
+    #[test]
+    fn the_fingerprint_follows_roles_texts_and_skipped_turns() {
+        let rows = |items: &[Option<(&'static str, &str)>]| -> Vec<TurnRow> {
+            items
+                .iter()
+                .map(|r| r.map(|(role, text)| (role, text.to_string())))
+                .collect()
+        };
+        let base = fingerprint(&rows(&[Some(("user", "ab")), None]));
+        assert_eq!(base, fingerprint(&rows(&[Some(("user", "ab")), None])));
+        assert_ne!(base, fingerprint(&rows(&[Some(("assistant", "ab")), None])));
+        assert_ne!(base, fingerprint(&rows(&[Some(("user", "a")), None])));
+        assert_ne!(base, fingerprint(&rows(&[Some(("user", "ab"))])));
+        assert_ne!(base, fingerprint(&rows(&[None, Some(("user", "ab"))])));
     }
 
     /// A row re-pointed at another session stops returning what it indexed at

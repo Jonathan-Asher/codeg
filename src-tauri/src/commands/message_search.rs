@@ -8,9 +8,19 @@
 //! moved since they were last indexed. That covers finished turns (the status
 //! change at turn end bumps `updated_at`) and imports without hooking either
 //! path.
+//!
+//! `updated_at` moves on every turn, so a busy session would have its whole
+//! transcript re-read every minute. Two things keep that cheap: a conversation
+//! that only grew is indexed by appending its new turns (see
+//! `message_search_service::index_conversation`), and [`Pacing`] spaces the
+//! re-reads of one conversation by how long reading it took — a transcript
+//! that takes a second to parse is re-read at most every couple of minutes.
+//! Conversations are indexed one at a time with a pause between them, so the
+//! indexer never queues a burst of writes in front of the app's own.
 
+use std::collections::HashMap;
 use std::future::Future;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use sea_orm::DatabaseConnection;
@@ -64,6 +74,39 @@ pub async fn message_search(
     message_search_core(&db.conn, &query, limit).await
 }
 
+/// A conversation is re-read for the index no sooner than this many times as
+/// long as its last read took, so keeping it current costs at most about 1% of
+/// the time…
+const REREAD_COST_FACTOR: u32 = 100;
+/// …but never later than this after its last read.
+const MAX_REREAD_GAP: Duration = Duration::from_secs(30 * 60);
+/// Pause between two conversations of a pass, so the app's own reads and
+/// writes get the database (and the CPU) in between.
+const BETWEEN_CONVERSATIONS: Duration = Duration::from_millis(100);
+
+/// When the indexer last read each conversation, and how long that took.
+#[derive(Debug, Default)]
+pub struct Pacing {
+    last_read: HashMap<i32, (Instant, Duration)>,
+}
+
+impl Pacing {
+    /// Whether `conversation_id` may be re-read at `now`.
+    fn due(&self, conversation_id: i32, now: Instant) -> bool {
+        self.last_read
+            .get(&conversation_id)
+            .is_none_or(|(at, took)| now.saturating_duration_since(*at) >= reread_gap(*took))
+    }
+
+    fn record(&mut self, conversation_id: i32, at: Instant, took: Duration) {
+        self.last_read.insert(conversation_id, (at, took));
+    }
+}
+
+fn reread_gap(took: Duration) -> Duration {
+    took.saturating_mul(REREAD_COST_FACTOR).min(MAX_REREAD_GAP)
+}
+
 /// Index up to `batch` conversations that are new or changed since their last
 /// indexing and have settled. Returns how many were processed; a full batch
 /// means more may be waiting.
@@ -71,7 +114,17 @@ pub async fn index_stale_conversations(
     conn: &DatabaseConnection,
     batch: usize,
 ) -> Result<usize, DbError> {
-    index_stale_conversations_with(conn, batch, move |id| async move {
+    index_stale_conversations_paced(conn, batch, &mut Pacing::default()).await
+}
+
+/// [`index_stale_conversations`], leaving out the conversations `pacing` says
+/// were read too recently.
+pub async fn index_stale_conversations_paced(
+    conn: &DatabaseConnection,
+    batch: usize,
+    pacing: &mut Pacing,
+) -> Result<usize, DbError> {
+    index_stale_conversations_with(conn, batch, pacing, move |id| async move {
         get_folder_conversation_core(conn, id)
             .await
             .map(|(detail, _)| detail.turns)
@@ -79,11 +132,12 @@ pub async fn index_stale_conversations(
     .await
 }
 
-/// [`index_stale_conversations`] reading each transcript with `read_turns`, so
-/// a test can make a read fail.
+/// [`index_stale_conversations_paced`] reading each transcript with
+/// `read_turns`, so a test can make a read fail.
 async fn index_stale_conversations_with<F, Fut>(
     conn: &DatabaseConnection,
     batch: usize,
+    pacing: &mut Pacing,
     read_turns: F,
 ) -> Result<usize, DbError>
 where
@@ -91,10 +145,22 @@ where
     Fut: Future<Output = Result<Vec<MessageTurn>, AppCommandError>>,
 {
     let settled_before = Utc::now() - chrono::Duration::seconds(SETTLE_SECS);
-    let stale =
-        message_search_service::list_stale_conversations(conn, settled_before, batch).await?;
-    for conversation in &stale {
-        match read_turns(conversation.id).await {
+    let now = Instant::now();
+    let stale: Vec<_> =
+        message_search_service::list_stale_conversations(conn, settled_before, usize::MAX)
+            .await?
+            .into_iter()
+            .filter(|conversation| pacing.due(conversation.id, now))
+            .take(batch)
+            .collect();
+    for (n, conversation) in stale.iter().enumerate() {
+        if n > 0 {
+            tokio::time::sleep(BETWEEN_CONVERSATIONS).await;
+        }
+        let read_started = Instant::now();
+        let read = read_turns(conversation.id).await;
+        pacing.record(conversation.id, read_started, read_started.elapsed());
+        match read {
             Ok(turns) => {
                 message_search_service::index_conversation(
                     conn,
@@ -132,8 +198,9 @@ where
 #[tracing::instrument(name = "bg", skip_all, fields(task = "message-search"))]
 pub async fn run_message_indexer(conn: DatabaseConnection) {
     tokio::time::sleep(INDEX_START_DELAY).await;
+    let mut pacing = Pacing::default();
     loop {
-        let pause = match index_stale_conversations(&conn, INDEX_BATCH).await {
+        let pause = match index_stale_conversations_paced(&conn, INDEX_BATCH, &mut pacing).await {
             Ok(done) if done >= INDEX_BATCH => INDEX_BATCH_PAUSE,
             Ok(_) => INDEX_INTERVAL,
             Err(err) => {
@@ -211,7 +278,7 @@ mod tests {
         // Indexed while its transcript could be read.
         set_updated_at(&db.conn, id, 120).await;
         assert_eq!(
-            index_stale_conversations_with(&db.conn, 25, readable)
+            index_stale_conversations_with(&db.conn, 25, &mut Pacing::default(), readable)
                 .await
                 .unwrap(),
             1
@@ -222,7 +289,7 @@ mod tests {
         // before must stop matching, not linger behind the new stamp.
         set_updated_at(&db.conn, id, 60).await;
         assert_eq!(
-            index_stale_conversations_with(&db.conn, 25, unreadable)
+            index_stale_conversations_with(&db.conn, 25, &mut Pacing::default(), unreadable)
                 .await
                 .unwrap(),
             1
@@ -232,7 +299,7 @@ mod tests {
 
         // Stamped all the same, so the next pass leaves it alone.
         assert_eq!(
-            index_stale_conversations_with(&db.conn, 25, unreadable)
+            index_stale_conversations_with(&db.conn, 25, &mut Pacing::default(), unreadable)
                 .await
                 .unwrap(),
             0
@@ -251,5 +318,55 @@ mod tests {
         assert_eq!(index_stale_conversations(&db.conn, 2).await.unwrap(), 2);
         assert_eq!(index_stale_conversations(&db.conn, 2).await.unwrap(), 1);
         assert_eq!(index_stale_conversations(&db.conn, 2).await.unwrap(), 0);
+    }
+
+    /// A conversation is re-read only once enough time has passed for how
+    /// long its last read took; the others are not held up by it.
+    #[test]
+    fn rereads_are_spaced_by_how_long_the_last_read_took() {
+        let now = Instant::now();
+        let mut pacing = Pacing::default();
+        assert!(pacing.due(1, now), "never read");
+
+        pacing.record(1, now, Duration::from_secs(1));
+        assert!(!pacing.due(1, now + Duration::from_secs(60)));
+        assert!(pacing.due(1, now + Duration::from_secs(100)));
+        assert!(pacing.due(2, now), "another conversation");
+
+        pacing.record(3, now, Duration::from_secs(3600));
+        assert!(!pacing.due(3, now + MAX_REREAD_GAP - Duration::from_secs(1)));
+        assert!(pacing.due(3, now + MAX_REREAD_GAP), "capped");
+    }
+
+    #[tokio::test]
+    async fn a_conversation_read_moments_ago_waits_while_others_are_indexed() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/fts-proj").await;
+        let slow = seed_conversation(&db, folder, AgentType::ClaudeCode).await;
+        let other = seed_conversation(&db, folder, AgentType::ClaudeCode).await;
+        set_updated_at(&db.conn, slow, 120).await;
+        set_updated_at(&db.conn, other, 120).await;
+        let mut pacing = Pacing::default();
+        pacing.record(slow, Instant::now(), Duration::from_secs(10));
+        let read = |_: i32| async { Ok::<_, AppCommandError>(vec![user_turn("hello there")]) };
+
+        assert_eq!(
+            index_stale_conversations_with(&db.conn, 25, &mut pacing, read)
+                .await
+                .unwrap(),
+            1,
+            "only the other conversation"
+        );
+        let stale: Vec<i32> = message_search_service::list_stale_conversations(
+            &db.conn,
+            Utc::now(),
+            10,
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|c| c.id)
+        .collect();
+        assert_eq!(stale, [slow], "still due once its gap has passed");
     }
 }
