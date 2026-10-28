@@ -2315,11 +2315,13 @@
       "label": "Activity",
       "working": "Working",
       "needsYou": "Needs you",
-      "idle": "Idle",
+      "idle": "Finished · waiting for you",
       "interrupted": "Interrupted",
       "workingHint": "A turn is running right now.",
       "needsYouHint": "The agent is waiting for you before it can go on.",
-      "idleHint": "Nothing is running. Send a message to start a turn.",
+      "idleHint": "The agent finished its turn and is waiting for you. Send a message to go on.",
+      "idleAsks": "Finished · asks: {line}",
+      "idleSaid": "Finished · {line}",
       "interruptedHint": "The last turn was cut off before it finished: codeg closed or the agent stopped. Continue picks it up where it left off.",
       "background": "Idle — {count, plural, =0 {background work running} one {# background task running} other {# background tasks running}}",
       "backgroundHint": "The agent has answered and is idle while its background work finishes. A message you send now runs right away.",
@@ -3447,6 +3449,8 @@
         "toolFallbackTitle": "Tool",
         "notificationTurnComplete": "{agent} has finished responding",
         "notificationError": "{agent} error: {message}",
+        "emptyTurnNotice": "{agent} ended the turn without a reply. Your message may not have reached it.",
+        "emptyTurnRetry": "Retry",
         "notificationQuestion": "{agent} is waiting for your answer",
         "notificationErrorRedacted": "{agent} ran into an error",
         "claudeApiRetry": {
@@ -5743,7 +5747,7 @@
   },
   "CriticalSessions": {
     "headline": {
-      "idle": "Critical session waiting",
+      "idle": "Finished, waiting for you",
       "needsYou": "Critical session needs you",
       "interrupted": "Critical session interrupted",
       "stalled": "Critical session may be stuck",
@@ -5751,7 +5755,9 @@
       "limitContinued": "Critical session continued"
     },
     "body": {
-      "idle": "The agent finished its turn {elapsed} ago, and nothing has happened since.",
+      "idle": "The agent finished its turn {elapsed} ago and is waiting for you.",
+      "idleAsks": "Finished {elapsed} ago · asks: {line}",
+      "idleSaid": "Finished {elapsed} ago · {line}",
       "needsYou": "The agent has been waiting for your answer for {elapsed}.",
       "interrupted": "The last turn was cut off {elapsed} ago, and nothing has happened since.",
       "stalled": "A turn is running, but nothing has streamed for {elapsed}.",

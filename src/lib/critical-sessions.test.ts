@@ -157,8 +157,8 @@ describe("setConversationCritical", () => {
 
 describe("postCriticalNotification", () => {
   const text = {
-    title: "⚑ Critical session waiting: Deploy fix",
-    redactedTitle: "⚑ Critical session waiting",
+    title: "⚑ Finished, waiting for you: Deploy fix",
+    redactedTitle: "⚑ Finished, waiting for you",
     body: "The agent finished its turn 1 min ago.",
   }
 

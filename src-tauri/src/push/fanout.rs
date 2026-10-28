@@ -251,7 +251,12 @@ pub fn critical_message(
     alert: &CriticalAlert,
     agent_type: Option<String>,
 ) -> PushMessage {
-    let (title, body) = wording::critical(lang, alert.kind, alert.title.as_deref());
+    let (title, body) = wording::critical(
+        lang,
+        alert.kind,
+        alert.title.as_deref(),
+        alert.last_line.as_ref(),
+    );
     PushMessage {
         kind: PushKind::Critical,
         title,

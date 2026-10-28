@@ -7,7 +7,7 @@
 //! desktop's reminder notification (`PendingItems.reminder.*` and
 //! `PendingItems.duration.*`), copied the same way.
 
-use crate::acp::critical_watch::CriticalAlertKind;
+use crate::acp::critical_watch::{CriticalAlertKind, LastLine};
 use crate::chat_channel::i18n::{self as channel_i18n, Lang};
 use crate::pending::PendingKind;
 
@@ -299,22 +299,32 @@ pub fn session_title_and_body(
     }
 }
 
-/// A critical alert: "⚑ <headline>: <session>", and what it is about.
+/// A critical alert: "⚑ <headline>: <session>", and what it is about. An idle
+/// alert that knows the reply the turn ended on quotes the start of its last
+/// line ("Finished · asks: …"), so a finished turn waiting on the user does
+/// not read as a session that stopped.
 pub fn critical(
     lang: Lang,
     kind: CriticalAlertKind,
     session_title: Option<&str>,
+    last_line: Option<&LastLine>,
 ) -> (String, String) {
     let session = session_title
         .map(str::trim)
         .filter(|t| !t.is_empty())
         .unwrap_or_else(|| channel_i18n::critical_untitled(lang));
+    let body = match (kind, last_line) {
+        (CriticalAlertKind::Idle, Some(line)) => {
+            channel_i18n::critical_finished_line(lang, &line.text, line.asks)
+        }
+        _ => channel_i18n::critical_alert_body(lang, kind).to_string(),
+    };
     (
         format!(
             "⚑ {}: {session}",
             channel_i18n::critical_alert_title(lang, kind)
         ),
-        channel_i18n::critical_alert_body(lang, kind).to_string(),
+        body,
     )
 }
 
@@ -459,10 +469,58 @@ mod tests {
 
     #[test]
     fn a_critical_alert_names_its_session() {
-        let (title, body) = critical(Lang::En, CriticalAlertKind::NeedsYou, Some("Deploy"));
+        let (title, body) =
+            critical(Lang::En, CriticalAlertKind::NeedsYou, Some("Deploy"), None);
         assert_eq!(title, "⚑ Critical session needs you: Deploy");
         assert!(!body.is_empty());
-        let (untitled, _) = critical(Lang::En, CriticalAlertKind::Idle, None);
-        assert!(untitled.starts_with("⚑ Critical session waiting: "));
+        let (untitled, body) = critical(Lang::En, CriticalAlertKind::Idle, None, None);
+        assert!(untitled.starts_with("⚑ Finished, waiting for you: "));
+        assert_eq!(body, "The agent finished its turn and is waiting for you.");
+    }
+
+    /// The case that read as "stopped": a turn that ended on a question.
+    #[test]
+    fn an_idle_alert_quotes_the_line_the_turn_ended_on() {
+        let asks = LastLine {
+            text: "Want me to change the box to that?".into(),
+            asks: true,
+        };
+        let (title, body) = critical(Lang::En, CriticalAlertKind::Idle, Some("Box"), Some(&asks));
+        assert_eq!(title, "⚑ Finished, waiting for you: Box");
+        assert_eq!(body, "Finished · asks: Want me to change the box to that?");
+
+        let said = LastLine {
+            text: "All three tests pass.".into(),
+            asks: false,
+        };
+        let (_, body) = critical(Lang::En, CriticalAlertKind::Idle, Some("Box"), Some(&said));
+        assert_eq!(body, "Finished · All three tests pass.");
+
+        // Only idle alerts quote it.
+        let (_, body) =
+            critical(Lang::En, CriticalAlertKind::Interrupted, Some("Box"), Some(&asks));
+        assert!(!body.contains("Want me"));
+    }
+
+    /// The desktop alert heads an idle session as the push does, and quotes
+    /// the line too (with how long ago the turn ended).
+    #[test]
+    fn the_idle_wording_matches_the_desktop_messages() {
+        for (lang, name, raw) in LANGS {
+            let messages: serde_json::Value = serde_json::from_str(raw).unwrap();
+            let critical = &messages["CriticalSessions"];
+            assert_eq!(
+                critical["headline"]["idle"],
+                channel_i18n::critical_alert_title(lang, CriticalAlertKind::Idle),
+                "{name}"
+            );
+            for key in ["idleAsks", "idleSaid"] {
+                let text = critical["body"][key].as_str().unwrap_or_default();
+                assert!(
+                    text.contains("{line}") && text.contains("{elapsed}"),
+                    "{name} {key}"
+                );
+            }
+        }
     }
 }

@@ -4615,6 +4615,9 @@ export interface CriticalAlert {
   sound: boolean
   /** For `limit_paused`: when the usage limit resets. */
   resets_at?: string
+  /** For `idle`: the start of the last line of the reply the turn ended on,
+   *  and whether it asks the user something. */
+  last_line?: { text: string; asks: boolean }
 }
 
 /** The alerts waiting for an acknowledgement (Rust

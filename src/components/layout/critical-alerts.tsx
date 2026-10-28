@@ -79,7 +79,15 @@ export function criticalAlertText(
     session,
     title: t("notificationTitle", { headline, session }),
     redactedTitle: t("notificationTitleRedacted", { headline }),
-    body: t(`body.${CRITICAL_ALERT_BODY_KEYS[alert.kind]}`, { elapsed, time }),
+    // A finished turn waiting on the user quotes how its reply ended, so it
+    // does not read as a session that stopped.
+    body:
+      alert.kind === "idle" && alert.last_line
+        ? t(alert.last_line.asks ? "body.idleAsks" : "body.idleSaid", {
+            elapsed,
+            line: alert.last_line.text,
+          })
+        : t(`body.${CRITICAL_ALERT_BODY_KEYS[alert.kind]}`, { elapsed, time }),
   }
 }
 

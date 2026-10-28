@@ -2315,11 +2315,13 @@
       "label": "Atividade",
       "working": "Trabalhando",
       "needsYou": "Precisa de você",
-      "idle": "Ociosa",
+      "idle": "Concluído · aguardando você",
       "interrupted": "Interrompida",
       "workingHint": "Há um turno em execução agora.",
       "needsYouHint": "O agente está esperando sua resposta para continuar.",
-      "idleHint": "Nada em execução. Envie uma mensagem para iniciar um turno.",
+      "idleHint": "O agente terminou o turno e está aguardando você. Envie uma mensagem para continuar.",
+      "idleAsks": "Concluído · pergunta: {line}",
+      "idleSaid": "Concluído · {line}",
       "interruptedHint": "O último turno foi cortado antes de terminar: o codeg fechou ou o agente parou. Continuar retoma de onde parou.",
       "background": "Ociosa — {count, plural, =0 {trabalho em segundo plano em execução} one {# tarefa em segundo plano em execução} other {# tarefas em segundo plano em execução}}",
       "backgroundHint": "O agente já respondeu e aguarda, ocioso, o fim do trabalho em segundo plano. Uma mensagem enviada agora é executada na hora.",
@@ -3447,6 +3449,8 @@
         "toolFallbackTitle": "Ferramenta",
         "notificationTurnComplete": "{agent} terminou de responder",
         "notificationError": "{agent} erro: {message}",
+        "emptyTurnNotice": "{agent} encerrou o turno sem responder. Sua mensagem pode não ter chegado.",
+        "emptyTurnRetry": "Tentar novamente",
         "notificationQuestion": "{agent} está aguardando sua resposta",
         "notificationErrorRedacted": "{agent} encontrou um erro",
         "claudeApiRetry": {
@@ -5743,7 +5747,7 @@
   },
   "CriticalSessions": {
     "headline": {
-      "idle": "Sessão crítica aguardando",
+      "idle": "Concluído, aguardando você",
       "needsYou": "Uma sessão crítica precisa de você",
       "interrupted": "Sessão crítica interrompida",
       "stalled": "Uma sessão crítica pode estar travada",
@@ -5751,7 +5755,9 @@
       "limitContinued": "Sessão crítica retomada"
     },
     "body": {
-      "idle": "O agente terminou o turno há {elapsed} e nada aconteceu desde então.",
+      "idle": "O agente terminou o turno há {elapsed} e está aguardando você.",
+      "idleAsks": "Concluído há {elapsed} · pergunta: {line}",
+      "idleSaid": "Concluído há {elapsed} · {line}",
       "needsYou": "O agente está aguardando sua resposta há {elapsed}.",
       "interrupted": "O último turno foi interrompido há {elapsed} e nada aconteceu desde então.",
       "stalled": "Um turno está em andamento, mas nada foi transmitido há {elapsed}.",

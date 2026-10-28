@@ -221,3 +221,43 @@ export function backgroundTaskTotal(
 ): number {
   return Math.max(heldBackgroundTasks ?? 0, background?.task_count ?? 0)
 }
+
+/** Characters of a reply's last line the idle status quotes. */
+const LAST_LINE_CHARS = 90
+
+/**
+ * The start of the last line of an agent's reply, as a finished session's
+ * status quotes it ("Finished · asks: Want me to change the box to that?"),
+ * and whether that line asks the user something. Mirrors Rust
+ * `critical_watch::last_line`, which words the idle alert.
+ */
+export function lastReplyLine(
+  reply: string
+): { text: string; asks: boolean } | null {
+  const lines = reply
+    .split(/\r?\n/)
+    .map((l) => l.replace(/^[#>\-\s]+/, "").trim())
+    .filter((l) => l.length > 0)
+  let line = lines[lines.length - 1]
+  if (line === undefined) return null
+  for (const mark of ["**", "__", "*", "_"]) {
+    if (
+      line.length > mark.length * 2 &&
+      line.startsWith(mark) &&
+      line.endsWith(mark)
+    ) {
+      const inner = line.slice(mark.length, -mark.length).trim()
+      if (inner) {
+        line = inner
+        break
+      }
+    }
+  }
+  const asks = /[?？؟]$/.test(line.replace(/[*_`)\s]+$/, ""))
+  const chars = Array.from(line)
+  const text =
+    chars.length > LAST_LINE_CHARS
+      ? `${chars.slice(0, LAST_LINE_CHARS).join("").trimEnd()}…`
+      : line
+  return { text, asks }
+}

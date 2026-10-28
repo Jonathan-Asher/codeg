@@ -144,11 +144,27 @@ describe("CriticalAlerts", () => {
     renderAlerts()
     expect(
       // The banner's flag icon stands for the notification title's ⚑.
-      await screen.findByText("Critical session waiting: Deploy fix")
+      await screen.findByText("Finished, waiting for you: Deploy fix")
     ).toBeTruthy()
     expect(
       screen.getByText(
-        "The agent finished its turn 1 min ago, and nothing has happened since."
+        "The agent finished its turn 1 min ago and is waiting for you."
+      )
+    ).toBeTruthy()
+  })
+
+  it("quotes how the reply ended when the turn ended on a question", async () => {
+    h.getCriticalAlerts.mockResolvedValue(
+      snapshot([
+        alert({
+          last_line: { text: "Want me to change the box to that?", asks: true },
+        }),
+      ])
+    )
+    renderAlerts()
+    expect(
+      await screen.findByText(
+        "Finished 1 min ago · asks: Want me to change the box to that?"
       )
     ).toBeTruthy()
   })
@@ -170,8 +186,8 @@ describe("CriticalAlerts", () => {
       expect(h.deliverSystemNotification).toHaveBeenCalledTimes(1)
     )
     expect(h.deliverSystemNotification).toHaveBeenCalledWith(
-      "⚑ Critical session waiting: Deploy fix",
-      "The agent finished its turn 1 min ago, and nothing has happened since.",
+      "⚑ Finished, waiting for you: Deploy fix",
+      "The agent finished its turn 1 min ago and is waiting for you.",
       {
         contextKey: null,
         folderId: 3,

@@ -2315,11 +2315,13 @@
       "label": "النشاط",
       "working": "يعمل",
       "needsYou": "بانتظارك",
-      "idle": "خامل",
+      "idle": "انتهى · بانتظارك",
       "interrupted": "انقطع",
       "workingHint": "هناك دور قيد التشغيل الآن.",
       "needsYouHint": "الوكيل ينتظرك ليتمكن من المتابعة.",
-      "idleHint": "لا شيء قيد التشغيل. أرسل رسالة لبدء دور جديد.",
+      "idleHint": "أنهى الوكيل دوره وهو بانتظارك. أرسل رسالة للمتابعة.",
+      "idleAsks": "انتهى · يسأل: {line}",
+      "idleSaid": "انتهى · {line}",
       "interruptedHint": "انقطع الدور الأخير قبل أن يكتمل: أُغلق codeg أو توقف الوكيل. «متابعة» يستأنفه من حيث توقف.",
       "background": "خامل — {count, plural, =0 {عمل في الخلفية قيد التشغيل} one {مهمة واحدة في الخلفية قيد التشغيل} two {مهمتان في الخلفية قيد التشغيل} few {# مهام في الخلفية قيد التشغيل} many {# مهمة في الخلفية قيد التشغيل} other {# مهمة في الخلفية قيد التشغيل}}",
       "backgroundHint": "أنهى الوكيل رده وهو خامل بانتظار انتهاء عمله في الخلفية. أي رسالة ترسلها الآن تُنفَّذ فورًا.",
@@ -3447,6 +3449,8 @@
         "toolFallbackTitle": "أداة",
         "notificationTurnComplete": "{agent} أنهى الاستجابة",
         "notificationError": "{agent} خطأ: {message}",
+        "emptyTurnNotice": "أنهى {agent} الدور دون رد. ربما لم تصل رسالتك.",
+        "emptyTurnRetry": "إعادة المحاولة",
         "notificationQuestion": "{agent} ينتظر إجابتك",
         "notificationErrorRedacted": "واجه {agent} خطأً",
         "claudeApiRetry": {
@@ -5743,7 +5747,7 @@
   },
   "CriticalSessions": {
     "headline": {
-      "idle": "جلسة حرجة في الانتظار",
+      "idle": "انتهى، بانتظارك",
       "needsYou": "جلسة حرجة تحتاج إليك",
       "interrupted": "تمت مقاطعة جلسة حرجة",
       "stalled": "قد تكون جلسة حرجة عالقة",
@@ -5751,7 +5755,9 @@
       "limitContinued": "استُؤنفت الجلسة الحرجة"
     },
     "body": {
-      "idle": "أنهى الوكيل دوره منذ {elapsed} ولم يحدث شيء منذ ذلك الحين.",
+      "idle": "أنهى الوكيل دوره منذ {elapsed} وهو بانتظارك.",
+      "idleAsks": "انتهى منذ {elapsed} · يسأل: {line}",
+      "idleSaid": "انتهى منذ {elapsed} · {line}",
       "needsYou": "ينتظر الوكيل إجابتك منذ {elapsed}.",
       "interrupted": "تمت مقاطعة الدور الأخير منذ {elapsed} ولم يحدث شيء منذ ذلك الحين.",
       "stalled": "هناك دور قيد التشغيل، لكن لم يُبث أي شيء منذ {elapsed}.",

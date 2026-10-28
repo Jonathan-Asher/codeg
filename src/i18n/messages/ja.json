@@ -2315,11 +2315,13 @@
       "label": "アクティビティ",
       "working": "実行中",
       "needsYou": "対応待ち",
-      "idle": "待機中",
+      "idle": "完了 · 返答待ち",
       "interrupted": "中断",
       "workingHint": "いまターンを実行しています。",
       "needsYouHint": "エージェントはあなたの対応を待っています。",
-      "idleHint": "実行中のものはありません。メッセージを送ると新しいターンが始まります。",
+      "idleHint": "エージェントはターンを終え、あなたを待っています。メッセージを送ると続きます。",
+      "idleAsks": "完了 · 質問：{line}",
+      "idleSaid": "完了 · {line}",
       "interruptedHint": "前回のターンは完了前に中断されました（codeg が終了したか、エージェントが停止しました）。「続行」で中断したところから再開します。",
       "background": "待機中 — {count, plural, =0 {バックグラウンド処理を実行中} other {# 件のバックグラウンドタスクを実行中}}",
       "backgroundHint": "エージェントは応答を終え、バックグラウンド処理の完了を待っています。いま送信したメッセージはすぐに実行されます。",
@@ -3447,6 +3449,8 @@
         "toolFallbackTitle": "ツール",
         "notificationTurnComplete": "{agent} の応答が完了しました",
         "notificationError": "{agent} エラー：{message}",
+        "emptyTurnNotice": "{agent} は返答せずにターンを終えました。メッセージが届いていない可能性があります。",
+        "emptyTurnRetry": "再試行",
         "notificationQuestion": "{agent} が回答を待っています",
         "notificationErrorRedacted": "{agent} でエラーが発生しました",
         "claudeApiRetry": {
@@ -5743,7 +5747,7 @@
   },
   "CriticalSessions": {
     "headline": {
-      "idle": "重要セッションが待機中",
+      "idle": "完了・あなたの返答待ち",
       "needsYou": "重要セッションが対応を待っています",
       "interrupted": "重要セッションが中断されました",
       "stalled": "重要セッションが止まっている可能性があります",
@@ -5751,7 +5755,9 @@
       "limitContinued": "重要セッションを再開"
     },
     "body": {
-      "idle": "エージェントは {elapsed} 前にターンを終え、その後動きがありません。",
+      "idle": "エージェントは {elapsed} 前にターンを終え、あなたを待っています。",
+      "idleAsks": "{elapsed} 前に完了 · 質問：{line}",
+      "idleSaid": "{elapsed} 前に完了 · {line}",
       "needsYou": "エージェントが {elapsed} 間あなたの回答を待っています。",
       "interrupted": "前回のターンは {elapsed} 前に中断され、その後動きがありません。",
       "stalled": "ターンは実行中ですが、{elapsed} 間何も出力されていません。",

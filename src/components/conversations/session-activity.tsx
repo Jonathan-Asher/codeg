@@ -22,6 +22,7 @@ import type {
 import {
   backgroundTaskTotal,
   deriveSessionActivity,
+  lastReplyLine,
   SESSION_ACTIVITY_HINT_KEYS,
   SESSION_ACTIVITY_LABEL_KEYS,
   type SessionActivity,
@@ -38,6 +39,7 @@ import { getAgentLabel } from "@/lib/custom-agents"
 import type { ConnectionAttachInfo } from "@/hooks/use-connection-status"
 import { useAttachPhaseLabel } from "@/hooks/use-attach-phase-label"
 import { useConversationAttention } from "@/stores/conversation-attention-store"
+import { useConversationRuntimeStore } from "@/stores/conversation-runtime-store"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { LimitPauseButtons, useLimitResetParts } from "./limit-pause"
@@ -167,6 +169,25 @@ export function SessionActivityIcon({
   }
 }
 
+/** The text of the agent's reply the open conversation's last exchange ended
+ *  on, or `null` when it ended on the user's side or is not loaded here. */
+function useLastReply(conversationId: number): string | null {
+  return useConversationRuntimeStore((s) => {
+    const turns = s.byConversationId.get(conversationId)?.detail?.turns
+    if (!turns) return null
+    for (let i = turns.length - 1; i >= 0; i--) {
+      const turn = turns[i]
+      if (turn.role === "user") return null
+      if (turn.role !== "assistant") continue
+      const text = turn.blocks
+        .flatMap((b) => (b.type === "text" ? [b.text] : []))
+        .join("\n")
+      if (text.trim()) return text
+    }
+    return null
+  })
+}
+
 interface SessionActivityRowProps {
   summary: DbConversationSummary
   /** This client's own live connection status for the conversation, when it
@@ -213,6 +234,11 @@ export function SessionActivityRow({
     limitPause: summary.limit_pause,
     background,
   })
+  // A finished session quotes how the agent's reply ended — "Finished ·
+  // asks: …" — so waiting on you does not read as stopped.
+  const lastReply = useLastReply(summary.id)
+  const idleLine =
+    activity === "idle" && lastReply ? lastReplyLine(lastReply) : null
   const pause = activity === "limit_paused" ? waitingLimitPause(summary) : null
   // Paused because no account behind the account pool can take a request,
   // rather than on the account's own limit.
@@ -277,7 +303,11 @@ export function SessionActivityRow({
                 ? t("limitPoolPaused", labelValues)
                 : limitStopped
                   ? t("limitStopped")
-                  : t(SESSION_ACTIVITY_LABEL_KEYS[activity], labelValues)}
+                  : idleLine
+                    ? t(idleLine.asks ? "idleAsks" : "idleSaid", {
+                        line: idleLine.text,
+                      })
+                    : t(SESSION_ACTIVITY_LABEL_KEYS[activity], labelValues)}
           </p>
           {phaseLabel && (
             <p

@@ -2315,11 +2315,13 @@
       "label": "Activité",
       "working": "En cours",
       "needsYou": "Vous attend",
-      "idle": "Inactive",
+      "idle": "Terminé · vous attend",
       "interrupted": "Interrompue",
       "workingHint": "Un tour est en cours d'exécution.",
       "needsYouHint": "L'agent attend votre réponse pour continuer.",
-      "idleHint": "Rien n'est en cours. Envoyez un message pour lancer un tour.",
+      "idleHint": "L'agent a terminé son tour et vous attend. Envoyez un message pour continuer.",
+      "idleAsks": "Terminé · demande : {line}",
+      "idleSaid": "Terminé · {line}",
       "interruptedHint": "Le dernier tour a été coupé avant la fin : codeg s'est fermé ou l'agent s'est arrêté. Continuer le reprend là où il s'était arrêté.",
       "background": "Inactive — {count, plural, =0 {travail en arrière-plan en cours} one {# tâche en arrière-plan en cours} other {# tâches en arrière-plan en cours}}",
       "backgroundHint": "L'agent a répondu et attend, inactif, la fin de son travail en arrière-plan. Un message envoyé maintenant s'exécute tout de suite.",
@@ -3447,6 +3449,8 @@
         "toolFallbackTitle": "Outil",
         "notificationTurnComplete": "{agent} a terminé de répondre",
         "notificationError": "{agent} erreur : {message}",
+        "emptyTurnNotice": "{agent} a terminé le tour sans répondre. Votre message ne lui est peut-être pas parvenu.",
+        "emptyTurnRetry": "Réessayer",
         "notificationQuestion": "{agent} attend votre réponse",
         "notificationErrorRedacted": "{agent} a rencontré une erreur",
         "claudeApiRetry": {
@@ -5743,7 +5747,7 @@
   },
   "CriticalSessions": {
     "headline": {
-      "idle": "Session critique en attente",
+      "idle": "Terminé, vous attend",
       "needsYou": "Une session critique a besoin de vous",
       "interrupted": "Session critique interrompue",
       "stalled": "Une session critique est peut-être bloquée",
@@ -5751,7 +5755,9 @@
       "limitContinued": "Session critique reprise"
     },
     "body": {
-      "idle": "L'agent a terminé son tour il y a {elapsed}, et rien ne s'est passé depuis.",
+      "idle": "L'agent a terminé son tour il y a {elapsed} et vous attend.",
+      "idleAsks": "Terminé il y a {elapsed} · demande : {line}",
+      "idleSaid": "Terminé il y a {elapsed} · {line}",
       "needsYou": "L'agent attend votre réponse depuis {elapsed}.",
       "interrupted": "Le dernier tour a été interrompu il y a {elapsed}, et rien ne s'est passé depuis.",
       "stalled": "Un tour est en cours, mais rien n'a été diffusé depuis {elapsed}.",

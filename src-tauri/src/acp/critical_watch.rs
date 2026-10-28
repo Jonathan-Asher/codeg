@@ -530,6 +530,16 @@ pub fn with_limit_pause(phase: Phase, limit_paused: bool) -> Phase {
 pub struct LiveState {
     pub status: ConnectionStatus,
     pub awaiting_background: bool,
+    /// The last line of the agent's reply in the turn that just ended.
+    pub last_line: Option<LastLine>,
+}
+
+/// The start of the last line of the agent's last reply (see [`last_line`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LastLine {
+    pub text: String,
+    /// The line ends with a question mark: the agent asks the user something.
+    pub asks: bool,
 }
 
 // ── Alerts and the registry ──
@@ -555,6 +565,11 @@ pub struct CriticalAlert {
     /// For [`CriticalAlertKind::LimitPaused`]: when the usage limit resets.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resets_at: Option<DateTime<Utc>>,
+    /// For [`CriticalAlertKind::Idle`]: the last line of the reply the turn
+    /// ended on, when this process saw it — so the alert reads "Finished ·
+    /// asks: …" rather than as a session that stopped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_line: Option<LastLine>,
 }
 
 /// Payload of [`CRITICAL_ALERTS_EVENT`] and of `get_critical_alerts`.
@@ -781,9 +796,22 @@ impl CriticalRegistry {
             fired_at: wall_now,
             sound: settings.sound,
             resets_at: None,
+            last_line: None,
         };
         entry.last = Some(alert.clone());
         Some(alert)
+    }
+
+    /// Record the reply line an idle alert quotes on the alert kept for the
+    /// active list, so the list reads like the notification did.
+    pub fn note_last_line(&mut self, conversation_id: i32, line: Option<LastLine>) {
+        if let Some(last) = self
+            .sessions
+            .get_mut(&conversation_id)
+            .and_then(|entry| entry.last.as_mut())
+        {
+            last.last_line = line;
+        }
     }
 
     /// The evaluation pass is over; sessions found from now on were marked.
@@ -993,7 +1021,39 @@ async fn live_state(manager: &ConnectionManager, conversation_id: i32) -> Option
     Some(LiveState {
         status: s.status.clone(),
         awaiting_background: s.awaiting_background,
+        last_line: s.last_assistant_text.as_deref().and_then(last_line),
     })
+}
+
+/// Characters of a reply's last line an alert quotes.
+const LAST_LINE_CHARS: usize = 90;
+
+/// The start of the last line of an agent's reply, as an idle alert quotes it
+/// ("Finished · asks: Want me to change the box to that?"), and whether that
+/// line asks the user something. `None` for a reply with no text.
+pub fn last_line(reply: &str) -> Option<LastLine> {
+    let line = reply
+        .lines()
+        .map(|l| l.trim_start_matches(['#', '>', '-', ' ', '\t']).trim())
+        .rfind(|l| !l.is_empty())?;
+    // Markdown emphasis around the whole line ("**Ship it?**") is not text.
+    let line = ["**", "__", "*", "_"]
+        .iter()
+        .find_map(|mark| {
+            line.strip_prefix(mark)
+                .and_then(|l| l.strip_suffix(mark))
+                .filter(|l| !l.trim().is_empty())
+        })
+        .unwrap_or(line)
+        .trim();
+    let asks = line
+        .trim_end_matches(['*', '_', '`', ')', ' '])
+        .ends_with(['?', '？', '؟']);
+    let text = match line.char_indices().nth(LAST_LINE_CHARS) {
+        Some((cut, _)) => format!("{}…", line[..cut].trim_end()),
+        None => line.to_string(),
+    };
+    Some(LastLine { text, asks })
 }
 
 async fn channel_lang(db: &DatabaseConnection) -> Lang {
@@ -1017,7 +1077,13 @@ pub fn channel_message(lang: Lang, alert: &CriticalAlert) -> RichMessage {
         "⚑ {}: {session}",
         channel_i18n::critical_alert_title(lang, alert.kind)
     );
-    let mut message = RichMessage::info(channel_i18n::critical_alert_body(lang, alert.kind))
+    let body = match (alert.kind, alert.last_line.as_ref()) {
+        (CriticalAlertKind::Idle, Some(line)) => {
+            channel_i18n::critical_finished_line(lang, &line.text, line.asks)
+        }
+        _ => channel_i18n::critical_alert_body(lang, alert.kind).to_string(),
+    };
+    let mut message = RichMessage::info(body)
         .with_title(title)
         .with_field(
             channel_i18n::critical_agent_label(lang),
@@ -1078,6 +1144,7 @@ pub async fn announce_limit_event(
         fired_at: now,
         sound: settings.sound,
         resets_at,
+        last_line: None,
     };
     tracing::info!(
         "[critical] limit announcement {} for conversation {} ({kind:?})",
@@ -1161,6 +1228,7 @@ async fn evaluate(manager: &ConnectionManager, db: &DatabaseConnection, emitter:
             .collect()
     };
     let mut observed = Vec::with_capacity(rows.len());
+    let mut last_lines: HashMap<i32, LastLine> = HashMap::new();
     for row in &rows {
         let live = live_state(manager, row.id).await;
         let phase = with_limit_pause(
@@ -1168,6 +1236,9 @@ async fn evaluate(manager: &ConnectionManager, db: &DatabaseConnection, emitter:
             crate::acp::limit_continue::is_limit_paused(row),
         );
         observed.push((row.id, phase));
+        if let Some(line) = live.and_then(|live| live.last_line) {
+            last_lines.insert(row.id, line);
+        }
     }
 
     let now = Instant::now();
@@ -1177,7 +1248,14 @@ async fn evaluate(manager: &ConnectionManager, db: &DatabaseConnection, emitter:
         r.sync_rows(rows.iter().map(WatchedRow::from));
         let fired: Vec<CriticalAlert> = observed
             .iter()
-            .filter_map(|(id, phase)| r.step(*id, *phase, now, wall_now))
+            .filter_map(|(id, phase)| {
+                let mut alert = r.step(*id, *phase, now, wall_now)?;
+                if alert.kind == CriticalAlertKind::Idle {
+                    alert.last_line = last_lines.get(id).cloned();
+                    r.note_last_line(*id, alert.last_line.clone());
+                }
+                Some(alert)
+            })
             .collect();
         r.finish_pass();
         (
@@ -1596,18 +1674,42 @@ mod tests {
     }
 
     #[test]
+    fn the_last_line_is_quoted_and_a_question_asks() {
+        let asked = last_line("Changed the layout.\n\nWant me to change the box to that?\n")
+            .expect("a line");
+        assert_eq!(asked.text, "Want me to change the box to that?");
+        assert!(asked.asks);
+
+        let bold = last_line("## Summary\n- **Ship it?**\n\n").expect("a line");
+        assert_eq!(bold.text, "Ship it?");
+        assert!(bold.asks);
+
+        let said = last_line("All three tests pass.").expect("a line");
+        assert!(!said.asks);
+
+        let long = last_line(&"word ".repeat(40)).expect("a line");
+        assert!(long.text.ends_with('…'));
+        assert!(long.text.chars().count() <= LAST_LINE_CHARS + 1);
+
+        assert_eq!(last_line(" \n\n"), None);
+    }
+
+    #[test]
     fn derive_phase_reads_attention_live_state_and_turn_state() {
         let prompting = LiveState {
             status: ConnectionStatus::Prompting,
             awaiting_background: false,
+            last_line: None,
         };
         let held = LiveState {
             status: ConnectionStatus::Prompting,
             awaiting_background: true,
+            last_line: None,
         };
         let connected = LiveState {
             status: ConnectionStatus::Connected,
             awaiting_background: false,
+            last_line: None,
         };
         let running = Some(ConversationTurnState::Running);
         assert_eq!(derive_phase(true, Some(&prompting), running), NEEDS_YOU);
@@ -1929,6 +2031,7 @@ mod tests {
             fired_at: Utc::now(),
             sound: true,
             resets_at: None,
+            last_line: None,
         };
         let msg = channel_message(Lang::En, &alert);
         let title = msg.title.expect("title");

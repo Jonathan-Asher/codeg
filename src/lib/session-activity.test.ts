@@ -5,6 +5,7 @@ import {
   deriveSessionActivity,
   isSessionRunning,
   isTurnRunning,
+  lastReplyLine,
   summaryActivity,
 } from "./session-activity"
 
@@ -359,5 +360,28 @@ describe("backgroundTaskTotal", () => {
     expect(backgroundTaskTotal(null, undefined)).toBe(0)
     expect(backgroundTaskTotal(2, { task_count: 1 })).toBe(2)
     expect(backgroundTaskTotal(null, { task_count: 3 })).toBe(3)
+  })
+})
+
+describe("lastReplyLine", () => {
+  it("quotes the reply's last line and says when it asks", () => {
+    expect(
+      lastReplyLine("Changed the layout.\n\nWant me to change the box to that?\n")
+    ).toEqual({ text: "Want me to change the box to that?", asks: true })
+    expect(lastReplyLine("## Summary\n- **Ship it?**\n")).toEqual({
+      text: "Ship it?",
+      asks: true,
+    })
+    expect(lastReplyLine("All three tests pass.")).toEqual({
+      text: "All three tests pass.",
+      asks: false,
+    })
+  })
+
+  it("cuts a long line and has nothing to say for an empty reply", () => {
+    const long = lastReplyLine("word ".repeat(40))
+    expect(long?.text.endsWith("…")).toBe(true)
+    expect(Array.from(long?.text ?? "").length).toBeLessThanOrEqual(91)
+    expect(lastReplyLine(" \n\n")).toBeNull()
   })
 })

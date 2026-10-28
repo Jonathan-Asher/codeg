@@ -436,7 +436,7 @@ describe("SessionDetailsDialog activity", () => {
       turn_state: null,
     })
     expect(activityOf(container)).toBe("idle")
-    expect(getByText("Idle")).toBeTruthy()
+    expect(getByText("Finished · waiting for you")).toBeTruthy()
     expect(queryByText("Working")).toBeNull()
     // The review status is still shown, under a name that doesn't read as
     // "running".

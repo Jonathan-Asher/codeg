@@ -2315,11 +2315,13 @@
       "label": "Aktivität",
       "working": "Arbeitet",
       "needsYou": "Wartet auf dich",
-      "idle": "Leerlauf",
+      "idle": "Fertig · wartet auf dich",
       "interrupted": "Unterbrochen",
       "workingHint": "Gerade läuft eine Runde.",
       "needsYouHint": "Der Agent wartet auf dich, bevor er weitermachen kann.",
-      "idleHint": "Gerade läuft nichts. Schick eine Nachricht, um eine Runde zu starten.",
+      "idleHint": "Der Agent hat seine Runde beendet und wartet auf dich. Schick eine Nachricht, um weiterzumachen.",
+      "idleAsks": "Fertig · fragt: {line}",
+      "idleSaid": "Fertig · {line}",
       "interruptedHint": "Die letzte Runde wurde abgebrochen, bevor sie fertig war: codeg wurde beendet oder der Agent hat angehalten. „Fortsetzen“ macht dort weiter, wo sie aufgehört hat.",
       "background": "Leerlauf — {count, plural, =0 {Hintergrundarbeit läuft} one {# Hintergrundaufgabe läuft} other {# Hintergrundaufgaben laufen}}",
       "backgroundHint": "Der Agent hat geantwortet und wartet, bis seine Hintergrundarbeit fertig ist. Eine Nachricht, die du jetzt sendest, läuft sofort.",
@@ -3447,6 +3449,8 @@
         "toolFallbackTitle": "Werkzeug",
         "notificationTurnComplete": "{agent} hat die Antwort abgeschlossen",
         "notificationError": "{agent} Fehler: {message}",
+        "emptyTurnNotice": "{agent} hat die Runde ohne Antwort beendet. Deine Nachricht ist vielleicht nicht angekommen.",
+        "emptyTurnRetry": "Erneut versuchen",
         "notificationQuestion": "{agent} wartet auf deine Antwort",
         "notificationErrorRedacted": "{agent} ist auf einen Fehler gestoßen",
         "claudeApiRetry": {
@@ -5743,7 +5747,7 @@
   },
   "CriticalSessions": {
     "headline": {
-      "idle": "Kritische Sitzung wartet",
+      "idle": "Fertig, wartet auf dich",
       "needsYou": "Kritische Sitzung wartet auf dich",
       "interrupted": "Kritische Sitzung unterbrochen",
       "stalled": "Kritische Sitzung hängt möglicherweise",
@@ -5751,7 +5755,9 @@
       "limitContinued": "Kritische Sitzung fortgesetzt"
     },
     "body": {
-      "idle": "Der Agent hat seine Runde vor {elapsed} beendet, seitdem ist nichts passiert.",
+      "idle": "Der Agent hat seine Runde vor {elapsed} beendet und wartet auf dich.",
+      "idleAsks": "Fertig vor {elapsed} · fragt: {line}",
+      "idleSaid": "Fertig vor {elapsed} · {line}",
       "needsYou": "Der Agent wartet seit {elapsed} auf deine Antwort.",
       "interrupted": "Die letzte Runde wurde vor {elapsed} abgebrochen, seitdem ist nichts passiert.",
       "stalled": "Eine Runde läuft, aber seit {elapsed} kommt keine Ausgabe.",

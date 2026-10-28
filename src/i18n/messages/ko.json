@@ -2315,11 +2315,13 @@
       "label": "활동",
       "working": "작업 중",
       "needsYou": "응답 필요",
-      "idle": "대기 중",
+      "idle": "완료 · 응답 대기 중",
       "interrupted": "중단됨",
       "workingHint": "지금 턴이 실행 중입니다.",
       "needsYouHint": "에이전트가 계속하려면 응답이 필요합니다.",
-      "idleHint": "실행 중인 작업이 없습니다. 메시지를 보내면 새 턴이 시작됩니다.",
+      "idleHint": "에이전트가 턴을 마치고 당신을 기다리고 있습니다. 메시지를 보내면 이어집니다.",
+      "idleAsks": "완료 · 질문: {line}",
+      "idleSaid": "완료 · {line}",
       "interruptedHint": "마지막 턴이 끝나기 전에 중단되었습니다(codeg 종료 또는 에이전트 중지). 계속을 누르면 중단된 곳부터 이어갑니다.",
       "background": "대기 중 — {count, plural, =0 {백그라운드 작업 실행 중} other {백그라운드 작업 #개 실행 중}}",
       "backgroundHint": "에이전트가 응답을 마치고 백그라운드 작업이 끝나기를 기다리고 있습니다. 지금 보내는 메시지는 바로 실행됩니다.",
@@ -3447,6 +3449,8 @@
         "toolFallbackTitle": "도구",
         "notificationTurnComplete": "{agent} 응답이 완료되었습니다",
         "notificationError": "{agent} 오류: {message}",
+        "emptyTurnNotice": "{agent}이(가) 응답 없이 턴을 마쳤습니다. 메시지가 전달되지 않았을 수 있습니다.",
+        "emptyTurnRetry": "다시 시도",
         "notificationQuestion": "{agent}이(가) 답변을 기다리고 있습니다",
         "notificationErrorRedacted": "{agent}에서 오류가 발생했습니다",
         "claudeApiRetry": {
@@ -5743,7 +5747,7 @@
   },
   "CriticalSessions": {
     "headline": {
-      "idle": "중요 세션 대기 중",
+      "idle": "완료 · 응답 대기 중",
       "needsYou": "중요 세션이 응답을 기다립니다",
       "interrupted": "중요 세션이 중단됨",
       "stalled": "중요 세션이 멈춘 것 같습니다",
@@ -5751,7 +5755,9 @@
       "limitContinued": "중요 세션 계속됨"
     },
     "body": {
-      "idle": "에이전트가 {elapsed} 전에 턴을 마쳤고 그 이후 아무 일도 없었습니다.",
+      "idle": "에이전트가 {elapsed} 전에 턴을 마치고 당신을 기다리고 있습니다.",
+      "idleAsks": "{elapsed} 전에 완료 · 질문: {line}",
+      "idleSaid": "{elapsed} 전에 완료 · {line}",
       "needsYou": "에이전트가 {elapsed} 동안 답변을 기다리고 있습니다.",
       "interrupted": "마지막 턴이 {elapsed} 전에 중단되었고 그 이후 아무 일도 없었습니다.",
       "stalled": "턴이 실행 중이지만 {elapsed} 동안 출력이 없습니다.",
