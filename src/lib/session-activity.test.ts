@@ -366,7 +366,9 @@ describe("backgroundTaskTotal", () => {
 describe("lastReplyLine", () => {
   it("quotes the reply's last line and says when it asks", () => {
     expect(
-      lastReplyLine("Changed the layout.\n\nWant me to change the box to that?\n")
+      lastReplyLine(
+        "Changed the layout.\n\nWant me to change the box to that?\n"
+      )
     ).toEqual({ text: "Want me to change the box to that?", asks: true })
     expect(lastReplyLine("## Summary\n- **Ship it?**\n")).toEqual({
       text: "Ship it?",

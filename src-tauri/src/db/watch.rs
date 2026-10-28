@@ -69,10 +69,7 @@ pub async fn watch_writes(conn: &mut SqliteConnection) -> Result<(), sea_orm::sq
 /// Close the write in progress, logging it when it held the lock too long.
 /// Returns how long it held it.
 fn report_write(open: &Mutex<Option<(Instant, String)>>, outcome: &str) -> Option<Duration> {
-    let (since, first_write) = open
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .take()?;
+    let (since, first_write) = open.lock().unwrap_or_else(PoisonError::into_inner).take()?;
     let held = since.elapsed();
     if held >= SLOW_WRITE_LOCK {
         tracing::warn!(
@@ -146,12 +143,20 @@ mod tests {
     #[test]
     fn a_write_is_timed_from_its_first_change_and_closed_once() {
         let open: OpenWrite = Arc::default();
-        assert_eq!(report_write(&open, "committed"), None, "nothing was written");
+        assert_eq!(
+            report_write(&open, "committed"),
+            None,
+            "nothing was written"
+        );
 
         *open.lock().unwrap() = Some((Instant::now() - Duration::from_secs(2), "Insert t".into()));
         let held = report_write(&open, "committed").expect("an open write");
         assert!(held >= Duration::from_secs(2));
-        assert_eq!(report_write(&open, "committed"), None, "closed by the first report");
+        assert_eq!(
+            report_write(&open, "committed"),
+            None,
+            "closed by the first report"
+        );
     }
 
     #[test]
