@@ -10,12 +10,11 @@ pub mod test_helpers;
 use std::path::Path;
 use std::time::Duration;
 
-use sea_orm::sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use sea_orm::sqlx::ConnectOptions as _;
-use sea_orm::{
-    ConnectOptions, ConnectionTrait, Database, DatabaseConnection, DbBackend, DbErr, RuntimeErr,
-    SqlxSqliteConnector, Statement,
+use sea_orm::sqlx::sqlite::{
+    SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
 };
+use sea_orm::sqlx::ConnectOptions as _;
+use sea_orm::{DatabaseConnection, DbErr, RuntimeErr, SqlxSqliteConnector};
 use sea_orm_migration::MigratorTrait;
 
 use error::DbError;
@@ -70,10 +69,6 @@ pub async fn init_database(
     crate::commands::backup::restore::cleanup_transient_dirs(app_data_dir);
 
     let db_path = app_data_dir.join(database_file_name());
-    let db_url = format!(
-        "sqlite:{}?mode=rwc",
-        urlencoding::encode(&db_path.to_string_lossy())
-    );
 
     // Apply migrations on a dedicated single connection. The runtime pool below
     // keeps several connections open for read concurrency, but sea-orm spreads a
@@ -83,14 +78,7 @@ pub async fn init_database(
     // cached SQLite schema predates the `ALTER TABLE`, producing a flaky
     // `no such column: "is_chat"` under load. One connection observes every DDL
     // change in order, so the schema it compiles against is always current.
-    let mut migrate_opts = ConnectOptions::new(db_url.clone());
-    migrate_opts
-        .max_connections(1)
-        .min_connections(1)
-        .connect_timeout(Duration::from_secs(10))
-        .sqlx_logging(false);
-    let migrate_conn = Database::connect(migrate_opts).await?;
-    apply_sqlite_pragmas(&migrate_conn).await?;
+    let migrate_conn = open_pool(&db_path, 1).await?;
     Migrator::up(&migrate_conn, None)
         .await
         .map_err(|e| DbError::Migration(e.to_string()))?;
@@ -98,25 +86,7 @@ pub async fn init_database(
 
     // Runtime connection pool. Migrations are already applied above, so the
     // schema is stable and spreading queries across pooled connections is safe.
-    // Every connection it opens gets the write-lock watch, and every statement
-    // the slow-statement log (see `watch`).
-    let options = db_url
-        .parse::<SqliteConnectOptions>()
-        .map_err(sqlx_error)?
-        .disable_statement_logging();
-    let pool = SqlitePoolOptions::new()
-        .max_connections(5)
-        .min_connections(1)
-        .acquire_timeout(Duration::from_secs(10))
-        .acquire_slow_threshold(watch::SLOW_ACQUIRE)
-        .idle_timeout(Duration::from_secs(300))
-        .after_connect(|conn, _meta| Box::pin(async move { watch::watch_writes(conn).await }))
-        .connect_with(options)
-        .await
-        .map_err(sqlx_error)?;
-    let mut conn = SqlxSqliteConnector::from_sqlx_sqlite_pool(pool);
-    conn.set_metric_callback(watch::log_slow_statement);
-    apply_sqlite_pragmas(&conn).await?;
+    let conn = open_pool(&db_path, POOL_MAX_CONNECTIONS).await?;
 
     service::app_metadata_service::update_app_version(&conn, app_version).await?;
 
@@ -160,25 +130,49 @@ pub async fn init_database(
     Ok(AppDatabase { conn })
 }
 
-fn sqlx_error(e: sea_orm::sqlx::Error) -> DbError {
-    DbError::Database(DbErr::Conn(RuntimeErr::SqlxError(e)))
+/// Connections in the runtime pool.
+const POOL_MAX_CONNECTIONS: u32 = 5;
+/// How long a statement waits for another connection's write lock before it
+/// fails with "database is locked".
+const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How every connection to the database is opened. sqlx applies these to each
+/// connection it opens, including one re-opened after the idle timeout — not
+/// just to whichever pooled connection a `PRAGMA` statement happens to land on
+/// (which left the others on SQLite's defaults: `synchronous=FULL`, a 2 MB
+/// page cache). `journal_mode=WAL` persists in the database file.
+pub(crate) fn connect_options(db_path: &Path) -> SqliteConnectOptions {
+    SqliteConnectOptions::new()
+        .filename(db_path)
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal)
+        .busy_timeout(BUSY_TIMEOUT)
+        .synchronous(SqliteSynchronous::Normal)
+        .foreign_keys(true)
+        .pragma("cache_size", "-8000")
+        .disable_statement_logging()
 }
 
-/// Apply SQLite performance and reliability pragmas to a freshly opened
-/// connection. `journal_mode=WAL` persists in the database header; the rest are
-/// per-connection settings that must be re-applied every time a connection opens.
-async fn apply_sqlite_pragmas(conn: &DatabaseConnection) -> Result<(), DbError> {
-    for pragma in [
-        "PRAGMA journal_mode=WAL;",
-        "PRAGMA busy_timeout=5000;",
-        "PRAGMA synchronous=NORMAL;",
-        "PRAGMA foreign_keys=ON;",
-        "PRAGMA cache_size=-8000;",
-    ] {
-        conn.execute(Statement::from_string(DbBackend::Sqlite, pragma.to_owned()))
-            .await?;
-    }
-    Ok(())
+/// A pool of up to `max_connections` connections opened with
+/// [`connect_options`]. Every connection gets the write-lock watch, and every
+/// statement the slow-statement log (see [`watch`]).
+pub(crate) async fn open_pool(
+    db_path: &Path,
+    max_connections: u32,
+) -> Result<DatabaseConnection, DbError> {
+    let pool = SqlitePoolOptions::new()
+        .max_connections(max_connections)
+        .min_connections(1)
+        .acquire_timeout(Duration::from_secs(10))
+        .acquire_slow_threshold(watch::SLOW_ACQUIRE)
+        .idle_timeout(Duration::from_secs(300))
+        .after_connect(|conn, _meta| Box::pin(async move { watch::watch_writes(conn).await }))
+        .connect_with(connect_options(db_path))
+        .await
+        .map_err(|e| DbError::Database(DbErr::Conn(RuntimeErr::SqlxError(e))))?;
+    let mut conn = SqlxSqliteConnector::from_sqlx_sqlite_pool(pool);
+    conn.set_metric_callback(watch::log_slow_statement);
+    Ok(conn)
 }
 
 #[cfg(test)]
@@ -191,19 +185,18 @@ mod owner_tests {
     use crate::models::agent::AgentType;
     use sea_orm::EntityTrait;
 
-    fn db_url(dir: &Path) -> String {
-        format!(
-            "sqlite:{}?mode=rwc",
-            urlencoding::encode(&dir.join(database_file_name()).to_string_lossy())
-        )
+    /// The data dir's database, opened without claiming the dir.
+    async fn open(dir: &Path) -> DatabaseConnection {
+        open_pool(&dir.join(database_file_name()), 1)
+            .await
+            .expect("open")
     }
 
     /// A data dir whose database holds one conversation with a running turn, as
     /// its owner leaves it mid-turn. Written without claiming the dir. Returns
     /// the conversation's id.
     async fn seed_running_turn(dir: &Path) -> i32 {
-        let conn = Database::connect(db_url(dir).as_str()).await.expect("open");
-        apply_sqlite_pragmas(&conn).await.expect("pragmas");
+        let conn = open(dir).await;
         Migrator::up(&conn, None).await.expect("migrate");
         app_metadata_service::update_app_version(&conn, "1.0.0")
             .await
@@ -226,7 +219,7 @@ mod owner_tests {
     /// The row and the recorded app version as they stand, read without
     /// anything that sweeps.
     async fn stored(dir: &Path, id: i32) -> (conversation::Model, Option<String>) {
-        let conn = Database::connect(db_url(dir).as_str()).await.expect("open");
+        let conn = open(dir).await;
         let row = conversation::Entity::find_by_id(id)
             .one(&conn)
             .await
@@ -277,5 +270,49 @@ mod owner_tests {
             .expect("row");
         assert_eq!(swept.turn_state, Some(ConversationTurnState::Interrupted));
         assert_eq!(swept.auto_resume, Some(ConversationAutoResume::Pending));
+    }
+}
+
+#[cfg(test)]
+mod pool_tests {
+    use super::*;
+    use sea_orm::{ConnectionTrait, DbBackend, Statement, TransactionTrait};
+
+    async fn pragma(conn: &impl ConnectionTrait, name: &str) -> String {
+        let row = conn
+            .query_one(Statement::from_string(
+                DbBackend::Sqlite,
+                format!("PRAGMA {name}"),
+            ))
+            .await
+            .expect("pragma")
+            .expect("row");
+        row.try_get_by_index::<i64>(0)
+            .map(|v| v.to_string())
+            .or_else(|_| row.try_get_by_index::<String>(0))
+            .expect("value")
+    }
+
+    /// Every connection the pool opens carries the settings, not just the one
+    /// a `PRAGMA` statement on the pool lands on: hold all of them at once (a
+    /// transaction pins its connection) and read them from each.
+    #[tokio::test]
+    async fn every_pooled_connection_gets_the_pragmas() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let conn = open_pool(&tmp.path().join("p.db"), POOL_MAX_CONNECTIONS)
+            .await
+            .expect("pool");
+        let mut held = Vec::new();
+        for _ in 0..POOL_MAX_CONNECTIONS {
+            held.push(conn.begin().await.expect("begin"));
+        }
+        for txn in &held {
+            assert_eq!(pragma(txn, "journal_mode").await, "wal");
+            assert_eq!(pragma(txn, "busy_timeout").await, "5000");
+            // NORMAL
+            assert_eq!(pragma(txn, "synchronous").await, "1");
+            assert_eq!(pragma(txn, "foreign_keys").await, "1");
+            assert_eq!(pragma(txn, "cache_size").await, "-8000");
+        }
     }
 }
