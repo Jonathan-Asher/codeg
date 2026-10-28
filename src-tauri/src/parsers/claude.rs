@@ -384,6 +384,83 @@ struct PendingGoal {
     record_uuid: Option<String>,
 }
 
+/// A message the user sent while a turn was running, rewritten as the `user`
+/// record it is, plus the ids the CLI gave it.
+///
+/// Claude Code absorbs such a message into the running turn: the model reads it
+/// at its next step and answers within the same turn. The only record of it is
+/// a `queued_command` attachment (`commandMode: "prompt"`) at the point it was
+/// read, with the text and images the user sent in `prompt` (a string, or a
+/// content array when images came with it). There is no ordinary `user` record,
+/// so reading attachments as model context lost the message from every reload
+/// while the reply to it stayed, answering a question nobody could see.
+///
+/// Only messages a person typed qualify: `origin.kind` is `human`, or absent
+/// on CLI builds that predate origins (those only ever queued typed prompts in
+/// this mode). The same attachment also carries background-task notifications
+/// (`commandMode: "task-notification"`), messages from other sessions (`peer`)
+/// and coordinator prompts. Those are addressed to the model, not written by
+/// the user, and stay out of the conversation.
+///
+/// The ids are the record's own `uuid`, `source_uuid` (the queued command) and
+/// `delivery_id`: a resume replays history into the same file, and a message
+/// must not show twice.
+fn queued_user_prompt(value: &serde_json::Value) -> Option<(serde_json::Value, Vec<String>)> {
+    if value.get("type").and_then(|t| t.as_str()) != Some("attachment") {
+        return None;
+    }
+    let attachment = value.get("attachment")?;
+    if attachment.get("type").and_then(|t| t.as_str()) != Some("queued_command")
+        || attachment.get("commandMode").and_then(|m| m.as_str()) != Some("prompt")
+    {
+        return None;
+    }
+    let origin_kind = attachment
+        .get("origin")
+        .filter(|o| !o.is_null())
+        .map(|o| o.get("kind").and_then(|k| k.as_str()));
+    if !matches!(origin_kind, None | Some(Some("human"))) {
+        return None;
+    }
+    let prompt = attachment
+        .get("prompt")
+        .filter(|p| p.is_string() || p.is_array())?;
+
+    let field = |v: &serde_json::Value, key: &str| {
+        v.get(key)
+            .and_then(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let ids: Vec<String> = [
+        field(value, "uuid"),
+        field(attachment, "source_uuid"),
+        field(attachment, "delivery_id"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let mut record = serde_json::json!({
+        "type": "user",
+        "message": { "role": "user", "content": prompt }
+    });
+    let fields = record
+        .as_object_mut()
+        .expect("record is built as an object");
+    for key in ["uuid", "timestamp", "cwd", "gitBranch", "sessionId"] {
+        if let Some(v) = value.get(key) {
+            fields.insert(key.to_string(), v.clone());
+        }
+    }
+    if let Some(ts) = attachment.get("timestamp") {
+        fields.entry("timestamp").or_insert_with(|| ts.clone());
+    }
+    if let Some(id) = ids.first() {
+        fields.entry("uuid").or_insert_with(|| id.clone().into());
+    }
+    Some((record, ids))
+}
+
 /// Read a Claude Code `goal_status` attachment as a goal transition, expressed
 /// in the provider-neutral goal-snapshot shape the live path already renders.
 ///
@@ -1633,6 +1710,10 @@ pub(crate) struct ClaudeRecordAccumulator {
     /// up: the index of the divider it produced. See the insert in `feed_value`
     /// for why the prompt can't simply be emitted where the CLI wrote it.
     compaction_prompt_slot: Option<usize>,
+    /// Ids of the messages already read from `queued_command` attachments (see
+    /// [`queued_user_prompt`]), so a replayed copy, or a `user` record for the
+    /// same message, is not shown a second time.
+    queued_prompt_ids: std::collections::HashSet<String>,
 }
 
 impl ClaudeRecordAccumulator {
@@ -1657,6 +1738,7 @@ impl ClaudeRecordAccumulator {
             pending_assistant_message_id: None,
             seen_compaction_uuids: std::collections::HashSet::new(),
             compaction_prompt_slot: None,
+            queued_prompt_ids: std::collections::HashSet::new(),
         }
     }
 
@@ -1746,6 +1828,28 @@ impl ClaudeRecordAccumulator {
     }
 
     pub(crate) fn feed_value(&mut self, value: serde_json::Value) {
+        // A message typed while the turn ran is read from here on as the user
+        // record it is (see `queued_user_prompt`), once.
+        let value = match queued_user_prompt(&value) {
+            Some((record, ids)) => {
+                if ids.iter().any(|id| self.queued_prompt_ids.contains(id)) {
+                    return;
+                }
+                self.queued_prompt_ids.extend(ids);
+                record
+            }
+            None => {
+                if value.get("type").and_then(|t| t.as_str()) == Some("user")
+                    && value
+                        .get("uuid")
+                        .and_then(|u| u.as_str())
+                        .is_some_and(|u| self.queued_prompt_ids.contains(u))
+                {
+                    return;
+                }
+                value
+            }
+        };
         let Self {
             session_path: path,
             messages,
@@ -1766,6 +1870,7 @@ impl ClaudeRecordAccumulator {
             pending_assistant_message_id,
             seen_compaction_uuids,
             compaction_prompt_slot,
+            queued_prompt_ids: _,
         } = self;
 
         let msg_type = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
@@ -7466,5 +7571,116 @@ mod tests {
         assert!(is_descriptor_exhaustion(&std::io::Error::from_raw_os_error(libc::ENFILE)));
         assert!(!is_descriptor_exhaustion(&std::io::Error::from_raw_os_error(libc::EACCES)));
         assert!(!is_descriptor_exhaustion(&std::io::Error::from_raw_os_error(libc::ENOENT)));
+    }
+
+    /// Feed records and group them, as the detail parse does.
+    fn queued_turns(records: &[serde_json::Value]) -> Vec<MessageTurn> {
+        let mut acc = ClaudeRecordAccumulator::new(PathBuf::from("/nonexistent.jsonl"));
+        for record in records {
+            acc.feed_line(&record.to_string());
+        }
+        acc.finalize_background_lifecycle();
+        group_into_turns(acc.messages)
+    }
+
+    fn queued(uuid: &str, ts: &str, attachment: serde_json::Value) -> serde_json::Value {
+        json!({"type": "attachment", "uuid": uuid, "timestamp": ts, "attachment": attachment})
+    }
+
+    fn assistant_text(uuid: &str, ts: &str, text: &str) -> serde_json::Value {
+        json!({
+            "type": "assistant", "uuid": uuid, "timestamp": ts,
+            "message": {"id": format!("msg-{uuid}"), "role": "assistant",
+                "content": [{"type": "text", "text": text}]}
+        })
+    }
+
+    #[test]
+    fn queued_typed_message_becomes_a_user_turn_at_its_position() {
+        let turns = queued_turns(&[
+            json!({"type": "user", "uuid": "u0", "timestamp": "2026-10-28T09:50:00Z",
+                "message": {"role": "user", "content": "make it bolder"}}),
+            assistant_text("a1", "2026-10-28T09:50:05Z", "on it"),
+            // Older CLI builds wrote no origin; the text is all there is.
+            queued("q1", "2026-10-28T09:50:10Z", json!({
+                "type": "queued_command", "commandMode": "prompt",
+                "prompt": "also the back"
+            })),
+            assistant_text("a2", "2026-10-28T09:50:20Z", "both done"),
+        ]);
+        let roles: Vec<_> = turns.iter().map(role_name).collect();
+        assert_eq!(roles, vec!["user", "assistant", "user", "assistant"]);
+        assert!(matches!(
+            &turns[2].blocks[..],
+            [ContentBlock::Text { text }] if text == "also the back"
+        ));
+    }
+
+    #[test]
+    fn queued_message_keeps_its_picture() {
+        let turns = queued_turns(&[queued(
+            "q1",
+            "2026-10-28T09:54:48.556Z",
+            json!({
+                "type": "queued_command", "commandMode": "prompt",
+                "origin": {"kind": "human"}, "humanTurn": true,
+                "source_uuid": "s1", "delivery_id": "d1",
+                "prompt": [
+                    {"type": "text", "text": "red?"},
+                    {"type": "image", "source": {"type": "base64",
+                        "media_type": "image/png", "data": "iVBORw0KGgo="}}
+                ]
+            }),
+        )]);
+        assert_eq!(turns.len(), 1);
+        assert!(matches!(turns[0].role, TurnRole::User));
+        assert!(matches!(
+            &turns[0].blocks[..],
+            [ContentBlock::Text { text }, ContentBlock::Image { mime_type, data, .. }]
+                if text == "red?" && mime_type == "image/png" && data == "iVBORw0KGgo="
+        ));
+    }
+
+    #[test]
+    fn queued_messages_not_typed_by_the_user_stay_hidden() {
+        let turns = queued_turns(&[
+            queued("q1", "2026-10-28T09:56:37Z", json!({
+                "type": "queued_command", "commandMode": "task-notification",
+                "origin": {"kind": "task-notification"},
+                "prompt": "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>"
+            })),
+            queued("q2", "2026-10-28T09:56:38Z", json!({
+                "type": "queued_command", "commandMode": "prompt",
+                "origin": {"kind": "peer"},
+                "prompt": "<cross-session-message from=\"x\">hi</cross-session-message>"
+            })),
+            queued("q3", "2026-10-28T09:56:39Z", json!({
+                "type": "queued_command", "origin": {"kind": "coordinator"},
+                "prompt": "next step"
+            })),
+            assistant_text("a1", "2026-10-28T09:56:49Z", "done"),
+        ]);
+        let roles: Vec<_> = turns.iter().map(role_name).collect();
+        assert_eq!(roles, vec!["assistant"]);
+    }
+
+    #[test]
+    fn queued_message_shows_once_when_the_transcript_repeats_it() {
+        let insert = queued("q1", "2026-10-28T09:54:48Z", json!({
+            "type": "queued_command", "commandMode": "prompt",
+            "origin": {"kind": "human"}, "source_uuid": "s1", "delivery_id": "d1",
+            "prompt": "red?"
+        }));
+        let turns = queued_turns(&[
+            insert.clone(),
+            assistant_text("a1", "2026-10-28T09:55:00Z", "no"),
+            // A resume replays the record verbatim, and a `user` record for
+            // the same queued command names it by `source_uuid`.
+            insert,
+            json!({"type": "user", "uuid": "s1", "timestamp": "2026-10-28T09:55:01Z",
+                "message": {"role": "user", "content": "red?"}}),
+        ]);
+        let roles: Vec<_> = turns.iter().map(role_name).collect();
+        assert_eq!(roles, vec!["user", "assistant"]);
     }
 }

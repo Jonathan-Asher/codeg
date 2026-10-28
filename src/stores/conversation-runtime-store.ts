@@ -1613,7 +1613,32 @@ export function computeTurnMetadataPatches(params: {
    * their existing best-effort alignment.
    */
   parseEndsWithAssistant: boolean
+  /**
+   * Both sides in full, user turns included: `localTurns` and the parse from
+   * the batch boundary on. Pass only when the parse is known to start exactly
+   * where this batch does (a verified window).
+   *
+   * A message the user sends mid-turn is a user turn INSIDE the reply, on both
+   * sides, and it splits the reply into halves the thread shows separately.
+   * Aligned by count over the whole batch, the second half's live turns took
+   * the stats of the parse's LAST sub-turns only (the reply's final sentence:
+   * "Worked for 0s") while every sub-turn before them, the second half's
+   * included, was summed into the first half. With both sides cut at their
+   * user turns, each half aligns against its own sub-turns. Used only when the
+   * cuts agree (as many user turns on each side, and no half that one side has
+   * and the other lacks); otherwise the whole-batch alignment applies as
+   * before.
+   */
+  bySegment?: { localTurns: MessageTurn[]; parsedTurns: MessageTurn[] }
 }): TurnMetadataPatch[] {
+  if (params.bySegment) {
+    const segmented = alignBySegment(
+      params.bySegment.localTurns,
+      params.bySegment.parsedTurns,
+      params.parseEndsWithAssistant
+    )
+    if (segmented) return segmented
+  }
   const { localAssistantIndices, parsedAssistantTurns } = params
   // Drop the persisted history at the front of the parse; only this session's
   // turns can align to localTurns. Clamp so a detail/parse count skew (e.g. a
@@ -1623,7 +1648,114 @@ export function computeTurnMetadataPatches(params: {
     parsedAssistantTurns.length
   )
   const sessionParsedTurns = parsedAssistantTurns.slice(historyBoundary)
+  return alignAssistantRun(
+    localAssistantIndices,
+    sessionParsedTurns,
+    params.parseEndsWithAssistant
+  )
+}
 
+/**
+ * The assistant turns between consecutive user turns, as indices into `turns`.
+ * Entry 0 is what precedes the first user turn.
+ */
+function assistantRunsBetweenUserTurns(turns: MessageTurn[]): number[][] {
+  const runs: number[][] = [[]]
+  turns.forEach((turn, i) => {
+    if (turn.role === "user") runs.push([])
+    else if (turn.role === "assistant") runs[runs.length - 1].push(i)
+  })
+  return runs
+}
+
+/** Per-segment alignment (see `bySegment`), or `null` when the cuts disagree. */
+function alignBySegment(
+  localTurns: MessageTurn[],
+  parsedTurns: MessageTurn[],
+  parseEndsWithAssistant: boolean
+): TurnMetadataPatch[] | null {
+  const local = assistantRunsBetweenUserTurns(localTurns)
+  const parsed = assistantRunsBetweenUserTurns(parsedTurns)
+  if (local.length !== parsed.length) return null
+  // A half one side has and the other lacks is a turn this client never
+  // streamed (or one the transcript has not reached): only the whole-batch
+  // rules know how to treat that. The newest half is exempt on the parse
+  // side, where a transcript still behind simply has nothing for it yet.
+  for (let k = 0; k < local.length; k++) {
+    if (local[k].length === 0 && parsed[k].length > 0) return null
+    if (
+      local[k].length > 0 &&
+      parsed[k].length === 0 &&
+      k !== local.length - 1
+    ) {
+      return null
+    }
+  }
+  const patches: TurnMetadataPatch[] = []
+  for (let k = 0; k < local.length; k++) {
+    if (local[k].length === 0) continue
+    patches.push(
+      ...alignAssistantRun(
+        local[k],
+        parsed[k].map((i) => parsedTurns[i]),
+        parseEndsWithAssistant
+      )
+    )
+  }
+  return patches
+}
+
+/**
+ * Whether this session's own copy of the batch is the transcript's reply cut
+ * short: everything it says is in the transcript, and the transcript says
+ * more. Both sides are cut at their user turns (a message sent mid-turn
+ * included) and compared run by run; whitespace is not compared. `false` when
+ * the cuts disagree, since the runs then cannot be paired, and whenever the
+ * local copy says something the transcript does not: the two are then worded
+ * differently (some agents stream text they record otherwise), and reading the
+ * transcript would replace one wording with the other rather than fill a gap.
+ *
+ * Only text is compared: tool call ids, for one, are named differently on the
+ * two sides by some agents.
+ */
+export function localCopyMissesReplyText(
+  localTurns: MessageTurn[],
+  parsedTurns: MessageTurn[]
+): boolean {
+  const local = assistantRunsBetweenUserTurns(localTurns)
+  const parsed = assistantRunsBetweenUserTurns(parsedTurns)
+  if (local.length !== parsed.length) return false
+  const squash = (text: string) => text.replace(/\s+/g, " ").trim()
+  const textOf = (turns: MessageTurn[], indices: number[]) =>
+    indices
+      .flatMap((i) =>
+        turns[i].blocks.flatMap((b) =>
+          b.type === "text" ? [squash(b.text)] : []
+        )
+      )
+      .filter((text) => text.length > 0)
+  let missing = false
+  for (let k = 0; k < local.length; k++) {
+    const have = textOf(localTurns, local[k])
+    const want = textOf(parsedTurns, parsed[k])
+    const wantAll = want.join(" ")
+    if (have.some((text) => !wantAll.includes(text))) return false
+    const haveAll = have.join(" ")
+    if (want.some((text) => !haveAll.includes(text))) missing = true
+  }
+  return missing
+}
+
+/**
+ * Align one run of this session's assistant turns (`localAssistantIndices`,
+ * indices into `localTurns`) with the parse's assistant turns for the same
+ * run. See `computeTurnMetadataPatches` for the rules.
+ */
+function alignAssistantRun(
+  localAssistantIndices: number[],
+  sessionParsedTurns: MessageTurn[],
+  parseEndsWithAssistant: boolean
+): TurnMetadataPatch[] {
   const offset = sessionParsedTurns.length - localAssistantIndices.length
   const patches: TurnMetadataPatch[] = []
 
@@ -1681,7 +1813,7 @@ export function computeTurnMetadataPatches(params: {
     // old whole-batch alignment — a summed number in the wrong row is
     // cosmetic.
     let sourceTurnIdToApply: string | null | undefined
-    const idIsPlaceable = params.parseEndsWithAssistant && offset === 0
+    const idIsPlaceable = parseEndsWithAssistant && offset === 0
 
     if (parsedIdx >= 0 && parsedIdx < sessionParsedTurns.length) {
       const pt = sessionParsedTurns[parsedIdx]
@@ -4137,6 +4269,9 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
     // so the allowance is the same wherever in the schedule that state first
     // shows up.
     let usageOnlyRounds = 0
+    // Whether this sync already replaced the local copy with the transcript
+    // (see `localCopyMissesReplyText`); once is enough.
+    let contentReloaded = false
 
     // Advance the backoff, unless this sync was cancelled, already moved on,
     // or has run out of attempts. Hoisted so the attempt below can call it;
@@ -4235,6 +4370,14 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
                     parseEndsWithAssistant:
                       parsed.turns[parsed.turns.length - 1]?.role ===
                       "assistant",
+                    // A verified window starts exactly where this batch
+                    // does, so both sides can be cut at their user turns.
+                    bySegment: windowVerified
+                      ? {
+                          localTurns: cur.localTurns,
+                          parsedTurns: parsed.turns,
+                        }
+                      : undefined,
                   })
             // An unverified window is worth another look ONLY when the
             // transcript is behind: `fromIndex` clamps to the total, so an
@@ -4256,6 +4399,30 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
                 turnPatches: patches,
                 sessionStats: parsed.session_stats,
               })
+            }
+
+            // The patches above fill in numbers; the words on screen are still
+            // this client's own copy of the stream, beside whatever detail it
+            // last fetched. Two states leave that wrong until a reload, and
+            // both are mended by reading the transcript, once, now that it
+            // holds the finished reply (what it shows is what a reload would):
+            //   - the transcript holds reply text the local copy never got (a
+            //     reply that arrived while the stream was not reaching this
+            //     client): the reply would stay cut short;
+            //   - the detail on screen is a snapshot taken while this turn
+            //     ran (it names an in-flight prompt): its copy of the reply's
+            //     first half, and of any message sent mid-turn, now sits
+            //     beside the finished local copy of the same reply.
+            if (
+              !contentReloaded &&
+              windowVerified &&
+              parsed.turns[parsed.turns.length - 1]?.role === "assistant" &&
+              (cur.detail?.in_flight_user_turn_id != null ||
+                localCopyMissesReplyText(cur.localTurns, parsed.turns))
+            ) {
+              contentReloaded = true
+              void refetchDetail(runtimeId, { quiet: true })
+              return
             }
 
             // How far behind the transcript still is, judged on the NEWEST
