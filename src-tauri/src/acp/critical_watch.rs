@@ -1295,7 +1295,7 @@ pub fn critical_watch_task(
     emitter: EventEmitter,
 ) -> impl Future<Output = ()> + Send + 'static {
     let mut rx = bus.subscribe();
-    async move {
+    tracing::Instrument::instrument(async move {
         let settings = load_critical_settings(&db).await;
         let acks = load_acks(&db).await;
         with_registry(|r| {
@@ -1318,7 +1318,7 @@ pub fn critical_watch_task(
                 _ = tick.tick() => evaluate(&manager, &db, &emitter).await,
             }
         }
-    }
+    }, tracing::info_span!("bg", task = "critical-watch"))
 }
 
 #[cfg(test)]

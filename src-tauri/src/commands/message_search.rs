@@ -129,6 +129,7 @@ where
 
 /// Keep the message index current for the life of the process. See the module
 /// docs for the lifecycle.
+#[tracing::instrument(name = "bg", skip_all, fields(task = "message-search"))]
 pub async fn run_message_indexer(conn: DatabaseConnection) {
     tokio::time::sleep(INDEX_START_DELAY).await;
     loop {

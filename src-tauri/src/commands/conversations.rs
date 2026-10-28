@@ -1442,7 +1442,19 @@ pub async fn get_folder_conversation_core(
         };
         tokio::task::spawn_blocking(move || -> Result<_, AppCommandError> {
             let parser = build_agent_parser(at);
-            match parser.get_conversation(&eid) {
+            let parse_started = std::time::Instant::now();
+            let parsed = parser.get_conversation(&eid);
+            let parse_time = parse_started.elapsed();
+            if parse_time >= SLOW_DETAIL {
+                tracing::info!(
+                    conversation_id,
+                    parse_ms = parse_time.as_millis() as u64,
+                    turns = parsed.as_ref().map(|d| d.turns.len()).unwrap_or(0),
+                    "[conversations] parsed conversation {conversation_id} in {} ms",
+                    parse_time.as_millis()
+                );
+            }
+            match parsed {
                 Ok(d) => {
                     // Claude `/clear` (and similar on-disk id changes) make
                     // the parser resolve a different uuid than we asked for.
@@ -1927,7 +1939,9 @@ pub async fn get_folder_conversation_with_live_core(
     conversation_id: i32,
     window: Option<crate::commands::turn_window::TurnWindowReq>,
 ) -> Result<DbConversationDetail, AppCommandError> {
+    let started = std::time::Instant::now();
     let (mut detail, parsed_title) = get_folder_conversation_core(conn, conversation_id).await?;
+    let core_time = started.elapsed();
 
     // Per-turn auto-title backfill. The parse `get_folder_conversation_core`
     // just did already produced the session-file title; adopt it (and broadcast
@@ -1992,11 +2006,27 @@ pub async fn get_folder_conversation_with_live_core(
         detail.in_flight_user_turn_id =
             apply_in_flight_message_id(&mut detail.turns, &pending, started_at);
     }
+    let turns_total = detail.turns.len();
     if let Some(req) = window {
         apply_turn_window(&mut detail, req);
     }
+    let total = started.elapsed();
+    if total >= SLOW_DETAIL {
+        tracing::info!(
+            conversation_id,
+            total_ms = total.as_millis() as u64,
+            core_ms = core_time.as_millis() as u64,
+            turns_total,
+            turns_sent = detail.turns.len(),
+            "[conversations] detail for {conversation_id} took {} ms",
+            total.as_millis()
+        );
+    }
     Ok(detail)
 }
+
+/// A detail fetch or transcript parse this slow is logged with its timings.
+const SLOW_DETAIL: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// One page of older history for the reverse-infinite-scroll path. Light
 /// variant of the detail fetch: full parse + delegation-meta injection (both

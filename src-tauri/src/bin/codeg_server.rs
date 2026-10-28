@@ -754,6 +754,8 @@ async fn async_main() -> ExitCode {
     tokio::spawn(codeg_lib::commands::message_search::run_message_indexer(
         state.db.conn.clone(),
     ));
+    // Log async-runtime stalls (mirrors lib.rs setup).
+    tokio::spawn(codeg_lib::db::watch::run_runtime_stall_watch());
 
     // Label worktree folders registered before aliases were seeded at creation
     // with the branch they have checked out (mirrors lib.rs setup). Background;

@@ -1011,6 +1011,9 @@ mod tauri_app {
                         db_for_index,
                     ));
                 }
+                // Log async-runtime stalls: a stalled runtime holds every pooled
+                // connection its tasks have checked out.
+                tauri::async_runtime::spawn(db::watch::run_runtime_stall_watch());
 
                 // Label worktree folders registered before aliases were seeded at
                 // creation with the branch they have checked out, so the sidebar

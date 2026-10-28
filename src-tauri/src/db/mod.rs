@@ -2,6 +2,7 @@ pub mod entities;
 pub mod error;
 pub mod migration;
 pub mod service;
+pub mod watch;
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_helpers;
@@ -9,8 +10,11 @@ pub mod test_helpers;
 use std::path::Path;
 use std::time::Duration;
 
+use sea_orm::sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sea_orm::sqlx::ConnectOptions as _;
 use sea_orm::{
-    ConnectOptions, ConnectionTrait, Database, DatabaseConnection, DbBackend, Statement,
+    ConnectOptions, ConnectionTrait, Database, DatabaseConnection, DbBackend, DbErr, RuntimeErr,
+    SqlxSqliteConnector, Statement,
 };
 use sea_orm_migration::MigratorTrait;
 
@@ -94,13 +98,24 @@ pub async fn init_database(
 
     // Runtime connection pool. Migrations are already applied above, so the
     // schema is stable and spreading queries across pooled connections is safe.
-    let mut opts = ConnectOptions::new(db_url);
-    opts.max_connections(5)
+    // Every connection it opens gets the write-lock watch, and every statement
+    // the slow-statement log (see `watch`).
+    let options = db_url
+        .parse::<SqliteConnectOptions>()
+        .map_err(sqlx_error)?
+        .disable_statement_logging();
+    let pool = SqlitePoolOptions::new()
+        .max_connections(5)
         .min_connections(1)
-        .connect_timeout(Duration::from_secs(10))
+        .acquire_timeout(Duration::from_secs(10))
+        .acquire_slow_threshold(watch::SLOW_ACQUIRE)
         .idle_timeout(Duration::from_secs(300))
-        .sqlx_logging(false);
-    let conn = Database::connect(opts).await?;
+        .after_connect(|conn, _meta| Box::pin(async move { watch::watch_writes(conn).await }))
+        .connect_with(options)
+        .await
+        .map_err(sqlx_error)?;
+    let mut conn = SqlxSqliteConnector::from_sqlx_sqlite_pool(pool);
+    conn.set_metric_callback(watch::log_slow_statement);
     apply_sqlite_pragmas(&conn).await?;
 
     service::app_metadata_service::update_app_version(&conn, app_version).await?;
@@ -143,6 +158,10 @@ pub async fn init_database(
     }
 
     Ok(AppDatabase { conn })
+}
+
+fn sqlx_error(e: sea_orm::sqlx::Error) -> DbError {
+    DbError::Database(DbErr::Conn(RuntimeErr::SqlxError(e)))
 }
 
 /// Apply SQLite performance and reliability pragmas to a freshly opened

@@ -923,6 +923,7 @@ pub fn plan_due(
 
 /// The boot task. Spawn once per process, after the lifecycle subscriber (it
 /// records the continuation's turn as running).
+#[tracing::instrument(name = "bg", skip_all, fields(task = "limit-continue"))]
 pub async fn run_limit_continue(
     db: AppDatabase,
     manager: ConnectionManager,

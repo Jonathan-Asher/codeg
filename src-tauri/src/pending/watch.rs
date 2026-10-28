@@ -415,7 +415,7 @@ pub fn pending_watch_task(
     emitter: EventEmitter,
 ) -> impl Future<Output = ()> + Send + 'static {
     let mut rx = bus.subscribe();
-    async move {
+    tracing::Instrument::instrument(async move {
         let settings = load_reminder_settings(&db).await.effective();
         let stored = load_stored(&db).await;
         let now = Utc::now();
@@ -443,5 +443,5 @@ pub fn pending_watch_task(
             }
             watch.pass().await;
         }
-    }
+    }, tracing::info_span!("bg", task = "pending-watch"))
 }
