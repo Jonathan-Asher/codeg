@@ -60,7 +60,9 @@ pub async fn watch_writes(conn: &mut SqliteConnection) -> Result<(), sea_orm::sq
         // `true` lets the commit go ahead.
         true
     });
-    handle.set_rollback_hook(move || report_write(&open, "rolled back"));
+    handle.set_rollback_hook(move || {
+        report_write(&open, "rolled back");
+    });
     Ok(())
 }
 
