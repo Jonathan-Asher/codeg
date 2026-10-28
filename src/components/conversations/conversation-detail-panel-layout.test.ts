@@ -613,10 +613,11 @@ describe("ConversationDetailPanel session-load failure surface", () => {
       "hideInput={isWelcomeMode || Boolean(acpLoadError)}"
     )
     // …and the banner takes its place, explaining why and offering recovery.
-    // It outranks the usage-limit and interrupted-turn banners, which share
-    // the slot: a session that can't be loaded can't be continued either.
-    expect(source).toContain(
-      "acpLoadErrorBanner ?? limitPausedBanner ?? interruptedBanner"
+    // It outranks the usage-limit, interrupted-turn and empty-turn banners,
+    // which share the slot: a session that can't be loaded can't be continued
+    // (or retried) either.
+    expect(source).toMatch(
+      /acpLoadErrorBanner \?\?\s+limitPausedBanner \?\?\s+interruptedBanner \?\?\s+emptyTurnBanner/
     )
     const bannerStart = source.indexOf("const acpLoadErrorBanner")
     expect(bannerStart).toBeGreaterThan(-1)
