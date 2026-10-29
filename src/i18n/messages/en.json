@@ -5493,7 +5493,10 @@
     "dismiss": "Dismiss",
     "turnEndedResent": "The turn ended — sent as a new message instead.",
     "turnEnded": "The turn already ended.",
-    "submitFailed": "Couldn't send your note"
+    "submitFailed": "Couldn't send your note",
+    "steerSending": "Sending…",
+    "steerWaiting": "Waiting for the agent to read it",
+    "steerWaitingSubagent": "Waiting for the agent to read it, after the sub-agent it is waiting on finishes"
   },
   "AgentToolsSettings": {
     "title": "In-conversation tools",

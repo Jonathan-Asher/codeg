@@ -5493,7 +5493,10 @@
     "dismiss": "Verwerfen",
     "turnEndedResent": "Die Runde endete – stattdessen als neue Nachricht gesendet.",
     "turnEnded": "Die Runde ist bereits beendet.",
-    "submitFailed": "Deine Notiz konnte nicht gesendet werden"
+    "submitFailed": "Deine Notiz konnte nicht gesendet werden",
+    "steerSending": "Wird gesendet…",
+    "steerWaiting": "Wartet darauf, dass der Agent sie liest",
+    "steerWaitingSubagent": "Der Agent liest sie, sobald der Sub-Agent fertig ist, auf den er wartet"
   },
   "AgentToolsSettings": {
     "title": "Tools in der Unterhaltung",

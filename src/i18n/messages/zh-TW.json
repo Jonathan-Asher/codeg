@@ -5493,7 +5493,10 @@
     "dismiss": "忽略",
     "turnEndedResent": "本輪已結束——已改為作為新訊息送出。",
     "turnEnded": "本輪已結束。",
-    "submitFailed": "留言送出失敗"
+    "submitFailed": "留言送出失敗",
+    "steerSending": "正在傳送…",
+    "steerWaiting": "等待代理讀取",
+    "steerWaitingSubagent": "等待代理讀取（在它等待的子代理完成之後）"
   },
   "AgentToolsSettings": {
     "title": "對話內工具",

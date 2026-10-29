@@ -295,7 +295,24 @@ export type LiveContentBlock =
       text: string
       createdAt: string
       blocks?: ContentBlock[] | null
+      /**
+       * Where the message stands: `sending` until the server has it,
+       * `waiting` until the agent reads it (a native steer counts as read
+       * once the reply moves on past it, see `steerStateOf`). Absent: read,
+       * the shape of every steer recorded before states existed.
+       */
+      state?: SteeringState | null
+      /**
+       * `pull`: a note the agent reads with its feedback tool, recorded as that
+       * tool's result rather than as a message, so it leaves the transcript
+       * when the turn ends (an unread one stays in the notes list). Absent:
+       * native, a message of the turn.
+       */
+      channel?: "native" | "pull" | null
     }
+
+/** See the `steering` block's `state`. */
+export type SteeringState = "sending" | "waiting"
 
 export interface LiveMessage {
   id: string
@@ -835,6 +852,25 @@ type Action =
       /** What the user sent, when it was more than plain text — see the
        *  `steering` block. Absent for a text-only steer. */
       blocks?: ContentBlock[] | null
+      state?: SteeringState | null
+      channel?: "native" | "pull" | null
+      /**
+       * The server just took it: a message already shown (sent from here)
+       * whose reply moved on meanwhile moves to the end, where it landed.
+       */
+      moveToEnd?: boolean
+    }
+  | {
+      /** A steer the server refused (the turn ended): it goes back to the queue. */
+      type: "STEERING_FAILED"
+      contextKey: string
+      id: string
+    }
+  | {
+      /** The agent read these notes (pull): each lands at the end, read. */
+      type: "STEERING_READ"
+      contextKey: string
+      ids: string[]
     }
   | {
       type: "CLAUDE_API_RETRY"
@@ -1545,6 +1581,44 @@ function ensureLiveMessage(prev: LiveMessage | null): LiveMessage {
   }
 }
 
+/**
+ * `next` (a snapshot's live message, which never carries `steering` blocks)
+ * with the steering blocks of `prev` put back, each after as many non-steering
+ * blocks as preceded it in `prev`. Null `next` stays null.
+ */
+export function carrySteeringBlocks(
+  prev: LiveMessage | null,
+  next: LiveMessage | null
+): LiveMessage | null {
+  if (!next || !prev) return next
+  if (!prev.content.some((b) => b.type === "steering")) return next
+  if (next.content.some((b) => b.type === "steering")) return next
+  const carried: { after: number; block: LiveContentBlock }[] = []
+  let seen = 0
+  for (const block of prev.content) {
+    if (block.type === "steering") carried.push({ after: seen, block })
+    else seen++
+  }
+  const content: LiveContentBlock[] = []
+  let k = 0
+  next.content.forEach((block, i) => {
+    while (k < carried.length && carried[k].after <= i) {
+      content.push(carried[k++].block)
+    }
+    content.push(block)
+  })
+  while (k < carried.length) content.push(carried[k++].block)
+  return { ...next, content }
+}
+
+/** The steering ids a live message shows (see `steeredMessageIds`). */
+function steeringIdsOf(message: LiveMessage | null): string[] {
+  const ids = (message?.content ?? []).flatMap((b) =>
+    b.type === "steering" ? [b.id] : []
+  )
+  return ids.length > 0 ? ids : EMPTY_STEERED_MESSAGE_IDS
+}
+
 /** Shared empty `steeredMessageIds`, so a turn that steers nothing (almost all
  *  of them) keeps a stable reference through `connRenderEqual`. */
 const EMPTY_STEERED_MESSAGE_IDS: string[] = []
@@ -1981,7 +2055,13 @@ function connectionsReducer(
         return next
       }
 
-      const hydratedLiveMessage = action.patch.liveMessage
+      // The wire has no `steering` block (see below): the messages this
+      // client already showed in the running reply are carried over, each
+      // after as many of the reply's blocks as it followed before.
+      const hydratedLiveMessage = carrySteeringBlocks(
+        current.liveMessage,
+        action.patch.liveMessage
+      )
       const hydratedPendingPermission = mergePendingPermissionWithLiveMessage(
         action.patch.pendingPermission,
         hydratedLiveMessage ?? current.liveMessage
@@ -2013,22 +2093,14 @@ function connectionsReducer(
         liveMessage: hydratedLiveMessage,
         // The snapshot's live message REPLACES the local one, and the wire has
         // no `steering` block (the backend never records one — see
-        // `snapshot-denormalize`), so every adopted mid-turn message is gone
-        // from the transcript with it. Keeping the adoption ids past that would
-        // hide the strips for messages that are no longer rendered anywhere,
-        // which is the one failure worse than showing them twice. Drop them:
-        // the notes list (hydrated from the same snapshot's `feedback`) shows
-        // those messages as strips again.
-        //
-        // Unconditional, including a null `liveMessage` — where the runtime
-        // mirror keeps the previous one (it never writes null) and the steered
-        // turn is still on screen for now. Holding the ids would be right for
-        // that frame and wrong from the next delta on, which rebuilds the live
-        // message without the block and would leave the message nowhere for
-        // the rest of the turn. The cost is the opposite way round: a message
-        // whose persisted copy the transcript is already showing gets a strip
-        // beside it until the turn ends. Turn-scoped, and visible.
-        steeredMessageIds: EMPTY_STEERED_MESSAGE_IDS,
+        // `snapshot-denormalize`): the ones this client showed are carried
+        // over (`carrySteeringBlocks`), and the adoption ids follow exactly
+        // what is on screen. Keeping ids for messages rendered nowhere would
+        // hide their strips too, the one failure worse than showing them
+        // twice; so with no live message in the snapshot the ids go, and the
+        // notes list (hydrated from the same snapshot's `feedback`) shows those
+        // messages as strips again.
+        steeredMessageIds: steeringIdsOf(hydratedLiveMessage),
         pendingPermission: hydratedPendingPermission,
         pendingAskQuestion: action.patch.pendingAskQuestion,
         pendingPlanApproval: action.patch.pendingPlanApproval,
@@ -2970,28 +3042,102 @@ function connectionsReducer(
       // message onto the PREVIOUS turn's completed liveMessage. The note keeps
       // its strip in that case (it is absent from `steeredMessageIds`), and
       // the agent recorded it either way, so a reload still shows it.
-      if (conn.status !== "prompting") return state
-      // Idempotent by note id: the submit broadcast reaches every attached
-      // client, and one client is also the sender.
-      if (conn.steeredMessageIds.includes(action.id)) return state
+      // A turn held open for background work takes steers too: that is the
+      // way into it.
+      if (conn.status !== "prompting" && !conn.awaitingBackground) return state
       const prev = ensureLiveMessage(conn.liveMessage)
+      const block = {
+        type: "steering" as const,
+        id: action.id,
+        text: action.text,
+        createdAt: action.createdAt,
+        blocks: action.blocks ?? null,
+        state: action.state ?? null,
+        channel: action.channel ?? null,
+      }
+      // Once per note id: the submit broadcast reaches every attached client,
+      // and the sender showed it already. A later word on the same note
+      // updates it in place, or moves it to where the server took it.
+      const index = prev.content.findIndex(
+        (b) => b.type === "steering" && b.id === action.id
+      )
+      let content: LiveContentBlock[]
+      if (index < 0) {
+        if (conn.steeredMessageIds.includes(action.id)) return state
+        content = [...prev.content, block]
+      } else {
+        const existing = prev.content[index]
+        if (existing.type !== "steering") return state
+        // Only ever forward (sending → waiting → read): a late or repeated
+        // word on the note never takes it back.
+        const rank = (s: SteeringState | null | undefined) =>
+          s === "sending" ? 0 : s === "waiting" ? 1 : 2
+        const updated = {
+          ...existing,
+          ...block,
+          state:
+            rank(existing.state) >= rank(block.state)
+              ? (existing.state ?? null)
+              : block.state,
+          blocks: block.blocks ?? existing.blocks ?? null,
+        }
+        const last = index === prev.content.length - 1
+        content =
+          action.moveToEnd && !last && existing.state != null
+            ? [
+                ...prev.content.slice(0, index),
+                ...prev.content.slice(index + 1),
+                updated,
+              ]
+            : prev.content.map((b, i) => (i === index ? updated : b))
+      }
       const next = new Map(state)
       next.set(action.contextKey, {
         ...conn,
-        liveMessage: {
-          ...prev,
-          content: [
-            ...prev.content,
-            {
-              type: "steering" as const,
-              id: action.id,
-              text: action.text,
-              createdAt: action.createdAt,
-              blocks: action.blocks ?? null,
-            },
-          ],
-        },
-        steeredMessageIds: [...conn.steeredMessageIds, action.id],
+        liveMessage: { ...prev, content },
+        steeredMessageIds: conn.steeredMessageIds.includes(action.id)
+          ? conn.steeredMessageIds
+          : [...conn.steeredMessageIds, action.id],
+      })
+      return next
+    }
+
+    case "STEERING_FAILED": {
+      const conn = state.get(action.contextKey)
+      if (!conn?.liveMessage) return state
+      const content = conn.liveMessage.content.filter(
+        (b) => !(b.type === "steering" && b.id === action.id)
+      )
+      if (content.length === conn.liveMessage.content.length) return state
+      const next = new Map(state)
+      next.set(action.contextKey, {
+        ...conn,
+        liveMessage: { ...conn.liveMessage, content },
+        steeredMessageIds: conn.steeredMessageIds.filter(
+          (id) => id !== action.id
+        ),
+      })
+      return next
+    }
+
+    case "STEERING_READ": {
+      const conn = state.get(action.contextKey)
+      if (!conn?.liveMessage) return state
+      const ids = new Set(action.ids)
+      const read: LiveContentBlock[] = []
+      const rest: LiveContentBlock[] = []
+      for (const b of conn.liveMessage.content) {
+        if (b.type === "steering" && ids.has(b.id)) {
+          read.push({ ...b, state: null })
+        } else {
+          rest.push(b)
+        }
+      }
+      if (read.length === 0) return state
+      const next = new Map(state)
+      next.set(action.contextKey, {
+        ...conn,
+        liveMessage: { ...conn.liveMessage, content: [...rest, ...read] },
       })
       return next
     }
@@ -3428,6 +3574,21 @@ export interface AcpActionsValue {
    * subsequent settings change re-shows it. Wired to the banner's X button.
    */
   dismissConfigStale(contextKey: string): void
+  /**
+   * Show a steered message in the running reply the moment it is sent
+   * (`sending`), ahead of the server's word on it.
+   */
+  showSteering(
+    contextKey: string,
+    note: {
+      id: string
+      text: string
+      blocks?: ContentBlock[] | null
+      channel: "native" | "pull"
+    }
+  ): void
+  /** Take a shown steer back: the server refused it (it returns to the queue). */
+  dropSteering(contextKey: string, id: string): void
   /**
    * Close AIR retry-incident strips (client-local, like `dismissConfigStale`)
    * — one call per strip, carrying every record that strip stood for. The
@@ -4939,7 +5100,11 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           // channel — the agent has not read it, and when it does it arrives
           // as a tool result, never a user message. Those stay in the notes
           // list above the composer, which is where a reload leaves them too.
-          if (e.item.status !== "delivered") break
+          //
+          // Both show in the running reply at once, as the user's message
+          // waiting for the agent to read it. A pull note leaves the
+          // transcript when the turn ends (its record is the tool result); an
+          // unread one stays in the notes list.
           flushStreamingQueue(contextKey)
           dispatch({
             type: "STEERING_MESSAGE",
@@ -4947,6 +5112,9 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             id: e.item.id,
             text: e.item.text,
             createdAt: e.item.created_at,
+            state: "waiting",
+            channel: e.item.status === "delivered" ? "native" : "pull",
+            moveToEnd: true,
             // Present only when the draft carried attachments. Widened through
             // the same mapping a `user_message` echo uses, so one message
             // renders identically whichever of the two routes it arrives by.
@@ -4956,6 +5124,11 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           })
           break
         }
+        case "feedback_consumed":
+          // The agent read these notes (pull channel): they land here.
+          flushStreamingQueue(contextKey)
+          dispatch({ type: "STEERING_READ", contextKey, ids: e.ids })
+          break
         case "permission_resolved":
           // Backend signals a permission was answered (this window's local
           // respondPermission, a sibling window, a server-mode peer, or
@@ -7649,6 +7822,38 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     [dispatch]
   )
 
+  // The sender shows a steered message the moment it is sent, before the
+  // server has it (`sending`), and takes it back if the server refuses it.
+  const showSteering = useCallback(
+    (
+      contextKey: string,
+      note: {
+        id: string
+        text: string
+        blocks?: ContentBlock[] | null
+        channel: "native" | "pull"
+      }
+    ) => {
+      dispatch({
+        type: "STEERING_MESSAGE",
+        contextKey,
+        id: note.id,
+        text: note.text,
+        createdAt: new Date().toISOString(),
+        blocks: note.blocks ?? null,
+        state: "sending",
+        channel: note.channel,
+      })
+    },
+    [dispatch]
+  )
+  const dropSteering = useCallback(
+    (contextKey: string, id: string) => {
+      dispatch({ type: "STEERING_FAILED", contextKey, id })
+    },
+    [dispatch]
+  )
+
   const dismissSessionFailuresAction = useCallback(
     (contextKey: string, ids: string[]) => {
       dispatch({ type: "DISMISS_SESSION_FAILURES", contextKey, ids })
@@ -8070,6 +8275,8 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       dismissConfigStale,
       dismissSessionFailures: dismissSessionFailuresAction,
       registerSessionFailureActions,
+      showSteering,
+      dropSteering,
     }),
     [
       connect,
@@ -8099,6 +8306,8 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       dismissConfigStale,
       dismissSessionFailuresAction,
       registerSessionFailureActions,
+      showSteering,
+      dropSteering,
     ]
   )
 

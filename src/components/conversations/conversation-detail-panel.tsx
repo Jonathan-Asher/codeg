@@ -3440,6 +3440,15 @@ const ConversationTabView = memo(function ConversationTabView({
     // not as strips above the composer.
     steeredMessageIds: conn.steeredMessageIds,
     onResendAsPrompt: resendFeedbackAsPrompt,
+    onSteerSending: useCallback(
+      (note: { id: string; text: string; channel: "native" | "pull" }) =>
+        acpActions.showSteering(tabId, note),
+      [acpActions, tabId]
+    ),
+    onSteerFailed: useCallback(
+      (id: string) => acpActions.dropSteering(tabId, id),
+      [acpActions, tabId]
+    ),
   })
   // Composer mid-turn send, over whichever live-feedback channel this session
   // has (native push or the pull tool). Rethrows — MessageInput owns the
@@ -3614,16 +3623,29 @@ const ConversationTabView = memo(function ConversationTabView({
         emptyTurnBanner
       }
       feedbackList={
-        feedback.showList ? (
-          <FeedbackNotesDisplay
-            notes={feedback.notes}
-            // Past the turn the list is the only place an unread note still
-            // exists on screen, so it carries its own recovery actions rather
-            // than disappearing with the turn that never read it.
-            expired={feedback.notesExpired}
-            onResend={feedback.resendNote}
-            onDismiss={feedback.dismissNote}
-          />
+        feedback.showList || feedback.carriedNotes.length > 0 ? (
+          <>
+            {feedback.carriedNotes.length > 0 && (
+              <FeedbackNotesDisplay
+                notes={feedback.carriedNotes}
+                expired
+                onResend={feedback.resendNote}
+                onDismiss={feedback.dismissNote}
+              />
+            )}
+            {feedback.showList && (
+              <FeedbackNotesDisplay
+                notes={feedback.notes}
+                // Past the turn the list is the only place an unread note
+                // still exists on screen, so it carries its own recovery
+                // actions rather than disappearing with the turn that never
+                // read it.
+                expired={feedback.notesExpired}
+                onResend={feedback.resendNote}
+                onDismiss={feedback.dismissNote}
+              />
+            )}
+          </>
         ) : null
       }
       onAddFeedback={feedback.featureEnabled ? feedback.openDialog : undefined}

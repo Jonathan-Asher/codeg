@@ -5493,7 +5493,10 @@
     "dismiss": "تجاهل",
     "turnEndedResent": "انتهت الجولة — تم الإرسال كرسالة جديدة بدلاً من ذلك.",
     "turnEnded": "انتهت الجولة بالفعل.",
-    "submitFailed": "تعذّر إرسال ملاحظتك"
+    "submitFailed": "تعذّر إرسال ملاحظتك",
+    "steerSending": "جارٍ الإرسال…",
+    "steerWaiting": "بانتظار أن يقرأها الوكيل",
+    "steerWaitingSubagent": "سيقرؤها الوكيل بعد انتهاء الوكيل الفرعي الذي ينتظره"
   },
   "AgentToolsSettings": {
     "title": "أدوات داخل المحادثة",

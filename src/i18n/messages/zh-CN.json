@@ -5493,7 +5493,10 @@
     "dismiss": "忽略",
     "turnEndedResent": "本轮已结束——已改为作为新消息发送。",
     "turnEnded": "本轮已结束。",
-    "submitFailed": "留言发送失败"
+    "submitFailed": "留言发送失败",
+    "steerSending": "正在发送…",
+    "steerWaiting": "等待智能体读取",
+    "steerWaitingSubagent": "等待智能体读取（它正在等待的子智能体完成后）"
   },
   "AgentToolsSettings": {
     "title": "会话内工具",

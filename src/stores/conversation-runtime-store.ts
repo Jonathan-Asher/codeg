@@ -689,6 +689,58 @@ interface StreamingGroup {
    * so an unreadable stamp falling back here can never widen its bound.
    */
   timestamp?: string
+  /** A steered message the agent has not read yet (see `steerStateOf`). */
+  steerState?: MessageTurn["steer_state"]
+}
+
+/**
+ * Whether the agent has read the steered message at `index` of `content`, as
+ * far as the stream can tell: a message waiting for the agent counts as read
+ * once the reply moves on past it with something of the agent's own (prose,
+ * or a tool call while no sub-agent runs). The agent only takes a message in
+ * between its steps, so that is the first thing it says with the message in
+ * hand. A sub-agent's output does not count: the agent waits on it, and reads
+ * the message once it is back.
+ */
+export function steerStateOf(
+  content: readonly LiveContentBlock[],
+  index: number,
+  subAgentRunning: boolean
+): MessageTurn["steer_state"] {
+  const block = content[index]
+  if (block?.type !== "steering" || block.state == null) return null
+  if (block.state === "sending") return "sending"
+  for (let i = index + 1; i < content.length; i++) {
+    const next = content[i]
+    if (
+      (next.type === "text" || next.type === "thinking") &&
+      !next.parentToolUseId &&
+      next.text.trim().length > 0
+    ) {
+      return null
+    }
+    if (next.type === "tool_call" && !subAgentRunning) return null
+  }
+  return subAgentRunning ? "waiting_subagent" : "waiting"
+}
+
+/**
+ * A live message as the turn leaves it, for promotion into `localTurns`:
+ * notes the agent reads with its feedback tool (pull) go, since the transcript
+ * records them as that tool's result, not as messages (an unread one stays in
+ * the notes list), and a native steer still marked unread is read now: the
+ * turn that took it is over.
+ */
+export function liveMessageForPromotion(message: LiveMessage): LiveMessage {
+  if (!message.content.some((b) => b.type === "steering")) return message
+  const content: LiveContentBlock[] = []
+  for (const block of message.content) {
+    if (block.type !== "steering") content.push(block)
+    else if (block.channel !== "pull") {
+      content.push(block.state == null ? block : { ...block, state: null })
+    }
+  }
+  return { ...message, content }
 }
 
 // Cache joined chunk output keyed by chunks-array identity. The ACP reducer
@@ -1289,8 +1341,16 @@ export function buildStreamingTurnsFromLiveMessage(
     liveMessage.content,
     childToolCallIds
   )
+  // A sub-agent the agent is waiting on: a message steered meanwhile is read
+  // once it is back (see `steerStateOf`).
+  const subAgentRunning = content.some(
+    (block) =>
+      block.type === "tool_call" &&
+      agentIds.has(block.info.tool_call_id) &&
+      (block.info.status === "in_progress" || block.info.status === "pending")
+  )
 
-  for (const block of content) {
+  for (const [blockIndex, block] of content.entries()) {
     // Parented subagent text/thinking never enters the main thread: it was
     // already collected into `agentTranscripts` during Phase 1 (which is why
     // an Agent tool_call positioned EARLIER in content sees its full
@@ -1311,6 +1371,7 @@ export function buildStreamingTurnsFromLiveMessage(
     if (block.type === "steering") {
       groups.push({
         role: "user",
+        steerState: steerStateOf(content, blockIndex, subAgentRunning),
         // `blocks` is what the user actually sent and wins whenever it is
         // there; `text` is the composer's display form, which collapses
         // attachments into words, so falling back to it for a draft that had
@@ -1582,6 +1643,7 @@ export function buildStreamingTurnsFromLiveMessage(
       role: group.role,
       blocks: group.blocks,
       timestamp: group.timestamp ?? timestamp,
+      ...(group.steerState ? { steer_state: group.steerState } : {}),
     }))
 
   return { turns, inProgressToolCallIds }
@@ -2384,10 +2446,13 @@ function reducer(
       // No agent transcripts on promotion: they are transient live-only data
       // (see the option's doc) — parented blocks are still routed out of the
       // main thread, just not re-attached to the promoted card.
+      // Steered notes the agent reads with its feedback tool are not messages
+      // of the transcript, and the turn that took a native steer is over
+      // (`liveMessageForPromotion`).
       const streamingTurns = sourceLiveMessage
         ? buildStreamingTurnsFromLiveMessage(
             current.conversationId,
-            sourceLiveMessage,
+            liveMessageForPromotion(sourceLiveMessage),
             { attachAgentTranscripts: false }
           ).turns
         : []

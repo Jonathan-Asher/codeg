@@ -313,6 +313,11 @@ export interface MessageTurn {
    * Absent on turns that came from the parser to begin with — those already ARE
    * `turn-N` — so read it as `turn.source_turn_id ?? turn.id`. */
   source_turn_id?: string | null
+  /** CLIENT-ONLY, never on the wire. A message the user steered into the
+   *  running reply that the agent has not read yet: `sending` until the server
+   *  has it, `waiting` until the agent reads it (`waiting_subagent` while a
+   *  sub-agent the agent waits on is still running). Absent once read. */
+  steer_state?: "sending" | "waiting" | "waiting_subagent" | null
 }
 
 export interface ConversationDetail {

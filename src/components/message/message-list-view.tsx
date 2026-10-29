@@ -43,6 +43,7 @@ import { LiveTurnStats } from "./live-turn-stats"
 import { ModelLabelProvider } from "./model-label-context"
 import { ReplyArtifacts } from "./reply-artifacts"
 import { UserResourceLinks } from "./user-resource-links"
+import { SteerStateCaption } from "./steer-state-caption"
 import { UserImageAttachments } from "./user-image-attachments"
 import { AgentPlanOverlay } from "@/components/chat/agent-plan-overlay"
 import {
@@ -1217,6 +1218,9 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
         )}
         {group.role === "user" && group.resources.length > 0 ? (
           <UserResourceLinks resources={group.resources} className="self-end" />
+        ) : null}
+        {group.role === "user" && sourceTurns?.[0]?.steer_state ? (
+          <SteerStateCaption state={sourceTurns[0].steer_state} />
         ) : null}
       </Message>
       {showStats && group.role === "assistant" && sourceTurns && (

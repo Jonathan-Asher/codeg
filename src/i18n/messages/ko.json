@@ -5493,7 +5493,10 @@
     "dismiss": "닫기",
     "turnEndedResent": "턴이 종료되어 새 메시지로 보냈습니다.",
     "turnEnded": "턴이 이미 종료되었습니다.",
-    "submitFailed": "메모를 보내지 못했습니다"
+    "submitFailed": "메모를 보내지 못했습니다",
+    "steerSending": "보내는 중…",
+    "steerWaiting": "에이전트가 읽기를 기다리는 중",
+    "steerWaitingSubagent": "에이전트가 기다리는 하위 에이전트가 끝난 뒤 읽을 예정"
   },
   "AgentToolsSettings": {
     "title": "대화 내 도구",

@@ -5493,7 +5493,10 @@
     "dismiss": "Dispensar",
     "turnEndedResent": "O turno terminou — enviado como nova mensagem.",
     "turnEnded": "O turno já terminou.",
-    "submitFailed": "Não foi possível enviar a sua nota"
+    "submitFailed": "Não foi possível enviar a sua nota",
+    "steerSending": "Enviando…",
+    "steerWaiting": "Aguardando o agente ler",
+    "steerWaitingSubagent": "O agente vai ler quando o subagente que ele aguarda terminar"
   },
   "AgentToolsSettings": {
     "title": "Ferramentas na conversa",

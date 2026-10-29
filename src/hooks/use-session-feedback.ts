@@ -73,6 +73,17 @@ export interface UseSessionFeedbackArgs {
   /** Reroute a note as an ordinary prompt when the turn ended before it could be
    *  submitted (turn-end race). */
   onResendAsPrompt?: (text: string) => void
+  /**
+   * A steer is on its way (`steer` with a client id): show it in the running
+   * reply now, as the user's message, before the server has it.
+   */
+  onSteerSending?: (note: {
+    id: string
+    text: string
+    channel: "native" | "pull"
+  }) => void
+  /** The server refused that steer (it goes back to the queue): take it back. */
+  onSteerFailed?: (id: string) => void
 }
 
 export interface UseSessionFeedback {
@@ -97,6 +108,12 @@ export interface UseSessionFeedback {
   steerAvailable: boolean
   /** Whether to render the notes list above the composer. */
   showList: boolean
+  /**
+   * Notes an earlier turn never got to: kept, in the expired form, until the
+   * user resends or dismisses them, instead of vanishing when the next turn
+   * starts.
+   */
+  carriedNotes: FeedbackItem[]
   /** Whether the listed notes outlived their turn: the agent finished without
    *  reading them, so the list drops its "waiting" reading and switches to the
    *  expired form (say so, then offer {@link resendNote} / {@link dismissNote}).
@@ -137,9 +154,14 @@ export function useSessionFeedback({
   enabled,
   steeredMessageIds,
   onResendAsPrompt,
+  onSteerSending,
+  onSteerFailed,
 }: UseSessionFeedbackArgs): UseSessionFeedback {
   const t = useTranslations("LiveFeedback")
   const [notes, setNotes] = useState<FeedbackItem[]>([])
+  const [carriedNotes, setCarriedNotes] = useState<FeedbackItem[]>([])
+  const steerCallbacksRef = useRef({ onSteerSending, onSteerFailed })
+  steerCallbacksRef.current = { onSteerSending, onSteerFailed }
   const [submitting, setSubmitting] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
   // Whether THIS agent actually has the `check_user_feedback` tool (from the
@@ -200,6 +222,7 @@ export function useSessionFeedback({
   // (live wins in the merge); consumed-id tombstones override stale `pending`.
   useEffect(() => {
     setNotes([])
+    setCarriedNotes([])
     setToolAvailable(false)
     setNativeSteering(false)
     steeringDowngradedRef.current = false
@@ -309,6 +332,17 @@ export function useSessionFeedback({
             // clear so a fresh turn begins empty. Bump the generation so an
             // in-flight snapshot fetch from the previous turn can't re-add them.
             turnGenRef.current += 1
+            // A note the agent never read is not dropped with its turn: it
+            // stays listed, expired, until the user resends or dismisses it.
+            const unread = notesRef.current.filter(
+              (n) => n.status === "pending" && !dismissedRef.current.has(n.id)
+            )
+            if (unread.length > 0) {
+              setCarriedNotes((prev) => [
+                ...prev,
+                ...unread.filter((n) => !prev.some((p) => p.id === n.id)),
+              ])
+            }
             setNotes([])
             consumedRef.current = new Map()
             // The backend cleared these notes too, so their tombstones have
@@ -444,12 +478,22 @@ export function useSessionFeedback({
       if (!text || !connectionId) {
         throw new Error("nothing to steer")
       }
-      const item = await submitSessionFeedback(
-        connectionId,
-        text,
-        blocks,
-        clientId
-      )
+      // On screen at once, as the user's message in the running reply; the
+      // server's word on it (taken, read) moves it along from there.
+      if (clientId) {
+        steerCallbacksRef.current.onSteerSending?.({
+          id: clientId,
+          text,
+          channel: nativeSteering ? "native" : "pull",
+        })
+      }
+      let item: FeedbackItem
+      try {
+        item = await submitSessionFeedback(connectionId, text, blocks, clientId)
+      } catch (error) {
+        if (clientId) steerCallbacksRef.current.onSteerFailed?.(clientId)
+        throw error
+      }
       // A resolution that landed after a connection switch must not touch the
       // new connection's channel state or note list (reconcileChannel guards
       // itself too; the append needs the same protection).
@@ -462,7 +506,7 @@ export function useSessionFeedback({
       }
       return item
     },
-    [connectionId, reconcileChannel]
+    [connectionId, nativeSteering, reconcileChannel]
   )
 
   const openDialog = useCallback(() => setDialogOpen(true), [])
@@ -474,6 +518,7 @@ export function useSessionFeedback({
   const dismissNote = useCallback((id: string) => {
     dismissedRef.current.add(id)
     setNotes((prev) => prev.filter((n) => n.id !== id))
+    setCarriedNotes((prev) => prev.filter((n) => n.id !== id))
   }, [])
 
   // Salvage an expired row as an ordinary message. `onResendAsPrompt` is the
@@ -486,13 +531,16 @@ export function useSessionFeedback({
       // both still see the note (the row only leaves on the next render), and
       // resending is the one action here that must not happen twice.
       if (dismissedRef.current.has(id)) return
-      const note = notesRef.current.find((n) => n.id === id)
+      const note =
+        notesRef.current.find((n) => n.id === id) ??
+        carriedNotes.find((n) => n.id === id)
       if (!note) return
       dismissedRef.current.add(id)
       setNotes((prev) => prev.filter((n) => n.id !== id))
+      setCarriedNotes((prev) => prev.filter((n) => n.id !== id))
       onResendAsPrompt?.(note.text)
     },
-    [onResendAsPrompt]
+    [carriedNotes, onResendAsPrompt]
   )
 
   // `connectionId` belongs here, not only in `canSubmit`: a note rides
@@ -517,9 +565,13 @@ export function useSessionFeedback({
   // ones stay up in the expired form — the list used to require `isPrompting`
   // outright, which is how a note the agent never got to vanished without a
   // word (and the next turn then cleared it for good).
+  //
+  // Read off every note, adopted or not: a note shown in the running reply
+  // (pull) leaves the transcript with its turn, so an unread one must be
+  // listed here then. A native steer is delivered from birth and never is.
   const unreadNotes = useMemo(
-    () => unadoptedNotes.filter((n) => n.status === "pending"),
-    [unadoptedNotes]
+    () => notes.filter((n) => n.status === "pending"),
+    [notes]
   )
   // A live, IDLE session is the only proof the turn actually ended. Not merely
   // `!isPrompting`: a mid-turn attach hydrates while the entry is still
@@ -537,6 +589,7 @@ export function useSessionFeedback({
   return useMemo(
     () => ({
       notes: visibleNotes,
+      carriedNotes,
       featureEnabled: enabled,
       canSubmit,
       channel,
@@ -554,6 +607,7 @@ export function useSessionFeedback({
     }),
     [
       visibleNotes,
+      carriedNotes,
       enabled,
       canSubmit,
       channel,

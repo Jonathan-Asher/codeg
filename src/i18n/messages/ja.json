@@ -5493,7 +5493,10 @@
     "dismiss": "閉じる",
     "turnEndedResent": "ターンが終了したため、新しいメッセージとして送信しました。",
     "turnEnded": "ターンはすでに終了しています。",
-    "submitFailed": "メモを送信できませんでした"
+    "submitFailed": "メモを送信できませんでした",
+    "steerSending": "送信中…",
+    "steerWaiting": "エージェントが読むのを待っています",
+    "steerWaitingSubagent": "エージェントが読むのを待っています（待機中のサブエージェントの完了後）"
   },
   "AgentToolsSettings": {
     "title": "会話内ツール",

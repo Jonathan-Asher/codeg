@@ -5493,7 +5493,10 @@
     "dismiss": "Ignorer",
     "turnEndedResent": "Le tour est terminé : envoyé comme nouveau message.",
     "turnEnded": "Le tour est déjà terminé.",
-    "submitFailed": "Impossible d'envoyer votre note"
+    "submitFailed": "Impossible d'envoyer votre note",
+    "steerSending": "Envoi…",
+    "steerWaiting": "En attente de lecture par l’agent",
+    "steerWaitingSubagent": "L’agent la lira quand le sous-agent qu’il attend aura fini"
   },
   "AgentToolsSettings": {
     "title": "Outils dans la conversation",
