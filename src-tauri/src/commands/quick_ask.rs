@@ -344,11 +344,12 @@ pub fn remove_claude_project_dir(
     cwd: &str,
     report: &mut PrivateSessionCleanup,
 ) {
-    report.remove_path(
-        &claude_config_dir
-            .join("projects")
-            .join(claude_project_dir_name(cwd)),
-    );
+    let project_dir = claude_config_dir
+        .join("projects")
+        .join(claude_project_dir_name(cwd));
+    // A private session must not outlive its files in the transcript cache.
+    crate::parsers::detail_cache::DetailCache::global().forget_under(&project_dir);
+    report.remove_path(&project_dir);
 }
 
 /// Remove what Claude Code keeps about one session elsewhere under its config
@@ -377,7 +378,9 @@ pub fn remove_claude_session_leftovers(
         }
     }
     for dir in &project_dirs {
-        report.remove_path(&dir.join(format!("{session_id}.jsonl")));
+        let transcript = dir.join(format!("{session_id}.jsonl"));
+        crate::parsers::detail_cache::DetailCache::global().forget_under(&transcript);
+        report.remove_path(&transcript);
         // Sub-agent transcripts and tool results live next to the transcript.
         report.remove_path(&dir.join(session_id));
     }

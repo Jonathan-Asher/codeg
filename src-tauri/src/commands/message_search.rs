@@ -26,10 +26,11 @@ use chrono::Utc;
 use sea_orm::DatabaseConnection;
 
 use crate::app_error::AppCommandError;
-use crate::commands::conversations::get_folder_conversation_core;
+use crate::commands::conversations::{load_folder_conversation, ContentNeed};
 use crate::db::error::DbError;
 use crate::db::service::message_search_service::{self, MessageSearchHit};
 use crate::models::message::MessageTurn;
+use crate::parsers::CacheUse;
 // Only the desktop command wrapper takes `tauri::State<AppDatabase>`.
 #[cfg(feature = "tauri-runtime")]
 use crate::db::AppDatabase;
@@ -124,17 +125,19 @@ pub async fn index_stale_conversations_paced(
     batch: usize,
     pacing: &mut Pacing,
 ) -> Result<usize, DbError> {
+    // Read through the transcript cache when the conversation is in it (a
+    // busy session is, and costs only its appended bytes), without adding the
+    // ones nobody has open: a pass over every conversation would push those
+    // out. The turns are read in place, not copied.
     index_stale_conversations_with(conn, batch, pacing, move |id| async move {
-        get_folder_conversation_core(conn, id)
-            .await
-            .map(|(detail, _)| detail.turns)
+        load_folder_conversation(conn, id, ContentNeed::All, CacheUse::IfPresent).await
     })
     .await
 }
 
 /// [`index_stale_conversations_paced`] reading each transcript with
 /// `read_turns`, so a test can make a read fail.
-async fn index_stale_conversations_with<F, Fut>(
+async fn index_stale_conversations_with<F, Fut, T>(
     conn: &DatabaseConnection,
     batch: usize,
     pacing: &mut Pacing,
@@ -142,7 +145,8 @@ async fn index_stale_conversations_with<F, Fut>(
 ) -> Result<usize, DbError>
 where
     F: Fn(i32) -> Fut,
-    Fut: Future<Output = Result<Vec<MessageTurn>, AppCommandError>>,
+    Fut: Future<Output = Result<T, AppCommandError>>,
+    T: AsRef<[MessageTurn]>,
 {
     let settled_before = Utc::now() - chrono::Duration::seconds(SETTLE_SECS);
     let now = Instant::now();
@@ -166,7 +170,7 @@ where
                     conn,
                     conversation.id,
                     conversation.updated_at,
-                    &turns,
+                    turns.as_ref(),
                 )
                 .await?;
             }
