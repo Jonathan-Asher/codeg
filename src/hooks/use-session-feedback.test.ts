@@ -382,6 +382,67 @@ describe("useSessionFeedback", () => {
     return hook
   }
 
+  it("lists an unread note the running reply showed, once the turn ends", async () => {
+    // Shown as the user's message while the turn ran (adopted), it leaves the
+    // transcript with the turn: the list is where it must be then.
+    const { result } = await endTurnWith([note("n1", "use pnpm")], {
+      steeredMessageIds: ["n1"],
+    })
+    expect(result.current.showList).toBe(true)
+    expect(result.current.notes.map((n) => n.id)).toEqual(["n1"])
+  })
+
+  it("never drops an unread note when the next turn starts", async () => {
+    const { result } = await endTurnWith([note("n1", "use pnpm")])
+    act(() =>
+      capturedHandler!({
+        seq: 1,
+        connection_id: "c1",
+        type: "user_message",
+      } as unknown as EventEnvelope)
+    )
+    // Carried, expired, until resent or dismissed.
+    expect(result.current.carriedNotes.map((n) => n.id)).toEqual(["n1"])
+    act(() => result.current.dismissNote("n1"))
+    expect(result.current.carriedNotes).toEqual([])
+  })
+
+  it("shows a steer before the server answers, and takes back a refused one", async () => {
+    const onSteerSending = vi.fn()
+    const onSteerFailed = vi.fn()
+    const { result } = renderHook(() =>
+      useSessionFeedback({ ...baseProps, onSteerSending, onSteerFailed })
+    )
+    await waitFor(() => expect(capturedHandler).toBeTruthy())
+
+    let answer!: (item: FeedbackItem) => void
+    mockSubmit.mockImplementationOnce(
+      () => new Promise((resolve) => (answer = resolve))
+    )
+    let sent!: Promise<FeedbackItem>
+    act(() => {
+      sent = result.current.steer("use pnpm", undefined, "optimistic-1")
+    })
+    expect(onSteerSending).toHaveBeenCalledWith({
+      id: "optimistic-1",
+      text: "use pnpm",
+      channel: "pull",
+    })
+    await act(async () => {
+      answer(note("optimistic-1", "use pnpm"))
+      await sent
+    })
+    expect(onSteerFailed).not.toHaveBeenCalled()
+
+    mockSubmit.mockRejectedValueOnce(new Error("no active turn"))
+    await act(async () => {
+      await expect(
+        result.current.steer("too late", undefined, "optimistic-2")
+      ).rejects.toThrow()
+    })
+    expect(onSteerFailed).toHaveBeenCalledWith("optimistic-2")
+  })
+
   it("keeps an unread note listed once the turn ends, as expired", async () => {
     const { result } = await endTurnWith([note("n1", "use pnpm")])
 

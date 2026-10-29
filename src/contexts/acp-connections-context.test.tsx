@@ -5833,6 +5833,9 @@ describe("AcpConnectionsProvider mid-turn steering messages", () => {
         // A text-only note records no block list, so the renderer falls back
         // to `text` exactly as it always has.
         blocks: null,
+        // The server has it; the agent reads it between its steps.
+        state: "waiting",
+        channel: "native",
       },
     ])
     expect(conn().steeredMessageIds).toEqual(["n1"])
@@ -5875,11 +5878,16 @@ describe("AcpConnectionsProvider mid-turn steering messages", () => {
             uri: null,
           },
         ],
+        state: "waiting",
+        channel: "native",
       },
     ])
   })
 
-  it("ignores a pending note - the pull channel is not a user message", async () => {
+  it("shows a pending note (pull) in the running reply, waiting to be read", async () => {
+    // The agent reads it with its feedback tool, which records it as that
+    // tool's result: it shows as the user's message only while the turn runs
+    // (see `liveMessageForPromotion`), and an unread one stays in the list.
     const handlers = await connectOwner()
     emitAcpEvent(handlers, {
       seq: 1,
@@ -5889,8 +5897,99 @@ describe("AcpConnectionsProvider mid-turn steering messages", () => {
     })
     emitAcpEvent(handlers, submitted(2, "n1", "waiting note", "pending"))
 
-    expect(steeringBlocks()).toEqual([])
-    expect(conn().steeredMessageIds).toEqual([])
+    expect(steeringBlocks()).toEqual([
+      expect.objectContaining({
+        id: "n1",
+        text: "waiting note",
+        state: "waiting",
+        channel: "pull",
+      }),
+    ])
+    expect(conn().steeredMessageIds).toEqual(["n1"])
+  })
+
+  it("lands a note where the agent read it", async () => {
+    const handlers = await connectOwner()
+    emitAcpEvent(handlers, {
+      seq: 1,
+      connection_id: "spawned-conn",
+      type: "status_changed",
+      status: "prompting",
+    })
+    emitAcpEvent(handlers, submitted(2, "n1", "check the logs", "pending"))
+    emitAcpEvent(handlers, {
+      seq: 3,
+      connection_id: "spawned-conn",
+      type: "content_delta",
+      text: "still on the first step",
+    } as unknown as EventEnvelope)
+    emitAcpEvent(handlers, {
+      seq: 4,
+      connection_id: "spawned-conn",
+      type: "feedback_consumed",
+      ids: ["n1"],
+      delivered_at: STEER_AT,
+    } as unknown as EventEnvelope)
+
+    const content = conn().liveMessage!.content
+    expect(content[content.length - 1]).toEqual(
+      expect.objectContaining({ type: "steering", id: "n1", state: null })
+    )
+  })
+
+  it("shows a steer the moment it is sent, and takes back one the server refuses", async () => {
+    const handlers = await connectOwner()
+    emitAcpEvent(handlers, {
+      seq: 1,
+      connection_id: "spawned-conn",
+      type: "status_changed",
+      status: "prompting",
+    })
+    act(() => {
+      h.actions!.showSteering(TAB, {
+        id: "c1",
+        text: "stop and use pnpm",
+        channel: "native",
+      })
+    })
+    expect(steeringBlocks()).toEqual([
+      expect.objectContaining({ id: "c1", state: "sending" }),
+    ])
+    expect(conn().steeredMessageIds).toEqual(["c1"])
+
+    // The reply moved on before the server took it: it lands at the end,
+    // where it was taken, waiting for the agent to read it.
+    emitAcpEvent(handlers, {
+      seq: 2,
+      connection_id: "spawned-conn",
+      type: "content_delta",
+      text: "running the build",
+    } as unknown as EventEnvelope)
+    emitAcpEvent(handlers, submitted(3, "c1", "stop and use pnpm", "delivered"))
+    const content = conn().liveMessage!.content
+    expect(content).toHaveLength(2)
+    expect(content[1]).toEqual(
+      expect.objectContaining({
+        id: "c1",
+        state: "waiting",
+        createdAt: STEER_AT,
+      })
+    )
+
+    act(() => {
+      h.actions!.showSteering(TAB, {
+        id: "c2",
+        text: "too late",
+        channel: "native",
+      })
+    })
+    act(() => {
+      h.actions!.dropSteering(TAB, "c2")
+    })
+    expect(steeringBlocks().map((b) => b.type === "steering" && b.id)).toEqual([
+      "c1",
+    ])
+    expect(conn().steeredMessageIds).toEqual(["c1"])
   })
 
   it("is idempotent - the submit broadcast reaches the sender too", async () => {
@@ -5960,12 +6059,11 @@ describe("AcpConnectionsProvider mid-turn steering messages", () => {
     expect(steeringBlocks()).toEqual([])
   })
 
-  it("gives the note its strip back when a snapshot replaces the live message", async () => {
+  it("keeps a steered message on screen when a snapshot replaces the live message", async () => {
     // A mid-turn re-attach (WS reconnect in server mode) hydrates the backend's
-    // live message, which carries no steering block — the wire has no such kind
-    // — so the spliced message is gone from the transcript. Holding on to the
-    // adoption there would hide the strip for a message that is now rendered
-    // NOWHERE, the one failure worse than rendering it twice.
+    // live message, which carries no steering block — the wire has no such
+    // kind. The message this client showed is carried over, after the block
+    // it followed, and stays adopted (no strip twice).
     const handlers = await connectOwner()
     emitAcpEvent(handlers, {
       seq: 1,
@@ -6011,8 +6109,12 @@ describe("AcpConnectionsProvider mid-turn steering messages", () => {
       event_seq: 9,
     } as unknown as LiveSessionSnapshot)
 
-    expect(steeringBlocks()).toEqual([])
-    expect(conn().steeredMessageIds).toEqual([])
+    // It followed none of the reply's blocks here, so it opens the message.
+    expect(conn().liveMessage!.content.map((b) => b.type)).toEqual([
+      "steering",
+      "text",
+    ])
+    expect(conn().steeredMessageIds).toEqual(["n1"])
   })
 })
 
