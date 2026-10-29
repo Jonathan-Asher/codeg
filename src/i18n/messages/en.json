@@ -3781,7 +3781,8 @@
         "changeScopeUser": "Saved to user settings",
         "changeScopeProject": "Saved to project settings",
         "changeScopeProjectLocal": "Saved to local project settings",
-        "changeScopePersistent": "Saved permanently"
+        "changeScopePersistent": "Saved permanently",
+        "keyboardHint": "Press 1–9 to choose an option, the arrow keys to move between them, Enter for the focused one, Esc to go back to the message box."
       },
       "questionDialog": {
         "title": "Agent is asking a question",
@@ -4221,7 +4222,8 @@
         "submit": "Submit",
         "submitError": "Couldn't submit. Please try again.",
         "collapse": "Collapse",
-        "expand": "Expand"
+        "expand": "Expand",
+        "keyboardHint": "Arrow keys move, Enter chooses and continues, 1–9 picks an option, Space ticks a box in a multiple-choice question, Ctrl or ⌘ + Enter submits, Esc goes back to the message box."
       },
       "planApproval": {
         "title": "The agent has a plan — review it",
@@ -4232,7 +4234,8 @@
         "feedbackPlaceholder": "What should change?",
         "sendChanges": "Send",
         "cancel": "Cancel",
-        "submitError": "Couldn't submit. Please try again."
+        "submitError": "Couldn't submit. Please try again.",
+        "keyboardHint": "Press 1 to approve, 2 to request changes, 3 and then Enter to abandon, Esc to go back to the message box."
       },
       "feedbackCheckResult": {
         "count": "{count, plural, =1 {1 feedback note} other {# feedback notes}}",

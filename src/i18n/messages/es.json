@@ -3781,7 +3781,8 @@
         "changeScopeUser": "Guardado en la configuración del usuario",
         "changeScopeProject": "Guardado en la configuración del proyecto",
         "changeScopeProjectLocal": "Guardado en la configuración local del proyecto",
-        "changeScopePersistent": "Guardado permanentemente"
+        "changeScopePersistent": "Guardado permanentemente",
+        "keyboardHint": "Pulsa 1–9 para elegir una opción, las flechas para moverte entre ellas, Enter para la que tiene el foco y Esc para volver al cuadro de mensaje."
       },
       "questionDialog": {
         "title": "El agente está haciendo una pregunta",
@@ -4221,7 +4222,8 @@
         "submit": "Enviar",
         "submitError": "No se pudo enviar. Inténtalo de nuevo.",
         "collapse": "Plegar",
-        "expand": "Desplegar"
+        "expand": "Desplegar",
+        "keyboardHint": "Las flechas mueven, Enter elige y continúa, 1–9 elige una opción, Espacio marca en una pregunta de opción múltiple, Ctrl o ⌘ + Enter envía y Esc vuelve al cuadro de mensaje."
       },
       "planApproval": {
         "title": "El agente tiene un plan: revísalo",
@@ -4232,7 +4234,8 @@
         "feedbackPlaceholder": "¿Qué debería cambiar?",
         "sendChanges": "Enviar",
         "cancel": "Cancelar",
-        "submitError": "No se pudo enviar. Inténtalo de nuevo."
+        "submitError": "No se pudo enviar. Inténtalo de nuevo.",
+        "keyboardHint": "Pulsa 1 para aprobar, 2 para pedir cambios, 3 y luego Enter para abandonar, y Esc para volver al cuadro de mensaje."
       },
       "feedbackCheckResult": {
         "count": "{count, plural, =1 {1 comentario} other {# comentarios}}",

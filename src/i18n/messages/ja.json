@@ -3781,7 +3781,8 @@
         "changeScopeUser": "ユーザー設定に保存",
         "changeScopeProject": "プロジェクト設定に保存",
         "changeScopeProjectLocal": "ローカルプロジェクト設定に保存",
-        "changeScopePersistent": "永続的に保存"
+        "changeScopePersistent": "永続的に保存",
+        "keyboardHint": "1〜9 で選択肢を選択、矢印キーで移動、Enter でフォーカス中の選択肢を選択、Esc で入力欄に戻ります。"
       },
       "questionDialog": {
         "title": "エージェントが質問しています",
@@ -4221,7 +4222,8 @@
         "submit": "送信",
         "submitError": "送信できませんでした。もう一度お試しください。",
         "collapse": "折りたたむ",
-        "expand": "展開"
+        "expand": "展開",
+        "keyboardHint": "矢印キーで移動、Enter で選択して次へ、1〜9 で選択肢を選択、複数選択の質問では Space でチェック、Ctrl または ⌘ + Enter で送信、Esc で入力欄に戻ります。"
       },
       "planApproval": {
         "title": "エージェントが計画を提示しました — 確認してください",
@@ -4232,7 +4234,8 @@
         "feedbackPlaceholder": "何を変更しますか？",
         "sendChanges": "送信",
         "cancel": "キャンセル",
-        "submitError": "送信できませんでした。もう一度お試しください。"
+        "submitError": "送信できませんでした。もう一度お試しください。",
+        "keyboardHint": "1 で承認、2 で変更を依頼、3 のあと Enter で破棄、Esc で入力欄に戻ります。"
       },
       "feedbackCheckResult": {
         "count": "フィードバック {count} 件",

@@ -3781,7 +3781,8 @@
         "changeScopeUser": "In Benutzereinstellungen gespeichert",
         "changeScopeProject": "In Projekteinstellungen gespeichert",
         "changeScopeProjectLocal": "In lokalen Projekteinstellungen gespeichert",
-        "changeScopePersistent": "Dauerhaft gespeichert"
+        "changeScopePersistent": "Dauerhaft gespeichert",
+        "keyboardHint": "1–9 wählt eine Option, die Pfeiltasten wechseln zwischen ihnen, Enter wählt die fokussierte, Esc kehrt zum Nachrichtenfeld zurück."
       },
       "questionDialog": {
         "title": "Agent stellt eine Frage",
@@ -4221,7 +4222,8 @@
         "submit": "Senden",
         "submitError": "Senden fehlgeschlagen. Bitte versuche es erneut.",
         "collapse": "Einklappen",
-        "expand": "Ausklappen"
+        "expand": "Ausklappen",
+        "keyboardHint": "Pfeiltasten bewegen, Enter wählt und macht weiter, 1–9 wählt eine Option, die Leertaste hakt bei Mehrfachauswahl an, Strg oder ⌘ + Enter sendet ab, Esc kehrt zum Nachrichtenfeld zurück."
       },
       "planApproval": {
         "title": "Der Agent hat einen Plan – bitte prüfen",
@@ -4232,7 +4234,8 @@
         "feedbackPlaceholder": "Was soll geändert werden?",
         "sendChanges": "Senden",
         "cancel": "Abbrechen",
-        "submitError": "Senden fehlgeschlagen. Bitte erneut versuchen."
+        "submitError": "Senden fehlgeschlagen. Bitte erneut versuchen.",
+        "keyboardHint": "1 genehmigt, 2 fordert Änderungen an, 3 und dann Enter verwirft, Esc kehrt zum Nachrichtenfeld zurück."
       },
       "feedbackCheckResult": {
         "count": "{count, plural, =1 {1 Rückmeldung} other {# Rückmeldungen}}",

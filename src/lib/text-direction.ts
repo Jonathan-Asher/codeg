@@ -27,6 +27,11 @@
  */
 export type TextDirection = "ltr" | "rtl"
 
+/** The writing direction of a UI locale — what the app puts on `<html dir>`. */
+export function localeDirection(locale: string): TextDirection {
+  return locale === "ar" || locale.startsWith("ar-") ? "rtl" : "ltr"
+}
+
 /** Share of RTL words that makes an LTR-opening text RTL. */
 export const RTL_WORD_SHARE = 0.4
 

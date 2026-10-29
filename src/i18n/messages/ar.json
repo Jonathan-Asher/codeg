@@ -3781,7 +3781,8 @@
         "changeScopeUser": "محفوظ في إعدادات المستخدم",
         "changeScopeProject": "محفوظ في إعدادات المشروع",
         "changeScopeProjectLocal": "محفوظ في إعدادات المشروع المحلية",
-        "changeScopePersistent": "محفوظ بشكل دائم"
+        "changeScopePersistent": "محفوظ بشكل دائم",
+        "keyboardHint": "اضغط 1–9 لاختيار خيار، ومفاتيح الأسهم للتنقل بينها، وEnter للخيار المحدد، وEsc للعودة إلى مربع الرسالة."
       },
       "questionDialog": {
         "title": "الوكيل يطرح سؤالاً",
@@ -4221,7 +4222,8 @@
         "submit": "إرسال",
         "submitError": "تعذّر الإرسال. حاول مرة أخرى.",
         "collapse": "طيّ",
-        "expand": "توسيع"
+        "expand": "توسيع",
+        "keyboardHint": "تنقّل بمفاتيح الأسهم، وEnter يختار ويتابع، و1–9 يختار خيارًا، والمسافة تحدد في سؤال متعدد الاختيارات، وCtrl أو ⌘ + Enter يرسل، وEsc يعود إلى مربع الرسالة."
       },
       "planApproval": {
         "title": "لدى الوكيل خطة — راجعها",
@@ -4232,7 +4234,8 @@
         "feedbackPlaceholder": "ما الذي ينبغي تغييره؟",
         "sendChanges": "إرسال",
         "cancel": "إلغاء",
-        "submitError": "تعذّر الإرسال. حاول مرة أخرى."
+        "submitError": "تعذّر الإرسال. حاول مرة أخرى.",
+        "keyboardHint": "اضغط 1 للموافقة، و2 لطلب تغييرات، و3 ثم Enter للتخلي، وEsc للعودة إلى مربع الرسالة."
       },
       "feedbackCheckResult": {
         "count": "{count} ملاحظة",

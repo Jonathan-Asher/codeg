@@ -242,7 +242,12 @@ export function ConversationShell({
   onInjectConsumed,
 }: ConversationShellProps) {
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
+    // The composer scope: the blocking cards below hand the keyboard to this
+    // conversation's composer (Esc) and take it from there (↑ when empty).
+    <div
+      className="relative flex h-full min-h-0 flex-col"
+      data-composer-scope=""
+    >
       {topBanner}
 
       <div className="flex-1 min-h-0">{children}</div>
@@ -251,6 +256,7 @@ export function ConversationShell({
         permission={pendingPermission}
         onRespond={onRespondPermission}
         agentType={agentType}
+        autoFocus={isActive ?? true}
       />
 
       <QuestionDialog question={pendingQuestion} onAnswer={onAnswerQuestion} />
@@ -265,6 +271,7 @@ export function ConversationShell({
             <AskQuestionCard
               question={pendingAskQuestion}
               onAnswer={onAnswerAskQuestion}
+              autoFocus={isActive ?? true}
             />
           </div>
         )}
@@ -276,6 +283,7 @@ export function ConversationShell({
               key={pendingPlanApproval.approval_id}
               approval={pendingPlanApproval}
               onAnswer={onAnswerPlanApproval}
+              autoFocus={isActive ?? true}
             />
           </div>
         )}

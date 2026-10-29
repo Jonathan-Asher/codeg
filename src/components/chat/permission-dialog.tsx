@@ -1,7 +1,7 @@
 "use client"
 
-import { useMemo } from "react"
-import { useTranslations } from "next-intl"
+import { useId, useMemo, useRef, type KeyboardEvent } from "react"
+import { useLocale, useTranslations } from "next-intl"
 import {
   ShieldAlert,
   Terminal,
@@ -14,6 +14,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Keycap } from "@/components/chat/keycap"
 import { CodeBlock } from "@/components/ai-elements/code-block"
 import { UnifiedDiffPreview } from "@/components/diff/unified-diff-preview"
 import { MessageResponse } from "@/components/ai-elements/message"
@@ -25,7 +26,14 @@ import {
   type PermissionOptionChange,
 } from "@/lib/permission-request"
 import { useAgentVocabulary } from "@/hooks/use-agent-vocabulary"
-import { detectTextDirection } from "@/lib/text-direction"
+import { useCardArrivalFocus, useComposerHandoff } from "@/hooks/use-card-focus"
+import {
+  focusComposerAfterAnswer,
+  focusComposerFrom,
+  isTypingTarget,
+} from "@/lib/card-focus"
+import { isImeCompositionKey } from "@/lib/ime-composition"
+import { detectTextDirection, localeDirection } from "@/lib/text-direction"
 import type { AgentType } from "@/lib/types"
 
 interface PermissionDialogProps {
@@ -38,6 +46,30 @@ interface PermissionDialogProps {
    * rendering.
    */
   agentType?: AgentType | null
+  /** Take keyboard focus when a request arrives — never from someone typing
+   *  (see `canCardTakeFocus`). A conversation not in front passes false. */
+  autoFocus?: boolean
+}
+
+const DIGIT = /^[1-9]$/
+
+const isRejectOption = (opt: { kind: string }) => opt.kind.startsWith("reject")
+
+/**
+ * The option bare Enter answers with: the one the card already emphasises —
+ * the first decline on a `defaultToNo` ask, the leading option of Claude's
+ * plan card — else a one-time approval, never an "always" grant that outlives
+ * this request. -1 when none qualifies.
+ */
+export function defaultPermissionOptionIndex(
+  options: readonly { kind: string }[],
+  defaultToNo: boolean,
+  isPlanApproval: boolean
+): number {
+  if (defaultToNo) return options.findIndex(isRejectOption)
+  if (isPlanApproval) return options[0] && !isRejectOption(options[0]) ? 0 : -1
+  const once = options.findIndex((opt) => opt.kind === "allow_once")
+  return once >= 0 ? once : options.findIndex((opt) => !isRejectOption(opt))
 }
 
 function formatKindLabel(kind: string, fallbackLabel: string): string {
@@ -71,8 +103,12 @@ export function PermissionDialog({
   permission,
   onRespond,
   agentType,
+  autoFocus = true,
 }: PermissionDialogProps) {
   const t = useTranslations("Folder.chat.permissionDialog")
+  const dir = localeDirection(useLocale())
+  const hintId = useId()
+  const rootRef = useRef<HTMLDivElement>(null)
   const vocabulary = useAgentVocabulary(agentType)
   const parsed = useMemo(
     () => parsePermissionToolCall(permission?.tool_call),
@@ -99,6 +135,10 @@ export function PermissionDialog({
     }
     return out
   }, [permission?.options])
+  // Keyboard: focus lands on the default option when a request arrives (never
+  // from someone typing), and ↑ in an empty composer comes back here.
+  useCardArrivalFocus(rootRef, permission?.request_id ?? null, autoFocus)
+  useComposerHandoff(rootRef, permission != null)
   if (!permission) return null
 
   // Approvals are surfaced one at a time (backend FIFO), so the count of the
@@ -128,8 +168,84 @@ export function PermissionDialog({
   const hasContentText = Boolean(parsed.contentText)
   const hasStructured = hasOtherStructured || hasContentText
 
+  const defaultIndex = defaultPermissionOptionIndex(
+    options,
+    parsed.defaultToNo,
+    isPlanApproval
+  )
+  // Where the keyboard enters: the default option, else the first one —
+  // except on a defaultToNo ask with no decline to land on.
+  const entryIndex =
+    defaultIndex >= 0 ? defaultIndex : parsed.defaultToNo ? -1 : 0
+
+  const respond = (optionId: string) => {
+    // With the last request answered the keyboard goes back to the composer;
+    // while more are queued it stays here for the next one.
+    const returnFocus =
+      queued > 0 ? null : focusComposerAfterAnswer(rootRef.current)
+    onRespond(permission.request_id, optionId)
+    returnFocus?.()
+  }
+
+  // 1-9 answer with that option, arrows move between the options, Enter and
+  // Space press the focused one (natively), Esc goes back to the composer and
+  // never answers.
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.defaultPrevented || isImeCompositionKey(e)) return
+    if (e.key === "Escape") {
+      if (focusComposerFrom(rootRef.current)) {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+      return
+    }
+    if (e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e.target)) return
+    // A held key repeats; one press must never answer this request and then
+    // the next one in the queue.
+    if (e.repeat && (e.key === "Enter" || e.key === " " || DIGIT.test(e.key))) {
+      e.preventDefault()
+      return
+    }
+    const buttons = Array.from(
+      rootRef.current?.querySelectorAll<HTMLButtonElement>(
+        "[data-permission-option]"
+      ) ?? []
+    )
+    if (DIGIT.test(e.key)) {
+      const index = Number(e.key) - 1
+      const opt = options[index]
+      if (!opt) return
+      e.preventDefault()
+      // A defaultToNo ask must not be approvable by one stray key: the number
+      // of an approval only moves to it, and Enter there confirms.
+      if (parsed.defaultToNo && !isRejectOption(opt)) buttons[index]?.focus()
+      else respond(opt.option_id)
+      return
+    }
+    const horizontal = e.key === "ArrowLeft" || e.key === "ArrowRight"
+    if (!horizontal && e.key !== "ArrowUp" && e.key !== "ArrowDown") return
+    const at = buttons.indexOf(document.activeElement as HTMLButtonElement)
+    // Focus in the body (a code block, a link) keeps its own arrows.
+    if (at < 0) return
+    const forward = horizontal
+      ? (e.key === "ArrowRight") === (dir === "ltr")
+      : e.key === "ArrowDown"
+    e.preventDefault()
+    buttons[(at + (forward ? 1 : -1) + buttons.length) % buttons.length].focus()
+  }
+
   return (
-    <div className="mx-4 mb-3 rounded-xl border border-border/70 bg-card/95 p-3 shadow-sm">
+    <div
+      ref={rootRef}
+      role="group"
+      aria-label={parsed.description ?? parsed.title}
+      aria-describedby={hintId}
+      onKeyDown={onKeyDown}
+      className="mx-4 mb-3 rounded-xl border border-border/70 bg-card/95 p-3 shadow-sm"
+    >
+      <p id={hintId} className="sr-only">
+        {t("keyboardHint")}
+      </p>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 space-y-1">
           <div className="flex items-center gap-1.5 text-sm font-medium">
@@ -368,14 +484,15 @@ export function PermissionDialog({
       </div>
 
       {/* `_meta.permission.defaultToNo` (claude-agent-acp ≥0.77.0) marks an ask
-          that "must not be approvable by a stray keystroke". codeg pre-selects
-          nothing and binds no key, and the adapter already sends the reject
-          options first — so all that is left is the emphasis, which today puts
-          the single filled button on "Allow". Inverting it keeps every option
-          one click away while making the decline the one the eye lands on. */}
+          that "must not be approvable by a stray keystroke". The keyboard
+          honours it — focus and bare Enter land on the decline, and an
+          approval's number only moves to it — and so does the emphasis, which
+          otherwise puts the filled button on "Allow". Inverting it keeps every
+          option one click away while making the decline the one the eye lands
+          on. */}
       <div className="mt-3 flex flex-wrap gap-2">
         {options.map((opt, index) => {
-          const isReject = opt.kind.startsWith("reject")
+          const isReject = isRejectOption(opt)
           // Claude Code's plan card offers several approvals that leave the
           // session in different modes. The backend leads with the mode to
           // continue in, so that one alone is the primary button.
@@ -387,11 +504,15 @@ export function PermissionDialog({
           return (
             <Button
               key={opt.option_id}
+              data-permission-option=""
+              data-card-entry={index === entryIndex ? "" : undefined}
               variant={emphasized ? "default" : "outline"}
               className="h-auto min-h-9 whitespace-normal break-words text-left"
-              onClick={() => onRespond(permission.request_id, opt.option_id)}
+              onClick={() => respond(opt.option_id)}
             >
               {opt.name}
+              {index < 9 && <Keycap className="ms-1">{index + 1}</Keycap>}
+              {index === defaultIndex && <Keycap>↵</Keycap>}
             </Button>
           )
         })}

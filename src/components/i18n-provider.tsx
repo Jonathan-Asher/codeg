@@ -24,6 +24,7 @@ import {
 } from "@/lib/i18n"
 import { getSystemLanguageSettings } from "@/lib/api"
 import { disposeTauriListener } from "@/lib/tauri-listener"
+import { localeDirection } from "@/lib/text-direction"
 import { AppBootLoading } from "@/components/layout/app-boot-loading"
 import type { AppLocale, SystemLanguageSettings } from "@/lib/types"
 
@@ -289,7 +290,7 @@ export function AppI18nProvider({
 
   useEffect(() => {
     document.documentElement.lang = activeIntlLocale
-    document.documentElement.dir = activeIntlLocale === "ar" ? "rtl" : "ltr"
+    document.documentElement.dir = localeDirection(activeIntlLocale)
   }, [activeIntlLocale])
 
   const contextValue = useMemo<AppI18nContextValue>(

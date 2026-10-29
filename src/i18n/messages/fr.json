@@ -3781,7 +3781,8 @@
         "changeScopeUser": "Enregistré dans les paramètres utilisateur",
         "changeScopeProject": "Enregistré dans les paramètres du projet",
         "changeScopeProjectLocal": "Enregistré dans les paramètres locaux du projet",
-        "changeScopePersistent": "Enregistré définitivement"
+        "changeScopePersistent": "Enregistré définitivement",
+        "keyboardHint": "Appuyez sur 1–9 pour choisir une option, sur les flèches pour passer de l'une à l'autre, sur Entrée pour celle qui a le focus et sur Échap pour revenir à la zone de message."
       },
       "questionDialog": {
         "title": "L'agent pose une question",
@@ -4221,7 +4222,8 @@
         "submit": "Envoyer",
         "submitError": "Échec de l'envoi. Veuillez réessayer.",
         "collapse": "Replier",
-        "expand": "Déplier"
+        "expand": "Déplier",
+        "keyboardHint": "Les flèches déplacent, Entrée choisit et continue, 1–9 choisit une option, Espace coche dans une question à choix multiples, Ctrl ou ⌘ + Entrée envoie, Échap revient à la zone de message."
       },
       "planApproval": {
         "title": "L'agent a un plan — à vérifier",
@@ -4232,7 +4234,8 @@
         "feedbackPlaceholder": "Que faut-il changer ?",
         "sendChanges": "Envoyer",
         "cancel": "Annuler",
-        "submitError": "Échec de l'envoi. Veuillez réessayer."
+        "submitError": "Échec de l'envoi. Veuillez réessayer.",
+        "keyboardHint": "Appuyez sur 1 pour approuver, 2 pour demander des modifications, 3 puis Entrée pour abandonner, Échap pour revenir à la zone de message."
       },
       "feedbackCheckResult": {
         "count": "{count, plural, =1 {1 retour} other {# retours}}",

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect, useCallback } from "react"
+import { useState, useRef, useCallback } from "react"
 import { useTranslations } from "next-intl"
 import { MessageCircleQuestion, SendHorizonal } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -8,6 +8,8 @@ import { matchShortcutEvent } from "@/lib/keyboard-shortcuts"
 import { detectTextDirection } from "@/lib/text-direction"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import { useImeGuard } from "@/hooks/use-ime-guard"
+import { useCardArrivalFocus, useComposerHandoff } from "@/hooks/use-card-focus"
+import { focusComposerFrom } from "@/lib/card-focus"
 import type { PendingQuestion } from "@/contexts/acp-connections-context"
 
 interface QuestionDialogProps {
@@ -20,7 +22,7 @@ export function QuestionDialog({ question, onAnswer }: QuestionDialogProps) {
   const ime = useImeGuard()
   const { shortcuts } = useShortcutSettings()
   const [answer, setAnswer] = useState("")
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
   const prevQuestionIdRef = useRef<string | null>(null)
 
   const questionId = question?.tool_call_id ?? null
@@ -31,11 +33,10 @@ export function QuestionDialog({ question, onAnswer }: QuestionDialogProps) {
     }
   }
 
-  useEffect(() => {
-    if (question) {
-      textareaRef.current?.focus()
-    }
-  }, [question])
+  // The answer field takes focus when a question arrives, never from someone
+  // typing; ↑ in an empty composer comes back to it.
+  useCardArrivalFocus(rootRef, questionId, true)
+  useComposerHandoff(rootRef, questionId !== null)
 
   const handleSubmit = useCallback(() => {
     const trimmed = answer.trim()
@@ -48,6 +49,12 @@ export function QuestionDialog({ question, onAnswer }: QuestionDialogProps) {
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       // The Enter that confirms a CJK candidate must reach the IME, not send.
       if (ime.isComposing(e)) return
+      // Esc goes back to the composer; it never answers.
+      if (e.key === "Escape" && focusComposerFrom(rootRef.current)) {
+        e.preventDefault()
+        e.stopPropagation()
+        return
+      }
       if (matchShortcutEvent(e, shortcuts.send_message)) {
         e.preventDefault()
         handleSubmit()
@@ -59,7 +66,10 @@ export function QuestionDialog({ question, onAnswer }: QuestionDialogProps) {
   if (!question) return null
 
   return (
-    <div className="mx-4 mb-3 rounded-xl border border-blue-500/30 bg-card/95 p-3 shadow-sm">
+    <div
+      ref={rootRef}
+      className="mx-4 mb-3 rounded-xl border border-blue-500/30 bg-card/95 p-3 shadow-sm"
+    >
       <div className="flex items-center gap-1.5 text-sm font-medium">
         <MessageCircleQuestion className="h-4 w-4 shrink-0 text-blue-500" />
         <span>{t("title")}</span>
@@ -74,7 +84,7 @@ export function QuestionDialog({ question, onAnswer }: QuestionDialogProps) {
 
       <div className="mt-3 flex gap-2">
         <textarea
-          ref={textareaRef}
+          data-card-entry=""
           value={answer}
           dir={detectTextDirection(answer)}
           onChange={(e) => setAnswer(e.target.value)}

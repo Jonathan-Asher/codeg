@@ -494,6 +494,7 @@ export function QuickAskWindow() {
       ref={rootRef}
       className="relative flex h-full min-h-0 flex-col"
       data-testid="quick-ask"
+      data-composer-scope=""
       {...attach.containerDragProps}
     >
       {attach.isDragActive && (
@@ -675,6 +676,7 @@ export function QuickAskWindow() {
                 "min-h-6 flex-1 resize-none bg-transparent py-0.5 text-sm leading-[1.7143] outline-none placeholder:text-muted-foreground"
               )}
               data-testid="qa-input"
+              data-composer-input=""
             />
             {streaming ? (
               <Button

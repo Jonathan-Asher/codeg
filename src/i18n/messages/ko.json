@@ -3781,7 +3781,8 @@
         "changeScopeUser": "사용자 설정에 저장",
         "changeScopeProject": "프로젝트 설정에 저장",
         "changeScopeProjectLocal": "로컬 프로젝트 설정에 저장",
-        "changeScopePersistent": "영구 저장"
+        "changeScopePersistent": "영구 저장",
+        "keyboardHint": "1–9로 옵션 선택, 화살표 키로 옵션 간 이동, Enter로 현재 옵션 선택, Esc로 입력창으로 돌아갑니다."
       },
       "questionDialog": {
         "title": "에이전트가 질문하고 있습니다",
@@ -4221,7 +4222,8 @@
         "submit": "제출",
         "submitError": "제출하지 못했습니다. 다시 시도해 주세요.",
         "collapse": "접기",
-        "expand": "펼치기"
+        "expand": "펼치기",
+        "keyboardHint": "화살표 키로 이동, Enter로 선택 후 계속, 1–9로 옵션 선택, 복수 선택 질문에서는 Space로 체크, Ctrl 또는 ⌘ + Enter로 제출, Esc로 입력창으로 돌아갑니다."
       },
       "planApproval": {
         "title": "에이전트가 계획을 제시했습니다 — 검토하세요",
@@ -4232,7 +4234,8 @@
         "feedbackPlaceholder": "무엇을 변경할까요?",
         "sendChanges": "보내기",
         "cancel": "취소",
-        "submitError": "제출하지 못했습니다. 다시 시도하세요."
+        "submitError": "제출하지 못했습니다. 다시 시도하세요.",
+        "keyboardHint": "1로 승인, 2로 변경 요청, 3 다음 Enter로 포기, Esc로 입력창으로 돌아갑니다."
       },
       "feedbackCheckResult": {
         "count": "피드백 {count}개",

@@ -3781,7 +3781,8 @@
         "changeScopeUser": "儲存至使用者設定",
         "changeScopeProject": "儲存至專案設定",
         "changeScopeProjectLocal": "儲存至本機專案設定",
-        "changeScopePersistent": "永久儲存"
+        "changeScopePersistent": "永久儲存",
+        "keyboardHint": "按 1–9 選擇選項，方向鍵在選項間移動，Enter 選擇目前選項，Esc 返回輸入框。"
       },
       "questionDialog": {
         "title": "代理正在提問",
@@ -4221,7 +4222,8 @@
         "submit": "提交",
         "submitError": "提交失敗，請重試。",
         "collapse": "摺疊",
-        "expand": "展開"
+        "expand": "展開",
+        "keyboardHint": "方向鍵移動，Enter 選擇並繼續，1–9 選擇對應選項，複選題中用空白鍵勾選，Ctrl 或 ⌘ + Enter 送出，Esc 返回輸入框。"
       },
       "planApproval": {
         "title": "智慧代理已提出計畫——請審閱",
@@ -4232,7 +4234,8 @@
         "feedbackPlaceholder": "需要修改什麼？",
         "sendChanges": "傳送",
         "cancel": "取消",
-        "submitError": "提交失敗，請重試。"
+        "submitError": "提交失敗，請重試。",
+        "keyboardHint": "按 1 核准，按 2 要求修改，按 3 再按 Enter 放棄，Esc 返回輸入框。"
       },
       "feedbackCheckResult": {
         "count": "{count} 則回饋",
