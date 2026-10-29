@@ -161,7 +161,7 @@ describe("answers marked secret", () => {
     const stored = backend.entries.get(historyEntryKey("web:a", 3))!.json
     expect(stored).not.toContain("sk-live-123")
     expect(stored).toContain("Your API key?")
-    const loaded = await cache.load("web:a", 3)
+    const loaded = (await cache.load("web:a", 3))?.detail
     const result = loaded!.turns[1].blocks[1]
     expect(result.type === "tool_result" && result.output_preview).toBeNull()
   })
@@ -180,7 +180,7 @@ describe("the disk cache", () => {
       true
     )
     const afterRestart = createHistoryDiskCache(backend)
-    expect(await afterRestart.load("local", 7)).toEqual(detail)
+    expect((await afterRestart.load("local", 7))?.detail).toEqual(detail)
   })
 
   it("keeps each server's sessions apart", async () => {
@@ -195,7 +195,7 @@ describe("the disk cache", () => {
     await cache.clearServer("remote:https://a.example")
     expect(await cache.load("remote:https://a.example", 7)).toBeNull()
     expect(
-      (await cache.load("remote:https://b.example", 7))!.turns
+      (await cache.load("remote:https://b.example", 7))!.detail.turns
     ).toHaveLength(3)
   })
 
@@ -226,6 +226,17 @@ describe("the disk cache", () => {
     await bySize.save("local", 3, windowed(3, 2))
     expect(await bySize.load("local", 1)).toBeNull()
     expect(await bySize.load("local", 3)).not.toBeNull()
+  })
+
+  it("keeps only the newest turns of a large window, within the entry budget", async () => {
+    const backend = createMemoryDiskBackend()
+    const cache = createHistoryDiskCache(backend, { maxEntryBytes: 10_000 })
+    await cache.save("local", 8, windowed(8, 40, 0, "x".repeat(1000)))
+    const entry = backend.entries.get(historyEntryKey("local", 8))!
+    expect(entry.json.length).toBeLessThanOrEqual(10_000)
+    const kept = (await cache.load("local", 8))!.detail
+    expect(kept.turns[kept.turns.length - 1].id).toBe("turn-39")
+    expect(kept.turns_offset).toBeGreaterThan(0)
   })
 
   it("forgets a deleted session, and everything on sign-out", async () => {

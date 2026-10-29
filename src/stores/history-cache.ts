@@ -1,3 +1,4 @@
+import { perfMark } from "@/lib/perf-marks"
 import type { DbConversationDetail } from "@/lib/types"
 import {
   getHistoryDiskCache,
@@ -56,20 +57,27 @@ export function warmFromDisk(
   const server = historyServerKey()
   const disk = getHistoryDiskCache()
   if (server === null || !disk) return Promise.resolve(null)
-  const read = disk.load(server, conversationId).then((detail) => {
+  const startedAt = Date.now()
+  const read = disk.load(server, conversationId).then((kept) => {
     if (diskReads.get(conversationId) === read) {
       diskReads.delete(conversationId)
     }
+    perfMark("detail:disk", {
+      conversationId,
+      ms: Date.now() - startedAt,
+      hit: kept != null,
+      ...(kept ? { bytes: kept.json.length } : {}),
+    })
     // Asked to forget this server or session while the read was out.
-    if (!detail || historyServerKey() !== server || forgotten.has(read)) {
+    if (!kept || historyServerKey() !== server || forgotten.has(read)) {
       return null
     }
     // It is what the disk holds: shown and refreshed, never written back.
-    written.add(detail)
+    written.add(kept.detail)
     if (stillWanted() && !leftDetailCache.has(conversationId)) {
-      leftDetailCache.put(conversationId, detail)
+      leftDetailCache.put(conversationId, kept)
     }
-    return detail
+    return kept.detail
   })
   diskReads.set(conversationId, read)
   return read

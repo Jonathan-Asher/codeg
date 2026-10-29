@@ -2134,6 +2134,15 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
 
   hydrate: () => {
     let cancelled = false
+    // The tab each group showed when this device last closed: read back from
+    // the history cache while the server lists the tabs (device-local, so
+    // possibly stale; a session read for nothing just sits in memory).
+    prewarmConversationsFromDisk(
+      Object.values(get().groupSelection).flatMap((tabId) => {
+        const id = /^conv-.+-(\d+)$/.exec(tabId)?.[1]
+        return id ? [Number(id)] : []
+      })
+    )
     void (async () => {
       let snapshotLoaded = false
       try {

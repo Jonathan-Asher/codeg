@@ -27,6 +27,15 @@ import {
 export const HISTORY_DISK_MAX_BYTES = 100 * 1024 * 1024
 /** Sessions kept. */
 export const HISTORY_DISK_MAX_ENTRIES = 64
+/**
+ * Largest single entry. Smaller than what memory keeps: a restart reads the
+ * restored tabs back while the app is still starting, and in a webview the
+ * read crosses into the storage process, so its cost grows with the entry
+ * (~400 ms for 7 MB on the M1 box, mid-startup). The newest turns paint the
+ * view, the refresh brings whatever came after them, and older history pages
+ * in as the reader scrolls up.
+ */
+export const HISTORY_DISK_ENTRY_MAX_BYTES = 2 * 1024 * 1024
 /** Bumped when the stored shape changes: older entries are then ignored. */
 const ENTRY_FORMAT = 1
 
@@ -51,11 +60,12 @@ export interface DiskBackend {
 }
 
 export interface HistoryDiskCache {
-  /** The kept detail, or null (none, unreadable, or written by an older format). */
-  load(
-    server: string,
-    conversationId: number
-  ): Promise<DbConversationDetail | null>
+  /**
+   * The kept detail with the JSON it was read from (its size, for the memory
+   * budget, without serializing it again), or null: none, unreadable, or
+   * written by an older format.
+   */
+  load(server: string, conversationId: number): Promise<KeptDetail | null>
   /** Write `detail` (shaped and stripped of secrets here). False when not kept. */
   save(
     server: string,
@@ -95,9 +105,18 @@ function looksLikeDetail(
 
 export function createHistoryDiskCache(
   backend: DiskBackend,
-  options?: { maxBytes?: number; maxEntries?: number; now?: () => number }
+  options?: {
+    maxBytes?: number
+    maxEntries?: number
+    maxEntryBytes?: number
+    now?: () => number
+  }
 ): HistoryDiskCache {
   const maxBytes = options?.maxBytes ?? HISTORY_DISK_MAX_BYTES
+  const maxEntryBytes = Math.min(
+    options?.maxEntryBytes ?? HISTORY_DISK_ENTRY_MAX_BYTES,
+    maxBytes
+  )
   const maxEntries = options?.maxEntries ?? HISTORY_DISK_MAX_ENTRIES
   const now = options?.now ?? Date.now
   // One operation at a time in this window, in call order: a removal asked
@@ -145,23 +164,31 @@ export function createHistoryDiskCache(
           await backend.remove([key])
           return null
         }
-        await backend.touch(key, now())
-        return parsed
+        // Recency is noted after the answer is out: the open waits on it.
+        void serial(() => backend.touch(key, now()), undefined)
+        return { detail: parsed, json: entry.json }
       }, null)
     },
 
     save(server, conversationId, value) {
       const key = historyEntryKey(server, conversationId)
       return serial(async () => {
-        const shaped = isKept(value) ? value : shapeKeptDetail(value)
+        // Taken out first, so what is measured is what is written.
+        const detail = withoutSecretAnswers(
+          isKept(value) ? value.detail : value
+        )
+        const shaped =
+          isKept(value) &&
+          detail === value.detail &&
+          value.json.length <= maxEntryBytes
+            ? value
+            : shapeKeptDetail(detail, { maxBytes: maxEntryBytes })
         if (!shaped) {
           await backend.remove([key])
           return false
         }
-        const clean = withoutSecretAnswers(shaped.detail)
-        const json =
-          clean === shaped.detail ? shaped.json : JSON.stringify(clean)
-        if (json.length > maxBytes) {
+        const json = shaped.json
+        if (json.length > maxEntryBytes) {
           await backend.remove([key])
           return false
         }
