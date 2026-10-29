@@ -103,6 +103,10 @@ pub enum AcpError {
     /// same click works once the turn ends.
     #[error("this agent can only fork between turns")]
     ForkNeedsIdle,
+    /// The agent's adapter answered `initialize` without `session/fork`, so
+    /// none of its conversations can be forked.
+    #[error("this agent cannot fork a conversation")]
+    ForkUnsupported,
     /// Every enabled account of the local account pool is at its limit, so
     /// the agent cannot take a request: a prompt held back before it reached
     /// the agent, or an attach stopped because the agent hung in its own 429
@@ -173,6 +177,7 @@ impl AcpError {
             Self::AgentAuthRequired(_) => Some("agent_auth_required"),
             Self::ForkPointUnresolved(_) => Some("fork_point_unresolved"),
             Self::ForkNeedsIdle => Some("fork_needs_idle"),
+            Self::ForkUnsupported => Some("fork_unsupported"),
             Self::PoolExhausted { .. } => Some("pool_exhausted"),
             Self::Protocol(_) => None,
         }

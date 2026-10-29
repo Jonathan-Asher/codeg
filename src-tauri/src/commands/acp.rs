@@ -10971,6 +10971,63 @@ pub async fn acp_fork_to_new_conversation(
     .await
 }
 
+/// "Fork" on a whole conversation — the sidebar's and the conversation
+/// menu's: a NEW conversation forked at its latest finished reply, open or
+/// not. See [`ConnectionManager::fork_conversation_to_new_conversation`].
+/// Shared by the Tauri command and the web handler; `owner_window_label` and
+/// `emitter` are the caller's.
+pub(crate) async fn acp_fork_conversation_core(
+    manager: &ConnectionManager,
+    db: &AppDatabase,
+    data_dir: &Path,
+    conversation_id: i32,
+    owner_window_label: String,
+    emitter: EventEmitter,
+) -> Result<crate::acp::types::ForkToNewConversationInfo, AcpError> {
+    let agent_type = crate::db::service::conversation_service::get_by_id(&db.conn, conversation_id)
+        .await
+        .map_err(|e| AcpError::protocol(e.to_string()))?
+        .agent_type;
+    // The fork launches an agent process; like a connect, it never installs
+    // one.
+    verify_agent_installed(agent_type).await?;
+    let runtime_env = build_session_runtime_env(db, agent_type, None, data_dir).await?;
+    manager
+        .fork_conversation_to_new_conversation(
+            db,
+            conversation_id,
+            owner_window_label,
+            emitter,
+            runtime_env,
+        )
+        .await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_fork_conversation(
+    conversation_id: i32,
+    db: State<'_, AppDatabase>,
+    manager: State<'_, ConnectionManager>,
+    app_handle: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<crate::acp::types::ForkToNewConversationInfo, AcpError> {
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map(|p| crate::paths::resolve_effective_data_dir(&p))
+        .unwrap_or_else(|_| PathBuf::from("."));
+    acp_fork_conversation_core(
+        &manager,
+        &db,
+        &app_data_dir,
+        conversation_id,
+        window.label().to_string(),
+        EventEmitter::Tauri(app_handle),
+    )
+    .await
+}
+
 /// Stop one AIR async task. `Ok(false)` = the adapter declined (unknown,
 /// already terminal, or a stop already in flight) — a real answer, not a
 /// failure.

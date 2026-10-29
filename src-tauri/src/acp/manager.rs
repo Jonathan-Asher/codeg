@@ -471,7 +471,32 @@ pub(crate) struct MidRunForkJob {
     pub working_dir: Option<String>,
     pub owner_window_label: String,
     pub source_session_id: String,
-    pub fork_point: crate::acp::fork::ForkPoint,
+    /// `None` forks at the tail: only between turns, see
+    /// [`crate::acp::fork::settle_latest_reply_fork_point`].
+    pub fork_point: Option<crate::acp::fork::ForkPoint>,
+}
+
+/// The conversation a fork into a new one copies, as read off its live
+/// connection or, with none, off its row (see
+/// [`ConnectionManager::fork_conversation_to_new_conversation`]).
+struct NewConversationForkSource {
+    agent_type: AgentType,
+    adapter: crate::acp::fork::ForkAdapter,
+    /// Where the new row is announced.
+    emitter: EventEmitter,
+    owner_window_label: String,
+    conversation_id: i32,
+    working_dir: Option<String>,
+    /// The session the connection runs; the row's own wins when it has one.
+    live_session_id: Option<String>,
+    running: bool,
+    pending: Option<(
+        crate::acp::session_state::PendingUserMessage,
+        Option<chrono::DateTime<chrono::Utc>>,
+    )>,
+    /// The connection's prompt lock, held for the whole fork by an adapter
+    /// that cannot fork while a turn runs.
+    turn_gate: Option<tokio::sync::OwnedMutexGuard<()>>,
 }
 
 /// What [`ConnectionManager::release`] did with a connection.
@@ -3687,10 +3712,178 @@ impl ConnectionManager {
         F: FnOnce(MidRunForkJob) -> FFut + Send + 'static,
         FFut: std::future::Future<Output = Result<String, AcpError>> + Send + 'static,
     {
-        // Read the source connection, and nothing more. No prompt lock: the
-        // running turn — and every prompt queued behind it — must never wait
-        // on a fork it takes no part in.
-        let (state_arc, emitter, owner_window_label, agent_type) = {
+        let source = self.live_fork_source(conn_id, conversation_id, false).await?;
+        self.fork_source_to_new_conversation(
+            db,
+            source,
+            Some(fork_from_turn_id),
+            read_conversation,
+            fork,
+        )
+        .await
+    }
+
+    /// "Fork" on a whole conversation, from the sidebar or the conversation's
+    /// menu: duplicate it, forked at its latest finished reply, into a NEW
+    /// conversation, whether or not anything has it open.
+    ///
+    /// Given the row alone, this finds the rest itself — the agent, the
+    /// session, and where the latest finished reply is — and forks in a
+    /// separate agent process, as [`Self::fork_session_to_new_conversation`]
+    /// does, sharing its code. Nothing about the original changes: not its
+    /// row, not its connection, not a turn running on it.
+    ///
+    /// * No connection has the conversation open (most sidebar rows): nothing
+    ///   is writing to its session, so any agent that forks can fork it, at
+    ///   the last reply in its transcript.
+    /// * A connection has it open: its adapter decides, as for "Fork from
+    ///   here". One that forks while a turn runs forks at the last reply
+    ///   before a running turn's prompt. Any other is refused while a turn
+    ///   runs ([`AcpError::ForkNeedsIdle`]) and otherwise forks with that
+    ///   connection's prompt lock held throughout, so no turn starts writing
+    ///   to the session under the fork.
+    ///
+    /// `owner_window_label` and `emitter` stand in for a connection's when no
+    /// connection has the conversation open: the window the forking process
+    /// belongs to, and where the new row is announced.
+    pub async fn fork_conversation_to_new_conversation(
+        &self,
+        db: &AppDatabase,
+        conversation_id: i32,
+        owner_window_label: String,
+        emitter: EventEmitter,
+        runtime_env: BTreeMap<String, String>,
+    ) -> Result<ForkToNewConversationInfo, AcpError> {
+        let reader = db.conn.clone();
+        let forker = self.clone_ref();
+        self.fork_conversation_to_new_conversation_with(
+            db,
+            conversation_id,
+            owner_window_label,
+            emitter,
+            move |conversation_id| async move {
+                crate::commands::conversations::get_folder_conversation_core(
+                    &reader,
+                    conversation_id,
+                )
+                .await
+                .map(|(detail, _)| (detail.turns, detail.summary.external_id))
+                .map_err(|e| e.to_string())
+            },
+            move |job| async move { forker.fork_in_new_agent_process(job, runtime_env).await },
+        )
+        .await
+    }
+
+    /// [`Self::fork_conversation_to_new_conversation`] with the same two
+    /// outside effects handed in as [`Self::fork_to_new_conversation_with`].
+    async fn fork_conversation_to_new_conversation_with<R, RFut, F, FFut>(
+        &self,
+        db: &AppDatabase,
+        conversation_id: i32,
+        owner_window_label: String,
+        emitter: EventEmitter,
+        read_conversation: R,
+        fork: F,
+    ) -> Result<ForkToNewConversationInfo, AcpError>
+    where
+        R: FnOnce(i32) -> RFut,
+        RFut: std::future::Future<
+            Output = Result<(Vec<crate::models::message::MessageTurn>, Option<String>), String>,
+        >,
+        F: FnOnce(MidRunForkJob) -> FFut + Send + 'static,
+        FFut: std::future::Future<Output = Result<String, AcpError>> + Send + 'static,
+    {
+        let row = conversation_service::get_by_id(&db.conn, conversation_id)
+            .await
+            .map_err(|e| AcpError::protocol(e.to_string()))?;
+        let agent_type = row.agent_type;
+        // A row with no agent session has never had a reply.
+        let session_id = row.external_id.clone().ok_or_else(|| {
+            AcpError::ForkPointUnresolved(crate::acp::fork::NO_FINISHED_REPLY.to_string())
+        })?;
+        let source = match self
+            .live_holder_of_conversation(conversation_id, agent_type, &session_id)
+            .await
+        {
+            Some(conn_id) => self.live_fork_source(&conn_id, Some(conversation_id), true).await?,
+            None => {
+                // The directory a connection would open it in.
+                let working_dir = match row.origin_cwd.clone() {
+                    Some(cwd) => Some(cwd),
+                    None => crate::db::service::folder_service::get_folder_by_id(
+                        &db.conn,
+                        row.folder_id,
+                    )
+                    .await
+                    .map_err(|e| AcpError::protocol(e.to_string()))?
+                    .map(|folder| folder.path),
+                };
+                NewConversationForkSource {
+                    agent_type,
+                    adapter: agent_type.into(),
+                    emitter,
+                    owner_window_label,
+                    conversation_id,
+                    working_dir,
+                    live_session_id: Some(session_id),
+                    running: false,
+                    pending: None,
+                    turn_gate: None,
+                }
+            }
+        };
+        self.fork_source_to_new_conversation(db, source, None, read_conversation, fork)
+            .await
+    }
+
+    /// The live connection that has this conversation open: linked to its
+    /// row, or — not linked to any row yet — running its session.
+    async fn live_holder_of_conversation(
+        &self,
+        conversation_id: i32,
+        agent_type: AgentType,
+        session_id: &str,
+    ) -> Option<String> {
+        let connections = self.connections.lock().await;
+        for (id, conn) in connections.iter() {
+            if conn.agent_type != agent_type {
+                continue;
+            }
+            let state = conn.state.read().await;
+            let holds = match state.conversation_id {
+                Some(linked) => linked == conversation_id,
+                None => state.represents_session(session_id),
+            };
+            if holds
+                && matches!(
+                    state.status,
+                    ConnectionStatus::Connecting
+                        | ConnectionStatus::Connected
+                        | ConnectionStatus::Prompting
+                )
+            {
+                return Some(id.clone());
+            }
+        }
+        None
+    }
+
+    /// What a fork into a new conversation reads off a live connection.
+    ///
+    /// The connection is only READ. No prompt lock for an adapter that forks
+    /// while a turn runs: the running turn — and every prompt queued behind
+    /// it — must never wait on a fork it takes no part in. Any other adapter
+    /// is refused ([`AcpError::ForkNeedsIdle`]), unless `gate_turns`: then it
+    /// may fork between turns, holding the prompt lock until the fork is done
+    /// so that no turn starts writing to the session it is reading.
+    async fn live_fork_source(
+        &self,
+        conn_id: &str,
+        conversation_id: Option<i32>,
+        gate_turns: bool,
+    ) -> Result<NewConversationForkSource, AcpError> {
+        let (state_arc, emitter, owner_window_label, agent_type, prompt_lock) = {
             let connections = self.connections.lock().await;
             let conn = connections
                 .get(conn_id)
@@ -3700,12 +3893,21 @@ impl ConnectionManager {
                 conn.emitter.clone(),
                 conn.owner_window_label.clone(),
                 conn.agent_type,
+                conn.prompt_lock.clone(),
             )
         };
         let adapter = fork_adapter_of(&*state_arc.read().await);
-        if !adapter.caps.while_running {
+        let turn_gate = if adapter.caps.while_running {
+            None
+        } else if gate_turns {
+            let gate = prompt_lock.lock_owned().await;
+            if state_arc.read().await.turn_in_flight {
+                return Err(AcpError::ForkNeedsIdle);
+            }
+            Some(gate)
+        } else {
             return Err(AcpError::ForkNeedsIdle);
-        }
+        };
 
         // Whether a turn runs, and the prompt that started it — read BEFORE
         // the transcript: a turn starting in between only adds a prompt the
@@ -3725,14 +3927,59 @@ impl ConnectionManager {
         let conversation_id = linked.or(conversation_id).ok_or_else(|| {
             AcpError::protocol("fork requires a conversation row".to_string())
         })?;
+        Ok(NewConversationForkSource {
+            agent_type,
+            adapter,
+            emitter,
+            owner_window_label,
+            conversation_id,
+            working_dir: working_dir.map(|p| p.to_string_lossy().into_owned()),
+            live_session_id,
+            running,
+            pending,
+            turn_gate,
+        })
+    }
+
+    /// Fork `source` into a new conversation, at `fork_from_turn_id` — a
+    /// finished reply — or, given none, at the conversation's latest finished
+    /// reply.
+    async fn fork_source_to_new_conversation<R, RFut, F, FFut>(
+        &self,
+        db: &AppDatabase,
+        source: NewConversationForkSource,
+        fork_from_turn_id: Option<&str>,
+        read_conversation: R,
+        fork: F,
+    ) -> Result<ForkToNewConversationInfo, AcpError>
+    where
+        R: FnOnce(i32) -> RFut,
+        RFut: std::future::Future<
+            Output = Result<(Vec<crate::models::message::MessageTurn>, Option<String>), String>,
+        >,
+        F: FnOnce(MidRunForkJob) -> FFut + Send + 'static,
+        FFut: std::future::Future<Output = Result<String, AcpError>> + Send + 'static,
+    {
+        let NewConversationForkSource {
+            agent_type,
+            adapter,
+            emitter,
+            owner_window_label,
+            conversation_id,
+            working_dir,
+            live_session_id,
+            running,
+            pending,
+            turn_gate,
+        } = source;
 
         let (mut turns, row_session_id) = match read_conversation(conversation_id).await {
             Ok((turns, session)) => (Ok(turns), session),
             Err(e) => {
                 tracing::warn!(
-                    connection_id = %conn_id,
-                    turn_id = %fork_from_turn_id,
-                    "[ACP] could not read the conversation to resolve a mid-run fork point ({e})"
+                    conversation_id,
+                    turn_id = ?fork_from_turn_id,
+                    "[ACP] could not read the conversation to resolve a fork point ({e})"
                 );
                 (Err(e), None)
             }
@@ -3748,13 +3995,22 @@ impl ConnectionManager {
             }
             _ => None,
         };
-        let fork_point = crate::acp::fork::settle_mid_run_fork_point(
-            turns.as_deref().map_err(String::as_str),
-            fork_from_turn_id,
-            adapter,
-            running,
-            in_flight_prompt.as_deref(),
-        )?;
+        let turns = turns.as_deref().map_err(String::as_str);
+        let fork_point = match fork_from_turn_id {
+            Some(turn_id) => Some(crate::acp::fork::settle_mid_run_fork_point(
+                turns,
+                turn_id,
+                adapter,
+                running,
+                in_flight_prompt.as_deref(),
+            )?),
+            None => crate::acp::fork::settle_latest_reply_fork_point(
+                turns,
+                adapter,
+                running,
+                in_flight_prompt.as_deref(),
+            )?,
+        };
 
         // The transcript the row shows. That is the agent's session — except
         // after a Claude `/clear`, where the row follows the new transcript
@@ -3766,17 +4022,19 @@ impl ConnectionManager {
         })?;
         let job = MidRunForkJob {
             agent_type,
-            working_dir: working_dir.map(|p| p.to_string_lossy().into_owned()),
+            working_dir,
             owner_window_label,
             source_session_id: source_session_id.clone(),
             fork_point,
         };
         tracing::info!(
-            connection_id = %conn_id,
             conversation_id,
             running,
             source_session = %source_session_id,
-            fork_point = %job.fork_point.message_id,
+            fork_point = job
+                .fork_point
+                .as_ref()
+                .map_or("<tail>", |point| point.message_id.as_str()),
             "[ACP] forking into a new conversation"
         );
 
@@ -3788,6 +4046,9 @@ impl ConnectionManager {
         // waits to hand the result back.
         let db_conn = db.conn.clone();
         let handle = tokio::spawn(async move {
+            // Held until the fork is recorded, so no turn starts writing to
+            // the session it reads (see `live_fork_source`).
+            let _turn_gate = turn_gate;
             let forked_session_id = fork(job).await?;
             let row =
                 Self::record_fork_to_new_conversation(&db_conn, conversation_id, &forked_session_id)
@@ -11929,9 +12190,10 @@ mod tests {
         // The fork the agent process was asked for.
         let job = seen.lock().unwrap().take().expect("forked");
         assert_eq!(job.source_session_id, "session-S1");
-        assert_eq!(job.fork_point.message_id, "msg_01");
+        let point = job.fork_point.as_ref().expect("a named reply");
+        assert_eq!(point.message_id, "msg_01");
         assert_eq!(
-            job.fork_point.message_fingerprint.as_deref(),
+            point.message_fingerprint.as_deref(),
             Some(crate::acp::fork::fingerprint_agent_message("hello").as_str())
         );
         assert_eq!(job.working_dir.as_deref(), Some("/tmp/fork-mid-run"));
@@ -12070,7 +12332,10 @@ mod tests {
             .fork_to_new_conversation_with(&db, conn_id, None, "turn-3", read, fork)
             .await
             .expect("an ended turn's reply is finished");
-        assert_eq!(seen.lock().unwrap().take().unwrap().fork_point.message_id, "msg_02");
+        assert_eq!(
+            seen.lock().unwrap().take().unwrap().fork_point.unwrap().message_id,
+            "msg_02"
+        );
         assert_ne!(info.conversation_id, pre.id);
     }
 
@@ -12130,6 +12395,310 @@ mod tests {
         assert_eq!(event.payload["kind"], "upsert");
         assert_eq!(event.payload["summary"]["id"], info.conversation_id);
         assert_eq!(event.payload["summary"]["external_id"], "session-S4");
+    }
+
+    // --- Fork on a whole conversation ----------------------------------------
+    //
+    // `fork_conversation_to_new_conversation_with` takes a conversation id
+    // alone. With no connection open on it, everything comes off its row.
+
+    /// A Claude Code conversation on session S1 that nothing has open: pinned,
+    /// critical, with a model and a mode.
+    async fn seed_closed_conversation(db: &AppDatabase, agent_type: AgentType) -> conversation::Model {
+        use crate::db::test_helpers;
+        let folder_id = test_helpers::seed_folder(db, "/tmp/fork-conversation").await;
+        let pre = conversation_service::create(
+            &db.conn,
+            folder_id,
+            agent_type,
+            Some("Topic".into()),
+            Some("main".into()),
+        )
+        .await
+        .unwrap();
+        conversation_service::bind_external_id(&db.conn, pre.id, "session-S1", &[])
+            .await
+            .unwrap();
+        let mut active: conversation::ActiveModel = conversation::Entity::find_by_id(pre.id)
+            .one(&db.conn)
+            .await
+            .unwrap()
+            .unwrap()
+            .into();
+        active.model = Set(Some("opus".into()));
+        active.selector_state = Set(Some(r#"{"mode":"plan"}"#.into()));
+        active.critical = Set(true);
+        active.pinned_at = Set(Some(chrono::Utc::now()));
+        active.pin_order = Set(Some(0));
+        active.update(&db.conn).await.unwrap();
+        conversation::Entity::find_by_id(pre.id)
+            .one(&db.conn)
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn conversation_fork_with_nothing_open_copies_it_into_a_new_row() {
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let mgr = ConnectionManager::new();
+        let pre = seed_closed_conversation(&db, AgentType::ClaudeCode).await;
+        let broadcaster = Arc::new(WebEventBroadcaster::new());
+        let mut rx = broadcaster.subscribe();
+
+        let (read, fork, seen) = mid_run_io(mid_run_transcript(), Ok("session-S2"));
+        let info = mgr
+            .fork_conversation_to_new_conversation_with(
+                &db,
+                pre.id,
+                "window-a".into(),
+                EventEmitter::test_web_only(broadcaster.clone()),
+                read,
+                fork,
+            )
+            .await
+            .expect("an idle conversation forks");
+
+        // Its latest reply, from its own session, in its folder's directory,
+        // under the caller's window — and no connection was opened for it.
+        let job = seen.lock().unwrap().take().expect("forked");
+        assert_eq!(job.agent_type, AgentType::ClaudeCode);
+        assert_eq!(job.source_session_id, "session-S1");
+        assert_eq!(job.fork_point.expect("a named reply").message_id, "msg_02");
+        assert_eq!(job.working_dir.as_deref(), Some("/tmp/fork-conversation"));
+        assert_eq!(job.owner_window_label, "window-a");
+        assert!(mgr.connections.lock().await.is_empty());
+
+        let after = conversation::Entity::find_by_id(pre.id).one(&db.conn).await.unwrap();
+        assert_eq!(after, Some(pre.clone()), "the original is not touched");
+
+        assert_eq!(info.forked_session_id, "session-S2");
+        assert_eq!(info.original_session_id, "session-S1");
+        assert_eq!(info.folder_id, pre.folder_id);
+        assert_eq!(info.title.as_deref(), Some("[Fork] Topic"));
+        let row = conversation::Entity::find_by_id(info.conversation_id)
+            .one(&db.conn)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.folder_id, pre.folder_id);
+        assert_eq!(row.external_id.as_deref(), Some("session-S2"));
+        assert_eq!(row.title.as_deref(), Some("[Fork] Topic"));
+        assert_eq!(row.selector_state, pre.selector_state, "same mode and model");
+        assert_eq!(row.model, pre.model);
+        assert!(!row.critical, "the fork starts unwatched");
+        assert_eq!(row.pinned_at, None, "and unpinned");
+        assert_eq!(row.pin_order, None);
+        let event = rx.try_recv().expect("the new row is announced");
+        assert_eq!(event.payload["summary"]["id"], info.conversation_id);
+
+        // Forked again, it is numbered past the first fork.
+        let (read, fork, _) = mid_run_io(mid_run_transcript(), Ok("session-S3"));
+        let again = mgr
+            .fork_conversation_to_new_conversation_with(
+                &db,
+                pre.id,
+                "window-a".into(),
+                EventEmitter::Noop,
+                read,
+                fork,
+            )
+            .await
+            .unwrap();
+        assert_eq!(again.title.as_deref(), Some("[Fork-2] Topic"));
+    }
+
+    #[tokio::test]
+    async fn conversation_fork_refuses_a_conversation_with_no_finished_reply() {
+        use crate::db::test_helpers;
+        use crate::models::message::TurnRole;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let mgr = ConnectionManager::new();
+        let pre = seed_closed_conversation(&db, AgentType::ClaudeCode).await;
+
+        let only_a_prompt = vec![mid_run_turn("turn-0", TurnRole::User, "hi", None)];
+        let (read, fork, seen) = mid_run_io(only_a_prompt, Ok("session-S2"));
+        let err = mgr
+            .fork_conversation_to_new_conversation_with(
+                &db,
+                pre.id,
+                "w".into(),
+                EventEmitter::Noop,
+                read,
+                fork,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains(crate::acp::fork::NO_FINISHED_REPLY), "{err}");
+        assert!(seen.lock().unwrap().is_none(), "no agent process was asked to fork");
+
+        // A row that never reached an agent session has no reply either.
+        let draft = conversation_service::create(
+            &db.conn,
+            pre.folder_id,
+            AgentType::ClaudeCode,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let (read, fork, seen) = mid_run_io(mid_run_transcript(), Ok("session-S2"));
+        let err = mgr
+            .fork_conversation_to_new_conversation_with(
+                &db,
+                draft.id,
+                "w".into(),
+                EventEmitter::Noop,
+                read,
+                fork,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AcpError::ForkPointUnresolved(_)), "got {err:?}");
+        assert!(seen.lock().unwrap().is_none());
+        let all = conversation::Entity::find().all(&db.conn).await.unwrap();
+        assert_eq!(all.len(), 2, "nothing written");
+    }
+
+    #[tokio::test]
+    async fn conversation_fork_of_an_agent_that_cannot_fork_writes_nothing() {
+        // An agent codeg cannot name a reply for forks at the tail between
+        // turns; one whose adapter has no `session/fork` says so, and nothing
+        // is left behind.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let mgr = ConnectionManager::new();
+        let pre = seed_closed_conversation(&db, AgentType::Gemini).await;
+        let seen = Arc::new(std::sync::Mutex::new(None));
+        let cell = seen.clone();
+        let (read, _, _) = mid_run_io(mid_run_transcript(), Ok("unused"));
+        let fork = move |job: MidRunForkJob| {
+            *cell.lock().unwrap() = Some(job);
+            std::future::ready(Err::<String, _>(AcpError::ForkUnsupported))
+        };
+        let err = mgr
+            .fork_conversation_to_new_conversation_with(
+                &db,
+                pre.id,
+                "w".into(),
+                EventEmitter::Noop,
+                read,
+                fork,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AcpError::ForkUnsupported), "got {err:?}");
+        let job = seen.lock().unwrap().take().expect("the agent was asked");
+        assert!(job.fork_point.is_none(), "a tail fork");
+        let all = conversation::Entity::find().all(&db.conn).await.unwrap();
+        assert_eq!(all, vec![pre], "nothing written");
+    }
+
+    #[tokio::test]
+    async fn conversation_fork_of_a_running_turn_follows_the_live_adapter() {
+        use crate::db::test_helpers;
+        // Claude Code forks at the last reply before the running turn's
+        // prompt, without waiting on the running connection's prompt lock.
+        let db = test_helpers::fresh_in_memory_db().await;
+        let mgr = ConnectionManager::new();
+        let conn_id = "c-conversation-fork";
+        let (pre, mut cmd_rx) =
+            seed_running_conversation(&db, &mgr, conn_id, AgentType::ClaudeCode).await;
+        let lock = mgr.clone_prompt_lock(conn_id).await.unwrap();
+        let held = lock.clone().lock_owned().await;
+        let (read, fork, seen) = mid_run_io(mid_run_transcript(), Ok("session-S2"));
+        let info = tokio::time::timeout(
+            Duration::from_secs(5),
+            mgr.fork_conversation_to_new_conversation_with(
+                &db,
+                pre.id,
+                "window-b".into(),
+                EventEmitter::Noop,
+                read,
+                fork,
+            ),
+        )
+        .await
+        .expect("must not wait on the running connection's prompt lock")
+        .unwrap();
+        drop(held);
+        let job = seen.lock().unwrap().take().unwrap();
+        assert_eq!(job.fork_point.unwrap().message_id, "msg_01");
+        assert_eq!(job.owner_window_label, "test-window", "the connection's window");
+        assert!(cmd_rx.try_recv().is_err(), "nothing is sent to the running turn");
+        assert!(mgr.get_state(conn_id).await.unwrap().read().await.turn_in_flight);
+        assert_ne!(info.conversation_id, pre.id);
+        let after = conversation::Entity::find_by_id(pre.id).one(&db.conn).await.unwrap();
+        assert_eq!(after, Some(pre), "the running conversation's row is not touched");
+
+        // Codex forks only between turns.
+        let db = test_helpers::fresh_in_memory_db().await;
+        let mgr = ConnectionManager::new();
+        let (pre, _cmd_rx) = seed_running_conversation(&db, &mgr, conn_id, AgentType::Codex).await;
+        let (read, fork, seen) = mid_run_io(mid_run_transcript(), Ok("session-S2"));
+        let err = mgr
+            .fork_conversation_to_new_conversation_with(
+                &db,
+                pre.id,
+                "w".into(),
+                EventEmitter::Noop,
+                read,
+                fork,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AcpError::ForkNeedsIdle), "got {err:?}");
+        assert!(seen.lock().unwrap().is_none());
+        let all = conversation::Entity::find().all(&db.conn).await.unwrap();
+        assert_eq!(all, vec![pre], "nothing written");
+    }
+
+    #[tokio::test]
+    async fn conversation_fork_between_turns_keeps_a_turn_from_starting_under_it() {
+        // Codex open in a tab, idle: it forks, with the connection's prompt
+        // lock held until the fork is recorded, and the turn gate free after.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let mgr = ConnectionManager::new();
+        let conn_id = "c-idle-codex";
+        let (pre, mut cmd_rx) = seed_running_conversation(&db, &mgr, conn_id, AgentType::Codex).await;
+        {
+            let state = mgr.get_state(conn_id).await.unwrap();
+            let mut s = state.write().await;
+            s.turn_in_flight = false;
+            s.status = ConnectionStatus::Connected;
+        }
+        let lock = mgr.clone_prompt_lock(conn_id).await.unwrap();
+        let gate = lock.clone();
+        let seen = Arc::new(std::sync::Mutex::new(None));
+        let cell = seen.clone();
+        let (read, _, _) = mid_run_io(mid_run_transcript(), Ok("unused"));
+        let fork = move |job: MidRunForkJob| {
+            *cell.lock().unwrap() = Some((job, gate.try_lock().is_err()));
+            std::future::ready(Ok::<_, AcpError>("session-S2".to_string()))
+        };
+        let info = mgr
+            .fork_conversation_to_new_conversation_with(
+                &db,
+                pre.id,
+                "w".into(),
+                EventEmitter::Noop,
+                read,
+                fork,
+            )
+            .await
+            .expect("an idle Codex conversation forks");
+        let (job, gated) = seen.lock().unwrap().take().unwrap();
+        assert!(gated, "no prompt could start while the agent forked");
+        assert!(lock.try_lock().is_ok(), "and the lock is free again");
+        let point = job.fork_point.expect("a named reply");
+        assert_eq!(point.message_id, "turn-3");
+        assert!(point.message_fingerprint.is_some());
+        assert!(cmd_rx.try_recv().is_err());
+        assert_eq!(info.title.as_deref(), Some("[Fork] Topic"));
+        let after = conversation::Entity::find_by_id(pre.id).one(&db.conn).await.unwrap();
+        assert_eq!(after, Some(pre));
     }
 
     // --- wait_for_session_options polling ----------------------------------

@@ -7235,16 +7235,16 @@ async fn run_connection(
             }) = detached_fork
             {
                 if !supports_fork {
-                    let _ = reply.send(Err(AcpError::protocol(
-                        "This agent does not support session/fork".to_string(),
-                    )));
+                    let _ = reply.send(Err(AcpError::ForkUnsupported));
                     return Ok(());
                 }
                 tracing::info!(
                     "[ACP] detached fork: session/fork for session_id={} cwd={} fork_point={}",
                     source_session_id,
                     cwd_string,
-                    fork_point.message_id
+                    fork_point
+                        .as_ref()
+                        .map_or("<tail>", |point| point.message_id.as_str())
                 );
                 let source = SessionId::new(source_session_id);
                 let forked = match attach
@@ -7252,7 +7252,7 @@ async fn run_connection(
                         &cx,
                         &source,
                         &cwd_string,
-                        Some(&fork_point),
+                        fork_point.as_ref(),
                     ))
                     .await
                 {
@@ -10780,9 +10780,9 @@ fn live_mode_for_fork(
 /// disk can serve this (`acp::fork::forks_while_running`).
 pub struct DetachedForkRequest {
     pub source_session_id: String,
-    /// Always a named reply: forked mid-turn, the tail is the reply still
-    /// being written.
-    pub fork_point: crate::acp::fork::ForkPoint,
+    /// A named reply, or `None` for the tail — only for a session no turn is
+    /// writing (forked mid-turn, the tail is the reply still being written).
+    pub fork_point: Option<crate::acp::fork::ForkPoint>,
     pub reply: tokio::sync::oneshot::Sender<Result<String, AcpError>>,
 }
 

@@ -1073,6 +1073,10 @@ pub fn build_router(
             post(handlers::acp::acp_fork_to_new_conversation),
         )
         .route(
+            "/acp_fork_conversation",
+            post(handlers::acp::acp_fork_conversation),
+        )
+        .route(
             "/acp_stop_async_task",
             post(handlers::acp::acp_stop_async_task),
         )
