@@ -2390,7 +2390,13 @@
       "reopen": "重新開啟",
       "expandSubsessions": "展開子會話",
       "collapseSubsessions": "摺疊子會話",
-      "exportMarkdown": "匯出為 Markdown"
+      "exportMarkdown": "匯出為 Markdown",
+      "fork": "分叉",
+      "forking": "正在分叉…",
+      "forkFailed": "無法分叉此對話：{error}",
+      "forkUnsupported": "此代理無法分叉對話",
+      "forkAfterReply": "請在目前回覆完成後再分叉",
+      "forkNoReply": "暫無可分叉的內容：還沒有已完成的回覆"
     },
     "search": {
       "dialogTitle": "搜尋",

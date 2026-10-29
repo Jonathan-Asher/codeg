@@ -2390,7 +2390,13 @@
       "reopen": "再開する",
       "expandSubsessions": "サブ会話を展開",
       "collapseSubsessions": "サブ会話を折りたたむ",
-      "exportMarkdown": "Export as Markdown"
+      "exportMarkdown": "Export as Markdown",
+      "fork": "分岐",
+      "forking": "分岐しています…",
+      "forkFailed": "会話を分岐できませんでした：{error}",
+      "forkUnsupported": "このエージェントは会話を分岐できません",
+      "forkAfterReply": "現在の返信が終わってから分岐してください",
+      "forkNoReply": "まだ分岐できるものがありません：完了した返信がありません"
     },
     "search": {
       "dialogTitle": "検索",

@@ -658,13 +658,51 @@ pub async fn acp_fork_to_new_conversation(
     .await
     .map_err(|e| {
         let message = e.to_string();
-        // Both refusals are answers about this request, not server faults:
-        // an agent that only forks between turns, and a reply that is not a
-        // fork point (still being written, or not one the agent can name).
+        // Refusals are answers about this request, not server faults: an
+        // agent that only forks between turns, a reply that is not a fork
+        // point (still being written, or not one the agent can name), and an
+        // agent that cannot fork at all.
         match e {
-            AcpError::ForkNeedsIdle | AcpError::ForkPointUnresolved(_) => {
-                AppCommandError::new(AppErrorCode::InvalidInput, message)
-            }
+            AcpError::ForkNeedsIdle
+            | AcpError::ForkPointUnresolved(_)
+            | AcpError::ForkUnsupported => AppCommandError::new(AppErrorCode::InvalidInput, message),
+            _ => AppCommandError::task_execution_failed(message),
+        }
+    })?;
+    Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpForkConversationParams {
+    pub conversation_id: i32,
+}
+
+/// "Fork" on a whole conversation, open or not — into a new conversation, in
+/// a separate agent process. See
+/// `ConnectionManager::fork_conversation_to_new_conversation`.
+pub async fn acp_fork_conversation(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpForkConversationParams>,
+) -> Result<Json<crate::acp::types::ForkToNewConversationInfo>, AppCommandError> {
+    let result = acp_commands::acp_fork_conversation_core(
+        &state.connection_manager,
+        &state.db,
+        &state.data_dir,
+        params.conversation_id,
+        "web".to_string(),
+        state.emitter.clone(),
+    )
+    .await
+    .map_err(|e| {
+        let message = e.to_string();
+        // Refusals about this conversation, not server faults: a running turn
+        // on an agent that forks only between turns, no finished reply, an
+        // agent that cannot fork.
+        match e {
+            AcpError::ForkNeedsIdle
+            | AcpError::ForkPointUnresolved(_)
+            | AcpError::ForkUnsupported => AppCommandError::new(AppErrorCode::InvalidInput, message),
             _ => AppCommandError::task_execution_failed(message),
         }
     })?;

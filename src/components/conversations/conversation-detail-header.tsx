@@ -10,11 +10,20 @@ import {
   Pencil,
   Pin,
   PinOff,
+  Split,
   SquarePen,
   Trash2,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useImeGuard } from "@/hooks/use-ime-guard"
+import {
+  useForkBlockLabel,
+  useForkConversation,
+} from "@/hooks/use-fork-conversation"
+import {
+  conversationForkBlock,
+  type ConversationForkBlock,
+} from "@/lib/fork-conversation"
 import {
   deleteConversation,
   updateConversationPinned,
@@ -26,7 +35,7 @@ import { ConversationHeaderFolderPicker } from "@/components/chat/conversation-c
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { useTabActions } from "@/contexts/tab-context"
 import { getRuntimeSession } from "@/stores/conversation-runtime-store"
-import type { ConversationStatus } from "@/lib/types"
+import type { ConversationStatus, DbConversationSummary } from "@/lib/types"
 import { STATUS_ORDER } from "@/lib/types"
 import { ConversationStatusDot } from "@/components/conversations/conversation-status-dot"
 import { useSessionColumnWidth } from "@/hooks/use-appearance"
@@ -96,7 +105,7 @@ interface ConversationDetailHeaderProps {
  * tiled.
  *
  * The ⋯ menu mirrors the sidebar conversation card's right-click menu (new /
- * rename / pin / details / status / delete) so the two entry points stay
+ * rename / fork / pin / details / status / delete) so the two entry points stay
  * consistent, wired to the same APIs. It also carries Session width, the
  * device-wide column width from Settings → Appearance, so it can be switched
  * from the conversation it is seen in. Subscriptions are kept narrow — a
@@ -160,6 +169,35 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
     tabId: string
     title: string
   } | null>(null)
+
+  // "Fork": its target and why it can't run, snapshotted when the menu opens
+  // (the header follows the active tab; see the dialog targets above).
+  const forkConversation = useForkConversation()
+  const forkBlockLabel = useForkBlockLabel()
+  const [forkTarget, setForkTarget] = useState<DbConversationSummary | null>(
+    null
+  )
+  const forkBlock: ConversationForkBlock | null = forkTarget
+    ? conversationForkBlock(forkTarget)
+    : "no_reply"
+
+  const handleMenuOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open) return
+      setForkTarget(
+        conversationId == null
+          ? null
+          : (useAppWorkspaceStore
+              .getState()
+              .conversations.find((c) => c.id === conversationId) ?? null)
+      )
+    },
+    [conversationId]
+  )
+
+  const handleFork = useCallback(() => {
+    if (forkTarget) forkConversation(forkTarget)
+  }, [forkTarget, forkConversation])
 
   const persisted = conversationId != null
   const displayTitle =
@@ -285,7 +323,7 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
         )}
       </div>
       <div className="flex shrink-0 items-center">
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={handleMenuOpenChange}>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
@@ -309,6 +347,21 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
               <Pencil className="h-4 w-4" />
               {t("rename")}
             </DropdownMenuItem>
+            {/* As in the sidebar's menu: a disabled item takes no pointer,
+                so its wrapper carries the reason. */}
+            {forkBlock ? (
+              <div title={forkBlockLabel(forkBlock)}>
+                <DropdownMenuItem disabled>
+                  <Split className="h-4 w-4" />
+                  {t("fork")}
+                </DropdownMenuItem>
+              </div>
+            ) : (
+              <DropdownMenuItem onSelect={handleFork}>
+                <Split className="h-4 w-4" />
+                {t("fork")}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem disabled={!persisted} onSelect={handleTogglePin}>
               {isPinned ? (
                 <PinOff className="h-4 w-4" />

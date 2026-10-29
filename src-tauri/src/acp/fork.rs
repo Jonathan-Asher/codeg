@@ -455,6 +455,63 @@ pub fn settle_mid_run_fork_point(
     })
 }
 
+/// Why "Fork" on a whole conversation was refused: it has no reply that
+/// finished — nothing sent yet, or only the turn still running.
+pub const NO_FINISHED_REPLY: &str = "this conversation has no finished reply to fork yet";
+
+/// Settle where "Fork" on a whole conversation lands: its latest FINISHED
+/// reply. `None` is a tail fork.
+///
+/// While a turn runs (`running`), that is the last reply before the turn's
+/// prompt — found as [`settle_mid_run_fork_point`] finds the prompt, and
+/// settled the way it settles a reply picked by hand: named, never the tail,
+/// and only for an adapter that forks while a turn runs.
+///
+/// Between turns it is the last reply in the transcript, and nothing is
+/// writing to the session, so a reply the agent cannot name forks at the
+/// tail, which is the same place (followed at most by a prompt that got no
+/// reply).
+pub fn settle_latest_reply_fork_point(
+    turns: Result<&[MessageTurn], &str>,
+    adapter: impl Into<ForkAdapter>,
+    running: bool,
+    in_flight_prompt_turn_id: Option<&str>,
+) -> Result<Option<ForkPoint>, AcpError> {
+    let adapter = adapter.into();
+    if running && !adapter.caps.while_running {
+        return Err(AcpError::ForkNeedsIdle);
+    }
+    let turns = turns.map_err(|reason| {
+        AcpError::ForkPointUnresolved(format!("the conversation could not be read ({reason})"))
+    })?;
+    let is_user = |t: &MessageTurn| matches!(t.role, TurnRole::User);
+    let finished = if running {
+        let prompt = in_flight_prompt_turn_id
+            .and_then(|id| turns.iter().position(|t| t.id == id && is_user(t)))
+            .or_else(|| turns.iter().rposition(is_user))
+            .unwrap_or(0);
+        &turns[..prompt]
+    } else {
+        turns
+    };
+    let reply = finished
+        .iter()
+        .rev()
+        .find(|t| matches!(t.role, TurnRole::Assistant) && !t.blocks.is_empty())
+        .ok_or_else(|| AcpError::ForkPointUnresolved(NO_FINISHED_REPLY.to_string()))?;
+    if running {
+        return settle_mid_run_fork_point(
+            Ok(turns),
+            &reply.id,
+            adapter,
+            true,
+            in_flight_prompt_turn_id,
+        )
+        .map(Some);
+    }
+    Ok(resolve_fork_point(turns, &reply.id, adapter.agent_type))
+}
+
 /// The `(before edit)` marker an edit fork gives the row holding the original
 /// branch. Plain English on purpose: conversation titles are data, not UI
 /// copy — the `[Fork] ` prefix is not localized either.
@@ -1070,6 +1127,70 @@ mod tests {
             // A point it cannot name is refused, as for every strict adapter.
             assert!(settle_fork_point(Ok(history().as_slice()), "turn-9", pi, mode).is_err());
         }
+    }
+
+    /// "Fork" on a whole conversation: between turns, its last reply; while a
+    /// turn runs, the last reply before that turn's prompt.
+    #[test]
+    fn latest_reply_fork_point_is_the_newest_finished_reply() {
+        let turns = running_history();
+        let idle = settle_latest_reply_fork_point(
+            Ok(turns.as_slice()),
+            AgentType::ClaudeCode,
+            false,
+            None,
+        )
+        .unwrap()
+        .expect("a named reply");
+        assert_eq!(idle.message_id, "msg_02");
+        let running = settle_latest_reply_fork_point(
+            Ok(turns.as_slice()),
+            AgentType::ClaudeCode,
+            true,
+            Some("turn-2"),
+        )
+        .unwrap()
+        .expect("a named reply");
+        assert_eq!(running.message_id, "msg_01");
+
+        // An empty bubble is no reply; a prompt with no reply after it is
+        // passed over between turns.
+        let mut trailing = turns.clone();
+        trailing[3].blocks.clear();
+        trailing.push(turn("turn-4", TurnRole::User, "and again", None));
+        let point =
+            settle_latest_reply_fork_point(Ok(trailing.as_slice()), AgentType::ClaudeCode, false, None)
+                .unwrap()
+                .unwrap();
+        assert_eq!(point.message_id, "msg_01");
+    }
+
+    #[test]
+    fn latest_reply_fork_point_refuses_what_it_cannot_fork() {
+        let turns = running_history();
+        // No reply at all, or only the one the running turn is writing.
+        let first_prompt = &turns[..1];
+        for running in [false, true] {
+            let err =
+                settle_latest_reply_fork_point(Ok(first_prompt), AgentType::ClaudeCode, running, None)
+                    .unwrap_err();
+            assert!(err.to_string().contains(NO_FINISHED_REPLY), "{err}");
+        }
+        // Mid-turn, an agent that forks only between turns waits.
+        assert!(matches!(
+            settle_latest_reply_fork_point(Ok(turns.as_slice()), AgentType::Codex, true, None),
+            Err(AcpError::ForkNeedsIdle)
+        ));
+        assert!(matches!(
+            settle_latest_reply_fork_point(Err("gone"), AgentType::ClaudeCode, false, None),
+            Err(AcpError::ForkPointUnresolved(_))
+        ));
+        // Between turns, an agent that names no reply forks at the tail.
+        assert!(
+            settle_latest_reply_fork_point(Ok(turns.as_slice()), AgentType::Gemini, false, None)
+                .unwrap()
+                .is_none()
+        );
     }
 
     /// Mid-run forks for Pi follow the same advertisement.

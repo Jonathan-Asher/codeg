@@ -2390,7 +2390,13 @@
       "reopen": "Reopen",
       "expandSubsessions": "Expand sub-conversations",
       "collapseSubsessions": "Collapse sub-conversations",
-      "exportMarkdown": "Export as Markdown"
+      "exportMarkdown": "Export as Markdown",
+      "fork": "Fork",
+      "forking": "Forking…",
+      "forkFailed": "Couldn't fork the conversation: {error}",
+      "forkUnsupported": "This agent can't fork conversations",
+      "forkAfterReply": "Fork after the current reply finishes",
+      "forkNoReply": "Nothing to fork yet: no reply has finished"
     },
     "search": {
       "dialogTitle": "Search",

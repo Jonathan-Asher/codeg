@@ -2390,7 +2390,13 @@
       "reopen": "إعادة فتح",
       "expandSubsessions": "توسيع المحادثات الفرعية",
       "collapseSubsessions": "طي المحادثات الفرعية",
-      "exportMarkdown": "Export as Markdown"
+      "exportMarkdown": "Export as Markdown",
+      "fork": "تفريع",
+      "forking": "جارٍ التفريع…",
+      "forkFailed": "تعذّر تفريع المحادثة: {error}",
+      "forkUnsupported": "لا يمكن لهذا الوكيل تفريع المحادثات",
+      "forkAfterReply": "فرِّع بعد انتهاء الرد الحالي",
+      "forkNoReply": "لا يوجد ما يمكن تفريعه بعد: لم يكتمل أي رد"
     },
     "search": {
       "dialogTitle": "بحث",

@@ -2390,7 +2390,13 @@
       "reopen": "다시 열기",
       "expandSubsessions": "하위 대화 펼치기",
       "collapseSubsessions": "하위 대화 접기",
-      "exportMarkdown": "Export as Markdown"
+      "exportMarkdown": "Export as Markdown",
+      "fork": "분기",
+      "forking": "분기하는 중…",
+      "forkFailed": "대화를 분기할 수 없습니다: {error}",
+      "forkUnsupported": "이 에이전트는 대화를 분기할 수 없습니다",
+      "forkAfterReply": "현재 답변이 끝난 후 분기하세요",
+      "forkNoReply": "아직 분기할 내용이 없습니다: 완료된 답변이 없습니다"
     },
     "search": {
       "dialogTitle": "검색",
