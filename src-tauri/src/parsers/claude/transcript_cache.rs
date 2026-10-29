@@ -1093,3 +1093,6 @@ fn split_at_last_newline(bytes: &[u8]) -> (&[u8], &[u8]) {
         None => (&[], bytes),
     }
 }
+
+#[cfg(test)]
+mod tests;
