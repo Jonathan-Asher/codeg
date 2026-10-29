@@ -21,6 +21,8 @@ const h = vi.hoisted(() => ({
   openNewConversationTab: vi.fn(),
   updateConversationLocal: vi.fn(),
   refreshConversations: vi.fn(),
+  forkConversation: vi.fn(),
+  conversations: [] as unknown[],
 }))
 
 vi.mock("@/lib/api", () => ({
@@ -39,7 +41,9 @@ vi.mock("@/stores/app-workspace-store", () => {
   const state = {
     updateConversationLocal: h.updateConversationLocal,
     refreshConversations: h.refreshConversations,
-    conversations: [] as unknown[],
+    get conversations() {
+      return h.conversations
+    },
   }
   const useStore = (selector: (s: typeof state) => unknown) => selector(state)
   useStore.getState = () => state
@@ -47,6 +51,16 @@ vi.mock("@/stores/app-workspace-store", () => {
 })
 vi.mock("@/stores/conversation-runtime-store", () => ({
   getRuntimeSession: () => null,
+}))
+// The fork itself (`lib/fork-conversation`) is covered on its own; here only
+// what the menu offers and what it asks for.
+vi.mock("@/hooks/use-fork-conversation", () => ({
+  useForkConversation: () => h.forkConversation,
+  useForkBlockLabel: () => (block: string) => `blocked:${block}`,
+}))
+vi.mock("@/lib/fork-conversation", () => ({
+  conversationForkBlock: (c: { external_id: string | null }) =>
+    c.external_id ? null : "no_reply",
 }))
 vi.mock("./session-details-dialog", () => ({
   SessionDetailsDialog: () => null,
@@ -84,6 +98,38 @@ function withIntl(ui: ReactElement) {
     </NextIntlClientProvider>
   )
 }
+
+describe("ConversationDetailHeader fork", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    h.conversations = []
+  })
+
+  it("forks the conversation the menu was opened for", async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    const summary = { id: 1, agent_type: "claude_code", external_id: "s1" }
+    h.conversations = [summary]
+    const { getByLabelText, getByRole } = render(
+      withIntl(<ConversationDetailHeader {...A} />)
+    )
+    await user.click(getByLabelText("More actions"))
+    await user.click(getByRole("menuitem", { name: "Fork" }))
+    expect(h.forkConversation).toHaveBeenCalledWith(summary)
+  })
+
+  it("is disabled, saying why, when there is nothing to fork", async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    h.conversations = [{ id: 1, agent_type: "claude_code", external_id: null }]
+    const { getByLabelText, getByRole } = render(
+      withIntl(<ConversationDetailHeader {...A} />)
+    )
+    await user.click(getByLabelText("More actions"))
+    const item = getByRole("menuitem", { name: "Fork" })
+    expect(item).toHaveAttribute("data-disabled")
+    expect(item.closest("[title]")).toHaveAttribute("title", "blocked:no_reply")
+    expect(h.forkConversation).not.toHaveBeenCalled()
+  })
+})
 
 describe("ConversationDetailHeader dialog target snapshot", () => {
   beforeEach(() => {

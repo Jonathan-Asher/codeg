@@ -2389,7 +2389,13 @@
       "reopen": "重新打开",
       "expandSubsessions": "展开子会话",
       "collapseSubsessions": "折叠子会话",
-      "exportMarkdown": "导出为 Markdown"
+      "exportMarkdown": "导出为 Markdown",
+      "fork": "分叉",
+      "forking": "正在分叉…",
+      "forkFailed": "无法分叉此对话：{error}",
+      "forkUnsupported": "此智能体无法分叉对话",
+      "forkAfterReply": "请在当前回复完成后再分叉",
+      "forkNoReply": "暂无可分叉的内容：还没有已完成的回复"
     },
     "search": {
       "dialogTitle": "搜索",

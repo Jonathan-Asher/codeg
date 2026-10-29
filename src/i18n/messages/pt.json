@@ -2389,7 +2389,13 @@
       "reopen": "Reabrir",
       "expandSubsessions": "Expandir subconversas",
       "collapseSubsessions": "Recolher subconversas",
-      "exportMarkdown": "Export as Markdown"
+      "exportMarkdown": "Export as Markdown",
+      "fork": "Bifurcar",
+      "forking": "Bifurcando…",
+      "forkFailed": "Não foi possível bifurcar a conversa: {error}",
+      "forkUnsupported": "Este agente não pode bifurcar conversas",
+      "forkAfterReply": "Bifurque quando a resposta atual terminar",
+      "forkNoReply": "Ainda não há nada para bifurcar: nenhuma resposta terminou"
     },
     "search": {
       "dialogTitle": "Buscar",

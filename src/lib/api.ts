@@ -587,6 +587,29 @@ export async function acpForkToNewConversation(
 }
 
 /**
+ * "Fork" on a whole conversation (the sidebar's and the conversation menu's):
+ * the backend forks it at its latest FINISHED reply, in a separate agent
+ * process, into a new conversation row — given the row alone, so it works for
+ * a conversation nothing has open. The original conversation, its row and any
+ * connection or turn on it are left alone.
+ *
+ * Refused, with nothing created, for a conversation with no finished reply,
+ * for an agent that cannot fork (`this agent cannot fork a conversation`),
+ * and while a turn runs on an agent that forks only between turns
+ * (`isForkNeedsIdleRejection`).
+ */
+export async function acpForkConversation(
+  conversationId: number
+): Promise<ForkToNewConversationResult> {
+  return getTransport().call(
+    "acp_fork_conversation",
+    { conversationId },
+    // Launches an agent process of its own, as `acpForkToNewConversation`.
+    { timeoutMs: ACP_CONNECT_TIMEOUT_MS }
+  )
+}
+
+/**
  * Stop one AIR async task (`_session/async_task/stop`).
  *
  * Resolves to the adapter's own verdict, NOT "the request went through": it

@@ -2389,7 +2389,13 @@
       "reopen": "Erneut öffnen",
       "expandSubsessions": "Unterkonversationen einblenden",
       "collapseSubsessions": "Unterkonversationen ausblenden",
-      "exportMarkdown": "Export as Markdown"
+      "exportMarkdown": "Export as Markdown",
+      "fork": "Verzweigen",
+      "forking": "Wird verzweigt…",
+      "forkFailed": "Unterhaltung konnte nicht verzweigt werden: {error}",
+      "forkUnsupported": "Dieser Agent kann keine Unterhaltungen verzweigen",
+      "forkAfterReply": "Verzweige, sobald die aktuelle Antwort fertig ist",
+      "forkNoReply": "Noch nichts zu verzweigen: keine Antwort ist fertig"
     },
     "search": {
       "dialogTitle": "Suchen",

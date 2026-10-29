@@ -29,6 +29,7 @@ import {
   ClipboardCheck,
   Play,
   RotateCw,
+  Split,
   type LucideIcon,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -57,6 +58,14 @@ import {
 import { useOptionalAcpActions } from "@/contexts/acp-connection-contexts"
 import { cn } from "@/lib/utils"
 import { formatConversationTitle } from "@/lib/conversation-title"
+import {
+  conversationForkBlock,
+  type ConversationForkBlock,
+} from "@/lib/fork-conversation"
+import {
+  useForkBlockLabel,
+  useForkConversation,
+} from "@/hooks/use-fork-conversation"
 import { CriticalFlag } from "@/components/conversations/critical-flag"
 import {
   ContextMenu,
@@ -269,7 +278,12 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [renameValue, setRenameValue] = useState("")
   const [attachTabId, setAttachTabId] = useState<string | null>(null)
+  // Why "Fork" can't run, snapshotted when the menu opens like `attachTabId`;
+  // the backend still refuses a fork the state changed under.
+  const [forkBlock, setForkBlock] = useState<ConversationForkBlock | null>(null)
   const [hoverOpen, setHoverOpen] = useState(false)
+  const forkConversation = useForkConversation()
+  const forkBlockLabel = useForkBlockLabel()
 
   const handleClick = useCallback(() => {
     onSelect(conversation.id, conversation.agent_type, conversation.folder_id)
@@ -309,13 +323,22 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   // subscription — and a re-render on every tab switch — to each of them for a
   // value only the context menu reads. This snapshot drives the DISABLED STATE
   // only; the click re-resolves (see `handleAttachToSession`).
-  const handleMenuOpenChange = useCallback((open: boolean) => {
-    if (!open) return
-    // The context menu takes the row over; drop the details bubble so the two
-    // don't stack on the same spot.
-    setHoverOpen(false)
-    setAttachTabId(resolveAttachTabId())
-  }, [])
+  const handleMenuOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open) return
+      // The context menu takes the row over; drop the details bubble so the
+      // two don't stack on the same spot.
+      setHoverOpen(false)
+      setAttachTabId(resolveAttachTabId())
+      setForkBlock(conversationForkBlock(conversation))
+    },
+    [conversation]
+  )
+
+  const handleFork = useCallback(
+    () => forkConversation(conversation),
+    [forkConversation, conversation]
+  )
 
   // See `isKeyboardFocus`: suppress Radix's open-on-focus unless the focus
   // really came from the keyboard, so clicking a row doesn't pop the bubble.
@@ -937,6 +960,22 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
               <Pencil className="h-4 w-4" />
               {t("rename")}
             </ContextMenuItem>
+            {/* A copy forked at the latest finished reply, in a new tab; this
+                row stays as it is. A disabled item takes no pointer, so its
+                wrapper carries the reason. */}
+            {forkBlock ? (
+              <div title={forkBlockLabel(forkBlock)}>
+                <ContextMenuItem disabled>
+                  <Split className="h-4 w-4" />
+                  {t("fork")}
+                </ContextMenuItem>
+              </div>
+            ) : (
+              <ContextMenuItem onSelect={handleFork}>
+                <Split className="h-4 w-4" />
+                {t("fork")}
+              </ContextMenuItem>
+            )}
             {onTogglePin && (
               <ContextMenuItem
                 onSelect={() => onTogglePin(conversation.id, !isPinned)}
