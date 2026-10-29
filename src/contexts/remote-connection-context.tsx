@@ -10,6 +10,7 @@ import {
   configureRemoteDesktopTransport,
 } from "@/lib/transport"
 import { resetBackendScopedStores } from "@/stores/backend-scoped-store-reset"
+import { noteRemoteServer } from "@/stores/history-cache"
 import { getRemoteWorkspaceConnection } from "@/lib/remote-workspace"
 import { toErrorMessage } from "@/lib/app-error"
 import type { RemoteWorkspaceConnection } from "@/lib/types"
@@ -96,6 +97,7 @@ export function RemoteConnectionGate({ children }: { children: ReactNode }) {
           onUnauthorized: () =>
             setState((prev) => ({ ...prev, expired: true })),
         })
+        noteRemoteServer(next.id, next.base_url)
         setState({
           connection: next,
           loadedId: remoteConnectionId,

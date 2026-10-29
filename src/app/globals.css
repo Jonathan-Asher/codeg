@@ -1705,6 +1705,14 @@
   }
 }
 
+/* A waiting state that shows only once the wait is noticeable: a transcript
+   read from the history cache, or one a refresh is bringing up to date,
+   usually answers before it would appear, and then nothing flashes. */
+.codeg-delayed-show {
+  animation: tool-content-fade 150ms ease-out var(--codeg-show-delay, 400ms)
+    both;
+}
+
 /* Reply fold body — the "Worked for …" header's progress section
    (`CompletedTurnContent`). Unlike the tool collapsibles above, this one DOES
    animate its height: it is the one fold per reply the reader toggles by hand,

@@ -39,6 +39,7 @@ import {
   cancelConversationPreconnect,
   preconnectConversation,
 } from "@/lib/session-preconnect"
+import { warmConversationFromDisk } from "@/stores/conversation-runtime-store"
 import type {
   AttentionKind,
   DbConversationSummary,
@@ -285,7 +286,11 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   // and on the backend), so it is ready by the time the click lands. A row
   // already open in a tab is live already.
   const handlePointerEnter = useCallback(() => {
-    if (!isOpenInTab) preconnectConversation(conversation)
+    if (isOpenInTab) return
+    preconnectConversation(conversation)
+    // And read its transcript back from the history cache, if it is there:
+    // a click then paints it at once.
+    warmConversationFromDisk(conversation.id)
   }, [conversation, isOpenInTab])
   const handlePointerLeave = useCallback(() => {
     cancelConversationPreconnect(conversation)

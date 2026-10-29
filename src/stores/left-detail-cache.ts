@@ -1,4 +1,5 @@
 import type { DbConversationDetail } from "@/lib/types"
+import { shapeKeptDetail, type KeptDetail } from "@/stores/history-snapshot"
 
 /**
  * Details of sessions the user recently left (L0 of the offline plan): going
@@ -8,12 +9,20 @@ import type { DbConversationDetail } from "@/lib/types"
  * Only what the server served is kept (`detail`: its turns, window
  * coordinates, summary and stats), never optimistic or local turns, and never
  * a detail fetched mid-turn (`in_flight_user_turn_id`): its in-flight
- * suppression would be stale by the time it came back. Phase 3 puts a disk
- * layer behind the same interface.
+ * suppression would be stale by the time it came back. A kept detail is cut
+ * to its tail window (`shapeKeptDetail`): history paged in above it is read
+ * again when the user scrolls back up. The disk layer behind it
+ * (`history-disk-cache`) keeps the same windows across restarts.
  */
 export interface DetailCache {
-  /** Keep `detail` for `conversationId` (a DB id), newest last. */
-  put(conversationId: number, detail: DbConversationDetail): void
+  /**
+   * Keep `detail` for `conversationId` (a DB id), newest last. Returns what
+   * was kept, with its JSON form (which a disk write reuses), or null.
+   */
+  put(
+    conversationId: number,
+    detail: DbConversationDetail | KeptDetail
+  ): KeptDetail | null
   /** Hand the kept detail back and forget it (it is live again). */
   take(conversationId: number): DbConversationDetail | null
   /** Whether a detail is kept for `conversationId` (without taking it). */
@@ -24,20 +33,16 @@ export interface DetailCache {
 }
 
 /** Sessions kept. */
-export const LEFT_DETAIL_MAX_ENTRIES = 8
+export const LEFT_DETAIL_MAX_ENTRIES = 12
 /** Budget across them, estimated from their JSON length. */
-export const LEFT_DETAIL_MAX_BYTES = 150 * 1024 * 1024
-
-function estimateBytes(detail: DbConversationDetail): number {
-  try {
-    return JSON.stringify(detail).length
-  } catch {
-    return Number.POSITIVE_INFINITY
-  }
-}
+export const LEFT_DETAIL_MAX_BYTES = 50 * 1024 * 1024
 
 export function isKeepableDetail(detail: DbConversationDetail): boolean {
   return detail.in_flight_user_turn_id == null
+}
+
+function isKept(value: DbConversationDetail | KeptDetail): value is KeptDetail {
+  return typeof (value as KeptDetail).json === "string"
 }
 
 export function createMemoryDetailCache(options?: {
@@ -62,18 +67,25 @@ export function createMemoryDetailCache(options?: {
   }
 
   return {
-    put(conversationId, detail) {
+    put(conversationId, value) {
       remove(conversationId)
-      if (!isKeepableDetail(detail)) return
-      const bytes = estimateBytes(detail)
-      if (bytes > maxBytes) return
-      entries.set(conversationId, { detail, bytes })
-      total += bytes
+      const kept = isKept(value)
+        ? value
+        : isKeepableDetail(value)
+          ? shapeKeptDetail(value, { maxBytes })
+          : null
+      if (!kept || kept.json.length > maxBytes) return null
+      entries.set(conversationId, {
+        detail: kept.detail,
+        bytes: kept.json.length,
+      })
+      total += kept.json.length
       while (entries.size > maxEntries || total > maxBytes) {
         const oldest = entries.keys().next().value
         if (oldest === undefined) break
         remove(oldest)
       }
+      return kept
     },
     take(conversationId) {
       return remove(conversationId)?.detail ?? null

@@ -64,6 +64,7 @@ import {
 } from "@/components/ui/resizable"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
+import { forgetRemoteServer } from "@/stores/history-cache"
 
 const LEFT_MIN_WIDTH = 260
 const RIGHT_MIN_WIDTH = 380
@@ -451,10 +452,13 @@ export function RemoteWorkspaceManageDialog({
   const handleDelete = useCallback(async () => {
     if (deleteTargetId === null) return
     const target = deleteTargetId
+    const targetUrl = connections.find((item) => item.id === target)?.base_url
     setDeleting(true)
     setFormError(null)
     try {
       await deleteRemoteWorkspaceConnection(target)
+      // Its sessions' transcripts kept on this machine go with it.
+      forgetRemoteServer(target, targetUrl)
       setConnections((prev) => {
         const next = prev.filter((item) => item.id !== target)
         setSelectedId((current) =>
@@ -473,7 +477,7 @@ export function RemoteWorkspaceManageDialog({
     } finally {
       setDeleting(false)
     }
-  }, [deleteTargetId, onChanged, t])
+  }, [connections, deleteTargetId, onChanged, t])
 
   return (
     <>

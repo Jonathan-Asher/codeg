@@ -20,6 +20,7 @@ import {
   updateFolderGroup as apiUpdateFolderGroup,
 } from "@/lib/api"
 import { toErrorMessage } from "@/lib/app-error"
+import { forgetConversationHistory } from "@/stores/history-cache"
 import {
   forgetClosedConversation,
   forgetClosedTabsInFolder,
@@ -525,6 +526,8 @@ export const useAppWorkspaceStore = create<AppWorkspaceStoreState>()(
       // restoring a conversation that was closed BEFORE it was deleted — the
       // close-time opt-out only sees tabs that are still open.
       forgetClosedConversation(id)
+      // Nor may a reopen paint it from the history cache.
+      forgetConversationHistory(id)
       deletedIds.add(id)
       if (deletedIds.size > DELETED_TOMBSTONE_CAP) {
         // FIFO eviction — Set preserves insertion order.

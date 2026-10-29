@@ -2274,7 +2274,8 @@
         "toolResult": "结果",
         "toolError": "错误"
       },
-      "moreActions": "更多操作"
+      "moreActions": "更多操作",
+      "refreshing": "正在刷新…"
     },
     "sessionDetails": {
       "menuLabel": "会话详情",

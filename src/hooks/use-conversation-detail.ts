@@ -30,6 +30,11 @@ export function useConversationDetail(
   loading: boolean
   error: string | null
   acpLoadError: string | null
+  /**
+   * The detail shown is a kept copy whose session id the server has not
+   * confirmed yet (see `detailUnverified`): connecting waits for it.
+   */
+  unverified: boolean
 } {
   const enabled = options?.enabled ?? true
   // Subscribe to ONLY the detail-related fields this hook exposes, not the whole
@@ -40,19 +45,26 @@ export function useConversationDetail(
   // mid-stream, so `useShallow` keeps the slice reference-stable across batches
   // and consumers re-render only on a real detail transition. (`hasSession`
   // preserves the "session exists yet?" signal the loading state depends on.)
-  const { detail, detailLoading, detailError, acpLoadError, hasSession } =
-    useConversationRuntimeStore(
-      useShallow((s) => {
-        const session = s.byConversationId.get(conversationId)
-        return {
-          detail: session?.detail ?? null,
-          detailLoading: session?.detailLoading ?? false,
-          detailError: session?.detailError ?? null,
-          acpLoadError: session?.acpLoadError ?? null,
-          hasSession: session != null,
-        }
-      })
-    )
+  const {
+    detail,
+    detailLoading,
+    detailError,
+    acpLoadError,
+    hasSession,
+    unverified,
+  } = useConversationRuntimeStore(
+    useShallow((s) => {
+      const session = s.byConversationId.get(conversationId)
+      return {
+        detail: session?.detail ?? null,
+        detailLoading: session?.detailLoading ?? false,
+        detailError: session?.detailError ?? null,
+        acpLoadError: session?.acpLoadError ?? null,
+        hasSession: session != null,
+        unverified: session?.detailUnverified === true,
+      }
+    })
+  )
   const { fetchDetail } = useConversationRuntimeActions()
   const isVirtual = isVirtualConversationId(conversationId)
 
@@ -68,5 +80,6 @@ export function useConversationDetail(
     loading: hasSession ? detailLoading : !isVirtual,
     error: detailError,
     acpLoadError,
+    unverified,
   }
 }

@@ -2396,7 +2396,9 @@ export function MessageListView({
   if (detailLoading && !hasRenderableContent) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        {/* Shown only once the wait is noticeable: a session read back from
+            the history cache paints before it would appear. */}
+        <div className="codeg-delayed-show flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
           <span>{t("loading")}</span>
         </div>

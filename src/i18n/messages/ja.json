@@ -2274,7 +2274,8 @@
         "toolResult": "結果",
         "toolError": "エラー"
       },
-      "moreActions": "その他の操作"
+      "moreActions": "その他の操作",
+      "refreshing": "更新中…"
     },
     "sessionDetails": {
       "menuLabel": "セッション詳細",

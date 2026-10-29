@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import { useShallow } from "zustand/react/shallow"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
+import { prewarmConversationsFromDisk } from "@/stores/conversation-runtime-store"
 import { registerBackendScopedStoreReset } from "@/stores/backend-scoped-store-reset"
 import {
   getFolderConversation,
@@ -2164,6 +2165,18 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
         const activeItem = snap.items.find(
           (it) => it.is_active && it.conversation_id != null
         )
+        // Read the restored tabs' sessions back from the history cache while
+        // their views mount: the active one first, the rest behind it.
+        prewarmConversationsFromDisk([
+          ...(activeItem?.conversation_id != null
+            ? [activeItem.conversation_id]
+            : []),
+          ...snap.items.flatMap((it) =>
+            it.conversation_id != null && it !== activeItem
+              ? [it.conversation_id]
+              : []
+          ),
+        ])
         let restoredActive: string | null = activeItem
           ? makeConversationTabId(
               activeItem.folder_id,

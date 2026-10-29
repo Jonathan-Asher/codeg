@@ -17,6 +17,7 @@ import type {
   SessionStats,
   ToolCallStatus,
   TurnUsage,
+  DbConversationSummary,
 } from "@/lib/types"
 import {
   extendPrefixFingerprint,
@@ -41,6 +42,17 @@ import { BACKGROUND_TASK_MARKER } from "@/lib/background-agent"
 import { imageCardLabel } from "@/lib/image-tool-label"
 import { perfMark } from "@/lib/perf-marks"
 import { leftDetailCache } from "@/stores/left-detail-cache"
+import {
+  historyDiskEnabled,
+  keepLeftDetail,
+  pendingDiskRead,
+  scheduleDiskSave,
+  warmFromDisk,
+} from "@/stores/history-cache"
+import {
+  isConversationDeleted,
+  useAppWorkspaceStore,
+} from "@/stores/app-workspace-store"
 
 /**
  * Conversation-runtime shared state as a Zustand store — the per-conversation
@@ -156,6 +168,19 @@ export interface ConversationRuntimeSession {
   detail: DbConversationDetail | null
   detailLoading: boolean
   detailError: string | null
+  /**
+   * The detail on screen is a kept copy (memory or disk, see `history-cache`)
+   * being brought up to date in the background, or one a reconnect is
+   * re-reading: the thread shows a subtle "refreshing" mark meanwhile.
+   */
+  detailRevalidating?: boolean
+  /**
+   * The detail on screen is a kept copy whose session id nothing has
+   * confirmed yet: a fork may have re-pointed this row at another agent
+   * session since the copy was taken. Auto-connect waits for the refresh
+   * (like it waits for a cold load) rather than resume the old session.
+   */
+  detailUnverified?: boolean
 
   // ACP `session/load` failed in a way codeg cannot paper over: the agent
   // reports ResourceNotFound for the historical session_id, the session or
@@ -306,6 +331,13 @@ type Action =
       type: "HYDRATE_DETAIL"
       conversationId: number
       detail: DbConversationDetail
+      /** Nothing confirmed the copy's session id (see `detailUnverified`). */
+      unverified?: boolean
+    }
+  | {
+      type: "SET_DETAIL_REVALIDATING"
+      conversationId: number
+      revalidating: boolean
     }
   | {
       type: "FETCH_DETAIL_SUCCESS"
@@ -510,6 +542,8 @@ function createEmptySession(
     detail: null,
     detailLoading: false,
     detailError: null,
+    detailRevalidating: false,
+    detailUnverified: false,
     acpLoadError: null,
     localTurns: [],
     backgroundTurns: [],
@@ -2129,6 +2163,9 @@ function reducer(
           : action.detail,
         detailLoading: false,
         detailError: null,
+        // The server answered: whatever session id the detail names is the
+        // row's current one.
+        detailUnverified: false,
         // This response re-parsed the transcript, so any out-of-turn content
         // the wire dropped is either in `detail.turns` now or never persisted.
         // Either way the pill has nothing left to offer. Deliberately NOT
@@ -2171,15 +2208,35 @@ function reducer(
       }
     }
 
-    case "HYDRATE_DETAIL":
+    case "HYDRATE_DETAIL": {
       // Exactly what a fetch that just returned this detail would do: the
       // kept copy holds server turns only (never optimistic or local ones),
       // so it is applied like one.
-      return reducer(state, {
+      const hydrated = reducer(state, {
         type: "FETCH_DETAIL_SUCCESS",
         conversationId: action.conversationId,
         detail: action.detail,
       })
+      if (!action.unverified) return hydrated
+      return updateSessionInState(hydrated, action.conversationId, (s) => ({
+        ...s,
+        detailUnverified: true,
+      }))
+    }
+
+    case "SET_DETAIL_REVALIDATING": {
+      const current = state.byConversationId.get(action.conversationId)
+      if (
+        !current ||
+        (current.detailRevalidating ?? false) === action.revalidating
+      ) {
+        return state
+      }
+      return updateSessionInState(state, action.conversationId, (s) => ({
+        ...s,
+        detailRevalidating: action.revalidating,
+      }))
+    }
 
     case "FETCH_DETAIL_ERROR":
       return updateSessionInState(state, action.conversationId, (current) => ({
@@ -2919,6 +2976,11 @@ export interface RuntimeActions {
        * turns keep their objects, and a failure leaves the content as it was.
        */
       quiet?: boolean
+      /**
+       * What is on screen may be out of date (a kept copy, a reconnect): show
+       * the "refreshing" mark while it is re-read. Implies `quiet`.
+       */
+      revalidate?: boolean
     }
   ) => Promise<boolean>
   /**
@@ -3938,32 +4000,74 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
     return getFolderConversation(fetchId, { tailTurns: TAIL_TURNS_DEFAULT })
   }
 
-  const fetchDetail = (conversationId: number): void => {
-    const session = get().byConversationId.get(conversationId)
-    if (session?.detail || session?.detailLoading) return
-
-    // Skip fetch if session has active data (ongoing conversation)
-    if (
-      session &&
-      (session.optimisticTurns.length > 0 ||
-        session.liveMessage !== null ||
-        session.localTurns.length > 0)
-    ) {
-      return
+  // Revalidations out per session (see `detailRevalidating`).
+  const revalidationsOut = new Map<number, number>()
+  const beginRevalidation = (conversationId: number): (() => void) => {
+    const count = (revalidationsOut.get(conversationId) ?? 0) + 1
+    revalidationsOut.set(conversationId, count)
+    if (count === 1) {
+      dispatch({
+        type: "SET_DETAIL_REVALIDATING",
+        conversationId,
+        revalidating: true,
+      })
     }
-
-    // Left recently and kept (see `leftDetailCache`): on screen at once, then
-    // brought up to date in the background — a quiet refetch, so the content
-    // stays while it runs, and a failure keeps what is shown.
-    const kept = leftDetailCache.take(conversationId)
-    if (kept) {
-      dispatch({ type: "HYDRATE_DETAIL", conversationId, detail: kept })
-      perfMark("detail:hydrate", { conversationId, turns: kept.turns.length })
-      void refetchDetail(conversationId, { quiet: true })
-      return
+    let settled = false
+    return () => {
+      if (settled) return
+      settled = true
+      const left = (revalidationsOut.get(conversationId) ?? 1) - 1
+      if (left > 0) {
+        revalidationsOut.set(conversationId, left)
+        return
+      }
+      revalidationsOut.delete(conversationId)
+      dispatch({
+        type: "SET_DETAIL_REVALIDATING",
+        conversationId,
+        revalidating: false,
+      })
     }
+  }
 
-    const generation = bumpFetchGeneration(conversationId)
+  /**
+   * Put a kept copy on screen and bring it up to date in the background (a
+   * quiet refetch: the content stays while it runs, and a failure keeps what
+   * is shown). The copy's session id is checked against the sidebar's row
+   * first: a row a fork re-pointed at another agent session since the copy
+   * was taken shows that session now, so the copy is dropped. When the row is
+   * not known, the copy is shown but auto-connect waits for the refresh.
+   */
+  const hydrateKept = (
+    conversationId: number,
+    kept: DbConversationDetail,
+    source: "memory" | "disk"
+  ): boolean => {
+    const row = findConversationSummary(conversationId)
+    if (row && !sameSession(row, kept)) {
+      perfMark("detail:hydrate:stale", { conversationId, source })
+      return false
+    }
+    dispatch({
+      type: "HYDRATE_DETAIL",
+      conversationId,
+      detail: kept,
+      unverified: !row,
+    })
+    perfMark("detail:hydrate", {
+      conversationId,
+      turns: kept.turns.length,
+      source,
+    })
+    void refetchDetail(conversationId, { revalidate: true })
+    return true
+  }
+
+  /** The cold open: the default tail window, with a loading state. */
+  const fetchDetailFromServer = (
+    conversationId: number,
+    generation = bumpFetchGeneration(conversationId)
+  ): void => {
     dispatch({ type: "FETCH_DETAIL_START", conversationId })
     const startedAt = Date.now()
     // Asked for ahead of this view (`prefetchConversationDetail`) and still on
@@ -3986,7 +4090,18 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
           ms: Date.now() - startedAt,
         })
         if (!isLatestGeneration(conversationId, generation)) return
-        dispatch({ type: "FETCH_DETAIL_SUCCESS", conversationId, detail })
+        dispatch({
+          type: "FETCH_DETAIL_SUCCESS",
+          conversationId,
+          detail,
+          // A copy from disk may have landed meanwhile (see `fetchDetail`).
+          keepUnchanged: true,
+        })
+        dispatch({
+          type: "SET_DETAIL_REVALIDATING",
+          conversationId,
+          revalidating: false,
+        })
       })
       .catch((error: unknown) => {
         perfMark("detail:fetch:end", {
@@ -3996,6 +4111,15 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
           ms: Date.now() - startedAt,
         })
         if (!isLatestGeneration(conversationId, generation)) return
+        // A copy from disk is on screen: keep it, like a failed refresh.
+        if (get().byConversationId.get(conversationId)?.detail) {
+          dispatch({
+            type: "SET_DETAIL_REVALIDATING",
+            conversationId,
+            revalidating: false,
+          })
+          return
+        }
         dispatch({
           type: "FETCH_DETAIL_ERROR",
           conversationId,
@@ -4004,12 +4128,115 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
       })
   }
 
+  /**
+   * Nothing in memory: look on disk first. The read is short (the store is
+   * opened when the window starts, see `prewarmFromDisk`), so the request
+   * waits for it rather than downloading a window the disk may already hold;
+   * past `DISK_RESTORE_WAIT_MS` the request goes out anyway, and a copy that
+   * still arrives before it answers is shown in the meantime.
+   */
+  const fetchDetailViaDisk = (conversationId: number): void => {
+    const generation = bumpFetchGeneration(conversationId)
+    restoringFromDisk.add(conversationId)
+    let requested = false
+    const request = () => {
+      if (requested) return
+      requested = true
+      restoringFromDisk.delete(conversationId)
+      if (!isLatestGeneration(conversationId, generation)) return
+      if (get().byConversationId.get(conversationId)?.detail) return
+      fetchDetailFromServer(conversationId, generation)
+    }
+    const timer = setTimeout(request, DISK_RESTORE_WAIT_MS)
+    const read =
+      pendingDiskRead(conversationId) ??
+      warmFromDisk(
+        conversationId,
+        () => !get().byConversationId.get(conversationId)?.detail
+      )
+    void read.then((found) => {
+      // Memory has it now (this read, or a warm-up that just landed).
+      const kept = found ? leftDetailCache.take(conversationId) : null
+      if (!kept) {
+        clearTimeout(timer)
+        request()
+        return
+      }
+      if (!requested) {
+        clearTimeout(timer)
+        requested = true
+        restoringFromDisk.delete(conversationId)
+        if (!isLatestGeneration(conversationId, generation)) return
+        if (get().byConversationId.get(conversationId)?.detail) return
+        if (!hydrateKept(conversationId, kept, "disk")) {
+          fetchDetailFromServer(conversationId)
+        }
+        return
+      }
+      // The request is out (the read was slow): show the copy until it
+      // answers, which then lands on it as a merge.
+      const session = get().byConversationId.get(conversationId)
+      if (
+        isLatestGeneration(conversationId, generation) &&
+        session &&
+        !session.detail &&
+        session.detailLoading
+      ) {
+        const row = findConversationSummary(conversationId)
+        if (row && !sameSession(row, kept)) return
+        dispatch({
+          type: "HYDRATE_DETAIL",
+          conversationId,
+          detail: kept,
+          unverified: !row,
+        })
+        dispatch({
+          type: "SET_DETAIL_REVALIDATING",
+          conversationId,
+          revalidating: true,
+        })
+      }
+    })
+  }
+
+  const fetchDetail = (conversationId: number): void => {
+    const session = get().byConversationId.get(conversationId)
+    if (session?.detail || session?.detailLoading) return
+    if (restoringFromDisk.has(conversationId)) return
+
+    // Skip fetch if session has active data (ongoing conversation)
+    if (
+      session &&
+      (session.optimisticTurns.length > 0 ||
+        session.liveMessage !== null ||
+        session.localTurns.length > 0)
+    ) {
+      return
+    }
+
+    // Left recently and kept (see `leftDetailCache`): on screen at once, then
+    // brought up to date in the background.
+    const kept = leftDetailCache.take(conversationId)
+    if (kept && hydrateKept(conversationId, kept, "memory")) return
+
+    if (
+      conversationId > 0 &&
+      !hasDetailPrefetch(conversationId) &&
+      historyDiskEnabled()
+    ) {
+      fetchDetailViaDisk(conversationId)
+      return
+    }
+    fetchDetailFromServer(conversationId)
+  }
+
   const refetchDetail = (
     conversationId: number,
     options?: {
       preserveLive?: boolean
       dropLiveTurnIds?: string[]
       quiet?: boolean
+      revalidate?: boolean
     }
   ): Promise<boolean> => {
     // The session key is not always a fetchable DB id: a conversation started
@@ -4025,18 +4252,25 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
     const generation = bumpFetchGeneration(conversationId)
     // Quiet: a background refresh of what is on screen. No loading state, and
     // a failure leaves the content (and any earlier error) as it was.
-    const quiet = options?.quiet === true
+    const revalidate = options?.revalidate === true
+    const quiet = options?.quiet === true || revalidate
     if (!quiet) dispatch({ type: "FETCH_DETAIL_START", conversationId })
+    // The "refreshing" mark stays while any revalidation of this session is
+    // out, whichever of them answers first.
+    const settleRevalidation = revalidate
+      ? beginRevalidation(conversationId)
+      : () => {}
     const startedAt = Date.now()
     perfMark("detail:fetch:start", {
       conversationId,
-      kind: quiet ? "quiet" : "refetch",
+      kind: revalidate ? "revalidate" : quiet ? "quiet" : "refetch",
     })
     // Never rejects: failure is reported as `false` (and as FETCH_DETAIL_ERROR
     // in the store), so the many callers that fire and forget cannot leak an
     // unhandled rejection.
     return fetchDetailWindowed(fetchId, session?.detail ?? null)
       .then((detail) => {
+        settleRevalidation()
         perfMark("detail:fetch:end", {
           conversationId,
           kind: "refetch",
@@ -4055,6 +4289,7 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
         return true
       })
       .catch((error: unknown) => {
+        settleRevalidation()
         if (!isLatestGeneration(conversationId, generation)) return false
         if (quiet) return false
         dispatch({
@@ -4600,6 +4835,20 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
   }
 })
 
+// Keep the window of every session on screen on disk as the server serves
+// it, so a restart paints the restored tabs at once (`prewarmFromDisk`). Only
+// a detail that changed is written, once it has been quiet for a moment, and
+// never one fetched mid-turn (`scheduleDiskSave`).
+useConversationRuntimeStore.subscribe((state, prev) => {
+  if (state.byConversationId === prev.byConversationId) return
+  for (const [key, session] of state.byConversationId) {
+    const detail = session.detail
+    if (!detail || prev.byConversationId.get(key)?.detail === detail) continue
+    const dbId = session.dbConversationId ?? key
+    if (dbId > 0) scheduleDiskSave(dbId, detail)
+  }
+})
+
 // ─── Read helpers ────────────────────────────────────────────────────────
 // Callbacks/effects read fresh state through `getState()` (no subscription);
 // components subscribe via `useConversationRuntimeStore(selector)` instead.
@@ -4619,6 +4868,35 @@ export function getRuntimeSession(
 // DB id, until they land or a view takes them over.
 const detailPrefetches = new Map<number, Promise<DbConversationDetail>>()
 
+function hasDetailPrefetch(conversationId: number): boolean {
+  return detailPrefetches.has(conversationId)
+}
+
+// Opens waiting on a disk read (see `fetchDetailViaDisk`), by DB id.
+const restoringFromDisk = new Set<number>()
+
+/** How long an open waits for the disk before asking the server anyway. */
+const DISK_RESTORE_WAIT_MS = 250
+
+/** The sidebar's row for a session, when the list holds it. */
+function findConversationSummary(
+  conversationId: number
+): DbConversationSummary | null {
+  return (
+    useAppWorkspaceStore
+      .getState()
+      .conversations.find((c) => c.id === conversationId) ?? null
+  )
+}
+
+/** Whether a kept copy is of the agent session the row holds now. */
+function sameSession(
+  row: DbConversationSummary,
+  kept: DbConversationDetail
+): boolean {
+  return (row.external_id ?? null) === (kept.summary.external_id ?? null)
+}
+
 /**
  * Fetch a session's stored transcript before a view opens it, so the view
  * paints from memory rather than waiting on the request (the quick switcher
@@ -4633,8 +4911,57 @@ const detailPrefetches = new Map<number, Promise<DbConversationDetail>>()
 export function prefetchConversationDetail(conversationId: number): void {
   if (conversationId <= 0 || detailPrefetches.has(conversationId)) return
   if (leftDetailCache.has(conversationId)) return
-  const sessions = useConversationRuntimeStore.getState().byConversationId
-  if (sessions.has(conversationId)) return
+  if (pendingDiskRead(conversationId)) return
+  if (viewHolds(conversationId)) return
+  // A copy on disk is as good: the open refreshes it either way. Only a miss
+  // asks the server.
+  if (historyDiskEnabled()) {
+    void warmFromDisk(conversationId, () => !viewHolds(conversationId)).then(
+      (found) => {
+        if (!found && !viewHolds(conversationId)) {
+          prefetchFromServer(conversationId)
+        }
+      }
+    )
+    return
+  }
+  prefetchFromServer(conversationId)
+}
+
+/**
+ * Read a session's transcript back from the history cache into memory, where
+ * the view that opens it next finds it at once (a sidebar row under the
+ * pointer). Cheap: a disk read, never a server request.
+ */
+export function warmConversationFromDisk(conversationId: number): void {
+  if (conversationId <= 0 || viewHasDetail(conversationId)) return
+  // A view may already be mounting on it (a restored tab): the copy is still
+  // wanted until a detail is on screen.
+  void warmFromDisk(conversationId, () => !viewHasDetail(conversationId))
+}
+
+function viewHasDetail(conversationId: number): boolean {
+  return (
+    useConversationRuntimeStore.getState().byConversationId.get(conversationId)
+      ?.detail != null
+  )
+}
+
+/** The same for several sessions, in order (the restored tabs at startup). */
+export function prewarmConversationsFromDisk(
+  conversationIds: readonly number[]
+): void {
+  for (const id of conversationIds) warmConversationFromDisk(id)
+}
+
+function viewHolds(conversationId: number): boolean {
+  return useConversationRuntimeStore
+    .getState()
+    .byConversationId.has(conversationId)
+}
+
+function prefetchFromServer(conversationId: number): void {
+  if (detailPrefetches.has(conversationId)) return
   perfMark("detail:prefetch:start", { conversationId })
   const request = getFolderConversation(conversationId, {
     tailTurns: TAIL_TURNS_DEFAULT,
@@ -4703,8 +5030,8 @@ export function releaseRuntimeSession(conversationId: number): void {
         .getState()
         .byConversationId.get(conversationId)
       const keepAs = session?.dbConversationId ?? conversationId
-      if (session?.detail && keepAs > 0) {
-        leftDetailCache.put(keepAs, session.detail)
+      if (session?.detail && keepAs > 0 && !isConversationDeleted(keepAs)) {
+        keepLeftDetail(keepAs, session.detail)
       }
       useConversationRuntimeStore
         .getState()
@@ -4774,6 +5101,7 @@ export function resetConversationRuntimeStore(): void {
   fetchGeneration.clear()
   leftDetailCache.clear()
   detailPrefetches.clear()
+  restoringFromDisk.clear()
   for (const cancel of viewerDetailSyncCancels.values()) cancel()
   viewerDetailSyncCancels.clear()
   for (const pending of pendingSessionReleases.values()) clearTimeout(pending)

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { isDesktop } from "@/lib/platform"
+import { clearHistoryCache } from "@/stores/history-cache"
 
 export default function LoginPage() {
   const router = useRouter()
@@ -15,6 +16,12 @@ export default function LoginPage() {
   useEffect(() => {
     document.title = t("documentTitle")
   }, [t])
+
+  // Every way out of a session ends here (sign-out, an expired or rejected
+  // token): forget the transcripts this browser kept for it.
+  useEffect(() => {
+    if (!isDesktop()) void clearHistoryCache("all")
+  }, [])
 
   // Desktop users skip login entirely
   if (isDesktop()) {

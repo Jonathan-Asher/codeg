@@ -2274,7 +2274,8 @@
         "toolResult": "النتيجة",
         "toolError": "خطأ"
       },
-      "moreActions": "إجراءات إضافية"
+      "moreActions": "إجراءات إضافية",
+      "refreshing": "جارٍ التحديث…"
     },
     "sessionDetails": {
       "menuLabel": "تفاصيل الجلسة",

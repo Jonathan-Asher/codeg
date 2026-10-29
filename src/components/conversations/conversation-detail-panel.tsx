@@ -637,6 +637,7 @@ const ConversationTabView = memo(function ConversationTabView({
     loading: detailLoading,
     error: detailError,
     acpLoadError,
+    unverified: detailUnverified,
   } = useConversationDetail(effectiveConversationId)
 
   // Subscribe to only the fields this panel actually reads from its runtime
@@ -697,8 +698,12 @@ const ConversationTabView = memo(function ConversationTabView({
   // the backend falls back to session/new, orphaning the historical
   // context. cline doesn't support session resume, so it connects
   // immediately regardless.
+  // A transcript painted from the history cache counts as loading here until
+  // the server confirms its session id: a fork may have re-pointed the row.
   const awaitingHistoricalSessionId =
-    hasPersistedConversation && selectedAgent !== "cline" && detailLoading
+    hasPersistedConversation &&
+    selectedAgent !== "cline" &&
+    (detailLoading || detailUnverified)
   // Install status of the currently selected agent. An agent can be enabled and
   // platform-available yet have no CLI/SDK installed; selecting one can never
   // connect. Rather than firing a doomed (and racy) auto-connect whose only
@@ -840,9 +845,11 @@ const ConversationTabView = memo(function ConversationTabView({
       () => connectionStore.getConnection(tabId)?.liveMessage != null,
       [connectionStore, tabId]
     ),
+    // In place: the transcript stays on screen (with the "refreshing" mark)
+    // while it is re-read, and a failure keeps it.
     refetch: useCallback(
       (conversationId: number) =>
-        refetchDetail(conversationId, { quiet: true }),
+        refetchDetail(conversationId, { revalidate: true }),
       [refetchDetail]
     ),
   })

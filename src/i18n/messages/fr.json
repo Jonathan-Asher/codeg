@@ -2274,7 +2274,8 @@
         "toolResult": "Résultat",
         "toolError": "Erreur"
       },
-      "moreActions": "Plus d’actions"
+      "moreActions": "Plus d’actions",
+      "refreshing": "Actualisation…"
     },
     "sessionDetails": {
       "menuLabel": "Détails de la session",
