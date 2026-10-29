@@ -47,6 +47,8 @@ vi.mock("@/stores/app-workspace-store", () => {
 })
 vi.mock("@/stores/conversation-runtime-store", () => ({
   getRuntimeSession: () => null,
+  // The "refreshing" mark reads the session; none here.
+  useConversationRuntimeStore: () => false,
 }))
 vi.mock("./session-details-dialog", () => ({
   SessionDetailsDialog: () => null,
