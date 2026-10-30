@@ -1876,6 +1876,51 @@
   }
 }
 
+/* What the slide moves is the panel boxes, not their content. For the length
+   of a sidebar/aux slide the shown conversation — its group's tab stack, the
+   background tabs (`absolute inset-0` in it) included — is held at the width
+   it had when the slide began (panel-slide.ts writes --slide-freeze-w and this
+   attribute), centred on its container by its start margin (negative while
+   the container is the narrower one) — so the centred session column travels
+   with the panel's centre exactly as it would when re-laid out. While it is
+   held, the panel's per-frame resize only moves it: no re-layout of the
+   transcripts and no ResizeObserver round (virtua's row measuring, the
+   composer's overflow hooks). Taking hold changes no computed width and
+   nothing else (no position, containment or layer of its own), so it costs
+   nothing; letting go is the one re-layout at the final width, after the
+   slide. Wider than the panel it is clipped by it; narrower, it leaves the
+   panel's background — what the column's empty margins look like anyway.
+
+   The width is registered as NOT inherited: an ordinary custom property
+   inherits, so writing it on a tab stack restyled — and in WebKit re-laid out
+   — every transcript inside it, the very cost the hold exists to avoid (and
+   again on letting go). */
+@property --slide-freeze-w {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+[data-slide-frozen="center"] {
+  width: var(--slide-freeze-w);
+  margin-inline-start: calc((100% - var(--slide-freeze-w)) / 2);
+}
+
+/* The other kept-mounted HIDDEN subtrees — the file column under the
+   conversation overlay, the conversation column under maximized files, the
+   conversation surface under a workbench route — are laid out like any other
+   (`visibility: hidden` stops the paint, not the layout), so a slide re-laid
+   them out at every frame and fired their ResizeObservers (Monaco's layout
+   among them). They are held at their width too, and only while hidden:
+   panel-slide.ts lets them go one per frame after the slide, and one shown
+   before that drops out of this rule and lays out at once. (Not
+   `content-visibility: hidden`: WebKit re-lays out the whole subtree whenever
+   it is shown again, which made every tab switch slower.) */
+.conversation-tab-hidden[data-slide-frozen="hold"] {
+  width: var(--slide-freeze-w);
+  right: auto;
+}
+
 /* Keep-alive conversation tabs (see ConversationDetailPanel) hide the inactive
    tab with `visibility: hidden` (Tailwind `invisible`) while staying mounted so
    the active tab can reuse their layout. Tailwind v4's `transition-all` resolves

@@ -15,6 +15,11 @@ import {
   useState,
 } from "react"
 import type { ImperativePanelGroupHandle } from "react-resizable-panels"
+import {
+  slideHoldStyle,
+  usePanelSlideOnToggle,
+  useSlideFreeze,
+} from "./panel-slide"
 import { FolderTitleBar } from "@/components/layout/folder-title-bar"
 import { Sidebar } from "@/components/layout/sidebar"
 import { StatusBar } from "@/components/layout/status-bar"
@@ -136,12 +141,6 @@ const DEFAULT_FUSION_LAYOUT: [number, number] = [56, 44]
 const MIN_CENTER_WIDTH_PX = 420
 const MIN_WORKSPACE_HEIGHT_PX = 220
 const LAYOUT_EPSILON = 0.25
-// Slide duration for panel show/hide; must match the CSS transition on
-// `.panel-slide-animating > [data-panel]` in globals.css. The transition class
-// is held a touch past this so the animation finishes before it's removed
-// (removing it mid-transition would snap the final pixels).
-const PANEL_SLIDE_MS = 240
-const PANEL_SLIDE_CLEANUP_MS = PANEL_SLIDE_MS + 60
 
 /** A failing conversation view, isolated; switching tabs clears the error. */
 function ConversationErrorBoundary({
@@ -193,45 +192,6 @@ function resolvePanelSizeRange(
 }
 
 /**
- * Returns `true` for a brief window after `open` flips, so the caller can add
- * the `.panel-slide-animating` class that animates the panel resize (a "push"
- * slide) on explicit show/hide toggles only — never on the initial mount, on
- * localStorage hydration, or during resize-handle drags. The first settled
- * `open` value (once `ready`) establishes a baseline without animating.
- *
- * The toggle is detected during render (React's sanctioned "adjust state when a
- * prop changes" pattern) rather than in an effect: turning the class on in the
- * render that observes the flip lands it in the same commit as the panel
- * resize, so the browser has the transition in place before `flex-grow`
- * changes. Turn-off is deferred to a timer keyed on a per-toggle sequence, so a
- * fresh toggle mid-slide re-arms the timer instead of inheriting the old one.
- */
-function usePanelSlideOnToggle(open: boolean, ready: boolean): boolean {
-  const [animating, setAnimating] = useState(false)
-  const [slideSeq, setSlideSeq] = useState(0)
-  const [prevOpen, setPrevOpen] = useState<boolean | null>(null)
-
-  if (ready) {
-    if (prevOpen === null) {
-      // Adopt the hydrated value as the baseline without animating.
-      setPrevOpen(open)
-    } else if (prevOpen !== open) {
-      setPrevOpen(open)
-      setAnimating(true)
-      setSlideSeq((seq) => seq + 1)
-    }
-  }
-
-  useEffect(() => {
-    if (slideSeq === 0) return
-    const timer = setTimeout(() => setAnimating(false), PANEL_SLIDE_CLEANUP_MS)
-    return () => clearTimeout(timer)
-  }, [slideSeq])
-
-  return animating
-}
-
-/**
  * The conversation surface while a full-page workbench route covers it: kept
  * MOUNTED (so background conversations keep streaming) and merely stopped from
  * painting.
@@ -269,6 +229,8 @@ function KeptMountedSurface({
           hidden && "conversation-tab-hidden invisible"
         )}
         inert={hidden || undefined}
+        // Hidden, it keeps its width through a sidebar slide (panel-slide.ts).
+        data-slide-freeze={hidden ? "hold" : undefined}
       >
         {children}
       </div>
@@ -401,6 +363,7 @@ function WorkspaceContent({ children }: { children: React.ReactNode }) {
                   filesMaximized && "conversation-tab-hidden invisible"
                 )}
                 inert={filesMaximized || undefined}
+                data-slide-freeze={filesMaximized ? "hold" : undefined}
               >
                 {/* Conversation column top bar (UNSPLIT only): the tab strip,
                   plus a left reserve (only when the sidebar is collapsed, so
@@ -519,6 +482,9 @@ function WorkspaceContent({ children }: { children: React.ReactNode }) {
                 mode === "conversation" && "conversation-tab-hidden invisible"
               )}
               aria-hidden={mode === "conversation"}
+              // Hidden, it keeps its width through a sidebar/aux slide instead
+              // of re-laying out its editors per frame (panel-slide.ts).
+              data-slide-freeze={mode === "conversation" ? "hold" : undefined}
             >
               {/* File column top bar: the file tab strip + a right reserve for
                   the fixed corner overlay (only when the aux panel is collapsed,
@@ -786,6 +752,11 @@ function FolderWorkspaceShell({ children }: { children: React.ReactNode }) {
   const shellGroupRef = useRef<ImperativePanelGroupHandle | null>(null)
   const mainGroupRef = useRef<ImperativePanelGroupHandle | null>(null)
   const shellContainerRef = useRef<HTMLDivElement | null>(null)
+  // A sidebar/aux slide only moves panel boxes: the shown conversation keeps
+  // its width (centred) and the hidden keep-alive subtrees keep theirs
+  // (`[data-slide-freeze]`, see panel-slide.ts), so no transcript re-lays out
+  // per frame; each does once, after the slide.
+  useSlideFreeze(shellContainerRef, shellSlideAnimating)
   const mainContainerRef = useRef<HTMLDivElement | null>(null)
 
   const [shellWidth, setShellWidth] = useState(0)
@@ -1071,6 +1042,23 @@ function FolderWorkspaceShell({ children }: { children: React.ReactNode }) {
     safeMainHeight
   )
 
+  // A side panel sliding OPEN renders its content at the width it ends at,
+  // pinned to the panel's outer edge, so the content slides in whole while the
+  // panel (overflow-hidden) uncovers it — instead of re-laying out the whole
+  // sidebar / file tree at every intermediate width of the slide.
+  const slideTargetLayout =
+    (sidebarAnimating && sidebarOpen) || (auxAnimating && auxOpen)
+      ? buildShellLayout()
+      : null
+  const sidebarSlideHold =
+    slideTargetLayout && sidebarAnimating && sidebarOpen
+      ? slideHoldStyle("end", (slideTargetLayout[0] / 100) * safeShellWidth)
+      : undefined
+  const auxSlideHold =
+    slideTargetLayout && auxAnimating && auxOpen
+      ? slideHoldStyle("start", (slideTargetLayout[2] / 100) * safeShellWidth)
+      : undefined
+
   return (
     <div
       ref={shellContainerRef}
@@ -1095,10 +1083,12 @@ function FolderWorkspaceShell({ children }: { children: React.ReactNode }) {
               it closes, but the panel keeps a shrinking width for the 240ms
               slide — an un-backed wrapper would show the root `bg-background`
               (white) through that gap. */}
-          <div className="h-full min-h-0 overflow-hidden ws-surface-sidebar">
-            <AppErrorBoundary scope="sidebar">
-              <Sidebar />
-            </AppErrorBoundary>
+          <div className="relative h-full min-h-0 overflow-hidden ws-surface-sidebar">
+            <div className="h-full" style={sidebarSlideHold}>
+              <AppErrorBoundary scope="sidebar">
+                <Sidebar />
+              </AppErrorBoundary>
+            </div>
           </div>
         </ResizablePanel>
 
@@ -1199,10 +1189,12 @@ function FolderWorkspaceShell({ children }: { children: React.ReactNode }) {
               paired `bg-background` is the off-state (image disabled): equivalent
               to the old opaque wrapper, so the 240ms collapse slide still never
               flashes white while AuxPanel `return null`s. */}
-          <div className="h-full min-h-0 overflow-hidden bg-background ws-transparent-bg">
-            <AppErrorBoundary scope="aux-panel">
-              <AuxPanel />
-            </AppErrorBoundary>
+          <div className="relative h-full min-h-0 overflow-hidden bg-background ws-transparent-bg">
+            <div className="h-full" style={auxSlideHold}>
+              <AppErrorBoundary scope="aux-panel">
+                <AuxPanel />
+              </AppErrorBoundary>
+            </div>
           </div>
         </ResizablePanel>
       </ResizablePanelGroup>

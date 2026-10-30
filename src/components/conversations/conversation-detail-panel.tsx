@@ -4382,6 +4382,12 @@ export function ConversationDetailPanel() {
                 "relative h-full",
                 canTileG && "flex min-w-full flex-row"
               )}
+              // While the sidebar or aux panel slides, the group's tab stack
+              // keeps its width, centred: the shown tab moves with the panel
+              // and neither it nor the hidden tabs (`absolute inset-0` in
+              // here) re-lay out per frame — once, after the slide
+              // (panel-slide.ts). A tiled row scrolls instead; left alone.
+              data-slide-freeze={canTileG ? undefined : "center"}
             >
               {groupTabs.map((tab, indexInGroup) =>
                 renderTabWrapper(tab, indexInGroup, groupId, canTileG)
