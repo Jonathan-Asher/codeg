@@ -2,10 +2,15 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 const transports = vi.hoisted(() => {
   type Call = (command: string, args?: unknown) => Promise<unknown>
-  return {
-    shell: { call: vi.fn<Call>(async () => ({ streamId: "s1" })) },
-    remote: { call: vi.fn<Call>(async () => ({ streamId: "remote" })) },
-  }
+  type Subscribe = (
+    event: string,
+    handler: (payload: unknown) => void
+  ) => Promise<() => void>
+  const transport = (streamId: string) => ({
+    call: vi.fn<Call>(async () => ({ streamId })),
+    subscribe: vi.fn<Subscribe>(async () => () => {}),
+  })
+  return { shell: transport("s1"), remote: transport("remote") }
 })
 vi.mock("@/lib/transport", () => ({
   getShellTransport: () => transports.shell,
@@ -13,7 +18,12 @@ vi.mock("@/lib/transport", () => ({
   getTransport: () => transports.remote,
 }))
 
-import { naturalApi, naturalVoiceHost, ttsApi } from "./natural-api"
+import {
+  naturalApi,
+  naturalVoiceHost,
+  TTS_STATUS_EVENT,
+  ttsApi,
+} from "./natural-api"
 
 afterEach(() => {
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
@@ -42,6 +52,27 @@ describe("natural voice backend calls", () => {
       streamId: "s1",
       waitMs: 10_000,
     })
+  })
+
+  it("download, delete and report on the models of this window's own backend, in a remote-workspace window too", async () => {
+    await ttsApi.status()
+    await ttsApi.downloadModels()
+    await ttsApi.cancelDownload()
+    await ttsApi.deleteModels()
+    const handler = vi.fn()
+    await ttsApi.onStatus(handler)
+    expect(transports.remote.call).not.toHaveBeenCalled()
+    expect(transports.remote.subscribe).not.toHaveBeenCalled()
+    expect(transports.shell.call.mock.calls.map((c) => c[0])).toEqual([
+      "tts_status",
+      "tts_download_models",
+      "tts_cancel_download",
+      "tts_delete_models",
+    ])
+    expect(transports.shell.subscribe).toHaveBeenCalledWith(
+      TTS_STATUS_EVENT,
+      handler
+    )
   })
 
   it("are made locally in the desktop app and by the server in a browser", () => {

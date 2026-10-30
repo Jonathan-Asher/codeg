@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { ReadAloudPlayer, type ReadAloudNotice } from "./player"
+import {
+  NATURAL_STATUS_CHECK_MS,
+  NATURAL_STATUS_TTL_MS,
+  ReadAloudPlayer,
+  type ReadAloudNotice,
+} from "./player"
 import type { TtsStatus } from "./natural-api"
 import { DEFAULT_READ_ALOUD_PREFS, type ReadAloudPrefs } from "./prefs"
 import {
@@ -32,6 +37,10 @@ function setup(
     status?: TtsStatus | null
     audio?: FakeAudioOut | null
     keyTarget?: Document
+    /** How long ago the backend gave `status`, in ms (default: just now). */
+    statusAge?: number
+    /** What the backend says when asked again; not asked without it. */
+    recheck?: () => Promise<TtsStatus | null>
   } = {}
 ) {
   const synth = new FakeSynth(FAKE_VOICES)
@@ -39,6 +48,14 @@ function setup(
   const audio = options.audio === undefined ? new FakeAudioOut() : options.audio
   const prefs = { ...DEFAULT_READ_ALOUD_PREFS, ...options.prefs }
   let status = options.status === undefined ? fakeTtsStatus() : options.status
+  let statusAge = options.statusAge ?? 0
+  const recheck = options.recheck
+  const refreshStatus = recheck
+    ? vi.fn(async () => {
+        status = await recheck()
+        statusAge = 0
+      })
+    : undefined
   const player = new ReadAloudPlayer({
     synth,
     createUtterance: (text) => new FakeUtterance(text),
@@ -48,6 +65,8 @@ function setup(
       api,
       getAudio: () => audio,
       getStatus: () => status,
+      getStatusAge: () => statusAge,
+      refreshStatus,
     },
   })
   const notices: ReadAloudNotice[] = []
@@ -60,6 +79,7 @@ function setup(
     player,
     prefs,
     notices,
+    refreshStatus,
     setStatus: (next: TtsStatus | null) => {
       status = next
     },
@@ -153,6 +173,129 @@ describe("engine choice", () => {
       ok: false,
       reason: "empty",
     })
+    expect(player.getState().status).toBe("idle")
+  })
+})
+
+describe("a status that may be out of date", () => {
+  // The models were downloaded in another window (Settings) after this one
+  // last heard from the backend.
+  const STALE = NATURAL_STATUS_TTL_MS + 1
+  const missing = () => fakeTtsStatus({ installed: false })
+
+  it("tries the engine for a user who chose the natural voice", async () => {
+    const { player, api, synth } = setup({
+      prefs: { engine: "natural" },
+      status: missing(),
+      statusAge: STALE,
+    })
+    player.speak("r1", "Hello there.")
+    await settle()
+    expect(api.spoken).toHaveLength(1)
+    expect(synth.spoken).toHaveLength(0)
+  })
+
+  it("asks the backend before a chosen natural voice gives way to the system voices", async () => {
+    const ready = setup({
+      prefs: { engine: "natural" },
+      status: missing(),
+      statusAge: STALE,
+      recheck: async () => fakeTtsStatus(),
+    })
+    ready.player.speak("r1", "Hello there.")
+    await settle()
+    expect(ready.refreshStatus).toHaveBeenCalledTimes(1)
+    expect(ready.api.spoken).toHaveLength(1)
+    expect(ready.synth.spoken).toHaveLength(0)
+
+    // Still downloading: the system voices read, as Settings says, with no
+    // "the natural voice stopped" notice.
+    const pending = setup({
+      prefs: { engine: "natural" },
+      status: missing(),
+      statusAge: STALE,
+      recheck: async () => missing(),
+    })
+    pending.player.speak("r1", "Hello there.")
+    await settle()
+    expect(pending.api.spoken).toHaveLength(0)
+    expect(pending.synth.spoken).toHaveLength(1)
+    expect(pending.notices).toEqual([])
+  })
+
+  it("tries a chosen natural voice when the backend doesn't answer in time", async () => {
+    vi.useFakeTimers()
+    const { player, api, synth } = setup({
+      prefs: { engine: "natural" },
+      status: missing(),
+      statusAge: STALE,
+      recheck: () => new Promise(() => {}),
+    })
+    player.speak("r1", "Hello there.")
+    await vi.advanceTimersByTimeAsync(NATURAL_STATUS_CHECK_MS - 1)
+    expect(api.spoken).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(1)
+    await settle()
+    expect(api.spoken).toHaveLength(1)
+    expect(synth.spoken).toHaveLength(0)
+  })
+
+  it("with no choice, asks the backend before falling back to the system voices", async () => {
+    const { player, api, synth, audio, refreshStatus } = setup({
+      status: missing(),
+      statusAge: STALE,
+      recheck: async () => fakeTtsStatus(),
+    })
+    expect(player.speak("r1", "Hello there.")).toEqual({
+      ok: true,
+      missingVoices: [],
+    })
+    // The reply shows as being read while the backend is asked.
+    expect(player.getState()).toEqual({ status: "playing", currentId: "r1" })
+    // The audio output starts inside the click, as the natural voice needs.
+    expect(audio.resumes).toBe(1)
+    await settle()
+    expect(refreshStatus).toHaveBeenCalledTimes(1)
+    expect(api.spoken.map((s) => s.text)).toEqual(["Hello there."])
+    expect(synth.spoken).toHaveLength(0)
+  })
+
+  it("with no choice, reads with the system voices once the backend confirms the models are missing", async () => {
+    const { player, api, synth, audio } = setup({
+      status: missing(),
+      statusAge: STALE,
+      recheck: async () => missing(),
+    })
+    player.speak("r1", "Hello there.")
+    expect(synth.spoken).toHaveLength(0)
+    await settle()
+    expect(synth.spoken.map((u) => u.text)).toEqual(["Hello there."])
+    expect(api.spoken).toHaveLength(0)
+    expect(audio.suspends).toBe(1)
+  })
+
+  it("trusts a recent answer and starts at once", () => {
+    const { player, synth, refreshStatus } = setup({
+      status: missing(),
+      statusAge: NATURAL_STATUS_TTL_MS - 1,
+      recheck: async () => fakeTtsStatus(),
+    })
+    player.speak("r1", "Hello there.")
+    expect(synth.spoken).toHaveLength(1)
+    expect(refreshStatus).not.toHaveBeenCalled()
+  })
+
+  it("drops the check's answer when the reply was stopped meanwhile", async () => {
+    const { player, api, synth } = setup({
+      status: missing(),
+      statusAge: STALE,
+      recheck: async () => fakeTtsStatus(),
+    })
+    player.speak("r1", "Hello there.")
+    player.stop()
+    await settle()
+    expect(api.spoken).toHaveLength(0)
+    expect(synth.spoken).toHaveLength(0)
     expect(player.getState().status).toBe("idle")
   })
 })

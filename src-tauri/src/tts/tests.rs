@@ -405,6 +405,38 @@ async fn a_failed_download_is_reported_and_can_be_retried() {
 }
 
 #[tokio::test]
+async fn status_changes_are_announced() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = Arc::new(Script::default());
+    let svc = service(dir.path(), &script, IDLE_SHUTDOWN, Duration::from_secs(30));
+    let heard: Arc<Mutex<Vec<TtsStatus>>> = Arc::default();
+    let sink = heard.clone();
+    svc.on_status_change(|| Arc::new(move |status: TtsStatus| sink.lock().unwrap().push(status)));
+    // Only the first listener counts.
+    svc.on_status_change(|| panic!("a second listener must not be built"));
+
+    svc.start_download().unwrap();
+    for _ in 0..200 {
+        if heard.lock().unwrap().len() >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    {
+        let heard = heard.lock().unwrap();
+        assert_eq!(heard.len(), 2, "{heard:?}");
+        assert!(matches!(heard[0].download, DownloadState::Downloading { .. }));
+        assert!(matches!(heard[1].download, DownloadState::Failed { .. }));
+    }
+
+    svc.store().unwrap().install_placeholder_for_tests();
+    svc.delete_models().await.unwrap();
+    let last = heard.lock().unwrap().last().cloned().unwrap();
+    assert!(!last.installed);
+    assert!(matches!(last.download, DownloadState::Idle));
+}
+
+#[tokio::test]
 async fn delete_removes_the_models_and_stops_the_engine() {
     let dir = tempfile::tempdir().unwrap();
     let script = Arc::new(Script::default());
