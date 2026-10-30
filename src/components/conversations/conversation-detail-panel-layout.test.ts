@@ -74,6 +74,33 @@ describe("ConversationDetailPanel new conversation layout", () => {
     expect(welcomeBranch).toContain("tall")
   })
 
+  // A sidebar/aux slide resizes this column every frame. Each group's tab
+  // stack (shown tab + the hidden ones inside it) is held centred, and every
+  // other hidden keep-alive subtree is held as it is, so no transcript re-lays
+  // out per frame (see panel-slide.ts). A tiled row scrolls and is left alone.
+  it("holds the tab stacks and the hidden keep-alive subtrees through a panel slide", () => {
+    expect(source).toContain(
+      'data-slide-freeze={canTileG ? undefined : "center"}'
+    )
+    // Not per tab: restyling a hidden tab re-lays it out in WebKit.
+    expect(source).not.toContain('visible ? "center" : "hold"')
+    // The other hidden subtrees: the conversation surface under a workbench
+    // route, the conversation column under maximized files, the file column
+    // under the conversation overlay.
+    expect(workspaceLayoutSource).toContain(
+      'data-slide-freeze={hidden ? "hold" : undefined}'
+    )
+    expect(workspaceLayoutSource).toContain(
+      'data-slide-freeze={filesMaximized ? "hold" : undefined}'
+    )
+    expect(workspaceLayoutSource).toContain(
+      'data-slide-freeze={mode === "conversation" ? "hold" : undefined}'
+    )
+    expect(globalsCssSource).toContain(
+      '.conversation-tab-hidden[data-slide-frozen="hold"]'
+    )
+  })
+
   it("snaps the hidden keep-alive tab so `transition-all` descendants don't ghost", () => {
     // Inactive tabs stay mounted and hide with `visibility: hidden` (`invisible`).
     // In Tailwind v4 `transition-all` transitions `visibility` too, so welcome
