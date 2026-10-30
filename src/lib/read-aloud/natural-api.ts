@@ -5,11 +5,13 @@
  * Always through the SHELL transport, never the remote one: the voice is made
  * on the machine whose speakers play it. In the desktop app that is the local
  * backend, a remote-workspace window included (it runs inside this Mac's own
- * app); in a browser it is the server the page came from.
+ * app); in a browser it is the server the page came from. The status events
+ * come from the same backend, so a remote-workspace window hears about this
+ * Mac's models, not the remote server's.
  */
 
 import { detectEnvironment } from "@/lib/transport/detect"
-import { getShellTransport } from "@/lib/transport"
+import { getShellTransport, type UnsubscribeFn } from "@/lib/transport"
 
 export type TtsDownloadState =
   | { state: "idle" }
@@ -77,11 +79,18 @@ function call<T>(command: string, args?: Record<string, unknown>) {
   return getShellTransport().call<T>(command, args, { timeoutMs: 30_000 })
 }
 
+/** Sent by the backend with the new status whenever a download starts, ends,
+ *  fails or is cancelled, or the models are deleted, from whichever window
+ *  asked (`TTS_STATUS_EVENT` in `src-tauri/src/commands/tts.rs`). */
+export const TTS_STATUS_EVENT = "tts://status"
+
 export const ttsApi = {
   status: () => call<TtsStatus>("tts_status"),
   downloadModels: () => call<TtsStatus>("tts_download_models"),
   cancelDownload: () => call<TtsStatus>("tts_cancel_download"),
   deleteModels: () => call<TtsStatus>("tts_delete_models"),
+  onStatus: (handler: (status: unknown) => void): Promise<UnsubscribeFn> =>
+    getShellTransport().subscribe<unknown>(TTS_STATUS_EVENT, handler),
 }
 
 export const naturalApi: NaturalApi = {

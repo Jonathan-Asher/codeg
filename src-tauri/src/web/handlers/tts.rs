@@ -23,19 +23,19 @@ pub async fn tts_status(
 pub async fn tts_download_models(
     Extension(state): Extension<Arc<AppState>>,
 ) -> Result<Json<TtsStatus>, AppCommandError> {
-    tts_download_models_core(&state.data_dir).map(Json)
+    tts_download_models_core(&state.data_dir, &state.emitter).map(Json)
 }
 
 pub async fn tts_cancel_download(
     Extension(state): Extension<Arc<AppState>>,
 ) -> Result<Json<TtsStatus>, AppCommandError> {
-    Ok(Json(tts_cancel_download_core(&state.data_dir).await))
+    Ok(Json(tts_cancel_download_core(&state.data_dir, &state.emitter).await))
 }
 
 pub async fn tts_delete_models(
     Extension(state): Extension<Arc<AppState>>,
 ) -> Result<Json<TtsStatus>, AppCommandError> {
-    tts_delete_models_core(&state.data_dir).await.map(Json)
+    tts_delete_models_core(&state.data_dir, &state.emitter).await.map(Json)
 }
 
 pub async fn tts_speak(

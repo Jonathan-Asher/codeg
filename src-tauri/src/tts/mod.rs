@@ -273,6 +273,11 @@ struct SlotInner {
     last_poll: Instant,
 }
 
+/// Told the new status whenever the models or a download change state, so
+/// every window of the app, and every client of the server, learns that the
+/// voice became ready (or stopped being) without asking.
+pub type StatusListener = Arc<dyn Fn(TtsStatus) + Send + Sync>;
+
 /// One synthesis as a client sees it: the chunks not yet polled.
 struct Slot {
     sidecar_id: u64,
@@ -299,6 +304,7 @@ pub struct TtsService {
     streams: Mutex<HashMap<String, Arc<Slot>>>,
     last_used: Mutex<Instant>,
     reaper_running: AtomicBool,
+    status_listener: OnceLock<StatusListener>,
 }
 
 static SERVICE: OnceLock<Arc<TtsService>> = OnceLock::new();
@@ -350,6 +356,19 @@ impl TtsService {
             streams: Mutex::new(HashMap::new()),
             last_used: Mutex::new(Instant::now()),
             reaper_running: AtomicBool::new(false),
+            status_listener: OnceLock::new(),
+        }
+    }
+
+    /// Who hears about status changes. The first listener stays: a process
+    /// has one event emitter, so later calls only build one to drop it.
+    pub fn on_status_change(&self, listener: impl FnOnce() -> StatusListener) {
+        self.status_listener.get_or_init(listener);
+    }
+
+    fn announce(&self) {
+        if let Some(listener) = self.status_listener.get() {
+            listener(self.status());
         }
     }
 
@@ -498,6 +517,8 @@ impl TtsService {
                 bytes_total: store.total_bytes(),
             };
         }
+        // Before the task starts, so its own announcement can't be overtaken.
+        self.announce();
         let token = CancellationToken::new();
         *self.download_cancel.lock().unwrap() = Some(token.clone());
         let this = self.clone();
@@ -527,6 +548,7 @@ impl TtsService {
             };
             *this.download.lock().unwrap() = next;
             this.download_cancel.lock().unwrap().take();
+            this.announce();
         });
         *self.download_task.lock().unwrap() = Some(task);
         Ok(self.status())
@@ -546,6 +568,7 @@ impl TtsService {
             *state = DownloadState::Idle;
         }
         drop(state);
+        self.announce();
         self.status()
     }
 
@@ -556,6 +579,7 @@ impl TtsService {
         self.stop_engine().await;
         store.delete()?;
         *self.download.lock().unwrap() = DownloadState::Idle;
+        self.announce();
         Ok(self.status())
     }
 

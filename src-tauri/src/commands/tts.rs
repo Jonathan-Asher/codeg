@@ -6,9 +6,19 @@
 //! machine whose speakers play it; a browser calls the server it is served by.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::app_error::AppCommandError;
-use crate::tts::{self, PollRequest, PollResult, SpeakRequest, SpeakStarted, TtsError, TtsStatus};
+use crate::tts::{
+    self, PollRequest, PollResult, SpeakRequest, SpeakStarted, TtsError, TtsService, TtsStatus,
+};
+use crate::web::event_bridge::{emit_event, EventEmitter};
+
+/// Sent with the new [`TtsStatus`] whenever a download starts, finishes,
+/// fails or is cancelled, or the models are deleted: every window (and every
+/// client of a server) keeps its own copy of the status, and the one that
+/// asked for the change is only one of them.
+pub const TTS_STATUS_EVENT: &str = "tts://status";
 
 /// Error keys the read-aloud UI branches on (`src/lib/read-aloud/natural-api.ts`).
 pub const TTS_I18N_KEY_NOT_INSTALLED: &str = "tts.notInstalled";
@@ -30,20 +40,36 @@ impl From<TtsError> for AppCommandError {
     }
 }
 
+/// The service, announcing its status changes through `emitter`.
+fn announcing_service(data_dir: &Path, emitter: &EventEmitter) -> Arc<TtsService> {
+    let service = tts::service_for(data_dir);
+    service.on_status_change(|| {
+        let emitter = emitter.clone();
+        Arc::new(move |status: TtsStatus| emit_event(&emitter, TTS_STATUS_EVENT, &status))
+    });
+    service
+}
+
 pub fn tts_status_core(data_dir: &Path) -> TtsStatus {
     tts::service_for(data_dir).status()
 }
 
-pub fn tts_download_models_core(data_dir: &Path) -> Result<TtsStatus, AppCommandError> {
-    Ok(tts::service_for(data_dir).start_download()?)
+pub fn tts_download_models_core(
+    data_dir: &Path,
+    emitter: &EventEmitter,
+) -> Result<TtsStatus, AppCommandError> {
+    Ok(announcing_service(data_dir, emitter).start_download()?)
 }
 
-pub async fn tts_cancel_download_core(data_dir: &Path) -> TtsStatus {
-    tts::service_for(data_dir).cancel_download().await
+pub async fn tts_cancel_download_core(data_dir: &Path, emitter: &EventEmitter) -> TtsStatus {
+    announcing_service(data_dir, emitter).cancel_download().await
 }
 
-pub async fn tts_delete_models_core(data_dir: &Path) -> Result<TtsStatus, AppCommandError> {
-    Ok(tts::service_for(data_dir).delete_models().await?)
+pub async fn tts_delete_models_core(
+    data_dir: &Path,
+    emitter: &EventEmitter,
+) -> Result<TtsStatus, AppCommandError> {
+    Ok(announcing_service(data_dir, emitter).delete_models().await?)
 }
 
 pub async fn tts_speak_core(
@@ -80,19 +106,22 @@ pub async fn tts_status(app: tauri::AppHandle) -> Result<TtsStatus, AppCommandEr
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn tts_download_models(app: tauri::AppHandle) -> Result<TtsStatus, AppCommandError> {
-    tts_download_models_core(&desktop_data_dir(&app))
+    let data_dir = desktop_data_dir(&app);
+    tts_download_models_core(&data_dir, &EventEmitter::Tauri(app))
 }
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn tts_cancel_download(app: tauri::AppHandle) -> Result<TtsStatus, AppCommandError> {
-    Ok(tts_cancel_download_core(&desktop_data_dir(&app)).await)
+    let data_dir = desktop_data_dir(&app);
+    Ok(tts_cancel_download_core(&data_dir, &EventEmitter::Tauri(app)).await)
 }
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn tts_delete_models(app: tauri::AppHandle) -> Result<TtsStatus, AppCommandError> {
-    tts_delete_models_core(&desktop_data_dir(&app)).await
+    let data_dir = desktop_data_dir(&app);
+    tts_delete_models_core(&data_dir, &EventEmitter::Tauri(app)).await
 }
 
 #[cfg(feature = "tauri-runtime")]

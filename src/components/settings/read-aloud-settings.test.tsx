@@ -33,6 +33,7 @@ vi.mock("@/lib/read-aloud/natural-api", async (importOriginal) => {
       downloadModels: action("download"),
       cancelDownload: action("cancel"),
       deleteModels: action("delete"),
+      onStatus: async () => () => {},
     },
   }
 })
