@@ -10,8 +10,11 @@
  * desktop, the server for a browser) and played here.
  *
  * A reply the natural voice can't finish is handed to the system voices from
- * the paragraph it was on. Everything below about the engine is about the
- * system voices.
+ * the paragraph it was on. Which of the two starts a reply follows this
+ * window's copy of the natural voice's status (`natural-status.ts`); a "not
+ * installed" it hasn't had confirmed lately is checked with the backend before
+ * the reply starts, since the models are usually downloaded in another window
+ * (Settings). Everything below about the engine is about the system voices.
  *
  * A reply is prepared once (`speechTextFromMarkdown`), cut into sentences and
  * script runs (`buildSpeechSegments`), and fed to the engine ONE utterance at
@@ -52,8 +55,10 @@ import {
 } from "./natural-player"
 import {
   getNaturalStatus,
+  naturalStatusAge,
   naturalVoiceReady,
   refreshNaturalStatus,
+  watchNaturalStatus,
 } from "./natural-status"
 
 export type ReadAloudStatus = "idle" | "playing" | "paused"
@@ -98,7 +103,16 @@ export interface NaturalEnv {
   getAudio: () => AudioOut | null
   /** The backend's last known status; null before it answered. */
   getStatus: () => TtsStatus | null
+  /** How long ago the backend last answered, in ms (Infinity: never).
+   *  Without it the status is taken as current. */
+  getStatusAge?: () => number
+  /** Ask the backend again; settles once the status is updated. */
+  refreshStatus?: () => Promise<unknown>
 }
+
+/** How a reply read now starts: with the natural voice, with the system
+ *  voices, or once the backend has been asked again (`check`). */
+type EngineChoice = "natural" | "system" | "check"
 
 /** The parts of `window.speechSynthesis` the player uses. */
 export interface SynthLike {
@@ -124,6 +138,13 @@ export interface PlayerEnv {
 
 /** Pause between `cancel()` and the next `speak()` when switching replies. */
 export const RESTART_DELAY_MS = 80
+
+/** A "not installed" older than this is checked with the backend before a
+ *  reply starts with the system voices. */
+export const NATURAL_STATUS_TTL_MS = 10_000
+
+/** Longest a reply waits for that check; past it, it starts anyway. */
+export const NATURAL_STATUS_CHECK_MS = 300
 /** How often the watchdog checks on an utterance whose `end` hasn't come. */
 export const WATCHDOG_INTERVAL_MS = 500
 /** How long voices are polled for when `voiceschanged` doesn't fire. */
@@ -223,15 +244,52 @@ export class ReadAloudPlayer {
 
   /** Whether a reply read now goes to the natural voice. */
   usesNaturalVoice(prefs: ReadAloudPrefs = this.getPrefs()): boolean {
+    return this.chooseEngine(prefs) === "natural"
+  }
+
+  /**
+   * The engine for a reply read now. The status this window holds can be out
+   * of date: the models are usually downloaded in another window, and an
+   * announcement of it can be missed. So a "not installed" (or no answer at
+   * all) that hasn't been confirmed lately is `check`ed with the backend first;
+   * `checked` is the decision after that.
+   */
+  private chooseEngine(prefs: ReadAloudPrefs, checked = false): EngineChoice {
     const env = this.naturalEnv
-    if (!env || prefs.engine === "system") return false
-    const status = env.getStatus()
-    // Not known yet: only a user who chose it explicitly gets a try (the
-    // backend refuses if it can't, and the system voices take over).
-    const ready = status
-      ? naturalVoiceReady(status)
-      : prefs.engine === "natural"
-    return ready && env.getAudio() !== null
+    if (!env || prefs.engine === "system") return "system"
+    const choice = ((): EngineChoice => {
+      const status = env.getStatus()
+      if (naturalVoiceReady(status)) return "natural"
+      // A backend that can't make the voice at all doesn't change its mind.
+      if (status && !status.supported) return "system"
+      const stale = (env.getStatusAge?.() ?? 0) > NATURAL_STATUS_TTL_MS
+      if (stale && !checked && env.refreshStatus) return "check"
+      // Unknown, or missing without a recent answer to say so: a user who
+      // chose the natural voice gets a try (the backend refuses if it can't,
+      // and the system voices take over). Recently confirmed missing: the
+      // system voices read until it is downloaded, as Settings says.
+      const unconfirmed = !status || stale
+      return unconfirmed && prefs.engine === "natural" ? "natural" : "system"
+    })()
+    // Asked last: the audio output is created on first use.
+    return choice !== "system" && env.getAudio() === null ? "system" : choice
+  }
+
+  /** Ask the backend for the status again, waiting at most
+   *  `NATURAL_STATUS_CHECK_MS`. */
+  private checkStatus(): Promise<void> {
+    const refresh = this.naturalEnv?.refreshStatus
+    if (!refresh) return Promise.resolve()
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, NATURAL_STATUS_CHECK_MS)
+      void Promise.resolve()
+        .then(refresh)
+        .catch(() => {})
+        .then(() => {
+          clearTimeout(timer)
+          resolve()
+        })
+    })
   }
 
   // ── Voices ──
@@ -331,8 +389,9 @@ export class ReadAloudPlayer {
   speak(id: string, markdown: string): SpeakResult {
     const speechText = speechTextFromMarkdown(markdown)
     const prefs = this.getPrefs()
+    const engine = this.chooseEngine(prefs)
 
-    if (this.usesNaturalVoice(prefs)) {
+    if (engine === "natural") {
       const paragraphs = naturalParagraphs(speechText)
       if (paragraphs.length === 0) return { ok: false, reason: "empty" }
       this.halt()
@@ -353,6 +412,38 @@ export class ReadAloudPlayer {
     this.index = 0
     this.setState({ status: "playing", currentId: id })
     const generation = this.generation
+
+    if (engine === "check") {
+      // Started here, inside the click, in case the answer is the natural
+      // voice: an audio context may only start in a user gesture.
+      const audio = this.naturalEnv?.getAudio()
+      if (audio) {
+        void audio.resume().catch(() => {})
+        this.naturalAudio = audio
+      }
+      void this.checkStatus().then(() => {
+        if (generation !== this.generation) return
+        const latest = this.getPrefs()
+        const paragraphs = naturalParagraphs(speechText)
+        if (
+          this.chooseEngine(latest, true) === "natural" &&
+          paragraphs.length > 0
+        ) {
+          this.queue = []
+          this.startNatural(paragraphs, latest)
+          return
+        }
+        this.releaseNaturalAudio()
+        this.startSystem(generation, engineBusy)
+      })
+    } else {
+      this.startSystem(generation, engineBusy)
+    }
+    return { ok: true, missingVoices: [...missing] }
+  }
+
+  /** Start the queue on the system voices. */
+  private startSystem(generation: number, engineBusy: boolean): void {
     if (engineBusy) {
       this.startTimer = setTimeout(() => {
         this.startTimer = null
@@ -363,7 +454,6 @@ export class ReadAloudPlayer {
       // let a user gesture start speech.
       this.speakNext(generation)
     }
-    return { ok: true, missingVoices: [...missing] }
   }
 
   pause(): void {
@@ -619,13 +709,17 @@ export function getReadAloudPlayer(): ReadAloudPlayer | null {
             api: naturalApi,
             getAudio: getAudioOut,
             getStatus: getNaturalStatus,
+            getStatusAge: naturalStatusAge,
+            refreshStatus: refreshNaturalStatus,
           }
         : (naturalEnvOverride ?? undefined),
   })
   const player = instance
   window.addEventListener("pagehide", () => player.stop())
   if (naturalEnvOverride === undefined) {
-    // The status decides the engine inside the click, so have it ready.
+    // The status decides the engine inside the click, so have it ready, and
+    // keep it so when another window downloads or deletes the models.
+    watchNaturalStatus()
     void refreshNaturalStatus()
     bindAudioUnlock(player)
   }
