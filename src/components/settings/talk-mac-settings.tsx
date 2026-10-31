@@ -131,13 +131,13 @@ export function TalkMacSettingsSection() {
     void talkVoiceApi
       .status()
       .then((next) => {
-        if (!cancelled) setStatus(next)
+        if (!cancelled && next) setStatus(next)
       })
       .catch(() => {})
     void talkPrefsApi
       .get()
       .then((next) => {
-        if (!cancelled) setPrefs(next)
+        if (!cancelled && next) setPrefs(next)
       })
       .catch(() => {})
     let off: (() => void) | null = null
@@ -206,7 +206,7 @@ export function TalkMacSettingsSection() {
     }
   }, [recording, save])
 
-  if (!desktop || status === null) return null
+  if (!desktop || !status) return null
   // Only where the platform could run it at all.
   if (status.unsupportedReason === "platform") return null
 
