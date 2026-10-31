@@ -237,6 +237,9 @@ pub struct ActiveDelegationState {
 pub struct PendingUserMessage {
     pub message_id: String,
     pub blocks: Vec<crate::acp::types::UserMessageBlock>,
+    /// The prompt was spoken (`AcpEvent::UserMessage::spoken`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub spoken: bool,
 }
 
 /// What a live session is blocked on, waiting for the user to act. Drives the
@@ -600,6 +603,14 @@ pub struct SessionState {
     /// opt-in), rerouting subsequent notes to the MCP pull path.
     pub native_steering_available: bool,
 
+    /// Which talk rules this connection's agent has in its context (a digest
+    /// of the full rules it was sent, `crate::talk::rules_key`), so later
+    /// messages in Talk mode carry the short reminder instead. `None` until
+    /// the full rules reach the agent, and again after a context compaction,
+    /// a `/clear`, Talk being switched on or off, and the Off note.
+    /// Backend-internal: not part of the client snapshot.
+    pub talk_rules_key: Option<String>,
+
     /// Which generation of codex-acp's `request_user_input` bridge this
     /// connection is talking to — 1.12.0 swapped the question and the tab
     /// header between a form property's `title` and `description`, and nothing
@@ -871,6 +882,7 @@ impl SessionState {
             delegation_enabled: false,
             feedback_tool_available: false,
             native_steering_available: false,
+            talk_rules_key: None,
             codex_user_input_shape: None,
             neutral_goal_channel: false,
             goal_control_method: crate::acp::codex_goal::LEGACY_GOAL_CONTROL_METHOD.to_string(),
@@ -893,6 +905,24 @@ impl SessionState {
             claude_auth_respawn: None,
             claude_auth_retry_prompt: None,
             claude_auth_respawning: false,
+        }
+    }
+
+    /// A context compaction that completed summarized the talk rules away
+    /// with the rest of the context: the next message in Talk mode carries
+    /// them in full again. Every adapter's compaction reaches here as the
+    /// shared `_meta.contextCompaction` card (see
+    /// `connection.rs::session_compaction_event`).
+    fn forget_talk_rules_on_compaction(
+        &mut self,
+        status: Option<&str>,
+        meta: Option<&serde_json::Value>,
+    ) {
+        let compaction = meta
+            .and_then(|meta| meta.get("contextCompaction"))
+            .is_some_and(|value| !value.is_null() && value.as_bool() != Some(false));
+        if compaction && status == Some("completed") {
+            self.talk_rules_key = None;
         }
     }
 
@@ -1135,6 +1165,7 @@ impl SessionState {
                 images,
             } => {
                 self.settle_retry_incidents_on_progress();
+                self.forget_talk_rules_on_compaction(Some(status.as_str()), meta.as_ref());
                 self.upsert_tool_call(
                     tool_call_id,
                     Some(kind),
@@ -1167,6 +1198,7 @@ impl SessionState {
                 images,
                 ..
             } => {
+                self.forget_talk_rules_on_compaction(status.as_deref(), meta.as_ref());
                 self.upsert_tool_call(
                     tool_call_id,
                     None,
@@ -1401,13 +1433,18 @@ impl SessionState {
                 self.pending_plan_approval = None;
                 self.status = ConnectionStatus::Connected;
             }
-            AcpEvent::UserMessage { message_id, blocks } => {
+            AcpEvent::UserMessage {
+                message_id,
+                blocks,
+                spoken,
+            } => {
                 // Capture the in-flight user prompt so a client attaching
                 // mid-turn renders the user turn from the snapshot (the
                 // one-shot event won't replay for it). Cleared on TurnComplete.
                 self.pending_user_message = Some(PendingUserMessage {
                     message_id: message_id.clone(),
                     blocks: blocks.clone(),
+                    spoken: *spoken,
                 });
                 // Reference instant for the in-flight prompt's recency check in
                 // `apply_in_flight_message_id`. Set here (not at manager enqueue)
@@ -2844,6 +2881,7 @@ mod tests {
         s.apply_event(&AcpEvent::UserMessage {
             message_id: "m1".into(),
             blocks: vec![],
+            spoken: false,
         });
         assert!(s.session_failures.values().all(|f| f.resolved));
         s.apply_event(&failure("t1:error", 2, "error", "stale replay"));
@@ -3228,6 +3266,7 @@ mod tests {
         s.apply_event(&AcpEvent::UserMessage {
             message_id: "m1".into(),
             blocks: vec![],
+            spoken: false,
         });
         assert!(s.pending_plan_approval.is_none());
     }
@@ -3379,6 +3418,7 @@ mod tests {
             blocks: vec![UserMessageBlock::Text {
                 text: text.to_string(),
             }],
+            spoken: false,
         }
     }
 

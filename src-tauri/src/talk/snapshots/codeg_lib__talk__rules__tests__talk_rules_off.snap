@@ -1,0 +1,5 @@
+---
+source: src/talk/rules.rs
+expression: off()
+---
+Talk mode is off: the person is reading your replies again. Go back to your normal written style, with formatting, paths and code as usual.

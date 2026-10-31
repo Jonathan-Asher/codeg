@@ -109,6 +109,11 @@ pub struct DbConversationSummary {
     /// Mirror of `conversation.critical_stall`: whether a critical
     /// conversation also alerts when a working turn goes silent.
     pub critical_stall: bool,
+    /// Talk mode is on: the user is holding a voice conversation with this
+    /// session from the phone (see `crate::talk`), so new messages carry the
+    /// talk rules. `true` only for `conversation.talk_state = on` (`ending`
+    /// reads as off: it only waits to tell the agent). Drives the Talk badge.
+    pub talk_mode: bool,
     /// The usage-limit pause, when the last turn ended because the account
     /// hit its usage limit (see `acp::limit_continue`). Always serialized —
     /// `null` when there is none — so the upsert that settles a pause clears

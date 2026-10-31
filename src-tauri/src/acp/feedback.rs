@@ -69,6 +69,10 @@ pub struct FeedbackItem {
     /// images identically.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blocks: Option<Vec<crate::acp::types::UserMessageBlock>>,
+    /// The user spoke this message through the phone's Talk mode (see
+    /// `crate::talk`): it carries the mic marker. Omitted when typed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub spoken: bool,
 }
 
 impl FeedbackItem {
@@ -86,6 +90,7 @@ impl FeedbackItem {
             status: FeedbackStatus::Pending,
             delivered_at: None,
             blocks: None,
+            spoken: false,
         }
     }
 
@@ -118,6 +123,7 @@ impl FeedbackItem {
             status: FeedbackStatus::Delivered,
             delivered_at: Some(at),
             blocks,
+            spoken: false,
         }
     }
 }

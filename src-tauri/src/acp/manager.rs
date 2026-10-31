@@ -11,7 +11,8 @@ use sea_orm::{
 };
 
 use crate::acp::connection::{
-    spawn_agent_connection, AgentConnection, ConnectionCommand, GoalControlAction, SteerOutcome,
+    spawn_agent_connection, AgentConnection, ConnectionCommand, GoalControlAction, PromptTalk,
+    SteerOutcome,
 };
 use crate::acp::agent_mentions::strip_route_separator_from_prompt;
 use crate::acp::error::AcpError;
@@ -1754,6 +1755,7 @@ impl ConnectionManager {
         conn_id: &str,
         mut blocks: Vec<PromptInputBlock>,
         user_message: Option<(String, Vec<crate::acp::UserMessageBlock>)>,
+        talk: PromptTalk,
     ) -> Result<(), AcpError> {
         // Reject an empty prompt BEFORE touching the concurrency gate. An empty
         // prompt produces no turn — and thus no `TurnComplete` to clear the gate
@@ -1814,6 +1816,7 @@ impl ConnectionManager {
         permit.send(ConnectionCommand::Prompt {
             blocks,
             user_message,
+            talk,
         });
         Ok(())
     }
@@ -1869,7 +1872,8 @@ impl ConnectionManager {
     ) -> Result<(), AcpError> {
         let prompt_lock = self.clone_prompt_lock(conn_id).await?;
         let _guard = prompt_lock.lock_owned().await;
-        self.send_prompt_inner(conn_id, blocks, None).await
+        self.send_prompt_inner(conn_id, blocks, None, PromptTalk::default())
+            .await
     }
 
     /// Send a prompt that is deliberately NOT linked to a conversation row.
@@ -1926,7 +1930,8 @@ impl ConnectionManager {
         // arrive as empty-payload markers, exactly like a linked prompt's;
         // without this the agent would get image blocks with no bytes.
         crate::acp::prompt_hydration::hydrate_prompt_blocks(&mut blocks, uploads_root).await?;
-        self.send_prompt_inner(conn_id, blocks, None).await
+        self.send_prompt_inner(conn_id, blocks, None, PromptTalk::default())
+            .await
     }
 
     /// Send a prompt while ensuring a `Conversation` DB row is bound to this
@@ -1999,6 +2004,32 @@ impl ConnectionManager {
         conversation_id: Option<i32>,
         client_message_id: Option<String>,
     ) -> Result<PromptAccepted, AcpError> {
+        self.send_client_prompt_spoken(
+            db,
+            conn_id,
+            blocks,
+            folder_id,
+            conversation_id,
+            client_message_id,
+            false,
+        )
+        .await
+    }
+
+    /// [`Self::send_client_prompt`] for a message the user may have SPOKEN
+    /// (`spoken`: the phone's Talk mode). Talk mode decides the frame the
+    /// prompt carries, and a spoken one turns Talk on (see `crate::talk`).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn send_client_prompt_spoken(
+        &self,
+        db: &AppDatabase,
+        conn_id: &str,
+        blocks: Vec<PromptInputBlock>,
+        folder_id: Option<i32>,
+        conversation_id: Option<i32>,
+        client_message_id: Option<String>,
+        spoken: bool,
+    ) -> Result<PromptAccepted, AcpError> {
         let mgr = self.clone_ref();
         let db = AppDatabase {
             conn: db.conn.clone(),
@@ -2012,6 +2043,7 @@ impl ConnectionManager {
                 folder_id,
                 conversation_id,
                 client_message_id,
+                spoken,
             )
             .await
         });
@@ -2023,7 +2055,8 @@ impl ConnectionManager {
         }
     }
 
-    /// The body of [`Self::send_client_prompt`], run detached.
+    /// The body of [`Self::send_client_prompt_spoken`], run detached.
+    #[allow(clippy::too_many_arguments)]
     async fn client_prompt_detached(
         &self,
         db: &AppDatabase,
@@ -2032,6 +2065,7 @@ impl ConnectionManager {
         folder_id: Option<i32>,
         conversation_id: Option<i32>,
         client_message_id: Option<String>,
+        spoken: bool,
     ) -> Result<PromptAccepted, AcpError> {
         let id = client_message_id
             .as_deref()
@@ -2040,14 +2074,14 @@ impl ConnectionManager {
             .map(str::to_string);
         let Some(id) = id else {
             self.check_pool_for_prompt(conn_id).await?;
-            self.send_prompt_linked_with_message_id(
+            self.send_talking_prompt(
                 db,
                 conn_id,
                 blocks,
                 folder_id,
                 conversation_id,
-                None,
                 client_message_id,
+                spoken,
             )
             .await?;
             return Ok(PromptAccepted { duplicate: false });
@@ -2075,20 +2109,78 @@ impl ConnectionManager {
         }
         self.check_pool_for_prompt(conn_id).await?;
         let linked = self
-            .send_prompt_linked_with_message_id(
+            .send_talking_prompt(
                 db,
                 conn_id,
                 blocks,
                 folder_id,
                 conversation_id,
-                None,
                 Some(id.clone()),
+                spoken,
             )
             .await?;
         if let Some(cid) = linked.or(known_conversation) {
             self.message_receipts.record(db, cid, &id).await;
         }
         Ok(PromptAccepted { duplicate: false })
+    }
+
+    /// A client's prompt with Talk mode applied (see `crate::talk`): the frame
+    /// it carries is decided before the send, and recorded as delivered once
+    /// the prompt is accepted. Outside Talk this is exactly
+    /// [`Self::send_prompt_linked_with_message_id`].
+    #[allow(clippy::too_many_arguments)]
+    async fn send_talking_prompt(
+        &self,
+        db: &AppDatabase,
+        conn_id: &str,
+        blocks: Vec<PromptInputBlock>,
+        folder_id: Option<i32>,
+        conversation_id: Option<i32>,
+        client_message_id: Option<String>,
+        spoken: bool,
+    ) -> Result<Option<i32>, AcpError> {
+        let Some((state, emitter)) = self.get_state_and_emitter(conn_id).await else {
+            return Err(AcpError::ConnectionNotFound(conn_id.to_string()));
+        };
+        let known_conversation = match conversation_id {
+            Some(cid) => Some(cid),
+            None => state.read().await.conversation_id,
+        };
+        let talk = crate::talk::plan_frame(
+            &db.conn,
+            &emitter,
+            &state,
+            known_conversation,
+            &blocks,
+            spoken,
+        )
+        .await;
+        let linked = self
+            .send_prompt_linked_talking(
+                db,
+                conn_id,
+                blocks,
+                folder_id,
+                conversation_id,
+                None,
+                client_message_id,
+                PromptTalk {
+                    frame: talk.frame.clone(),
+                    spoken,
+                },
+            )
+            .await?;
+        crate::talk::finish_frame(
+            &db.conn,
+            &emitter,
+            &state,
+            linked.or(known_conversation),
+            &talk,
+            true,
+        )
+        .await;
+        Ok(linked)
     }
 
     /// A message delivered into the running turn (`submit_session_feedback`),
@@ -2109,13 +2201,31 @@ impl ConnectionManager {
         blocks: Option<Vec<PromptInputBlock>>,
         client_id: Option<String>,
     ) -> Result<FeedbackItem, AcpError> {
+        self.submit_client_feedback_spoken(db, conn_id, text, blocks, client_id, false)
+            .await
+    }
+
+    /// [`Self::submit_client_feedback`] for a message the user may have
+    /// SPOKEN (`spoken`: the phone's Talk mode); see
+    /// [`Self::send_client_prompt_spoken`].
+    pub async fn submit_client_feedback_spoken(
+        &self,
+        db: &AppDatabase,
+        conn_id: &str,
+        text: String,
+        blocks: Option<Vec<PromptInputBlock>>,
+        client_id: Option<String>,
+        spoken: bool,
+    ) -> Result<FeedbackItem, AcpError> {
         let id = client_id
             .as_deref()
             .map(str::trim)
             .filter(|id| crate::acp::message_receipts::is_valid_id(id))
             .map(str::to_string);
         let Some(id) = id else {
-            return self.submit_feedback(conn_id, text, blocks).await;
+            return self
+                .submit_talking_feedback(db, conn_id, text, blocks, None, spoken)
+                .await;
         };
         let mgr = self.clone_ref();
         let db = AppDatabase {
@@ -2123,7 +2233,7 @@ impl ConnectionManager {
         };
         let conn_id = conn_id.to_string();
         let task = tokio::spawn(async move {
-            mgr.client_feedback_detached(&db, &conn_id, text, blocks, id)
+            mgr.client_feedback_detached(&db, &conn_id, text, blocks, id, spoken)
                 .await
         });
         match task.await {
@@ -2134,7 +2244,7 @@ impl ConnectionManager {
         }
     }
 
-    /// The body of [`Self::submit_client_feedback`], run detached.
+    /// The body of [`Self::submit_client_feedback_spoken`], run detached.
     async fn client_feedback_detached(
         &self,
         db: &AppDatabase,
@@ -2142,6 +2252,7 @@ impl ConnectionManager {
         text: String,
         blocks: Option<Vec<PromptInputBlock>>,
         id: String,
+        spoken: bool,
     ) -> Result<FeedbackItem, AcpError> {
         let _same_id = self.message_receipts.lock_id(&id).await;
         if let Some(state) = self.get_state(conn_id).await {
@@ -2173,11 +2284,41 @@ impl ConnectionManager {
             }
         }
         let item = self
-            .submit_feedback_with_id(conn_id, text, blocks, Some(id.clone()))
+            .submit_talking_feedback(db, conn_id, text, blocks, Some(id.clone()), spoken)
             .await?;
         if let Some(cid) = conversation {
             self.message_receipts.record(db, cid, &id).await;
         }
+        Ok(item)
+    }
+
+    /// A client's message into the running turn with Talk mode applied (see
+    /// `crate::talk`): the frame rides a native insert only, and counts as
+    /// delivered only when the insert reports `injected`.
+    async fn submit_talking_feedback(
+        &self,
+        db: &AppDatabase,
+        conn_id: &str,
+        text: String,
+        blocks: Option<Vec<PromptInputBlock>>,
+        note_id: Option<String>,
+        spoken: bool,
+    ) -> Result<FeedbackItem, AcpError> {
+        let Some((state, emitter)) = self.get_state_and_emitter(conn_id).await else {
+            return Err(AcpError::ConnectionNotFound(conn_id.to_string()));
+        };
+        let conversation = state.read().await.conversation_id;
+        // What the agent would read: the draft, or the note's text alone.
+        let wire = match &blocks {
+            Some(blocks) if !blocks.is_empty() => blocks.clone(),
+            _ => vec![PromptInputBlock::Text { text: text.clone() }],
+        };
+        let talk =
+            crate::talk::plan_frame(&db.conn, &emitter, &state, conversation, &wire, spoken).await;
+        let (item, delivered) = self
+            .submit_feedback_talking(conn_id, text, blocks, note_id, &talk)
+            .await?;
+        crate::talk::finish_frame(&db.conn, &emitter, &state, conversation, &talk, delivered).await;
         Ok(item)
     }
 
@@ -2194,11 +2335,39 @@ impl ConnectionManager {
         &self,
         db: &AppDatabase,
         conn_id: &str,
+        blocks: Vec<PromptInputBlock>,
+        folder_id: Option<i32>,
+        conversation_id: Option<i32>,
+        delegation: Option<crate::acp::delegation::spawner::DelegationLink>,
+        client_message_id: Option<String>,
+    ) -> Result<Option<i32>, AcpError> {
+        self.send_prompt_linked_talking(
+            db,
+            conn_id,
+            blocks,
+            folder_id,
+            conversation_id,
+            delegation,
+            client_message_id,
+            PromptTalk::default(),
+        )
+        .await
+    }
+
+    /// [`Self::send_prompt_linked_with_message_id`] with Talk mode's part of
+    /// the prompt (see `crate::talk`): the frame appended at the agent
+    /// boundary, and whether the `UserMessage` broadcast says it was spoken.
+    #[allow(clippy::too_many_arguments)]
+    async fn send_prompt_linked_talking(
+        &self,
+        db: &AppDatabase,
+        conn_id: &str,
         mut blocks: Vec<PromptInputBlock>,
         folder_id: Option<i32>,
         conversation_id: Option<i32>,
         delegation: Option<crate::acp::delegation::spawner::DelegationLink>,
         client_message_id: Option<String>,
+        talk: PromptTalk,
     ) -> Result<Option<i32>, AcpError> {
         // Reject an empty prompt up front, BEFORE any side effects: linking /
         // creating the conversation row, flipping it to InProgress, or emitting
@@ -2658,7 +2827,7 @@ impl ConnectionManager {
         // lifecycle subscriber's PendingReview write also never fires and the
         // row would be stuck until a follow-up `send_prompt_linked` re-flipped it.
         match self
-            .send_prompt_inner(conn_id, blocks, user_message)
+            .send_prompt_inner(conn_id, blocks, user_message, talk)
             .await
         {
             Ok(()) => {
@@ -3625,6 +3794,7 @@ impl ConnectionManager {
                         limit_auto_continue: Set(true),
                         limit_resume_reason: Set(None),
                         last_viewed_at: Set(None),
+                        talk_state: Set(None),
                     };
                     let inserted = sibling.insert(txn).await?;
                     Ok(inserted.id)
@@ -4231,6 +4401,7 @@ impl ConnectionManager {
             limit_auto_continue: Set(true),
             limit_resume_reason: Set(None),
             last_viewed_at: Set(None),
+            talk_state: Set(None),
         };
         row.insert(db_conn)
             .await
@@ -4983,7 +5154,34 @@ impl ConnectionManager {
         blocks: Option<Vec<PromptInputBlock>>,
         note_id: Option<String>,
     ) -> Result<FeedbackItem, AcpError> {
+        self.submit_feedback_talking(
+            conn_id,
+            text,
+            blocks,
+            note_id,
+            &crate::talk::TalkSend::none(),
+        )
+        .await
+        .map(|(item, _)| item)
+    }
+
+    /// As [`Self::submit_feedback_with_id`], with Talk mode's part (see
+    /// `crate::talk`): the note says whether it was spoken, and a native
+    /// insert carries the talk frame. Also answers whether the frame reached
+    /// the agent (only an `injected` insert counts).
+    async fn submit_feedback_talking(
+        &self,
+        conn_id: &str,
+        mut text: String,
+        blocks: Option<Vec<PromptInputBlock>>,
+        note_id: Option<String>,
+        talk: &crate::talk::TalkSend,
+    ) -> Result<(FeedbackItem, bool), AcpError> {
         let note_id = note_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        // The internal frames' separator is reserved here as on every prompt
+        // (`strip_route_separator_from_prompt`): an insert now carries a talk
+        // frame, and only codeg may write one.
+        text.retain(|c| c != '\u{1e}');
         let trimmed = text.trim();
         if trimmed.is_empty() {
             return Err(AcpError::InvalidFeedback("empty note".into()));
@@ -4994,7 +5192,10 @@ impl ConnectionManager {
             )));
         }
         let text = trimmed.to_string();
-        let blocks = blocks.filter(|b| !b.is_empty());
+        let mut blocks = blocks.filter(|b| !b.is_empty());
+        if let Some(blocks) = blocks.as_mut() {
+            strip_route_separator_from_prompt(blocks);
+        }
         let (state, cmd_tx, emitter) = {
             let connections = self.connections.lock().await;
             let conn = connections
@@ -5024,7 +5225,15 @@ impl ConnectionManager {
 
         if native {
             return Self::submit_feedback_native(
-                conn_id, state, cmd_tx, emitter, note_id, text, blocks,
+                conn_id,
+                state,
+                cmd_tx,
+                emitter,
+                note_id,
+                text,
+                blocks,
+                talk.frame.clone(),
+                talk.spoken,
             )
             .await;
         }
@@ -5043,7 +5252,8 @@ impl ConnectionManager {
             return Err(AcpError::NoActiveTurn);
         }
 
-        let item = FeedbackItem::new_pending(note_id, text, chrono::Utc::now());
+        let mut item = FeedbackItem::new_pending(note_id, text, chrono::Utc::now());
+        item.spoken = talk.spoken;
         // Gate on `turn_in_flight` and append in ONE critical section (via the
         // gated emit): a `TurnComplete` (flips the flag) or `UserMessage`
         // (clears `feedback`) can't slip between the gate and the append+seq, so
@@ -5058,7 +5268,8 @@ impl ConnectionManager {
         if !applied {
             return Err(AcpError::NoActiveTurn);
         }
-        Ok(item)
+        // The pull tool hands the agent the note's text alone: no frame.
+        Ok((item, false))
     }
 
     /// Native `_session/steering` delivery — the push half of
@@ -5090,6 +5301,7 @@ impl ConnectionManager {
     ///   injection can cause. The frontend relies on that ordering to tell the
     ///   agent's own copy of the message from the same words sent in an
     ///   earlier round (`suppressPersistedSteeredPrompts`).
+    #[allow(clippy::too_many_arguments)]
     async fn submit_feedback_native(
         conn_id: &str,
         state: Arc<tokio::sync::RwLock<crate::acp::session_state::SessionState>>,
@@ -5098,7 +5310,9 @@ impl ConnectionManager {
         note_id: String,
         text: String,
         blocks: Option<Vec<PromptInputBlock>>,
-    ) -> Result<FeedbackItem, AcpError> {
+        talk_frame: Option<String>,
+        spoken: bool,
+    ) -> Result<(FeedbackItem, bool), AcpError> {
         // Cheap pre-flight, NOT the authoritative check (that's the loop's
         // idle arm replying `NoActiveTurn`): skip the round-trip when no turn
         // is in flight at all. The counter read alongside it identifies WHICH
@@ -5180,8 +5394,9 @@ impl ConnectionManager {
             .then(|| crate::acp::user_blocks_from_prompt(&wire_blocks))
             .filter(|projected| crate::acp::feedback::attachment_bytes(projected) > 0);
         let conn_id_for_task = conn_id.to_string();
+        let carries_frame = talk_frame.is_some();
         let handle = tokio::spawn(async move {
-            let outcome: Result<FeedbackItem, AcpError> = async {
+            let outcome: Result<(FeedbackItem, bool), AcpError> = async {
                 // Stamped BEFORE the command goes out, so the note's instant is
                 // causally earlier than anything the injection can cause. The
                 // adapter pushes the text to the agent before it answers, and
@@ -5198,6 +5413,7 @@ impl ConnectionManager {
                 cmd_tx
                     .send(ConnectionCommand::Steer {
                         blocks: wire_blocks,
+                        talk_frame,
                         reply: reply_tx,
                     })
                     .await
@@ -5205,6 +5421,9 @@ impl ConnectionManager {
                 let steer = reply_rx.await.map_err(|_| {
                     AcpError::protocol("Steer reply channel closed".to_string())
                 })??;
+                // Only an injected insert counts as the talk frame having
+                // reached the agent (see `crate::talk::finish_frame`).
+                let frame_delivered = carries_frame && steer == SteerOutcome::Injected;
                 match steer {
                     // Honored opt-in: the content was NOT consumed and is
                     // still host-owned. Surface the frontend's existing
@@ -5226,7 +5445,9 @@ impl ConnectionManager {
                         state.write().await.native_steering_available = false;
                     }
                 }
-                let item = FeedbackItem::new_delivered(note_id, text, created_at, record_blocks);
+                let mut item =
+                    FeedbackItem::new_delivered(note_id, text, created_at, record_blocks);
+                item.spoken = spoken;
                 // Ungated on purpose — see the invariant on this fn's doc.
                 emit_with_state(
                     &state,
@@ -5234,7 +5455,7 @@ impl ConnectionManager {
                     AcpEvent::FeedbackSubmitted { item: item.clone() },
                 )
                 .await;
-                Ok(item)
+                Ok((item, frame_delivered))
             }
             .await;
             // Surface real failures even when the caller is gone (the
@@ -7256,6 +7477,7 @@ mod tests {
         let ConnectionCommand::Prompt {
             blocks,
             user_message,
+            ..
         } = command
         else {
             panic!("expected prompt command");
@@ -8099,6 +8321,7 @@ mod tests {
                     text: "filler".into(),
                 }],
                 user_message: None,
+                talk: PromptTalk::default(),
             })
             .await
             .unwrap();
@@ -8111,6 +8334,7 @@ mod tests {
                 text: "blocked".into(),
             }],
             None,
+            PromptTalk::default(),
         );
         let res = tokio::time::timeout(std::time::Duration::from_millis(50), fut).await;
         assert!(
@@ -12054,6 +12278,7 @@ mod tests {
             model: None,
             completed_at: None,
             agent_message_id: agent_message_id.map(str::to_string),
+            spoken: false,
         }
     }
 
@@ -13016,7 +13241,7 @@ mod tests {
     ) -> tokio::task::JoinHandle<Vec<PromptInputBlock>> {
         tokio::spawn(async move {
             match rx.recv().await {
-                Some(ConnectionCommand::Steer { blocks, reply }) => {
+                Some(ConnectionCommand::Steer { blocks, reply, .. }) => {
                     let _ = reply.send(outcome);
                     blocks
                 }
@@ -13510,6 +13735,7 @@ mod tests {
         state.write().await.apply_event(&AcpEvent::UserMessage {
             message_id: "m-next".into(),
             blocks: Vec::new(),
+            spoken: false,
         });
         assert!(state.read().await.feedback.is_empty());
     }

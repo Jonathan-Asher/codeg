@@ -426,13 +426,19 @@ fn estimate_envelope_size(envelope: &EventEnvelope) -> usize {
         // Can carry a base64 `UserMessageBlock::Image` from a pasted prompt
         // image, so it is sized structurally too — otherwise a multi-MB user
         // image would be fully serialized under the write lock via the fallback.
-        AcpEvent::UserMessage { message_id, blocks } => {
+        AcpEvent::UserMessage {
+            message_id,
+            blocks,
+            spoken,
+        } => {
             // `"blocks":[` + block objects + `,` between them + `]` (the
-            // `message_id`/`blocks` keys themselves are covered by the base).
+            // `message_id`/`blocks` keys themselves are covered by the base),
+            // and `,"spoken":true` when it is set.
             json_str_len(message_id)
                 + 2
                 + blocks.len().saturating_sub(1)
                 + blocks.iter().map(user_block_size).sum::<usize>()
+                + if *spoken { 16 } else { 0 }
         }
         // Carries whole parsed transcript turns (tool outputs, rebuilt diffs —
         // potentially large), so it is sized structurally like the other large
@@ -495,6 +501,8 @@ fn message_turn_size(turn: &crate::models::message::MessageTurn) -> usize {
     // full `usage` object (4 u64 fields, ≤ ~130 B) + `duration_ms`.
     384 + json_str_len(&turn.id)
         + opt_str_size(&turn.model)
+        // `,"spoken":true` on a spoken user turn.
+        + if turn.spoken { 16 } else { 0 }
         + turn.blocks.len().saturating_sub(1)
         + turn.blocks.iter().map(content_block_size).sum::<usize>()
 }
@@ -618,6 +626,7 @@ mod tests {
                     data: base64,
                     mime_type: "image/png".into(),
                 }],
+                spoken: false,
             },
         })
     }
@@ -950,6 +959,7 @@ mod tests {
                             text: String::new(),
                         })
                         .collect(),
+                    spoken: true,
                 },
             }),
             user_message_with_image(8, "A".repeat(1000)),
@@ -1041,7 +1051,8 @@ mod tests {
             duration_ms: Some(u64::MAX),
             model: Some("claude-sonnet-5[1m]".into()),
             completed_at: Some(chrono::Utc::now()),
-        agent_message_id: None,
+            agent_message_id: None,
+            spoken: false,
         };
         let env = Arc::new(EventEnvelope {
             seq: u64::MAX,
@@ -1146,6 +1157,7 @@ mod tests {
             payload: AcpEvent::UserMessage {
                 message_id: "u".into(),
                 blocks,
+                spoken: false,
             },
         });
         let serialized = serde_json::to_vec(&*env).expect("serialize").len();

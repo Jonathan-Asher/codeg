@@ -59,6 +59,7 @@ pub mod process;
 pub mod pty_flow;
 pub mod push;
 pub mod supervise;
+pub mod talk;
 mod terminal;
 /// Natural read-aloud: BlueTTS through the macOS `codeg-tts` sidecar.
 pub mod tts;
@@ -109,6 +110,7 @@ mod tauri_app {
         attention as attention_commands,
         auto_resume as auto_resume_commands,
         critical_sessions as critical_sessions_commands,
+        talk as talk_commands,
         limit_continue as limit_continue_commands,
         claude_plan_mode as claude_plan_mode_commands,
         push as push_commands,
@@ -1871,6 +1873,9 @@ mod tauri_app {
                 critical_sessions_commands::snooze_critical_session,
                 critical_sessions_commands::get_critical_session_settings,
                 critical_sessions_commands::update_critical_session_settings,
+                talk_commands::set_conversation_talk_mode,
+                talk_commands::get_talk_settings,
+                talk_commands::update_talk_settings,
                 claude_plan_mode_commands::get_claude_plan_settings,
                 claude_plan_mode_commands::update_claude_plan_settings,
                 limit_continue_commands::get_limit_continue_settings,

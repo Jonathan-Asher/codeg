@@ -158,6 +158,18 @@ pub fn build_router(
             post(handlers::critical_sessions::update_conversation_critical),
         )
         .route(
+            "/set_conversation_talk_mode",
+            post(handlers::talk::set_conversation_talk_mode),
+        )
+        .route(
+            "/get_talk_settings",
+            post(handlers::talk::get_talk_settings),
+        )
+        .route(
+            "/update_talk_settings",
+            post(handlers::talk::update_talk_settings),
+        )
+        .route(
             "/get_claude_plan_settings",
             post(handlers::claude_plan_mode::get_claude_plan_settings),
         )

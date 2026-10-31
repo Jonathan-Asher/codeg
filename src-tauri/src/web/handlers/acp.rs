@@ -261,6 +261,9 @@ pub struct AcpPromptParams {
     pub conversation_id: Option<i32>,
     #[serde(default)]
     pub client_message_id: Option<String>,
+    /// The user spoke this message (the phone's Talk mode, see `crate::talk`).
+    #[serde(default)]
+    pub spoken: Option<bool>,
 }
 
 /// Answers `{"duplicate": bool}`: `true` when a message with the same
@@ -272,13 +275,14 @@ pub async fn acp_prompt(
 ) -> Result<Json<crate::acp::manager::PromptAccepted>, AppCommandError> {
     let sent = state
         .connection_manager
-        .send_client_prompt(
+        .send_client_prompt_spoken(
             &state.db,
             &params.connection_id,
             params.blocks,
             params.folder_id,
             params.conversation_id,
             params.client_message_id,
+            params.spoken.unwrap_or(false),
         )
         .await;
     let accepted = sent.map_err(|e| {

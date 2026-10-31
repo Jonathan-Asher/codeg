@@ -141,16 +141,25 @@ pub async fn set_feedback_settings(
 /// ended → fall back to an ordinary prompt), `InvalidFeedback` (empty/oversized).
 #[cfg(feature = "tauri-runtime")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn submit_session_feedback(
     connection_id: String,
     text: String,
     blocks: Option<Vec<crate::acp::types::PromptInputBlock>>,
     client_id: Option<String>,
+    spoken: Option<bool>,
     db: tauri::State<'_, crate::db::AppDatabase>,
     manager: tauri::State<'_, crate::acp::manager::ConnectionManager>,
 ) -> Result<crate::acp::feedback::FeedbackItem, crate::acp::error::AcpError> {
     manager
-        .submit_client_feedback(&db, &connection_id, text, blocks, client_id)
+        .submit_client_feedback_spoken(
+            &db,
+            &connection_id,
+            text,
+            blocks,
+            client_id,
+            spoken.unwrap_or(false),
+        )
         .await
 }
 

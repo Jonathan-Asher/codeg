@@ -1,0 +1,30 @@
+---
+source: src/talk/rules.rs
+expression: out
+---
+## language=auto address=auto
+Talk mode is on (voice): one to three short spoken sentences, in the person's language (casual Israeli Hebrew by default), without assuming the person's gender; no markdown, lists, emojis, paths, URLs, hashes or code in speech; anything to show goes in one code block; command descriptions and plan openings in plain spoken words; one question at a time; long work in the background; report results briefly.
+
+## language=auto address=masculine
+Talk mode is on (voice): one to three short spoken sentences, in the person's language (casual Israeli Hebrew by default), addressing the person in the masculine in Hebrew; no markdown, lists, emojis, paths, URLs, hashes or code in speech; anything to show goes in one code block; command descriptions and plan openings in plain spoken words; one question at a time; long work in the background; report results briefly.
+
+## language=auto address=feminine
+Talk mode is on (voice): one to three short spoken sentences, in the person's language (casual Israeli Hebrew by default), addressing the person in the feminine in Hebrew; no markdown, lists, emojis, paths, URLs, hashes or code in speech; anything to show goes in one code block; command descriptions and plan openings in plain spoken words; one question at a time; long work in the background; report results briefly.
+
+## language=he address=auto
+Talk mode is on (voice): one to three short spoken sentences, in casual Israeli Hebrew, without assuming the person's gender; no markdown, lists, emojis, paths, URLs, hashes or code in speech; anything to show goes in one code block; command descriptions and plan openings in plain spoken words; one question at a time; long work in the background; report results briefly.
+
+## language=he address=masculine
+Talk mode is on (voice): one to three short spoken sentences, in casual Israeli Hebrew, addressing the person in the masculine in Hebrew; no markdown, lists, emojis, paths, URLs, hashes or code in speech; anything to show goes in one code block; command descriptions and plan openings in plain spoken words; one question at a time; long work in the background; report results briefly.
+
+## language=he address=feminine
+Talk mode is on (voice): one to three short spoken sentences, in casual Israeli Hebrew, addressing the person in the feminine in Hebrew; no markdown, lists, emojis, paths, URLs, hashes or code in speech; anything to show goes in one code block; command descriptions and plan openings in plain spoken words; one question at a time; long work in the background; report results briefly.
+
+## language=en address=auto
+Talk mode is on (voice): one to three short spoken sentences, in casual spoken English, without assuming the person's gender; no markdown, lists, emojis, paths, URLs, hashes or code in speech; anything to show goes in one code block; command descriptions and plan openings in plain spoken words; one question at a time; long work in the background; report results briefly.
+
+## language=en address=masculine
+Talk mode is on (voice): one to three short spoken sentences, in casual spoken English, addressing the person in the masculine in Hebrew; no markdown, lists, emojis, paths, URLs, hashes or code in speech; anything to show goes in one code block; command descriptions and plan openings in plain spoken words; one question at a time; long work in the background; report results briefly.
+
+## language=en address=feminine
+Talk mode is on (voice): one to three short spoken sentences, in casual spoken English, addressing the person in the feminine in Hebrew; no markdown, lists, emojis, paths, URLs, hashes or code in speech; anything to show goes in one code block; command descriptions and plan openings in plain spoken words; one question at a time; long work in the background; report results briefly.

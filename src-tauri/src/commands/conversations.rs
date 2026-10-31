@@ -3477,6 +3477,7 @@ mod tests {
             turn_state: None,
             critical: false,
             critical_stall: true,
+            talk_mode: false,
             limit_pause: None,
             limit_auto_continue: true,
             limit_reason: None,
@@ -3578,8 +3579,8 @@ mod tests {
         crate::acp::session_state::PendingUserMessage {
             message_id: message_id.into(),
             blocks: vec![crate::acp::types::UserMessageBlock::Text { text: text.into() }],
-        }
             spoken: false,
+        }
     }
 
     #[test]
@@ -3873,8 +3874,8 @@ mod tests {
                     data: data.into(),
                     mime_type: "image/png".into(),
                 }],
-            }
                 spoken: false,
+            }
         };
 
         let mut turns = vec![image_turn("turn-0", "AAAA")];
@@ -7356,6 +7357,7 @@ mod tests {
                 turn_state: None,
                 critical: false,
                 critical_stall: true,
+                talk_mode: false,
                 limit_pause: None,
                 limit_auto_continue: true,
                 limit_reason: None,

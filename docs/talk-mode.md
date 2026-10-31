@@ -212,8 +212,9 @@ Talk mode is on (voice): …␞
 ```
 
 `len` is the body's length in UTF-8 bytes and `digest` the first 16 hex digits
-of its SHA-256. A frame is recognized by those two, not by its wording, so the
-rules can change without old frames leaking into history. U+001E is removed
+of the SHA-256 of `<mode>\n<spoken>\n<body>`. A frame is recognized by those
+two, not by its wording, so the rules can change without old frames leaking
+into history. U+001E is removed
 from everything a client sends, so only the server can write one.
 
 ## 6. Presence: `talking`

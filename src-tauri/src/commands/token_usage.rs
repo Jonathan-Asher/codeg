@@ -1364,6 +1364,7 @@ mod tests {
                 turn_state: None,
                 critical: false,
                 critical_stall: true,
+                talk_mode: false,
                 limit_pause: None,
                 limit_auto_continue: true,
                 limit_reason: None,

@@ -132,6 +132,7 @@ async fn create_inner(
         limit_auto_continue: Set(true),
         limit_resume_reason: Set(None),
         last_viewed_at: Set(None),
+        talk_state: Set(None),
     };
     Ok(model.insert(conn).await?)
 }
@@ -1690,6 +1691,80 @@ pub async fn list_critical(conn: &DatabaseConnection) -> Result<Vec<conversation
         .await?)
 }
 
+/// A conversation's Talk state (`crate::talk`): `None` when there is no live
+/// row, `Some(None)` when Talk is off.
+pub async fn read_talk_state(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+) -> Result<Option<Option<conversation::ConversationTalkState>>, DbError> {
+    Ok(conversation::Entity::find_by_id(conversation_id)
+        .filter(conversation::Column::DeletedAt.is_null())
+        .one(conn)
+        .await?
+        .map(|row| row.talk_state))
+}
+
+/// A typed SQL value for the `talk_state` column.
+fn talk_state_value(state: Option<conversation::ConversationTalkState>) -> sea_orm::Value {
+    match state {
+        Some(state) => state.into(),
+        None => sea_orm::Value::String(None),
+    }
+}
+
+/// Set a conversation's Talk state. Like [`update_critical`] this is a
+/// preference, not activity: only the one column is written and `updated_at`
+/// stays put. Returns whether it changed anything (a live row holding another
+/// state).
+pub async fn set_talk_state(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    state: Option<conversation::ConversationTalkState>,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::{Condition, Expr};
+    let differs = match state {
+        Some(state) => Condition::any()
+            .add(conversation::Column::TalkState.is_null())
+            .add(conversation::Column::TalkState.ne(state)),
+        None => Condition::all().add(conversation::Column::TalkState.is_not_null()),
+    };
+    let res = conversation::Entity::update_many()
+        .col_expr(
+            conversation::Column::TalkState,
+            Expr::value(talk_state_value(state)),
+        )
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .filter(conversation::Column::DeletedAt.is_null())
+        .filter(differs)
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected > 0)
+}
+
+/// [`set_talk_state`] only while the row still holds `from` — a compare and
+/// set, so the Off note's delivery clearing `ending` never undoes a Talk
+/// switched on again meanwhile. Returns whether the row was written.
+pub async fn swap_talk_state(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    from: Option<conversation::ConversationTalkState>,
+    to: Option<conversation::ConversationTalkState>,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::Expr;
+    let update = conversation::Entity::update_many()
+        .col_expr(
+            conversation::Column::TalkState,
+            Expr::value(talk_state_value(to)),
+        )
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .filter(conversation::Column::DeletedAt.is_null());
+    let update = match from {
+        Some(state) => update.filter(conversation::Column::TalkState.eq(state)),
+        None => update.filter(conversation::Column::TalkState.is_null()),
+    };
+    Ok(update.exec(conn).await?.rows_affected > 0)
+}
+
 /// Persist a manual order for the sidebar's "Pinned" section: `pin_order =
 /// index` for each id in `ordered_ids` (top to bottom, 0-based). The frontend
 /// sends the section's full order, so every pinned row it shows is written.
@@ -2142,6 +2217,7 @@ impl CarriedOverRow {
             limit_auto_continue: Set(true),
             limit_resume_reason: Set(None),
             last_viewed_at: Set(None),
+            talk_state: Set(None),
         }
     }
 }
@@ -2322,6 +2398,7 @@ fn conv_to_summary(r: conversation::Model) -> DbConversationSummary {
         turn_state: r.turn_state,
         critical: r.critical,
         critical_stall: r.critical_stall,
+        talk_mode: r.talk_state == Some(conversation::ConversationTalkState::On),
         limit_pause: limit_pause_of(r.limit_resume_at, r.limit_resume_state, r.limit_resume_attempts),
         limit_auto_continue: r.limit_auto_continue,
         limit_reason: r.limit_resume_reason,

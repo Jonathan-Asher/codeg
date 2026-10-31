@@ -62,6 +62,9 @@ pub struct SubmitSessionFeedbackParams {
     /// recorded instead of delivering it twice.
     #[serde(default)]
     pub client_id: Option<String>,
+    /// The user spoke this message (the phone's Talk mode, see `crate::talk`).
+    #[serde(default)]
+    pub spoken: Option<bool>,
 }
 
 pub async fn submit_session_feedback(
@@ -72,12 +75,13 @@ pub async fn submit_session_feedback(
     // in `submit_feedback`; recoverable rejections map to 4xx below.
     let item = state
         .connection_manager
-        .submit_client_feedback(
+        .submit_client_feedback_spoken(
             &state.db,
             &params.connection_id,
             params.text,
             params.blocks,
             params.client_id,
+            params.spoken.unwrap_or(false),
         )
         .await
         .map_err(|e| {

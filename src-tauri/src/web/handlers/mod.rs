@@ -2,6 +2,7 @@ pub mod acp;
 pub mod app_update;
 pub mod auto_resume;
 pub mod critical_sessions;
+pub mod talk;
 pub mod client_diagnostics;
 pub mod limit_continue;
 pub mod claude_plan_mode;

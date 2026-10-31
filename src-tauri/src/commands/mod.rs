@@ -11,6 +11,8 @@ pub mod claude_plan_mode;
 pub mod limit_continue;
 #[cfg(feature = "tauri-runtime")]
 pub mod push;
+#[cfg(feature = "tauri-runtime")]
+pub mod talk;
 pub mod automation;
 pub mod background;
 pub mod backup;

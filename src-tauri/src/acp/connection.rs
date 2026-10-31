@@ -1210,6 +1210,17 @@ pub enum SteerOutcome {
     StartedNewTurn,
 }
 
+/// What Talk mode adds to an outgoing prompt (see `crate::talk`).
+#[derive(Debug, Clone, Default)]
+pub struct PromptTalk {
+    /// The talk frame, appended as the prompt's last block at the agent
+    /// boundary only ([`prepare_agent_bound_prompt`]): the ledger, the
+    /// broadcast and the previews keep the user's own blocks.
+    pub frame: Option<String>,
+    /// The user spoke this prompt: the `UserMessage` broadcast says so.
+    pub spoken: bool,
+}
+
 /// Commands sent from Tauri command handlers to the ACP connection loop.
 pub enum ConnectionCommand {
     Prompt {
@@ -1222,6 +1233,8 @@ pub enum ConnectionCommand {
         /// prompt actually being processed. `None` for delegation children,
         /// empty prompts, unbound conversations, and non-linked senders.
         user_message: Option<(String, Vec<UserMessageBlock>)>,
+        /// Talk mode's frame and spoken flag; empty outside Talk.
+        talk: PromptTalk,
     },
     SetMode {
         mode_id: String,
@@ -1264,6 +1277,9 @@ pub enum ConnectionCommand {
     /// so the oneshot can never hang.
     Steer {
         blocks: Vec<PromptInputBlock>,
+        /// Talk mode's frame, appended to the wire copy only (see
+        /// [`PromptTalk::frame`]).
+        talk_frame: Option<String>,
         reply: tokio::sync::oneshot::Sender<Result<SteerOutcome, AcpError>>,
     },
     /// Stop one AIR async task (`_session/async_task/stop`; claude-agent-acp
@@ -10742,16 +10758,29 @@ pub(crate) fn map_prompt_blocks(blocks: Vec<PromptInputBlock>) -> Vec<ContentBlo
 /// companion's delegation group — that flag is the only gate, and it is already
 /// the injection gate's own verdict (`supports_mcp` + `agent_delivers_wire_mcp`
 /// + the delegation feature being on).
+///
+/// Talk mode's frame (see `crate::talk`) goes last, after the routing frame:
+/// both only ever ride a NEW message, so nothing the agent already has (and
+/// has cached) changes.
 fn prepare_agent_bound_prompt(
     agent_type: AgentType,
     mut blocks: Vec<PromptInputBlock>,
     delegation_enabled: bool,
+    talk_frame: Option<String>,
 ) -> Vec<ContentBlock> {
     append_agent_routes(&mut blocks, delegation_enabled);
+    append_talk_frame(&mut blocks, talk_frame);
     if agent_type == AgentType::Grok {
         blocks = normalize_grok_image_blocks(blocks);
     }
     map_prompt_blocks(blocks)
+}
+
+/// Append Talk mode's frame as the message's own last text block.
+fn append_talk_frame(blocks: &mut Vec<PromptInputBlock>, talk_frame: Option<String>) {
+    if let Some(frame) = talk_frame {
+        blocks.push(PromptInputBlock::Text { text: frame });
+    }
 }
 
 /// The mode a fork should carry into its child: the event-tracked mode of the
@@ -11806,9 +11835,11 @@ async fn run_conversation_loop(
         let cmd = loop {
             if let Some(blocks) = auth_retry_prompt.take() {
                 next_prompt_is_auth_retry = true;
+                // Its talk frame, if it had one, is already among the blocks.
                 break Some(ConnectionCommand::Prompt {
                     blocks,
                     user_message: None,
+                    talk: PromptTalk::default(),
                 });
             }
             tokio::select! {
@@ -11902,6 +11933,7 @@ async fn run_conversation_loop(
             Some(ConnectionCommand::Prompt {
                 blocks,
                 user_message,
+                talk,
             }) => {
                 // Fingerprint the outgoing prompt for the background watcher's
                 // foreground/out-of-turn classifier BEFORE the blocks are
@@ -11916,10 +11948,16 @@ async fn run_conversation_loop(
                 if is_auth_retry {
                     state.write().await.claude_auth_respawning = false;
                 }
+                // The retry is a resend of exactly what goes out now, so it
+                // keeps the talk frame too (the retry adds none of its own).
                 let mut auth_retry_blocks = (agent_type == AgentType::ClaudeCode
                     && !is_auth_retry
                     && state.read().await.claude_cli.is_some())
-                .then(|| blocks.clone());
+                .then(|| {
+                    let mut retry = blocks.clone();
+                    append_talk_frame(&mut retry, talk.frame.clone());
+                    retry
+                });
                 cb_state.held_auth_failures = auth_retry_blocks.as_ref().map(|_| Vec::new());
                 // Establishment is over the moment the user speaks: from here a
                 // config push is attributable to the prompt (`/model` typed in
@@ -11951,7 +11989,7 @@ async fn run_conversation_loop(
                 // receives the machine routing block derived from agent badges.
                 let delegation_enabled = state.read().await.delegation_enabled;
                 let prompt_blocks =
-                    prepare_agent_bound_prompt(agent_type, blocks, delegation_enabled);
+                    prepare_agent_bound_prompt(agent_type, blocks, delegation_enabled, talk.frame);
                 if prompt_blocks.is_empty() {
                     // Defensive: the manager rejects empty prompts before the
                     // concurrency gate is set / the command is enqueued (see
@@ -11995,8 +12033,16 @@ async fn run_conversation_loop(
                 // `pending_user_message` so a client attaching mid-turn still
                 // renders the user turn from the snapshot.
                 if let Some((message_id, blocks)) = user_message {
-                    emit_with_state(state, emitter, AcpEvent::UserMessage { message_id, blocks })
-                        .await;
+                    emit_with_state(
+                        state,
+                        emitter,
+                        AcpEvent::UserMessage {
+                            message_id,
+                            blocks,
+                            spoken: talk.spoken,
+                        },
+                    )
+                    .await;
                 }
 
                 // Stamp the journal's turn start AFTER the `UserMessage`
@@ -12705,7 +12751,11 @@ async fn run_conversation_loop(
                                         let _ = reply.send(landed);
                                     }
                                 }
-                                Some(ConnectionCommand::Steer { blocks, reply }) => {
+                                Some(ConnectionCommand::Steer {
+                                    blocks,
+                                    talk_frame,
+                                    reply,
+                                }) => {
                                     // Protocol round-trip only — the manager's
                                     // cancellation-shielded task records the
                                     // note + broadcasts `FeedbackSubmitted`
@@ -12717,7 +12767,17 @@ async fn run_conversation_loop(
                                     // commands, not session updates. A dead
                                     // receiver is fine — the reply is then
                                     // moot (teardown), nothing to unwind.
-                                    let outcome = send_steer_request(&cx, &sid, &blocks).await;
+                                    // Talk mode's frame rides the wire copy
+                                    // only; the ledger below keeps the
+                                    // user's own blocks.
+                                    let outcome = match talk_frame {
+                                        Some(frame) => {
+                                            let mut wire = blocks.clone();
+                                            append_talk_frame(&mut wire, Some(frame));
+                                            send_steer_request(&cx, &sid, &wire).await
+                                        }
+                                        None => send_steer_request(&cx, &sid, &blocks).await,
+                                    };
                                     // A steered message still lands in the
                                     // agent's OWN transcript as a user record,
                                     // which `group_into_turns` reads as the
@@ -13007,7 +13067,7 @@ async fn run_conversation_loop(
                     let _ = reply.send(landed);
                 }
             }
-            Some(ConnectionCommand::Steer { blocks: _, reply }) => {
+            Some(ConnectionCommand::Steer { reply, .. }) => {
                 // Steering only means something for a RUNNING turn. Reply —
                 // never drop — so the manager's shielded task can't hang on
                 // the oneshot; the caller falls back to a normal prompt (the
@@ -13730,6 +13790,16 @@ enum PiChunkRoute {
     },
 }
 
+/// What pi-acp says once its automatic compaction has summarized the context.
+const PI_AUTO_COMPACTION_FINISHED: &str =
+    "Automatic compaction finished; context was summarized to continue the session.";
+
+/// pi-acp's announcement that automatic compaction finished (dropped from the
+/// prose by [`pi_message_chunk_route`]; the talk rules need to know).
+fn pi_auto_compaction_finished(agent_type: AgentType, text: &str) -> bool {
+    agent_type == AgentType::Pi && text.trim() == PI_AUTO_COMPACTION_FINISHED
+}
+
 /// Tell a pi `agent_message_chunk` that is the ASSISTANT SPEAKING from one that
 /// is pi-acp ANNOUNCING SOMETHING (issue #525).
 ///
@@ -13820,8 +13890,7 @@ fn pi_message_chunk_route(
         // silently blank the delegation result / work-task summary. Restoring the
         // card is a follow-up, gated on teaching that extraction to skip
         // compaction refs (which codex and grok need too).
-        "Context nearing limit, running automatic compaction..."
-        | "Automatic compaction finished; context was summarized to continue the session." => {
+        "Context nearing limit, running automatic compaction..." | PI_AUTO_COMPACTION_FINISHED => {
             PiChunkRoute::Drop
         }
         // pi-acp's own prompt queue. codeg's turn gate normally makes this
@@ -17038,7 +17107,13 @@ async fn emit_conversation_update(
                 // where it splices into the reply — issue #525. Classify before
                 // emitting; `Prose` is every other agent's only outcome.
                 match pi_message_chunk_route(agent_type, &text.text, meta.as_ref()) {
-                    PiChunkRoute::Drop => {}
+                    PiChunkRoute::Drop => {
+                        // The context was summarized, the talk rules with it:
+                        // the next message in Talk mode carries them again.
+                        if pi_auto_compaction_finished(agent_type, &text.text) {
+                            state.write().await.talk_rules_key = None;
+                        }
+                    }
                     PiChunkRoute::Retrying {
                         attempt,
                         max,
@@ -22293,7 +22368,7 @@ mod tests {
             AgentType::Gemini,
             AgentType::custom("delegating-custom").expect("valid custom id"),
         ] {
-            let prompt = prepare_agent_bound_prompt(parent, blocks.clone(), true);
+            let prompt = prepare_agent_bound_prompt(parent, blocks.clone(), true, None);
             assert_eq!(prompt.len(), 2, "{parent} must receive the routing block");
             assert!(matches!(
                 &prompt[0],
@@ -22310,12 +22385,44 @@ mod tests {
         // An agent that never received the companion (OpenClaw's
         // supports_mcp=false, pi's wire exclusion) reaches here with delegation
         // off and keeps a pristine prompt.
-        let unrouted = prepare_agent_bound_prompt(AgentType::OpenClaw, blocks, false);
+        let unrouted = prepare_agent_bound_prompt(AgentType::OpenClaw, blocks, false, None);
         assert_eq!(unrouted.len(), 1);
         assert!(matches!(
             &unrouted[0],
             ContentBlock::Text(text) if text.text == visible
         ));
+    }
+
+    /// Talk mode's frame is the very last block, after the routing frame,
+    /// and the user's own words stay first and untouched.
+    #[test]
+    fn final_agent_boundary_appends_the_talk_frame_last() {
+        let visible = "ask [@Antigravity](codeg://agent/antigravity) to build";
+        let blocks = vec![PromptInputBlock::Text {
+            text: visible.into(),
+        }];
+        let frame = crate::acp::talk_frame::render(
+            crate::acp::talk_frame::TalkFrameMode::Compact,
+            true,
+            "Talk mode is on (voice).",
+        );
+        let prompt = prepare_agent_bound_prompt(
+            AgentType::ClaudeCode,
+            blocks.clone(),
+            true,
+            Some(frame.clone()),
+        );
+        assert_eq!(prompt.len(), 3);
+        assert!(matches!(&prompt[0], ContentBlock::Text(text) if text.text == visible));
+        assert!(matches!(
+            &prompt[1],
+            ContentBlock::Text(text) if text.text.contains("Codeg composer routing metadata")
+        ));
+        assert!(matches!(&prompt[2], ContentBlock::Text(text) if text.text == frame));
+
+        let plain = prepare_agent_bound_prompt(AgentType::Pi, blocks, false, Some(frame.clone()));
+        assert_eq!(plain.len(), 2);
+        assert!(matches!(&plain[1], ContentBlock::Text(text) if text.text == frame));
     }
 
     #[test]

@@ -10758,23 +10758,26 @@ pub async fn acp_connect(
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
+#[allow(clippy::too_many_arguments)]
 pub async fn acp_prompt(
     connection_id: String,
     blocks: Vec<PromptInputBlock>,
     folder_id: Option<i32>,
     conversation_id: Option<i32>,
     client_message_id: Option<String>,
+    spoken: Option<bool>,
     db: State<'_, crate::db::AppDatabase>,
     manager: State<'_, ConnectionManager>,
 ) -> Result<crate::acp::manager::PromptAccepted, AcpError> {
     manager
-        .send_client_prompt(
+        .send_client_prompt_spoken(
             &db,
             &connection_id,
             blocks,
             folder_id,
             conversation_id,
             client_message_id,
+            spoken.unwrap_or(false),
         )
         .await
 }

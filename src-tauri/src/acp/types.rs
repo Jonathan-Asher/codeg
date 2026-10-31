@@ -779,6 +779,10 @@ pub enum AcpEvent {
     UserMessage {
         message_id: String,
         blocks: Vec<UserMessageBlock>,
+        /// The user spoke this message through the phone's Talk mode (see
+        /// `crate::talk`): it carries the mic marker. Omitted when typed.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        spoken: bool,
     },
     /// The user submitted a live-feedback note while the agent is mid-turn (the
     /// `check_user_feedback` MCP-tool steering path). Broadcast so every client

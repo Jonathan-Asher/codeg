@@ -97,6 +97,21 @@ pub enum ConversationLimitReason {
     PoolCapacity,
 }
 
+/// A conversation's Talk mode: a hands-free voice conversation held from the
+/// phone (see `crate::talk`). `None` on the row means Talk is off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::None)")]
+#[serde(rename_all = "snake_case")]
+pub enum ConversationTalkState {
+    /// Talk is on: new messages carry the talk rules.
+    #[sea_orm(string_value = "on")]
+    On,
+    /// Talk was turned off and the agent has not been told yet: the next
+    /// message carries the Off note, then the state clears.
+    #[sea_orm(string_value = "ending")]
+    Ending,
+}
+
 /// What kind of row this conversation is — drives sidebar visibility and
 /// grouping. `regular` renders under its folder group; `chat` renders in the
 /// flat "Chat" section; `loop` belongs to the Loop Engineering workbench and is
@@ -203,6 +218,10 @@ pub struct Model {
     /// on any client. A view is not activity: written only through
     /// `conversation_service::mark_viewed`, never with `updated_at`.
     pub last_viewed_at: Option<DateTimeUtc>,
+    /// Talk mode; see [`ConversationTalkState`]. A preference, not activity:
+    /// written only through `conversation_service::set_talk_state`, never
+    /// with `updated_at`.
+    pub talk_state: Option<ConversationTalkState>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
