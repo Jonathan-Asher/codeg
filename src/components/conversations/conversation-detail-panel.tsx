@@ -943,7 +943,10 @@ const ConversationTabView = memo(function ConversationTabView({
     ? composerConnStatus
     : newChatComposerStatus({
         status: composerConnStatus,
-        canConnect: canAutoConnect,
+        // The agent list still loading (the first second or so of a fresh
+        // start) holds the connect back, not the chat: a message sent then
+        // waits like any other.
+        canConnect: canAutoConnect || !agentsLoaded,
         settingUp: selectorsLoading || presetsPending,
         connectFailed: conn.connectFailed,
       })
