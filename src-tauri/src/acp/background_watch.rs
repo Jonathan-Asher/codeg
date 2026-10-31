@@ -2695,6 +2695,99 @@ mod tests {
         );
     }
 
+    /// A user record carrying a talk frame, as claude-agent-acp writes a
+    /// prompt or a steered message in Talk mode: the user's words, then the
+    /// frame as its own text block.
+    fn talk_user_record(uuid: &str, words: &str) -> String {
+        let frame = crate::acp::talk_frame::render(
+            crate::acp::talk_frame::TalkFrameMode::Compact,
+            true,
+            "Talk mode is on (voice): one to three short spoken sentences.",
+        );
+        serde_json::json!({
+            "type": "user",
+            "timestamp": "2026-07-07T03:49:30.000Z",
+            "uuid": uuid,
+            "message": {"role": "user", "content": [
+                {"type": "text", "text": words},
+                {"type": "text", "text": frame}
+            ]}
+        })
+        .to_string()
+    }
+
+    /// The ledger keeps a steered message's own words while the transcript
+    /// holds them with the talk frame after them: it still classifies as the
+    /// wire-rendered turn it is.
+    #[test]
+    fn a_steered_message_with_a_talk_frame_classifies_foreground() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        let ledger = PromptLedger::shared();
+        ledger.record_text("build a test page");
+
+        let mut ws = WatchState::new();
+        ws.session_id = Some("s1".into());
+        ws.epoch = Some(epoch("2020-01-01T00:00:00Z"));
+        ws.adopt_file(path.clone());
+        write_lines(
+            &path,
+            &[
+                &user_prompt_array("u1", "build a test page"),
+                &assistant_text("a1", "working"),
+            ],
+        );
+        let event = tick_prompting(&mut ws, &ledger);
+        assert!(event.is_none() || unpack(event.unwrap()).0.is_empty());
+
+        ledger.record_text("רגע, תעשה אותו כהה");
+        write_lines(
+            &path,
+            &[
+                &talk_user_record("u2", "רגע, תעשה אותו כהה"),
+                &assistant_text("a2", "restyling"),
+            ],
+        );
+        let event = tick_prompting(&mut ws, &ledger);
+        assert!(
+            event.is_none() || unpack(event.unwrap()).0.is_empty(),
+            "a steered turn in Talk mode is wire-rendered too"
+        );
+    }
+
+    /// Overlay turns go through the same frame pass as the detail: a message
+    /// the user sent in Talk mode shows without its frame, marked spoken.
+    #[test]
+    fn overlay_turns_show_no_talk_frame_and_keep_the_spoken_mark() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_lines(&path, &[]);
+        let ledger = PromptLedger::shared();
+        let mut ws = WatchState::with_file_for_test("s1", path.clone());
+        write_lines(
+            &path,
+            &[
+                &cron_prompt("check the build"),
+                &assistant_text("a-1", "on it"),
+                &talk_user_record("u-talk", "תבדוק גם את הטסטים"),
+                &assistant_text("a-2", "בודק"),
+            ],
+        );
+        let (turns, ..) = unpack(tick_now(&mut ws, &ledger).expect("turns event"));
+        let spoken = turns
+            .iter()
+            .find(|t| {
+                t.blocks.iter().any(|b| {
+                    matches!(b, crate::models::ContentBlock::Text { text } if text.contains("הטסטים"))
+                })
+            })
+            .expect("the message is in the overlay");
+        assert!(spoken.spoken);
+        assert_eq!(spoken.blocks.len(), 1, "the frame block is gone");
+        let rendered = serde_json::to_string(&turns).unwrap();
+        assert!(!rendered.contains("codeg_internal_talk"), "{rendered}");
+    }
+
     /// A slash command sent from codeg writes MORE than its own record: the
     /// command, then `<local-command-stdout>`, then (for `/goal`) the `isMeta`
     /// STRING instruction Claude Code injects for the model — and only then the
