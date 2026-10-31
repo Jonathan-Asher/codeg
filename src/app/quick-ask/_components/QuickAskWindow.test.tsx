@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import enMessages from "@/i18n/messages/en.json"
 
@@ -113,6 +113,10 @@ vi.mock("@/lib/api", async (orig) => ({
 }))
 
 import { QuickAskWindow } from "./QuickAskWindow"
+import {
+  rememberSelectorConfigOptions,
+  resetSelectorOptionsCacheForTests,
+} from "@/lib/selector-options-cache"
 
 const PNG_BASE64 = "iVBORw0KGgo="
 
@@ -635,5 +639,81 @@ describe("QuickAskWindow", () => {
     expect(screen.getByTestId("qa-error")).toHaveTextContent(
       "Couldn't start the agent: not logged in"
     )
+  })
+
+  describe("model and effort before the session is up", () => {
+    const option = (
+      id: string,
+      category: string,
+      current: string,
+      values: string[]
+    ) => ({
+      id,
+      name: id,
+      category,
+      kind: {
+        type: "select" as const,
+        current_value: current,
+        options: values.map((v) => ({ value: v, name: `${v} name` })),
+        groups: [],
+      },
+    })
+    /** The lists some earlier Claude Code session reported, on Opus / Max. */
+    const remembered = () => [
+      option("model", "model", "opus", ["haiku", "sonnet", "opus"]),
+      option("effort", "thought_level", "max", ["low", "high", "max"]),
+    ]
+
+    afterEach(() => {
+      resetSelectorOptionsCacheForTests()
+    })
+
+    it("offers the agent's remembered lists, with Quick Ask's own picks", async () => {
+      rememberSelectorConfigOptions("claude_code", remembered())
+      renderWindow()
+      // Quick Ask's Haiku / Low, not the earlier session's Opus / Max.
+      expect(screen.getByTestId("qa-model-picker")).toHaveTextContent(
+        "Claude Code · haiku name · low name"
+      )
+      fireEvent.click(screen.getByTestId("qa-model-picker"))
+      const models = await screen.findByTestId("qa-model-list")
+      expect(models).toHaveTextContent("sonnet name")
+      expect(screen.getByTestId("qa-effort-list")).toHaveTextContent(
+        "high name"
+      )
+    })
+
+    it("hands a model picked while connecting to the session once it reports", async () => {
+      rememberSelectorConfigOptions("claude_code", remembered())
+      h.session.conn.status = "connecting"
+      const { rerender } = renderWindow()
+      fireEvent.click(screen.getByTestId("qa-model-picker"))
+      fireEvent.click(await screen.findByText("sonnet name"))
+      // Kept as Quick Ask's pick; the session isn't there to take it yet.
+      expect(
+        JSON.parse(window.localStorage.getItem("codeg:quick-ask:v1") ?? "{}")
+          .configValues
+      ).toEqual({ claude_code: { model: "sonnet" } })
+      vi.mocked(h.session.setConfigOption).mockClear()
+
+      // The session the connect had already started comes up on Haiku.
+      h.session.conn.status = "connected"
+      h.session.conn.agentType = "claude_code"
+      h.session.conn.configOptions = [
+        option("model", "model", "haiku", ["haiku", "sonnet"]),
+        option("effort", "thought_level", "low", ["low", "high"]),
+      ]
+      rerender(
+        <NextIntlClientProvider locale="en" messages={enMessages}>
+          <QuickAskWindow />
+        </NextIntlClientProvider>
+      )
+      await waitFor(() =>
+        expect(h.session.setConfigOption).toHaveBeenCalledWith(
+          "model",
+          "sonnet"
+        )
+      )
+    })
   })
 })

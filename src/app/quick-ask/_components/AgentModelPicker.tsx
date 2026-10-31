@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/popover"
 import { useModelLabels } from "@/hooks/use-model-labels"
 import { getAgentLabel } from "@/lib/custom-agents"
+import { offeredSelectValue, type SelectorValues } from "@/lib/selector-display"
 import type {
   AgentType,
   SessionConfigOptionInfo,
@@ -60,6 +61,34 @@ export function findEffortOption(
         (o.category === "thought_level" || o.id === "effort")
     ) ?? null
   )
+}
+
+/**
+ * The picker's options before a session has reported its own: the lists this
+ * agent last reported (remembered across restarts), each select showing the
+ * value of the first layer it offers — Quick Ask's own pick, else what a new
+ * session of the agent starts with, else the agent's recommendation — or no
+ * value at all. Never the value another session last had.
+ */
+export function rememberedPickerOptions(
+  configOptions: SessionConfigOptionInfo[] | null | undefined,
+  layers: readonly (SelectorValues | null | undefined)[]
+): SessionConfigOptionInfo[] | null {
+  if (!configOptions || configOptions.length === 0) return null
+  return configOptions.map((option) => {
+    if (option.kind.type !== "select") return option
+    let value = ""
+    for (const layer of layers) {
+      const candidate = layer?.configValues?.[option.id]
+      if (candidate == null) continue
+      const offered = offeredSelectValue(option, candidate)
+      if (offered != null) {
+        value = offered
+        break
+      }
+    }
+    return { ...option, kind: { ...option.kind, current_value: value } }
+  })
 }
 
 function capitalize(value: string): string {

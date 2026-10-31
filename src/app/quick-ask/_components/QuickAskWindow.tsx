@@ -31,6 +31,14 @@ import { useFeedbackEnabled } from "@/hooks/use-feedback-enabled"
 import { CHAT_TEXT_SCOPE_CLASS } from "@/lib/chat-text-scale"
 import { getAgentLabel } from "@/lib/custom-agents"
 import {
+  recommendedSelectorValues,
+  selectorPicksOwed,
+} from "@/lib/selector-display"
+import {
+  useNewSessionValues,
+  useSelectorTemplate,
+} from "@/lib/selector-options-cache"
+import {
   hideQuickAskWindow,
   openQuickAskConversation,
 } from "@/lib/quick-ask/desktop"
@@ -63,6 +71,7 @@ import {
   AgentModelPicker,
   findEffortOption,
   findModelOption,
+  rememberedPickerOptions,
   selectChoices,
 } from "./AgentModelPicker"
 import { QuickAskThread } from "./QuickAskThread"
@@ -216,6 +225,24 @@ export function QuickAskWindow() {
   const streaming = bound && conn.status === "prompting"
   const liveAgent = qa.effectiveAgent
   const connOptions = conn.agentType === liveAgent ? conn.configOptions : null
+  // Until the session reports, the picker offers the lists the agent last
+  // reported, so a model and effort can be chosen before it is up — kept as
+  // Quick Ask's picks, shipped with the connect, and handed to a session
+  // already on its way once it reports (see `onValueChange`).
+  const rememberedTemplate = useSelectorTemplate(liveAgent)
+  const newSessionValues = useNewSessionValues(liveAgent)
+  const rememberedOptions = useMemo(
+    () =>
+      target === "existing"
+        ? null
+        : rememberedPickerOptions(rememberedTemplate?.configOptions, [
+            { modeId: null, configValues },
+            newSessionValues,
+            recommendedSelectorValues(rememberedTemplate),
+          ]),
+    [target, rememberedTemplate, configValues, newSessionValues]
+  )
+  const pickerOptions = connOptions ?? rememberedOptions
 
   // A model switch resets effort to that model's own default (Claude Code
   // does). Quick Ask keeps its saved effort instead, once per model, and only
@@ -229,6 +256,30 @@ export function QuickAskWindow() {
       : null
   const liveModel =
     modelOption?.kind.type === "select" ? modelOption.kind.current_value : null
+  // Picks made while the session could not take them yet: the connect had
+  // already shipped the picks of its moment, so these go to the session as
+  // soon as it reports its options (model first — see `selectorPicksOwed`).
+  const pendingPicksRef = useRef<{
+    agent: AgentType
+    values: Record<string, string>
+  } | null>(null)
+  const sessionTakesPicks =
+    conn.agentType === liveAgent &&
+    (conn.status === "connected" || conn.status === "prompting")
+  useEffect(() => {
+    const pending = pendingPicksRef.current
+    if (!pending || pending.agent !== liveAgent) return
+    if (!sessionTakesPicks || !connOptions) return
+    pendingPicksRef.current = null
+    void (async () => {
+      for (const [configId, valueId] of selectorPicksOwed(
+        connOptions,
+        pending.values
+      )) {
+        await setLiveConfig(configId, valueId).catch(() => {})
+      }
+    })()
+  }, [connOptions, liveAgent, sessionTakesPicks, setLiveConfig])
   const wantedEffort = target === "existing" ? undefined : configValues.effort
   const effortOffered =
     wantedEffort != null &&
@@ -446,6 +497,16 @@ export function QuickAskWindow() {
   }
   const onValueChange = (configId: string, valueId: string) => {
     savePrefs((p) => withConfigValue(p, agentType, configId, valueId))
+    if (!sessionTakesPicks) {
+      const pending = pendingPicksRef.current
+      pendingPicksRef.current = {
+        agent: agentType,
+        values: {
+          ...(pending?.agent === agentType ? pending.values : null),
+          [configId]: valueId,
+        },
+      }
+    }
     void qa.setConfigOption(configId, valueId).catch(() => {})
   }
 
@@ -715,7 +776,7 @@ export function QuickAskWindow() {
             agents={installedAgents}
             onAgentChange={onAgentChange}
             agentLocked={locked || target === "existing"}
-            configOptions={connOptions}
+            configOptions={pickerOptions}
             savedValues={target === "existing" ? {} : configValues}
             onValueChange={onValueChange}
             readOnly={target === "existing"}
