@@ -147,6 +147,12 @@ import {
   saveConfigPreference,
 } from "@/lib/selector-prefs-storage"
 import { rememberModelLabels } from "@/lib/model-label-store"
+import {
+  getSelectorTemplate,
+  rememberSelectorConfigOptions,
+  rememberSelectorModes,
+  rememberSelectorTemplate,
+} from "@/lib/selector-options-cache"
 import { describeError } from "@/lib/app-error"
 import { isAttachingPhase, statusWhileAttaching } from "@/lib/attach-phase"
 import {
@@ -1100,21 +1106,14 @@ const MAX_RECONNECT_SETTLE_WAITS = 3
 const CONNECT_SETTLE_WAIT_TIMEOUT_MS = 15_000
 
 // Per-agentType cache of the last selectors (modes / configOptions) any session
-// of that agent reported. Its value LISTS describe the agent (which selectors
-// it has, how their values read); its CURRENT values belong to whichever
-// session reported last, so it is a template only — never shown or applied as
-// another session's state. A tab that has nothing of its own yet lays its own
-// stored values over it (see `lib/selector-display.ts`).
-const selectorsCache = new Map<
-  string,
-  {
-    modes: SessionModeStateInfo | null
-    configOptions: SessionConfigOptionInfo[] | null
-  }
->()
-
+// of that agent reported, kept across restarts (`lib/selector-options-cache`).
+// Its value LISTS describe the agent (which selectors it has, how their values
+// read); its CURRENT values belong to whichever session reported last, so it
+// is a template only — never shown or applied as another session's state. A
+// tab that has nothing of its own yet lays its own stored values over it (see
+// `lib/selector-display.ts`).
 export function getCachedSelectors(agentType: string) {
-  return selectorsCache.get(agentType) ?? null
+  return getSelectorTemplate(agentType)
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -5479,12 +5478,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           })
           const modeConn = storeRef.current.connections.get(contextKey)
           if (modeConn) {
-            const entry = selectorsCache.get(modeConn.agentType) ?? {
-              modes: null,
-              configOptions: null,
-            }
-            entry.modes = e.modes
-            selectorsCache.set(modeConn.agentType, entry)
+            rememberSelectorModes(modeConn.agentType, e.modes)
           }
           break
         }
@@ -5499,12 +5493,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           })
           const cfgConn = storeRef.current.connections.get(contextKey)
           if (cfgConn) {
-            const entry = selectorsCache.get(cfgConn.agentType) ?? {
-              modes: null,
-              configOptions: null,
-            }
-            entry.configOptions = e.config_options
-            selectorsCache.set(cfgConn.agentType, entry)
+            rememberSelectorConfigOptions(cfgConn.agentType, e.config_options)
             // This is the only place a model's DISPLAY name and its id are seen
             // together. Transcripts record the id alone, so without capturing
             // the pair here an agent with opaque ids (qoder's `qfmodel`) can
@@ -5546,16 +5535,16 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             type: "SELECTORS_READY",
             contextKey,
           })
-          // Cache for agent types that may not emit session_modes /
+          // The session is set up: its lists are now the agent's, replacing
+          // what an older session (or an older version of the agent) offered.
+          // Also records an agent that emits no session_modes /
           // session_config_options at all (no selectors).
           const rdyConn = storeRef.current.connections.get(contextKey)
           if (rdyConn) {
-            if (!selectorsCache.has(rdyConn.agentType)) {
-              selectorsCache.set(rdyConn.agentType, {
-                modes: rdyConn.modes,
-                configOptions: rdyConn.configOptions,
-              })
-            }
+            rememberSelectorTemplate(rdyConn.agentType, {
+              modes: rdyConn.modes,
+              configOptions: rdyConn.configOptions,
+            })
             // Also covers the replay path, where the options were restored onto
             // the connection without a fresh `session_config_options` event.
             rememberModelLabels(rdyConn.agentType, rdyConn.configOptions)
@@ -7967,7 +7956,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
     if (!conn) return
     // Persist user's mode selection to localStorage
     const modes =
-      conn.modes ?? selectorsCache.get(conn.agentType)?.modes ?? null
+      conn.modes ?? getSelectorTemplate(conn.agentType)?.modes ?? null
     if (modes) {
       saveModePreference(conn.agentType, {
         ...modes,
