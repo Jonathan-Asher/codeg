@@ -1896,7 +1896,8 @@ describe("AcpConnectionsProvider switching a new chat's agent mid-connect", () =
     expect(h.acpDisconnect).toHaveBeenCalledWith("claude-conn")
     // ...and nothing ever listened to it, so none of its events can land on
     // the new agent's session.
-    expect(h.attach.mock.calls.map((call) => call[0])).toEqual(["pi-conn"])
+    const attached = h.attach.mock.calls as unknown as Array<[string]>
+    expect(attached.map((call) => call[0])).toEqual(["pi-conn"])
     expect(h.acpConnect).toHaveBeenCalledTimes(2)
     expect(h.acpConnect.mock.calls[1][0]).toBe("pi")
     expect(h.store!.getConnection(NEW_TAB)).toMatchObject({

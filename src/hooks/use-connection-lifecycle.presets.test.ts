@@ -377,7 +377,7 @@ describe("switching a new chat's agent while it connects", () => {
       undefined,
       undefined
     )
-    const first = tasks.added.at(-1)
+    const first = tasks.added[tasks.added.length - 1]
     expect(first?.label).toContain("Claude Code")
 
     rerender({ agentType: "pi", newSession: true })
@@ -388,7 +388,7 @@ describe("switching a new chat's agent while it connects", () => {
       undefined
     )
     expect(tasks.removed).toContain(first?.id)
-    expect(tasks.added.at(-1)?.label).toContain("Pi")
+    expect(tasks.added[tasks.added.length - 1]?.label).toContain("Pi")
   })
 })
 
