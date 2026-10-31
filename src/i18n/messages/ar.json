@@ -3746,6 +3746,7 @@
       },
       "agentSelector": {
         "noEnabledAgents": "لا يوجد وكلاء مفعّلون",
+        "loadingAgents": "جارٍ تحميل الوكلاء…",
         "openAgentsSettings": "فتح إعدادات الوكلاء",
         "notInstalled": "غير مثبّت",
         "moreAgents": "وكلاء إضافيون ({count})"

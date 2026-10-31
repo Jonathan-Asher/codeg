@@ -15,6 +15,7 @@ import type { AgentType, AcpAgentInfo } from "@/lib/types"
 import { getAgentLabel } from "@/lib/custom-agents"
 import { AgentIcon } from "@/components/agent-icon"
 import { SelectorTooltip } from "@/components/chat/selector-tooltip"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Popover,
   PopoverContent,
@@ -77,7 +78,7 @@ export function AgentSelector({
   align = "start",
 }: AgentSelectorProps) {
   const t = useTranslations("Folder.chat.agentSelector")
-  const { agents: rawAgents } = useAcpAgents()
+  const { agents: rawAgents, fresh } = useAcpAgents()
   const agents = useMemo<AcpAgentInfo[]>(
     () => rawAgents.filter((a) => a.enabled),
     [rawAgents]
@@ -323,6 +324,28 @@ export function AgentSelector({
     },
     []
   )
+
+  if (agents.length === 0 && !fresh) {
+    // The list is still on its way (the first moments after a start): not the
+    // same as having no agents, which would send the user to the settings.
+    return (
+      <div
+        role="status"
+        aria-label={t("loadingAgents")}
+        title={t("loadingAgents")}
+        data-testid="agent-selector-loading"
+        className={cn(
+          "flex h-9 items-center gap-1.5 px-1",
+          align === "center" && "justify-center"
+        )}
+      >
+        <Skeleton className="h-7 w-28 rounded-full" />
+        <Skeleton className="h-7 w-7 rounded-full" />
+        <Skeleton className="h-7 w-7 rounded-full" />
+        <Skeleton className="h-7 w-7 rounded-full" />
+      </div>
+    )
+  }
 
   if (agents.length === 0) {
     return (

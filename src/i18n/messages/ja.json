@@ -3746,6 +3746,7 @@
       },
       "agentSelector": {
         "noEnabledAgents": "有効なエージェントがありません",
+        "loadingAgents": "エージェントを読み込み中…",
         "openAgentsSettings": "エージェント設定を開く",
         "notInstalled": "未インストール",
         "moreAgents": "他のエージェント（{count}）"

@@ -3746,6 +3746,7 @@
       },
       "agentSelector": {
         "noEnabledAgents": "No hay agentes habilitados",
+        "loadingAgents": "Cargando agentes…",
         "openAgentsSettings": "Abrir ajustes de agentes",
         "notInstalled": "No instalado",
         "moreAgents": "Más agentes ({count})"

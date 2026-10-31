@@ -3746,6 +3746,7 @@
       },
       "agentSelector": {
         "noEnabledAgents": "暫無已啟用的 Agent",
+        "loadingAgents": "正在載入智慧體…",
         "openAgentsSettings": "開啟 Agents 設定",
         "notInstalled": "未安裝",
         "moreAgents": "更多 Agent（{count}）"

@@ -3746,6 +3746,7 @@
       },
       "agentSelector": {
         "noEnabledAgents": "활성화된 에이전트가 없습니다",
+        "loadingAgents": "에이전트를 불러오는 중…",
         "openAgentsSettings": "에이전트 설정 열기",
         "notInstalled": "설치되지 않음",
         "moreAgents": "에이전트 더 보기 ({count})"

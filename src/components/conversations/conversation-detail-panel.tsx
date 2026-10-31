@@ -694,7 +694,7 @@ const ConversationTabView = memo(function ConversationTabView({
   // connect. Rather than firing a doomed (and racy) auto-connect whose only
   // outcome is a transient "not installed" toast, we skip the connect and
   // surface a persistent install prompt instead (see composerBlockedMessage).
-  const { agents: acpAgents } = useAcpAgents()
+  const { agents: acpAgents, fresh: agentsFresh } = useAcpAgents()
   const selectedAgentNotInstalled = useMemo(() => {
     const info = acpAgents.find((a) => a.agent_type === selectedAgent)
     return (
@@ -943,10 +943,10 @@ const ConversationTabView = memo(function ConversationTabView({
     ? composerConnStatus
     : newChatComposerStatus({
         status: composerConnStatus,
-        // The agent list still loading (the first second or so of a fresh
-        // start) holds the connect back, not the chat: a message sent then
-        // waits like any other.
-        canConnect: canAutoConnect || !agentsLoaded,
+        // The agent list still loading (the first moments after a start)
+        // holds the connect back, not the chat: a message sent then waits
+        // like any other.
+        canConnect: canAutoConnect || !agentsFresh,
         settingUp: selectorsLoading || presetsPending,
         connectFailed: conn.connectFailed,
       })

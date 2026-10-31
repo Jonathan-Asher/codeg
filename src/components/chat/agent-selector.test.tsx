@@ -151,6 +151,23 @@ describe("AgentSelector", () => {
     expect(onOpenSettings).toHaveBeenCalledTimes(1)
   })
 
+  it("shows the list loading, not an empty state, before the agents have arrived", () => {
+    // The first moments after a start: nothing is known yet, which is not the
+    // same as having no agents (that one sends the user to the settings).
+    mockUseAcpAgents.mockReturnValue({
+      agents: [],
+      fresh: false,
+      refresh: async () => {},
+    })
+    renderWithIntl(
+      <AgentSelector onSelect={() => {}} onOpenAgentsSettings={() => {}} />
+    )
+    expect(
+      screen.getByRole("status", { name: "Loading agents…" })
+    ).toBeInTheDocument()
+    expect(screen.queryByText("No enabled agents")).toBeNull()
+  })
+
   it("clicking an available agent invokes onSelect with its agent_type", () => {
     mockUseAcpAgents.mockReturnValue({
       agents: [agent("claude_code"), agent("codex")],
