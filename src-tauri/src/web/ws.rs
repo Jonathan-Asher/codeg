@@ -451,11 +451,13 @@ async fn handle_client_msg(
             focused,
             idle_secs,
             conversation_ids,
+            talking,
         } => presence.report(PresenceReport {
             visible,
             focused,
             idle_secs,
             conversation_ids,
+            talking,
         }),
     }
 }

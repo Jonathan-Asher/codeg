@@ -525,6 +525,18 @@ pub fn with_limit_pause(phase: Phase, limit_paused: bool) -> Phase {
     }
 }
 
+/// A session the user is talking to by voice (the phone's Talk mode; see
+/// `crate::presence`) is attended: it reads as [`Phase::Paused`], which never
+/// alerts, and once the talk ends (or the phone stops reporting) a fresh
+/// stretch starts from there.
+pub fn with_talk(phase: Phase, talking: bool) -> Phase {
+    if talking {
+        Phase::Paused
+    } else {
+        phase
+    }
+}
+
 /// The live connection's side of [`derive_phase`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct LiveState {
@@ -1317,13 +1329,21 @@ async fn evaluate(manager: &ConnectionManager, db: &DatabaseConnection, emitter:
             .map(|(id, _)| id)
             .collect()
     };
+    let talking = if rows.is_empty() {
+        HashSet::new()
+    } else {
+        crate::presence::talking()
+    };
     let mut observed = Vec::with_capacity(rows.len());
     let mut last_lines: HashMap<i32, LastLine> = HashMap::new();
     for row in &rows {
         let live = live_state(manager, row.id).await;
-        let phase = with_limit_pause(
-            derive_phase(needs_you.contains(&row.id), live.as_ref(), row.turn_state),
-            crate::acp::limit_continue::is_limit_paused(row),
+        let phase = with_talk(
+            with_limit_pause(
+                derive_phase(needs_you.contains(&row.id), live.as_ref(), row.turn_state),
+                crate::acp::limit_continue::is_limit_paused(row),
+            ),
+            talking.contains(&row.id),
         );
         observed.push((row.id, phase));
         if let Some(line) = live.and_then(|live| live.last_line) {
@@ -1554,6 +1574,39 @@ mod tests {
             .expect("repeat after 5 min");
         assert_eq!(second.count, 2);
         assert_eq!(second.episode, first.episode, "same idle stretch");
+    }
+
+    /// Talking to a critical session by voice holds every alert off, the
+    /// stall alert included; once the talk ends, the idle stretch starts
+    /// over from there.
+    #[test]
+    fn a_session_talked_to_never_alerts_and_starts_over_after() {
+        let t0 = Instant::now();
+        let mut w = idle_since(t0, ENDED);
+        let talking = with_talk(ENDED, true);
+        assert_eq!(talking, Phase::Paused);
+        assert_eq!(w.step(obs(talking, 1), &th(), t0 + secs(30)), None);
+        assert_eq!(w.step(obs(talking, 1), &th(), t0 + secs(3600)), None);
+        assert_eq!(
+            w.step(
+                obs(with_talk(Phase::Working, true), 2),
+                &th(),
+                t0 + secs(7200)
+            ),
+            None,
+            "no stall alert while talking either"
+        );
+        assert!(!w.active());
+
+        let ended = t0 + secs(7300);
+        let back = with_talk(ENDED, false);
+        assert_eq!(back, ENDED);
+        assert_eq!(w.step(obs(back, 3), &th(), ended), None);
+        assert_eq!(w.step(obs(back, 3), &th(), ended + secs(59)), None);
+        let alert = w
+            .step(obs(back, 3), &th(), ended + secs(60))
+            .expect("alerts again an idle threshold after the talk");
+        assert_eq!(alert.since, ended);
     }
 
     #[test]

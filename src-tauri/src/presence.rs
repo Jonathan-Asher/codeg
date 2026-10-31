@@ -20,6 +20,11 @@
 //!   WebSocket subprotocol.
 //! * **looking at a session**: some client, iOS included, is looking and
 //!   shows that session. Nothing is pushed about it.
+//! * **talking to a session**: the phone holds a Talk-mode voice conversation
+//!   with it (`talking`, see `crate::talk`), screen locked or not. While that
+//!   report is fresh the session counts as looked at — nothing is pushed or
+//!   reminded about it — and its critical alerts hold off. A phone that dies
+//!   stops reporting, and [`STALE_AFTER`] later everything comes back.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex};
@@ -76,6 +81,10 @@ pub struct PresenceReport {
     pub idle_secs: u64,
     /// The sessions the window shows (the active tab's conversation).
     pub conversation_ids: Vec<i32>,
+    /// The client holds a Talk-mode voice conversation with the sessions in
+    /// `conversation_ids` (the iPhone, often with its screen locked). Counts
+    /// whatever `visible`, `focused` and `idle_secs` say.
+    pub talking: bool,
 }
 
 /// Whether one report, `age` old, means the user is looking.
@@ -157,6 +166,8 @@ impl PresenceRegistry {
 
     pub fn looking(&self, now: Instant) -> Looking {
         let mut looking = Looking::default();
+        // Talking to a session is attending to it, from a pocket included.
+        looking.conversations.extend(self.talking(now));
         for client in self.clients.values() {
             let Some((report, at)) = &client.report else {
                 continue;
@@ -172,6 +183,19 @@ impl PresenceRegistry {
                 .extend(report.conversation_ids.iter().copied());
         }
         looking
+    }
+
+    /// The sessions some client is talking to, by a report less than
+    /// [`STALE_AFTER`] old.
+    pub fn talking(&self, now: Instant) -> HashSet<i32> {
+        self.clients
+            .values()
+            .filter_map(|client| client.report.as_ref())
+            .filter(|(report, at)| {
+                report.talking && now.saturating_duration_since(*at) <= STALE_AFTER
+            })
+            .flat_map(|(report, _)| report.conversation_ids.iter().copied())
+            .collect()
     }
 
     /// Drop desktop-window entries nobody refreshed in a long time (a closed
@@ -209,6 +233,13 @@ pub fn snapshot() -> Looking {
         r.prune(now);
         r.looking(now)
     })
+}
+
+/// The sessions some client is talking to now (see
+/// [`PresenceRegistry::talking`]).
+pub fn talking() -> HashSet<i32> {
+    let now = Instant::now();
+    with_registry(|r| r.talking(now))
 }
 
 /// A desktop window of this process reported its presence.
@@ -260,6 +291,7 @@ mod tests {
             focused,
             idle_secs,
             conversation_ids: ids.to_vec(),
+            talking: false,
         }
     }
 
@@ -356,6 +388,38 @@ mod tests {
             ClientKind::Window
         );
         assert_eq!(ClientKind::from_ws_protocols(None), ClientKind::Window);
+    }
+
+    /// The phone talking from a pocket: its scene is in the background, so
+    /// it is not looking, but the session it talks to counts as attended
+    /// until its reports stop.
+    #[test]
+    fn talking_attends_its_session_until_the_reports_stop() {
+        let t0 = Instant::now();
+        let mut r = PresenceRegistry::default();
+        let phone = r.connect_socket(ClientKind::Ios);
+        r.report_socket(
+            phone,
+            PresenceReport {
+                talking: true,
+                ..report(false, false, 0, &[12])
+            },
+            t0,
+        );
+        let looking = r.looking(t0);
+        assert!(looking.away(), "talking is not sitting at the desk");
+        assert!(looking.at(12));
+        assert!(!looking.at(13));
+        assert_eq!(r.talking(t0), HashSet::from([12]));
+
+        let later = t0 + STALE_AFTER + Duration::from_secs(1);
+        assert!(!r.looking(later).at(12), "a dead phone gets alerts again");
+        assert!(r.talking(later).is_empty());
+
+        // Talk ended: the same session in hand, but not talked to.
+        r.report_socket(phone, report(false, false, 0, &[12]), later);
+        assert!(r.talking(later).is_empty());
+        assert!(!r.looking(later).at(12));
     }
 
     #[test]

@@ -64,6 +64,10 @@ pub enum ClientMsg {
         idle_secs: u64,
         #[serde(default)]
         conversation_ids: Vec<i32>,
+        /// The client holds a Talk-mode voice conversation with those
+        /// sessions (see `crate::presence`).
+        #[serde(default)]
+        talking: bool,
     },
 }
 
