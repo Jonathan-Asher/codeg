@@ -86,8 +86,10 @@ main_exe=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents
 
 # Deepest first: nested code must be signed before whatever contains it.
 by_depth() { awk -F/ '{ print NF "\t" $0 }' | sort -rn | cut -f2-; }
+# A universal binary (whisper.framework's) also gets one "<path> (for
+# architecture x86_64):" line per slice: those aren't files.
 machos=$(find "$APP/Contents" -type f -print0 | xargs -0 file -F $'\t' |
-  awk -F'\t' '$2 ~ /Mach-O/ { print $1 }' | by_depth)
+  awk -F'\t' '$2 ~ /Mach-O/ && $1 !~ / \(for architecture [^)]*\)/ { print $1 }' | by_depth)
 [ -n "$machos" ] || die "no Mach-O files found in $APP"
 
 TALK="$APP/Contents/MacOS/codeg-talk"
