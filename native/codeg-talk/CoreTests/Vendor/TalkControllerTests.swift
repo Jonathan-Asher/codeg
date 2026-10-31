@@ -75,6 +75,8 @@ final class FakeTalkAudio: TalkAudioIO {
     var speechStops = 0
     var inputMutes: [Bool] = []
     var running = false
+    /// The order Talk's end does things in, shared with the system and backend.
+    var log: TalkEndLog?
 
     init() {
         frames = AsyncStream { _ in }
@@ -98,6 +100,7 @@ final class FakeTalkAudio: TalkAudioIO {
         stops += 1
         running = false
         queued = []
+        log?.append("audio stop")
     }
 
     func schedule(_ samples: [Float], sampleRate: Double, onPlayed: @escaping @Sendable () -> Void) {
@@ -248,6 +251,41 @@ final class FakeTalkSystem: TalkSystem {
 
     var reportEnvironment = TalkReportEnvironment(app: ["version": "1.0", "build": "1"],
                                                   device: ["model": "Test1,1", "os": "Test 1.0"])
+    var log: TalkEndLog?
+    var backgroundWork: [FakeBackgroundWork] = []
+
+    func beginBackgroundWork(_ name: String) -> TalkBackgroundWork {
+        log?.append("background begin")
+        let work = FakeBackgroundWork(log: log)
+        backgroundWork.append(work)
+        return work
+    }
+}
+
+/// Time to finish after the audio stops, as the fake system gives it.
+@MainActor
+final class FakeBackgroundWork: TalkBackgroundWork {
+    private let log: TalkEndLog?
+    private(set) var ended = 0
+
+    init(log: TalkEndLog?) {
+        self.log = log
+    }
+
+    func end() {
+        ended += 1
+        log?.append("background end")
+    }
+}
+
+/// What Talk's end did, in order, across the fakes.
+@MainActor
+final class TalkEndLog {
+    private(set) var entries: [String] = []
+
+    func append(_ entry: String) { entries.append(entry) }
+
+    func index(of entry: String) -> Int? { entries.firstIndex(of: entry) }
 }
 
 @MainActor
@@ -268,12 +306,53 @@ final class FakeTalkBackend: TalkBackend {
         holds.append(hold)
     }
 
-    func setTalkMode(conversationID: Int, enabled: Bool) async throws { talkModes.append(enabled) }
+    func setTalkMode(conversationID: Int, enabled: Bool) async throws {
+        if !enabled, let gate = talkModeOffGate { await gate.wait() }
+        talkModes.append(enabled)
+        log?.append("talk mode \(enabled ? "on" : "off")")
+    }
     func fetchSettings() async -> TalkSettings? { fetched }
     func respond(item: PendingItem, optionId: String) async throws { responses.append((item.id, optionId)) }
     func answer(item: PendingItem, answer: QuestionAnswer) async throws { answers.append((item.id, answer)) }
     func answerPlan(item: PendingItem, decision: PlanApprovalDecision, feedback: String?) async throws {}
-    func upload(report: Data) async throws { uploads.append(report) }
+    /// Reports kept and not sent yet.
+    var kept: [Data] = []
+    /// Sending fails while set: the reports stay kept.
+    var sendFails = false
+    var log: TalkEndLog?
+    /// Holds Talk mode off until opened.
+    var talkModeOffGate: TalkGate?
+
+    func keep(reports: [Data]) {
+        kept.append(contentsOf: reports)
+        log?.append("keep \(reports.count)")
+    }
+
+    func sendKeptReports() async {
+        guard !sendFails else { return }
+        uploads.append(contentsOf: kept)
+        kept = []
+        log?.append("sent")
+    }
+}
+
+/// Something a fake waits on until a test opens it.
+@MainActor
+final class TalkGate {
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var isOpen = false
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        let resumed = waiters
+        waiters = []
+        for waiter in resumed { waiter.resume() }
+    }
 }
 
 @MainActor
@@ -803,6 +882,79 @@ final class TalkControllerTests: XCTestCase {
         XCTAssertLessThan(h.backend.uploads.first?.count ?? .max, 1_048_576)
     }
 
+    func testTheReportsAreKeptAndTheTimeTakenBeforeTheAudioStops() async {
+        // With the iPhone locked, the audio is all that keeps the app
+        // running; 1.4.0 stopped it first, and iOS suspended the app before
+        // the reports went.
+        let h = TalkHarness()
+        await h.start()
+        await h.say("שלום")
+        let log = TalkEndLog()
+        h.system.log = log
+        h.audio.log = log
+        h.backend.log = log
+        h.controller.end()
+        XCTAssertEqual(h.backend.kept.count, 1, "kept at once, before anything is sent")
+        XCTAssertTrue(h.backend.uploads.isEmpty)
+        await h.settle()
+        XCTAssertEqual(log.entries.first, "background begin")
+        XCTAssertLessThan(log.index(of: "keep 1") ?? .max, log.index(of: "audio stop") ?? -1)
+        XCTAssertEqual(log.entries.last, "background end", "the time is given back once everything went")
+        XCTAssertEqual(h.system.backgroundWork.count, 1)
+        XCTAssertEqual(h.system.backgroundWork.first?.ended, 1)
+        XCTAssertTrue(h.backend.kept.isEmpty)
+        XCTAssertEqual(h.backend.uploads.count, 1)
+        let report = h.backend.uploads.first.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        XCTAssertEqual(report?["kind"] as? String, "talk_lab")
+        XCTAssertEqual(report?["app"] as? [String: String], ["version": "1.0", "build": "1"], "named by the system")
+        XCTAssertEqual(report?["device"] as? [String: String], ["model": "Test1,1", "os": "Test 1.0"])
+    }
+
+    func testTheReportsGoWhileTalkModeTurnsOff() async {
+        let h = TalkHarness()
+        let gate = TalkGate()
+        h.backend.talkModeOffGate = gate
+        await h.start()
+        await h.say("שלום")
+        h.controller.end()
+        for _ in 0..<40 { await Task.yield() }
+        XCTAssertEqual(h.backend.uploads.count, 1, "not held up by Talk mode off")
+        XCTAssertEqual(h.backend.talkModes, [true])
+        XCTAssertEqual(h.system.backgroundWork.first?.ended, 0, "the time is held meanwhile")
+        gate.open()
+        await h.settle()
+        XCTAssertEqual(h.backend.talkModes, [true, false])
+        XCTAssertEqual(h.backend.holds, [true, false])
+        XCTAssertEqual(h.system.backgroundWork.first?.ended, 1)
+    }
+
+    func testReportsThatDidNotGoStayKept() async {
+        let h = TalkHarness()
+        h.backend.sendFails = true
+        await h.start()
+        await h.say("שלום")
+        h.controller.end()
+        await h.settle()
+        XCTAssertTrue(h.backend.uploads.isEmpty)
+        XCTAssertEqual(h.backend.kept.count, 1, "kept for the next try")
+        XCTAssertEqual(h.backend.talkModes, [true, false])
+        XCTAssertEqual(h.system.backgroundWork.first?.ended, 1)
+    }
+
+    func testWithoutSharingNothingIsKeptOrSentButTalkModeStillGoesOff() async {
+        let h = TalkHarness()
+        await h.start()
+        await h.say("שלום")
+        TalkPrefs(defaults: h.defaults).shareTelemetry = false
+        h.backend.kept = [Data("{}".utf8)]
+        h.controller.end()
+        await h.settle()
+        XCTAssertTrue(h.backend.uploads.isEmpty, "nothing is shared, not even an earlier Talk's")
+        XCTAssertEqual(h.backend.kept, [Data("{}".utf8)])
+        XCTAssertEqual(h.backend.talkModes, [true, false])
+        XCTAssertEqual(h.system.backgroundWork.first?.ended, 1)
+    }
+
     func testSayingEndEndsTalk() async {
         let h = TalkHarness()
         await h.start()
@@ -940,6 +1092,56 @@ final class TalkControllerTests: XCTestCase {
         let total = parts.compactMap { ($0["talk"] as? [String: Any])?["utterances"] as? [Any] }.map(\.count).reduce(0, +)
         XCTAssertEqual(total, 300)
         XCTAssertTrue(parts.allSatisfy { $0["kind"] as? String == "talk_lab" })
+    }
+
+    func testThePartsFitWhatTheServerStores() {
+        // The server stores a report pretty-printed, up to about twice the
+        // JSON sent, and refuses one over 1 MiB: a part is cut by that size.
+        var telemetry = TalkTelemetry(conversationID: 1, origin: 0, settings: TalkTelemetry.Settings(
+            handsFree: true, patience: "normal", interruptBySpeaking: true, smartTurn: "shadow",
+            echoSetting: "automatic", naturalVoice: true, language: "he", address: "masculine"))
+        for id in 0..<200 {
+            telemetry.began(id: id, start: .speech, route: "builtIn", echo: "none", inBackground: false,
+                            whisperLoaded: true, at: Double(id))
+            telemetry.update(id) { utterance in
+                utterance.pauses = (0..<20).map {
+                    TalkTelemetry.Pause(at: Double($0), speechEnd: 0.5, dangling: false, smartTurn: 0.25, resumed: true)
+                }
+            }
+        }
+        let limit = 64 * 1024
+        let reports = telemetry.reports(app: ["version": "1.4.1"], device: ["model": "iPhone"], storedLimit: limit)
+        XCTAssertGreaterThan(reports.count, 1)
+        XCTAssertGreaterThan(TalkTelemetry.storedSize(of: reports[0]), reports[0].count * 3 / 2,
+                             "pretty-printed, the copy is well over the JSON sent")
+        for report in reports { XCTAssertLessThanOrEqual(TalkTelemetry.storedSize(of: report), limit) }
+        let talks = reports.compactMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            .compactMap { $0["talk"] as? [String: Any] }
+        XCTAssertEqual(talks.compactMap { ($0["utterances"] as? [Any])?.count }.reduce(0, +), 200)
+        XCTAssertEqual(talks.compactMap { $0["part"] as? Int }, Array(1...reports.count))
+        XCTAssertTrue(talks.allSatisfy { $0["parts"] as? Int == reports.count })
+        XCTAssertNotNil(talks.first?["events"], "the first part carries the Talk's events")
+    }
+
+    func testTheStoredSizeIsTheServersPrettyPrintedCopy() {
+        let report = #"{"a":[1,{"b":"x,y:[]{\"}"}],"c":{},"d":[]}"#
+        // serde_json's to_vec_pretty of the envelope codeg stores.
+        let stored = #"""
+        {
+          "receivedAtMs": 1761955200000,
+          "report": {
+            "a": [
+              1,
+              {
+                "b": "x,y:[]{\"}"
+              }
+            ],
+            "c": {},
+            "d": []
+          }
+        }
+        """#
+        XCTAssertEqual(TalkTelemetry.storedSize(of: Data(report.utf8)), stored.utf8.count)
     }
 }
 

@@ -66,6 +66,19 @@ protocol TalkSystem: AnyObject {
 
     /// The app and device the Talk's `talk_lab` reports name.
     var reportEnvironment: TalkReportEnvironment { get }
+
+    /// Time to finish what is left once the audio stops (the reports, Talk
+    /// mode off): with the iPhone locked, the audio is all that keeps the app
+    /// running, and iOS suspends it as soon as the audio stops. A platform
+    /// that doesn't suspend gives one that does nothing.
+    func beginBackgroundWork(_ name: String) -> TalkBackgroundWork
+}
+
+/// Time ``TalkSystem/beginBackgroundWork(_:)`` gave; ``end()`` gives it back.
+@MainActor
+protocol TalkBackgroundWork: AnyObject {
+    /// Once; later calls do nothing.
+    func end()
 }
 
 /// The Lock Screen and AirPods commands, as Talk takes them.
@@ -102,8 +115,15 @@ protocol TalkBackend: AnyObject {
     func answer(item: PendingItem, answer: QuestionAnswer) async throws
     func answerPlan(item: PendingItem, decision: PlanApprovalDecision, feedback: String?) async throws
 
-    /// One `talk_lab` report (`report_client_diagnostic`).
-    func upload(report: Data) async throws
+    /// Keep a Talk's `talk_lab` reports until the session's server has them.
+    /// Synchronous, before the audio stops: on the iPhone they are written
+    /// to disk, so they outlive the app being suspended or quit and go when
+    /// it comes back.
+    func keep(reports: [Data])
+    /// Send the reports kept for the session's server
+    /// (`report_client_diagnostic`); each is let go once the server has it,
+    /// or refused it for what it is.
+    func sendKeptReports() async
 }
 
 /// Something scheduled; cancel it to keep it from running.

@@ -328,6 +328,10 @@ final class TalkHelper: WireSink {
         let seconds = options.idleExit
         idleTimer = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(Int(seconds * 1000)))
+            // A Talk's end still sending (the reports) holds the exit off.
+            while !Task.isCancelled, MacBackgroundWork.active > 0 {
+                try? await Task.sleep(for: .seconds(1))
+            }
             guard !Task.isCancelled, let self, self.talk == nil else { return }
             TalkLog.write("no Talk for \(Int(seconds)) s; exiting")
             self.quit()

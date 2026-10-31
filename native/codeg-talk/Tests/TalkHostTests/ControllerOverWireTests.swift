@@ -90,6 +90,19 @@ final class FakeSystem: TalkSystem {
     var reportEnvironment: TalkReportEnvironment {
         TalkReportEnvironment(app: ["version": "test"], device: ["model": "Mac", "os": "macOS 26"])
     }
+
+    final class Work: TalkBackgroundWork {
+        private(set) var ended = false
+        func end() { ended = true }
+    }
+
+    private(set) var work: [Work] = []
+
+    func beginBackgroundWork(_ name: String) -> TalkBackgroundWork {
+        let made = Work()
+        work.append(made)
+        return made
+    }
 }
 
 /// Timers fired by hand.
@@ -168,11 +181,14 @@ struct ControllerOverWireTests {
         let port = MirrorPort(conversationID: 42, snapshot: snapshot,
                               live: WireLive(turnId: "42:7", text: "בדקתי את הלוגים.", streaming: false),
                               requests: requests, flags: flags, sink: sink)
-        let backend = BridgeBackend(conversationID: 42, settings: nil, items: [], requests: requests, flags: flags)
+        let kept = KeptReports()
+        let backend = BridgeBackend(conversationID: 42, settings: nil, items: [], requests: requests, flags: flags,
+                                    kept: kept)
         let audio = FakeAudio()
+        let system = FakeSystem()
         let controller = TalkController(
             conversationID: 42, title: "Fix the build", port: port,
-            dependencies: TalkDependencies(audio: audio, system: FakeSystem(), backend: backend, prefs: Self.prefs()))
+            dependencies: TalkDependencies(audio: audio, system: system, backend: backend, prefs: Self.prefs()))
         let publisher = UIStatePublisher(controller: controller, sink: sink, scheduler: TaskTalkScheduler(),
                                          clock: SystemTalkClock())
         publisher.start()
@@ -233,6 +249,9 @@ struct ControllerOverWireTests {
         for upload in sink.requests("uploadReport") {
             requests.resolve(WireResponse(id: upload["id"] as! Int, ok: true, value: nil, error: nil))
         }
+        // The end's background time is given back once the reports went.
+        #expect(await waitUntil { system.work.count == 1 && system.work[0].ended })
+        #expect(kept.reports.isEmpty)
         #expect(audio.stops >= 1)
         publisher.stop()
         #expect(lastState()?["status"] as? String == "ended")

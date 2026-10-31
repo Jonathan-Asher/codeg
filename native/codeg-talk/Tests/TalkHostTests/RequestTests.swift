@@ -101,9 +101,9 @@ struct RequestTests {
 
     // MARK: - BridgeBackend
 
-    func backend(_ requests: WireRequests, items: [PendingItem] = []) -> BridgeBackend {
+    func backend(_ requests: WireRequests, items: [PendingItem] = [], kept: KeptReports? = nil) -> BridgeBackend {
         BridgeBackend(conversationID: 42, settings: TalkSettings(language: .auto, address: .feminine),
-                      items: items, requests: requests, flags: WireFlags(sink: sink))
+                      items: items, requests: requests, flags: WireFlags(sink: sink), kept: kept ?? KeptReports())
     }
 
     static func item(_ id: String, conversation: Int, root: Int) -> PendingItem {
@@ -180,16 +180,28 @@ struct RequestTests {
         try await plan.value
     }
 
-    @Test func reportsGoUpAsObjects() async throws {
-        let requests = WireRequests(sink: sink, timeout: 5)
-        let backend = backend(requests)
-        let report = try JSONSerialization.data(withJSONObject: ["kind": "talk_lab", "talk": ["parts": 1]])
-        let upload = Task { try await backend.upload(report: report) }
+    @Test func keptReportsGoUpAsObjectsAndStayUntilTheWindowAnswers() async throws {
+        let requests = WireRequests(sink: sink, timeout: 0.1)
+        let kept = KeptReports()
+        let backend = backend(requests, kept: kept)
+        let first = try JSONSerialization.data(withJSONObject: ["kind": "talk_lab", "talk": ["part": 1]])
+        let second = try JSONSerialization.data(withJSONObject: ["kind": "talk_lab", "talk": ["part": 2]])
+        backend.keep(reports: [first, second])
+        let send = Task { await backend.sendKeptReports() }
         await settle()
         #expect((sink.requests("uploadReport").last?["report"] as? NSDictionary)
-            == ["kind": "talk_lab", "talk": ["parts": 1]])
+            == ["kind": "talk_lab", "talk": ["part": 1]])
         try answer(sink, requests, op: "uploadReport")
-        try await upload.value
+        // The second gets no answer: kept for the next send.
+        await send.value
+        #expect(sink.requests("uploadReport").count == 2)
+        #expect(kept.reports == [second])
+        // A refusal lets it go too.
+        let again = Task { await backend.sendKeptReports() }
+        await settle()
+        try answer(sink, requests, op: "uploadReport", ok: false, error: "too big")
+        await again.value
+        #expect(kept.reports.isEmpty)
     }
 
     @Test func holdingTheSessionIsAFlag() {

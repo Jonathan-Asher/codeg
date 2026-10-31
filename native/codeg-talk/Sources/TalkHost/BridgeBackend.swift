@@ -24,15 +24,17 @@ final class BridgeBackend: TalkBackend {
     private let conversationID: Int
     private let requests: WireRequests
     private let flags: WireFlags
+    private let kept: KeptReports
     private var items: [PendingItem] = []
 
     init(conversationID: Int, settings: TalkSettings?, items: [PendingItem], requests: WireRequests,
-         flags: WireFlags) {
+         flags: WireFlags, kept: KeptReports? = nil) {
         self.conversationID = conversationID
         cachedSettings = settings
         self.items = items
         self.requests = requests
         self.flags = flags
+        self.kept = kept ?? .shared
     }
 
     func holdSession(_ hold: Bool) {
@@ -82,15 +84,65 @@ final class BridgeBackend: TalkBackend {
         try await expect(.answerItemPlan(item: WireItemRef(item), decision: decision, feedback: feedback))
     }
 
-    /// One `talk_lab` report; the window posts `{"report": report}` to
-    /// `report_client_diagnostic`.
-    func upload(report: Data) async throws {
-        guard let object = try? JSONSerialization.jsonObject(with: report) else { return }
-        try await expect(.uploadReport(report: AnyJSON(any: object)))
+    /// A Talk's `talk_lab` reports, kept until the window has passed them
+    /// on (for the helper's life: a report the window didn't answer goes
+    /// with the next Talk's).
+    func keep(reports: [Data]) {
+        kept.keep(reports)
+    }
+
+    /// Each kept report as an `uploadReport` request; the window posts
+    /// `{"report": report}` to `report_client_diagnostic`. A report the
+    /// window took or refused is let go; one it didn't answer is kept.
+    func sendKeptReports() async {
+        await kept.send { report in
+            guard let object = try? JSONSerialization.jsonObject(with: report) else { return true }
+            guard let response = await self.requests.request(.uploadReport(report: AnyJSON(any: object))) else {
+                return false
+            }
+            if !response.succeeded {
+                TalkLog.write("the window refused a Talk report: \(response.error ?? "no reason")")
+            }
+            return true
+        }
     }
 
     private func expect(_ op: WireRequest.Op) async throws {
         guard let response = await requests.request(op) else { throw Failure.noAnswer(op.name) }
         guard response.succeeded else { throw Failure.refused(op.name, response.error) }
+    }
+}
+
+/// The Talk reports the helper still has to hand over, across Talks. One
+/// send at a time; a report added meanwhile goes with the next.
+@MainActor
+final class KeptReports {
+    static let shared = KeptReports()
+
+    private(set) var reports: [Data] = []
+    private var sending = false
+
+    func keep(_ more: [Data]) {
+        reports.append(contentsOf: more)
+    }
+
+    /// Offer each report to `deliver`, in order; true lets it go.
+    func send(_ deliver: (Data) async -> Bool) async {
+        guard !sending else { return }
+        sending = true
+        defer { sending = false }
+        var offered = 0
+        while offered < reports.count {
+            let report = reports[offered]
+            if await deliver(report), let index = reports.firstIndex(of: report) {
+                reports.remove(at: index)
+            } else {
+                offered += 1
+            }
+        }
+    }
+
+    func removeAll() {
+        reports = []
     }
 }

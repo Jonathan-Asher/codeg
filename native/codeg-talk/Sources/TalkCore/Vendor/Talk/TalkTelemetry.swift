@@ -5,8 +5,8 @@ import Foundation
 /// end-of-turn trace and which transcript won; for the whole Talk, echo and
 /// barge-in counts per route, memory and thermal state, and what went wrong.
 /// Text only (what was heard and said), never audio. Sent at the end as
-/// `talk_lab` reports (``reports(app:device:maxBytes:)``), each under the
-/// server's 1 MiB.
+/// `talk_lab` reports (``reports(app:device:maxBytes:storedLimit:)``), each
+/// under the server's 1 MiB as the server stores it.
 ///
 /// Times are seconds since Talk started.
 struct TalkTelemetry: Sendable {
@@ -238,8 +238,10 @@ struct TalkTelemetry: Sendable {
     // MARK: - Reports
 
     /// The `talk_lab` reports: the Talk's record, its utterances split over
-    /// as many parts as keep each report's JSON under `maxBytes`.
-    func reports(app: [String: String], device: [String: String], maxBytes: Int = 600 * 1024) -> [Data] {
+    /// as many parts as keep each report's JSON under `maxBytes`, and what
+    /// the server stores of it under `storedLimit` (see ``storedSize(of:)``).
+    func reports(app: [String: String], device: [String: String], maxBytes: Int = 600 * 1024,
+                 storedLimit: Int = Self.storedLimit) -> [Data] {
         let encoder = JSONEncoder()
         let sizes = utterances.map { (try? encoder.encode($0).count) ?? 4096 }
         // The first part also carries the routes, memory and events.
@@ -255,7 +257,90 @@ struct TalkTelemetry: Sendable {
             parts[parts.count - 1].append(utterance)
             used += size + 1
         }
-        return parts.indices.compactMap { encode(parts: parts, app: app, device: device, index: $0, count: parts.count) }
+        // A part the server would store over its limit is halved until it
+        // fits (or is down to one utterance).
+        var fitted: [[Utterance]] = []
+        var waiting = parts
+        while !waiting.isEmpty {
+            let part = waiting.removeFirst()
+            if part.count > 1,
+               let data = encode(parts: fitted + [part] + waiting, app: app, device: device, index: fitted.count,
+                                 count: fitted.count + 1 + waiting.count),
+               Self.storedSize(of: data) > storedLimit {
+                let half = part.count / 2
+                waiting.insert(contentsOf: [Array(part[..<half]), Array(part[half...])], at: 0)
+                continue
+            }
+            fitted.append(part)
+        }
+        return fitted.indices.compactMap { encode(parts: fitted, app: app, device: device, index: $0, count: fitted.count) }
+    }
+
+    /// The most the server stores of one report: it refuses one over 1 MiB,
+    /// less room for the part numbers, which grow as parts split.
+    static let storedLimit = 1_048_576 - 8_192
+
+    /// The size of the copy the server stores of `report` (codeg's
+    /// `report_client_diagnostic`): `serde_json`'s pretty printing of
+    /// `{"receivedAtMs": <13 digits>, "report": <report>}`, which it holds to
+    /// 1 MiB. Up to about twice the compact JSON sent: every value in a
+    /// non-empty array or object goes on a line of its own, indented two
+    /// spaces a level, and every key gets a space after its colon. Counted
+    /// from the compact JSON, so `\/` (one byte longer than the `/` the
+    /// server writes) errs on the large side.
+    static func storedSize(of report: Data) -> Int {
+        let space = UInt8(ascii: " "), newline = UInt8(ascii: "\n"), tab = UInt8(ascii: "\t"),
+            carriageReturn = UInt8(ascii: "\r")
+        // `{\n  "receivedAtMs": 1761955200000,\n  "report": ` and `\n}`.
+        var size = 49 + report.count
+        // One entry per open array or object: whether it has a value yet.
+        var open: [Bool] = []
+        var inString = false
+        var escaped = false
+        var opening = false
+        for byte in report {
+            if inString {
+                if escaped {
+                    escaped = false
+                } else if byte == UInt8(ascii: "\\") {
+                    escaped = true
+                } else if byte == UInt8(ascii: "\"") {
+                    inString = false
+                }
+                continue
+            }
+            if byte == space || byte == newline || byte == tab || byte == carriageReturn {
+                size -= 1
+                continue
+            }
+            // The report sits one level inside the envelope, so a value in a
+            // container opened at depth d (1 for the report) is indented d + 1
+            // levels, and its closing bracket d.
+            let depth = open.count
+            if opening {
+                opening = false
+                if byte != UInt8(ascii: "]") && byte != UInt8(ascii: "}") {
+                    open[depth - 1] = true
+                    size += 1 + 2 * (depth + 1)
+                }
+            }
+            switch byte {
+            case UInt8(ascii: "\""):
+                inString = true
+            case UInt8(ascii: "{"), UInt8(ascii: "["):
+                open.append(false)
+                opening = true
+            case UInt8(ascii: "}"), UInt8(ascii: "]"):
+                if open.popLast() == true { size += 1 + 2 * depth }
+            case UInt8(ascii: ","):
+                size += 1 + 2 * (depth + 1)
+            case UInt8(ascii: ":"):
+                size += 1
+            default:
+                break
+            }
+        }
+        return size
     }
 
     private func encode(parts: [[Utterance]], app: [String: String], device: [String: String], index: Int,

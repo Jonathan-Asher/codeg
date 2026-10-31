@@ -518,6 +518,18 @@ final class TalkController {
     private func release() {
         guard !released else { return }
         released = true
+        // With the iPhone locked, the audio is all that keeps the app
+        // running: iOS suspends it as soon as the audio stops. So the time
+        // to finish is taken and the reports are kept before it stops (1.4.0
+        // stopped it first, and its reports and Talk mode off never went).
+        let background = system.beginBackgroundWork("Talk end")
+        telemetry.end(at: clock.now())
+        telemetry.event("end", nil, at: clock.now())
+        let sharing = prefs.shareTelemetry
+        if sharing {
+            let environment = system.reportEnvironment
+            backend.keep(reports: telemetry.reports(app: environment.app, device: environment.device))
+        }
         frameTask?.cancel()
         eventTask?.cancel()
         finalTask?.cancel()
@@ -541,21 +553,18 @@ final class TalkController {
         finalizing = nil
         listening = false
         hardMuted = false
-        telemetry.end(at: clock.now())
-        telemetry.event("end", nil, at: clock.now())
-        let report = prefs.shareTelemetry ? telemetry : nil
-        let environment = system.reportEnvironment
         let conversationID = conversationID
         let backend = backend
-        // The server's Talk mode goes off, then the session is let go.
+        // The kept reports go while the server's Talk mode goes off, then
+        // the session is let go; the time is given back once both are done.
         track {
+            let reports = Task { @MainActor in
+                if sharing { await backend.sendKeptReports() }
+            }
             try? await backend.setTalkMode(conversationID: conversationID, enabled: false)
             backend.holdSession(false)
-            if let report {
-                for data in report.reports(app: environment.app, device: environment.device) {
-                    try? await backend.upload(report: data)
-                }
-            }
+            await reports.value
+            background.end()
         }
         if machine.state.phase == .ending { send(.ended) }
         syncUI()

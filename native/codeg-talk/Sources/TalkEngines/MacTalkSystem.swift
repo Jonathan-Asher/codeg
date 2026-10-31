@@ -25,10 +25,10 @@ final class EngineCache {
 
     /// Zipformer threads, as on the iPhone; the rest of the cores are left
     /// to whisper and the voice.
-    static let zipformerThreads = 2
-    static let smartTurnThreads = 2
+    nonisolated static let zipformerThreads = 2
+    nonisolated static let smartTurnThreads = 2
     /// BlueTTS's ONNX Runtime threads while Talk runs (the iPhone's cap).
-    static let voiceThreads = 4
+    nonisolated static let voiceThreads = 4
 
     func recognizer(_ files: TransducerModelFiles) async throws -> StreamingTransducerRecognizer {
         if let recognizer, recognizer.files == files { return recognizer.value }
@@ -255,6 +255,12 @@ final class MacTalkSystem: TalkSystem {
     func setNowPlaying(title: String?) {}
     func setRemoteTarget(_ target: TalkRemoteTarget?) {}
 
+    /// The Mac doesn't suspend the helper; the work is only counted, so the
+    /// helper doesn't exit while a Talk's end is still sending.
+    func beginBackgroundWork(_ name: String) -> TalkBackgroundWork {
+        MacBackgroundWork(name)
+    }
+
     var reportEnvironment: TalkReportEnvironment {
         var app = self.app
         app["helper"] = TalkWire.helperVersion
@@ -328,4 +334,24 @@ extension TalkStartError {
         "Talk's models aren't on this Mac yet. Download them in Settings › Talk.")
     static let microphoneOff = TalkStartError(
         "Microphone access is off for codeg. Turn it on in System Settings › Privacy & Security › Microphone.")
+}
+
+/// Work a Talk's end still does (Talk mode off, the reports).
+@MainActor
+final class MacBackgroundWork: TalkBackgroundWork {
+    /// Work begun and not ended.
+    private(set) static var active = 0
+    private let name: String
+    private var ended = false
+
+    init(_ name: String) {
+        self.name = name
+        Self.active += 1
+    }
+
+    func end() {
+        guard !ended else { return }
+        ended = true
+        Self.active -= 1
+    }
 }
