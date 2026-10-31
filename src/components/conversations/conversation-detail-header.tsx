@@ -114,10 +114,10 @@ interface ConversationDetailHeaderProps {
  * rename / fork / pin / Talk mode / details / status / delete) so the two
  * entry points stay consistent, wired to the same APIs. It also carries
  * Session width, the device-wide column width from Settings → Appearance, so
- * it can be switched from the conversation it is seen in. Subscriptions are kept narrow — a
- * primitive `pinned_at != null` boolean — so the header never re-renders on
- * streaming tokens; details data is read on demand at click time via
- * `getRuntimeSession` / store `getState`.
+ * it can be switched from the conversation it is seen in. Subscriptions are
+ * kept narrow — a primitive `pinned_at != null` boolean — so the header never
+ * re-renders on streaming tokens; details data is read on demand at click time
+ * via `getRuntimeSession` / store `getState`.
  */
 export const ConversationDetailHeader = memo(function ConversationDetailHeader({
   tabId,
