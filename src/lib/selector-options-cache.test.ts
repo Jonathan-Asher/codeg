@@ -138,13 +138,28 @@ describe("selector-options-cache", () => {
   it("returns the same template object until the lists change", () => {
     rememberSelectorConfigOptions("claude_code", CLAUDE_OPTIONS)
     const first = getSelectorTemplate("claude_code")
-    // A repeat report (every reconnect sends the same lists) is no change.
+    // A repeat report (every reconnect sends the same lists) is no change...
     rememberSelectorConfigOptions(
       "claude_code",
       JSON.parse(JSON.stringify(CLAUDE_OPTIONS))
     )
     expect(getSelectorTemplate("claude_code")).toBe(first)
-    rememberSelectorConfigOptions("claude_code", [CLAUDE_OPTIONS[0]])
+    // ...nor is a pick in some session, which only moves a current value:
+    // nothing is rewritten and no composer re-renders for it.
+    const written = localStorage.getItem(SELECTOR_OPTIONS_STORAGE_KEY)
+    rememberSelectorConfigOptions("claude_code", [
+      select("model", "sonnet", ["opus", "sonnet"], { category: "model" }),
+      CLAUDE_OPTIONS[1],
+    ])
+    expect(getSelectorTemplate("claude_code")).toBe(first)
+    expect(localStorage.getItem(SELECTOR_OPTIONS_STORAGE_KEY)).toBe(written)
+    // A model the agent newly offers is a change.
+    rememberSelectorConfigOptions("claude_code", [
+      select("model", "opus", ["opus", "sonnet", "haiku"], {
+        category: "model",
+      }),
+      CLAUDE_OPTIONS[1],
+    ])
     expect(getSelectorTemplate("claude_code")).not.toBe(first)
   })
 

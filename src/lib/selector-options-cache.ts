@@ -59,7 +59,8 @@ interface AgentEntry {
   /** Frozen, and replaced (never mutated) on change, so it can be returned
    *  as a `useSyncExternalStore` snapshot. */
   template: SelectorTemplate
-  /** The serialized lists, to tell a real change from a repeat report. */
+  /** The lists' shape, serialized (see `shapeJson`), to tell a real change
+   *  from a repeat report. */
   listsJson: string
   newSession: SelectorValues | null
   /** When the entry last changed (epoch ms): the oldest is dropped first. */
@@ -202,6 +203,26 @@ function readValues(raw: unknown): SelectorValues | null {
 
 // ── Entries ──
 
+/**
+ * What the lists say about the AGENT — which selectors, which values, what
+ * they are called — without their current values, which belong to whichever
+ * session reported them and are never shown from here. Only a change in this
+ * is a change of the remembered lists: every pick in any session reports the
+ * lists again with one value moved, and treating that as new lists would
+ * rewrite the record and re-render every composer of the agent each time.
+ */
+function shapeJson(template: SelectorTemplate): string {
+  const modes = template.modes
+    ? { ...template.modes, current_mode_id: null }
+    : null
+  const configOptions =
+    template.configOptions?.map((option) => ({
+      ...option,
+      kind: { ...option.kind, current_value: null },
+    })) ?? null
+  return JSON.stringify([modes, configOptions])
+}
+
 function freezeTemplate(template: SelectorTemplate): SelectorTemplate {
   return Object.freeze({
     modes: template.modes,
@@ -216,7 +237,7 @@ function makeEntry(
 ): AgentEntry {
   return {
     template: freezeTemplate(template),
-    listsJson: JSON.stringify([template.modes, template.configOptions]),
+    listsJson: shapeJson(template),
     newSession,
     at,
   }
@@ -409,8 +430,7 @@ function withLists(
   existing: AgentEntry | undefined,
   template: SelectorTemplate
 ): AgentEntry | null {
-  const listsJson = JSON.stringify([template.modes, template.configOptions])
-  if (existing && existing.listsJson === listsJson) return null
+  if (existing && existing.listsJson === shapeJson(template)) return null
   return makeEntry(template, existing?.newSession ?? null, Date.now())
 }
 
