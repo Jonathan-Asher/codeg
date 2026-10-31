@@ -198,6 +198,9 @@ final class TalkHelper: WireSink {
             old.flags.silence()
             old.publisher.stop()
             old.controller.end()
+            // Its goodbye isn't heard: two voice-processing engines at once
+            // would fight over the devices.
+            old.audio.stop()
             send(.ended(reason: "replaced", error: nil))
         }
         idleTimer?.cancel()
