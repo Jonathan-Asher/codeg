@@ -155,6 +155,9 @@ pub enum TtsError {
     InvalidInput(String),
     #[error("this read-aloud stream has ended or never existed")]
     StreamNotFound,
+    /// Talk on this Mac holds the microphone and the speakers.
+    #[error("read aloud is paused while Talk runs")]
+    TalkActive,
     #[error("{0}")]
     Engine(String),
     #[error("{0}")]
@@ -305,6 +308,8 @@ pub struct TtsService {
     last_used: Mutex<Instant>,
     reaper_running: AtomicBool,
     status_listener: OnceLock<StatusListener>,
+    /// Talk on this Mac runs: nothing is read aloud meanwhile.
+    talk_active: AtomicBool,
 }
 
 static SERVICE: OnceLock<Arc<TtsService>> = OnceLock::new();
@@ -357,6 +362,7 @@ impl TtsService {
             last_used: Mutex::new(Instant::now()),
             reaper_running: AtomicBool::new(false),
             status_listener: OnceLock::new(),
+            talk_active: AtomicBool::new(false),
         }
     }
 
@@ -629,7 +635,9 @@ impl TtsService {
         }
     }
 
-    async fn stop_engine(&self) {
+    /// Stop the sidecar now (its ~0.9 GB of models go with it); the next
+    /// `speak` starts it again. Streams in flight end.
+    pub async fn stop_engine(&self) {
         let mut engine = self.engine.lock().await;
         let streams: Vec<_> = self.streams.lock().unwrap().drain().collect();
         drop(streams);
@@ -700,9 +708,23 @@ impl TtsService {
         }
     }
 
+    /// Talk on this Mac started (`true`) or ended: while it runs `speak` is
+    /// refused. Whoever starts Talk also calls [`Self::stop_engine`], so the
+    /// engine's memory is free for Talk's own models.
+    pub fn set_talk_active(&self, active: bool) {
+        self.talk_active.store(active, Ordering::SeqCst);
+    }
+
+    pub fn talk_active(&self) -> bool {
+        self.talk_active.load(Ordering::SeqCst)
+    }
+
     // ── Streams ──
 
     pub async fn speak(self: &Arc<Self>, request: SpeakRequest) -> Result<SpeakStarted, TtsError> {
+        if self.talk_active() {
+            return Err(TtsError::TalkActive);
+        }
         let store = self.check_supported()?;
         if !store.is_installed() {
             return Err(TtsError::NotInstalled);

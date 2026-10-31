@@ -20,6 +20,9 @@
 //! The phone's contract: `docs/talk-mode.md`.
 
 pub mod rules;
+/// Talk on this Mac: the native voice helper, its models and the relay to
+/// the window that holds the Talk.
+pub mod voice;
 
 use std::sync::Arc;
 

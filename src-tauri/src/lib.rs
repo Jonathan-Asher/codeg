@@ -111,6 +111,7 @@ mod tauri_app {
         auto_resume as auto_resume_commands,
         critical_sessions as critical_sessions_commands,
         talk as talk_commands,
+        talk_voice as talk_voice_commands,
         limit_continue as limit_continue_commands,
         claude_plan_mode as claude_plan_mode_commands,
         push as push_commands,
@@ -1553,6 +1554,15 @@ mod tauri_app {
                     );
                 }
 
+                // Talk on this Mac: the relay's host, and its global shortcut.
+                {
+                    let db_for_talk = app.state::<db::AppDatabase>().conn.clone();
+                    let talk_prefs = tauri::async_runtime::block_on(async move {
+                        crate::talk::voice::prefs::load_prefs(&db_for_talk).await
+                    });
+                    talk_voice_commands::init_talk_voice(app.handle(), &talk_prefs);
+                }
+
                 // Clicks on notifications posted before this launch (an update
                 // or restart since) still open their session.
                 notification::install_click_handler(app.handle());
@@ -1615,6 +1625,13 @@ mod tauri_app {
                 use tauri::Emitter;
                 let _ = app.emit_to("pet", "pet://menu-action", payload);
             })
+            // A page loading again (a reload) in the window that holds a
+            // Talk on this Mac ends that Talk: the page that drove it is gone.
+            .on_page_load(|webview, payload| {
+                if payload.event() == tauri::webview::PageLoadEvent::Started {
+                    talk_voice_commands::window_gone(webview.label());
+                }
+            })
             .on_window_event(|window, event| {
                 let label = window.label().to_string();
 
@@ -1622,6 +1639,8 @@ mod tauri_app {
                 // destroyed by the platform, owned windows are closed here.
                 if matches!(event, tauri::WindowEvent::Destroyed) {
                     browser_commands::close_all_for_owner(window.app_handle(), &label);
+                    // So does a Talk on this Mac it holds.
+                    talk_voice_commands::window_gone(&label);
                 }
 
                 // With the last remote workspace window gone, a main window
@@ -1740,6 +1759,7 @@ mod tauri_app {
                 // Quick Ask follows the workspace the user last worked in.
                 if matches!(event, tauri::WindowEvent::Focused(true)) {
                     quick_ask_commands::desktop::note_window_focused(&label);
+                    talk_voice_commands::note_window_focused(&label);
                 }
                 if label == quick_ask_commands::desktop::QUICK_ASK_WINDOW_LABEL {
                     match event {
@@ -1876,6 +1896,16 @@ mod tauri_app {
                 talk_commands::set_conversation_talk_mode,
                 talk_commands::get_talk_settings,
                 talk_commands::update_talk_settings,
+                talk_voice_commands::talk_voice_status,
+                talk_voice_commands::talk_voice_start,
+                talk_voice_commands::talk_voice_send,
+                talk_voice_commands::talk_voice_stop,
+                talk_voice_commands::talk_models_status,
+                talk_voice_commands::talk_models_download,
+                talk_voice_commands::talk_models_cancel,
+                talk_voice_commands::talk_models_delete,
+                talk_voice_commands::talk_voice_prefs_get,
+                talk_voice_commands::talk_voice_prefs_update,
                 claude_plan_mode_commands::get_claude_plan_settings,
                 claude_plan_mode_commands::update_claude_plan_settings,
                 limit_continue_commands::get_limit_continue_settings,

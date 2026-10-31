@@ -205,6 +205,33 @@ async fn speak_streams_chunks_and_warm_starts_one_engine() {
     assert!(status.engine_loaded);
 }
 
+/// Talk on this Mac takes the speakers: the engine stops (its memory goes)
+/// and nothing is read aloud until Talk ends.
+#[tokio::test]
+async fn talk_on_this_mac_stops_the_engine_and_pauses_read_aloud() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = Arc::new(Script::default());
+    let svc = installed(dir.path(), &script);
+    let first = svc.speak(speak("before")).await.unwrap();
+    drain(&svc, &first.stream_id).await;
+    assert!(svc.status().engine_running);
+
+    svc.set_talk_active(true);
+    svc.stop_engine().await;
+    assert!(svc.talk_active());
+    assert!(!svc.status().engine_running, "stopped to free its memory");
+    assert!(matches!(
+        svc.speak(speak("during")).await,
+        Err(TtsError::TalkActive)
+    ));
+    assert_eq!(script.spawns.load(Ordering::SeqCst), 1);
+
+    svc.set_talk_active(false);
+    let after = svc.speak(speak("after")).await.unwrap();
+    drain(&svc, &after.stream_id).await;
+    assert_eq!(script.spawns.load(Ordering::SeqCst), 2, "started again");
+}
+
 #[tokio::test]
 async fn cancel_stops_the_synthesis_in_the_sidecar() {
     let dir = tempfile::tempdir().unwrap();
