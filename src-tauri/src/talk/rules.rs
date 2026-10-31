@@ -3,8 +3,8 @@
 //! Three notes, all in English (the agent's working language; the reply
 //! language is a rule of its own):
 //!
-//! * [`full`]: the whole set, about 350 tokens, sent once per connection;
-//! * [`compact`]: a one-paragraph reminder on every later message;
+//! * [`full`]: the whole set, about 550 tokens, sent once per connection;
+//! * [`compact`]: a one-paragraph reminder (about 100) on every later message;
 //! * [`off`]: one line when Talk mode ends.
 //!
 //! The wording can change freely: a frame is recognized by its length and
