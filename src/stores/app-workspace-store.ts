@@ -106,6 +106,7 @@ export interface AppWorkspaceStoreState {
         | "pin_order"
         | "critical"
         | "critical_stall"
+        | "talk_mode"
         | "limit_auto_continue"
         | "last_viewed_at"
       >
@@ -454,13 +455,15 @@ export const useAppWorkspaceStore = create<AppWorkspaceStoreState>()(
       // `updated_at` untouched so an updated-sorted folder doesn't briefly
       // float the row. Status/title patches still bump.
       // Marking a session critical is the same kind of preference, and so is
-      // its continue-after-the-usage-limit switch. Opening a session is not
+      // its continue-after-the-usage-limit switch; so is Talk mode, which the
+      // backend sets without moving `updated_at`. Opening a session is not
       // activity either (`mark_conversations_viewed`).
       const bumpUpdatedAt =
         !("pinned_at" in patch) &&
         !("pin_order" in patch) &&
         !("critical" in patch) &&
         !("critical_stall" in patch) &&
+        !("talk_mode" in patch) &&
         !("limit_auto_continue" in patch) &&
         !("last_viewed_at" in patch)
       next[idx] = {

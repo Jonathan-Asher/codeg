@@ -318,6 +318,10 @@ export interface MessageTurn {
    *  has it, `waiting` until the agent reads it (`waiting_subagent` while a
    *  sub-agent the agent waits on is still running). Absent once read. */
   steer_state?: "sending" | "waiting" | "waiting_subagent" | null
+  /** A user turn the user spoke through the phone's Talk mode rather than
+   *  typed: it shows a mic marker. Absent on typed messages, on every other
+   *  role, and from servers that predate Talk mode. */
+  spoken?: boolean
 }
 
 export interface ConversationDetail {
@@ -559,6 +563,11 @@ export interface DbConversationSummary {
   /** Whether a critical conversation also alerts when a working turn goes
    *  silent ("may be stuck"). On unless turned off for this session. */
   critical_stall?: boolean
+  /** Talk mode is on: the user holds a voice conversation with this session
+   *  from the phone, so its new messages ask the agent for short spoken
+   *  answers (see `lib/talk-mode.ts`). Absent from a server that predates
+   *  the field, which reads as off. */
+  talk_mode?: boolean
   /** The usage-limit pause: the last turn stopped because the account hit
    *  its usage limit, and the backend continues the session once it resets
    *  (see `lib/limit-continue.ts`). `null` when there is none; absent from a
@@ -3219,6 +3228,8 @@ export type AcpEvent =
       type: "user_message"
       message_id: string
       blocks: UserMessageBlock[]
+      /** Spoken through the phone's Talk mode; absent on a typed message. */
+      spoken?: boolean
     }
   /**
    * The user submitted a live-feedback note while the agent is mid-turn (the
@@ -3448,6 +3459,8 @@ export interface FeedbackItem {
    *  words about an image. Backend-projected by `user_blocks_from_prompt`
    *  after hydration, the same shape `user_message` broadcasts. */
   blocks?: UserMessageBlock[] | null
+  /** Spoken through the phone's Talk mode; absent on a typed note. */
+  spoken?: boolean
 }
 
 /** Snapshot of the most recent ACP runtime error. */
@@ -3622,6 +3635,8 @@ export interface LiveSessionSnapshot {
   pending_user_message?: {
     message_id: string
     blocks: UserMessageBlock[]
+    /** Spoken through the phone's Talk mode; absent on a typed prompt. */
+    spoken?: boolean
   } | null
   /** Live sub-agent delegations recoverable from the snapshot. May be absent
    *  on older server payloads (then treated as `[]`). */
@@ -4629,6 +4644,24 @@ export interface CriticalAlert {
  *  `CriticalAlertsSnapshot`). */
 export interface CriticalAlertsSnapshot {
   alerts: CriticalAlert[]
+}
+
+// --- Talk mode ---
+
+/** The language Talk mode answers in. `auto`: the language of the user's
+ *  last message, Hebrew when unsure. */
+export type TalkLanguage = "auto" | "he" | "en"
+
+/** How Talk mode addresses the user in Hebrew. `auto` avoids gendered
+ *  second-person forms. */
+export type TalkAddress = "auto" | "masculine" | "feminine"
+
+/** "Talk mode" (Rust `TalkSettings`): global, stored by the backend. The
+ *  phone's Talk mode replies follow them; a change reaches every session with
+ *  its next message. An unknown stored value reads as `auto`. */
+export interface TalkSettings {
+  language: TalkLanguage
+  address: TalkAddress
 }
 
 // --- Logging ---

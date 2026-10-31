@@ -2,10 +2,12 @@
 
 import { memo, useCallback, useState } from "react"
 import {
+  AudioLines,
   ChevronRight,
   Circle,
   EllipsisVertical,
   Info,
+  MicOff,
   MoveHorizontal,
   Pencil,
   Pin,
@@ -15,6 +17,7 @@ import {
   Trash2,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import { useImeGuard } from "@/hooks/use-ime-guard"
 import {
   useForkBlockLabel,
@@ -31,6 +34,8 @@ import {
   updateConversationTitle,
 } from "@/lib/api"
 import { formatConversationTitle } from "@/lib/conversation-title"
+import { toErrorMessage } from "@/lib/app-error"
+import { setTalkMode } from "@/lib/talk-mode"
 import { ConversationHeaderFolderPicker } from "@/components/chat/conversation-context-bar"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { useTabActions } from "@/contexts/tab-context"
@@ -38,6 +43,7 @@ import { getRuntimeSession } from "@/stores/conversation-runtime-store"
 import type { ConversationStatus, DbConversationSummary } from "@/lib/types"
 import { STATUS_ORDER } from "@/lib/types"
 import { ConversationStatusDot } from "@/components/conversations/conversation-status-dot"
+import { TalkBadge } from "@/components/conversations/talk-badge"
 import { useSessionColumnWidth } from "@/hooks/use-appearance"
 import { useSessionColumnWidthLabel } from "@/hooks/use-session-column-width-label"
 import {
@@ -105,10 +111,10 @@ interface ConversationDetailHeaderProps {
  * tiled.
  *
  * The ⋯ menu mirrors the sidebar conversation card's right-click menu (new /
- * rename / fork / pin / details / status / delete) so the two entry points stay
- * consistent, wired to the same APIs. It also carries Session width, the
- * device-wide column width from Settings → Appearance, so it can be switched
- * from the conversation it is seen in. Subscriptions are kept narrow — a
+ * rename / fork / pin / Talk mode / details / status / delete) so the two
+ * entry points stay consistent, wired to the same APIs. It also carries
+ * Session width, the device-wide column width from Settings → Appearance, so
+ * it can be switched from the conversation it is seen in. Subscriptions are kept narrow — a
  * primitive `pinned_at != null` boolean — so the header never re-renders on
  * streaming tokens; details data is read on demand at click time via
  * `getRuntimeSession` / store `getState`.
@@ -151,6 +157,19 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
       conversationId != null &&
       (s.conversations.find((c) => c.id === conversationId)?.pinned_at ??
         null) != null
+  )
+  // Talk mode, held from the phone: a badge by the title while it is on.
+  const isTalk = useAppWorkspaceStore(
+    (s) =>
+      conversationId != null &&
+      s.conversations.find((c) => c.id === conversationId)?.talk_mode === true
+  )
+  // A delegation sub-session is driven by its parent: no "turn on" there
+  // (only "turn off", should one be on), as in the sidebar's menu.
+  const isSubsession = useAppWorkspaceStore(
+    (s) =>
+      conversationId != null &&
+      s.conversations.find((c) => c.id === conversationId)?.parent_id != null
   )
 
   const [details, setDetails] = useState<ActiveSessionDetails | null>(null)
@@ -216,6 +235,14 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
       console.error("[ConversationDetailHeader] toggle pin:", err)
     })
   }, [conversationId, isPinned, updateConversationLocal])
+
+  const handleToggleTalk = useCallback(() => {
+    if (conversationId == null) return
+    // Optimistic, and put back if the backend refuses (see `lib/talk-mode`).
+    setTalkMode(conversationId, !isTalk).catch((err) => {
+      toast.error(t("talkToggleFailed", { message: toErrorMessage(err) }))
+    })
+  }, [conversationId, isTalk, t])
 
   const handleNewConversation = useCallback(() => {
     if (!folderPath) return
@@ -315,6 +342,7 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
         >
           {displayTitle}
         </span>
+        {isTalk ? <TalkBadge /> : null}
         {/* Paused (or stopped) on a usage limit: said here too, so the
             state shows whichever surface the user looks at. */}
         <LimitPauseHeaderBadge conversationId={conversationId} />
@@ -370,6 +398,21 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
               )}
               {isPinned ? t("unpin") : t("pin")}
             </DropdownMenuItem>
+            {/* Talk is held from the phone; turned off here too, for one a
+                phone left on. */}
+            {(!isSubsession || isTalk) && (
+              <DropdownMenuItem
+                disabled={!persisted}
+                onSelect={handleToggleTalk}
+              >
+                {isTalk ? (
+                  <MicOff className="h-4 w-4" />
+                ) : (
+                  <AudioLines className="h-4 w-4" />
+                )}
+                {isTalk ? t("talkOff") : t("talkOn")}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               disabled={!persisted}
               onSelect={handleOpenDetails}

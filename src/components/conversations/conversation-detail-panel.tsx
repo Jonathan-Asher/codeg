@@ -186,7 +186,6 @@ import {
   type PromptDraft,
   type PromptInputBlock,
   type QuestionAnswer,
-  type UserMessageBlock,
 } from "@/lib/types"
 import {
   lastUserPromptText,
@@ -201,7 +200,7 @@ import {
   type UserMessageEditRequest,
 } from "@/lib/edit-message"
 import { loadKeepOriginalOnEdit } from "@/lib/edit-message-prefs"
-import { contentBlocksFromUserMessage } from "@/lib/user-message-blocks"
+import { buildUserTurnFromMessageBlocks } from "@/lib/user-message-blocks"
 import { getAgentLabel } from "@/lib/custom-agents"
 import {
   getSavedModeId,
@@ -307,22 +306,6 @@ function buildOptimisticUserTurnFromDraft(
     id,
     role: "user",
     blocks,
-    timestamp: new Date().toISOString(),
-  }
-}
-
-/** Build a user `MessageTurn` from a broadcast `user_message` (event or
- *  snapshot `pending_user_message`). Used by cross-client VIEWERS to render the
- *  sender's prompt. The turn `id` is the broadcast `message_id` so the runtime
- *  reducer can dedup it idempotently. */
-function buildUserTurnFromMessageBlocks(
-  messageId: string,
-  blocks: UserMessageBlock[]
-): MessageTurn {
-  return {
-    id: messageId,
-    role: "user",
-    blocks: contentBlocksFromUserMessage(blocks),
     timestamp: new Date().toISOString(),
   }
 }
@@ -1560,7 +1543,11 @@ const ConversationTabView = memo(function ConversationTabView({
     if (!pending) return
     appendViewerUserTurn(
       effectiveConversationId,
-      buildUserTurnFromMessageBlocks(pending.messageId, pending.blocks)
+      buildUserTurnFromMessageBlocks(
+        pending.messageId,
+        pending.blocks,
+        pending.spoken
+      )
     )
   }, [conn.pendingUserMessage, effectiveConversationId, appendViewerUserTurn])
 
@@ -1576,7 +1563,11 @@ const ConversationTabView = memo(function ConversationTabView({
         if (envelope.connection_id !== conn.connectionId) return
         appendViewerUserTurn(
           effectiveConversationId,
-          buildUserTurnFromMessageBlocks(envelope.message_id, envelope.blocks)
+          buildUserTurnFromMessageBlocks(
+            envelope.message_id,
+            envelope.blocks,
+            envelope.spoken
+          )
         )
       },
       [conn.connectionId, effectiveConversationId, appendViewerUserTurn]

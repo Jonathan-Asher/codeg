@@ -70,6 +70,8 @@ vi.mock("@/lib/api", () => ({
   listPushDevices: vi.fn(async () => []),
   // So does the dictation section.
   getDictationRefineSettings: vi.fn(() => new Promise(() => {})),
+  // And the Talk mode section.
+  getTalkSettings: vi.fn(() => new Promise(() => {})),
   // And the reminders section.
   getPendingReminderSettings: vi.fn(() => new Promise(() => {})),
 }))
@@ -82,7 +84,12 @@ vi.mock("@/lib/transport", () => ({
   // the browser's to grant or the OS's; `false` puts it on the browser branch,
   // which is the one with visible controls to assert on.
   isDesktop: () => false,
-  getShellTransport: () => ({ call: vi.fn() }),
+  // `subscribe`: the read-aloud section listens for the natural voice's
+  // status (`ttsApi.onStatus`).
+  getShellTransport: () => ({
+    call: vi.fn(),
+    subscribe: vi.fn(async () => () => {}),
+  }),
 }))
 // The rendering section is gated on the host webview having an env knob to
 // flip, so the platform has to be steerable per test. `vi.hoisted` because the

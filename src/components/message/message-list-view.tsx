@@ -44,6 +44,7 @@ import { ModelLabelProvider } from "./model-label-context"
 import { ReplyArtifacts } from "./reply-artifacts"
 import { UserResourceLinks } from "./user-resource-links"
 import { SteerStateCaption } from "./steer-state-caption"
+import { SpokenMarker } from "./spoken-marker"
 import { UserImageAttachments } from "./user-image-attachments"
 import { AgentPlanOverlay } from "@/components/chat/agent-plan-overlay"
 import {
@@ -1199,6 +1200,8 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
                 onStart={onStartEdit}
               />
             )}
+            {/* Spoken through the phone's Talk mode, not typed. */}
+            {sourceTurns?.[0]?.spoken === true ? <SpokenMarker /> : null}
             <MessageContent>
               <CollapsibleUserMessage parts={group.parts} />
             </MessageContent>

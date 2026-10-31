@@ -1,4 +1,4 @@
-import type { ContentBlock, UserMessageBlock } from "@/lib/types"
+import type { ContentBlock, MessageTurn, UserMessageBlock } from "@/lib/types"
 
 /**
  * Widen the lean `UserMessageBlock`s the backend broadcasts into the
@@ -28,4 +28,25 @@ export function contentBlocksFromUserMessage(
       ? { type: "image", data: b.data, mime_type: b.mime_type, uri: null }
       : { type: "text", text: b.text }
   )
+}
+
+/**
+ * A user `MessageTurn` from a broadcast `user_message` (the live event, or a
+ * snapshot's `pending_user_message`), for a cross-client VIEWER to render the
+ * sender's prompt. The turn `id` is the broadcast `message_id` so the runtime
+ * reducer can dedup it idempotently. A message spoken through the phone's Talk
+ * mode stays marked as spoken, so its mic marker shows before any reload.
+ */
+export function buildUserTurnFromMessageBlocks(
+  messageId: string,
+  blocks: UserMessageBlock[],
+  spoken?: boolean
+): MessageTurn {
+  return {
+    id: messageId,
+    role: "user",
+    blocks: contentBlocksFromUserMessage(blocks),
+    timestamp: new Date().toISOString(),
+    ...(spoken ? { spoken: true } : {}),
+  }
 }

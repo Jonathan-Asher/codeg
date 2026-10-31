@@ -224,6 +224,8 @@ export interface PendingPermission {
 export interface PendingUserMessage {
   messageId: string
   blocks: UserMessageBlock[]
+  /** Spoken through the phone's Talk mode; absent on a typed prompt. */
+  spoken?: boolean
 }
 
 export interface PendingQuestion {
@@ -309,6 +311,9 @@ export type LiveContentBlock =
        * native, a message of the turn.
        */
       channel?: "native" | "pull" | null
+      /** Spoken through the phone's Talk mode (the note's `spoken`): its user
+       *  turn shows the mic marker. Absent on a typed message. */
+      spoken?: boolean
     }
 
 /** See the `steering` block's `state`. */
@@ -854,6 +859,8 @@ type Action =
       blocks?: ContentBlock[] | null
       state?: SteeringState | null
       channel?: "native" | "pull" | null
+      /** Spoken through the phone's Talk mode — see the `steering` block. */
+      spoken?: boolean
       /**
        * The server just took it: a message already shown (sent from here)
        * whose reply moved on meanwhile moves to the end, where it landed.
@@ -3054,6 +3061,9 @@ function connectionsReducer(
         blocks: action.blocks ?? null,
         state: action.state ?? null,
         channel: action.channel ?? null,
+        // Only ever added: a later word on the note (the server taking one
+        // sent from here) keeps it through `...existing` below.
+        ...(action.spoken ? { spoken: true as const } : {}),
       }
       // Once per note id: the submit broadcast reaches every attached client,
       // and the sender showed it already. A later word on the same note
@@ -5121,6 +5131,8 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             blocks: e.item.blocks
               ? contentBlocksFromUserMessage(e.item.blocks)
               : null,
+            // Spoken through the phone's Talk mode: the mic marker.
+            spoken: e.item.spoken === true,
           })
           break
         }

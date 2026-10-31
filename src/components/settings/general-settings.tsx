@@ -51,6 +51,7 @@ import { CriticalSessionSettingsSection } from "@/components/settings/critical-s
 import { PendingReminderSettingsSection } from "@/components/settings/pending-reminder-settings"
 import { IphonePushSettingsSection } from "@/components/settings/iphone-push-settings"
 import { DictationRefineSettingsSection } from "@/components/settings/dictation-refine-settings"
+import { TalkSettingsSection } from "@/components/settings/talk-settings"
 import { ResumeAfterRestartSettingsSection } from "@/components/settings/resume-after-restart-settings"
 import { LimitContinueSettingsSection } from "@/components/settings/limit-continue-settings"
 import { QuickAskSettingsSection } from "@/components/settings/quick-ask-settings"
@@ -559,6 +560,9 @@ export function GeneralSettings() {
 
         {/* What the iPhone's dictation goes through before the agent. */}
         <DictationRefineSettingsSection />
+
+        {/* How the agent answers in the iPhone's Talk mode. */}
+        <TalkSettingsSection />
       </div>
     </ScrollArea>
   )

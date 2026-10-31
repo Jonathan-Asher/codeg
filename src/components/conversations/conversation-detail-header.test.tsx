@@ -17,6 +17,7 @@ const h = vi.hoisted(() => ({
   deleteConversation: vi.fn(async () => {}),
   updateConversationStatus: vi.fn(async () => {}),
   updateConversationPinned: vi.fn(async () => {}),
+  setConversationTalkMode: vi.fn(async () => {}),
   closeTab: vi.fn(),
   openNewConversationTab: vi.fn(),
   updateConversationLocal: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock("@/lib/api", () => ({
   deleteConversation: h.deleteConversation,
   updateConversationStatus: h.updateConversationStatus,
   updateConversationPinned: h.updateConversationPinned,
+  setConversationTalkMode: h.setConversationTalkMode,
 }))
 vi.mock("@/contexts/tab-context", () => ({
   useTabActions: () => ({
@@ -130,6 +132,48 @@ describe("ConversationDetailHeader fork", () => {
     expect(item).toHaveAttribute("data-disabled")
     expect(item.closest("[title]")).toHaveAttribute("title", "blocked:no_reply")
     expect(h.forkConversation).not.toHaveBeenCalled()
+  })
+})
+
+describe("ConversationDetailHeader Talk mode", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    h.conversations = []
+  })
+
+  it("shows the badge while Talk is on, and turns it off from the menu", async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    h.conversations = [
+      { id: 1, agent_type: "open_code", external_id: "s1", talk_mode: true },
+    ]
+    const { getByLabelText, getByRole, getByTitle, queryByRole } = render(
+      withIntl(<ConversationDetailHeader {...A} />)
+    )
+    expect(getByTitle("Talk mode on")).toBeInTheDocument()
+    await user.click(getByLabelText("More actions"))
+    expect(queryByRole("menuitem", { name: "Turn on Talk mode" })).toBeNull()
+    await user.click(getByRole("menuitem", { name: "Turn off Talk mode" }))
+    // Optimistic, then the backend.
+    expect(h.updateConversationLocal).toHaveBeenCalledWith(1, {
+      talk_mode: false,
+    })
+    await waitFor(() =>
+      expect(h.setConversationTalkMode).toHaveBeenCalledWith(1, false)
+    )
+  })
+
+  it("turns Talk on for the conversation the header shows", async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    h.conversations = [{ id: 1, agent_type: "open_code", external_id: "s1" }]
+    const { getByLabelText, getByRole, queryByTitle } = render(
+      withIntl(<ConversationDetailHeader {...A} />)
+    )
+    expect(queryByTitle("Talk mode on")).toBeNull()
+    await user.click(getByLabelText("More actions"))
+    await user.click(getByRole("menuitem", { name: "Turn on Talk mode" }))
+    await waitFor(() =>
+      expect(h.setConversationTalkMode).toHaveBeenCalledWith(1, true)
+    )
   })
 })
 

@@ -5841,6 +5841,29 @@ describe("AcpConnectionsProvider mid-turn steering messages", () => {
     expect(conn().steeredMessageIds).toEqual(["n1"])
   })
 
+  it("marks a note spoken through Talk mode as spoken", async () => {
+    // The mic marker on its user turn, before any reload brings the history
+    // turn (which says the same).
+    const handlers = await connectOwner()
+    emitAcpEvent(handlers, {
+      seq: 1,
+      connection_id: "spawned-conn",
+      type: "status_changed",
+      status: "prompting",
+    })
+    const spoken = submitted(2, "n1", "stop for a second", "delivered")
+    ;(spoken as unknown as { item: { spoken?: boolean } }).item.spoken = true
+    emitAcpEvent(handlers, spoken)
+    emitAcpEvent(handlers, submitted(3, "n2", "typed note", "delivered"))
+
+    const [first, second] = steeringBlocks()
+    expect(first).toEqual(
+      expect.objectContaining({ id: "n1", channel: "native", spoken: true })
+    )
+    // A typed note's block keeps the shape it always had.
+    expect(second).not.toHaveProperty("spoken")
+  })
+
   it("carries a steered note's image into the live turn, not just its text", async () => {
     // `text` is the composer's display form — it collapses an attachment into
     // words. Without the note's blocks the running turn would show a sentence

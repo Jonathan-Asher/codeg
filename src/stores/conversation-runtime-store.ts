@@ -691,6 +691,8 @@ interface StreamingGroup {
   timestamp?: string
   /** A steered message the agent has not read yet (see `steerStateOf`). */
   steerState?: MessageTurn["steer_state"]
+  /** A steered message spoken through the phone's Talk mode. */
+  spoken?: boolean
 }
 
 /**
@@ -1386,6 +1388,7 @@ export function buildStreamingTurnsFromLiveMessage(
         timestamp: Number.isFinite(Date.parse(block.createdAt))
           ? new Date(block.createdAt).toISOString()
           : undefined,
+        spoken: block.spoken === true,
       })
       groups.push({ role: "assistant", blocks: [] })
       currentGroupHasCompletedTool = false
@@ -1644,6 +1647,7 @@ export function buildStreamingTurnsFromLiveMessage(
       blocks: group.blocks,
       timestamp: group.timestamp ?? timestamp,
       ...(group.steerState ? { steer_state: group.steerState } : {}),
+      ...(group.spoken ? { spoken: true } : {}),
     }))
 
   return { turns, inProgressToolCallIds }

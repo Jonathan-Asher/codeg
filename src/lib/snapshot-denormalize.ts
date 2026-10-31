@@ -167,6 +167,7 @@ export function denormalizeSnapshot(wire: LiveSessionSnapshot): SnapshotPatch {
       ? {
           messageId: wire.pending_user_message.message_id,
           blocks: wire.pending_user_message.blocks,
+          ...(wire.pending_user_message.spoken ? { spoken: true } : {}),
         }
       : null,
     promptCapabilities: wire.prompt_capabilities ?? DEFAULT_PROMPT_CAPS,

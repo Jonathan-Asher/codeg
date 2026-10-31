@@ -118,6 +118,39 @@ describe("denormalizeSnapshot — turn held open for background work", () => {
   })
 })
 
+describe("denormalizeSnapshot — pending user message", () => {
+  it("keeps a message spoken through Talk mode marked as spoken", () => {
+    const patch = denormalizeSnapshot(
+      baseSnapshot({
+        status: "prompting",
+        pending_user_message: {
+          message_id: "optimistic-1",
+          blocks: [{ type: "text", text: "check the logs" }],
+          spoken: true,
+        },
+      })
+    )
+    expect(patch.pendingUserMessage).toEqual({
+      messageId: "optimistic-1",
+      blocks: [{ type: "text", text: "check the logs" }],
+      spoken: true,
+    })
+  })
+
+  it("adds no spoken flag to a typed message (or an older server's)", () => {
+    const patch = denormalizeSnapshot(
+      baseSnapshot({
+        status: "prompting",
+        pending_user_message: {
+          message_id: "optimistic-2",
+          blocks: [{ type: "text", text: "typed" }],
+        },
+      })
+    )
+    expect(patch.pendingUserMessage).not.toHaveProperty("spoken")
+  })
+})
+
 describe("denormalizeSnapshot — config staleness", () => {
   it("carries config_stale / config_stale_kind into the patch", () => {
     const patch = denormalizeSnapshot(

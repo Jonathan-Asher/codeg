@@ -172,6 +172,7 @@ import type {
   ClaudePlanSettings,
   CriticalAlertsSnapshot,
   CriticalSessionSettings,
+  TalkSettings,
   PendingItemsSnapshot,
   PendingReminderSettings,
   PushDevice,
@@ -2256,6 +2257,32 @@ export async function updateCriticalSessionSettings(
   settings: CriticalSessionSettings
 ): Promise<CriticalSessionSettings> {
   return getTransport().call("update_critical_session_settings", { settings })
+}
+
+// --- Talk mode ---
+
+/** Turn the phone's Talk mode on or off for a conversation. Off reaches the
+ *  agent with the user's next message; nothing is sent to it by itself. Every
+ *  client gets the row back through `conversation://changed`. */
+export async function setConversationTalkMode(
+  conversationId: number,
+  enabled: boolean
+): Promise<void> {
+  return getTransport().call("set_conversation_talk_mode", {
+    conversationId,
+    enabled,
+  })
+}
+
+export async function getTalkSettings(): Promise<TalkSettings> {
+  return getTransport().call("get_talk_settings")
+}
+
+/** Store the settings; every session gets them with its next message. */
+export async function updateTalkSettings(
+  settings: TalkSettings
+): Promise<TalkSettings> {
+  return getTransport().call("update_talk_settings", { settings })
 }
 
 // --- iPhone push ---

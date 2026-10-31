@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest"
 
-import { contentBlocksFromUserMessage } from "./user-message-blocks"
+import {
+  buildUserTurnFromMessageBlocks,
+  contentBlocksFromUserMessage,
+} from "./user-message-blocks"
 
 describe("contentBlocksFromUserMessage", () => {
   it("passes text through unchanged", () => {
@@ -39,5 +42,44 @@ describe("contentBlocksFromUserMessage", () => {
 
   it("maps an empty list to an empty list", () => {
     expect(contentBlocksFromUserMessage([])).toEqual([])
+  })
+})
+
+describe("buildUserTurnFromMessageBlocks", () => {
+  it("builds the user turn a viewer shows, under the broadcast id", () => {
+    const turn = buildUserTurnFromMessageBlocks("optimistic-1", [
+      { type: "text", text: "ship it" },
+      { type: "image", data: "aGk=", mime_type: "image/png" },
+    ])
+    expect(turn).toEqual({
+      id: "optimistic-1",
+      role: "user",
+      blocks: [
+        { type: "text", text: "ship it" },
+        { type: "image", data: "aGk=", mime_type: "image/png", uri: null },
+      ],
+      timestamp: expect.any(String),
+    })
+    // A typed message carries no flag at all, the shape history has.
+    expect(turn).not.toHaveProperty("spoken")
+  })
+
+  it("keeps a message spoken through Talk mode marked as spoken", () => {
+    // The mic marker shows on the live turn, before any reload brings the
+    // history turn (which says the same).
+    expect(
+      buildUserTurnFromMessageBlocks(
+        "optimistic-2",
+        [{ type: "text", text: "stop for a second" }],
+        true
+      ).spoken
+    ).toBe(true)
+    expect(
+      buildUserTurnFromMessageBlocks(
+        "optimistic-3",
+        [{ type: "text", text: "typed" }],
+        false
+      )
+    ).not.toHaveProperty("spoken")
   })
 })

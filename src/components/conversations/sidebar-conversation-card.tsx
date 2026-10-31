@@ -9,6 +9,8 @@ import {
 } from "react"
 import {
   AtSign,
+  AudioLines,
+  MicOff,
   Pencil,
   Trash2,
   Circle,
@@ -68,6 +70,7 @@ import {
   useForkConversation,
 } from "@/hooks/use-fork-conversation"
 import { CriticalFlag } from "@/components/conversations/critical-flag"
+import { TalkBadge } from "@/components/conversations/talk-badge"
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -216,6 +219,9 @@ interface SidebarConversationCardProps {
   /** Mark or unmark the conversation critical (alerts when it sits idle).
    *  Absent keeps the menu without the item. */
   onToggleCritical?: (id: number, nextCritical: boolean) => void
+  /** Turn the phone's Talk mode on or off for the conversation. Absent keeps
+   *  the menu without the item. */
+  onToggleTalk?: (id: number, nextTalk: boolean) => void
   /** Export the conversation to a Markdown file (server-side serializer).
    *  Offered on pinned rows; absent keeps the menu without the item. */
   onExportMarkdown?: (id: number) => void
@@ -260,6 +266,7 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   onNewConversation,
   onTogglePin,
   onToggleCritical,
+  onToggleTalk,
   onExportMarkdown,
   depth = 0,
   hasChildren = false,
@@ -465,6 +472,7 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   const isCancelled = status === "cancelled"
   const isPinned = conversation.pinned_at != null
   const isCritical = conversation.critical === true
+  const isTalk = conversation.talk_mode === true
   const isCompleted = status === "completed"
   // Delegation sub-sessions (a child of another conversation) don't get the
   // hover quick actions: pinning a sub-agent run to the root Pinned section or
@@ -619,6 +627,7 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                       </span>
                     ) : null}
                     {isCritical ? <CriticalFlag /> : null}
+                    {isTalk ? <TalkBadge /> : null}
                   </button>
 
                   {/* Expand/collapse affordance for delegation children. It overlays
@@ -1006,6 +1015,20 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                   <Flag className="h-4 w-4" />
                 )}
                 {isCritical ? t("unmarkCritical") : t("markCritical")}
+              </ContextMenuItem>
+            )}
+            {/* Talk is held from the phone; turned off here too, for one a
+                phone left on. Not offered on a sub-session, like the mark. */}
+            {onToggleTalk && (!isSubsession || isTalk) && (
+              <ContextMenuItem
+                onSelect={() => onToggleTalk(conversation.id, !isTalk)}
+              >
+                {isTalk ? (
+                  <MicOff className="h-4 w-4" />
+                ) : (
+                  <AudioLines className="h-4 w-4" />
+                )}
+                {isTalk ? t("talkOff") : t("talkOn")}
               </ContextMenuItem>
             )}
             {onExportMarkdown && (

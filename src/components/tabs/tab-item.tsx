@@ -16,8 +16,10 @@ import { toast } from "sonner"
 import { cn, handleMiddleClickClose } from "@/lib/utils"
 import { toErrorMessage } from "@/lib/app-error"
 import { setConversationCritical } from "@/lib/critical-sessions"
+import { setTalkMode } from "@/lib/talk-mode"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { CriticalFlag } from "@/components/conversations/critical-flag"
+import { TalkBadge } from "@/components/conversations/talk-badge"
 import {
   acquireDragSelectionGuard,
   releaseDragSelectionGuard,
@@ -173,6 +175,11 @@ export const TabItem = memo(function TabItem({
       conversationId != null &&
       s.conversations.find((c) => c.id === conversationId)?.critical === true
   )
+  const isTalk = useAppWorkspaceStore(
+    (s) =>
+      conversationId != null &&
+      s.conversations.find((c) => c.id === conversationId)?.talk_mode === true
+  )
   // A delegation sub-session is driven by its parent and not watched on its
   // own, so its tab offers no mark (only an unmark, should one be marked).
   const isSubsession = useAppWorkspaceStore(
@@ -200,6 +207,12 @@ export const TabItem = memo(function TabItem({
       toast.error(t("criticalToggleFailed", { message: toErrorMessage(err) }))
     })
   }, [conversationId, isCritical, t])
+  const handleToggleTalk = useCallback(() => {
+    if (conversationId == null) return
+    setTalkMode(conversationId, !isTalk).catch((err) => {
+      toast.error(t("talkToggleFailed", { message: toErrorMessage(err) }))
+    })
+  }, [conversationId, isTalk, t])
 
   const resolvedFolderName = folderName ?? String(tab.folderId)
   const baseTooltip = folderBranch
@@ -478,6 +491,7 @@ export const TabItem = memo(function TabItem({
               title={dotTitle || undefined}
             />
             {isCritical ? <CriticalFlag /> : null}
+            {isTalk ? <TalkBadge /> : null}
             <span
               className={cn(
                 // Embedded: grow + shrink as the tab tightens, but instead of an
@@ -530,14 +544,24 @@ export const TabItem = memo(function TabItem({
             {t("closeOthers")}
           </ContextMenuItem>
           <ContextMenuSeparator />
-          {conversationId != null && (!isSubsession || isCritical) && (
-            <>
-              <ContextMenuItem onSelect={handleToggleCritical}>
-                {isCritical ? t("unmarkCritical") : t("markCritical")}
-              </ContextMenuItem>
-              <ContextMenuSeparator />
-            </>
-          )}
+          {conversationId != null &&
+            (!isSubsession || isCritical || isTalk) && (
+              <>
+                {(!isSubsession || isCritical) && (
+                  <ContextMenuItem onSelect={handleToggleCritical}>
+                    {isCritical ? t("unmarkCritical") : t("markCritical")}
+                  </ContextMenuItem>
+                )}
+                {/* Talk is held from the phone; turned off here too, for one
+                    a phone left on. */}
+                {(!isSubsession || isTalk) && (
+                  <ContextMenuItem onSelect={handleToggleTalk}>
+                    {isTalk ? t("talkOff") : t("talkOn")}
+                  </ContextMenuItem>
+                )}
+                <ContextMenuSeparator />
+              </>
+            )}
           {/* IDEA-style split-group vocabulary. Plain "Split" seeds the new
               group with a fresh draft (a conversation can't be open in two
               groups at once), "Split and Move" relocates this tab. */}

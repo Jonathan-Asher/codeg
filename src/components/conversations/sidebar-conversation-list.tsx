@@ -203,6 +203,7 @@ import { cn } from "@/lib/utils"
 import { FolderAliasLabel } from "./folder-alias-label"
 import { toErrorMessage } from "@/lib/app-error"
 import { setConversationCritical } from "@/lib/critical-sessions"
+import { setTalkMode } from "@/lib/talk-mode"
 import { isSessionRunning } from "@/lib/session-activity"
 import { continueInterruptedSession } from "@/lib/session-continue"
 
@@ -2552,6 +2553,19 @@ export function SidebarConversationList({
     [t]
   )
 
+  // The same for Talk mode (held from the phone; turned off here for one a
+  // phone left on).
+  const handleToggleTalk = useCallback(
+    async (id: number, nextTalk: boolean) => {
+      try {
+        await setTalkMode(id, nextTalk)
+      } catch (err) {
+        toast.error(t("talkToggleFailed", { message: toErrorMessage(err) }))
+      }
+    },
+    [t]
+  )
+
   // ── Pinned-section drag reorder ──────────────────────────────────────────
   // Pointer-driven (see `usePinnedPointerReorder` for why not HTML5 drag):
   // press a pinned row, move it, release. The new order applies locally at once
@@ -3813,6 +3827,7 @@ export function SidebarConversationList({
         onNewConversation={handleNewConversationForFolder}
         onTogglePin={handleTogglePin}
         onToggleCritical={handleToggleCritical}
+        onToggleTalk={handleToggleTalk}
         onExportMarkdown={row.pinned ? handleExportMarkdown : undefined}
         depth={row.depth}
         hasChildren={conv.child_count > 0}
