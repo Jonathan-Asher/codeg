@@ -433,13 +433,6 @@ fn find_halved_body_prefix(text: &str) -> Option<usize> {
         .map(|length| capped.len() - length)
 }
 
-/// The record contains one or more valid internal frames and no user-visible
-/// content. Used by the Codex parser to avoid phantom turns and promotion
-/// coverage from adapters that persist ACP text blocks separately.
-pub(crate) fn contains_only_internal_agent_routes(input: &str) -> bool {
-    contains_internal_agent_routes(input) && strip_internal_agent_routes(input).trim().is_empty()
-}
-
 /// RS is reserved for the internal frame, so it is REMOVED from every prompt
 /// at ingress — never used to reject the prompt.
 ///

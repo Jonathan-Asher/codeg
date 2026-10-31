@@ -40,8 +40,9 @@ pub(crate) fn strip_all_with_talk(input: &str) -> (String, Option<TalkFrameInfo>
 }
 
 /// The record holds one or more frames and nothing a user wrote. Used where a
-/// record must be skipped structurally rather than emptied later (the Codex
-/// parser, for adapters that persist each prompt block as its own record).
+/// record must be skipped structurally rather than emptied later: the Codex
+/// parser, against phantom turns and promotion coverage from adapters that
+/// persist each prompt block as its own record.
 pub(crate) fn contains_only_frames(input: &str) -> bool {
     contains_any(input) && strip_all(input).trim().is_empty()
 }
