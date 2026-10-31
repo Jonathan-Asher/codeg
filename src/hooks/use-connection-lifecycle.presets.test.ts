@@ -323,6 +323,24 @@ describe("a new chat before its session is up", () => {
       configValues: { effort: "max" },
     })
   })
+
+  it("counts the agent's own value where it no longer offers the pick", async () => {
+    rememberSelectorConfigOptions(
+      "claude_code",
+      claudeOptions("opus", "high", ["opus", "sonnet", "haiku"])
+    )
+    saveConfigPreference("claude_code", "model", "haiku")
+    const { rerender } = renderNewChat()
+    // Haiku is gone: the session started on Opus by itself.
+    sessionReady("claude_code", claudeOptions("opus", "high"))
+    await act(async () => {
+      rerender({ agentType: "claude_code", newSession: true })
+    })
+    expect(getNewSessionValues("claude_code")?.configValues).toEqual({
+      model: "opus",
+      effort: "high",
+    })
+  })
 })
 
 describe("switching a new chat's agent while it connects", () => {

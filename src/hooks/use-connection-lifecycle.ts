@@ -12,6 +12,7 @@ import { describeError, extractAppCommandError } from "@/lib/app-error"
 import { notify } from "@/lib/notify"
 import { isConnectionBusy } from "@/lib/connection-teardown"
 import {
+  offeredSelectValue,
   recommendedSelectorValues,
   resolveDisplayedSelectors,
   selectorPicksOwed,
@@ -839,17 +840,25 @@ export function useConnectionLifecycle({
     if (!newSession || !liveReady || !connectionId) return
     if (recordedConnectionRef.current === connectionId) return
     recordedConnectionRef.current = connectionId
+    // An option the user picked shows the pick, not a default — unless the
+    // agent no longer offers what was picked, and started on its own value.
     const picked = getSavedPrefsForConnect(agentType)
     const configValues: Record<string, string> = {}
     for (const option of configOptions ?? []) {
-      if (picked.configValues?.[option.id] != null) continue
-      configValues[option.id] =
-        option.kind.type === "select"
-          ? option.kind.current_value
-          : String(option.kind.current_value)
+      const pick = picked.configValues?.[option.id]
+      if (option.kind.type === "select") {
+        if (pick != null && offeredSelectValue(option, pick) != null) continue
+        configValues[option.id] = option.kind.current_value
+      } else if (option.kind.type === "boolean") {
+        if (pick != null) continue
+        configValues[option.id] = String(option.kind.current_value)
+      }
     }
+    const modePicked =
+      picked.modeId != null &&
+      (modes?.available_modes.some((m) => m.id === picked.modeId) ?? false)
     rememberNewSessionValues(agentType, {
-      modeId: picked.modeId ? null : (modes?.current_mode_id ?? null),
+      modeId: modePicked ? null : (modes?.current_mode_id ?? null),
       configValues: Object.keys(configValues).length > 0 ? configValues : null,
     })
   }, [newSession, liveReady, connectionId, agentType, configOptions, modes])
