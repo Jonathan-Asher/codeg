@@ -1,6 +1,9 @@
 //! Settings › Talk on this Mac: the global shortcut, hands-free or hold to
-//! talk, interrupting by speaking, and whether the whisper pack makes the
-//! final transcript. Kept in `app_metadata` of this Mac's own backend.
+//! talk, interrupting by speaking, whether the whisper pack makes the final
+//! transcript, and the rest of the helper's `prefs` (patience, echo
+//! cancellation, progress phrases, Smart Turn, telemetry). Kept in
+//! `app_metadata` of this Mac's own backend; the window sends them with each
+//! `start`.
 
 use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
@@ -30,6 +33,17 @@ pub struct TalkVoicePrefs {
     pub interrupt_by_speaking: bool,
     /// The whisper pack makes the final transcript when it is downloaded.
     pub use_whisper: bool,
+    /// How long a pause ends what you say: `short`, `normal`, `long`.
+    pub patience: String,
+    /// Echo cancellation: `automatic` (by the route), `voiceProcessing`,
+    /// `off`.
+    pub echo_mode: String,
+    /// A short phrase while long work runs.
+    pub speak_progress: bool,
+    /// Smart Turn decides the end of turn (otherwise it only logs).
+    pub smart_turn_active: bool,
+    /// Talk's tuning report goes to this Mac's diagnostics.
+    pub share_telemetry: bool,
 }
 
 impl Default for TalkVoicePrefs {
@@ -40,14 +54,29 @@ impl Default for TalkVoicePrefs {
             hands_free: true,
             interrupt_by_speaking: true,
             use_whisper: true,
+            patience: "normal".to_string(),
+            echo_mode: "automatic".to_string(),
+            speak_progress: false,
+            smart_turn_active: false,
+            share_telemetry: true,
         }
     }
 }
 
 impl TalkVoicePrefs {
-    /// A shortcut the registrar can take, or why not.
+    /// A shortcut the registrar can take, or why not; an unknown patience or
+    /// echo mode reads as the default.
     pub fn normalized(mut self) -> Result<Self, String> {
         self.shortcut = crate::commands::quick_ask::normalize_shortcut(&self.shortcut)?;
+        if !matches!(self.patience.as_str(), "short" | "normal" | "long") {
+            self.patience = "normal".into();
+        }
+        if !matches!(
+            self.echo_mode.as_str(),
+            "automatic" | "voiceProcessing" | "off"
+        ) {
+            self.echo_mode = "automatic".into();
+        }
         Ok(self)
     }
 }
@@ -106,6 +135,31 @@ mod tests {
         let json = serde_json::to_value(&prefs).unwrap();
         assert_eq!(json["interruptBySpeaking"], true);
         assert_eq!(json["shortcutEnabled"], true);
+    }
+
+    #[test]
+    fn unknown_patience_or_echo_mode_reads_as_the_default() {
+        let prefs = TalkVoicePrefs {
+            patience: "forever".into(),
+            echo_mode: "loud".into(),
+            ..TalkVoicePrefs::default()
+        }
+        .normalized()
+        .unwrap();
+        assert_eq!(prefs.patience, "normal");
+        assert_eq!(prefs.echo_mode, "automatic");
+        let json = serde_json::to_value(TalkVoicePrefs::default()).unwrap();
+        for key in [
+            "handsFree",
+            "patience",
+            "interruptBySpeaking",
+            "speakProgress",
+            "smartTurnActive",
+            "echoMode",
+            "shareTelemetry",
+        ] {
+            assert!(json.get(key).is_some(), "the helper's prefs carry {key}");
+        }
     }
 
     #[test]

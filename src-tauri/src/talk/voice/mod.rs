@@ -170,11 +170,9 @@ pub enum TalkVoiceError {
 /// What the helper is started with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HelperLaunch {
-    /// `<data dir>/talk`: one directory per model pack.
-    pub models_dir: PathBuf,
-    /// The natural voice's models, when downloaded.
-    pub voice_dir: Option<PathBuf>,
-    /// espeak-ng's data (the natural voice's English).
+    /// espeak-ng's data (the natural voice's English); without it the helper
+    /// looks next to itself, as codeg-tts does. The model paths travel in
+    /// each `start` (`models`), so a pack downloaded meanwhile is used.
     pub espeak_data: Option<PathBuf>,
 }
 
@@ -254,12 +252,7 @@ pub fn locate_espeak_data() -> Option<PathBuf> {
 
 /// The arguments the helper gets.
 pub fn helper_args(launch: &HelperLaunch) -> Vec<std::ffi::OsString> {
-    let mut args: Vec<std::ffi::OsString> =
-        vec!["--models".into(), launch.models_dir.clone().into()];
-    if let Some(voice) = &launch.voice_dir {
-        args.push("--voice-models".into());
-        args.push(voice.clone().into());
-    }
+    let mut args: Vec<std::ffi::OsString> = Vec::new();
     if let Some(espeak) = &launch.espeak_data {
         args.push("--espeak-data".into());
         args.push(espeak.clone().into());
@@ -298,8 +291,49 @@ pub fn process_spawner(binary: PathBuf) -> HelperSpawner {
     })
 }
 
-/// Read what `codeg-talk --probe` printed: the last JSON object line is its
-/// report; `ok` needs a clean exit and a report that doesn't say otherwise.
+/// The oldest macOS Talk's engines run on.
+const MIN_MACOS: u64 = 15;
+
+/// Why a probe report rules Talk out, if it does. The report is
+/// `{"arm64", "macos", "mic", "protocol", "version", "whisperLoads"}`; the
+/// microphone permission is not a reason (Talk asks for it when it starts,
+/// and the dock links to the setting when it is off).
+fn probe_problem(report: &Value) -> Option<String> {
+    if report.get("ok").and_then(Value::as_bool) == Some(false) {
+        return Some(
+            report
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("the Talk helper's check failed")
+                .to_string(),
+        );
+    }
+    if report.get("arm64").and_then(Value::as_bool) == Some(false) {
+        return Some("Talk on this Mac needs Apple Silicon".into());
+    }
+    if let Some(protocol) = report.get("protocol").and_then(Value::as_u64) {
+        if protocol != u64::from(PROTOCOL_VERSION) {
+            return Some(format!(
+                "the Talk helper speaks protocol {protocol}, this app {PROTOCOL_VERSION}"
+            ));
+        }
+    }
+    let major = report
+        .get("macos")
+        .and_then(Value::as_str)
+        .and_then(|v| v.split('.').next())
+        .and_then(|m| m.trim().parse::<u64>().ok());
+    if major.is_some_and(|m| m < MIN_MACOS) {
+        return Some(format!("Talk on this Mac needs macOS {MIN_MACOS} or later"));
+    }
+    if report.get("whisperLoads").and_then(Value::as_bool) == Some(false) {
+        return Some("the speech engine (whisper.cpp) did not load".into());
+    }
+    None
+}
+
+/// Read what `codeg-talk --probe` printed: its report is the last JSON object
+/// line. It passes with a clean exit and nothing in the report against it.
 pub fn parse_probe(success: bool, stdout: &str, stderr: &str) -> ProbeOutcome {
     let report = stdout
         .lines()
@@ -308,30 +342,21 @@ pub fn parse_probe(success: bool, stdout: &str, stderr: &str) -> ProbeOutcome {
         .filter(|line| line.starts_with('{'))
         .find_map(|line| serde_json::from_str::<Value>(line).ok())
         .filter(Value::is_object);
-    let says_ok = report
-        .as_ref()
-        .and_then(|r| r.get("ok"))
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
-    let ok = success && says_ok;
-    let error = if ok {
-        None
+    let error = if success {
+        report.as_ref().and_then(probe_problem)
     } else {
-        let from_report = report
-            .as_ref()
-            .and_then(|r| r.get("error"))
-            .and_then(Value::as_str)
-            .map(str::to_string);
-        Some(from_report.unwrap_or_else(|| {
-            let tail = stderr.trim();
-            if tail.is_empty() {
-                "the Talk helper's check failed".to_string()
-            } else {
-                tail.lines().last().unwrap_or(tail).to_string()
-            }
-        }))
+        let tail = stderr.trim();
+        Some(if tail.is_empty() {
+            "the Talk helper's check failed".to_string()
+        } else {
+            tail.lines().last().unwrap_or(tail).to_string()
+        })
     };
-    ProbeOutcome { ok, error, report }
+    ProbeOutcome {
+        ok: error.is_none(),
+        error,
+        report,
+    }
 }
 
 /// Runs `codeg-talk --probe` on the real binary.
@@ -682,7 +707,17 @@ impl TalkVoiceService {
                         outcome.error
                     );
                 }
-                self.state.lock().unwrap().probe = Some(outcome);
+                let other_protocol = outcome
+                    .report
+                    .as_ref()
+                    .and_then(|r| r.get("protocol"))
+                    .and_then(Value::as_u64)
+                    .filter(|p| *p != u64::from(PROTOCOL_VERSION));
+                let mut state = self.state.lock().unwrap();
+                if let Some(protocol) = other_protocol {
+                    state.protocol_mismatch = Some(u32::try_from(protocol).unwrap_or(u32::MAX));
+                }
+                state.probe = Some(outcome);
             }
         }
         self.status()
@@ -720,17 +755,15 @@ impl TalkVoiceService {
                 return Err(e);
             }
         };
-        let voice_dir = (self.voice)();
+        // The window's prefs say whether whisper makes the final transcript
+        // (`useWhisper`, ours; the helper ignores it).
+        let use_whisper = message
+            .pointer("/prefs/useWhisper")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let models = self.start_models(use_whisper);
         if let Some(object) = message.as_object_mut() {
-            object.insert(
-                "models".into(),
-                json!({
-                    "dir": self.models.root().display().to_string(),
-                    "packs": self.models.installed_dirs(),
-                    "voice": voice_dir.map(|d| d.display().to_string()),
-                    "espeakData": self.espeak_data.as_ref().map(|d| d.display().to_string()),
-                }),
-            );
+            object.insert("models".into(), models);
         }
         let id = self.next_talk.fetch_add(1, Ordering::Relaxed);
         let line = serde_json::to_string(&message)
@@ -766,6 +799,48 @@ impl TalkVoiceService {
         );
         self.announce();
         Ok(TalkStarted { talk_id: id, hello })
+    }
+
+    /// The model paths for a `start`: `zipformer` `{encoder, decoder, joiner,
+    /// tokens}`, `vad`, `smartTurn`, `whisper`, `languageID`, `bluetts`,
+    /// `espeakData`; absolute paths, null where absent.
+    pub fn start_models(&self, use_whisper: bool) -> Value {
+        use self::catalog::{SMART_TURN, WHISPER, ZIPFORMER};
+        let path = |pack: &str, role: &str| {
+            self.models
+                .part_path(pack, role)
+                .map(|p| p.display().to_string())
+        };
+        let zipformer = match (
+            path(ZIPFORMER, "encoder"),
+            path(ZIPFORMER, "decoder"),
+            path(ZIPFORMER, "joiner"),
+            path(ZIPFORMER, "tokens"),
+        ) {
+            (Some(encoder), Some(decoder), Some(joiner), Some(tokens)) => json!({
+                "encoder": encoder,
+                "decoder": decoder,
+                "joiner": joiner,
+                "tokens": tokens,
+            }),
+            _ => Value::Null,
+        };
+        let whisper = |role: &str| {
+            if use_whisper {
+                path(WHISPER, role)
+            } else {
+                None
+            }
+        };
+        json!({
+            "zipformer": zipformer,
+            "vad": path(ZIPFORMER, "vad").or_else(|| path(WHISPER, "vad")),
+            "smartTurn": path(SMART_TURN, "weights"),
+            "whisper": whisper("weights"),
+            "languageID": whisper("languageID"),
+            "bluetts": (self.voice)().map(|d| d.display().to_string()),
+            "espeakData": self.espeak_data.as_ref().map(|d| d.display().to_string()),
+        })
     }
 
     /// A message from the window that holds Talk `talk_id`, for the helper.
@@ -1024,8 +1099,6 @@ impl TalkVoiceService {
             .clone()
             .ok_or_else(|| TalkVoiceError::Unsupported("platform".into()))?;
         let launch = HelperLaunch {
-            models_dir: self.models.root().to_path_buf(),
-            voice_dir: (self.voice)(),
             espeak_data: self.espeak_data.clone(),
         };
         let spawned = spawner(&launch)
@@ -1104,6 +1177,7 @@ impl TalkVoiceService {
             }
             return;
         }
+        let mut message = message;
         let mut finished = None;
         let mut presence = None;
         let mut target = None;
@@ -1126,6 +1200,11 @@ impl TalkVoiceService {
                 target = Some((talk.window.clone(), talk.id));
             }
             if kind == "ended" {
+                // Ended to make way for another Talk: the window hears so,
+                // whatever the helper calls its answer to `end`.
+                if talk.ending == Some(EndReason::Replaced) {
+                    message["reason"] = json!(EndReason::Replaced.as_str());
+                }
                 finished = state.talk.take();
             }
         }

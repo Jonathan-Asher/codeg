@@ -98,8 +98,9 @@ fn fake_spawner(fakes: Arc<Fakes>) -> HelperSpawner {
                         let reply = match message["type"].as_str() {
                             Some("start") => Some(json!({"type": "state", "phase": "listening"})),
                             Some("echo") => Some(json!({"type": "echo", "n": message["n"].clone()})),
+                            // As codeg-talk answers it.
                             Some("end") if script.answers_end => {
-                                Some(json!({"type": "ended", "reason": message["reason"].clone()}))
+                                Some(json!({"type": "ended", "reason": "ended", "error": null}))
                             }
                             _ => None,
                         };
@@ -283,28 +284,58 @@ async fn messages_reach_the_helper_in_order_and_its_replies_reach_only_the_owner
     assert_eq!(received[0]["type"], "start");
     assert_eq!(received[0]["conversationId"], 42);
     let models = &received[0]["models"];
-    assert!(models["packs"][ZIPFORMER]
-        .as_str()
-        .unwrap()
-        .ends_with(ZIPFORMER));
-    assert!(models["packs"][SMART_TURN].is_string());
-    assert!(
-        models["packs"][catalog::WHISPER].is_null(),
-        "not downloaded"
+    let file = |value: &Value, pack: &str, name: &str| {
+        let path = PathBuf::from(value.as_str().unwrap());
+        assert!(path.is_absolute());
+        assert!(path.ends_with(format!("talk/{pack}/{name}")), "{path:?}");
+    };
+    file(
+        &models["zipformer"]["encoder"],
+        ZIPFORMER,
+        "zipformer2-66m-streaming-he-encoder.int8.onnx",
     );
-    assert!(models["voice"].as_str().unwrap().ends_with("bluetts-2.5"));
+    file(
+        &models["zipformer"]["decoder"],
+        ZIPFORMER,
+        "zipformer2-66m-streaming-he-decoder.int8.onnx",
+    );
+    file(
+        &models["zipformer"]["joiner"],
+        ZIPFORMER,
+        "zipformer2-66m-streaming-he-joiner.int8.onnx",
+    );
+    file(
+        &models["zipformer"]["tokens"],
+        ZIPFORMER,
+        "zipformer2-66m-streaming-he-tokens.txt",
+    );
+    file(&models["vad"], ZIPFORMER, "ggml-silero-v5.1.2.bin");
+    file(&models["smartTurn"], SMART_TURN, "smart-turn-v3.2-cpu.onnx");
+    assert!(models["whisper"].is_null(), "not downloaded");
+    assert!(models["languageID"].is_null());
+    assert!(models["bluetts"].as_str().unwrap().ends_with("bluetts-2.5"));
     assert_eq!(models["espeakData"], "/app/Resources/tts/espeak-ng-data");
+    // The helper's own fixture (native/codeg-talk/fixtures/protocol) has the
+    // same keys.
+    let fixture: Value =
+        serde_json::from_str(include_str!("testdata/to-helper.start.json")).unwrap();
+    let keys = |v: &Value| {
+        let mut keys: Vec<String> = v.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        keys
+    };
+    assert_eq!(keys(models), keys(&fixture["models"]));
+    assert_eq!(
+        keys(&models["zipformer"]),
+        keys(&fixture["models"]["zipformer"])
+    );
     assert_eq!(received[1]["n"], 0);
-    // The paths also went on the command line.
+    // espeak-ng's data also went on the command line.
     let launch = h.fakes.launches.lock().unwrap()[0].clone();
-    let args: Vec<String> = helper_args(&launch)
-        .into_iter()
-        .map(|a| a.to_string_lossy().into_owned())
-        .collect();
-    assert_eq!(args[0], "--models");
-    assert!(args[1].ends_with("talk"));
-    assert!(args.contains(&"--voice-models".to_string()));
-    assert!(args.contains(&"--espeak-data".to_string()));
+    assert_eq!(
+        helper_args(&launch),
+        vec!["--espeak-data", "/app/Resources/tts/espeak-ng-data"]
+    );
     assert_eq!(*h.host.active.lock().unwrap(), vec![true]);
     let active = h.service.active().unwrap();
     assert_eq!(
@@ -353,7 +384,7 @@ async fn stopping_sends_end_and_delivers_the_helpers_ended() {
     let ended = h.host.of_type("main", "ended");
     assert_eq!(ended.len(), 1);
     assert_eq!(ended[0].0, started.talk_id);
-    assert_eq!(ended[0].1["reason"], "stopped");
+    assert_eq!(ended[0].1["reason"], "ended", "the helper's own word");
     let received = h.fakes.received(0);
     assert_eq!(received.last().unwrap()["type"], "end");
     assert!(h.service.active().is_none());
@@ -669,7 +700,7 @@ async fn a_failed_probe_makes_talk_unsupported_until_it_passes() {
             parse_probe(
                 true,
                 &format!(
-                    r#"{{"ok": {ok}, "macos": "15.2", "error": "microphone access is denied"}}"#
+                    r#"{{"arm64":true,"macos":"15.2","mic":"granted","protocol":1,"version":"1.0.0","whisperLoads":{ok}}}"#
                 ),
                 "",
             )
@@ -682,7 +713,7 @@ async fn a_failed_probe_makes_talk_unsupported_until_it_passes() {
     assert_eq!(status.unsupported_reason.as_deref(), Some("probe"));
     assert_eq!(
         status.probe.unwrap().error.as_deref(),
-        Some("microphone access is denied")
+        Some("the speech engine (whisper.cpp) did not load")
     );
     assert!(h.service.start(request("main", 1, true)).await.is_err());
     *passes.lock().unwrap() = true;
@@ -697,9 +728,42 @@ async fn a_failed_probe_makes_talk_unsupported_until_it_passes() {
 
 #[test]
 fn the_probe_report_is_read_from_its_last_json_line() {
-    let ok = parse_probe(true, "loading\n{\"ok\":true,\"mic\":\"granted\"}\n", "");
+    // What codeg-talk --probe prints.
+    let line = r#"{"arm64":true,"macos":"26.6.2","mic":"undetermined","protocol":1,"version":"1.0.0","whisperLoads":true}"#;
+    let ok = parse_probe(true, &format!("loading\n{line}\n"), "");
     assert!(ok.ok && ok.error.is_none());
-    assert_eq!(ok.report.unwrap()["mic"], "granted");
+    assert_eq!(ok.report.unwrap()["mic"], "undetermined");
+    let denied = parse_probe(true, &line.replace("undetermined", "denied"), "");
+    assert!(
+        denied.ok,
+        "the microphone permission is asked when Talk starts"
+    );
+    let intel = parse_probe(
+        true,
+        &line.replace(r#""arm64":true"#, r#""arm64":false"#),
+        "",
+    );
+    assert_eq!(
+        intel.error.as_deref(),
+        Some("Talk on this Mac needs Apple Silicon")
+    );
+    let old = parse_probe(true, &line.replace("26.6.2", "14.7"), "");
+    assert_eq!(
+        old.error.as_deref(),
+        Some("Talk on this Mac needs macOS 15 or later")
+    );
+    let no_whisper = parse_probe(
+        true,
+        &line.replace(r#""whisperLoads":true"#, r#""whisperLoads":false"#),
+        "",
+    );
+    assert!(!no_whisper.ok);
+    let other = parse_probe(
+        true,
+        &line.replace(r#""protocol":1"#, r#""protocol":2"#),
+        "",
+    );
+    assert!(!other.ok);
     let failed_exit = parse_probe(false, "", "dyld: whisper.framework not found\n");
     assert!(!failed_exit.ok);
     assert_eq!(
@@ -721,27 +785,79 @@ fn the_probe_report_is_read_from_its_last_json_line() {
 }
 
 #[test]
-fn the_helper_gets_the_model_voice_and_espeak_paths() {
+fn the_helper_is_launched_with_espeak_data_only() {
+    let launch = HelperLaunch { espeak_data: None };
+    assert!(helper_args(&launch).is_empty());
     let launch = HelperLaunch {
-        models_dir: PathBuf::from("/data/talk"),
-        voice_dir: None,
-        espeak_data: None,
-    };
-    assert_eq!(helper_args(&launch), vec!["--models", "/data/talk"]);
-    let launch = HelperLaunch {
-        models_dir: PathBuf::from("/data/talk"),
-        voice_dir: Some(PathBuf::from("/data/tts/bluetts-2.5")),
         espeak_data: Some(PathBuf::from("/app/espeak-ng-data")),
     };
     assert_eq!(
         helper_args(&launch),
-        vec![
-            "--models",
-            "/data/talk",
-            "--voice-models",
-            "/data/tts/bluetts-2.5",
-            "--espeak-data",
-            "/app/espeak-ng-data"
-        ]
+        vec!["--espeak-data", "/app/espeak-ng-data"]
     );
+}
+
+#[tokio::test]
+async fn whisper_goes_to_the_helper_once_downloaded_and_wanted() {
+    let h = harness();
+    h.service
+        .models()
+        .install_placeholders_for_tests(&[catalog::WHISPER]);
+    let models = h.service.start_models(true);
+    assert!(models["whisper"]
+        .as_str()
+        .unwrap()
+        .ends_with("he-turbo/ggml-ivrit-large-v3-turbo-q8_0.bin"));
+    assert!(models["languageID"]
+        .as_str()
+        .unwrap()
+        .ends_with("he-turbo/ggml-tiny-q8_0.bin"));
+    let without = h.service.start_models(false);
+    assert!(without["whisper"].is_null() && without["languageID"].is_null());
+    // The window's prefs decide.
+    let mut req = request("main", 9, true);
+    req.message["prefs"] = json!({"handsFree": true, "useWhisper": false});
+    h.service.start(req).await.unwrap();
+    eventually("the start", || !h.fakes.received(0).is_empty()).await;
+    assert!(h.fakes.received(0)[0]["models"]["whisper"].is_null());
+}
+
+#[tokio::test]
+async fn a_probe_naming_another_protocol_makes_talk_unsupported() {
+    let prober: HelperProber = Arc::new(|| {
+        Box::pin(async {
+            parse_probe(
+                true,
+                r#"{"arm64":true,"macos":"15.4","mic":"granted","protocol":2,"version":"2.0.0","whisperLoads":true}"#,
+                "",
+            )
+        })
+    });
+    let h = harness_with(Script::default(), Some(prober));
+    let status = h.service.probe(false).await;
+    assert!(!status.supported);
+    assert_eq!(status.unsupported_reason.as_deref(), Some("protocol"));
+}
+
+#[tokio::test]
+async fn the_first_status_starts_the_probe_in_the_background() {
+    let runs = Arc::new(AtomicUsize::new(0));
+    let counter = runs.clone();
+    let prober: HelperProber = Arc::new(move || {
+        counter.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { parse_probe(true, "", "") })
+    });
+    let h = harness_with(Script::default(), Some(prober));
+    let before = h.host.statuses.load(Ordering::SeqCst);
+    h.service.ensure_probe();
+    h.service.ensure_probe();
+    eventually("the probe", || h.service.status().probe.is_some()).await;
+    eventually("announced", || {
+        h.host.statuses.load(Ordering::SeqCst) > before
+    })
+    .await;
+    assert_eq!(runs.load(Ordering::SeqCst), 1, "once");
+    h.service.ensure_probe();
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert_eq!(runs.load(Ordering::SeqCst), 1, "not again");
 }

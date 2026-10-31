@@ -168,6 +168,16 @@ impl TalkModels {
                 .all(|slot| slot.store.is_installed())
     }
 
+    /// Where the file playing `role` in pack `pack` is, once the pack is
+    /// installed.
+    pub fn part_path(&self, pack: &str, role: &str) -> Option<PathBuf> {
+        let slot = self.packs.iter().find(|slot| slot.pack.id == pack)?;
+        let file = slot.pack.parts.get(role)?;
+        slot.store
+            .is_installed()
+            .then(|| slot.store.dir().join(file))
+    }
+
     /// The installed packs' directories, by pack id.
     pub fn installed_dirs(&self) -> BTreeMap<String, String> {
         self.packs
@@ -330,6 +340,7 @@ mod tests {
                 size: 4,
                 sha256: "0".repeat(64),
             }],
+            parts: [("weights".to_string(), format!("{id}.bin"))].into(),
         }
     }
 
@@ -347,6 +358,19 @@ mod tests {
         assert!(status.ready);
         let whisper = status.packs.iter().find(|p| p.id == WHISPER).unwrap();
         assert!(!whisper.installed && !whisper.required && whisper.recommended);
+        assert_eq!(
+            models.part_path(SMART_TURN, "weights").unwrap(),
+            dir.path().join(SMART_TURN).join("smart-turn-v3.2-cpu.onnx")
+        );
+        assert!(models
+            .part_path(ZIPFORMER, "vad")
+            .unwrap()
+            .ends_with("ggml-silero-v5.1.2.bin"));
+        assert!(
+            models.part_path(WHISPER, "weights").is_none(),
+            "not installed"
+        );
+        assert!(models.part_path(ZIPFORMER, "nope").is_none());
         let dirs = models.installed_dirs();
         assert_eq!(dirs.len(), 2);
         assert!(dirs[ZIPFORMER].ends_with(ZIPFORMER));

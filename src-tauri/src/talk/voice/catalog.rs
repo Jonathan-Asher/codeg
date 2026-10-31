@@ -13,6 +13,8 @@
 //! Each pack downloads into a directory of its own under `<data dir>/talk/`,
 //! checked file by file (`crate::tts::store::ModelStore`).
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::tts::catalog::{validate, ModelFile};
@@ -42,6 +44,10 @@ pub struct ModelPack {
     #[serde(default)]
     pub recommended: bool,
     pub files: Vec<ModelFile>,
+    /// What each file is for (`encoder`, `vad`, `weights`, ...): the helper
+    /// is told the path of each role (`start.models`).
+    #[serde(default)]
+    pub parts: BTreeMap<String, String>,
 }
 
 impl ModelPack {
@@ -59,6 +65,16 @@ fn release_file(release: &str, path: &str, size: u64, sha256: &str) -> ModelFile
         size,
         sha256: sha256.to_string(),
     }
+}
+
+/// The voice detector, in both the Zipformer and the whisper pack.
+const SILERO: &str = "ggml-silero-v5.1.2.bin";
+
+fn parts(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+    pairs
+        .iter()
+        .map(|(role, path)| (role.to_string(), path.to_string()))
+        .collect()
 }
 
 fn silero() -> ModelFile {
@@ -105,6 +121,13 @@ pub fn builtin() -> Vec<ModelPack> {
                 ),
                 silero(),
             ],
+            parts: parts(&[
+                ("encoder", "zipformer2-66m-streaming-he-encoder.int8.onnx"),
+                ("decoder", "zipformer2-66m-streaming-he-decoder.int8.onnx"),
+                ("joiner", "zipformer2-66m-streaming-he-joiner.int8.onnx"),
+                ("tokens", "zipformer2-66m-streaming-he-tokens.txt"),
+                ("vad", SILERO),
+            ]),
         },
         ModelPack {
             id: SMART_TURN.to_string(),
@@ -117,6 +140,7 @@ pub fn builtin() -> Vec<ModelPack> {
                 8_679_182,
                 "2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f",
             )],
+            parts: parts(&[("weights", "smart-turn-v3.2-cpu.onnx")]),
         },
         ModelPack {
             id: WHISPER.to_string(),
@@ -138,6 +162,11 @@ pub fn builtin() -> Vec<ModelPack> {
                     "c2085835d3f50733e2ff6e4b41ae8a2b8d8110461e18821b09a15c40c42d1cca",
                 ),
             ],
+            parts: parts(&[
+                ("weights", "ggml-ivrit-large-v3-turbo-q8_0.bin"),
+                ("vad", SILERO),
+                ("languageID", "ggml-tiny-q8_0.bin"),
+            ]),
         },
     ]
 }
@@ -168,6 +197,14 @@ pub fn validate_packs(packs: &[ModelPack]) -> Result<(), String> {
             return Err(format!("pack {} is listed twice", pack.id));
         }
         validate(&pack.files).map_err(|e| format!("pack {}: {e}", pack.id))?;
+        for (role, path) in &pack.parts {
+            if !pack.files.iter().any(|f| &f.path == path) {
+                return Err(format!(
+                    "pack {}: its {role} {path:?} is not one of its files",
+                    pack.id
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -206,10 +243,17 @@ mod tests {
     }
 
     #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
     struct IosModel {
         id: String,
         title: String,
         files: Vec<ModelFile>,
+        weights: Option<String>,
+        vad: Option<String>,
+        #[serde(rename = "languageID")]
+        language_id: Option<String>,
+        #[serde(default)]
+        parts: BTreeMap<String, String>,
     }
 
     #[test]
@@ -223,6 +267,20 @@ mod tests {
                 .unwrap_or_else(|| panic!("{} is not in stt-models.json", pack.id));
             assert_eq!(pack.title, model.title, "{}", pack.id);
             assert_eq!(pack.files, model.files, "{}", pack.id);
+            // Every role names the file the iPhone uses for it.
+            let mut roles = model.parts.clone();
+            if let Some(vad) = &model.vad {
+                roles.insert("vad".into(), vad.clone());
+            }
+            if let Some(language_id) = &model.language_id {
+                roles.insert("languageID".into(), language_id.clone());
+            }
+            if model.parts.is_empty() {
+                if let Some(weights) = &model.weights {
+                    roles.insert("weights".into(), weights.clone());
+                }
+            }
+            assert_eq!(pack.parts, roles, "{}", pack.id);
         }
     }
 
@@ -257,6 +315,14 @@ mod tests {
         let mut packs = builtin();
         packs[1].id = packs[0].id.clone();
         assert!(validate_packs(&packs).is_err());
+        let mut packs = builtin();
+        packs[1]
+            .parts
+            .insert("weights".into(), "elsewhere.onnx".into());
+        assert!(
+            validate_packs(&packs).is_err(),
+            "a role must name one of the files"
+        );
         assert!(validate_packs(&[]).is_err());
     }
 }
