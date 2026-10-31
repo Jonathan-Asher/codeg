@@ -91,6 +91,7 @@ let package = Package(
         .executableTarget(
             name: "codeg-talk",
             dependencies: ["TalkCore", "TalkHost", "TalkEngines"],
+            exclude: ["Info.plist"],
             swiftSettings: [.swiftLanguageMode(.v5)],
             linkerSettings: [
                 // Inside codeg.app the helper is Contents/MacOS/codeg-talk and
@@ -98,6 +99,9 @@ let package = Package(
                 // target/debug and target/Frameworks). SwiftPM's own
                 // @loader_path covers a `swift build` tree.
                 .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"]),
+                // The microphone usage string, for a helper started on its own.
+                .unsafeFlags(["-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__info_plist",
+                              "-Xlinker", "\(Context.packageDirectory)/Sources/codeg-talk/Info.plist"]),
             ]
         ),
         .testTarget(

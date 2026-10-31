@@ -24,11 +24,15 @@ final class WireRequests {
         self.timeout = timeout
     }
 
+    /// The window is gone (stdin closed): requests fail at once.
+    private(set) var isClosed = false
+
     /// Requests sent and not yet answered.
     var pendingCount: Int { waiting.count }
 
     /// Send `op` and wait for its answer (nil: none in time).
     func request(_ op: WireRequest.Op) async -> WireResponse? {
+        guard !isClosed else { return nil }
         let id = nextID
         nextID += 1
         return await withCheckedContinuation { continuation in
@@ -51,10 +55,15 @@ final class WireRequests {
         finish(response.id, with: response)
     }
 
-    /// Complete every waiting request as unanswered (the window went away,
-    /// or the Talk is over).
+    /// Complete every waiting request as unanswered.
     func failAll() {
         for id in waiting.keys.sorted() { finish(id, with: nil) }
+    }
+
+    /// No window to answer any more: fail what waits and what comes.
+    func close() {
+        isClosed = true
+        failAll()
     }
 
     private func finish(_ id: Int, with response: WireResponse?) {
@@ -78,8 +87,16 @@ final class WireFlags {
     var keepsStreamAttached = false { didSet { publish() } }
     var isTalking = false { didSet { publish() } }
     var holdSession = false { didSet { publish() } }
+    /// A Talk another one replaced: what it lets go of is no longer the
+    /// window's state.
+    private var silenced = false
+
+    func silence() {
+        silenced = true
+    }
 
     private func publish() {
+        guard !silenced else { return }
         let now = (keepsStreamAttached: keepsStreamAttached, isTalking: isTalking, holdSession: holdSession)
         guard now != sent else { return }
         sent = now

@@ -176,7 +176,9 @@ answerableByVoice}` or null), `mute` (`none`/`soft`/`hard`), `handsFree`,
 `suggestHeadphones` (speakers without echo cancellation: talking over the
 reply can't interrupt it).
 
-A crash of the helper, or a reload of the owning page, is reported to the
+After `ended` the helper can still send `req`s for that Talk (Talk mode off,
+the reports): keep relaying and answering them until the process exits. A
+crash of the helper, or a reload of the owning page, is reported to the
 window as `ended` by Rust.
 
 ## Audio

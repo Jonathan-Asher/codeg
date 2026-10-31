@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Embedded in the codeg-talk binary (__TEXT,__info_plist). Spawned by
+	     codeg.app, macOS attributes the microphone to codeg and shows the
+	     app's own usage string; this one only covers a helper started on
+	     its own (a terminal, tests), which would otherwise be killed on its
+	     first microphone access. -->
+	<key>CFBundleIdentifier</key>
+	<string>app.codeg.codeg-talk</string>
+	<key>CFBundleName</key>
+	<string>codeg-talk</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>codeg listens while you talk with a session in Talk.</string>
+</dict>
+</plist>
