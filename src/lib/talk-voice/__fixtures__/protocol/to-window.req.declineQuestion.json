@@ -1,0 +1,6 @@
+{
+  "id": 8,
+  "op": "declineQuestion",
+  "questionId": "q-3",
+  "type": "req"
+}

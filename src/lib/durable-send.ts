@@ -46,6 +46,8 @@ export interface DurableSendArgs {
   clientMessageId: string
   /** The failure of the previous attempt, when this is a resend. */
   previousFailure?: SendFailure
+  /** Said in Talk: kept through a bounce or a failure. */
+  spoken?: boolean
   /** The message was the queue's head (the auto-flush sent it). */
   fromQueueFlush: boolean
   /** Undo what the send put on screen (the optimistic turn, the sync state). */
@@ -82,7 +84,11 @@ export function durableSendCallbacks(
   const backToQueue = (opts?: RequeueOptions) => {
     queue.settleSend(clientMessageId)
     rollback()
-    const keep: RequeueOptions = { clientMessageId, ...opts }
+    const keep: RequeueOptions = {
+      clientMessageId,
+      ...(args.spoken ? { spoken: true } : {}),
+      ...opts,
+    }
     // FIFO: the auto-flush draft WAS the queue head → back to the front; a
     // direct send (the queue was empty when it left) → tail.
     if (fromQueueFlush) queue.requeueFront(draft, modeId, keep)
@@ -106,7 +112,11 @@ export function durableSendCallbacks(
       const failure = nextSendFailure(error, previousFailure)
       queue.settleSend(clientMessageId)
       rollback()
-      queue.requeueFront(draft, modeId, { clientMessageId, failure })
+      queue.requeueFront(draft, modeId, {
+        clientMessageId,
+        failure,
+        ...(args.spoken ? { spoken: true } : {}),
+      })
       args.onFailed?.(failure)
       return failure.autoRetry
     },

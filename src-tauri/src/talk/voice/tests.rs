@@ -13,6 +13,10 @@ struct Script {
     protocol: u32,
     /// Answer `end` with `ended`.
     answers_end: bool,
+    /// On `end`, first ask what the iPhone's controller asks as it lets go
+    /// (Talk mode off, its report, and a stray message), and say `ended`
+    /// once all three are answered.
+    asks_on_end: bool,
 }
 
 impl Default for Script {
@@ -20,6 +24,7 @@ impl Default for Script {
         Self {
             protocol: PROTOCOL_VERSION,
             answers_end: true,
+            asks_on_end: false,
         }
     }
 }
@@ -89,12 +94,37 @@ fn fake_spawner(fakes: Arc<Fakes>) -> HelperSpawner {
                 return;
             }
             let mut lines = tokio::io::BufReader::new(helper_in).lines();
+            let mut awaiting_answers = 0usize;
             loop {
                 tokio::select! {
                     line = lines.next_line() => {
                         let Ok(Some(line)) = line else { return };
                         let message: Value = serde_json::from_str(&line).unwrap();
                         received.lock().unwrap().push(message.clone());
+                        if message["type"] == "end" && script.asks_on_end {
+                            let asks = [
+                                json!({"type": "req", "id": 1, "op": "setTalkMode", "enabled": false}),
+                                json!({"type": "req", "id": 2, "op": "uploadReport", "report": {"kind": "talk_lab", "id": "talk-1"}}),
+                                json!({"type": "req", "id": 3, "op": "sendSpoken", "text": "one more thing"}),
+                            ];
+                            for ask in asks {
+                                if helper_out.write_all(format!("{ask}\n").as_bytes()).await.is_err() {
+                                    return;
+                                }
+                            }
+                            awaiting_answers = 3;
+                            continue;
+                        }
+                        if message["type"] == "res" && awaiting_answers > 0 {
+                            awaiting_answers -= 1;
+                            if awaiting_answers == 0 {
+                                let ended = json!({"type": "ended", "reason": "ended", "error": null});
+                                if helper_out.write_all(format!("{ended}\n").as_bytes()).await.is_err() {
+                                    return;
+                                }
+                            }
+                            continue;
+                        }
                         let reply = match message["type"].as_str() {
                             Some("start") => Some(json!({"type": "state", "phase": "listening"})),
                             Some("echo") => Some(json!({"type": "echo", "n": message["n"].clone()})),
@@ -138,6 +168,8 @@ struct Recorder {
     active: Mutex<Vec<bool>>,
     presence: Mutex<Vec<(String, i32, bool)>>,
     statuses: AtomicUsize,
+    talk_modes: Arc<Mutex<Vec<(i32, bool)>>>,
+    reports: Mutex<Vec<Value>>,
 }
 
 impl TalkHost for Recorder {
@@ -161,6 +193,23 @@ impl TalkHost for Recorder {
 
     fn status_changed(&self, _status: &TalkVoiceStatus) {
         self.statuses.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn set_talk_mode(
+        &self,
+        conversation_id: i32,
+        enabled: bool,
+    ) -> BoxFuture<'static, Result<(), String>> {
+        let calls = self.talk_modes.clone();
+        Box::pin(async move {
+            calls.lock().unwrap().push((conversation_id, enabled));
+            Ok(())
+        })
+    }
+
+    fn store_report(&self, report: Value) -> Result<(), String> {
+        self.reports.lock().unwrap().push(report);
+        Ok(())
     }
 }
 
@@ -206,6 +255,7 @@ fn harness_with(script: Script, prober: Option<HelperProber>) -> Harness {
         unsupported_reason: None,
         hello_timeout: Duration::from_secs(2),
         end_timeout: Duration::from_millis(200),
+        gone_timeout: Duration::from_secs(2),
         heartbeat: Duration::from_millis(20),
     });
     service
@@ -469,6 +519,87 @@ async fn closing_or_reloading_the_window_ends_its_talk() {
     assert_eq!(*h.host.active.lock().unwrap(), vec![true, false]);
 }
 
+/// The answers the helper got, by request id.
+fn answers(received: &[Value]) -> std::collections::HashMap<i64, Value> {
+    received
+        .iter()
+        .filter(|m| m["type"] == "res")
+        .map(|m| (m["id"].as_i64().unwrap(), m.clone()))
+        .collect()
+}
+
+#[tokio::test]
+async fn a_local_talk_whose_window_is_gone_has_its_last_requests_answered_here() {
+    let h = harness_with(
+        Script {
+            asks_on_end: true,
+            ..Script::default()
+        },
+        None,
+    );
+    h.service.start(request("main", 5, true)).await.unwrap();
+    h.service.window_gone("main").await;
+    assert!(h.service.active().is_none(), "it ended");
+    let answers = answers(&h.fakes.received(0));
+    assert_eq!(answers[&1]["ok"], true, "Talk mode off, on this backend");
+    assert_eq!(answers[&2]["ok"], true, "the report stored here");
+    assert_eq!(answers[&3]["ok"], false);
+    assert_eq!(answers[&3]["error"], WINDOW_GONE);
+    assert_eq!(*h.host.talk_modes.lock().unwrap(), vec![(5, false)]);
+    assert_eq!(
+        h.host.reports.lock().unwrap().clone(),
+        vec![json!({"kind": "talk_lab", "id": "talk-1"})]
+    );
+    assert!(h
+        .host
+        .delivered
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|(_, p)| p["message"]["type"] != "req"));
+    assert!(
+        h.service.status().helper_running,
+        "the helper stayed for the next Talk"
+    );
+}
+
+#[tokio::test]
+async fn a_remote_talk_whose_window_is_gone_leaves_talk_mode_to_its_server_and_keeps_its_report() {
+    let h = harness_with(
+        Script {
+            asks_on_end: true,
+            ..Script::default()
+        },
+        None,
+    );
+    h.service
+        .start(request("remote-workspace-2", 9, false))
+        .await
+        .unwrap();
+    h.service.window_gone("remote-workspace-2").await;
+    assert!(h.service.active().is_none());
+    let answers = answers(&h.fakes.received(0));
+    assert_eq!(answers[&1]["ok"], true, "the server turns it off itself");
+    assert_eq!(answers[&2]["ok"], false);
+    assert_eq!(answers[&2]["error"], REPORT_NOT_TAKEN);
+    assert_eq!(answers[&3]["ok"], false);
+    assert!(h.host.talk_modes.lock().unwrap().is_empty());
+    assert!(h.host.reports.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn requests_of_a_live_window_still_go_to_it() {
+    let h = harness();
+    let started = h.service.start(request("main", 5, true)).await.unwrap();
+    h.fakes.say(
+        0,
+        json!({"type": "req", "id": 4, "op": "setTalkMode", "enabled": true}),
+    );
+    eventually("the request", || !h.host.of_type("main", "req").is_empty()).await;
+    assert_eq!(h.host.of_type("main", "req")[0].0, started.talk_id);
+    assert!(h.host.talk_modes.lock().unwrap().is_empty());
+}
+
 #[tokio::test]
 async fn a_helper_crash_ends_the_talk_and_the_next_talk_starts_a_new_helper() {
     let h = harness();
@@ -677,6 +808,7 @@ async fn without_a_helper_talk_is_unsupported() {
         unsupported_reason: Some("helperMissing".into()),
         hello_timeout: Duration::from_secs(1),
         end_timeout: Duration::from_millis(100),
+        gone_timeout: Duration::from_millis(500),
         heartbeat: Duration::from_millis(20),
     });
     let status = service.status();

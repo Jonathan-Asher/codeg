@@ -239,6 +239,12 @@ import { useExportLabels } from "@/lib/use-export-labels"
 import { resolveActiveSessionDetails } from "./active-session-details"
 import { ConversationDetailHeader } from "./conversation-detail-header"
 import { SessionDetailsDialog } from "./session-details-dialog"
+import { TalkDock } from "@/components/talk-voice/talk-dock"
+import {
+  registerTalkSendAdapter,
+  spokenSender,
+  type TalkSendAdapter,
+} from "@/lib/talk-voice/adapters"
 
 interface ConversationTabViewProps {
   tabId: string
@@ -277,14 +283,22 @@ interface SendOptions {
   fromQueueFlush?: boolean
   clientMessageId?: string
   failure?: SendFailure
+  /** Said in Talk: sent (or kept in the queue) marked spoken. */
+  spoken?: boolean
 }
+
+/** What `handleSend` did with a message: it went out as a prompt, or it
+ *  waits in the queue (not ready, behind other messages, or bounced). */
+export type PanelSendResult = "sent" | "queued"
 
 function buildOptimisticUserTurnFromDraft(
   draft: PromptDraft,
   attachedResourcesFallback: string,
   // The message's client id: the turn is keyed by it, so the server's echo
   // (which carries it back) replaces this copy instead of joining it.
-  id: string = `optimistic-${randomUUID()}`
+  id: string = `optimistic-${randomUUID()}`,
+  // Said in Talk: the turn shows the mic marker.
+  spoken = false
 ): MessageTurn {
   // `draft.displayText` is the composer's full Markdown, which already renders
   // every inline file/resource badge as a `[label](uri)` link (see
@@ -309,6 +323,7 @@ function buildOptimisticUserTurnFromDraft(
     role: "user",
     blocks,
     timestamp: new Date().toISOString(),
+    ...(spoken ? { spoken: true } : {}),
   }
 }
 
@@ -1209,8 +1224,12 @@ const ConversationTabView = memo(function ConversationTabView({
     autoSendQueueRef.current = mqDequeue
   }, [mqDequeue])
   const handleSendRef = useRef<
-    (draft: PromptDraft, modeId?: string | null, opts?: SendOptions) => void
-  >(() => {})
+    (
+      draft: PromptDraft,
+      modeId?: string | null,
+      opts?: SendOptions
+    ) => PanelSendResult
+  >(() => "queued")
   // Timestamp of the last send that bounced with TurnBusyError. The flush below
   // backs off after a bounce so repeated busy rejections (backend still running
   // another turn while this client believes it is idle) don't spin one failed
@@ -1525,6 +1544,7 @@ const ConversationTabView = memo(function ConversationTabView({
             fromQueueFlush: true,
             clientMessageId: next.clientMessageId,
             failure: next.failure,
+            ...(next.spoken ? { spoken: true } : {}),
           }
         )
       }
@@ -1757,9 +1777,12 @@ const ConversationTabView = memo(function ConversationTabView({
       //
       // `clientMessageId` / `failure`: a queued message keeps its id across
       // attempts (the server answers a repeat as a duplicate) and its failure
-      // count.
+      // count. `spoken`: said in Talk (the message goes out, or waits, marked
+      // spoken and shows the mic marker).
+      //
+      // Says whether the message went out now or waits in the queue.
       opts?: SendOptions
-    ) => {
+    ): PanelSendResult => {
       // Capture the tab's chat-draft state + eager scratch dir synchronously,
       // before any await. A folderless chat draft is NOT special-cased here:
       // its first send takes the exact same gated, inline path as a normal new
@@ -1774,8 +1797,13 @@ const ConversationTabView = memo(function ConversationTabView({
       // The composer cleared itself the moment it handed the draft over, so
       // a message that cannot go out right now waits in the queue — never
       // dropped. The head goes back to the front, a new message to the tail.
-      const keepQueued = (failure?: SendFailure) => {
-        const keep = { clientMessageId, failure: failure ?? opts?.failure }
+      const spoken = opts?.spoken === true
+      const keepQueued = (failure?: SendFailure): PanelSendResult => {
+        const keep = {
+          clientMessageId,
+          failure: failure ?? opts?.failure,
+          ...(spoken ? { spoken: true } : {}),
+        }
         if (fromQueueFlush) {
           // Handed back like a bounce, so the flush backs off before it
           // looks at the head again.
@@ -1784,12 +1812,12 @@ const ConversationTabView = memo(function ConversationTabView({
         } else {
           mqEnqueue(draft, modeIdForQueue, keep)
         }
+        return "queued"
       }
 
       if (!hasPersistedConversation && !canAutoConnect) {
         setAgentConnectError(tWelcome("enableAgentFirstPlaceholder"))
-        keepQueued()
-        return
+        return keepQueued()
       }
       // Connected AND the connection's cwd matches this tab's working dir. Bare
       // `connStatus === "connected"` is not enough: a chat draft mid-reconnect can
@@ -1797,8 +1825,7 @@ const ConversationTabView = memo(function ConversationTabView({
       // deliver to the wrong workspace. Same predicate the flush effect uses.
       // A new chat's picks still on their way to its session go first, too.
       if (!connectionReady || presetsPending) {
-        keepQueued()
-        return
+        return keepQueued()
       }
 
       // Preserve FIFO: a direct send issued while the queue is non-empty joins
@@ -1813,8 +1840,9 @@ const ConversationTabView = memo(function ConversationTabView({
         mqEnqueue(draft, modeIdForQueue, {
           clientMessageId,
           failure: opts?.failure,
+          ...(spoken ? { spoken: true } : {}),
         })
-        return
+        return "queued"
       }
 
       // Single-flight the unbound new-tab create. A second direct submit fired
@@ -1832,14 +1860,14 @@ const ConversationTabView = memo(function ConversationTabView({
         )
       ) {
         // It follows the first message once the conversation exists.
-        keepQueued()
-        return
+        return keepQueued()
       }
 
       const optimisticTurn = buildOptimisticUserTurnFromDraft(
         draft,
         sharedT("attachedResources"),
-        clientMessageId
+        clientMessageId,
+        spoken
       )
       appendOptimisticTurn(
         effectiveConversationId,
@@ -1851,7 +1879,12 @@ const ConversationTabView = memo(function ConversationTabView({
       setHasSentMessage(true)
       // On its way: stored until the server answers, so a reload or a closed
       // window in the meantime brings it back (and resends it with this id).
-      mqTrackSend({ clientMessageId, draft, modeId: modeIdForQueue })
+      mqTrackSend({
+        clientMessageId,
+        draft,
+        modeId: modeIdForQueue,
+        ...(spoken ? { spoken: true } : {}),
+      })
 
       // What happens to the message after the send (see `lib/durable-send`):
       // - a busy turn (another co-controlling client, or a "prompting" status
@@ -1877,6 +1910,7 @@ const ConversationTabView = memo(function ConversationTabView({
         modeId: modeIdForQueue,
         clientMessageId,
         previousFailure: opts?.failure,
+        spoken,
         fromQueueFlush,
         rollback: () =>
           removeOptimisticTurn(effectiveConversationId, optimisticTurn.id),
@@ -1911,12 +1945,13 @@ const ConversationTabView = memo(function ConversationTabView({
           // so viewers' synthesized user turn dedups against our own optimistic
           // turn by exact id (and never suppresses a different sender's prompt).
           clientMessageId,
+          ...(spoken ? { spoken: true } : {}),
           onTurnInProgress,
           onPoolExhausted,
           onSendFailed,
           onAccepted,
         })
-        return
+        return "sent"
       }
 
       // New-tab path: create the DB row first, then send with the new id
@@ -1928,7 +1963,7 @@ const ConversationTabView = memo(function ConversationTabView({
       // a normal new conversation. This is the whole point of the fix: after the
       // scratch dir exists, chat mode shares the normal send path and never
       // depends on the flush-on-connect queue to deliver its first prompt.
-      if (createConversationPendingRef.current) return
+      if (createConversationPendingRef.current) return "queued"
       createConversationPendingRef.current = true
       const title = promptDraftTitleSeed(draft, sharedT("attachedResources"))
       const chatSend = sendOwnTab?.isChat === true
@@ -2014,6 +2049,7 @@ const ConversationTabView = memo(function ConversationTabView({
             folderId: sendFolderId,
             conversationId: newConversationId,
             clientMessageId,
+            ...(spoken ? { spoken: true } : {}),
             onTurnInProgress,
             onPoolExhausted,
             onSendFailed,
@@ -2036,6 +2072,7 @@ const ConversationTabView = memo(function ConversationTabView({
           mqRequeueFront(draft, modeIdForQueue, {
             clientMessageId,
             failure: nextSendFailure(e, opts?.failure),
+            ...(spoken ? { spoken: true } : {}),
           })
           if (mountedRef.current) {
             setAgentConnectError(tWelcome("createConversationFailed"))
@@ -2044,6 +2081,7 @@ const ConversationTabView = memo(function ConversationTabView({
           createConversationPendingRef.current = false
         }
       })()
+      return "sent"
     },
     [
       appendOptimisticTurn,
@@ -3477,8 +3515,12 @@ const ConversationTabView = memo(function ConversationTabView({
     steeredMessageIds: conn.steeredMessageIds,
     onResendAsPrompt: resendFeedbackAsPrompt,
     onSteerSending: useCallback(
-      (note: { id: string; text: string; channel: "native" | "pull" }) =>
-        acpActions.showSteering(tabId, note),
+      (note: {
+        id: string
+        text: string
+        channel: "native" | "pull"
+        spoken?: boolean
+      }) => acpActions.showSteering(tabId, note),
       [acpActions, tabId]
     ),
     onSteerFailed: useCallback(
@@ -3500,6 +3542,41 @@ const ConversationTabView = memo(function ConversationTabView({
     },
     [feedbackSteer]
   )
+
+  // Talk on this Mac sends what the person says through this tab's own
+  // pipeline (`lib/talk-voice/adapters`), so the queue, the outbox and the
+  // optimistic turn behave as for a typed message, marked spoken: a prompt
+  // when the session is idle, into the running turn when it takes a message
+  // now (Talk's interruptions never cancel), the queue otherwise.
+  const feedbackSteerRef = useRef(feedbackSteer)
+  const steerAvailableRef = useRef(feedback.steerAvailable)
+  useEffect(() => {
+    feedbackSteerRef.current = feedbackSteer
+    steerAvailableRef.current = feedback.steerAvailable
+  }, [feedbackSteer, feedback.steerAvailable])
+  useEffect(() => {
+    if (dbConversationId == null || dbConversationId <= 0) return
+    const adapter: TalkSendAdapter = {
+      contextKey: tabId,
+      sendSpoken: spokenSender({
+        connection: () => connectionStore.getConnection(tabId),
+        steerAvailable: () => steerAvailableRef.current,
+        send: (draft, opts) =>
+          handleSendRef.current(draft, selectedModeIdRef.current, {
+            spoken: true,
+            ...opts,
+          }),
+        steer: (text, clientId) =>
+          feedbackSteerRef.current(text, undefined, clientId, true),
+        enqueue: (draft, opts) =>
+          mqEnqueue(draft, selectedModeIdRef.current, opts),
+        newClientId: newClientMessageId,
+        isNoActiveTurn: isNoActiveTurnRejection,
+        failure: (error) => nextSendFailure(error, undefined),
+      }),
+    }
+    return registerTalkSendAdapter(dbConversationId, adapter)
+  }, [dbConversationId, tabId, connectionStore, mqEnqueue])
 
   // Click-to-insert for a queued row: send THAT item into the running turn
   // over the same live-feedback channel the composer's mid-turn dropdown uses.
@@ -3609,6 +3686,7 @@ const ConversationTabView = memo(function ConversationTabView({
   return (
     <ConversationShell
       getSentHistory={getSentHistory}
+      talkDock={<TalkDock conversationId={dbConversationId ?? null} />}
       topBanner={
         <>
           <SessionConfigStaleBanner contextKey={tabId} />

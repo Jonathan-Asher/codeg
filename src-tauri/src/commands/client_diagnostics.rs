@@ -7,7 +7,8 @@
 //! A report carries stack frames, the app's build, the device and OS, and
 //! the app's recent events (screens, microphone and audio-route changes);
 //! the app never puts message text, file names or tokens in one. The server
-//! stores it as sent and logs only its kind and size, never its content.
+//! stores it as sent (compact JSON) and logs only its kind and size, never its
+//! content; a refused report is logged with its kind, size and the reason.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -17,7 +18,7 @@ use serde_json::{Map, Value};
 
 use crate::app_error::AppCommandError;
 
-/// Largest report accepted, serialized.
+/// Largest report accepted: its compact JSON, as the app sends it.
 pub const MAX_REPORT_BYTES: usize = 1024 * 1024;
 /// Reports kept at most.
 pub const MAX_REPORTS: usize = 300;
@@ -141,23 +142,55 @@ pub fn report_client_diagnostic_core(
     store_report(dir, report, MAX_REPORTS, MAX_TOTAL_BYTES)
 }
 
+/// A report that is not stored leaves a line in the log: its kind, its size
+/// and why (never its content).
+fn refused(kind: &str, bytes: usize, reason: &str, error: AppCommandError) -> AppCommandError {
+    tracing::warn!(kind = %kind, bytes, reason = %reason, "refused a client diagnostic report");
+    error
+}
+
 fn store_report(
     dir: &Path,
     report: Value,
     max_reports: usize,
     max_total_bytes: u64,
 ) -> Result<ClientDiagnosticReceipt, AppCommandError> {
+    // The size of what the app sent (compact JSON), which is also what is
+    // stored: pretty-printed it would be about twice as large, and a report
+    // the app fitted to the limit would be refused.
+    let size = serde_json::to_vec(&report).map(|b| b.len()).unwrap_or(usize::MAX);
     let Value::Object(fields) = &report else {
-        return Err(AppCommandError::invalid_input(
-            "A crash report must be a JSON object",
+        return Err(refused(
+            "?",
+            size,
+            "not a JSON object",
+            AppCommandError::invalid_input("A crash report must be a JSON object"),
         ));
     };
-    let kind = fields
+    let Some(kind) = fields
         .get("kind")
         .and_then(Value::as_str)
         .filter(|k| !k.is_empty() && k.len() <= 64)
-        .ok_or_else(|| AppCommandError::invalid_input("A crash report needs a kind"))?
-        .to_string();
+        .map(str::to_string)
+    else {
+        return Err(refused(
+            "?",
+            size,
+            "no kind",
+            AppCommandError::invalid_input("A crash report needs a kind"),
+        ));
+    };
+    if size > MAX_REPORT_BYTES {
+        return Err(refused(
+            &kind,
+            size,
+            "too large",
+            AppCommandError::invalid_input(format!(
+                "The crash report is larger than {} KiB",
+                MAX_REPORT_BYTES / 1024
+            )),
+        ));
+    }
     let id = fields
         .get("id")
         .and_then(Value::as_str)
@@ -169,21 +202,25 @@ fn store_report(
     let mut envelope = Map::new();
     envelope.insert("receivedAtMs".into(), Value::from(received_at_ms));
     envelope.insert("report".into(), report);
-    let bytes = serde_json::to_vec_pretty(&Value::Object(envelope)).map_err(|e| {
-        AppCommandError::invalid_input("The crash report isn't valid JSON")
-            .with_detail(e.to_string())
+    let bytes = serde_json::to_vec(&Value::Object(envelope)).map_err(|e| {
+        refused(
+            &kind,
+            size,
+            "not serializable",
+            AppCommandError::invalid_input("The crash report isn't valid JSON")
+                .with_detail(e.to_string()),
+        )
     })?;
-    if bytes.len() > MAX_REPORT_BYTES {
-        return Err(AppCommandError::invalid_input(format!(
-            "The crash report is larger than {} KiB",
-            MAX_REPORT_BYTES / 1024
-        )));
-    }
 
     let _guard = STORE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     std::fs::create_dir_all(dir).map_err(|e| {
-        AppCommandError::io_error("Failed to create the crash report directory")
-            .with_detail(e.to_string())
+        refused(
+            &kind,
+            size,
+            "could not create the directory",
+            AppCommandError::io_error("Failed to create the crash report directory")
+                .with_detail(e.to_string()),
+        )
     })?;
     if stored_files(dir)
         .iter()
@@ -197,7 +234,13 @@ fn store_report(
         .and_then(|_| std::fs::rename(&tmp, &path))
         .map_err(|e| {
             let _ = std::fs::remove_file(&tmp);
-            AppCommandError::io_error("Failed to store the crash report").with_detail(e.to_string())
+            refused(
+                &kind,
+                size,
+                "could not write the file",
+                AppCommandError::io_error("Failed to store the crash report")
+                    .with_detail(e.to_string()),
+            )
         })?;
     evict(dir, max_reports, max_total_bytes);
     // The kind and size only: a report's content never reaches the log.
@@ -380,6 +423,49 @@ mod tests {
         let again = report_client_diagnostic_core(dir.path(), crash("same-id")).unwrap();
         assert!(again.stored);
         assert_eq!(list_client_diagnostics_core(dir.path(), None).len(), 1);
+    }
+
+    /// What the app sends is held to the limit, not a pretty-printed copy
+    /// (about twice as large): a report the app fitted is stored, compact,
+    /// and reads back.
+    #[test]
+    fn the_limit_is_on_the_compact_report_which_is_stored_compact() {
+        let dir = tempfile::tempdir().unwrap();
+        let rows: Vec<Value> = (0..12_000)
+            .map(|i| json!({ "t": i, "event": "vad", "p": [0.1, 0.2] }))
+            .collect();
+        let report = json!({ "kind": "talk_lab", "id": "talk-big", "utterances": rows });
+        let compact = serde_json::to_vec(&report).unwrap().len();
+        let pretty = serde_json::to_vec_pretty(&report).unwrap().len();
+        assert!(compact < MAX_REPORT_BYTES && pretty > MAX_REPORT_BYTES);
+        report_client_diagnostic_core(dir.path(), report.clone()).unwrap();
+        let (path, _, size) = stored_files(dir.path()).remove(0);
+        assert!(!std::fs::read_to_string(&path).unwrap().contains('\n'));
+        assert!((size as usize) < MAX_REPORT_BYTES + 64);
+        assert_eq!(
+            get_client_diagnostic_core(dir.path(), "talk-big").unwrap()["report"],
+            report
+        );
+    }
+
+    /// Reports stored pretty-printed by an earlier version still list and
+    /// read.
+    #[test]
+    fn an_older_pretty_printed_report_still_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let envelope = json!({ "receivedAtMs": 1_761_955_200_000u64, "report": crash("OLD1") });
+        std::fs::write(
+            dir.path().join(file_name(1_761_955_200_000, "OLD1")),
+            serde_json::to_vec_pretty(&envelope).unwrap(),
+        )
+        .unwrap();
+        let list = list_client_diagnostics_core(dir.path(), None);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, "OLD1");
+        assert_eq!(
+            get_client_diagnostic_core(dir.path(), "OLD1").unwrap()["report"],
+            crash("OLD1")
+        );
     }
 
     #[test]

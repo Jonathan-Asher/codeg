@@ -441,6 +441,18 @@ describe("useSessionFeedback", () => {
       ).rejects.toThrow()
     })
     expect(onSteerFailed).toHaveBeenCalledWith("optimistic-2")
+
+    // Said in Talk: shown with the mic marker.
+    mockSubmit.mockResolvedValueOnce(note("optimistic-3", "and lint"))
+    await act(async () => {
+      await result.current.steer("and lint", undefined, "optimistic-3", true)
+    })
+    expect(onSteerSending).toHaveBeenLastCalledWith({
+      id: "optimistic-3",
+      text: "and lint",
+      channel: "pull",
+      spoken: true,
+    })
   })
 
   it("keeps an unread note listed once the turn ends, as expired", async () => {
@@ -607,9 +619,23 @@ describe("useSessionFeedback", () => {
       "c1",
       "go left",
       undefined,
-      undefined
+      undefined,
+      false
     )
     expect(result.current.notes.map((n) => n.id)).toContain("st1")
+
+    // Said in Talk: marked spoken on the wire.
+    mockSubmit.mockResolvedValueOnce(note("st0", "say it", "delivered"))
+    await act(async () => {
+      await result.current.steer("say it", undefined, "cid-spoken", true)
+    })
+    expect(mockSubmit).toHaveBeenLastCalledWith(
+      "c1",
+      "say it",
+      undefined,
+      "cid-spoken",
+      true
+    )
 
     // A draft with attachments hands its full block list through untouched —
     // the API layer owns upload-marker stripping, the backend the channel
@@ -630,7 +656,8 @@ describe("useSessionFeedback", () => {
       "c1",
       "match this",
       blocks,
-      undefined
+      undefined,
+      false
     )
 
     const noTurn = new Error("no turn")

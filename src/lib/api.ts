@@ -375,7 +375,10 @@ export async function acpPrompt(
   blocks: PromptInputBlock[],
   folderId: number | null = null,
   conversationId: number | null = null,
-  clientMessageId: string | null = null
+  clientMessageId: string | null = null,
+  // Said in Talk rather than typed (`docs/talk-mode.md` §4): the server turns
+  // Talk on and marks the message spoken. Sent only when true.
+  spoken = false
 ): Promise<PromptAccepted> {
   try {
     const answer = await getTransport().call<unknown>("acp_prompt", {
@@ -389,6 +392,7 @@ export async function acpPrompt(
       folderId,
       conversationId,
       clientMessageId,
+      ...(spoken ? { spoken: true } : {}),
     })
     // An older server answers with no body.
     const duplicate =
@@ -6153,7 +6157,9 @@ export async function submitSessionFeedback(
   blocks?: PromptInputBlock[] | null,
   // The message's client id: the note is recorded under it, and a resend
   // with the same id is answered with that note instead of a second delivery.
-  clientId?: string | null
+  clientId?: string | null,
+  // Said in Talk rather than typed; sent only when true (see `acpPrompt`).
+  spoken = false
 ): Promise<FeedbackItem> {
   return getTransport().call("submit_session_feedback", {
     connectionId,
@@ -6166,6 +6172,7 @@ export async function submitSessionFeedback(
             !isDesktop() || getActiveRemoteConnectionId() !== null
           )
         : null,
+    ...(spoken ? { spoken: true } : {}),
   })
 }
 

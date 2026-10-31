@@ -1,0 +1,33 @@
+{
+  "ask": null,
+  "awaitingBackground": false,
+  "backgroundOutstanding": 0,
+  "canReportCutOff": true,
+  "current": null,
+  "echo": "voiceProcessing",
+  "error": null,
+  "fastMode": false,
+  "handsFree": true,
+  "heard": "תבדוק למה הבילד נופל",
+  "heardFinal": true,
+  "mic": "granted",
+  "mute": "none",
+  "naturalVoice": true,
+  "pauseReason": null,
+  "route": "builtIn",
+  "speaksHebrew": true,
+  "spoken": [
+    {
+      "id": "42:7#0",
+      "text": "בדקתי את הלוגים של ה-CI."
+    },
+    {
+      "id": "42:7#1",
+      "text": "הבדיקות של ה-API נופלות כי חסר משתנה סביבה."
+    }
+  ],
+  "status": "listening",
+  "suggestHeadphones": false,
+  "title": "Fix the flaky build",
+  "type": "state"
+}

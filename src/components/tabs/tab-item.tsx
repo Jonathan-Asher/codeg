@@ -20,6 +20,7 @@ import { setTalkMode } from "@/lib/talk-mode"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { CriticalFlag } from "@/components/conversations/critical-flag"
 import { TalkBadge } from "@/components/conversations/talk-badge"
+import { useTalkMenu } from "@/components/talk-voice/use-talk-menu"
 import {
   acquireDragSelectionGuard,
   releaseDragSelectionGuard,
@@ -187,6 +188,8 @@ export const TabItem = memo(function TabItem({
       conversationId != null &&
       s.conversations.find((c) => c.id === conversationId)?.parent_id != null
   )
+  const talkMenu = useTalkMenu(conversationId, isTalk)
+  const tTalk = useTranslations("TalkVoice")
   // Live background activity the review-status dot can't show: the agent
   // running a turn of its own, or idle while its background tasks run.
   const background = useConversationBackground(conversationId)
@@ -545,20 +548,34 @@ export const TabItem = memo(function TabItem({
           </ContextMenuItem>
           <ContextMenuSeparator />
           {conversationId != null &&
-            (!isSubsession || isCritical || isTalk) && (
+            (!isSubsession || isCritical || isTalk || talkMenu.showEndTalk) && (
               <>
                 {(!isSubsession || isCritical) && (
                   <ContextMenuItem onSelect={handleToggleCritical}>
                     {isCritical ? t("unmarkCritical") : t("markCritical")}
                   </ContextMenuItem>
                 )}
-                {/* Talk is held from the phone; turned off here too, for one
-                    a phone left on. */}
-                {(!isSubsession || isTalk) && (
-                  <ContextMenuItem onSelect={handleToggleTalk}>
-                    {isTalk ? t("talkOff") : t("talkOn")}
+                {/* Talk on this Mac, or its end in the window that holds
+                    it. */}
+                {talkMenu.showEndTalk && (
+                  <ContextMenuItem onSelect={talkMenu.endTalk}>
+                    {tTalk("menuEndTalk")}
                   </ContextMenuItem>
                 )}
+                {!isSubsession && talkMenu.showTalkOnMac && (
+                  <ContextMenuItem onSelect={talkMenu.startTalk}>
+                    {tTalk("menuTalkOnMac")}
+                  </ContextMenuItem>
+                )}
+                {/* Talk mode held from the phone: turned off here too, for
+                    one a phone left on. Turned on (reply style only) where
+                    Talk on this Mac can't run. */}
+                {(!isSubsession || isTalk) &&
+                  (talkMenu.showTurnOff || talkMenu.showTurnOn) && (
+                    <ContextMenuItem onSelect={handleToggleTalk}>
+                      {isTalk ? t("talkOff") : t("talkOn")}
+                    </ContextMenuItem>
+                  )}
                 <ContextMenuSeparator />
               </>
             )}

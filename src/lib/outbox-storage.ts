@@ -26,6 +26,8 @@ export interface InFlightMessage {
   modeId: string | null
   /** When the send started (ms). */
   startedAt: number
+  /** Said in Talk (see `QueuedMessage.spoken`). */
+  spoken?: boolean
 }
 
 /** The persisted form of a queued message (mirror of `QueuedMessage`). */
@@ -37,6 +39,7 @@ export interface StoredQueuedMessage {
   adoptSendTimeMode?: boolean
   holdUntilTurnEnd?: boolean
   failure?: SendFailure
+  spoken?: boolean
 }
 
 export interface StoredOutbox {

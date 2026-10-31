@@ -21,6 +21,8 @@ This page is the contract the iPhone client builds against.
 7. [Events the phone relies on](#7-events)
 8. [History: `MessageTurn.spoken`](#8-history)
 9. [Desktop](#9-desktop)
+10. [Talk on this Mac](#10-talk-on-this-mac)
+11. [A Talk nobody reports](#11-a-talk-nobody-reports)
 
 ## 1. Rules that never change
 
@@ -350,3 +352,83 @@ that predate Talk.
   Talk left on by a phone that crashed).
 - Spoken user messages show a small mic marker.
 - **Settings › Talk** edits the language and the address form (§3).
+- Talk on this Mac (§10) adds "Talk on this Mac" and "End Talk" to the same
+  menus; "Turn off Talk mode" stays for a Talk the phone holds, and "Turn on
+  Talk mode" (the reply style only) stays only where Talk on this Mac can't
+  run.
+
+## 10. Talk on this Mac
+
+The same hands-free conversation, held from the desktop app with the Mac's
+own microphone and speakers: speak Hebrew and pause, the message goes, the
+reply is spoken sentence by sentence, and talking over it interrupts (into
+the running turn, never a cancel). It works for a session on this Mac and for
+a session on a remote server shown in a remote-workspace window.
+
+**Requirements.** The macOS desktop app on Apple Silicon (macOS 15 or later),
+the helper's check passed, `CODEG_TALK` not `off`, a saved conversation, and
+a server that knows Talk mode (`talk_mode` present on the summary). The first
+start asks for the speech models (Settings › Talk on this Mac, or the setup
+dialog "Talk on this Mac" opens):
+
+| Pack | Size | |
+|---|---|---|
+| `he-zipformer-stream` | ~73 MB | required: the live transcription and the voice detector |
+| `smart-turn-v3.2` | ~9 MB | required: end of turn |
+| `he-turbo` | ~919 MB | recommended: whisper for the final transcript |
+
+They are the iPhone's packs (codeg-ios `stt-models.json`, same URLs and
+sha256), one directory each under `<data dir>/talk/`. The natural voice is
+read aloud's BlueTTS (`<data dir>/tts/bluetts-2.5`); without it the system
+voice speaks.
+
+**How it runs.**
+
+- The voice loop is `codeg-talk`, a native helper next to the codeg
+  executable (`native/codeg-talk`; its README has the protocol). One audio
+  engine with macOS voice processing runs the microphone and the speech, which
+  is what lets you interrupt on speakers.
+- Rust (`src-tauri/src/talk/voice`) starts the helper and relays JSON lines
+  between it and the window that holds the Talk: the helper's messages go to
+  that window only (`talk-voice://message`). One Talk at a time; a new one
+  replaces the old. Closing or reloading the window ends it, and Rust answers
+  the helper's last requests itself (Talk mode off and the report for a local
+  session; for a remote one the server's own rule in §11 turns Talk off).
+- The window drives the session (`src/lib/talk-voice/bridge.ts`): it tells the
+  helper the live turn's main-thread text (the iPhone's `mainThreadText`), each
+  turn's end with its stop reason, the waiting cards, background turns and the
+  sub-agents' pending items, and carries out the helper's requests through the
+  tab's own send pipeline: a spoken message is sent, inserted into the turn or
+  queued exactly like a typed one, marked `spoken` (§4).
+- Talk is bound to the conversation's tab: starting opens the tab, closing it
+  ends Talk. Read aloud pauses while a Talk runs, and natural speech is
+  refused meanwhile.
+- Presence: for a local session the backend reports `talking` (§6) while the
+  helper says the person is talking; for a remote session the window's
+  presence report to that server carries it.
+- Workspace windows keep running at full speed while hidden (WebKit's
+  background throttling is off on macOS 14+), so a Talk goes on while you work
+  in another app.
+
+**The dock** sits above the composer: an orb with the microphone and speech
+levels (hold it to talk in hold-to-talk mode; tap it to interrupt), captions
+for you and the agent, the choices as big buttons when Talk asks something,
+"You cut me off", Mute, Skip, End, and hands-free or hold to talk.
+
+**The global shortcut** (default ⌥⌘T, Settings › Talk on this Mac): a tap
+mutes and unmutes, holding it is push to talk, and with no Talk running it
+starts one with the session in front.
+
+**Commands** (desktop, the local backend only): `talk_voice_status`
+(`refreshProbe` runs the helper's check again), `talk_voice_start`,
+`talk_voice_send` (a batch of messages, in order), `talk_voice_stop`,
+`talk_models_status|download|cancel|delete`, `talk_voice_prefs_get|update`,
+`talk_voice_open_mic_settings`.
+
+## 11. A Talk nobody reports
+
+A conversation that stays in Talk (`on`) while no client's fresh presence
+report names it for 15 minutes (a phone suspended mid-call, a crash) has its
+Talk turned off, as the menu would: the state becomes `ending` and the Off
+note goes with the next message. A fresh report from any client naming the
+conversation (talking, looking, or merely showing it) holds it.

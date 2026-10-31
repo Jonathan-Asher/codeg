@@ -1415,6 +1415,15 @@ mod tauri_app {
                     crate::web::event_bridge::EventEmitter::Tauri(app.handle().clone()),
                 ));
 
+                // A Talk left on with no client reporting it (a phone
+                // suspended mid-call) goes off after 15 minutes. Mirrored in
+                // `bin/codeg_server.rs`.
+                tauri::async_runtime::spawn(crate::talk::idle::talk_idle_task(
+                    app.state::<crate::db::AppDatabase>().conn.clone(),
+                    crate::web::event_bridge::EventEmitter::Tauri(app.handle().clone()),
+                    app.state::<ConnectionManager>().clone_ref(),
+                ));
+
                 // iPhone push for the desktop notification's moments (turn
                 // finished, needs you, errors). Mirrored in
                 // `bin/codeg_server.rs`.
@@ -1906,6 +1915,7 @@ mod tauri_app {
                 talk_voice_commands::talk_models_delete,
                 talk_voice_commands::talk_voice_prefs_get,
                 talk_voice_commands::talk_voice_prefs_update,
+                talk_voice_commands::talk_voice_open_mic_settings,
                 claude_plan_mode_commands::get_claude_plan_settings,
                 claude_plan_mode_commands::update_claude_plan_settings,
                 limit_continue_commands::get_limit_continue_settings,

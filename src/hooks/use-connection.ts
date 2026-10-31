@@ -163,6 +163,8 @@ export interface UseConnectionReturn {
       conversationId?: number | null
       clientMessageId?: string | null
       unlinked?: boolean
+      /** Said in Talk (see `acpPrompt`). */
+      spoken?: boolean
     }
   ) => Promise<PromptAccepted>
   setMode: (modeId: string) => Promise<void>
@@ -388,6 +390,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
         conversationId?: number | null
         clientMessageId?: string | null
         unlinked?: boolean
+        spoken?: boolean
       }
     ) => actions.sendPrompt(contextKey, blocks, opts),
     [actions, contextKey]

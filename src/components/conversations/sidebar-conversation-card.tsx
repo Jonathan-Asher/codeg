@@ -32,6 +32,7 @@ import {
   Play,
   RotateCw,
   Split,
+  PhoneOff,
   type LucideIcon,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -71,6 +72,7 @@ import {
 } from "@/hooks/use-fork-conversation"
 import { CriticalFlag } from "@/components/conversations/critical-flag"
 import { TalkBadge } from "@/components/conversations/talk-badge"
+import { useTalkMenu } from "@/components/talk-voice/use-talk-menu"
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -473,6 +475,8 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   const isPinned = conversation.pinned_at != null
   const isCritical = conversation.critical === true
   const isTalk = conversation.talk_mode === true
+  const talkMenu = useTalkMenu(conversation.id, isTalk)
+  const tTalk = useTranslations("TalkVoice")
   const isCompleted = status === "completed"
   // Delegation sub-sessions (a child of another conversation) don't get the
   // hover quick actions: pinning a sub-agent run to the root Pinned section or
@@ -1017,20 +1021,37 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                 {isCritical ? t("unmarkCritical") : t("markCritical")}
               </ContextMenuItem>
             )}
-            {/* Talk is held from the phone; turned off here too, for one a
-                phone left on. Not offered on a sub-session, like the mark. */}
-            {onToggleTalk && (!isSubsession || isTalk) && (
-              <ContextMenuItem
-                onSelect={() => onToggleTalk(conversation.id, !isTalk)}
-              >
-                {isTalk ? (
-                  <MicOff className="h-4 w-4" />
-                ) : (
-                  <AudioLines className="h-4 w-4" />
-                )}
-                {isTalk ? t("talkOff") : t("talkOn")}
+            {/* Talk on this Mac, or its end in the window that holds it. Not
+                offered on a sub-session, like the mark. */}
+            {talkMenu.showEndTalk && (
+              <ContextMenuItem onSelect={talkMenu.endTalk}>
+                <PhoneOff className="h-4 w-4" />
+                {tTalk("menuEndTalk")}
               </ContextMenuItem>
             )}
+            {!isSubsession && talkMenu.showTalkOnMac && (
+              <ContextMenuItem onSelect={talkMenu.startTalk}>
+                <AudioLines className="h-4 w-4" />
+                {tTalk("menuTalkOnMac")}
+              </ContextMenuItem>
+            )}
+            {/* Talk mode held from the phone; turned off here too, for one a
+                phone left on. Turned on (reply style only) where Talk on this
+                Mac can't run. */}
+            {onToggleTalk &&
+              (!isSubsession || isTalk) &&
+              (talkMenu.showTurnOff || talkMenu.showTurnOn) && (
+                <ContextMenuItem
+                  onSelect={() => onToggleTalk(conversation.id, !isTalk)}
+                >
+                  {isTalk ? (
+                    <MicOff className="h-4 w-4" />
+                  ) : (
+                    <AudioLines className="h-4 w-4" />
+                  )}
+                  {isTalk ? t("talkOff") : t("talkOn")}
+                </ContextMenuItem>
+              )}
             {onExportMarkdown && (
               <ContextMenuItem
                 onSelect={() => onExportMarkdown(conversation.id)}

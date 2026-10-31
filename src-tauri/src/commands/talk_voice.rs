@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use futures::future::BoxFuture;
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, EventTarget, Manager, State};
@@ -118,6 +119,38 @@ impl TalkHost for DesktopHost {
             voice::STATUS_EVENT,
             status,
         );
+    }
+
+    fn set_talk_mode(
+        &self,
+        conversation_id: i32,
+        enabled: bool,
+    ) -> BoxFuture<'static, Result<(), String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let db = app.state::<AppDatabase>().conn.clone();
+            let manager = app
+                .state::<crate::acp::manager::ConnectionManager>()
+                .clone_ref();
+            crate::talk::set_conversation_talk_mode_core(
+                &db,
+                &EventEmitter::Tauri(app.clone()),
+                &manager,
+                conversation_id,
+                enabled,
+            )
+            .await
+            .map_err(|e| e.to_string())
+        })
+    }
+
+    fn store_report(&self, report: Value) -> Result<(), String> {
+        crate::commands::client_diagnostics::report_client_diagnostic_core(
+            &crate::paths::codeg_client_diagnostics_root(),
+            report,
+        )
+        .map(|_| ())
+        .map_err(|e| e.to_string())
     }
 }
 
@@ -358,15 +391,22 @@ pub async fn talk_voice_start(
         .await?)
 }
 
-/// A message for the helper, from the window that holds Talk `talk_id`.
+/// Messages for the helper, in order, from the window that holds Talk
+/// `talk_id`. One call carries a batch: separate invokes are not handled in
+/// the order they were made, so the window queues its messages and sends
+/// what gathered while the previous call was in flight.
 #[tauri::command]
 pub async fn talk_voice_send(
     app: AppHandle,
     webview: tauri::Webview,
     talk_id: u64,
-    message: Value,
+    messages: Vec<Value>,
 ) -> Result<(), AppCommandError> {
-    Ok(desktop_service(&app).send(webview.label(), talk_id, message)?)
+    let service = desktop_service(&app);
+    for message in messages {
+        service.send(webview.label(), talk_id, message)?;
+    }
+    Ok(())
 }
 
 /// End Talk `talk_id`. A Talk that already ended is not an error.
@@ -439,6 +479,34 @@ pub async fn talk_voice_prefs_update(
     let saved = save_prefs(&db.conn, prefs).await?;
     apply_shortcut(&app, &saved);
     Ok(prefs_view(saved))
+}
+
+/// System Settings › Privacy & Security › Microphone, where codeg's access
+/// is switched on when it was refused.
+pub const MIC_SETTINGS_URL: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
+
+#[tauri::command]
+pub async fn talk_voice_open_mic_settings() -> Result<(), AppCommandError> {
+    #[cfg(target_os = "macos")]
+    {
+        let status = crate::process::std_command("open")
+            .arg(MIC_SETTINGS_URL)
+            .status()
+            .map_err(AppCommandError::io)?;
+        if !status.success() {
+            return Err(AppCommandError::task_execution_failed(
+                "Could not open the microphone settings",
+            ));
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err(AppCommandError::dependency_missing(
+            "Talk on this Mac runs on macOS only",
+        ))
+    }
 }
 
 #[cfg(test)]

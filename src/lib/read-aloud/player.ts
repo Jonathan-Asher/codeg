@@ -39,6 +39,7 @@
  * - Chrome keeps speaking after the page is gone; leaving the page stops it.
  */
 
+import { isTalkVoiceActive } from "@/lib/talk-voice/active"
 import {
   buildSpeechSegments,
   speechTextFromMarkdown,
@@ -77,7 +78,7 @@ export type SpeakResult =
       /** Languages the text needs that no installed voice speaks. */
       missingVoices: string[]
     }
-  | { ok: false; reason: "unsupported" | "empty" }
+  | { ok: false; reason: "unsupported" | "empty" | "talkActive" }
 
 /** The parts of `SpeechSynthesisUtterance` the player sets. */
 export interface UtteranceLike {
@@ -385,8 +386,10 @@ export class ReadAloudPlayer {
     return { queue, missing }
   }
 
-  /** Read `markdown` as `id`, replacing whatever is being read. */
+  /** Read `markdown` as `id`, replacing whatever is being read. Nothing is
+   *  read while a Talk on this Mac runs (it has the speakers). */
   speak(id: string, markdown: string): SpeakResult {
+    if (isTalkVoiceActive()) return { ok: false, reason: "talkActive" }
     const speechText = speechTextFromMarkdown(markdown)
     const prefs = this.getPrefs()
     const engine = this.chooseEngine(prefs)

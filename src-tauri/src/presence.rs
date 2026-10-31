@@ -202,6 +202,17 @@ impl PresenceRegistry {
             .collect()
     }
 
+    /// The sessions some client's fresh report names, whatever it says about
+    /// them (looking, talking, or merely shown on a locked phone).
+    pub fn reported(&self, now: Instant) -> HashSet<i32> {
+        self.clients
+            .values()
+            .filter_map(|client| client.report.as_ref())
+            .filter(|(_, at)| now.saturating_duration_since(*at) <= STALE_AFTER)
+            .flat_map(|(report, _)| report.conversation_ids.iter().copied())
+            .collect()
+    }
+
     /// Drop desktop-window entries nobody refreshed in a long time (a closed
     /// window never says goodbye).
     fn prune(&mut self, now: Instant) {
@@ -244,6 +255,13 @@ pub fn snapshot() -> Looking {
 pub fn talking() -> HashSet<i32> {
     let now = Instant::now();
     with_registry(|r| r.talking(now))
+}
+
+/// The sessions some client's fresh report names (see
+/// [`PresenceRegistry::reported`]).
+pub fn reported() -> HashSet<i32> {
+    let now = Instant::now();
+    with_registry(|r| r.reported(now))
 }
 
 /// A desktop window of this process reported its presence.
@@ -430,6 +448,19 @@ mod tests {
         r.report_socket(phone, report(false, false, 0, &[12]), later);
         assert!(r.talking(later).is_empty());
         assert!(!r.looking(later).at(12));
+    }
+
+    #[test]
+    fn a_fresh_report_names_its_sessions_whatever_it_says() {
+        let mut r = PresenceRegistry::default();
+        let t0 = Instant::now();
+        let phone = r.connect_socket(ClientKind::Ios);
+        // A locked phone showing session 25: not looking, not talking.
+        r.report_socket(phone, report(false, false, 0, &[25]), t0);
+        assert!(r.looking(t0).conversations.is_empty());
+        assert_eq!(r.reported(t0), HashSet::from([25]));
+        let later = t0 + STALE_AFTER + Duration::from_secs(1);
+        assert!(r.reported(later).is_empty(), "a dead phone names nothing");
     }
 
     /// Talk on this Mac reports under a window key of its own: the session

@@ -65,6 +65,8 @@ pub const SHORTCUT_EVENT: &str = "talk-voice://shortcut";
 const HELLO_TIMEOUT: Duration = Duration::from_secs(20);
 /// How long a Talk being ended has to answer `ended`.
 const END_TIMEOUT: Duration = Duration::from_secs(3);
+/// The same for a Talk whose window is gone (its last requests come first).
+const GONE_TIMEOUT: Duration = Duration::from_secs(15);
 /// How often `talking` presence is refreshed (a report lives 90 s).
 const HEARTBEAT: Duration = Duration::from_secs(20);
 /// How long `codeg-talk --probe` may take.
@@ -406,7 +408,26 @@ pub trait TalkHost: Send + Sync + 'static {
     fn presence(&self, _key: &str, _conversation_id: i32, _talking: bool) {}
     /// The status changed (a Talk started or ended, the helper went away).
     fn status_changed(&self, _status: &TalkVoiceStatus) {}
+    /// Talk mode on or off for a local session, asked by a Talk whose window
+    /// is gone (it is ending).
+    fn set_talk_mode(
+        &self,
+        _conversation_id: i32,
+        _enabled: bool,
+    ) -> BoxFuture<'static, Result<(), String>> {
+        Box::pin(async { Err("Talk mode can't be switched from here".to_string()) })
+    }
+    /// Store a Talk report (`talk_lab`) in this Mac's diagnostics, for a
+    /// local session whose window is gone.
+    fn store_report(&self, _report: Value) -> Result<(), String> {
+        Err("reports can't be stored from here".to_string())
+    }
 }
+
+/// The answer to a request of a Talk whose window is gone.
+const WINDOW_GONE: &str = "the window that held the Talk is gone";
+/// The answer that leaves a report with the helper, for the next Talk.
+const REPORT_NOT_TAKEN: &str = "not taken";
 
 /// Why a Talk ends, as the window hears it in `ended{reason}` when the relay
 /// ends it itself.
@@ -447,6 +468,9 @@ pub struct TalkVoiceConfig {
     pub unsupported_reason: Option<String>,
     pub hello_timeout: Duration,
     pub end_timeout: Duration,
+    /// How long a Talk whose window is gone may take to end: the helper's
+    /// last requests (Talk mode off, its report) are answered here first.
+    pub gone_timeout: Duration,
     pub heartbeat: Duration,
 }
 
@@ -511,6 +535,7 @@ pub struct TalkVoiceService {
     unsupported_reason: Option<String>,
     hello_timeout: Duration,
     end_timeout: Duration,
+    gone_timeout: Duration,
     heartbeat: Duration,
     host: OnceLock<Arc<dyn TalkHost>>,
     state: Mutex<RelayState>,
@@ -560,6 +585,7 @@ impl TalkVoiceService {
             unsupported_reason: config.unsupported_reason,
             hello_timeout: config.hello_timeout,
             end_timeout: config.end_timeout,
+            gone_timeout: config.gone_timeout,
             heartbeat: config.heartbeat,
             host: OnceLock::new(),
             state: Mutex::new(RelayState::default()),
@@ -607,6 +633,7 @@ impl TalkVoiceService {
             unsupported_reason: reason,
             hello_timeout: HELLO_TIMEOUT,
             end_timeout: END_TIMEOUT,
+            gone_timeout: GONE_TIMEOUT,
             heartbeat: HEARTBEAT,
         })
     }
@@ -965,8 +992,13 @@ impl TalkVoiceService {
                 });
             sent.then_some(rx)
         };
+        let wait = if reason == EndReason::WindowClosed {
+            self.gone_timeout
+        } else {
+            self.end_timeout
+        };
         let answered = match ended_rx {
-            Some(rx) => tokio::time::timeout(self.end_timeout, rx)
+            Some(rx) => tokio::time::timeout(wait, rx)
                 .await
                 .is_ok_and(|r| r.is_ok()),
             None => false,
@@ -1177,6 +1209,30 @@ impl TalkVoiceService {
             }
             return;
         }
+        if kind == "req" {
+            // A Talk whose window is gone: its last requests are answered
+            // here (the window can't), so it can finish ending.
+            let gone = {
+                let state = self.state.lock().unwrap();
+                state
+                    .talk
+                    .as_ref()
+                    .filter(|t| t.generation == generation && t.window_gone)
+                    .and_then(|t| {
+                        let lines = state
+                            .helper
+                            .as_ref()
+                            .filter(|h| h.generation == generation)?
+                            .lines
+                            .clone();
+                        Some((t.local, t.conversation_id, lines))
+                    })
+            };
+            if let Some((local, conversation_id, lines)) = gone {
+                self.answer_for_gone_window(message, local, conversation_id, lines);
+                return;
+            }
+        }
         let mut message = message;
         let mut finished = None;
         let mut presence = None;
@@ -1217,6 +1273,60 @@ impl TalkVoiceService {
         if let Some(talk) = finished {
             self.after_ended(talk);
         }
+    }
+
+    /// Answer a request of a Talk whose window is gone. Talk mode off: a local
+    /// session is switched here; a remote one is left to its server, which
+    /// turns a Talk nobody reports off by itself (`talk::idle`). The report:
+    /// a local session's goes to this Mac's diagnostics; a remote one's is
+    /// not taken, so the helper keeps it for the next Talk. Anything else
+    /// fails.
+    fn answer_for_gone_window(
+        &self,
+        request: Value,
+        local: bool,
+        conversation_id: i32,
+        lines: HelperLines,
+    ) {
+        let id = request.get("id").cloned().unwrap_or(Value::Null);
+        let op = request
+            .get("op")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let host = self.host().cloned();
+        tokio::spawn(async move {
+            let answer: Result<Value, String> = match op.as_str() {
+                "setTalkMode" if local => {
+                    let enabled = request
+                        .get("enabled")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    match host {
+                        Some(host) => host
+                            .set_talk_mode(conversation_id, enabled)
+                            .await
+                            .map(|()| json!(true)),
+                        None => Err(WINDOW_GONE.to_string()),
+                    }
+                }
+                "setTalkMode" => Ok(json!(true)),
+                "uploadReport" if local => {
+                    let report = request.get("report").cloned().unwrap_or(Value::Null);
+                    match host {
+                        Some(host) => host.store_report(report).map(|()| json!(true)),
+                        None => Err(REPORT_NOT_TAKEN.to_string()),
+                    }
+                }
+                "uploadReport" => Err(REPORT_NOT_TAKEN.to_string()),
+                _ => Err(WINDOW_GONE.to_string()),
+            };
+            let response = match answer {
+                Ok(value) => json!({"type": "res", "id": id, "ok": true, "value": value}),
+                Err(error) => json!({"type": "res", "id": id, "ok": false, "error": error}),
+            };
+            let _ = lines.send(response.to_string());
+        });
     }
 
     /// The person started or stopped talking in the local Talk running now.
