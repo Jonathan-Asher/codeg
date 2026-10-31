@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest"
 import {
   NO_SELECTORS,
   offeredSelectValue,
+  overlaySelectorLayers,
   overlaySelectorValues,
+  recommendedSelectorValues,
   resolveDisplayedSelectors,
   selectorValuesFromRecord,
+  withSelectorPicks,
   type DisplayedSelectors,
 } from "@/lib/selector-display"
 import type { SessionConfigOptionInfo, SessionModeStateInfo } from "@/lib/types"
@@ -213,5 +216,121 @@ describe("offeredSelectValue — model ids an agent stopped listing", () => {
       { modeId: null, configValues: { model: "opus[1m]" } }
     )
     expect(currentValues(shown)).toEqual({ model: "opus" })
+  })
+})
+
+describe("a brand-new chat before its session is up", () => {
+  /** The remembered lists, with session A's current values (Sonnet / Low)
+   *  and the agent's own recommendation for the effort. */
+  const REMEMBERED: DisplayedSelectors = {
+    modes: { ...MODES, current_mode_id: "plan" },
+    configOptions: [
+      select("model", "sonnet", ["opus", "sonnet", "haiku"], "model"),
+      {
+        ...select(
+          "effort",
+          "low",
+          ["low", "medium", "high", "max"],
+          "thought_level"
+        ),
+        recommended_value: "high",
+      },
+    ],
+  }
+
+  it("shows every remembered selector with what the chat will start with", () => {
+    const shown = resolveDisplayedSelectors({
+      live: null,
+      // The user's saved pick for the model...
+      stored: { modeId: null, configValues: { model: "haiku" } },
+      template: REMEMBERED,
+      defaults: [
+        // ...what the agent's last new session started with...
+        { modeId: "default", configValues: { model: "opus" } },
+        // ...and what the agent recommends.
+        recommendedSelectorValues(REMEMBERED),
+      ],
+    })
+    expect(currentValues(shown)).toEqual({ model: "haiku", effort: "high" })
+    expect(shown.modes?.current_mode_id).toBe("default")
+  })
+
+  it("never shows another session's current value for an option nothing fills", () => {
+    const shown = resolveDisplayedSelectors({
+      live: null,
+      stored: null,
+      template: {
+        modes: null,
+        configOptions: [select("model", "sonnet", ["opus", "sonnet"], "model")],
+      },
+      defaults: [null, null],
+    })
+    expect(shown).toEqual(NO_SELECTORS)
+  })
+
+  it("falls back silently from a saved pick the agent no longer offers", () => {
+    const shown = overlaySelectorLayers(REMEMBERED, [
+      { modeId: "gone", configValues: { model: "opus-4", effort: "max" } },
+      { modeId: "default", configValues: { model: "opus" } },
+    ])
+    expect(currentValues(shown)).toEqual({ model: "opus", effort: "max" })
+    expect(shown.modes?.current_mode_id).toBe("default")
+  })
+
+  it("switches to the live lists once the session reports, replacing the remembered ones", () => {
+    const live: DisplayedSelectors = {
+      modes: MODES,
+      configOptions: [select("model", "opus-6", ["opus-6", "sonnet"], "model")],
+    }
+    expect(
+      resolveDisplayedSelectors({
+        live,
+        stored: { modeId: null, configValues: { model: "haiku" } },
+        template: REMEMBERED,
+        defaults: [recommendedSelectorValues(REMEMBERED)],
+      })
+    ).toBe(live)
+  })
+})
+
+describe("recommendedSelectorValues", () => {
+  it("collects the select options' recommendations", () => {
+    expect(
+      recommendedSelectorValues({
+        modes: null,
+        configOptions: [
+          { ...select("model", "a", ["a", "b"]), recommended_value: "b" },
+          select("effort", "low", ["low"]),
+        ],
+      })
+    ).toEqual({ modeId: null, configValues: { model: "b" } })
+  })
+
+  it("is nothing when no option recommends anything", () => {
+    expect(recommendedSelectorValues(LAST_SEEN_FROM_A)).toBeNull()
+    expect(recommendedSelectorValues(null)).toBeNull()
+  })
+})
+
+describe("withSelectorPicks", () => {
+  it("shows a pick still on its way over the value the session reported", () => {
+    const live: DisplayedSelectors = {
+      modes: MODES,
+      configOptions: [
+        select("model", "sonnet", ["opus", "sonnet"], "model"),
+        select("effort", "low", ["low", "max"]),
+      ],
+    }
+    const shown = withSelectorPicks(live, { effort: "max", model: "gpt" })
+    // The model the session does not offer stays as reported.
+    expect(currentValues(shown)).toEqual({ model: "sonnet", effort: "max" })
+    expect(shown.modes).toBe(MODES)
+  })
+
+  it("leaves the selectors untouched without picks", () => {
+    expect(withSelectorPicks(LAST_SEEN_FROM_A, null)).toBe(LAST_SEEN_FROM_A)
+    expect(withSelectorPicks(LAST_SEEN_FROM_A, { effort: "low" })).toBe(
+      LAST_SEEN_FROM_A
+    )
   })
 })

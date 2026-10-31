@@ -70,6 +70,10 @@ export interface UseConnectionReturn {
   /** Set while the connection waits for the account pool (its attach is in
    *  `pool_wait`, or it failed on `pool_exhausted`), with when it frees up. */
   poolWait: PoolHold | null
+  /** The key's last `connect()` failed and nothing replaced it: no entry and
+   *  none on its way. `status` reads `null` then, as for a key never
+   *  connected; this tells the two apart. */
+  connectFailed: boolean
   promptCapabilities: PromptCapabilitiesInfo
   supportsFork: boolean
   /** See `ConnectionState.forkStrictPoint`. */
@@ -292,6 +296,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   // Gone after a pool failure, the entry's reason lives on as the key's
   // connect error until the retry starts.
   const poolWait = connection?.poolWait ?? connectError?.poolWait ?? null
+  const connectFailed = !connection && !connectPending && connectError != null
   const promptCapabilities =
     connection?.promptCapabilities ?? DEFAULT_PROMPT_CAPABILITIES
   const supportsFork = connection?.supportsFork ?? false
@@ -437,6 +442,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       attachPhase,
       attachStartedAt,
       poolWait,
+      connectFailed,
       promptCapabilities,
       supportsFork,
       forkStrictPoint,
@@ -488,6 +494,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       attachPhase,
       attachStartedAt,
       poolWait,
+      connectFailed,
       promptCapabilities,
       supportsFork,
       forkStrictPoint,

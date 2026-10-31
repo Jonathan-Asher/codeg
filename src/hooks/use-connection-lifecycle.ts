@@ -12,9 +12,21 @@ import { describeError, extractAppCommandError } from "@/lib/app-error"
 import { notify } from "@/lib/notify"
 import { isConnectionBusy } from "@/lib/connection-teardown"
 import {
+  recommendedSelectorValues,
   resolveDisplayedSelectors,
+  selectorPicksOwed,
+  withSelectorPicks,
   type SelectorValues,
 } from "@/lib/selector-display"
+import {
+  rememberNewSessionValues,
+  useNewSessionValues,
+  useSelectorTemplate,
+} from "@/lib/selector-options-cache"
+import {
+  getSavedPrefsForConnect,
+  saveConfigPreference,
+} from "@/lib/selector-prefs-storage"
 import { TurnBusyError } from "@/lib/turn-busy"
 import type { PromptAccepted } from "@/lib/api"
 import {
@@ -75,6 +87,19 @@ interface UseConnectionLifecycleOptions {
    * conversation's (see `lib/selector-display.ts`).
    */
   storedSelectors?: SelectorValues | null
+  /**
+   * A brand-new chat (no conversation row yet), whose mode / model / effort can
+   * be set before its session is up:
+   * - its selectors show from the agent's remembered lists, each with the
+   *   value the chat will start with (see `lib/selector-display.ts`);
+   * - a pick made before the session is ready is saved as the agent's pick
+   *   (which the connect applies) and, if a session is already on its way,
+   *   applied to it as soon as it is ready — `presetsPending` until then;
+   * - its first session's starting values are remembered for the next new
+   *   chat of the agent.
+   * An existing conversation never sets this: its selectors are its own.
+   */
+  newSession?: boolean
 }
 
 export interface UseConnectionLifecycleReturn {
@@ -125,6 +150,35 @@ export interface UseConnectionLifecycleReturn {
   handleSetConfigOption: (configId: string, valueId: string) => void
   handleCancel: () => void
   handleRespondPermission: (requestId: string, optionId: string) => void
+  /** A new chat's picks made before its session was ready have not reached
+   *  it yet: a message sent now would run without them, so sends wait. */
+  presetsPending: boolean
+  /** A new chat with nothing to show in its selector row yet (no session of
+   *  the agent described it): the row says the options come with the
+   *  connection instead of staying blank. */
+  selectorsAwaitConnection: boolean
+}
+
+/**
+ * How long a pick made before the session was ready may hold a new chat's
+ * first message back while it is applied. The agent normally answers at once;
+ * one that never does must not keep the message from going at all.
+ */
+export const PRESET_PICK_APPLY_TIMEOUT_MS = 10_000
+
+/** `promise`, or nothing after `ms` — whichever comes first. */
+function settleWithin(promise: Promise<unknown>, ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms)
+    promise
+      .catch((e: unknown) => {
+        console.error("[ConnLifecycle] apply pick made before ready:", e)
+      })
+      .finally(() => {
+        clearTimeout(timer)
+        resolve()
+      })
+  })
 }
 
 /**
@@ -196,6 +250,7 @@ export function useConnectionLifecycle({
   preparing = false,
   isTransientUnmount,
   storedSelectors = null,
+  newSession = false,
 }: UseConnectionLifecycleOptions): UseConnectionLifecycleReturn {
   const t = useTranslations("Folder.chat.connectionLifecycle")
   const { setActiveKey, touchActivity } = useAcpActions()
@@ -231,20 +286,61 @@ export function useConnectionLifecycle({
   // shown as this tab's — the tab's own stored values are laid over it until
   // its connection reports (see `lib/selector-display.ts`). A connection still
   // bound to a previous agent (a draft mid-switch) is not this tab's either.
+  // Subscribed so the row follows a report from another tab (or window) while
+  // this one has none of its own; read through the connection store's view of
+  // the same cache.
+  useSelectorTemplate(agentType)
   const template = getCachedSelectors(agentType)
   const hasTemplate = template !== null
   const templateModes = template?.modes ?? null
   const templateConfigOptions = template?.configOptions ?? null
   const liveIsOwn = conn.agentType == null || conn.agentType === agentType
+  // The session can take a pick right now: it is up and set up, for THIS
+  // tab's agent and working directory — not one still bound to the agent a
+  // new chat had before a switch, nor one mid-reconnect to another cwd.
+  const liveReady =
+    isInteractiveStatus &&
+    selectorsReady &&
+    conn.agentType === agentType &&
+    (conn.connectedWorkingDir ?? null) === (workingDir ?? null)
+  // A new chat shows, for an option it has no pick for, what it will start
+  // with (see `newSession`).
+  const newSessionValues = useNewSessionValues(agentType)
+  const recommendedValues = useMemo(
+    () =>
+      newSession && hasTemplate
+        ? recommendedSelectorValues({
+            modes: templateModes,
+            configOptions: templateConfigOptions,
+          })
+        : null,
+    [newSession, hasTemplate, templateModes, templateConfigOptions]
+  )
+  // Picks a new chat made before its session was ready, per agent: a switch
+  // leaves them behind as that agent's saved picks.
+  const [presetPicks, setPresetPicks] = useState<{
+    agentType: AgentType
+    values: Record<string, string>
+  } | null>(null)
+  const pendingPicks =
+    newSession && presetPicks?.agentType === agentType
+      ? presetPicks.values
+      : null
   const displayed = useMemo(
     () =>
-      resolveDisplayedSelectors({
-        live: liveIsOwn ? { modes, configOptions } : null,
-        stored: storedSelectors,
-        template: hasTemplate
-          ? { modes: templateModes, configOptions: templateConfigOptions }
-          : null,
-      }),
+      withSelectorPicks(
+        resolveDisplayedSelectors({
+          live: liveIsOwn ? { modes, configOptions } : null,
+          stored: storedSelectors,
+          template: hasTemplate
+            ? { modes: templateModes, configOptions: templateConfigOptions }
+            : null,
+          defaults: newSession ? [newSessionValues, recommendedValues] : [],
+        }),
+        // Until the session has taken them, the picks stay on screen over
+        // the values it reported.
+        pendingPicks
+      ),
     [
       liveIsOwn,
       modes,
@@ -253,6 +349,10 @@ export function useConnectionLifecycle({
       hasTemplate,
       templateModes,
       templateConfigOptions,
+      newSession,
+      newSessionValues,
+      recommendedValues,
+      pendingPicks,
     ]
   )
   // Visual-only loading indicators for selector chips: while the session's
@@ -276,6 +376,8 @@ export function useConnectionLifecycle({
   // Gate for send button: block until the backend session is fully
   // initialized (selectorsReady from the real backend event, not cache).
   const selectorsLoading = isInteractiveStatus && !selectorsReady
+  const selectorsAwaitConnection =
+    newSession && nothingToShow && !agentHasNoSelectors && !liveReady
   const [lastAutoConnectError, setLastAutoConnectError] = useState<{
     contextKey: string
     agentType: AgentType
@@ -392,7 +494,7 @@ export function useConnectionLifecycle({
       attachPhase === "configuring"
         ? attachPhase
         : null
-    const phase = !foreground
+    const step = !foreground
       ? null
       : status === "connecting"
         ? attachStep
@@ -403,6 +505,9 @@ export function useConnectionLifecycle({
         : preparing
           ? "preparing"
           : null
+    // Keyed by the agent too: a new chat switched to another agent while
+    // still connecting gets a row naming the agent it now waits for.
+    const phase = step === null ? null : `${step}|${agentType}`
     if (phase !== null && phase === taskPhaseRef.current) return
     taskPhaseRef.current = phase
     if (taskIdRef.current) {
@@ -429,7 +534,7 @@ export function useConnectionLifecycle({
     const title =
       attachStep && status === "connecting"
         ? t(ATTACH_TASK_TITLE_KEYS[attachStep], { agent })
-        : phase === "preparing"
+        : step === "preparing"
           ? t("tasks.preparingTitle", { agent })
           : t("tasks.connectingTitle", { agent })
     // Waiting for the account pool: say when it frees up, and that the
@@ -439,7 +544,7 @@ export function useConnectionLifecycle({
     addTask(
       id,
       title,
-      phase === "preparing"
+      step === "preparing"
         ? t("tasks.preparingDescription")
         : attachStep === "pool_wait"
           ? poolTime
@@ -673,15 +778,81 @@ export function useConnectionLifecycle({
     )
   }, [connCancel])
 
+  const liveReadyRef = useRef(liveReady)
+  useEffect(() => {
+    liveReadyRef.current = liveReady
+  }, [liveReady])
   const handleSetConfigOption = useCallback(
     (configId: string, valueId: string) => {
       touchActivity(contextKey)
+      if (newSession && !liveReadyRef.current) {
+        // A new chat whose session is not ready for it — not started yet,
+        // still opening, or still the agent the chat had before a switch.
+        // Never to that connection: kept as this agent's saved pick, which
+        // the connect applies, and owed to a session already on its way.
+        saveConfigPreference(agentType, configId, valueId)
+        setPresetPicks((prev) => ({
+          agentType,
+          values: {
+            ...(prev?.agentType === agentType ? prev.values : null),
+            [configId]: valueId,
+          },
+        }))
+        return
+      }
       connSetConfigOption(configId, valueId).catch((e: unknown) =>
         console.error("[ConnLifecycle] setConfigOption:", e)
       )
     },
-    [connSetConfigOption, contextKey, touchActivity]
+    [agentType, connSetConfigOption, contextKey, newSession, touchActivity]
   )
+
+  // Hand the picks made before the session was ready to it once it is. The
+  // connect shipped the picks saved at THAT moment, so anything picked since
+  // still has to go. Once settled they leave `pendingPicks` (and with them
+  // `presetsPending`), whether the agent took them or not.
+  const applyingPicksRef = useRef(false)
+  useEffect(() => {
+    if (!liveReady || !pendingPicks || applyingPicksRef.current) return
+    const owed = selectorPicksOwed(configOptions, pendingPicks)
+    applyingPicksRef.current = true
+    void (async () => {
+      for (const [configId, valueId] of owed) {
+        await settleWithin(
+          connSetConfigOption(configId, valueId),
+          PRESET_PICK_APPLY_TIMEOUT_MS
+        )
+      }
+    })().finally(() => {
+      applyingPicksRef.current = false
+      setPresetPicks((prev) => (prev?.values === pendingPicks ? null : prev))
+    })
+  }, [liveReady, pendingPicks, configOptions, connSetConfigOption])
+
+  // A new chat's first session, once set up, shows what a new session of
+  // this agent starts with for every option the user has not picked: kept for
+  // the next new chat's selectors (see `lib/selector-options-cache`). Once
+  // per connection.
+  const recordedConnectionRef = useRef<string | null>(null)
+  const connectionId = conn.connectionId
+  useEffect(() => {
+    if (!newSession || !liveReady || !connectionId) return
+    if (recordedConnectionRef.current === connectionId) return
+    recordedConnectionRef.current = connectionId
+    const picked = getSavedPrefsForConnect(agentType)
+    const configValues: Record<string, string> = {}
+    for (const option of configOptions ?? []) {
+      if (picked.configValues?.[option.id] != null) continue
+      configValues[option.id] =
+        option.kind.type === "select"
+          ? option.kind.current_value
+          : String(option.kind.current_value)
+    }
+    rememberNewSessionValues(agentType, {
+      modeId: picked.modeId ? null : (modes?.current_mode_id ?? null),
+      configValues: Object.keys(configValues).length > 0 ? configValues : null,
+    })
+  }, [newSession, liveReady, connectionId, agentType, configOptions, modes])
 
   const handleRespondPermission = useCallback(
     (requestId: string, optionId: string) => {
@@ -706,5 +877,7 @@ export function useConnectionLifecycle({
     handleSetConfigOption,
     handleCancel,
     handleRespondPermission,
+    presetsPending: pendingPicks !== null,
+    selectorsAwaitConnection,
   }
 }

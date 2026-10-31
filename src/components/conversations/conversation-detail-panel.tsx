@@ -48,6 +48,7 @@ import {
   newClientMessageId,
   useMessageQueue,
   type QueuedMessage,
+  type RequeueOptions,
 } from "@/hooks/use-message-queue"
 import {
   autoReconnectDelayMs,
@@ -122,6 +123,7 @@ import {
 import {
   flushRetryDelayMs,
   isConnectionReady,
+  newChatComposerStatus,
   shouldQueueDirectSend,
   shouldRejectDuplicateCreate,
 } from "@/lib/queue-flush"
@@ -784,6 +786,8 @@ const ConversationTabView = memo(function ConversationTabView({
     handleSetConfigOption,
     handleCancel,
     handleRespondPermission,
+    presetsPending,
+    selectorsAwaitConnection,
   } = useConnectionLifecycle({
     contextKey: tabId,
     agentType: selectedAgent,
@@ -809,6 +813,9 @@ const ConversationTabView = memo(function ConversationTabView({
       [tabId, groupId]
     ),
     storedSelectors,
+    // A new chat's agent, mode, model and effort can all be set before its
+    // session is up (see `newSession`); a conversation keeps its own.
+    newSession: dbConversationId == null,
   })
   const { status: connStatus, sessionId: connSessionId } = conn
 
@@ -882,7 +889,6 @@ const ConversationTabView = memo(function ConversationTabView({
   useEffect(() => {
     isViewerRef.current = conn.isViewer
   }, [conn.isViewer])
-  const isConnecting = connStatus === "connecting"
   // The tab's connection is keyed by a stable tabId, but agent switching is
   // async — and for a not-installed target, connect()'s preflight throws BEFORE
   // it tears down the old connection. So `conn` can still describe the PREVIOUS
@@ -913,6 +919,34 @@ const ConversationTabView = memo(function ConversationTabView({
     conn.agentType,
     selectedAgent
   )
+  // Present "connecting" to the composer while connected-but-not-ready, so it
+  // disables its send affordance instead of inviting a submit handleSend rejects.
+  // While the live connection still belongs to a different agent, present the
+  // selected agent's real state: "disconnected" when it isn't installed (the
+  // install banner explains why), otherwise "connecting" (the switch is in
+  // flight). Only ever differs from connStatus during those transient windows.
+  const composerConnStatus = connIsForOtherAgent
+    ? selectedAgentNotInstalled
+      ? "disconnected"
+      : "connecting"
+    : connStatus === "connected" && !connectionReady
+      ? "connecting"
+      : connStatus
+  // A brand-new chat takes its first message whatever state its session is in
+  // on the way up — not started yet, opening, still the previous agent's
+  // after a switch, or setting itself up and taking the picks made meanwhile:
+  // the composer reads "connecting", so a send waits in the queue (saying it
+  // goes once connected) and goes as soon as the session is ready. A session
+  // that failed reads as failed: the queue says "Not sent" and offers Retry,
+  // and nothing is lost. See `newChatComposerStatus`.
+  const newChatComposerConnStatus = hasPersistedConversation
+    ? composerConnStatus
+    : newChatComposerStatus({
+        status: composerConnStatus,
+        canConnect: canAutoConnect,
+        settingUp: selectorsLoading || presetsPending,
+        connectFailed: conn.connectFailed,
+      })
   // Why the queue is not going out, when something says so: the account pool
   // is out (it then goes by itself), or the connection failed (Retry; it then
   // goes as soon as the connection is back).
@@ -978,8 +1012,13 @@ const ConversationTabView = memo(function ConversationTabView({
     queueLength: msgQueue.length,
     held: poolHold,
     connPoolWait: connIsForOtherAgent ? null : conn.poolWait,
-    status: connIsForOtherAgent ? null : connStatus,
+    status: hasPersistedConversation
+      ? connIsForOtherAgent
+        ? null
+        : connStatus
+      : newChatComposerConnStatus,
     limitPause: limitPauseHold ? persistedLimitPause : null,
+    newChat: !hasPersistedConversation,
     agentLabel: getAgentLabel(selectedAgent),
     onRetry: retryConnection,
   })
@@ -1009,19 +1048,6 @@ const ConversationTabView = memo(function ConversationTabView({
   useEffect(() => {
     connectionReadyRef.current = connectionReady
   }, [connectionReady])
-  // Present "connecting" to the composer while connected-but-not-ready, so it
-  // disables its send affordance instead of inviting a submit handleSend rejects.
-  // While the live connection still belongs to a different agent, present the
-  // selected agent's real state: "disconnected" when it isn't installed (the
-  // install banner explains why), otherwise "connecting" (the switch is in
-  // flight). Only ever differs from connStatus during those transient windows.
-  const composerConnStatus = connIsForOtherAgent
-    ? selectedAgentNotInstalled
-      ? "disconnected"
-      : "connecting"
-    : connStatus === "connected" && !connectionReady
-      ? "connecting"
-      : connStatus
 
   // What this agent's session can do, for the transcript's actions (Fork from
   // here, Edit message). A connection says so at `initialize`, before it
@@ -1448,6 +1474,9 @@ const ConversationTabView = memo(function ConversationTabView({
     // switched keeps the OLD agent's connection live at the same cwd until the
     // lifecycle reconnects — which, for a not-installed target, never happens.
     if (!connectionReady) return
+    // A new chat's picks made before its session was ready go to the agent
+    // first: its first message runs with them.
+    if (presetsPending) return
     if (runtimeSyncState === "awaiting_persist") return
     // An edit is forking the session its message goes into; anything queued
     // meanwhile follows it rather than racing ahead. See `editInFlight`.
@@ -1502,6 +1531,7 @@ const ConversationTabView = memo(function ConversationTabView({
     // so it is the only connection dependency this effect needs.
   }, [
     connectionReady,
+    presetsPending,
     runtimeSyncState,
     msgQueue.length,
     queueHead,
@@ -1762,7 +1792,8 @@ const ConversationTabView = memo(function ConversationTabView({
       // `connStatus === "connected"` is not enough: a chat draft mid-reconnect can
       // read a stale "connected" for the old cwd, and an inline send then would
       // deliver to the wrong workspace. Same predicate the flush effect uses.
-      if (!connectionReady) {
+      // A new chat's picks still on their way to its session go first, too.
+      if (!connectionReady || presetsPending) {
         keepQueued()
         return
       }
@@ -2024,6 +2055,7 @@ const ConversationTabView = memo(function ConversationTabView({
       bindConversationTab,
       canAutoConnect,
       connectionReady,
+      presetsPending,
       effectiveConversationId,
       folderId,
       hasPersistedConversation,
@@ -2541,6 +2573,16 @@ const ConversationTabView = memo(function ConversationTabView({
       }
     },
     [mqEditingItemId, mqUpdateItem]
+  )
+
+  // A new chat's message sent before its session is ready takes the mode in
+  // effect when it actually SENDS — the session's own, with the user's picks
+  // applied — not the one the chip showed from the remembered lists (see
+  // `QueuedMessage.adoptSendTimeMode`).
+  const handleNewChatEnqueue = useCallback(
+    (draft: PromptDraft, modeId: string | null, opts?: RequeueOptions) =>
+      mqEnqueue(draft, modeId, { ...opts, adoptSendTimeMode: true }),
+    [mqEnqueue]
   )
 
   const showDraftHeader = !hasPersistedConversation && !hasSentMessage
@@ -3721,7 +3763,10 @@ const ConversationTabView = memo(function ConversationTabView({
                     )
                   }}
                   onOpenAgentsSettings={handleOpenAgentsSettings}
-                  disabled={isConnecting || dbConversationId != null}
+                  // Switchable whatever the connection is doing: a session
+                  // still on its way is dropped for the new agent's. Fixed
+                  // once the conversation exists.
+                  disabled={dbConversationId != null}
                 />
               </div>
               {composerBlockedMessage ? (
@@ -3746,10 +3791,11 @@ const ConversationTabView = memo(function ConversationTabView({
                 </div>
               ) : null}
               <ChatInput
-                // composerConnStatus (not connStatus): a chat draft mid-reconnect
-                // reads "connecting" until the connection's cwd matches, so the
-                // send affordance stays disabled until handleSend would accept it.
-                status={composerConnStatus}
+                // Not connStatus: a chat draft mid-reconnect reads "connecting"
+                // until the connection's cwd matches, and a new chat reads it
+                // until its session is ready — so a send waits in the queue
+                // until handleSend would accept it.
+                status={newChatComposerConnStatus}
                 promptCapabilities={conn.promptCapabilities}
                 defaultPath={workingDirForConnection}
                 agentName={getAgentLabel(selectedAgent)}
@@ -3761,6 +3807,7 @@ const ConversationTabView = memo(function ConversationTabView({
                 modeLoading={modeLoading}
                 configOptionsLoading={configOptionsLoading}
                 selectorsLoading={selectorsLoading}
+                selectorsAwaitConnection={selectorsAwaitConnection}
                 selectedModeId={selectedModeId}
                 onModeChange={handleModeChange}
                 onConfigOptionChange={handleSetConfigOption}
@@ -3770,6 +3817,22 @@ const ConversationTabView = memo(function ConversationTabView({
                 draftStorageKey={draftStorageKey}
                 isActive={isActive}
                 showActiveFlow={showActiveFlow}
+                // The first message, sent while the session is on its way,
+                // waits here — above the composer, saying it goes once
+                // connected — and the queue sends it as soon as it can.
+                queue={msgQueue}
+                queueNotice={queueNotice}
+                onEnqueue={handleNewChatEnqueue}
+                onQueueReorder={mqReorder}
+                onQueueEdit={handleQueueEdit}
+                onQueueDelete={mqRemove}
+                onQueueRetry={mqRetry}
+                editingItemId={mqEditingItemId}
+                editingDraftText={editingQueueDraftText}
+                editingDraftBlocks={editingQueueDraftBlocks}
+                isEditingQueueItem={mqEditingItemId != null}
+                onSaveQueueEdit={handleSaveQueueEdit}
+                onCancelQueueEdit={handleQueueCancelEdit}
                 onAddFeedback={
                   feedback.featureEnabled ? feedback.openDialog : undefined
                 }
@@ -3801,7 +3864,7 @@ const ConversationTabView = memo(function ConversationTabView({
                 )
               }}
               onOpenAgentsSettings={handleOpenAgentsSettings}
-              disabled={isConnecting || dbConversationId != null}
+              disabled={dbConversationId != null}
             />
             {composerBlockedMessage ? (
               <div className="mt-2 flex w-full items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">

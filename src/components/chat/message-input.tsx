@@ -213,6 +213,12 @@ interface MessageInputProps {
   configOptions?: SessionConfigOptionInfo[]
   modeLoading?: boolean
   configOptionsLoading?: boolean
+  /**
+   * A new chat with nothing to show in its selector row yet: no session of the
+   * agent has described its options. The row says they come with the
+   * connection, in place of the loading placeholder.
+   */
+  selectorsAwaitConnection?: boolean
   selectedModeId?: string | null
   onModeChange?: (modeId: string) => void
   onConfigOptionChange?: (configId: string, valueId: string) => void
@@ -425,6 +431,25 @@ function SelectorLoadingPlaceholder({ label }: { label: string }) {
   )
 }
 
+/**
+ * What a new chat's selector row says while no session of its agent has
+ * described the options yet (the first chat ever with that agent): they come
+ * with the connection. Plain muted text at the chips' height — nothing is
+ * blocked meanwhile, and it is replaced by the chips the moment they exist.
+ */
+function SelectorAwaitConnectionNote({ label }: { label: string }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      data-testid="selectors-await-connection"
+      className="flex h-6 shrink-0 items-center px-1 text-xs text-muted-foreground"
+    >
+      <span className="truncate">{label}</span>
+    </div>
+  )
+}
+
 // Groups for the searchable + virtualized model picker, or `null` when the
 // option should keep the lightweight selectors. Only the MODEL option, and only
 // when its list is long enough to jank, qualifies. Falls back to a single
@@ -455,6 +480,7 @@ export function MessageInput({
   configOptions,
   modeLoading = false,
   configOptionsLoading = false,
+  selectorsAwaitConnection = false,
   selectedModeId,
   onModeChange,
   onConfigOptionChange,
@@ -1001,16 +1027,25 @@ export function MessageInput({
   }, [hasModes, selectedModeId, availableModes])
   const showModeSelector =
     hasModes && Boolean(effectiveModeId) && !hasConfigOptions
-  const showModeLoading = modeLoading && !hasConfigOptions && !showModeSelector
-  const showConfigLoading = configOptionsLoading && !hasConfigOptions
+  const showSelectorsAwaitConnection =
+    selectorsAwaitConnection && !hasConfigOptions && !showModeSelector
+  const showModeLoading =
+    modeLoading &&
+    !hasConfigOptions &&
+    !showModeSelector &&
+    !showSelectorsAwaitConnection
+  const showConfigLoading =
+    configOptionsLoading && !hasConfigOptions && !showSelectorsAwaitConnection
   const showSelectorsLoading = showConfigLoading || showModeLoading
   const hasAnySelector =
-    hasConfigOptions || showModeSelector || showSelectorsLoading
+    hasConfigOptions ||
+    showModeSelector ||
+    showSelectorsLoading ||
+    showSelectorsAwaitConnection
   // The loading placeholder takes the inline slot too, not just the collapsed
   // popover's row: at composer widths the chips would occupy, "still loading"
   // has to be visible without opening anything.
-  const hasInlineSelectors =
-    hasConfigOptions || showModeSelector || showSelectorsLoading
+  const hasInlineSelectors = hasAnySelector
   const hasFolderBranchPicker = useConversationFolderBranchPickerVisible(
     attachmentTabId,
     folderPickerOverride
@@ -2044,6 +2079,9 @@ export function MessageInput({
 
   const inlineSelectorItems = (
     <>
+      {showSelectorsAwaitConnection && (
+        <SelectorAwaitConnectionNote label={t("selectorsLoadOnConnect")} />
+      )}
       {showSelectorsLoading && (
         <SelectorLoadingPlaceholder
           label={showConfigLoading ? t("loadingSettings") : t("loadingMode")}
@@ -2655,6 +2693,11 @@ export function MessageInput({
                           }
                           className="w-[22rem] max-w-[calc(100vw-1rem)] p-1"
                         >
+                          {showSelectorsAwaitConnection && (
+                            <SelectorLoadingChip
+                              label={t("selectorsLoadOnConnect")}
+                            />
+                          )}
                           {showConfigLoading && (
                             <SelectorLoadingChip label={t("loadingSettings")} />
                           )}

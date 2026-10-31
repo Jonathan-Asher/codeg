@@ -75,6 +75,8 @@ interface ConversationShellProps {
   modeLoading?: boolean
   configOptionsLoading?: boolean
   selectorsLoading?: boolean
+  /** Pass-through: see `MessageInput.selectorsAwaitConnection`. */
+  selectorsAwaitConnection?: boolean
   selectedModeId?: string | null
   onModeChange?: (modeId: string) => void
   onConfigOptionChange?: (configId: string, valueId: string) => void
@@ -198,6 +200,7 @@ export function ConversationShell({
   modeLoading = false,
   configOptionsLoading = false,
   selectorsLoading = false,
+  selectorsAwaitConnection = false,
   selectedModeId,
   onModeChange,
   onConfigOptionChange,
@@ -315,6 +318,7 @@ export function ConversationShell({
               modeLoading={modeLoading}
               configOptionsLoading={configOptionsLoading}
               selectorsLoading={selectorsLoading}
+              selectorsAwaitConnection={selectorsAwaitConnection}
               selectedModeId={selectedModeId}
               onModeChange={onModeChange}
               onConfigOptionChange={onConfigOptionChange}

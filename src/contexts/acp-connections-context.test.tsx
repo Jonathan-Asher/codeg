@@ -1858,6 +1858,124 @@ describe("AcpConnectionsProvider abandoned connect tears down only what it creat
   })
 })
 
+describe("AcpConnectionsProvider switching a new chat's agent mid-connect", () => {
+  const NEW_TAB = "tab-new-chat"
+
+  it("drops a connection still being opened for the old agent, then opens the new one", async () => {
+    await mountProvider()
+    let resolveOld: (id: string) => void = () => {}
+    h.acpConnect
+      .mockImplementationOnce(
+        () =>
+          new Promise<string>((res) => {
+            resolveOld = res
+          })
+      )
+      .mockResolvedValueOnce("pi-conn")
+    let oldConnect: Promise<void> | undefined
+    await act(async () => {
+      oldConnect = h.actions!.connect(NEW_TAB, "claude_code", "/work/p")
+    })
+    // The user picks Pi while Claude Code is still spawning.
+    await act(async () => {
+      await h.actions!.connect(NEW_TAB, "pi", "/work/p")
+    })
+    // One agent at a time: the switch waits for the spawn in flight instead
+    // of racing it.
+    expect(h.acpConnect).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      resolveOld("claude-conn")
+      await oldConnect
+    })
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    // The connection the old agent got is killed, never registered...
+    expect(h.acpDisconnect).toHaveBeenCalledWith("claude-conn")
+    // ...and nothing ever listened to it, so none of its events can land on
+    // the new agent's session.
+    expect(h.attach.mock.calls.map((call) => call[0])).toEqual(["pi-conn"])
+    expect(h.acpConnect).toHaveBeenCalledTimes(2)
+    expect(h.acpConnect.mock.calls[1][0]).toBe("pi")
+    expect(h.store!.getConnection(NEW_TAB)).toMatchObject({
+      connectionId: "pi-conn",
+      agentType: "pi",
+    })
+  })
+
+  it("tears down the old agent's opening session before the new one attaches", async () => {
+    await mountProvider()
+    h.acpConnect
+      .mockResolvedValueOnce("claude-conn")
+      .mockResolvedValueOnce("pi-conn")
+    await act(async () => {
+      await h.actions!.connect(NEW_TAB, "claude_code", "/work/p")
+    })
+    // Registered, still opening its session.
+    expect(h.store!.getConnection(NEW_TAB)?.connectionId).toBe("claude-conn")
+    const oldSub = h.attach.mock.results[0]?.value as {
+      detach: ReturnType<typeof vi.fn>
+    }
+
+    await act(async () => {
+      await h.actions!.connect(NEW_TAB, "pi", "/work/p")
+    })
+
+    expect(h.acpDisconnect).toHaveBeenCalledWith("claude-conn")
+    // Its event stream is let go of before the new agent's is opened: after a
+    // detach the transport delivers nothing more of it.
+    expect(oldSub.detach).toHaveBeenCalled()
+    expect(oldSub.detach.mock.invocationCallOrder[0]).toBeLessThan(
+      h.attach.mock.invocationCallOrder[1]
+    )
+    expect(h.store!.getConnection(NEW_TAB)).toMatchObject({
+      connectionId: "pi-conn",
+      agentType: "pi",
+    })
+  })
+
+  it("keeps the agent's lists across a restart, replaced by a later session's", async () => {
+    await mountProvider()
+    h.acpConnect.mockResolvedValueOnce("claude-conn")
+    await act(async () => {
+      await h.actions!.connect(NEW_TAB, "claude_code", "/work/p")
+    })
+    const handlers = latestAttachHandlers()
+    const options: SessionConfigOptionInfo[] = [
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        kind: {
+          type: "select",
+          current_value: "opus-6",
+          options: [{ value: "opus-6", name: "Opus 6" }],
+          groups: [],
+        },
+      },
+    ]
+    emitAcpEvent(handlers, {
+      seq: 1,
+      connection_id: "claude-conn",
+      type: "session_config_options",
+      config_options: options,
+    })
+    emitAcpEvent(handlers, {
+      seq: 2,
+      connection_id: "claude-conn",
+      type: "selectors_ready",
+    } as EventEnvelope)
+
+    expect(getCachedSelectors("claude_code")?.configOptions).toEqual(options)
+    const stored = JSON.parse(
+      localStorage.getItem("codeg:selector-options") ?? "null"
+    )
+    expect(stored.agents.claude_code.configOptions).toEqual(options)
+  })
+})
+
 describe("AcpConnectionsProvider permission request details", () => {
   it("hydrates a permission request from an existing live tool call input", async () => {
     await mountProvider()

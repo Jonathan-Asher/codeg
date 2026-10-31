@@ -23,6 +23,7 @@ export function useQueueNotice(
     connPoolWait,
     status,
     limitPause,
+    newChat,
     agentLabel,
     onRetry,
   } = input
@@ -32,6 +33,7 @@ export function useQueueNotice(
     connPoolWait,
     status,
     limitPause,
+    newChat,
   })
   const resumesAt = kind?.kind === "pool" ? kind.resumesAt : null
   const resetsAt = kind?.kind === "limit" ? kind.resetsAt : null
@@ -54,6 +56,12 @@ export function useQueueNotice(
         tone: "failed",
         text: t("notSent", { agent: agentLabel }),
         action: { label: t("retry"), onClick: onRetry },
+      }
+    }
+    if (kindName === "sends_when_connected") {
+      return {
+        tone: "waiting",
+        text: t("sendsWhenConnected", { agent: agentLabel }),
       }
     }
     return null

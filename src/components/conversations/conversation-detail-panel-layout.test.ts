@@ -580,11 +580,13 @@ describe("ConversationDetailPanel send-path hardening", () => {
     expect(afterFork).toContain('t("editMessageHistoryFailedInPlace")')
   })
 
-  it("disables the welcome composer while connected-but-not-ready", () => {
-    // The composer reads a downgraded status so its send affordance is disabled
-    // during the transient mismatch window instead of inviting a rejected send.
+  it("holds the welcome composer's sends while connected-but-not-ready", () => {
+    // The composer reads a downgraded status ("connecting") during the
+    // transient mismatch window, so a send waits in the queue — it goes once
+    // the session is ready — instead of going out and being rejected.
     expect(source).toContain("composerConnStatus")
-    expect(source).toContain("status={composerConnStatus}")
+    expect(source).toContain("status: composerConnStatus,")
+    expect(source).toContain("status={newChatComposerConnStatus}")
   })
 
   it("single-flights the unbound create before any optimistic mutation", () => {

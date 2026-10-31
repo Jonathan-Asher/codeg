@@ -76,3 +76,38 @@ describe("queueNoticeFor", () => {
     }
   })
 })
+
+describe("queueNoticeFor — a brand-new chat", () => {
+  it("says the first message goes once the session is connected", () => {
+    expect(
+      queueNoticeFor({ ...base, status: "connecting", newChat: true })
+    ).toEqual({ kind: "sends_when_connected" })
+  })
+
+  it("keeps the louder notices ahead of it", () => {
+    expect(
+      queueNoticeFor({
+        ...base,
+        status: "connecting",
+        newChat: true,
+        held: { resumesAt: 5 },
+      })
+    ).toEqual({ kind: "pool", resumesAt: 5 })
+    // A failed connect is "Not sent" with Retry, never a promise to send.
+    expect(queueNoticeFor({ ...base, status: "error", newChat: true })).toEqual(
+      { kind: "not_sent" }
+    )
+  })
+
+  it("says nothing for an empty queue or an existing conversation", () => {
+    expect(
+      queueNoticeFor({
+        ...base,
+        queueLength: 0,
+        status: "connecting",
+        newChat: true,
+      })
+    ).toBeNull()
+    expect(queueNoticeFor({ ...base, status: "connecting" })).toBeNull()
+  })
+})

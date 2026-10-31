@@ -1,3 +1,5 @@
+import type { ConnectionStatus } from "@/lib/types"
+
 /**
  * Rate-limiting for the conversation message-queue auto-flush.
  *
@@ -101,4 +103,42 @@ export function shouldRejectDuplicateCreate(
   createPending: boolean
 ): boolean {
   return !hasPersistedId && createPending
+}
+
+/**
+ * What a brand-new chat's composer reads, given its connection `status` as
+ * already reconciled for the agent the chat has selected (a connection still
+ * bound to the previous agent reads "connecting" — or "disconnected" when the
+ * selected one is not installed).
+ *
+ * A new chat takes its first message whatever state its session is in on the
+ * way up: not started yet, opening, or connected but still setting itself up
+ * (`settingUp`: its selectors not reported yet, or picks made before it was
+ * ready still on their way to it). All of them read "connecting", which is
+ * what lets the composer queue a send — the queue sends it as soon as the
+ * session is ready. Only while a session is expected at all (`canConnect`):
+ * with no usable agent, or one that is not installed, there is nothing to
+ * wait for.
+ *
+ * A connect that failed outright leaves no connection behind, so its status
+ * reads `null`, as for one never started; `connectFailed` makes that read as
+ * the failure it is — the queue then says "Not sent" and offers Retry instead
+ * of promising to send.
+ */
+export function newChatComposerStatus({
+  status,
+  canConnect,
+  settingUp,
+  connectFailed,
+}: {
+  status: ConnectionStatus | null
+  canConnect: boolean
+  settingUp: boolean
+  connectFailed: boolean
+}): ConnectionStatus | null {
+  if (status == null && connectFailed) return "error"
+  if (!canConnect) return status
+  if (status == null || status === "connecting") return "connecting"
+  if (status === "connected" && settingUp) return "connecting"
+  return status
 }

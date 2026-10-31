@@ -169,3 +169,53 @@ describe("ChatInput slash-command loading window", () => {
     expect(renderStatus({ status: "disconnected" })?.disabled).toBe(true)
   })
 })
+
+// A brand-new chat's composer is handed "connecting" for as long as its
+// session is on its way (see `newChatComposerStatus`), together with a queue:
+// the first message is taken right away and waits there until the session is
+// ready, instead of the send button sitting greyed out.
+describe("ChatInput while a new chat's session is on its way", () => {
+  afterEach(() => {
+    cleanup()
+    lastProps.current = null
+  })
+
+  function renderNewChat(props: Partial<ComponentProps<typeof ChatInput>>) {
+    render(
+      <ChatInput
+        status="connecting"
+        promptCapabilities={{
+          image: false,
+          audio: false,
+          embedded_context: false,
+        }}
+        onSend={() => {}}
+        onCancel={() => {}}
+        onEnqueue={() => {}}
+        {...props}
+      />
+    )
+    return lastProps.current
+  }
+
+  it("takes a send into the queue instead of refusing it", () => {
+    const props = renderNewChat({ selectorsLoading: true })
+    expect(props?.disabled).toBe(false)
+    expect(props?.queueSends).toBe(true)
+    expect(props?.placeholder).toBe("connectingQueued")
+  })
+
+  it("sends normally once the session is ready", () => {
+    const props = renderNewChat({ status: "connected" })
+    expect(props?.disabled).toBe(false)
+    expect(props?.queueSends).toBe(false)
+  })
+
+  it("passes on that the options come with the connection", () => {
+    expect(
+      renderNewChat({ selectorsAwaitConnection: true })
+        ?.selectorsAwaitConnection
+    ).toBe(true)
+    expect(renderNewChat({})?.selectorsAwaitConnection).toBe(false)
+  })
+})

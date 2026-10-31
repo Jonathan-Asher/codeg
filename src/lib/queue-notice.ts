@@ -13,14 +13,18 @@ import type { ConnectionStatus, LimitPause } from "@/lib/types"
  * - `not_sent`: the connection failed or is gone, so nothing would ever go
  *   out without a new connection. The surface offers Retry, and the queue
  *   flushes by itself as soon as a connection is back.
+ * - `sends_when_connected`: a brand-new chat's first message, sent while its
+ *   session was still opening. It goes out by itself once it is up — said
+ *   out loud there, where nothing else on screen shows that it will.
  *
  * `null` when the queue is empty or simply waiting its turn (a reply in
- * progress, a session still opening).
+ * progress, an existing conversation still opening).
  */
 export type QueueNoticeKind =
   | { kind: "limit"; resetsAt: string }
   | { kind: "pool"; resumesAt: number | null }
   | { kind: "not_sent" }
+  | { kind: "sends_when_connected" }
   | null
 
 export interface QueueNoticeInput {
@@ -35,6 +39,9 @@ export interface QueueNoticeInput {
   /** The session's usage-limit pause while it waits (`waitingLimitPause`):
    *  the queue holds until the continuation. */
   limitPause?: Pick<LimitPause, "resets_at"> | null
+  /** A brand-new chat, which has no conversation until its first message
+   *  goes out. */
+  newChat?: boolean
 }
 
 export function queueNoticeFor(input: QueueNoticeInput): QueueNoticeKind {
@@ -50,6 +57,9 @@ export function queueNoticeFor(input: QueueNoticeInput): QueueNoticeKind {
     input.status === "disconnected"
   ) {
     return { kind: "not_sent" }
+  }
+  if (input.newChat && input.status === "connecting") {
+    return { kind: "sends_when_connected" }
   }
   return null
 }

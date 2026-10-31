@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   flushRetryDelayMs,
   isConnectionReady,
+  newChatComposerStatus,
   QUEUE_FLUSH_RETRY_BACKOFF_MS,
   shouldQueueDirectSend,
   shouldRejectDuplicateCreate,
@@ -122,5 +123,56 @@ describe("shouldRejectDuplicateCreate", () => {
   it("never single-flights a persisted conversation (it allows concurrent queued sends)", () => {
     expect(shouldRejectDuplicateCreate(true, true)).toBe(false)
     expect(shouldRejectDuplicateCreate(true, false)).toBe(false)
+  })
+})
+
+describe("newChatComposerStatus", () => {
+  const waiting = {
+    canConnect: true,
+    settingUp: false,
+    connectFailed: false,
+  }
+
+  it("reads connecting while the session is on its way, so a send can queue", () => {
+    expect(newChatComposerStatus({ ...waiting, status: null })).toBe(
+      "connecting"
+    )
+    expect(newChatComposerStatus({ ...waiting, status: "connecting" })).toBe(
+      "connecting"
+    )
+    // Connected, but still setting up or taking picks made before.
+    expect(
+      newChatComposerStatus({
+        ...waiting,
+        status: "connected",
+        settingUp: true,
+      })
+    ).toBe("connecting")
+  })
+
+  it("reads the session as it is once it is ready", () => {
+    expect(newChatComposerStatus({ ...waiting, status: "connected" })).toBe(
+      "connected"
+    )
+  })
+
+  it("reads a failed connect as failed, whether or not it left a connection", () => {
+    expect(newChatComposerStatus({ ...waiting, status: "error" })).toBe("error")
+    expect(
+      newChatComposerStatus({ ...waiting, status: null, connectFailed: true })
+    ).toBe("error")
+  })
+
+  it("promises nothing when no session is expected", () => {
+    expect(
+      newChatComposerStatus({ ...waiting, status: null, canConnect: false })
+    ).toBeNull()
+    expect(
+      newChatComposerStatus({
+        ...waiting,
+        status: "disconnected",
+        canConnect: false,
+      })
+    ).toBe("disconnected")
   })
 })

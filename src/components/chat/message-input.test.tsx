@@ -1012,6 +1012,37 @@ describe("MessageInput selector loading placeholder", () => {
     expect(screen.getByRole("button", { name: /Model/ })).toBeInTheDocument()
   })
 
+  it("says a new chat's options come with the connection, in place of the placeholder", async () => {
+    const view = renderInput({
+      selectorsAwaitConnection: true,
+      configOptionsLoading: true,
+      configOptions: [],
+    })
+    await waitFor(() =>
+      expect(view.container.querySelector('[role="textbox"]')).not.toBeNull()
+    )
+    expect(screen.getByTestId("selectors-await-connection")).toHaveTextContent(
+      MSGS.selectorsLoadOnConnect
+    )
+    expect(
+      screen.queryByRole("status", { name: MSGS.loadingSettings })
+    ).toBeNull()
+
+    // The remembered options are known after all: the chips replace it.
+    view.rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <MessageInput
+          onSend={vi.fn()}
+          promptCapabilities={CAPS}
+          selectorsAwaitConnection
+          configOptions={[MODEL_OPTION]}
+        />
+      </NextIntlClientProvider>
+    )
+    expect(screen.queryByTestId("selectors-await-connection")).toBeNull()
+    expect(screen.getByRole("button", { name: /Model/ })).toBeInTheDocument()
+  })
+
   it("renders no selector affordance at all when nothing is loading or known", async () => {
     // The pre-fix steady state: an agent with neither modes nor config options
     // must not grow a placeholder that never resolves.

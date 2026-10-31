@@ -38,6 +38,8 @@ interface ChatInputProps {
   modeLoading?: boolean
   configOptionsLoading?: boolean
   selectorsLoading?: boolean
+  /** Pass-through: see `MessageInput.selectorsAwaitConnection`. */
+  selectorsAwaitConnection?: boolean
   selectedModeId?: string | null
   onModeChange?: (modeId: string) => void
   onConfigOptionChange?: (configId: string, valueId: string) => void
@@ -150,6 +152,7 @@ export const ChatInput = memo(function ChatInput({
   modeLoading = false,
   configOptionsLoading = false,
   selectorsLoading = false,
+  selectorsAwaitConnection = false,
   selectedModeId,
   onModeChange,
   onConfigOptionChange,
@@ -272,6 +275,7 @@ export const ChatInput = memo(function ChatInput({
         configOptions={configOptions}
         modeLoading={modeLoading}
         configOptionsLoading={configOptionsLoading}
+        selectorsAwaitConnection={selectorsAwaitConnection}
         selectedModeId={selectedModeId}
         onModeChange={onModeChange}
         onConfigOptionChange={onConfigOptionChange}

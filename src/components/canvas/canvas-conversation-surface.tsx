@@ -20,7 +20,9 @@ import {
   newClientMessageId,
   useMessageQueue,
   type QueuedMessage,
+  type RequeueOptions,
 } from "@/hooks/use-message-queue"
+import { useAcpAgents } from "@/hooks/use-acp-agents"
 import { durableSendCallbacks } from "@/lib/durable-send"
 import { outboxStorageKey } from "@/lib/outbox-storage"
 import { nextSendFailure, type SendFailure } from "@/lib/send-failure"
@@ -38,7 +40,11 @@ import {
   canDeliverIntoHeldTurn,
 } from "@/lib/background-idle"
 import { notify } from "@/lib/notify"
-import { shouldQueueDirectSend } from "@/lib/queue-flush"
+import {
+  isConnectionReady,
+  newChatComposerStatus,
+  shouldQueueDirectSend,
+} from "@/lib/queue-flush"
 import { getAgentLabel } from "@/lib/custom-agents"
 import { usePoolHold } from "@/hooks/use-pool-hold"
 import { useQueueNotice } from "@/hooks/use-queue-notice"
@@ -428,6 +434,8 @@ export function CanvasConversationSurface({
     handleSetConfigOption,
     handleCancel,
     handleRespondPermission,
+    presetsPending,
+    selectorsAwaitConnection,
   } = useConnectionLifecycle({
     contextKey,
     agentType,
@@ -448,9 +456,64 @@ export function CanvasConversationSurface({
     // instead of spawning a second agent for the same session.
     conversationId: dbConversationId ?? undefined,
     storedSelectors,
+    // A draft's agent, mode, model and effort can all be set before its
+    // session is up (see `newSession`); a conversation keeps its own.
+    newSession: dbConversationId == null,
   })
   const connStatus = conn.status
   const connSessionId = conn.sessionId
+
+  // A draft can switch agents while its session is still on its way, and
+  // until the switch lands the card's connection is the PREVIOUS agent's:
+  // nothing of the card's may reach it (the workspace tab reconciles the
+  // same way — see conversation-detail-panel). Never true for a conversation,
+  // whose agent is fixed.
+  const connIsForOtherAgent =
+    conn.agentType != null && conn.agentType !== agentType
+  const { agents: acpAgents } = useAcpAgents()
+  const agentNotInstalled = useMemo(() => {
+    const info = acpAgents.find((a) => a.agent_type === agentType)
+    return (
+      info != null && info.enabled && info.available && !info.installed_version
+    )
+  }, [acpAgents, agentType])
+  // A draft's connection is ready for THIS card: connected, at its working
+  // dir, and to its agent.
+  const cardConnectionReady = isConnectionReady(
+    connStatus,
+    conn.connectedWorkingDir,
+    workingDir,
+    conn.agentType,
+    agentType
+  )
+  // ...and its session can take the first message: set up, and holding the
+  // picks made before it was ready.
+  const draftSessionReady =
+    cardConnectionReady && !selectorsLoading && !presetsPending
+  const draftSessionReadyRef = useRef(draftSessionReady)
+  useEffect(() => {
+    draftSessionReadyRef.current = draftSessionReady
+  }, [draftSessionReady])
+  // What the composer goes by. A draft takes its first message whatever state
+  // its session is in on the way up — it waits in the queue and goes once the
+  // session is ready (see `newChatComposerStatus`); a connection still bound
+  // to the previous agent reads as the switch it is. A conversation's
+  // composer reads its connection as it always has.
+  const composerStatus =
+    dbConversationId != null
+      ? connStatus
+      : newChatComposerStatus({
+          status: connIsForOtherAgent
+            ? agentNotInstalled
+              ? "disconnected"
+              : "connecting"
+            : connStatus === "connected" && !cardConnectionReady
+              ? "connecting"
+              : connStatus,
+          canConnect: isActive && !agentNotInstalled,
+          settingUp: selectorsLoading || presetsPending,
+          connectFailed: conn.connectFailed,
+        })
 
   /**
    * Re-entry repair: let the database have the last word on a session this
@@ -637,12 +700,21 @@ export function CanvasConversationSurface({
       const modeIdForQueue = selectedModeIdArg ?? null
       const clientMessageId = opts?.clientMessageId ?? newClientMessageId()
       // The composer cleared itself already: a message that cannot go out
-      // now waits in the queue rather than vanishing.
-      if (!alreadyPersisted && (creatingRef.current || !draftTarget)) {
-        mqEnqueue(draft, modeIdForQueue, {
+      // now waits in the queue rather than vanishing — including a draft's
+      // first message while its session is not ready for it (it would reach
+      // no agent, or the one the draft had before a switch). The queue head
+      // goes back to the front.
+      if (
+        !alreadyPersisted &&
+        (creatingRef.current || !draftTarget || !draftSessionReadyRef.current)
+      ) {
+        const keep = {
           clientMessageId,
           failure: opts?.failure,
-        })
+          adoptSendTimeMode: true,
+        }
+        if (fromQueueFlush) mqRequeueFront(draft, modeIdForQueue, keep)
+        else mqEnqueue(draft, modeIdForQueue, keep)
         return
       }
 
@@ -868,7 +940,10 @@ export function CanvasConversationSurface({
     [handleSend]
   )
   const isQueueConnectionReady = useCallback(
-    () => connStatusRef.current === "connected",
+    () =>
+      dbConversationIdRef.current != null
+        ? connStatusRef.current === "connected"
+        : draftSessionReadyRef.current,
     []
   )
   const notifyHeldDeliveryFailed = useCallback(
@@ -887,11 +962,13 @@ export function CanvasConversationSurface({
     remove: mqRemove,
     holdUntilTurnEnd: mqHoldUntilTurnEnd,
     editingItemId: mqEditingItemId,
-    // A persisted conversation only: a draft card's first send is what
-    // creates the row, and the card that replaces it carries on from there.
+    // A draft's first message, sent while its session was on its way, goes
+    // once that session is ready; sending it is what creates the row, and the
+    // card that replaces the draft carries on from there.
     canSendNow:
-      dbConversationId != null &&
-      connStatus === "connected" &&
+      (dbConversationId != null
+        ? connStatus === "connected"
+        : draftSessionReady && !creating) &&
       runtimeSyncState !== "awaiting_persist",
     isConnectionReady: isQueueConnectionReady,
     // The account pool has no account that could take it yet, or the
@@ -921,9 +998,10 @@ export function CanvasConversationSurface({
   const queueNotice = useQueueNotice({
     queueLength: msgQueue.length,
     held: poolHold,
-    connPoolWait: conn.poolWait,
-    status: connStatus,
+    connPoolWait: connIsForOtherAgent ? null : conn.poolWait,
+    status: composerStatus,
     limitPause: limitPause?.pause ?? null,
+    newChat: dbConversationId == null,
     agentLabel: getAgentLabel(agentType),
     onRetry: retryConnection,
   })
@@ -1031,6 +1109,13 @@ export function CanvasConversationSurface({
   )
 
   const isDraft = dbConversationId == null
+  // A draft's message queued before its session is ready takes the mode in
+  // effect when it actually sends (see `QueuedMessage.adoptSendTimeMode`).
+  const handleDraftEnqueue = useCallback(
+    (draft: PromptDraft, modeId: string | null, opts?: RequeueOptions) =>
+      mqEnqueue(draft, modeId, { ...opts, adoptSendTimeMode: true }),
+    [mqEnqueue]
+  )
 
   return (
     <div className={cn("flex h-full min-h-0 w-full flex-col", className)}>
@@ -1041,7 +1126,7 @@ export function CanvasConversationSurface({
           added here later. */}
       <div className="nowheel flex min-h-0 flex-1 flex-col">
         <ConversationShell
-          status={connStatus}
+          status={composerStatus}
           promptCapabilities={conn.promptCapabilities}
           defaultPath={workingDir}
           agentName={getAgentLabel(agentType)}
@@ -1064,11 +1149,14 @@ export function CanvasConversationSurface({
           modeLoading={modeLoading}
           configOptionsLoading={configOptionsLoading}
           selectorsLoading={selectorsLoading}
+          selectorsAwaitConnection={selectorsAwaitConnection}
           selectedModeId={selectedModeId}
           onModeChange={handleModeChange}
           onConfigOptionChange={handleSetConfigOption}
           agentType={agentType}
-          availableCommands={conn.availableCommands ?? []}
+          availableCommands={
+            connIsForOtherAgent ? [] : (conn.availableCommands ?? [])
+          }
           draftStorageKey={`canvas-draft:${contextKey}`}
           getSentHistory={getSentHistory}
           // The card's own connection key doubles as its composer scope: the
@@ -1080,9 +1168,9 @@ export function CanvasConversationSurface({
           queue={msgQueue}
           queueNotice={queueNotice}
           connectingReason={poolWaitLabel?.text ?? null}
-          // A draft card's first send creates the conversation; it has no
-          // queue until then (see `canSendNow` above).
-          onEnqueue={isDraft ? undefined : mqEnqueue}
+          // A draft's first message waits here while its session is on its
+          // way, and goes once it is ready (see `canSendNow` above).
+          onEnqueue={isDraft ? handleDraftEnqueue : mqEnqueue}
           awaitingBackground={awaitingBackground}
           backgroundTaskCount={countBackgroundTasks(
             conn.backgroundOutstanding,
@@ -1108,7 +1196,8 @@ export function CanvasConversationSurface({
                 defaultAgentType={agentType}
                 onSelect={onAgentTypeChange}
                 onFallback={onAgentTypeChange}
-                disabled={conn.status === "connecting"}
+                // Switchable whatever the connection is doing: a session
+                // still on its way is dropped for the new agent's.
               />
             </div>
           )}
