@@ -10,6 +10,8 @@
 #                               files: compiled as one module, unchanged.
 #   Sources/TalkEngines/Vendor  the engines' adapters and the files that import
 #                               whisper.cpp or ExceptionCatcher.
+#   CoreTests/Vendor            the iPhone's Talk tests that run on macOS
+#                               (scripts/test-core.sh runs them).
 #   ../SherpaOnnx ../SmartTurn ../WhisperCpp ../ExceptionCatcher
 #                               the engine packages, whole.
 #
@@ -51,6 +53,7 @@ pkg = Path(pkg)
 LOCK = pkg / "vendor.lock"
 CORE_DIR = "Sources/TalkCore/Vendor"
 ENGINES_DIR = "Sources/TalkEngines/Vendor"
+TESTS_DIR = "CoreTests/Vendor"
 PACKAGES = ["SherpaOnnx", "SmartTurn", "WhisperCpp", "ExceptionCatcher"]
 
 CORE = "CodegiOS/Features/Talk/Core"
@@ -71,6 +74,12 @@ SUPPORT = {
         "Support/SpeechToText.swift": "CodegiOS/Features/Dictation/SpeechToText.swift",
         "Support/DictationLanguage.swift": "CodegiOS/Features/Dictation/DictationLanguage.swift",
         "Support/DictationText.swift": "CodegiOS/Features/Dictation/DictationText.swift",
+    },
+    TESTS_DIR: {
+        f"{name}.swift": f"CodegiOSTests/{name}.swift" for name in [
+            "TalkControllerTests", "TalkMachineTests", "TalkPolicyTests", "TalkRouterTests", "TalkFeedTests",
+            "TalkTextTests", "TalkSpokenPromptsTests", "TalkSpeechTextTests", "TalkCoreAudioTests",
+        ]
     },
     ENGINES_DIR: {
         "StreamingSileroVAD.swift": "CodegiOS/Features/Voice/StreamingSileroVAD.swift",
@@ -139,7 +148,7 @@ def read_lock():
 def owned_files():
     """Every file in the directories this script owns."""
     out = set()
-    for d in [CORE_DIR, ENGINES_DIR]:
+    for d in [CORE_DIR, ENGINES_DIR, TESTS_DIR]:
         for p in (pkg / d).rglob("*"):
             if p.is_file():
                 out.add(str(p.relative_to(pkg)))

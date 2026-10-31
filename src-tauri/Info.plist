@@ -6,5 +6,10 @@
 	     usage string macOS refuses Apple Events silently instead of asking. -->
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Agents running in codeg control other apps when you ask them to.</string>
+	<!-- Talk on the Mac: the codeg-talk helper listens through the
+	     microphone. macOS attributes the helper to codeg and asks with this
+	     string. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>codeg listens while you talk with a session in Talk.</string>
 </dict>
 </plist>

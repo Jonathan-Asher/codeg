@@ -8,5 +8,10 @@
 	     it carries this entitlement. -->
 	<key>com.apple.security.automation.apple-events</key>
 	<true/>
+	<!-- Talk on the Mac listens through the microphone (the codeg-talk
+	     helper, which carries it too). Required for the microphone once the
+	     app runs with the hardened runtime; harmless without it. -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
 </dict>
 </plist>

@@ -1,8 +1,11 @@
 {
   "bundle": {
-    "externalBin": ["binaries/codeg-mcp", "binaries/codeg-tts"],
+    "externalBin": ["binaries/codeg-mcp", "binaries/codeg-tts", "binaries/codeg-talk"],
     "resources": {
       "../native/BlueTTSKit/Sources/BlueTTSEspeak/Resources/espeak-ng-data": "tts/espeak-ng-data/"
+    },
+    "macOS": {
+      "frameworks": ["binaries/whisper.framework"]
     }
   }
 }

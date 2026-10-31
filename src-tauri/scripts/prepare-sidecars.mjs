@@ -18,6 +18,17 @@
 //      native/codeg-tts/README.md. `CODEG_SKIP_TTS_SIDECAR=1` skips it (the
 //      app then ships build.rs's empty placeholder and reads aloud with the
 //      system voices only).
+//   5. On macOS targets only: Talk on the Mac's helper `codeg-talk` (Swift
+//      package `native/codeg-talk`), built for arm64 only with
+//      `swift build -c release --triple arm64-apple-macosx15.0` (its engines,
+//      whisper.framework's and sherpa-onnx's, are Apple Silicon only), and
+//      the whisper.framework it links, staged as `binaries/whisper.framework`
+//      (tauri.macos.conf.json bundles it into Contents/Frameworks). A
+//      universal build gets the real helper as its arm64 slice and a stub as
+//      its x86_64 one; an x86_64 build, or `CODEG_SKIP_TALK_SIDECAR=1`, ships
+//      the stub (`native/codeg-talk/stub`), which tells codeg Talk on this Mac
+//      is unavailable, and a stub framework. GPL-3.0-or-later like codeg-tts;
+//      see native/codeg-talk/README.md.
 //
 // Why a separate script (not inline in beforeBuildCommand / GitHub Actions):
 //   - Cross-compile in release.yml passes `--target <triple>` so we honour
@@ -31,7 +42,16 @@
 // Windows GitHub runners.
 
 import { execFileSync } from "node:child_process"
-import { existsSync, copyFileSync, mkdirSync, chmodSync } from "node:fs"
+import {
+  existsSync,
+  copyFileSync,
+  mkdirSync,
+  chmodSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs"
+import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import process from "node:process"
@@ -42,6 +62,10 @@ const BINARIES_DIR = join(SRC_TAURI, "binaries")
 const BIN_NAME = "codeg-mcp"
 const TTS_BIN_NAME = "codeg-tts"
 const TTS_PACKAGE = resolve(SRC_TAURI, "..", "native", "codeg-tts")
+const TALK_BIN_NAME = "codeg-talk"
+const TALK_PACKAGE = resolve(SRC_TAURI, "..", "native", "codeg-talk")
+const TALK_SWIFT_TRIPLE = "arm64-apple-macosx15.0"
+const WHISPER_FRAMEWORK = "whisper.framework"
 
 function log(msg) {
   console.log(`[prepare-sidecars] ${msg}`)
@@ -132,6 +156,7 @@ function main() {
   log(`sidecar staged at ${dest}`)
 
   buildTtsSidecar(target)
+  buildTalkSidecar(target)
 }
 
 /** The Swift triple for a Rust darwin triple (`aarch64` → `arm64`). */
@@ -200,6 +225,135 @@ function buildTtsSidecar(target) {
   }
   chmodSync(dest, 0o755)
   log(`sidecar staged at ${dest}`)
+}
+
+function requireSwift(what, skipVar) {
+  try {
+    execFileSync("swift", ["--version"], { stdio: "ignore" })
+  } catch {
+    die(
+      `${what} needs the Swift toolchain (Xcode or the Command Line ` +
+        `Tools). Install it, or set ${skipVar}=1 to build without it.`
+    )
+  }
+}
+
+/**
+ * Talk on the Mac's helper and the whisper.framework it links, staged as
+ * `binaries/codeg-talk-<triple>` and `binaries/whisper.framework`.
+ */
+function buildTalkSidecar(target) {
+  if (!target.endsWith("apple-darwin")) return
+  mkdirSync(BINARIES_DIR, { recursive: true })
+  const dest = join(BINARIES_DIR, `${TALK_BIN_NAME}-${target}`)
+  const framework = join(BINARIES_DIR, WHISPER_FRAMEWORK)
+  const runsTalk =
+    target === "aarch64-apple-darwin" || target === "universal-apple-darwin"
+  if (process.env.CODEG_SKIP_TALK_SIDECAR === "1" || !runsTalk) {
+    const why = runsTalk
+      ? "CODEG_SKIP_TALK_SIDECAR=1"
+      : `${target} can't run Talk's engines (Apple Silicon only)`
+    log(`${why}: staging the ${TALK_BIN_NAME} stub (no Talk on this Mac)`)
+    stageTalkStub(target, dest, framework)
+    return
+  }
+  requireSwift(TALK_BIN_NAME, "CODEG_SKIP_TALK_SIDECAR")
+
+  const args = [
+    "build",
+    "-c",
+    "release",
+    "--product",
+    TALK_BIN_NAME,
+    "--triple",
+    TALK_SWIFT_TRIPLE,
+  ]
+  log(`building ${TALK_BIN_NAME} (swift ${args.join(" ")})`)
+  execFileSync("swift", args, { stdio: "inherit", cwd: TALK_PACKAGE })
+  const binDir = execFileSync("swift", [...args, "--show-bin-path"], {
+    encoding: "utf8",
+    cwd: TALK_PACKAGE,
+  }).trim()
+  const built = join(binDir, TALK_BIN_NAME)
+  const builtFramework = join(binDir, WHISPER_FRAMEWORK)
+  if (!existsSync(built) || !existsSync(builtFramework)) {
+    die(`expected ${built} and ${builtFramework} after swift build`)
+  }
+  if (target === "universal-apple-darwin") {
+    // Apple Silicon runs the real helper; an Intel Mac runs the stub's slice.
+    const stub = compileTalkStub(["x86_64"])
+    execFileSync("lipo", ["-create", "-output", dest, built, stub], {
+      stdio: "inherit",
+    })
+  } else {
+    copyFileSync(built, dest)
+  }
+  chmodSync(dest, 0o755)
+  // ditto keeps the framework's Versions/Current symlinks.
+  rmSync(framework, { recursive: true, force: true })
+  execFileSync("ditto", [builtFramework, framework], { stdio: "inherit" })
+  log(`sidecar staged at ${dest}, ${WHISPER_FRAMEWORK} at ${framework}`)
+}
+
+/** The stub's architectures for a target. */
+function stubArches(target) {
+  if (target.startsWith("x86_64-")) return ["x86_64"]
+  if (target.startsWith("aarch64-")) return ["arm64"]
+  return ["arm64", "x86_64"]
+}
+
+/** Compile the codeg-talk stub for `arches`; returns its path. */
+function compileTalkStub(arches) {
+  const out = join(mkdtempSync(join(tmpdir(), "codeg-talk-stub-")), "codeg-talk")
+  execFileSync(
+    "clang",
+    [
+      ...arches.flatMap((a) => ["-arch", a]),
+      "-mmacosx-version-min=11.0",
+      "-O2",
+      "-o",
+      out,
+      join(TALK_PACKAGE, "stub", "codeg-talk-stub.c"),
+    ],
+    { stdio: "inherit" }
+  )
+  return out
+}
+
+/**
+ * The stub helper, and a stub whisper.framework for tauri.macos.conf.json to
+ * bundle (nothing loads it).
+ */
+function stageTalkStub(target, dest, framework) {
+  const arches = stubArches(target)
+  copyFileSync(compileTalkStub(arches), dest)
+  chmodSync(dest, 0o755)
+
+  rmSync(framework, { recursive: true, force: true })
+  const version = join(framework, "Versions", "A")
+  mkdirSync(join(version, "Resources"), { recursive: true })
+  execFileSync(
+    "clang",
+    [
+      ...arches.flatMap((a) => ["-arch", a]),
+      "-dynamiclib",
+      "-mmacosx-version-min=11.0",
+      "-install_name",
+      "@rpath/whisper.framework/Versions/A/whisper",
+      "-o",
+      join(version, "whisper"),
+      join(TALK_PACKAGE, "stub", "whisper-stub.c"),
+    ],
+    { stdio: "inherit" }
+  )
+  copyFileSync(
+    join(TALK_PACKAGE, "stub", "whisper-stub-Info.plist"),
+    join(version, "Resources", "Info.plist")
+  )
+  symlinkSync("A", join(framework, "Versions", "Current"))
+  symlinkSync("Versions/Current/whisper", join(framework, "whisper"))
+  symlinkSync("Versions/Current/Resources", join(framework, "Resources"))
+  log(`stub staged at ${dest}, stub ${WHISPER_FRAMEWORK} at ${framework}`)
 }
 
 main()

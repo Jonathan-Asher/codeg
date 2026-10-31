@@ -14,11 +14,15 @@
 #
 # What it does:
 #   1. signs every nested Mach-O (helpers in Contents/MacOS, any dylibs or
-#      nested bundles), deepest first, then the .app itself. No hardened
-#      runtime (it changes what the app may spawn and load; only
-#      notarization needs it) and no timestamp (needs Apple's server).
+#      nested bundles such as Talk's whisper.framework), deepest first, then
+#      the .app itself. No hardened runtime (it changes what the app may spawn
+#      and load; only notarization needs it) and no timestamp (needs Apple's
+#      server). Talk on the Mac's helper, codeg-talk, gets its own
+#      entitlements (the microphone).
 #   2. verifies the result and fails unless the designated requirement
-#      names app.codeg and the team.
+#      names app.codeg and the team, and Talk on the Mac has what the
+#      microphone needs: the usage string, the audio-input entitlement on the
+#      app and on codeg-talk, and codeg-talk signed for the team.
 #   3. rebuilds codeg.app.tar.gz from the signed bundle, the way tauri does
 #      (a single top-level codeg.app/), and deletes tauri's stale .sig. The
 #      caller re-signs the archive with the updater key.
@@ -41,6 +45,8 @@ BUNDLE_ID=app.codeg
 # Entitlements for the app itself (Apple Events for agents that script other
 # apps). Nested helpers keep none.
 ENTITLEMENTS=${CODEG_SIGN_ENTITLEMENTS:-$(cd "$(dirname "$0")/.." && pwd)/src-tauri/codeg.entitlements}
+# Talk on the Mac's helper records the microphone: its own entitlements.
+TALK_ENTITLEMENTS=${CODEG_SIGN_TALK_ENTITLEMENTS:-$(cd "$(dirname "$0")/.." && pwd)/src-tauri/codeg-talk.entitlements}
 
 # The runner runs with an isolated HOME, so resolve the account's real home.
 REAL_HOME=$(python3 -c 'import os, pwd; print(pwd.getpwuid(os.getuid()).pw_dir)')
@@ -52,6 +58,7 @@ die() { echo "::error title=Developer ID signing::$*" >&2; exit 1; }
 
 [ -d "$APP/Contents" ] || die "no app bundle at $APP"
 [ -f "$ENTITLEMENTS" ] || die "entitlements file missing: $ENTITLEMENTS"
+[ -f "$TALK_ENTITLEMENTS" ] || die "entitlements file missing: $TALK_ENTITLEMENTS"
 [ -f "$KEYCHAIN" ] && [ -f "$PASSWORD_FILE" ] ||
   die "signing keychain missing ($KEYCHAIN); see docs/fork-solution-plan.md"
 
@@ -83,10 +90,16 @@ machos=$(find "$APP/Contents" -type f -print0 | xargs -0 file -F $'\t' |
   awk -F'\t' '$2 ~ /Mach-O/ { print $1 }' | by_depth)
 [ -n "$machos" ] || die "no Mach-O files found in $APP"
 
+TALK="$APP/Contents/MacOS/codeg-talk"
 while IFS= read -r f; do
   [ "$f" = "$APP/Contents/MacOS/$main_exe" ] && continue
   echo "signing $f"
-  sign --identifier "$BUNDLE_ID.$(basename "$f")" "$f"
+  if [ "$f" = "$TALK" ]; then
+    HOME="$SIGN_HOME" codesign --force --sign "$IDENTITY" --keychain "$KEYCHAIN" \
+      --timestamp=none --identifier "$BUNDLE_ID.codeg-talk" --entitlements "$TALK_ENTITLEMENTS" "$f"
+  else
+    sign --identifier "$BUNDLE_ID.$(basename "$f")" "$f"
+  fi
 done <<< "$machos"
 
 while IFS= read -r b; do
@@ -112,6 +125,30 @@ codesign -d --entitlements - "$APP" 2>/dev/null | grep -q 'com.apple.security.au
   die "the app lost its Apple Events entitlement"
 /usr/libexec/PlistBuddy -c 'Print :NSAppleEventsUsageDescription' "$APP/Contents/Info.plist" >/dev/null 2>&1 ||
   die "Info.plist has no NSAppleEventsUsageDescription (src-tauri/Info.plist not merged?)"
+
+# Talk on the Mac: the microphone's usage string and entitlement, and the
+# helper signed for the team with its own. An Intel build (or
+# CODEG_SKIP_TALK_SIDECAR=1) ships prepare-sidecars' stub, which never records.
+/usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$APP/Contents/Info.plist" >/dev/null 2>&1 ||
+  die "Info.plist has no NSMicrophoneUsageDescription (src-tauri/Info.plist not merged?)"
+codesign -d --entitlements - "$APP" 2>/dev/null | grep -q 'com.apple.security.device.audio-input' ||
+  die "the app lost its audio-input entitlement (Talk on the Mac's microphone)"
+[ -s "$TALK" ] || die "codeg-talk is missing or empty (build.rs's placeholder: prepare-sidecars didn't run)"
+codesign -d --entitlements - "$TALK" 2>/dev/null | grep -q 'com.apple.security.device.audio-input' ||
+  die "codeg-talk lacks the audio-input entitlement"
+talk_team=$(codesign -dv "$TALK" 2>&1 | sed -n 's/^TeamIdentifier=//p')
+[ "$talk_team" = "$TEAM" ] || die "codeg-talk is signed for team '$talk_team', not $TEAM"
+[ -d "$APP/Contents/Frameworks/whisper.framework" ] || die "whisper.framework is missing from Contents/Frameworks"
+if otool -l "$TALK" | grep -q __info_plist; then
+  strings -a "$TALK" | grep -q NSMicrophoneUsageDescription ||
+    die "codeg-talk's embedded Info.plist has no NSMicrophoneUsageDescription"
+  otool -L "$TALK" | grep -q '@rpath/whisper.framework/' || die "codeg-talk doesn't link whisper.framework"
+  echo "Talk on the Mac: codeg-talk signed for $talk_team with the microphone entitlement"
+elif [ "${CODEG_SKIP_TALK_SIDECAR:-}" = 1 ] || [ "$(uname -m)" != arm64 ]; then
+  echo "Talk on the Mac: codeg-talk is the stub (no Talk on the Mac in this build)"
+else
+  die "codeg-talk is the stub on an Apple Silicon build (prepare-sidecars didn't build native/codeg-talk)"
+fi
 
 # Every Mach-O in the bundle carries the team.
 while IFS= read -r f; do
