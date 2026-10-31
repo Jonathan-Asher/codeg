@@ -1431,7 +1431,8 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 duration_ms: None,
                 model: None,
                 completed_at: msg.completed_at,
-            agent_message_id: None,
+                agent_message_id: None,
+                spoken: false,
             });
             i += 1;
         } else if matches!(msg.role, MessageRole::System) {
@@ -1444,7 +1445,8 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 duration_ms: None,
                 model: None,
                 completed_at: msg.completed_at,
-            agent_message_id: None,
+                agent_message_id: None,
+                spoken: false,
             });
             i += 1;
         } else {
@@ -1487,6 +1489,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 model: turn_model,
                 completed_at,
                 agent_message_id,
+                spoken: false,
             });
         }
     }
@@ -2017,6 +2020,78 @@ mod tests {
             Some(r#"{"exitCode":0}"#),
             "an unrecognized object still surfaces something"
         );
+    }
+
+    /// Talk mode: pi-acp joins a prompt's text blocks into one string with no
+    /// separator, so the talk frame lands right after the user's words, in
+    /// the same message. History (read through the frame pass, as a client
+    /// gets it) shows the words alone and marks the spoken turn, and the
+    /// title — which falls back to the first message here — never shows the
+    /// frame.
+    #[test]
+    fn talk_frames_leave_history_and_mark_spoken_turns() {
+        use crate::acp::talk_frame::{render, TalkFrameMode};
+        let dir = tempdir().expect("tempdir");
+        let id = "talk-mode-0001";
+        let full = render(
+            TalkFrameMode::Full,
+            true,
+            "Talk mode is on. Answer in one to three short spoken sentences.",
+        );
+        let off = render(TalkFrameMode::Off, false, "Talk mode is off.");
+        write_session(
+            dir.path(),
+            "--Users-demo-app--",
+            "ts_talk-mode-0001.jsonl",
+            &[
+                json!({"type":"session","version":3,"id":id,"timestamp":"2026-11-01T10:00:00.000Z","cwd":"/Users/demo/app"}),
+                json!({"type":"message","id":"m1","timestamp":"2026-11-01T10:00:01.000Z",
+                       "message":{"role":"user","content":format!("תבדוק למה הבילד נופל{full}")}}),
+                json!({"type":"message","id":"m2","timestamp":"2026-11-01T10:00:02.000Z",
+                       "message":{"role":"assistant","model":"claude-sonnet-4-6",
+                         "content":[{"type":"text","text":"אני בודק."}]}}),
+                json!({"type":"message","id":"m3","timestamp":"2026-11-01T10:01:00.000Z",
+                       "message":{"role":"user","content":format!("thanks{off}")}}),
+                json!({"type":"message","id":"m4","timestamp":"2026-11-01T10:01:02.000Z",
+                       "message":{"role":"assistant","model":"claude-sonnet-4-6",
+                         "content":[{"type":"text","text":"Sure."}]}}),
+            ],
+        );
+
+        let mut detail = PiParser::with_base_dir(dir.path().to_path_buf())
+            .get_conversation(id)
+            .expect("detail");
+        crate::parsers::sanitize_detail(&mut detail);
+        let users: Vec<(String, bool)> = detail
+            .turns
+            .iter()
+            .filter(|t| matches!(t.role, TurnRole::User))
+            .map(|t| {
+                let text = t
+                    .blocks
+                    .iter()
+                    .map(|b| match b {
+                        ContentBlock::Text { text } => text.as_str(),
+                        _ => "",
+                    })
+                    .collect::<String>();
+                (text, t.spoken)
+            })
+            .collect();
+        assert_eq!(
+            users,
+            [
+                ("תבדוק למה הבילד נופל".to_string(), true),
+                ("thanks".to_string(), false)
+            ]
+        );
+        assert_eq!(
+            detail.summary.title.as_deref(),
+            Some("תבדוק למה הבילד נופל")
+        );
+        assert!(!serde_json::to_string(&detail)
+            .expect("serialize")
+            .contains("codeg_internal_talk"));
     }
 
     #[test]

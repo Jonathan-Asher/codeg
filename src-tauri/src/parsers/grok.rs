@@ -773,7 +773,8 @@ fn parse_updates(path: &Path) -> ParsedUpdates {
                         duration_ms: None,
                         model: None,
                         completed_at: None,
-                    agent_message_id: None,
+                        agent_message_id: None,
+                        spoken: false,
                     });
                 }
             }
@@ -1644,7 +1645,8 @@ fn ensure_assistant(
             duration_ms: None,
             model: None,
             completed_at: None,
-        agent_message_id: None,
+            agent_message_id: None,
+            spoken: false,
         });
     }
     assistant.as_mut().expect("assistant just set")

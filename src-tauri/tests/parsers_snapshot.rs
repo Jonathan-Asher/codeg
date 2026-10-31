@@ -13,6 +13,7 @@
 use std::fs;
 use std::path::Path;
 
+use codeg_lib::models::{ContentBlock, TurnRole};
 use codeg_lib::parsers::{
     claude::ClaudeParser, cline::ClineParser, codex::CodexParser, gemini::GeminiParser,
     hermes::HermesParser, kimi_code::KimiCodeParser, openclaw::OpenClawParser,
@@ -108,6 +109,140 @@ fn claude_mid_turn_insert_snapshot() {
     let detail = parser.get_conversation(session_id).expect("detail claude");
 
     assert_json_snapshot!("claude_mid_turn_insert_detail", detail.turns, {
+        ".**.timestamp" => "[ts]",
+        ".**.completed_at" => "[ts]",
+    });
+}
+
+/// Talk mode: a spoken prompt carrying the full rules, a message inserted
+/// mid-turn (recorded as a `queued_command`) carrying the reminder, and a
+/// typed message carrying the Off note. Each frame is its own text block, as
+/// claude-agent-acp writes a prompt's blocks. History shows only what the
+/// user said, marks the spoken turns, and never shows a frame — read the way
+/// a client gets it, through the frame pass (`sanitize_detail`).
+#[test]
+fn claude_talk_mode_snapshot() {
+    use codeg_lib::acp::talk_frame::{render, TalkFrameMode};
+
+    let temp = tempfile::tempdir().expect("create tempdir");
+    let base = temp.path().to_path_buf();
+    let session_id = "claude-talk-001";
+    let full = render(
+        TalkFrameMode::Full,
+        true,
+        "Talk mode is on. Answer in one to three short spoken sentences.",
+    );
+    let compact = render(
+        TalkFrameMode::Compact,
+        true,
+        "Talk mode is on (voice): one to three short spoken sentences.",
+    );
+    let off = render(TalkFrameMode::Off, false, "Talk mode is off.");
+    let user = |uuid: &str, ts: &str, words: &str, frame: &str| {
+        json!({
+            "type": "user",
+            "sessionId": session_id,
+            "timestamp": ts,
+            "uuid": uuid,
+            "cwd": "/tmp/demo",
+            "message": { "role": "user", "content": [
+                {"type": "text", "text": words},
+                {"type": "text", "text": frame}
+            ] }
+        })
+    };
+    let assistant = |uuid: &str, ts: &str, text: &str| {
+        json!({
+            "type": "assistant",
+            "sessionId": session_id,
+            "timestamp": ts,
+            "uuid": uuid,
+            "message": {
+                "id": format!("msg_{uuid}"),
+                "model": "claude-sonnet-4-6",
+                "role": "assistant",
+                "content": [{"type": "text", "text": text}],
+                "usage": {"input_tokens": 10, "output_tokens": 5}
+            }
+        })
+    };
+    let insert = json!({
+        "type": "attachment",
+        "sessionId": session_id,
+        "timestamp": "2026-11-01T10:00:03Z",
+        "uuid": "q1",
+        "attachment": {
+            "type": "queued_command",
+            "commandMode": "prompt",
+            "origin": {"kind": "human"},
+            "prompt": [
+                {"type": "text", "text": "רגע, תבדוק גם את הטסטים"},
+                {"type": "text", "text": compact}
+            ],
+            "source_uuid": "s1"
+        }
+    });
+    let records = [
+        user("u1", "2026-11-01T10:00:00Z", "תבדוק למה הבילד נופל", &full),
+        assistant("a1", "2026-11-01T10:00:02Z", "אני בודק את זה."),
+        insert,
+        assistant("a2", "2026-11-01T10:00:05Z", "הבילד נופל על בדיקת טיפוסים."),
+        user(
+            "u2",
+            "2026-11-01T10:01:00Z",
+            "thanks, back at the desk",
+            &off,
+        ),
+        assistant("a3", "2026-11-01T10:01:02Z", "Sure."),
+    ];
+    let jsonl: String = records.iter().map(|r| format!("{r}\n")).collect();
+    write(
+        &base.join("-tmp-demo").join(format!("{session_id}.jsonl")),
+        &jsonl,
+    );
+
+    let parser = ClaudeParser::with_base_dir(base);
+    let mut detail = parser.get_conversation(session_id).expect("detail claude");
+    codeg_lib::parsers::sanitize_detail(&mut detail);
+
+    let users: Vec<_> = detail
+        .turns
+        .iter()
+        .filter(|t| matches!(t.role, TurnRole::User))
+        .collect();
+    let words: Vec<String> = users
+        .iter()
+        .map(|t| {
+            t.blocks
+                .iter()
+                .map(|b| match b {
+                    ContentBlock::Text { text } => text.clone(),
+                    _ => String::new(),
+                })
+                .collect()
+        })
+        .collect();
+    assert_eq!(
+        words,
+        [
+            "תבדוק למה הבילד נופל",
+            "רגע, תבדוק גם את הטסטים",
+            "thanks, back at the desk"
+        ]
+    );
+    let spoken: Vec<bool> = users.iter().map(|t| t.spoken).collect();
+    assert_eq!(spoken, [true, true, false]);
+    let rendered = serde_json::to_string(&detail).expect("serialize");
+    assert!(!rendered.contains("codeg_internal_talk"), "{rendered}");
+    assert!(!rendered.contains('\u{1e}'));
+    assert!(!detail
+        .summary
+        .title
+        .as_deref()
+        .unwrap_or_default()
+        .contains("Talk mode"));
+
+    assert_json_snapshot!("claude_talk_mode_detail", detail.turns, {
         ".**.timestamp" => "[ts]",
         ".**.completed_at" => "[ts]",
     });

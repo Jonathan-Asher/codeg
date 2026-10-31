@@ -416,7 +416,8 @@ pub fn project_turns(entries: &[TranscriptEntry]) -> Vec<MessageTurn> {
                     duration_ms: None,
                     model: None,
                     completed_at: None,
-                agent_message_id: None,
+                    agent_message_id: None,
+                    spoken: false,
                 });
                 seq += 1;
                 prompt_just_recorded = true;
@@ -481,7 +482,8 @@ fn flush(pending: &mut Option<PendingTurn>, turns: &mut Vec<MessageTurn>, seq: &
             .or_else(|| p.last_at_ms.checked_sub(p.started_at_ms)),
         model: p.model,
         completed_at: Some(epoch_ms_to_utc(p.last_at_ms)),
-    agent_message_id: None,
+        agent_message_id: None,
+        spoken: false,
     });
     *seq += 1;
 }
@@ -592,6 +594,7 @@ fn apply_update(
                         model: None,
                         completed_at: None,
                         agent_message_id: None,
+                        spoken: false,
                     });
                     *seq += 1;
                 }

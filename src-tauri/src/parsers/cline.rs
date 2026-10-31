@@ -387,6 +387,7 @@ impl ClineParser {
                         model,
                         completed_at: Some(timestamp),
                         agent_message_id: None,
+                        spoken: false,
                     });
                 }
                 "user" => {
@@ -402,6 +403,7 @@ impl ClineParser {
                             model: None,
                             completed_at: Some(timestamp),
                             agent_message_id: None,
+                            spoken: false,
                         });
                     }
                     if !parsed.user_blocks.is_empty() {
@@ -415,6 +417,7 @@ impl ClineParser {
                             model: None,
                             completed_at: Some(timestamp),
                             agent_message_id: None,
+                            spoken: false,
                         });
                     }
                 }
@@ -689,7 +692,8 @@ impl ClineParser {
                         duration_ms: None,
                         model,
                         completed_at: Some(timestamp),
-                    agent_message_id: None,
+                        agent_message_id: None,
+                        spoken: false,
                     });
                 }
                 "user" => {
@@ -710,7 +714,8 @@ impl ClineParser {
                             duration_ms: None,
                             model: None,
                             completed_at: Some(timestamp),
-                        agent_message_id: None,
+                            agent_message_id: None,
+                            spoken: false,
                         });
                     }
 
@@ -726,7 +731,8 @@ impl ClineParser {
                             duration_ms: None,
                             model: None,
                             completed_at: Some(timestamp),
-                        agent_message_id: None,
+                            agent_message_id: None,
+                            spoken: false,
                         });
                     }
                 }

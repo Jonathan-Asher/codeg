@@ -971,6 +971,7 @@ fn tail_copy(detail: &ConversationDetail, from: usize) -> ConversationDetail {
                     model: None,
                     completed_at: t.completed_at,
                     agent_message_id: None,
+                    spoken: false,
                 }
             }
         })

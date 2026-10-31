@@ -1001,7 +1001,8 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 duration_ms: None,
                 model: None,
                 completed_at: msg.completed_at,
-            agent_message_id: None,
+                agent_message_id: None,
+                spoken: false,
             });
             i += 1;
             continue;
@@ -1017,7 +1018,8 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 duration_ms: None,
                 model: None,
                 completed_at: msg.completed_at,
-            agent_message_id: None,
+                agent_message_id: None,
+                spoken: false,
             });
             i += 1;
             continue;
@@ -1061,7 +1063,8 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
             duration_ms,
             model,
             completed_at,
-        agent_message_id: None,
+            agent_message_id: None,
+            spoken: false,
         });
     }
 

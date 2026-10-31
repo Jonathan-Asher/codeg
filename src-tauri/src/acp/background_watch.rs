@@ -1796,6 +1796,10 @@ impl WatchState {
         // detail parse does.
         episode.acc.apply_background_lifecycle(&mut messages);
         let mut turns = group_into_turns(messages);
+        // The same frame pass as the detail parse (`RouteSanitized`): a
+        // message steered into a held turn lands in the transcript with its
+        // talk frame, and must not show it here either.
+        crate::parsers::sanitize_turns(&mut turns);
         crate::parsers::relocate_orphaned_tool_results(&mut turns);
         crate::parsers::structurize_read_tool_output(&mut turns);
         crate::parsers::resolve_patch_line_numbers(&mut turns, Some(cwd));

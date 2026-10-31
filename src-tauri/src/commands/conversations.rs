@@ -3509,7 +3509,8 @@ mod tests {
             duration_ms: None,
             model: None,
             completed_at: None,
-        agent_message_id: None,
+            agent_message_id: None,
+            spoken: false,
         }
     }
 
@@ -3548,7 +3549,8 @@ mod tests {
             duration_ms: None,
             model: None,
             completed_at: None,
-        agent_message_id: None,
+            agent_message_id: None,
+            spoken: false,
         }
     }
 
@@ -3567,7 +3569,8 @@ mod tests {
             duration_ms: None,
             model: None,
             completed_at: completed.then_some(ts),
-        agent_message_id: None,
+            agent_message_id: None,
+            spoken: false,
         }
     }
 
@@ -3576,6 +3579,7 @@ mod tests {
             message_id: message_id.into(),
             blocks: vec![crate::acp::types::UserMessageBlock::Text { text: text.into() }],
         }
+            spoken: false,
     }
 
     #[test]
@@ -3859,7 +3863,8 @@ mod tests {
             duration_ms: None,
             model: None,
             completed_at: None,
-        agent_message_id: None,
+            agent_message_id: None,
+            spoken: false,
         };
         let pending_image = |message_id: &str, data: &str| {
             crate::acp::session_state::PendingUserMessage {
@@ -3869,6 +3874,7 @@ mod tests {
                     mime_type: "image/png".into(),
                 }],
             }
+                spoken: false,
         };
 
         let mut turns = vec![image_turn("turn-0", "AAAA")];
@@ -3989,7 +3995,8 @@ mod tests {
             duration_ms: None,
             model: None,
             completed_at: None,
-        agent_message_id: None,
+            agent_message_id: None,
+            spoken: false,
         }
     }
 
@@ -4266,7 +4273,8 @@ mod tests {
             duration_ms: None,
             model: None,
             completed_at: None,
-        agent_message_id: None,
+            agent_message_id: None,
+            spoken: false,
         }];
         let children = vec![summary_child(42, "tu-1", "completed")];
         inject_delegation_meta(&mut turns, &children);

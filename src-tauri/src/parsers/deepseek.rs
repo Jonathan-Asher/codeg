@@ -895,6 +895,7 @@ fn parse_session_events(text: &str, attachments: Option<&Path>) -> SessionParse 
                     model: None,
                     completed_at: Some(ts),
                     agent_message_id: None,
+                    spoken: false,
                 });
             }
             "request/header" => {
@@ -1244,6 +1245,7 @@ fn ensure_assistant<'a>(
                 model,
                 completed_at: None,
                 agent_message_id: None,
+                spoken: false,
             });
             let idx = turns.len() - 1;
             *open_assistant = Some(idx);

@@ -664,6 +664,7 @@ mod tests {
                     model: None,
                     completed_at: None,
                     agent_message_id: None,
+                    spoken: false,
                 })
                 .collect(),
             session_stats: None,

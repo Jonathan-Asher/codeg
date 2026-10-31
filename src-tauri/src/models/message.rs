@@ -249,4 +249,11 @@ pub struct MessageTurn {
     /// synthesized turns, which name nothing the agent stored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_message_id: Option<String>,
+    /// A user turn the user SPOKE, through the phone's Talk mode (see
+    /// `crate::talk`): the talk frame that came with the message said so,
+    /// and the history pass that removed the frame
+    /// (`parsers::sanitize_detail`) set this. Drives the mic marker.
+    /// `false` for typed messages and every other role, and then omitted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub spoken: bool,
 }

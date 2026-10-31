@@ -8,9 +8,12 @@ use chrono::{DateTime, Utc};
 use regex::Regex;
 use walkdir::WalkDir;
 
-use crate::acp::agent_mentions::{
-    contains_only_internal_agent_routes, strip_internal_agent_routes,
-};
+use crate::acp::agent_mentions::strip_internal_agent_routes;
+// Structural skips cover every internal frame kind (a talk-frame-only record
+// is as much a transport record as a routing-only one); the visible-text
+// strips stay routing-only so a talk frame reaches the history pass, which
+// reads whether the message was spoken from it.
+use crate::acp::internal_frames::contains_only_frames;
 use crate::models::*;
 use crate::parsers::codex_code_mode::{
     extract_chunk_ids, extract_shell_session_ids, is_code_mode_call, parse_code_mode_script,
@@ -575,7 +578,7 @@ impl CodexParser {
                                     .get("images")
                                     .and_then(|v| v.as_array())
                                     .is_some_and(|images| !images.is_empty());
-                                if contains_only_internal_agent_routes(raw_text) && !has_images {
+                                if contains_only_frames(raw_text) && !has_images {
                                     continue;
                                 }
                                 if skip_duplicate_user_record(
@@ -3497,7 +3500,7 @@ impl CodexParser {
                                     }
                                 }
 
-                                if blocks.is_empty() && contains_only_internal_agent_routes(&text) {
+                                if blocks.is_empty() && contains_only_frames(&text) {
                                     continue;
                                 }
 
@@ -5918,7 +5921,7 @@ fn promotion_payload_type<'a>(msg_type: &str, value: &'a serde_json::Value) -> &
         let route_only = payload
             .and_then(|payload| payload.get("message"))
             .and_then(serde_json::Value::as_str)
-            .is_some_and(contains_only_internal_agent_routes);
+            .is_some_and(contains_only_frames);
         let has_images = payload
             .and_then(|payload| payload.get("images"))
             .and_then(serde_json::Value::as_array)
@@ -6320,7 +6323,8 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 duration_ms: None,
                 model: None,
                 completed_at: msg.completed_at,
-            agent_message_id: None,
+                agent_message_id: None,
+                spoken: false,
             });
             i += 1;
         } else if matches!(msg.role, MessageRole::System) {
@@ -6333,7 +6337,8 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 duration_ms: None,
                 model: None,
                 completed_at: msg.completed_at,
-            agent_message_id: None,
+                agent_message_id: None,
+                spoken: false,
             });
             i += 1;
         } else {
@@ -6374,7 +6379,8 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 duration_ms,
                 model: turn_model,
                 completed_at,
-            agent_message_id: None,
+                agent_message_id: None,
+                spoken: false,
             });
         }
     }

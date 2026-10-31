@@ -3673,6 +3673,7 @@ pub(crate) fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn
                 model: turn_model,
                 completed_at,
                 agent_message_id,
+                spoken: false,
             });
         } else if matches!(msg.role, MessageRole::System) {
             turns.push(MessageTurn {
@@ -3685,6 +3686,7 @@ pub(crate) fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn
                 model: None,
                 completed_at: msg.completed_at,
                 agent_message_id: None,
+                spoken: false,
             });
         } else {
             turns.push(MessageTurn {
@@ -3697,6 +3699,7 @@ pub(crate) fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn
                 model: None,
                 completed_at: msg.completed_at,
                 agent_message_id: None,
+                spoken: false,
             });
         }
     }
@@ -4048,6 +4051,7 @@ mod tests {
             model: None,
             completed_at: None,
             agent_message_id: Some(id.into()),
+            spoken: false,
         };
         let compaction = |post: u64| MessageTurn {
             id: "turn-c".into(),
@@ -4062,6 +4066,7 @@ mod tests {
             model: None,
             completed_at: None,
             agent_message_id: None,
+            spoken: false,
         };
 
         // Nothing since the compaction: the boundary is the only honest number.
@@ -4784,7 +4789,8 @@ mod tests {
                 duration_ms: None,
                 model: None,
                 completed_at: None,
-            agent_message_id: None,
+                agent_message_id: None,
+                spoken: false,
             },
             MessageTurn {
                 id: "turn-1".to_string(),
@@ -4800,7 +4806,8 @@ mod tests {
                 duration_ms: None,
                 model: None,
                 completed_at: None,
-            agent_message_id: None,
+                agent_message_id: None,
+                spoken: false,
             },
         ];
 

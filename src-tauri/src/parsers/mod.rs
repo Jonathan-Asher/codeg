@@ -382,11 +382,15 @@ pub fn build_agent_parser(agent_type: AgentType) -> Box<dyn AgentParser> {
     Box::new(RouteSanitized(inner))
 }
 
-/// Removes Codeg's internal `@agent` routing frame from whatever a parser read
-/// back out of an agent's own transcript.
+/// Removes Codeg's internal frames — the `@agent` routing frame and the talk
+/// frame (see [`crate::acp::internal_frames`]) — from whatever a parser read
+/// back out of an agent's own transcript, and marks the user turns a talk
+/// frame says were spoken.
 ///
-/// Only complete frames that re-render byte-for-byte are touched (see
-/// [`crate::acp::agent_mentions::strip_internal_agent_routes`]), and the
+/// Only complete frames are touched (a routing frame that re-renders
+/// byte-for-byte, see
+/// [`crate::acp::agent_mentions::strip_internal_agent_routes`]; a talk frame
+/// whose length and digest match, see [`crate::acp::talk_frame`]), and the
 /// separator that opens one is scrubbed from every prompt at ingress, so
 /// look-alike user prose is never eligible. A BLOCK left with no content after
 /// stripping carried nothing but the frame and is dropped; a user turn left
@@ -439,34 +443,57 @@ impl AgentParser for RouteSanitized {
     }
 }
 
-/// The route-frame pass [`RouteSanitized`] applies to every detail. Idempotent,
+/// The frame pass [`RouteSanitized`] applies to every detail. Idempotent,
 /// so a detail that already went through it (a cached one) is left as it is.
-pub(crate) fn sanitize_detail(detail: &mut ConversationDetail) {
-    let before = detail.turns.len();
-    detail.turns.retain_mut(|turn| {
+///
+/// `pub` for the parser snapshot tests, which read a transcript the way a
+/// client gets it.
+pub fn sanitize_detail(detail: &mut ConversationDetail) {
+    let dropped = sanitize_turns(&mut detail.turns);
+    // Keep the count the sidebar shows in step with the turns actually
+    // rendered; the summary rides along inside the detail.
+    detail.summary.message_count = detail
+        .summary
+        .message_count
+        .saturating_sub(dropped as u32);
+    sanitize_summary(&mut detail.summary);
+}
+
+/// The frame pass over a list of turns, for every reader that shows turns
+/// without a whole detail around them (the background overlay,
+/// `acp::background_watch`). Removes every internal frame from the user
+/// turns, marks the turns whose talk frame said they were spoken, and drops
+/// what held nothing but frames. Returns how many turns it dropped.
+pub(crate) fn sanitize_turns(turns: &mut Vec<MessageTurn>) -> usize {
+    let before = turns.len();
+    turns.retain_mut(|turn| {
         if !matches!(turn.role, TurnRole::User) {
             return true;
         }
+        let mut spoken = false;
         turn.blocks.retain_mut(|block| {
             let ContentBlock::Text { text } = block else {
                 return true;
             };
+            let Some(removed) = sanitize_text(text) else {
+                return true;
+            };
+            spoken |= removed.spoken;
             // Only a block that actually HELD a frame is eligible to go: an
             // empty text block a parser produced for some other reason is
             // left exactly as it was found.
-            !(sanitize_text(text) && text.trim().is_empty())
+            !text.trim().is_empty()
         });
+        if spoken {
+            turn.spoken = true;
+        }
         // A turn whose ONLY content was the frame carried no user message.
         !turn.blocks.iter().all(|block| match block {
             ContentBlock::Text { text } => text.trim().is_empty(),
             _ => false,
         })
     });
-    // Keep the count the sidebar shows in step with the turns actually
-    // rendered; the summary rides along inside the detail.
-    let dropped = (before - detail.turns.len()) as u32;
-    detail.summary.message_count = detail.summary.message_count.saturating_sub(dropped);
-    sanitize_summary(&mut detail.summary);
+    before - turns.len()
 }
 
 fn sanitize_summary(summary: &mut ConversationSummary) {
@@ -475,14 +502,21 @@ fn sanitize_summary(summary: &mut ConversationSummary) {
         // Titles are capped by their parser BEFORE reaching here, so a frame can
         // straddle the cut and survive `sanitize_text`, which only removes whole
         // frames. Anything from a leftover marker on is truncated frame.
-        crate::acp::agent_mentions::cut_at_route_frame_marker(title);
+        crate::acp::internal_frames::cut_at_frame_marker(title);
         if title.trim().is_empty() {
             summary.title = None;
         }
     }
 }
 
-/// Strip every complete frame from `text`, reporting whether one was there.
+/// What [`sanitize_text`] took out of a string.
+struct RemovedFrames {
+    /// A talk frame said the message was spoken.
+    spoken: bool,
+}
+
+/// Strip every complete frame from `text`, reporting what was there (`None`
+/// when there was none).
 ///
 /// The trailing trim only runs when a frame WAS removed, and it is load-bearing
 /// for the agents that join a prompt's text blocks into one record with a blank
@@ -490,15 +524,18 @@ fn sanitize_summary(summary: &mut ConversationSummary) {
 /// frame, so `"prose\n\n<frame>"` comes back as `"prose\n"` — which
 /// `whitespace-pre-wrap` paints as an extra blank line under the message. Text
 /// with no frame in it is never touched.
-fn sanitize_text(text: &mut String) -> bool {
+fn sanitize_text(text: &mut String) -> Option<RemovedFrames> {
     // Single scan short-circuit: history with no frame pays one memchr per
-    // string, not a parse attempt.
-    if !crate::acp::agent_mentions::contains_internal_agent_routes(text) {
-        return false;
+    // string per frame kind, not a parse attempt.
+    if !crate::acp::internal_frames::contains_any(text) {
+        return None;
     }
-    *text = crate::acp::agent_mentions::strip_internal_agent_routes(text);
+    let (stripped, talk) = crate::acp::internal_frames::strip_all_with_talk(text);
+    *text = stripped;
     text.truncate(text.trim_end().len());
-    true
+    Some(RemovedFrames {
+        spoken: talk.is_some_and(|talk| talk.spoken),
+    })
 }
 
 /// Expand a leading `~` in a relocation env var, for the agents whose OWN
@@ -1671,7 +1708,8 @@ mod route_sanitizer_tests {
             duration_ms: None,
             model: None,
             completed_at: None,
-        agent_message_id: None,
+            agent_message_id: None,
+            spoken: false,
         }
     }
 
@@ -2028,7 +2066,8 @@ mod tests {
             duration_ms: None,
             model: None,
             completed_at: Some(base + chrono::Duration::seconds(end_s)),
-        agent_message_id: None,
+            agent_message_id: None,
+            spoken: false,
         }
     }
 
@@ -2366,7 +2405,8 @@ mod tests {
                 duration_ms: None,
                 model: None,
                 completed_at: None,
-            agent_message_id: None,
+                agent_message_id: None,
+                spoken: false,
             },
             MessageTurn {
                 id: "turn-1".to_string(),
@@ -2382,7 +2422,8 @@ mod tests {
                 duration_ms: None,
                 model: None,
                 completed_at: None,
-            agent_message_id: None,
+                agent_message_id: None,
+                spoken: false,
             },
         ];
 
