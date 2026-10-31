@@ -176,11 +176,14 @@ to each new message that goes through `acp_prompt`, or through
 (`_session/steering`; Claude Code, Pi). The frame is its own text block, after
 everything else in the message (after codeg's `@agent` routing frame, if any).
 
-| Mode | When | Size |
+| Mode | When | Size (with its descriptor) |
 |---|---|---|
-| **Full** | State `on`, and this connection has not carried the rules yet: the first message after Talk was turned on, after a reconnect, after a context compaction completed, after `/clear`, and after a settings change. | about 350 tokens |
-| **Compact** | State `on`, and the rules are already in this connection's context. | about 60 tokens |
-| **Off** | State `ending`: once, then the state clears. | about 25 tokens |
+| **Full** | State `on`, and this connection has not carried the rules yet: the first message after Talk was turned on, after a reconnect, after a context compaction completed, after `/clear`, and after a settings change. | about 600 tokens |
+| **Compact** | State `on`, and the rules are already in this connection's context. | about 140 tokens |
+| **Off** | State `ending`: once, then the state clears. | about 65 tokens |
+
+Like the rest of a new message, a frame is written to the prompt cache once
+and read from it afterwards; nothing before it is ever re-sent.
 
 No frame is added to:
 
