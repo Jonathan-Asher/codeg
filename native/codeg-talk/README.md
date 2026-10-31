@@ -31,6 +31,8 @@ helper plays its audio itself.
 | `TalkHost` | `Wire` (the protocol), `MirrorPort` (the session mirror behind the controller's synchronous `TalkSessionPort`), `BridgeBackend` (`TalkBackend` over the wire), `UIStatePublisher`, `MacEchoPolicy`. No engine dependencies. |
 | `TalkEngines` | `MacTalkAudioEngine` (`TalkAudioIO`), `CoreAudioRoute`, `MacMicTap`, `MacTalkSystem`, the BlueTTS and system-voice synthesizers, the engine cache; vendored adapters (`Vendor/`) |
 | `codeg-talk` | the executable |
+| `CoreTests/` | the iPhone's Talk tests that run on macOS (vendored) and an XCTest stand-in, for `scripts/test-core.sh` |
+| `stub/` | what an Intel build ships instead: a helper that only says Talk is unavailable, and a stub `whisper.framework` |
 
 The vendored files keep Swift's default (internal) access; the other targets
 reach them through testable imports, so the library targets are compiled with
@@ -40,7 +42,7 @@ file (`-testable-import-module`), as the app's single module does.
 ```sh
 swift build -c release --product codeg-talk --triple arm64-apple-macosx15.0   # what prepare-sidecars.mjs runs
 swift test                     # TalkHost: wire fixtures, mirror, requests, echo policy, routes, channel 0
-scripts/test-core.sh           # the vendored iPhone Talk tests, on macOS without Xcode
+scripts/test-core.sh           # the vendored iPhone Talk tests (174), on macOS without Xcode
 scripts/sync-from-ios.sh --check
 ```
 
@@ -48,7 +50,7 @@ scripts/sync-from-ios.sh --check
 
 `scripts/sync-from-ios.sh --commit <ref>` copies codeg-ios's
 `CodegiOS/Features/Talk/Core/` (every file), the models and support files Talk
-needs, and the engine packages (`../SherpaOnnx`, `../SmartTurn`,
+needs, the Talk tests that run on macOS, and the engine packages (`../SherpaOnnx`, `../SmartTurn`,
 `../WhisperCpp`, `../ExceptionCatcher`) at a pinned commit, read with
 `git show` (the iOS checkout is never touched). It writes `vendor.lock`: the
 commit and the sha256 and source of every vendored file. `--check` verifies
@@ -68,8 +70,11 @@ codeg-talk --version
 the macOS version, whether it runs natively on Apple Silicon, whether
 whisper.cpp loaded (the framework linked and answered), and the microphone
 permission (`granted`, `denied`, `undetermined`). It never asks for the
-microphone. Built for an Intel or universal target, codeg ships a stub with
-the same probe (`"arm64":false`) that refuses to start.
+microphone. Offer Talk on this Mac when `arm64` and `whisperLoads` are
+true, `stub` is absent and macOS is 15 or later. An Intel build (and the
+x86_64 slice of a universal one, or `CODEG_SKIP_TALK_SIDECAR=1`) ships
+`stub/codeg-talk-stub.c` instead: its probe has `"stub":true,"whisperLoads":false`,
+and started normally it says `hello`, then `ended` (`failed`) and exits.
 
 The process loads the engines on its first `start` and keeps them loaded
 across Talks; it exits 2 minutes (`--idle-exit`) after the last Talk ended,
