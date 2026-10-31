@@ -272,10 +272,6 @@ impl TalkSend {
     pub fn none() -> Self {
         Self::default()
     }
-
-    pub fn mode(&self) -> Option<TalkFrameMode> {
-        self.planned.as_ref().map(|planned| planned.mode)
-    }
 }
 
 /// Decide the frame for a message about to go to the agent on `session`.

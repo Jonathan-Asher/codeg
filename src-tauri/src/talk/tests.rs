@@ -412,16 +412,19 @@ async fn a_completed_compaction_or_new_settings_send_the_full_rules_again() {
     assert_eq!(body, "x");
 }
 
+/// The channel back, the blocks an insert carried and its talk frame.
+type AnsweredSteer = (
+    mpsc::Receiver<ConnectionCommand>,
+    Vec<PromptInputBlock>,
+    Option<String>,
+);
+
 /// Play the connection loop's role for one insert: answer `outcome` and hand
 /// back the frame the command carried.
 fn answer_steer(
     mut rx: mpsc::Receiver<ConnectionCommand>,
     outcome: SteerOutcome,
-) -> tokio::task::JoinHandle<(
-    mpsc::Receiver<ConnectionCommand>,
-    Vec<PromptInputBlock>,
-    Option<String>,
-)> {
+) -> tokio::task::JoinHandle<AnsweredSteer> {
     tokio::spawn(async move {
         match rx.recv().await {
             Some(ConnectionCommand::Steer {
