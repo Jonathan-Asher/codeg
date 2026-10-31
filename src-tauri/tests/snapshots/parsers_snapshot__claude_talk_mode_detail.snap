@@ -1,0 +1,107 @@
+---
+source: tests/parsers_snapshot.rs
+expression: detail.turns
+---
+[
+  {
+    "id": "turn-0",
+    "role": "user",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "תבדוק למה הבילד נופל"
+      }
+    ],
+    "timestamp": "[ts]",
+    "completed_at": "[ts]",
+    "spoken": true
+  },
+  {
+    "id": "turn-1",
+    "role": "assistant",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "אני בודק את זה."
+      }
+    ],
+    "timestamp": "[ts]",
+    "usage": {
+      "input_tokens": 10,
+      "output_tokens": 5,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0
+    },
+    "duration_ms": 2000,
+    "model": "claude-sonnet-4-6",
+    "completed_at": "[ts]",
+    "agent_message_id": "msg_a1"
+  },
+  {
+    "id": "turn-2",
+    "role": "user",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "רגע, תבדוק גם את הטסטים"
+      }
+    ],
+    "timestamp": "[ts]",
+    "completed_at": "[ts]",
+    "spoken": true
+  },
+  {
+    "id": "turn-3",
+    "role": "assistant",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "הבילד נופל על בדיקת טיפוסים."
+      }
+    ],
+    "timestamp": "[ts]",
+    "usage": {
+      "input_tokens": 10,
+      "output_tokens": 5,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0
+    },
+    "duration_ms": 2000,
+    "model": "claude-sonnet-4-6",
+    "completed_at": "[ts]",
+    "agent_message_id": "msg_a2"
+  },
+  {
+    "id": "turn-4",
+    "role": "user",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "thanks, back at the desk"
+      }
+    ],
+    "timestamp": "[ts]",
+    "completed_at": "[ts]"
+  },
+  {
+    "id": "turn-5",
+    "role": "assistant",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Sure."
+      }
+    ],
+    "timestamp": "[ts]",
+    "usage": {
+      "input_tokens": 10,
+      "output_tokens": 5,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0
+    },
+    "duration_ms": 2000,
+    "model": "claude-sonnet-4-6",
+    "completed_at": "[ts]",
+    "agent_message_id": "msg_a3"
+  }
+]
