@@ -1,0 +1,12 @@
+{
+  "id": 10,
+  "item": {
+    "connectionId": "conn-9",
+    "conversationId": 57,
+    "itemId": "permission:conn-9:perm-11",
+    "requestId": "perm-11"
+  },
+  "op": "respondItem",
+  "optionId": "allow",
+  "type": "req"
+}

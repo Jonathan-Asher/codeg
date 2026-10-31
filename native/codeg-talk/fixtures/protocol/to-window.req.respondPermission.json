@@ -1,0 +1,7 @@
+{
+  "id": 4,
+  "op": "respondPermission",
+  "optionId": "allow",
+  "requestId": "perm-7",
+  "type": "req"
+}

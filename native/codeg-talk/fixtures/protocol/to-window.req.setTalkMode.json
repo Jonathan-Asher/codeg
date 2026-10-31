@@ -1,0 +1,6 @@
+{
+  "enabled": true,
+  "id": 1,
+  "op": "setTalkMode",
+  "type": "req"
+}

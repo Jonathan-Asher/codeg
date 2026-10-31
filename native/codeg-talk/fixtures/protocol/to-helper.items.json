@@ -1,0 +1,76 @@
+{
+  "items": [
+    {
+      "agent_label": "Claude Code",
+      "agent_type": "claude_code",
+      "asked_at": "2026-11-01T09:31:02.5Z",
+      "connection_id": "conn-9",
+      "conversation_id": 57,
+      "folder_id": 3,
+      "folder_name": "codeg",
+      "id": "permission:conn-9:perm-11",
+      "kind": "permission",
+      "last_reminded_at": null,
+      "next_reminder_at": null,
+      "options": [
+        {
+          "id": "allow",
+          "kind": "allow_once",
+          "label": "Allow"
+        },
+        {
+          "id": "deny",
+          "kind": "reject_once",
+          "label": "Reject"
+        }
+      ],
+      "phone_notified": false,
+      "question": null,
+      "queued": 0,
+      "reminders_sent": 0,
+      "request_id": "perm-11",
+      "root_conversation_id": 42,
+      "source": "permission",
+      "text": "Run npm test",
+      "title": "Fix the flaky build"
+    },
+    {
+      "agent_label": "Claude Code",
+      "agent_type": "claude_code",
+      "asked_at": "2026-11-01T09:31:40Z",
+      "connection_id": "conn-9",
+      "conversation_id": 57,
+      "folder_id": 3,
+      "folder_name": "codeg",
+      "id": "question:conn-9:q-12",
+      "kind": "question",
+      "last_reminded_at": "2026-11-01T09:36:40Z",
+      "next_reminder_at": "2026-11-01T09:46:40Z",
+      "options": [
+        {
+          "id": "vitest",
+          "label": "vitest"
+        },
+        {
+          "id": "jest",
+          "label": "jest"
+        }
+      ],
+      "phone_notified": false,
+      "question": {
+        "count": 1,
+        "header": "Runner",
+        "item_id": "c41d",
+        "multi_select": false
+      },
+      "queued": 0,
+      "reminders_sent": 1,
+      "request_id": "q-12",
+      "root_conversation_id": 42,
+      "source": "question",
+      "text": "Which test runner?",
+      "title": "Fix the flaky build"
+    }
+  ],
+  "type": "items"
+}

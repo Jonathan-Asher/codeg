@@ -1,0 +1,51 @@
+{
+  "ask": {
+    "acceptsOwnWords": false,
+    "answerableByVoice": true,
+    "choices": [
+      {
+        "id": "allow",
+        "label": "Allow"
+      },
+      {
+        "id": "always",
+        "label": "Always allow"
+      },
+      {
+        "id": "deny",
+        "label": "Reject"
+      }
+    ],
+    "id": "permission:perm-7",
+    "isSecret": false,
+    "kind": "permission",
+    "multiSelect": false,
+    "prompt": "אני רוצה להריץ rm -rf build. לאשר?"
+  },
+  "awaitingBackground": false,
+  "backgroundOutstanding": 0,
+  "canReportCutOff": false,
+  "current": "ask:permission:perm-7:0:0",
+  "echo": "none",
+  "error": null,
+  "fastMode": false,
+  "handsFree": true,
+  "heard": "",
+  "heardFinal": false,
+  "mic": "granted",
+  "mute": "none",
+  "naturalVoice": true,
+  "pauseReason": null,
+  "route": "wired",
+  "speaksHebrew": true,
+  "spoken": [
+    {
+      "id": "ask:permission:perm-7:0:0",
+      "text": "אני רוצה להריץ rm -rf build. לאשר?"
+    }
+  ],
+  "status": "asking",
+  "suggestHeadphones": false,
+  "title": "Fix the flaky build",
+  "type": "state"
+}

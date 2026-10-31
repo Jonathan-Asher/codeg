@@ -8,6 +8,8 @@
 //   BlueTTSEspeak  GPL-3.0-or-later. espeak-ng 1.52.0 compiled from source plus its
 //                  English data, wrapped as an `EnglishPhonemizer`. Linking it makes the
 //                  combined binary GPL-3; see README "Licensing".
+//   OnnxRuntime    MIT. ONNX Runtime 1.30.0 and its Objective-C bindings (module
+//                  `OnnxRuntimeBindings`), for other on-device models in the same app.
 //   bluetts-cli    macOS-only benchmarking / golden-file tool (not for the app).
 
 import PackageDescription
@@ -21,6 +23,10 @@ let package = Package(
     products: [
         .library(name: "BlueTTSKit", targets: ["BlueTTSKit"]),
         .library(name: "BlueTTSEspeak", targets: ["BlueTTSEspeak"]),
+        // ONNX Runtime 1.30.0 itself (module `OnnxRuntimeBindings`), for other
+        // packages in the app (SherpaOnnx, SmartTurn), so the app links one
+        // runtime.
+        .library(name: "OnnxRuntime", targets: ["OnnxRuntimeBindings"]),
         .executable(name: "bluetts-cli", targets: ["bluetts-cli"]),
     ],
     dependencies: [],

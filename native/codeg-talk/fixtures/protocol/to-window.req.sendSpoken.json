@@ -1,0 +1,6 @@
+{
+  "id": 3,
+  "op": "sendSpoken",
+  "text": "תוסיף את המשתנה ל-staging ותריץ שוב",
+  "type": "req"
+}

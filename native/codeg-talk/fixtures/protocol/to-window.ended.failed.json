@@ -1,0 +1,5 @@
+{
+  "error": "Talk's live transcription didn't load. Delete its model in Settings › Talk and download it again.",
+  "reason": "failed",
+  "type": "ended"
+}

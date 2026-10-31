@@ -1,0 +1,22 @@
+{
+  "answer": {
+    "answers": [
+      {
+        "labels": [
+          "vitest"
+        ],
+        "questionId": "c41d"
+      }
+    ],
+    "declined": false
+  },
+  "id": 11,
+  "item": {
+    "connectionId": "conn-9",
+    "conversationId": 57,
+    "itemId": "question:conn-9:q-12",
+    "requestId": "q-12"
+  },
+  "op": "answerItem",
+  "type": "req"
+}

@@ -1,0 +1,32 @@
+{
+  "turns": [
+    {
+      "blocks": [
+        {
+          "text": "סיימתי להריץ את הבדיקות ברקע: כולן עוברות.",
+          "type": "text"
+        },
+        {
+          "input_preview": "npm test",
+          "tool_name": "Bash",
+          "tool_use_id": "toolu_77",
+          "type": "tool_use"
+        },
+        {
+          "is_error": false,
+          "output_preview": "212 passed",
+          "tool_use_id": "toolu_77",
+          "type": "tool_result"
+        }
+      ],
+      "completed_at": "2026-11-01T09:40:17.745Z",
+      "duration_ms": 5400,
+      "id": "turn-31",
+      "model": "opus",
+      "role": "assistant",
+      "timestamp": "2026-11-01T09:40:12.345678Z",
+      "usage": null
+    }
+  ],
+  "type": "bgTurns"
+}

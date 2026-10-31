@@ -1,0 +1,13 @@
+{
+  "decision": "approve",
+  "feedback": null,
+  "id": 12,
+  "item": {
+    "connectionId": "conn-9",
+    "conversationId": 57,
+    "itemId": "plan:conn-9:plan-4",
+    "requestId": "plan-4"
+  },
+  "op": "answerItemPlan",
+  "type": "req"
+}
