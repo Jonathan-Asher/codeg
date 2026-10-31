@@ -5808,7 +5808,7 @@
     "statusPaused": "Paused",
     "statusEnded": "Ended",
     "statusFailed": "Talk stopped",
-    "softMuted": "Listening only for “unmute” or “end”",
+    "softMuted": "Muted: listening only for voice commands",
     "backgroundWork": "{count, plural, one {# task} other {# tasks}} running in the background",
     "modeLabel": "How Talk listens",
     "handsFree": "Hands-free",
