@@ -13,7 +13,7 @@
 
 import { useCallback } from "react"
 
-import { useTalkEligibility, useTalkVoice } from "@/contexts/talk-voice-context"
+import { useTalkEligibility, useTalkVoice } from "@/contexts/talk-voice-state"
 
 export interface TalkMenu {
   showTalkOnMac: boolean

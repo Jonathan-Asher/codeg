@@ -129,6 +129,21 @@ export const TALK_VOICE_SHORTCUT_EVENT = "talk-voice://shortcut"
 export const TALK_VOICE_ERROR_UNSUPPORTED = "talkVoice.unsupported"
 export const TALK_VOICE_ERROR_MODELS_MISSING = "talkVoice.modelsMissing"
 
+/**
+ * A call's result as a promise, whatever it returned or threw: a window
+ * whose backend lacks the command, or a test double answering a plain value,
+ * must not break the page.
+ */
+export function settled<T>(
+  run: () => Promise<T> | T | undefined
+): Promise<T | undefined> {
+  try {
+    return Promise.resolve(run())
+  } catch (error) {
+    return Promise.reject(error)
+  }
+}
+
 function call<T>(command: string, args?: Record<string, unknown>) {
   return getShellTransport().call<T>(command, args, { timeoutMs: 30_000 })
 }

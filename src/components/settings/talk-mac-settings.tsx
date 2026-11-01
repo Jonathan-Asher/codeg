@@ -49,6 +49,7 @@ import {
 import {
   DEFAULT_TALK_SHORTCUT,
   openMicSettings,
+  settled,
   talkPrefsApi,
   talkVoiceApi,
   type TalkVoicePrefs,
@@ -128,25 +129,24 @@ export function TalkMacSettingsSection() {
   useEffect(() => {
     if (!desktop) return
     let cancelled = false
-    void talkVoiceApi
-      .status()
+    void settled(() => talkVoiceApi.status())
       .then((next) => {
         if (!cancelled && next) setStatus(next)
       })
       .catch(() => {})
-    void talkPrefsApi
-      .get()
+    void settled(() => talkPrefsApi.get())
       .then((next) => {
         if (!cancelled && next) setPrefs(next)
       })
       .catch(() => {})
     let off: (() => void) | null = null
-    void talkVoiceApi
-      .onStatus((payload) => setStatus(payload as TalkVoiceStatus))
-      .then((unsubscribe) => {
-        if (cancelled) unsubscribe()
-        else off = unsubscribe
-      })
+    void settled(() =>
+      talkVoiceApi.onStatus((payload) => setStatus(payload as TalkVoiceStatus))
+    ).then((unsubscribe) => {
+      if (typeof unsubscribe !== "function") return
+      if (cancelled) unsubscribe()
+      else off = unsubscribe
+    })
     return () => {
       cancelled = true
       off?.()

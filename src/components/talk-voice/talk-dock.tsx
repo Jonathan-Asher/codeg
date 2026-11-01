@@ -18,7 +18,7 @@ import {
   useTalkUi,
   useTalkVoice,
   type TalkSession,
-} from "@/contexts/talk-voice-context"
+} from "@/contexts/talk-voice-state"
 import { toErrorMessage } from "@/lib/app-error"
 import {
   openMicSettings,

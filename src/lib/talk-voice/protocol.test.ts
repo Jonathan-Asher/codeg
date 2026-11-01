@@ -100,7 +100,9 @@ describe("the helper's messages", () => {
 
   it("ignores what it doesn't know, and reads Rust's envelope", () => {
     expect(parseHelperMessage({ type: "somethingNew" })).toBeNull()
-    expect(parseHelperMessage({ type: "req", id: 1, op: "unknownOp" })).toBeNull()
+    expect(
+      parseHelperMessage({ type: "req", id: 1, op: "unknownOp" })
+    ).toBeNull()
     expect(parseHelperMessage("state")).toBeNull()
     expect(parseEnvelope({ talkId: 3, message: { type: "level" } })).toEqual({
       talkId: 3,
@@ -188,7 +190,11 @@ describe("the window's messages", () => {
     void _models
     expect(keys(started)).toEqual(keys(withoutModels))
     const message = started as unknown as Record<string, unknown>
-    expect(keys(message.port)).toEqual(keys(reference.port))
+    // `title` is a port field too (the helper reads it from `port`
+    // messages); its start fixture carries it at the top level only.
+    expect(keys(message.port).filter((k) => k !== "title")).toEqual(
+      keys(reference.port)
+    )
     expect(keys(message.voice)).toEqual(keys(reference.voice))
     expect(keys(message.app)).toEqual(keys(reference.app))
     expect(keys(message.settings)).toEqual(keys(reference.settings))

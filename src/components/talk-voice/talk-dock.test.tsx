@@ -20,7 +20,7 @@ const h = vi.hoisted(() => ({
   prefsUpdate: vi.fn(),
 }))
 
-vi.mock("@/contexts/talk-voice-context", () => ({
+vi.mock("@/contexts/talk-voice-state", () => ({
   useTalkVoice: () => ({
     session: h.session,
     control: h.control,

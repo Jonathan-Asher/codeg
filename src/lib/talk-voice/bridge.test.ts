@@ -8,6 +8,7 @@ import type { EventEnvelope, MessageTurn, PendingItem } from "@/lib/types"
 import type { TalkVoiceApi } from "./api"
 import type { TalkSendAdapter } from "./adapters"
 import {
+  LINGER_MS,
   TalkBridge,
   type TalkBridgeActions,
   type TalkBridgeBackend,
@@ -15,6 +16,10 @@ import {
 } from "./bridge"
 import { GRACE_MS } from "./live-text"
 import type { WindowMessage } from "./protocol"
+
+function last<T>(items: readonly T[]): T | undefined {
+  return items[items.length - 1]
+}
 
 const KEY = "conv-3-claude_code-42"
 
@@ -375,7 +380,7 @@ describe("TalkBridge", () => {
     // The next turn has the next id.
     t.store.set({ status: "prompting", liveMessage: live([text("Next.")]) })
     await vi.waitFor(() =>
-      expect(t.sent().at(-1)).toMatchObject({ type: "live", turnId: "42:2" })
+      expect(last(t.sent())).toMatchObject({ type: "live", turnId: "42:2" })
     )
   })
 
@@ -387,7 +392,7 @@ describe("TalkBridge", () => {
     t.store.set({ status: "disconnected" })
     vi.advanceTimersByTime(GRACE_MS)
     await vi.waitFor(() => expect(types(t.sent())).toContain("turnEnded"))
-    expect(t.sent().at(-1)).toEqual({
+    expect(last(t.sent())).toEqual({
       type: "turnEnded",
       turnId: "42:1",
       stopReason: null,
@@ -667,6 +672,7 @@ describe("TalkBridge", () => {
   })
 
   it("ends when the helper says so, and lets go of everything", async () => {
+    vi.useFakeTimers()
     const t = setup({ local: false })
     await t.start()
     t.deliver({
@@ -679,7 +685,6 @@ describe("TalkBridge", () => {
       error: "the models didn't load",
     })
     expect(t.bridge.running).toBe(false)
-    expect(t.listening()).toBe(false)
     expect(t.store.listeners.size).toBe(0)
     expect(t.setTalking).toHaveBeenLastCalledWith(null)
     expect(t.actions.registerLiveSurfaceKeys).toHaveBeenLastCalledWith(
@@ -690,6 +695,37 @@ describe("TalkBridge", () => {
     t.store.set({ status: "prompting" })
     await Promise.resolve()
     expect(t.sent()).toHaveLength(count)
+    // Its last requests may still come; then it stops listening.
+    expect(t.listening()).toBe(true)
+    vi.advanceTimersByTime(LINGER_MS)
+    expect(t.listening()).toBe(false)
+  })
+
+  it("answers the Talk's last requests after its end: Talk mode off and its reports", async () => {
+    const t = setup({ local: false })
+    await t.start()
+    t.deliver({ type: "ended", reason: "ended", error: null })
+    t.deliver({ type: "req", id: 21, op: "setTalkMode", enabled: false })
+    t.deliver({
+      type: "req",
+      id: 22,
+      op: "uploadReport",
+      report: { kind: "talk_lab" },
+    })
+    t.deliver({ type: "req", id: 23, op: "sendSpoken", text: "late" })
+    t.deliver({ type: "req", id: 24, op: "setTalkMode", enabled: false }, 99)
+    await vi.waitFor(() =>
+      expect(t.sent().filter((m) => m.type === "res")).toHaveLength(3)
+    )
+    expect(t.backend.setTalkMode).toHaveBeenCalledWith(42, false)
+    expect(t.backend.uploadReport).toHaveBeenCalledWith({ kind: "talk_lab" })
+    expect(t.sent()).toContainEqual({
+      type: "res",
+      id: 23,
+      ok: false,
+      error: "the Talk has ended",
+    })
+    expect(t.adapter?.sendSpoken).not.toHaveBeenCalled()
   })
 
   it("stops through the backend, and reports the helper's ended once", async () => {

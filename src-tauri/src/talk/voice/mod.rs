@@ -310,6 +310,10 @@ fn probe_problem(report: &Value) -> Option<String> {
                 .to_string(),
         );
     }
+    // What an Intel build ships instead of the helper.
+    if report.get("stub").and_then(Value::as_bool) == Some(true) {
+        return Some("this build of codeg has no Talk helper".into());
+    }
     if report.get("arm64").and_then(Value::as_bool) == Some(false) {
         return Some("Talk on this Mac needs Apple Silicon".into());
     }
@@ -517,9 +521,35 @@ impl ActiveTalk {
 }
 
 #[derive(Default)]
+/// A Talk that ended, for the requests its helper still sends (Talk mode
+/// off, its reports: the iPhone's controller asks for them as it lets go,
+/// after `ended`).
+#[derive(Debug, Clone)]
+struct EndedTalk {
+    id: u64,
+    window: String,
+    generation: u64,
+    local: bool,
+    conversation_id: i32,
+    window_gone: bool,
+}
+
+/// Whether a request is one a Talk makes as it ends: Talk mode off, or a
+/// report. With another Talk running, those still belong to the one that
+/// ended; anything else is the running Talk's.
+fn is_end_of_talk_request(request: &Value) -> bool {
+    match request.get("op").and_then(Value::as_str) {
+        Some("uploadReport") => true,
+        Some("setTalkMode") => request.get("enabled").and_then(Value::as_bool) == Some(false),
+        _ => false,
+    }
+}
+
 struct RelayState {
     helper: Option<HelperProc>,
     talk: Option<ActiveTalk>,
+    /// The Talk that ended last on the running helper.
+    ended: Option<EndedTalk>,
     next_generation: u64,
     /// A helper said this protocol version instead of ours.
     protocol_mismatch: Option<u32>,
@@ -889,6 +919,24 @@ impl TalkVoiceService {
         let line = serde_json::to_string(&message)
             .map_err(|e| TalkVoiceError::InvalidInput(e.to_string()))?;
         let state = self.state.lock().unwrap();
+        // The answer to a request a Talk made after it ended.
+        if let Some(ended) = state.ended.as_ref().filter(|e| e.id == talk_id) {
+            if ended.window != window {
+                return Err(TalkVoiceError::NotOwner);
+            }
+            if kind != Some("res") {
+                return Err(TalkVoiceError::NotRunning);
+            }
+            let helper = state
+                .helper
+                .as_ref()
+                .filter(|h| h.generation == ended.generation)
+                .ok_or(TalkVoiceError::NotRunning)?;
+            return helper
+                .lines
+                .send(line)
+                .map_err(|_| TalkVoiceError::Helper("the Talk helper stopped".into()));
+        }
         let talk = state.talk.as_ref().ok_or(TalkVoiceError::NotRunning)?;
         if talk.id != talk_id {
             return Err(TalkVoiceError::NotRunning);
@@ -1034,6 +1082,14 @@ impl TalkVoiceService {
         if let Some(heartbeat) = talk.heartbeat.take() {
             heartbeat.abort();
         }
+        self.state.lock().unwrap().ended = Some(EndedTalk {
+            id: talk.id,
+            window: talk.window.clone(),
+            generation: talk.generation,
+            local: talk.local,
+            conversation_id: talk.conversation_id,
+            window_gone: talk.window_gone,
+        });
         if let Some(host) = self.host() {
             if talk.local && talk.talking {
                 host.presence(&talk.presence_key(), talk.conversation_id, false);
@@ -1209,29 +1265,8 @@ impl TalkVoiceService {
             }
             return;
         }
-        if kind == "req" {
-            // A Talk whose window is gone: its last requests are answered
-            // here (the window can't), so it can finish ending.
-            let gone = {
-                let state = self.state.lock().unwrap();
-                state
-                    .talk
-                    .as_ref()
-                    .filter(|t| t.generation == generation && t.window_gone)
-                    .and_then(|t| {
-                        let lines = state
-                            .helper
-                            .as_ref()
-                            .filter(|h| h.generation == generation)?
-                            .lines
-                            .clone();
-                        Some((t.local, t.conversation_id, lines))
-                    })
-            };
-            if let Some((local, conversation_id, lines)) = gone {
-                self.answer_for_gone_window(message, local, conversation_id, lines);
-                return;
-            }
+        if kind == "req" && self.route_request(generation, &message) {
+            return;
         }
         let mut message = message;
         let mut finished = None;
@@ -1273,6 +1308,55 @@ impl TalkVoiceService {
         if let Some(talk) = finished {
             self.after_ended(talk);
         }
+    }
+
+    /// A request that is not the running Talk's to deliver as usual: one of
+    /// a Talk that ended (its window gets it; with the window gone, it is
+    /// answered here), or one of a running Talk whose window is gone
+    /// (answered here, so it can finish ending). True when it was handled.
+    fn route_request(&self, generation: u64, request: &Value) -> bool {
+        enum Owner {
+            Window(String, u64),
+            Gone(bool, i32),
+        }
+        let (owner, lines) = {
+            let state = self.state.lock().unwrap();
+            let Some(lines) = state
+                .helper
+                .as_ref()
+                .filter(|h| h.generation == generation)
+                .map(|h| h.lines.clone())
+            else {
+                return false;
+            };
+            let current = state.talk.as_ref().filter(|t| t.generation == generation);
+            let ended = state.ended.as_ref().filter(|e| e.generation == generation);
+            let owner = match (current, ended) {
+                (current, Some(ended)) if current.is_none() || is_end_of_talk_request(request) => {
+                    if ended.window_gone {
+                        Owner::Gone(ended.local, ended.conversation_id)
+                    } else {
+                        Owner::Window(ended.window.clone(), ended.id)
+                    }
+                }
+                (Some(current), _) if current.window_gone => {
+                    Owner::Gone(current.local, current.conversation_id)
+                }
+                _ => return false,
+            };
+            (owner, lines)
+        };
+        match owner {
+            Owner::Window(window, id) => {
+                if let Some(host) = self.host() {
+                    host.deliver(&window, &json!({"talkId": id, "message": request}));
+                }
+            }
+            Owner::Gone(local, conversation_id) => {
+                self.answer_for_gone_window(request.clone(), local, conversation_id, lines);
+            }
+        }
+        true
     }
 
     /// Answer a request of a Talk whose window is gone. Talk mode off: a local
@@ -1363,6 +1447,7 @@ impl TalkVoiceService {
             let mut state = self.state.lock().unwrap();
             let helper = state.helper.take_if(|h| h.generation == generation);
             let talk = state.talk.take_if(|t| t.generation == generation);
+            state.ended.take_if(|e| e.generation == generation);
             (helper, talk)
         };
         drop(helper);

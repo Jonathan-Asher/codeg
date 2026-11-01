@@ -8,7 +8,11 @@
 
 import { useCallback, useEffect, useState } from "react"
 
-import { talkModelsApi, type TalkModelsStatus } from "@/lib/talk-voice/api"
+import {
+  settled,
+  talkModelsApi,
+  type TalkModelsStatus,
+} from "@/lib/talk-voice/api"
 
 const POLL_MS = 1000
 
@@ -30,22 +34,22 @@ export function useTalkModels(enabled = true): TalkModels {
     if (!enabled) return
     let cancelled = false
     let off: (() => void) | null = null
-    void talkModelsApi
-      .status()
+    void settled(() => talkModelsApi.status())
       .then((next) => {
-        if (!cancelled) setStatus(next)
+        if (!cancelled && next) setStatus(next)
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(String(e))
       })
-    void talkModelsApi
-      .onChange((payload) => {
+    void settled(() =>
+      talkModelsApi.onChange((payload) => {
         if (!cancelled) setStatus(payload as TalkModelsStatus)
       })
-      .then((unsubscribe) => {
-        if (cancelled) unsubscribe()
-        else off = unsubscribe
-      })
+    ).then((unsubscribe) => {
+      if (typeof unsubscribe !== "function") return
+      if (cancelled) unsubscribe()
+      else off = unsubscribe
+    })
     return () => {
       cancelled = true
       off?.()
@@ -57,9 +61,10 @@ export function useTalkModels(enabled = true): TalkModels {
   useEffect(() => {
     if (!enabled || !downloading) return
     const timer = window.setInterval(() => {
-      void talkModelsApi
-        .status()
-        .then(setStatus)
+      void settled(() => talkModelsApi.status())
+        .then((next) => {
+          if (next) setStatus(next)
+        })
         .catch(() => {})
     }, POLL_MS)
     return () => window.clearInterval(timer)

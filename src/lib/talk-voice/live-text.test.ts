@@ -7,6 +7,10 @@ import type {
 import { GRACE_MS, LiveTurnTracker, mainThreadText } from "./live-text"
 import type { WindowMessage } from "./protocol"
 
+function last<T>(items: readonly T[]): T | undefined {
+  return items[items.length - 1]
+}
+
 const text = (value: string, parentToolUseId?: string): LiveContentBlock =>
   parentToolUseId
     ? { type: "text", text: value, parentToolUseId }
@@ -140,7 +144,7 @@ describe("LiveTurnTracker", () => {
         text("Found it."),
       ])
     )
-    expect(lives().at(-1)?.text).toBe("Looking now.\n\nFound it.")
+    expect(last(lives())?.text).toBe("Looking now.\n\nFound it.")
     expect(lives().some((m) => m.text.includes("sub-agent notes"))).toBe(false)
     expect(lives().every((m) => m.streaming)).toBe(true)
     expect(new Set(lives().map((m) => m.turnId))).toEqual(new Set(["42:1"]))
@@ -156,8 +160,8 @@ describe("LiveTurnTracker", () => {
     expect(ends()).toEqual([
       { type: "turnEnded", turnId: "42:1", stopReason: "end_turn" },
     ])
-    const lastLive = sent.lastIndexOf(lives().at(-1) as WindowMessage)
-    expect(lives().at(-1)).toMatchObject({ streaming: false })
+    const lastLive = sent.lastIndexOf(last(lives()) as WindowMessage)
+    expect(last(lives())).toMatchObject({ streaming: false })
     expect(lastLive).toBe(sent.length - 2)
   })
 
@@ -166,7 +170,7 @@ describe("LiveTurnTracker", () => {
     tracker.update(conn("connected", [text("One.")]))
     tracker.turnComplete("end_turn")
     tracker.update(conn("prompting", [text("Two.")]))
-    expect(lives().at(-1)).toMatchObject({ turnId: "42:2", text: "Two." })
+    expect(last(lives())).toMatchObject({ turnId: "42:2", text: "Two." })
     tracker.update(conn("connected", [text("Two.")]))
     tracker.turnComplete("cancelled")
     expect(ends()).toEqual([
@@ -185,7 +189,7 @@ describe("LiveTurnTracker", () => {
     vi.advanceTimersByTime(GRACE_MS * 2)
     expect(ends()).toEqual([])
     expect(new Set(lives().map((m) => m.turnId))).toEqual(new Set(["42:1"]))
-    expect(lives().at(-1)?.text).toBe("Working on it. Almost there.")
+    expect(last(lives())?.text).toBe("Working on it. Almost there.")
   })
 
   it("tells a turn that left without turn_complete as ended after the grace", () => {
@@ -196,7 +200,7 @@ describe("LiveTurnTracker", () => {
     expect(ends()).toEqual([
       { type: "turnEnded", turnId: "42:1", stopReason: null },
     ])
-    expect(lives().at(-1)).toMatchObject({
+    expect(last(lives())).toMatchObject({
       text: "Working on it. Done.",
       streaming: false,
     })
@@ -206,7 +210,7 @@ describe("LiveTurnTracker", () => {
     tracker.update(conn("prompting", [text("Trying.")]))
     tracker.update(conn("connected", [text("Trying.")], { error: "boom" }))
     vi.advanceTimersByTime(GRACE_MS)
-    expect(ends().at(-1)?.stopReason).toBe("error")
+    expect(last(ends())?.stopReason).toBe("error")
   })
 
   it("ends a turn once", () => {

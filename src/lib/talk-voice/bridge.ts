@@ -133,6 +133,13 @@ export type TalkBridgeStart = Pick<
  *  (`registerLiveSurfaceKeys`). */
 const LIVE_SURFACE_SOURCE = "talk-voice"
 
+/** How long after its end a Talk's last requests are still answered: the
+ *  helper turns Talk mode off and sends its reports after `ended`. */
+export const LINGER_MS = 60_000
+
+/** The requests a Talk makes as it lets go. */
+const LATE_OPS: ReadonlySet<string> = new Set(["setTalkMode", "uploadReport"])
+
 /** A sub-agent's waiting item of this conversation. */
 export function isSubAgentItem(item: PendingItem, conversationId: number) {
   return (
@@ -164,6 +171,9 @@ export class TalkBridge {
   private readonly sentTurns = new Map<string, string>()
   private readonly seenEvents = new Set<string>()
   private readonly unsubscribe: (() => void)[] = []
+  /** The helper's messages, kept a while after the end (`LINGER_MS`). */
+  private helperOff: (() => void) | null = null
+  private lingerTimer: unknown = null
   /** Helper messages that came before `start` answered with the Talk id. */
   private early: unknown[] = []
   private outbox: WindowMessage[] = []
@@ -195,11 +205,12 @@ export class TalkBridge {
     this.phase = "starting"
     const { api, sources, actions } = this.options
     // Listen first: the helper answers the start before the call returns.
-    this.unsubscribe.push(
-      await api.onMessage((payload) => this.onHelperPayload(payload))
+    this.helperOff = await api.onMessage((payload) =>
+      this.onHelperPayload(payload)
     )
     if (this.phase !== "starting") {
       this.teardown()
+      this.stopListening()
       throw new Error("Talk ended as it started")
     }
     const conn = sources.store.getConnection(this.contextKey)
@@ -229,10 +240,12 @@ export class TalkBridge {
       )
     } catch (error) {
       this.teardown()
+      this.stopListening()
       throw error
     }
     if (this.phase !== "starting") {
       // Ended (or stopped) while it was starting.
+      this.stopListening()
       void api.stop(started.talkId).catch(() => {})
       throw new Error("Talk ended as it started")
     }
@@ -318,8 +331,8 @@ export class TalkBridge {
 
   /** Let go without telling the helper (the window is going away). */
   dispose(): void {
-    if (this.phase === "ended") return
-    this.teardown()
+    if (this.phase !== "ended") this.teardown()
+    this.stopListening()
   }
 
   // ── The session → the helper ──
@@ -365,7 +378,10 @@ export class TalkBridge {
   // ── The helper → the session ──
 
   private onHelperPayload(payload: unknown): void {
-    if (this.phase === "ended") return
+    if (this.phase === "ended") {
+      this.onLateRequest(payload)
+      return
+    }
     if (this.phase === "starting" || this.talkId === null) {
       this.early.push(payload)
       return
@@ -479,6 +495,42 @@ export class TalkBridge {
     }
   }
 
+  /** A request of this Talk after its end: Talk mode off and its reports
+   *  are carried out as before; anything else is refused. */
+  private onLateRequest(payload: unknown): void {
+    const envelope = parseEnvelope(payload)
+    if (!envelope || this.talkId === null || envelope.talkId !== this.talkId) {
+      return
+    }
+    const message = parseHelperMessage(envelope.message)
+    if (!message || message.type !== "req") return
+    const talkId = this.talkId
+    const answer = async () => {
+      if (!LATE_OPS.has(message.op)) {
+        return responseMessage(message.id, {
+          ok: false,
+          error: "the Talk has ended",
+        })
+      }
+      try {
+        return responseMessage(message.id, {
+          ok: true,
+          value: await this.perform(message),
+        })
+      } catch (error) {
+        return responseMessage(message.id, {
+          ok: false,
+          error: errorText(error),
+        })
+      }
+    }
+    void answer().then((response) =>
+      this.options.api
+        .send(talkId, [response])
+        .catch((error) => console.warn("[TalkBridge] late answer:", error))
+    )
+  }
+
   // ── Plumbing ──
 
   /** Queue a message for the helper; sent in order, a batch per call. */
@@ -511,9 +563,40 @@ export class TalkBridge {
   private finish(ended: { reason: string; error: string | null }): void {
     if (this.phase === "ended") return
     this.teardown()
+    // Its last requests (Talk mode off, the reports) come after `ended`.
+    if (this.helperOff) {
+      const timers = this.options.timers ?? {
+        setTimeout: (handler: () => void, ms: number) =>
+          globalThis.setTimeout(handler, ms),
+        clearTimeout: (handle: unknown) =>
+          globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>),
+      }
+      this.lingerTimer = timers.setTimeout(
+        () => this.stopListening(),
+        LINGER_MS
+      )
+    }
     if (this.endedReported) return
     this.endedReported = true
     this.options.onEnded?.(ended)
+  }
+
+  private stopListening(): void {
+    if (this.lingerTimer !== null) {
+      const clear =
+        this.options.timers?.clearTimeout ??
+        ((handle: unknown) =>
+          globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>))
+      clear(this.lingerTimer)
+      this.lingerTimer = null
+    }
+    const off = this.helperOff
+    this.helperOff = null
+    try {
+      off?.()
+    } catch {
+      // Already gone.
+    }
   }
 
   private teardown(): void {

@@ -12,14 +12,11 @@
  */
 
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
   type ReactNode,
 } from "react"
 import { useTranslations } from "next-intl"
@@ -42,6 +39,7 @@ import { talkSendAdapter } from "@/lib/talk-voice/adapters"
 import {
   DEFAULT_TALK_VOICE_PREFS,
   TALK_VOICE_ERROR_MODELS_MISSING,
+  settled,
   talkModelsApi,
   talkPrefsApi,
   talkVoiceApi,
@@ -50,134 +48,20 @@ import {
   type TalkVoiceStatus,
 } from "@/lib/talk-voice/api"
 import { TalkBridge } from "@/lib/talk-voice/bridge"
-import type {
-  TalkAppInfo,
-  TalkControl,
-  TalkLevel,
-  TalkUiState,
-} from "@/lib/talk-voice/protocol"
+import type { TalkAppInfo, TalkControl } from "@/lib/talk-voice/protocol"
 import { sessionBackend } from "@/lib/talk-voice/session-backend"
+import {
+  levelsStore,
+  TalkVoiceContext,
+  uiStore,
+  type TalkSession,
+  type TalkVoiceContextValue,
+} from "@/contexts/talk-voice-state"
 import { watchTabClosed } from "@/lib/talk-voice/tab-watch"
 import { isDesktop, isRemoteDesktopMode } from "@/lib/transport"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { usePendingItemsStore } from "@/stores/pending-items-store"
 import { useTabStore } from "@/stores/tab-store"
-
-/** Whether a conversation can be talked with on this Mac, and if not why. */
-export type TalkEligibility =
-  /** Talk on this Mac can start. */
-  | "ok"
-  /** Not the desktop app. */
-  | "unavailable"
-  /** The helper is missing, the Mac can't run it, or it is switched off. */
-  | "unsupported"
-  /** A new chat not saved yet. */
-  | "notSaved"
-  /** The session's server predates Talk mode. */
-  | "noTalkMode"
-
-export interface TalkSession {
-  conversationId: number
-  /** The conversation tab's id. */
-  contextKey: string
-  talkId: number | null
-  phase: "starting" | "running"
-}
-
-/**
- * Changes only when a Talk starts or ends or the backend's status does, so
- * every menu can read it; the dock's fast-changing state (the helper's
- * `state`, the levels) lives in stores of its own ({@link useTalkUi},
- * {@link useTalkLevels}).
- */
-export interface TalkVoiceContextValue {
-  /** The desktop app: Talk on this Mac may run in this window. */
-  available: boolean
-  status: TalkVoiceStatus | null
-  /** Talk on this Mac can run here (the helper is in and its check passed). */
-  supported: boolean
-  /** This window's Talk. */
-  session: TalkSession | null
-  startTalk(conversationId: number): Promise<void>
-  endTalk(): Promise<void>
-  control(control: TalkControl): void
-  refreshStatus(refreshProbe?: boolean): Promise<void>
-}
-
-const TalkVoiceContext = createContext<TalkVoiceContextValue | null>(null)
-
-/** Outside the provider (another page, a test): no Talk on this Mac. */
-const INERT: TalkVoiceContextValue = {
-  available: false,
-  status: null,
-  supported: false,
-  session: null,
-  startTalk: async () => {},
-  endTalk: async () => {},
-  control: () => {},
-  refreshStatus: async () => {},
-}
-
-export function useTalkVoice(): TalkVoiceContextValue {
-  return useContext(TalkVoiceContext) ?? INERT
-}
-
-/** Whether `conversationId` can be talked with on this Mac (a narrow store
- *  read per conversation, so a menu re-renders only for its own row). */
-export function useTalkEligibility(
-  conversationId: number | null | undefined
-): TalkEligibility {
-  const { available, supported } = useTalkVoice()
-  const knowsTalk = useAppWorkspaceStore((s) => {
-    if (conversationId == null || conversationId <= 0) return null
-    const summary = s.conversations.find((c) => c.id === conversationId)
-    if (!summary) return null
-    return typeof summary.talk_mode === "boolean"
-  })
-  if (!available) return "unavailable"
-  if (!supported) return "unsupported"
-  if (knowsTalk === null) return "notSaved"
-  if (!knowsTalk) return "noTalkMode"
-  return "ok"
-}
-
-/** A value kept out of React state, so only its readers re-render. */
-function externalValue<T>(initial: T) {
-  let value = initial
-  const listeners = new Set<() => void>()
-  return {
-    get: () => value,
-    set(next: T) {
-      value = next
-      for (const listener of [...listeners]) listener()
-    },
-    subscribe(onChange: () => void) {
-      listeners.add(onChange)
-      return () => {
-        listeners.delete(onChange)
-      }
-    },
-  }
-}
-
-// The microphone and speech levels (15 a second) and the helper's `state`
-// (up to 20 a second): only the dock reads them.
-const levelsStore = externalValue<TalkLevel | null>(null)
-const uiStore = externalValue<TalkUiState | null>(null)
-
-/** The latest levels (`{in, out}`, 0…1), or null. */
-export function useTalkLevels(): TalkLevel | null {
-  return useSyncExternalStore(
-    levelsStore.subscribe,
-    levelsStore.get,
-    () => null
-  )
-}
-
-/** The helper's latest `state` for this window's Talk, or null. */
-export function useTalkUi(): TalkUiState | null {
-  return useSyncExternalStore(uiStore.subscribe, uiStore.get, () => null)
-}
 
 async function appInfo(): Promise<TalkAppInfo> {
   try {
@@ -198,6 +82,16 @@ function conversationSummary(conversationId: number) {
     .getState()
     .conversations.find((c) => c.id === conversationId)
 }
+
+export {
+  useTalkEligibility,
+  useTalkLevels,
+  useTalkUi,
+  useTalkVoice,
+  type TalkEligibility,
+  type TalkSession,
+  type TalkVoiceContextValue,
+} from "@/contexts/talk-voice-state"
 
 export function TalkVoiceProvider({ children }: { children: ReactNode }) {
   const t = useTranslations("TalkVoice")
@@ -225,24 +119,28 @@ export function TalkVoiceProvider({ children }: { children: ReactNode }) {
     if (!available) return
     let cancelled = false
     const offs: (() => void)[] = []
-    void talkVoiceApi
-      .status()
+    void settled(() => talkVoiceApi.status())
       .then((next) => {
-        if (!cancelled) setStatus(next)
+        if (!cancelled && next) setStatus(next)
       })
       .catch(() => {
         // An older backend without Talk on this Mac.
       })
-    void talkVoiceApi
-      .onStatus((payload) => setStatus(payload as TalkVoiceStatus))
-      .then((off) => (cancelled ? off() : offs.push(off)))
-    void talkModelsApi
-      .onChange((payload) =>
+    const keep = (off: (() => void) | undefined) => {
+      if (typeof off !== "function") return
+      if (cancelled) off()
+      else offs.push(off)
+    }
+    void settled(() =>
+      talkVoiceApi.onStatus((payload) => setStatus(payload as TalkVoiceStatus))
+    ).then(keep)
+    void settled(() =>
+      talkModelsApi.onChange((payload) =>
         setStatus((prev) =>
           prev ? { ...prev, models: payload as TalkModelsStatus } : prev
         )
       )
-      .then((off) => (cancelled ? off() : offs.push(off)))
+    ).then(keep)
     return () => {
       cancelled = true
       for (const off of offs) off()
@@ -447,8 +345,8 @@ export function TalkVoiceProvider({ children }: { children: ReactNode }) {
     if (!available) return
     let cancelled = false
     let off: (() => void) | null = null
-    void talkVoiceApi
-      .onShortcut(() => {
+    void settled(() =>
+      talkVoiceApi.onShortcut(() => {
         if (bridgeRef.current) return
         const tabs = useTabStore.getState()
         const active = tabs.rawTabs.find((tab) => tab.id === tabs.activeTabId)
@@ -458,10 +356,11 @@ export function TalkVoiceProvider({ children }: { children: ReactNode }) {
           toast.info(tRef.current("shortcutNoSession"))
         }
       })
-      .then((unsubscribe) => {
-        if (cancelled) unsubscribe()
-        else off = unsubscribe
-      })
+    ).then((unsubscribe) => {
+      if (typeof unsubscribe !== "function") return
+      if (cancelled) unsubscribe()
+      else off = unsubscribe
+    })
     return () => {
       cancelled = true
       off?.()

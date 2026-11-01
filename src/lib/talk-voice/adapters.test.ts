@@ -63,7 +63,9 @@ describe("spokenSender (codeg-ios sendSpoken)", () => {
       connection: () => ({ status: "prompting", nativeSteering: true }),
     })
     await expect(spokenSender(d)("and lint?")).resolves.toBe("insert")
-    expect(calls.steer).toEqual([{ text: "and lint?", clientId: "optimistic-1" }])
+    expect(calls.steer).toEqual([
+      { text: "and lint?", clientId: "optimistic-1" },
+    ])
     expect(calls.send).toEqual([])
   })
 
