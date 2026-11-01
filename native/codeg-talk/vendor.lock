@@ -1,8 +1,8 @@
 # codeg-talk vendor.lock: written by scripts/sync-from-ios.sh, checked by
 # `scripts/sync-from-ios.sh --check`. Never edit vendored files by hand.
 @repo Jonathan-Asher/codeg-ios
-@commit 0187113a200c0f1f90c8cd95111589c53fb38daf
-@subject Talk reports its timings again: keep the reports and take background time before the audio stops, send them while Talk m
+@commit 7eda84637d7a59890455f8372c2a62a3d9626b33
+@subject Talk keeps and sends its timing reports even when a call ends with the phone locked, and its reusable parts move into th
 016b8ef8dfc2361cf5db79de3fc4f9f7c3c1b326885cea53a6fe0cf0aded81d7  ../WhisperCpp/Package.swift  Packages/WhisperCpp/Package.swift
 069c588b7c7340a417f4cef2a1ff80370733a74357fe1cf7a540891a2e382f01  Sources/TalkCore/Vendor/Talk/TalkController.swift  CodegiOS/Features/Talk/Core/TalkController.swift
 08cba67a99825bfda96cd1d8d0e16c7c7d8540bae70bf1f8737b30635c6e5919  Sources/TalkCore/Vendor/Support/SpeechToText.swift  CodegiOS/Features/Dictation/SpeechToText.swift
