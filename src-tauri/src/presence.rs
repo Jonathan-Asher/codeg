@@ -164,6 +164,10 @@ impl PresenceRegistry {
         );
     }
 
+    pub fn forget_window(&mut self, label: &str) {
+        self.clients.remove(&ClientKey::Window(label.to_string()));
+    }
+
     pub fn looking(&self, now: Instant) -> Looking {
         let mut looking = Looking::default();
         // Talking to a session is attending to it, from a pocket included.
@@ -194,6 +198,17 @@ impl PresenceRegistry {
             .filter(|(report, at)| {
                 report.talking && now.saturating_duration_since(*at) <= STALE_AFTER
             })
+            .flat_map(|(report, _)| report.conversation_ids.iter().copied())
+            .collect()
+    }
+
+    /// The sessions some client's fresh report names, whatever it says about
+    /// them (looking, talking, or merely shown on a locked phone).
+    pub fn reported(&self, now: Instant) -> HashSet<i32> {
+        self.clients
+            .values()
+            .filter_map(|client| client.report.as_ref())
+            .filter(|(_, at)| now.saturating_duration_since(*at) <= STALE_AFTER)
             .flat_map(|(report, _)| report.conversation_ids.iter().copied())
             .collect()
     }
@@ -242,10 +257,23 @@ pub fn talking() -> HashSet<i32> {
     with_registry(|r| r.talking(now))
 }
 
+/// The sessions some client's fresh report names (see
+/// [`PresenceRegistry::reported`]).
+pub fn reported() -> HashSet<i32> {
+    let now = Instant::now();
+    with_registry(|r| r.reported(now))
+}
+
 /// A desktop window of this process reported its presence.
 pub fn report_window(label: &str, report: PresenceReport) {
     let now = Instant::now();
     with_registry(|r| r.report_window(label, report, now));
+}
+
+/// Drop a desktop window's entry at once (a Talk on this Mac that ended,
+/// rather than waiting [`STALE_AFTER`] for its report to go stale).
+pub fn forget_window(label: &str) {
+    with_registry(|r| r.forget_window(label));
 }
 
 /// How many event WebSockets are connected (diagnostics).
@@ -420,6 +448,43 @@ mod tests {
         r.report_socket(phone, report(false, false, 0, &[12]), later);
         assert!(r.talking(later).is_empty());
         assert!(!r.looking(later).at(12));
+    }
+
+    #[test]
+    fn a_fresh_report_names_its_sessions_whatever_it_says() {
+        let mut r = PresenceRegistry::default();
+        let t0 = Instant::now();
+        let phone = r.connect_socket(ClientKind::Ios);
+        // A locked phone showing session 25: not looking, not talking.
+        r.report_socket(phone, report(false, false, 0, &[25]), t0);
+        assert!(r.looking(t0).conversations.is_empty());
+        assert_eq!(r.reported(t0), HashSet::from([25]));
+        let later = t0 + STALE_AFTER + Duration::from_secs(1);
+        assert!(r.reported(later).is_empty(), "a dead phone names nothing");
+    }
+
+    /// Talk on this Mac reports under a window key of its own: the session
+    /// counts as attended, nobody counts as at the desk, and the entry goes
+    /// as soon as the Talk ends.
+    #[test]
+    fn a_talk_on_this_mac_attends_its_session_until_forgotten() {
+        let mut r = PresenceRegistry::default();
+        let t0 = Instant::now();
+        r.report_window(
+            "talk-voice:3",
+            PresenceReport {
+                talking: true,
+                ..report(false, false, 0, &[21])
+            },
+            t0,
+        );
+        let looking = r.looking(t0);
+        assert!(looking.away());
+        assert!(looking.at(21));
+        assert_eq!(r.talking(t0), HashSet::from([21]));
+        r.forget_window("talk-voice:3");
+        assert!(r.talking(t0).is_empty());
+        assert!(!r.looking(t0).at(21));
     }
 
     #[test]

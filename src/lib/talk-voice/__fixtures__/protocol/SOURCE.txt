@@ -1,0 +1,1 @@
+Copied from native/codeg-talk/fixtures/protocol on feat/talk-mac-helper at 284fa9527. Keep in step with the helper: re-copy when it changes.

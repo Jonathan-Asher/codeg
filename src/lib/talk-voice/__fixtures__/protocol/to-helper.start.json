@@ -1,0 +1,195 @@
+{
+  "app": {
+    "build": "318",
+    "bundleId": "app.codeg",
+    "version": "0.9.2-fork.318"
+  },
+  "conversationId": 42,
+  "folder": "codeg",
+  "items": [
+    {
+      "agent_label": "Claude Code",
+      "agent_type": "claude_code",
+      "asked_at": "2026-11-01T09:31:02.5Z",
+      "connection_id": "conn-9",
+      "conversation_id": 57,
+      "folder_id": 3,
+      "folder_name": "codeg",
+      "id": "permission:conn-9:perm-11",
+      "kind": "permission",
+      "last_reminded_at": null,
+      "next_reminder_at": null,
+      "options": [
+        {
+          "id": "allow",
+          "kind": "allow_once",
+          "label": "Allow"
+        },
+        {
+          "id": "deny",
+          "kind": "reject_once",
+          "label": "Reject"
+        }
+      ],
+      "phone_notified": false,
+      "question": null,
+      "queued": 0,
+      "reminders_sent": 0,
+      "request_id": "perm-11",
+      "root_conversation_id": 42,
+      "source": "permission",
+      "text": "Run npm test",
+      "title": "Fix the flaky build"
+    },
+    {
+      "agent_label": "Claude Code",
+      "agent_type": "claude_code",
+      "asked_at": "2026-11-01T09:31:40Z",
+      "connection_id": "conn-9",
+      "conversation_id": 57,
+      "folder_id": 3,
+      "folder_name": "codeg",
+      "id": "question:conn-9:q-12",
+      "kind": "question",
+      "last_reminded_at": "2026-11-01T09:36:40Z",
+      "next_reminder_at": "2026-11-01T09:46:40Z",
+      "options": [
+        {
+          "id": "vitest",
+          "label": "vitest"
+        },
+        {
+          "id": "jest",
+          "label": "jest"
+        }
+      ],
+      "phone_notified": false,
+      "question": {
+        "count": 1,
+        "header": "Runner",
+        "item_id": "c41d",
+        "multi_select": false
+      },
+      "queued": 0,
+      "reminders_sent": 1,
+      "request_id": "q-12",
+      "root_conversation_id": 42,
+      "source": "question",
+      "text": "Which test runner?",
+      "title": "Fix the flaky build"
+    },
+    {
+      "agent_label": "Claude Code",
+      "agent_type": "claude_code",
+      "asked_at": "2026-11-01T09:31:02.5Z",
+      "connection_id": "conn-1",
+      "conversation_id": 42,
+      "folder_id": 3,
+      "folder_name": "codeg",
+      "id": "permission:conn-1:perm-7",
+      "kind": "permission",
+      "last_reminded_at": null,
+      "next_reminder_at": null,
+      "options": [
+        {
+          "id": "allow",
+          "kind": "allow_once",
+          "label": "Allow"
+        },
+        {
+          "id": "deny",
+          "kind": "reject_once",
+          "label": "Reject"
+        }
+      ],
+      "phone_notified": false,
+      "question": null,
+      "queued": 0,
+      "reminders_sent": 0,
+      "request_id": "perm-7",
+      "root_conversation_id": 42,
+      "source": "permission",
+      "text": "rm -rf build",
+      "title": "Fix the flaky build"
+    }
+  ],
+  "live": {
+    "streaming": true,
+    "text": "בדקתי את הלוגים של ה-CI.",
+    "turnId": "42:7"
+  },
+  "models": {
+    "bluetts": "/Users/jonathan/Library/Application Support/app.codeg/tts/models",
+    "espeakData": "/Applications/codeg.app/Contents/Resources/tts/espeak-ng-data",
+    "languageID": "/Users/jonathan/Library/Application Support/app.codeg/talk/he-turbo/ggml-tiny-q8_0.bin",
+    "smartTurn": "/Users/jonathan/Library/Application Support/app.codeg/talk/smart-turn-v3.2/smart-turn-v3.2-cpu.onnx",
+    "vad": "/Users/jonathan/Library/Application Support/app.codeg/talk/he-zipformer-stream/ggml-silero-v5.1.2.bin",
+    "whisper": "/Users/jonathan/Library/Application Support/app.codeg/talk/he-turbo/ggml-ivrit-large-v3-turbo-q8_0.bin",
+    "zipformer": {
+      "decoder": "/Users/jonathan/Library/Application Support/app.codeg/talk/he-zipformer-stream/zipformer2-66m-streaming-he-decoder.int8.onnx",
+      "encoder": "/Users/jonathan/Library/Application Support/app.codeg/talk/he-zipformer-stream/zipformer2-66m-streaming-he-encoder.int8.onnx",
+      "joiner": "/Users/jonathan/Library/Application Support/app.codeg/talk/he-zipformer-stream/zipformer2-66m-streaming-he-joiner.int8.onnx",
+      "tokens": "/Users/jonathan/Library/Application Support/app.codeg/talk/he-zipformer-stream/zipformer2-66m-streaming-he-tokens.txt"
+    }
+  },
+  "port": {
+    "awaitingBackground": false,
+    "backgroundOutstanding": 0,
+    "canInsertIntoTurn": true,
+    "isInFlight": true,
+    "pendingPermission": {
+      "created_at": "2026-11-01T09:30:00.123456Z",
+      "options": [
+        {
+          "kind": "allow_once",
+          "name": "Allow",
+          "option_id": "allow"
+        },
+        {
+          "kind": "allow_always",
+          "name": "Always allow",
+          "option_id": "always"
+        },
+        {
+          "kind": "reject_once",
+          "name": "Reject",
+          "option_id": "deny"
+        }
+      ],
+      "queued": 0,
+      "request_id": "perm-7",
+      "tool_call": {
+        "kind": "execute",
+        "raw_input": {
+          "command": "rm -rf build",
+          "description": "Delete the build folder"
+        },
+        "title": "rm -rf build",
+        "toolCallId": "toolu_01"
+      },
+      "tool_call_id": "toolu_01"
+    },
+    "pendingPlanApproval": null,
+    "pendingQuestion": null
+  },
+  "prefs": {
+    "echoMode": "automatic",
+    "handsFree": true,
+    "interruptBySpeaking": true,
+    "patience": "normal",
+    "shareTelemetry": true,
+    "smartTurnActive": false,
+    "speakProgress": false
+  },
+  "protocol": 1,
+  "settings": {
+    "address": "masculine",
+    "language": "auto"
+  },
+  "title": "Fix the flaky build",
+  "type": "start",
+  "voice": {
+    "name": "noa",
+    "speed": 1.0
+  }
+}

@@ -151,6 +151,7 @@ import {
   useReadAloudActions,
   useReadAloudSupported,
 } from "@/lib/read-aloud/use-read-aloud"
+import { isTalkVoiceActive } from "@/lib/talk-voice/active"
 import { MarkdownImageProvider } from "@/components/ai-elements/markdown-local-image"
 
 interface MessageListViewProps {
@@ -1677,7 +1678,8 @@ export function MessageListView({
     const before = autoReadArmRef.current
     if (before === undefined) return
     autoReadArmRef.current = undefined
-    if (!autoRead || !isActive) return
+    // A Talk on this Mac speaks the replies itself.
+    if (!autoRead || !isActive || isTalkVoiceActive()) return
     const reply = lastFinishedReply(threadItems, readAloudScope)
     if (!reply || fingerprint(reply) === before) return
     readAloud.read(reply.id, reply.text)

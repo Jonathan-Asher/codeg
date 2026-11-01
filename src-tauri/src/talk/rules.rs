@@ -83,9 +83,9 @@ fn compact_address(address: TalkAddress) -> &'static str {
 /// The full rules for a connection to `agent_type` under `settings`.
 pub fn full(settings: TalkSettings, agent_type: AgentType) -> String {
     format!(
-        "Talk mode is on. The person is talking with you by voice from their phone, \
-sometimes with the phone in a pocket. Their messages are speech transcripts, so go by \
-the meaning and allow for recognition mistakes. English terms may arrive written in \
+        "Talk mode is on. The person is talking with you by voice from their phone \
+(sometimes in a pocket) or their computer. Their messages are speech transcripts, so go \
+by the meaning and allow for recognition mistakes. English terms may arrive written in \
 Hebrew letters or spelled out; for example, \"פול ריקווסט\" means a pull request. \
 Everything you write is read aloud except fenced code blocks, which are only shown on \
 screen. Talk like a colleague on a call. {language} {address}

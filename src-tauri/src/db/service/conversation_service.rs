@@ -1704,6 +1704,18 @@ pub async fn read_talk_state(
         .map(|row| row.talk_state))
 }
 
+/// The live conversations in Talk (`on`).
+pub async fn list_talk_on(conn: &DatabaseConnection) -> Result<Vec<i32>, DbError> {
+    Ok(conversation::Entity::find()
+        .select_only()
+        .column(conversation::Column::Id)
+        .filter(conversation::Column::TalkState.eq(conversation::ConversationTalkState::On))
+        .filter(conversation::Column::DeletedAt.is_null())
+        .into_tuple::<i32>()
+        .all(conn)
+        .await?)
+}
+
 /// A typed SQL value for the `talk_state` column.
 fn talk_state_value(state: Option<conversation::ConversationTalkState>) -> sea_orm::Value {
     match state {

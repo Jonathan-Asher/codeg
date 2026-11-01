@@ -23,6 +23,7 @@ pub const TTS_STATUS_EVENT: &str = "tts://status";
 /// Error keys the read-aloud UI branches on (`src/lib/read-aloud/natural-api.ts`).
 pub const TTS_I18N_KEY_NOT_INSTALLED: &str = "tts.notInstalled";
 pub const TTS_I18N_KEY_UNSUPPORTED: &str = "tts.unsupported";
+pub const TTS_I18N_KEY_TALK_ACTIVE: &str = "tts.talkActive";
 
 impl From<TtsError> for AppCommandError {
     fn from(err: TtsError) -> Self {
@@ -34,6 +35,8 @@ impl From<TtsError> for AppCommandError {
                 .with_i18n(TTS_I18N_KEY_NOT_INSTALLED, Default::default()),
             TtsError::InvalidInput(_) => AppCommandError::invalid_input(message),
             TtsError::StreamNotFound => AppCommandError::not_found(message),
+            TtsError::TalkActive => AppCommandError::configuration_invalid(message)
+                .with_i18n(TTS_I18N_KEY_TALK_ACTIVE, Default::default()),
             TtsError::Engine(_) => AppCommandError::task_execution_failed(message),
             TtsError::Io(e) => AppCommandError::io(e),
         }
@@ -169,6 +172,8 @@ mod tests {
             AppCommandError::from(TtsError::StreamNotFound).code,
             AppErrorCode::NotFound
         ));
+        let e = AppCommandError::from(TtsError::TalkActive);
+        assert_eq!(e.i18n_key.as_deref(), Some(TTS_I18N_KEY_TALK_ACTIVE));
         assert!(matches!(
             AppCommandError::from(TtsError::InvalidInput("x".into())).code,
             AppErrorCode::InvalidInput

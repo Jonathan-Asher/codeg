@@ -94,6 +94,9 @@ interface ConversationShellProps {
    *  the agent failed to load this session) without hijacking the message
    *  area above. Renders nothing when omitted. */
   composerBanner?: ReactNode
+  /** Talk on this Mac's dock (`TalkDock`), above the composer while this
+   *  window talks with the conversation; renders nothing otherwise. */
+  talkDock?: ReactNode
   /** Optional read-only live-feedback notes list rendered just above the
    *  composer (see `FeedbackNotesDisplay`). Renders nothing when there are no
    *  notes for the current turn. */
@@ -212,6 +215,7 @@ export function ConversationShell({
   getSentHistory,
   hideInput = false,
   composerBanner,
+  talkDock,
   feedbackList,
   onAddFeedback,
   feedbackAddDisabled,
@@ -294,6 +298,12 @@ export function ConversationShell({
         {composerBanner && (
           <div className="mx-auto w-full max-w-(--session-column-max-width) px-4 pb-2">
             {composerBanner}
+          </div>
+        )}
+
+        {talkDock && (
+          <div className="mx-auto w-full max-w-(--session-column-max-width) px-4">
+            {talkDock}
           </div>
         )}
 

@@ -107,6 +107,7 @@ export function useReadAloudActions(): ReadAloudActions {
       if (!result) return result
       if (!result.ok) {
         if (result.reason === "empty") toast.info(t("nothingToRead"))
+        if (result.reason === "talkActive") toast.info(t("pausedForTalk"))
         return result
       }
       if (

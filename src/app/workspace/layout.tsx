@@ -88,6 +88,7 @@ import { WorkspaceTransfersToasts } from "@/components/layout/workspace-transfer
 import { AutoResumeToasts } from "@/components/layout/auto-resume-toasts"
 import { CriticalAlerts } from "@/components/layout/critical-alerts"
 import { PendingItemsBridge } from "@/components/layout/pending-items-bridge"
+import { TalkVoiceProvider } from "@/contexts/talk-voice-context"
 import { ShownSessionPresence } from "@/components/workspace/shown-session-presence"
 import { ConversationViewTracker } from "@/components/workspace/conversation-view-tracker"
 import {
@@ -1417,9 +1418,16 @@ function WorkspaceLayoutInner({ children }: { children: React.ReactNode }) {
                                           notification leaves any workbench
                                           page for the session's tab. */}
                                     <NotificationClickBridge />
-                                    <FolderLayoutShell>
-                                      {children}
-                                    </FolderLayoutShell>
+                                    {/* Talk on this Mac: inside the tabs and
+                                          the workbench route (starting a Talk
+                                          opens the session's tab) and the
+                                          ACP connections (its bridge reads
+                                          the tab's connection). */}
+                                    <TalkVoiceProvider>
+                                      <FolderLayoutShell>
+                                        {children}
+                                      </FolderLayoutShell>
+                                    </TalkVoiceProvider>
                                   </WorkbenchRouteProvider>
                                 </TasksViewProvider>
                               </AutomationsViewProvider>

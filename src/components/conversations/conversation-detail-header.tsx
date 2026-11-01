@@ -10,6 +10,7 @@ import {
   MicOff,
   MoveHorizontal,
   Pencil,
+  PhoneOff,
   Pin,
   PinOff,
   Split,
@@ -88,6 +89,7 @@ import {
 import { LimitPauseHeaderBadge } from "./limit-pause"
 import { HistoryRefreshingIndicator } from "./history-refreshing-indicator"
 import { SessionDetailsDialog } from "./session-details-dialog"
+import { useTalkMenu } from "@/components/talk-voice/use-talk-menu"
 
 interface ConversationDetailHeaderProps {
   tabId: string
@@ -171,6 +173,8 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
       conversationId != null &&
       s.conversations.find((c) => c.id === conversationId)?.parent_id != null
   )
+  const talkMenu = useTalkMenu(conversationId, isTalk)
+  const tTalk = useTranslations("TalkVoice")
 
   const [details, setDetails] = useState<ActiveSessionDetails | null>(null)
   // Snapshot the action target when a dialog OPENS. The header is a SINGLE
@@ -398,21 +402,39 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
               )}
               {isPinned ? t("unpin") : t("pin")}
             </DropdownMenuItem>
-            {/* Talk is held from the phone; turned off here too, for one a
-                phone left on. */}
-            {(!isSubsession || isTalk) && (
-              <DropdownMenuItem
-                disabled={!persisted}
-                onSelect={handleToggleTalk}
-              >
-                {isTalk ? (
-                  <MicOff className="h-4 w-4" />
-                ) : (
-                  <AudioLines className="h-4 w-4" />
-                )}
-                {isTalk ? t("talkOff") : t("talkOn")}
+            {/* Talk on this Mac, or its end in the window that holds it. */}
+            {talkMenu.showEndTalk && (
+              <DropdownMenuItem onSelect={talkMenu.endTalk}>
+                <PhoneOff className="h-4 w-4" />
+                {tTalk("menuEndTalk")}
               </DropdownMenuItem>
             )}
+            {!isSubsession && talkMenu.showTalkOnMac && (
+              <DropdownMenuItem
+                disabled={!persisted}
+                onSelect={talkMenu.startTalk}
+              >
+                <AudioLines className="h-4 w-4" />
+                {tTalk("menuTalkOnMac")}
+              </DropdownMenuItem>
+            )}
+            {/* Talk mode held from the phone: turned off here too, for one a
+                phone left on. Turned on (reply style only) where Talk on
+                this Mac can't run. */}
+            {(!isSubsession || isTalk) &&
+              (talkMenu.showTurnOff || talkMenu.showTurnOn) && (
+                <DropdownMenuItem
+                  disabled={!persisted}
+                  onSelect={handleToggleTalk}
+                >
+                  {isTalk ? (
+                    <MicOff className="h-4 w-4" />
+                  ) : (
+                    <AudioLines className="h-4 w-4" />
+                  )}
+                  {isTalk ? t("talkOff") : t("talkOn")}
+                </DropdownMenuItem>
+              )}
             <DropdownMenuItem
               disabled={!persisted}
               onSelect={handleOpenDetails}

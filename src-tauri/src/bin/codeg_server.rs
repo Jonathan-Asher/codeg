@@ -716,6 +716,14 @@ async fn async_main() -> ExitCode {
         state.emitter.clone(),
     ));
 
+    // A Talk left on with no client reporting it goes off after 15 minutes
+    // (mirrors lib.rs setup).
+    tokio::spawn(codeg_lib::talk::idle::talk_idle_task(
+        state.db.conn.clone(),
+        state.emitter.clone(),
+        state.connection_manager.clone_ref(),
+    ));
+
     // iPhone push for turn finished / needs you / errors (mirrors lib.rs
     // setup); critical alerts push from the watchdog above.
     tokio::spawn(codeg_lib::push::fanout::push_event_task(

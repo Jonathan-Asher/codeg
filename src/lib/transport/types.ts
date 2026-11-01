@@ -129,6 +129,9 @@ export interface ClientPresence {
   idle_secs: number
   /** The sessions this window shows. */
   conversation_ids: number[]
+  /** The window holds a Talk with the session in `conversation_ids` (Talk
+   *  on this Mac, `docs/talk-mode.md` §6). Absent when not talking. */
+  talking?: boolean
 }
 
 /** The event-socket frame for a presence report (`ClientMsg::Presence`). */

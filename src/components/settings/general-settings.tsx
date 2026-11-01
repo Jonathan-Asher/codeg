@@ -52,6 +52,7 @@ import { PendingReminderSettingsSection } from "@/components/settings/pending-re
 import { IphonePushSettingsSection } from "@/components/settings/iphone-push-settings"
 import { DictationRefineSettingsSection } from "@/components/settings/dictation-refine-settings"
 import { TalkSettingsSection } from "@/components/settings/talk-settings"
+import { TalkMacSettingsSection } from "@/components/settings/talk-mac-settings"
 import { ResumeAfterRestartSettingsSection } from "@/components/settings/resume-after-restart-settings"
 import { LimitContinueSettingsSection } from "@/components/settings/limit-continue-settings"
 import { QuickAskSettingsSection } from "@/components/settings/quick-ask-settings"
@@ -561,8 +562,11 @@ export function GeneralSettings() {
         {/* What the iPhone's dictation goes through before the agent. */}
         <DictationRefineSettingsSection />
 
-        {/* How the agent answers in the iPhone's Talk mode. */}
+        {/* How the agent answers in Talk mode (the iPhone's, and this Mac's). */}
         <TalkSettingsSection />
+
+        {/* Talk on this Mac: its speech models, shortcut and listening. */}
+        <TalkMacSettingsSection />
       </div>
     </ScrollArea>
   )

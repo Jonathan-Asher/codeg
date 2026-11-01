@@ -1,0 +1,17 @@
+{
+  "answer": {
+    "answers": [
+      {
+        "labels": [
+          "staging"
+        ],
+        "questionId": "1b7c"
+      }
+    ],
+    "declined": false
+  },
+  "id": 7,
+  "op": "answerQuestion",
+  "questionId": "q-3",
+  "type": "req"
+}

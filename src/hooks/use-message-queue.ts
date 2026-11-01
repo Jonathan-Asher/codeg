@@ -71,6 +71,11 @@ export interface QueuedMessage {
    * messages behind it, keeping their order).
    */
   failure?: SendFailure
+  /**
+   * Said in Talk rather than typed: it goes out marked spoken (the server
+   * adds Talk's note and shows a microphone), however long it waits here.
+   */
+  spoken?: boolean
 }
 
 /** What a message re-entering the queue keeps from its earlier life. */
@@ -79,6 +84,7 @@ export interface RequeueOptions {
   failure?: SendFailure
   adoptSendTimeMode?: boolean
   holdUntilTurnEnd?: boolean
+  spoken?: boolean
 }
 
 export interface UseMessageQueueReturn {
@@ -154,6 +160,7 @@ function restoreQueue(storageKey: string | null | undefined): OutboxState {
       modeId: entry.modeId,
       clientMessageId: entry.clientMessageId,
       failure: interruptedSendFailure(),
+      ...(entry.spoken ? { spoken: true } : {}),
     }))
   return { queue: [...interrupted, ...stored.queue], inflight: new Map() }
 }
@@ -308,6 +315,7 @@ export function useMessageQueue(
       ...(opts?.adoptSendTimeMode ? { adoptSendTimeMode: true } : {}),
       ...(opts?.holdUntilTurnEnd ? { holdUntilTurnEnd: true } : {}),
       ...(opts?.failure ? { failure: opts.failure } : {}),
+      ...(opts?.spoken ? { spoken: true } : {}),
     }),
     []
   )
@@ -398,6 +406,7 @@ export function useMessageQueue(
                 clientMessageId: newClientMessageId(),
                 ...(item.adoptSendTimeMode ? { adoptSendTimeMode: true } : {}),
                 ...(item.holdUntilTurnEnd ? { holdUntilTurnEnd: true } : {}),
+                ...(item.spoken ? { spoken: true } : {}),
               }
             : item
         )

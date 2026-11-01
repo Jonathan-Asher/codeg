@@ -35,6 +35,7 @@ function samePresence(a: ClientPresence | null, b: ClientPresence): boolean {
   return (
     a.visible === b.visible &&
     a.focused === b.focused &&
+    (a.talking === true) === (b.talking === true) &&
     a.conversation_ids.length === b.conversation_ids.length &&
     a.conversation_ids.every((id, i) => id === b.conversation_ids[i])
   )
@@ -42,15 +43,21 @@ function samePresence(a: ClientPresence | null, b: ClientPresence): boolean {
 
 /** Hand one report to every backend that decides about this window. */
 function deliver(presence: ClientPresence): void {
-  // The event socket of a browser or remote-desktop window.
+  // The event socket of a browser or remote-desktop window: a remote server
+  // hears `talking` from here while this window holds a Talk with one of its
+  // sessions.
   getTransport().reportPresence?.(presence)
   if (!isDesktop()) return
   // The desktop app's own backend, which runs the alerts for its local
   // sessions. A remote window's session ids belong to the remote server, so
-  // the local backend only learns that the user is at this machine.
+  // the local backend only learns that the user is at this machine. A Talk
+  // with a local session is reported by the backend itself (it hears the
+  // helper), so `talking` never goes this way.
+  const untalked: ClientPresence = { ...presence }
+  delete untalked.talking
   const local = isRemoteDesktopMode()
-    ? { ...presence, conversation_ids: [] }
-    : presence
+    ? { ...untalked, conversation_ids: [] }
+    : untalked
   void getShellTransport()
     .call("report_client_presence", { presence: local })
     .catch(() => {
@@ -61,6 +68,9 @@ function deliver(presence: ClientPresence): void {
 export interface PresenceSource {
   /** The sessions this window shows right now. */
   conversationIds(): number[]
+  /** The session this window holds a Talk with, if any. While there is one,
+   *  the report names only it, with `talking`. */
+  talking?(): number | null
   /** Call `onChange` when they change; returns the unsubscribe. */
   subscribe(onChange: () => void): () => void
 }
@@ -82,8 +92,23 @@ export function setShownConversations(ids: number[]): void {
   for (const listener of shownListeners) listener()
 }
 
+// The session a Talk on this Mac in this window talks with (the Talk
+// bridge sets it while the helper says the person is talking).
+let talkingId: number | null = null
+
+export function setTalkingConversation(id: number | null): void {
+  if (id === talkingId) return
+  talkingId = id
+  for (const listener of shownListeners) listener()
+}
+
+export function talkingConversation(): number | null {
+  return talkingId
+}
+
 export const shownConversations: PresenceSource = {
   conversationIds: () => shownIds,
+  talking: () => talkingId,
   subscribe: (onChange) => {
     shownListeners.add(onChange)
     return () => {
@@ -106,12 +131,18 @@ export function startPresenceReporting(
   let lastInput = Date.now()
   let lastSent: ClientPresence | null = null
 
-  const current = (): ClientPresence => ({
-    visible: document.visibilityState === "visible",
-    focused: typeof document.hasFocus === "function" && document.hasFocus(),
-    idle_secs: Math.max(0, Math.floor((Date.now() - lastInput) / 1000)),
-    conversation_ids: source.conversationIds(),
-  })
+  const current = (): ClientPresence => {
+    const talking = source.talking?.() ?? null
+    return {
+      visible: document.visibilityState === "visible",
+      focused: typeof document.hasFocus === "function" && document.hasFocus(),
+      idle_secs: Math.max(0, Math.floor((Date.now() - lastInput) / 1000)),
+      // Talking marks every id in the report, so it names only the session
+      // talked with (never one merely shown next to it).
+      conversation_ids: talking != null ? [talking] : source.conversationIds(),
+      ...(talking != null ? { talking: true } : {}),
+    }
+  }
 
   const report = (force: boolean) => {
     const next = current()

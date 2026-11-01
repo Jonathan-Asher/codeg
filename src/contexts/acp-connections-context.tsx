@@ -3449,6 +3449,8 @@ export interface AcpActionsValue {
       /** A private (Quick Ask) question: sent without creating or linking a
        *  conversation row. The backend refuses it on a linked connection. */
       unlinked?: boolean
+      /** Said in Talk rather than typed (`docs/talk-mode.md` §4). */
+      spoken?: boolean
     }
   ): Promise<PromptAccepted>
   setMode(contextKey: string, modeId: string): Promise<void>
@@ -3594,6 +3596,8 @@ export interface AcpActionsValue {
       text: string
       blocks?: ContentBlock[] | null
       channel: "native" | "pull"
+      /** Said in Talk: the message shows a mic marker. */
+      spoken?: boolean
     }
   ): void
   /** Take a shown steer back: the server refused it (it returns to the queue). */
@@ -7833,6 +7837,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         text: string
         blocks?: ContentBlock[] | null
         channel: "native" | "pull"
+        spoken?: boolean
       }
     ) => {
       dispatch({
@@ -7844,6 +7849,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         blocks: note.blocks ?? null,
         state: "sending",
         channel: note.channel,
+        ...(note.spoken ? { spoken: true } : {}),
       })
     },
     [dispatch]
@@ -7917,6 +7923,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         conversationId?: number | null
         clientMessageId?: string | null
         unlinked?: boolean
+        spoken?: boolean
       }
     ) => {
       const conn = storeRef.current.connections.get(contextKey)
@@ -7935,7 +7942,8 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           blocks,
           opts?.folderId ?? null,
           opts?.conversationId ?? null,
-          opts?.clientMessageId ?? null
+          opts?.clientMessageId ?? null,
+          opts?.spoken === true
         )
       } catch (e) {
         // Same reasoning as `cancel`: the backend disowning this id proves the

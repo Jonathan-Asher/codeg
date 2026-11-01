@@ -122,6 +122,8 @@ export interface UseConnectionLifecycleReturn {
       folderId?: number | null
       conversationId?: number | null
       clientMessageId?: string | null
+      /** Said in Talk rather than typed (see `acpPrompt`). */
+      spoken?: boolean
       /**
        * Called when the backend rejected the send because a turn was already
        * in flight (a second, concurrent prompt). The caller re-queues the
@@ -706,6 +708,7 @@ export function useConnectionLifecycle({
         folderId?: number | null
         conversationId?: number | null
         clientMessageId?: string | null
+        spoken?: boolean
         onTurnInProgress?: () => void
         /** The account pool had no account that could take it: the backend
          *  held it back. The caller keeps it queued and waits for the pool;
@@ -732,6 +735,7 @@ export function useConnectionLifecycle({
           folderId: opts?.folderId,
           conversationId: opts?.conversationId,
           clientMessageId: opts?.clientMessageId,
+          ...(opts?.spoken ? { spoken: true } : {}),
         })
         onAccepted?.(accepted)
       })().catch((e: unknown) => {

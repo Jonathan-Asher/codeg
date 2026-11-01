@@ -19,7 +19,12 @@
 //!
 //! The phone's contract: `docs/talk-mode.md`.
 
+/// Talk left on with no client: turned off after a while.
+pub mod idle;
 pub mod rules;
+/// Talk on this Mac: the native voice helper, its models and the relay to
+/// the window that holds the Talk.
+pub mod voice;
 
 use std::sync::Arc;
 

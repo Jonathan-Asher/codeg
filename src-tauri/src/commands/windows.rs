@@ -246,6 +246,11 @@ where
             .hidden_title(true)
             .title_bar_style(tauri::TitleBarStyle::Overlay)
             .traffic_light_position(traffic_light_position())
+            // A hidden or minimized window keeps its timers and event
+            // handling at full speed: the window that holds a Talk on this
+            // Mac drives the session from its page while the person works in
+            // another app. WebKit applies it on macOS 14 and later.
+            .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
     }
 
     #[cfg(target_os = "windows")]

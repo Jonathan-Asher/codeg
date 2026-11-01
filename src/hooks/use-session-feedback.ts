@@ -81,6 +81,8 @@ export interface UseSessionFeedbackArgs {
     id: string
     text: string
     channel: "native" | "pull"
+    /** Said in Talk (the message shows a mic marker). */
+    spoken?: boolean
   }) => void
   /** The server refused that steer (it goes back to the queue): take it back. */
   onSteerFailed?: (id: string) => void
@@ -144,7 +146,9 @@ export interface UseSessionFeedback {
   steer: (
     text: string,
     blocks?: PromptInputBlock[],
-    clientId?: string
+    clientId?: string,
+    /** Said in Talk rather than typed (`docs/talk-mode.md` §4). */
+    spoken?: boolean
   ) => Promise<FeedbackItem>
 }
 
@@ -472,7 +476,8 @@ export function useSessionFeedback({
       rawText: string,
       blocks?: PromptInputBlock[],
       // The message's client id (see `submitSessionFeedback`).
-      clientId?: string
+      clientId?: string,
+      spoken = false
     ): Promise<FeedbackItem> => {
       const text = rawText.trim()
       if (!text || !connectionId) {
@@ -485,11 +490,18 @@ export function useSessionFeedback({
           id: clientId,
           text,
           channel: nativeSteering ? "native" : "pull",
+          ...(spoken ? { spoken: true } : {}),
         })
       }
       let item: FeedbackItem
       try {
-        item = await submitSessionFeedback(connectionId, text, blocks, clientId)
+        item = await submitSessionFeedback(
+          connectionId,
+          text,
+          blocks,
+          clientId,
+          spoken
+        )
       } catch (error) {
         if (clientId) steerCallbacksRef.current.onSteerFailed?.(clientId)
         throw error

@@ -1,0 +1,141 @@
+{
+  "schema": 1,
+  "release": "models-v2",
+  "models": [
+    {
+      "id": "he-turbo",
+      "title": "ivrit.ai Hebrew whisper",
+      "summary": "Hebrew with English terms, or English. large-v3-turbo fine-tuned by ivrit.ai, q8_0, with whisper tiny to tell Hebrew from English.",
+      "languages": [
+        "he",
+        "en"
+      ],
+      "detectsLanguage": false,
+      "license": "Apache-2.0",
+      "source": "ivrit-ai/whisper-large-v3-turbo-ggml ggml-model.bin (sha256 c8090411113357097bfafc2b8e228ec1639fa7f5fe4ecb5d054ac0ccef8641b1), quantized to q8_0 with whisper.cpp v1.9.1 whisper-quantize. VAD: ggml-org/whisper-vad ggml-silero-v5.1.2.bin (MIT). Language ID: ggerganov/whisper.cpp ggml-tiny-q8_0.bin (byte-identical, revision 5359861c739e955e79d9a303bcbc70fb988958b1; MIT, OpenAI whisper tiny).",
+      "weights": "ggml-ivrit-large-v3-turbo-q8_0.bin",
+      "vad": "ggml-silero-v5.1.2.bin",
+      "languageID": "ggml-tiny-q8_0.bin",
+      "files": [
+        {
+          "path": "ggml-ivrit-large-v3-turbo-q8_0.bin",
+          "url": "https://github.com/Jonathan-Asher/codeg-ios/releases/download/models-v1/ggml-ivrit-large-v3-turbo-q8_0.bin",
+          "size": 874188075,
+          "sha256": "123a936e686b06d45b52dc1790251a1418841352ca94079ae643d57893ffc9a6"
+        },
+        {
+          "path": "ggml-silero-v5.1.2.bin",
+          "url": "https://github.com/Jonathan-Asher/codeg-ios/releases/download/models-v1/ggml-silero-v5.1.2.bin",
+          "size": 885098,
+          "sha256": "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf"
+        },
+        {
+          "path": "ggml-tiny-q8_0.bin",
+          "url": "https://github.com/Jonathan-Asher/codeg-ios/releases/download/models-v1/ggml-tiny-q8_0.bin",
+          "size": 43537433,
+          "sha256": "c2085835d3f50733e2ff6e4b41ae8a2b8d8110461e18821b09a15c40c42d1cca"
+        }
+      ]
+    },
+    {
+      "id": "multi-turbo",
+      "title": "Multilingual whisper",
+      "summary": "OpenAI large-v3-turbo, q5_0. Detects the language; weaker Hebrew.",
+      "languages": [
+        "auto"
+      ],
+      "detectsLanguage": true,
+      "license": "MIT",
+      "source": "ggerganov/whisper.cpp ggml-large-v3-turbo-q5_0.bin (byte-identical; reproduced with whisper-quantize q5_0 from ggml-large-v3-turbo.bin). VAD: ggml-org/whisper-vad ggml-silero-v5.1.2.bin (MIT).",
+      "weights": "ggml-large-v3-turbo-q5_0.bin",
+      "vad": "ggml-silero-v5.1.2.bin",
+      "files": [
+        {
+          "path": "ggml-large-v3-turbo-q5_0.bin",
+          "url": "https://github.com/Jonathan-Asher/codeg-ios/releases/download/models-v1/ggml-large-v3-turbo-q5_0.bin",
+          "size": 574041195,
+          "sha256": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2"
+        },
+        {
+          "path": "ggml-silero-v5.1.2.bin",
+          "url": "https://github.com/Jonathan-Asher/codeg-ios/releases/download/models-v1/ggml-silero-v5.1.2.bin",
+          "size": 885098,
+          "sha256": "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf"
+        }
+      ]
+    },
+    {
+      "id": "he-zipformer-stream",
+      "title": "ivrit.ai Hebrew streaming Zipformer",
+      "summary": "Live Hebrew transcription for Talk: a 66M-parameter streaming Zipformer2 transducer, int8, decoding 1.28 s chunks as you speak. English terms come out spelled letter by letter.",
+      "languages": [
+        "he"
+      ],
+      "detectsLanguage": false,
+      "license": "CC-BY-4.0",
+      "source": "zipformer2-66m-streaming-he by Yakov Kolani (thewh1teagle/zipformer2-66m-streaming-he, revision 6c07526ebfdfc71d12ed4ce6aaebe32774a2613a, CC-BY-4.0), as mirrored by ivrit.ai (ivrit-ai/zipformer2-66m-streaming-he, revision ee769a2a13b887f91572eec349458bfb0fe79e7a): sherpa-onnx/encoder.int8.onnx, decoder.int8.onnx, joiner.int8.onnx and tokens.txt, byte-identical, renamed with the model's name in front. Fine-tuned from icefall's streaming Zipformer (Apache-2.0) on ivrit.ai audio. VAD: ggml-org/whisper-vad ggml-silero-v5.1.2.bin (MIT), the models-v1 file.",
+      "engine": "transducer",
+      "weights": "zipformer2-66m-streaming-he-encoder.int8.onnx",
+      "parts": {
+        "encoder": "zipformer2-66m-streaming-he-encoder.int8.onnx",
+        "decoder": "zipformer2-66m-streaming-he-decoder.int8.onnx",
+        "joiner": "zipformer2-66m-streaming-he-joiner.int8.onnx",
+        "tokens": "zipformer2-66m-streaming-he-tokens.txt"
+      },
+      "vad": "ggml-silero-v5.1.2.bin",
+      "files": [
+        {
+          "path": "zipformer2-66m-streaming-he-encoder.int8.onnx",
+          "url": "https://github.com/Jonathan-Asher/codeg-ios/releases/download/models-v2/zipformer2-66m-streaming-he-encoder.int8.onnx",
+          "size": 70478964,
+          "sha256": "6c6febcb74a09435315a1d872a6539f6e7fc2c333533f14c74edc0e85c49ffcd"
+        },
+        {
+          "path": "zipformer2-66m-streaming-he-decoder.int8.onnx",
+          "url": "https://github.com/Jonathan-Asher/codeg-ios/releases/download/models-v2/zipformer2-66m-streaming-he-decoder.int8.onnx",
+          "size": 1049105,
+          "sha256": "feb03e7c8aa761593a9284a6fa1e91259be3702de75f630062256c1a59c5a906"
+        },
+        {
+          "path": "zipformer2-66m-streaming-he-joiner.int8.onnx",
+          "url": "https://github.com/Jonathan-Asher/codeg-ios/releases/download/models-v2/zipformer2-66m-streaming-he-joiner.int8.onnx",
+          "size": 771805,
+          "sha256": "1d2c6d8e6dabc5eb52de52e95718e9bdfbffbfe7ead3808fb5ffd74e83bd9cae"
+        },
+        {
+          "path": "zipformer2-66m-streaming-he-tokens.txt",
+          "url": "https://github.com/Jonathan-Asher/codeg-ios/releases/download/models-v2/zipformer2-66m-streaming-he-tokens.txt",
+          "size": 17086,
+          "sha256": "e4ebb5e72a6aeef47437a55fa2308ebbedb7c51c557de7a89bf965c23ea9af4a"
+        },
+        {
+          "path": "ggml-silero-v5.1.2.bin",
+          "url": "https://github.com/Jonathan-Asher/codeg-ios/releases/download/models-v1/ggml-silero-v5.1.2.bin",
+          "size": 885098,
+          "sha256": "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf"
+        }
+      ]
+    },
+    {
+      "id": "smart-turn-v3.2",
+      "title": "Smart Turn v3.2",
+      "summary": "End-of-turn detection for Talk: whether you have finished speaking, from the last 8 s of audio. int8, on the CPU. No Hebrew in its training data, so Talk only logs it at first.",
+      "languages": [
+        "auto"
+      ],
+      "detectsLanguage": false,
+      "license": "BSD-2-Clause",
+      "source": "pipecat-ai/smart-turn-v3 smart-turn-v3.2-cpu.onnx (revision f766f81d3cfdf7737ac64aad813d91bbfd56bf93), byte-identical: Smart Turn v3.2 by Daily (BSD-2-Clause), a Whisper Tiny encoder (MIT, OpenAI) with a linear classifier head, quantized to int8 by its authors.",
+      "engine": "turn",
+      "weights": "smart-turn-v3.2-cpu.onnx",
+      "files": [
+        {
+          "path": "smart-turn-v3.2-cpu.onnx",
+          "url": "https://github.com/Jonathan-Asher/codeg-ios/releases/download/models-v2/smart-turn-v3.2-cpu.onnx",
+          "size": 8679182,
+          "sha256": "2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f"
+        }
+      ]
+    }
+  ]
+}
