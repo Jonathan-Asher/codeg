@@ -133,18 +133,20 @@ codesign -d --entitlements - "$APP" 2>/dev/null | grep -q 'com.apple.security.au
 # CODEG_SKIP_TALK_SIDECAR=1) ships prepare-sidecars' stub, which never records.
 /usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$APP/Contents/Info.plist" >/dev/null 2>&1 ||
   die "Info.plist has no NSMicrophoneUsageDescription (src-tauri/Info.plist not merged?)"
-codesign -d --entitlements - "$APP" 2>/dev/null | grep -q 'com.apple.security.device.audio-input' ||
+codesign -d --entitlements - "$APP" 2>/dev/null | grep 'com.apple.security.device.audio-input' >/dev/null ||
   die "the app lost its audio-input entitlement (Talk on the Mac's microphone)"
 [ -s "$TALK" ] || die "codeg-talk is missing or empty (build.rs's placeholder: prepare-sidecars didn't run)"
-codesign -d --entitlements - "$TALK" 2>/dev/null | grep -q 'com.apple.security.device.audio-input' ||
+codesign -d --entitlements - "$TALK" 2>/dev/null | grep 'com.apple.security.device.audio-input' >/dev/null ||
   die "codeg-talk lacks the audio-input entitlement"
 talk_team=$(codesign -dv "$TALK" 2>&1 | sed -n 's/^TeamIdentifier=//p')
 [ "$talk_team" = "$TEAM" ] || die "codeg-talk is signed for team '$talk_team', not $TEAM"
 [ -d "$APP/Contents/Frameworks/whisper.framework" ] || die "whisper.framework is missing from Contents/Frameworks"
-if otool -l "$TALK" | grep -q __info_plist; then
-  strings -a "$TALK" | grep -q NSMicrophoneUsageDescription ||
+# (grep without -q: with pipefail, -q quitting early kills otool or strings
+# with SIGPIPE and fails the pipeline.)
+if otool -l "$TALK" | grep __info_plist >/dev/null; then
+  strings -a "$TALK" | grep NSMicrophoneUsageDescription >/dev/null ||
     die "codeg-talk's embedded Info.plist has no NSMicrophoneUsageDescription"
-  otool -L "$TALK" | grep -q '@rpath/whisper.framework/' || die "codeg-talk doesn't link whisper.framework"
+  otool -L "$TALK" | grep '@rpath/whisper.framework/' >/dev/null || die "codeg-talk doesn't link whisper.framework"
   echo "Talk on the Mac: codeg-talk signed for $talk_team with the microphone entitlement"
 elif [ "${CODEG_SKIP_TALK_SIDECAR:-}" = 1 ] || [ "$(uname -m)" != arm64 ]; then
   echo "Talk on the Mac: codeg-talk is the stub (no Talk on the Mac in this build)"
