@@ -191,15 +191,15 @@ export function TalkVoiceProvider({ children }: { children: ReactNode }) {
         toast.error(tr("notFound"))
         return
       }
-      let current: TalkVoiceStatus | null = null
+      let current: TalkVoiceStatus | undefined
       try {
-        current = await talkVoiceApi.status()
-        setStatus(current)
+        current = await settled(() => talkVoiceApi.status())
+        if (current) setStatus(current)
       } catch (error) {
         toast.error(tr("startFailed", { error: toErrorMessage(error) }))
         return
       }
-      if (!current.supported) {
+      if (!current?.supported) {
         toast.error(tr("unsupported"))
         return
       }
@@ -230,7 +230,9 @@ export function TalkVoiceProvider({ children }: { children: ReactNode }) {
 
       getReadAloudPlayer()?.stop()
       const [prefs, settings, app] = await Promise.all([
-        talkPrefsApi.get().catch(() => DEFAULT_TALK_VOICE_PREFS),
+        settled(() => talkPrefsApi.get())
+          .then((stored) => stored ?? DEFAULT_TALK_VOICE_PREFS)
+          .catch(() => DEFAULT_TALK_VOICE_PREFS),
         getTalkSettings().catch(() => null),
         appInfo(),
       ])
