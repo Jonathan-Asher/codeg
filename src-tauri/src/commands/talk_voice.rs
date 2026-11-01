@@ -277,10 +277,20 @@ fn shortcut_released(app: &AppHandle) {
         return;
     };
     let service = desktop_service(app);
-    service.control(json!({"type": "control", "op": "press", "down": false}));
-    if down_at.elapsed() < TAP {
-        service.control(json!({"type": "control", "op": "toggleMute"}));
+    for control in release_controls(down_at.elapsed()) {
+        service.control(control);
     }
+}
+
+/// What letting go of the shortcut after `held` sends: the end of push to
+/// talk (a press this short is a click to the helper, which drops what it
+/// heard), and for a tap the Mute button too.
+fn release_controls(held: Duration) -> Vec<Value> {
+    let mut controls = vec![json!({"type": "control", "op": "press", "down": false})];
+    if held < TAP {
+        controls.push(json!({"type": "control", "op": "toggleMute"}));
+    }
+    controls
 }
 
 /// Register (or unregister) the shortcut to match `prefs`, replacing what was
@@ -533,6 +543,18 @@ mod tests {
             AppCommandError::from(ModelsError::UnknownPack("x".into())).code,
             AppErrorCode::NotFound
         ));
+    }
+
+    #[test]
+    fn a_tap_mutes_and_a_hold_is_push_to_talk() {
+        let tap = release_controls(Duration::from_millis(120));
+        assert_eq!(tap.len(), 2);
+        assert_eq!(tap[0]["op"], "press");
+        assert_eq!(tap[0]["down"], false);
+        assert_eq!(tap[1]["op"], "toggleMute");
+        let hold = release_controls(Duration::from_millis(900));
+        assert_eq!(hold.len(), 1);
+        assert_eq!(hold[0]["op"], "press");
     }
 
     #[test]
