@@ -520,7 +520,6 @@ impl ActiveTalk {
     }
 }
 
-#[derive(Default)]
 /// A Talk that ended, for the requests its helper still sends (Talk mode
 /// off, its reports: the iPhone's controller asks for them as it lets go,
 /// after `ended`).
@@ -545,6 +544,7 @@ fn is_end_of_talk_request(request: &Value) -> bool {
     }
 }
 
+#[derive(Default)]
 struct RelayState {
     helper: Option<HelperProc>,
     talk: Option<ActiveTalk>,
