@@ -391,9 +391,12 @@ voice speaks.
 - Rust (`src-tauri/src/talk/voice`) starts the helper and relays JSON lines
   between it and the window that holds the Talk: the helper's messages go to
   that window only (`talk-voice://message`). One Talk at a time; a new one
-  replaces the old. Closing or reloading the window ends it, and Rust answers
-  the helper's last requests itself (Talk mode off and the report for a local
-  session; for a remote one the server's own rule in §11 turns Talk off).
+  replaces the old. Closing or reloading the window ends it. The helper's
+  last requests (Talk mode off and its report, which come just after it
+  ends) go to the window that held the Talk; with that window gone Rust
+  answers them (a local session's Talk mode off and report are done here;
+  for a remote one the server's own rule in §11 turns Talk off, and the
+  helper keeps the report for the next Talk).
 - The window drives the session (`src/lib/talk-voice/bridge.ts`): it tells the
   helper the live turn's main-thread text (the iPhone's `mainThreadText`), each
   turn's end with its stop reason, the waiting cards, background turns and the
