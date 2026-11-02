@@ -1575,7 +1575,7 @@ mod tests {
         // Only the appended bytes are read, and an unchanged file costs a stat.
         let read_before = f.core.bytes_read;
         let line = sent("p-1", later(0), "next");
-        append(&path, &[line.clone()]);
+        append(&path, std::slice::from_ref(&line));
         assert_eq!(f.changed(&path).await, 1);
         assert_eq!(f.core.bytes_read - read_before, line.len() as u64 + 1);
         let read_before = f.core.bytes_read;
