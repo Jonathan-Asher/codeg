@@ -74,16 +74,19 @@ const SLOW_SCAN: Duration = Duration::from_secs(60);
 const SCAN_WITHOUT_EVENTS: Duration = Duration::from_secs(15);
 /// How often the rows are read again and their transcripts found again.
 const REFRESH: Duration = Duration::from_secs(5 * 60);
-/// Time the app gets to finish starting before the first catch-up.
-const STARTUP_DELAY: Duration = Duration::from_secs(15);
+/// Time the app gets to finish starting before the first catch-up, which reads
+/// back what landed meanwhile anyway.
+const STARTUP_DELAY: Duration = Duration::from_secs(60);
 /// A transcript written to, or a row active, in this many days is scanned. Any
 /// other is read only once a change event names it.
 const ACTIVE_DAYS: i64 = 14;
 /// First chunk of a catch-up; each next one is twice the size, up to the max.
 const CATCH_UP_FIRST_CHUNK: u64 = 64 * 1024;
 const CATCH_UP_MAX_CHUNK: u64 = 1024 * 1024;
-/// Most a catch-up reads before it gives up looking for the row's time.
-const CATCH_UP_MAX: u64 = 16 * 1024 * 1024;
+/// Most a catch-up reads before it gives up looking for the row's time. A turn
+/// that started further back than this from the end of its transcript, while
+/// nothing read it, goes uncounted.
+const CATCH_UP_MAX: u64 = 8 * 1024 * 1024;
 /// Most read forward in one go. A transcript further behind than this is
 /// caught up from its end instead.
 const FORWARD_MAX: u64 = 16 * 1024 * 1024;
@@ -170,14 +173,22 @@ impl ScanState {
         record_timestamp(value)
     }
 
-    /// Whether a raw line has to be parsed: only a user record starts a turn,
-    /// and while a command waits for its verdict the model's answer settles it.
+    /// Whether a raw line has to be parsed. Only a user record starts a turn,
+    /// and a tool's result never does: results are most of a transcript's
+    /// bytes, and they are skipped unparsed. While a command waits for its
+    /// verdict, any user record or the model's answer can settle it.
     fn wants(&self, agent: AgentType, line: &str) -> bool {
         if agent == AgentType::Pi {
             return line.contains(r#""role":"user""#);
         }
-        line.contains(r#""type":"user""#)
-            || (self.pending_command.is_some() && line.contains(r#""type":"assistant""#))
+        if !line.contains(r#""type":"user""#) {
+            return self.pending_command.is_some() && line.contains(r#""type":"assistant""#);
+        }
+        self.pending_command.is_some()
+            || !line.contains(r#""tool_use_id""#)
+            || [r#""promptSource""#, r#""turnOrigin""#, r#""origin""#]
+                .iter()
+                .any(|key| line.contains(*key))
     }
 }
 
@@ -254,10 +265,12 @@ struct CatchUp {
 /// Catch a transcript up from its end: the newest turn start after `floor`.
 ///
 /// Reads backwards in growing chunks, each one's lines in order, and stops at
-/// the first chunk that holds a turn start or a conversation record `floor`
-/// already covers (everything before such a record is older still), at the
-/// start of the file, or after [`CATCH_UP_MAX`] bytes. Most transcripts end in
-/// a record the row's time covers, so their catch-up is one small read.
+/// the first chunk that holds a turn start or begins with a conversation
+/// record `floor` already covers (records are written in time order, so all
+/// before it are older still), at the start of the file, or after
+/// [`CATCH_UP_MAX`] bytes. Most transcripts end in records the row's time
+/// covers, so their catch-up is one small read; one whose last turn began
+/// before the row's time and ran on is read back to where that time falls.
 fn catch_up(
     path: &Path,
     agent: AgentType,
@@ -320,21 +333,22 @@ fn catch_up(
         };
         let mut scan = ScanState::default();
         let mut newest = None;
-        let mut covered = false;
+        // Whether `floor` covers the chunk, which its first conversation
+        // record's time says.
+        let mut covered = None;
         for line in buf[first..].split_inclusive(|b| *b == b'\n') {
             let Ok(text) = std::str::from_utf8(line) else {
                 continue;
             };
-            if !may_be_conversation_record(agent, text) && !scan.wants(agent, text) {
+            let dates_chunk = covered.is_none() && may_be_conversation_record(agent, text);
+            if !dates_chunk && !scan.wants(agent, text) {
                 continue;
             }
             let Ok(value) = serde_json::from_str::<Value>(text) else {
                 continue;
             };
-            if is_conversation_record(agent, &value)
-                && record_timestamp(&value).is_some_and(|at| at <= floor)
-            {
-                covered = true;
+            if covered.is_none() && is_conversation_record(agent, &value) {
+                covered = record_timestamp(&value).map(|at| at <= floor);
             }
             newest = newest.max(scan.feed(agent, &value));
         }
@@ -348,7 +362,7 @@ fn catch_up(
                 scan: at_end.unwrap_or_default(),
             });
         }
-        if covered {
+        if covered == Some(true) {
             break;
         }
         carry = buf[..first].to_vec();
@@ -1636,6 +1650,22 @@ mod tests {
             })
             .collect();
         assert_eq!(starts, vec![message]);
+    }
+
+    #[test]
+    fn only_lines_that_can_start_a_turn_are_parsed() {
+        let mut scan = ScanState::default();
+        let agent = AgentType::ClaudeCode;
+        assert!(scan.wants(agent, &sent("p-1", later(0), "hello")));
+        assert!(
+            !scan.wants(agent, &tool_result("p-1", later(1))),
+            "a tool's result is skipped unparsed"
+        );
+        assert!(!scan.wants(agent, &reply("a1", later(2), "ok")));
+        // A command waiting for its verdict: the model's answer can settle it.
+        scan.pending_command = Some((Some("p-2".into()), later(3)));
+        assert!(scan.wants(agent, &reply("a2", later(4), "ok")));
+        assert!(scan.wants(agent, &tool_result("p-2", later(5))));
     }
 
     /// The `timestamp` a line carries.
