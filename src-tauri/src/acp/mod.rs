@@ -35,6 +35,7 @@ pub mod message_receipts;
 pub mod one_session;
 pub mod opencode_catalog;
 pub mod opencode_plugins;
+pub mod outside_activity;
 pub mod plan_approval;
 pub mod preflight;
 pub mod prompt_hydration;

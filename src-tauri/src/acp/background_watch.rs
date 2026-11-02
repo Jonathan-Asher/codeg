@@ -68,8 +68,8 @@ use crate::models::agent::AgentType;
 use crate::models::message::MessageTurn;
 use crate::parsers::claude::{
     capture_tag, capture_title_record, find_clear_rollover_successor, find_session_file,
-    group_into_turns, is_meta_message, slash_command_display, stop_hook_feedback,
-    task_notification_result_regex, task_notification_status_regex,
+    group_into_turns, is_meta_message, record_timestamp, slash_command_display,
+    stop_hook_feedback, task_notification_result_regex, task_notification_status_regex,
     task_notification_summary_regex, task_notification_task_id_regex,
     task_notification_tool_use_id_regex, ClaudeRecordAccumulator, BACKGROUND_RESULT_MAX_CHARS,
     CONTEXT_CONTINUATION_PREFIX,
@@ -1697,12 +1697,12 @@ impl WatchState {
                 &origin_task_id,
                 Some(task_id) if self.current_turn_launched_ids.contains(task_id)
             );
-            if !held {
-                let at = value
-                    .get("timestamp")
-                    .and_then(|t| t.as_str())
-                    .and_then(|t| t.parse::<chrono::DateTime<chrono::Utc>>().ok());
-                self.initiator_activity_at = self.initiator_activity_at.max(at);
+            // The records a client-side command leaves (a model switch, a
+            // rename) open an episode like any initiator, but they start no
+            // turn: a selector or a title must never move the session.
+            if !held && starts_activity(value) {
+                self.initiator_activity_at =
+                    self.initiator_activity_at.max(record_timestamp(value));
             }
             let rotate = self
                 .episode
@@ -1924,13 +1924,70 @@ fn turn_initiator_text(value: &serde_json::Value) -> Option<TurnInitiatorText> {
     Some(TurnInitiatorText::Verbatim(text))
 }
 
+/// Whether a record starts a turn the session lists count as activity: a
+/// message typed, sent through the SDK or queued, a message from another
+/// session, a cron or `/loop` fire, a task notification.
+///
+/// The CLI stamps every record it hands the model as a new query with where it
+/// came from (`promptSource`, `turnOrigin`, `origin`). The records it writes
+/// around a client-side command carry none of that: the caveat, the command,
+/// its output (a model or effort switch codeg makes is recorded as a `/model`
+/// or `/effort` command), shell-mode input and output, and the notes it adds
+/// to the context (a `/rename` leaves one). None of them starts a turn, and a
+/// selector or a title must never move a session. A CLI that predates the
+/// stamps wrote none at all, so an unstamped plain message still counts.
+///
+/// A record written for the transcript only asks nothing of the model either,
+/// stamped or not: resuming a session notes the background work an earlier
+/// process left unfinished that way, so opening a session in codeg writes one.
+///
+/// Prompt-expanding commands (`/loop`, a custom command) are left out here:
+/// their command record carries no stamp either, and only the record after it
+/// tells them from a client-side one (`acp::outside_activity` reads that pair).
+pub(crate) fn starts_activity(value: &serde_json::Value) -> bool {
+    if turn_initiator_text(value).is_none() {
+        return false;
+    }
+    if ["queueTranscriptOnly", "isVisibleInTranscriptOnly"]
+        .iter()
+        .any(|key| value.get(*key).and_then(|v| v.as_bool()) == Some(true))
+    {
+        return false;
+    }
+    if ["promptSource", "turnOrigin", "origin"]
+        .iter()
+        .any(|key| value.get(*key).is_some_and(|v| !v.is_null()))
+    {
+        return true;
+    }
+    // An interrupt's marker ends a turn; it starts none.
+    if is_meta_message(value) || crate::parsers::claude::is_interrupt_marker(value) {
+        return false;
+    }
+    match value.pointer("/message/content") {
+        Some(serde_json::Value::String(text)) => !is_client_command_record(text),
+        _ => true,
+    }
+}
+
+/// A user record that is a slash command, or that a client-side command or
+/// shell mode wrote: `<command-name>`, `<local-command-caveat>`,
+/// `<local-command-stdout>`, `<bash-input>`, `<bash-stdout>` and the like.
+fn is_client_command_record(text: &str) -> bool {
+    let text = text.trim_start();
+    slash_command_display(text).is_some()
+        || ["<command-", "<local-command-", "<bash-"]
+            .iter()
+            .any(|prefix| text.starts_with(prefix))
+}
+
 /// The submission a record belongs to. Claude Code stamps every user record it
 /// writes while composing and running ONE prompt with that prompt's `promptId`
 /// (verified across real transcripts: 13 prompts in a session carried 10
 /// distinct ids, repeating only across a prompt's own interrupt/retry), so it is
 /// the only reliable way to tell a submission's side records — command output,
 /// the instruction `/goal` injects — from an unrelated initiator.
-fn record_submission_id(value: &serde_json::Value) -> Option<String> {
+pub(crate) fn record_submission_id(value: &serde_json::Value) -> Option<String> {
     value
         .get("promptId")
         .and_then(|p| p.as_str())
@@ -3799,6 +3856,40 @@ mod tests {
         assert!(
             tick_now(&mut ws, &ledger).is_none(),
             "nothing new, nothing reported"
+        );
+    }
+
+    /// What a model switch, a rename and a resume leave in the transcript (the
+    /// caveat, the command and its output; the note naming the session; the
+    /// note of an earlier process's unfinished work, for the transcript only)
+    /// opens an episode like any initiator, but starts no turn: a selector, a
+    /// title or opening a session must never move it. A cron fire after them
+    /// does.
+    #[test]
+    fn what_a_switch_a_rename_or_a_resume_writes_is_not_activity() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_lines(&path, &[]);
+        let ledger = PromptLedger::shared();
+        let mut ws = WatchState::with_file_for_test("s1", path.clone());
+        let activity = |event: Option<AcpEvent>| match event {
+            Some(AcpEvent::BackgroundActivity { activity_at, .. }) => activity_at,
+            _ => None,
+        };
+
+        let caveat = r#"{"type":"user","timestamp":"2026-11-02T18:45:20.954Z","uuid":"u-cv","isMeta":true,"promptId":"p-model","message":{"role":"user","content":"<local-command-caveat>The command below was run directly, not sent to you as a request.</local-command-caveat>"}}"#;
+        let command = r#"{"type":"user","timestamp":"2026-11-02T18:45:20.954Z","uuid":"u-cmd","promptId":"p-model","message":{"role":"user","content":"<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args>opus</command-args>"}}"#;
+        let output = r#"{"type":"user","timestamp":"2026-11-02T18:45:20.954Z","uuid":"u-out","promptId":"p-model","message":{"role":"user","content":"<local-command-stdout>Set model to opus</local-command-stdout>"}}"#;
+        let noted = r#"{"type":"user","timestamp":"2026-11-02T18:45:20.970Z","uuid":"u-noted","promptId":"p-model","promptSource":"system","origin":{"kind":"task-notification"},"queueTranscriptOnly":true,"message":{"role":"user","content":"<task-notification>\n<task-id>a1</task-id>\n<status>stopped</status>\n<summary>1 background agent did not finish before the previous session ended</summary>\n</task-notification>"}}"#;
+        let named = r#"{"type":"user","timestamp":"2026-11-02T18:46:02.000Z","uuid":"u-name","isMeta":true,"message":{"role":"user","content":"<system-reminder>\nThe user named this session \"Store listings\".\n</system-reminder>"}}"#;
+        write_lines(&path, &[caveat, command, output, noted, named]);
+        assert_eq!(activity(tick_now(&mut ws, &ledger)), None);
+
+        let cron = r#"{"type":"user","timestamp":"2026-11-02T18:50:00.000Z","uuid":"u-cron","isMeta":true,"promptSource":"system","turnOrigin":"scheduled","message":{"role":"user","content":"check the build"}}"#;
+        write_lines(&path, &[cron]);
+        assert_eq!(
+            activity(tick_now(&mut ws, &ledger)),
+            Some("2026-11-02T18:50:00Z".parse().unwrap())
         );
     }
 

@@ -741,6 +741,14 @@ async fn async_main() -> ExitCode {
         state.emitter.clone(),
     ));
 
+    // Sessions driven outside codeg still move up in the lists when a turn
+    // lands in their transcript (mirrors lib.rs setup).
+    tokio::spawn(codeg_lib::acp::outside_activity::outside_activity_task(
+        state.db.conn.clone(),
+        state.connection_manager.clone_ref(),
+        state.emitter.clone(),
+    ));
+
     // Config-sync uploader (mirrors lib.rs setup): sleeps a minute, then
     // compares the configuration's hash every interval and uploads only when
     // it changed. Does nothing at all until a WebDAV endpoint is configured.

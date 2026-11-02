@@ -1080,6 +1080,34 @@ fn bash_execution_notices(value: &Value, cancelled: bool) -> Vec<String> {
     notices
 }
 
+/// Whether a session record is a user message, which is what starts a turn in
+/// pi: a prompt, a steer, or a message an extension sends the agent (a
+/// background job's notice). The same records the transcript shows as the
+/// user's ([`parse_message_record`]); nothing else pi writes (a model or
+/// thinking change, a name, a shell command, an extension's own note) does.
+pub(crate) fn is_user_message(value: &Value) -> bool {
+    if value.get("type").and_then(Value::as_str) != Some("message") {
+        return false;
+    }
+    let Some(message) = value.get("message") else {
+        return false;
+    };
+    if message.get("role").and_then(Value::as_str) != Some("user") {
+        return false;
+    }
+    let content = message.get("content");
+    !user_content_text(content).trim().is_empty()
+        || content.and_then(Value::as_array).is_some_and(|items| {
+            items.iter().any(|item| {
+                item.get("type").and_then(Value::as_str) == Some("image")
+                    && item
+                        .get("data")
+                        .and_then(Value::as_str)
+                        .is_some_and(|data| !data.is_empty())
+            })
+        })
+}
+
 /// A `user` message's `content` is either a plain string or an array of blocks;
 /// join the text of every string / `{type:"text",text}` part.
 fn user_content_text(content: Option<&Value>) -> String {
@@ -1372,7 +1400,9 @@ fn session_id_of(path: &Path) -> Option<String> {
 
 /// Recover a conversation id from a `<timestamp>_<uuid>.jsonl` filename when the
 /// header is missing: the `<uuid>` after the first `_`, else the whole stem.
-fn fallback_id(path: &Path) -> String {
+/// pi names a session's file after its id, so this is also how a session's file
+/// is found without opening every one (`acp::outside_activity`).
+pub(crate) fn fallback_id(path: &Path) -> String {
     let stem = path
         .file_stem()
         .unwrap_or_default()

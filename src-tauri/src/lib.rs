@@ -1447,6 +1447,15 @@ mod tauri_app {
                     crate::web::event_bridge::EventEmitter::Tauri(app.handle().clone()),
                 ));
 
+                // A session driven outside codeg (another session resuming it,
+                // a terminal) still moves up in the lists when a turn lands in
+                // its transcript. Mirrored in `bin/codeg_server.rs`.
+                tauri::async_runtime::spawn(crate::acp::outside_activity::outside_activity_task(
+                    app.state::<crate::db::AppDatabase>().conn.clone(),
+                    app.state::<ConnectionManager>().clone_ref(),
+                    crate::web::event_bridge::EventEmitter::Tauri(app.handle().clone()),
+                ));
+
                 // OS `codeg://` URLs. Register the listener after the DB is
                 // live so a warm-start click can look the conversation up.
                 // Cold-start URLs are also read here and baked into the main

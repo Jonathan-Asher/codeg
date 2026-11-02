@@ -5926,6 +5926,25 @@ impl ConnectionManager {
         None
     }
 
+    /// Every conversation a live connection is bound to, with whether that
+    /// connection is running a turn right now: the sessions the transcript
+    /// watcher for outside activity (`acp::outside_activity`) leaves to the
+    /// connection that drives them. A connection opened to view a session is
+    /// bound only by its first prompt, so it is not in here. One lock pass over
+    /// the connections map, mirroring `find_connection_by_conversation_id`.
+    pub async fn bound_conversations(&self) -> HashMap<i32, bool> {
+        let connections = self.connections.lock().await;
+        let mut bound = HashMap::new();
+        for conn in connections.values() {
+            let state = conn.state.read().await;
+            if let Some(conversation_id) = state.conversation_id {
+                let prompting = state.status == ConnectionStatus::Prompting;
+                *bound.entry(conversation_id).or_insert(false) |= prompting;
+            }
+        }
+        bound
+    }
+
     /// The in-flight user prompt for `conversation_id` and the instant its turn
     /// started, if a turn is currently running on its live connection. `Some`
     /// exactly between `UserMessage` and `TurnComplete` (see
