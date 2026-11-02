@@ -467,7 +467,15 @@ describe("UnifiedDiffPreview — side-by-side view", () => {
     // pair leaves a filler on the right.
     const rows = container.querySelectorAll(".w-max > div")
     expect(rows).toHaveLength(8)
-    for (const row of rows) expect(row).toHaveClass("min-h-[1.25rem]")
+    // One full line: the same chat-unit length the panes set as their line
+    // height (20px at 100%), so a filler keeps step with the code rows at any
+    // chat text size.
+    for (const pane of container.querySelectorAll(".w-max")) {
+      expect(pane).toHaveClass("leading-[calc(var(--chat-rem,1rem)*1.25)]")
+    }
+    for (const row of rows) {
+      expect(row).toHaveClass("min-h-[calc(var(--chat-rem,1rem)*1.25)]")
+    }
   })
 
   it("repeats the hunk marker in both panes so the rows stay level", () => {

@@ -654,21 +654,31 @@ const STICKY_RAIL = "sticky left-0 flex shrink-0 bg-background"
  */
 const STICKY_RAIL_TINT = "flex pr-1"
 
+/**
+ * A code row's line height and the line-number gutters, in chat text units.
+ * Inside a `.chat-text-scope` (a transcript, a permission card) the `text-xs`
+ * code follows the chat text size, and these follow it with it — a fixed
+ * 1.25rem line would stack 24px text on 20px rows at 200%. Everywhere else
+ * `--chat-rem` is unset and they are the rem sizes they always were: 20px
+ * rows and 56px / 48px gutters at 100%.
+ */
+const ROW_LEADING = "leading-[calc(var(--chat-rem,1rem)*1.25)]"
+const ROW_MIN_H = "min-h-[calc(var(--chat-rem,1rem)*1.25)]"
+const GUTTER =
+  "w-[calc(var(--chat-rem,1rem)*3.5)] select-none pr-1 text-right text-muted-foreground/40"
+const SPLIT_GUTTER_W = "w-[calc(var(--chat-rem,1rem)*3)]"
+
 function HunkLines({ rows }: { rows: ParsedDiffRow[] }) {
   return (
-    <div className="font-mono text-xs leading-[1.25rem]">
+    <div className={`font-mono text-xs ${ROW_LEADING}`}>
       {rows.map((row, i) => {
         const tint = ROW_CLASS[rowMarker(row)]
         return (
           <div key={i} className={cn("flex", tint)}>
             <span className={STICKY_RAIL}>
               <span className={cn(STICKY_RAIL_TINT, tint)}>
-                <span className="w-[3.5rem] select-none pr-1 text-right text-muted-foreground/40">
-                  {row.oldLine ?? ""}
-                </span>
-                <span className="w-[3.5rem] select-none pr-1 text-right text-muted-foreground/40">
-                  {row.newLine ?? ""}
-                </span>
+                <span className={GUTTER}>{row.oldLine ?? ""}</span>
+                <span className={GUTTER}>{row.newLine ?? ""}</span>
                 <span
                   className={cn(
                     "w-4 select-none text-center",
@@ -690,14 +700,12 @@ function HunkLines({ rows }: { rows: ParsedDiffRow[] }) {
 /** Clean file content view for new files (no diff signs, green highlight as added) */
 function NewFileLines({ rows }: { rows: ParsedDiffRow[] }) {
   return (
-    <div className="font-mono text-xs leading-[1.25rem]">
+    <div className={`font-mono text-xs ${ROW_LEADING}`}>
       {rows.map((row, i) => (
         <div key={i} className={cn("flex", ROW_CLASS.added)}>
           <span className={STICKY_RAIL}>
             <span className={cn(STICKY_RAIL_TINT, ROW_CLASS.added)}>
-              <span className="w-[3.5rem] select-none pr-1 text-right text-muted-foreground/40">
-                {row.newLine ?? i + 1}
-              </span>
+              <span className={GUTTER}>{row.newLine ?? i + 1}</span>
             </span>
           </span>
           <span className="flex-1 whitespace-pre pr-3">{row.text}</span>
@@ -711,17 +719,18 @@ function SplitCellView({ cell }: { cell: SplitCell }) {
   const empty = cell.text === null
   const tint = empty ? "bg-muted/20" : ROW_CLASS[cell.marker]
   return (
-    // `min-h-[1.25rem]` (one `leading-[1.25rem]` line) is what holds a filler cell
+    // `ROW_MIN_H` (one `ROW_LEADING` line) is what holds a filler cell
     // open. It carries neither a number nor text, so its flex line has nothing
     // to give it height: the old single grid let the opposite cell hold the row
     // open, but independent panes each lay out alone, and a collapsed filler
     // slides every row below it one line out of step with the other side.
-    <div className={cn("flex min-h-[1.25rem]", tint)}>
+    <div className={cn("flex", ROW_MIN_H, tint)}>
       <span className={STICKY_RAIL}>
         <span className={cn(STICKY_RAIL_TINT, tint)}>
           <span
             className={cn(
-              "w-[3rem] select-none pr-1 text-right",
+              SPLIT_GUTTER_W,
+              "select-none pr-1 text-right",
               empty ? "text-transparent" : "text-muted-foreground/40"
             )}
           >
@@ -789,7 +798,7 @@ function SplitPane({
   side: "left" | "right"
 }) {
   return (
-    <div className="w-max min-w-full font-mono text-xs leading-[1.25rem]">
+    <div className={`w-max min-w-full font-mono text-xs ${ROW_LEADING}`}>
       {blocks.map((block) => (
         <Fragment key={block.key}>
           {block.separator && (
