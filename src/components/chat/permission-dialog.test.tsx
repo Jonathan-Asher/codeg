@@ -497,3 +497,37 @@ describe("PermissionDialog", () => {
     expect(screen.getByText("Allow once")).toBeInTheDocument()
   })
 })
+
+describe("PermissionDialog and the chat text size", () => {
+  // What the agent asks to run or change is read like the transcript, so the
+  // card carries the chat text scope itself: docked by the composer, in the
+  // live drawer, or in Quick Ask.
+  it("puts the request in a chat text scope, with pills that grow with their text", () => {
+    const permission: PendingPermission = {
+      request_id: "req-scope",
+      tool_call: {
+        title: "ls -la",
+        kind: "execute",
+        rawInput: { command: "ls -la" },
+      },
+      options: baseOptions,
+      queued: 2,
+    }
+    const { container } = renderWithIntl(
+      <PermissionDialog permission={permission} onRespond={() => {}} />
+    )
+    const card = screen.getByRole("group", { name: "ls -la" })
+    expect(card).toHaveClass("chat-text-scope")
+    expect(card).toContainElement(
+      screen.getByRole("button", { name: "Allow once" })
+    )
+    // A badge is a fixed 20px pill that hides its overflow; at a large chat
+    // text size that clipped the queue count and the tool kind.
+    const badges = container.querySelectorAll('[data-slot="badge"]')
+    expect(badges).toHaveLength(2)
+    for (const badge of badges) {
+      expect(badge).toHaveClass("h-auto", "min-h-5", "leading-none")
+      expect(badge).not.toHaveClass("h-5")
+    }
+  })
+})

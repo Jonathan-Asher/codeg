@@ -27,6 +27,8 @@ import {
   formatShortcutLabel,
   matchShortcutEvent,
 } from "@/lib/keyboard-shortcuts"
+import { CHAT_TEXT_SCOPE_CLASS } from "@/lib/chat-text-scale"
+import { cn } from "@/lib/utils"
 import { localeDirection } from "@/lib/text-direction"
 import type {
   PendingPlanApprovalState,
@@ -48,6 +50,10 @@ interface PlanApprovalCardProps {
    *  (see `canCardTakeFocus`). A conversation not in front passes false. */
   autoFocus?: boolean
 }
+
+/** A button's height follows its label, which follows the chat text size;
+ *  `min-h-8` is the `size="sm"` height it has at 100%. */
+const ACTION_BUTTON = "h-auto min-h-8"
 
 /** The card's controls, by the `data-plan-action` that names them. */
 type PlanControl =
@@ -209,13 +215,18 @@ export function PlanApprovalCard({
   }
 
   return (
+    // The plan is the agent's own text, so the card follows the chat text size
+    // like the transcript does (see `.chat-text-scope`).
     <div
       ref={rootRef}
       role="group"
       aria-label={t("title")}
       aria-describedby={hintId}
       onKeyDown={onKeyDown}
-      className="w-full space-y-3 rounded-lg border border-border/60 bg-card/60 p-4"
+      className={cn(
+        CHAT_TEXT_SCOPE_CLASS,
+        "w-full space-y-3 rounded-lg border border-border/60 bg-card/60 p-4"
+      )}
     >
       <p id={hintId} className="sr-only">
         {t("keyboardHint")}
@@ -249,11 +260,12 @@ export function PlanApprovalCard({
             rows={3}
             autoFocus
           />
-          <div className="flex items-center justify-end gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <Button
               data-plan-action="cancel"
               variant="ghost"
               size="sm"
+              className={ACTION_BUTTON}
               disabled={locked}
               onClick={() => setChangesOpen(false)}
             >
@@ -262,6 +274,7 @@ export function PlanApprovalCard({
             <Button
               data-plan-action="send"
               size="sm"
+              className={ACTION_BUTTON}
               disabled={locked || !feedback.trim()}
               onClick={sendChanges}
             >
@@ -282,6 +295,7 @@ export function PlanApprovalCard({
             data-plan-action="approve"
             data-card-entry=""
             size="sm"
+            className={ACTION_BUTTON}
             disabled={locked}
             onClick={() => decide("approve")}
           >
@@ -294,6 +308,7 @@ export function PlanApprovalCard({
             data-plan-action="request_changes"
             variant="outline"
             size="sm"
+            className={ACTION_BUTTON}
             disabled={locked}
             onClick={openNotes}
           >
@@ -304,6 +319,7 @@ export function PlanApprovalCard({
             data-plan-action="abandon"
             variant="destructive"
             size="sm"
+            className={ACTION_BUTTON}
             disabled={locked}
             onClick={() => decide("abandon")}
           >

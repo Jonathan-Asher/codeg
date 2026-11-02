@@ -32,6 +32,10 @@ import {
   focusComposerFrom,
 } from "@/lib/card-focus"
 import { isImeCompositionKey } from "@/lib/ime-composition"
+import {
+  CHAT_TEXT_BADGE_CLASS,
+  CHAT_TEXT_SCOPE_CLASS,
+} from "@/lib/chat-text-scale"
 import { cn } from "@/lib/utils"
 import { splitRecommended } from "@/lib/ask-question"
 import { detectTextDirection, localeDirection } from "@/lib/text-direction"
@@ -87,6 +91,10 @@ type FocusRequest =
 
 const DIGIT = /^[1-9]$/
 
+/** A footer button's height follows its label, which follows the chat text
+ *  size; `min-h-8` is the `size="sm"` height it has at 100%. */
+const FOOTER_BUTTON = "h-auto min-h-8"
+
 function initialState(
   questions: QuestionSpec[],
   seed?: SeedSelections
@@ -118,8 +126,11 @@ function ChoiceMark({ multi, checked }: { multi: boolean; checked: boolean }) {
   return (
     <span
       aria-hidden="true"
+      // Level with the first line of the label, a `text-sm` line 1.25 chat
+      // units tall: the mark keeps its size while the line grows with the
+      // chat text size. At 100% that is the 2px of `mt-0.5`.
       className={cn(
-        "mt-0.5 flex size-4 shrink-0 items-center justify-center border border-input dark:bg-input/30",
+        "mt-[calc(var(--chat-rem,1rem)*0.625_-_var(--spacing)*2)] flex size-4 shrink-0 items-center justify-center border border-input dark:bg-input/30",
         multi ? "rounded-[4px]" : "rounded-full",
         checked &&
           "border-primary bg-primary text-primary-foreground dark:bg-primary"
@@ -193,11 +204,21 @@ export function AskQuestionCard({
   // few-option tab and a many-option tab never resizes the card. Sized to the
   // tallest question (its option count plus the always-present "Other" row),
   // capped to the viewport; a taller-than-estimated tab scrolls internally.
+  //
+  // In chat text units, as the rows are: a row is its padding and border
+  // (spacing units) plus its label and description lines (chat units), so the
+  // reserve grows with the chat text size like the rows do. The cap shrinks by
+  // what the card's own header, tabs and footer grow past 100% (about four chat
+  // units' growth, 64px at 200%), so a larger size scrolls the options instead
+  // of pushing the composer off a short window. At 100% this is the
+  // `min(<4 × rows + 1>rem, 50svh)` it always was.
   const maxRows = useMemo(
     () => questions.reduce((m, q) => Math.max(m, q.options.length + 1), 1),
     [questions]
   )
-  const bodyHeight = `min(${maxRows * 4 + 1}rem, 50svh)`
+  const chatUnit = "var(--chat-rem, 1rem)"
+  const chatUnitGrowth = `(${chatUnit} - var(--chat-text-unit, 1rem))`
+  const bodyHeight = `min(calc(${maxRows} * (var(--spacing) * 7 + ${chatUnit} * 2.25) + ${chatUnit}), calc(50svh - ${chatUnitGrowth} * 4))`
 
   if (question.question_id !== renderedId) {
     setRenderedId(question.question_id)
@@ -676,7 +697,10 @@ export function AskQuestionCard({
       >
         {text}
         {recommended && (
-          <Badge variant="secondary" className="text-3xs">
+          <Badge
+            variant="secondary"
+            className={cn("text-3xs", CHAT_TEXT_BADGE_CLASS)}
+          >
             {t("recommended")}
           </Badge>
         )}
@@ -744,8 +768,11 @@ export function AskQuestionCard({
       >
         <ChoiceMark multi={q.multi_select} checked={selected} />
         {content}
+        {/* Level with the label's first line, like the mark: the keycap is
+            1.6em of its own (0.625-unit) text, so 0.2em is the 2px of
+            `mt-0.5` at 100% and keeps it centred as both grow. */}
         {!readOnly && i < 9 && (
-          <Keycap className="ms-auto mt-0.5">{i + 1}</Keycap>
+          <Keycap className="ms-auto mt-[0.2em]">{i + 1}</Keycap>
         )}
       </button>
     )
@@ -790,7 +817,10 @@ export function AskQuestionCard({
 
   const questionHeading = (q: QuestionSpec, index: number) => (
     <div className="flex items-center gap-2">
-      <Badge variant="outline" className="shrink-0 text-3xs">
+      <Badge
+        variant="outline"
+        className={cn("shrink-0 text-3xs", CHAT_TEXT_BADGE_CLASS)}
+      >
         {q.multi_select ? t("multiSelect") : t("singleSelect")}
       </Badge>
       <p
@@ -818,12 +848,17 @@ export function AskQuestionCard({
     // Collapsed, only the header row is left, so the message list gets the space
     // back outright.
     // `overflow-hidden` clips the full-bleed progress bar to the rounded corners.
+    // The question is the agent's own text, so the card follows the chat text
+    // size like the transcript does — wherever it is docked (the composer, the
+    // live drawer, Quick Ask). The answered record in the transcript already
+    // sits in the thread's scope, which a nested scope does not scale again.
     <div
       ref={rootRef}
       role="group"
       aria-label={title ?? t("title")}
       onKeyDown={onCardKeyDown}
       className={cn(
+        CHAT_TEXT_SCOPE_CLASS,
         "mb-2 flex max-h-[88svh] flex-col overflow-hidden rounded-xl border border-primary/30 bg-card ws-msg-card",
         readOnly ? "shadow-sm" : "shadow-lg"
       )}
@@ -902,7 +937,10 @@ export function AskQuestionCard({
               dir={dir}
               className="flex min-h-0 flex-col gap-2"
             >
-              <TabsList className="w-full shrink-0">
+              {/* As tall as its tabs rather than a fixed h-9, which is what
+                  that comes to at 100%: the tab labels grow with the chat
+                  text size. */}
+              <TabsList className="min-h-9 w-full shrink-0 group-data-horizontal/tabs:h-auto">
                 {questions.map((q, i) => {
                   const done = isAnswered(state[q.id])
                   return (
@@ -934,7 +972,9 @@ export function AskQuestionCard({
                       {done ? (
                         <Check className="size-3.5 shrink-0 text-primary" />
                       ) : (
-                        <span className="flex size-4 shrink-0 items-center justify-center rounded-full border border-current text-3xs leading-none">
+                        // 1.6em of its own text: 16px at 100%, and it grows
+                        // with the number.
+                        <span className="flex size-[1.6em] shrink-0 items-center justify-center rounded-full border border-current text-3xs leading-none">
                           {i + 1}
                         </span>
                       )}
@@ -966,18 +1006,22 @@ export function AskQuestionCard({
             </div>
           ))}
 
-        {/* Footer — dropped in the read-only/answered view and while collapsed */}
+        {/* Footer — dropped in the read-only/answered view and while collapsed.
+            Wraps rather than running out of a narrow pane at a large chat
+            text size, and its buttons grow with their labels (32px at 100%,
+            as `size="sm"` is). */}
         {!readOnly && !collapsed && (
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
             <Button
               variant="ghost"
               size="sm"
+              className={FOOTER_BUTTON}
               onClick={skip}
               disabled={submitting}
             >
               {t("skip")}
             </Button>
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
               {error && (
                 <span role="alert" className="text-xs text-destructive">
                   {t("submitError")}
@@ -987,6 +1031,7 @@ export function AskQuestionCard({
                 <Button
                   variant="outline"
                   size="sm"
+                  className={FOOTER_BUTTON}
                   onClick={() => setActiveId(nextId)}
                   disabled={submitting}
                 >
@@ -997,6 +1042,7 @@ export function AskQuestionCard({
               )}
               <Button
                 size="sm"
+                className={FOOTER_BUTTON}
                 disabled={!complete || submitting}
                 onClick={() => submit()}
                 aria-keyshortcuts="Meta+Enter Control+Enter"

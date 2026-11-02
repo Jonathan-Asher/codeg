@@ -1047,8 +1047,9 @@
 
 /* Chat text size (Settings → Appearance; Cmd/Ctrl+Shift+= / - / 0). Scales the
    conversation's own text and nothing else: the transcript, the composer's
-   input, Quick Ask — each marked with this class — while the sidebar, tabs,
-   status bar and settings keep the window zoom alone.
+   input, Quick Ask, the question / plan / permission cards docked by the
+   composer — each marked with this class — while the sidebar, tabs, status bar
+   and settings keep the window zoom alone.
 
    Same move as `.canvas-board-units` below: every Tailwind v4 text utility
    resolves through a `--text-*` token, so restating the tokens for a subtree

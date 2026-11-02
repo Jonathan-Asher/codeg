@@ -1,7 +1,8 @@
 /**
  * Chat text size: a second, narrower zoom that scales only the conversation's
- * own text — message bodies, code blocks, tool output, user bubbles and the
- * composer's input — and leaves the sidebar, tabs, status bar, settings and
+ * own text — message bodies, code blocks, tool output, user bubbles, the
+ * composer's input and the cards the agent waits on (questions, plans,
+ * permission prompts) — and leaves the sidebar, tabs, status bar, settings and
  * every other panel alone. The window zoom (`theme-presets` ZOOM_LEVELS) scales
  * everything; the two compound.
  *
@@ -36,6 +37,18 @@ export const CHAT_TEXT_SCALE_PROPERTY = "--chat-text-scale"
 
 /** Put on an element whose text should follow the chat text size. */
 export const CHAT_TEXT_SCOPE_CLASS = "chat-text-scope"
+
+/**
+ * For a `Badge` inside a chat text scope. A badge is a fixed 20px pill that
+ * hides its overflow, so a larger chat text size clips its text; with this the
+ * pill grows with the text instead, and is the same 20px at 100% (the text sits
+ * centred either way).
+ *
+ * Pass it AFTER the badge's text size (`cn("text-3xs", CHAT_TEXT_BADGE_CLASS)`):
+ * tailwind-merge drops a `leading-*` that a later `text-*` follows, and without
+ * `leading-none` the inherited line height makes the pill taller at 100%.
+ */
+export const CHAT_TEXT_BADGE_CLASS = "h-auto min-h-5 leading-none"
 
 /**
  * Fired on `window` synchronously right BEFORE the new scale is written, so a

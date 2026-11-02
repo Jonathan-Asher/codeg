@@ -32,9 +32,14 @@ import {
   focusComposerFrom,
   isTypingTarget,
 } from "@/lib/card-focus"
+import {
+  CHAT_TEXT_BADGE_CLASS,
+  CHAT_TEXT_SCOPE_CLASS,
+} from "@/lib/chat-text-scale"
 import { isImeCompositionKey } from "@/lib/ime-composition"
 import { detectTextDirection, localeDirection } from "@/lib/text-direction"
 import type { AgentType } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 interface PermissionDialogProps {
   permission: PendingPermission | null
@@ -235,13 +240,18 @@ export function PermissionDialog({
   }
 
   return (
+    // What the agent wants to run or change is read like the transcript, so
+    // the card follows the chat text size (see `.chat-text-scope`).
     <div
       ref={rootRef}
       role="group"
       aria-label={parsed.description ?? parsed.title}
       aria-describedby={hintId}
       onKeyDown={onKeyDown}
-      className="mx-4 mb-3 rounded-xl border border-border/70 bg-card/95 p-3 shadow-sm"
+      className={cn(
+        CHAT_TEXT_SCOPE_CLASS,
+        "mx-4 mb-3 rounded-xl border border-border/70 bg-card/95 p-3 shadow-sm"
+      )}
     >
       <p id={hintId} className="sr-only">
         {t("keyboardHint")}
@@ -279,11 +289,17 @@ export function PermissionDialog({
           {/* Only one card shows at a time, so without this the remaining
               approvals look like the agent has stopped responding. */}
           {queued > 0 ? (
-            <Badge variant="secondary" className="text-3xs tabular-nums">
+            <Badge
+              variant="secondary"
+              className={cn("text-3xs tabular-nums", CHAT_TEXT_BADGE_CLASS)}
+            >
               {t("queuedCount", { count: queued })}
             </Badge>
           ) : null}
-          <Badge variant="outline" className="text-3xs">
+          <Badge
+            variant="outline"
+            className={cn("text-3xs", CHAT_TEXT_BADGE_CLASS)}
+          >
             {formatKindLabel(parsed.normalizedKind, t("kindFallbackTool"))}
           </Badge>
         </div>
@@ -367,7 +383,10 @@ export function PermissionDialog({
                   className="flex items-center gap-2 text-xs"
                 >
                   {item.tool && (
-                    <Badge variant="outline" className="shrink-0 text-3xs">
+                    <Badge
+                      variant="outline"
+                      className={cn("shrink-0 text-3xs", CHAT_TEXT_BADGE_CLASS)}
+                    >
                       {item.tool}
                     </Badge>
                   )}
@@ -450,7 +469,10 @@ export function PermissionDialog({
                         {change.scope && (
                           <Badge
                             variant="outline"
-                            className="shrink-0 text-3xs"
+                            className={cn(
+                              "shrink-0 text-3xs",
+                              CHAT_TEXT_BADGE_CLASS
+                            )}
                           >
                             {t(CHANGE_SCOPE_LABEL_KEYS[change.scope])}
                           </Badge>

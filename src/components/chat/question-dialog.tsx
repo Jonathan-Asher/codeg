@@ -10,6 +10,8 @@ import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import { useImeGuard } from "@/hooks/use-ime-guard"
 import { useCardArrivalFocus, useComposerHandoff } from "@/hooks/use-card-focus"
 import { focusComposerFrom } from "@/lib/card-focus"
+import { CHAT_TEXT_SCOPE_CLASS } from "@/lib/chat-text-scale"
+import { cn } from "@/lib/utils"
 import type { PendingQuestion } from "@/contexts/acp-connections-context"
 
 interface QuestionDialogProps {
@@ -66,9 +68,14 @@ export function QuestionDialog({ question, onAnswer }: QuestionDialogProps) {
   if (!question) return null
 
   return (
+    // The agent's question follows the chat text size like the transcript
+    // (see `.chat-text-scope`).
     <div
       ref={rootRef}
-      className="mx-4 mb-3 rounded-xl border border-blue-500/30 bg-card/95 p-3 shadow-sm"
+      className={cn(
+        CHAT_TEXT_SCOPE_CLASS,
+        "mx-4 mb-3 rounded-xl border border-blue-500/30 bg-card/95 p-3 shadow-sm"
+      )}
     >
       <div className="flex items-center gap-1.5 text-sm font-medium">
         <MessageCircleQuestion className="h-4 w-4 shrink-0 text-blue-500" />
@@ -94,11 +101,13 @@ export function QuestionDialog({ question, onAnswer }: QuestionDialogProps) {
           rows={2}
           className="flex-1 resize-none rounded-md border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         />
+        {/* Grows with its label at a large chat text size; 32px (`sm`) at
+            100%. */}
         <Button
           size="sm"
           disabled={!answer.trim()}
           onClick={handleSubmit}
-          className="self-end"
+          className="h-auto min-h-8 self-end"
         >
           <SendHorizonal className="mr-1.5 h-3.5 w-3.5" />
           {t("send")}

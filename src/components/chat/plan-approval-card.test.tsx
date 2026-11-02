@@ -104,3 +104,22 @@ describe("PlanApprovalCard", () => {
     ).toBeInTheDocument()
   })
 })
+
+describe("PlanApprovalCard and the chat text size", () => {
+  // The plan is the agent's own text, read like the transcript: the card
+  // carries the chat text scope itself, wherever it is docked.
+  it("puts the plan in a chat text scope, with buttons that grow with their labels", () => {
+    renderCard(make("1. step one"))
+    const card = screen.getByRole("group", {
+      name: "The agent has a plan — review it",
+    })
+    expect(card).toHaveClass("chat-text-scope")
+    for (const name of ["Approve & build", "Request changes", "Abandon"]) {
+      const button = screen.getByRole("button", { name })
+      expect(card).toContainElement(button)
+      // A fixed 32px button would clip a large chat text size.
+      expect(button).toHaveClass("h-auto", "min-h-8")
+      expect(button).not.toHaveClass("h-8")
+    }
+  })
+})

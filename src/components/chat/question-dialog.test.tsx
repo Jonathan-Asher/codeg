@@ -93,3 +93,23 @@ describe("QuestionDialog", () => {
     expect(refreshed.value).toBe("")
   })
 })
+
+describe("QuestionDialog and the chat text size", () => {
+  it("puts the question and the answer field in a chat text scope", () => {
+    renderWithIntl(
+      <QuestionDialog
+        question={{ tool_call_id: "q-s", question: "Which file?" }}
+        onAnswer={() => {}}
+      />
+    )
+    const scope = screen.getByText("Which file?").closest(".chat-text-scope")
+    expect(scope).not.toBeNull()
+    expect(scope).toContainElement(
+      screen.getByPlaceholderText("Type your answer...")
+    )
+    // The Send button grows with its label rather than clipping it.
+    const send = screen.getByRole("button", { name: /Send/i })
+    expect(send).toHaveClass("h-auto", "min-h-8")
+    expect(send).not.toHaveClass("h-8")
+  })
+})

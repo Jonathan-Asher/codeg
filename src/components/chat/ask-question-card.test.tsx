@@ -632,3 +632,43 @@ describe("AskQuestionCard collapse", () => {
     expect(screen.getByRole("button", { name: "Submit" })).not.toBeDisabled()
   })
 })
+
+describe("AskQuestionCard and the chat text size", () => {
+  // The question is the agent's own text, read like the transcript: the card
+  // carries the chat text scope itself, so it grows wherever it is docked (the
+  // composer, the live drawer, Quick Ask) and not only inside a thread.
+  it("puts the whole card in a chat text scope", () => {
+    renderCard(single)
+    const card = screen.getByRole("group", {
+      name: "The agent needs your input",
+    })
+    expect(card).toHaveClass("chat-text-scope")
+    expect(card).toContainElement(screen.getByText("Which approach?"))
+    expect(card).toContainElement(screen.getByRole("button", { name: "Skip" }))
+  })
+
+  it("reserves the tabs' height in chat text units, so it grows with the rows", () => {
+    renderCard(twoSingle)
+    const height = screen.getByRole("tabpanel").style.height
+    // Three rows (two options and "Other") of padding plus chat-sized text,
+    // capped at half the viewport less what the card's chrome grows by.
+    expect(height).toBe(
+      "min(calc(3 * (var(--spacing) * 7 + var(--chat-rem, 1rem) * 2.25) + var(--chat-rem, 1rem)), calc(50svh - (var(--chat-rem, 1rem) - var(--chat-text-unit, 1rem)) * 4))"
+    )
+  })
+
+  it("lets its labelled controls grow with their text", () => {
+    renderCard(twoSingle)
+    // Fixed-height pills and buttons would clip a large chat text size. The
+    // badge keeps `leading-none` through the class merge, or it is taller than
+    // 20px at 100%.
+    const badge = screen.getByText("Single")
+    expect(badge).toHaveClass("h-auto", "min-h-5", "leading-none", "text-3xs")
+    expect(badge).not.toHaveClass("h-5")
+    for (const name of ["Skip", "Next"]) {
+      const button = screen.getByRole("button", { name: new RegExp(name) })
+      expect(button).toHaveClass("h-auto", "min-h-8")
+      expect(button).not.toHaveClass("h-8")
+    }
+  })
+})
