@@ -27,10 +27,8 @@ use tokio::sync::RwLock;
 use crate::models::conversation::SessionStats;
 
 /// Hard cap on how many recent turns a single `get_session_info` call may
-/// request. The companion clamps the agent-supplied `max_messages` to this, and
-/// the resolver treats it as the authoritative ceiling so a pathological value
-/// can't blow up the UDS frame or the LLM context.
-pub const MAX_SESSION_MESSAGES: u32 = 200;
+/// request; shared with the companion, which clamps to it too.
+pub use codeg_mcp_protocol::MAX_SESSION_MESSAGES;
 
 /// One compacted turn from the referenced session's transcript. NEVER carries a
 /// raw `MessageTurn` / image bytes — only role + truncated text + tool names — so

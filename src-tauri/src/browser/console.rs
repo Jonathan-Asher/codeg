@@ -40,6 +40,10 @@ use std::collections::VecDeque;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+// The level and the query a console read is made of; the companion builds
+// these, so they live in the protocol crate it shares.
+pub use codeg_mcp_protocol::browser::{ConsoleLevel, ConsoleQuery};
+
 /// Lines kept per tab. A page that has printed more than this since it
 /// loaded has said its piece; what an agent needs is the most recent of it.
 pub const CONSOLE_RING_CAPACITY: usize = 200;
@@ -81,41 +85,6 @@ pub const CONSOLE_MAX_REPORTED_DROP: u64 = 100_000;
 /// this size costs is the parse, on the main thread, and the engine will
 /// send another one for the next line.
 pub const CDP_MAX_EVENT_BYTES: usize = 256 * 1024;
-
-/// Severity, in the order a `minLevel` filter compares it: everything from
-/// `Debug` up.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ConsoleLevel {
-    Debug,
-    Log,
-    Info,
-    Warn,
-    Error,
-}
-
-impl ConsoleLevel {
-    pub fn parse(raw: &str) -> Option<Self> {
-        match raw {
-            "debug" => Some(Self::Debug),
-            "log" => Some(Self::Log),
-            "info" => Some(Self::Info),
-            "warn" | "warning" => Some(Self::Warn),
-            "error" => Some(Self::Error),
-            _ => None,
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Debug => "debug",
-            Self::Log => "log",
-            Self::Info => "info",
-            Self::Warn => "warn",
-            Self::Error => "error",
-        }
-    }
-}
 
 /// Where a line came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -196,22 +165,6 @@ pub struct ReportedLine {
     /// Lines the sender discarded before this one (the helper's per-second
     /// budget). Added to the ring's count.
     pub dropped: u64,
-}
-
-/// What a read asks for.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConsoleQuery {
-    /// Only lines after this `seq`. `0` is everything the ring holds.
-    #[serde(default)]
-    pub since: u64,
-    /// Only lines at this level or above. Absent is everything.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub min_level: Option<ConsoleLevel>,
-    /// At most this many lines, oldest first. Absent is
-    /// [`DEFAULT_CONSOLE_LIMIT`]; `0` is treated the same.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub limit: Option<usize>,
 }
 
 /// What a read answers.

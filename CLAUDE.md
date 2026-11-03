@@ -31,19 +31,19 @@ pnpm build                     # 静态导出构建
 ### 后端 Rust（在 `src-tauri/` 目录下执行）
 
 ```bash
-# 桌面模式（默认 feature）
+# 桌面模式（默认 feature；`--workspace` 连同 codeg-mcp 与 codeg-mcp-protocol 两个成员一起）
 cargo check
-cargo test --features test-utils
-cargo clippy --all-targets --features test-utils -- -D warnings
+cargo test --workspace --features test-utils
+cargo clippy --workspace --all-targets --features test-utils -- -D warnings
 
-# 服务器模式
-cargo check --no-default-features --bin codeg-server
-cargo test --no-default-features --bin codeg-server --lib
-cargo clippy --no-default-features --bin codeg-server --lib -- -D warnings
+# 服务器模式（`server` feature 才编译 codeg-server 二进制）
+cargo check --no-default-features --features server --bin codeg-server
+cargo test --no-default-features --features server --bin codeg-server --lib
+cargo clippy --no-default-features --features server --bin codeg-server --lib -- -D warnings
 
-# codeg-mcp 协作伴生进程（多智能体委托）
-cargo check --no-default-features --bin codeg-mcp
-cargo clippy --no-default-features --bin codeg-mcp -- -D warnings
+# codeg-mcp 协作伴生进程（多智能体委托），独立的 workspace 成员，只用自己的依赖 feature
+cargo clippy -p codeg-mcp -p codeg-mcp-protocol --all-targets -- -D warnings
+cargo test -p codeg-mcp -p codeg-mcp-protocol
 
 # 解析器快照评审（输出变化时）
 cargo insta review
@@ -57,8 +57,8 @@ INSTA_UPDATE=auto cargo test --features test-utils     # 自动写新 .snap
 项目通过 Cargo feature flags 支持三种二进制：
 
 - **`codeg`**（`tauri-runtime`，默认）：完整桌面应用，包含 Tauri 窗口管理、系统通知、自动更新等
-- **`codeg-server`**（无 feature，`--no-default-features`）：独立服务器模式，仅编译 Axum HTTP API + WebSocket
-- **`codeg-mcp`**（无 feature）：per-launch stdio MCP 伴生进程，被注入到代理 CLI 的 MCP 配置中，向 LLM 暴露**异步**子智能体委托工具。
+- **`codeg-server`**（`--no-default-features --features server`）：独立服务器模式，仅编译 Axum HTTP API + WebSocket。`server` feature 不在默认 feature 里，所以桌面构建（`tauri build`）不编译、也不打包它
+- **`codeg-mcp`**（独立 crate `src-tauri/crates/codeg-mcp`）：per-launch stdio MCP 伴生进程，被注入到代理 CLI 的 MCP 配置中，向 LLM 暴露**异步**子智能体委托工具。它只依赖 `crates/codeg-mcp-protocol`（broker socket 协议、工具请求类型、共享的名称与上限），不链接主库，所以几秒就能编译完；主库在原来的路径（`acp::delegation::transport`、`acp::question` 等）重新导出这些类型。
 
 ### 共享核心
 

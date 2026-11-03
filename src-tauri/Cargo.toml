@@ -1,9 +1,24 @@
-[package]
-name = "codeg"
+# The app's package and the workspace root. The members are the `codeg-mcp`
+# companion and the protocol crate it shares with the app: the companion builds
+# on its own (`cargo build -p codeg-mcp`), in seconds, without this package's
+# library. Commands run here without `-p` or `--workspace` still mean the app.
+[workspace]
+members = ["crates/codeg-mcp-protocol", "crates/codeg-mcp"]
+resolver = "2"
+
+# One version for all three: the companion and the app speak a protocol with no
+# version field, so they always ship from the same commit.
+[workspace.package]
 version = "0.32.2"
-description = "Agent Code Generation App"
 authors = ["feitao"]
 edition = "2021"
+
+[package]
+name = "codeg"
+version.workspace = true
+description = "Agent Code Generation App"
+authors.workspace = true
+edition.workspace = true
 default-run = "codeg"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -13,7 +28,11 @@ default-run = "codeg"
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "codeg_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# rlib only: the binaries below are all that link it. `staticlib` and `cdylib`
+# are what Tauri's iOS and Android builds link, and this app has no mobile
+# target (no `gen/apple`, no `gen/android`); building them anyway cost every
+# release a 340 MB static archive and a full extra link.
+crate-type = ["rlib"]
 
 [features]
 default = ["tauri-runtime", "browser-child"]
@@ -43,7 +62,15 @@ tauri-runtime = [
 # `ConnectionManager::insert_test_connection`, parser `with_base_dir`, the
 # `db::test_helpers` module) for integration tests in `tests/*.rs`. Without
 # this feature the items are physically uncompiled in release builds.
-test-utils = []
+# It also builds the `codeg-server` binary, which integration tests run
+# (`CARGO_BIN_EXE_codeg-server`).
+test-utils = ["server"]
+# The standalone `codeg-server` binary (its `[[bin]]` requires this). Desktop
+# builds leave it off: `tauri build` compiles and bundles every binary whose
+# required features are on, and codeg.app has no use for an 80 MB server.
+# Server builds, Docker and CI name it:
+#   cargo build --release --no-default-features --features server --bin codeg-server
+server = []
 # Built-in browser. `browser-child` compiles the embedded surface: a wry child
 # webview created directly through tauri-runtime-wry's re-exported `wry`
 # (`WebViewBuilder::build_as_child`), which is exactly how tauri-runtime-wry
@@ -66,17 +93,15 @@ required-features = ["tauri-runtime"]
 [[bin]]
 name = "codeg-server"
 path = "src/bin/codeg_server.rs"
-required-features = []
-
-[[bin]]
-name = "codeg-mcp"
-path = "src/bin/codeg_mcp.rs"
-required-features = []
+required-features = ["server"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [], optional = true }
 
 [dependencies]
+# The wire contract with the `codeg-mcp` companion (crates/codeg-mcp-protocol),
+# re-exported at the paths it had before the split.
+codeg-mcp-protocol = { path = "crates/codeg-mcp-protocol" }
 # `devtools` is what makes the web inspector exist in a RELEASE build — in a
 # debug one `debug_assertions` already does. It reaches wry through
 # tauri-runtime-wry, which is where a browser tab's child webview is built, and
@@ -148,9 +173,6 @@ zstd = "0.13"
 tar = "0.4"
 zip = "2"
 regex = "1"
-# Grapheme-safe shortening of an ask-question header chip, so a Hebrew letter
-# keeps its niqqud and an emoji its modifiers. Already in the desktop tree.
-unicode-segmentation = "1"
 portable-pty = "0.8"
 urlencoding = "2"
 # WHATWG URL parsing outside the desktop runtime. `tauri::Url` is this same

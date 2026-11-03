@@ -139,7 +139,7 @@ const ARGS_WRAPPER_KEYS = [
  * label the card with the TOOL's name ("Creating automation
  * mcp__codeg-mcp__create_automation") instead of the automation's. Safe for all
  * five tools because none of their schemas
- * (`src-tauri/src/acp/delegation/tool_schema.json`) has an argument named after
+ * (`src-tauri/crates/codeg-mcp/src/tool_schema.json`) has an argument named after
  * a wrapper key, so a descent can only ever reach a real payload.
  */
 function findArgs(

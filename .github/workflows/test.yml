@@ -77,23 +77,26 @@ jobs:
             # parser `with_base_dir`, `db::test_helpers`) for integration tests
             # under `tests/`. Without the flag those items are physically
             # uncompiled, so integration tests would fail to link.
-            cargo_args: "--features test-utils"
+            # `--workspace`: the codeg-mcp companion and its protocol crate
+            # are workspace members next to the app.
+            cargo_args: "--workspace --features test-utils"
             # Desktop clippy must lint integration tests too, so it picks up
             # `--all-targets`. test-utils is already on, so tests compile.
-            clippy_args: "--all-targets --features test-utils"
+            clippy_args: "--workspace --all-targets --features test-utils"
           - mode: server
             # Server build is feature-gated off the Tauri runtime; no
             # need for webkit/appindicator system libs. `--lib` skips
             # integration tests for `cargo test`, so `test-utils` is not
             # required here.
-            cargo_args: "--no-default-features --bin codeg-server --lib"
+            # `server` is the feature the codeg-server binary requires.
+            cargo_args: "--no-default-features --features server --bin codeg-server --lib"
             # Server clippy intentionally skips `--all-targets`: integration
             # tests are already linted in the desktop cells, and pulling
             # them in here would force `test-utils` (a test-only feature)
             # into the server build matrix. Lint scope here is lib + the
             # codeg-server binary, which is exactly the cfg-gated surface
             # that this cell exists to verify.
-            clippy_args: "--no-default-features --bin codeg-server --lib"
+            clippy_args: "--no-default-features --features server --bin codeg-server --lib"
     steps:
       - uses: actions/checkout@v4
 
@@ -144,6 +147,18 @@ jobs:
         # advisories are cleared.
         working-directory: src-tauri
         run: cargo clippy ${{ matrix.clippy_args }} -- -D warnings
+
+      - name: codeg-mcp builds on its own
+        # The companion ships from `cargo build -p codeg-mcp`, which resolves
+        # only its own dependencies' features; the workspace build in the
+        # desktop cells unifies them with the app's and would hide a missing
+        # one. The server cells need no GTK, and Windows exercises the named
+        # pipe transport.
+        if: matrix.mode == 'server'
+        working-directory: src-tauri
+        run: |
+          cargo clippy -p codeg-mcp -p codeg-mcp-protocol --all-targets -- -D warnings
+          cargo test -p codeg-mcp -p codeg-mcp-protocol
 
       - name: Web handlers must route through commands/*_core
         # Lock in the dedup from Phase 8: web/handlers/{folders,conversations}.rs

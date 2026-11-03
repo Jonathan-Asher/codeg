@@ -1,6 +1,5 @@
-//! Companion-side MCP protocol — the bits that live inside the `codeg-mcp`
-//! binary but are factored out into the library so they can be unit-tested
-//! without spawning the binary.
+//! Companion-side MCP protocol — the bits of the `codeg-mcp` binary that live
+//! in its library half so they can be unit-tested without spawning it.
 //!
 //! The companion speaks newline-delimited JSON-RPC 2.0 on stdio:
 //! one request → one response per line, with concurrent dispatch so
@@ -41,10 +40,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::{oneshot, Mutex};
 
-use crate::acp::chat_authoring::{
-    NewAutomationSpec, NewWorkTaskSpec, MAX_PROMPT_CHARS, MAX_TITLE_CHARS,
+use codeg_mcp_protocol::authoring::{
+    AutomationAction, NewAutomationSpec, NewWorkTaskSpec, MAX_PROMPT_CHARS, MAX_TITLE_CHARS,
 };
-use crate::acp::delegation::transport::{
+use codeg_mcp_protocol::features;
+use codeg_mcp_protocol::question::{parse_questions, restore_sent_headers, sent_headers};
+use codeg_mcp_protocol::transport::{
     client_ask_round_trip, client_browser_act_round_trip, client_browser_capture_round_trip,
     client_browser_console_round_trip, client_browser_eval_round_trip,
     client_browser_snapshot_round_trip, client_browser_tab_op_round_trip,
@@ -62,9 +63,7 @@ use crate::acp::delegation::transport::{
     BrokerResumeTaskRequest, BrokerSessionRequest, BrokerStatusRequest,
     BrokerTaskCompleteRequest, BrokerTaskProgressRequest,
 };
-use crate::acp::question::{parse_questions, restore_sent_headers, sent_headers};
-use crate::acp::session_info::MAX_SESSION_MESSAGES;
-use crate::models::AutomationAction;
+use codeg_mcp_protocol::MAX_SESSION_MESSAGES;
 
 /// Upper bound on one broker-side cancel round-trip. Bounds both
 /// `handle_cancel_notification` (so stdin dispatch can't stall behind a
@@ -75,6 +74,10 @@ use crate::models::AutomationAction;
 /// main side's `cancel_by_parent` cascade when the parent ACP connection
 /// eventually ends.
 const BROKER_CANCEL_BUDGET: Duration = Duration::from_millis(500);
+
+/// A boxed, sendable future: `futures::future::BoxFuture`, without the
+/// dependency for one alias.
+pub type BoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
 
 /// Wrap `client_cancel` in [`BROKER_CANCEL_BUDGET`] so callers can fire
 /// a synchronous cancel without worrying about a hung listener freezing
@@ -88,7 +91,7 @@ async fn send_broker_cancel(socket_path: &str, req: &BrokerCancelRequest) {
 
 /// Static MCP tool schema. Lives next to this module so codeg-mcp ships
 /// a single embedded copy — no runtime file IO, no version skew with the
-/// broker's [`super::types::DelegationRequest`].
+/// broker's `codeg_lib::acp::delegation::types::DelegationRequest`.
 pub const TOOL_SCHEMA_JSON: &str = include_str!("tool_schema.json");
 
 #[derive(Debug, Deserialize)]
@@ -217,15 +220,15 @@ impl CompanionFeatures {
         };
         for tok in s.split(',').map(str::trim).filter(|t| !t.is_empty()) {
             match tok {
-                "delegation" => f.delegation = true,
-                "feedback" => f.feedback = true,
-                "ask" => f.ask = true,
-                "sessions" => f.sessions = true,
-                "tasks" => f.tasks = true,
-                "automations" => f.automations = true,
-                "taskboard" => f.taskboard = true,
-                "browser" => f.browser = true,
-                "browser_eval" => f.browser_eval = true,
+                features::DELEGATION => f.delegation = true,
+                features::FEEDBACK => f.feedback = true,
+                features::ASK => f.ask = true,
+                features::SESSIONS => f.sessions = true,
+                features::TASKS => f.tasks = true,
+                features::AUTOMATIONS => f.automations = true,
+                features::TASKBOARD => f.taskboard = true,
+                features::BROWSER => f.browser = true,
+                features::BROWSER_EVAL => f.browser_eval = true,
                 _ => {}
             }
         }
@@ -367,7 +370,7 @@ pub enum LineAction {
 /// Every other tool leaves this `None`.
 pub struct SpawnResult {
     pub response: Option<JsonRpcResponse>,
-    pub after_relay: Option<futures_util::future::BoxFuture<'static, ()>>,
+    pub after_relay: Option<BoxFuture<'static, ()>>,
 }
 
 /// Materialized async tools/call ready to drive in a tokio task. The binary
@@ -381,7 +384,7 @@ pub struct SpawnedCall {
     pub request_id_key: String,
     /// The future that performs the UDS round-trip racing the cancel channel
     /// and resolves to the [`SpawnResult`] to relay (and optionally commit).
-    pub future: futures_util::future::BoxFuture<'static, SpawnResult>,
+    pub future: BoxFuture<'static, SpawnResult>,
     /// The `_meta.progressToken` the agent attached to this `tools/call`, if
     /// any. While the call is pending the binary sends a
     /// `notifications/progress` on it every [`progress_heartbeat_interval`]
@@ -1054,7 +1057,7 @@ async fn register_and_spawn(
     inflight: Arc<InflightCalls>,
     id: Value,
     external_handle: Option<String>,
-    round_trip: futures_util::future::BoxFuture<'static, std::io::Result<BrokerResponse>>,
+    round_trip: BoxFuture<'static, std::io::Result<BrokerResponse>>,
     render: fn(&Value) -> Value,
 ) -> LineAction {
     let (cancel_tx, cancel_rx) = oneshot::channel();
@@ -1171,10 +1174,9 @@ async fn register_and_spawn_feedback(
                         // (at-least-once at the agent-facing boundary).
                         let outcome = resp.outcome;
                         let response = ok(id_for_response, render_feedback_result(&outcome));
-                        let commit: futures_util::future::BoxFuture<'static, ()> =
-                            Box::pin(async move {
-                                commit_feedback_after_delivery(&socket, &token, &outcome).await;
-                            });
+                        let commit: BoxFuture<'static, ()> = Box::pin(async move {
+                            commit_feedback_after_delivery(&socket, &token, &outcome).await;
+                        });
                         SpawnResult {
                             response: Some(response),
                             after_relay: Some(commit),
@@ -1370,10 +1372,11 @@ fn render_batch_report(tasks: &[Value]) -> Value {
     })
 }
 
-/// Map a serialized [`super::types::DelegationTaskReport`] into MCP `tools/call`
-/// result content. Shared by `delegate_to_agent` and `cancel_delegation`, which
-/// each resolve to a single report; `get_delegation_status` no longer uses this
-/// path — it always renders via [`render_status_result`] / [`render_batch_report`].
+/// Map a serialized `DelegationTaskReport` (codeg's `acp::delegation::types`)
+/// into MCP `tools/call` result content. Shared by `delegate_to_agent` and
+/// `cancel_delegation`, which each resolve to a single report;
+/// `get_delegation_status` no longer uses this path — it always renders via
+/// [`render_status_result`] / [`render_batch_report`].
 /// Kept separate so unit tests can assert the mapping without a real socket.
 ///
 /// The human-readable `content` text is the result for a `completed` task and
@@ -1567,7 +1570,7 @@ fn parse_work_task_spec(arguments: &Value) -> Result<NewWorkTaskSpec, String> {
 
 /// Character-safe truncation shared by both spec parsers.
 fn truncate_chars(s: &str, cap: usize) -> String {
-    crate::acp::chat_authoring::truncate_chars(s, cap)
+    codeg_mcp_protocol::authoring::truncate_chars(s, cap)
 }
 
 /// Extract the `session_id` integer from the `get_session_info` arguments,
@@ -1619,7 +1622,7 @@ fn parse_max_messages(arguments: &Value) -> u32 {
 }
 
 /// Map the `get_session_info` round-trip outcome (a serialized
-/// [`crate::acp::session_info::SessionInfo`]) into an MCP `tools/call` result. A
+/// `codeg_lib::acp::session_info::SessionInfo`) into an MCP `tools/call` result. A
 /// not-found result is surfaced as readable text with `isError: false` (the LLM
 /// reads it and proceeds), never as a tool error. The full structured envelope
 /// rides along in `structuredContent` for hosts that keep it.
@@ -1677,8 +1680,8 @@ fn parse_max_chars(arguments: &Value) -> Option<usize> {
 pub fn browser_action_request(
     name: &str,
     arguments: &Value,
-) -> Result<(String, crate::browser::agent::ActionRequest), String> {
-    use crate::browser::agent::{ActionKind, ActionRequest, PointerButton};
+) -> Result<(String, codeg_mcp_protocol::browser::ActionRequest), String> {
+    use codeg_mcp_protocol::browser::{ActionKind, ActionRequest, PointerButton};
     let text = |key: &str| {
         arguments
             .get(key)
@@ -1813,8 +1816,8 @@ pub fn browser_action_request(
 /// other than what was asked and reporting it done is the worst answer.
 pub fn browser_console_query(
     arguments: &Value,
-) -> Result<(String, crate::browser::console::ConsoleQuery), String> {
-    use crate::browser::console::{ConsoleLevel, ConsoleQuery};
+) -> Result<(String, codeg_mcp_protocol::browser::ConsoleQuery), String> {
+    use codeg_mcp_protocol::browser::{ConsoleLevel, ConsoleQuery};
     let tab_id = arguments
         .get("tabId")
         .or_else(|| arguments.get("tab_id"))
@@ -1882,8 +1885,8 @@ pub fn browser_console_query(
 /// capture that the model would take for the element.
 pub fn browser_capture_request(
     arguments: &Value,
-) -> Result<(String, crate::browser::capture::CaptureRequest), String> {
-    use crate::browser::capture::{CaptureFormat, CaptureRequest};
+) -> Result<(String, codeg_mcp_protocol::browser::CaptureRequest), String> {
+    use codeg_mcp_protocol::browser::{CaptureFormat, CaptureRequest};
     let tab_id = arguments
         .get("tabId")
         .or_else(|| arguments.get("tab_id"))
@@ -1968,8 +1971,8 @@ pub fn browser_capture_request(
 /// — the codeg-side one is the gate, this one is the message.
 pub fn browser_eval_request(
     arguments: &Value,
-) -> Result<(String, crate::browser::eval::EvalRequest), String> {
-    use crate::browser::eval::{validate_code, EvalRequest};
+) -> Result<(String, codeg_mcp_protocol::browser::EvalRequest), String> {
+    use codeg_mcp_protocol::browser::{validate_code, EvalRequest};
     let tab_id = arguments
         .get("tabId")
         .or_else(|| arguments.get("tab_id"))
@@ -2008,8 +2011,8 @@ pub fn browser_eval_request(
 pub fn browser_tab_op(
     name: &str,
     arguments: &Value,
-) -> Result<crate::acp::browser_tools::BrowserTabOp, String> {
-    use crate::acp::browser_tools::BrowserTabOp;
+) -> Result<codeg_mcp_protocol::browser::BrowserTabOp, String> {
+    use codeg_mcp_protocol::browser::BrowserTabOp;
     let text = |key: &str| -> Result<String, String> {
         match arguments.get(key) {
             Some(Value::String(s)) if !s.trim().is_empty() => Ok(s.trim().to_string()),
@@ -2034,7 +2037,7 @@ pub fn browser_tab_op(
 
 /// Map a `browser_open_tab` / `browser_navigate` / `browser_close_tab`
 /// round-trip outcome (a serialized
-/// [`crate::acp::browser_tools::BrowserTabOutcome`]) into an MCP `tools/call`
+/// `codeg_lib::acp::browser_tools::BrowserTabOutcome`) into an MCP `tools/call`
 /// result.
 ///
 /// The successful text says the level as well as the address, because that is
@@ -2098,7 +2101,7 @@ pub fn render_browser_tab_op_result(outcome: &Value) -> Value {
 }
 
 /// Map a `browser_eval` round-trip outcome (a serialized
-/// [`crate::acp::browser_tools::BrowserEvalOutcome`]) into an MCP `tools/call`
+/// `codeg_lib::acp::browser_tools::BrowserEvalOutcome`) into an MCP `tools/call`
 /// result.
 pub fn render_browser_eval_result(outcome: &Value) -> Value {
     let text = match outcome.get("result") {
@@ -2135,7 +2138,7 @@ pub fn render_browser_eval_result(outcome: &Value) -> Value {
 }
 
 /// Map a `browser_console_messages` round-trip outcome (a serialized
-/// [`crate::acp::browser_tools::BrowserConsoleOutcome`]) into an MCP
+/// `codeg_lib::acp::browser_tools::BrowserConsoleOutcome`) into an MCP
 /// `tools/call` result: one line per entry, the way a console reads, with
 /// the cursor to continue from.
 pub fn render_browser_console_result(outcome: &Value) -> Value {
@@ -2214,7 +2217,7 @@ pub fn render_browser_console_result(outcome: &Value) -> Value {
 }
 
 /// Map a `browser_screenshot` round-trip outcome (a serialized
-/// [`crate::acp::browser_tools::BrowserCaptureOutcome`]) into an MCP
+/// `codeg_lib::acp::browser_tools::BrowserCaptureOutcome`) into an MCP
 /// `tools/call` result: the image itself as image content, a line of text
 /// saying what it shows, and the metadata — without the base64, which would
 /// double the payload — as structured content.
@@ -2327,7 +2330,7 @@ fn scroll_note(scrolled: Option<&Value>) -> String {
 }
 
 /// Map an action tool's round-trip outcome (a serialized
-/// [`crate::acp::browser_tools::BrowserActOutcome`]) into an MCP `tools/call`
+/// `codeg_lib::acp::browser_tools::BrowserActOutcome`) into an MCP `tools/call`
 /// result.
 ///
 /// Soft refusals are `isError: false` like the read's: a stale ref or a
@@ -2365,7 +2368,7 @@ pub fn render_browser_act_result(outcome: &Value) -> Value {
 }
 
 /// Map a `browser_list_tabs` round-trip outcome (a serialized
-/// [`crate::acp::browser_tools::BrowserTabsOutcome`]) into an MCP `tools/call`
+/// `codeg_lib::acp::browser_tools::BrowserTabsOutcome`) into an MCP `tools/call`
 /// result.
 ///
 /// One line per tab, and the unshared ones say what to do about it — an agent
@@ -2422,7 +2425,7 @@ pub fn render_browser_tabs_result(outcome: &Value) -> Value {
 }
 
 /// Map a `browser_snapshot` round-trip outcome (a serialized
-/// [`crate::acp::browser_tools::BrowserSnapshotOutcome`]) into an MCP
+/// `codeg_lib::acp::browser_tools::BrowserSnapshotOutcome`) into an MCP
 /// `tools/call` result.
 ///
 /// A refusal is `isError: false` like every other soft outcome here. Being
@@ -2505,7 +2508,7 @@ pub fn render_task_ack(outcome: &Value) -> Value {
 }
 
 /// Map a `create_automation` / `create_work_task` round-trip outcome (a
-/// serialized [`crate::acp::chat_authoring::AuthoringOutcome`]) into an MCP
+/// serialized `codeg_lib::acp::chat_authoring::AuthoringOutcome`) into an MCP
 /// `tools/call` result.
 ///
 /// A refusal (feature off, folder not resolvable, bad cron) renders as readable
@@ -4050,7 +4053,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn feedback_spawn_commits_after_delivery() {
-        use crate::acp::delegation::transport::{read_frame, write_frame, BrokerMessage};
+        use codeg_mcp_protocol::transport::{read_frame, write_frame, BrokerMessage};
         use tokio::net::UnixListener;
 
         // `/tmp`, not `$TMPDIR`: a socket path has ~104 bytes of `sun_path` to
@@ -4123,7 +4126,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn feedback_spawn_cancel_sends_no_commit() {
-        use crate::acp::delegation::transport::{read_frame, write_frame, BrokerMessage};
+        use codeg_mcp_protocol::transport::{read_frame, write_frame, BrokerMessage};
         use tokio::net::UnixListener;
 
         // `/tmp`, not `$TMPDIR`: a socket path has ~104 bytes of `sun_path` to
@@ -4289,7 +4292,7 @@ mod tests {
     /// argument errors rather than round trips.
     #[test]
     fn eval_arguments_are_checked_before_anyone_is_asked() {
-        use crate::browser::eval::MAX_EVAL_CODE_CHARS;
+        use codeg_mcp_protocol::browser::MAX_EVAL_CODE_CHARS;
         let (tab, req) =
             browser_eval_request(&json!({ "tabId": "t1", "code": "  return 1  " })).unwrap();
         assert_eq!(tab, "t1");
@@ -4367,8 +4370,8 @@ mod tests {
     /// that a ref come with its generation.
     #[test]
     fn console_and_screenshot_arguments_are_parsed_strictly() {
-        use crate::browser::capture::CaptureFormat;
-        use crate::browser::console::ConsoleLevel;
+        use codeg_mcp_protocol::browser::CaptureFormat;
+        use codeg_mcp_protocol::browser::ConsoleLevel;
         let (tab, q) = browser_console_query(&json!({ "tabId": "t1" })).unwrap();
         assert_eq!(tab, "t1");
         assert_eq!((q.since, q.min_level, q.limit), (0, None, None));
@@ -4487,7 +4490,7 @@ mod tests {
     /// trip to codeg.
     #[test]
     fn action_tools_build_one_request_and_name_what_is_missing() {
-        use crate::browser::agent::{ActionKind, PointerButton};
+        use codeg_mcp_protocol::browser::{ActionKind, PointerButton};
         let base = json!({ "tabId": "t1", "generation": "g.3.1", "ref": "e7" });
         let with = |extra: Value| {
             let mut v = base.clone();
@@ -4680,7 +4683,7 @@ mod tests {
     /// address", which reads like the site's fault.
     #[test]
     fn the_tab_tools_take_a_non_empty_string_for_each_argument() {
-        use crate::acp::browser_tools::BrowserTabOp;
+        use codeg_mcp_protocol::browser::BrowserTabOp;
         assert_eq!(
             browser_tab_op("browser_open_tab", &json!({ "url": " https://example.com/ " })).unwrap(),
             BrowserTabOp::Open {

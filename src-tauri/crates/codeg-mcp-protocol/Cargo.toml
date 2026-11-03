@@ -1,0 +1,21 @@
+[package]
+name = "codeg-mcp-protocol"
+description = "The wire contract between codeg and its codeg-mcp companion"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# `net`: the broker socket (Unix) or named pipe (Windows); `time`: the named
+# pipe's open retry.
+tokio = { version = "1", features = ["io-util", "net", "time"] }
+uuid = { version = "1", features = ["v4"] }
+# Grapheme-safe shortening of a question's header chip.
+unicode-segmentation = "1"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt"] }

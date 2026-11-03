@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::db::entities::automation::{IsolationMode, TriggerKind};
 pub use crate::db::entities::automation_run::AutomationRunStatus;
+/// What firing an automation does; shared with the companion's
+/// `create_automation` request.
+pub use codeg_mcp_protocol::authoring::AutomationAction;
 
 /// A saved, schedulable, replayable composer launch. Wire form mirrors
 /// `src/lib/types.ts` (`Automation`).
@@ -65,20 +68,6 @@ pub struct AutomationDraft {
     pub branch: Option<String>,
     pub is_remote_branch: bool,
     pub config: serde_json::Value,
-}
-
-/// What firing the automation does. Lives inside the config blob (not a
-/// column) so every pre-existing row deserializes as the legacy default —
-/// nothing queries automations by action.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AutomationAction {
-    /// Launch a headless agent session (the original behavior).
-    #[default]
-    LaunchSession,
-    /// Enqueue a work task (status todo) on the target folder's board; the
-    /// work-task engine owns the actual execution.
-    EnqueueTask,
 }
 
 /// The structured shape stored inside `automation.config`. Kept tolerant

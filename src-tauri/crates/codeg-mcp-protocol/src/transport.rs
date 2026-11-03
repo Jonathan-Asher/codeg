@@ -59,8 +59,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::acp::chat_authoring::{NewAutomationSpec, NewWorkTaskSpec};
-use crate::acp::question::QuestionSpec;
+use crate::authoring::{NewAutomationSpec, NewWorkTaskSpec};
+use crate::browser::{ActionRequest, BrowserTabOp, CaptureRequest, ConsoleQuery, EvalRequest};
+use crate::question::QuestionSpec;
 
 /// One delegation call's worth of input forwarded from the companion to the
 /// main process. The main process re-validates `token` and maps
@@ -85,8 +86,8 @@ pub struct BrokerRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_handle: Option<String>,
     /// Raw `arguments` JSON from the MCP `tools/call` request, schema-shaped
-    /// per [`super::tool_schema_json`]. The main process re-parses into
-    /// [`super::types::DelegationRequest`].
+    /// per the companion's `tool_schema.json`. The main process re-parses into
+    /// `codeg_lib::acp::delegation::types::DelegationRequest`.
     pub input: Value,
 }
 
@@ -200,7 +201,7 @@ pub struct BrokerSessionRequest {
     pub session_id: i32,
     /// How many of the most recent turns to include as compacted text. `None` /
     /// `0` → metadata only (no transcript parse); a positive value is clamped to
-    /// [`crate::acp::session_info::MAX_SESSION_MESSAGES`] by the resolver.
+    /// [`crate::MAX_SESSION_MESSAGES`] by the resolver.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_messages: Option<u32>,
 }
@@ -263,7 +264,7 @@ pub struct BrokerBrowserSnapshotRequest {
     pub token: String,
     pub tab_id: String,
     /// Cap on the rendered tree, in characters. `None` →
-    /// [`crate::acp::browser_tools::DEFAULT_SNAPSHOT_MAX_CHARS`].
+    /// `codeg_lib::acp::browser_tools::DEFAULT_SNAPSHOT_MAX_CHARS`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_chars: Option<usize>,
 }
@@ -277,7 +278,7 @@ pub struct BrokerBrowserSnapshotRequest {
 pub struct BrokerBrowserActRequest {
     pub token: String,
     pub tab_id: String,
-    pub request: crate::browser::agent::ActionRequest,
+    pub request: ActionRequest,
 }
 
 /// What one shared page printed to its console. Backs the
@@ -288,7 +289,7 @@ pub struct BrokerBrowserConsoleRequest {
     pub token: String,
     pub tab_id: String,
     #[serde(default)]
-    pub query: crate::browser::console::ConsoleQuery,
+    pub query: ConsoleQuery,
 }
 
 /// A screenshot of one shared page. Backs the `browser_screenshot` MCP tool;
@@ -299,7 +300,7 @@ pub struct BrokerBrowserCaptureRequest {
     pub token: String,
     pub tab_id: String,
     #[serde(default)]
-    pub request: crate::browser::capture::CaptureRequest,
+    pub request: CaptureRequest,
 }
 
 /// Run the caller's own code on one shared page. Backs the `browser_eval` MCP
@@ -314,7 +315,7 @@ pub struct BrokerBrowserCaptureRequest {
 pub struct BrokerBrowserEvalRequest {
     pub token: String,
     pub tab_id: String,
-    pub request: crate::browser::eval::EvalRequest,
+    pub request: EvalRequest,
 }
 
 /// Open a tab, point one somewhere else, or close one. Backs
@@ -328,7 +329,7 @@ pub struct BrokerBrowserEvalRequest {
 pub struct BrokerBrowserTabOpRequest {
     pub token: String,
     #[serde(flatten)]
-    pub op: crate::acp::browser_tools::BrowserTabOp,
+    pub op: BrowserTabOp,
 }
 
 /// Tagged top-level message dispatched by the listener. Adding new variants
@@ -369,10 +370,11 @@ pub enum BrokerMessage {
 }
 
 /// The wrapped outcome the main process returns over the same socket.
-/// `outcome` is a serialized [`super::types::DelegationTaskReport`] for `Call`
-/// / `CancelTask` messages, a `{ "tasks": [report, ...] }` envelope (one report
-/// per requested id, in request order) for `Status`, and `Value::Null` for
-/// `Cancel` acknowledgements.
+/// `outcome` is a serialized `DelegationTaskReport` (codeg's
+/// `acp::delegation::types`) for `Call` / `CancelTask` messages, a
+/// `{ "tasks": [report, ...] }` envelope (one report per requested id, in
+/// request order) for `Status`, and `Value::Null` for `Cancel`
+/// acknowledgements.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrokerResponse {
     pub outcome: Value,
@@ -444,8 +446,8 @@ async fn message_round_trip(socket_path: &str, msg: &BrokerMessage) -> io::Resul
 }
 
 /// Dispatch a `delegate_to_agent` call and read back the broker's
-/// [`super::types::DelegationTaskReport`] (a `Running` ack, or a terminal
-/// report when the child finished during setup / setup failed).
+/// `DelegationTaskReport` (a `Running` ack, or a terminal report when the
+/// child finished during setup / setup failed).
 pub async fn client_round_trip(
     socket_path: &str,
     req: &BrokerRequest,
@@ -541,7 +543,7 @@ pub async fn client_task_complete_round_trip(
 }
 
 /// Dispatch a `create_automation` request and read back the serialized
-/// [`crate::acp::chat_authoring::AuthoringOutcome`].
+/// `codeg_lib::acp::chat_authoring::AuthoringOutcome`.
 pub async fn client_create_automation_round_trip(
     socket_path: &str,
     req: &BrokerCreateAutomationRequest,
@@ -550,7 +552,7 @@ pub async fn client_create_automation_round_trip(
 }
 
 /// Dispatch a `create_work_task` request and read back the serialized
-/// [`crate::acp::chat_authoring::AuthoringOutcome`].
+/// `codeg_lib::acp::chat_authoring::AuthoringOutcome`.
 pub async fn client_create_work_task_round_trip(
     socket_path: &str,
     req: &BrokerCreateWorkTaskRequest,
@@ -559,7 +561,7 @@ pub async fn client_create_work_task_round_trip(
 }
 
 /// Dispatch a `browser_list_tabs` request and read back the serialized
-/// [`crate::acp::browser_tools::BrowserTabsOutcome`].
+/// `codeg_lib::acp::browser_tools::BrowserTabsOutcome`.
 pub async fn client_browser_tabs_round_trip(
     socket_path: &str,
     req: &BrokerBrowserTabsRequest,
@@ -568,7 +570,7 @@ pub async fn client_browser_tabs_round_trip(
 }
 
 /// Dispatch a `browser_snapshot` request and read back the serialized
-/// [`crate::acp::browser_tools::BrowserSnapshotOutcome`].
+/// `codeg_lib::acp::browser_tools::BrowserSnapshotOutcome`.
 pub async fn client_browser_snapshot_round_trip(
     socket_path: &str,
     req: &BrokerBrowserSnapshotRequest,
@@ -577,7 +579,7 @@ pub async fn client_browser_snapshot_round_trip(
 }
 
 /// Dispatch an action request and read back the serialized
-/// [`crate::acp::browser_tools::BrowserActOutcome`].
+/// `codeg_lib::acp::browser_tools::BrowserActOutcome`.
 pub async fn client_browser_act_round_trip(
     socket_path: &str,
     req: &BrokerBrowserActRequest,
@@ -586,7 +588,7 @@ pub async fn client_browser_act_round_trip(
 }
 
 /// Dispatch a `browser_console_messages` request and read back the serialized
-/// [`crate::acp::browser_tools::BrowserConsoleOutcome`].
+/// `codeg_lib::acp::browser_tools::BrowserConsoleOutcome`.
 pub async fn client_browser_console_round_trip(
     socket_path: &str,
     req: &BrokerBrowserConsoleRequest,
@@ -595,7 +597,7 @@ pub async fn client_browser_console_round_trip(
 }
 
 /// Dispatch a `browser_screenshot` request and read back the serialized
-/// [`crate::acp::browser_tools::BrowserCaptureOutcome`].
+/// `codeg_lib::acp::browser_tools::BrowserCaptureOutcome`.
 pub async fn client_browser_capture_round_trip(
     socket_path: &str,
     req: &BrokerBrowserCaptureRequest,
@@ -604,7 +606,7 @@ pub async fn client_browser_capture_round_trip(
 }
 
 /// Dispatch a `browser_eval` request and read back the serialized
-/// [`crate::acp::browser_tools::BrowserEvalOutcome`].
+/// `codeg_lib::acp::browser_tools::BrowserEvalOutcome`.
 pub async fn client_browser_eval_round_trip(
     socket_path: &str,
     req: &BrokerBrowserEvalRequest,
@@ -613,7 +615,7 @@ pub async fn client_browser_eval_round_trip(
 }
 
 /// Dispatch one of the three tab-lifecycle requests and read back the
-/// serialized [`crate::acp::browser_tools::BrowserTabOutcome`].
+/// serialized `codeg_lib::acp::browser_tools::BrowserTabOutcome`.
 pub async fn client_browser_tab_op_round_trip(
     socket_path: &str,
     req: &BrokerBrowserTabOpRequest,

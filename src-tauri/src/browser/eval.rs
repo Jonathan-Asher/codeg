@@ -43,13 +43,9 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The most code a caller may send in one call.
-///
-/// A cap on consent rather than on cost. The person approving a snippet has to
-/// be able to read it; four thousand characters is already more than anyone
-/// reads carefully, and a tool that accepted a hundred kilobytes of minified
-/// script would be asking for a signature on a document nobody opened.
-pub const MAX_EVAL_CODE_CHARS: usize = 4000;
+// The request, its size cap and the check the companion runs before sending
+// it live in the protocol crate the companion shares.
+pub use codeg_mcp_protocol::browser::{validate_code, BadCode, EvalRequest, MAX_EVAL_CODE_CHARS};
 
 /// The most of the result that comes back. Rendering happens in the page, so
 /// this is also what stops a page from answering with a hundred megabytes.
@@ -59,52 +55,6 @@ pub const MAX_EVAL_VALUE_CHARS: usize = 4000;
 /// bounds an honest answer; this bounds a dishonest one, before `serde_json`
 /// walks it.
 pub const MAX_EVAL_ANSWER_BYTES: usize = 256 * 1024;
-
-/// What an agent asks to run.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EvalRequest {
-    /// A function body: the code runs inside `function () { … }`, so it
-    /// `return`s the value to report. Statements, `const`, early returns and
-    /// comments all behave as they read.
-    pub code: String,
-}
-
-/// Why a snippet was not even put in front of a person.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BadCode {
-    Empty,
-    TooLong,
-}
-
-impl BadCode {
-    pub fn message(self) -> String {
-        match self {
-            BadCode::Empty => "browser_eval needs `code`: the body of a function to run on the \
-                               page, which returns the value to report."
-                .to_string(),
-            BadCode::TooLong => format!(
-                "browser_eval takes at most {MAX_EVAL_CODE_CHARS} characters of code. A person \
-                 has to read and approve every snippet before it runs, so send the smallest \
-                 piece that answers your question rather than a program."
-            ),
-        }
-    }
-}
-
-/// Whether this is a snippet worth showing a person at all.
-///
-/// Length is counted in characters, not bytes: it stands in for how much there
-/// is to read, and a page's worth of Japanese is a page's worth either way.
-pub fn validate_code(code: &str) -> Result<(), BadCode> {
-    if code.trim().is_empty() {
-        return Err(BadCode::Empty);
-    }
-    if code.chars().count() > MAX_EVAL_CODE_CHARS {
-        return Err(BadCode::TooLong);
-    }
-    Ok(())
-}
 
 /// What the page says came of the code.
 ///

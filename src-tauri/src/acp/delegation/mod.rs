@@ -37,18 +37,20 @@
 //! task, never a second iteration on it (the tool takes no task text).
 
 pub mod broker;
-pub mod companion;
 pub mod depth;
 pub mod event_emitter;
 pub mod limit_delivery;
 pub mod listener;
 pub mod live_reply;
 pub mod meta_writer;
-pub mod parent_watcher;
 pub mod service;
 pub mod spawner;
-pub mod transport;
 pub mod types;
+
+/// The broker socket's wire format, shared with the companion. The companion
+/// itself (its MCP side, the parent watchdog, the tool schema) is the
+/// `codeg-mcp` crate in `crates/codeg-mcp`, which never links this library.
+pub use codeg_mcp_protocol::transport;
 
 /// Canonical titles written onto a parent tool call that was announced
 /// identity-less (Cursor's `"MCP: tool"` — see

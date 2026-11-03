@@ -793,7 +793,7 @@ pub enum PidState {
 
 /// Tri-state liveness probe.
 ///
-/// Deliberately NOT `delegation::parent_watcher::parent_alive`, which answers a
+/// Deliberately NOT the companion's `parent_watcher::parent_alive`, which answers a
 /// bool and treats every `OpenProcess` failure as "gone". That is correct for
 /// its own caller — a child watching its own parent in the same session, where
 /// access-denied cannot happen — and wrong here, where one codeg instance is

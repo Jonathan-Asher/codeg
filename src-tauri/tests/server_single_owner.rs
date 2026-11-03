@@ -19,7 +19,6 @@ use codeg_lib::models::agent::AgentType;
 use sea_orm::EntityTrait;
 
 const SERVER: &str = env!("CARGO_BIN_EXE_codeg-server");
-const MCP: &str = env!("CARGO_BIN_EXE_codeg-mcp");
 
 /// A scratch root for the HOME and data dir handed to a binary. Neither exists
 /// until something creates it.
@@ -139,34 +138,6 @@ fn an_unknown_flag_prints_the_usage_exits_2_and_touches_nothing() {
     assert!(stderr.contains("unknown option '--port'"), "{stderr}");
     assert!(stderr.contains("Usage: codeg-server"), "{stderr}");
     assert!(out.stdout.is_empty(), "{}", describe(&out));
-    assert_eq!(sandbox.contents(), Vec::<PathBuf>::new());
-}
-
-#[test]
-fn codeg_mcp_flags_print_and_exit() {
-    let sandbox = Sandbox::new();
-    let run = |args: &[&str]| {
-        sandbox
-            .command(MCP)
-            .args(args)
-            .output()
-            .expect("run codeg-mcp")
-    };
-
-    let version = run(&["--version"]);
-    assert!(version.status.success(), "{}", describe(&version));
-    assert_eq!(
-        String::from_utf8_lossy(&version.stdout).trim(),
-        env!("CARGO_PKG_VERSION")
-    );
-    let help = run(&["-h"]);
-    assert!(help.status.success(), "{}", describe(&help));
-    assert!(String::from_utf8_lossy(&help.stdout).contains("Usage: codeg-mcp"));
-    let unknown = run(&["--bogus"]);
-    assert_eq!(unknown.status.code(), Some(2), "{}", describe(&unknown));
-    let stderr = String::from_utf8_lossy(&unknown.stderr);
-    assert!(stderr.contains("unknown arg: --bogus"), "{stderr}");
-    assert!(stderr.contains("Usage: codeg-mcp"), "{stderr}");
     assert_eq!(sandbox.contents(), Vec::<PathBuf>::new());
 }
 

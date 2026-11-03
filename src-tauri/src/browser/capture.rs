@@ -21,6 +21,10 @@
 use image::{imageops::FilterType, DynamicImage, ImageFormat};
 use serde::{Deserialize, Serialize};
 
+// What a screenshot request is made of; the companion builds it, so it lives
+// in the protocol crate it shares.
+pub use codeg_mcp_protocol::browser::{CaptureFormat, CaptureRequest};
+
 /// Output width when the caller names none: the widest a screenshot needs to
 /// be to read its text, and about as large as a vision model takes in before
 /// scaling it down itself.
@@ -45,58 +49,6 @@ pub const CAPTURE_MAX_ENCODED_BYTES: usize = 3_500_000;
 /// Narrower than this and a screenshot shows nothing; the budget loop stops
 /// here rather than shrinking to a dot.
 const CAPTURE_MIN_WIDTH: u32 = 64;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum CaptureFormat {
-    #[default]
-    Png,
-    Jpeg,
-}
-
-impl CaptureFormat {
-    pub fn mime(self) -> &'static str {
-        match self {
-            Self::Png => "image/png",
-            Self::Jpeg => "image/jpeg",
-        }
-    }
-
-    pub fn parse(raw: &str) -> Option<Self> {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "png" => Some(Self::Png),
-            "jpeg" => Some(Self::Jpeg),
-            _ => None,
-        }
-    }
-}
-
-/// What an agent asks a capture for. `generation` and `ref` name an element
-/// from a snapshot to crop to; both or neither.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CaptureRequest {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub generation: Option<String>,
-    #[serde(rename = "ref", default, skip_serializing_if = "Option::is_none")]
-    pub target: Option<String>,
-    /// Output width in pixels; the height follows. Absent or `0` is
-    /// [`DEFAULT_CAPTURE_MAX_WIDTH`]; capped at [`CAPTURE_MAX_WIDTH_CEILING`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_width: Option<u32>,
-    #[serde(default)]
-    pub format: CaptureFormat,
-}
-
-impl CaptureRequest {
-    /// The element to crop to, when the request names one.
-    pub fn clip_target(&self) -> Option<(&str, &str)> {
-        match (self.generation.as_deref(), self.target.as_deref()) {
-            (Some(generation), Some(target)) => Some((generation, target)),
-            _ => None,
-        }
-    }
-}
 
 /// A rectangle of the page in viewport CSS pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
