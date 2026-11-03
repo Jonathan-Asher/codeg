@@ -3743,11 +3743,18 @@ mod tests {
         assert_eq!(s.active_tool_calls.len(), 1);
         assert!(s.active_tool_calls.contains_key("tc-1"));
 
-        // Snapshot output unchanged (modulo last_activity_at which is internal).
+        // Snapshot output unchanged (modulo last_activity_at which is internal,
+        // and attach_elapsed_ms, a clock reading that ticks between the two
+        // snapshots on a busy machine).
         let after = s.to_snapshot();
+        let without_clock = |snap: &LiveSessionSnapshot| {
+            let mut json = serde_json::to_value(snap).unwrap();
+            json.as_object_mut().unwrap().remove("attach_elapsed_ms");
+            json
+        };
         assert_eq!(
-            serde_json::to_value(&before).unwrap(),
-            serde_json::to_value(&after).unwrap(),
+            without_clock(&before),
+            without_clock(&after),
             "snapshot must be byte-identical after no-op event"
         );
     }
