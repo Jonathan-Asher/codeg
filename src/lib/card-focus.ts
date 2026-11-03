@@ -14,6 +14,12 @@ import { isImeCompositionKey } from "@/lib/ime-composition"
  * state, the same pieces mount in a tab, a canvas card, the web client and a
  * remote-workspace window, and a capture listener on the scope sees the
  * composer's keys before ProseMirror does.
+ *
+ * Only a card on screen takes the keyboard or answers a key. A conversation
+ * stays mounted while hidden (a background tab, a workspace under a full-page
+ * route), and focus can be left behind in it when it hides; see
+ * {@link isShown}. A window the user is not in takes nothing either; see
+ * {@link isWindowFocused}.
  */
 
 export const COMPOSER_SCOPE_ATTR = "data-composer-scope"
@@ -24,6 +30,12 @@ const ENTRY_SELECTOR = `[${CARD_ENTRY_ATTR}]`
 const COMPOSER_SELECTOR = ".codeg-composer-content, [data-composer-input]"
 const POPUP_SELECTOR =
   '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-radix-popper-content-wrapper]'
+// The subtrees the app keeps mounted but hidden: an inactive keep-alive tab,
+// a workspace surface or column under a full-page route or maximized files,
+// and a drawer hidden with its host all carry `conversation-tab-hidden` (see
+// globals.css; the covered ones are also `inert`); a closed palette is
+// `hidden`.
+const HIDDEN_SURFACE_SELECTOR = ".conversation-tab-hidden, [inert], [hidden]"
 const TEXT_INPUT_TYPES = new Set([
   "text",
   "search",
@@ -65,6 +77,53 @@ function isComposing(): boolean {
   return composingEl !== null
 }
 
+// Whether the user is in this window. A window `blur` says they left; its
+// `focus`, or any key or press in the page (which only reach a window the user
+// is in), says they are back, so one missed event can't leave it stuck. Not
+// `document.hasFocus()`: jsdom answers false whenever nothing is focused, and
+// a web view can answer false until its first click.
+let windowBlurred = false
+let windowTrackerInstalled = false
+
+export function installWindowFocusTracker(): void {
+  if (windowTrackerInstalled || typeof window === "undefined") return
+  windowTrackerInstalled = true
+  const back = () => {
+    windowBlurred = false
+  }
+  // Not in the capture phase: `blur` and `focus` don't bubble, so these see
+  // only the window's own, never an element's.
+  window.addEventListener("blur", () => {
+    windowBlurred = true
+  })
+  window.addEventListener("focus", back)
+  document.addEventListener("keydown", back, true)
+  document.addEventListener("pointerdown", back, true)
+}
+
+/** Is the user in this window, as far as its focus events tell? */
+export function isWindowFocused(): boolean {
+  return !windowBlurred
+}
+
+// With the module, not with the first card: a conversation's first card often
+// arrives while the user is away, and the blur that says so came before any
+// card had mounted.
+installWindowFocusTracker()
+
+/**
+ * Is the element on screen: connected, not inside a surface kept mounted but
+ * hidden, and not hidden any other way the engine can tell (jsdom has no
+ * `checkVisibility`; there the markers are what count).
+ */
+export function isShown(el: Element | null): boolean {
+  if (!el?.isConnected || el.closest(HIDDEN_SURFACE_SELECTOR)) return false
+  return (
+    typeof el.checkVisibility !== "function" ||
+    el.checkVisibility({ visibilityProperty: true })
+  )
+}
+
 function isEditable(el: Element): boolean {
   if (el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
     return true
@@ -94,14 +153,17 @@ export function scopeOf(el: Element | null): HTMLElement | null {
 }
 
 /**
- * May a card that just arrived take keyboard focus? Yes from nowhere, from
- * inside itself, from its own conversation's EMPTY composer, or from a plain
- * control of its own conversation. Never from someone typing — a composer with
- * text, an IME composition, any other field — and never out of another
- * conversation, a dialog or a menu.
+ * May a card that just arrived take keyboard focus? Never while the card is off
+ * screen. Yes from nowhere, from focus left behind in a surface no longer on
+ * screen, from inside itself, from its own conversation's EMPTY composer, or
+ * from a plain control of its own conversation. Never from someone typing — a
+ * composer with text, an IME composition, any other field — and never out of
+ * another conversation on screen, a dialog or a menu.
  */
 export function canCardTakeFocus(card: Element): boolean {
   if (typeof document === "undefined") return false
+  // Keys typed into a card nobody can see would answer it blind.
+  if (!isShown(card)) return false
   const active = document.activeElement
   if (
     !active ||
@@ -112,6 +174,9 @@ export function canCardTakeFocus(card: Element): boolean {
   }
   if (card.contains(active)) return true
   if (isComposing()) return false
+  // Focus left in a surface that has gone off screen (the tab just switched
+  // away from, a closed palette) is nobody's place any more.
+  if (!isShown(active)) return true
   const scope = scopeOf(card)
   const composer = active.closest(COMPOSER_SELECTOR)
   if (composer) {
@@ -126,12 +191,24 @@ export function canCardTakeFocus(card: Element): boolean {
   return !popup || popup.contains(card)
 }
 
-/** Focus the card's entry element. Returns false when it has none. */
+/** Focus the card's entry element. Returns false when the card has none or is
+ *  off screen. */
 export function focusCardEntry(card: Element | null): boolean {
+  if (!isShown(card)) return false
   const entry = card?.querySelector<HTMLElement>(ENTRY_SELECTOR)
   if (!entry) return false
   entry.focus()
   return true
+}
+
+/** Let go of the keyboard if it is in the card, which is going off screen or
+ *  already is: a key must never answer a card nobody can see. */
+export function releaseKeyboard(card: Element | null): void {
+  if (typeof document === "undefined") return
+  const active = document.activeElement
+  if (card && active instanceof HTMLElement && card.contains(active)) {
+    active.blur()
+  }
 }
 
 /** The composer input of the card's conversation, if it has one. */
@@ -188,7 +265,7 @@ export function handleComposerArrowUp(
   }
   const entries = scope.querySelectorAll<HTMLElement>(ENTRY_SELECTOR)
   const entry = entries[entries.length - 1]
-  if (!entry) return false
+  if (!entry || !isShown(entry)) return false
   event.preventDefault()
   event.stopPropagation()
   entry.focus()

@@ -23,7 +23,11 @@ import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Keycap } from "@/components/chat/keycap"
-import { useCardArrivalFocus, useComposerHandoff } from "@/hooks/use-card-focus"
+import {
+  useCardArrivalFocus,
+  useCardKeyGuard,
+  useComposerHandoff,
+} from "@/hooks/use-card-focus"
 import { useImeGuard } from "@/hooks/use-ime-guard"
 import { useIsMac } from "@/hooks/use-is-mac"
 import {
@@ -240,13 +244,15 @@ export function AskQuestionCard({
   }
 
   // Keyboard: the card takes focus when a set arrives (never from someone
-  // typing), and ↑ in an empty composer brings it back here.
+  // typing), and ↑ in an empty composer brings it back here. Off screen (a
+  // background tab) it takes neither focus nor keys.
   useCardArrivalFocus(
     rootRef,
     readOnly ? null : question.question_id,
     autoFocus
   )
   useComposerHandoff(rootRef, !readOnly)
+  const guardKeys = useCardKeyGuard(rootRef)
 
   const listId = (index: number) => `${uid}-q${index}`
   const labelId = (index: number) => `${uid}-q${index}-label`
@@ -856,6 +862,7 @@ export function AskQuestionCard({
       ref={rootRef}
       role="group"
       aria-label={title ?? t("title")}
+      onKeyDownCapture={guardKeys}
       onKeyDown={onCardKeyDown}
       className={cn(
         CHAT_TEXT_SCOPE_CLASS,

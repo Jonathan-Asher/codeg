@@ -14,7 +14,11 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { MessageResponse } from "@/components/ai-elements/message"
 import { Keycap } from "@/components/chat/keycap"
-import { useCardArrivalFocus, useComposerHandoff } from "@/hooks/use-card-focus"
+import {
+  useCardArrivalFocus,
+  useCardKeyGuard,
+  useComposerHandoff,
+} from "@/hooks/use-card-focus"
 import { useImeGuard } from "@/hooks/use-ime-guard"
 import { useIsMac } from "@/hooks/use-is-mac"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
@@ -100,6 +104,7 @@ export function PlanApprovalCard({
 
   useCardArrivalFocus(rootRef, approval.approval_id, autoFocus)
   useComposerHandoff(rootRef, true)
+  const guardKeys = useCardKeyGuard(rootRef)
   useLayoutEffect(() => {
     const control = refocus.current
     if (!control) return
@@ -222,6 +227,7 @@ export function PlanApprovalCard({
       role="group"
       aria-label={t("title")}
       aria-describedby={hintId}
+      onKeyDownCapture={guardKeys}
       onKeyDown={onKeyDown}
       className={cn(
         CHAT_TEXT_SCOPE_CLASS,

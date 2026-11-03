@@ -266,7 +266,11 @@ export function ConversationShell({
         autoFocus={isActive ?? true}
       />
 
-      <QuestionDialog question={pendingQuestion} onAnswer={onAnswerQuestion} />
+      <QuestionDialog
+        question={pendingQuestion}
+        onAnswer={onAnswerQuestion}
+        autoFocus={isActive ?? true}
+      />
 
       {/* Composer dock. The ask-question card sits in normal flow just above the
           feedback list and input — like the permission/question dialogs — so it

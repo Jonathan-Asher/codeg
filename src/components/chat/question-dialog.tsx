@@ -8,7 +8,11 @@ import { matchShortcutEvent } from "@/lib/keyboard-shortcuts"
 import { detectTextDirection } from "@/lib/text-direction"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import { useImeGuard } from "@/hooks/use-ime-guard"
-import { useCardArrivalFocus, useComposerHandoff } from "@/hooks/use-card-focus"
+import {
+  useCardArrivalFocus,
+  useCardKeyGuard,
+  useComposerHandoff,
+} from "@/hooks/use-card-focus"
 import { focusComposerFrom } from "@/lib/card-focus"
 import { CHAT_TEXT_SCOPE_CLASS } from "@/lib/chat-text-scale"
 import { cn } from "@/lib/utils"
@@ -17,9 +21,16 @@ import type { PendingQuestion } from "@/contexts/acp-connections-context"
 interface QuestionDialogProps {
   question: PendingQuestion | null
   onAnswer: (answer: string) => void
+  /** Take keyboard focus when a question arrives — never from someone typing
+   *  (see `canCardTakeFocus`). A conversation not in front passes false. */
+  autoFocus?: boolean
 }
 
-export function QuestionDialog({ question, onAnswer }: QuestionDialogProps) {
+export function QuestionDialog({
+  question,
+  onAnswer,
+  autoFocus = true,
+}: QuestionDialogProps) {
   const t = useTranslations("Folder.chat.questionDialog")
   const ime = useImeGuard()
   const { shortcuts } = useShortcutSettings()
@@ -36,9 +47,11 @@ export function QuestionDialog({ question, onAnswer }: QuestionDialogProps) {
   }
 
   // The answer field takes focus when a question arrives, never from someone
-  // typing; ↑ in an empty composer comes back to it.
-  useCardArrivalFocus(rootRef, questionId, true)
+  // typing; ↑ in an empty composer comes back to it. Off screen (a background
+  // tab) it takes neither focus nor keys.
+  useCardArrivalFocus(rootRef, questionId, autoFocus)
   useComposerHandoff(rootRef, questionId !== null)
+  const guardKeys = useCardKeyGuard(rootRef)
 
   const handleSubmit = useCallback(() => {
     const trimmed = answer.trim()
@@ -72,6 +85,7 @@ export function QuestionDialog({ question, onAnswer }: QuestionDialogProps) {
     // (see `.chat-text-scope`).
     <div
       ref={rootRef}
+      onKeyDownCapture={guardKeys}
       className={cn(
         CHAT_TEXT_SCOPE_CLASS,
         "mx-4 mb-3 rounded-xl border border-blue-500/30 bg-card/95 p-3 shadow-sm"

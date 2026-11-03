@@ -26,7 +26,11 @@ import {
   type PermissionOptionChange,
 } from "@/lib/permission-request"
 import { useAgentVocabulary } from "@/hooks/use-agent-vocabulary"
-import { useCardArrivalFocus, useComposerHandoff } from "@/hooks/use-card-focus"
+import {
+  useCardArrivalFocus,
+  useCardKeyGuard,
+  useComposerHandoff,
+} from "@/hooks/use-card-focus"
 import {
   focusComposerAfterAnswer,
   focusComposerFrom,
@@ -141,9 +145,11 @@ export function PermissionDialog({
     return out
   }, [permission?.options])
   // Keyboard: focus lands on the default option when a request arrives (never
-  // from someone typing), and ↑ in an empty composer comes back here.
+  // from someone typing), and ↑ in an empty composer comes back here. Off
+  // screen (a background tab) it takes neither focus nor keys.
   useCardArrivalFocus(rootRef, permission?.request_id ?? null, autoFocus)
   useComposerHandoff(rootRef, permission != null)
+  const guardKeys = useCardKeyGuard(rootRef)
   if (!permission) return null
 
   // Approvals are surfaced one at a time (backend FIFO), so the count of the
@@ -247,6 +253,7 @@ export function PermissionDialog({
       role="group"
       aria-label={parsed.description ?? parsed.title}
       aria-describedby={hintId}
+      onKeyDownCapture={guardKeys}
       onKeyDown={onKeyDown}
       className={cn(
         CHAT_TEXT_SCOPE_CLASS,
