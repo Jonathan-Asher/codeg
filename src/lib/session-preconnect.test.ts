@@ -7,6 +7,10 @@ vi.mock("@/lib/api", () => ({
 import { acpPreconnect } from "@/lib/api"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import {
+  clearOutsideWriter,
+  reportOutsideWriter,
+} from "@/stores/outside-writer-store"
+import {
   cancelConversationPreconnect,
   cancelSessionPreconnect,
   createPreconnectScheduler,
@@ -218,6 +222,29 @@ describe("requestSessionPreconnect", () => {
       "claude_code",
       "/work/seven",
       "sid-7"
+    )
+  })
+
+  it("never pre-opens a session another process runs", () => {
+    reportOutsideWriter("busy-1", { pid: 4242, startedAt: null })
+    requestSessionPreconnect(target("busy-1"))
+    vi.advanceTimersByTime(1000)
+    expect(acpPreconnect).not.toHaveBeenCalled()
+
+    // The pointer moved on to it: the intent before it goes too.
+    requestSessionPreconnect(target("free-1"))
+    requestSessionPreconnect(target("busy-1"))
+    vi.advanceTimersByTime(1000)
+    expect(acpPreconnect).not.toHaveBeenCalled()
+
+    // Once that process is done, a hover opens it again.
+    clearOutsideWriter("busy-1")
+    requestSessionPreconnect(target("busy-1"))
+    vi.advanceTimersByTime(300)
+    expect(acpPreconnect).toHaveBeenCalledWith(
+      "claude_code",
+      "/work/proj",
+      "busy-1"
     )
   })
 })

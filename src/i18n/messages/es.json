@@ -3600,6 +3600,9 @@
         "mentionGroupSkill": "Habilidades"
       },
       "messageQueue": {
+        "outsideWriter": "Se envía cuando el otro proceso termine y codeg se conecte.",
+        "outsideWriterStopped": "No enviado: codeg no está conectado mientras otro proceso ejecuta esta sesión.",
+        "connect": "Conectar",
         "addToQueue": "Agregar a la cola",
         "saveEdit": "Guardar",
         "cancelEdit": "Cancelar edición",
@@ -4301,6 +4304,21 @@
         "reconnectDisabledDuringTurn": "Disponible cuando termine el turno actual",
         "dismiss": "Descartar",
         "applied": "Nueva configuración aplicada"
+      },
+      "outsideWriter": {
+        "waiting": "Esta sesión se está ejecutando en otro proceso (pid {pid}, iniciado {time}). codeg se conectará cuando termine.",
+        "waitingNoTime": "Esta sesión se está ejecutando en otro proceso (pid {pid}). codeg se conectará cuando termine.",
+        "stopped": "Sin esperar al proceso {pid}: codeg se conecta a esta sesión solo cuando lo pidas.",
+        "connectAnyway": "Conectar de todos modos",
+        "connectAnywayHint": "Conectar ahora, mientras el otro proceso sigue ejecutando esta sesión",
+        "connecting": "Conectando…",
+        "stopWaiting": "Dejar de esperar",
+        "connect": "Conectar",
+        "confirmTitle": "¿Conectar de todos modos?",
+        "confirmDescription": "El proceso {pid} sigue ejecutando esta sesión. Si codeg también la reanuda, ambos escribirán en su historial, que puede dividirse en dos ramas.",
+        "confirmAction": "Conectar de todos modos",
+        "cancel": "Cancelar",
+        "composerReason": "Ejecutándose en otro proceso"
       },
       "piProjectTrust": {
         "title": "Este proyecto incluye recursos de pi",

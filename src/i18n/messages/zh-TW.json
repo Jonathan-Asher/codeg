@@ -3600,6 +3600,9 @@
         "mentionGroupSkill": "技能"
       },
       "messageQueue": {
+        "outsideWriter": "另一個行程結束且 codeg 連線後送出。",
+        "outsideWriterStopped": "未送出：另一個行程執行此工作階段期間，codeg 未連線。",
+        "connect": "連線",
         "addToQueue": "加入佇列",
         "saveEdit": "儲存",
         "cancelEdit": "取消編輯",
@@ -4301,6 +4304,21 @@
         "reconnectDisabledDuringTurn": "目前回合結束後可重新連線",
         "dismiss": "忽略",
         "applied": "已套用新設定"
+      },
+      "outsideWriter": {
+        "waiting": "此工作階段正在另一個行程中執行（pid {pid}，啟動於 {time}）。該行程結束後 codeg 會自動連線。",
+        "waitingNoTime": "此工作階段正在另一個行程中執行（pid {pid}）。該行程結束後 codeg 會自動連線。",
+        "stopped": "不再等待行程 {pid}：只有在你要求時，codeg 才會連線此工作階段。",
+        "connectAnyway": "仍要連線",
+        "connectAnywayHint": "在另一個行程仍執行此工作階段時立即連線",
+        "connecting": "連線中…",
+        "stopWaiting": "停止等待",
+        "connect": "連線",
+        "confirmTitle": "仍要連線？",
+        "confirmDescription": "行程 {pid} 仍在執行此工作階段。如果 codeg 也繼續此工作階段，兩者都會寫入其記錄，記錄可能會分叉為兩個分支。",
+        "confirmAction": "仍要連線",
+        "cancel": "取消",
+        "composerReason": "正在另一個行程中執行"
       },
       "piProjectTrust": {
         "title": "此專案自帶 pi 資源",

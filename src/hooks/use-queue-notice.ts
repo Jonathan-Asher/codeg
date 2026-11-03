@@ -11,10 +11,15 @@ import { queueNoticeFor, type QueueNoticeInput } from "@/lib/queue-notice"
 /**
  * The line shown above a composer's queue when its messages are held (see
  * `queueNoticeFor`), localized. `onRetry` asks for a new connection; the
- * queue then flushes by itself once it is up.
+ * queue then flushes by itself once it is up. `onConnect` is what connects a
+ * session the user stopped waiting on (`onRetry` when not given).
  */
 export function useQueueNotice(
-  input: QueueNoticeInput & { agentLabel: string; onRetry: () => void }
+  input: QueueNoticeInput & {
+    agentLabel: string
+    onRetry: () => void
+    onConnect?: () => void
+  }
 ): QueueNotice | null {
   const t = useTranslations("Folder.chat.messageQueue")
   const {
@@ -24,8 +29,10 @@ export function useQueueNotice(
     status,
     limitPause,
     newChat,
+    outsideWriter,
     agentLabel,
     onRetry,
+    onConnect,
   } = input
   const kind = queueNoticeFor({
     queueLength,
@@ -34,13 +41,25 @@ export function useQueueNotice(
     status,
     limitPause,
     newChat,
+    outsideWriter,
   })
   const resumesAt = kind?.kind === "pool" ? kind.resumesAt : null
   const resetsAt = kind?.kind === "limit" ? kind.resetsAt : null
   // When the paused session continues, kept current while it shows.
   const resetTime = useLimitResetParts(resetsAt)?.time ?? null
   const kindName = kind?.kind ?? null
+  const stoppedWaiting = kind?.kind === "outside_writer" && kind.stopped
+  const connect = onConnect ?? onRetry
   return useMemo(() => {
+    if (kindName === "outside_writer") {
+      return stoppedWaiting
+        ? {
+            tone: "failed",
+            text: t("outsideWriterStopped"),
+            action: { label: t("connect"), onClick: connect },
+          }
+        : { tone: "waiting", text: t("outsideWriter") }
+    }
     if (kindName === "limit" && resetTime) {
       return { tone: "waiting", text: t("limitPaused", { time: resetTime }) }
     }
@@ -65,5 +84,14 @@ export function useQueueNotice(
       }
     }
     return null
-  }, [kindName, resumesAt, resetTime, agentLabel, onRetry, t])
+  }, [
+    kindName,
+    stoppedWaiting,
+    resumesAt,
+    resetTime,
+    agentLabel,
+    onRetry,
+    connect,
+    t,
+  ])
 }

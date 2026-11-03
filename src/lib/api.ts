@@ -31,6 +31,7 @@ import {
 } from "./forge-list-prefs"
 import { TurnBusyError, isTurnInProgressRejection } from "./turn-busy"
 import { PoolExhaustedError, poolHoldFromError } from "./pool-hold"
+import type { OutsideWriter } from "./outside-writer"
 import type { FolderThemeColor } from "./theme-presets"
 import type { FollowUpIntent } from "./task-follow-up"
 import type {
@@ -301,7 +302,10 @@ export async function acpConnect(
   preferredModeId?: string | null,
   preferredConfigValues?: Record<string, string> | null,
   /** A Quick Ask private question: ask the agent not to keep a transcript. */
-  ephemeral?: boolean
+  ephemeral?: boolean,
+  /** The user saw that another process runs the session and chose to
+   *  connect anyway (see `lib/outside-writer`). */
+  allowOutsideWriter?: boolean
 ): Promise<string> {
   return getTransport().call(
     "acp_connect",
@@ -312,6 +316,7 @@ export async function acpConnect(
       preferredModeId: preferredModeId ?? null,
       preferredConfigValues: preferredConfigValues ?? null,
       ...(ephemeral ? { ephemeral: true } : {}),
+      ...(allowOutsideWriter ? { allowOutsideWriter: true } : {}),
     },
     { timeoutMs: ACP_CONNECT_TIMEOUT_MS }
   )
@@ -734,6 +739,30 @@ export async function acpPreconnect(
   return getTransport().call("acp_preconnect", {
     agentType,
     workingDir,
+    sessionId,
+  })
+}
+
+/** Whether another process runs a session, and how its transcript stands. */
+export interface AcpOutsideWriterStatus {
+  /** The process codeg did not start that runs the session, or `null`
+   *  once there is none. */
+  writer: OutsideWriter | null
+  /** The transcript's size and modification time, when it has one: a
+   *  change means the other process wrote to it. */
+  transcript: { len: number; modifiedMs: number | null } | null
+}
+
+/**
+ * Ask whether a process codeg did not start still runs `sessionId`. A
+ * session view polls it while it waits to connect (see `lib/outside-writer`).
+ */
+export async function acpOutsideWriterStatus(
+  agentType: AgentType,
+  sessionId: string
+): Promise<AcpOutsideWriterStatus> {
+  return getTransport().call("acp_outside_writer_status", {
+    agentType,
     sessionId,
   })
 }

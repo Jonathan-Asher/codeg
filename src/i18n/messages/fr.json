@@ -3600,6 +3600,9 @@
         "mentionGroupSkill": "Compétences"
       },
       "messageQueue": {
+        "outsideWriter": "Partira quand l’autre processus aura terminé et que codeg sera connecté.",
+        "outsideWriterStopped": "Non envoyé : codeg n’est pas connecté tant qu’un autre processus exécute cette session.",
+        "connect": "Se connecter",
         "addToQueue": "Mettre en file",
         "saveEdit": "Enregistrer",
         "cancelEdit": "Annuler la modification",
@@ -4301,6 +4304,21 @@
         "reconnectDisabledDuringTurn": "Disponible une fois le tour en cours terminé",
         "dismiss": "Ignorer",
         "applied": "Nouvelle configuration appliquée"
+      },
+      "outsideWriter": {
+        "waiting": "Cette session s’exécute dans un autre processus (pid {pid}, démarré {time}). codeg se connectera quand il aura terminé.",
+        "waitingNoTime": "Cette session s’exécute dans un autre processus (pid {pid}). codeg se connectera quand il aura terminé.",
+        "stopped": "Plus d’attente du processus {pid} : codeg ne se connecte à cette session que si vous le demandez.",
+        "connectAnyway": "Se connecter quand même",
+        "connectAnywayHint": "Se connecter maintenant, pendant que l’autre processus exécute encore cette session",
+        "connecting": "Connexion…",
+        "stopWaiting": "Ne plus attendre",
+        "connect": "Se connecter",
+        "confirmTitle": "Se connecter quand même ?",
+        "confirmDescription": "Le processus {pid} exécute encore cette session. Si codeg la reprend aussi, tous deux écrivent dans son historique, qui peut se scinder en deux branches.",
+        "confirmAction": "Se connecter quand même",
+        "cancel": "Annuler",
+        "composerReason": "En cours dans un autre processus"
       },
       "piProjectTrust": {
         "title": "Ce projet fournit des ressources pi",

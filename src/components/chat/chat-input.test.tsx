@@ -218,4 +218,16 @@ describe("ChatInput while a new chat's session is on its way", () => {
     ).toBe(true)
     expect(renderNewChat({})?.selectorsAwaitConnection).toBe(false)
   })
+
+  // A conversation another process runs reads "connecting" while codeg waits
+  // for that process: a message sent meanwhile waits in the queue, and the
+  // placeholder says why.
+  it("queues a send while another process runs the session", () => {
+    const props = renderNewChat({
+      connectingReason: "Running in another process",
+    })
+    expect(props?.disabled).toBe(false)
+    expect(props?.queueSends).toBe(true)
+    expect(props?.placeholder).toBe("connectingWaiting")
+  })
 })
