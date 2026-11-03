@@ -64,6 +64,15 @@ describe("canOfferContinue", () => {
     ).toBe(true)
   })
 
+  it("stands aside while the output-limit notice offers its own Continue", () => {
+    expect(
+      gate({ connectionStatus: "connected" }, { outputLimitNotice: true })
+    ).toBe(false)
+    expect(
+      gate({ connectionStatus: "connected" }, { outputLimitNotice: false })
+    ).toBe(true)
+  })
+
   it("hides it while a turn is in flight", () => {
     expect(gate({ connectionStatus: "prompting" })).toBe(false)
     // No live connection here, but the summary says a turn runs.

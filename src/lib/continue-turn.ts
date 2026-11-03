@@ -125,6 +125,10 @@ export interface ContinueGateInputs {
   /** The docked composer is shown (not the welcome screen, not replaced by a
    *  load-error banner). */
   composerAvailable: boolean
+  /** The reply ran out of output tokens and the notice under it carries its
+   *  own Continue (see `lib/output-limit`): one on screen, not two. Defaults
+   *  to `false`. */
+  outputLimitNotice?: boolean
 }
 
 /**
@@ -150,8 +154,10 @@ export function canOfferContinue({
   connectionReady,
   connectionOpening = false,
   composerAvailable,
+  outputLimitNotice = false,
 }: ContinueGateInputs): boolean {
   if (!composerAvailable || !endsWithAgentReply) return false
+  if (outputLimitNotice) return false
   if (pendingInteraction || queuedCount > 0) return false
   if (activity === "idle") return connectionReady || connectionOpening
   return activity === "background"
