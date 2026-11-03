@@ -1607,6 +1607,73 @@ pub async fn record_out_of_turn_activity(
     Ok(res.rows_affected > 0)
 }
 
+/// A conversation whose agent session keeps a transcript codeg can follow: the
+/// row, its agent and session, and its activity time now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivityCandidate {
+    pub id: i32,
+    pub agent_type: AgentType,
+    pub external_id: String,
+    pub updated_at: chrono::DateTime<Utc>,
+}
+
+/// The conversations of `agent_types` the session lists show (live, a root row,
+/// not a loop run, in a live folder) that are bound to an agent session. The
+/// watcher for activity outside codeg (`acp::outside_activity`) follows their
+/// transcripts, and every row it moves is broadcast as a list upsert, so it may
+/// only see rows [`list_all`] returns.
+pub async fn list_activity_candidates(
+    conn: &DatabaseConnection,
+    agent_types: &[AgentType],
+) -> Result<Vec<ActivityCandidate>, DbError> {
+    let rows = conversation::Entity::find()
+        .filter(conversation::Column::DeletedAt.is_null())
+        .filter(conversation::Column::ParentId.is_null())
+        .filter(conversation::Column::Kind.ne(ConversationKind::Loop))
+        .filter(conversation::Column::ExternalId.is_not_null())
+        .filter(
+            conversation::Column::AgentType
+                .is_in(agent_types.iter().map(|agent| agent.as_wire().into_owned())),
+        )
+        .filter(
+            conversation::Column::FolderId.in_subquery(
+                sea_orm::sea_query::Query::select()
+                    .column(folder::Column::Id)
+                    .from(folder::Entity)
+                    .and_where(folder::Column::DeletedAt.is_null())
+                    .to_owned(),
+            ),
+        )
+        .order_by_asc(conversation::Column::Id)
+        .all(conn)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            Some(ActivityCandidate {
+                id: row.id,
+                agent_type: AgentType::from_wire(&row.agent_type)?,
+                external_id: row.external_id.filter(|id| !id.is_empty())?,
+                updated_at: row.updated_at,
+            })
+        })
+        .collect())
+}
+
+/// `updated_at` of a live root conversation, or `None` once it is deleted (or
+/// for a delegation child, which the lists never show).
+pub async fn activity_floor(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+) -> Result<Option<chrono::DateTime<Utc>>, DbError> {
+    let row = conversation::Entity::find_by_id(conversation_id)
+        .filter(conversation::Column::DeletedAt.is_null())
+        .filter(conversation::Column::ParentId.is_null())
+        .one(conn)
+        .await?;
+    Ok(row.map(|row| row.updated_at))
+}
+
 /// The user opened this conversation (made it the active tab) at `at`, on
 /// any client. Writes `last_viewed_at` only: a view is not activity, so
 /// `updated_at` stays put (same reasoning as [`refresh_auto_title`]).

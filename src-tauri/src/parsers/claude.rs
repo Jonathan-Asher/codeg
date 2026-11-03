@@ -195,7 +195,7 @@ fn is_slash_command_expansion(value: &serde_json::Value, prompt_id: Option<&str>
 }
 
 /// What the record following a buffered slash command says about that command.
-enum PendingCommandVerdict {
+pub(crate) enum PendingCommandVerdict {
     /// A real turn followed — the command IS that turn's prompt, so render it.
     Emit,
     /// The next thing in the transcript is another user-authored record, so the
@@ -281,7 +281,7 @@ fn is_task_notification_record(value: &serde_json::Value) -> bool {
 /// reply eventually came along. Everything the CLI writes in between keeps the
 /// question open, and a command left unresolved when the feed ends stays hidden:
 /// end-of-file is a sampling boundary, not evidence.
-fn pending_command_verdict(
+pub(crate) fn pending_command_verdict(
     value: &serde_json::Value,
     prompt_id: Option<&str>,
 ) -> PendingCommandVerdict {
@@ -1234,7 +1234,8 @@ pub(crate) const CLEAR_ROLLOVER_MAX_GAP_SECS: i64 = 300;
 const CLEAR_ROLLOVER_BACK_TOLERANCE_SECS: i64 = 5;
 const CLEAR_ROLLOVER_CHAIN_LIMIT: usize = 32;
 
-fn record_timestamp(value: &serde_json::Value) -> Option<DateTime<Utc>> {
+/// A record's own `timestamp`, when it has a readable one.
+pub(crate) fn record_timestamp(value: &serde_json::Value) -> Option<DateTime<Utc>> {
     value
         .get("timestamp")
         .and_then(|t| t.as_str())
