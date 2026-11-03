@@ -226,8 +226,9 @@ codeg. A Developer ID signature makes the requirement `identifier "app.codeg"` +
 **What signs.** The build job on the Mac runner (`m4-build`) runs `scripts/ci-devid-sign.sh` after
 `pnpm tauri build --bundles app`. The script:
 - re-signs every Mach-O in the bundle, deepest first (`Contents/MacOS/codeg-mcp`, `codeg-tts` and
-  `codeg-server`, any dylibs or nested bundles, then the app itself), with "Developer ID Application: Jonathan Ashurov
-  (3L92BZK46V)", SHA-1 `A4DFC81686CC4636EB1CCCF1E7829EF7346C21E8`;
+  `codeg-talk`, `whisper.framework`, any other dylibs or nested bundles, then the app itself), with "Developer ID
+  Application: Jonathan Ashurov (3L92BZK46V)", SHA-1 `A4DFC81686CC4636EB1CCCF1E7829EF7346C21E8`. The bundle has no
+  `codeg-server`: that binary needs the `server` feature, which desktop builds leave off;
 - verifies the result (`codesign --verify --deep --strict`), and fails the build unless the designated
   requirement names `app.codeg` and the team and every Mach-O carries the team;
 - rebuilds `codeg.app.tar.gz` from the signed bundle, with the same layout tauri uses.

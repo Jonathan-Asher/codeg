@@ -101,7 +101,7 @@ jobs:
         env:
           CARGO_INCREMENTAL: ${{ runner.environment == 'self-hosted' && '1' || '0' }}
         run: |
-          cargo clippy --no-default-features --bin codeg-server --lib -- -D warnings
+          cargo clippy --no-default-features --features server --bin codeg-server --lib -- -D warnings
           cargo check --no-default-features --bin codeg-mcp
 
   build:

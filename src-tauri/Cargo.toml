@@ -47,7 +47,15 @@ tauri-runtime = [
 # `ConnectionManager::insert_test_connection`, parser `with_base_dir`, the
 # `db::test_helpers` module) for integration tests in `tests/*.rs`. Without
 # this feature the items are physically uncompiled in release builds.
-test-utils = []
+# It also builds the `codeg-server` binary, which integration tests run
+# (`CARGO_BIN_EXE_codeg-server`).
+test-utils = ["server"]
+# The standalone `codeg-server` binary (its `[[bin]]` requires this). Desktop
+# builds leave it off: `tauri build` compiles and bundles every binary whose
+# required features are on, and codeg.app has no use for an 80 MB server.
+# Server builds, Docker and CI name it:
+#   cargo build --release --no-default-features --features server --bin codeg-server
+server = []
 # Built-in browser. `browser-child` compiles the embedded surface: a wry child
 # webview created directly through tauri-runtime-wry's re-exported `wry`
 # (`WebViewBuilder::build_as_child`), which is exactly how tauri-runtime-wry
@@ -70,7 +78,7 @@ required-features = ["tauri-runtime"]
 [[bin]]
 name = "codeg-server"
 path = "src/bin/codeg_server.rs"
-required-features = []
+required-features = ["server"]
 
 [[bin]]
 name = "codeg-mcp"

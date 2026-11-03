@@ -673,7 +673,7 @@ jobs:
         # the cross-compile env (Linux arm64) without dragging in tauri
         # runtime deps.
         run: |
-          cargo build --release --bin codeg-server --no-default-features --target ${{ matrix.target }}
+          cargo build --release --bin codeg-server --no-default-features --features server --target ${{ matrix.target }}
           cargo build --release --bin codeg-mcp --no-default-features --target ${{ matrix.target }}
 
       - name: Package (Unix)
