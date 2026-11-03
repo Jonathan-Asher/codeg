@@ -1048,6 +1048,10 @@ pub fn build_router(
         .route("/acp_disconnect", post(handlers::acp::acp_disconnect))
         .route("/acp_preconnect", post(handlers::acp::acp_preconnect))
         .route(
+            "/acp_outside_writer_status",
+            post(handlers::acp::acp_outside_writer_status),
+        )
+        .route(
             "/acp_release_connection",
             post(handlers::acp::acp_release_connection),
         )

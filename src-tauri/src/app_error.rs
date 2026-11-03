@@ -141,6 +141,10 @@ pub enum AppErrorCode {
     /// pool is at its limit. Maps to HTTP 409 like `TurnInProgress`: the
     /// client keeps the message queued and sends it once the pool has room.
     PoolExhausted,
+    /// A connect was refused because a process codeg did not start runs the
+    /// session. Maps to HTTP 409: the client waits for that process to finish
+    /// (or the user connects anyway); nothing went wrong on the server.
+    SessionRunningElsewhere,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
