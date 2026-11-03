@@ -776,6 +776,15 @@ pub struct SessionState {
     /// like `turn_in_flight`.
     pub last_turn_ended_abnormally: bool,
 
+    /// How the most recently completed turn ended: the stop reason its
+    /// `TurnComplete` carried (`end_turn`, `max_tokens`, `cancelled`, …).
+    /// Cleared when the next prompt starts (`StatusChanged` → `Prompting`).
+    /// Carried on `to_snapshot()` so a client attaching after the turn ended
+    /// (web reconnect, window refresh, the phone) still learns how it ended —
+    /// a reply cut off by the model's output limit looks finished in the
+    /// transcript, and the one-shot event won't replay for that client.
+    pub last_stop_reason: Option<String>,
+
     /// True when the agent's effective settings changed after this connection
     /// was spawned — the running process is still on its launch-time config and
     /// needs a restart to pick up the change. Set/cleared by
@@ -898,6 +907,7 @@ impl SessionState {
             turn_in_flight: false,
             turns_completed: 0,
             last_turn_ended_abnormally: false,
+            last_stop_reason: None,
             config_stale: false,
             config_stale_kind: None,
             last_native_title: None,
@@ -1046,6 +1056,9 @@ impl SessionState {
                     // new error scope, so stale recoverable errors must not be
                     // resurrected by a later snapshot attach.
                     self.last_error = None;
+                    // Same scope: the previous turn's ending no longer
+                    // describes the session.
+                    self.last_stop_reason = None;
                 }
                 if matches!(
                     status,
@@ -1317,6 +1330,7 @@ impl SessionState {
                 // other than a normal end-of-turn means this turn's content
                 // may never have reached the wire.
                 self.last_turn_ended_abnormally = stop_reason != "end_turn";
+                self.last_stop_reason = Some(stop_reason.clone());
                 // The held turn (if it was one) is over.
                 self.awaiting_background = false;
                 // AIR retry warnings resolve at the CLEAN turn boundary —
@@ -2362,6 +2376,7 @@ impl SessionState {
             config_stale: self.config_stale,
             config_stale_kind: self.config_stale_kind,
             last_error: self.last_error.clone(),
+            last_stop_reason: self.last_stop_reason.clone(),
             session_failures: self.session_failures.values().cloned().collect(),
             async_tasks: self.async_tasks.values().cloned().collect(),
             goal_actions: self.goal_actions.clone(),
@@ -2498,6 +2513,11 @@ pub struct LiveSessionSnapshot {
     /// no error has occurred so older clients and common snapshots stay small.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<SessionLastError>,
+    /// How the last completed turn ended (see `SessionState.last_stop_reason`).
+    /// Omitted before the first turn ends and while a turn runs;
+    /// `#[serde(default)]` so older payloads deserialize to `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_stop_reason: Option<String>,
     /// AIR typed session failure table (resolved entries and revision
     /// watermarks included — see `SessionState.session_failures`). A client
     /// attaching mid-session seeds its reducer from this and keeps applying
@@ -3723,11 +3743,18 @@ mod tests {
         assert_eq!(s.active_tool_calls.len(), 1);
         assert!(s.active_tool_calls.contains_key("tc-1"));
 
-        // Snapshot output unchanged (modulo last_activity_at which is internal).
+        // Snapshot output unchanged (modulo last_activity_at which is internal,
+        // and attach_elapsed_ms, a clock reading that ticks between the two
+        // snapshots on a busy machine).
         let after = s.to_snapshot();
+        let without_clock = |snap: &LiveSessionSnapshot| {
+            let mut json = serde_json::to_value(snap).unwrap();
+            json.as_object_mut().unwrap().remove("attach_elapsed_ms");
+            json
+        };
         assert_eq!(
-            serde_json::to_value(&before).unwrap(),
-            serde_json::to_value(&after).unwrap(),
+            without_clock(&before),
+            without_clock(&after),
             "snapshot must be byte-identical after no-op event"
         );
     }
@@ -4943,6 +4970,60 @@ mod tests {
             Some("the answer"),
             "the agent's late response must not erase the captured result"
         );
+    }
+
+    /// How the last turn ended reaches a client that attaches after it: a
+    /// reply cut off by the model's output limit (`max_tokens`) looks finished
+    /// in the transcript, so the snapshot is the only place a refreshed or
+    /// second client can learn it. The next prompt clears it.
+    #[test]
+    fn snapshot_carries_the_last_stop_reason_until_the_next_prompt() {
+        let mut s = fresh_state();
+        let json = serde_json::to_value(s.to_snapshot()).unwrap();
+        assert!(
+            json.get("last_stop_reason").is_none(),
+            "no turn ended yet: the field stays off the wire"
+        );
+
+        s.apply_event(&AcpEvent::StatusChanged {
+            status: ConnectionStatus::Prompting,
+        });
+        s.apply_event(&AcpEvent::TurnComplete {
+            session_id: "ext".into(),
+            stop_reason: "max_tokens".into(),
+            agent_type: "pi".into(),
+        });
+        assert_eq!(s.last_stop_reason.as_deref(), Some("max_tokens"));
+        let json = serde_json::to_value(s.to_snapshot()).unwrap();
+        assert_eq!(
+            json.get("last_stop_reason").and_then(|v| v.as_str()),
+            Some("max_tokens")
+        );
+
+        s.apply_event(&AcpEvent::StatusChanged {
+            status: ConnectionStatus::Prompting,
+        });
+        assert_eq!(s.last_stop_reason, None, "a new prompt starts a new turn");
+        assert!(serde_json::to_value(s.to_snapshot())
+            .unwrap()
+            .get("last_stop_reason")
+            .is_none());
+
+        s.apply_event(&AcpEvent::TurnComplete {
+            session_id: "ext".into(),
+            stop_reason: "end_turn".into(),
+            agent_type: "pi".into(),
+        });
+        assert_eq!(s.to_snapshot().last_stop_reason.as_deref(), Some("end_turn"));
+    }
+
+    /// Older servers send no `last_stop_reason`; their snapshots still parse.
+    #[test]
+    fn snapshot_without_last_stop_reason_deserializes() {
+        let mut json = serde_json::to_value(fresh_state().to_snapshot()).unwrap();
+        json.as_object_mut().unwrap().remove("last_stop_reason");
+        let snap: LiveSessionSnapshot = serde_json::from_value(json).unwrap();
+        assert_eq!(snap.last_stop_reason, None);
     }
 
     #[test]

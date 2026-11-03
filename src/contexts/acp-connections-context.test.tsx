@@ -7341,5 +7341,70 @@ describe("AcpConnectionsProvider with another process running the session", () =
       false,
       true
     )
+
+// How the last turn ended (`lastStopReason`): `max_tokens` puts the
+// output-limit notice under the reply (`lib/output-limit`). It comes from the
+// turn's `turn_complete`, or — for a client that attached after the turn
+// ended — from the snapshot; the next prompt clears it.
+describe("AcpConnectionsProvider last stop reason", () => {
+  async function connectOwner(): Promise<AttachHandlers> {
+    h.acpFindConnectionForConversation.mockResolvedValue(null)
+    await mountProvider()
+    await act(async () => {
+      await h.actions!.connect(TAB, "claude_code", "/tmp/x", "sess-1", 42)
+    })
+    return latestAttachHandlers()
+  }
+
+  function prompting(handlers: AttachHandlers, seq: number) {
+    emitAcpEvent(handlers, {
+      seq,
+      connection_id: "spawned-conn",
+      type: "status_changed",
+      status: "prompting",
+    })
+  }
+
+  function turnComplete(
+    handlers: AttachHandlers,
+    seq: number,
+    stop_reason: string
+  ) {
+    emitAcpEvent(handlers, {
+      seq,
+      connection_id: "spawned-conn",
+      type: "turn_complete",
+      session_id: "sess-1",
+      stop_reason,
+    })
+  }
+
+  it("keeps how the last turn ended until the next prompt starts", async () => {
+    const handlers = await connectOwner()
+    expect(h.store!.getConnection(TAB)?.lastStopReason ?? null).toBeNull()
+
+    prompting(handlers, 1)
+    turnComplete(handlers, 2, "max_tokens")
+    expect(h.store!.getConnection(TAB)?.lastStopReason).toBe("max_tokens")
+    expect(h.store!.getConnection(TAB)?.status).toBe("connected")
+
+    prompting(handlers, 3)
+    expect(h.store!.getConnection(TAB)?.lastStopReason).toBeNull()
+
+    turnComplete(handlers, 4, "end_turn")
+    expect(h.store!.getConnection(TAB)?.lastStopReason).toBe("end_turn")
+  })
+
+  it("recovers it from a fresh snapshot (the client missed the turn's end)", async () => {
+    const handlers = await connectOwner()
+    h.denormalizeSnapshot.mockReturnValue({
+      ...snapshotBase(),
+      eventSeq: 5,
+      lastStopReason: "max_tokens",
+    })
+    hydrateSnapshot(handlers, {
+      event_seq: 5,
+    } as unknown as LiveSessionSnapshot)
+    expect(h.store!.getConnection(TAB)?.lastStopReason).toBe("max_tokens")
   })
 })

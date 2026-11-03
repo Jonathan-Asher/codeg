@@ -3683,6 +3683,9 @@ export interface LiveSessionSnapshot {
   config_stale_kind?: ConfigStaleKind | null
   /** Latest agent/runtime error recoverable after reconnect. */
   last_error?: SessionLastError | null
+  /** How the last completed turn ended (`end_turn`, `max_tokens`, …). Absent
+   *  before the first turn ends, while a turn runs, and on older servers. */
+  last_stop_reason?: string | null
   /** AIR typed session failure table — resolved entries and their revision
    *  watermarks included, so an attaching client seeds the same monotonic
    *  merge the live path applies. Absent while empty (the common case). */

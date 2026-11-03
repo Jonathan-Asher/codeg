@@ -170,6 +170,19 @@ describe("denormalizeSnapshot — config staleness", () => {
   })
 })
 
+describe("denormalizeSnapshot — last stop reason", () => {
+  it("carries how the last turn ended into the patch", () => {
+    const patch = denormalizeSnapshot(
+      baseSnapshot({ last_stop_reason: "max_tokens" })
+    )
+    expect(patch.lastStopReason).toBe("max_tokens")
+  })
+
+  it("defaults to null when the field is absent (no turn ended, or an older server)", () => {
+    expect(denormalizeSnapshot(baseSnapshot()).lastStopReason).toBeNull()
+  })
+})
+
 describe("denormalizeSnapshot — fork capabilities", () => {
   it("carries what the adapter's fork can do into the patch", () => {
     const patch = denormalizeSnapshot(

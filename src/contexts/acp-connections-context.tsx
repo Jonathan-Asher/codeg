@@ -414,6 +414,14 @@ export interface ConnectionState {
   /** `error` (red) or `warning` (amber) — how the popover tints `error`. */
   errorLevel: AcpErrorLevel
   /**
+   * How the last completed turn ended: the stop reason its `turn_complete`
+   * carried (`end_turn`, `max_tokens`, `cancelled`, …), or the snapshot's
+   * `last_stop_reason` for a client that attached after it. Cleared when the
+   * next prompt starts. `max_tokens` puts the output-limit notice under the
+   * reply (see `lib/output-limit`). Absent until a turn ends.
+   */
+  lastStopReason?: string | null
+  /**
    * Set when the agent rejected `session/load` in a way codeg cannot paper
    * over: no record of the session, the session/process died, or it is
    * archived. Distinct from `error` because the UI surfaces it inline in the
@@ -653,6 +661,8 @@ type Action =
       type: "STATUS_CHANGED"
       contextKey: string
       status: ConnectionStatus
+      /** Set when a `turn_complete` ends the turn: how it stopped. */
+      stopReason?: string
     }
   | {
       // The connection moved to a new step on its way to a usable session
@@ -2162,6 +2172,9 @@ function connectionsReducer(
         error: action.patch.lastError,
         errorCode: action.patch.lastErrorCode,
         errorLevel: action.patch.lastErrorLevel,
+        // Current state too: how the last turn ended, for a client that
+        // attached after it (the one-shot `turn_complete` won't replay).
+        lastStopReason: action.patch.lastStopReason,
         lastAppliedSeq: action.patch.eventSeq,
       })
       return next
@@ -2255,6 +2268,8 @@ function connectionsReducer(
         updated.claudeApiRetry = null
         updated.error = null
         updated.errorCode = null
+        // A new turn: how the previous one ended no longer applies.
+        updated.lastStopReason = null
         // Steering adoptions belong to the turn whose stream they split.
         updated.steeredMessageIds = EMPTY_STEERED_MESSAGE_IDS
         // Starting a prompt past an active AIR failure acknowledges it —
@@ -2283,6 +2298,9 @@ function connectionsReducer(
         // Likewise a blocked exit_plan_mode approval — cleared via
         // `plan_approval_resolved` normally; this is the turn-end safety net.
         updated.pendingPlanApproval = null
+      }
+      if (action.stopReason !== undefined) {
+        updated.lastStopReason = action.stopReason
       }
       next.set(action.contextKey, updated)
       return next
@@ -5797,6 +5815,7 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             type: "STATUS_CHANGED",
             contextKey,
             status: "connected",
+            stopReason: e.stop_reason,
           })
           // The turn streamed shrunk frames (see `onFrameCut`): what was just
           // promoted into the thread is that incomplete copy. Replace it with
