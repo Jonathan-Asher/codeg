@@ -7341,6 +7341,8 @@ describe("AcpConnectionsProvider with another process running the session", () =
       false,
       true
     )
+  })
+})
 
 // How the last turn ended (`lastStopReason`): `max_tokens` puts the
 // output-limit notice under the reply (`lib/output-limit`). It comes from the
