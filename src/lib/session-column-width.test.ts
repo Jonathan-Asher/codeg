@@ -112,7 +112,9 @@ describe("the session column reads the variable", () => {
 
   /** Every wrapper of the conversation column, which must stay aligned. */
   const COLUMN_FILES: Array<[string, number]> = [
-    ["src/components/chat/conversation-shell.tsx", 5],
+    // The dock: the question card, the plan card, the composer banner, the
+    // Talk dock, the feedback notes and the composer.
+    ["src/components/chat/conversation-shell.tsx", 6],
     ["src/components/message/virtualized-message-thread.tsx", 2],
     ["src/components/conversations/conversation-detail-panel.tsx", 2],
     ["src/components/chat/pi-project-trust-banner.tsx", 1],
