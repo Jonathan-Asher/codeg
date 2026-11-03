@@ -30,6 +30,10 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
+// Which tab op is asked for; the companion builds it, so it lives in the
+// protocol crate it shares.
+pub use codeg_mcp_protocol::browser::BrowserTabOp;
+
 use crate::browser::agent::{ActionOutcome, ActionRequest, AgentTabSummary, PageSnapshot};
 use crate::browser::capture::{CaptureOutcome, CaptureRequest};
 use crate::browser::console::{ConsoleQuery, ConsoleReadout};
@@ -499,29 +503,6 @@ impl BrowserTabOutcome {
     pub fn control_required(tab_id: &str) -> Self {
         let act = BrowserActOutcome::control_required(tab_id);
         Self::refused(Some(tab_id), ERROR_CONTROL_REQUIRED, act.note.unwrap_or_default())
-    }
-}
-
-/// Which of the three tab tools is being asked for.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
-pub enum BrowserTabOp {
-    /// Open a new tab on this address, in the foreground.
-    Open { url: String },
-    /// Point an existing tab at this address.
-    Navigate { tab_id: String, url: String },
-    /// Close an existing tab.
-    Close { tab_id: String },
-}
-
-impl BrowserTabOp {
-    /// The tab the op names, for a refusal that has to name one before the
-    /// access impl is reached.
-    pub fn tab_id(&self) -> Option<&str> {
-        match self {
-            Self::Open { .. } => None,
-            Self::Navigate { tab_id, .. } | Self::Close { tab_id } => Some(tab_id),
-        }
     }
 }
 

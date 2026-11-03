@@ -5,17 +5,13 @@
 // What it does:
 //   1. Resolves the target triple — `--target <triple>` arg, or
 //      `TAURI_TARGET_TRIPLE` env, or the host's `rustc -vV` host triple.
-//   2. Except on macOS: runs
-//      `cargo build --release --bin codeg-mcp --no-default-features` for that
-//      triple from `src-tauri/`.
+//   2. Runs `cargo build --release -p codeg-mcp` for that triple from
+//      `src-tauri/`. The companion is its own workspace package
+//      (crates/codeg-mcp) and depends only on the protocol crate, so this
+//      takes seconds: it never compiles the app's library.
 //   3. Copies the produced binary to
 //      `src-tauri/binaries/codeg-mcp-<triple>{.exe}` so Tauri's externalBin
 //      bundler picks it up under the bare name `codeg-mcp` at install time.
-//      macOS skips 2 and 3: `tauri build` compiles `codeg-mcp` as one of the
-//      package's binaries and its bundler copies that one into
-//      Contents/MacOS, so a sidecar build there was thrown away (and cost a
-//      second compile of the whole library). tauri.macos.conf.json does not
-//      list it.
 //   4. On macOS targets only: builds the natural-voice sidecar `codeg-tts`
 //      (Swift package `native/codeg-tts`, BlueTTS 2.5 + RenikudPlus) with
 //      `swift build -c release` and stages it the same way. It is listed in
@@ -196,35 +192,19 @@ function main() {
   buildTalkSidecar(target)
 }
 
-/**
- * The `codeg-mcp` companion as an externalBin sidecar, for every target but
- * macOS, where `tauri build` bundles the package's own `codeg-mcp` binary.
- */
+/** The `codeg-mcp` companion, staged as an externalBin sidecar. */
 function buildMcpSidecar(target) {
-  if (target.endsWith("apple-darwin")) {
-    log(`${BIN_NAME}: no sidecar on macOS (tauri build bundles the binary)`)
-    return
-  }
   const isWindows = target.includes("windows")
   const ext = isWindows ? ".exe" : ""
-  log(`building ${BIN_NAME} (--release --no-default-features)`)
+  log(`building ${BIN_NAME} (--release -p ${BIN_NAME})`)
 
-  // cargo build needs to run from src-tauri so it resolves the local manifest
-  // and shares the swatinem/rust-cache key with other cargo invocations.
-  // `--no-default-features` keeps codeg-mcp free of the Tauri runtime deps —
-  // the bin's required-features is empty, so this just enables cross-compile
-  // without dragging in macOS-private-api / Linux WebKit / Windows WebView2.
+  // cargo build needs to run from src-tauri so it resolves the workspace
+  // manifest and shares the swatinem/rust-cache key with other cargo
+  // invocations. The package needs no features and links no UI framework, so
+  // cross-compiling it pulls in nothing platform-specific beyond libc.
   execFileSync(
     "cargo",
-    [
-      "build",
-      "--release",
-      "--bin",
-      BIN_NAME,
-      "--no-default-features",
-      "--target",
-      target,
-    ],
+    ["build", "--release", "-p", BIN_NAME, "--target", target],
     { stdio: "inherit", cwd: SRC_TAURI }
   )
 

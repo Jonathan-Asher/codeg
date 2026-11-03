@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install -y \
 
 COPY dist/${TARGETARCH}/codeg-server /usr/local/bin/codeg-server
 # codeg-mcp is the stdio MCP companion the runtime injects per session
-# (see acp/delegation/companion.rs). It must ship next to codeg-server so
+# (src-tauri/crates/codeg-mcp). It must ship next to codeg-server so
 # `locate_codeg_mcp_binary()` finds it via the exe-sibling lookup.
 COPY dist/${TARGETARCH}/codeg-mcp /usr/local/bin/codeg-mcp
 COPY dist/web /app/web

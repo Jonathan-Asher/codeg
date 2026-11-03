@@ -21,9 +21,11 @@
 //! `--disabled-agents` optionally names the built-ins to drop from that
 //! schema so only agents enabled in settings are advertised.
 //! Everything heavyweight — JSON-RPC dispatch, UDS round-trip, MCP tool
-//! schema, cancellation tracking — lives in
-//! `codeg_lib::acp::delegation::{companion, transport}` so it's
-//! unit-testable without spawning a process.
+//! schema, cancellation tracking — lives in this crate's library
+//! ([`codeg_mcp::companion`]) and the protocol crate it shares with codeg
+//! (`codeg_mcp_protocol::transport`), so it's unit-testable without spawning
+//! a process. Neither links codeg's library, so the companion builds in
+//! seconds and loads no UI frameworks.
 //!
 //! Stdin lines are dispatched concurrently: synchronous methods
 //! (`initialize`, `tools/list`) emit a response inline, `tools/call`
@@ -32,15 +34,16 @@
 //! blocking the reader. Stdout writes are serialized through a mutex so
 //! interleaved frames never corrupt the wire.
 
-use std::io::Write;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use codeg_lib::acp::delegation::companion::{
+use codeg_mcp::companion::{
     dispatch_line, drain_and_cancel_all, drive_with_heartbeat, progress_heartbeat_interval,
     CompanionContext, CompanionFeatures, InflightCalls, JsonRpcResponse, LineAction, SpawnResult,
 };
-use codeg_lib::acp::delegation::parent_watcher::{wait_for_parent_exit, DEFAULT_POLL_INTERVAL};
+use codeg_mcp::log;
+use codeg_mcp::parent_watcher::{wait_for_parent_exit, DEFAULT_POLL_INTERVAL};
+use codeg_mcp_protocol::flags;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Stdout};
 use tokio::sync::Mutex;
 
@@ -85,25 +88,25 @@ fn parse_args() -> Result<Args, String> {
     let mut iter = std::env::args().skip(1);
     while let Some(arg) = iter.next() {
         match arg.as_str() {
-            "--parent-connection-id" => {
+            flags::PARENT_CONNECTION_ID => {
                 parent_connection_id = Some(
                     iter.next()
                         .ok_or_else(|| "--parent-connection-id requires a value".to_string())?,
                 );
             }
-            "--socket-path" => {
+            flags::SOCKET_PATH => {
                 socket_path = Some(
                     iter.next()
                         .ok_or_else(|| "--socket-path requires a value".to_string())?,
                 );
             }
-            "--token" => {
+            flags::TOKEN => {
                 token = Some(
                     iter.next()
                         .ok_or_else(|| "--token requires a value".to_string())?,
                 );
             }
-            "--parent-pid" => {
+            flags::PARENT_PID => {
                 let raw = iter
                     .next()
                     .ok_or_else(|| "--parent-pid requires a value".to_string())?;
@@ -112,19 +115,19 @@ fn parse_args() -> Result<Args, String> {
                         .map_err(|e| format!("--parent-pid must be a u32: {e}"))?,
                 );
             }
-            "--features" => {
+            flags::FEATURES => {
                 features = Some(
                     iter.next()
                         .ok_or_else(|| "--features requires a value".to_string())?,
                 );
             }
-            "--custom-agents" => {
+            flags::CUSTOM_AGENTS => {
                 custom_agents = Some(
                     iter.next()
                         .ok_or_else(|| "--custom-agents requires a value".to_string())?,
                 );
             }
-            "--disabled-agents" => {
+            flags::DISABLED_AGENTS => {
                 disabled_agents = Some(
                     iter.next()
                         .ok_or_else(|| "--disabled-agents requires a value".to_string())?,
@@ -189,14 +192,10 @@ async fn write_line(stdout: &Arc<Mutex<Stdout>>, serialized: &str) -> std::io::R
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
-    // Stderr-only subscriber: stdout is the JSON-RPC protocol channel, and
-    // concurrent mcp processes share no log file. No hub/buffer/emitter.
-    let _log_guard = codeg_lib::logging::init::init_mcp();
-
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
-            let _ = writeln!(std::io::stderr(), "codeg-mcp: {e}\n{USAGE}");
+            log!("{e}\n{USAGE}");
             return ExitCode::from(2);
         }
     };
@@ -240,10 +239,7 @@ async fn main() -> ExitCode {
                 // closes the window between MCP shutdown and parent ACP
                 // disconnect detection on the codeg side.
                 drain_and_cancel_all(&ctx, &inflight, "parent process exited").await;
-                let _ = writeln!(
-                    std::io::stderr(),
-                    "codeg-mcp: parent process exited, shutting down"
-                );
+                log!("parent process exited, shutting down");
                 // Hard exit on purpose: `tokio::io::stdin()` parks a
                 // blocking worker thread that the runtime can't cancel,
                 // so returning normally would keep the process alive
@@ -264,7 +260,7 @@ async fn main() -> ExitCode {
                         break;
                     }
                     Err(e) => {
-                        let _ = writeln!(std::io::stderr(), "codeg-mcp: read stdin: {e}");
+                        log!("read stdin: {e}");
                         drain_and_cancel_all(&ctx, &inflight, "companion stdin error").await;
                         return ExitCode::from(1);
                     }
@@ -277,7 +273,7 @@ async fn main() -> ExitCode {
                 match action {
                     LineAction::Respond(resp) => {
                         if let Err(e) = write_response(&stdout, &resp).await {
-                            let _ = writeln!(std::io::stderr(), "codeg-mcp: write stdout: {e}");
+                            log!("write stdout: {e}");
                             return ExitCode::from(1);
                         }
                     }
@@ -312,10 +308,7 @@ async fn main() -> ExitCode {
                                 return;
                             };
                             if let Err(e) = write_response(&stdout, &resp).await {
-                                let _ = writeln!(
-                                    std::io::stderr(),
-                                    "codeg-mcp: write stdout: {e}"
-                                );
+                                log!("write stdout: {e}");
                                 // Relay failed (agent stdin gone) → skip any
                                 // post-relay action so feedback notes stay
                                 // pending for the next check (at-least-once).

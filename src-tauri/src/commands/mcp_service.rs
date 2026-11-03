@@ -27,6 +27,7 @@
 #[cfg(any(test, feature = "tauri-runtime"))]
 use std::sync::Arc;
 
+use codeg_mcp_protocol::features;
 use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 
@@ -167,26 +168,26 @@ pub async fn codeg_mcp_service_status_core(
 
     let delegation_cfg = sources.broker.config_snapshot().await;
     let authoring_cfg = sources.authoring.snapshot().await;
-    // Same order the companion's `CompanionFeatures::parse` recognizes. `tasks`
+    // The companion's `--features` names, in the order it lists them. `tasks`
     // is deliberately absent: it is a per-spawn flag on task-engine launches,
     // not a setting anyone can toggle, so listing it here would invite the user
     // to look for a switch that doesn't exist.
     let browser_cfg = sources.browser.snapshot().await;
     let tool_groups = vec![
-        CodegMcpToolGroup::group("delegation", delegation_cfg.enabled),
-        CodegMcpToolGroup::group("feedback", sources.feedback.is_enabled().await),
-        CodegMcpToolGroup::group("ask", sources.question.is_enabled().await),
-        CodegMcpToolGroup::group("sessions", sources.session_info.is_enabled().await),
-        CodegMcpToolGroup::group("automations", authoring_cfg.automations_enabled),
-        CodegMcpToolGroup::group("taskboard", authoring_cfg.work_tasks_enabled),
-        CodegMcpToolGroup::group("browser", browser_cfg.enabled),
+        CodegMcpToolGroup::group(features::DELEGATION, delegation_cfg.enabled),
+        CodegMcpToolGroup::group(features::FEEDBACK, sources.feedback.is_enabled().await),
+        CodegMcpToolGroup::group(features::ASK, sources.question.is_enabled().await),
+        CodegMcpToolGroup::group(features::SESSIONS, sources.session_info.is_enabled().await),
+        CodegMcpToolGroup::group(features::AUTOMATIONS, authoring_cfg.automations_enabled),
+        CodegMcpToolGroup::group(features::TASKBOARD, authoring_cfg.work_tasks_enabled),
+        CodegMcpToolGroup::group(features::BROWSER, browser_cfg.enabled),
         // `browser_eval` reports what the runtime would actually hand an
         // agent, which is the pair ANDed: a stored `true` under a group that
         // is off is not a switch anyone can act on, and showing it on would
         // say an agent may run code when none can.
         CodegMcpToolGroup::within(
-            "browser_eval",
-            "browser",
+            features::BROWSER_EVAL,
+            features::BROWSER,
             browser_cfg.enabled && browser_cfg.eval,
         ),
     ];
@@ -267,10 +268,10 @@ pub async fn set_codeg_mcp_tool_group_core(
     };
 
     match key {
-        "delegation" => {
+        features::DELEGATION => {
             delegation::set_delegation_enabled_core(conn, targets.broker, emitter, enabled).await?;
         }
-        "feedback" => {
+        features::FEEDBACK => {
             feedback::set_feedback_settings_core(
                 conn,
                 targets.feedback,
@@ -279,7 +280,7 @@ pub async fn set_codeg_mcp_tool_group_core(
             )
             .await?;
         }
-        "ask" => {
+        features::ASK => {
             question::set_question_settings_core(
                 conn,
                 targets.question,
@@ -288,7 +289,7 @@ pub async fn set_codeg_mcp_tool_group_core(
             )
             .await?;
         }
-        "sessions" => {
+        features::SESSIONS => {
             session_info::set_session_info_settings_core(
                 conn,
                 targets.session_info,
@@ -297,8 +298,8 @@ pub async fn set_codeg_mcp_tool_group_core(
             )
             .await?;
         }
-        "browser" | "browser_eval" => {
-            let flag = if key == "browser" {
+        features::BROWSER | features::BROWSER_EVAL => {
+            let flag = if key == features::BROWSER {
                 browser_tools::BrowserToolsFlag::Group
             } else {
                 browser_tools::BrowserToolsFlag::Eval
@@ -312,8 +313,8 @@ pub async fn set_codeg_mcp_tool_group_core(
             )
             .await?;
         }
-        "automations" | "taskboard" => {
-            let flag = if key == "automations" {
+        features::AUTOMATIONS | features::TASKBOARD => {
+            let flag = if key == features::AUTOMATIONS {
                 ChatAuthoringFlag::Automations
             } else {
                 ChatAuthoringFlag::WorkTasks

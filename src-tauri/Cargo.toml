@@ -1,9 +1,24 @@
-[package]
-name = "codeg"
+# The app's package and the workspace root. The members are the `codeg-mcp`
+# companion and the protocol crate it shares with the app: the companion builds
+# on its own (`cargo build -p codeg-mcp`), in seconds, without this package's
+# library. Commands run here without `-p` or `--workspace` still mean the app.
+[workspace]
+members = ["crates/codeg-mcp-protocol", "crates/codeg-mcp"]
+resolver = "2"
+
+# One version for all three: the companion and the app speak a protocol with no
+# version field, so they always ship from the same commit.
+[workspace.package]
 version = "0.32.2"
-description = "Agent Code Generation App"
 authors = ["feitao"]
 edition = "2021"
+
+[package]
+name = "codeg"
+version.workspace = true
+description = "Agent Code Generation App"
+authors.workspace = true
+edition.workspace = true
 default-run = "codeg"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -80,15 +95,13 @@ name = "codeg-server"
 path = "src/bin/codeg_server.rs"
 required-features = ["server"]
 
-[[bin]]
-name = "codeg-mcp"
-path = "src/bin/codeg_mcp.rs"
-required-features = []
-
 [build-dependencies]
 tauri-build = { version = "2", features = [], optional = true }
 
 [dependencies]
+# The wire contract with the `codeg-mcp` companion (crates/codeg-mcp-protocol),
+# re-exported at the paths it had before the split.
+codeg-mcp-protocol = { path = "crates/codeg-mcp-protocol" }
 # `devtools` is what makes the web inspector exist in a RELEASE build — in a
 # debug one `debug_assertions` already does. It reaches wry through
 # tauri-runtime-wry, which is where a browser tab's child webview is built, and
@@ -160,9 +173,6 @@ zstd = "0.13"
 tar = "0.4"
 zip = "2"
 regex = "1"
-# Grapheme-safe shortening of an ask-question header chip, so a Hebrew letter
-# keeps its niqqud and an emoji its modifiers. Already in the desktop tree.
-unicode-segmentation = "1"
 portable-pty = "0.8"
 urlencoding = "2"
 # WHATWG URL parsing outside the desktop runtime. `tauri::Url` is this same

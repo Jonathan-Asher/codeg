@@ -15,10 +15,11 @@ RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/li
 WORKDIR /app/src-tauri
 COPY src-tauri/ ./
 # codeg-mcp is the stdio MCP companion the runtime injects per session
-# (see acp/delegation/companion.rs). It must ship next to codeg-server so
-# `locate_codeg_mcp_binary()` finds it via the exe-sibling lookup.
+# (crates/codeg-mcp, its own workspace package). It must ship next to
+# codeg-server so `locate_codeg_mcp_binary()` finds it via the exe-sibling
+# lookup.
 RUN cargo build --release --bin codeg-server --no-default-features --features server \
- && cargo build --release --bin codeg-mcp --no-default-features
+ && cargo build --release -p codeg-mcp
 
 # Stage 3: Runtime
 FROM node:24-bookworm-slim

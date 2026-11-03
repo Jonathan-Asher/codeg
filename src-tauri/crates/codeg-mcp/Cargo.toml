@@ -1,0 +1,37 @@
+[package]
+name = "codeg-mcp"
+description = "The stdio MCP companion codeg injects into every agent session"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+name = "codeg_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "codeg-mcp"
+path = "src/main.rs"
+
+[dependencies]
+codeg-mcp-protocol = { path = "../codeg-mcp-protocol" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Named rather than inherited from a larger graph, so the sidecar compiles with
+# exactly what it uses: a single-threaded runtime, stdio, the broker socket,
+# timers.
+tokio = { version = "1", features = ["io-std", "io-util", "macros", "net", "rt", "sync", "time"] }
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(unix)'.dependencies]
+# The parent watchdog's `kill(pid, 0)` existence probe.
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# The parent watchdog's OpenProcess / GetExitCodeProcess probe.
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["io-std", "io-util", "macros", "net", "rt", "sync", "test-util", "time"] }

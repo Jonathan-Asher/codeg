@@ -7,7 +7,7 @@
  * agent sent. The output is the tool result the agent CLI persisted: in
  * practice that is the companion's structured `{ answers, declined }` envelope
  * (each answer's `selected` is already a string array — see `render_ask_result`
- * in `src-tauri/src/acp/delegation/companion.rs`), which is what we parse first.
+ * in `src-tauri/crates/codeg-mcp/src/companion.rs`), which is what we parse first.
  * We also fall back to the companion's human-readable result text for any CLI
  * that persists `content` instead of `structuredContent`.
  */

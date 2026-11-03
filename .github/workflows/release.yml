@@ -301,22 +301,20 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # Build the sidecars for the matrix target and stage them under
-      # `src-tauri/binaries/`. On Linux and Windows that is the `codeg-mcp`
-      # companion, `src-tauri/binaries/codeg-mcp-<triple>{.exe}`, which
-      # `tauri-action` (below) bundles via the `bundle.externalBin` entry in
-      # `tauri.conf.json` — Tauri installs it next to the main executable
-      # (install root on Linux/Windows) where the runtime
-      # `locate_codeg_mcp_binary()` finds it via `current_exe` sibling
-      # lookup. On macOS it is `codeg-tts` and `codeg-talk`: there `tauri
-      # build` compiles `codeg-mcp` as a binary of the package and bundles it
-      # into Contents/MacOS itself. The Linux arm64 cross env vars set above
-      # also apply to this cargo invocation.
+      # `src-tauri/binaries/`: the `codeg-mcp` companion
+      # (`cargo build -p codeg-mcp`, its own workspace package) as
+      # `src-tauri/binaries/codeg-mcp-<triple>{.exe}`, plus `codeg-tts` and
+      # `codeg-talk` on macOS. `tauri-action` (below) bundles them via the
+      # `bundle.externalBin` entries — Tauri installs them next to the main
+      # executable (Contents/MacOS on macOS, install root on Linux/Windows)
+      # where the runtime `locate_codeg_mcp_binary()` finds the companion via
+      # `current_exe` sibling lookup. The Linux arm64 cross env vars set
+      # above also apply to this cargo invocation.
       - name: Stage sidecars for the Tauri bundle
         shell: bash
         run: pnpm tauri:prepare-sidecars --target ${{ matrix.target }}
 
       - name: Verify codeg-mcp sidecar landed
-        if: ${{ !contains(matrix.target, 'apple-darwin') }}
         shell: bash
         run: |
           ext=""
@@ -668,13 +666,12 @@ jobs:
       - name: Build server + codeg-mcp companion
         working-directory: src-tauri
         # `codeg-mcp` is the stdio MCP companion the runtime injects per
-        # session (see acp/delegation/companion.rs). Built with the same
-        # `--no-default-features --target` flags as the server so it shares
-        # the cross-compile env (Linux arm64) without dragging in tauri
-        # runtime deps.
+        # session (crates/codeg-mcp, its own workspace package). Built with the
+        # same `--target` as the server so it shares the cross-compile env
+        # (Linux arm64); it never links the app's library.
         run: |
           cargo build --release --bin codeg-server --no-default-features --features server --target ${{ matrix.target }}
-          cargo build --release --bin codeg-mcp --no-default-features --target ${{ matrix.target }}
+          cargo build --release -p codeg-mcp --target ${{ matrix.target }}
 
       - name: Package (Unix)
         if: runner.os != 'Windows'

@@ -1,18 +1,17 @@
 fn main() {
     #[cfg(feature = "tauri-runtime")]
     {
+        // The companion, built from its own package (crates/codeg-mcp) by
+        // prepare-sidecars on every platform.
+        ensure_sidecar_placeholder("codeg-mcp");
+        // macOS only: the natural-voice sidecar (`native/codeg-tts`) and Talk
+        // on the Mac's helper (`native/codeg-talk`) with the whisper.framework
+        // it links, listed in tauri.macos.conf.json. Built by the same
+        // prepare-sidecars step.
         if std::env::var("TARGET").unwrap_or_default().contains("apple-darwin") {
-            // macOS: the natural-voice sidecar (`native/codeg-tts`) and Talk on
-            // the Mac's helper (`native/codeg-talk`) with the whisper.framework
-            // it links, listed in tauri.macos.conf.json and built by
-            // prepare-sidecars. `codeg-mcp` is not a sidecar there: `tauri
-            // build` compiles it as one of this package's binaries and bundles
-            // it into Contents/MacOS itself.
             ensure_sidecar_placeholder("codeg-tts");
             ensure_sidecar_placeholder("codeg-talk");
             ensure_framework_placeholder("whisper");
-        } else {
-            ensure_sidecar_placeholder("codeg-mcp");
         }
         tauri_build::build();
     }

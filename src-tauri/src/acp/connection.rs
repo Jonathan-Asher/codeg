@@ -6251,44 +6251,45 @@ struct CompanionFeatureFlags {
 /// The `--features` value for a companion launch, or `None` when no group is
 /// enabled (the companion isn't injected at all). Pulled out as a pure function
 /// so the inject/skip decision is unit-testable without a real binary on disk or
-/// a live broker. The order here is the order the companion's
-/// `CompanionFeatures::parse` recognizes.
+/// a live broker. The names are the protocol crate's, which the companion's
+/// `CompanionFeatures::parse` reads.
 fn companion_features_arg(flags: CompanionFeatureFlags) -> Option<String> {
-    let mut features: Vec<&str> = Vec::new();
+    use codeg_mcp_protocol::features;
+    let mut groups: Vec<&str> = Vec::new();
     if flags.delegation {
-        features.push("delegation");
+        groups.push(features::DELEGATION);
     }
     if flags.feedback {
-        features.push("feedback");
+        groups.push(features::FEEDBACK);
     }
     if flags.ask {
-        features.push("ask");
+        groups.push(features::ASK);
     }
     if flags.sessions {
-        features.push("sessions");
+        groups.push(features::SESSIONS);
     }
     if flags.tasks {
-        features.push("tasks");
+        groups.push(features::TASKS);
     }
     if flags.automations {
-        features.push("automations");
+        groups.push(features::AUTOMATIONS);
     }
     if flags.taskboard {
-        features.push("taskboard");
+        groups.push(features::TASKBOARD);
     }
     if flags.browser {
-        features.push("browser");
+        groups.push(features::BROWSER);
     }
     // Only ever alongside `browser`: the companion requires both, and a
     // `--features browser_eval` on its own would be a line in an agent's MCP
     // config that reads as if it granted something.
     if flags.browser && flags.browser_eval {
-        features.push("browser_eval");
+        groups.push(features::BROWSER_EVAL);
     }
-    if features.is_empty() {
+    if groups.is_empty() {
         return None;
     }
-    Some(features.join(","))
+    Some(groups.join(","))
 }
 
 /// Outcome of injecting the `codeg-mcp` companion: the per-launch token to
@@ -6423,30 +6424,32 @@ where
             },
         )
         .await;
+    // The companion's flag names (`flags` is the feature set above).
+    use codeg_mcp_protocol::flags as arg;
     let mut server = McpServerStdio::new("codeg-mcp", binary_path.clone());
     let mut args = vec![
-        "--parent-connection-id".to_string(),
+        arg::PARENT_CONNECTION_ID.to_string(),
         parent_connection_id.to_string(),
-        "--socket-path".to_string(),
+        arg::SOCKET_PATH.to_string(),
         injection.socket_path.to_string_lossy().to_string(),
-        "--token".to_string(),
+        arg::TOKEN.to_string(),
         token.clone(),
         // Self-cleanup watchdog: codeg-mcp exits when this PID is gone so
         // orphaned companions can't keep the binary file locked across an
         // installer upgrade (Windows) or hold a stale broker connection
         // (any platform).
-        "--parent-pid".to_string(),
+        arg::PARENT_PID.to_string(),
         std::process::id().to_string(),
         // Tool groups to expose this launch (see `CompanionFeatureFlags`).
-        "--features".to_string(),
+        arg::FEATURES.to_string(),
         features_arg,
     ];
     if !custom_slugs.is_empty() {
-        args.push("--custom-agents".to_string());
+        args.push(arg::CUSTOM_AGENTS.to_string());
         args.push(custom_slugs.join(","));
     }
     if !disabled_builtins.is_empty() {
-        args.push("--disabled-agents".to_string());
+        args.push(arg::DISABLED_AGENTS.to_string());
         args.push(disabled_builtins.join(","));
     }
     server = server.args(args);

@@ -94,15 +94,17 @@ jobs:
           CARGO_INCREMENTAL: ${{ runner.environment == 'self-hosted' && '1' || '0' }}
         run: |
           mkdir -p ../out   # tauri-build requires frontendDist to exist
-          cargo clippy --all-targets --features test-utils -- -D warnings
-          cargo test --features test-utils
+          cargo clippy --workspace --all-targets --features test-utils -- -D warnings
+          cargo test --workspace --features test-utils
       - name: Rust clippy (server) + mcp companion
         working-directory: src-tauri
         env:
           CARGO_INCREMENTAL: ${{ runner.environment == 'self-hosted' && '1' || '0' }}
         run: |
           cargo clippy --no-default-features --features server --bin codeg-server --lib -- -D warnings
-          cargo check --no-default-features --bin codeg-mcp
+          # The companion on its own, with only the features it asks for: the
+          # workspace build above unifies them with the app's.
+          cargo clippy -p codeg-mcp -p codeg-mcp-protocol --all-targets -- -D warnings
 
   build:
     if: github.ref == 'refs/heads/fork/solution-plan' || github.event_name == 'workflow_dispatch'
