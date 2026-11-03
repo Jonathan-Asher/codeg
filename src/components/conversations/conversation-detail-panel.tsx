@@ -74,6 +74,7 @@ import { EmptyTurnBanner } from "@/components/chat/empty-turn-banner"
 import { LimitPausedBanner } from "@/components/conversations/limit-pause"
 import { limitStopReason, waitingLimitPause } from "@/lib/limit-continue"
 import { deriveSessionActivity } from "@/lib/session-activity"
+import { hitOutputLimit } from "@/lib/output-limit"
 import {
   canOfferContinue,
   continuePromptDraft,
@@ -3436,6 +3437,16 @@ const ConversationTabView = memo(function ConversationTabView({
           canShowDetailErrorActions ? handleOpenNewSession : undefined
         }
         onRetryTurn={composerAvailable ? handleRetryRequest : undefined}
+        // The last turn ran out of output tokens: Continue under the reply
+        // queues the same "continue" as the interrupted banner's, so it goes
+        // out the moment the session can take it (see `lib/output-limit`).
+        onContinueAfterOutputLimit={
+          composerAvailable &&
+          !connIsForOtherAgent &&
+          hitOutputLimit(conn.lastStopReason)
+            ? handleContinueInterrupted
+            : undefined
+        }
         onQuoteSelection={composerAvailable ? handleQuoteSelection : undefined}
         // Asking opens its own conversation, so it needs a folder to open it in
         // rather than a usable composer here — a transcript whose composer is

@@ -110,6 +110,9 @@ export interface UseConnectionReturn {
   error: string | null
   /** The stable code of `error` (e.g. `turn_failed_empty`), when it had one. */
   errorCode: string | null
+  /** How the last completed turn ended (`max_tokens`, …), until the next
+   *  prompt starts; `null` before the first turn ends. */
+  lastStopReason: string | null
   loadError: string | null
   /** Runnable recovery for `loadError` (today `codex unarchive <id>`), or
    *  null when the failure has none. Carried separately from the localized
@@ -332,6 +335,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   const asyncTasks = connection?.asyncTasks ?? EMPTY_ASYNC_TASKS
   const error = connection?.error ?? null
   const errorCode = connection?.errorCode ?? null
+  const lastStopReason = connection?.lastStopReason ?? null
   const loadError = connection?.loadError ?? null
   const loadErrorCommand = connection?.loadErrorCommand ?? null
   const configStale = connection?.configStale ?? false
@@ -468,6 +472,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       asyncTasks,
       error,
       errorCode,
+      lastStopReason,
       loadError,
       loadErrorCommand,
       configStale,
@@ -520,6 +525,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       asyncTasks,
       error,
       errorCode,
+      lastStopReason,
       loadError,
       loadErrorCommand,
       configStale,

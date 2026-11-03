@@ -103,6 +103,10 @@ export interface SnapshotPatch {
   lastErrorCode: string | null
   /** How `lastError` is tinted — see `routeAcpError`. */
   lastErrorLevel: AcpErrorLevel
+  /** How the last completed turn ended (e.g. `max_tokens`), so a client that
+   *  attaches after it still shows the output-limit notice. `null` when the
+   *  server omitted it. */
+  lastStopReason: string | null
   eventSeq: number
   /** Live sub-agent delegations carried by the snapshot. Consumed directly at
    *  the attach call sites to re-seed `DelegationProvider` bindings (see
@@ -185,6 +189,7 @@ export function denormalizeSnapshot(wire: LiveSessionSnapshot): SnapshotPatch {
     lastError,
     lastErrorCode,
     lastErrorLevel: routeAcpError(lastErrorCode).level,
+    lastStopReason: wire.last_stop_reason ?? null,
     eventSeq: wire.event_seq,
     activeDelegations: wire.active_delegations ?? [],
     attachPhase: wire.attach_phase,

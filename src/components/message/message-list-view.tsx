@@ -153,6 +153,7 @@ import {
 } from "@/lib/read-aloud/use-read-aloud"
 import { isTalkVoiceActive } from "@/lib/talk-voice/active"
 import { MarkdownImageProvider } from "@/components/ai-elements/markdown-local-image"
+import { OutputLimitNotice } from "./output-limit-notice"
 
 interface MessageListViewProps {
   conversationId: number
@@ -189,6 +190,12 @@ interface MessageListViewProps {
    *  without re-sending that message (see `lib/retry-nudge`). Omitted on
    *  read-only surfaces (sub-agent dialogs, task transcripts). */
   onRetryTurn?: () => void
+  /** The session's last turn ended because the model hit its output limit
+   *  (stop reason `max_tokens`, see `lib/output-limit`): the reply at the end
+   *  of the thread says so, with a Continue that runs this (the host sends
+   *  "continue"). Undefined when the turn ended any other way, and on
+   *  read-only surfaces. */
+  onContinueAfterOutputLimit?: () => void
   /**
    * Renders the per-conversation message navigator rail. Enabled in the main
    * conversation view; disabled in compact embeds (e.g. the sub-agent dialog).
@@ -1328,6 +1335,7 @@ export function MessageListView({
   onReload,
   onNewSession,
   onRetryTurn,
+  onContinueAfterOutputLimit,
   showMessageNav = true,
   userTurnHeader = null,
   onQuoteSelection,
@@ -1973,6 +1981,16 @@ export function MessageListView({
             item.isThreadTail &&
             item.phase === "persisted" &&
             connStatus !== "prompting"
+          // Output-limit notice: the last turn ended because the model ran
+          // out of output tokens, so the reply at the end of the thread was
+          // cut off. Not while a turn runs, nor once something is queued —
+          // that starts the next turn (a click on Continue queued one).
+          const showOutputLimit =
+            onContinueAfterOutputLimit != null &&
+            item.group.role === "assistant" &&
+            item.isThreadTail &&
+            connStatus !== "prompting" &&
+            !hasQueuedMessages
           // Edit affordance: a settled user message the host can run an edit
           // for, with a reply right before it or nothing at all (see
           // `computeUserEditTargets`). Not on a message still on its way
@@ -2178,6 +2196,9 @@ export function MessageListView({
                   </button>
                 </div>
               )}
+              {showOutputLimit && (
+                <OutputLimitNotice onContinue={onContinueAfterOutputLimit} />
+              )}
             </div>
           )
         }
@@ -2210,6 +2231,7 @@ export function MessageListView({
       findOpen,
       activeFindHit?.key,
       onRetryTurn,
+      onContinueAfterOutputLimit,
       connStatus,
       t,
       onEditUserMessage,
