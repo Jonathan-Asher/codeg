@@ -77,6 +77,10 @@ pub struct AcpConnectParams {
     /// A Quick Ask private question: ask the agent not to keep a transcript.
     #[serde(default)]
     pub ephemeral: Option<bool>,
+    /// The user saw that another process runs the session and chose to
+    /// connect anyway (see `acp::outside_writer`).
+    #[serde(default)]
+    pub allow_outside_writer: Option<bool>,
 }
 
 pub async fn acp_connect(
@@ -129,10 +133,11 @@ pub async fn acp_connect(
     // finishes and lands in the connection map, where the client's retry finds
     // and shares it.
     let spawn_state = Arc::clone(&state);
+    let outside_writer = acp_commands::outside_writer_policy(params.allow_outside_writer);
     let connection_id = tokio::spawn(async move {
         spawn_state
             .connection_manager
-            .spawn_agent_detached(
+            .spawn_agent_detached_with_policy(
                 params.agent_type,
                 params.working_dir,
                 params.session_id,
@@ -141,12 +146,23 @@ pub async fn acp_connect(
                 emitter,
                 preferred_mode_id,
                 preferred_config_values,
+                outside_writer,
             )
             .await
     })
     .await
     .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?
-    .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    .map_err(|e| {
+        let message = e.to_string();
+        // Another process runs the session: the client waits for it, which
+        // is no server fault (409, like a turn already in progress).
+        match e {
+            AcpError::SessionRunningElsewhere { .. } => {
+                AppCommandError::new(AppErrorCode::SessionRunningElsewhere, message)
+            }
+            _ => AppCommandError::task_execution_failed(message),
+        }
+    })?;
     // This client owns it now — including a warm or pre-opened connection the
     // dedup just handed back.
     state
@@ -155,6 +171,29 @@ pub async fn acp_connect(
         .await;
 
     Ok(Json(connection_id))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpOutsideWriterStatusParams {
+    pub agent_type: AgentType,
+    pub session_id: String,
+}
+
+/// Whether a process codeg did not start runs the session, and how its
+/// transcript stands; see `acp_commands::acp_outside_writer_status_core`.
+pub async fn acp_outside_writer_status(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<AcpOutsideWriterStatusParams>,
+) -> Result<Json<crate::acp::outside_writer::OutsideWriterStatus>, AppCommandError> {
+    let status = acp_commands::acp_outside_writer_status_core(
+        &state.connection_manager,
+        params.agent_type,
+        params.session_id,
+    )
+    .await
+    .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
+    Ok(Json(status))
 }
 
 #[derive(Deserialize)]

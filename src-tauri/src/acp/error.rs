@@ -120,6 +120,16 @@ pub enum AcpError {
         agent: String,
         resumes_at: Option<i64>,
     },
+    /// A process codeg did not start runs the session (see
+    /// `acp::outside_writer`), so codeg did not resume it: two processes
+    /// appending to one session's transcript split its history. Clients
+    /// recognize it by its code or by the bracketed marker at the end of the
+    /// message, which names the process (see `running_elsewhere_marker`),
+    /// then wait for that process to finish, or connect anyway when the user
+    /// says so. `started_at` is when the process registered, in milliseconds
+    /// since the epoch.
+    #[error("This session is running in another process (pid {pid}); codeg connects once it finishes. {}", running_elsewhere_marker(.pid, .started_at))]
+    SessionRunningElsewhere { pid: u32, started_at: Option<i64> },
 }
 
 impl AcpError {
@@ -179,6 +189,7 @@ impl AcpError {
             Self::ForkNeedsIdle => Some("fork_needs_idle"),
             Self::ForkUnsupported => Some("fork_unsupported"),
             Self::PoolExhausted { .. } => Some("pool_exhausted"),
+            Self::SessionRunningElsewhere { .. } => Some("session_running_elsewhere"),
             Self::Protocol(_) => None,
         }
     }
@@ -210,6 +221,18 @@ fn pool_exhausted_marker(resumes_at: &Option<i64>) -> String {
     match resumes_at {
         Some(t) => format!("[pool_exhausted resumes_at={t}]"),
         None => "[pool_exhausted]".to_string(),
+    }
+}
+
+/// The machine-readable tail of [`AcpError::SessionRunningElsewhere`]'s
+/// message: `[running_elsewhere pid=<pid> started_at=<epoch ms>]`, without
+/// `started_at` when the process did not say. Tauri hands a command's error
+/// over as its message alone, so it is how a client learns which process to
+/// wait for.
+fn running_elsewhere_marker(pid: &u32, started_at: &Option<i64>) -> String {
+    match started_at {
+        Some(at) => format!("[running_elsewhere pid={pid} started_at={at}]"),
+        None => format!("[running_elsewhere pid={pid}]"),
     }
 }
 
@@ -254,4 +277,30 @@ fn is_executable_format_error(message: &str) -> bool {
         || lowered.contains("bad cpu type in executable")
         || lowered.contains("not a valid win32 application")
         || lowered.contains("is not a valid application for this os platform")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AcpError;
+
+    /// The frontend reads the process to wait for out of the message (Tauri)
+    /// or the code (web), so both are part of the contract.
+    #[test]
+    fn a_session_running_elsewhere_names_its_process_in_the_message() {
+        let err = AcpError::SessionRunningElsewhere {
+            pid: 4242,
+            started_at: Some(1_793_616_490_351),
+        };
+        assert_eq!(err.code(), Some("session_running_elsewhere"));
+        assert!(err
+            .to_string()
+            .ends_with("[running_elsewhere pid=4242 started_at=1793616490351]"));
+        let unknown_start = AcpError::SessionRunningElsewhere {
+            pid: 4242,
+            started_at: None,
+        };
+        assert!(unknown_start
+            .to_string()
+            .ends_with("[running_elsewhere pid=4242]"));
+    }
 }

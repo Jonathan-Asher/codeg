@@ -12,6 +12,12 @@ import {
 } from "@/contexts/acp-connections-context"
 import { acpSetConfigOption } from "@/lib/api"
 import {
+  markConnectingAnyway,
+  outsideWriterFor,
+  reportOutsideWriter,
+  useOutsideWriterStore,
+} from "@/stores/outside-writer-store"
+import {
   CONNECTION_IDLE_TIMEOUT_MS,
   CONNECTION_KEEPALIVE_INTERVAL_MS,
   IDLE_SWEEP_INTERVAL_MS,
@@ -7195,5 +7201,145 @@ describe("AcpConnectionsProvider attach phases", () => {
     })
     expect(h.store!.getConnection(TAB)).toBeUndefined()
     expect(h.store!.getConnectError(TAB)).toBeUndefined()
+  })
+})
+
+// ── A session a process codeg did not start runs (lib/outside-writer) ──
+
+const REFUSED =
+  "This session is running in another process (pid 4242); codeg connects once it finishes. [running_elsewhere pid=4242 started_at=1793616490351]"
+
+describe("AcpConnectionsProvider with another process running the session", () => {
+  afterEach(() => {
+    useOutsideWriterStore.setState({ bySession: {} })
+  })
+
+  it("waits for that process instead of reporting a failure", async () => {
+    // Tauri hands the refusal over as its message alone.
+    h.acpConnect.mockRejectedValueOnce(REFUSED)
+    await mountProvider()
+    await act(async () => {
+      await expect(
+        h.actions!.connect(TAB, "claude_code", "/tmp/x", "sess-1")
+      ).rejects.toBe(REFUSED)
+    })
+    expect(outsideWriterFor("sess-1")).toEqual({
+      writer: { pid: 4242, startedAt: 1_793_616_490_351 },
+      phase: "waiting",
+    })
+    expect(h.store!.getConnectError(TAB)).toBeUndefined()
+    expect(h.store!.getConnection(TAB)).toBeUndefined()
+    expect(h.toastError).not.toHaveBeenCalled()
+    expect(h.recordAlert).not.toHaveBeenCalled()
+  })
+
+  it("reads the web transport's refusal the same way", async () => {
+    h.acpConnect.mockRejectedValueOnce({
+      code: "session_running_elsewhere",
+      message: REFUSED,
+    })
+    await mountProvider()
+    await act(async () => {
+      await expect(
+        h.actions!.connect(TAB, "claude_code", "/tmp/x", "sess-1")
+      ).rejects.toMatchObject({ code: "session_running_elsewhere" })
+    })
+    expect(outsideWriterFor("sess-1")?.writer.pid).toBe(4242)
+    expect(h.toastError).not.toHaveBeenCalled()
+  })
+
+  it("connects anyway for that one connect, and a reconnect asks again", async () => {
+    reportOutsideWriter("sess-1", { pid: 4242, startedAt: null })
+    await mountProvider()
+    await act(async () => {
+      await h.actions!.connect(
+        TAB,
+        "claude_code",
+        "/tmp/x",
+        "sess-1",
+        undefined,
+        { allowOutsideWriter: true }
+      )
+    })
+    expect(h.acpConnect).toHaveBeenLastCalledWith(
+      "claude_code",
+      "/tmp/x",
+      "sess-1",
+      undefined,
+      {},
+      false,
+      true
+    )
+    // Resumed: nothing is left to wait for.
+    expect(outsideWriterFor("sess-1")).toBeUndefined()
+
+    await act(async () => {
+      await h.actions!.reconnect(TAB)
+    })
+    expect(h.acpConnect).toHaveBeenLastCalledWith(
+      "claude_code",
+      "/tmp/x",
+      "sess-1",
+      undefined,
+      {}
+    )
+  })
+
+  it("goes back to waiting when connecting anyway fails for another reason", async () => {
+    reportOutsideWriter("sess-1", { pid: 4242, startedAt: null })
+    markConnectingAnyway("sess-1")
+    h.acpConnect.mockRejectedValueOnce(new Error("spawn claude ENOENT"))
+    await mountProvider()
+    await act(async () => {
+      await expect(
+        h.actions!.connect(TAB, "claude_code", "/tmp/x", "sess-1", undefined, {
+          allowOutsideWriter: true,
+        })
+      ).rejects.toThrow("spawn claude ENOENT")
+    })
+    expect(outsideWriterFor("sess-1")?.phase).toBe("waiting")
+    // That failure is reported like any other.
+    expect(h.store!.getConnectError(TAB)?.detail).toBe("spawn claude ENOENT")
+  })
+
+  it("never drops a Connect anyway queued behind the connect being refused", async () => {
+    await mountProvider()
+    let refuse: (reason: unknown) => void = () => {}
+    h.acpConnect.mockImplementationOnce(
+      () =>
+        new Promise<string>((_, reject) => {
+          refuse = reject
+        })
+    )
+    let first: Promise<void> | undefined
+    await act(async () => {
+      first = h.actions!.connect(TAB, "claude_code", "/tmp/x", "sess-1")
+      await Promise.resolve()
+    })
+    await vi.waitFor(() => expect(h.acpConnect).toHaveBeenCalledTimes(1))
+    await act(async () => {
+      await h.actions!.connect(
+        TAB,
+        "claude_code",
+        "/tmp/x",
+        "sess-1",
+        undefined,
+        { allowOutsideWriter: true }
+      )
+    })
+    await act(async () => {
+      refuse(REFUSED)
+      await first
+    })
+    await vi.waitFor(() => expect(h.acpConnect).toHaveBeenCalledTimes(2))
+    expect(h.acpConnect).toHaveBeenLastCalledWith(
+      "claude_code",
+      "/tmp/x",
+      "sess-1",
+      undefined,
+      {},
+      false,
+      true
+    )
   })
 })

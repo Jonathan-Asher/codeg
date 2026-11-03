@@ -111,3 +111,37 @@ describe("queueNoticeFor — a brand-new chat", () => {
     expect(queueNoticeFor({ ...base, status: "connecting" })).toBeNull()
   })
 })
+
+describe("queueNoticeFor with another process running the session", () => {
+  it("says the queue waits for that process while codeg does", () => {
+    expect(
+      queueNoticeFor({
+        ...base,
+        status: "connecting",
+        outsideWriter: "waiting",
+      })
+    ).toEqual({ kind: "outside_writer", stopped: false })
+  })
+
+  it("says nothing goes out once the user stopped waiting", () => {
+    expect(
+      queueNoticeFor({ ...base, status: null, outsideWriter: "stopped" })
+    ).toEqual({ kind: "outside_writer", stopped: true })
+  })
+
+  it("comes before every other reason, and needs a queue", () => {
+    expect(
+      queueNoticeFor({
+        ...base,
+        status: "error",
+        held: { resumesAt: 5 },
+        limitPause: { resets_at: "2026-11-03T12:00:00Z" },
+        outsideWriter: "waiting",
+      })
+    ).toEqual({ kind: "outside_writer", stopped: false })
+    expect(
+      queueNoticeFor({ ...base, queueLength: 0, outsideWriter: "waiting" })
+    ).toBeNull()
+    expect(queueNoticeFor({ ...base, outsideWriter: null })).toBeNull()
+  })
+})

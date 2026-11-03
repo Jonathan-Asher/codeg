@@ -12,7 +12,8 @@ fn status_for_app_error_code(code: AppErrorCode) -> StatusCode {
         AppErrorCode::NotFound => StatusCode::NOT_FOUND,
         AppErrorCode::AlreadyExists
         | AppErrorCode::TurnInProgress
-        | AppErrorCode::PoolExhausted => StatusCode::CONFLICT,
+        | AppErrorCode::PoolExhausted
+        | AppErrorCode::SessionRunningElsewhere => StatusCode::CONFLICT,
         AppErrorCode::PermissionDenied => StatusCode::FORBIDDEN,
         AppErrorCode::ConfigurationMissing
         | AppErrorCode::ConfigurationInvalid

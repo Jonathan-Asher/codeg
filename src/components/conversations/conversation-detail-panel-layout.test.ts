@@ -642,11 +642,13 @@ describe("ConversationDetailPanel session-load failure surface", () => {
       "hideInput={isWelcomeMode || Boolean(acpLoadError)}"
     )
     // …and the banner takes its place, explaining why and offering recovery.
-    // It outranks the usage-limit, interrupted-turn and empty-turn banners,
-    // which share the slot: a session that can't be loaded can't be continued
-    // (or retried) either.
+    // It outranks the outside-writer, usage-limit, interrupted-turn and
+    // empty-turn banners, which share the slot: a session that can't be loaded
+    // can't be continued (or retried) either. Next comes the wait for another
+    // process that runs the session: nothing else can act on it before codeg
+    // has connected.
     expect(source).toMatch(
-      /acpLoadErrorBanner \?\?\s+limitPausedBanner \?\?\s+interruptedBanner \?\?\s+emptyTurnBanner/
+      /acpLoadErrorBanner \?\?\s+outsideWriterBanner \?\?\s+limitPausedBanner \?\?\s+interruptedBanner \?\?\s+emptyTurnBanner/
     )
     const bannerStart = source.indexOf("const acpLoadErrorBanner")
     expect(bannerStart).toBeGreaterThan(-1)
@@ -835,6 +837,40 @@ describe("ConversationDetailPanel actions before the session is ready", () => {
     )
     expect(conversationShellSource).toContain(
       "continueBeforeReady={continueBeforeReady}"
+    )
+  })
+})
+
+// Another process runs the session (`lib/outside-writer`): the tab waits for
+// it instead of resuming the session next to it.
+describe("ConversationDetailPanel while another process runs the session", () => {
+  it("holds back every connect of its own while it waits", () => {
+    expect(source).toContain(
+      "isActive: isActive && canAutoConnect && !connectHeld && !outsideWriterHeld"
+    )
+    // The pending actions and the unsent-message retry wait too.
+    expect(source).toMatch(
+      /awaitingHistoricalSessionId \|\| connectHeld \|\| outsideWriterHeld\)/
+    )
+    expect(source).toContain(
+      "if (!unsentHeadRetries || connIsForOtherAgent || outsideWriterHeld) return"
+    )
+  })
+
+  it("takes a message into the queue meanwhile, and says why", () => {
+    // "connecting" is what lets the composer queue a send (`ChatInput`'s
+    // queue-while-connecting) instead of refusing it with no connection.
+    expect(source).toContain(
+      'status={outsideWriterWaiting ? "connecting" : connStatus}'
+    )
+    expect(source).toContain('tOutsideWriter("composerReason")')
+    expect(source).toContain("onConnect: connectOutsideSession")
+  })
+
+  it("re-reads the transcript the other process writes while it waits", () => {
+    expect(source).toContain("onTranscriptChanged: refreshOutsideTranscript")
+    expect(source).toContain(
+      "void refetchDetail(effectiveConversationId, { quiet: true })"
     )
   })
 })

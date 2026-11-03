@@ -17,6 +17,7 @@ import { isResyncing } from "@/lib/resync-coordinator"
 import { isWebLinkDown } from "@/lib/transport/web-connection-store"
 import type { AgentType } from "@/lib/types"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
+import { outsideWriterFor } from "@/stores/outside-writer-store"
 
 export interface PreconnectTarget {
   agentType: AgentType
@@ -169,6 +170,13 @@ export function requestSessionPreconnect(target: PreconnectTarget): void {
   // Speculative work waits while the link is down or a reconnect's refetches
   // are still running: it would only queue behind them, or fail.
   if (isWebLinkDown() || isResyncing()) return
+  // Another process runs the session (see `lib/outside-writer`): a hover must
+  // never be what starts a second writer of it. The backend refuses too; this
+  // spares the request. The intent it replaces is stale either way.
+  if (outsideWriterFor(target.sessionId)) {
+    shared?.withdraw()
+    return
+  }
   sharedScheduler().intend(target)
 }
 

@@ -3600,6 +3600,9 @@
         "mentionGroupSkill": "المهارات"
       },
       "messageQueue": {
+        "outsideWriter": "تُرسل عند انتهاء العملية الأخرى واتصال codeg.",
+        "outsideWriterStopped": "لم تُرسل: codeg غير متصل بينما تشغّل عملية أخرى هذه الجلسة.",
+        "connect": "اتصال",
         "addToQueue": "إضافة للقائمة",
         "saveEdit": "حفظ",
         "cancelEdit": "إلغاء التعديل",
@@ -4301,6 +4304,21 @@
         "reconnectDisabledDuringTurn": "متاح بعد انتهاء الدور الحالي",
         "dismiss": "تجاهل",
         "applied": "تم تطبيق الإعدادات الجديدة"
+      },
+      "outsideWriter": {
+        "waiting": "هذه الجلسة قيد التشغيل في عملية أخرى (pid {pid}، بدأت {time}). سيتصل codeg عند انتهائها.",
+        "waitingNoTime": "هذه الجلسة قيد التشغيل في عملية أخرى (pid {pid}). سيتصل codeg عند انتهائها.",
+        "stopped": "لا انتظار للعملية {pid}: لا يتصل codeg بهذه الجلسة إلا عندما تطلب ذلك.",
+        "connectAnyway": "اتصل على أي حال",
+        "connectAnywayHint": "اتصل الآن بينما لا تزال العملية الأخرى تشغّل هذه الجلسة",
+        "connecting": "جارٍ الاتصال…",
+        "stopWaiting": "توقف عن الانتظار",
+        "connect": "اتصال",
+        "confirmTitle": "الاتصال على أي حال؟",
+        "confirmDescription": "لا تزال العملية {pid} تشغّل هذه الجلسة. إذا استأنفها codeg أيضًا، فسيكتب كلاهما في سجلها، وقد ينقسم إلى فرعين.",
+        "confirmAction": "اتصل على أي حال",
+        "cancel": "إلغاء",
+        "composerReason": "قيد التشغيل في عملية أخرى"
       },
       "piProjectTrust": {
         "title": "يتضمّن هذا المشروع موارد pi",

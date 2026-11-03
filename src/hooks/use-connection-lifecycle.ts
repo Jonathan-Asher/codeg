@@ -29,6 +29,7 @@ import {
   saveConfigPreference,
 } from "@/lib/selector-prefs-storage"
 import { TurnBusyError } from "@/lib/turn-busy"
+import { outsideWriterFromError } from "@/lib/outside-writer"
 import type { PromptAccepted } from "@/lib/api"
 import {
   PoolExhaustedError,
@@ -239,6 +240,8 @@ function normalizeErrorMessage(error: unknown): string {
 }
 
 function isExpectedConnectError(error: unknown): boolean {
+  // Another process runs the session: the view waits for it and says so.
+  if (outsideWriterFromError(error)) return true
   if (!error || typeof error !== "object") return false
   return (error as { alerted?: unknown }).alerted === true
 }

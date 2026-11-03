@@ -54,7 +54,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::io::{BufRead, Read, Seek, SeekFrom};
-use std::path::PathBuf;
+use std::ops::ControlFlow;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -113,6 +114,16 @@ const MAX_EPISODE_MESSAGES: usize = 512;
 /// hard cap on per-tick work. Double the boundary threshold so normal
 /// boundary rotation always wins for multi-turn episodes.
 const FORCE_ROTATE_MESSAGES: usize = MAX_EPISODE_MESSAGES * 2;
+/// Most the arm baseline reads back from the end of a transcript looking for
+/// the last turn before the watch began; past it, it reads from the start.
+const BASELINE_TAIL_MAX: u64 = 8 * 1024 * 1024;
+/// Most the arm's title seed reads back from the baseline; the rest of the
+/// history is read only if the tail ever names the session again.
+const TITLE_SEED_MAX: u64 = 8 * 1024 * 1024;
+/// First chunk a backward read takes from the end of a transcript; each next
+/// one is twice the size, up to [`TAIL_MAX_CHUNK`].
+const TAIL_FIRST_CHUNK: u64 = 64 * 1024;
+const TAIL_MAX_CHUNK: u64 = 1024 * 1024;
 
 /// How a transcript record supplied its turn-initiating text. Verbatim text
 /// can use the ledger's ordinary prefix match; a slash command reconstructed
@@ -778,6 +789,11 @@ pub(crate) struct WatchState {
     /// watch would silently fall back onto the dead transcript. Cleared by
     /// `rearm`: a fork/resume is a different session, not this chain.
     rolled_over_id: Option<String>,
+    /// Where the arm's title seed stopped reading the history back: the
+    /// bytes before this offset hold titles it has not seen, so the first
+    /// title record read off the tail reads them before it resolves (see
+    /// `seed_titles_from_history`). `None` once the whole history is known.
+    title_history_end: Option<u64>,
 }
 
 impl WatchState {
@@ -817,6 +833,7 @@ impl WatchState {
             pending_title: None,
             pending_transcript_id: None,
             rolled_over_id: None,
+            title_history_end: None,
         }
     }
 
@@ -845,6 +862,14 @@ impl WatchState {
         let record_type = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
         if !matches!(record_type, "custom-title" | "ai-title") {
             return;
+        }
+        // The arm's seed stopped short of the start of a long history: what
+        // the name was before this record is only known once the rest of the
+        // history has been read for titles too.
+        if let Some(end) = self.title_history_end.take() {
+            if let Some(path) = self.file.clone() {
+                self.complete_title_history(&path, end);
+            }
         }
         let before = self.resolved_title();
         capture_title_record(value, record_type, &mut self.custom_title, &mut self.ai_title);
@@ -1338,21 +1363,76 @@ impl WatchState {
     /// baseline skips, and resolving over the tail alone would let the next
     /// `ai-title` publish over the user's own name — which the CLI re-emits
     /// constantly (228 identical copies in one observed transcript), so the
-    /// exposure is not theoretical. Seeding costs one bounded read of the
-    /// prefix, once per arm, on top of the whole-file read
-    /// `baseline_offset_since` just did.
+    /// exposure is not theoretical.
+    ///
+    /// **Read from the baseline backwards, only as far as it takes.** The
+    /// newest `custom-title` settles the name — the user's name outranks
+    /// every generated one, older or newer — so the read stops there, and
+    /// Claude Code re-emits its title records all along a session (the last
+    /// of 188 sat 7.7 KB from the end of one 79 MB transcript). A history
+    /// with no `custom-title` in its last [`TITLE_SEED_MAX`] bytes leaves the
+    /// rest to [`Self::complete_title_history`], which the first title record
+    /// read off the tail runs before it resolves: an older name is still
+    /// found, but only a session that names itself again reads that far.
     ///
     /// `pending_title` is deliberately untouched: history renders through the
     /// ordinary detail fetch, which already resolved this same pair over these
     /// same bytes, so re-publishing it would rename on every reconnect.
-    fn seed_titles_from_history(&mut self, path: &PathBuf, upto: u64) {
+    fn seed_titles_from_history(&mut self, path: &Path, upto: u64) {
+        self.seed_titles_within(path, upto, TITLE_SEED_MAX);
+    }
+
+    /// [`Self::seed_titles_from_history`] reading back at most `max_back`
+    /// bytes. Returns how many bytes it read.
+    fn seed_titles_within(&mut self, path: &Path, upto: u64, max_back: u64) -> u64 {
+        self.title_history_end = None;
         if upto == 0 {
-            return;
+            return 0;
         }
+        // Newest first: a slot already filled holds a newer value.
+        let mut custom: Option<String> = None;
+        let mut ai: Option<String> = None;
+        let scanned = scan_lines_backward(path, upto, max_back, |_, line| {
+            let Some(value) = title_record(line) else {
+                return ControlFlow::Continue(());
+            };
+            let record_type = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            let (mut this_custom, mut this_ai) = (None, None);
+            capture_title_record(&value, record_type, &mut this_custom, &mut this_ai);
+            custom = custom.take().or(this_custom);
+            ai = ai.take().or(this_ai);
+            if custom.is_some() {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        });
+        let Ok(scan) = scanned else {
+            return 0;
+        };
+        // Like the tail reader, a slot only ever takes a value: none found
+        // leaves what the slot held.
+        if custom.is_some() {
+            self.custom_title = custom;
+        }
+        if ai.is_some() {
+            self.ai_title = ai;
+        }
+        if scan.end == ScanEnd::Limit {
+            self.title_history_end = Some(scan.reached);
+        }
+        scan.read
+    }
+
+    /// Read `[0, end)`, the history the arm's title seed did not, for titles,
+    /// filling only the slots the newer part left empty. Forward, every line
+    /// that names no title record passed over unparsed.
+    fn complete_title_history(&mut self, path: &Path, end: u64) {
         let Ok(file) = std::fs::File::open(path) else {
             return;
         };
-        let mut reader = std::io::BufReader::new(file.take(upto));
+        let mut reader = std::io::BufReader::new(file.take(end));
+        let (mut custom, mut ai) = (None, None);
         let mut line = Vec::new();
         loop {
             line.clear();
@@ -1360,23 +1440,17 @@ impl WatchState {
                 Ok(0) | Err(_) => break,
                 Ok(_) => {}
             }
-            // Mirror the tail reader: a non-UTF-8 (or unparsable) line is
-            // skipped, never fatal to the rest of the scan.
-            let Ok(text) = std::str::from_utf8(&line) else {
+            let Some(value) = title_record(&line) else {
                 continue;
             };
-            let Ok(value) = serde_json::from_str::<serde_json::Value>(text.trim_end()) else {
-                continue;
-            };
-            let Some(record_type) = value.get("type").and_then(|t| t.as_str()) else {
-                continue;
-            };
-            capture_title_record(
-                &value,
-                record_type,
-                &mut self.custom_title,
-                &mut self.ai_title,
-            );
+            let record_type = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            capture_title_record(&value, record_type, &mut custom, &mut ai);
+        }
+        if self.custom_title.is_none() {
+            self.custom_title = custom;
+        }
+        if self.ai_title.is_none() {
+            self.ai_title = ai;
         }
     }
 
@@ -2033,39 +2107,240 @@ fn task_notification_origin_id(text: &str) -> Option<String> {
 /// The skipped metadata carries no turn or accounting the watcher consumes.
 /// `None` only when the file can't be read. One-shot cost at arm time (runs
 /// inside the tick's `spawn_blocking`).
-fn baseline_offset_since(path: &PathBuf, epoch: std::time::SystemTime) -> Option<u64> {
-    let bytes = std::fs::read(path).ok()?;
+///
+/// **Read from the end.** Records are appended in time order, so the
+/// boundary lies after the newest conversation record older than `epoch`,
+/// and everything before that record is history: the transcript is read
+/// backwards (see [`scan_lines_backward`]) only until it, which for a resumed
+/// session is the last turn before the connection opened — a few KiB of a
+/// transcript that can run to tens of MB. Past [`BASELINE_TAIL_MAX`] bytes
+/// without one (that much written since `epoch`, or one record that large)
+/// the boundary is found reading forward from the start instead, as it always
+/// was, so a record written while the connection opened is never missed.
+fn baseline_offset_since(path: &Path, epoch: std::time::SystemTime) -> Option<u64> {
+    baseline_scan(path, epoch, BASELINE_TAIL_MAX).map(|(offset, _)| offset)
+}
+
+/// [`baseline_offset_since`] reading back at most `max_back` bytes before it
+/// turns to the forward read. Also returns how many bytes it read.
+fn baseline_scan(
+    path: &Path,
+    epoch: std::time::SystemTime,
+    max_back: u64,
+) -> Option<(u64, u64)> {
     let epoch: chrono::DateTime<chrono::Utc> = epoch.into();
-    let mut offset = 0u64;
-    for line in bytes.split_inclusive(|b| *b == b'\n') {
-        if line.last() != Some(&b'\n') {
-            break;
+    let len = std::fs::metadata(path).ok()?.len();
+    // The first conversation record at/after `epoch` seen so far: reading
+    // backwards, every one seen replaces the last.
+    let mut earliest_new: Option<u64> = None;
+    let scan = scan_lines_backward(path, len, max_back, |offset, line| {
+        match conversation_record_time(line) {
+            Some(at) if at >= epoch => {
+                earliest_new = Some(offset);
+                ControlFlow::Continue(())
+            }
+            // History: so is everything before it.
+            Some(_) => ControlFlow::Break(()),
+            None => ControlFlow::Continue(()),
         }
-        let start = offset;
-        offset += line.len() as u64;
-        let Ok(text) = std::str::from_utf8(line) else {
-            continue;
-        };
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
-            continue;
-        };
-        // Only real conversation records anchor the boundary; fork-time head
-        // metadata (see the doc comment) must never be the boundary.
-        let record_type = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        if record_type != "user" && record_type != "assistant" {
-            continue;
-        }
-        let Some(ts) = value.get("timestamp").and_then(|t| t.as_str()) else {
-            continue;
-        };
-        let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(ts) else {
-            continue;
-        };
-        if parsed.with_timezone(&chrono::Utc) >= epoch {
-            return Some(start);
+    })
+    .ok()?;
+    match scan.end {
+        ScanEnd::Stopped | ScanEnd::Start => Some((
+            earliest_new.or(scan.complete_end).unwrap_or(0),
+            scan.read,
+        )),
+        ScanEnd::Limit => {
+            let (offset, read) = baseline_forward(path, epoch)?;
+            Some((offset, scan.read + read))
         }
     }
-    Some(offset)
+}
+
+/// The boundary read forward from the start: the first conversation record
+/// at/after `epoch`, or the end of the last complete line. Stops at that
+/// record. Returns the offset and the bytes read.
+fn baseline_forward(path: &Path, epoch: chrono::DateTime<chrono::Utc>) -> Option<(u64, u64)> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut reader = std::io::BufReader::new(file);
+    let mut offset = 0u64;
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        let n = reader.read_until(b'\n', &mut line).ok()? as u64;
+        // End of file, or a trailing partial line (a record being flushed
+        // now): the baseline stays ahead of it.
+        if n == 0 || line.last() != Some(&b'\n') {
+            return Some((offset, offset + n));
+        }
+        let start = offset;
+        offset += n;
+        if conversation_record_time(&line).is_some_and(|at| at >= epoch) {
+            return Some((start, offset));
+        }
+    }
+}
+
+/// When a transcript line was written, if it is a conversation record (a
+/// `user` or `assistant` record) whose `timestamp` says so: what the arm
+/// baseline is keyed on. Only its two fields are taken out of the line.
+fn conversation_record_time(line: &[u8]) -> Option<chrono::DateTime<chrono::Utc>> {
+    #[derive(serde::Deserialize)]
+    struct Head {
+        #[serde(rename = "type")]
+        kind: Option<String>,
+        timestamp: Option<String>,
+    }
+    let text = std::str::from_utf8(line).ok()?;
+    let head: Head = serde_json::from_str(text).ok()?;
+    // Only real conversation records anchor the boundary; fork-time head
+    // metadata (see `baseline_offset_since`) must never be the boundary.
+    if !matches!(head.kind.as_deref(), Some("user" | "assistant")) {
+        return None;
+    }
+    let at = chrono::DateTime::parse_from_rfc3339(head.timestamp.as_deref()?).ok()?;
+    Some(at.with_timezone(&chrono::Utc))
+}
+
+/// The line, parsed, when it is a `custom-title` or `ai-title` record. Any
+/// other line costs a substring search, never a parse.
+fn title_record(line: &[u8]) -> Option<serde_json::Value> {
+    let text = std::str::from_utf8(line).ok()?;
+    if !(text.contains("\"custom-title\"") || text.contains("\"ai-title\"")) {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_str(text.trim_end()).ok()?;
+    matches!(
+        value.get("type").and_then(|t| t.as_str()),
+        Some("custom-title" | "ai-title")
+    )
+    .then_some(value)
+}
+
+/// How a [`scan_lines_backward`] ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScanEnd {
+    /// The visitor stopped it.
+    Stopped,
+    /// It visited every line back to the start of the file.
+    Start,
+    /// It read its byte limit first.
+    Limit,
+}
+
+/// What a [`scan_lines_backward`] did.
+#[derive(Debug, Clone, Copy)]
+struct BackwardScan {
+    end: ScanEnd,
+    /// Just past the last complete line at or before the scan's start: where
+    /// a trailing partial line, if any, begins. `None` only when the limit
+    /// came first.
+    complete_end: Option<u64>,
+    /// Where the oldest line it visited starts: the lines from here to
+    /// `complete_end` were all visited, the ones before it were not.
+    reached: u64,
+    /// Bytes read.
+    read: u64,
+}
+
+/// Visit the complete lines of `path` that end at or before `upto`, newest
+/// first, each with the offset it starts at (the line keeps its `\n`), until
+/// `visit` breaks, the start of the file is reached, or `max` bytes have been
+/// read. A partial line after the last newline is not a line yet and is never
+/// visited. Reads backwards in chunks that double from [`TAIL_FIRST_CHUNK`]
+/// up to [`TAIL_MAX_CHUNK`], the way `outside_activity`'s catch-up does.
+fn scan_lines_backward(
+    path: &Path,
+    upto: u64,
+    max: u64,
+    mut visit: impl FnMut(u64, &[u8]) -> ControlFlow<()>,
+) -> std::io::Result<BackwardScan> {
+    let mut file = std::fs::File::open(path)?;
+    let upto = upto.min(file.metadata()?.len());
+    // [hi, upto) has been read. `carry` holds the bytes from `hi` to the end
+    // of a line that began before `hi`.
+    let mut hi = upto;
+    let mut carry: Vec<u8> = Vec::new();
+    let mut chunk = TAIL_FIRST_CHUNK;
+    let mut read = 0u64;
+    let mut complete_end: Option<u64> = None;
+    let mut reached = upto;
+    while hi > 0 {
+        if read >= max {
+            return Ok(BackwardScan {
+                end: ScanEnd::Limit,
+                complete_end,
+                reached,
+                read,
+            });
+        }
+        let lo = hi.saturating_sub(chunk.min(max - read));
+        let mut buf = vec![0u8; (hi - lo) as usize];
+        file.seek(SeekFrom::Start(lo))?;
+        file.read_exact(&mut buf)?;
+        read += hi - lo;
+        buf.append(&mut carry);
+        hi = lo;
+        chunk = (chunk * 2).min(TAIL_MAX_CHUNK);
+        if complete_end.is_none() {
+            // Still looking for where the last complete line ends: what
+            // follows it is a record being written, left to the tail reader.
+            match buf.iter().rposition(|b| *b == b'\n') {
+                Some(last) => {
+                    let end = lo + last as u64 + 1;
+                    complete_end = Some(end);
+                    reached = end;
+                    buf.truncate(last + 1);
+                }
+                None if lo == 0 => {
+                    complete_end = Some(0);
+                    reached = 0;
+                    break;
+                }
+                None => continue,
+            }
+        }
+        // The bytes before the first newline may end a line that began before
+        // `lo`: they go with the next chunk.
+        let first = if lo == 0 {
+            0
+        } else {
+            match buf.iter().position(|b| *b == b'\n') {
+                Some(newline) => newline + 1,
+                None => {
+                    carry = buf;
+                    continue;
+                }
+            }
+        };
+        let lines = &buf[first..];
+        let base = lo + first as u64;
+        let mut line_end = lines.len();
+        while line_end > 0 {
+            let start = lines[..line_end - 1]
+                .iter()
+                .rposition(|b| *b == b'\n')
+                .map_or(0, |newline| newline + 1);
+            reached = base + start as u64;
+            if visit(reached, &lines[start..line_end]).is_break() {
+                return Ok(BackwardScan {
+                    end: ScanEnd::Stopped,
+                    complete_end,
+                    reached,
+                    read,
+                });
+            }
+            line_end = start;
+        }
+        buf.truncate(first);
+        carry = buf;
+    }
+    Ok(BackwardScan {
+        end: ScanEnd::Start,
+        complete_end: complete_end.or(Some(0)),
+        reached,
+        read,
+    })
 }
 
 /// Whether a `TaskOutput` `task.status` is terminal — the task has stopped and
@@ -2353,6 +2628,199 @@ mod tests {
             Some(new_turn_offset),
             "fork-time head metadata must not drag the copied history past the baseline"
         );
+    }
+
+    /// A user record at `ts` carrying `text`.
+    fn user_at(uuid: &str, ts: &str, text: &str) -> String {
+        format!(
+            r#"{{"type":"user","timestamp":"{ts}","uuid":"{uuid}","message":{{"role":"user","content":[{{"type":"text","text":"{text}"}}]}}}}"#
+        )
+    }
+
+    /// `n` turns of history before the watch began, about `size` bytes each.
+    fn write_history(path: &PathBuf, n: usize, size: usize) {
+        let padding = "h".repeat(size);
+        let lines: Vec<String> = (0..n)
+            .map(|i| user_at(&format!("u-old-{i}"), "2026-07-07T03:40:00.000Z", &padding))
+            .collect();
+        write_lines(path, &lines.iter().map(String::as_str).collect::<Vec<_>>());
+    }
+
+    fn file_len(path: &PathBuf) -> u64 {
+        std::fs::metadata(path).unwrap().len()
+    }
+
+    /// The backward read hands out exactly the file's complete lines, newest
+    /// first, whatever their sizes — lines straddling every chunk boundary,
+    /// one larger than the largest chunk — and never the partial line a
+    /// record still being written leaves at the end.
+    #[test]
+    fn baseline_backward_read_visits_every_complete_line_newest_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        let mut lines: Vec<String> = (0..400)
+            .map(|i| format!("{i}:{}", "y".repeat((i * 7919) % 9000)))
+            .collect();
+        lines.push(format!("big:{}", "z".repeat(3 * TAIL_MAX_CHUNK as usize)));
+        lines.extend((0..50).map(|i| format!("tail-{i}")));
+        write_lines(&path, &lines.iter().map(String::as_str).collect::<Vec<_>>());
+        append_raw(&path, r#"{"type":"user","still-being-wri"#);
+        let bytes = std::fs::read(&path).unwrap();
+        let complete = bytes.iter().rposition(|b| *b == b'\n').unwrap() + 1;
+        let mut expected = Vec::new();
+        let mut offset = 0u64;
+        for line in bytes[..complete].split_inclusive(|b| *b == b'\n') {
+            expected.push((offset, line.to_vec()));
+            offset += line.len() as u64;
+        }
+        expected.reverse();
+
+        let mut seen = Vec::new();
+        let scan = scan_lines_backward(&path, bytes.len() as u64, u64::MAX, |at, line| {
+            seen.push((at, line.to_vec()));
+            ControlFlow::Continue(())
+        })
+        .unwrap();
+        assert_eq!(scan.end, ScanEnd::Start);
+        assert_eq!(scan.complete_end, Some(complete as u64));
+        assert_eq!(scan.read, bytes.len() as u64, "each byte is read once");
+        assert!(seen == expected, "the lines read backwards are not the file's");
+
+        // With a limit, it stops short, and says where.
+        let mut seen = Vec::new();
+        let scan = scan_lines_backward(&path, bytes.len() as u64, 200_000, |at, line| {
+            seen.push((at, line.to_vec()));
+            ControlFlow::Continue(())
+        })
+        .unwrap();
+        assert_eq!(scan.end, ScanEnd::Limit);
+        assert!(scan.read <= 200_000);
+        assert!(!seen.is_empty() && seen[..] == expected[..seen.len()]);
+        assert_eq!(scan.reached, seen.last().unwrap().0);
+    }
+
+    /// The arm baseline of a resumed session reads back only to the last turn
+    /// before the watch began, however long the history behind it.
+    #[test]
+    fn baseline_reads_only_the_tail_of_a_long_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_history(&path, 1024, 4096); // about 4 MiB
+        let history = file_len(&path);
+        let new_turn = user_at("u-new", "2026-07-07T03:50:10.000Z", "hello");
+        write_lines(&path, &[&new_turn]);
+
+        let (offset, read) =
+            baseline_scan(&path, epoch("2026-07-07T03:50:00.000Z"), BASELINE_TAIL_MAX).unwrap();
+        assert_eq!(offset, history, "the new turn is the first the watch reads");
+        assert!(read <= TAIL_FIRST_CHUNK, "read {read} of {} bytes", file_len(&path));
+
+        // All history: the end of the file, from the tail alone too.
+        let (offset, read) =
+            baseline_scan(&path, epoch("2030-01-01T00:00:00Z"), BASELINE_TAIL_MAX).unwrap();
+        assert_eq!(offset, file_len(&path));
+        assert!(read <= TAIL_FIRST_CHUNK);
+
+        // And it is the boundary the forward read finds.
+        for at in ["2026-07-07T03:50:00.000Z", "2030-01-01T00:00:00Z", "2020-01-01T00:00:00Z"] {
+            let at = epoch(at);
+            assert_eq!(
+                baseline_scan(&path, at, BASELINE_TAIL_MAX).map(|(offset, _)| offset),
+                baseline_forward(&path, at.into()).map(|(offset, _)| offset),
+            );
+        }
+    }
+
+    /// More written since the watch began than the backward read may take:
+    /// the boundary comes from the forward read, so none of it is skipped.
+    #[test]
+    fn baseline_reads_forward_past_its_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_history(&path, 8, 512);
+        let history = file_len(&path);
+        let padding = "n".repeat(512);
+        let written_since: Vec<String> = (0..64)
+            .map(|i| user_at(&format!("u-new-{i}"), "2026-07-07T03:50:10.000Z", &padding))
+            .collect();
+        write_lines(&path, &written_since.iter().map(String::as_str).collect::<Vec<_>>());
+
+        let (offset, read) =
+            baseline_scan(&path, epoch("2026-07-07T03:50:00.000Z"), 4 * 1024).unwrap();
+        assert_eq!(offset, history);
+        assert!(read > 4 * 1024, "the forward read ran too");
+    }
+
+    /// The title seed reads back from the baseline only to the user's newest
+    /// name: Claude Code re-emits it all along a session.
+    #[test]
+    fn title_seed_reads_back_only_to_the_newest_user_title() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_lines(&path, &[&custom_title("first-name")]);
+        write_history(&path, 512, 4096); // about 2 MiB
+        write_lines(&path, &[&ai_title("Generated Name"), &custom_title("auth-refactor")]);
+        write_history(&path, 4, 512);
+
+        let mut ws = WatchState::new();
+        let read = ws.seed_titles_within(&path, file_len(&path), TITLE_SEED_MAX);
+        assert_eq!(ws.resolved_title().as_deref(), Some("auth-refactor"));
+        assert_eq!(ws.title_history_end, None);
+        assert!(read <= TAIL_FIRST_CHUNK, "read {read} of {} bytes", file_len(&path));
+    }
+
+    /// The user's name sits further back than the seed reads, and a generated
+    /// name lands in the tail: the rest of the history is read before the
+    /// name resolves, so the user's own still wins.
+    #[test]
+    fn title_seed_beyond_its_window_still_outranks_a_later_generated_title() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_lines(&path, &[&custom_title("auth-refactor")]);
+        write_history(&path, 64, 1024);
+        let ledger = PromptLedger::shared();
+        let mut ws = WatchState::new();
+        ws.rearm("s1".to_string(), epoch("2030-01-01T00:00:00Z"));
+        ws.adopt_file(path.clone());
+        assert_eq!(ws.resolved_title().as_deref(), Some("auth-refactor"));
+
+        // The same arm with a window too short to reach the name.
+        ws.custom_title = None;
+        let read = ws.seed_titles_within(&path, ws.committed, 16 * 1024);
+        assert!(read <= 16 * 1024);
+        assert_eq!(ws.resolved_title(), None);
+        assert!(ws.title_history_end.is_some());
+
+        write_lines(&path, &[&ai_title("Concise AI Summary")]);
+        let _ = tick_now(&mut ws, &ledger);
+        assert_eq!(ws.pending_title, None, "the user's name must not be displaced");
+        assert_eq!(ws.resolved_title().as_deref(), Some("auth-refactor"));
+        assert_eq!(ws.title_history_end, None, "the history is read once");
+    }
+
+    /// A name re-emitted from beyond the window is the one the history
+    /// already had: not published again. A new one is.
+    #[test]
+    fn title_seed_beyond_its_window_never_republishes_the_same_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_session(&dir);
+        write_lines(&path, &[&ai_title("Old Session Name")]);
+        write_history(&path, 64, 1024);
+        let ledger = PromptLedger::shared();
+        let mut ws = WatchState::new();
+        ws.rearm("s1".to_string(), epoch("2030-01-01T00:00:00Z"));
+        ws.adopt_file(path.clone());
+        ws.ai_title = None;
+        ws.seed_titles_within(&path, ws.committed, 16 * 1024);
+        assert_eq!(ws.resolved_title(), None);
+
+        write_lines(&path, &[&ai_title("Old Session Name")]);
+        let _ = tick_now(&mut ws, &ledger);
+        assert_eq!(ws.pending_title, None);
+
+        write_lines(&path, &[&ai_title("New Session Name")]);
+        let _ = tick_now(&mut ws, &ledger);
+        assert_eq!(ws.pending_title.take().as_deref(), Some("New Session Name"));
     }
 
     /// A new session's file can be discovered mid-flush of its FIRST record:

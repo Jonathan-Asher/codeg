@@ -3600,6 +3600,9 @@
         "mentionGroupSkill": "Skills"
       },
       "messageQueue": {
+        "outsideWriter": "Sends once the other process finishes and codeg connects.",
+        "outsideWriterStopped": "Not sent: codeg isn’t connected while another process runs this session.",
+        "connect": "Connect",
         "addToQueue": "Queue message",
         "saveEdit": "Save",
         "cancelEdit": "Cancel edit",
@@ -4301,6 +4304,21 @@
         "reconnectDisabledDuringTurn": "Available once the current turn finishes",
         "dismiss": "Dismiss",
         "applied": "New configuration applied"
+      },
+      "outsideWriter": {
+        "waiting": "This session is running in another process (pid {pid}, started {time}). codeg will connect when it finishes.",
+        "waitingNoTime": "This session is running in another process (pid {pid}). codeg will connect when it finishes.",
+        "stopped": "Not waiting for process {pid}: codeg connects to this session only when you ask.",
+        "connectAnyway": "Connect anyway",
+        "connectAnywayHint": "Connect now, while the other process still runs this session",
+        "connecting": "Connecting…",
+        "stopWaiting": "Stop waiting",
+        "connect": "Connect",
+        "confirmTitle": "Connect anyway?",
+        "confirmDescription": "Process {pid} is still running this session. If codeg resumes it too, both write to its history, which can split into two branches.",
+        "confirmAction": "Connect anyway",
+        "cancel": "Cancel",
+        "composerReason": "Running in another process"
       },
       "piProjectTrust": {
         "title": "This project ships pi resources",

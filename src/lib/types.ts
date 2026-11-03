@@ -60,6 +60,8 @@ export type AppErrorCode =
   | "external_command_failed"
   | "window_operation_failed"
   | "task_execution_failed"
+  /** Another process runs the session; see `lib/outside-writer`. */
+  | "session_running_elsewhere"
   | (string & {})
 
 export interface AppCommandError {

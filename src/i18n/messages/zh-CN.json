@@ -3600,6 +3600,9 @@
         "mentionGroupSkill": "技能"
       },
       "messageQueue": {
+        "outsideWriter": "另一个进程结束且 codeg 连接后发送。",
+        "outsideWriterStopped": "未发送：另一个进程运行此会话期间，codeg 未连接。",
+        "connect": "连接",
         "addToQueue": "加入队列",
         "saveEdit": "保存",
         "cancelEdit": "取消编辑",
@@ -4301,6 +4304,21 @@
         "reconnectDisabledDuringTurn": "当前回合结束后可重连",
         "dismiss": "忽略",
         "applied": "新配置已应用"
+      },
+      "outsideWriter": {
+        "waiting": "此会话正在另一个进程中运行（pid {pid}，启动于 {time}）。该进程结束后 codeg 会自动连接。",
+        "waitingNoTime": "此会话正在另一个进程中运行（pid {pid}）。该进程结束后 codeg 会自动连接。",
+        "stopped": "不再等待进程 {pid}：只有在你要求时，codeg 才会连接此会话。",
+        "connectAnyway": "仍然连接",
+        "connectAnywayHint": "在另一个进程仍运行此会话时立即连接",
+        "connecting": "连接中…",
+        "stopWaiting": "停止等待",
+        "connect": "连接",
+        "confirmTitle": "仍然连接？",
+        "confirmDescription": "进程 {pid} 仍在运行此会话。如果 codeg 也恢复该会话，两者都会写入其历史记录，历史可能会分叉为两个分支。",
+        "confirmAction": "仍然连接",
+        "cancel": "取消",
+        "composerReason": "正在另一个进程中运行"
       },
       "piProjectTrust": {
         "title": "该项目自带 pi 资源",

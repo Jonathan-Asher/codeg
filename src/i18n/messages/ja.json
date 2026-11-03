@@ -3600,6 +3600,9 @@
         "mentionGroupSkill": "スキル"
       },
       "messageQueue": {
+        "outsideWriter": "別のプロセスが終了し、codeg が接続すると送信されます。",
+        "outsideWriterStopped": "未送信：別のプロセスがこのセッションを実行中のため、codeg は接続していません。",
+        "connect": "接続",
         "addToQueue": "キューに追加",
         "saveEdit": "保存",
         "cancelEdit": "編集をキャンセル",
@@ -4301,6 +4304,21 @@
         "reconnectDisabledDuringTurn": "現在のターンが完了すると再接続できます",
         "dismiss": "閉じる",
         "applied": "新しい設定を適用しました"
+      },
+      "outsideWriter": {
+        "waiting": "このセッションは別のプロセスで実行中です（pid {pid}、{time} に開始）。終了すると codeg が接続します。",
+        "waitingNoTime": "このセッションは別のプロセスで実行中です（pid {pid}）。終了すると codeg が接続します。",
+        "stopped": "プロセス {pid} を待機していません。codeg はリクエストしたときだけこのセッションに接続します。",
+        "connectAnyway": "それでも接続",
+        "connectAnywayHint": "別のプロセスがこのセッションを実行中のまま、今すぐ接続します",
+        "connecting": "接続中…",
+        "stopWaiting": "待機をやめる",
+        "connect": "接続",
+        "confirmTitle": "それでも接続しますか？",
+        "confirmDescription": "プロセス {pid} がまだこのセッションを実行しています。codeg も再開すると両方が履歴に書き込み、履歴が 2 つに分岐する可能性があります。",
+        "confirmAction": "それでも接続",
+        "cancel": "キャンセル",
+        "composerReason": "別のプロセスで実行中"
       },
       "piProjectTrust": {
         "title": "このプロジェクトには pi リソースが含まれています",

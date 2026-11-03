@@ -16,6 +16,10 @@ import type { ConnectionStatus, LimitPause } from "@/lib/types"
  * - `sends_when_connected`: a brand-new chat's first message, sent while its
  *   session was still opening. It goes out by itself once it is up — said
  *   out loud there, where nothing else on screen shows that it will.
+ * - `outside_writer`: another process runs the session (see
+ *   `lib/outside-writer`), so codeg has not connected. While it waits for
+ *   that process the queue goes out once it finishes and codeg connects;
+ *   once the user stopped waiting (`stopped`), only after they connect.
  *
  * `null` when the queue is empty or simply waiting its turn (a reply in
  * progress, an existing conversation still opening).
@@ -25,6 +29,7 @@ export type QueueNoticeKind =
   | { kind: "pool"; resumesAt: number | null }
   | { kind: "not_sent" }
   | { kind: "sends_when_connected" }
+  | { kind: "outside_writer"; stopped: boolean }
   | null
 
 export interface QueueNoticeInput {
@@ -42,10 +47,21 @@ export interface QueueNoticeInput {
   /** A brand-new chat, which has no conversation until its first message
    *  goes out. */
   newChat?: boolean
+  /** Another process runs the session and codeg is not connected: waiting
+   *  for it, or the user stopped waiting. */
+  outsideWriter?: "waiting" | "stopped" | null
 }
 
 export function queueNoticeFor(input: QueueNoticeInput): QueueNoticeKind {
   if (input.queueLength === 0) return null
+  // Nothing goes out while another process runs the session, whatever else
+  // would hold it back too.
+  if (input.outsideWriter) {
+    return {
+      kind: "outside_writer",
+      stopped: input.outsideWriter === "stopped",
+    }
+  }
   if (input.limitPause) {
     return { kind: "limit", resetsAt: input.limitPause.resets_at }
   }

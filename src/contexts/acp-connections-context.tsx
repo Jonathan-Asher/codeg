@@ -155,6 +155,12 @@ import {
 } from "@/lib/selector-options-cache"
 import { describeError } from "@/lib/app-error"
 import { isAttachingPhase, statusWhileAttaching } from "@/lib/attach-phase"
+import { outsideWriterFromError } from "@/lib/outside-writer"
+import {
+  clearOutsideWriter,
+  reportOutsideWriter,
+  resumeWaitingForOutsideWriter,
+} from "@/stores/outside-writer-store"
 import {
   formatPoolResumeTime,
   poolHoldFromError,
@@ -568,6 +574,9 @@ type ConnectRequest = {
   selectorPrefs?: ConnectSelectorPrefs
   /** Ask the agent not to keep a transcript (see {@link ConnectOptions}). */
   ephemeral?: boolean
+  /** Resume even though another process runs the session (see
+   *  {@link ConnectOptions}). */
+  allowOutsideWriter?: boolean
 }
 
 /** Mode + config values shipped with `acp_connect`. */
@@ -588,19 +597,34 @@ export interface ConnectOptions {
   selectorPrefs?: ConnectSelectorPrefs
   /** A private (unrecorded) session: the agent is asked not to persist it. */
   ephemeral?: boolean
+  /** The user saw that a process codeg did not start runs the session, and
+   *  chose to connect anyway (see `lib/outside-writer`). For this connect
+   *  only: a reconnect waits for that process again. */
+  allowOutsideWriter?: boolean
 }
 
 function connectOptionsOf(request: ConnectRequest): ConnectOptions | undefined {
-  if (request.selectorPrefs === undefined && !request.ephemeral)
+  if (
+    request.selectorPrefs === undefined &&
+    !request.ephemeral &&
+    !request.allowOutsideWriter
+  )
     return undefined
-  return { selectorPrefs: request.selectorPrefs, ephemeral: request.ephemeral }
+  return {
+    selectorPrefs: request.selectorPrefs,
+    ephemeral: request.ephemeral,
+    ...(request.allowOutsideWriter ? { allowOutsideWriter: true } : {}),
+  }
 }
 
 function sameConnectRequest(a: ConnectRequest, b: ConnectRequest) {
   return (
     a.agentType === b.agentType &&
     (a.workingDir ?? null) === (b.workingDir ?? null) &&
-    (a.sessionId ?? null) === (b.sessionId ?? null)
+    (a.sessionId ?? null) === (b.sessionId ?? null) &&
+    // A "Connect anyway" queued behind a connect that is being refused is
+    // the user's own answer to that refusal: never dropped as a duplicate.
+    Boolean(a.allowOutsideWriter) === Boolean(b.allowOutsideWriter)
   )
 }
 
@@ -6961,11 +6985,15 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           ? { selectorPrefs: options.selectorPrefs }
           : {}),
         ...(options?.ephemeral ? { ephemeral: true } : {}),
+        ...(options?.allowOutsideWriter ? { allowOutsideWriter: true } : {}),
       }
       // Remember BEFORE the in-flight early return and before the preflight can
       // throw: a connect that never produced a store entry is precisely when
-      // `reconnect()` has nothing else to go on.
-      lastConnectParamsRef.current.set(contextKey, request)
+      // `reconnect()` has nothing else to go on. Without a "Connect anyway":
+      // that answers one refusal, and a reconnect asks again.
+      const remembered: ConnectRequest = { ...request }
+      delete remembered.allowOutsideWriter
+      lastConnectParamsRef.current.set(contextKey, remembered)
       if (connectingKeysRef.current.has(contextKey)) {
         pendingConnectRequestsRef.current.set(contextKey, request)
         return
@@ -7277,8 +7305,12 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             )
             // Attached (or superseded) — done. Otherwise the connection died
             // between discovery and the attach, so fall through and spawn one
-            // rather than leaving a viewer bound to a dead id.
-            if (attached) return
+            // rather than leaving a viewer bound to a dead id. A codeg
+            // connection runs the session now: nothing left to wait for.
+            if (attached) {
+              if (sessionId) clearOutsideWriter(sessionId)
+              return
+            }
           }
         }
 
@@ -7302,22 +7334,35 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         // so the apply-on-event hook never fired).
         const savedPrefs =
           request.selectorPrefs ?? getSavedPrefsForConnect(agentType)
-        const connectionId = request.ephemeral
+        const connectionId = request.allowOutsideWriter
           ? await acpConnect(
               agentType,
               workingDir,
               sessionId,
               savedPrefs.modeId,
               savedPrefs.configValues,
+              request.ephemeral === true,
               true
             )
-          : await acpConnect(
-              agentType,
-              workingDir,
-              sessionId,
-              savedPrefs.modeId,
-              savedPrefs.configValues
-            )
+          : request.ephemeral
+            ? await acpConnect(
+                agentType,
+                workingDir,
+                sessionId,
+                savedPrefs.modeId,
+                savedPrefs.configValues,
+                true
+              )
+            : await acpConnect(
+                agentType,
+                workingDir,
+                sessionId,
+                savedPrefs.modeId,
+                savedPrefs.configValues
+              )
+        // The backend let the session be resumed: no process outside codeg
+        // runs it, or the user chose to connect anyway.
+        if (sessionId) clearOutsideWriter(sessionId)
 
         // If disconnect was requested while connect was in flight, tear down
         // immediately instead of registering the connection — but tear down
@@ -7429,7 +7474,18 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
         const pendingRequest = pendingConnectRequestsRef.current.get(contextKey)
         const superseded =
           pendingRequest != null && !sameConnectRequest(pendingRequest, request)
-        if (!superseded && !isAlertedError(err)) {
+        const outsideWriter = sessionId ? outsideWriterFromError(err) : null
+        if (!superseded && outsideWriter && sessionId) {
+          // Not a failure: a process codeg did not start runs the session,
+          // and resuming it next to that process would split its history.
+          // The session's view waits for it and says so itself.
+          reportOutsideWriter(sessionId, outsideWriter)
+        } else if (!superseded && request.allowOutsideWriter && sessionId) {
+          // "Connect anyway" failed for another reason: back to waiting, so
+          // the choice can be made again.
+          resumeWaitingForOutsideWriter(sessionId)
+        }
+        if (!superseded && !outsideWriter && !isAlertedError(err)) {
           const message = normalizeErrorMessage(err)
           const agentLabel = getAgentLabel(agentType)
           // Backend safety net: if the agent turned out to be not

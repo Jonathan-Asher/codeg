@@ -10698,6 +10698,7 @@ pub async fn acp_connect(
     preferred_mode_id: Option<String>,
     preferred_config_values: Option<BTreeMap<String, String>>,
     ephemeral: Option<bool>,
+    allow_outside_writer: Option<bool>,
     manager: State<'_, ConnectionManager>,
     db: State<'_, AppDatabase>,
     app_handle: tauri::AppHandle,
@@ -10739,7 +10740,7 @@ pub async fn acp_connect(
     // `AttachProgress` events instead of sitting on this call while the
     // agent opens the session.
     let connection_id = manager
-        .spawn_agent_detached(
+        .spawn_agent_detached_with_policy(
             agent_type,
             working_dir,
             session_id,
@@ -10748,6 +10749,7 @@ pub async fn acp_connect(
             emitter,
             preferred_mode_id,
             preferred_config_values,
+            outside_writer_policy(allow_outside_writer),
         )
         .await?;
     // This window owns it now — including a warm or pre-opened connection the
@@ -11127,6 +11129,40 @@ pub async fn acp_release_connection(
     manager: State<'_, ConnectionManager>,
 ) -> Result<crate::acp::manager::ReleaseOutcome, AcpError> {
     manager.release(&connection_id).await
+}
+
+/// What a connect's `allowOutsideWriter` asks for: the user saw that another
+/// process runs the session and chose to connect anyway, or (by default) the
+/// connect waits for that process.
+pub(crate) fn outside_writer_policy(
+    allow_outside_writer: Option<bool>,
+) -> crate::acp::manager::OutsideWriterPolicy {
+    if allow_outside_writer.unwrap_or(false) {
+        crate::acp::manager::OutsideWriterPolicy::Allow
+    } else {
+        crate::acp::manager::OutsideWriterPolicy::Refuse
+    }
+}
+
+/// Whether a process codeg did not start runs `session_id`, and how its
+/// transcript stands. A session view polls it while it waits for that process
+/// to finish, and connects once it has (see `acp::outside_writer`).
+pub(crate) async fn acp_outside_writer_status_core(
+    manager: &ConnectionManager,
+    agent_type: AgentType,
+    session_id: String,
+) -> Result<crate::acp::outside_writer::OutsideWriterStatus, AcpError> {
+    Ok(manager.outside_writer_status(agent_type, &session_id).await)
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[cfg_attr(feature = "tauri-runtime", tauri::command)]
+pub async fn acp_outside_writer_status(
+    agent_type: AgentType,
+    session_id: String,
+    manager: State<'_, ConnectionManager>,
+) -> Result<crate::acp::outside_writer::OutsideWriterStatus, AcpError> {
+    acp_outside_writer_status_core(&manager, agent_type, session_id).await
 }
 
 /// Open a session in the background because the user is about to look at it.

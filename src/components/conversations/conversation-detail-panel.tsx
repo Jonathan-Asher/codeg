@@ -82,6 +82,14 @@ import {
 import { useConversationAttention } from "@/stores/conversation-attention-store"
 import { useConversationBackground } from "@/stores/conversation-background-store"
 import { useSessionConnectHoldStore } from "@/stores/session-connect-hold-store"
+import {
+  clearOutsideWriter,
+  markConnectingAnyway,
+  stopWaitingForOutsideWriter,
+  useOutsideWriterStore,
+} from "@/stores/outside-writer-store"
+import { OutsideWriterBanner } from "@/components/chat/outside-writer-banner"
+import { useOutsideWriterWait } from "@/hooks/use-outside-writer-wait"
 import { PiProjectTrustBanner } from "@/components/chat/pi-project-trust-banner"
 import { FeedbackNotesDisplay } from "@/components/chat/feedback-notes-display"
 import { FeedbackDialog } from "@/components/chat/feedback-dialog"
@@ -373,6 +381,7 @@ const ConversationTabView = memo(function ConversationTabView({
   const sharedT = useTranslations("Folder.chat.shared")
   const tMessageList = useTranslations("Folder.chat.messageList")
   const tAsyncTasks = useTranslations("Folder.chat.asyncTasks")
+  const tOutsideWriter = useTranslations("Folder.chat.outsideWriter")
   const refreshConversations = useAppWorkspaceStore(
     (s) => s.refreshConversations
   )
@@ -739,6 +748,18 @@ const ConversationTabView = memo(function ConversationTabView({
   // passes, but only the one the steps stop on should start its agent. Read
   // only by the active tab, so the hold never re-renders a background one.
   const connectHeld = useSessionConnectHoldStore((s) => isActive && s.held)
+  // A process codeg did not start runs this session (see `lib/outside-writer`):
+  // resuming it too would split its history. A connect the backend refused for
+  // that puts the session in this store; while it is there, the tab shows the
+  // transcript as that process writes it and holds back every connect of its
+  // own, until the process finishes or the user connects anyway.
+  const outsideWriterSessionId = hasPersistedConversation
+    ? externalId
+    : undefined
+  const outsideWriter = useOutsideWriterStore((s) =>
+    outsideWriterSessionId ? s.bySession[outsideWriterSessionId] : undefined
+  )
+  const outsideWriterHeld = outsideWriter != null
   // Draft composer text is keyed PER TAB while unbound: each split group has its
   // own draft, and a single shared key made them overwrite each other. The key
   // survives restarts with the tab id (persisted in the group blob).
@@ -806,7 +827,7 @@ const ConversationTabView = memo(function ConversationTabView({
   } = useConnectionLifecycle({
     contextKey: tabId,
     agentType: selectedAgent,
-    isActive: isActive && canAutoConnect && !connectHeld,
+    isActive: isActive && canAutoConnect && !connectHeld && !outsideWriterHeld,
     workingDir: workingDirForConnection,
     sessionId:
       dbConversationId != null && selectedAgent !== "cline"
@@ -833,6 +854,70 @@ const ConversationTabView = memo(function ConversationTabView({
     newSession: dbConversationId == null,
   })
   const { status: connStatus, sessionId: connSessionId } = conn
+  // Says so only while no connection of codeg's runs the session: one that
+  // does (another client connected anyway) is what the tab shows instead.
+  const outsideWriterShown =
+    outsideWriter != null &&
+    connStatus !== "connected" &&
+    connStatus !== "prompting"
+  // Waiting for that process: the composer reads "connecting", so a message
+  // sent meanwhile waits in the queue and goes once codeg has connected.
+  const outsideWriterWaiting =
+    outsideWriterShown && outsideWriter?.phase !== "stopped"
+  // A connection of codeg's runs the session now (another client connected
+  // anyway, and this tab joined it): nothing is left to wait for, and the
+  // hold must not outlive it.
+  const connectionUp = connStatus === "connected" || connStatus === "prompting"
+  useEffect(() => {
+    if (connectionUp && outsideWriterHeld && outsideWriterSessionId) {
+      clearOutsideWriter(outsideWriterSessionId)
+    }
+  }, [connectionUp, outsideWriterHeld, outsideWriterSessionId])
+  // The transcript the other process writes, re-read as it grows.
+  const refreshOutsideTranscript = useCallback(() => {
+    void refetchDetail(effectiveConversationId, { quiet: true })
+  }, [refetchDetail, effectiveConversationId])
+  useOutsideWriterWait({
+    agentType: selectedAgent,
+    sessionId: outsideWriterSessionId,
+    enabled:
+      isActive && outsideWriterShown && outsideWriter?.phase === "waiting",
+    onTranscriptChanged: refreshOutsideTranscript,
+  })
+  // Connect the tab to the session now, past its outside-writer hold: the
+  // ordinary way (which waits again while the process still runs), or, once
+  // the user confirmed, next to that process.
+  const connectToOutsideSession = useCallback(
+    (allowOutsideWriter: boolean) => {
+      if (!outsideWriterSessionId || !workingDirForConnection) return
+      if (allowOutsideWriter) markConnectingAnyway(outsideWriterSessionId)
+      void acpActions
+        .connect(
+          tabId,
+          selectedAgent,
+          workingDirForConnection,
+          outsideWriterSessionId,
+          dbConversationId ?? undefined,
+          allowOutsideWriter ? { allowOutsideWriter: true } : undefined
+        )
+        .catch(() => {
+          // A refusal puts the session back to waiting; any other failure
+          // publishes (and notifies) its own.
+        })
+    },
+    [
+      acpActions,
+      dbConversationId,
+      outsideWriterSessionId,
+      selectedAgent,
+      tabId,
+      workingDirForConnection,
+    ]
+  )
+  const connectOutsideSession = useCallback(
+    () => connectToOutsideSession(false),
+    [connectToOutsideSession]
+  )
 
   // Re-fetch the transcript after sleep or a transport reconnect: a turn that
   // finished while this client's socket was down lives only in the persisted
@@ -989,7 +1074,7 @@ const ConversationTabView = memo(function ConversationTabView({
       autoReconnectsRef.current = 0
       return
     }
-    if (!unsentHeadRetries || connIsForOtherAgent) return
+    if (!unsentHeadRetries || connIsForOtherAgent || outsideWriterHeld) return
     // No connection at all (dropped when the transport reconnected to a
     // server that no longer has it) counts as gone too.
     if (
@@ -1015,6 +1100,7 @@ const ConversationTabView = memo(function ConversationTabView({
     connStatus,
     connIsForOtherAgent,
     unsentHeadRetries,
+    outsideWriterHeld,
     autoReconnectTick,
   ])
   // While the session waits for the account pool, the composer says so.
@@ -1037,8 +1123,16 @@ const ConversationTabView = memo(function ConversationTabView({
       : newChatComposerConnStatus,
     limitPause: limitPauseHold ? persistedLimitPause : null,
     newChat: !hasPersistedConversation,
+    outsideWriter: !outsideWriterShown
+      ? null
+      : outsideWriter?.phase === "stopped"
+        ? "stopped"
+        : outsideWriter?.phase === "waiting"
+          ? "waiting"
+          : null,
     agentLabel: getAgentLabel(selectedAgent),
     onRetry: retryConnection,
+    onConnect: connectOutsideSession,
   })
   // The turn in flight is held open only for background work: the agent is
   // idle, so a message is delivered into the turn right away and the queue
@@ -1416,7 +1510,8 @@ const ConversationTabView = memo(function ConversationTabView({
         return
       }
       // The auto-connect starts by itself once these clear.
-      if (awaitingHistoricalSessionId || connectHeld) return
+      if (awaitingHistoricalSessionId || connectHeld || outsideWriterHeld)
+        return
       if (!pendingConnectTriedRef.current) {
         pendingConnectTriedRef.current = true
         setPendingConnectInFlight(true)
@@ -1450,6 +1545,7 @@ const ConversationTabView = memo(function ConversationTabView({
     actionsUnreachable,
     awaitingHistoricalSessionId,
     connectHeld,
+    outsideWriterHeld,
     connectionIdleForActions,
     dropPendingActions,
     handleFocus,
@@ -3179,6 +3275,21 @@ const ConversationTabView = memo(function ConversationTabView({
       />
     ) : null
 
+  // Another process runs the session: which one, that codeg connects once it
+  // finishes, and Connect anyway / Stop waiting (see `lib/outside-writer`).
+  const outsideWriterBanner =
+    outsideWriterShown && outsideWriter && outsideWriterSessionId ? (
+      <OutsideWriterBanner
+        writer={outsideWriter.writer}
+        phase={outsideWriter.phase}
+        onConnectAnyway={() => connectToOutsideSession(true)}
+        onStopWaiting={() =>
+          stopWaitingForOutsideWriter(outsideWriterSessionId)
+        }
+        onConnect={connectOutsideSession}
+      />
+    ) : null
+
   // The composer's one-click Continue (see `lib/continue-turn`): the agent has
   // replied and the session sits idle — or idle while background work holds
   // its turn open — so "keep going" is a click, not a typed message. The
@@ -3697,7 +3808,7 @@ const ConversationTabView = memo(function ConversationTabView({
           />
         </>
       }
-      status={connStatus}
+      status={outsideWriterWaiting ? "connecting" : connStatus}
       promptCapabilities={conn.promptCapabilities}
       defaultPath={workingDirForConnection}
       agentName={getAgentLabel(selectedAgent)}
@@ -3732,6 +3843,7 @@ const ConversationTabView = memo(function ConversationTabView({
       onInjectConsumed={handleComposerInjectConsumed}
       composerBanner={
         acpLoadErrorBanner ??
+        outsideWriterBanner ??
         limitPausedBanner ??
         interruptedBanner ??
         emptyTurnBanner
@@ -3768,7 +3880,11 @@ const ConversationTabView = memo(function ConversationTabView({
       showActiveFlow={showActiveFlow}
       queue={msgQueue}
       queueNotice={queueNotice}
-      connectingReason={poolWaitLabel?.text ?? null}
+      connectingReason={
+        outsideWriterWaiting
+          ? tOutsideWriter("composerReason")
+          : (poolWaitLabel?.text ?? null)
+      }
       onEnqueue={mqEnqueue}
       awaitingBackground={awaitingBackground}
       backgroundTaskCount={heldBackgroundTasks}

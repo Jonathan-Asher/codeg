@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,6 +22,9 @@ use crate::acp::feedback::{
     SessionFeedbackAccess, MAX_FEEDBACK_CHARS, MAX_FEEDBACK_RESPONSE_BYTES,
 };
 use crate::acp::fork::ForkMode;
+use crate::acp::outside_writer::{
+    launch_config_dir, OutsideWriter, OutsideWriterLookup, OutsideWriterStatus,
+};
 use crate::acp::plan_approval::{
     PlanApprovalAnswer, RegisteredPlanApproval, SessionPlanApprovalAccess,
 };
@@ -523,10 +527,23 @@ pub enum PreconnectOutcome {
     AlreadyOpen { connection_id: String },
     /// Skipped: the speculative cap or every attach slot is taken.
     Busy,
-    /// Skipped: nothing to reopen (no session id).
+    /// Skipped: nothing to reopen (no session id), a live connection
+    /// elsewhere runs it, or a process codeg did not start does.
     Skipped,
     /// Speculative connects are turned off.
     Disabled,
+}
+
+/// Whether a connect may resume a session a process codeg did not start is
+/// running (see [`crate::acp::outside_writer`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutsideWriterPolicy {
+    /// Refuse with [`AcpError::SessionRunningElsewhere`]: two processes
+    /// appending to one session's transcript split its history.
+    Refuse,
+    /// The user saw that another process runs the session and chose to
+    /// connect anyway.
+    Allow,
 }
 
 /// Unclaimed speculative connections allowed at once, by default.
@@ -670,6 +687,10 @@ pub struct ConnectionManager {
     /// id, so a retry of a send whose answer was lost is not delivered twice.
     /// Shared across `clone_ref` clones. See [`crate::acp::message_receipts`].
     message_receipts: Arc<crate::acp::message_receipts::MessageReceipts>,
+    /// Where to look for processes codeg did not start that run a session it
+    /// is about to resume (see [`crate::acp::outside_writer`]): the Claude
+    /// Code registry and the OS, or a test's stand-ins.
+    outside_writers: OutsideWriterLookup,
 }
 
 /// A parked `ask_user_question` awaiting its answer. The `sender` resolves the
@@ -710,6 +731,7 @@ impl ConnectionManager {
             pending_questions: Arc::new(Mutex::new(HashMap::new())),
             pending_plan_approvals: Arc::new(Mutex::new(HashMap::new())),
             message_receipts: Arc::new(crate::acp::message_receipts::MessageReceipts::new()),
+            outside_writers: OutsideWriterLookup::system(),
         }
     }
 
@@ -728,7 +750,16 @@ impl ConnectionManager {
             pending_questions: self.pending_questions.clone(),
             pending_plan_approvals: self.pending_plan_approvals.clone(),
             message_receipts: self.message_receipts.clone(),
+            outside_writers: self.outside_writers.clone(),
         }
+    }
+
+    /// Look for outside processes in a test's registry and process table
+    /// instead of the machine's.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn with_outside_writer_lookup(mut self, lookup: OutsideWriterLookup) -> Self {
+        self.outside_writers = lookup;
+        self
     }
 
     /// Set the delegation injection context exactly once during bootstrap.
@@ -782,6 +813,7 @@ impl ConnectionManager {
             pending_questions: Arc::new(Mutex::new(HashMap::new())),
             pending_plan_approvals: Arc::new(Mutex::new(HashMap::new())),
             message_receipts: Arc::new(crate::acp::message_receipts::MessageReceipts::new()),
+            outside_writers: OutsideWriterLookup::system(),
         }
     }
 
@@ -906,6 +938,7 @@ impl ConnectionManager {
             preferred_config_values,
             AttachWait::UntilReady,
             false,
+            OutsideWriterPolicy::Refuse,
         )
         .await
     }
@@ -932,6 +965,37 @@ impl ConnectionManager {
         preferred_mode_id: Option<String>,
         preferred_config_values: BTreeMap<String, String>,
     ) -> Result<String, AcpError> {
+        self.spawn_agent_detached_with_policy(
+            agent_type,
+            working_dir,
+            session_id,
+            runtime_env,
+            owner_window_label,
+            emitter,
+            preferred_mode_id,
+            preferred_config_values,
+            OutsideWriterPolicy::Refuse,
+        )
+        .await
+    }
+
+    /// As [`Self::spawn_agent_detached`], saying whether the session may be
+    /// resumed while a process codeg did not start runs it: only a user who
+    /// was told so, and chose to connect anyway, gets
+    /// [`OutsideWriterPolicy::Allow`].
+    #[allow(clippy::too_many_arguments)]
+    pub async fn spawn_agent_detached_with_policy(
+        &self,
+        agent_type: AgentType,
+        working_dir: Option<String>,
+        session_id: Option<String>,
+        runtime_env: BTreeMap<String, String>,
+        owner_window_label: String,
+        emitter: EventEmitter,
+        preferred_mode_id: Option<String>,
+        preferred_config_values: BTreeMap<String, String>,
+        outside_writer: OutsideWriterPolicy,
+    ) -> Result<String, AcpError> {
         self.spawn_agent_with(
             agent_type,
             working_dir,
@@ -943,6 +1007,7 @@ impl ConnectionManager {
             preferred_config_values,
             AttachWait::No,
             false,
+            outside_writer,
         )
         .await
     }
@@ -960,6 +1025,7 @@ impl ConnectionManager {
         preferred_config_values: BTreeMap<String, String>,
         wait: AttachWait,
         speculative: bool,
+        outside_writer: OutsideWriterPolicy,
     ) -> Result<String, AcpError> {
         // Held until the new connection is in the map. A restore writing back
         // to the agents' own directories takes the write side, so it can never
@@ -1011,6 +1077,23 @@ impl ConnectionManager {
             .find_connection_for_reuse(agent_type, working_dir_path.as_ref(), session_id.as_deref())
             .await
         {
+            // A copy nobody has claimed (a released warm session, a
+            // pre-open) sat idle while another process may have taken the
+            // session over: handed out, its next prompt would append from a
+            // context that misses that process's turns. Not handed out while
+            // that process runs; the idle copy goes, and the session is
+            // resumed afresh once the other process is done.
+            if outside_writer == OutsideWriterPolicy::Refuse {
+                if let Some(sid) = session_id.as_deref() {
+                    self.refuse_unclaimed_copy_of_outside_session(
+                        agent_type,
+                        sid,
+                        &existing,
+                        &runtime_env,
+                    )
+                    .await?;
+                }
+            }
             let phase = self.attach_phase_of(&existing).await;
             tracing::info!(
                 "[ACP] reusing connection id={} for session_id={} owner_window={} attach_phase={}",
@@ -1021,6 +1104,13 @@ impl ConnectionManager {
             );
             existing
         } else {
+            // Never a second writer next to a process codeg did not start
+            // (see `acp::outside_writer`). Checked before anything else
+            // happens, so a refusal leaves every connection as it was.
+            if let Some(sid) = session_id.as_deref() {
+                self.outside_writer_gate(agent_type, sid, &runtime_env, outside_writer)
+                    .await?;
+            }
             let connection_id = uuid::Uuid::new_v4().to_string();
             tracing::info!(
                 "[ACP] spawning connection id={} owner_window={} agent={:?} session_id={}{}",
@@ -1366,6 +1456,18 @@ impl ConnectionManager {
             );
             return Ok(PreconnectOutcome::Skipped);
         }
+        // Nor next to a process codeg did not start: a hover must never be
+        // what makes a second writer of a session.
+        if let Some(writer) = self
+            .outside_writer_of(agent_type, &session_id, &runtime_env)
+            .await
+        {
+            tracing::debug!(
+                "[ACP] preconnect session={session_id} skipped: process {} runs it outside codeg",
+                writer.pid
+            );
+            return Ok(PreconnectOutcome::Skipped);
+        }
         let (opening, open_unclaimed) = self.speculative_census().await;
         let Some(evict) = plan_speculative_open(opening, open_unclaimed, max_speculative) else {
             tracing::debug!(
@@ -1385,7 +1487,7 @@ impl ConnectionManager {
             );
             let _ = self.disconnect(&id).await;
         }
-        let connection_id = self
+        let opened = self
             .spawn_agent_with(
                 agent_type,
                 working_dir,
@@ -1397,9 +1499,15 @@ impl ConnectionManager {
                 preferred_config_values,
                 AttachWait::No,
                 true,
+                OutsideWriterPolicy::Refuse,
             )
-            .await?;
-        Ok(PreconnectOutcome::Opening { connection_id })
+            .await;
+        match opened {
+            Ok(connection_id) => Ok(PreconnectOutcome::Opening { connection_id }),
+            // An outside process started meanwhile: nothing was opened.
+            Err(AcpError::SessionRunningElsewhere { .. }) => Ok(PreconnectOutcome::Skipped),
+            Err(e) => Err(e),
+        }
     }
 
     /// Unclaimed speculative connections: how many are still opening their
@@ -1743,6 +1851,171 @@ impl ConnectionManager {
             }
         }
         None
+    }
+
+    /// The pids of the agent processes codeg runs: every connection's, and
+    /// those of connections still exiting. claude-agent-acp starts each
+    /// Claude Code process as its own child, so a Claude Code process whose
+    /// parent is in here is codeg's (see [`crate::acp::outside_writer`]).
+    pub(crate) async fn own_agent_pids(&self) -> HashSet<u32> {
+        use std::sync::atomic::Ordering;
+        // Map lock first, as `disconnect` takes them: a connection moving into
+        // `draining` is seen in one place or the other, never in neither.
+        let connections = self.connections.lock().await;
+        let mut pids: HashSet<u32> = connections
+            .values()
+            .map(|conn| conn.child_pid.load(Ordering::SeqCst))
+            .filter(|pid| *pid != 0)
+            .collect();
+        let mut draining = self.draining.lock().await;
+        prune_reaped(&mut draining);
+        pids.extend(
+            draining
+                .iter()
+                .map(|child| child.pid.load(Ordering::SeqCst))
+                .filter(|pid| *pid != 0),
+        );
+        pids
+    }
+
+    /// The process codeg did not start that runs agent session `session_id`,
+    /// if one does. Claude Code only: its live-session registry is the one
+    /// signal there is. `runtime_env` is the launch's: a `CLAUDE_CONFIG_DIR`
+    /// there names the registry the agent would register in.
+    pub(crate) async fn outside_writer_of(
+        &self,
+        agent_type: AgentType,
+        session_id: &str,
+        runtime_env: &BTreeMap<String, String>,
+    ) -> Option<OutsideWriter> {
+        if agent_type != AgentType::ClaudeCode || session_id.is_empty() {
+            return None;
+        }
+        let own = self.own_agent_pids().await;
+        let lookup = self.outside_writers.clone();
+        let session_id = session_id.to_string();
+        let config_dir = launch_config_dir(runtime_env);
+        tokio::task::spawn_blocking(move || lookup.find(&session_id, &own, config_dir.as_deref()))
+            .await
+            .ok()
+            .flatten()
+    }
+
+    /// Whether a process codeg did not start runs `session_id`, and how its
+    /// transcript stands: what a session view polls while it waits for that
+    /// process to finish before connecting.
+    pub async fn outside_writer_status(
+        &self,
+        agent_type: AgentType,
+        session_id: &str,
+    ) -> OutsideWriterStatus {
+        let writer = self
+            .outside_writer_of(agent_type, session_id, &BTreeMap::new())
+            .await;
+        let transcript = if agent_type == AgentType::ClaudeCode {
+            let lookup = self.outside_writers.clone();
+            let session_id = session_id.to_string();
+            tokio::task::spawn_blocking(move || lookup.transcript_stamp(&session_id))
+                .await
+                .ok()
+                .flatten()
+        } else {
+            None
+        };
+        OutsideWriterStatus { writer, transcript }
+    }
+
+    /// Refuse to resume `session_id` while a process codeg did not start runs
+    /// it, unless the user chose to connect anyway.
+    pub(crate) async fn outside_writer_gate(
+        &self,
+        agent_type: AgentType,
+        session_id: &str,
+        runtime_env: &BTreeMap<String, String>,
+        policy: OutsideWriterPolicy,
+    ) -> Result<(), AcpError> {
+        let Some(writer) = self
+            .outside_writer_of(agent_type, session_id, runtime_env)
+            .await
+        else {
+            return Ok(());
+        };
+        match policy {
+            OutsideWriterPolicy::Allow => {
+                tracing::warn!(
+                    "[ACP] resuming session={session_id} although process {} runs it outside \
+                     codeg: the user chose to connect anyway",
+                    writer.pid
+                );
+                Ok(())
+            }
+            OutsideWriterPolicy::Refuse => {
+                tracing::info!(
+                    "[ACP] not resuming session={session_id}: process {} ({}) runs it outside codeg",
+                    writer.pid,
+                    writer.status.as_deref().unwrap_or("status unknown"),
+                );
+                Err(AcpError::SessionRunningElsewhere {
+                    pid: writer.pid,
+                    started_at: writer.started_at,
+                })
+            }
+        }
+    }
+
+    /// For the reuse branch of `spawn_agent_with`: refuse to hand out
+    /// `conn_id`, a copy of `session_id` nobody has claimed (parked or
+    /// pre-opened), while a process codeg did not start runs the session —
+    /// and end that idle copy, unless background work still runs in it. A
+    /// connection somebody uses is never touched here.
+    async fn refuse_unclaimed_copy_of_outside_session(
+        &self,
+        agent_type: AgentType,
+        session_id: &str,
+        conn_id: &str,
+        runtime_env: &BTreeMap<String, String>,
+    ) -> Result<(), AcpError> {
+        let state = {
+            let connections = self.connections.lock().await;
+            match connections.get(conn_id) {
+                Some(conn) => Arc::clone(&conn.state),
+                None => return Ok(()),
+            }
+        };
+        let (unclaimed, background) = {
+            let s = state.read().await;
+            (
+                s.parked || s.speculative,
+                s.has_active_background_work(chrono::Utc::now()),
+            )
+        };
+        if !unclaimed {
+            return Ok(());
+        }
+        let Some(writer) = self
+            .outside_writer_of(agent_type, session_id, runtime_env)
+            .await
+        else {
+            return Ok(());
+        };
+        if background {
+            tracing::info!(
+                "[ACP] not handing out connection={conn_id} (session={session_id}): process {} \
+                 runs the session outside codeg; kept for its background work",
+                writer.pid
+            );
+        } else {
+            tracing::info!(
+                "[ACP] ending idle connection={conn_id} (session={session_id}): process {} runs \
+                 the session outside codeg",
+                writer.pid
+            );
+            let _ = self.disconnect(conn_id).await;
+        }
+        Err(AcpError::SessionRunningElsewhere {
+            pid: writer.pid,
+            started_at: writer.started_at,
+        })
     }
 
     /// Forwards a prompt to the connection's command channel without
@@ -6802,6 +7075,290 @@ mod tests {
             .unwrap();
         assert_eq!(outcome, PreconnectOutcome::Skipped);
         assert_eq!(live_ids(&mgr).await, vec!["live"]);
+    }
+
+    // ── A session a process codeg did not start runs (acp::outside_writer) ──
+
+    /// When the outside process registered: Mon Nov  2 10:48:09 2026 UTC.
+    const OUTSIDE_STARTED: i64 = 1_793_616_489;
+    /// The outside process's pid.
+    const OUTSIDE_PID: u32 = 4242;
+    /// A working directory that does not exist: should a refusal ever regress
+    /// into a spawn, no agent can start there.
+    const NOWHERE: &str = "/nonexistent/codeg-outside-writer-test";
+
+    struct OutsideWorld {
+        _dir: tempfile::TempDir,
+        processes: Arc<crate::acp::outside_writer::testing::FakeProcesses>,
+        mgr: ConnectionManager,
+    }
+
+    /// A manager reading a registry and a process table of the test's own, in
+    /// which process [`OUTSIDE_PID`], a child of `parent`, runs `session`, and
+    /// the session's transcript holds `transcript` bytes.
+    fn outside_world_with_parent(session: &str, parent: u32) -> OutsideWorld {
+        use crate::acp::outside_writer::testing::{write_record, FakeProcesses};
+        let dir = tempfile::tempdir().unwrap();
+        let processes = Arc::new(FakeProcesses::default());
+        processes.start(OUTSIDE_PID, parent, OUTSIDE_STARTED);
+        write_record(
+            &dir.path().join("sessions"),
+            OUTSIDE_PID,
+            session,
+            OUTSIDE_STARTED,
+        );
+        let project = dir.path().join("projects").join("-work-project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join(format!("{session}.jsonl")), b"{}\n{}\n").unwrap();
+        let lookup = OutsideWriterLookup::new(dir.path().to_path_buf(), processes.clone());
+        OutsideWorld {
+            _dir: dir,
+            processes,
+            mgr: ConnectionManager::new().with_outside_writer_lookup(lookup),
+        }
+    }
+
+    /// As [`outside_world_with_parent`], the process started from a terminal.
+    fn outside_world(session: &str) -> OutsideWorld {
+        outside_world_with_parent(session, 1)
+    }
+
+    async fn connect_to(
+        mgr: &ConnectionManager,
+        working_dir: &str,
+        session: &str,
+        policy: OutsideWriterPolicy,
+    ) -> Result<String, AcpError> {
+        mgr.spawn_agent_detached_with_policy(
+            AgentType::ClaudeCode,
+            Some(working_dir.to_string()),
+            Some(session.to_string()),
+            BTreeMap::new(),
+            "test-window".to_string(),
+            EventEmitter::Noop,
+            None,
+            BTreeMap::new(),
+            policy,
+        )
+        .await
+    }
+
+    fn is_running_elsewhere(err: &AcpError) -> bool {
+        matches!(
+            err,
+            AcpError::SessionRunningElsewhere {
+                pid: OUTSIDE_PID,
+                started_at: Some(at),
+            } if *at == OUTSIDE_STARTED * 1000
+        )
+    }
+
+    async fn set_unclaimed(mgr: &ConnectionManager, id: &str, background: bool) {
+        let map = mgr.connections.lock().await;
+        let mut s = map.get(id).unwrap().state.write().await;
+        s.parked = true;
+        if background {
+            s.background_outstanding = 1;
+            s.background_activity_at = Some(chrono::Utc::now());
+        }
+    }
+
+    /// The refusal comes before anything else a resume does: no agent is
+    /// started, and a holder of the session elsewhere, which a resume would
+    /// close, is left alone.
+    #[tokio::test]
+    async fn outside_writer_refuses_a_resume_and_changes_nothing() {
+        let world = outside_world("session-x");
+        let claude = AgentType::ClaudeCode;
+        let live = ConnectionStatus::Connected;
+        insert_session_holder(&world.mgr, "elsewhere", claude, "/a", "session-x", Some(1), live)
+            .await;
+        let err = connect_to(&world.mgr, NOWHERE, "session-x", OutsideWriterPolicy::Refuse)
+            .await
+            .unwrap_err();
+        assert!(is_running_elsewhere(&err), "got {err:?}");
+        assert_eq!(live_ids(&world.mgr).await, vec!["elsewhere"]);
+    }
+
+    /// The gate itself: shut while the process runs, open to a user who
+    /// chose to connect anyway, and open once the process has exited — the
+    /// moment a waiting view connects.
+    #[tokio::test]
+    async fn outside_writer_gate_opens_for_connect_anyway_and_once_the_process_exits() {
+        let world = outside_world("session-x");
+        let env = BTreeMap::new();
+        let claude = AgentType::ClaudeCode;
+        let refuse = OutsideWriterPolicy::Refuse;
+        let gate = |agent, session: &'static str, policy| {
+            let mgr = world.mgr.clone_ref();
+            let env = env.clone();
+            async move { mgr.outside_writer_gate(agent, session, &env, policy).await }
+        };
+        let err = gate(claude, "session-x", refuse).await.unwrap_err();
+        assert!(is_running_elsewhere(&err), "got {err:?}");
+        assert!(gate(claude, "session-x", OutsideWriterPolicy::Allow)
+            .await
+            .is_ok());
+        // Another session, and an agent that keeps no registry, pass.
+        assert!(gate(claude, "session-y", refuse).await.is_ok());
+        assert!(gate(AgentType::Codex, "session-x", refuse).await.is_ok());
+
+        world.processes.exit(OUTSIDE_PID);
+        assert!(gate(claude, "session-x", refuse).await.is_ok());
+    }
+
+    /// A Claude Code process whose parent is a codeg agent process is
+    /// codeg's own, whatever session it runs.
+    #[tokio::test]
+    async fn outside_writer_is_never_a_process_of_codegs_own() {
+        let world = outside_world_with_parent("session-x", 7777);
+        let pid = insert_session_holder(
+            &world.mgr,
+            "adapter",
+            AgentType::ClaudeCode,
+            "/a",
+            "session-other",
+            None,
+            ConnectionStatus::Connected,
+        )
+        .await;
+        pid.store(7777, std::sync::atomic::Ordering::SeqCst);
+        let env = BTreeMap::new();
+        assert!(world
+            .mgr
+            .outside_writer_gate(
+                AgentType::ClaudeCode,
+                "session-x",
+                &env,
+                OutsideWriterPolicy::Refuse
+            )
+            .await
+            .is_ok());
+    }
+
+    /// Nor once the adapter is on its way out: its process can still be
+    /// exiting, and so can the CLI below it.
+    #[tokio::test]
+    async fn outside_writer_own_pids_include_connections_still_exiting() {
+        let mgr = ConnectionManager::new();
+        let claude = AgentType::ClaudeCode;
+        let live = || ConnectionStatus::Connected;
+        let a = insert_session_holder(&mgr, "a", claude, "/a", "S", None, live()).await;
+        a.store(1111, std::sync::atomic::Ordering::SeqCst);
+        let b = insert_session_holder(&mgr, "b", claude, "/b", "T", None, live()).await;
+        b.store(2222, std::sync::atomic::Ordering::SeqCst);
+        insert_session_holder(&mgr, "c", claude, "/c", "U", None, live()).await;
+        mgr.disconnect("b").await.unwrap();
+        assert_eq!(mgr.own_agent_pids().await, HashSet::from([1111, 2222]));
+    }
+
+    /// A hover never starts an agent next to an outside process, and never
+    /// drops the pre-open it already holds for something else either.
+    #[tokio::test]
+    async fn outside_writer_skips_a_hover_preconnect() {
+        let world = outside_world("session-x");
+        let claude = AgentType::ClaudeCode;
+        let live = ConnectionStatus::Connected;
+        insert_session_holder(&world.mgr, "pre", claude, "/p", "session-p", None, live).await;
+        {
+            let map = world.mgr.connections.lock().await;
+            map.get("pre").unwrap().state.write().await.speculative = true;
+        }
+        let outcome = world
+            .mgr
+            .preconnect(
+                claude,
+                Some(NOWHERE.to_string()),
+                "session-x".to_string(),
+                BTreeMap::new(),
+                "test-window".to_string(),
+                EventEmitter::Noop,
+                None,
+                BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(outcome, PreconnectOutcome::Skipped);
+        assert_eq!(live_ids(&world.mgr).await, vec!["pre"]);
+    }
+
+    /// A released warm copy sat idle while the outside process ran the
+    /// session: it is not handed out, and it goes.
+    #[tokio::test]
+    async fn outside_writer_ends_an_idle_unclaimed_copy_instead_of_handing_it_out() {
+        let world = outside_world("session-x");
+        let claude = AgentType::ClaudeCode;
+        let live = ConnectionStatus::Connected;
+        insert_session_holder(&world.mgr, "warm", claude, NOWHERE, "session-x", Some(1), live)
+            .await;
+        set_unclaimed(&world.mgr, "warm", false).await;
+        let err = connect_to(&world.mgr, NOWHERE, "session-x", OutsideWriterPolicy::Refuse)
+            .await
+            .unwrap_err();
+        assert!(is_running_elsewhere(&err), "got {err:?}");
+        assert!(live_ids(&world.mgr).await.is_empty(), "the idle copy is ended");
+    }
+
+    /// One with background work still running in it is kept for that work,
+    /// but not handed out either.
+    #[tokio::test]
+    async fn outside_writer_keeps_an_unclaimed_copy_with_background_work() {
+        let world = outside_world("session-x");
+        let claude = AgentType::ClaudeCode;
+        let live = ConnectionStatus::Connected;
+        insert_session_holder(&world.mgr, "warm", claude, NOWHERE, "session-x", Some(1), live)
+            .await;
+        set_unclaimed(&world.mgr, "warm", true).await;
+        let err = connect_to(&world.mgr, NOWHERE, "session-x", OutsideWriterPolicy::Refuse)
+            .await
+            .unwrap_err();
+        assert!(is_running_elsewhere(&err), "got {err:?}");
+        assert_eq!(live_ids(&world.mgr).await, vec!["warm"]);
+    }
+
+    /// A connection somebody uses is joined as always, and an unclaimed one
+    /// is handed to a user who chose to connect anyway.
+    #[tokio::test]
+    async fn outside_writer_leaves_a_connection_in_use_and_connect_anyway_alone() {
+        let world = outside_world("session-x");
+        let claude = AgentType::ClaudeCode;
+        let live = || ConnectionStatus::Connected;
+        insert_session_holder(&world.mgr, "used", claude, NOWHERE, "session-x", Some(1), live())
+            .await;
+        assert_eq!(
+            connect_to(&world.mgr, NOWHERE, "session-x", OutsideWriterPolicy::Refuse)
+                .await
+                .unwrap(),
+            "used"
+        );
+
+        let elsewhere = format!("{NOWHERE}-2");
+        insert_session_holder(&world.mgr, "warm", claude, &elsewhere, "session-x", Some(1), live())
+            .await;
+        set_unclaimed(&world.mgr, "warm", false).await;
+        assert_eq!(
+            connect_to(&world.mgr, &elsewhere, "session-x", OutsideWriterPolicy::Allow)
+                .await
+                .unwrap(),
+            "warm"
+        );
+        assert_eq!(live_ids(&world.mgr).await, vec!["used", "warm"]);
+    }
+
+    /// What a waiting view polls: the process, then nothing once it exits —
+    /// with the transcript's size all along.
+    #[tokio::test]
+    async fn outside_writer_status_reports_the_process_until_it_exits() {
+        let world = outside_world("session-x");
+        let claude = AgentType::ClaudeCode;
+        let status = world.mgr.outside_writer_status(claude, "session-x").await;
+        assert_eq!(status.writer.map(|w| w.pid), Some(OUTSIDE_PID));
+        assert_eq!(status.transcript.map(|t| t.len), Some(6));
+
+        world.processes.exit(OUTSIDE_PID);
+        let status = world.mgr.outside_writer_status(claude, "session-x").await;
+        assert_eq!(status.writer, None);
+        assert_eq!(status.transcript.map(|t| t.len), Some(6));
     }
 
     /// Before a spawn there is no keeper: every live holder of the session goes.

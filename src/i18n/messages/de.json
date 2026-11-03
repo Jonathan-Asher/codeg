@@ -3600,6 +3600,9 @@
         "mentionGroupSkill": "Fähigkeiten"
       },
       "messageQueue": {
+        "outsideWriter": "Wird gesendet, sobald der andere Prozess fertig ist und codeg verbunden ist.",
+        "outsideWriterStopped": "Nicht gesendet: codeg ist nicht verbunden, solange ein anderer Prozess diese Sitzung ausführt.",
+        "connect": "Verbinden",
         "addToQueue": "Zur Warteschlange",
         "saveEdit": "Speichern",
         "cancelEdit": "Bearbeitung abbrechen",
@@ -4301,6 +4304,21 @@
         "reconnectDisabledDuringTurn": "Verfügbar, sobald die aktuelle Runde abgeschlossen ist",
         "dismiss": "Schließen",
         "applied": "Neue Konfiguration angewendet"
+      },
+      "outsideWriter": {
+        "waiting": "Diese Sitzung läuft in einem anderen Prozess (PID {pid}, gestartet {time}). codeg verbindet sich, sobald er fertig ist.",
+        "waitingNoTime": "Diese Sitzung läuft in einem anderen Prozess (PID {pid}). codeg verbindet sich, sobald er fertig ist.",
+        "stopped": "Kein Warten auf Prozess {pid}: codeg verbindet sich mit dieser Sitzung nur, wenn du es willst.",
+        "connectAnyway": "Trotzdem verbinden",
+        "connectAnywayHint": "Jetzt verbinden, während der andere Prozess diese Sitzung noch ausführt",
+        "connecting": "Verbinden…",
+        "stopWaiting": "Nicht mehr warten",
+        "connect": "Verbinden",
+        "confirmTitle": "Trotzdem verbinden?",
+        "confirmDescription": "Prozess {pid} führt diese Sitzung noch aus. Setzt codeg sie ebenfalls fort, schreiben beide in ihren Verlauf, der sich dann in zwei Zweige aufspalten kann.",
+        "confirmAction": "Trotzdem verbinden",
+        "cancel": "Abbrechen",
+        "composerReason": "Läuft in einem anderen Prozess"
       },
       "piProjectTrust": {
         "title": "Dieses Projekt enthält pi-Ressourcen",
