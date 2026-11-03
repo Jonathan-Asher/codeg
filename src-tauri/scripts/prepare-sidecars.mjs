@@ -5,11 +5,17 @@
 // What it does:
 //   1. Resolves the target triple — `--target <triple>` arg, or
 //      `TAURI_TARGET_TRIPLE` env, or the host's `rustc -vV` host triple.
-//   2. Runs `cargo build --release --bin codeg-mcp --no-default-features`
-//      for that triple from `src-tauri/`.
+//   2. Except on macOS: runs
+//      `cargo build --release --bin codeg-mcp --no-default-features` for that
+//      triple from `src-tauri/`.
 //   3. Copies the produced binary to
 //      `src-tauri/binaries/codeg-mcp-<triple>{.exe}` so Tauri's externalBin
 //      bundler picks it up under the bare name `codeg-mcp` at install time.
+//      macOS skips 2 and 3: `tauri build` compiles `codeg-mcp` as one of the
+//      package's binaries and its bundler copies that one into
+//      Contents/MacOS, so a sidecar build there was thrown away (and cost a
+//      second compile of the whole library). tauri.macos.conf.json does not
+//      list it.
 //   4. On macOS targets only: builds the natural-voice sidecar `codeg-tts`
 //      (Swift package `native/codeg-tts`, BlueTTS 2.5 + RenikudPlus) with
 //      `swift build -c release` and stages it the same way. It is listed in
@@ -30,6 +36,11 @@
 //      is unavailable, and a stub framework. GPL-3.0-or-later like codeg-tts;
 //      see native/codeg-talk/README.md.
 //
+// Every staged file and framework is replaced only when its bytes changed.
+// tauri-build and build.rs watch them (`cargo:rerun-if-changed`, which goes
+// by modification time), so rewriting an identical copy re-ran the build
+// script and recompiled the whole crate on every build.
+//
 // Why a separate script (not inline in beforeBuildCommand / GitHub Actions):
 //   - Cross-compile in release.yml passes `--target <triple>` so we honour
 //     the matrix triple rather than rebuilding for the host.
@@ -48,6 +59,10 @@ import {
   mkdirSync,
   chmodSync,
   mkdtempSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  lstatSync,
   rmSync,
   symlinkSync,
 } from "node:fs"
@@ -89,6 +104,72 @@ function parseArgs(argv) {
   return args
 }
 
+/** True when `a` and `b` are both regular files with the same bytes. */
+function sameFile(a, b) {
+  if (!existsSync(b)) return false
+  const sa = lstatSync(a)
+  const sb = lstatSync(b)
+  if (!sa.isFile() || !sb.isFile() || sa.size !== sb.size) return false
+  return readFileSync(a).equals(readFileSync(b))
+}
+
+/**
+ * True when the trees at `a` and `b` hold the same entries: the same names,
+ * the same symlink targets and the same file bytes.
+ */
+function sameTree(a, b) {
+  if (!existsSync(b)) return false
+  const sa = lstatSync(a)
+  const sb = lstatSync(b)
+  if (sa.isSymbolicLink() || sb.isSymbolicLink()) {
+    return (
+      sa.isSymbolicLink() &&
+      sb.isSymbolicLink() &&
+      readlinkSync(a) === readlinkSync(b)
+    )
+  }
+  if (sa.isDirectory() || sb.isDirectory()) {
+    if (!sa.isDirectory() || !sb.isDirectory()) return false
+    const names = readdirSync(a).sort()
+    const other = readdirSync(b).sort()
+    if (names.length !== other.length) return false
+    return names.every(
+      (name, i) => name === other[i] && sameTree(join(a, name), join(b, name))
+    )
+  }
+  return sameFile(a, b)
+}
+
+/**
+ * Copy the file at `src` to `dest` unless `dest` already holds the same bytes,
+ * and make it executable. An unchanged sidecar keeps its modification time, so
+ * cargo does not re-run the build script that watches it.
+ */
+function stageFile(src, dest) {
+  if (sameFile(src, dest)) {
+    log(`unchanged: ${dest}`)
+    return
+  }
+  rmSync(dest, { force: true })
+  copyFileSync(src, dest)
+  chmodSync(dest, 0o755)
+  log(`sidecar staged at ${dest}`)
+}
+
+/**
+ * Replace the framework at `dest` with the one at `src` unless the two are
+ * already identical. ditto keeps the framework's Versions/Current symlinks.
+ */
+function stageFramework(src, dest) {
+  if (sameTree(src, dest)) {
+    log(`unchanged: ${dest}`)
+    return
+  }
+  rmSync(dest, { recursive: true, force: true })
+  execFileSync("ditto", [src, dest], { stdio: "inherit" })
+  log(`framework staged at ${dest}`)
+}
+
 function resolveHostTriple() {
   try {
     const out = execFileSync("rustc", ["-vV"], { encoding: "utf8" })
@@ -109,10 +190,23 @@ function main() {
   const { target: cliTarget } = parseArgs(process.argv.slice(2))
   const target =
     cliTarget || process.env.TAURI_TARGET_TRIPLE || resolveHostTriple()
+  log(`target triple: ${target}`)
+  buildMcpSidecar(target)
+  buildTtsSidecar(target)
+  buildTalkSidecar(target)
+}
+
+/**
+ * The `codeg-mcp` companion as an externalBin sidecar, for every target but
+ * macOS, where `tauri build` bundles the package's own `codeg-mcp` binary.
+ */
+function buildMcpSidecar(target) {
+  if (target.endsWith("apple-darwin")) {
+    log(`${BIN_NAME}: no sidecar on macOS (tauri build bundles the binary)`)
+    return
+  }
   const isWindows = target.includes("windows")
   const ext = isWindows ? ".exe" : ""
-
-  log(`target triple: ${target}`)
   log(`building ${BIN_NAME} (--release --no-default-features)`)
 
   // cargo build needs to run from src-tauri so it resolves the local manifest
@@ -146,17 +240,7 @@ function main() {
   }
 
   mkdirSync(BINARIES_DIR, { recursive: true })
-  const dest = join(BINARIES_DIR, `${BIN_NAME}-${target}${ext}`)
-  copyFileSync(built, dest)
-  if (!isWindows) {
-    // copyFileSync preserves modes on POSIX, but be explicit for tarball
-    // sources that may strip the +x bit.
-    chmodSync(dest, 0o755)
-  }
-  log(`sidecar staged at ${dest}`)
-
-  buildTtsSidecar(target)
-  buildTalkSidecar(target)
+  stageFile(built, join(BINARIES_DIR, `${BIN_NAME}-${target}${ext}`))
 }
 
 /** The Swift triple for a Rust darwin triple (`aarch64` → `arm64`). */
@@ -216,15 +300,16 @@ function buildTtsSidecar(target) {
 
   mkdirSync(BINARIES_DIR, { recursive: true })
   const dest = join(BINARIES_DIR, `${TTS_BIN_NAME}-${target}`)
-  if (builds.length > 1) {
-    execFileSync("lipo", ["-create", "-output", dest, ...builds], {
-      stdio: "inherit",
-    })
-  } else {
-    copyFileSync(builds[0], dest)
-  }
-  chmodSync(dest, 0o755)
-  log(`sidecar staged at ${dest}`)
+  stageFile(builds.length > 1 ? lipo(builds) : builds[0], dest)
+}
+
+/** A universal binary of `slices`, written to a temporary file. */
+function lipo(slices) {
+  const out = join(mkdtempSync(join(tmpdir(), "codeg-lipo-")), "universal")
+  execFileSync("lipo", ["-create", "-output", out, ...slices], {
+    stdio: "inherit",
+  })
+  return out
 }
 
 function requireSwift(what, skipVar) {
@@ -279,20 +364,15 @@ function buildTalkSidecar(target) {
   if (!existsSync(built) || !existsSync(builtFramework)) {
     die(`expected ${built} and ${builtFramework} after swift build`)
   }
-  if (target === "universal-apple-darwin") {
-    // Apple Silicon runs the real helper; an Intel Mac runs the stub's slice.
-    const stub = compileTalkStub(["x86_64"])
-    execFileSync("lipo", ["-create", "-output", dest, built, stub], {
-      stdio: "inherit",
-    })
-  } else {
-    copyFileSync(built, dest)
-  }
-  chmodSync(dest, 0o755)
-  // ditto keeps the framework's Versions/Current symlinks.
-  rmSync(framework, { recursive: true, force: true })
-  execFileSync("ditto", [builtFramework, framework], { stdio: "inherit" })
-  log(`sidecar staged at ${dest}, ${WHISPER_FRAMEWORK} at ${framework}`)
+  // Apple Silicon runs the real helper; on a universal build an Intel Mac
+  // runs the stub's slice.
+  stageFile(
+    target === "universal-apple-darwin"
+      ? lipo([built, compileTalkStub(["x86_64"])])
+      : built,
+    dest
+  )
+  stageFramework(builtFramework, framework)
 }
 
 /** The stub's architectures for a target. */
@@ -322,15 +402,18 @@ function compileTalkStub(arches) {
 
 /**
  * The stub helper, and a stub whisper.framework for tauri.macos.conf.json to
- * bundle (nothing loads it).
+ * bundle (nothing loads it). Both are built in a temporary directory and
+ * staged only when they differ from what is already there.
  */
 function stageTalkStub(target, dest, framework) {
   const arches = stubArches(target)
-  copyFileSync(compileTalkStub(arches), dest)
-  chmodSync(dest, 0o755)
+  stageFile(compileTalkStub(arches), dest)
 
-  rmSync(framework, { recursive: true, force: true })
-  const version = join(framework, "Versions", "A")
+  const stub = join(
+    mkdtempSync(join(tmpdir(), "codeg-whisper-stub-")),
+    WHISPER_FRAMEWORK
+  )
+  const version = join(stub, "Versions", "A")
   mkdirSync(join(version, "Resources"), { recursive: true })
   execFileSync(
     "clang",
@@ -350,10 +433,10 @@ function stageTalkStub(target, dest, framework) {
     join(TALK_PACKAGE, "stub", "whisper-stub-Info.plist"),
     join(version, "Resources", "Info.plist")
   )
-  symlinkSync("A", join(framework, "Versions", "Current"))
-  symlinkSync("Versions/Current/whisper", join(framework, "whisper"))
-  symlinkSync("Versions/Current/Resources", join(framework, "Resources"))
-  log(`stub staged at ${dest}, stub ${WHISPER_FRAMEWORK} at ${framework}`)
+  symlinkSync("A", join(stub, "Versions", "Current"))
+  symlinkSync("Versions/Current/whisper", join(stub, "whisper"))
+  symlinkSync("Versions/Current/Resources", join(stub, "Resources"))
+  stageFramework(stub, framework)
 }
 
 main()

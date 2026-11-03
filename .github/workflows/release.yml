@@ -300,20 +300,23 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      # Build the `codeg-mcp` companion binary for the matrix target and
-      # stage it as a Tauri sidecar at
-      # `src-tauri/binaries/codeg-mcp-<triple>{.exe}`. `tauri-action` (below)
-      # then bundles it via the `bundle.externalBin` entry in
+      # Build the sidecars for the matrix target and stage them under
+      # `src-tauri/binaries/`. On Linux and Windows that is the `codeg-mcp`
+      # companion, `src-tauri/binaries/codeg-mcp-<triple>{.exe}`, which
+      # `tauri-action` (below) bundles via the `bundle.externalBin` entry in
       # `tauri.conf.json` — Tauri installs it next to the main executable
-      # (Contents/MacOS on macOS, install root on Linux/Windows) where the
-      # runtime `locate_codeg_mcp_binary()` finds it via `current_exe`
-      # sibling lookup. The Linux arm64 cross env vars set above also
-      # apply to this cargo invocation.
-      - name: Stage codeg-mcp sidecar for Tauri bundle
+      # (install root on Linux/Windows) where the runtime
+      # `locate_codeg_mcp_binary()` finds it via `current_exe` sibling
+      # lookup. On macOS it is `codeg-tts` and `codeg-talk`: there `tauri
+      # build` compiles `codeg-mcp` as a binary of the package and bundles it
+      # into Contents/MacOS itself. The Linux arm64 cross env vars set above
+      # also apply to this cargo invocation.
+      - name: Stage sidecars for the Tauri bundle
         shell: bash
         run: pnpm tauri:prepare-sidecars --target ${{ matrix.target }}
 
       - name: Verify codeg-mcp sidecar landed
+        if: ${{ !contains(matrix.target, 'apple-darwin') }}
         shell: bash
         run: |
           ext=""

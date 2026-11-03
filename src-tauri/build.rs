@@ -1,33 +1,36 @@
 fn main() {
     #[cfg(feature = "tauri-runtime")]
     {
-        ensure_sidecar_placeholder("codeg-mcp");
-        // macOS only: the natural-voice sidecar (`native/codeg-tts`) and Talk
-        // on the Mac's helper (`native/codeg-talk`) with the whisper.framework
-        // it links, listed in tauri.macos.conf.json. Built by the same
-        // prepare-sidecars step.
         if std::env::var("TARGET").unwrap_or_default().contains("apple-darwin") {
+            // macOS: the natural-voice sidecar (`native/codeg-tts`) and Talk on
+            // the Mac's helper (`native/codeg-talk`) with the whisper.framework
+            // it links, listed in tauri.macos.conf.json and built by
+            // prepare-sidecars. `codeg-mcp` is not a sidecar there: `tauri
+            // build` compiles it as one of this package's binaries and bundles
+            // it into Contents/MacOS itself.
             ensure_sidecar_placeholder("codeg-tts");
             ensure_sidecar_placeholder("codeg-talk");
             ensure_framework_placeholder("whisper");
+        } else {
+            ensure_sidecar_placeholder("codeg-mcp");
         }
         tauri_build::build();
     }
 }
 
 /// Tauri's bundler validates that every `bundle.externalBin` path resolves
-/// to an existing file at build.rs time. The real `codeg-mcp` sidecar is
-/// produced by `pnpm tauri:prepare-sidecars` (invoked from
-/// `beforeBuildCommand` / `beforeDevCommand` and the CI release matrix) —
-/// but plain `cargo check --features tauri-runtime` doesn't go through that
-/// path, so without a backstop every contributor would hit
+/// to an existing file at build.rs time. The real sidecars are produced by
+/// `pnpm tauri:prepare-sidecars` (invoked from `beforeBuildCommand` /
+/// `beforeDevCommand` and the CI release matrix) — but plain
+/// `cargo check --features tauri-runtime` doesn't go through that path, so
+/// without a backstop every contributor would hit
 /// `resource path ... doesn't exist` on first compile.
 ///
 /// We write a zero-byte placeholder when the sidecar is missing so
 /// `cargo check` / clippy / rust-analyzer succeed. Production paths
 /// overwrite the placeholder with the real binary before Tauri bundles it:
 ///   * `pnpm tauri build`  → `beforeBuildCommand` → `prepare-sidecars.mjs`
-///   * release.yml         → explicit "Stage codeg-mcp sidecar" step
+///   * release.yml         → explicit "Stage sidecars" step
 ///   * `pnpm tauri dev`    → `beforeDevCommand` → `prepare-sidecars.mjs`
 ///
 /// If you ever bypass those wrappers (e.g. invoking the Tauri CLI directly
