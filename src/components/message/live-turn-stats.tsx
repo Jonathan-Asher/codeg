@@ -367,7 +367,11 @@ export function LiveTurnStats({
   const elapsedLabel = formatElapsedLabel(elapsed, t)
 
   return (
-    <div className="@container/turnstats shrink-0">
+    // Squeezed (a tall card docked under a short window leaves the message
+    // list less than this row), the row gives way and clips instead of
+    // spilling onto the card. With room to spare it keeps its full height:
+    // only a shortfall shrinks a flex item.
+    <div className="@container/turnstats min-h-0 overflow-clip">
       <div className="flex min-h-8 flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4 py-1 text-xs leading-none text-muted-foreground">
         <AgentIcon
           agentType={agentType}
