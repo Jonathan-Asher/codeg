@@ -3745,10 +3745,7 @@ impl ConnectionManager {
         };
         match (live, opening) {
             (Some(live), _) => {
-                if crate::acp::continued_session_ids(agent_type, &live)
-                    .iter()
-                    .any(|ancestor| *ancestor == row_session)
-                {
+                if crate::acp::continued_session_ids(agent_type, &live).contains(&row_session) {
                     return None;
                 }
                 Some(format!(
