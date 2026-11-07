@@ -782,6 +782,23 @@ describe("ConversationDetailPanel session-load failure surface", () => {
       "detail?.summary.external_id ?? runtimeExternalId ?? undefined"
     )
   })
+
+  it("holds the auto-connect until the row's session id is known, not just loaded", () => {
+    // A cold open restored from the history cache is no loading state while
+    // it reads the disk, and the view's mount has already created the runtime
+    // session: "not loading" let the connect through with no session id, the
+    // tab ran a brand-new session, and a fork from it failed with "Session …
+    // not found". The gate (`awaitsHistoricalSessionId`, tested on its own)
+    // also waits while nothing names the row's session.
+    expect(source).toContain(
+      "const awaitingHistoricalSessionId = awaitsHistoricalSessionId({"
+    )
+    expect(source).toContain("opensRow: effectiveConversationId > 0,")
+    expect(source).toContain("hasDetail: detail != null,")
+    expect(source).toContain("detailFailed: detailError != null,")
+    expect(source).toContain("sessionId: externalId,")
+    expect(source).not.toContain("(detailLoading || detailUnverified)\n")
+  })
 })
 
 describe("ConversationDetailPanel actions before the session is ready", () => {

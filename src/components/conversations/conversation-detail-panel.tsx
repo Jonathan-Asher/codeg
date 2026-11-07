@@ -246,6 +246,7 @@ import {
 } from "@/lib/export-conversation"
 import { useExportLabels } from "@/lib/use-export-labels"
 import { resolveActiveSessionDetails } from "./active-session-details"
+import { awaitsHistoricalSessionId } from "./historical-session-gate"
 import { ConversationDetailHeader } from "./conversation-detail-header"
 import { SessionDetailsDialog } from "./session-details-dialog"
 import { TalkDock } from "@/components/talk-voice/talk-dock"
@@ -706,14 +707,23 @@ const ConversationTabView = memo(function ConversationTabView({
   // session's external_id has been resolved before auto-connecting.
   // Otherwise the auto-connect effect fires with sessionId=undefined and
   // the backend falls back to session/new, orphaning the historical
-  // context. cline doesn't support session resume, so it connects
-  // immediately regardless.
+  // context — and the tab stays on that new session. "Resolved" is a session
+  // id or a detail that came back, not merely "not loading": a cold open
+  // restored from the history cache is no loading state while it reads the
+  // disk (see `awaitsHistoricalSessionId`). cline doesn't support session
+  // resume, so it connects immediately regardless.
   // A transcript painted from the history cache counts as loading here until
   // the server confirms its session id: a fork may have re-pointed the row.
-  const awaitingHistoricalSessionId =
-    hasPersistedConversation &&
-    selectedAgent !== "cline" &&
-    (detailLoading || detailUnverified)
+  const awaitingHistoricalSessionId = awaitsHistoricalSessionId({
+    hasPersistedConversation,
+    agentType: selectedAgent,
+    opensRow: effectiveConversationId > 0,
+    detailLoading,
+    detailUnverified,
+    hasDetail: detail != null,
+    detailFailed: detailError != null,
+    sessionId: externalId,
+  })
   // Install status of the currently selected agent. An agent can be enabled and
   // platform-available yet have no CLI/SDK installed; selecting one can never
   // connect. Rather than firing a doomed (and racy) auto-connect whose only
@@ -2364,14 +2374,7 @@ const ConversationTabView = memo(function ConversationTabView({
           title:
             err instanceof ForkBetweenTurnsOnlyError
               ? t("forkSessionBusy")
-              : t("forkSessionFailed", {
-                  error:
-                    err instanceof Error
-                      ? err.message
-                      : typeof err === "object" && err !== null
-                        ? JSON.stringify(err)
-                        : String(err),
-                }),
+              : t("forkSessionFailed", { error: toErrorMessage(err) }),
         })
       } finally {
         forkInFlightRef.current = false
