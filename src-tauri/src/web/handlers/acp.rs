@@ -657,13 +657,14 @@ pub async fn acp_fork(
             // A fork requested while a turn is in flight is an expected,
             // recoverable condition (409) — the frontend re-queues — not a
             // server fault (500). Mirror `acp_prompt`. So is an edit whose fork
-            // point cannot be named: the request is refused, nothing broke
+            // point cannot be named, and a connection that does not run the
+            // conversation's session: the request is refused, nothing broke
             // (400). Other errors stay 500.
             match e {
                 AcpError::TurnInProgress => {
                     AppCommandError::new(AppErrorCode::TurnInProgress, message)
                 }
-                AcpError::ForkPointUnresolved(_) => {
+                AcpError::ForkPointUnresolved(_) | AcpError::ForkSessionMismatch(_) => {
                     AppCommandError::new(AppErrorCode::InvalidInput, message)
                 }
                 _ => AppCommandError::task_execution_failed(message),

@@ -107,6 +107,15 @@ pub enum AcpError {
     /// none of its conversations can be forked.
     #[error("this agent cannot fork a conversation")]
     ForkUnsupported,
+    /// An in-place fork was asked of a connection that does not run the
+    /// conversation's own agent session: it runs another session (a
+    /// brand-new one, opened before the conversation's session id was
+    /// known), or it belongs to another conversation. Its live session is
+    /// what an in-place fork forks, so the agent would be asked for a reply
+    /// it has never seen. Refused before anything is linked or forked.
+    /// Carries the reason shown to the user.
+    #[error("{0}")]
+    ForkSessionMismatch(String),
     /// Every enabled account of the local account pool is at its limit, so
     /// the agent cannot take a request: a prompt held back before it reached
     /// the agent, or an attach stopped because the agent hung in its own 429
@@ -188,6 +197,7 @@ impl AcpError {
             Self::ForkPointUnresolved(_) => Some("fork_point_unresolved"),
             Self::ForkNeedsIdle => Some("fork_needs_idle"),
             Self::ForkUnsupported => Some("fork_unsupported"),
+            Self::ForkSessionMismatch(_) => Some("fork_session_mismatch"),
             Self::PoolExhausted { .. } => Some("pool_exhausted"),
             Self::SessionRunningElsewhere { .. } => Some("session_running_elsewhere"),
             Self::Protocol(_) => None,

@@ -3492,6 +3492,21 @@ impl ConnectionManager {
         let prompt_lock = self.clone_prompt_lock(conn_id).await?;
         let prompt_guard = prompt_lock.lock_owned().await;
 
+        // An in-place fork forks the connection's LIVE session at a reply
+        // named from the conversation's transcript, then moves that row to the
+        // fork. Both only line up when the live session is the row's own, so
+        // check it first — under the prompt lock, and before the row is
+        // linked: a connection that opened a brand-new session for a
+        // conversation whose session id it did not know yet would otherwise
+        // be linked to that row for good, and the agent asked to fork a
+        // session that has no such reply ("Session … not found").
+        if let Some(reason) =
+            Self::fork_session_mismatch(db, &state_arc, link_conversation_id).await
+        {
+            tracing::warn!(connection_id = %conn_id, "[ACP] fork refused: {reason}");
+            return Err(AcpError::ForkSessionMismatch(reason));
+        }
+
         // Link the conversation row on demand, under the prompt lock so it
         // can't race a concurrent first prompt. A conversation opened from
         // history resumes via `session_id`, but its row is bound to the
@@ -3676,6 +3691,78 @@ impl ConnectionManager {
                     "fork persistence task did not complete: {join_err}"
                 )))
             }
+        }
+    }
+
+    /// Why an in-place fork must not run on this connection, if it must not:
+    /// the connection is linked to another conversation than the caller's, or
+    /// it runs an agent session that is not the conversation's own.
+    ///
+    /// The conversation is the one the connection is linked to, else the
+    /// caller's (`requested_conversation_id`, the row a not-yet-linked
+    /// connection is about to adopt). Its session is the row's `external_id`.
+    /// The connection runs it when it is the live session, a transcript that
+    /// session rolled over to (a Claude `/clear`), or one the live session
+    /// continues (a custom agent that forgot it), or — still opening — when it
+    /// is the session the connection was spawned to reopen.
+    ///
+    /// Only a known difference refuses. A row that cannot be read, a row with
+    /// no session yet and a connection that has confirmed no session yet are
+    /// left to the steps after this one, as before.
+    async fn fork_session_mismatch(
+        db: &AppDatabase,
+        state_arc: &Arc<tokio::sync::RwLock<crate::acp::SessionState>>,
+        requested_conversation_id: Option<i32>,
+    ) -> Option<String> {
+        let (linked, agent_type) = {
+            let s = state_arc.read().await;
+            (s.conversation_id, s.agent_type)
+        };
+        if let (Some(linked), Some(requested)) = (linked, requested_conversation_id) {
+            if linked != requested {
+                return Some(format!(
+                    "This connection belongs to conversation {linked}, not to conversation \
+                     {requested}, so it cannot fork it. Reopen the conversation and fork again."
+                ));
+            }
+        }
+        let conversation_id = linked.or(requested_conversation_id)?;
+        let row_session = conversation_service::get_by_id(&db.conn, conversation_id)
+            .await
+            .ok()?
+            .external_id?;
+        let (live, opening) = {
+            let s = state_arc.read().await;
+            if s.represents_session(&row_session) {
+                return None;
+            }
+            (
+                s.external_id.clone(),
+                s.requested_session_id
+                    .clone()
+                    .filter(|_| s.attach_phase.is_attaching()),
+            )
+        };
+        match (live, opening) {
+            (Some(live), _) => {
+                if crate::acp::continued_session_ids(agent_type, &live)
+                    .iter()
+                    .any(|ancestor| *ancestor == row_session)
+                {
+                    return None;
+                }
+                Some(format!(
+                    "This connection runs agent session {live}, not the session of \
+                     conversation {conversation_id} ({row_session}), so it cannot fork it. \
+                     Reopen the conversation and fork again."
+                ))
+            }
+            (None, Some(opening)) => Some(format!(
+                "This connection is opening agent session {opening}, not the session of \
+                 conversation {conversation_id} ({row_session}), so it cannot fork it. \
+                 Reopen the conversation and fork again."
+            )),
+            (None, None) => None,
         }
     }
 
@@ -12008,8 +12095,10 @@ mod tests {
         );
         state.conversation_id = None;
         state.status = ConnectionStatus::Connected;
-        // A synthetic connection stands for one whose session is open.
+        // A synthetic connection stands for one whose session is open — the
+        // row's own, which it resumed.
         state.attach_phase = AttachPhase::Ready;
+        state.external_id = Some("session-S1".to_string());
         let conn = AgentConnection {
             id: "c-relink".to_string(),
             agent_type: AgentType::ClaudeCode,
@@ -12069,6 +12158,228 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(sibling.external_id.as_deref(), Some("session-S1"));
+    }
+
+    /// A conversation row in `folder_id`, bound to `session`.
+    async fn seed_forkable_row(
+        db: &AppDatabase,
+        folder_id: i32,
+        title: &str,
+        session: &str,
+    ) -> i32 {
+        let row = conversation_service::create(
+            &db.conn,
+            folder_id,
+            AgentType::ClaudeCode,
+            Some(title.into()),
+            None,
+        )
+        .await
+        .unwrap();
+        conversation_service::bind_external_id(&db.conn, row.id, session, &[])
+            .await
+            .unwrap();
+        row.id
+    }
+
+    #[tokio::test]
+    async fn fork_session_refuses_a_connection_running_another_session() {
+        // The reported failure. A tab opened a conversation before it knew the
+        // row's session id, so its connection opened a brand-new session of
+        // its own. "Fork from here" on one of the conversation's replies then
+        // reached that connection with the conversation's ids: the row was
+        // linked to it, and the agent was asked to fork the new, empty session
+        // at a reply only the row's session has — "Session … not found". It
+        // must be refused before anything happens: no link, no fork, the row
+        // as it was.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-new-session").await;
+        let row_id = seed_forkable_row(
+            &db,
+            folder_id,
+            "alphabeita-shipping-economics",
+            "session-of-the-row",
+        )
+        .await;
+        let mgr = ConnectionManager::new();
+        let mut rx =
+            insert_live_connection(&mgr, "c-new-session", AgentType::ClaudeCode, None).await;
+        mgr.get_state("c-new-session")
+            .await
+            .unwrap()
+            .write()
+            .await
+            .external_id = Some("brand-new-session".to_string());
+
+        let err = mgr
+            .fork_session(
+                &db,
+                "c-new-session",
+                Some(row_id),
+                Some(folder_id),
+                Some("msg_011Cg5dffugAmnK7g4Jii64j".to_string()),
+                ForkMode::Branch,
+            )
+            .await
+            .expect_err("a fork on a connection running another session must be refused");
+        assert!(
+            matches!(err, AcpError::ForkSessionMismatch(_)),
+            "got {err:?}"
+        );
+        assert_eq!(err.code(), Some("fork_session_mismatch"));
+        let message = err.to_string();
+        assert!(
+            message.contains("brand-new-session") && message.contains("session-of-the-row"),
+            "the refusal names both sessions: {message}"
+        );
+
+        assert!(
+            rx.try_recv().is_err(),
+            "the agent must not be asked to fork"
+        );
+        let state = mgr.get_state("c-new-session").await.unwrap();
+        assert_eq!(
+            state.read().await.conversation_id,
+            None,
+            "the connection must not be linked to the row"
+        );
+        let row = conversation_service::get_by_id(&db.conn, row_id)
+            .await
+            .unwrap();
+        assert_eq!(row.external_id.as_deref(), Some("session-of-the-row"));
+        assert_eq!(row.title.as_deref(), Some("alphabeita-shipping-economics"));
+        let rows = conversation::Entity::find().all(&db.conn).await.unwrap();
+        assert_eq!(rows.len(), 1, "no sibling row");
+    }
+
+    #[tokio::test]
+    async fn fork_session_refuses_a_linked_connection_running_another_session() {
+        // The second click of the same report: the first attempt had linked
+        // the row to that connection, so this one came in linked. A link does
+        // not make the connection's session the row's.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-linked-new").await;
+        let row_id = seed_forkable_row(&db, folder_id, "Linked", "session-of-the-row").await;
+        let mgr = ConnectionManager::new();
+        let mut rx = insert_live_connection(&mgr, "c-linked", AgentType::ClaudeCode, None).await;
+        {
+            let state = mgr.get_state("c-linked").await.unwrap();
+            let mut s = state.write().await;
+            s.conversation_id = Some(row_id);
+            s.external_id = Some("brand-new-session".to_string());
+        }
+
+        for (conversation_id, folder) in [(None, None), (Some(row_id), Some(folder_id))] {
+            let err = mgr
+                .fork_session(
+                    &db,
+                    "c-linked",
+                    conversation_id,
+                    folder,
+                    None,
+                    ForkMode::Branch,
+                )
+                .await
+                .expect_err("a linked connection on another session must be refused");
+            assert!(
+                matches!(err, AcpError::ForkSessionMismatch(_)),
+                "got {err:?}"
+            );
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "the agent must not be asked to fork"
+        );
+        let row = conversation_service::get_by_id(&db.conn, row_id)
+            .await
+            .unwrap();
+        assert_eq!(row.external_id.as_deref(), Some("session-of-the-row"));
+        assert_eq!(row.title.as_deref(), Some("Linked"));
+        let rows = conversation::Entity::find().all(&db.conn).await.unwrap();
+        assert_eq!(rows.len(), 1, "no sibling row");
+    }
+
+    #[tokio::test]
+    async fn fork_session_refuses_a_connection_linked_to_another_conversation() {
+        // Linked to one conversation, asked to fork another: the fork point is
+        // named in the other's transcript, and the row moved to the fork would
+        // be the wrong one.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-other-row").await;
+        let linked_id = seed_forkable_row(&db, folder_id, "Linked", "session-linked").await;
+        let asked_id = seed_forkable_row(&db, folder_id, "Asked", "session-asked").await;
+        let mgr = ConnectionManager::new();
+        let mut rx = insert_live_connection(&mgr, "c-other-row", AgentType::ClaudeCode, None).await;
+        {
+            let state = mgr.get_state("c-other-row").await.unwrap();
+            let mut s = state.write().await;
+            s.conversation_id = Some(linked_id);
+            s.external_id = Some("session-linked".to_string());
+        }
+
+        let err = mgr
+            .fork_session(
+                &db,
+                "c-other-row",
+                Some(asked_id),
+                Some(folder_id),
+                Some("msg_in_the_asked_row".to_string()),
+                ForkMode::Branch,
+            )
+            .await
+            .expect_err("a connection linked to another conversation must be refused");
+        assert!(
+            matches!(err, AcpError::ForkSessionMismatch(_)),
+            "got {err:?}"
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "the agent must not be asked to fork"
+        );
+        for (id, session) in [(linked_id, "session-linked"), (asked_id, "session-asked")] {
+            let row = conversation_service::get_by_id(&db.conn, id).await.unwrap();
+            assert_eq!(row.external_id.as_deref(), Some(session));
+        }
+    }
+
+    #[tokio::test]
+    async fn fork_session_still_forks_a_row_that_follows_a_cleared_transcript() {
+        // After a Claude `/clear` the row names the new transcript while the
+        // live ACP session keeps its id. That connection still runs the row's
+        // session, and the fork goes ahead as before.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/fork-cleared").await;
+        let row_id = seed_forkable_row(&db, folder_id, "Cleared", "transcript-after-clear").await;
+        let (mgr, join) =
+            manager_with_fake_fork("c-cleared", row_id, "session-S2", "acp-session").await;
+        {
+            let state = mgr.get_state("c-cleared").await.unwrap();
+            let mut s = state.write().await;
+            s.external_id = Some("acp-session".to_string());
+            s.transcript_aliases = vec!["transcript-after-clear".to_string()];
+        }
+
+        let result = mgr
+            .fork_session(&db, "c-cleared", None, None, None, ForkMode::Branch)
+            .await
+            .expect("the live session is the row's: the fork goes ahead");
+        let _ = join.await;
+        assert_eq!(result.forked_session_id, "session-S2");
+        let row = conversation_service::get_by_id(&db.conn, row_id)
+            .await
+            .unwrap();
+        assert_eq!(row.external_id.as_deref(), Some("session-S2"));
+        let sibling = conversation_service::get_by_id(&db.conn, result.sibling_conversation_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            sibling.external_id.as_deref(),
+            Some("transcript-after-clear")
+        );
     }
 
     // ---------- fork_session in edit mode (`ForkMode::Edit`) ----------
