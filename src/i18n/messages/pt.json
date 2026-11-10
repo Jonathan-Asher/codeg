@@ -4262,6 +4262,12 @@
         "submitError": "Não foi possível enviar. Tente novamente.",
         "keyboardHint": "Pressione 1 para aprovar, 2 para pedir alterações, 3 e depois Enter para abandonar, e Esc para voltar à caixa de mensagem."
       },
+      "promptCardResize": {
+        "question": "Redimensionar a pergunta",
+        "plan": "Redimensionar o plano",
+        "permission": "Redimensionar o pedido de permissão",
+        "hint": "Arraste para redimensionar · clique duas vezes para redefinir"
+      },
       "feedbackCheckResult": {
         "count": "{count, plural, =1 {1 comentário} other {# comentários}}",
         "expand": "Mostrar todos os comentários",

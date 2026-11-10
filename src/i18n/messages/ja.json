@@ -4262,6 +4262,12 @@
         "submitError": "送信できませんでした。もう一度お試しください。",
         "keyboardHint": "1 で承認、2 で変更を依頼、3 のあと Enter で破棄、Esc で入力欄に戻ります。"
       },
+      "promptCardResize": {
+        "question": "質問の高さを変更",
+        "plan": "計画の高さを変更",
+        "permission": "許可リクエストの高さを変更",
+        "hint": "ドラッグで高さを変更 · ダブルクリックでリセット"
+      },
       "feedbackCheckResult": {
         "count": "フィードバック {count} 件",
         "expand": "すべてのフィードバックを表示",

@@ -4262,6 +4262,12 @@
         "submitError": "Échec de l'envoi. Veuillez réessayer.",
         "keyboardHint": "Appuyez sur 1 pour approuver, 2 pour demander des modifications, 3 puis Entrée pour abandonner, Échap pour revenir à la zone de message."
       },
+      "promptCardResize": {
+        "question": "Redimensionner la question",
+        "plan": "Redimensionner le plan",
+        "permission": "Redimensionner la demande d'autorisation",
+        "hint": "Faites glisser pour redimensionner · double-cliquez pour réinitialiser"
+      },
       "feedbackCheckResult": {
         "count": "{count, plural, =1 {1 retour} other {# retours}}",
         "expand": "Afficher tous les retours",

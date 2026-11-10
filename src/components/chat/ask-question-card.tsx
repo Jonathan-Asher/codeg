@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Keycap } from "@/components/chat/keycap"
+import { PromptCardResizeHandle } from "@/components/chat/prompt-card-resize-handle"
 import {
   useCardArrivalFocus,
   useCardKeyGuard,
@@ -30,6 +31,11 @@ import {
 } from "@/hooks/use-card-focus"
 import { useImeGuard } from "@/hooks/use-ime-guard"
 import { useIsMac } from "@/hooks/use-is-mac"
+import {
+  promptCardBodyStyle,
+  usePromptCardResize,
+  type PromptCardDock,
+} from "@/hooks/use-prompt-card-resize"
 import {
   focusCardEntry,
   focusComposerAfterAnswer,
@@ -69,6 +75,10 @@ interface AskQuestionCardProps {
    *  typing (see `canCardTakeFocus`). A conversation that is not the one in
    *  front passes false, and takes it once it comes to the front. */
   autoFocus?: boolean
+  /** Where the live card is docked: the transcript it can take height from
+   *  (see `usePromptCardResize`). Without one (Quick Ask) it keeps its
+   *  automatic height and shows no resize handle. */
+  dock?: PromptCardDock | null
 }
 
 /** Seeded selections for the read-only view: chosen real-option labels plus any
@@ -158,6 +168,7 @@ export function AskQuestionCard({
   title,
   subtitle,
   autoFocus = true,
+  dock,
 }: AskQuestionCardProps) {
   const t = useTranslations("Folder.chat.askQuestion")
   const dir = localeDirection(useLocale())
@@ -253,6 +264,21 @@ export function AskQuestionCard({
   )
   useComposerHandoff(rootRef, !readOnly)
   const guardKeys = useCardKeyGuard(rootRef)
+  // The height the user dragged questions to (live card, docked, expanded):
+  // every tab takes it in place of the reserve above, a single question takes
+  // it as a cap.
+  const {
+    active: resizable,
+    height: chosenHeight,
+    bodyRef,
+    handleProps: resizeHandle,
+  } = usePromptCardResize({
+    kind: "question",
+    dock,
+    cardRef: rootRef,
+    sizing: questions.length > 1 ? "fixed" : "content",
+    enabled: !readOnly && !collapsed,
+  })
 
   const listId = (index: number) => `${uid}-q${index}`
   const labelId = (index: number) => `${uid}-q${index}-label`
@@ -852,7 +878,8 @@ export function AskQuestionCard({
     // Capped to the viewport (header + footer pinned, body scrolls) so a tall set
     // never covers the whole message list and always keeps Submit/Skip reachable.
     // Collapsed, only the header row is left, so the message list gets the space
-    // back outright.
+    // back outright. Expanded in a conversation's dock, its edge drags the body
+    // taller or shorter (`usePromptCardResize`).
     // `overflow-hidden` clips the full-bleed progress bar to the rounded corners.
     // The question is the agent's own text, so the card follows the chat text
     // size like the transcript does — wherever it is docked (the composer, the
@@ -867,9 +894,12 @@ export function AskQuestionCard({
       className={cn(
         CHAT_TEXT_SCOPE_CLASS,
         "mb-2 flex max-h-[88svh] flex-col overflow-hidden rounded-xl border border-primary/30 bg-card ws-msg-card",
-        readOnly ? "shadow-sm" : "shadow-lg"
+        readOnly ? "shadow-sm" : "shadow-lg",
+        resizable && "relative"
       )}
     >
+      {resizable && <PromptCardResizeHandle {...resizeHandle} />}
+
       {isMulti && !collapsed && (
         <Progress
           value={(answeredCount / questions.length) * 100}
@@ -994,8 +1024,18 @@ export function AskQuestionCard({
                 <TabsContent
                   key={q.id}
                   value={q.id}
-                  style={{ height: bodyHeight }}
-                  className="mt-0 flex-none space-y-2.5 overflow-y-auto pr-1"
+                  ref={q.id === activeId ? bodyRef : undefined}
+                  style={
+                    promptCardBodyStyle(chosenHeight, "fixed") ?? {
+                      height: bodyHeight,
+                    }
+                  }
+                  // A chosen height gives way to the card's viewport cap
+                  // rather than pushing the footer out of it.
+                  className={cn(
+                    "mt-0 space-y-2.5 overflow-y-auto pr-1",
+                    chosenHeight === null ? "flex-none" : "min-h-0 flex-initial"
+                  )}
                 >
                   {questionHeading(q, i)}
                   {renderOptions(q, i)}
@@ -1003,7 +1043,11 @@ export function AskQuestionCard({
               ))}
             </Tabs>
           ) : (
-            <div className="min-h-0 space-y-2.5 overflow-y-auto pr-1">
+            <div
+              ref={bodyRef}
+              style={promptCardBodyStyle(chosenHeight, "content")}
+              className="min-h-0 space-y-2.5 overflow-y-auto pr-1"
+            >
               {questions.map((q, i) => (
                 <div key={q.id} className="space-y-2.5">
                   {questionHeading(q, i)}

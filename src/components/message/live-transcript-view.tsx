@@ -22,7 +22,13 @@
  * next mount starts from a fresh persisted fetch.
  */
 
-import { useCallback, useEffect, useRef, useSyncExternalStore } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+} from "react"
 
 import {
   MessageListView,
@@ -38,6 +44,7 @@ import {
 import { PermissionDialog } from "@/components/chat/permission-dialog"
 import { AskQuestionCard } from "@/components/chat/ask-question-card"
 import { PlanApprovalCard } from "@/components/chat/plan-approval-card"
+import type { PromptCardDock } from "@/hooks/use-prompt-card-resize"
 import {
   type AgentType,
   type PlanApprovalAnswer,
@@ -300,6 +307,14 @@ export function LiveTranscriptView({
     [connectionId, answerPlanApproval]
   )
 
+  // The prompts sit above the transcript here, so they grow down into it,
+  // from their bottom edge (see `usePromptCardResize`).
+  const transcriptRef = useRef<HTMLDivElement>(null)
+  const dock = useMemo<PromptCardDock>(
+    () => ({ roomRef: transcriptRef, edge: "bottom" }),
+    []
+  )
+
   return (
     // Sized as a flex child: fills the host column's remaining height under
     // its header (h-full here would overflow by the header's height).
@@ -310,6 +325,7 @@ export function LiveTranscriptView({
             permission={pendingPermission}
             onRespond={onRespondPermission}
             agentType={agentType}
+            dock={dock}
           />
         </div>
       )}
@@ -320,6 +336,7 @@ export function LiveTranscriptView({
             <AskQuestionCard
               question={pendingAskQuestion}
               onAnswer={onAnswerAskQuestion}
+              dock={dock}
             />
           </div>
         )}
@@ -329,6 +346,7 @@ export function LiveTranscriptView({
             key={pendingPlanApproval.approval_id}
             approval={pendingPlanApproval}
             onAnswer={onAnswerPlanApproval}
+            dock={dock}
           />
         </div>
       )}
@@ -338,7 +356,7 @@ export function LiveTranscriptView({
           padded wrapper here doubled it, and in a panel this narrow the two
           layers cost the transcript a visible chunk of its width. This is
           exactly how the main conversation panel mounts the same component. */}
-      <div className="min-h-0 flex-1">
+      <div ref={transcriptRef} className="min-h-0 flex-1">
         <MessageListView
           conversationId={conversationId}
           // The viewed connection's own cwd. A delegation child runs in a

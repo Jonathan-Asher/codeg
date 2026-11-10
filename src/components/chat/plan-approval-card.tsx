@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { MessageResponse } from "@/components/ai-elements/message"
 import { Keycap } from "@/components/chat/keycap"
+import { PromptCardResizeHandle } from "@/components/chat/prompt-card-resize-handle"
 import {
   useCardArrivalFocus,
   useCardKeyGuard,
@@ -21,6 +22,11 @@ import {
 } from "@/hooks/use-card-focus"
 import { useImeGuard } from "@/hooks/use-ime-guard"
 import { useIsMac } from "@/hooks/use-is-mac"
+import {
+  promptCardBodyStyle,
+  usePromptCardResize,
+  type PromptCardDock,
+} from "@/hooks/use-prompt-card-resize"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import {
   focusComposerAfterAnswer,
@@ -53,6 +59,10 @@ interface PlanApprovalCardProps {
   /** Take keyboard focus when the approval arrives — never from someone typing
    *  (see `canCardTakeFocus`). A conversation not in front passes false. */
   autoFocus?: boolean
+  /** Where the card is docked: the transcript it can take height from (see
+   *  `usePromptCardResize`). Without one the plan keeps its automatic height
+   *  and the card shows no resize handle. */
+  dock?: PromptCardDock | null
 }
 
 /** A button's height follows its label, which follows the chat text size;
@@ -86,6 +96,7 @@ export function PlanApprovalCard({
   approval,
   onAnswer,
   autoFocus = true,
+  dock,
 }: PlanApprovalCardProps) {
   const t = useTranslations("Folder.chat.planApproval")
   const dir = localeDirection(useLocale())
@@ -125,6 +136,20 @@ export function PlanApprovalCard({
   }
 
   const plan = approval.plan_markdown.trim()
+  // The height the user dragged plans to (docked, with a plan to show) caps
+  // the prose.
+  const {
+    active: resizable,
+    height: chosenHeight,
+    bodyRef,
+    handleProps: resizeHandle,
+  } = usePromptCardResize({
+    kind: "plan",
+    dock,
+    cardRef: rootRef,
+    sizing: "content",
+    enabled: plan.length > 0,
+  })
 
   // Run a decision round-trip, holding the card in an in-flight state until it
   // resolves. On failure re-enable and surface a retryable error. The keyboard
@@ -231,9 +256,11 @@ export function PlanApprovalCard({
       onKeyDown={onKeyDown}
       className={cn(
         CHAT_TEXT_SCOPE_CLASS,
-        "w-full space-y-3 rounded-lg border border-border/60 bg-card/60 p-4"
+        "w-full space-y-3 rounded-lg border border-border/60 bg-card/60 p-4",
+        resizable && "relative"
       )}
     >
+      {resizable && <PromptCardResizeHandle {...resizeHandle} />}
       <p id={hintId} className="sr-only">
         {t("keyboardHint")}
       </p>
@@ -243,7 +270,14 @@ export function PlanApprovalCard({
       </div>
 
       {plan ? (
-        <div className="prose prose-sm max-h-80 max-w-none overflow-auto rounded-md border border-border/60 bg-muted/30 px-3.5 py-3 text-sm dark:prose-invert [&_ol]:list-inside [&_ul]:list-inside">
+        <div
+          ref={bodyRef}
+          style={promptCardBodyStyle(chosenHeight, "content")}
+          className={cn(
+            "prose prose-sm max-w-none overflow-auto rounded-md border border-border/60 bg-muted/30 px-3.5 py-3 text-sm dark:prose-invert [&_ol]:list-inside [&_ul]:list-inside",
+            chosenHeight === null && "max-h-80"
+          )}
+        >
           <MessageResponse>{plan}</MessageResponse>
         </div>
       ) : (

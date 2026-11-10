@@ -4262,6 +4262,12 @@
         "submitError": "제출하지 못했습니다. 다시 시도하세요.",
         "keyboardHint": "1로 승인, 2로 변경 요청, 3 다음 Enter로 포기, Esc로 입력창으로 돌아갑니다."
       },
+      "promptCardResize": {
+        "question": "질문 높이 조절",
+        "plan": "계획 높이 조절",
+        "permission": "권한 요청 높이 조절",
+        "hint": "드래그하여 높이 조절 · 더블클릭하여 초기화"
+      },
       "feedbackCheckResult": {
         "count": "피드백 {count}개",
         "expand": "모든 피드백 표시",

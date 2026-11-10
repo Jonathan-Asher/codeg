@@ -1,5 +1,5 @@
 import type { ConversationFolderPickerOverride } from "@/components/chat/conversation-context-bar"
-import type { ReactNode } from "react"
+import { useMemo, useRef, type ReactNode } from "react"
 import type {
   AgentType,
   ConnectionStatus,
@@ -32,6 +32,7 @@ import { PermissionDialog } from "@/components/chat/permission-dialog"
 import { QuestionDialog } from "@/components/chat/question-dialog"
 import { AskQuestionCard } from "@/components/chat/ask-question-card"
 import { PlanApprovalCard } from "@/components/chat/plan-approval-card"
+import type { PromptCardDock } from "@/hooks/use-prompt-card-resize"
 
 interface ConversationShellProps {
   status: ConnectionStatus | null
@@ -248,6 +249,13 @@ export function ConversationShell({
   injectContent,
   onInjectConsumed,
 }: ConversationShellProps) {
+  // The blocking cards below the thread grow upwards into it, and only by
+  // what it can spare (see `usePromptCardResize`).
+  const threadRef = useRef<HTMLDivElement>(null)
+  const dock = useMemo<PromptCardDock>(
+    () => ({ roomRef: threadRef, edge: "top" }),
+    []
+  )
   return (
     // The composer scope: the blocking cards below hand the keyboard to this
     // conversation's composer (Esc) and take it from there (↑ when empty).
@@ -257,13 +265,16 @@ export function ConversationShell({
     >
       {topBanner}
 
-      <div className="flex-1 min-h-0">{children}</div>
+      <div ref={threadRef} className="flex-1 min-h-0">
+        {children}
+      </div>
 
       <PermissionDialog
         permission={pendingPermission}
         onRespond={onRespondPermission}
         agentType={agentType}
         autoFocus={isActive ?? true}
+        dock={dock}
       />
 
       <QuestionDialog
@@ -283,6 +294,7 @@ export function ConversationShell({
               question={pendingAskQuestion}
               onAnswer={onAnswerAskQuestion}
               autoFocus={isActive ?? true}
+              dock={dock}
             />
           </div>
         )}
@@ -295,6 +307,7 @@ export function ConversationShell({
               approval={pendingPlanApproval}
               onAnswer={onAnswerPlanApproval}
               autoFocus={isActive ?? true}
+              dock={dock}
             />
           </div>
         )}

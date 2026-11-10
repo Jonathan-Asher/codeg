@@ -4262,6 +4262,12 @@
         "submitError": "Couldn't submit. Please try again.",
         "keyboardHint": "Press 1 to approve, 2 to request changes, 3 and then Enter to abandon, Esc to go back to the message box."
       },
+      "promptCardResize": {
+        "question": "Resize question",
+        "plan": "Resize plan",
+        "permission": "Resize permission request",
+        "hint": "Drag to resize · double-click to reset"
+      },
       "feedbackCheckResult": {
         "count": "{count, plural, =1 {1 feedback note} other {# feedback notes}}",
         "expand": "Show all feedback",

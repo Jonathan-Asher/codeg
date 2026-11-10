@@ -4262,6 +4262,12 @@
         "submitError": "提交失敗，請重試。",
         "keyboardHint": "按 1 核准，按 2 要求修改，按 3 再按 Enter 放棄，Esc 返回輸入框。"
       },
+      "promptCardResize": {
+        "question": "調整問題高度",
+        "plan": "調整計畫高度",
+        "permission": "調整權限請求高度",
+        "hint": "拖曳調整高度 · 雙擊恢復預設"
+      },
       "feedbackCheckResult": {
         "count": "{count} 則回饋",
         "expand": "展開全部回饋",

@@ -4262,6 +4262,12 @@
         "submitError": "Senden fehlgeschlagen. Bitte erneut versuchen.",
         "keyboardHint": "1 genehmigt, 2 fordert Änderungen an, 3 und dann Enter verwirft, Esc kehrt zum Nachrichtenfeld zurück."
       },
+      "promptCardResize": {
+        "question": "Höhe der Frage ändern",
+        "plan": "Höhe des Plans ändern",
+        "permission": "Höhe der Berechtigungsanfrage ändern",
+        "hint": "Ziehen, um die Höhe zu ändern · Doppelklick zum Zurücksetzen"
+      },
       "feedbackCheckResult": {
         "count": "{count, plural, =1 {1 Rückmeldung} other {# Rückmeldungen}}",
         "expand": "Alle Rückmeldungen anzeigen",

@@ -4262,6 +4262,12 @@
         "submitError": "No se pudo enviar. Inténtalo de nuevo.",
         "keyboardHint": "Pulsa 1 para aprobar, 2 para pedir cambios, 3 y luego Enter para abandonar, y Esc para volver al cuadro de mensaje."
       },
+      "promptCardResize": {
+        "question": "Cambiar la altura de la pregunta",
+        "plan": "Cambiar la altura del plan",
+        "permission": "Cambiar la altura de la solicitud de permiso",
+        "hint": "Arrastra para cambiar la altura · doble clic para restablecer"
+      },
       "feedbackCheckResult": {
         "count": "{count, plural, =1 {1 comentario} other {# comentarios}}",
         "expand": "Mostrar todos los comentarios",

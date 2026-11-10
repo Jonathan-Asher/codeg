@@ -4262,6 +4262,12 @@
         "submitError": "提交失败，请重试。",
         "keyboardHint": "按 1 批准，按 2 请求修改，按 3 再按 Enter 放弃，Esc 返回输入框。"
       },
+      "promptCardResize": {
+        "question": "调整问题高度",
+        "plan": "调整计划高度",
+        "permission": "调整权限请求高度",
+        "hint": "拖动调整高度 · 双击恢复默认"
+      },
       "feedbackCheckResult": {
         "count": "{count} 条反馈",
         "expand": "展开全部反馈",

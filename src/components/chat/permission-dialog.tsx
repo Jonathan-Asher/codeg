@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Keycap } from "@/components/chat/keycap"
+import { PromptCardResizeHandle } from "@/components/chat/prompt-card-resize-handle"
 import { CodeBlock } from "@/components/ai-elements/code-block"
 import { UnifiedDiffPreview } from "@/components/diff/unified-diff-preview"
 import { MessageResponse } from "@/components/ai-elements/message"
@@ -31,6 +32,11 @@ import {
   useCardKeyGuard,
   useComposerHandoff,
 } from "@/hooks/use-card-focus"
+import {
+  promptCardBodyStyle,
+  usePromptCardResize,
+  type PromptCardDock,
+} from "@/hooks/use-prompt-card-resize"
 import {
   focusComposerAfterAnswer,
   focusComposerFrom,
@@ -58,6 +64,10 @@ interface PermissionDialogProps {
   /** Take keyboard focus when a request arrives — never from someone typing
    *  (see `canCardTakeFocus`). A conversation not in front passes false. */
   autoFocus?: boolean
+  /** Where the card is docked: the transcript it can take height from (see
+   *  `usePromptCardResize`). Without one (Quick Ask) its body keeps its
+   *  automatic height and the card shows no resize handle. */
+  dock?: PromptCardDock | null
 }
 
 const DIGIT = /^[1-9]$/
@@ -113,6 +123,7 @@ export function PermissionDialog({
   onRespond,
   agentType,
   autoFocus = true,
+  dock,
 }: PermissionDialogProps) {
   const t = useTranslations("Folder.chat.permissionDialog")
   const dir = localeDirection(useLocale())
@@ -150,6 +161,20 @@ export function PermissionDialog({
   useCardArrivalFocus(rootRef, permission?.request_id ?? null, autoFocus)
   useComposerHandoff(rootRef, permission != null)
   const guardKeys = useCardKeyGuard(rootRef)
+  // The height the user dragged permission requests to (docked) caps the
+  // body.
+  const {
+    active: resizable,
+    height: chosenHeight,
+    bodyRef,
+    handleProps: resizeHandle,
+  } = usePromptCardResize({
+    kind: "permission",
+    dock,
+    cardRef: rootRef,
+    sizing: "content",
+    enabled: permission != null,
+  })
   if (!permission) return null
 
   // Approvals are surfaced one at a time (backend FIFO), so the count of the
@@ -257,9 +282,11 @@ export function PermissionDialog({
       onKeyDown={onKeyDown}
       className={cn(
         CHAT_TEXT_SCOPE_CLASS,
-        "mx-4 mb-3 rounded-xl border border-border/70 bg-card/95 p-3 shadow-sm"
+        "mx-4 mb-3 rounded-xl border border-border/70 bg-card/95 p-3 shadow-sm",
+        resizable && "relative"
       )}
     >
+      {resizable && <PromptCardResizeHandle {...resizeHandle} />}
       <p id={hintId} className="sr-only">
         {t("keyboardHint")}
       </p>
@@ -312,7 +339,14 @@ export function PermissionDialog({
         </div>
       </div>
 
-      <div className="mt-3 max-h-[min(36vh,18rem)] space-y-2 overflow-y-auto pr-1">
+      <div
+        ref={bodyRef}
+        style={promptCardBodyStyle(chosenHeight, "content")}
+        className={cn(
+          "mt-3 space-y-2 overflow-y-auto pr-1",
+          chosenHeight === null && "max-h-[min(36vh,18rem)]"
+        )}
+      >
         {parsed.command && (
           <div className="space-y-1.5 rounded-md border border-border/60 bg-muted/20 p-2">
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
