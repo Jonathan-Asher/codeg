@@ -356,7 +356,7 @@ export function LiveTranscriptView({
           padded wrapper here doubled it, and in a panel this narrow the two
           layers cost the transcript a visible chunk of its width. This is
           exactly how the main conversation panel mounts the same component. */}
-      <div ref={transcriptRef} className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1" ref={transcriptRef}>
         <MessageListView
           conversationId={conversationId}
           // The viewed connection's own cwd. A delegation child runs in a
