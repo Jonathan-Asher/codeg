@@ -170,7 +170,8 @@ Content-Type: application/json
   "environment": "production",       // "sandbox" for a debug build from Xcode
   "bundleId": "io.ashurov.codeg",    // optional, default: the settings' bundle id
   "name": "Jonathan's iPhone",       // optional, shown in Settings
-  "platform": "ios"                  // optional
+  "platform": "ios",                 // optional
+  "sounds": { "kinds": { "needs_you": "codeg-chime.caf" } }  // optional, see Sounds
 }
 ```
 
@@ -185,6 +186,56 @@ with `{"token": "…"}`.
 The app can read and change its own preferences with `list_push_devices` and
 `update_push_device_prefs` (`{"id": …, "prefs": {"turn_finished": "away",
 "needs_you": "always", "critical": true, "errors": false}}`).
+
+### Sounds
+
+A device picks the sound its notifications play. It sends its choices with
+the registration, as `sounds`, and the server names the file in each push's
+`aps.sound`; iOS plays it from the app bundle or the app's `Library/Sounds`.
+
+```json
+{
+  "kinds": { "needs_you": "codeg-chime.caf", "plan": "codeg-marimba.caf", "turn_finished": "none" },
+  "critical": "codeg-bell.caf",
+  "projects": { "7": "codeg-glass.caf" },
+  "sessions": { "42": "none" }
+}
+```
+
+| Field | Plays |
+|---|---|
+| `kinds.needs_you` | a question or a permission request (the first push and the catch-up) |
+| `kinds.plan` | a plan waiting for approval, also one that arrives as a permission request (`pending_kind: "plan"`) |
+| `kinds.reminder` | every reminder (`reminder: true`), whatever waits |
+| `kinds.turn_finished` | a finished turn, and the test push |
+| `kinds.critical` | a critical session's alert, whatever its `critical_kind` |
+| `kinds.error` | an error that broke a session |
+| `critical` | every notification of a session marked critical, its alerts included |
+| `projects.<folder id>` | every notification of a session in that folder, or in a worktree folder made from it (one without a sound of its own) |
+| `sessions.<conversation id>` | every notification of that session |
+
+A notification plays the first of these that is set: its session's sound,
+its folder's, its folder's root folder's (a worktree's project), the critical
+sessions' one (when its session is marked critical), then its kind's. A value is `"default"`, `"none"` or a file name.
+For a kind, `"default"` is the iOS default sound; for `critical`, a project or
+a session it means "as the next level says", the same as leaving the entry
+out. `"none"` sends no `sound` and keeps the alert: a silent banner. A file
+name is a plain name the app ships or imported: ASCII letters, digits, `-`,
+`_` and `.`, starting with a letter or a digit, no `..`, ending in `.caf`,
+`.wav` or `.aiff`, 64 characters at most. The ids are this server's own
+(`folder_id` and `conversation_id` of its pushes); a phone on several servers
+sends each its own.
+
+`sounds` replaces what the device had. What cannot be played is left out (an
+unknown kind, a path, another file type, an id that is not a number), and so
+are the folders and conversations the server no longer has (deleted, or never
+its own); without `sounds` (an app that predates them) the stored ones stay.
+They are kept with the device's preferences, so `update_push_device_prefs`
+leaves them as they are. Every device in `list_push_devices` and the
+registration's answer carries what the server kept, as
+`"sounds": {"kinds": {…}, "critical": "…", "projects": {…}, "sessions": {…}}`
+(`critical` only when chosen). An older server sends no `sounds`: its
+notifications keep the default sound, which is how the app tells.
 
 The environment must match the build. A TestFlight or App Store build gets
 production tokens; a debug build run from Xcode gets sandbox tokens. A
@@ -228,7 +279,7 @@ Body:
 | Field | Value |
 |---|---|
 | `alert.title`, `alert.body` | Already localized. Title ≤ 120 characters, body ≤ 600. |
-| `sound` | `"default"`. Absent for a critical alert when the critical-session tone is off. |
+| `sound` | The device's sound for this notification (see [Sounds](#sounds)), `"default"` unless it chose another. Absent when it chose none, and for a critical alert when the critical-session tone is off. |
 | `thread-id` | `<server_id>-<conversation_id>`: one group per session in Notification Center. |
 | `category` | `CODEG_CRITICAL`, `CODEG_PERMISSION`, `CODEG_QUESTION` or `CODEG_SESSION` (see actions). |
 | `interruption-level` | `time-sensitive` for `critical` and `needs_you` (reminders included), else `active`. The app needs the **Time Sensitive Notifications** capability for it to break through Focus. |

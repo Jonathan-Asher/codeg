@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
+use super::prefs::{DeviceSounds, SoundChoice, SoundContext, SoundSlot};
 use crate::acp::critical_watch::CriticalAlertKind;
 use crate::pending::PendingKind;
 
@@ -188,7 +189,8 @@ pub struct PushMessage {
     pub critical_kind: Option<CriticalAlertKind>,
     pub needs: Option<NeedsKind>,
     pub permission: Option<PermissionAction>,
-    /// Play the default sound.
+    /// Play a sound: the one each device chose for it
+    /// ([`PushMessage::sound_for`]), else the default one.
     pub sound: bool,
     /// `aps.badge`: how many items wait on the user. Filled at delivery.
     pub badge: Option<u32>,
@@ -256,6 +258,40 @@ impl PushMessage {
         }
     }
 
+    /// Which kind of notification this is to a device's sounds.
+    pub fn sound_slot(&self) -> SoundSlot {
+        let plan = self.needs == Some(NeedsKind::Plan)
+            || self
+                .pending
+                .as_ref()
+                .is_some_and(|p| p.kind == PendingKind::Plan);
+        match self.kind {
+            PushKind::NeedsYou if self.is_reminder() => SoundSlot::Reminder,
+            PushKind::NeedsYou if plan => SoundSlot::Plan,
+            PushKind::NeedsYou => SoundSlot::NeedsYou,
+            PushKind::Critical => SoundSlot::Critical,
+            PushKind::Error => SoundSlot::Error,
+            // A test sounds like what most pushes are; a badge plays nothing.
+            PushKind::TurnFinished | PushKind::Test | PushKind::Badge => SoundSlot::TurnFinished,
+        }
+    }
+
+    /// What this notification plays on a device with `sounds`: its session's
+    /// sound, its project's, the critical sessions' one, else its kind's
+    /// ([`DeviceSounds::resolve`]).
+    pub fn sound_for<'a>(
+        &self,
+        sounds: &'a DeviceSounds,
+        context: SoundContext,
+    ) -> &'a SoundChoice {
+        sounds.resolve(
+            self.conversation_id,
+            self.folder_id,
+            context,
+            self.sound_slot(),
+        )
+    }
+
     /// Critical alerts and a blocked agent break through Focus.
     pub fn time_sensitive(&self) -> bool {
         matches!(self.kind, PushKind::Critical | PushKind::NeedsYou)
@@ -290,8 +326,15 @@ impl PushMessage {
         }
     }
 
-    /// The JSON body: `aps` plus codeg's custom fields at the top level.
+    /// The JSON body with the default sound.
     pub fn body_json(&self, server_id: &str) -> Value {
+        self.body_json_for(server_id, &SoundChoice::Default)
+    }
+
+    /// The JSON body for a device on which this notification plays `sound`
+    /// ([`PushMessage::sound_for`]): `aps` plus codeg's custom fields at the
+    /// top level.
+    pub fn body_json_for(&self, server_id: &str, sound: &SoundChoice) -> Value {
         if self.kind == PushKind::Badge {
             return json!({
                 "aps": { "badge": self.badge.unwrap_or(0) },
@@ -308,8 +351,8 @@ impl PushMessage {
                 "body": clip(&self.body, MAX_BODY_CHARS),
             }),
         );
-        if self.sound {
-            aps.insert("sound".into(), json!("default"));
+        if let Some(name) = sound.aps_sound().filter(|_| self.sound) {
+            aps.insert("sound".into(), json!(name));
         }
         aps.insert("thread-id".into(), json!(self.thread_id(server_id)));
         aps.insert("category".into(), json!(self.category()));
@@ -639,6 +682,161 @@ mod tests {
         assert_eq!(body["pending_kind"], "plan");
         assert_eq!(body["connection_id"], "conn-1");
         assert_eq!(body["request_id"], "req-9");
+    }
+
+    fn sounds(chosen: Value) -> DeviceSounds {
+        DeviceSounds::from_wire(&chosen).0
+    }
+
+    #[test]
+    fn each_kind_plays_the_sound_the_device_chose_for_it() {
+        let chosen = sounds(json!({ "kinds": {
+            "needs_you": "codeg-chime.caf",
+            "plan": "codeg-marimba.caf",
+            "reminder": "codeg-bell.caf",
+            "turn_finished": "codeg-pop.caf",
+            "critical": "codeg-glass.caf",
+            "error": "codeg-knock.caf",
+        }}));
+        let sound_of = |msg: &PushMessage| {
+            msg.body_json_for("srv1", msg.sound_for(&chosen, SoundContext::default()))["aps"]
+                ["sound"]
+                .clone()
+        };
+
+        let mut question = message(PushKind::NeedsYou);
+        question.needs = Some(NeedsKind::Question);
+        question.pending = Some(PendingPush {
+            reminder: false,
+            attempt: 0,
+            ..question_push(&["SQLite", "Postgres"])
+        });
+        assert_eq!(sound_of(&question), "codeg-chime.caf");
+
+        let mut permission = message(PushKind::NeedsYou);
+        permission.needs = Some(NeedsKind::Permission);
+        assert_eq!(sound_of(&permission), "codeg-chime.caf");
+
+        let mut plan = message(PushKind::NeedsYou);
+        plan.needs = Some(NeedsKind::Plan);
+        assert_eq!(sound_of(&plan), "codeg-marimba.caf");
+
+        // Claude Code's plan card is a permission request: still a plan.
+        let mut plan_card = permission.clone();
+        plan_card.pending = Some(PendingPush {
+            kind: PendingKind::Plan,
+            reminder: false,
+            attempt: 0,
+            question: None,
+            ..question_push(&[])
+        });
+        assert_eq!(sound_of(&plan_card), "codeg-marimba.caf");
+
+        // A reminder of any of them.
+        let mut reminder = question.clone();
+        reminder.pending = Some(question_push(&["SQLite", "Postgres"]));
+        assert_eq!(sound_of(&reminder), "codeg-bell.caf");
+        let mut plan_reminder = plan_card.clone();
+        plan_reminder.pending.as_mut().unwrap().reminder = true;
+        assert_eq!(sound_of(&plan_reminder), "codeg-bell.caf");
+
+        assert_eq!(sound_of(&message(PushKind::TurnFinished)), "codeg-pop.caf");
+        assert_eq!(sound_of(&message(PushKind::Test)), "codeg-pop.caf");
+        assert_eq!(sound_of(&message(PushKind::Critical)), "codeg-glass.caf");
+        assert_eq!(sound_of(&message(PushKind::Error)), "codeg-knock.caf");
+    }
+
+    #[test]
+    fn the_session_project_and_critical_sounds_come_before_the_kind() {
+        let chosen = sounds(json!({
+            "kinds": { "turn_finished": "codeg-pop.caf" },
+            "critical": "codeg-bell.caf",
+            "projects": { "7": "codeg-chime.caf" },
+            "sessions": { "42": "codeg-ping.caf" },
+        }));
+        let critical = SoundContext {
+            critical_session: true,
+            root_folder_id: None,
+        };
+        // message() is conversation 42 in folder 7.
+        let msg = message(PushKind::TurnFinished);
+        assert_eq!(
+            msg.sound_for(&chosen, critical),
+            &SoundChoice::File("codeg-ping.caf".into())
+        );
+        let mut other_session = msg.clone();
+        other_session.conversation_id = Some(5);
+        assert_eq!(
+            other_session.sound_for(&chosen, critical),
+            &SoundChoice::File("codeg-chime.caf".into())
+        );
+        let mut other_project = other_session.clone();
+        other_project.folder_id = Some(9);
+        assert_eq!(
+            other_project.sound_for(&chosen, critical),
+            &SoundChoice::File("codeg-bell.caf".into())
+        );
+        assert_eq!(
+            other_project.sound_for(&chosen, SoundContext::default()),
+            &SoundChoice::File("codeg-pop.caf".into())
+        );
+        // Folder 9 is a worktree of project 7.
+        let in_worktree = SoundContext {
+            critical_session: true,
+            root_folder_id: Some(7),
+        };
+        assert_eq!(
+            other_project.sound_for(&chosen, in_worktree),
+            &SoundChoice::File("codeg-chime.caf".into())
+        );
+        let body = other_project.body_json_for("srv1", other_project.sound_for(&chosen, critical));
+        assert_eq!(body["aps"]["sound"], "codeg-bell.caf");
+    }
+
+    #[test]
+    fn a_kind_the_device_left_alone_plays_the_default_sound() {
+        let only_plans = sounds(json!({ "kinds": { "plan": "codeg-chime.caf" } }));
+        let msg = message(PushKind::TurnFinished);
+        let sound = msg.sound_for(&only_plans, SoundContext::default());
+        assert_eq!(sound, &SoundChoice::Default);
+        assert_eq!(msg.body_json_for("srv1", sound), msg.body_json("srv1"));
+        assert_eq!(msg.body_json("srv1")["aps"]["sound"], "default");
+    }
+
+    #[test]
+    fn none_drops_the_sound_and_keeps_the_rest() {
+        let mut msg = message(PushKind::NeedsYou);
+        msg.needs = Some(NeedsKind::Question);
+        msg.badge = Some(1);
+        msg.pending = Some(PendingPush {
+            reminder: false,
+            attempt: 0,
+            ..question_push(&["SQLite", "Postgres"])
+        });
+        let body = msg.body_json_for("srv1", &SoundChoice::Silent);
+        assert!(body["aps"].get("sound").is_none());
+        assert_eq!(body["aps"]["alert"]["title"], "Fix the login bug");
+        assert_eq!(body["aps"]["interruption-level"], "time-sensitive");
+        assert_eq!(body["aps"]["category"], CATEGORY_QUESTION);
+        assert_eq!(body["aps"]["mutable-content"], 1);
+        assert_eq!(body["aps"]["badge"], 1);
+        // The sound is all that changes.
+        let mut loud = msg.body_json("srv1");
+        assert_eq!(loud["aps"]["sound"], "default");
+        loud["aps"].as_object_mut().unwrap().remove("sound");
+        assert_eq!(body, loud);
+    }
+
+    #[test]
+    fn a_silent_push_stays_silent_whatever_the_device_chose() {
+        let glass = SoundChoice::File("codeg-glass.caf".into());
+        let mut msg = message(PushKind::Critical);
+        msg.sound = false;
+        assert!(msg.body_json_for("srv1", &glass)["aps"]
+            .get("sound")
+            .is_none());
+        let badge = PushMessage::badge_only(2);
+        assert_eq!(badge.body_json_for("srv1", &glass), badge.body_json("srv1"));
     }
 
     #[test]

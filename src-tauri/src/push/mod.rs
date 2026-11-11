@@ -33,23 +33,24 @@ pub mod prefs;
 pub mod warm;
 pub mod wording;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex};
 
 use chrono::{DateTime, Utc};
-use sea_orm::DatabaseConnection;
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::app_error::AppCommandError;
 use crate::chat_channel::i18n::Lang;
-use crate::db::entities::push_device;
+use crate::db::entities::{conversation, folder, push_device};
 use crate::db::service::{app_metadata_service, push_device_service};
 use crate::keyring_store;
 use crate::presence::Looking;
 
 use apns::{ApnsSender, Credentials, SendOutcome, Target};
 use payload::{PushKind, PushMessage};
-use prefs::DevicePrefs;
+use prefs::{stored_prefs_json, DevicePrefs, DeviceSounds, SoundContext};
 
 /// `app_metadata` key of [`PushSettings`].
 pub const PUSH_SETTINGS_KEY: &str = "push_settings";
@@ -336,6 +337,10 @@ pub struct PushDeviceView {
     pub bundle_id: String,
     pub token_hint: String,
     pub prefs: DevicePrefs,
+    /// The device's notification sounds here ([`prefs::DeviceSounds`]):
+    /// `{kinds, critical?, projects, sessions}`. Its presence tells a client
+    /// that this server plays them.
+    pub sounds: Value,
     pub created_at: DateTime<Utc>,
     pub last_seen_at: DateTime<Utc>,
 }
@@ -350,6 +355,7 @@ impl From<&push_device::Model> for PushDeviceView {
             bundle_id: row.bundle_id.clone(),
             token_hint: apns::token_hint(&row.token),
             prefs: DevicePrefs::from_json(&row.prefs),
+            sounds: DeviceSounds::from_prefs_json(&row.prefs).to_wire(),
             created_at: row.created_at,
             last_seen_at: row.last_seen_at,
         }
@@ -368,6 +374,10 @@ pub struct RegisterDevice {
     pub bundle_id: Option<String>,
     pub name: Option<String>,
     pub platform: Option<String>,
+    /// The device's notification sounds on this server
+    /// ([`prefs::DeviceSounds`]); they replace the stored ones. Absent (an
+    /// app that predates them) keeps what is stored.
+    pub sounds: Option<Value>,
 }
 
 /// The answer to a registration.
@@ -423,7 +433,7 @@ pub async fn register_device(
         .map(|p| p.trim().to_ascii_lowercase())
         .filter(|p| !p.is_empty())
         .unwrap_or_else(|| "ios".to_string());
-    let row = push_device_service::upsert(
+    let mut row = push_device_service::upsert(
         conn,
         push_device_service::NewDevice {
             token,
@@ -436,6 +446,9 @@ pub async fn register_device(
     )
     .await
     .map_err(AppCommandError::from)?;
+    if let Some(sounds) = &input.sounds {
+        row = store_sounds(conn, row, sounds).await?;
+    }
     tracing::info!(
         "[push] device {} registered ({}, {}, {})",
         row.id,
@@ -447,6 +460,136 @@ pub async fn register_device(
         device: PushDeviceView::from(&row),
         server_id: server_id(conn).await,
     })
+}
+
+/// Keep the sounds a device registered with, minus what cannot be played and
+/// the projects and sessions this server no longer has.
+async fn store_sounds(
+    conn: &DatabaseConnection,
+    row: push_device::Model,
+    raw: &Value,
+) -> Result<push_device::Model, AppCommandError> {
+    if !raw.is_object() {
+        tracing::warn!(
+            "[push] device {} sent sounds that are not an object; keeping its own",
+            row.id
+        );
+        return Ok(row);
+    }
+    let (mut sounds, rejected) = DeviceSounds::from_wire(raw);
+    if !rejected.is_empty() {
+        let shown: Vec<&str> = rejected.iter().take(10).map(String::as_str).collect();
+        tracing::info!(
+            "[push] device {}: left out {} sound(s) codeg cannot play: {}",
+            row.id,
+            rejected.len(),
+            shown.join(", ")
+        );
+    }
+    prune_sounds(conn, &mut sounds).await;
+    if sounds == DeviceSounds::from_prefs_json(&row.prefs) {
+        return Ok(row);
+    }
+    let prefs = stored_prefs_json(DevicePrefs::from_json(&row.prefs), &sounds);
+    Ok(push_device_service::update_prefs(conn, row.id, &prefs)
+        .await
+        .map_err(AppCommandError::from)?
+        .unwrap_or(row))
+}
+
+/// Drop the project and session sounds of folders and conversations this
+/// server no longer has (deleted, or never its own). A failed read drops
+/// nothing.
+async fn prune_sounds(conn: &DatabaseConnection, sounds: &mut DeviceSounds) {
+    let folder_ids = sounds.project_ids();
+    let conversation_ids = sounds.session_ids();
+    let folders: HashSet<i32> = if folder_ids.is_empty() {
+        HashSet::new()
+    } else {
+        match folder::Entity::find()
+            .select_only()
+            .column(folder::Column::Id)
+            .filter(folder::Column::Id.is_in(folder_ids))
+            .filter(folder::Column::DeletedAt.is_null())
+            .into_tuple::<i32>()
+            .all(conn)
+            .await
+        {
+            Ok(ids) => ids.into_iter().collect(),
+            Err(e) => {
+                tracing::warn!("[push] failed to read the folders of project sounds: {e}");
+                return;
+            }
+        }
+    };
+    let conversations: HashSet<i32> = if conversation_ids.is_empty() {
+        HashSet::new()
+    } else {
+        match conversation::Entity::find()
+            .select_only()
+            .column(conversation::Column::Id)
+            .filter(conversation::Column::Id.is_in(conversation_ids))
+            .filter(conversation::Column::DeletedAt.is_null())
+            .into_tuple::<i32>()
+            .all(conn)
+            .await
+        {
+            Ok(ids) => ids.into_iter().collect(),
+            Err(e) => {
+                tracing::warn!("[push] failed to read the conversations of session sounds: {e}");
+                return;
+            }
+        }
+    };
+    sounds.retain_ids(|id| folders.contains(&id), |id| conversations.contains(&id));
+}
+
+/// What the sounds of `devices` need to know about the session `message` is
+/// about, read only when one of them has a sound that depends on it.
+async fn sound_context(
+    conn: &DatabaseConnection,
+    message: &PushMessage,
+    devices: &[&push_device::Model],
+) -> SoundContext {
+    let sounds: Vec<DeviceSounds> = devices
+        .iter()
+        .map(|d| DeviceSounds::from_prefs_json(&d.prefs))
+        .collect();
+    let critical_session = sounds.iter().any(DeviceSounds::has_critical)
+        && (message.kind == PushKind::Critical || critical_session(conn, message).await);
+    let root_folder_id = match message.folder_id {
+        Some(id) if sounds.iter().any(DeviceSounds::has_projects) => root_folder(conn, id).await,
+        _ => None,
+    };
+    SoundContext {
+        critical_session,
+        root_folder_id,
+    }
+}
+
+/// Whether the session a notification is about is marked critical.
+async fn critical_session(conn: &DatabaseConnection, message: &PushMessage) -> bool {
+    let Some(id) = message.conversation_id else {
+        return false;
+    };
+    match conversation::Entity::find_by_id(id).one(conn).await {
+        Ok(row) => row.is_some_and(|row| row.critical && row.deleted_at.is_none()),
+        Err(e) => {
+            tracing::warn!("[push] failed to read conversation {id}: {e}");
+            false
+        }
+    }
+}
+
+/// The root folder of a worktree folder.
+async fn root_folder(conn: &DatabaseConnection, folder_id: i32) -> Option<i32> {
+    match folder::Entity::find_by_id(folder_id).one(conn).await {
+        Ok(row) => row.and_then(|row| row.parent_id),
+        Err(e) => {
+            tracing::warn!("[push] failed to read folder {folder_id}: {e}");
+            None
+        }
+    }
 }
 
 /// Remove a device by id (Settings) or by token (the app signing out).
@@ -487,7 +630,13 @@ pub async fn update_device_prefs(
     id: i32,
     prefs: DevicePrefs,
 ) -> Result<PushDeviceView, AppCommandError> {
-    let row = push_device_service::update_prefs(conn, id, &prefs.to_json())
+    // The sounds come with the registration: carry them over.
+    let sounds = push_device_service::find(conn, id)
+        .await
+        .map_err(AppCommandError::from)?
+        .map(|row| DeviceSounds::from_prefs_json(&row.prefs))
+        .unwrap_or_default();
+    let row = push_device_service::update_prefs(conn, id, &stored_prefs_json(prefs, &sounds))
         .await
         .map_err(AppCommandError::from)?
         .ok_or_else(|| AppCommandError::not_found(format!("No push device {id}")))?;
@@ -519,7 +668,7 @@ fn with_last_badge<R>(f: impl FnOnce(&mut HashMap<String, u32>) -> R) -> R {
 }
 
 /// The outcome for one device, after acting on it (a dead token's row is
-/// deleted).
+/// deleted). `context` picks the device's sound ([`sound_context`]).
 async fn send_to_device(
     sender: &ApnsSender,
     conn: &DatabaseConnection,
@@ -527,18 +676,21 @@ async fn send_to_device(
     device: &push_device::Model,
     message: &PushMessage,
     server_id: &str,
+    context: SoundContext,
 ) -> SendOutcome {
     let topic = if device.bundle_id.is_empty() {
         setup.settings.bundle_id.as_str()
     } else {
         device.bundle_id.as_str()
     };
+    let sounds = DeviceSounds::from_prefs_json(&device.prefs);
     let target = Target {
         device_id: device.id,
         token: &device.token,
         topic,
         environment: ApnsEnvironment::parse(&device.environment)
             .unwrap_or(setup.settings.environment),
+        sound: message.sound_for(&sounds, context),
     };
     let outcome = sender
         .send(&setup.credentials, &target, message, server_id)
@@ -624,9 +776,10 @@ pub async fn deliver_with(
         return DeliveryReport::default();
     }
     let server_id = server_id(conn).await;
+    let context = sound_context(conn, message, &chosen).await;
     let mut report = DeliveryReport::default();
     for device in chosen {
-        match send_to_device(sender, conn, setup, device, message, &server_id).await {
+        match send_to_device(sender, conn, setup, device, message, &server_id, context).await {
             SendOutcome::Delivered { .. } => report.delivered += 1,
             SendOutcome::DeviceGone { .. } => report.removed += 1,
             SendOutcome::Failed { reason, .. } => report.failed.push((device.id, reason)),
@@ -763,7 +916,9 @@ pub async fn send_test_with(
     let server_id = server_id(conn).await;
     let mut results = Vec::with_capacity(devices.len());
     for device in &devices {
-        let outcome = send_to_device(sender, conn, setup, device, &message, &server_id).await;
+        let context = SoundContext::default();
+        let outcome =
+            send_to_device(sender, conn, setup, device, &message, &server_id, context).await;
         results.push(test_outcome(device, outcome));
     }
     Ok(results)
@@ -806,7 +961,8 @@ pub async fn sync_badges_with(
     let message = PushMessage::badge_only(count);
     let server_id = server_id(conn).await;
     for device in &stale {
-        match send_to_device(sender, conn, setup, device, &message, &server_id).await {
+        let context = SoundContext::default();
+        match send_to_device(sender, conn, setup, device, &message, &server_id, context).await {
             SendOutcome::Delivered { .. } => report.delivered += 1,
             SendOutcome::DeviceGone { .. } => report.removed += 1,
             SendOutcome::Failed { reason, .. } => report.failed.push((device.id, reason)),
