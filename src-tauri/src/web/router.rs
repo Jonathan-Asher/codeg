@@ -1759,6 +1759,15 @@ pub fn build_router(
             "/get_plan_usage",
             post(handlers::plan_usage::get_plan_usage),
         )
+        // ─── Usage-limit resets ───
+        .route(
+            "/get_limit_resets",
+            post(handlers::limit_resets::get_limit_resets),
+        )
+        .route(
+            "/use_limit_reset",
+            post(handlers::limit_resets::use_limit_reset),
+        )
         // ─── Account pool management (maxpool) ───
         .route(
             "/usage_pool_manage_info",

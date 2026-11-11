@@ -5,6 +5,7 @@ pub mod critical_sessions;
 pub mod talk;
 pub mod client_diagnostics;
 pub mod limit_continue;
+pub mod limit_resets;
 pub mod claude_plan_mode;
 pub mod automation;
 pub mod canvas;

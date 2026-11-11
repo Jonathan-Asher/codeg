@@ -2368,6 +2368,8 @@ mod tauri_app {
                 token_usage_commands::token_usage_status,
                 token_usage_commands::token_usage_sync,
                 plan_usage_commands::get_plan_usage,
+                crate::commands::limit_resets::get_limit_resets,
+                crate::commands::limit_resets::use_limit_reset,
                 crate::commands::usage_pool::manage::usage_pool_manage_info,
                 crate::commands::usage_pool::manage::usage_pool_login_start,
                 crate::commands::usage_pool::manage::usage_pool_login_finish,

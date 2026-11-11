@@ -26,7 +26,11 @@
 //!   found by tailing the most recently written rollouts — never parsing a
 //!   whole file — and cached for [`CODEX_CACHE_TTL`].
 //!
-//! Neither source spawns a process or touches credentials.
+//! Neither source spawns a process or touches credentials. The usage-limit
+//! reset flow ([`crate::commands::limit_resets`]) does, and hands the fresh
+//! readings it gets on the way back here ([`observe_claude_usage_read`],
+//! [`observe_codex_live_snapshot`]), so the bars move as soon as a reset
+//! lands.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -466,6 +470,63 @@ fn claude_snapshot() -> Option<PlanUsageSnapshot> {
     with_claude_store(|slot| slot.clone())
 }
 
+/// The windows of a claude.ai usage read (`/api/oauth/usage`, which the
+/// usage-limit reset flow makes), as an update to the live reading. That
+/// endpoint reports `utilization` in percent (0–100) and `resets_at` as an
+/// ISO time. Only the account windows and the ones the live reading already
+/// shows are taken, so a read never adds rows the agent's own events don't.
+pub(crate) fn claude_update_from_usage_read(
+    body: &Value,
+    known: &[String],
+) -> Option<ClaudeRateLimitUpdate> {
+    let object = body.as_object()?;
+    let mut windows: Vec<PlanUsageWindow> = object
+        .iter()
+        .filter(|(id, _)| {
+            matches!(id.as_str(), "five_hour" | "seven_day") || known.iter().any(|k| k == *id)
+        })
+        .filter_map(|(id, window)| {
+            let used = window
+                .get("utilization")?
+                .as_f64()
+                .filter(|u| u.is_finite())?;
+            let resets_at = window
+                .get("resets_at")
+                .and_then(Value::as_str)
+                .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
+                .map(|dt| dt.timestamp());
+            Some(claude_window(id, clamp_percent(used), resets_at))
+        })
+        .collect();
+    if windows.is_empty() {
+        return None;
+    }
+    windows.sort_by_key(kind_order);
+    Some(ClaudeRateLimitUpdate {
+        windows,
+        status: None,
+    })
+}
+
+/// Fold a claude.ai usage read into the live Claude reading, save it and
+/// push it, as a turn's rate-limit event would. For the reset flow, so the
+/// bars move as soon as a reset lands rather than at the next turn.
+pub fn observe_claude_usage_read(emitter: &EventEmitter, body: &Value) {
+    let known: Vec<String> = claude_snapshot()
+        .map(|s| s.windows.into_iter().map(|w| w.id).collect())
+        .unwrap_or_default();
+    let Some(update) = claude_update_from_usage_read(body, &known) else {
+        return;
+    };
+    let snapshot = with_claude_store(|slot| {
+        let next = merge_claude_snapshot(slot.take(), update, now_secs());
+        *slot = Some(next.clone());
+        next
+    });
+    persist_claude_snapshot();
+    emit_event(emitter, PLAN_USAGE_CHANGED_EVENT, &snapshot);
+}
+
 // ─── Usage-limit resets (for `acp::limit_continue`) ─────────────────────
 
 /// The newest Claude rate-limit event that said the account is blocked
@@ -546,6 +607,42 @@ pub(crate) struct CodexScan {
 }
 
 static CODEX_CACHE: Mutex<Option<(Instant, CodexScan)>> = Mutex::new(None);
+
+/// The newest Codex reading taken from Codex's app-server (the usage-limit
+/// reset flow reads it there). Rollouts only move when a Codex turn runs, so
+/// right after a reset this is newer than any of them; whichever reading is
+/// newer is the one shown.
+static CODEX_LIVE: Mutex<Option<PlanUsageSnapshot>> = Mutex::new(None);
+
+/// Keep a Codex reading from its app-server and push it to every window.
+pub fn observe_codex_live_snapshot(emitter: &EventEmitter, snapshot: PlanUsageSnapshot) {
+    *CODEX_LIVE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(snapshot.clone());
+    emit_event(emitter, PLAN_USAGE_CHANGED_EVENT, &snapshot);
+}
+
+/// The newer of a rollout reading and an app-server one.
+pub(crate) fn newest_codex_snapshot(
+    rollout: Option<PlanUsageSnapshot>,
+    live: Option<PlanUsageSnapshot>,
+) -> Option<PlanUsageSnapshot> {
+    match (rollout, live) {
+        (Some(rollout), Some(live)) => Some(if live.observed_at > rollout.observed_at {
+            live
+        } else {
+            rollout
+        }),
+        (rollout, live) => rollout.or(live),
+    }
+}
+
+fn codex_live_snapshot() -> Option<PlanUsageSnapshot> {
+    CODEX_LIVE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+}
 
 fn codex_plan_label(plan_type: &str) -> String {
     match plan_type {
@@ -810,7 +907,8 @@ async fn codex_scan(force: bool) -> CodexScan {
 /// is always the latest one held.
 pub async fn get_plan_usage_core(force: bool) -> Result<PlanUsageReport, AppCommandError> {
     let (codex, pool) = tokio::join!(codex_scan(force), usage_pool::report_reading(force));
-    let snapshots = [claude_snapshot(), codex.snapshot]
+    let codex_snapshot = newest_codex_snapshot(codex.snapshot, codex_live_snapshot());
+    let snapshots = [claude_snapshot(), codex_snapshot]
         .into_iter()
         .flatten()
         .collect();

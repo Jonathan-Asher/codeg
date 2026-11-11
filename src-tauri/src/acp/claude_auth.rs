@@ -141,6 +141,17 @@ impl ClaudeCli {
         }
     }
 
+    /// A variable as the CLI sees it: the launch environment's value, else
+    /// codeg's own (the CLI inherits codeg's environment under it).
+    pub(crate) fn env_var(&self, key: &str) -> Option<String> {
+        self.env
+            .iter()
+            .rev()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.clone())
+            .or_else(|| std::env::var(key).ok())
+    }
+
     fn args(&self, args: &[&str]) -> Vec<String> {
         self.prefix
             .iter()
@@ -287,8 +298,19 @@ pub(crate) async fn read_status_within(
     cli: &ClaudeCli,
     timeout: Duration,
 ) -> Result<ClaudeAuthStatus, String> {
+    let stdout = run_status(cli, timeout).await?;
+    parse_status(&stdout)
+        .ok_or_else(|| "the Claude Code CLI gave no readable sign-in status".to_string())
+}
+
+/// `claude auth status --json`'s output, capped.
+async fn run_status(cli: &ClaudeCli, timeout: Duration) -> Result<String, String> {
+    run_cli(cli, &["auth", "status", "--json"], timeout).await
+}
+
+async fn run_cli(cli: &ClaudeCli, args: &[&str], timeout: Duration) -> Result<String, String> {
     let child = cli
-        .command(&["auth", "status", "--json"])
+        .command(args)
         .spawn()
         .map_err(|e| format!("could not run the Claude Code CLI: {e}"))?;
     let output = tokio::time::timeout(timeout, child.wait_with_output())
@@ -296,8 +318,61 @@ pub(crate) async fn read_status_within(
         .map_err(|_| "the Claude Code CLI did not answer in time".to_string())?
         .map_err(|e| format!("the Claude Code CLI failed: {e}"))?;
     let stdout = &output.stdout[..output.stdout.len().min(STATUS_OUTPUT_MAX)];
-    parse_status(&String::from_utf8_lossy(stdout))
-        .ok_or_else(|| "the Claude Code CLI gave no readable sign-in status".to_string())
+    Ok(String::from_utf8_lossy(stdout).into_owned())
+}
+
+/// Whose sign-in it is and where the CLI keeps it: the organization and
+/// the config dir from `claude auth status --json`. Internal. The UI gets
+/// only [`ClaudeAuthStatus`]. Codeg's usage-limit resets act on this
+/// login.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ClaudeLoginIdentity {
+    pub org_id: Option<String>,
+    pub config_dir: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawIdentity {
+    org_id: Option<String>,
+    config_directory: Option<String>,
+}
+
+pub(crate) fn parse_identity(stdout: &str) -> ClaudeLoginIdentity {
+    let start = stdout.find('{');
+    let end = stdout.rfind('}');
+    let raw = match (start, end) {
+        (Some(start), Some(end)) if start <= end => {
+            serde_json::from_str::<RawIdentity>(&stdout[start..=end]).ok()
+        }
+        _ => None,
+    };
+    let Some(raw) = raw else {
+        return ClaudeLoginIdentity::default();
+    };
+    // The config dir is a path: keep it whole, unlike the display fields.
+    let config_dir = raw
+        .config_directory
+        .filter(|dir| !dir.trim().is_empty() && !dir.chars().any(char::is_control));
+    ClaudeLoginIdentity {
+        org_id: clean_field(raw.org_id),
+        config_dir,
+    }
+}
+
+/// The sign-in status and the identity behind it, from one CLI run.
+pub(crate) async fn read_status_and_identity(
+    cli: &ClaudeCli,
+) -> Result<(ClaudeAuthStatus, ClaudeLoginIdentity), String> {
+    let stdout = run_status(cli, STATUS_TIMEOUT).await?;
+    let status = parse_status(&stdout)
+        .ok_or_else(|| "the Claude Code CLI gave no readable sign-in status".to_string())?;
+    Ok((status, parse_identity(&stdout)))
+}
+
+/// `claude --version`'s output ("2.1.303 (Claude Code)").
+pub(crate) async fn read_version_output(cli: &ClaudeCli) -> Result<String, String> {
+    run_cli(cli, &["--version"], STATUS_TIMEOUT).await
 }
 
 // ─── The retry decision ─────────────────────────────────────────────────
