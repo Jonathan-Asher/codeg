@@ -642,7 +642,7 @@ fn codex_credits_parse_from_the_live_shape() {
         assert!(!item.requires_limit);
     }
 
-    let snapshot = reading.snapshot.expect("windows");
+    let snapshot = reading.snapshot.clone().expect("windows");
     assert_eq!(snapshot.source, PlanUsageSource::Live);
     assert_eq!(snapshot.plan_label.as_deref(), Some("Pro Lite"));
     assert_eq!(snapshot.windows.len(), 1);
