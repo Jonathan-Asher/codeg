@@ -2368,7 +2368,10 @@
       "limitPoolBannerTitle": "Pausada por limites de uso",
       "limitStopped": "Parada por limites de uso",
       "limitStoppedHint": "O último turno parou num limite de uso e não continua mais sozinho. Continue quando o limite permitir.",
-      "workingWithItems": "Trabalhando · {count} em execução"
+      "workingWithItems": "Trabalhando · {count} em execução",
+      "useReset": "Usar uma redefinição e continuar",
+      "useResetTitle": "{count, plural, =1 {Use sua redefinição do limite de uso para recarregar o limite agora e continuar} other {Use uma das suas # redefinições do limite de uso para recarregar o limite agora e continuar}}",
+      "resetContinued": "Redefinição usada. A sessão continua agora."
     },
     "conversationCard": {
       "untitledConversation": "Conversa sem título",
@@ -6901,7 +6904,8 @@
     "source": {
       "claudeLive": "Dos turnos do Claude Code no codeg",
       "claudeSaved": "Última leitura salva antes de o codeg reiniciar",
-      "codexLog": "Do log de sessão mais recente do Codex"
+      "codexLog": "Do log de sessão mais recente do Codex",
+      "codexLive": "Lido do Codex agora mesmo"
     },
     "window": {
       "session5h": "Sessão de 5 horas",
@@ -7043,6 +7047,67 @@
       "reserveSummary": "Reserva de {percent}%",
       "reserveSummaryDynamic": "Reserva de {percent}%, liberada perto da redefinição",
       "position": "Posição {position}"
+    },
+    "resets": {
+      "title": "Redefinições do limite de uso",
+      "checking": "Procurando redefinições…",
+      "available": "{count, plural, one {# redefinição disponível} other {# redefinições disponíveis}}",
+      "availableUntil": "{count, plural, one {# redefinição disponível} other {# redefinições disponíveis}} · a primeira expira em {date}",
+      "none": "Nenhuma disponível",
+      "account": "Para {account}",
+      "expires": "Expira em {date}",
+      "noExpiry": "Não expira",
+      "times": "×{count}",
+      "use": "Usar redefinição",
+      "using": "Usando…",
+      "needsLimit": "Pode ser usada ao atingir um limite",
+      "paused": "Pausada por enquanto",
+      "notStarted": "Ainda não pode ser usada",
+      "notUsableNow": "Não pode ser usada agora",
+      "left": "{count, plural, =0 {Nenhuma redefinição restante.} one {# redefinição restante.} other {# redefinições restantes.}}",
+      "pausedSessions": "{count, plural, one {# sessão pausada no limite pode continuar agora.} other {# sessões pausadas no limite podem continuar agora.}}",
+      "continuePaused": "Continuar agora",
+      "continuedPaused": "{count, plural, one {Continuando # sessão.} other {Continuando # sessões.}}",
+      "continuePausedFailed": "Nem todas as sessões pausadas puderam continuar. Use Continuar agora na sessão.",
+      "kind": {
+        "session": "Redefinição da sessão",
+        "weekly": "Redefinição semanal",
+        "full": "Redefinição completa",
+        "fable": "Redefinição do Fable",
+        "other": "Redefinição do limite"
+      },
+      "refills": {
+        "session": "seu limite de sessão de 5 horas",
+        "weekly": "seu limite semanal",
+        "full": "todos os seus limites de uso",
+        "fable": "seu limite do Fable",
+        "other": "seus limites de uso"
+      },
+      "confirm": {
+        "title": "Usar uma redefinição?",
+        "body": "{count, plural, =1 {Usar sua única redefinição?} other {Usar 1 de # redefinições?}} Isso recarrega {refills} agora. Não dá para desfazer.",
+        "use": "Usar redefinição",
+        "cancel": "Cancelar"
+      },
+      "outcome": {
+        "reset": "Redefinição usada: seus limites foram recarregados.",
+        "nothingToReset": "Nada foi usado: esta redefinição só funciona ao atingir um limite.",
+        "noReset": "Nada foi usado: essa redefinição não está mais disponível.",
+        "alreadyUsed": "Essa redefinição já tinha sido usada. Nada mudou agora.",
+        "cooldown": "Outra redefinição está sendo aplicada nesta conta. Nada foi usado; tente de novo em um minuto.",
+        "unconfirmed": "Não foi possível confirmar que a redefinição foi aplicada. Se em um minuto você ainda estiver no limite, tente de novo: não será usada uma segunda redefinição."
+      },
+      "error": {
+        "notInstalled": "Não está instalado nesta máquina.",
+        "notLoggedIn": "Sem login nesta máquina, por isso as redefinições não podem ser lidas.",
+        "loginExpired": "O login expirou. Ele é renovado na próxima solicitação da sessão; tente depois disso.",
+        "notEligible": "Esta conta não recebe redefinições do limite de uso aqui.",
+        "surface": "O Claude oferece essas redefinições apenas no app de terminal do Claude Code (/limit-reset) e em claude.ai, não em outros apps.",
+        "unsupportedVersion": "Esta versão não pode usar redefinições. Atualize o agente.",
+        "network": "Não foi possível falar com o provedor. Tente de novo em instantes.",
+        "busy": "Já há uma redefinição em uso para esta conta.",
+        "failed": "Não foi possível verificar as redefinições."
+      }
     }
   },
   "Forge": {

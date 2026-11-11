@@ -10,18 +10,36 @@ import { NextIntlClientProvider } from "next-intl"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import enMessages from "@/i18n/messages/en.json"
-import type { DbConversationSummary, LimitPause } from "@/lib/types"
+import type {
+  DbConversationSummary,
+  LimitPause,
+  LimitResetsReport,
+  ProviderLimitResets,
+} from "@/lib/types"
 
 const h = vi.hoisted(() => ({
   cancelLimitContinue: vi.fn(),
   continueLimitNow: vi.fn(),
+  getLimitResets: vi.fn(),
+  consumeLimitReset: vi.fn(),
+  toast: {
+    success: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    warning: vi.fn(),
+  },
 }))
 
 vi.mock("@/lib/api", () => ({
   cancelLimitContinue: h.cancelLimitContinue,
   continueLimitNow: h.continueLimitNow,
+  getLimitResets: h.getLimitResets,
+  consumeLimitReset: h.consumeLimitReset,
 }))
 
+vi.mock("sonner", () => ({ toast: h.toast }))
+
+import { resetLimitResetsCacheForTests } from "@/hooks/use-limit-resets"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 
 import { LimitPauseHeaderBadge, LimitPausedBanner } from "./limit-pause"
@@ -72,9 +90,40 @@ function wrap(node: ReactNode) {
   )
 }
 
+function codexResets(available: number): ProviderLimitResets {
+  return {
+    provider: "codex",
+    available,
+    items: Array.from({ length: available }, (_, i) => ({
+      id: `credit-${i}`,
+      kind: "full" as const,
+      label: "Full reset",
+      description: null,
+      count: 1,
+      expires_at: Math.floor(Date.now() / 1000) + (i + 10) * 86_400,
+      usable_now: true,
+      requires_limit: false,
+      clears: [],
+      unavailable_reason: null,
+    })),
+    source: "codex_app_server",
+    account: null,
+    error: null,
+    fetched_at: Math.floor(Date.now() / 1000),
+  }
+}
+
+function listing(...providers: ProviderLimitResets[]): LimitResetsReport {
+  return { providers }
+}
+
 beforeEach(() => {
+  resetLimitResetsCacheForTests()
   h.cancelLimitContinue.mockReset().mockResolvedValue(true)
   h.continueLimitNow.mockReset().mockResolvedValue(true)
+  h.getLimitResets.mockReset().mockResolvedValue(listing())
+  h.consumeLimitReset.mockReset()
+  for (const fn of Object.values(h.toast)) fn.mockReset()
 })
 
 afterEach(() => cleanup())
@@ -109,6 +158,109 @@ describe("LimitPausedBanner", () => {
     expect(banner).toHaveTextContent(L.limitBannerClaimed)
     expect(screen.queryByTestId("limit-cancel-auto-continue")).toBeNull()
     expect(screen.queryByTestId("limit-continue-now")).toBeNull()
+  })
+})
+
+describe("LimitPausedBanner with a usage-limit reset", () => {
+  it("offers Use a reset and continue, asks first, and continues the session", async () => {
+    h.getLimitResets.mockResolvedValue(listing(codexResets(2)))
+    h.consumeLimitReset.mockResolvedValue({
+      provider: "codex",
+      outcome: "reset",
+      cleared: [],
+      resets: codexResets(1),
+      paused_conversations: [],
+      continued: 7,
+    })
+    wrap(
+      <LimitPausedBanner conversationId={7} pause={pause()} agentType="codex" />
+    )
+    const button = await screen.findByTestId("limit-use-reset")
+    expect(button).toHaveTextContent(L.useReset)
+    expect(button).toHaveAttribute(
+      "title",
+      "Use one of your 2 usage-limit resets to refill the limit now and continue"
+    )
+
+    fireEvent.click(button)
+    const dialog = screen.getByTestId("limit-reset-confirm")
+    expect(dialog).toHaveTextContent(
+      "Use 1 of 2 resets? This refills all your usage limits now. It can't be undone."
+    )
+    expect(h.consumeLimitReset).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId("limit-reset-confirm-use"))
+
+    await waitFor(() =>
+      expect(h.toast.success).toHaveBeenCalledWith(L.resetContinued)
+    )
+    expect(h.consumeLimitReset).toHaveBeenCalledWith({
+      provider: "codex",
+      id: "credit-0",
+      conversationId: 7,
+    })
+  })
+
+  it("reports what came of it when the session didn't continue", async () => {
+    h.getLimitResets.mockResolvedValue(listing(codexResets(1)))
+    h.consumeLimitReset.mockResolvedValue({
+      provider: "codex",
+      outcome: "already_used",
+      cleared: [],
+      resets: codexResets(0),
+      paused_conversations: [],
+      continued: null,
+    })
+    wrap(
+      <LimitPausedBanner conversationId={7} pause={pause()} agentType="codex" />
+    )
+    fireEvent.click(await screen.findByTestId("limit-use-reset"))
+    fireEvent.click(screen.getByTestId("limit-reset-confirm-use"))
+    await waitFor(() =>
+      expect(h.toast.info).toHaveBeenCalledWith(
+        enMessages.PlanUsage.resets.outcome.alreadyUsed
+      )
+    )
+    // The listing read after the attempt has none left: the offer goes.
+    await waitFor(() =>
+      expect(screen.queryByTestId("limit-use-reset")).toBeNull()
+    )
+  })
+
+  it("offers nothing without a usable reset, for a pool pause, or another agent", async () => {
+    h.getLimitResets.mockResolvedValue(listing(codexResets(0)))
+    wrap(
+      <LimitPausedBanner conversationId={7} pause={pause()} agentType="codex" />
+    )
+    await waitFor(() => expect(h.getLimitResets).toHaveBeenCalled())
+    expect(screen.queryByTestId("limit-use-reset")).toBeNull()
+    cleanup()
+
+    resetLimitResetsCacheForTests()
+    h.getLimitResets.mockClear().mockResolvedValue(listing(codexResets(2)))
+    wrap(
+      <>
+        <LimitPausedBanner
+          conversationId={7}
+          pause={pause()}
+          reason="pool_capacity"
+          agentType="codex"
+        />
+        <LimitPausedBanner
+          conversationId={8}
+          pause={pause()}
+          agentType="gemini"
+        />
+        <LimitPausedBanner
+          conversationId={9}
+          pause={pause({ state: "claimed" })}
+          agentType="codex"
+        />
+      </>
+    )
+    expect(screen.getAllByTestId("limit-paused-banner")).toHaveLength(3)
+    expect(screen.queryByTestId("limit-use-reset")).toBeNull()
+    // Nothing even asked for the listing.
+    expect(h.getLimitResets).not.toHaveBeenCalled()
   })
 })
 

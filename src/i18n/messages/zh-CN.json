@@ -2368,7 +2368,10 @@
       "limitPoolBannerTitle": "因用量上限暂停",
       "limitStopped": "因用量上限停止",
       "limitStoppedHint": "上一轮因用量上限而停止，且不会再自动继续。待额度允许时请手动继续。",
-      "workingWithItems": "工作中 · {count} 个运行中"
+      "workingWithItems": "工作中 · {count} 个运行中",
+      "useReset": "使用重置并继续",
+      "useResetTitle": "{count, plural, =1 {使用你的用量上限重置，立即恢复上限并继续} other {使用 # 次用量上限重置中的一次，立即恢复上限并继续}}",
+      "resetContinued": "已使用重置，会话现在继续。"
     },
     "conversationCard": {
       "untitledConversation": "未命名会话",
@@ -6901,7 +6904,8 @@
     "source": {
       "claudeLive": "来自 codeg 中的 Claude Code 对话轮次",
       "claudeSaved": "codeg 重启前保存的最后一次数据",
-      "codexLog": "来自最新的 Codex 会话日志"
+      "codexLog": "来自最新的 Codex 会话日志",
+      "codexLive": "刚从 Codex 读取"
     },
     "window": {
       "session5h": "5 小时会话",
@@ -7043,6 +7047,67 @@
       "reserveSummary": "预留 {percent}%",
       "reserveSummaryDynamic": "预留 {percent}%，临近重置时释放",
       "position": "第 {position} 位"
+    },
+    "resets": {
+      "title": "用量上限重置",
+      "checking": "正在检查重置…",
+      "available": "{count, plural, other {可用重置 # 次}}",
+      "availableUntil": "{count, plural, other {可用重置 # 次}} · 最早 {date} 到期",
+      "none": "暂无可用重置",
+      "account": "账号：{account}",
+      "expires": "{date} 到期",
+      "noExpiry": "不会过期",
+      "times": "×{count}",
+      "use": "使用重置",
+      "using": "正在使用…",
+      "needsLimit": "达到上限后才能使用",
+      "paused": "暂时停用",
+      "notStarted": "尚未开放",
+      "notUsableNow": "当前无法使用",
+      "left": "{count, plural, =0 {已无剩余重置。} other {剩余 # 次重置。}}",
+      "pausedSessions": "{count, plural, other {有 # 个因上限暂停的会话现在可以继续。}}",
+      "continuePaused": "立即继续",
+      "continuedPaused": "{count, plural, other {正在继续 # 个会话。}}",
+      "continuePausedFailed": "部分暂停的会话未能继续。请在对应会话中点击“立即继续”。",
+      "kind": {
+        "session": "会话重置",
+        "weekly": "每周重置",
+        "full": "完整重置",
+        "fable": "Fable 重置",
+        "other": "上限重置"
+      },
+      "refills": {
+        "session": "你的 5 小时会话上限",
+        "weekly": "你的每周上限",
+        "full": "你的所有用量上限",
+        "fable": "你的 Fable 上限",
+        "other": "你的用量上限"
+      },
+      "confirm": {
+        "title": "使用一次重置？",
+        "body": "{count, plural, =1 {要使用你唯一的一次重置吗？} other {要使用 # 次重置中的 1 次吗？}}这会立即恢复{refills}。此操作无法撤销。",
+        "use": "使用重置",
+        "cancel": "取消"
+      },
+      "outcome": {
+        "reset": "已使用重置：用量上限已恢复。",
+        "nothingToReset": "未使用任何重置：此重置只能在达到上限后使用。",
+        "noReset": "未使用任何重置：该重置已不可用。",
+        "alreadyUsed": "该重置已被使用，刚才没有任何变化。",
+        "cooldown": "此账号上另一次重置正在进行中。未使用任何重置，请一分钟后再试。",
+        "unconfirmed": "无法确认重置是否成功。如果一分钟后仍处于上限，请重试：不会额外消耗第二次重置。"
+      },
+      "error": {
+        "notInstalled": "此机器上未安装。",
+        "notLoggedIn": "此机器上未登录，无法读取其重置。",
+        "loginExpired": "登录已过期。会话下次发出请求时会自动续期，之后再试。",
+        "notEligible": "此账号在这里无法使用用量上限重置。",
+        "surface": "Claude 只在 Claude Code 终端应用（/limit-reset）和 claude.ai 中提供这些重置，不向其他应用提供。",
+        "unsupportedVersion": "此版本无法使用重置，请更新该智能体。",
+        "network": "无法连接到服务方，请稍后再试。",
+        "busy": "此账号正在使用一次重置。",
+        "failed": "无法检查重置。"
+      }
     }
   },
   "Forge": {

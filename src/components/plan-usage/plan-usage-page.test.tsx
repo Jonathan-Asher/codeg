@@ -3,14 +3,25 @@ import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type {
+  LimitResetsReport,
   PlanUsagePool,
   PlanUsagePoolAccount,
   PlanUsageReport,
   PlanUsageSnapshot,
   PlanUsageWindow,
+  UseLimitResetResult,
 } from "@/lib/types"
 
 const getPlanUsage = vi.fn<(force?: boolean) => Promise<PlanUsageReport>>()
+const getLimitResets = vi.fn<(force?: boolean) => Promise<LimitResetsReport>>()
+const consumeLimitReset =
+  vi.fn<
+    (args: {
+      provider: string
+      id?: string | null
+      conversationId?: number | null
+    }) => Promise<UseLimitResetResult>
+  >()
 let pushHandler: ((snapshot: PlanUsageSnapshot) => void) | null = null
 let poolHandler: ((pool: PlanUsagePool | null) => void) | null = null
 
@@ -67,6 +78,13 @@ const manage = vi.hoisted(() => {
 vi.mock("@/lib/api", () => ({
   ...manage,
   getPlanUsage: (force?: boolean) => getPlanUsage(force),
+  getLimitResets: (force?: boolean) => getLimitResets(force),
+  consumeLimitReset: (args: {
+    provider: string
+    id?: string | null
+    conversationId?: number | null
+  }) => consumeLimitReset(args),
+  continueLimitNow: () => Promise.resolve(true),
   subscribePlanUsageChanged: (handler: (s: PlanUsageSnapshot) => void) => {
     pushHandler = handler
     return Promise.resolve(() => {
@@ -90,6 +108,7 @@ vi.mock("@/lib/platform", () => ({
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
+import { resetLimitResetsCacheForTests } from "@/hooks/use-limit-resets"
 import { PlanUsagePage } from "./plan-usage-page"
 import enMessages from "@/i18n/messages/en.json"
 
@@ -302,6 +321,9 @@ const card = (name: "Claude Code" | "Codex") =>
 
 beforeEach(() => {
   getPlanUsage.mockReset()
+  resetLimitResetsCacheForTests()
+  getLimitResets.mockReset().mockResolvedValue({ providers: [] })
+  consumeLimitReset.mockReset()
   pushHandler = null
   poolHandler = null
   for (const fn of Object.values(manage)) fn.mockClear()
@@ -1042,5 +1064,92 @@ describe("PlanUsagePage account pool management", () => {
       await Promise.resolve()
     })
     expect(manage.usagePoolRestartNow).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("PlanUsagePage usage-limit resets", () => {
+  const codexResets = (available: number) => ({
+    provider: "codex" as const,
+    available,
+    items: Array.from({ length: available }, (_, i) => ({
+      id: `credit-${i}`,
+      kind: "full" as const,
+      label: "Full reset",
+      description: null,
+      count: 1,
+      expires_at: now() + (10 + i) * 86_400,
+      usable_now: true,
+      requires_limit: false,
+      clears: [],
+      unavailable_reason: null,
+    })),
+    source: "codex_app_server" as const,
+    account: "me@example.com",
+    error: null,
+    fetched_at: now(),
+  })
+
+  it("shows each provider's resets on its card, and a used one re-reads the bars", async () => {
+    getPlanUsage.mockResolvedValue(report([claudeSnapshot(), codexSnapshot()]))
+    getLimitResets.mockResolvedValue({
+      providers: [
+        {
+          provider: "claude_code",
+          available: 0,
+          items: [],
+          source: "claude_oauth",
+          account: "me@example.com",
+          error: { code: "not_eligible", message: "x", reason: "surface" },
+          fetched_at: now(),
+        },
+        codexResets(2),
+      ],
+    })
+    consumeLimitReset.mockResolvedValue({
+      provider: "codex",
+      outcome: "reset",
+      cleared: [],
+      resets: codexResets(1),
+      paused_conversations: [],
+      continued: null,
+    })
+    await mount()
+
+    const codex = card("Codex")
+    const resets = await within(codex).findByText(/2 resets available/)
+    expect(resets).toHaveTextContent(/first expires/)
+    expect(
+      within(card("Claude Code")).getByText(
+        enMessages.PlanUsage.resets.error.surface
+      )
+    ).toBeInTheDocument()
+    expect(getLimitResets).toHaveBeenCalledWith(false)
+
+    getPlanUsage.mockClear()
+    fireEvent.click(within(codex).getByRole("button", { name: "Use reset" }))
+    fireEvent.click(await screen.findByTestId("limit-reset-confirm-use"))
+    expect(
+      await within(codex).findByText(
+        /Reset used: your limits are refilled\. 1 reset left\./
+      )
+    ).toBeInTheDocument()
+    expect(consumeLimitReset).toHaveBeenCalledWith({
+      provider: "codex",
+      id: "credit-0",
+      conversationId: undefined,
+    })
+    // The bars are read again past the cache, and the count follows.
+    expect(getPlanUsage).toHaveBeenCalledWith(true)
+    expect(within(codex).getByText(/1 reset available/)).toBeInTheDocument()
+  })
+
+  it("asks the providers again on Refresh", async () => {
+    getPlanUsage.mockResolvedValue(report([claudeSnapshot(), codexSnapshot()]))
+    await mount()
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(getLimitResets).toHaveBeenCalledWith(true)
   })
 })

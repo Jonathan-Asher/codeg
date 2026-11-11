@@ -221,10 +221,13 @@ import type {
   OfficecliInfo,
   OfficecliSkill,
   SkillSyncReport,
+  LimitResetsReport,
+  PlanUsageAgent,
   PlanUsagePool,
   PlanUsagePoolReserve,
   PlanUsageReport,
   PlanUsageSnapshot,
+  UseLimitResetResult,
   ClaudeAuthStatus,
   PoolChange,
   PoolManageInfo,
@@ -4156,6 +4159,39 @@ export const PLAN_USAGE_CHANGED_EVENT = "plan-usage://changed"
  *  Codex session logs instead of reusing the backend's one-minute cache. */
 export async function getPlanUsage(force = false): Promise<PlanUsageReport> {
   return getTransport().call("get_plan_usage", { force })
+}
+
+/** Every provider's usage-limit resets (Claude Code, Codex). `force` asks
+ *  the providers again instead of reusing the backend's one-minute listing.
+ *  Reading them starts the agents' own tools, hence the longer timeout. */
+export async function getLimitResets(
+  force = false
+): Promise<LimitResetsReport> {
+  return getTransport().call(
+    "get_limit_resets",
+    { force },
+    { timeoutMs: 120_000 }
+  )
+}
+
+/** Use one usage-limit reset: `id`, or the provider's next one. It can't be
+ *  undone. With `conversationId`, that session — paused at its limit —
+ *  continues as soon as the reset lands. (Not named `use…`: it is not a
+ *  React hook.) */
+export async function consumeLimitReset(args: {
+  provider: PlanUsageAgent
+  id?: string | null
+  conversationId?: number | null
+}): Promise<UseLimitResetResult> {
+  return getTransport().call(
+    "use_limit_reset",
+    {
+      provider: args.provider,
+      id: args.id ?? null,
+      conversationId: args.conversationId ?? null,
+    },
+    { timeoutMs: 150_000 }
+  )
 }
 
 // Managing the account pool (maxpool) — host-side, and only where one is

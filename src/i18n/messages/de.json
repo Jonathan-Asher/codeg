@@ -2368,7 +2368,10 @@
       "limitPoolBannerTitle": "Wegen Nutzungslimits pausiert",
       "limitStopped": "Wegen Nutzungslimits angehalten",
       "limitStoppedHint": "Die letzte Runde wurde wegen eines Nutzungslimits angehalten und geht nicht mehr von selbst weiter. Setze sie fort, sobald das Limit es zulässt.",
-      "workingWithItems": "Arbeitet · {count} laufen"
+      "workingWithItems": "Arbeitet · {count} laufen",
+      "useReset": "Zurücksetzung nutzen und fortsetzen",
+      "useResetTitle": "{count, plural, =1 {Nutze deine Zurücksetzung des Nutzungslimits, um das Limit jetzt aufzufüllen und fortzusetzen} other {Nutze eine deiner # Zurücksetzungen des Nutzungslimits, um das Limit jetzt aufzufüllen und fortzusetzen}}",
+      "resetContinued": "Zurücksetzung genutzt. Die Sitzung wird jetzt fortgesetzt."
     },
     "conversationCard": {
       "untitledConversation": "Unbenannte Konversation",
@@ -6901,7 +6904,8 @@
     "source": {
       "claudeLive": "Aus Claude-Code-Turns in codeg",
       "claudeSaved": "Letzter Wert, gespeichert vor dem Neustart von codeg",
-      "codexLog": "Aus dem neuesten Codex-Sitzungsprotokoll"
+      "codexLog": "Aus dem neuesten Codex-Sitzungsprotokoll",
+      "codexLive": "Gerade eben aus Codex gelesen"
     },
     "window": {
       "session5h": "5-Stunden-Sitzung",
@@ -7043,6 +7047,67 @@
       "reserveSummary": "Reserve {percent} %",
       "reserveSummaryDynamic": "Reserve {percent} %, kurz vor dem Reset freigegeben",
       "position": "Position {position}"
+    },
+    "resets": {
+      "title": "Zurücksetzungen des Nutzungslimits",
+      "checking": "Suche nach Zurücksetzungen…",
+      "available": "{count, plural, one {# Zurücksetzung verfügbar} other {# Zurücksetzungen verfügbar}}",
+      "availableUntil": "{count, plural, one {# Zurücksetzung verfügbar} other {# Zurücksetzungen verfügbar}} · die erste läuft am {date} ab",
+      "none": "Keine verfügbar",
+      "account": "Für {account}",
+      "expires": "Läuft am {date} ab",
+      "noExpiry": "Läuft nicht ab",
+      "times": "×{count}",
+      "use": "Zurücksetzung nutzen",
+      "using": "Wird genutzt…",
+      "needsLimit": "Nutzbar, sobald ein Limit erreicht ist",
+      "paused": "Vorerst pausiert",
+      "notStarted": "Noch nicht nutzbar",
+      "notUsableNow": "Gerade nicht nutzbar",
+      "left": "{count, plural, =0 {Keine Zurücksetzung mehr übrig.} one {# Zurücksetzung übrig.} other {# Zurücksetzungen übrig.}}",
+      "pausedSessions": "{count, plural, one {# am Limit pausierte Sitzung kann jetzt fortgesetzt werden.} other {# am Limit pausierte Sitzungen können jetzt fortgesetzt werden.}}",
+      "continuePaused": "Jetzt fortsetzen",
+      "continuedPaused": "{count, plural, one {# Sitzung wird fortgesetzt.} other {# Sitzungen werden fortgesetzt.}}",
+      "continuePausedFailed": "Nicht jede pausierte Sitzung konnte fortgesetzt werden. Nutze dort Jetzt fortsetzen.",
+      "kind": {
+        "session": "Sitzungs-Zurücksetzung",
+        "weekly": "Wöchentliche Zurücksetzung",
+        "full": "Vollständige Zurücksetzung",
+        "fable": "Fable-Zurücksetzung",
+        "other": "Limit-Zurücksetzung"
+      },
+      "refills": {
+        "session": "dein 5-Stunden-Sitzungslimit",
+        "weekly": "dein Wochenlimit",
+        "full": "alle deine Nutzungslimits",
+        "fable": "dein Fable-Limit",
+        "other": "deine Nutzungslimits"
+      },
+      "confirm": {
+        "title": "Zurücksetzung nutzen?",
+        "body": "{count, plural, =1 {Deine einzige Zurücksetzung nutzen?} other {1 von # Zurücksetzungen nutzen?}} Damit wird {refills} jetzt aufgefüllt. Das lässt sich nicht rückgängig machen.",
+        "use": "Zurücksetzung nutzen",
+        "cancel": "Abbrechen"
+      },
+      "outcome": {
+        "reset": "Zurücksetzung genutzt: deine Limits sind aufgefüllt.",
+        "nothingToReset": "Nichts wurde verbraucht: Diese Zurücksetzung funktioniert erst, wenn ein Limit erreicht ist.",
+        "noReset": "Nichts wurde verbraucht: Diese Zurücksetzung ist nicht mehr verfügbar.",
+        "alreadyUsed": "Diese Zurücksetzung wurde bereits genutzt. Gerade hat sich nichts geändert.",
+        "cooldown": "Auf diesem Konto läuft gerade eine andere Zurücksetzung. Nichts wurde verbraucht; versuche es in einer Minute erneut.",
+        "unconfirmed": "Es ließ sich nicht bestätigen, dass die Zurücksetzung durchging. Wenn du in einer Minute noch am Limit bist, versuche es erneut: Es wird keine zweite Zurücksetzung verbraucht."
+      },
+      "error": {
+        "notInstalled": "Auf diesem Rechner nicht installiert.",
+        "notLoggedIn": "Auf diesem Rechner nicht angemeldet, daher können die Zurücksetzungen nicht gelesen werden.",
+        "loginExpired": "Die Anmeldung ist abgelaufen. Sie erneuert sich mit der nächsten Anfrage der Sitzung; versuche es danach erneut.",
+        "notEligible": "Diesem Konto werden hier keine Zurücksetzungen des Nutzungslimits angeboten.",
+        "surface": "Claude bietet diese Zurücksetzungen nur in der Terminal-App von Claude Code (/limit-reset) und auf claude.ai an, nicht in anderen Apps.",
+        "unsupportedVersion": "Diese Version kann keine Zurücksetzungen nutzen. Aktualisiere den Agenten.",
+        "network": "Der Anbieter war nicht erreichbar. Versuche es gleich noch einmal.",
+        "busy": "Für dieses Konto wird bereits eine Zurücksetzung genutzt.",
+        "failed": "Zurücksetzungen konnten nicht geprüft werden."
+      }
     }
   },
   "Forge": {

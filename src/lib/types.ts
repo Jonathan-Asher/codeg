@@ -2658,6 +2658,96 @@ export interface PlanUsageReport {
   pool?: PlanUsagePool | null
 }
 
+// ─── Usage-limit resets (mirrors `commands/limit_resets.rs`) ───
+
+/** What a reset refills: the 5-hour window, the weekly one, every limit, or
+ *  Claude's Fable-only limit. */
+export type LimitResetKind = "session" | "weekly" | "full" | "fable" | "other"
+
+/** One reset grant (Claude) or credit (Codex). */
+export interface LimitResetItem {
+  /** The provider's id, which `use_limit_reset` takes. `null` when only a
+   *  count is known and the provider picks. */
+  id: string | null
+  kind: LimitResetKind
+  /** The provider's own name for it ("Full reset"). */
+  label: string | null
+  description: string | null
+  /** Resets this grant still holds; a Codex credit is one. */
+  count: number
+  /** Epoch seconds. */
+  expires_at: number | null
+  usable_now: boolean
+  /** Only usable while a limit it refills is reached. */
+  requires_limit: boolean
+  /** Window ids it refills; empty means every window. */
+  clears: string[]
+  /** The provider's code for why it can't be used now (`paused`, …). */
+  unavailable_reason: string | null
+}
+
+export type LimitResetSource = "claude_oauth" | "codex_app_server"
+
+export type LimitResetErrorCode =
+  | "not_installed"
+  | "not_logged_in"
+  | "login_expired"
+  | "not_eligible"
+  | "unsupported_version"
+  | "network"
+  | "busy"
+  | "failed"
+
+export interface LimitResetError {
+  code: LimitResetErrorCode
+  /** English; the UI shows its own words for `code`. */
+  message: string
+  /** The provider's reason code (Claude's `surface`, `tier`, …). */
+  reason?: string | null
+}
+
+export interface ProviderLimitResets {
+  provider: PlanUsageAgent
+  /** Resets left across every grant still in date. */
+  available: number
+  /** Soonest to expire first. */
+  items: LimitResetItem[]
+  source: LimitResetSource
+  /** The account they belong to: the CLI's own sign-in. */
+  account: string | null
+  error: LimitResetError | null
+  /** Epoch seconds. */
+  fetched_at: number
+}
+
+export interface LimitResetsReport {
+  providers: ProviderLimitResets[]
+}
+
+/** `reset`: it went through. `unconfirmed`: no answer came; a retry reuses
+ *  the same attempt, so it can't use a second reset. The rest used nothing. */
+export type LimitResetOutcome =
+  | "reset"
+  | "nothing_to_reset"
+  | "no_reset"
+  | "already_used"
+  | "cooldown"
+  | "unconfirmed"
+
+export interface UseLimitResetResult {
+  provider: PlanUsageAgent
+  outcome: LimitResetOutcome
+  /** Window ids the provider says it refilled. */
+  cleared: string[]
+  /** The provider's resets read again after the attempt. */
+  resets: ProviderLimitResets | null
+  /** This provider's sessions paused at their limit, which could continue
+   *  now — not counting `continued`. */
+  paused_conversations: number[]
+  /** The paused session whose continuation went out with the reset. */
+  continued: number | null
+}
+
 /** What the pool says of an account's own health. */
 export type PlanUsagePoolAccountStatus =
   | "active"

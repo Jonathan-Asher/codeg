@@ -2,19 +2,32 @@
 
 /**
  * The usage-limit pause in the UI (`lib/limit-continue.ts`): when the limit
- * resets, kept current while it is shown, and the two things the user can do
- * about it — continue now (ahead of the reset; it may hit the limit again) or
- * cancel the automatic continuation (the turn is left interrupted, with the
- * manual Continue). Shared by the composer banner and the Session Details
- * activity line.
+ * resets, kept current while it is shown, and what the user can do about it —
+ * continue now (ahead of the reset; it may hit the limit again), cancel the
+ * automatic continuation (the turn is left interrupted, with the manual
+ * Continue), or, when the account has one, use a usage-limit reset and
+ * continue right away (`lib/limit-resets.ts`). Shared by the composer banner
+ * and the Session Details activity line.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { CirclePause, Hourglass, Play, X } from "lucide-react"
+import {
+  CirclePause,
+  Hourglass,
+  Loader2,
+  Play,
+  RotateCcw,
+  X,
+} from "lucide-react"
 import { useLocale, useTranslations } from "next-intl"
 import { toast } from "sonner"
 
+import {
+  LimitResetConfirmDialog,
+  useLimitResetRun,
+} from "@/components/plan-usage/plan-usage-resets"
 import { Button } from "@/components/ui/button"
+import { useLimitResets } from "@/hooks/use-limit-resets"
 import { cancelLimitContinue, continueLimitNow } from "@/lib/api"
 import { toErrorMessage } from "@/lib/app-error"
 import {
@@ -23,7 +36,13 @@ import {
   waitingLimitPause,
   type LimitResetParts,
 } from "@/lib/limit-continue"
-import type { LimitPause, LimitReason } from "@/lib/types"
+import { defaultUsableReset, findProviderResets } from "@/lib/limit-resets"
+import type {
+  AgentType,
+  LimitPause,
+  LimitReason,
+  PlanUsageAgent,
+} from "@/lib/types"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 
 /** How often "in 3h 12m" catches up. */
@@ -187,24 +206,117 @@ export function LimitPauseButtons({
   )
 }
 
+/** The provider whose usage-limit resets an agent's sessions can use. */
+export function resetProviderOf(
+  agentType: AgentType | null | undefined
+): PlanUsageAgent | null {
+  if (agentType === "claude_code") return "claude_code"
+  if (agentType === "codex") return "codex"
+  return null
+}
+
+/**
+ * "Use a reset and continue": shown only while the account has a reset it
+ * can use now. Asks first, like the Subscription usage screen; once the
+ * reset lands, the backend sends the session's continuation right away.
+ */
+export function LimitResetContinueButton({
+  conversationId,
+  provider,
+  buttonClassName,
+}: {
+  conversationId: number
+  provider: PlanUsageAgent
+  buttonClassName?: string
+}) {
+  const t = useTranslations("Folder.sessionActivity")
+  const { report } = useLimitResets()
+  const resets = findProviderResets(report, provider)
+  const reset = defaultUsableReset(resets)
+  const { busy, run } = useLimitResetRun(provider)
+  const [confirming, setConfirming] = useState(false)
+  if (!resets || !reset) return null
+  const applyReset = async () => {
+    const { result, message } = await run({ id: reset.id, conversationId })
+    if (result?.outcome === "reset" && result.continued === conversationId) {
+      toast.success(t("resetContinued"))
+      return
+    }
+    const show =
+      message.tone === "success"
+        ? toast.success
+        : message.tone === "error"
+          ? toast.error
+          : message.tone === "warning"
+            ? toast.warning
+            : toast.info
+    show(message.text)
+  }
+  return (
+    <>
+      <Button
+        size="xs"
+        variant="outline"
+        className={buttonClassName}
+        title={t("useResetTitle", { count: resets.available })}
+        disabled={busy}
+        onClick={() => setConfirming(true)}
+        data-testid="limit-use-reset"
+      >
+        {busy ? (
+          <Loader2 aria-hidden className="animate-spin" />
+        ) : (
+          <RotateCcw aria-hidden />
+        )}
+        {t("useReset")}
+      </Button>
+      {confirming && (
+        <LimitResetConfirmDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setConfirming(false)
+          }}
+          kind={reset.kind}
+          label={reset.label}
+          available={resets.available}
+          onConfirm={() => {
+            setConfirming(false)
+            void applyReset()
+          }}
+        />
+      )}
+    </>
+  )
+}
+
 /**
  * Docked above the composer of a conversation paused on the usage limit:
  * says when it continues by itself, and offers Cancel auto-continue and
- * Continue now. The caller decides when it shows.
+ * Continue now — and, when the account has a usage-limit reset, Use a reset
+ * and continue. The caller decides when it shows.
  */
 export function LimitPausedBanner({
   conversationId,
   pause,
   reason = "usage_limit",
+  agentType,
 }: {
   conversationId: number
   pause: LimitPause
   /** What it waits for: the account's own limit, or the account pool. */
   reason?: LimitReason
+  /** The session's agent, whose provider's resets it can offer. */
+  agentType?: AgentType | null
 }) {
   const t = useTranslations("Folder.sessionActivity")
   const parts = useLimitResetParts(pause.resets_at)
   const claimed = pause.state === "claimed"
+  // A reset refills the agent CLI's own account; a pool's pause waits on
+  // other accounts, so it is offered for the account's own limit only.
+  const resetProvider =
+    !claimed && reason === "usage_limit" ? resetProviderOf(agentType) : null
+  const buttonClassName =
+    "border-violet-500/40 bg-transparent text-violet-700 hover:bg-violet-500/15 hover:text-violet-800 dark:text-violet-300 dark:hover:text-violet-200"
   return (
     <div
       role="status"
@@ -230,10 +342,17 @@ export function LimitPausedBanner({
               })}
         </span>
       </span>
+      {resetProvider && (
+        <LimitResetContinueButton
+          conversationId={conversationId}
+          provider={resetProvider}
+          buttonClassName={buttonClassName}
+        />
+      )}
       <LimitPauseButtons
         conversationId={conversationId}
         claimed={claimed}
-        buttonClassName="border-violet-500/40 bg-transparent text-violet-700 hover:bg-violet-500/15 hover:text-violet-800 dark:text-violet-300 dark:hover:text-violet-200"
+        buttonClassName={buttonClassName}
       />
     </div>
   )

@@ -2368,7 +2368,10 @@
       "limitPoolBannerTitle": "En pause à cause des limites d'utilisation",
       "limitStopped": "Arrêtée par les limites d'utilisation",
       "limitStoppedHint": "Le dernier tour s'est arrêté sur une limite d'utilisation et ne reprend plus de lui-même. Reprenez-le quand la limite le permet.",
-      "workingWithItems": "En cours · {count} en cours d'exécution"
+      "workingWithItems": "En cours · {count} en cours d'exécution",
+      "useReset": "Utiliser une réinitialisation et continuer",
+      "useResetTitle": "{count, plural, =1 {Utiliser votre réinitialisation de la limite d'utilisation pour recharger la limite maintenant et continuer} other {Utiliser l'une de vos # réinitialisations de la limite d'utilisation pour recharger la limite maintenant et continuer}}",
+      "resetContinued": "Réinitialisation utilisée. La session reprend maintenant."
     },
     "conversationCard": {
       "untitledConversation": "Conversation sans titre",
@@ -6901,7 +6904,8 @@
     "source": {
       "claudeLive": "Issu des tours Claude Code dans codeg",
       "claudeSaved": "Dernière mesure enregistrée avant le redémarrage de codeg",
-      "codexLog": "Issu du journal de session Codex le plus récent"
+      "codexLog": "Issu du journal de session Codex le plus récent",
+      "codexLive": "Lu dans Codex à l'instant"
     },
     "window": {
       "session5h": "Session de 5 heures",
@@ -7043,6 +7047,67 @@
       "reserveSummary": "Réserve {percent} %",
       "reserveSummaryDynamic": "Réserve {percent} %, libérée avant la réinitialisation",
       "position": "Position {position}"
+    },
+    "resets": {
+      "title": "Réinitialisations de la limite d'utilisation",
+      "checking": "Recherche de réinitialisations…",
+      "available": "{count, plural, one {# réinitialisation disponible} other {# réinitialisations disponibles}}",
+      "availableUntil": "{count, plural, one {# réinitialisation disponible} other {# réinitialisations disponibles}} · la première expire le {date}",
+      "none": "Aucune disponible",
+      "account": "Pour {account}",
+      "expires": "Expire le {date}",
+      "noExpiry": "N'expire pas",
+      "times": "×{count}",
+      "use": "Utiliser",
+      "using": "Utilisation…",
+      "needsLimit": "Utilisable une fois une limite atteinte",
+      "paused": "En pause pour l'instant",
+      "notStarted": "Pas encore utilisable",
+      "notUsableNow": "Inutilisable pour le moment",
+      "left": "{count, plural, =0 {Plus aucune réinitialisation.} one {# réinitialisation restante.} other {# réinitialisations restantes.}}",
+      "pausedSessions": "{count, plural, one {# session en pause à la limite peut reprendre maintenant.} other {# sessions en pause à la limite peuvent reprendre maintenant.}}",
+      "continuePaused": "Continuer maintenant",
+      "continuedPaused": "{count, plural, one {Reprise de # session.} other {Reprise de # sessions.}}",
+      "continuePausedFailed": "Toutes les sessions en pause n'ont pas pu reprendre. Utilisez Continuer maintenant dans la session.",
+      "kind": {
+        "session": "Réinitialisation de session",
+        "weekly": "Réinitialisation hebdomadaire",
+        "full": "Réinitialisation complète",
+        "fable": "Réinitialisation Fable",
+        "other": "Réinitialisation de limite"
+      },
+      "refills": {
+        "session": "votre limite de session de 5 heures",
+        "weekly": "votre limite hebdomadaire",
+        "full": "toutes vos limites d'utilisation",
+        "fable": "votre limite Fable",
+        "other": "vos limites d'utilisation"
+      },
+      "confirm": {
+        "title": "Utiliser une réinitialisation ?",
+        "body": "{count, plural, =1 {Utiliser votre unique réinitialisation ?} other {Utiliser 1 réinitialisation sur # ?}} Cela recharge {refills} maintenant. C'est irréversible.",
+        "use": "Utiliser",
+        "cancel": "Annuler"
+      },
+      "outcome": {
+        "reset": "Réinitialisation utilisée : vos limites sont rechargées.",
+        "nothingToReset": "Rien n'a été utilisé : cette réinitialisation ne fonctionne qu'une fois une limite atteinte.",
+        "noReset": "Rien n'a été utilisé : cette réinitialisation n'est plus disponible.",
+        "alreadyUsed": "Cette réinitialisation avait déjà été utilisée. Rien n'a changé à l'instant.",
+        "cooldown": "Une autre réinitialisation est en cours sur ce compte. Rien n'a été utilisé ; réessayez dans une minute.",
+        "unconfirmed": "Impossible de confirmer que la réinitialisation a abouti. Si vous êtes toujours à la limite dans une minute, réessayez : cela n'utilisera pas une deuxième réinitialisation."
+      },
+      "error": {
+        "notInstalled": "Non installé sur cette machine.",
+        "notLoggedIn": "Aucune connexion sur cette machine : ses réinitialisations ne peuvent pas être lues.",
+        "loginExpired": "La connexion a expiré. Elle se renouvelle à la prochaine requête de la session ; réessayez ensuite.",
+        "notEligible": "Ce compte ne se voit pas proposer de réinitialisations de la limite d'utilisation ici.",
+        "surface": "Claude ne propose ces réinitialisations que dans l'app de terminal de Claude Code (/limit-reset) et sur claude.ai, pas aux autres apps.",
+        "unsupportedVersion": "Cette version ne peut pas utiliser de réinitialisations. Mettez l'agent à jour.",
+        "network": "Impossible de joindre le fournisseur. Réessayez dans un instant.",
+        "busy": "Une réinitialisation est déjà en cours d'utilisation pour ce compte.",
+        "failed": "Impossible de vérifier les réinitialisations."
+      }
     }
   },
   "Forge": {
