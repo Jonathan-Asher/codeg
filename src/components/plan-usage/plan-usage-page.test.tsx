@@ -1143,6 +1143,18 @@ describe("PlanUsagePage usage-limit resets", () => {
     expect(within(codex).getByText(/1 reset available/)).toBeInTheDocument()
   })
 
+  it("says when the Codex reading came from Codex itself", async () => {
+    getPlanUsage.mockResolvedValue(
+      report([claudeSnapshot(), codexSnapshot({ source: "live" })])
+    )
+    await mount()
+    const codex = within(card("Codex"))
+    expect(
+      codex.getByText(enMessages.PlanUsage.source.codexLive)
+    ).toBeInTheDocument()
+    expect(codex.queryByText(/newest Codex session log/)).toBeNull()
+  })
+
   it("asks the providers again on Refresh", async () => {
     getPlanUsage.mockResolvedValue(report([claudeSnapshot(), codexSnapshot()]))
     await mount()

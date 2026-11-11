@@ -6905,7 +6905,7 @@
       "claudeLive": "Aus Claude-Code-Turns in codeg",
       "claudeSaved": "Letzter Wert, gespeichert vor dem Neustart von codeg",
       "codexLog": "Aus dem neuesten Codex-Sitzungsprotokoll",
-      "codexLive": "Gerade eben aus Codex gelesen"
+      "codexLive": "Direkt aus Codex gelesen"
     },
     "window": {
       "session5h": "5-Stunden-Sitzung",

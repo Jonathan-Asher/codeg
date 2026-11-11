@@ -6905,7 +6905,7 @@
       "claudeLive": "來自 codeg 中的 Claude Code 對話輪次",
       "claudeSaved": "codeg 重新啟動前儲存的最後一筆資料",
       "codexLog": "來自最新的 Codex 工作階段日誌",
-      "codexLive": "剛從 Codex 讀取"
+      "codexLive": "直接從 Codex 讀取"
     },
     "window": {
       "session5h": "5 小時工作階段",

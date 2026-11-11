@@ -6905,7 +6905,7 @@
       "claudeLive": "De los turnos de Claude Code en codeg",
       "claudeSaved": "Último dato guardado antes de reiniciar codeg",
       "codexLog": "Del registro de sesión más reciente de Codex",
-      "codexLive": "Leído de Codex ahora mismo"
+      "codexLive": "Leído directamente de Codex"
     },
     "window": {
       "session5h": "Sesión de 5 horas",

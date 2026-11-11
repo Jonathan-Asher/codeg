@@ -6905,7 +6905,7 @@
       "claudeLive": "codeg での Claude Code のターンから",
       "claudeSaved": "codeg の再起動前に保存された最後の数値",
       "codexLog": "最新の Codex セッションログから",
-      "codexLive": "Codex からたった今読み取り"
+      "codexLive": "Codex から直接読み取り"
     },
     "window": {
       "session5h": "5 時間セッション",

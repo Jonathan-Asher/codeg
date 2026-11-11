@@ -6905,7 +6905,7 @@
       "claudeLive": "来自 codeg 中的 Claude Code 对话轮次",
       "claudeSaved": "codeg 重启前保存的最后一次数据",
       "codexLog": "来自最新的 Codex 会话日志",
-      "codexLive": "刚从 Codex 读取"
+      "codexLive": "直接从 Codex 读取"
     },
     "window": {
       "session5h": "5 小时会话",

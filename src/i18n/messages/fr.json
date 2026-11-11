@@ -6905,7 +6905,7 @@
       "claudeLive": "Issu des tours Claude Code dans codeg",
       "claudeSaved": "Dernière mesure enregistrée avant le redémarrage de codeg",
       "codexLog": "Issu du journal de session Codex le plus récent",
-      "codexLive": "Lu dans Codex à l'instant"
+      "codexLive": "Lu directement dans Codex"
     },
     "window": {
       "session5h": "Session de 5 heures",

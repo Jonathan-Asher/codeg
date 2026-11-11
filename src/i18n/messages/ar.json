@@ -6905,7 +6905,7 @@
       "claudeLive": "من أدوار Claude Code في codeg",
       "claudeSaved": "آخر قراءة محفوظة قبل إعادة تشغيل codeg",
       "codexLog": "من أحدث سجل جلسة لـ Codex",
-      "codexLive": "قُرئ من Codex للتو"
+      "codexLive": "قُرئ مباشرةً من Codex"
     },
     "window": {
       "session5h": "جلسة 5 ساعات",

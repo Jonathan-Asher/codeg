@@ -6905,7 +6905,7 @@
       "claudeLive": "codeg의 Claude Code 턴에서 가져옴",
       "claudeSaved": "codeg 재시작 전에 저장된 마지막 수치",
       "codexLog": "최신 Codex 세션 로그에서 가져옴",
-      "codexLive": "방금 Codex에서 읽어 옴"
+      "codexLive": "Codex에서 직접 읽어 옴"
     },
     "window": {
       "session5h": "5시간 세션",
