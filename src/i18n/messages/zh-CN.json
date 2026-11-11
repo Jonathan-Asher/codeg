@@ -2134,6 +2134,8 @@
       "attentionCountBadge": "{count} 个会话在等你处理",
       "statusCancelledBadge": "已取消",
       "worktreeRemovedBadge": "源 worktree 已删除",
+      "runsInBadge": "在 {path} 中运行",
+      "runsInLabel": "运行于",
       "criticalBadge": "关键会话",
       "criticalToggleFailed": "无法更新关键标记：{message}",
       "talkBadge": "语音对话模式已开启",
@@ -2402,6 +2404,43 @@
       "forkUnsupported": "此智能体无法分叉对话",
       "forkAfterReply": "请在当前回复完成后再分叉",
       "forkNoReply": "暂无可分叉的内容：还没有已完成的回复"
+    },
+    "moveSession": {
+      "menuLabel": "移动到项目…",
+      "title": "移动到项目",
+      "description": "将“{title}”移动到另一个项目。智能体按文件夹保存的文件会一起移动。",
+      "untitledSession": "未命名会话",
+      "pickProject": "选择项目",
+      "noProjects": "没有其他打开的项目。",
+      "checking": "正在检查…",
+      "fullNote": "会话及其文件将移动到 {project}，智能体会在那里继续。它的下一条消息会重新读取一次会话。",
+      "listedOnly": {
+        "agent_unsupported": "{agent} 的会话绑定在运行时所在的文件夹，因此这个会话只能列在 {project} 下，仍在 {path} 中运行。",
+        "claude_adapter_outdated": "已安装的 Claude Code 适配器版本过旧，无法移动会话文件，因此此会话只能列在 {project} 下，仍在 {path} 中运行。",
+        "session_files_not_found": "此会话的文件不在 {agent} 保存它们的位置，因此只能列在 {project} 下，仍在 {path} 中运行。"
+      },
+      "children": "它的 {count} 个子会话会一起移动。",
+      "cancel": "取消",
+      "move": "移动",
+      "moving": "正在移动…",
+      "moved": "已移动到 {project}",
+      "movedListedOnly": "已列在 {project} 下；仍在 {path} 中运行",
+      "failed": "无法移动会话：{message}",
+      "errors": {
+        "conversation_not_found": "此会话已不存在。",
+        "folder_not_found": "该项目已不在工作区中。",
+        "same_folder": "会话已在该项目中。",
+        "chat_conversation": "聊天会话没有可移出的项目。",
+        "chat_folder": "会话不能移动到聊天中。",
+        "subsession": "子会话会随启动它的会话一起移动。",
+        "unsupported_conversation": "此类会话无法移动。",
+        "work_task_linked": "此会话由工作任务运行，会留在该任务的项目中。",
+        "conversation_running": "会话正在工作，请在回复完成后再移动。",
+        "resume_pending": "会话即将自动继续。请在完成后再移动，或关闭它的自动继续。",
+        "running_elsewhere": "Claude Code 正在 codeg 之外运行此会话。请在该进程结束后再移动。",
+        "session_closing": "会话的智能体仍在关闭，请稍后再试。",
+        "move_failed": "无法移动会话的文件，因此未做任何更改。"
+      }
     },
     "search": {
       "dialogTitle": "搜索",

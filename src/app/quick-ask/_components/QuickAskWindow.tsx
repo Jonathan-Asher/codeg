@@ -170,6 +170,7 @@ export function QuickAskWindow() {
             id: sessionOption.id,
             folderId: sessionOption.folderId,
             folderPath: sessionOption.folderPath,
+            workingDir: sessionOption.workingDir,
             agentType: sessionOption.agentType,
             externalId: sessionOption.externalId,
             title: sessionOption.title,

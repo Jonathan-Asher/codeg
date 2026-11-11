@@ -3994,8 +3994,9 @@ export type ConversationMoveListedOnlyReason =
   | "claude_adapter_outdated"
   | "session_files_not_found"
 
-/** The stable codes a refused move carries in the error's `detail` (Rust
- *  `session_move::MoveRefusal::code`); its `i18n_key` is `errors.<code>`. */
+/** The stable codes a refused move carries (Rust
+ *  `session_move::MoveRefusal::code`): the error's `i18n_key` is
+ *  `errors.<code>` and `i18n_params.code` is the code itself. */
 export type ConversationMoveRefusal =
   | "conversation_not_found"
   | "folder_not_found"
@@ -4025,7 +4026,7 @@ export interface MoveConversationResult {
 /** Move a session to another project, with its files where the agent keys
  *  them by folder. `dryRun` only says what a move would do — the mode, why it
  *  is listed only, or why it is refused — and changes nothing. A refusal
- *  rejects with an `AppCommandError` whose `detail` is a
+ *  rejects with an `AppCommandError` whose `i18n_params.code` is a
  *  `ConversationMoveRefusal`. The server broadcasts the moved rows
  *  (`conversation://changed`) and the re-filed tabs (`tabs://changed`). */
 export async function moveConversationToFolder(

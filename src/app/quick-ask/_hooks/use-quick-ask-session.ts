@@ -102,6 +102,8 @@ export interface QuickAskSessionTarget {
   id: number
   folderId: number
   folderPath: string
+  /** Where the session runs (`working_dir`); the folder's path when absent. */
+  workingDir?: string
   agentType: AgentType
   externalId: string | null
   title: string | null
@@ -478,7 +480,7 @@ export function useQuickAskSession({
       if (!args.session) return null
       return {
         agentType: args.session.agentType,
-        workingDir: args.session.folderPath,
+        workingDir: args.session.workingDir || args.session.folderPath,
         sessionId: args.session.externalId ?? undefined,
         conversationId: args.session.id,
         options: undefined,

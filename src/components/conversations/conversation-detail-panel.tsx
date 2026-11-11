@@ -786,11 +786,23 @@ const ConversationTabView = memo(function ConversationTabView({
     if (dbConversationId != null) return
     adoptLegacyNewConversationDraft(draftStorageKey)
   }, [dbConversationId, draftStorageKey])
-  // Use the per-tab workingDir (derived from the tab's own folderId by the
-  // parent) rather than the active folder's path — otherwise switching tabs
-  // briefly exposes the previous folder's path to the ACP auto-connect
+  // Where this conversation's session runs, as the server records it
+  // (`working_dir`): its folder's path, or — moved to another project
+  // without its files — the folder it still runs in. A move rewrites it, and
+  // the auto-connect below reconnects there. Absent for a draft, a
+  // sub-session (not in the list) and an older server.
+  const recordedWorkingDir = useAppWorkspaceStore((s) =>
+    dbConversationId != null
+      ? (s.conversations.find((c) => c.id === dbConversationId)?.working_dir ??
+        null)
+      : null
+  )
+  // Otherwise the per-tab workingDir (derived from the tab's own folderId by
+  // the parent) rather than the active folder's path — otherwise switching
+  // tabs briefly exposes the previous folder's path to the ACP auto-connect
   // effect, and the connection sticks with the wrong cwd.
-  const workingDirForConnection = workingDir ?? folder?.path
+  const workingDirForConnection =
+    recordedWorkingDir ?? workingDir ?? folder?.path
 
   // What THIS tab's session runs with, for the composer to show while its own
   // connection has not reported yet (idle-swept, reopened after a restart,

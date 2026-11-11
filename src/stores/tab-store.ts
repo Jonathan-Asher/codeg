@@ -2783,10 +2783,39 @@ export function pruneOrphanDraftsOnce() {
 // Recompute `tabs` whenever the app-workspace `conversations` list changes (any
 // agent's turn start/stop): titles/status decorate from it. Reference reuse in
 // recomputeTabs keeps the array stable when no open tab is affected.
+/**
+ * A conversation moved to another project (`moveConversationToFolder`): its
+ * open tab follows — the same tab, keeping its place, title and live view,
+ * with its folder rewritten — as soon as the row's upsert lands. The server
+ * re-files the persisted tab too (`tabs://changed`), and the snapshot then
+ * finds this tab under its new key; a tab still keyed by the old folder would
+ * be dropped there and a second one opened in its place. Its per-tab working
+ * dir goes with the old folder: the view connects where the row says the
+ * session runs. Chat tabs keep their own scratch directory and are left alone.
+ */
+function followConversationFolders(
+  conversations: readonly DbConversationSummary[]
+) {
+  const { rawTabs } = useTabStore.getState()
+  if (rawTabs.length === 0 || conversations.length === 0) return
+  const folderOf = new Map<number, number>()
+  for (const c of conversations) folderOf.set(c.id, c.folder_id)
+  let changed = false
+  const next = rawTabs.map((tab) => {
+    if (tab.conversationId == null || tab.isChat) return tab
+    const folderId = folderOf.get(tab.conversationId)
+    if (folderId == null || folderId === tab.folderId) return tab
+    changed = true
+    return { ...tab, folderId, workingDir: undefined }
+  })
+  if (changed) useTabStore.setState({ rawTabs: next })
+}
+
 useAppWorkspaceStore.subscribe(() => {
   const c = useAppWorkspaceStore.getState().conversations
   if (c !== lastConversations) {
     lastConversations = c
+    followConversationFolders(c)
     recomputeTabs()
   }
 })

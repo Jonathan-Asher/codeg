@@ -2134,6 +2134,8 @@
       "attentionCountBadge": "{count, plural, one {# session vous attend} other {# sessions vous attendent}}",
       "statusCancelledBadge": "Annulé",
       "worktreeRemovedBadge": "Worktree d'origine supprimé",
+      "runsInBadge": "Tourne dans {path}",
+      "runsInLabel": "Tourne dans",
       "criticalBadge": "Session critique",
       "criticalToggleFailed": "Impossible de mettre à jour la marque critique : {message}",
       "talkBadge": "Mode conversation activé",
@@ -2402,6 +2404,43 @@
       "forkUnsupported": "Cet agent ne peut pas bifurquer de conversations",
       "forkAfterReply": "Bifurquez une fois la réponse en cours terminée",
       "forkNoReply": "Rien à bifurquer pour l'instant : aucune réponse n'est terminée"
+    },
+    "moveSession": {
+      "menuLabel": "Déplacer vers un projet…",
+      "title": "Déplacer vers un projet",
+      "description": "Déplacer « {title} » vers un autre projet. Ses fichiers l'accompagnent là où l'agent les range par dossier.",
+      "untitledSession": "Session sans titre",
+      "pickProject": "Choisir un projet",
+      "noProjects": "Aucun autre projet n'est ouvert.",
+      "checking": "Vérification…",
+      "fullNote": "La session et ses fichiers passent dans {project}, et l'agent y poursuit. Son prochain message relit la session une fois.",
+      "listedOnly": {
+        "agent_unsupported": "{agent} lie ses sessions au dossier où elles ont tourné : celle-ci peut seulement apparaître dans {project}. Elle continue de tourner dans {path}.",
+        "claude_adapter_outdated": "L'adaptateur Claude Code installé est trop ancien pour déplacer les fichiers de session : celle-ci peut seulement apparaître dans {project}. Elle continue de tourner dans {path}.",
+        "session_files_not_found": "Les fichiers de cette session ne sont pas là où {agent} les range : elle peut seulement apparaître dans {project}. Elle continue de tourner dans {path}."
+      },
+      "children": "{count, plural, one {Sa sous-session la suit.} other {Ses # sous-sessions la suivent.}}",
+      "cancel": "Annuler",
+      "move": "Déplacer",
+      "moving": "Déplacement…",
+      "moved": "Déplacée vers {project}",
+      "movedListedOnly": "Affichée dans {project} ; elle continue de tourner dans {path}",
+      "failed": "Impossible de déplacer la session : {message}",
+      "errors": {
+        "conversation_not_found": "Cette session n'existe plus.",
+        "folder_not_found": "Ce projet n'est plus dans l'espace de travail.",
+        "same_folder": "La session est déjà dans ce projet.",
+        "chat_conversation": "Les sessions de chat n'ont pas de projet à quitter.",
+        "chat_folder": "Une session ne peut pas être déplacée dans un chat.",
+        "subsession": "Une sous-session suit la session qui l'a lancée.",
+        "unsupported_conversation": "Ce type de session ne peut pas être déplacé.",
+        "work_task_linked": "Une tâche exécute cette session ; elle reste dans le projet de la tâche.",
+        "conversation_running": "La session travaille. Déplacez-la une fois sa réponse terminée.",
+        "resume_pending": "La session va reprendre d'elle-même. Déplacez-la ensuite, ou désactivez sa reprise automatique.",
+        "running_elsewhere": "Claude Code exécute cette session en dehors de codeg. Déplacez-la une fois ce processus terminé.",
+        "session_closing": "L'agent de la session est encore en train de se fermer. Réessayez dans un instant.",
+        "move_failed": "Les fichiers de la session n'ont pas pu être déplacés ; rien n'a été modifié."
+      }
     },
     "search": {
       "dialogTitle": "Rechercher",
