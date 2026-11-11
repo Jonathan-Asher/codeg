@@ -93,7 +93,7 @@ jobs:
           # workspace incremental debug builds are the whole point.
           CARGO_INCREMENTAL: ${{ runner.environment == 'self-hosted' && '1' || '0' }}
         run: |
-          mkdir -p ../out   # tauri-build requires frontendDist to exist
+          mkdir -p ../out   # tauri-build copies bundle.resources (../out → web/)
           cargo clippy --workspace --all-targets --features test-utils -- -D warnings
           cargo test --workspace --features test-utils
       - name: Rust clippy (server) + mcp companion

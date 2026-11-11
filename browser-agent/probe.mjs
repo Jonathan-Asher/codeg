@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const BUNDLE = readFileSync(
-  resolve(root, "src-tauri/src/browser/js/agent.bundle.js"),
+  resolve(root, "src-tauri/crates/codeg-lib/src/browser/js/agent.bundle.js"),
   "utf8"
 )
 // The page-world console shim, injected by the host into the PAGE world on

@@ -7,9 +7,9 @@ the text. The provider keys live in codeg. The phone never sees them.
 
 If the call fails, the client sends the original transcript as is.
 
-Code: `src-tauri/src/dictation_refine/` (logic, prompts, providers),
-`src-tauri/src/commands/dictation_refine.rs` (the `_core` functions and the
-desktop commands), `src-tauri/src/web/handlers/dictation_refine.rs` (HTTP).
+Code: `src-tauri/crates/codeg-lib/src/dictation_refine/` (logic, prompts, providers),
+`src-tauri/crates/codeg-lib/src/commands/dictation_refine.rs` (the `_core` functions and the
+desktop commands), `src-tauri/crates/codeg-lib/src/web/handlers/dictation_refine.rs` (HTTP).
 Settings UI: Settings › General › Dictation clean-up and translation.
 
 ## Calling it

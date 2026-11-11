@@ -200,7 +200,7 @@ The rules count as delivered on a connection only once the prompt was
 accepted, or once the insert reported `injected`. If anything else happened,
 the next message carries Full again.
 
-The rules are in `src-tauri/src/talk/rules.rs`. In short: one to three short
+The rules are in `src-tauri/crates/codeg-lib/src/talk/rules.rs`. In short: one to three short
 spoken sentences, no markdown, paths, URLs, hashes or code in speech; anything
 to show goes in one fenced code block (which the phone does not read aloud);
 command descriptions and plan openings in plain spoken words (the phone reads
@@ -388,7 +388,7 @@ voice speaks.
   executable (`native/codeg-talk`; its README has the protocol). One audio
   engine with macOS voice processing runs the microphone and the speech, which
   is what lets you interrupt on speakers.
-- Rust (`src-tauri/src/talk/voice`) starts the helper and relays JSON lines
+- Rust (`src-tauri/crates/codeg-lib/src/talk/voice`) starts the helper and relays JSON lines
   between it and the window that holds the Talk: the helper's messages go to
   that window only (`talk-voice://message`). One Talk at a time; a new one
   replaces the old. Closing or reloading the window ends it. The helper's

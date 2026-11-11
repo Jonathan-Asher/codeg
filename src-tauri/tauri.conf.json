@@ -7,7 +7,7 @@
     "beforeDevCommand": "pnpm tauri:before-dev",
     "devUrl": "http://localhost:3000",
     "beforeBuildCommand": "pnpm tauri:before-build",
-    "frontendDist": "../out"
+    "frontendDist": "frontend-placeholder"
   },
   "app": {
     "windows": [],

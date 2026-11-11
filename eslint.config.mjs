@@ -50,7 +50,7 @@ const eslintConfig = defineConfig([
     // It is written against Playwright's lint and compiler settings, not ours.
     "browser-agent/vendor/**",
     // esbuild's output, committed so a cargo build needs no node.
-    "src-tauri/src/browser/js/**",
+    "src-tauri/crates/codeg-lib/src/browser/js/**",
   ]),
   eslintConfigPrettier,
   eslintPluginPrettierRecommended,

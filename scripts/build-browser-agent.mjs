@@ -1,7 +1,8 @@
 // Bundles `browser-agent/` into the single script the isolated world runs.
 //
-// The product is committed (`src-tauri/src/browser/js/agent.bundle.js`) so a
-// cargo build never needs node: `include_str!` reads it at compile time, and a
+// The product is committed
+// (`src-tauri/crates/codeg-lib/src/browser/js/agent.bundle.js`) so a cargo
+// build never needs node: `include_str!` reads it at compile time, and a
 // contributor building only the Rust side gets a working browser without a
 // pnpm install. Run this whenever `browser-agent/` changes; CI checks that the
 // committed bundle matches its source.
@@ -17,7 +18,10 @@ import { dirname, resolve } from "node:path"
 import { readFileSync } from "node:fs"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
-const outfile = resolve(root, "src-tauri/src/browser/js/agent.bundle.js")
+const outfile = resolve(
+  root,
+  "src-tauri/crates/codeg-lib/src/browser/js/agent.bundle.js"
+)
 
 // `--check` proves the committed bundle is the one this source produces,
 // rather than something someone hand-edited or forgot to rebuild. esbuild is
