@@ -1,0 +1,285 @@
+[package]
+name = "codeg-lib"
+description = "codeg's core: agents and sessions, the database, the web service and the desktop app's runtime"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+# The crate keeps the name it had inside the `codeg` package, before it moved
+# here: insta snapshot names (`codeg_lib__…`) and the log targets saved log
+# levels refer to (`codeg_lib::…`) come from it.
+name = "codeg_lib"
+# rlib only: the binaries are all that link it. `staticlib` and `cdylib` are
+# what Tauri's iOS and Android builds link, and this app has no mobile target
+# (no `gen/apple`, no `gen/android`); building them anyway cost every release a
+# 340 MB static archive and a full extra link.
+crate-type = ["rlib"]
+
+[features]
+default = ["tauri-runtime", "browser-child"]
+tauri-runtime = [
+    "dep:tauri",
+    "dep:tauri-plugin-opener",
+    "dep:tauri-plugin-dialog",
+    "dep:fix-path-env",
+    "dep:tauri-plugin-window-state",
+    "dep:tauri-plugin-updater",
+    "dep:tauri-plugin-process",
+    "dep:tauri-plugin-notification",
+    "dep:tauri-plugin-single-instance",
+    "dep:tauri-plugin-deep-link",
+    "dep:tauri-plugin-autostart",
+    "dep:tauri-plugin-global-shortcut",
+    "dep:keyring",
+    # `src/browser` is compiled under this feature and reaches WebKitGTK
+    # directly on Linux. These three exist only on Linux targets; naming them
+    # here is a no-op everywhere else.
+    "dep:webkit2gtk",
+    "dep:gtk",
+    "dep:javascriptcore-rs",
+]
+# Exposes test scaffolding (`AppState::new_for_test`, `EventEmitter::test_web_only`,
+# `ConnectionManager::insert_test_connection`, parser `with_base_dir`, the
+# `db::test_helpers` module) for integration tests in `tests/*.rs`. Without
+# this feature the items are physically uncompiled in release builds.
+# It also builds the `codeg-server` binary, which integration tests run
+# (`CARGO_BIN_EXE_codeg-server`).
+test-utils = ["server"]
+# The standalone `codeg-server` binary (its `[[bin]]` requires this). Desktop
+# builds leave it off, and it lives in this package, not in `codeg`: `tauri
+# build` bundles the app package's binaries, and codeg.app has no use for an
+# 80 MB server. Server builds, Docker and CI name it:
+#   cargo build --release --no-default-features --features server --bin codeg-server
+server = []
+# Built-in browser. `browser-child` compiles the embedded surface: a wry child
+# webview created directly through tauri-runtime-wry's re-exported `wry`
+# (`WebViewBuilder::build_as_child`), which is exactly how tauri-runtime-wry
+# builds its own child webviews. Going through wry instead of tauri's
+# `Window::add_child` keeps the workspace window a plain `WebviewWindow` in
+# tauri's eyes — with a tauri child attached, `is_webview_window()` turns
+# false, `get_webview_window("main")` returns None and every command taking a
+# `tauri::WebviewWindow` argument fails — and it needs no `unstable` feature.
+# Only macOS and Windows compile the child surface; Linux uses owned windows
+# (wry's child build is X11-only and cannot be positioned on Wayland).
+browser-child = ["dep:tauri-runtime-wry", "dep:webview2-com", "dep:windows"]
+# Dev-only puppet driven by a JSON control file (see src/browser/smoke.rs).
+browser-smoke = []
+
+[[bin]]
+name = "codeg-server"
+path = "src/bin/codeg_server.rs"
+required-features = ["server"]
+
+[dependencies]
+# The wire contract with the `codeg-mcp` companion (crates/codeg-mcp-protocol),
+# re-exported at the paths it had before the split.
+codeg-mcp-protocol = { path = "../codeg-mcp-protocol" }
+# `devtools` is what makes the web inspector exist in a RELEASE build — in a
+# debug one `debug_assertions` already does. It reaches wry through
+# tauri-runtime-wry, which is where a browser tab's child webview is built, and
+# it is what `browser_open_devtools` needs: `WebView::open_devtools` and
+# `WebviewWindow::open_devtools` are both compiled under
+# `any(debug_assertions, feature = "devtools")` of THEIR crate, which nothing
+# on this side can test with `cfg!`. On for every target so that one call
+# site works everywhere instead of three.
+#
+# It also gives the app's OWN windows an inspector in release: tauri-runtime-wry
+# resolves an unset `devtools` attribute as `unwrap_or(true)`, and none of this
+# app's window builders sets one. Turn that off by giving them
+# `.devtools(cfg!(debug_assertions))`, not by taking this feature away — the
+# browser tabs need it.
+tauri = { version = "2.11", features = ["macos-private-api", "tray-icon", "devtools"], optional = true }
+# Only for its `wry` re-export (version-locked to the runtime tauri uses).
+tauri-runtime-wry = { version = "2.11", optional = true, default-features = false }
+tauri-plugin-opener = { version = "2", optional = true }
+tauri-plugin-dialog = { version = "2", optional = true }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+# Host IANA zone name (e.g. `Asia/Shanghai`) — chrono only exposes the offset.
+# Already in the tree as a chrono/clock dependency; named here so the
+# chat-authoring default timezone can use it directly.
+iana-time-zone = "0.1"
+cron = "0.12"
+thiserror = "2"
+dirs = "6"
+if-addrs = "0.13"
+walkdir = "2"
+ignore = "0.4"
+# Content search in the file tree tab: ripgrep's searcher and regex matcher
+# (the pieces the `grep` facade crate re-exports, without its printer/CLI
+# layers), walked with the same `ignore` rules as the workspace file listing.
+grep-matcher = "0.1"
+grep-regex = "0.1"
+grep-searcher = "0.1"
+# The official ACP runtime (the `sacp` crate was upstreamed into it and renamed).
+# Stable protocol v1 only: `unstable_protocol_v2` is deliberately left off, so
+# the builder's protocol-compat layer is a pass-through and `initialize` goes
+# out exactly as codeg writes it. The unstable features are exactly the surfaces
+# codeg consumes: `session/fork` and the Session Notices / Session Compaction
+# RFDs. (`unstable_end_turn_token_usage` stays off: codeg's token accounting
+# reads the agents' own transcripts, not the prompt response's `usage`.)
+agent-client-protocol = { version = "2.2.0", features = ["unstable_session_fork", "unstable_session_notices", "unstable_session_compaction"] }
+tokio = { version = "1", features = ["process", "io-util", "sync", "macros", "rt", "net", "rt-multi-thread"] }
+uuid = { version = "1", features = ["v4"] }
+# Version-5 UUIDs (browser profile data-store identifiers) by hand: uuid's
+# own `v5` feature would pull a second SHA-1 crate next to this one.
+sha1 = "0.10"
+futures = "0.3"
+futures-lite = "2"
+# gzip/brotli: send Accept-Encoding and transparently decompress on the
+# remote-workspace proxy path, matching the server's CompressionLayer.
+# rustls-tls: the APNs client (`push::apns`) must speak HTTP/2, negotiated
+# through ALPN, which the default native-tls backend does not offer. Only that
+# client opts in (`use_rustls_tls`); native-tls stays every other client's
+# default.
+reqwest ={ version = "0.12", features = ["stream", "json", "multipart", "gzip", "brotli", "rustls-tls"] }
+flate2 = "1"
+bzip2 = "0.5"
+# DeepSeek Harness session logs (`~/.dsh/sessions/**/session.jsonl.zstd`) are a
+# sequence of complete Zstandard frames appended per write batch; the parser
+# only decodes (`zstd::stream::decode_all` walks concatenated frames to EOF).
+zstd = "0.13"
+tar = "0.4"
+zip = "2"
+regex = "1"
+portable-pty = "0.8"
+urlencoding = "2"
+# WHATWG URL parsing outside the desktop runtime. `tauri::Url` is this same
+# crate, but tauri is not in the server build and `browser::service_url` is
+# (the terminal that prints a dev server's address exists in both).
+url = "2"
+fix-path-env = { git = "https://github.com/tauri-apps/fix-path-env-rs", version = "0.0.0", optional = true }
+sea-orm = { version = "1.1", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros"] }
+sea-orm-migration = { version = "1.1", features = ["sqlx-sqlite", "runtime-tokio-rustls"] }
+# Synchronous read-only access to agent-native SQLite session stores (the
+# Cursor parser reads ~/.cursor/chats/*/store.db from the sync AgentParser
+# trait, where sqlx's async pool doesn't fit). Pinned to the rusqlite line
+# whose libsqlite3-sys (0.30) matches sqlx-sqlite's, so both link the same
+# bundled SQLite.
+# `backup` = the online page-copy API, used to snapshot a third-party agent's
+# session store into a self-contained single file. Pure Rust-side feature; it
+# does not move libsqlite3-sys off the version sqlx-sqlite links.
+rusqlite = { version = "0.32", features = ["backup"] }
+toml = "0.8"
+# Format-preserving TOML editing for surgical scalar merges into user config
+# files (e.g. the Grok settings panel writing [ui]/[models] keys without
+# clobbering comments/layout). Already in the lock tree via `toml` 0.8.
+toml_edit = "0.19"
+serde_yaml = "0.9"
+notify = "6"
+base64 = "0.22"
+kill_tree = { version = "0.2", features = ["tokio"] }
+which = "7"
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"], optional = true }
+axum = { version = "0.8", features = ["ws", "multipart"] }
+async_zip = { version = "0.0.18", features = ["tokio", "deflate"] }
+tower-http = { version = "0.6", features = ["fs", "cors", "compression-gzip", "compression-br"] }
+# Direct deps (already in the graph via axum) so the compression predicate can
+# name the exact types tower-http's `Predicate` trait is defined over.
+http = "1"
+percent-encoding = "2"
+http-body = "1"
+# TCP keepalive on accepted web-client connections (`web::client_keepalive`).
+# Already in the graph via tokio, with the same features.
+socket2 = { version = "0.6", features = ["all"] }
+# The web service's own accept loop (`web::serve`), which axum's `serve` gives
+# no handle on: HTTP/1 idle and header-read timeouts, HTTP/2 keepalive pings.
+# Already in the graph via axum and reqwest, with these features.
+hyper-util = { version = "0.1", features = ["server", "http1", "http2", "service", "tokio"] }
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+futures-util = "0.3"
+tokio-util = { version = "0.7", features = ["io", "rt", "compat"] }
+prost = "0.13"
+rand = "0.8"
+qrcode = "0.14"
+image = { version = "0.25", default-features = false, features = ["png", "webp", "jpeg", "gif"] }
+include_dir = "0.7"
+sha2 = "0.10"
+# ES256 provider tokens for APNs (the `.p8` key is a P-256 PKCS#8 key).
+# Already in the tree through rustls.
+ring = "0.17"
+aes-gcm = { version = "0.10", features = ["stream"] }
+argon2 = "0.5"
+tempfile = "3"
+minisign-verify = "0.2"
+semver = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt", "registry", "std"] }
+tracing-appender = "0.2"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-window-state = { version = "2", optional = true }
+tauri-plugin-updater = { version = "2", optional = true }
+tauri-plugin-process = { version = "2", optional = true }
+tauri-plugin-notification = { version = "2", optional = true }
+tauri-plugin-single-instance = { version = "2", optional = true }
+tauri-plugin-deep-link = { version = "2", optional = true }
+# "Launch at login" toggle. Desktop-only: registry Run key on Windows, a
+# LaunchAgent plist on macOS, an XDG autostart .desktop entry on Linux.
+tauri-plugin-autostart = { version = "2", optional = true }
+# Quick Ask's system-wide shortcut (Option+Space by default). Registered from
+# Rust only; the webview never gets the plugin's JS API.
+tauri-plugin-global-shortcut = { version = "2", optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Claims the bundle identity notifications are filed under. Delivery itself
+# goes through `NSUserNotificationCenter` directly (objc2-foundation's
+# `NSUserNotification` feature below), so a click can open its session.
+mac-notification-sys = "0.6"
+# Built-in browser macOS shim (isolated world, world-scoped eval, snapshots,
+# back/forward). Versions track the ones wry 0.55 uses so the types line up
+# with the handles wry hands out.
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSData", "NSDictionary", "NSError", "NSObject", "NSArray", "NSValue", "NSURLRequest", "NSURL", "NSEnumerator", "NSObjCRuntime", "NSGeometry", "NSRange", "NSThread", "NSDate", "NSSet", "NSProcessInfo", "NSUUID", "NSURLError", "NSUserNotification"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "objc2-core-foundation", "WKWebView", "WKWebViewConfiguration", "WKUserContentController", "WKUserScript", "WKContentWorld", "WKScriptMessage", "WKScriptMessageHandler", "WKFrameInfo", "WKSnapshotConfiguration", "WKFindConfiguration", "WKFindResult", "WKNavigation", "WKNavigationAction", "WKNavigationDelegate", "WKNavigationResponse", "WKUIDelegate", "WKWebsiteDataStore", "WKWebsiteDataRecord", "WKContentRuleList", "WKContentRuleListStore"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-core-graphics", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSGraphics", "NSGraphicsContext", "NSPasteboard", "NSResponder", "NSView", "NSWindow", "NSRunningApplication", "NSWorkspace", "libc"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem", "Win32_Foundation", "Win32_System_Threading", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole", "Win32_UI_Shell"] }
+junction = "1"
+# Built-in browser Windows shim (isolated world over CDP, world-scoped eval,
+# snapshots, find, history, the sign-in identity, the subframe fence, and the
+# workspace window's own resize hook — see `shim::windows::hold_resize_hook`,
+# which is why `Win32_UI_Shell` carries window subclassing here as well as the
+# stream helper).
+# Versions track the ones wry 0.55 uses so the types line up with the handles
+# wry hands out — a second copy of either crate would make them distinct types.
+webview2-com = { version = "0.38", optional = true }
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"], optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Built-in browser Linux shim (isolated world, world-scoped eval, snapshots,
+# find, history, typed load failures, the subframe fence). Pinned to the exact
+# versions wry 0.55 resolves: these types are the ones tauri's `with_webview`
+# hands out, and a second copy of either crate would make them distinct types.
+#
+# Optional, and carried by `tauri-runtime` alone, because `src/browser` is
+# gated on that feature: a plain target dependency is unconditional on
+# features, so `--no-default-features` would still run the gtk-sys / gdk-sys /
+# atk-sys pkg-config probes while compiling none of the code that needs them.
+# Neither the codeg-server CI cell nor the Docker backend stage installs GTK.
+#
+# `v2_40` is not an independent floor we are choosing: tauri-runtime-wry turns
+# on wry's `linux-body`, which enables it already. Declaring it states the API
+# level this crate compiles against instead of borrowing another crate's
+# feature — if wry ever stops asking for it, the failure is a version error
+# here rather than a missing symbol somewhere in the shim.
+webkit2gtk = { version = "=2.0.2", features = ["v2_40"], optional = true }
+gtk = { version = "0.18", optional = true }
+javascriptcore-rs = { version = "=1.1.2", optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+temp-env = { version = "0.3", features = ["async_closure"] }
+tokio = { version = "1", features = ["test-util", "macros", "rt", "sync", "time"] }
+insta = { version = "1", features = ["json", "redactions"] }
+axum-test = { version = "17", features = ["ws"] }

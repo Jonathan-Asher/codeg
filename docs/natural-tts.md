@@ -17,7 +17,7 @@ This is fork-only. The sidecar links espeak-ng (GPL-3.0-or-later); see
    src/lib/read-aloud/natural-player.ts paragraph → tts_speak → tts_poll → Web Audio
         │  getShellTransport(): Tauri invoke, or fetch to the page's own server
         ▼
- backend  src-tauri/src/tts/            models, sidecar process, audio streams
+ backend  src-tauri/crates/codeg-lib/src/tts/  models, sidecar process, audio streams
         │  stdin: JSON requests   stdout: JSON headers + 16-bit PCM
         ▼
  codeg-tts (Swift, native/codeg-tts)    BlueTTSKit: tagging, normalizer, G2P, ONNX
@@ -90,7 +90,7 @@ and removes the directory.
 
 ## The model pack
 
-`src-tauri/src/tts/catalog.rs` pins the same files, revisions and sha256s as
+`src-tauri/crates/codeg-lib/src/tts/catalog.rs` pins the same files, revisions and sha256s as
 the iPhone app's `VoiceModelStore.swift` (BlueTTSKit `scripts/models.sha256`):
 BlueTTS 2.5 from `notmax123/BlueTTS2.5-onnx`, RenikudPlus from
 `notmax123/RenikudPlus`, voices `noa` (default), `adam`, `daniel`, `lily` from

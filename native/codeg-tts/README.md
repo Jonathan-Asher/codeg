@@ -12,7 +12,7 @@ long-lived sidecar of the codeg backend on macOS.
   for English, exactly as on the iPhone.
 - Audio streams back sentence by sentence as 16-bit PCM at 44.1 kHz.
 
-The backend side is `src-tauri/src/tts/` (model download, process, streams);
+The backend side is `src-tauri/crates/codeg-lib/src/tts/` (model download, process, streams);
 see `docs/natural-tts.md` for the whole feature.
 
 ## Protocol (version 1)

@@ -736,7 +736,8 @@ jobs:
       # Sign the server bundle with the SAME minisign key the desktop
       # updater uses (`tauri signer sign` writes `<file>.sig`). The server's
       # `update::verify` module verifies this signature against the embedded
-      # public key before installing — see src-tauri/src/update/verify.rs.
+      # public key before installing — see
+      # src-tauri/crates/codeg-lib/src/update/verify.rs.
       - name: Sign and checksum bundle (Unix)
         if: runner.os != 'Windows'
         env:

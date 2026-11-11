@@ -2,7 +2,7 @@
 
 The script a browser tab's **isolated world** runs when an agent needs to read
 the page, or act on it. Built by esbuild into
-`src-tauri/src/browser/js/agent.bundle.js`, which is committed.
+`src-tauri/crates/codeg-lib/src/browser/js/agent.bundle.js`, which is committed.
 
 ```
 pnpm browser:agent          # build the bundle

@@ -27,7 +27,7 @@ Destructive-action safety nets: **not a priority**.
   still coming up after wake); only auth rejections on the handshake count.
 - **Updater (2026-09-24, Jonathan: "we are holding the fork").** Everything update-related now points
   at the fork: the desktop feed already did (`tauri.conf.json`), and now so do the server-side manifest
-  (`src-tauri/src/update/version.rs`, which answers update checks for remote-workspace windows) and the
+  (`src-tauri/crates/codeg-lib/src/update/version.rs`, which answers update checks for remote-workspace windows) and the
   two "view release" links. Before, a remote window advertised upstream 0.32.1 and linked to it — installing
   that DMG would have wiped every fork feature. Fork builds carry their own version, stamped by CI:
   `<upstream major.minor.(patch+1)>-fork.<run number>` (e.g. `0.30.11-fork.42`), which is what makes the
@@ -86,18 +86,18 @@ Destructive-action safety nets: **not a priority**.
 
 ## Pain 1 — Search doesn't find chat content
 
-**Root cause (confirmed):** `src-tauri/src/commands/conversations.rs:264` — the search is a
+**Root cause (confirmed):** `src-tauri/crates/codeg-lib/src/commands/conversations.rs:264` — the search is a
 lowercased `contains()` over conversation **metadata only** (title, path, branch, model, folder).
 Message bodies never enter the DB; they live in per-agent session files.
 
-**Key asset already in the codebase:** `src-tauri/src/parsers/pi.rs` (2,507 lines) fully
+**Key asset already in the codebase:** `src-tauri/crates/codeg-lib/src/parsers/pi.rs` (2,507 lines) fully
 reconstructs pi session stores into `UnifiedMessage`s — including walking only the *active*
 branch of the tree (`active_branch()`, leaf → root via `parentId`). Equivalent parsers exist for
 claude, codex, opencode, gemini, grok, cline, etc. So message text is already derivable — it's
 just never indexed.
 
 **Plan (upstreamable — no fork needed, but we can carry it in the fork):**
-1. New module `src-tauri/src/search/`: incremental indexer over the parser outputs.
+1. New module `src-tauri/crates/codeg-lib/src/search/`: incremental indexer over the parser outputs.
    - SQLite **FTS5** virtual table `(conversation_id, agent_type, turn_idx, body, updated_at)`.
    - Trigger: watch session-file `mtime` per conversation (parsers already know the paths);
      re-parse and upsert on change. Full backfill on first run (~10 MB here — seconds).
@@ -132,7 +132,7 @@ FTS indexer; the indexer complements it for cross-conversation reach.
 **Root cause (confirmed):** pi sessions are trees (`id`/`parentId`, branches in place), and pi
 abandoned branches stay in the file. `parsers/pi.rs` deliberately projects **only the active
 branch** to a linear thread; codeg's UI renders exactly that projection. "Edit" in pi semantics
-= fork at a point; codeg has fork machinery (`src-tauri/src/acp/fork.rs`) but exposes no
+= fork at a point; codeg has fork machinery (`src-tauri/crates/codeg-lib/src/acp/fork.rs`) but exposes no
 per-message UI.
 
 **Plan:**
@@ -293,7 +293,7 @@ Privacy & Security. In both Accessibility and Screen Recording, remove the old c
 - Anything generally useful (search indexer, tree UI, resume fallback) → PR upstream to
   `xintaofei/codeg`; keep only pi-acp patches as local carryovers.
 - Rebase often: upstream ships ~1 release every few days (0.30.5 → 0.30.9 within a week).
-- Fork-only, never upstream: the natural read-aloud voice (`native/`, `src-tauri/src/tts/`, the
+- Fork-only, never upstream: the natural read-aloud voice (`native/`, `src-tauri/crates/codeg-lib/src/tts/`, the
   `codeg-tts` sidecar). It links espeak-ng (GPL-3.0-or-later); see `docs/natural-tts.md`.
 - Local build: `pnpm i && pnpm tauri dev` (desktop), tests via `pnpm test` /
   `cargo test --features test-utils`.
