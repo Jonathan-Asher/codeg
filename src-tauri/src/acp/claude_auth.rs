@@ -322,9 +322,9 @@ async fn run_cli(cli: &ClaudeCli, args: &[&str], timeout: Duration) -> Result<St
 }
 
 /// Whose sign-in it is and where the CLI keeps it: the organization and
-/// the config dir from `claude auth status --json`. Internal. The UI gets
-/// only [`ClaudeAuthStatus`]. Codeg's usage-limit resets act on this
-/// login.
+/// the config dir from `claude auth status --json`. Internal: the UI gets
+/// only [`ClaudeAuthStatus`]. The usage-limit resets
+/// (`commands::limit_resets`) act on this login.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ClaudeLoginIdentity {
     pub org_id: Option<String>,
