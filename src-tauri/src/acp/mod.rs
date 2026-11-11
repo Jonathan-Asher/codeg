@@ -28,6 +28,7 @@ pub mod host_tools_policy;
 pub mod idle_sweep;
 pub mod internal_bus;
 pub mod internal_frames;
+pub mod move_frame;
 pub mod lifecycle;
 pub mod limit_continue;
 pub mod manager;

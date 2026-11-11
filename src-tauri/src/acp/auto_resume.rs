@@ -520,9 +520,16 @@ pub(crate) async fn reopen_and_send(
     )
     .await;
 
-    // A tab that already reopened this session owns that connection: share
-    // it, and never tear it down on its behalf.
-    let working_dir = PathBuf::from(&folder.path);
+    // The directory a tab reopens it in (`working_dir` on the summary): the
+    // folder's path, or where a session moved without its files keeps
+    // running. A tab that already reopened this session owns that
+    // connection: share it, and never tear it down on its behalf.
+    let working_dir_str = conversation_service::working_dir_of(&db.conn, target.conversation_id)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| folder.path.clone());
+    let working_dir = PathBuf::from(&working_dir_str);
     let shared = manager
         .find_connection_for_reuse(agent_type, Some(&working_dir), Some(session_id.as_str()))
         .await
@@ -530,7 +537,7 @@ pub(crate) async fn reopen_and_send(
     let conn_id = manager
         .spawn_agent_detached(
             agent_type,
-            Some(folder.path.clone()),
+            Some(working_dir_str.clone()),
             Some(session_id.clone()),
             runtime_env,
             owner_label.to_string(),
@@ -939,6 +946,7 @@ mod tests {
             parent_tool_use_id: None,
             delegation_call_id: None,
             origin_cwd: None,
+            working_dir: None,
             turn_state: Some(ConversationTurnState::Interrupted),
             critical: false,
             critical_stall: true,

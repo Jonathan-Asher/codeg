@@ -60,6 +60,7 @@ mod m20261022_000001_conversation_limit_reason;
 mod m20261026_000001_conversation_last_viewed_at;
 mod m20261028_000001_message_fts_state_turns;
 mod m20261101_000001_conversation_talk_state;
+mod m20261111_000001_conversation_moved_from_cwd;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -126,6 +127,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261026_000001_conversation_last_viewed_at::Migration),
             Box::new(m20261028_000001_message_fts_state_turns::Migration),
             Box::new(m20261101_000001_conversation_talk_state::Migration),
+            Box::new(m20261111_000001_conversation_moved_from_cwd::Migration),
         ]
     }
 }

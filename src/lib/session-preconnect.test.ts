@@ -268,6 +268,24 @@ describe("preconnectTargetFor", () => {
     })
   })
 
+  it("opens a session moved without its files where it still runs", () => {
+    expect(
+      preconnectTargetFor(
+        {
+          agent_type: "gemini",
+          external_id: "sid-2",
+          folder_id: 1,
+          working_dir: "/work/old-proj",
+        },
+        folders
+      )
+    ).toEqual({
+      agentType: "gemini",
+      workingDir: "/work/old-proj",
+      sessionId: "sid-2",
+    })
+  })
+
   it("skips rows it cannot reopen the way their tab would", () => {
     // Nothing to resume yet.
     expect(

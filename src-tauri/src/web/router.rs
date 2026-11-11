@@ -332,6 +332,10 @@ pub fn build_router(
             post(handlers::conversations::update_conversation_pinned),
         )
         .route(
+            "/move_conversation_to_folder",
+            post(handlers::session_move::move_conversation_to_folder),
+        )
+        .route(
             "/mark_conversations_viewed",
             post(handlers::conversations::mark_conversations_viewed),
         )

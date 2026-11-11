@@ -548,6 +548,7 @@ async fn import_one(
         limit_resume_reason: Set(None),
         last_viewed_at: Set(None),
         talk_state: Set(None),
+        moved_from_cwd: Set(None),
     };
     conv.insert(conn).await?;
     Ok(ImportOutcome::Imported)
@@ -1046,6 +1047,7 @@ mod tests {
             limit_resume_reason: Set(None),
             last_viewed_at: Set(None),
             talk_state: Set(None),
+            moved_from_cwd: Set(None),
         }
         .insert(&db.conn)
         .await
@@ -1346,6 +1348,7 @@ mod tests {
             limit_resume_reason: Set(None),
             last_viewed_at: Set(None),
             talk_state: Set(None),
+            moved_from_cwd: Set(None),
         }
         .insert(&db.conn)
         .await

@@ -15,6 +15,9 @@ export interface QuickAskSessionOption {
   folderId: number
   folderName: string
   folderPath: string
+  /** Where the session runs: its `working_dir` (the folder's path, or the
+   *  folder a session moved without its files still runs in). */
+  workingDir?: string
   externalId: string | null
   updatedAt: string
 }
@@ -53,6 +56,7 @@ export function toSessionOptions(
         folderId: c.folder_id,
         folderName: folder.name,
         folderPath: folder.path,
+        workingDir: c.working_dir || folder.path,
         externalId: c.external_id,
         updatedAt: c.updated_at,
       }

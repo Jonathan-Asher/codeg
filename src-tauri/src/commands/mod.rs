@@ -12,6 +12,8 @@ pub mod limit_continue;
 #[cfg(feature = "tauri-runtime")]
 pub mod push;
 #[cfg(feature = "tauri-runtime")]
+pub mod session_move;
+#[cfg(feature = "tauri-runtime")]
 pub mod talk;
 /// Talk on this Mac: the voice helper's relay, models and shortcut (desktop).
 #[cfg(feature = "tauri-runtime")]

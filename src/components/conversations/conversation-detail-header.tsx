@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Circle,
   EllipsisVertical,
+  FolderInput,
   Info,
   MicOff,
   MoveHorizontal,
@@ -89,6 +90,11 @@ import {
 import { LimitPauseHeaderBadge } from "./limit-pause"
 import { HistoryRefreshingIndicator } from "./history-refreshing-indicator"
 import { SessionDetailsDialog } from "./session-details-dialog"
+import {
+  MoveToProjectDialog,
+  canMoveToProject,
+  type MoveToProjectTarget,
+} from "./move-to-project-dialog"
 import { useTalkMenu } from "@/components/talk-voice/use-talk-menu"
 
 interface ConversationDetailHeaderProps {
@@ -136,6 +142,7 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
   const tStatus = useTranslations("Folder.statusLabels")
   const tDetails = useTranslations("Folder.sessionDetails")
   const tWidth = useTranslations("AppearanceSettings.sessionWidth")
+  const tMove = useTranslations("Folder.moveSession")
   // Device-wide, not per conversation: the same width as Settings → Appearance.
   const { sessionColumnWidth, setSessionColumnWidth } = useSessionColumnWidth()
   const sessionWidthLabel = useSessionColumnWidthLabel()
@@ -221,6 +228,11 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
   const handleFork = useCallback(() => {
     if (forkTarget) forkConversation(forkTarget)
   }, [forkTarget, forkConversation])
+
+  // "Move to project…": its target is the row snapshotted when the menu
+  // opened (`forkTarget`), kept while the dialog is up so a tab switch under
+  // it cannot change which session moves.
+  const [moveTarget, setMoveTarget] = useState<MoveToProjectTarget | null>(null)
 
   const persisted = conversationId != null
   const displayTitle =
@@ -394,6 +406,14 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
                 {t("fork")}
               </DropdownMenuItem>
             )}
+            {/* Another project, with the agent's files where it keys them
+                by folder (as in the sidebar's menu). */}
+            {forkTarget && canMoveToProject(forkTarget) && (
+              <DropdownMenuItem onSelect={() => setMoveTarget(forkTarget)}>
+                <FolderInput className="h-4 w-4" />
+                {tMove("menuLabel")}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem disabled={!persisted} onSelect={handleTogglePin}>
               {isPinned ? (
                 <PinOff className="h-4 w-4" />
@@ -559,6 +579,16 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {moveTarget && (
+        <MoveToProjectDialog
+          open
+          onOpenChange={(o) => {
+            if (!o) setMoveTarget(null)
+          }}
+          conversation={moveTarget}
+        />
+      )}
 
       {details?.summary && (
         <SessionDetailsDialog

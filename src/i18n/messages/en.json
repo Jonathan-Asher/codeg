@@ -2134,6 +2134,8 @@
       "attentionCountBadge": "{count, plural, one {# session waiting for you} other {# sessions waiting for you}}",
       "statusCancelledBadge": "Cancelled",
       "worktreeRemovedBadge": "Source worktree removed",
+      "runsInBadge": "Runs in {path}",
+      "runsInLabel": "Runs in",
       "criticalBadge": "Critical session",
       "criticalToggleFailed": "Could not update the critical mark: {message}",
       "talkBadge": "Talk mode on",
@@ -2402,6 +2404,43 @@
       "forkUnsupported": "This agent can't fork conversations",
       "forkAfterReply": "Fork after the current reply finishes",
       "forkNoReply": "Nothing to fork yet: no reply has finished"
+    },
+    "moveSession": {
+      "menuLabel": "Move to project…",
+      "title": "Move to project",
+      "description": "Move “{title}” to another project. Its files go with it wherever the agent keeps them by folder.",
+      "untitledSession": "Untitled session",
+      "pickProject": "Choose a project",
+      "noProjects": "No other project is open.",
+      "checking": "Checking…",
+      "fullNote": "The session and its files move to {project}, and the agent continues there. Its next message rereads the session once.",
+      "listedOnly": {
+        "agent_unsupported": "{agent} keeps its sessions tied to the folder they ran in, so this one can only be listed under {project}. It keeps running in {path}.",
+        "claude_adapter_outdated": "The installed Claude Code adapter is too old to move session files, so this session can only be listed under {project}. It keeps running in {path}.",
+        "session_files_not_found": "This session's files aren't where {agent} keeps them, so it can only be listed under {project}. It keeps running in {path}."
+      },
+      "children": "{count, plural, one {Its sub-session moves with it.} other {Its # sub-sessions move with it.}}",
+      "cancel": "Cancel",
+      "move": "Move",
+      "moving": "Moving…",
+      "moved": "Moved to {project}",
+      "movedListedOnly": "Listed under {project}; it keeps running in {path}",
+      "failed": "Couldn't move the session: {message}",
+      "errors": {
+        "conversation_not_found": "This session no longer exists.",
+        "folder_not_found": "That project is no longer in the workspace.",
+        "same_folder": "The session is already in that project.",
+        "chat_conversation": "Chat sessions have no project to move from.",
+        "chat_folder": "A session can't be moved into a chat.",
+        "subsession": "A sub-session moves with the session that started it.",
+        "unsupported_conversation": "This kind of session can't be moved.",
+        "work_task_linked": "A work task runs this session; it stays with the task's project.",
+        "conversation_running": "The session is working. Move it once its reply has finished.",
+        "resume_pending": "The session is about to continue by itself. Move it once that's done, or turn its automatic continuation off.",
+        "running_elsewhere": "Claude Code is running this session outside codeg. Move it once that process has finished.",
+        "session_closing": "The session's agent is still closing. Try again in a moment.",
+        "move_failed": "The session's files couldn't be moved, so nothing was changed."
+      }
     },
     "search": {
       "dialogTitle": "Search",

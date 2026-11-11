@@ -1359,6 +1359,30 @@ fn summary_session_id(path: &Path, first_session_id: Option<String>) -> String {
     first_session_id.unwrap_or(stem)
 }
 
+/// The directory a `relocated` record moves the session to:
+/// `{"type":"relocated","sessionId":…,"relocatedCwd":…}`, which Claude Code
+/// appends when it moves a session's transcript to another project directory
+/// (`relocateSessionTranscript`), and codeg when it moves a session to another
+/// project (`crate::session_move`). Claude Code's own readers honor it only for
+/// the file's own session, and so does this; `None` for any other record.
+pub(crate) fn relocated_cwd_of(
+    value: &serde_json::Value,
+    file_session_id: Option<&str>,
+) -> Option<String> {
+    if value.get("type").and_then(|t| t.as_str()) != Some("relocated") {
+        return None;
+    }
+    let session_id = value.get("sessionId").and_then(|s| s.as_str())?;
+    if file_session_id.is_some_and(|own| own != session_id) {
+        return None;
+    }
+    value
+        .get("relocatedCwd")
+        .and_then(|c| c.as_str())
+        .filter(|c| !c.is_empty())
+        .map(str::to_string)
+}
+
 /// The process is out of file descriptors (`EMFILE`/`ENFILE`). Says nothing
 /// about the file or directory that hit it, and every open after it fails the
 /// same way, so a listing that sees it must fail as a whole rather than skip
@@ -1386,6 +1410,12 @@ impl ClaudeParser {
 
         let mut conversation_id: Option<String> = None;
         let mut cwd: Option<String> = None;
+        // A `relocated` record: the session was moved to another directory
+        // (see [`relocated_cwd_of`]); the last one names where it lives now.
+        let mut relocated_cwd: Option<String> = None;
+        let file_session_id = path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().to_string());
         let mut git_branch: Option<String> = None;
         let mut model: Option<String> = None;
         let mut title: Option<String> = None;
@@ -1410,6 +1440,11 @@ impl ClaudeParser {
             };
 
             let msg_type = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+            if let Some(moved_to) = relocated_cwd_of(&value, file_session_id.as_deref()) {
+                relocated_cwd = Some(moved_to);
+                continue;
+            }
 
             // Skip non-conversation entries
             if msg_type == "file-history-snapshot" || msg_type == "progress" {
@@ -1489,7 +1524,9 @@ impl ClaudeParser {
 
         let id = summary_session_id(path, conversation_id);
 
-        let folder_path = cwd.clone();
+        // Where the session lives: a relocation's directory over the one its
+        // records were written in, as Claude Code's own session info reads it.
+        let folder_path = relocated_cwd.or(cwd);
         let folder_name = folder_path.as_ref().map(|p| folder_name_from_path(p));
 
         // The user's own `/rename` first, then Claude Code's generated title,
@@ -1755,6 +1792,10 @@ pub(crate) struct ClaudeRecordAccumulator {
     /// recorded when `subagent_memo` is set: the cache must know when a file
     /// the records it already fed depended on has changed since.
     subagent_reads: Vec<(PathBuf, Option<FileStamp>)>,
+    /// Where a `relocated` record says the session lives now (the last one
+    /// wins); outranks `cwd` for the detail's folder (see
+    /// [`relocated_cwd_of`]).
+    relocated_cwd: Option<String>,
 }
 
 impl ClaudeRecordAccumulator {
@@ -1763,6 +1804,7 @@ impl ClaudeRecordAccumulator {
             session_path,
             messages: Vec::new(),
             cwd: None,
+            relocated_cwd: None,
             git_branch: None,
             model: None,
             title: None,
@@ -1916,6 +1958,7 @@ impl ClaudeRecordAccumulator {
             queued_prompt_ids: _,
             subagent_memo,
             subagent_reads,
+            relocated_cwd,
         } = self;
 
         let msg_type = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
@@ -1924,6 +1967,13 @@ impl ClaudeRecordAccumulator {
         // a response boundary and must not reconnect thinking on either side.
         if msg_type == "user" {
             *pending_assistant_message_id = None;
+        }
+
+        if let Some(moved_to) =
+            relocated_cwd_of(&value, path.file_stem().and_then(|stem| stem.to_str()))
+        {
+            *relocated_cwd = Some(moved_to);
+            return;
         }
 
         if msg_type == "file-history-snapshot" || msg_type == "progress" {
@@ -2785,6 +2835,7 @@ fn assemble_detail(
     let ClaudeRecordAccumulator {
         messages,
         cwd,
+        relocated_cwd,
         git_branch,
         model,
         title,
@@ -2795,6 +2846,8 @@ fn assemble_detail(
         ..
     } = acc;
 
+    // A relocated session's files resolve against where it lives now.
+    let cwd = relocated_cwd.or(cwd);
     let folder_path = cwd.clone();
     let folder_name = folder_path.as_ref().map(|p| folder_name_from_path(p));
 

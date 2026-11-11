@@ -33,6 +33,8 @@ import {
   RotateCw,
   Split,
   PhoneOff,
+  FolderInput,
+  FolderSymlink,
   type LucideIcon,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -110,6 +112,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ConversationStatusDot } from "./conversation-status-dot"
 import { SessionDetailsDialog } from "./session-details-dialog"
+import { MoveToProjectDialog, canMoveToProject } from "./move-to-project-dialog"
 import { SidebarConversationHoverDetails } from "./sidebar-conversation-hover-details"
 import { SessionActivityIcon, useBackgroundTitle } from "./session-activity"
 import { limitPauseReason, limitStopReason } from "@/lib/limit-continue"
@@ -283,9 +286,11 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   const tPhase = useTranslations("Folder.chat.attachPhase")
   const tStatus = useTranslations("Folder.statusLabels")
   const tDetails = useTranslations("Folder.sessionDetails")
+  const tMove = useTranslations("Folder.moveSession")
   const [renameOpen, setRenameOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
+  const [moveOpen, setMoveOpen] = useState(false)
   const [renameValue, setRenameValue] = useState("")
   const [attachTabId, setAttachTabId] = useState<string | null>(null)
   // Why "Fork" can't run, snapshotted when the menu opens like `attachTabId`;
@@ -613,22 +618,44 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                       {formatConversationTitle(conversation.title) ||
                         t("untitledConversation")}
                     </span>
-                    {/* Re-parented out of a removed worktree: history loads fine,
-                    but "continue" may need a fresh session (the agent's files
-                    were keyed to the old path). */}
+                    {/* Runs in a folder other than its project's: moved here
+                    without its files (it keeps running where it ran), or
+                    re-parented out of a removed worktree — history loads fine,
+                    but "continue" may need a fresh session there (the agent's
+                    files were keyed to the old path). */}
                     {conversation.origin_cwd ? (
-                      <span
-                        className="inline-flex shrink-0 items-center"
-                        title={tSidebar("worktreeRemovedBadge")}
-                      >
-                        <FolderX
-                          className="h-3 w-3 text-muted-foreground/60"
-                          aria-hidden
-                        />
-                        <span className="sr-only">
-                          {tSidebar("worktreeRemovedBadge")}
+                      conversation.working_dir === conversation.origin_cwd ? (
+                        <span
+                          className="inline-flex shrink-0 items-center"
+                          title={tSidebar("runsInBadge", {
+                            path: conversation.origin_cwd,
+                          })}
+                          data-testid="runs-in-badge"
+                        >
+                          <FolderSymlink
+                            className="h-3 w-3 text-muted-foreground/60"
+                            aria-hidden
+                          />
+                          <span className="sr-only">
+                            {tSidebar("runsInBadge", {
+                              path: conversation.origin_cwd,
+                            })}
+                          </span>
                         </span>
-                      </span>
+                      ) : (
+                        <span
+                          className="inline-flex shrink-0 items-center"
+                          title={tSidebar("worktreeRemovedBadge")}
+                        >
+                          <FolderX
+                            className="h-3 w-3 text-muted-foreground/60"
+                            aria-hidden
+                          />
+                          <span className="sr-only">
+                            {tSidebar("worktreeRemovedBadge")}
+                          </span>
+                        </span>
+                      )
                     ) : null}
                     {isCritical ? <CriticalFlag /> : null}
                     {isTalk ? <TalkBadge /> : null}
@@ -994,6 +1021,15 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                 {t("fork")}
               </ContextMenuItem>
             )}
+            {/* Another project, with the agent's files where it keys them
+                by folder. A chat or a sub-session (it moves with its
+                parent) has none to leave. */}
+            {canMoveToProject(conversation) && (
+              <ContextMenuItem onSelect={() => setMoveOpen(true)}>
+                <FolderInput className="h-4 w-4" />
+                {tMove("menuLabel")}
+              </ContextMenuItem>
+            )}
             {onTogglePin && (
               <ContextMenuItem
                 onSelect={() => onTogglePin(conversation.id, !isPinned)}
@@ -1174,6 +1210,14 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
           open
           onOpenChange={setDetailsOpen}
           summary={conversation}
+        />
+      )}
+
+      {moveOpen && (
+        <MoveToProjectDialog
+          open
+          onOpenChange={setMoveOpen}
+          conversation={conversation}
         />
       )}
     </>

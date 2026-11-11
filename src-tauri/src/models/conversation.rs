@@ -95,6 +95,16 @@ pub struct DbConversationSummary {
     /// path (set when a removed task worktree's conversations were re-parented).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub origin_cwd: Option<String>,
+    /// Where an agent session of this conversation runs: `origin_cwd` while
+    /// that directory still exists, else its folder's path
+    /// (`conversation_service::effective_working_dir`). Every reopen — a tab,
+    /// the phone, an automatic resume or continuation, a chat channel, a
+    /// fork — connects with this, so a session moved to another project
+    /// without its files keeps running where it ran. Absent only when the
+    /// folder could not be read, and from a server that predates the field
+    /// (a client then falls back to the folder's path).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
     /// Mirror of `conversation.turn_state`: `running` while a turn is in
     /// flight, `interrupted` when the last one was cut off, `null` otherwise.
     /// Always serialized, so a client can tell "no turn" (`null`) apart from a
