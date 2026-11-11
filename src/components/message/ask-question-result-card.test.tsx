@@ -128,6 +128,72 @@ describe("AskQuestionResultCard", () => {
     expect(screen.getByDisplayValue("Custom thing")).toBeInTheDocument()
   })
 
+  it("shows a typed answer with its line breaks", () => {
+    const input = JSON.stringify({
+      questions: [
+        {
+          question: "Anything else?",
+          header: "Notes",
+          multiSelect: false,
+          options: [{ label: "No", description: "" }],
+        },
+      ],
+    })
+    const output = JSON.stringify({
+      answers: [
+        {
+          header: "Notes",
+          question: "Anything else?",
+          selected: ["first line\nsecond line"],
+        },
+      ],
+      declined: false,
+    })
+    renderWithIntl(
+      <AskQuestionResultCard
+        input={input}
+        output={output}
+        state="output-available"
+      />
+    )
+    expand()
+
+    // The question line is pinned in the record too.
+    expect(
+      screen.getByText("Anything else?").closest("[data-question-heading]")
+    ).toHaveClass("sticky", "top-0")
+    expect(screen.getByRole("radio", { name: "Other" })).toBeChecked()
+    const answer = screen.getByRole("textbox", { name: "Other" })
+    expect(answer.tagName).toBe("TEXTAREA")
+    expect(answer).toHaveValue("first line\nsecond line")
+    expect(answer).toBeDisabled()
+  })
+
+  it("keeps a typed answer's lines when only the answers survive", () => {
+    const output = JSON.stringify({
+      answers: [
+        {
+          header: "Notes",
+          question: "Anything else?",
+          selected: ["first line\nsecond line"],
+        },
+      ],
+      declined: false,
+    })
+    renderWithIntl(
+      <AskQuestionResultCard
+        input="{not json"
+        output={output}
+        state="output-available"
+      />
+    )
+    // (The query collapses whitespace; the chip keeps it.)
+    const chip = screen.getByText("first line second line")
+    expect(chip.textContent).toBe("first line\nsecond line")
+    expect(chip).toHaveClass("whitespace-pre-wrap", "rounded-lg")
+    expect(chip).not.toHaveClass("rounded-4xl")
+  })
+
   it("matches an option label that itself contains a comma", () => {
     const input = JSON.stringify({
       questions: [

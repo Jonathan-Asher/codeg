@@ -4248,7 +4248,7 @@
         "submitError": "Falha ao enviar. Tente novamente.",
         "collapse": "Recolher",
         "expand": "Expandir",
-        "keyboardHint": "As setas movem, Enter escolhe e continua, 1–9 escolhe uma opção, Espaço marca numa pergunta de múltipla escolha, Ctrl ou ⌘ + Enter envia e Esc volta à caixa de mensagem."
+        "keyboardHint": "As setas movem, Enter escolhe e continua, Shift + Enter começa uma nova linha numa resposta escrita, 1–9 escolhe uma opção, Espaço marca numa pergunta de múltipla escolha, Ctrl ou ⌘ + Enter envia e Esc volta à caixa de mensagem."
       },
       "planApproval": {
         "title": "O agente tem um plano — revise",

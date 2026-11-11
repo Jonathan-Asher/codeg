@@ -132,8 +132,24 @@ const answered = (
   ...answers: { questionId: string; labels: string[] }[]
 ): QuestionAnswer => ({ answers, declined: false })
 
+const secretKey: PendingQuestionState = {
+  question_id: "q-secret",
+  created_at: "2026-01-01T00:00:00Z",
+  questions: [
+    {
+      id: "qs",
+      question: "Paste your API key",
+      header: "Key",
+      multi_select: false,
+      options: [],
+      is_secret: true,
+    },
+  ],
+}
+
 afterEach(() => {
   document.documentElement.dir = ""
+  vi.restoreAllMocks()
 })
 
 describe("AskQuestionCard keyboard: focus", () => {
@@ -345,6 +361,32 @@ describe("AskQuestionCard keyboard: options", () => {
     expect(list).toHaveFocus()
   })
 
+  it("keeps the highlighted row in view, clear of the question line", async () => {
+    const user = userEvent.setup()
+    const scroll = vi.spyOn(Element.prototype, "scrollIntoView")
+    renderScope(twoQuestions)
+    const list = screen.getByRole("radiogroup", { name: "First question?" })
+    const body = list.closest<HTMLElement>("[data-question-body]")!
+    const line = body.querySelector<HTMLElement>("[data-question-heading]")!
+    // What jsdom cannot lay out: a 30px question line over a 240px body.
+    Object.defineProperty(body, "clientHeight", { value: 240 })
+    Object.defineProperty(line, "offsetHeight", { value: 30 })
+    for (const [key, name] of [
+      ["{ArrowDown}", "Y"],
+      ["{End}", "Other"],
+      ["{Home}", "X"],
+      // A digit picks and moves on, after showing the row it picked.
+      ["2", "Y"],
+    ]) {
+      const row = screen.getByRole("radio", { name })
+      scroll.mockClear()
+      await user.keyboard(key)
+      expect(scroll.mock.contexts).toEqual([row])
+      expect(scroll).toHaveBeenCalledWith({ block: "nearest" })
+      expect(body.style.scrollPaddingTop).toBe("30px")
+    }
+  })
+
   it("an IME composition's Enter never continues or submits", () => {
     const { onAnswer } = renderScope(approach)
     fireEvent.keyDown(screen.getByRole("radiogroup"), { key: "End" })
@@ -356,6 +398,86 @@ describe("AskQuestionCard keyboard: options", () => {
     fireEvent.keyDown(field, { key: "Enter", metaKey: true, keyCode: 229 })
     expect(onAnswer).not.toHaveBeenCalled()
     expect(field).toHaveFocus()
+  })
+})
+
+describe("AskQuestionCard keyboard: a typed answer", () => {
+  const field = () => screen.getByPlaceholderText("Type your answer…")
+
+  it("Shift+Enter starts a new line and never continues", async () => {
+    const user = userEvent.setup()
+    const { onAnswer } = renderScope(approach)
+    await user.keyboard("{End}{Enter}")
+    expect(field()).toHaveFocus()
+    expect(field().tagName).toBe("TEXTAREA")
+    await user.keyboard("first{Shift>}{Enter}{/Shift}second")
+    expect(field()).toHaveValue("first\nsecond")
+    expect(field()).toHaveFocus()
+    expect(onAnswer).not.toHaveBeenCalled()
+  })
+
+  it("Enter still submits, with every line of the answer", async () => {
+    const user = userEvent.setup()
+    const { onAnswer } = renderScope(approach)
+    await user.keyboard("{End}{Enter}")
+    await user.keyboard("first{Shift>}{Enter}{/Shift}second{Enter}")
+    expect(onAnswer).toHaveBeenCalledWith(
+      "q-approach",
+      answered({ questionId: "qa", labels: ["first\nsecond"] })
+    )
+  })
+
+  it("Enter still continues to the next question", async () => {
+    const user = userEvent.setup()
+    const { onAnswer } = renderScope(twoQuestions)
+    await user.keyboard("{End}{Enter}")
+    await user.keyboard("one{Shift>}{Enter}{/Shift}two{Enter}")
+    expect(
+      screen.getByRole("radiogroup", { name: "Second question?" })
+    ).toHaveFocus()
+    expect(onAnswer).not.toHaveBeenCalled()
+    await user.keyboard("{Enter}")
+    expect(onAnswer).toHaveBeenCalledWith(
+      "q-two",
+      answered(
+        { questionId: "q1", labels: ["one\ntwo"] },
+        { questionId: "q2", labels: ["P"] }
+      )
+    )
+  })
+
+  it("↑ moves up a line, and goes back to the options from the first", async () => {
+    const user = userEvent.setup()
+    renderScope(approach)
+    const list = screen.getByRole("radiogroup")
+    await user.keyboard("{End}{Enter}")
+    await user.keyboard("first{Shift>}{Enter}{/Shift}second")
+    // The caret is on the second line: ↑ stays in the answer.
+    fireEvent.keyDown(field(), { key: "ArrowUp" })
+    expect(field()).toHaveFocus()
+    // On the first line it goes back to the options, on the "Other" row.
+    ;(field() as HTMLTextAreaElement).setSelectionRange(3, 3)
+    fireEvent.keyDown(field(), { key: "ArrowUp" })
+    expect(list).toHaveFocus()
+    expect(highlighted(list)).toBe("Other4")
+    expect(field()).toHaveValue("first\nsecond")
+  })
+
+  it("keeps a secret on one masked line", async () => {
+    const user = userEvent.setup()
+    const { onAnswer } = renderScope(secretKey)
+    const secret = screen.getByLabelText("Paste your API key")
+    expect(secret).toHaveFocus()
+    expect(secret.tagName).toBe("INPUT")
+    expect(secret).toHaveAttribute("type", "password")
+    await user.keyboard("sk-1{Shift>}{Enter}{/Shift}")
+    expect(secret).toHaveValue("sk-1")
+    expect(onAnswer).not.toHaveBeenCalled()
+    await user.keyboard("{Enter}")
+    expect(onAnswer).toHaveBeenCalledWith(
+      "q-secret",
+      answered({ questionId: "qs", labels: ["sk-1"] })
+    )
   })
 })
 

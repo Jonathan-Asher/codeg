@@ -4248,7 +4248,7 @@
         "submitError": "Échec de l'envoi. Veuillez réessayer.",
         "collapse": "Replier",
         "expand": "Déplier",
-        "keyboardHint": "Les flèches déplacent, Entrée choisit et continue, 1–9 choisit une option, Espace coche dans une question à choix multiples, Ctrl ou ⌘ + Entrée envoie, Échap revient à la zone de message."
+        "keyboardHint": "Les flèches déplacent, Entrée choisit et continue, Maj + Entrée commence une nouvelle ligne dans une réponse saisie, 1–9 choisit une option, Espace coche dans une question à choix multiples, Ctrl ou ⌘ + Entrée envoie, Échap revient à la zone de message."
       },
       "planApproval": {
         "title": "L'agent a un plan — à vérifier",

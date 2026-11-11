@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   canCardTakeFocus,
@@ -125,6 +125,55 @@ describe("handleComposerArrowUp", () => {
     )
     expect(handled).toBe(false)
     expect(byId("composer")).toHaveFocus()
+  })
+})
+
+describe("focusing a card's entry", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const card = `
+    <div id="scope" data-composer-scope="">
+      <div id="card">
+        <div id="list" tabindex="0" data-card-entry="" data-card-entry-keep-scroll=""></div>
+      </div>
+      <textarea id="composer" data-composer-input=""></textarea>
+    </div>
+  `
+
+  it("leaves the scroll alone for an entry in the card's own body", () => {
+    mount(card)
+    const focus = vi.spyOn(HTMLElement.prototype, "focus")
+    expect(focusCardEntry(byId("card"))).toBe(true)
+    expect(byId("list")).toHaveFocus()
+    expect(focus).toHaveBeenLastCalledWith({ preventScroll: true })
+  })
+
+  it("does the same for ↑ from the composer", () => {
+    mount(card)
+    const scope = byId("scope")
+    scope.addEventListener("keydown", (event) => {
+      handleComposerArrowUp(event, scope)
+    })
+    byId("composer").focus()
+    const focus = vi.spyOn(HTMLElement.prototype, "focus")
+    byId("composer").dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "ArrowUp",
+        bubbles: true,
+        cancelable: true,
+      })
+    )
+    expect(byId("list")).toHaveFocus()
+    expect(focus).toHaveBeenLastCalledWith({ preventScroll: true })
+  })
+
+  it("focuses any other entry as before", () => {
+    mount(`<div id="card"><button data-card-entry="">Allow</button></div>`)
+    const focus = vi.spyOn(HTMLElement.prototype, "focus")
+    expect(focusCardEntry(byId("card"))).toBe(true)
+    expect(focus).toHaveBeenLastCalledWith()
   })
 })
 

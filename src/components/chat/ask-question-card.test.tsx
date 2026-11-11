@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AskQuestionCard } from "./ask-question-card"
 import enMessages from "@/i18n/messages/en.json"
@@ -630,6 +630,231 @@ describe("AskQuestionCard collapse", () => {
       "Couldn't submit. Please try again."
     )
     expect(screen.getByRole("button", { name: "Submit" })).not.toBeDisabled()
+  })
+})
+
+describe("AskQuestionCard keeps the question in view", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  /** The question line of the question asking `text`, and its body. */
+  function heading(text: string): HTMLElement {
+    const el = screen
+      .getByText(text)
+      .closest<HTMLElement>("[data-question-heading]")
+    expect(el).not.toBeNull()
+    return el!
+  }
+  function bodyOf(el: HTMLElement): HTMLElement {
+    const body = el.closest<HTMLElement>("[data-question-body]")
+    expect(body).not.toBeNull()
+    return body!
+  }
+
+  /** Lay out what jsdom cannot: a body of `body` px holding a question line
+   *  of `line` px. */
+  function layout(body: HTMLElement, line: number, height: number) {
+    Object.defineProperty(body, "clientHeight", {
+      configurable: true,
+      value: height,
+    })
+    const el = body.querySelector("[data-question-heading]")!
+    Object.defineProperty(el, "offsetHeight", {
+      configurable: true,
+      value: line,
+    })
+  }
+
+  /** The arguments of the last call `spy` got on `el`. */
+  function lastCallOn(
+    spy: { mock: { calls: unknown[][]; contexts: unknown[] } },
+    el: Element
+  ): unknown[] | undefined {
+    return spy.mock.calls[spy.mock.contexts.lastIndexOf(el)]
+  }
+
+  it("pins the question line at the top of its body, tabs or not", () => {
+    renderCard(twoSingle)
+    const tabbed = heading("First question?")
+    expect(tabbed).toHaveClass("sticky", "top-0", "z-10")
+    expect(bodyOf(tabbed)).toBe(screen.getByRole("tabpanel"))
+    expect(bodyOf(tabbed).firstElementChild).toBe(tabbed)
+
+    renderCard(single)
+    const alone = heading("Which approach?")
+    expect(alone).toHaveClass("sticky", "top-0", "z-10")
+    expect(bodyOf(alone)).toHaveClass("overflow-y-auto")
+  })
+
+  it("backs the line and draws its divider only once something scrolls under it", () => {
+    renderCard(twoSingle)
+    const line = heading("First question?")
+    const body = bodyOf(line)
+    expect(body).toHaveClass("group/question-body")
+    expect(line).toHaveClass(
+      "group-data-[stuck]/question-body:bg-card",
+      "group-data-[stuck]/question-body:shadow-[0_1px_0_var(--border)]"
+    )
+    expect(body).not.toHaveAttribute("data-stuck")
+    body.scrollTop = 40
+    fireEvent.scroll(body)
+    expect(body).toHaveAttribute("data-stuck")
+    body.scrollTop = 0
+    fireEvent.scroll(body)
+    expect(body).not.toHaveAttribute("data-stuck")
+  })
+
+  it("lets a question taller than half its body scroll away instead", () => {
+    renderCard(twoSingle)
+    const line = heading("First question?")
+    const body = bodyOf(line)
+    expect(line).toHaveClass("group-data-[unpinned]/question-body:static")
+    layout(body, 120, 200)
+    body.scrollTop = 40
+    fireEvent.scroll(body)
+    expect(body).toHaveAttribute("data-unpinned")
+    expect(body).not.toHaveAttribute("data-stuck")
+    layout(body, 30, 200)
+    fireEvent.scroll(body)
+    expect(body).not.toHaveAttribute("data-unpinned")
+    expect(body).toHaveAttribute("data-stuck")
+  })
+
+  it("brings a question in at its top, however its tab opens", () => {
+    renderCard(twoSingle)
+    const [firstTab, secondTab] = screen.getAllByRole("tab")
+    fireEvent.click(screen.getByRole("button", { name: /Next/ }))
+    const second = screen.getByRole("tabpanel")
+    expect(second).toHaveTextContent("Second question?")
+    // The browser puts a hidden panel's scroll back when it shows again.
+    second.scrollTop = 120
+    second.setAttribute("data-stuck", "")
+    fireEvent.mouseDown(firstTab)
+    expect(screen.getByRole("tabpanel")).toHaveTextContent("First question?")
+    fireEvent.mouseDown(secondTab)
+    expect(screen.getByRole("tabpanel")).toBe(second)
+    expect(second.scrollTop).toBe(0)
+    expect(second).not.toHaveAttribute("data-stuck")
+
+    // Auto-advance from a pick does the same.
+    second.scrollTop = 120
+    fireEvent.mouseDown(firstTab)
+    fireEvent.click(screen.getByRole("radio", { name: "X" }))
+    expect(screen.getByRole("tabpanel")).toBe(second)
+    expect(second.scrollTop).toBe(0)
+  })
+
+  it("moves focus into the next question without scrolling it", () => {
+    const focus = vi.spyOn(HTMLElement.prototype, "focus")
+    renderCard(twoSingle)
+    fireEvent.click(screen.getByRole("radio", { name: "X" }))
+    const list = screen.getByRole("radiogroup", { name: "Second question?" })
+    expect(list).toHaveFocus()
+    expect(lastCallOn(focus, list)).toEqual([{ preventScroll: true }])
+    expect(bodyOf(list).scrollTop).toBe(0)
+  })
+
+  it("takes focus on arrival without scrolling", () => {
+    const focus = vi.spyOn(HTMLElement.prototype, "focus")
+    renderCard(single)
+    const list = screen.getByRole("radiogroup", { name: "Which approach?" })
+    expect(list).toHaveFocus()
+    expect(lastCallOn(focus, list)).toEqual([{ preventScroll: true }])
+  })
+
+  it("brings a replacement set in at its top, even one reusing an id", () => {
+    const onAnswer = vi.fn()
+    const view = render(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <AskQuestionCard question={single} onAnswer={onAnswer} />
+      </NextIntlClientProvider>
+    )
+    const body = bodyOf(screen.getByRole("radiogroup"))
+    body.scrollTop = 80
+    view.rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <AskQuestionCard
+          question={{ ...single, question_id: "q-1-again" }}
+          onAnswer={onAnswer}
+        />
+      </NextIntlClientProvider>
+    )
+    expect(bodyOf(screen.getByRole("radiogroup"))).toBe(body)
+    expect(body.scrollTop).toBe(0)
+  })
+
+  it("brings the Other field into view, clear of the question line", () => {
+    const focus = vi.spyOn(HTMLElement.prototype, "focus")
+    const scroll = vi.spyOn(Element.prototype, "scrollIntoView")
+    renderCard(single)
+    const body = bodyOf(screen.getByRole("radiogroup"))
+    layout(body, 30, 240)
+    fireEvent.click(screen.getByRole("radio", { name: "Other" }))
+    const field = screen.getByPlaceholderText("Type your answer…")
+    expect(field).toHaveFocus()
+    expect(lastCallOn(focus, field)).toEqual([{ preventScroll: true }])
+    expect(lastCallOn(scroll, field)).toEqual([{ block: "nearest" }])
+    expect(body.style.scrollPaddingTop).toBe("30px")
+  })
+
+  it("keeps a growing answer in view while it is typed", () => {
+    const scroll = vi.spyOn(Element.prototype, "scrollIntoView")
+    renderCard(single)
+    const body = bodyOf(screen.getByRole("radiogroup"))
+    layout(body, 30, 240)
+    fireEvent.click(screen.getByRole("radio", { name: "Other" }))
+    const field = screen.getByPlaceholderText("Type your answer…")
+    // Two lines now: taller than it was, still well inside the body.
+    Object.defineProperty(field, "offsetHeight", {
+      configurable: true,
+      value: 54,
+    })
+    body.style.scrollPaddingTop = ""
+    scroll.mockClear()
+    fireEvent.change(field, { target: { value: "first\nsecond" } })
+    expect(scroll.mock.contexts).toEqual([field])
+    expect(scroll).toHaveBeenLastCalledWith({ block: "nearest" })
+    expect(body.style.scrollPaddingTop).toBe("30px")
+  })
+
+  it("leaves an answer taller than the room under the question to the caret", () => {
+    const scroll = vi.spyOn(Element.prototype, "scrollIntoView")
+    renderCard(single)
+    const body = bodyOf(screen.getByRole("radiogroup"))
+    // 90px under a 30px question line, for a 134px answer.
+    layout(body, 30, 120)
+    fireEvent.click(screen.getByRole("radio", { name: "Other" }))
+    const field = screen.getByPlaceholderText("Type your answer…")
+    Object.defineProperty(field, "offsetHeight", {
+      configurable: true,
+      value: 134,
+    })
+    scroll.mockClear()
+    fireEvent.change(field, { target: { value: "1\n2\n3\n4\n5\n6" } })
+    expect(field).toHaveValue("1\n2\n3\n4\n5\n6")
+    expect(scroll).not.toHaveBeenCalled()
+  })
+
+  it("lets a long question scroll away from the moment it is entered", () => {
+    // Laid out before anything scrolls: a 120px question over a 200px body.
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(
+      function (this: HTMLElement) {
+        return this.hasAttribute("data-question-heading") ? 120 : 0
+      }
+    )
+    vi.spyOn(Element.prototype, "clientHeight", "get").mockImplementation(
+      function (this: Element) {
+        return this.hasAttribute("data-question-body") ? 200 : 0
+      }
+    )
+    renderCard(twoSingle)
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("data-unpinned")
+    fireEvent.click(screen.getByRole("button", { name: /Next/ }))
+    const second = screen.getByRole("tabpanel")
+    expect(second).toHaveTextContent("Second question?")
+    expect(second).toHaveAttribute("data-unpinned")
+    expect(second).not.toHaveAttribute("data-stuck")
   })
 })
 

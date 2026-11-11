@@ -4248,7 +4248,7 @@
         "submitError": "送信できませんでした。もう一度お試しください。",
         "collapse": "折りたたむ",
         "expand": "展開",
-        "keyboardHint": "矢印キーで移動、Enter で選択して次へ、1〜9 で選択肢を選択、複数選択の質問では Space でチェック、Ctrl または ⌘ + Enter で送信、Esc で入力欄に戻ります。"
+        "keyboardHint": "矢印キーで移動、Enter で選択して次へ、入力した回答では Shift + Enter で改行、1〜9 で選択肢を選択、複数選択の質問では Space でチェック、Ctrl または ⌘ + Enter で送信、Esc で入力欄に戻ります。"
       },
       "planApproval": {
         "title": "エージェントが計画を提示しました — 確認してください",

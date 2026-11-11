@@ -4248,7 +4248,7 @@
         "submitError": "Couldn't submit. Please try again.",
         "collapse": "Collapse",
         "expand": "Expand",
-        "keyboardHint": "Arrow keys move, Enter chooses and continues, 1–9 picks an option, Space ticks a box in a multiple-choice question, Ctrl or ⌘ + Enter submits, Esc goes back to the message box."
+        "keyboardHint": "Arrow keys move, Enter chooses and continues, Shift + Enter starts a new line in a typed answer, 1–9 picks an option, Space ticks a box in a multiple-choice question, Ctrl or ⌘ + Enter submits, Esc goes back to the message box."
       },
       "planApproval": {
         "title": "The agent has a plan — review it",

@@ -240,8 +240,17 @@ export function AskQuestionResultCard({
               )}
               {labels.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
+                  {/* A typed answer keeps its lines (Shift+Enter), in a box
+                      whose corners leave them whole: a pill's would cut
+                      into the first and last of several. */}
                   {labels.map((label) => (
-                    <Badge key={label} className="text-xs">
+                    <Badge
+                      key={label}
+                      className={cn(
+                        "h-auto whitespace-pre-wrap text-xs",
+                        label.includes("\n") && "rounded-lg"
+                      )}
+                    >
                       {label}
                     </Badge>
                   ))}

@@ -4248,7 +4248,7 @@
         "submitError": "Senden fehlgeschlagen. Bitte versuche es erneut.",
         "collapse": "Einklappen",
         "expand": "Ausklappen",
-        "keyboardHint": "Pfeiltasten bewegen, Enter wählt und macht weiter, 1–9 wählt eine Option, die Leertaste hakt bei Mehrfachauswahl an, Strg oder ⌘ + Enter sendet ab, Esc kehrt zum Nachrichtenfeld zurück."
+        "keyboardHint": "Pfeiltasten bewegen, Enter wählt und macht weiter, Shift + Enter beginnt in einer getippten Antwort eine neue Zeile, 1–9 wählt eine Option, die Leertaste hakt bei Mehrfachauswahl an, Strg oder ⌘ + Enter sendet ab, Esc kehrt zum Nachrichtenfeld zurück."
       },
       "planApproval": {
         "title": "Der Agent hat einen Plan – bitte prüfen",

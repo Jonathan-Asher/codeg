@@ -4248,7 +4248,7 @@
         "submitError": "No se pudo enviar. Inténtalo de nuevo.",
         "collapse": "Plegar",
         "expand": "Desplegar",
-        "keyboardHint": "Las flechas mueven, Enter elige y continúa, 1–9 elige una opción, Espacio marca en una pregunta de opción múltiple, Ctrl o ⌘ + Enter envía y Esc vuelve al cuadro de mensaje."
+        "keyboardHint": "Las flechas mueven, Enter elige y continúa, Shift + Enter empieza una línea nueva en una respuesta escrita, 1–9 elige una opción, Espacio marca en una pregunta de opción múltiple, Ctrl o ⌘ + Enter envía y Esc vuelve al cuadro de mensaje."
       },
       "planApproval": {
         "title": "El agente tiene un plan: revísalo",

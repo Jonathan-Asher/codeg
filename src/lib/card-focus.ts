@@ -8,7 +8,8 @@ import { isImeCompositionKey } from "@/lib/ime-composition"
  * composer input is the rich composer's editable (`.codeg-composer-content`) or
  * any element marked `data-composer-input` (quick ask's textarea). Each live
  * card marks the one element keyboard focus lands on with
- * {@link CARD_ENTRY_ATTR}.
+ * {@link CARD_ENTRY_ATTR}, and adds {@link CARD_ENTRY_KEEP_SCROLL_ATTR} when
+ * that element sits inside the card's own scrolling body.
  *
  * Plain DOM on purpose: the composer and the cards are siblings that share no
  * state, the same pieces mount in a tab, a canvas card, the web client and a
@@ -24,6 +25,11 @@ import { isImeCompositionKey } from "@/lib/ime-composition"
 
 export const COMPOSER_SCOPE_ATTR = "data-composer-scope"
 export const CARD_ENTRY_ATTR = "data-card-entry"
+/** An entry inside the card's own scrolling body is focused where it is: the
+ *  card decides what of that body shows. The browser's own scroll to a focused
+ *  element would line a tall entry (the question card's option list) up with
+ *  the top of the body, and push the question above it out of sight. */
+export const CARD_ENTRY_KEEP_SCROLL_ATTR = "data-card-entry-keep-scroll"
 
 const SCOPE_SELECTOR = `[${COMPOSER_SCOPE_ATTR}]`
 const ENTRY_SELECTOR = `[${CARD_ENTRY_ATTR}]`
@@ -191,13 +197,21 @@ export function canCardTakeFocus(card: Element): boolean {
   return !popup || popup.contains(card)
 }
 
+function focusEntry(entry: HTMLElement): void {
+  if (entry.hasAttribute(CARD_ENTRY_KEEP_SCROLL_ATTR)) {
+    entry.focus({ preventScroll: true })
+  } else {
+    entry.focus()
+  }
+}
+
 /** Focus the card's entry element. Returns false when the card has none or is
  *  off screen. */
 export function focusCardEntry(card: Element | null): boolean {
   if (!isShown(card)) return false
   const entry = card?.querySelector<HTMLElement>(ENTRY_SELECTOR)
   if (!entry) return false
-  entry.focus()
+  focusEntry(entry)
   return true
 }
 
@@ -268,7 +282,7 @@ export function handleComposerArrowUp(
   if (!entry || !isShown(entry)) return false
   event.preventDefault()
   event.stopPropagation()
-  entry.focus()
+  focusEntry(entry)
   return true
 }
 

@@ -4248,7 +4248,7 @@
         "submitError": "提交失敗，請重試。",
         "collapse": "摺疊",
         "expand": "展開",
-        "keyboardHint": "方向鍵移動，Enter 選擇並繼續，1–9 選擇對應選項，複選題中用空白鍵勾選，Ctrl 或 ⌘ + Enter 送出，Esc 返回輸入框。"
+        "keyboardHint": "方向鍵移動，Enter 選擇並繼續，輸入回答時 Shift + Enter 換行，1–9 選擇對應選項，複選題中用空白鍵勾選，Ctrl 或 ⌘ + Enter 送出，Esc 返回輸入框。"
       },
       "planApproval": {
         "title": "智慧代理已提出計畫——請審閱",

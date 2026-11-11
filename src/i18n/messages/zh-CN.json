@@ -4248,7 +4248,7 @@
         "submitError": "提交失败，请重试。",
         "collapse": "折叠",
         "expand": "展开",
-        "keyboardHint": "方向键移动，Enter 选择并继续，1–9 选择对应选项，多选题中用空格勾选，Ctrl 或 ⌘ + Enter 提交，Esc 返回输入框。"
+        "keyboardHint": "方向键移动，Enter 选择并继续，输入回答时 Shift + Enter 换行，1–9 选择对应选项，多选题中用空格勾选，Ctrl 或 ⌘ + Enter 提交，Esc 返回输入框。"
       },
       "planApproval": {
         "title": "智能体已给出计划——请审阅",

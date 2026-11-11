@@ -6,8 +6,11 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent as ReactChangeEvent,
+  type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
+  type UIEvent,
 } from "react"
 import { useLocale, useTranslations } from "next-intl"
 import {
@@ -109,6 +112,78 @@ const DIGIT = /^[1-9]$/
  *  size; `min-h-8` is the `size="sm"` height it has at 100%. */
 const FOOTER_BUTTON = "h-auto min-h-8"
 
+/** About six lines of a typed answer (`text-sm`, a line 1.25 chat units
+ *  tall) with its padding and border: past that it scrolls inside. */
+const ANSWER_MAX_HEIGHT =
+  "max-h-[calc(var(--chat-rem,1rem)*7.5_+_var(--spacing)*3_+_2px)]"
+
+/** A question's scrolling body (a tab's panel, or the single question's), and
+ *  the question line at its top. */
+const BODY_SELECTOR = "[data-question-body]"
+const HEADING_SELECTOR = "[data-question-heading]"
+
+/**
+ * The question line stays pinned over the top of its body while the options
+ * scroll, unless it would take more than half of the body: a question that
+ * long scrolls away with its options instead, as it always did. The body
+ * carries the outcome for the line's classes (`data-unpinned`, and
+ * `data-stuck` once something has scrolled under it). Returns the height the
+ * pinned line covers.
+ */
+function pinHeading(body: HTMLElement): number {
+  const heading = body.querySelector<HTMLElement>(HEADING_SELECTOR)
+  const height = heading?.offsetHeight ?? 0
+  const pinned = height * 2 <= body.clientHeight
+  body.toggleAttribute("data-unpinned", !pinned)
+  body.toggleAttribute("data-stuck", pinned && body.scrollTop > 0)
+  return pinned ? height : 0
+}
+
+function onBodyScroll(event: UIEvent<HTMLElement>) {
+  pinHeading(event.currentTarget)
+}
+
+/** Bring a row or a field into view with the least scrolling, clear of the
+ *  question line pinned over its body (the body's scroll padding). */
+function reveal(el: HTMLElement) {
+  const body = el.closest<HTMLElement>(BODY_SELECTOR)
+  if (body) body.style.scrollPaddingTop = `${pinHeading(body)}px`
+  el.scrollIntoView({ block: "nearest" })
+}
+
+/**
+ * A typed answer grows a line at a time, past the bottom of the body when it
+ * sits at the end of the options; the browser only keeps the caret in sight.
+ * While it is typed into, all of it stays in view, unless it is taller than
+ * the room under the question line: there the caret is the better guide.
+ */
+function keepTypingInView(field: HTMLElement) {
+  if (field !== document.activeElement) return
+  const body = field.closest<HTMLElement>(BODY_SELECTOR)
+  if (body && field.offsetHeight > body.clientHeight - pinHeading(body)) return
+  reveal(field)
+}
+
+/**
+ * The ref of each question line. It mounts when its question is entered (its
+ * tab opens, a new set arrives), and brings the body in at its top, the
+ * question in view. Not a given otherwise: a tab's panel stays mounted while
+ * it is hidden, and the browser puts back where it was scrolled. Whether the
+ * line can stay pinned is settled here too, before anything scrolls.
+ */
+function enterAtTop(heading: HTMLElement | null) {
+  const body = heading?.closest<HTMLElement>(BODY_SELECTOR)
+  if (!body) return
+  body.scrollTop = 0
+  pinHeading(body)
+}
+
+/** The engine sizes a field to its content by itself (`field-sizing`). */
+const FIELD_SIZES_ITSELF =
+  typeof CSS !== "undefined" &&
+  typeof CSS.supports === "function" &&
+  CSS.supports("field-sizing", "content")
+
 function initialState(
   questions: QuestionSpec[],
   seed?: SeedSelections
@@ -157,6 +232,47 @@ function ChoiceMark({ multi, checked }: { multi: boolean; checked: boolean }) {
           <span className="size-2 rounded-full bg-primary-foreground" />
         ))}
     </span>
+  )
+}
+
+/**
+ * A typed answer: one line at rest, growing with what is typed up to its
+ * `max-height`, then scrolling inside. Where the engine cannot size a field to
+ * its content, it is fitted each time the text changes.
+ */
+function AnswerArea({
+  ref,
+  value,
+  className,
+  ...props
+}: Omit<ComponentProps<"textarea">, "ref" | "value"> & {
+  ref: (el: HTMLElement | null) => void
+  value: string
+}) {
+  const own = useRef<HTMLTextAreaElement | null>(null)
+  useLayoutEffect(() => {
+    const el = own.current
+    if (!el) return
+    // Not laid out (inside something hidden), it keeps its one row.
+    if (!FIELD_SIZES_ITSELF) {
+      el.style.height = ""
+      if (el.scrollHeight > 0) {
+        el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`
+      }
+    }
+    keepTypingInView(el)
+  }, [value])
+  return (
+    <textarea
+      {...props}
+      ref={(el) => {
+        own.current = el
+        ref(el)
+      }}
+      rows={1}
+      value={value}
+      className={cn("block resize-none field-sizing-content", className)}
+    />
   )
 }
 
@@ -289,11 +405,16 @@ export function AskQuestionCard({
     questions[index]?.options.length === 0 ? fieldId(index) : listId(index)
 
   const focusElement = (el: HTMLElement) => {
-    el.focus()
-    // A field is entered at its end (typing on the "Other" row has already
-    // put the first character in it).
-    if (el instanceof HTMLInputElement) {
+    // Never the browser's own scroll to the focused element: it lines a tall
+    // option list up with the top of the body and pushes the question above
+    // it out of sight. A question comes in at its top instead (`enterAtTop`),
+    // and only a field, where the user types, is brought into view.
+    el.focus({ preventScroll: true })
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+      // A field is entered at its end (typing on the "Other" row has already
+      // put the first character in it).
       el.setSelectionRange(el.value.length, el.value.length)
+      reveal(el)
     }
   }
   const applyFocus = (req: FocusRequest): boolean => {
@@ -470,6 +591,13 @@ export function AskQuestionCard({
   }
   const moveHighlight = (q: QuestionSpec, row: number) =>
     setHighlight((prev) => ({ ...prev, [q.id]: row }))
+  // The keyboard's highlight is a row the list points at
+  // (`aria-activedescendant`), not focus: nothing else scrolls it into view.
+  const highlightRow = (q: QuestionSpec, index: number, row: number) => {
+    moveHighlight(q, row)
+    const el = document.getElementById(rowId(index, row))
+    if (el) reveal(el)
+  }
 
   const goTo = (index: number) => {
     const q = questions[index]
@@ -599,12 +727,16 @@ export function AskQuestionCard({
       case "ArrowDown":
       case "ArrowUp":
         e.preventDefault()
-        moveHighlight(q, (hl + (key === "ArrowDown" ? 1 : rows - 1)) % rows)
+        highlightRow(
+          q,
+          index,
+          (hl + (key === "ArrowDown" ? 1 : rows - 1)) % rows
+        )
         return
       case "Home":
       case "End":
         e.preventDefault()
-        moveHighlight(q, key === "Home" ? 0 : rows - 1)
+        highlightRow(q, index, key === "Home" ? 0 : rows - 1)
         return
       case "Enter":
         if (e.shiftKey) return
@@ -629,7 +761,7 @@ export function AskQuestionCard({
     }
     if (DIGIT.test(key) && Number(key) <= rows) {
       e.preventDefault()
-      moveHighlight(q, Number(key) - 1)
+      highlightRow(q, index, Number(key) - 1)
       activateRow(q, index, Number(key) - 1, "digit")
       return
     }
@@ -649,25 +781,33 @@ export function AskQuestionCard({
 
   // The "Other" field, or the whole answer of a question with no options.
   const onFieldKeyDown = (
-    e: ReactKeyboardEvent<HTMLInputElement>,
+    e: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
     q: QuestionSpec,
     index: number
   ) => {
     if (locked || ime.isComposing(e)) return
     if (e.metaKey || e.ctrlKey || e.altKey) return
+    const el = e.currentTarget
     const free = q.options.length === 0
     if (e.key === "Enter") {
-      // Single-line: Shift+Enter has no newline to add.
+      // Shift+Enter starts a new line of the answer, but a secret's one-line
+      // field has none to add.
+      if (e.shiftKey && el instanceof HTMLTextAreaElement) return
       e.preventDefault()
       if (!e.shiftKey && !e.repeat) continueFrom(index, state)
       return
     }
-    if (!free && (e.key === "Escape" || (e.key === "ArrowUp" && !e.shiftKey))) {
+    // ↑ moves up a line of the answer while there is one above the caret.
+    const firstLine = !el.value.slice(0, el.selectionStart ?? 0).includes("\n")
+    if (
+      !free &&
+      (e.key === "Escape" || (e.key === "ArrowUp" && !e.shiftKey && firstLine))
+    ) {
       // Back to the options, on the "Other" row; left empty, "Other" closes.
       e.preventDefault()
       const s = stateOf(q)
       if (s.otherText === "") commit(q, { ...s, otherActive: false })
-      moveHighlight(q, q.options.length)
+      highlightRow(q, index, q.options.length)
       requestFocus({ index, part: "entry" })
       return
     }
@@ -704,10 +844,11 @@ export function AskQuestionCard({
 
   // A selectable option card: the accent comes from our own selection state, and
   // the keyboard highlight adds a ring. The read-only view keeps the selection
-  // crisp (no opacity dim) so the answer stands out.
+  // crisp (no opacity dim) so the answer stands out. Scrolled into view, it
+  // keeps a few pixels clear, so its ring shows whole.
   const cardClass = (selected: boolean, highlighted: boolean) =>
     cn(
-      "flex w-full select-none items-start gap-2.5 rounded-lg border p-2.5 text-start font-normal outline-none transition-colors",
+      "flex w-full scroll-my-1 select-none items-start gap-2.5 rounded-lg border p-2.5 text-start font-normal outline-none transition-colors",
       selected ? "border-primary bg-primary/10" : "border-border/60",
       highlighted && "ring-2 ring-ring/50",
       highlighted && !selected && "bg-muted/40",
@@ -752,29 +893,42 @@ export function AskQuestionCard({
   // single-question layout and each tab panel.
   const renderOptions = (q: QuestionSpec, index: number) => {
     const s = state[q.id]
-    // Secret questions (codex marks API keys etc. with `is_secret`) mask the
-    // typed answer.
-    const inputType = q.is_secret ? "password" : "text"
     const inputClass =
       "w-full rounded-md border border-border/60 bg-background px-2.5 py-1.5 text-sm outline-none focus:border-ring disabled:cursor-not-allowed disabled:opacity-60"
-    const field = (label: string, entry: boolean) => (
-      <input
-        id={fieldId(index)}
-        ref={claimFocus(index, entry ? "entry" : "other")}
-        data-card-entry={entry && !readOnly ? "" : undefined}
-        type={inputType}
-        aria-label={label}
-        aria-describedby={readOnly ? undefined : hintId}
-        disabled={locked}
-        value={s?.otherText ?? ""}
-        dir={detectTextDirection(s?.otherText)}
-        onChange={(e) => setOtherText(q, e.target.value)}
-        {...ime.props}
-        onKeyDown={(e) => onFieldKeyDown(e, q, index)}
-        placeholder={t("otherPlaceholder")}
-        className={inputClass}
-      />
-    )
+    const field = (label: string, entry: boolean) => {
+      const props = {
+        id: fieldId(index),
+        ref: claimFocus(index, entry ? "entry" : "other"),
+        "data-card-entry": entry && !readOnly ? "" : undefined,
+        "data-card-entry-keep-scroll": entry && !readOnly ? "" : undefined,
+        "aria-label": label,
+        "aria-describedby": readOnly ? undefined : hintId,
+        disabled: locked,
+        value: s?.otherText ?? "",
+        dir: detectTextDirection(s?.otherText),
+        onChange: (
+          e: ReactChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+        ) => setOtherText(q, e.target.value),
+        ...ime.props,
+        onKeyDown: (
+          e: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement>
+        ) => onFieldKeyDown(e, q, index),
+        placeholder: t("otherPlaceholder"),
+      }
+      // Secret questions (codex marks API keys etc. with `is_secret`) mask
+      // the typed answer, on the single line a password takes.
+      if (q.is_secret) {
+        return <input {...props} type="password" className={inputClass} />
+      }
+      // Any other answer can run to several lines (Shift+Enter). The answered
+      // record shows all of them, the body scrolling rather than the field.
+      return (
+        <AnswerArea
+          {...props}
+          className={cn(inputClass, !readOnly && ANSWER_MAX_HEIGHT)}
+        />
+      )
+    }
 
     // Free-text question (no options — codex elicitation and MCP-server forms
     // ask open questions this way): the text input IS the answer field, always
@@ -817,6 +971,7 @@ export function AskQuestionCard({
           id={listId(index)}
           ref={claimFocus(index, "entry")}
           data-card-entry={readOnly ? undefined : ""}
+          data-card-entry-keep-scroll={readOnly ? undefined : ""}
           role={q.multi_select ? "group" : "radiogroup"}
           aria-labelledby={labelId(index)}
           aria-describedby={readOnly ? undefined : hintId}
@@ -847,8 +1002,19 @@ export function AskQuestionCard({
     )
   }
 
+  // The question line stays pinned at the top of its body while the options
+  // scroll under it (see `pinHeading`), on the card's own backing and over a
+  // hairline once something has passed beneath. Its bottom padding is the gap
+  // to the options, so the backing covers that too, and it reaches into the
+  // body's right padding to cover a row's ring there. Keyed by the set, so a
+  // new set remounts it and comes in at the top even where it reuses an id.
   const questionHeading = (q: QuestionSpec, index: number) => (
-    <div className="flex items-center gap-2">
+    <div
+      key={question.question_id}
+      ref={enterAtTop}
+      data-question-heading=""
+      className="sticky top-0 z-10 -mr-1 mb-0 flex items-center gap-2 pr-1 pb-2.5 group-data-[stuck]/question-body:bg-card group-data-[stuck]/question-body:shadow-[0_1px_0_var(--border)] group-data-[unpinned]/question-body:static"
+    >
       <Badge
         variant="outline"
         className={cn("shrink-0 text-3xs", CHAT_TEXT_BADGE_CLASS)}
@@ -1025,6 +1191,8 @@ export function AskQuestionCard({
                   key={q.id}
                   value={q.id}
                   ref={q.id === activeId ? bodyRef : undefined}
+                  data-question-body=""
+                  onScroll={onBodyScroll}
                   style={
                     promptCardBodyStyle(chosenHeight, "fixed") ?? {
                       height: bodyHeight,
@@ -1033,7 +1201,7 @@ export function AskQuestionCard({
                   // A chosen height gives way to the card's viewport cap
                   // rather than pushing the footer out of it.
                   className={cn(
-                    "mt-0 space-y-2.5 overflow-y-auto pr-1",
+                    "group/question-body mt-0 space-y-2.5 overflow-y-auto pr-1",
                     chosenHeight === null ? "flex-none" : "min-h-0 flex-initial"
                   )}
                 >
@@ -1045,8 +1213,10 @@ export function AskQuestionCard({
           ) : (
             <div
               ref={bodyRef}
+              data-question-body=""
+              onScroll={onBodyScroll}
               style={promptCardBodyStyle(chosenHeight, "content")}
-              className="min-h-0 space-y-2.5 overflow-y-auto pr-1"
+              className="group/question-body min-h-0 space-y-2.5 overflow-y-auto pr-1"
             >
               {questions.map((q, i) => (
                 <div key={q.id} className="space-y-2.5">
