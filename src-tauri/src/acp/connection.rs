@@ -1215,7 +1215,9 @@ pub enum SteerOutcome {
 pub struct PromptTalk {
     /// The talk frame, appended as the prompt's last block at the agent
     /// boundary only ([`prepare_agent_bound_prompt`]): the ledger, the
-    /// broadcast and the previews keep the user's own blocks.
+    /// broadcast and the previews keep the user's own blocks. The first
+    /// message after a move to another project carries the move note
+    /// (`acp::move_frame`) here too, in front of the talk frame.
     pub frame: Option<String>,
     /// The user spoke this prompt: the `UserMessage` broadcast says so.
     pub spoken: bool,

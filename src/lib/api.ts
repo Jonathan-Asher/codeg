@@ -3982,6 +3982,64 @@ export async function updateConversationPinned(
   })
 }
 
+/** How far a move to another project took the agent's own files (Rust
+ *  `session_move::MoveMode`): `full` — everything moved and the agent
+ *  continues in the new project's folder; `listed_only` — the session is only
+ *  filed under the new project and keeps running where it ran. */
+export type ConversationMoveMode = "full" | "listed_only"
+
+/** Why a move is listed only (Rust `session_move::ListedOnlyReason`). */
+export type ConversationMoveListedOnlyReason =
+  | "agent_unsupported"
+  | "claude_adapter_outdated"
+  | "session_files_not_found"
+
+/** The stable codes a refused move carries in the error's `detail` (Rust
+ *  `session_move::MoveRefusal::code`); its `i18n_key` is `errors.<code>`. */
+export type ConversationMoveRefusal =
+  | "conversation_not_found"
+  | "folder_not_found"
+  | "same_folder"
+  | "chat_conversation"
+  | "chat_folder"
+  | "subsession"
+  | "unsupported_conversation"
+  | "work_task_linked"
+  | "conversation_running"
+  | "resume_pending"
+  | "running_elsewhere"
+  | "session_closing"
+  | "move_failed"
+
+export interface MoveConversationResult {
+  /** The conversation as it is now (unchanged after a dry run). */
+  conversation: DbConversationSummary
+  mode: ConversationMoveMode
+  /** Set with `mode: "listed_only"`. */
+  reason?: ConversationMoveListedOnlyReason
+  /** The delegation sub-sessions that moved (or would move) with it. */
+  moved_children: number[]
+  dry_run: boolean
+}
+
+/** Move a session to another project, with its files where the agent keys
+ *  them by folder. `dryRun` only says what a move would do — the mode, why it
+ *  is listed only, or why it is refused — and changes nothing. A refusal
+ *  rejects with an `AppCommandError` whose `detail` is a
+ *  `ConversationMoveRefusal`. The server broadcasts the moved rows
+ *  (`conversation://changed`) and the re-filed tabs (`tabs://changed`). */
+export async function moveConversationToFolder(
+  conversationId: number,
+  folderId: number,
+  options?: { dryRun?: boolean }
+): Promise<MoveConversationResult> {
+  return getTransport().call("move_conversation_to_folder", {
+    conversationId,
+    folderId,
+    dryRun: options?.dryRun ?? false,
+  })
+}
+
 /** One message-content search hit (⌘K "Messages" tab). */
 export interface MessageSearchHit {
   conversation_id: number

@@ -133,6 +133,7 @@ async fn create_inner(
         limit_resume_reason: Set(None),
         last_viewed_at: Set(None),
         talk_state: Set(None),
+        moved_from_cwd: Set(None),
     };
     Ok(model.insert(conn).await?)
 }
@@ -2297,6 +2298,7 @@ impl CarriedOverRow {
             limit_resume_reason: Set(None),
             last_viewed_at: Set(None),
             talk_state: Set(None),
+            moved_from_cwd: Set(None),
         }
     }
 }
@@ -2474,6 +2476,9 @@ fn conv_to_summary(r: conversation::Model) -> DbConversationSummary {
         parent_tool_use_id: r.parent_tool_use_id,
         delegation_call_id: r.delegation_call_id,
         origin_cwd: r.origin_cwd,
+        // Pure mapper: backfilled by `fill_working_dirs`, which reads the
+        // folders' paths for the whole set at once.
+        working_dir: None,
         turn_state: r.turn_state,
         critical: r.critical,
         critical_stall: r.critical_stall,
@@ -2484,6 +2489,78 @@ fn conv_to_summary(r: conversation::Model) -> DbConversationSummary {
         selector_state: ConversationSelectorState::parse(r.selector_state.as_deref()),
         background: None,
     }
+}
+
+/// Where an agent session of a conversation runs: `origin_cwd` while that
+/// directory still exists, else the folder's path.
+///
+/// `origin_cwd` names the directory a session really ran in when that is not
+/// its folder's path: a task worktree's conversations re-filed under their
+/// project, or a session moved to another project without its files (see
+/// `crate::session_move`). Every reopen connects with this. A removed worktree
+/// falls back to the folder, which is what reopening it did before.
+pub fn effective_working_dir(origin_cwd: Option<&str>, folder_path: &str) -> String {
+    match origin_cwd {
+        Some(cwd) if !cwd.trim().is_empty() && std::path::Path::new(cwd).is_dir() => {
+            cwd.to_string()
+        }
+        _ => folder_path.to_string(),
+    }
+}
+
+/// [`effective_working_dir`] for one live conversation: the directory its
+/// agent session is reopened in. `None` when the row or its folder is gone.
+pub async fn working_dir_of(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+) -> Result<Option<String>, DbError> {
+    let Some(row) = find_live_row(conn, conversation_id).await? else {
+        return Ok(None);
+    };
+    Ok(folder::Entity::find_by_id(row.folder_id)
+        .one(conn)
+        .await?
+        .map(|folder| effective_working_dir(row.origin_cwd.as_deref(), &folder.path)))
+}
+
+/// Backfill each summary's `working_dir` ([`effective_working_dir`]) with ONE
+/// query for the folders' paths over the whole set. A summary whose folder is
+/// gone keeps `None`. No-op on an empty slice.
+async fn fill_working_dirs(
+    conn: &DatabaseConnection,
+    summaries: &mut [DbConversationSummary],
+) -> Result<(), DbError> {
+    if summaries.is_empty() {
+        return Ok(());
+    }
+    let mut folder_ids: Vec<i32> = summaries.iter().map(|s| s.folder_id).collect();
+    folder_ids.sort_unstable();
+    folder_ids.dedup();
+    let paths: std::collections::HashMap<i32, String> = folder::Entity::find()
+        .select_only()
+        .column(folder::Column::Id)
+        .column(folder::Column::Path)
+        .filter(folder::Column::Id.is_in(folder_ids))
+        .into_tuple::<(i32, String)>()
+        .all(conn)
+        .await?
+        .into_iter()
+        .collect();
+    for s in summaries.iter_mut() {
+        s.working_dir = paths
+            .get(&s.folder_id)
+            .map(|path| effective_working_dir(s.origin_cwd.as_deref(), path));
+    }
+    Ok(())
+}
+
+/// The derived fields of a set of summaries: child counts and working dirs.
+async fn fill_derived(
+    conn: &DatabaseConnection,
+    summaries: &mut [DbConversationSummary],
+) -> Result<(), DbError> {
+    fill_child_counts(conn, summaries).await?;
+    fill_working_dirs(conn, summaries).await
 }
 
 /// Backfill each summary's `child_count` with its number of direct, non-deleted
@@ -2523,6 +2600,114 @@ async fn fill_child_counts(
     Ok(())
 }
 
+/// The live (non-deleted) row of `conversation_id`, as stored.
+pub async fn find_live_row(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+) -> Result<Option<conversation::Model>, DbError> {
+    Ok(conversation::Entity::find_by_id(conversation_id)
+        .filter(conversation::Column::DeletedAt.is_null())
+        .one(conn)
+        .await?)
+}
+
+/// The live rows whose `parent_id` is `parent_id` (direct delegation
+/// children), oldest first.
+pub async fn list_live_child_rows(
+    conn: &DatabaseConnection,
+    parent_id: i32,
+) -> Result<Vec<conversation::Model>, DbError> {
+    Ok(conversation::Entity::find()
+        .filter(conversation::Column::ParentId.eq(parent_id))
+        .filter(conversation::Column::DeletedAt.is_null())
+        .order_by_asc(conversation::Column::Id)
+        .all(conn)
+        .await?)
+}
+
+/// One row's new place, written by [`move_rows_to_folder`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowMove {
+    pub conversation_id: i32,
+    pub folder_id: i32,
+    /// The directory the session keeps running in when that is not the new
+    /// folder's path (a move without the agent's files); `None` otherwise.
+    pub origin_cwd: Option<String>,
+    /// `Some` rewrites `git_branch` (re-detected in the new working dir).
+    pub git_branch: Option<Option<String>>,
+    /// The pending move note's old directory ([`take_move_note_from`]).
+    pub moved_from_cwd: Option<String>,
+}
+
+/// File rows under new folders, all or none: one transaction. `updated_at` is
+/// left alone — a move is not activity. Only live rows are written; returns how
+/// many were.
+pub async fn move_rows_to_folder(
+    conn: &DatabaseConnection,
+    moves: &[RowMove],
+) -> Result<u64, DbError> {
+    use sea_orm::sea_query::Expr;
+    use sea_orm::TransactionTrait;
+    let txn = conn.begin().await?;
+    let mut written = 0;
+    for row in moves {
+        let mut update = conversation::Entity::update_many()
+            .col_expr(conversation::Column::FolderId, Expr::value(row.folder_id))
+            .col_expr(
+                conversation::Column::OriginCwd,
+                Expr::value(row.origin_cwd.clone()),
+            )
+            .col_expr(
+                conversation::Column::MovedFromCwd,
+                Expr::value(row.moved_from_cwd.clone()),
+            );
+        if let Some(branch) = &row.git_branch {
+            update = update.col_expr(conversation::Column::GitBranch, Expr::value(branch.clone()));
+        }
+        written += update
+            .filter(conversation::Column::Id.eq(row.conversation_id))
+            .filter(conversation::Column::DeletedAt.is_null())
+            .exec(&txn)
+            .await?
+            .rows_affected;
+    }
+    txn.commit().await?;
+    Ok(written)
+}
+
+/// The directory a moved session ran in before its move, while the agent has
+/// not been told yet (`None`: nothing pending, or no such live row).
+pub async fn take_move_note_from(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+) -> Result<Option<String>, DbError> {
+    Ok(find_live_row(conn, conversation_id)
+        .await?
+        .and_then(|row| row.moved_from_cwd)
+        .filter(|from| !from.trim().is_empty()))
+}
+
+/// Clear the pending move note once it reached the agent — only while it
+/// still names `from`, so a second move made meanwhile keeps its own note.
+/// Returns whether the row was written.
+pub async fn clear_move_note(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    from: &str,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::Expr;
+    let res = conversation::Entity::update_many()
+        .col_expr(
+            conversation::Column::MovedFromCwd,
+            Expr::value(sea_orm::Value::String(None)),
+        )
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .filter(conversation::Column::MovedFromCwd.eq(from))
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected > 0)
+}
+
 pub async fn get_by_id(
     conn: &DatabaseConnection,
     conversation_id: i32,
@@ -2534,7 +2719,7 @@ pub async fn get_by_id(
         .ok_or_else(|| DbError::Migration(format!("Conversation not found: {conversation_id}")))?;
 
     let mut summary = conv_to_summary(conv);
-    fill_child_counts(conn, std::slice::from_mut(&mut summary)).await?;
+    fill_derived(conn, std::slice::from_mut(&mut summary)).await?;
     Ok(summary)
 }
 
@@ -2582,7 +2767,7 @@ pub async fn find_live_by_session_ref(
     match conv {
         Some(conv) => {
             let mut summary = conv_to_summary(conv);
-            fill_child_counts(conn, std::slice::from_mut(&mut summary)).await?;
+            fill_derived(conn, std::slice::from_mut(&mut summary)).await?;
             Ok(Some(summary))
         }
         None => Ok(None),
@@ -2653,7 +2838,7 @@ pub async fn list_by_folder(
     let rows = query.all(conn).await?;
 
     let mut summaries: Vec<DbConversationSummary> = rows.into_iter().map(conv_to_summary).collect();
-    fill_child_counts(conn, &mut summaries).await?;
+    fill_derived(conn, &mut summaries).await?;
 
     Ok(summaries)
 }
@@ -2735,7 +2920,7 @@ pub async fn list_all(
 
     let rows = query.all(conn).await?;
     let mut summaries: Vec<DbConversationSummary> = rows.into_iter().map(conv_to_summary).collect();
-    fill_child_counts(conn, &mut summaries).await?;
+    fill_derived(conn, &mut summaries).await?;
     Ok(summaries)
 }
 
@@ -2761,7 +2946,7 @@ pub async fn list_children(
         .all(conn)
         .await?;
     let mut summaries: Vec<DbConversationSummary> = rows.into_iter().map(conv_to_summary).collect();
-    fill_child_counts(conn, &mut summaries).await?;
+    fill_derived(conn, &mut summaries).await?;
     Ok(summaries)
 }
 

@@ -58,6 +58,8 @@ pub mod presence;
 pub mod process;
 pub mod pty_flow;
 pub mod push;
+/// Moving a session to another project, with its files.
+pub mod session_move;
 pub mod supervise;
 pub mod talk;
 mod terminal;
@@ -110,6 +112,7 @@ mod tauri_app {
         attention as attention_commands,
         auto_resume as auto_resume_commands,
         critical_sessions as critical_sessions_commands,
+        session_move as session_move_commands,
         talk as talk_commands,
         talk_voice as talk_voice_commands,
         limit_continue as limit_continue_commands,
@@ -1964,6 +1967,7 @@ mod tauri_app {
                 conversations::update_conversation_status,
                 conversations::update_conversation_title,
                 conversations::update_conversation_pinned,
+                session_move_commands::move_conversation_to_folder,
                 conversations::mark_conversations_viewed,
                 conversations::reorder_conversation_pins,
                 conversations::delete_conversation,

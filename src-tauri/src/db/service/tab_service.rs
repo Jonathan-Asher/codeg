@@ -230,6 +230,48 @@ pub async fn delete_conversation_tabs_and_bump(
     })
 }
 
+/// Atomically re-file every tab pointing at `conversation_ids` under
+/// `folder_id` (the conversations moved to another project): rewrite the rows,
+/// ALWAYS bump the version (barrier), snapshot — one transaction under
+/// [`version_lock`], same race-free guarantee as
+/// [`delete_conversation_tabs_and_bump`]. A tab's identity on every client is
+/// `(folder, agent, conversation)`, so without this an open tab keeps the old
+/// folder and the next open adds a second one. `emit` is `Some` only when a
+/// persisted row changed.
+pub async fn move_conversation_tabs_and_bump(
+    conn: &DatabaseConnection,
+    conversation_ids: &[i32],
+    folder_id: i32,
+) -> Result<TabInvalidation, DbError> {
+    use sea_orm::sea_query::Expr;
+    let _guard = version_lock().lock().await;
+    let txn = conn.begin().await?;
+    let moved = if conversation_ids.is_empty() {
+        0
+    } else {
+        opened_tab::Entity::update_many()
+            .col_expr(opened_tab::Column::FolderId, Expr::value(folder_id))
+            .col_expr(opened_tab::Column::UpdatedAt, Expr::value(Utc::now()))
+            .filter(opened_tab::Column::ConversationId.is_in(conversation_ids.iter().copied()))
+            .filter(opened_tab::Column::FolderId.ne(folder_id))
+            .exec(&txn)
+            .await?
+            .rows_affected
+    };
+    let next = get_tabs_version(&txn).await? + 1;
+    app_metadata_service::upsert_value(&txn, OPENED_TABS_VERSION_KEY, &next.to_string()).await?;
+    let emit = if moved > 0 {
+        Some(list_all_tabs(&txn).await?)
+    } else {
+        None
+    };
+    txn.commit().await?;
+    Ok(TabInvalidation {
+        version: next,
+        emit,
+    })
+}
+
 /// Atomically invalidate every tab belonging to a folder (folder removed from
 /// the workspace): delete the rows, ALWAYS bump the version (barrier), snapshot —
 /// one transaction under [`version_lock`], same race-free guarantee as
