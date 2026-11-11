@@ -102,8 +102,8 @@ pub struct MoveConversationResult {
 }
 
 /// Why a move was refused. [`MoveRefusal::code`] is the stable code a client
-/// maps (it travels as the error's `detail`; `i18n_key` is
-/// `errors.<code>`).
+/// maps: the error's `i18n_key` is `errors.<code>`, and `i18n_params.code`
+/// carries it bare. `message` is the English sentence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MoveRefusal {
     ConversationNotFound,
@@ -194,9 +194,11 @@ impl MoveRefusal {
             Some(cause) => format!("{} ({cause})", self.message()),
             None => self.message().to_string(),
         };
+        // The code rides the localization hint, not `detail`: clients show a
+        // `detail` in place of the message, and a bare code is no message.
+        let params = BTreeMap::from([("code".to_string(), self.code().to_string())]);
         AppCommandError::new(self.app_code(), message)
-            .with_detail(self.code())
-            .with_i18n(format!("errors.{}", self.code()), BTreeMap::new())
+            .with_i18n(format!("errors.{}", self.code()), params)
     }
 }
 

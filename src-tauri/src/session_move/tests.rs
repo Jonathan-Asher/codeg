@@ -173,7 +173,15 @@ impl Fixture {
 }
 
 fn refusal(result: Result<MoveConversationResult, AppCommandError>) -> String {
-    result.expect_err("refused").detail.unwrap_or_default()
+    let err = result.expect_err("refused");
+    let code = err
+        .i18n_params
+        .as_ref()
+        .and_then(|params| params.get("code"))
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(err.i18n_key, Some(format!("errors.{code}")));
+    code
 }
 
 // ─── Guards ──────────────────────────────────────────────────────────────
