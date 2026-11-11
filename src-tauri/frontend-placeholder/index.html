@@ -1,0 +1,29 @@
+<!doctype html>
+<!--
+  tauri.conf.json's frontendDist. Tauri compiles this folder into the app, and
+  the app shows it only when it cannot find the interface it is installed with:
+  the windows are served from the bundle's `web` folder (see
+  crates/codeg-lib/src/web/app_assets.rs), which `bundle.resources` copies from
+  the Next export. Keeping the export out of the binary is what lets an
+  interface change, or a new version number, skip recompiling the app.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>codeg</title>
+  </head>
+  <body
+    style="
+      font-family: -apple-system, system-ui, sans-serif;
+      margin: 3rem;
+      line-height: 1.5;
+    "
+  >
+    <h1>codeg cannot find its interface</h1>
+    <p>
+      The app's windows are served from the <code>web</code> folder installed
+      with it (on macOS, <code>codeg.app/Contents/Resources/web</code>), and
+      that folder is missing or incomplete. Reinstalling codeg restores it.
+    </p>
+  </body>
+</html>

@@ -503,7 +503,7 @@ mod tauri_app {
     /// No `mobile_entry_point`: the app has no mobile target, and the `mobile`
     /// cfg it keys on comes from tauri-build, which does not run for this
     /// crate.
-    pub fn run(context: tauri::Context<tauri::Wry>) {
+    pub fn run(mut context: tauri::Context<tauri::Wry>) {
         // First of all, while `main()` has only just called in and no other
         // thread exists: a codeg started from inside one of its own agent
         // sessions inherits that session's environment — a scratch `TMPDIR`
@@ -575,6 +575,10 @@ mod tauri_app {
         }
         process::ensure_node_in_path();
         process::ensure_user_npm_prefix_in_path();
+
+        // The interface is read from the bundle's `web` folder, not compiled
+        // into the binary; see `web::app_assets`.
+        web::app_assets::serve_bundled_interface(&mut context);
 
         let builder = tauri::Builder::default();
 

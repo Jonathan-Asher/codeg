@@ -16,6 +16,7 @@ fn main() {
     // The context is generated here, in the app's own package, and not in the
     // library: it is what tauri.conf.json (with the version a release stamps
     // into it), the icons and the capabilities compile into, so a change to
-    // any of them recompiles this file alone.
+    // any of them recompiles this file alone. The interface itself is not in
+    // it; `run` serves that from the bundle (`web::app_assets`).
     codeg_lib::run(tauri::generate_context!())
 }

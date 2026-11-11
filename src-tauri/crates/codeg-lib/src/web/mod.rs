@@ -1,3 +1,6 @@
+/// The desktop windows' asset provider: the interface read from the bundle.
+#[cfg(feature = "tauri-runtime")]
+pub mod app_assets;
 pub mod auth;
 pub mod browser_bridge;
 pub mod browser_tunnel;
@@ -334,14 +337,22 @@ fn classify_bind_error(err: std::io::Error) -> AppCommandError {
     AppCommandError::new(code, key).with_detail(err.to_string())
 }
 
+/// The interface the bundle carries: `bundle.resources` copies the Next export
+/// (`out/`) to `web/` in the resource directory. The desktop windows
+/// ([`app_assets`]) and the embedded web server both serve it from there.
+#[cfg(feature = "tauri-runtime")]
+pub(crate) fn bundled_web_dir(resource_dir: &std::path::Path) -> Option<PathBuf> {
+    let web = resource_dir.join("web");
+    web.join("index.html").is_file().then_some(web)
+}
+
 #[cfg(feature = "tauri-runtime")]
 pub(crate) fn find_static_dir_tauri(app: &tauri::AppHandle) -> PathBuf {
     use tauri::Manager;
-    // 1. Production: bundle.resources copies out/ → web/ inside the resource directory.
+    // 1. Production: the bundle's own copy of the export.
     let resource = app.path().resource_dir().ok();
     if let Some(ref dir) = resource {
-        let web = dir.join("web");
-        if web.join("index.html").exists() {
+        if let Some(web) = bundled_web_dir(dir) {
             tracing::info!(
                 "[WEB] Serving static files from resource/web: {}",
                 web.display()

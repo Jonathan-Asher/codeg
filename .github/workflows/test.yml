@@ -123,10 +123,11 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev
 
-      - name: Prepare Tauri frontendDist placeholder
-        # Tauri's build script validates `frontendDist` and bundled resource
-        # paths during Rust compilation. The frontend job owns the real static
-        # export; Rust desktop cells only need the path to exist for tests.
+      - name: Prepare the interface export path
+        # Tauri's build script copies the bundled resources (`out/` → `web/`)
+        # during Rust compilation and fails on a missing path. The frontend job
+        # owns the real static export; Rust desktop cells only need the path to
+        # exist for tests.
         if: matrix.mode == 'desktop'
         shell: bash
         run: |
