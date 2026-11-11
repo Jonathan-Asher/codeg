@@ -234,7 +234,7 @@ async fn a_sub_session_and_a_work_task_session_are_refused() {
         crate::models::WorkTaskDraft {
             folder_id: fx.old_folder,
             title: "a task".into(),
-            config: serde_json::json!({}),
+            config: serde_json::json!({ "display_text": "do it", "prompt_blocks": [] }),
         },
     )
     .await

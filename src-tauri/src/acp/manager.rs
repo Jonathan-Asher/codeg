@@ -13665,11 +13665,12 @@ mod tests {
         let pre = seed_closed_conversation(&db, AgentType::ClaudeCode).await;
         let runs_in = tempfile::tempdir().unwrap();
         let runs_in = runs_in.path().to_string_lossy().to_string();
-        for (origin, expected) in [
-            (runs_in.clone(), runs_in.as_str()),
+        for (origin, expected, forked) in [
+            (runs_in.clone(), runs_in.as_str(), "session-S2"),
             (
                 "/tmp/fork-conversation-removed-worktree".to_string(),
                 "/tmp/fork-conversation",
+                "session-S3",
             ),
         ] {
             let mut active: conversation::ActiveModel = conversation::Entity::find_by_id(pre.id)
@@ -13680,7 +13681,8 @@ mod tests {
                 .into();
             active.origin_cwd = Set(Some(origin));
             active.update(&db.conn).await.unwrap();
-            let (read, fork, seen) = mid_run_io(mid_run_transcript(), Ok("session-S2"));
+            // Each fork answers a session of its own: a row holds one.
+            let (read, fork, seen) = mid_run_io(mid_run_transcript(), Ok(forked));
             mgr.fork_conversation_to_new_conversation_with(
                 &db,
                 pre.id,
