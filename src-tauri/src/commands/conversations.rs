@@ -1477,6 +1477,10 @@ pub(crate) struct LoadedFolderConversation {
     parsed: Option<std::sync::Arc<ConversationDetail>>,
     /// Child rows, for the delegation meta.
     children: Vec<DbConversationSummary>,
+    /// The row's stored `model` column was empty when it was read (before
+    /// the transcript's model replaced it in `summary`): the only case the
+    /// session-model backfill has anything to write.
+    stored_model_empty: bool,
 }
 
 impl AsRef<[MessageTurn]> for LoadedFolderConversation {
@@ -1801,6 +1805,7 @@ pub(crate) async fn load_folder_conversation(
     // first value for the life of the conversation, and a mid-session `/model`
     // switch would never show. The stored value stays as the fallback for a
     // transcript that names no model at all.
+    let stored_model_empty = summary.model.as_deref().is_none_or(str::is_empty);
     if let Some(model) = parsed
         .as_ref()
         .and_then(|d| d.summary.model.clone())
@@ -1824,6 +1829,7 @@ pub(crate) async fn load_folder_conversation(
         summary,
         parsed,
         children,
+        stored_model_empty,
     })
 }
 
@@ -2241,16 +2247,15 @@ pub async fn get_folder_conversation_with_live_core(
     // Session-model backfill, the sibling of the auto-title above and for the
     // same reason: the row was inserted before any model was named, and the
     // sidebar reads the row rather than the transcript this parse just walked.
-    // `seed_model_if_empty` re-checks emptiness in SQL, so once a session has a
-    // model this is a no-op that writes nothing.
-    if let Some(model) = loaded.summary.model.clone() {
-        match conversation_service::seed_model_if_empty(conn, conversation_id, &model).await {
-            Ok(true) => upserted = true,
-            Ok(false) => {}
-            Err(e) => tracing::error!(
-                "[conversations] session-model backfill failed for {conversation_id}: {e}"
-            ),
-        }
+    if backfill_session_model(
+        conn,
+        conversation_id,
+        loaded.stored_model_empty,
+        loaded.summary.model.as_deref(),
+    )
+    .await
+    {
+        upserted = true;
     }
 
     if upserted {
@@ -2299,6 +2304,40 @@ pub async fn get_folder_conversation_with_live_core(
 
 /// A detail fetch or transcript parse this slow is logged with its timings.
 const SLOW_DETAIL: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Write the transcript's `model` to a row whose stored column is empty, and
+/// say whether a row changed.
+///
+/// A row that already has one is left alone without a statement. An `UPDATE`
+/// takes SQLite's write lock before it looks at a single row, even when its
+/// `WHERE` (`seed_model_if_empty` re-checks emptiness) matches nothing, so
+/// sending one on every detail read put every open of a session behind
+/// whatever else held the lock: the message-search indexer holds it for
+/// seconds, and those reads waited out the 5 s busy timeout and failed with
+/// "database is locked" (seen at 5 to 20 s on reads whose transcript part
+/// took 0.1 to 2 s).
+async fn backfill_session_model(
+    conn: &sea_orm::DatabaseConnection,
+    conversation_id: i32,
+    stored_model_empty: bool,
+    model: Option<&str>,
+) -> bool {
+    if !stored_model_empty {
+        return false;
+    }
+    let Some(model) = model else {
+        return false;
+    };
+    match conversation_service::seed_model_if_empty(conn, conversation_id, model).await {
+        Ok(written) => written,
+        Err(e) => {
+            tracing::error!(
+                "[conversations] session-model backfill failed for {conversation_id}: {e}"
+            );
+            false
+        }
+    }
+}
 
 /// One page of older history for the reverse-infinite-scroll path. Light
 /// variant of the detail fetch: the (cached) parse, then only the page's turns
@@ -3342,6 +3381,64 @@ mod tests {
         assert_eq!(event.channel, CONVERSATION_CHANGED_EVENT);
         assert_eq!(event.payload["summary"]["id"], id);
         assert!(rx.try_recv().is_err(), "announced once");
+    }
+
+    /// A detail read of a session whose row already has its model sends no
+    /// write: it no longer waits behind another writer (the message-search
+    /// indexer held the lock for seconds, and the read failed with "database
+    /// is locked" after the 5 s busy timeout). A row without one still gets
+    /// the transcript's.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_model_backfill_writes_only_to_a_row_without_a_model() {
+        use sea_orm::{ConnectionTrait, TransactionTrait};
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = crate::db::test_helpers::fresh_disk_db(dir.path()).await;
+        let folder = seed_folder(&db, "/tmp/codeg-model-backfill").await;
+        let with_model =
+            conversation_service::create(&db.conn, folder, AgentType::ClaudeCode, None, None)
+                .await
+                .expect("create")
+                .id;
+        assert!(
+            conversation_service::seed_model_if_empty(&db.conn, with_model, "opus")
+                .await
+                .expect("seed")
+        );
+        let without_model =
+            conversation_service::create(&db.conn, folder, AgentType::ClaudeCode, None, None)
+                .await
+                .expect("create")
+                .id;
+
+        // Another connection holds the write lock.
+        let writer = db.conn.begin().await.expect("begin");
+        writer
+            .execute_unprepared(&format!(
+                "UPDATE conversation SET title = 'busy' WHERE id = {without_model}"
+            ))
+            .await
+            .expect("take the write lock");
+        let started = std::time::Instant::now();
+        let written = backfill_session_model(&db.conn, with_model, false, Some("sonnet")).await;
+        assert!(!written);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "a row with a model must not wait for the write lock ({:?})",
+            started.elapsed()
+        );
+        writer.commit().await.expect("commit");
+
+        assert!(backfill_session_model(&db.conn, without_model, true, Some("sonnet")).await);
+        let kept = conversation_service::get_by_id(&db.conn, with_model)
+            .await
+            .expect("row");
+        let filled = conversation_service::get_by_id(&db.conn, without_model)
+            .await
+            .expect("row");
+        assert_eq!(kept.model.as_deref(), Some("opus"));
+        assert_eq!(filled.model.as_deref(), Some("sonnet"));
+        // Nothing to write without a model from the transcript.
+        assert!(!backfill_session_model(&db.conn, without_model, true, None).await);
     }
 
     /// When the row cannot be read at all, the clients are told to resync
