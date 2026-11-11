@@ -790,18 +790,19 @@ fn step(method: &'static str, reply: Value) -> Step {
     }
 }
 
+/// The client end of an in-memory app-server pipe.
+type PipeClient = AppServer<
+    tokio::io::ReadHalf<tokio::io::DuplexStream>,
+    tokio::io::WriteHalf<tokio::io::DuplexStream>,
+>;
+
+/// Lines a client sent that were not requests.
+type NonRequests = Arc<Mutex<Vec<Value>>>;
+
 /// A fake app-server on one end of a duplex pipe. Returns the client end
 /// and the lines the client sent that were not requests (notifications,
 /// replies to the server's own requests).
-fn fake_app_server(
-    script: Vec<Step>,
-) -> (
-    AppServer<
-        tokio::io::ReadHalf<tokio::io::DuplexStream>,
-        tokio::io::WriteHalf<tokio::io::DuplexStream>,
-    >,
-    Arc<Mutex<Vec<Value>>>,
-) {
+fn fake_app_server(script: Vec<Step>) -> (PipeClient, NonRequests) {
     let (client, server) = tokio::io::duplex(64 * 1024);
     let (server_read, mut server_write) = tokio::io::split(server);
     let other = Arc::new(Mutex::new(Vec::new()));
@@ -1236,10 +1237,7 @@ async fn codex_redeem_without_a_chatgpt_sign_in_uses_nothing() {
         "account/read",
         ok(json!({ "account": { "type": "apiKey" }, "requiresOpenaiAuth": true })),
     )]);
-    let error = redeem_codex(&mut server, None)
-        .await
-        .err()
-        .expect("refused");
+    let error = redeem_codex(&mut server, None).await.expect_err("refused");
     assert_eq!(error.code, LimitResetErrorCode::NotEligible);
 }
 
