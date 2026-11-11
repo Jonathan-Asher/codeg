@@ -1626,6 +1626,10 @@ impl AgentParser for ClaudeParser {
         let (resolved_id, resolved_path) = self.locate_transcript(conversation_id)?;
         transcript_cache::cached_detail(&resolved_path, &resolved_id, need)
     }
+
+    fn caches_details(&self) -> bool {
+        crate::parsers::detail_cache::DetailCache::global().enabled()
+    }
 }
 
 impl ClaudeParser {

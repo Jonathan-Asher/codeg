@@ -201,6 +201,11 @@ impl PushSink for ApnsSink {
                 report.failed.len()
             );
         }
+        if report.delivered > 0 {
+            // The tap opens the root session at its waiting card: have its
+            // transcript parsed by then.
+            push::warm::Warmer::global().session_pushed(&self.db, item.root_conversation_id);
+        }
         report.delivered > 0
     }
 

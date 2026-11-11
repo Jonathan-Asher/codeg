@@ -316,6 +316,14 @@ pub trait AgentParser {
         sanitize_detail(&mut detail);
         Ok(Arc::new(detail))
     }
+
+    /// Whether [`Self::get_conversation_shared`] keeps what it parsed for
+    /// the next read ([`detail_cache`]), so reading a conversation ahead of
+    /// time makes the next read cheap. A parser that parses afresh on every
+    /// call gains nothing from it.
+    fn caches_details(&self) -> bool {
+        false
+    }
 }
 
 /// Whether a read may add the transcript it parses to the cache.
@@ -440,6 +448,10 @@ impl AgentParser for RouteSanitized {
     ) -> Result<Arc<ConversationDetail>, ParseError> {
         // Already sanitized: that is the method's contract (see the trait).
         self.0.get_conversation_shared(conversation_id, need)
+    }
+
+    fn caches_details(&self) -> bool {
+        self.0.caches_details()
     }
 }
 

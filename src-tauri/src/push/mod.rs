@@ -12,6 +12,7 @@
 //!   finished, needs you, errors) from the event bus, plus every critical
 //!   session alert.
 //! * [`wording`] — what the notifications say.
+//! * [`warm`] — a pushed session's transcript, parsed before the tap opens it.
 //!
 //! The "needs you" pushes — the first one for each pending permission,
 //! question or plan, the catch-up when the user leaves the desk, and the
@@ -29,6 +30,7 @@ pub mod fanout;
 pub mod jwt;
 pub mod payload;
 pub mod prefs;
+pub mod warm;
 pub mod wording;
 
 use std::collections::HashMap;
@@ -643,6 +645,8 @@ pub async fn has_devices(conn: &DatabaseConnection) -> bool {
 }
 
 /// Send `message` with the stored credentials. Not set up: nothing happens.
+/// Once a device got it, the session it names is made ready to open
+/// ([`warm`]).
 pub async fn deliver(
     conn: &DatabaseConnection,
     message: &PushMessage,
@@ -658,7 +662,9 @@ pub async fn deliver(
             return DeliveryReport::default();
         }
     };
-    deliver_with(apns::sender(), conn, &setup, message, looking).await
+    let report = deliver_with(apns::sender(), conn, &setup, message, looking).await;
+    warm::Warmer::global().after_delivery(conn, message, &report);
+    report
 }
 
 /// One device's answer to "Send test push".

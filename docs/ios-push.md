@@ -144,6 +144,16 @@ Critical alerts are de-duplicated with the chat channels. An alert that reached
 an iPhone is not also sent to Telegram (or another channel), unless "Also send
 to chat channels" is on in the critical session settings.
 
+Once a push for a session reached a device, codeg reads that session's
+transcript through its transcript cache in the background, so the
+`get_folder_conversation` a tap on the notification sends is answered from
+memory rather than by parsing the whole transcript (2 to 7 s for a long Claude
+Code session). One read per session at a time and one at a time overall, after
+the push went out, within the cache's own budget (`CODEG_TRANSCRIPT_CACHE_MB`,
+200 MB by default); agents whose parser keeps nothing between reads are
+skipped (`push::warm`). The log says `[push] warmed conversation N for its
+notification in X ms`.
+
 ## 4. Registering a device
 
 After `UIApplication.registerForRemoteNotifications()` succeeds, send the token

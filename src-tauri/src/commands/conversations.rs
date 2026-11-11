@@ -2339,6 +2339,58 @@ async fn backfill_session_model(
     }
 }
 
+/// The turns a warm read asks for: what a phone opening the session reads
+/// first (its `tailTurns` window).
+const WARM_TAIL_TURNS: usize = 120;
+
+/// What [`warm_transcript_cache`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WarmOutcome {
+    /// The transcript was read through the cache: it is kept for the next read.
+    Warmed { turns: usize },
+    /// This agent's parser keeps nothing between reads, so a read ahead of
+    /// time would be a parse thrown away.
+    NotCached,
+    /// The row has no transcript to read (no session id yet, or no file).
+    NoTranscript,
+}
+
+/// Read a conversation's transcript through the transcript cache, so that the
+/// next detail read (the phone opening the session from a notification) is
+/// served from memory instead of parsing the whole file again.
+///
+/// Fills the cache like any open does ([`CacheUse::Fill`]), so the cache's
+/// own budget and eviction decide what stays; nothing is returned to anyone
+/// and nothing is written to the row besides what any read of it does (an
+/// external id that moved on disk). The parse runs on the blocking pool.
+pub(crate) async fn warm_transcript_cache(
+    conn: &sea_orm::DatabaseConnection,
+    conversation_id: i32,
+) -> Result<WarmOutcome, AppCommandError> {
+    let row = conversation_service::get_by_id(conn, conversation_id)
+        .await
+        .map_err(AppCommandError::from)?;
+    if row.external_id.is_none() {
+        return Ok(WarmOutcome::NoTranscript);
+    }
+    if !build_agent_parser(row.agent_type).caches_details() {
+        return Ok(WarmOutcome::NotCached);
+    }
+    let need = ContentNeed::Window {
+        req: Some(crate::commands::turn_window::TurnWindowReq::Tail(
+            WARM_TAIL_TURNS,
+        )),
+        in_flight_since: None,
+    };
+    let loaded = load_folder_conversation(conn, conversation_id, need, CacheUse::Fill).await?;
+    Ok(match loaded.parsed {
+        Some(parsed) => WarmOutcome::Warmed {
+            turns: parsed.turns.len(),
+        },
+        None => WarmOutcome::NoTranscript,
+    })
+}
+
 /// One page of older history for the reverse-infinite-scroll path. Light
 /// variant of the detail fetch: the (cached) parse, then only the page's turns
 /// copied out with their delegation meta — no auto-title refresh, no live
