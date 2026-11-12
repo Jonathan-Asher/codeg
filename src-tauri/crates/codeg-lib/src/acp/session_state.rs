@@ -704,6 +704,28 @@ pub struct SessionState {
     /// [`Self::has_live_async_task`].
     pub async_task_activity_at: Option<DateTime<Utc>>,
 
+    /// What pi-acp's live channel offers this connection (`acp::pi_meta`):
+    /// `Some` for a Pi adapter that advertised `_meta.piAcp.capabilities`,
+    /// set once at initialize. Backend-internal.
+    pub pi_live: Option<crate::acp::pi_meta::PiLiveCaps>,
+
+    /// When the run Pi started by itself that is showing as the current turn
+    /// began (`acp::pi_meta`). Such a turn has no user message, so this is
+    /// what tells the detail endpoint a turn is in flight and where its
+    /// persisted half starts (see `commands::conversations`). Cleared at
+    /// every `TurnComplete`. Backend-internal.
+    pub pi_agent_turn_started_at: Option<DateTime<Utc>>,
+
+    /// The latest card of each Pi sub-agent run and background job, by the
+    /// call that started it (`AcpEvent::ToolCard`). Carried on the snapshot
+    /// so a client attaching while a run is out — a reload, another window,
+    /// the phone — draws the card as it is now rather than as the transcript
+    /// last recorded it. At most [`TOOL_CARDS_MAX`], oldest dropped; cleared
+    /// when the connection moves to another session.
+    pub tool_cards: BTreeMap<String, serde_json::Value>,
+    /// `tool_cards`' keys, oldest first (the eviction order).
+    pub tool_card_order: std::collections::VecDeque<String>,
+
     /// Concatenated text content of the just-completed turn's assistant
     /// message. Captured at TurnComplete (just before live_message is
     /// cleared) so the lifecycle subscriber can surface it as the
@@ -921,6 +943,10 @@ impl SessionState {
             session_failures: BTreeMap::new(),
             async_tasks: BTreeMap::new(),
             async_task_activity_at: None,
+            pi_live: None,
+            pi_agent_turn_started_at: None,
+            tool_cards: BTreeMap::new(),
+            tool_card_order: std::collections::VecDeque::new(),
             last_assistant_text: None,
             turn_usage_limit: None,
             pending_user_message: None,
@@ -1072,6 +1098,9 @@ impl SessionState {
                     // accepted between turns.
                     self.async_tasks.clear();
                     self.async_task_activity_at = None;
+                    // Same for the cards of the runs and jobs it launched.
+                    self.tool_cards.clear();
+                    self.tool_card_order.clear();
                     // A prediction was for the session we just left.
                     self.prompt_suggestion = None;
                 }
@@ -1445,10 +1474,19 @@ impl SessionState {
                     self.last_assistant_text = None;
                 }
                 if let Some(live) = self.live_message.as_ref() {
+                    // A compaction card is not the agent's work: one that
+                    // lands after the reply (Pi compacts once a turn ends)
+                    // must not blank the reply that preceded it.
                     let after_last_tool_call = live
                         .content
                         .iter()
-                        .rposition(|b| matches!(b, LiveContentBlock::ToolCallRef { .. }))
+                        .rposition(|b| match b {
+                            LiveContentBlock::ToolCallRef { tool_call_id } => !self
+                                .active_tool_calls
+                                .get(tool_call_id)
+                                .is_some_and(|call| is_compaction_call(call.meta.as_ref())),
+                            _ => false,
+                        })
                         .map(|i| i + 1)
                         .unwrap_or(0);
                     let assembled: String = live.content[after_last_tool_call..]
@@ -1479,6 +1517,8 @@ impl SessionState {
                 // pending user message into a fresh attach.
                 self.pending_user_message = None;
                 self.pending_user_message_started_at = None;
+                // Likewise a run Pi started by itself.
+                self.pi_agent_turn_started_at = None;
                 // Turn finished: release the concurrency gate so the next prompt
                 // is accepted. (All connection-alive turn endings — normal,
                 // cancel, stop-reason — emit TurnComplete; disconnect/error
@@ -1783,6 +1823,20 @@ impl SessionState {
                 // on this connection, which is the only thing the keep-alive
                 // window asks.
                 self.async_task_activity_at = Some(Utc::now());
+            }
+            AcpEvent::ToolCard { tool_call_id, meta } => {
+                if self
+                    .tool_cards
+                    .insert(tool_call_id.clone(), meta.clone())
+                    .is_none()
+                {
+                    self.tool_card_order.push_back(tool_call_id.clone());
+                    while self.tool_card_order.len() > TOOL_CARDS_MAX {
+                        if let Some(old) = self.tool_card_order.pop_front() {
+                            self.tool_cards.remove(&old);
+                        }
+                    }
+                }
             }
             AcpEvent::TranscriptRolledOver { transcript_id } => {
                 if !self.transcript_aliases.contains(transcript_id) {
@@ -2438,6 +2492,14 @@ impl SessionState {
             last_stop_reason: self.last_stop_reason.clone(),
             session_failures: self.session_failures.values().cloned().collect(),
             async_tasks: self.async_tasks.values().cloned().collect(),
+            tool_cards: self
+                .tool_cards
+                .iter()
+                .map(|(tool_call_id, meta)| ToolCardState {
+                    tool_call_id: tool_call_id.clone(),
+                    meta: meta.clone(),
+                })
+                .collect(),
             goal_actions: self.goal_actions.clone(),
             attach_phase: self.attach_phase,
             attach_elapsed_ms: self.attach_elapsed_ms(),
@@ -2472,6 +2534,25 @@ pub(crate) fn background_keepalive_max_age() -> chrono::Duration {
             .unwrap_or(3600)
     });
     chrono::Duration::seconds(secs)
+}
+
+/// Cards kept per connection (`SessionState::tool_cards`). Each is
+/// re-published on every change, so an old one dropping out only loses its
+/// overlay on a reload, where the transcript's own card takes over.
+pub const TOOL_CARDS_MAX: usize = 256;
+
+/// One entry of the snapshot's `tool_cards`: the call and its card's `_meta`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolCardState {
+    pub tool_call_id: String,
+    pub meta: serde_json::Value,
+}
+
+/// Whether a call is a context-compaction card (`_meta.contextCompaction`,
+/// the shared marker every agent's compaction renders through).
+fn is_compaction_call(meta: Option<&serde_json::Value>) -> bool {
+    meta.and_then(|meta| meta.get("contextCompaction"))
+        .is_some_and(|value| !value.is_null() && value.as_bool() != Some(false))
 }
 
 /// `to_snapshot()` 的输出——前端可消费的 wire shape。
@@ -2594,6 +2675,11 @@ pub struct LiveSessionSnapshot {
     /// keep the wire shape byte-identical pre-feature.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub async_tasks: Vec<AsyncTaskRecord>,
+    /// The latest card of each Pi sub-agent run and background job (see
+    /// `SessionState.tool_cards`): the client draws the call with this
+    /// `_meta` wherever it sits, live or in history. Omitted while empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_cards: Vec<ToolCardState>,
     /// Goal-control action vocabulary the goal card gates its buttons on
     /// (see `SessionState.goal_actions`): the advertised list for neutral-goal
     /// adapters, the legacy ["pause","clear"] pair for the rest.

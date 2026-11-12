@@ -59,17 +59,17 @@ pub(crate) const BACKGROUND_JOB_META_KEY: &str = "codeg.backgroundJob";
 pub(crate) const AGENT_WAKE_META_KEY: &str = "codeg.agentWake";
 
 /// One raw notice kept on a card.
-const NOTE_MAX_CHARS: usize = 6_000;
+pub(super) const NOTE_MAX_CHARS: usize = 6_000;
 /// Raw notices kept per card.
-const NOTES_MAX: usize = 40;
+pub(super) const NOTES_MAX: usize = 40;
 /// A run's result (the cap the other parsers give a background result).
-const RESULT_MAX_CHARS: usize = 16_000;
+pub(super) const RESULT_MAX_CHARS: usize = 16_000;
 /// A child's task, result or error on its row.
-const ROW_TEXT_MAX_CHARS: usize = 4_000;
+pub(super) const ROW_TEXT_MAX_CHARS: usize = 4_000;
 /// A job's output tail.
 const TAIL_MAX_CHARS: usize = 4_000;
 /// The task shown as a card's description.
-const DESCRIPTION_MAX_CHARS: usize = 80;
+pub(super) const DESCRIPTION_MAX_CHARS: usize = 80;
 /// Session heads remembered across parses (see [`child_head`]).
 const CHILD_MEMO_MAX: usize = 4_096;
 /// Tool-argument previews, as `super::tool_arguments_preview` caps them.
@@ -591,7 +591,7 @@ impl Scan {
 /// The pi-subagents notices that carry a run's (or a workflow child's) result.
 /// pi-subagents 0.80 and later write them hidden (`display: false`) when the
 /// run completed without trouble, and still wake Pi with them.
-fn is_run_result(custom_type: &str) -> bool {
+pub(super) fn is_run_result(custom_type: &str) -> bool {
     matches!(
         custom_type,
         "subagent-notify" | "subagent-incremental-child-notify"
@@ -835,11 +835,15 @@ impl RunNotice {
                 "Session: ",
                 "Session share error: ",
                 "Scheduled run from ",
+                // pi-subagents 0.88: where the full output went, and what the
+                // model is told to do with it.
+                "Output saved to: ",
+                "Parent action: ",
             ]
             .iter()
             .any(|prefix| line.starts_with(prefix))
             {
-                // Bookkeeping for the model.
+                // Bookkeeping for the model, and what it is told to do next.
             } else if line == "Child outputs:" {
                 in_outputs = true;
             } else if in_outputs {
@@ -1017,7 +1021,7 @@ fn legacy_job_report(text: &str) -> Option<JobExit> {
 }
 
 /// What follows a report's `--- last output ---` line.
-fn output_tail(text: &str) -> Option<String> {
+pub(super) fn output_tail(text: &str) -> Option<String> {
     let (_, tail) = text.split_once("--- last output ---\n")?;
     let tail = tail.trim_end();
     (!tail.trim().is_empty()).then(|| tail_of(tail, TAIL_MAX_CHARS))
@@ -1543,7 +1547,7 @@ fn strip_run_bookkeeping(text: &str) -> String {
 
 /// Drop a leading `<agent>:` line — single-run previews open with the agent's
 /// name, which the card already shows.
-fn strip_agent_label(text: &str, agent: &str) -> String {
+pub(super) fn strip_agent_label(text: &str, agent: &str) -> String {
     let text = text.trim();
     match text.split_once('\n') {
         Some((first, rest)) if first.trim() == format!("{agent}:") => rest.trim().to_string(),
@@ -1551,7 +1555,7 @@ fn strip_agent_label(text: &str, agent: &str) -> String {
     }
 }
 
-fn normalize_status(status: &str) -> &'static str {
+pub(super) fn normalize_status(status: &str) -> &'static str {
     match status {
         "completed" | "complete" | "done" | "success" => "completed",
         "failed" | "error" => "failed",
@@ -2235,7 +2239,7 @@ impl Job {
 }
 
 /// pi-bg-jobs' own duration spelling: `58s`, `3m 52s`, `1h12m`.
-fn format_duration(ms: u64) -> String {
+pub(super) fn format_duration(ms: u64) -> String {
     let seconds = (ms + 500) / 1000;
     if seconds < 60 {
         return format!("{seconds}s");
@@ -2457,14 +2461,14 @@ fn regex(cell: &'static OnceLock<Regex>, pattern: &str) -> &'static Regex {
     cell.get_or_init(|| Regex::new(pattern).expect("valid regex"))
 }
 
-fn keyed(key: &str, value: Value) -> Value {
+pub(super) fn keyed(key: &str, value: Value) -> Value {
     let mut map = Map::new();
     map.insert(key.to_string(), value);
     Value::Object(map)
 }
 
 /// A JSON object of the fields that have a value, in order.
-fn object<const N: usize>(fields: [(&str, Option<Value>); N]) -> Value {
+pub(super) fn object<const N: usize>(fields: [(&str, Option<Value>); N]) -> Value {
     let mut map = Map::new();
     for (key, value) in fields {
         if let Some(value) = value {
@@ -2486,7 +2490,7 @@ fn first_word(text: String) -> String {
     text.split_whitespace().next().unwrap_or("").to_string()
 }
 
-fn first_line(text: &str) -> String {
+pub(super) fn first_line(text: &str) -> String {
     text.lines()
         .map(str::trim)
         .find(|line| !line.is_empty())
@@ -2503,7 +2507,7 @@ fn is_fanout_line(line: &str) -> bool {
 
 /// An error as the reader needs it: without the fan-out budget glued in front
 /// and without the script's stack frames.
-fn clean_error(error: &str) -> String {
+pub(super) fn clean_error(error: &str) -> String {
     error
         .lines()
         .filter(|line| !is_fanout_line(line) && !is_stack_frame(line))
@@ -2538,7 +2542,7 @@ fn is_model_directive(text: &str) -> bool {
 }
 
 /// A notice left as a System note, without the instructions meant for the model.
-fn clean_notice(text: &str) -> String {
+pub(super) fn clean_notice(text: &str) -> String {
     text.lines()
         .filter(|line| !is_model_directive(line))
         .collect::<Vec<_>>()

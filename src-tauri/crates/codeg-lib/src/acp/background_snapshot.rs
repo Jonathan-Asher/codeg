@@ -227,8 +227,22 @@ fn with_extra(
         (snapshot, None) => snapshot,
         (Some(mut snapshot), Some(extra)) => {
             for item in extra {
-                if !snapshot.items.contains(item) {
-                    snapshot.items.push(item.clone());
+                // The same work under Pi's own kind (a job the session lists
+                // call a shell, an async run they call a sub-agent): Pi's
+                // entry stands, with the time the live one was first seen.
+                let mut item = item.clone();
+                if let Some(id) = item.id.as_deref() {
+                    if let Some(at) = snapshot
+                        .items
+                        .iter()
+                        .position(|live| live.id.as_deref() == Some(id))
+                    {
+                        let live = snapshot.items.remove(at);
+                        item.started_at = item.started_at.or(live.started_at);
+                    }
+                }
+                if !snapshot.items.contains(&item) {
+                    snapshot.items.push(item);
                 }
             }
             Some(snapshot)

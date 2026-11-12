@@ -5772,6 +5772,26 @@ fn build_client_capabilities(
             }),
         );
     }
+    // pi-acp 0.0.34-steering.6 publishes its background jobs, async sub-agent
+    // runs and the runs Pi starts by itself as AIR async tasks — only to a
+    // client that asks, and it implements nothing else of AIR. That puts them
+    // in the Running strip with a Stop (`_session/async_task/stop` → cancel,
+    // `/bgj-kill`, `/subagents-stop`), and its 10-minute heartbeat keeps the
+    // connection — the Pi process that must deliver a run's completion — out
+    // of the idle sweeps (`has_live_async_task`). An older pi-acp ignores the
+    // key, and pi-acp answers with `_meta.jetbrains.air` only when it took it
+    // (`acp::pi_meta::PiLiveCaps::async_tasks`).
+    if agent_type == AgentType::Pi {
+        meta.insert(
+            "jetbrains".to_string(),
+            serde_json::json!({
+                "air": {
+                    "version": 1,
+                    "capabilities": ["asyncTasks"],
+                }
+            }),
+        );
+    }
     // codex-acp 1.13.0 (#528): with `terminal_output_delta` advertised, a
     // command's completion frame stops repeating its whole aggregated output
     // as `rawOutput`. codeg already takes that output from the deltas it
@@ -7495,8 +7515,18 @@ async fn run_connection(
             } else {
                 None
             };
+            // pi-acp's live structured channel (`acp::pi_meta`): runs Pi starts
+            // by itself as turns, sub-agent and job cards, notices, compaction.
+            let pi_live = crate::acp::pi_meta::PiLiveCaps::from_init_meta(
+                agent_type,
+                init_resp.meta.as_ref(),
+            );
+            if let Some(caps) = pi_live {
+                tracing::info!("[ACP][{}] pi live channel: {:?}", agent_type, caps);
+            }
             {
                 let mut s = state.write().await;
+                s.pi_live = pi_live;
                 // Native steering is independent of the MCP companion — set it
                 // even when no codeg-mcp is injected (it's exactly the channel
                 // that needs no tool; OpenClaw-style `supports_mcp: false`
@@ -11885,6 +11915,7 @@ async fn run_conversation_loop(
     // thought/message chunks. See `emit_conversation_update`. Shared across the
     // idle and turn loops.
     let mut cb_state = CodeBuddyLiveState::default();
+    cb_state.pi.caps = state.read().await.pi_live;
     // 1-based per-connection turn counter for the timing journal's ordinal
     // (see `turn_timings::TurnTiming::ord`) — incremented for EVERY Cursor
     // prompt turn, journaled or not, so consecutive ordinals prove adjacent
@@ -12000,6 +12031,20 @@ async fn run_conversation_loop(
             }
             // Reached only on the update arm (the command arm breaks out), so
             // `session` is free again here.
+            //
+            // A run Pi started by itself just ended (`acp::pi_meta`): settle it
+            // the way a prompt turn settles.
+            if let Some(close) = cb_state.pi.take_close() {
+                settle_pi_agent_turn(
+                    perms,
+                    state,
+                    emitter,
+                    agent_type,
+                    &session.session_id().0,
+                    close,
+                )
+                .await;
+            }
             for (config_id, value_id) in std::mem::take(&mut config_drift_to_reassert) {
                 tracing::info!(
                     "[ACP] re-asserting '{config_id}'='{value_id}' — the agent reverted it \
@@ -12029,6 +12074,8 @@ async fn run_conversation_loop(
                 // consumed: the transcript record this prompt becomes must
                 // classify as wire-rendered foreground, not overlay.
                 prompt_ledger.record_prompt_blocks(&blocks);
+                // This turn owns whatever Pi runs from here on.
+                cb_state.pi.prompt_started();
                 // A Claude Code prompt refused for a stale sign-in gets one
                 // more try on a fresh process (see `claude_auth`), so keep
                 // what it said until the turn is over. The retry itself is
@@ -12374,6 +12421,14 @@ async fn run_conversation_loop(
                                             &mut probe,
                                         )
                                         .await;
+                                        // No agent turn can be open under a
+                                        // prompt turn (it holds the gate), so
+                                        // an end here is a stale record's.
+                                        if let Some(close) = cb_state.pi.take_close() {
+                                            tracing::debug!(
+                                                "[ACP][pi] ignoring an agent turn end during a prompt turn: {close:?}"
+                                            );
+                                        }
                                         Ok(())
                                     },
                                 )
@@ -13176,7 +13231,30 @@ async fn run_conversation_loop(
                     let _ = reply.send(landed);
                 }
             }
-            Some(ConnectionCommand::Steer { reply, .. }) => {
+            Some(ConnectionCommand::Steer {
+                blocks,
+                talk_frame,
+                reply,
+            }) => {
+                if cb_state.pi.agent_turn_open() {
+                    // A run Pi started by itself is a turn too: pi-acp joins
+                    // the message to it (`injected`), as the in-turn arm's.
+                    let cx = session.connection();
+                    let sid = session.session_id().clone();
+                    let outcome = match talk_frame {
+                        Some(frame) => {
+                            let mut wire = blocks.clone();
+                            append_talk_frame(&mut wire, Some(frame));
+                            send_steer_request(&cx, &sid, &wire).await
+                        }
+                        None => send_steer_request(&cx, &sid, &blocks).await,
+                    };
+                    if matches!(outcome, Ok(SteerOutcome::Injected)) {
+                        prompt_ledger.record_prompt_blocks(&blocks);
+                    }
+                    let _ = reply.send(outcome);
+                    continue;
+                }
                 // Steering only means something for a RUNNING turn. Reply —
                 // never drop — so the manager's shielded task can't hang on
                 // the oneshot; the caller falls back to a normal prompt (the
@@ -13214,6 +13292,23 @@ async fn run_conversation_loop(
                 terminal_runtime
                     .release_all_for_session(sid.0.as_ref())
                     .await;
+                // Stop on a run Pi started by itself: `session/cancel` (above)
+                // aborts it in Pi; the turn ends here at once, as a prompt
+                // turn's does, without waiting for Pi's `ended`.
+                if cb_state.pi.cancel_turn() {
+                    settle_pi_agent_turn(
+                        perms,
+                        state,
+                        emitter,
+                        agent_type,
+                        &sid.0,
+                        crate::acp::pi_meta::TurnClose {
+                            stop_reason: "cancelled",
+                            error: None,
+                        },
+                    )
+                    .await;
+                }
                 // Unlike the mid-turn Cancel branch, this one does NOT emit
                 // `TurnComplete` (there is no turn), so nothing else would ever
                 // clear the on-screen permission card — before the compensating
@@ -13286,6 +13381,59 @@ async fn run_conversation_loop(
         }
     }
     Ok(None)
+}
+
+/// End the run Pi started by itself that this connection is showing as a turn
+/// (`acp::pi_meta`), the way a prompt turn ends: Pi's error first (it is the
+/// turn's toast), then `TurnComplete` with the permission queue drained in
+/// the same critical section, then `Connected`.
+async fn settle_pi_agent_turn(
+    perms: &PendingPermissions,
+    state: &Arc<RwLock<SessionState>>,
+    emitter: &EventEmitter,
+    agent_type: AgentType,
+    session_id: &str,
+    close: crate::acp::pi_meta::TurnClose,
+) {
+    tracing::info!(
+        "[ACP][pi] the run Pi started by itself ended: {}",
+        close.stop_reason
+    );
+    if let Some(message) = close.error {
+        emit_with_state(
+            state,
+            emitter,
+            AcpEvent::Error {
+                // Through `AcpError::protocol` for its sanitizer, as a rejected
+                // prompt's: Pi's message can quote a local path.
+                message: AcpError::protocol(message).to_string(),
+                agent_type: agent_type.to_string(),
+                code: None,
+                details: None,
+                terminal: false,
+            },
+        )
+        .await;
+    }
+    drain_permissions_then_emit(
+        perms,
+        state,
+        emitter,
+        AcpEvent::TurnComplete {
+            session_id: session_id.to_string(),
+            stop_reason: close.stop_reason.to_string(),
+            agent_type: agent_type.to_string(),
+        },
+    )
+    .await;
+    emit_with_state(
+        state,
+        emitter,
+        AcpEvent::StatusChanged {
+            status: ConnectionStatus::Connected,
+        },
+    )
+    .await;
 }
 
 /// Serialize tool-call `content` blocks into a single human-readable string.
@@ -15727,6 +15875,10 @@ struct CodeBuddyLiveState {
     /// failure was the stale process's, not the account's; any other ending
     /// publishes them as they would have been.
     held_auth_failures: Option<Vec<SessionFailureRecord>>,
+    /// Pi's live structured channel (`acp::pi_meta`): the run Pi started by
+    /// itself showing as a turn, its sub-agent and job cards, compaction.
+    /// Inert until `initialize` showed the channel.
+    pi: crate::acp::pi_meta::PiLiveState,
 }
 
 /// One announced-but-unpaired Grok `spawn_subagent` call. `description` /
@@ -17265,7 +17417,13 @@ async fn emit_conversation_update(
                     PiChunkRoute::Drop => {
                         // The context was summarized, the talk rules with it:
                         // the next message in Talk mode carries them again.
-                        if pi_auto_compaction_finished(agent_type, &text.text) {
+                        // A pi-acp with structured compaction draws the card,
+                        // whose completion resets them (`SessionState::
+                        // forget_talk_rules_on_compaction`); the sentence is
+                        // the fallback for one without.
+                        if pi_auto_compaction_finished(agent_type, &text.text)
+                            && !cb_state.pi.caps.is_some_and(|caps| caps.compaction)
+                        {
                             state.write().await.talk_rules_key = None;
                         }
                     }
@@ -17292,6 +17450,7 @@ async fn emit_conversation_update(
                         .await;
                     }
                     PiChunkRoute::Prose => {
+                        cb_state.pi.note_output();
                         // Claude subagent chunks (claude-agent-acp ≥0.63 with the
                         // `subagent-transcript` capability) are NOT suppressed: they
                         // emit with their parent id so the frontend can route them
@@ -17325,6 +17484,7 @@ async fn emit_conversation_update(
                 !cb_state.open_subagents.is_empty(),
                 meta.as_ref(),
             ) {
+                cb_state.pi.note_output();
                 let parent_tool_use_id = claude_chunk_parent_tool_use_id(agent_type, meta.as_ref());
                 emit_with_state(
                     state,
@@ -17361,6 +17521,17 @@ async fn emit_conversation_update(
                 CodexSubagentActivity::Other => return,
             };
             let tool_call_id = tc.tool_call_id.to_string();
+            // Pi calls a run's card already shows (`acp::pi_meta`): a
+            // workflow's child launches, Pi's answer to a child's question.
+            if agent_type == AgentType::Pi && cb_state.pi.enabled() {
+                cb_state.pi.note_output();
+                if cb_state
+                    .pi
+                    .drops_call(&tool_call_id, Some(tc.title.as_str()), tc.raw_input.as_ref())
+                {
+                    return;
+                }
+            }
             // Remember which capsule owns this child, so its eventual
             // `completed` / `interrupted` (announced under a synthetic id of its
             // own) can be routed back here.
@@ -17505,7 +17676,8 @@ async fn emit_conversation_update(
             // rawInput at all) re-asserts it instead of downgrading the capsule
             // to a generic tool card.
             let meta_marks_subagent = codebuddy_meta_marks_subagent(agent_type, tc.meta.as_ref())
-                || codex_subagent_launch;
+                || codex_subagent_launch
+                || crate::acp::pi_meta::marks_subagent(agent_type, tc.meta.as_ref());
             let meta_marks_background = codebuddy_meta_marks_background(agent_type, tc.meta.as_ref());
             let grok_spawn = grok_meta_marks_spawn_subagent(agent_type, tc.meta.as_ref());
             let status = format!("{:?}", tc.status).to_lowercase();
@@ -17518,8 +17690,24 @@ async fn emit_conversation_update(
                 &tc.title,
                 tc.meta,
             );
-            let meta = stamp_codex_search_action(agent_type, &tc.kind, hosted_shell, meta)
+            let mut meta = stamp_codex_search_action(agent_type, &tc.kind, hosted_shell, meta)
                 .map(serde_json::Value::Object);
+            // A Pi sub-agent run's or background job's card, reshaped into the
+            // history's (`acp::pi_meta`); published on its own too, so the
+            // card updates wherever it is drawn.
+            let mut raw_input = raw_input;
+            let pi_card = if agent_type == AgentType::Pi {
+                cb_state.pi.decorate_call(
+                    &tool_call_id,
+                    tc.raw_input.as_ref(),
+                    &mut raw_input,
+                    &mut meta,
+                    content.as_deref(),
+                    Some(status.as_str()),
+                )
+            } else {
+                None
+            };
             raw_output_cache.remove_if_final(&tool_call_id, Some(status.as_str()));
             // Track Grok's spawn_subagent lifecycle for the subagent-notification
             // pairing (progress meta + finished settle). No-op for other agents.
@@ -17593,6 +17781,9 @@ async fn emit_conversation_update(
                 },
             )
             .await;
+            if let Some(card) = pi_card {
+                emit_with_state(state, emitter, card).await;
+            }
         }
         SessionUpdate::ToolCallUpdate(tcu) => {
             // Symmetric with the `ToolCall` arm: the follow-up carries the same
@@ -17616,6 +17807,16 @@ async fn emit_conversation_update(
                     CodexSubagentActivity::Other => return,
                 };
             let tool_call_id = tcu.tool_call_id.to_string();
+            if agent_type == AgentType::Pi
+                && cb_state.pi.enabled()
+                && cb_state.pi.drops_call(
+                    &tool_call_id,
+                    tcu.fields.title.as_deref(),
+                    tcu.fields.raw_input.as_ref(),
+                )
+            {
+                return;
+            }
             if let (Some(thread_id), Some(input)) = (codex_subagent_thread, codex_subagent.as_ref())
             {
                 cb_state
@@ -17803,11 +18004,26 @@ async fn emit_conversation_update(
                 .filter(|l| !l.is_empty())
                 .and_then(|l| serde_json::to_value(l).ok());
             let meta_marks_subagent = codebuddy_meta_marks_subagent(agent_type, tcu.meta.as_ref())
-                || codex_subagent_launch;
+                || codex_subagent_launch
+                || crate::acp::pi_meta::marks_subagent(agent_type, tcu.meta.as_ref());
             let meta_marks_background = codebuddy_meta_marks_background(agent_type, tcu.meta.as_ref());
             let grok_spawn = grok_meta_marks_spawn_subagent(agent_type, tcu.meta.as_ref());
-            let meta = tcu.meta.clone().map(serde_json::Value::Object);
+            let mut meta = tcu.meta.clone().map(serde_json::Value::Object);
             let status = tcu.fields.status.map(|s| format!("{:?}", s).to_lowercase());
+            // Symmetric with the ToolCall arm.
+            let mut raw_input = raw_input;
+            let pi_card = if agent_type == AgentType::Pi {
+                cb_state.pi.decorate_call(
+                    &tool_call_id,
+                    tcu.fields.raw_input.as_ref(),
+                    &mut raw_input,
+                    &mut meta,
+                    content.as_deref(),
+                    status.as_deref(),
+                )
+            } else {
+                None
+            };
             raw_output_cache.remove_if_final(&tool_call_id, status.as_deref());
             // Same lifetime as the output cache — and deliberately NOT mirrored in
             // the ToolCall arm: pi's `session/load` replay opens the call ALREADY
@@ -17932,6 +18148,9 @@ async fn emit_conversation_update(
                 },
             )
             .await;
+            if let Some(card) = pi_card {
+                emit_with_state(state, emitter, card).await;
+            }
         }
         SessionUpdate::CurrentModeUpdate(update) => {
             emit_with_state(
@@ -18135,6 +18354,22 @@ async fn emit_conversation_update(
                 )
                 .await;
             }
+            // pi-acp's live structured channel (`acp::pi_meta`): a run Pi
+            // started by itself opens or closes a turn, cards and notices fold
+            // into the calls they report on, compaction draws its card.
+            if agent_type == AgentType::Pi && cb_state.pi.enabled() {
+                let outcome = crate::acp::pi_meta::on_session_info(
+                    state,
+                    emitter,
+                    &mut cb_state.pi,
+                    info.meta.as_ref(),
+                )
+                .await;
+                if outcome.opened_turn {
+                    // Turn-scoped, as at a prompt turn's start.
+                    cb_state.hosted_terminal_calls.clear();
+                }
+            }
         }
         other => {
             // Unhandled update types, for debugging. DEBUG, not INFO: this arm
@@ -18155,6 +18390,10 @@ async fn emit_conversation_update(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "connection_pi_live_tests.rs"]
+mod pi_live_tests;
 
 #[cfg(test)]
 mod tests {

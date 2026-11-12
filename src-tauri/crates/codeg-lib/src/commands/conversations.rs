@@ -2304,12 +2304,23 @@ pub async fn get_folder_conversation_with_live_core(
         }
     }
     let turns_total = loaded.all_turns().len();
-    let shaped = shape_turns(
+    let mut shaped = shape_turns(
         loaded.all_turns(),
         &loaded.children,
         window,
         pending.as_ref().map(|(p, started_at)| (p, *started_at)),
     );
+    // A run Pi started by itself is a turn in flight with no user message:
+    // name where its persisted half starts, so the client keeps its live
+    // copy and does not draw the run twice (see `pi_agent_turn_anchor`).
+    if pending.is_none() && shaped.in_flight_user_turn_id.is_none() {
+        if let Some(since) = manager
+            .pi_agent_turn_started_at_for_conversation(conversation_id)
+            .await
+        {
+            shaped.in_flight_user_turn_id = Some(pi_agent_turn_anchor(loaded.all_turns(), since));
+        }
+    }
     let detail = loaded.into_detail(shaped);
     let total = started.elapsed();
     if total >= SLOW_DETAIL {
@@ -2328,6 +2339,46 @@ pub async fn get_folder_conversation_with_live_core(
 
 /// A detail fetch or transcript parse this slow is logged with its timings.
 const SLOW_DETAIL: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// How far before a woken run's start the notice that woke it may be stamped
+/// (Pi writes the notice, then starts the run).
+const PI_WAKE_SLACK: chrono::Duration = chrono::Duration::seconds(1);
+
+/// The in-flight id of a run Pi started by itself, which began at `since`
+/// (Pi's clock, the transcript's): the System turn the history draws as its
+/// "woken by" divider once Pi has written the run's first reply, else a
+/// marker no turn carries. Either way the response says a turn is running,
+/// which is what keeps the client's live copy through the fetch; only the
+/// divider lets it hide the persisted half the live copy re-shows. The
+/// divider must be the newest one, after the user's last message and no
+/// older than the run, or an earlier run's would be taken for it.
+pub(crate) fn pi_agent_turn_anchor(
+    turns: &[MessageTurn],
+    since: chrono::DateTime<chrono::Utc>,
+) -> String {
+    for turn in turns.iter().rev() {
+        match turn.role {
+            TurnRole::User => break,
+            TurnRole::System if is_pi_wake_turn(turn) => {
+                if turn.timestamp >= since - PI_WAKE_SLACK {
+                    return turn.id.clone();
+                }
+                break;
+            }
+            _ => {}
+        }
+    }
+    format!("pi-agent-turn-{}", since.timestamp_millis())
+}
+
+/// Whether a System turn is the history's "woken by" marker
+/// (`parsers/pi/fold.rs`, `codeg.agentWake`).
+fn is_pi_wake_turn(turn: &MessageTurn) -> bool {
+    turn.blocks.iter().any(|block| {
+        matches!(block, ContentBlock::ToolUse { meta: Some(meta), .. }
+            if meta.get("codeg.agentWake").is_some())
+    })
+}
 
 /// Write the transcript's `model` to a row whose stored column is empty, and
 /// say whether a row changed.

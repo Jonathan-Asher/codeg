@@ -6540,6 +6540,24 @@ impl ConnectionManager {
         None
     }
 
+    /// When the run Pi started by itself that is showing as this
+    /// conversation's current turn began (`acp::pi_meta`), if one is.
+    pub async fn pi_agent_turn_started_at_for_conversation(
+        &self,
+        conversation_id: i32,
+    ) -> Option<chrono::DateTime<chrono::Utc>> {
+        let connections = self.connections.lock().await;
+        for conn in connections.values() {
+            let state = conn.state.read().await;
+            if state.conversation_id == Some(conversation_id) {
+                if let Some(at) = state.pi_agent_turn_started_at {
+                    return Some(at);
+                }
+            }
+        }
+        None
+    }
+
     /// Resolve an `(external_id, agent_type)` (agent session) to its
     /// currently-active connection id, if any. Sibling to
     /// `find_connection_by_conversation_id`, used as the discovery fallback for

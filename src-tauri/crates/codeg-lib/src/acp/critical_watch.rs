@@ -641,6 +641,7 @@ pub fn classify(event: &AcpEvent) -> Option<Signal> {
         | AcpEvent::ToolCallUpdate { .. }
         | AcpEvent::PlanUpdate { .. }
         | AcpEvent::AsyncTask { .. }
+        | AcpEvent::ToolCard { .. }
         | AcpEvent::BackgroundActivity { .. }
         | AcpEvent::AwaitingBackground { .. }
         | AcpEvent::DelegationStarted { .. }

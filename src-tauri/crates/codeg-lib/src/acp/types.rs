@@ -656,6 +656,17 @@ pub enum AcpEvent {
     /// advertises `asyncTasks` to: claude-agent-acp (0.73+) and codex-acp
     /// (1.10+).
     AsyncTask { delta: AsyncTaskDelta },
+    /// A tool call's card changed: one of Pi's sub-agent runs or background
+    /// jobs (`acp::pi_meta`). `meta` is the card's whole `_meta` in the shape
+    /// the history parser writes (`codeg.subagentRun` / `codeg.backgroundJob`,
+    /// `parsers::pi::live`) and replaces the previous one. The call may sit in
+    /// an earlier turn or already in history, so clients look it up by id
+    /// wherever they draw it; the session keeps the latest per call for the
+    /// snapshot (`SessionState::tool_cards`).
+    ToolCard {
+        tool_call_id: String,
+        meta: serde_json::Value,
+    },
     /// `session/load` failed in a way codeg cannot paper over — the agent has
     /// no record of this `session_id`, the session/process died, or it is
     /// archived. Emitted instead of silently falling back to `session/new`, so
