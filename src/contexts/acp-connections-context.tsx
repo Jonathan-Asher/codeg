@@ -1682,24 +1682,29 @@ export function carrySteeringBlocks(
   return { ...next, content }
 }
 
-/** The steering ids a live message shows (see `steeredMessageIds`). */
 /**
  * A snapshot's run and job cards (`tool_cards`) merged into the connection's
  * (see `ConnectionState.toolCards`). A fresh snapshot is the backend's newest
  * card per call, so it replaces ours; a stale one predates cards this client
  * already applied, so it only adds calls we have none for. The same reference
- * when nothing changes.
+ * when nothing changes — including a snapshot without the field, as
+ * `mergeAsyncTasks` treats one.
  */
 export function mergeToolCards(
   current: ReadonlyMap<string, Record<string, unknown>> | null,
-  incoming: ReadonlyArray<{
-    tool_call_id: string
-    meta: Record<string, unknown>
-  }>,
+  incoming:
+    | ReadonlyArray<{
+        tool_call_id: string
+        meta: Record<string, unknown>
+      }>
+    | null
+    | undefined,
   stale: boolean
 ): ReadonlyMap<string, Record<string, unknown>> | null {
+  if (!incoming || incoming.length === 0) return current
   let next: Map<string, Record<string, unknown>> | null = null
   for (const card of incoming) {
+    if (!card?.tool_call_id) continue
     if (stale && current?.has(card.tool_call_id)) continue
     if (current?.get(card.tool_call_id) === card.meta) continue
     next ??= new Map(current ?? [])
@@ -1708,6 +1713,7 @@ export function mergeToolCards(
   return next ?? current
 }
 
+/** The steering ids a live message shows (see `steeredMessageIds`). */
 function steeringIdsOf(message: LiveMessage | null): string[] {
   const ids = (message?.content ?? []).flatMap((b) =>
     b.type === "steering" ? [b.id] : []

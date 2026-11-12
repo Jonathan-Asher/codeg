@@ -49,6 +49,15 @@ describe("mergeToolCards", () => {
     expect(mergeToolCards(current, [], false)).toBe(current)
     expect(mergeToolCards(null, [], false)).toBeNull()
   })
+
+  it("leaves the cards alone for a snapshot without the field", () => {
+    const current = new Map([["call-1", done]])
+    expect(mergeToolCards(current, undefined, false)).toBe(current)
+    expect(mergeToolCards(null, null, true)).toBeNull()
+    expect(
+      mergeToolCards(current, [{ tool_call_id: "", meta: running }], false)
+    ).toBe(current)
+  })
 })
 
 describe("the snapshot's cards", () => {
