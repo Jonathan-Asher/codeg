@@ -135,6 +135,27 @@ pub async fn index_stale_conversations_paced(
     .await
 }
 
+/// What the indexer reads of one conversation: its turns, and whether a
+/// transcript was found to read them from.
+pub(crate) trait IndexRead: AsRef<[MessageTurn]> {
+    /// False when no transcript was found at all — none written yet, or the
+    /// agent deleted it (Claude Code removes sessions past its retention
+    /// period). The rows indexed from an earlier read are then the only copy
+    /// of the conversation's text, and are kept (see
+    /// `message_search_service::mark_indexed_keeping_rows`).
+    fn transcript_found(&self) -> bool {
+        true
+    }
+}
+
+impl IndexRead for Vec<MessageTurn> {}
+
+impl IndexRead for crate::commands::conversations::LoadedFolderConversation {
+    fn transcript_found(&self) -> bool {
+        self.has_transcript()
+    }
+}
+
 /// [`index_stale_conversations_paced`] reading each transcript with
 /// `read_turns`, so a test can make a read fail.
 async fn index_stale_conversations_with<F, Fut, T>(
@@ -146,7 +167,7 @@ async fn index_stale_conversations_with<F, Fut, T>(
 where
     F: Fn(i32) -> Fut,
     Fut: Future<Output = Result<T, AppCommandError>>,
-    T: AsRef<[MessageTurn]>,
+    T: IndexRead,
 {
     let settled_before = Utc::now() - chrono::Duration::seconds(SETTLE_SECS);
     let now = Instant::now();
@@ -165,6 +186,18 @@ where
         let read = read_turns(conversation.id).await;
         pacing.record(conversation.id, read_started, read_started.elapsed());
         match read {
+            // Nothing to read it from: keep what was indexed while there was.
+            // Rewriting it to "no turns" is what wiped a session's last copy of
+            // its text the first time anything touched the row after the agent
+            // deleted the transcript.
+            Ok(turns) if !turns.transcript_found() => {
+                message_search_service::mark_indexed_keeping_rows(
+                    conn,
+                    conversation.id,
+                    conversation.updated_at,
+                )
+                .await?;
+            }
             Ok(turns) => {
                 message_search_service::index_conversation(
                     conn,
@@ -307,6 +340,91 @@ mod tests {
                 .await
                 .unwrap(),
             0
+        );
+    }
+
+    /// What the indexer reads of a conversation whose transcript is not there
+    /// at all (see `IndexRead::transcript_found`).
+    struct NoTranscript;
+
+    impl AsRef<[MessageTurn]> for NoTranscript {
+        fn as_ref(&self) -> &[MessageTurn] {
+            &[]
+        }
+    }
+
+    impl IndexRead for NoTranscript {
+        fn transcript_found(&self) -> bool {
+            false
+        }
+    }
+
+    #[tokio::test]
+    async fn a_transcript_the_agent_deleted_keeps_what_was_indexed() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/fts-proj").await;
+        let id = seed_conversation(&db, folder, AgentType::ClaudeCode).await;
+        let readable = |_: i32| async {
+            Ok::<_, AppCommandError>(vec![
+                user_turn("the flaky upload retry"),
+                user_turn("and the second message"),
+            ])
+        };
+        let deleted = |_: i32| async { Ok::<_, AppCommandError>(NoTranscript) };
+        let search = |query: &'static str| message_search_core(&db.conn, query, None);
+
+        set_updated_at(&db.conn, id, 120).await;
+        index_stale_conversations_with(&db.conn, 25, &mut Pacing::default(), readable)
+            .await
+            .unwrap();
+        assert_eq!(search("upload").await.unwrap().len(), 1);
+
+        // The agent deleted the transcript, and something then touched the
+        // row (a prompt that never reached the agent): the pass that follows
+        // must not rewrite the conversation to "no turns" — its rows are the
+        // only copy of its text left.
+        set_updated_at(&db.conn, id, 60).await;
+        assert_eq!(
+            index_stale_conversations_with(&db.conn, 25, &mut Pacing::default(), deleted)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(search("upload").await.unwrap().len(), 1);
+        assert_eq!(
+            message_search_service::saved_turns(&db.conn, id)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+
+        // Stamped all the same, so the next pass leaves it alone.
+        assert_eq!(
+            index_stale_conversations_with(&db.conn, 25, &mut Pacing::default(), deleted)
+                .await
+                .unwrap(),
+            0
+        );
+
+        // A transcript that comes back is indexed again, against those rows.
+        set_updated_at(&db.conn, id, 30).await;
+        let back = |_: i32| async {
+            Ok::<_, AppCommandError>(vec![
+                user_turn("the flaky upload retry"),
+                user_turn("and the second message"),
+                user_turn("a third one"),
+            ])
+        };
+        index_stale_conversations_with(&db.conn, 25, &mut Pacing::default(), back)
+            .await
+            .unwrap();
+        assert_eq!(
+            message_search_service::saved_turns(&db.conn, id)
+                .await
+                .unwrap()
+                .len(),
+            3
         );
     }
 

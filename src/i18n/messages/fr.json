@@ -287,6 +287,9 @@
     "versionTitle": "Mise à jour logicielle",
     "updateDescription": "Vérifiez les nouvelles versions depuis la source de publication configurée et installez-les directement si disponibles.",
     "currentVersion": "Version actuelle",
+    "versionThisApp": "Cette app",
+    "versionServer": "Serveur {name}",
+    "runningVersions": "Cette app : {app} · Serveur {name} : {server}",
     "upgradableVersion": "Dernière version",
     "none": "Aucune",
     "lastChecked": "Dernière vérification : {time}",
@@ -4500,6 +4503,26 @@
         "elapsedMinutes": "{minutes} min {seconds} s",
         "withElapsed": "{step} · {elapsed}",
         "slowHint": "{agent} est encore en train de démarrer. Il exécute vos hooks SessionStart et vos réglages avant d’ouvrir la session : un hook lent ou injoignable se traduit par cette attente."
+      },
+      "historyUnavailable": {
+        "title": "Historique indisponible",
+        "reasonAgentCleanup": "{agent} a supprimé l'historique de cette session, car elle datait de plus de {days} jours.",
+        "reasonMissing": "Le fichier d'historique de l'agent pour cette session n'existe plus.",
+        "consequence": "Elle ne peut être ni reprise ni dupliquée. Ci-dessous, le texte que codeg a conservé pour la recherche : une copie partielle, avec les messages seulement, sans la sortie des outils.",
+        "startNew": "Démarrer une nouvelle session à partir de celle-ci",
+        "startNewHint": "Ouvre une nouvelle session {agent} dans ce dossier, avec le texte conservé dans la zone de saisie. Rien n'est envoyé tant que vous ne l'envoyez pas.",
+        "startNewHintNothingSaved": "Ouvre une nouvelle session {agent} dans ce dossier. Il n'y a aucun texte conservé à reprendre.",
+        "startNewFailed": "Impossible de préparer le texte conservé",
+        "savedCopyLabel": "Copie conservée · {count, plural, =0 {aucun message} one {# message} other {# messages}} · texte seul",
+        "savedCopyAria": "Messages conservés",
+        "loadingSaved": "Chargement de la copie conservée…",
+        "loadFailed": "Impossible de charger la copie conservée : {message}",
+        "nothingSaved": "codeg n'a conservé aucun texte de cette session.",
+        "roleUser": "Vous",
+        "roleSystem": "Système",
+        "untitled": "sans titre",
+        "prefillInline": "Ceci prolonge une session {agent} précédente, « {title} », dont {agent} n'a plus l'historique. Ci-dessous, le texte que codeg en a conservé : les messages seulement, sans les appels d'outils ni leur sortie. Prenez-le comme contexte pour ma prochaine demande.",
+        "prefillAttached": "Ceci prolonge une session {agent} précédente, « {title} », dont {agent} n'a plus l'historique. Le fichier joint contient le texte que codeg en a conservé : les messages seulement, sans les appels d'outils ni leur sortie. Prenez-le comme contexte pour ma prochaine demande."
       }
     },
     "diffPreview": {

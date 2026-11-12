@@ -16,7 +16,7 @@ use crate::models::*;
 use crate::parsers::codex::CodexParser;
 use crate::parsers::{
     build_agent_parser, folder_name_from_path, normalize_path_for_matching, path_eq_for_matching,
-    AgentParser, CacheUse, Need, ParseError,
+    AgentParser, CacheUse, Need, ParseError, TranscriptPresence,
 };
 use crate::web::event_bridge::{
     emit_event, ConversationChange, ConversationsBulkChanged, EventEmitter, ImportScanProgress,
@@ -1481,6 +1481,9 @@ pub(crate) struct LoadedFolderConversation {
     /// the transcript's model replaced it in `summary`): the only case the
     /// session-model backfill has anything to write.
     stored_model_empty: bool,
+    /// The agent's record of the session is gone while codeg's records show
+    /// it had one (see `commands::lost_history`).
+    history_unavailable: Option<HistoryUnavailable>,
 }
 
 impl AsRef<[MessageTurn]> for LoadedFolderConversation {
@@ -1493,6 +1496,11 @@ impl LoadedFolderConversation {
     /// Every turn; those before the read's [`ContentNeed`] may be stubs.
     pub(crate) fn all_turns(&self) -> &[MessageTurn] {
         self.parsed.as_deref().map_or(&[], |d| d.turns.as_slice())
+    }
+
+    /// Whether a transcript was found to read the turns from.
+    pub(crate) fn has_transcript(&self) -> bool {
+        self.parsed.is_some()
     }
 
     fn parsed_title(&self) -> Option<String> {
@@ -1512,6 +1520,7 @@ impl LoadedFolderConversation {
             assistant_turns_before_offset: window.as_ref().map(|m| m.assistant_before),
             prefix_hash: window.as_ref().map(|m| m.prefix_hash.clone()),
             uncovered_prefix_max_ts: window.and_then(|m| m.uncovered_prefix_max_ts),
+            history_unavailable: self.history_unavailable,
         }
     }
 }
@@ -1640,7 +1649,7 @@ pub(crate) async fn load_folder_conversation(
         .await
         .map_err(AppCommandError::from)?;
 
-    let (parsed, resolved_ext_id) = if let Some(ref ext_id) = summary.external_id {
+    let (parsed, resolved_ext_id, presence) = if let Some(ref ext_id) = summary.external_id {
         let at = summary.agent_type;
         let eid = ext_id.clone();
         let db_created_at = summary.created_at;
@@ -1686,7 +1695,7 @@ pub(crate) async fn load_folder_conversation(
                     // the parser resolve a different uuid than we asked for.
                     // Persist that so reopen/reconnect follow the live file.
                     let resolved = (d.summary.id != eid).then(|| d.summary.id.clone());
-                    Ok((Some(d), resolved))
+                    Ok((Some(d), resolved, TranscriptPresence::Present))
                 }
                 Err(crate::parsers::ParseError::ConversationNotFound(_)) => {
                     // The external_id may no longer match any local file —
@@ -1720,12 +1729,18 @@ pub(crate) async fn load_folder_conversation(
                             if let Some(conv) = matched {
                                 let new_ext_id = conv.id.clone();
                                 if let Ok(d) = read(&new_ext_id) {
-                                    return Ok((Some(d), Some(new_ext_id)));
+                                    return Ok((
+                                        Some(d),
+                                        Some(new_ext_id),
+                                        TranscriptPresence::Present,
+                                    ));
                                 }
                             }
                         }
                     }
-                    Ok((None, None))
+                    // Nothing to read: ask whether the agent's record of it
+                    // is gone, rather than never written or kept elsewhere.
+                    Ok((None, None, parser.transcript_presence(&eid)))
                 }
                 Err(e) => Err(parse_error_to_app_error(e)),
             }
@@ -1738,7 +1753,15 @@ pub(crate) async fn load_folder_conversation(
             .with_detail(e.to_string())
         })??
     } else {
-        (None, None)
+        (None, None, TranscriptPresence::Unknown)
+    };
+
+    // Read off the row as stored: the count below is about to be replaced by
+    // the (empty) parse's.
+    let history_unavailable = if parsed.is_none() && presence == TranscriptPresence::Missing {
+        crate::commands::lost_history::history_unavailable_for(conn, &summary).await
+    } else {
+        None
     };
 
     // If we resolved a different external_id (e.g. ACP UUID → parser branch ID,
@@ -1830,6 +1853,7 @@ pub(crate) async fn load_folder_conversation(
         parsed,
         children,
         stored_model_empty,
+        history_unavailable,
     })
 }
 
@@ -7524,6 +7548,7 @@ mod tests {
             assistant_turns_before_offset: None,
             prefix_hash: None,
             uncovered_prefix_max_ts: None,
+            history_unavailable: None,
         }
     }
 

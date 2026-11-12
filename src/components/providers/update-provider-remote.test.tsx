@@ -81,6 +81,12 @@ vi.mock("@/lib/transport", () => ({
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
+// This Mac's own app, which draws the remote window: a newer build than the
+// remote it is bound to.
+vi.mock("@tauri-apps/api/app", () => ({
+  getVersion: async () => "0.22.0",
+}))
+
 import { toast } from "sonner"
 import { UpdateProvider, useAppUpdate } from "./update-provider"
 import { RemoteConnectionContext } from "@/contexts/remote-connection-value"
@@ -94,6 +100,8 @@ function Probe() {
       <div data-testid="capability">{u?.capability ?? "none"}</div>
       <div data-testid="name">{u?.remoteName ?? "none"}</div>
       <div data-testid="current">{u?.currentVersion}</div>
+      <div data-testid="app">{u?.appVersion ?? "none"}</div>
+      <div data-testid="server">{u?.serverName ?? "none"}</div>
       <div data-testid="updated">{u?.updatedTo ?? "none"}</div>
       <div data-testid="restarting">{String(u?.isRestarting)}</div>
       <button onClick={() => void u?.startUpdate()}>start</button>
@@ -144,6 +152,16 @@ beforeEach(() => {
 })
 
 describe("UpdateProvider — remote desktop app", () => {
+  it("reads this app's version apart from the remote's, and names the remote", async () => {
+    // The window's controller is about the remote, whose version it reports
+    // as current; this app's own build comes from the local runtime. Shown as
+    // one number, the remote's read as this app's.
+    renderRemote()
+    await waitFor(() => expect(text("current")).toBe("0.21.7"))
+    await waitFor(() => expect(text("app")).toBe("0.22.0"))
+    expect(text("server")).toBe("studio")
+  })
+
   it("names the remote and asks before updating it", async () => {
     busy = {
       autoResume: true,

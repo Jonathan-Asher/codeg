@@ -53,6 +53,8 @@ function makeCtx(overrides: Partial<UpdateContextValue>): UpdateContextValue {
     isBusy: false,
     available: null,
     currentVersion: "0.21.7",
+    appVersion: null,
+    serverName: null,
     checking: false,
     checkError: null,
     lastCheckedAt: new Date("2026-07-24T10:00:00Z"),
@@ -454,6 +456,69 @@ describe("StatusBarUpdate — remote desktop app", () => {
       await screen.findByText(/couldn't reconnect after the restart/)
     ).toBeVisible()
     expect(screen.queryByRole("button", { name: /Update remote/ })).toBeNull()
+  })
+})
+
+// What Jonathan's Mac showed: this app on one build, the server the window
+// works against on an older one. The popover names both, so the server's
+// version can't read as this app's, and the arrow sits on the side it updates.
+describe("StatusBarUpdate — versions in a remote window", () => {
+  const remoteWindow = (overrides: Partial<UpdateContextValue>) =>
+    renderWith({
+      remoteName: "Johnnysclawd",
+      serverName: "Johnnysclawd",
+      capability: "desktop",
+      appVersion: "0.32.3-fork.229",
+      currentVersion: "0.32.3-fork.224",
+      available: { version: "0.32.3-fork.229", body: "", date: null },
+      ...overrides,
+    })
+
+  it("names this app's version and the server's, the server's being updated", async () => {
+    remoteWindow({})
+    fireEvent.click(
+      screen.getByRole("button", { name: /Remote: Johnnysclawd · New/ })
+    )
+
+    expect(await screen.findByText("This app")).toBeVisible()
+    expect(screen.getByText("v0.32.3-fork.229")).toBeVisible()
+    expect(screen.getByText("Server Johnnysclawd")).toBeVisible()
+    expect(
+      screen.getByText("v0.32.3-fork.224 → v0.32.3-fork.229")
+    ).toBeVisible()
+  })
+
+  it("puts the arrow on this app's row in the local app's popover", async () => {
+    const ua = vi
+      .spyOn(navigator, "userAgent", "get")
+      .mockReturnValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)")
+    try {
+      // The mock hands the same controller to both lookups, so the local
+      // popover reads the server's name and version off it too.
+      remoteWindow({
+        target: "local",
+        currentVersion: "0.32.3-fork.229",
+        available: { version: "0.32.3-fork.230", body: "", date: null },
+      })
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: /This Mac · New v0\.32\.3-fork\.230/,
+        })
+      )
+      expect(
+        await screen.findByText("v0.32.3-fork.229 → v0.32.3-fork.230")
+      ).toBeVisible()
+      expect(screen.getByText("Server Johnnysclawd")).toBeVisible()
+    } finally {
+      ua.mockRestore()
+    }
+  })
+
+  it("keeps the single version line in a local window", async () => {
+    renderWith({ available: RELEASE, appVersion: "0.21.7" })
+    fireEvent.click(screen.getByRole("button", { name: /New v0\.21\.9/ }))
+    expect(await screen.findByText("v0.21.7 → v0.21.9")).toBeVisible()
+    expect(screen.queryByText("This app")).toBeNull()
   })
 })
 

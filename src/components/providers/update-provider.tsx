@@ -54,6 +54,17 @@ import { RemoteUpdateConfirmDialog } from "@/components/layout/remote-update-con
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
+/** The `host[:port]` of a saved connection's address, or null when it has
+ * none that parses. */
+function hostOf(baseUrl: string | null | undefined): string | null {
+  if (!baseUrl) return null
+  try {
+    return new URL(baseUrl).host || null
+  } catch {
+    return null
+  }
+}
+
 const IDLE_STATE: AppUpdateState = { seq: 0, status: "idle" }
 
 /** How long a completed check stays fresh. Also the polling period for a
@@ -143,8 +154,23 @@ export interface UpdateContextValue {
 
   /** The newer release, or null when up to date / not yet checked. */
   available: AppUpdateInfo | null
-  /** The running version, from the last check (or "" before the first one). */
+  /** The version the target's backend is running, as that backend reports it
+   * now ("" until it has answered). Only ever read live — a status refresh, a
+   * check, a relaunch that landed — never restored from the cached check,
+   * which can be from before an update or relaunch. */
   currentVersion: string
+  /** This app's own running version, read from the desktop runtime: in a
+   * remote window, what runs HERE, as opposed to the remote's
+   * `currentVersion`. Null in a browser (it runs the server's own build) and
+   * until it has been read. */
+  appVersion: string | null
+  /** The remote codeg this window works against, when this controller is
+   * about one: the saved connection's name in a remote-desktop window. Null
+   * everywhere else (a local window, the local target, a browser, whose
+   * frontend is the server's own build). With it the version shows as two,
+   * labelled — "This app: … · Server <name>: …" — never as one unlabelled
+   * number that reads as this app's. */
+  serverName: string | null
   /** A check is in flight. */
   checking: boolean
   /** Raw failure message from the last check; classify with
@@ -245,7 +271,16 @@ export function UpdateProvider({
 
   // ─── Availability ───────────────────────────────────────────────────────
   const [available, setAvailable] = useState<AppUpdateInfo | null>(null)
-  const [currentVersion, setCurrentVersion] = useState("")
+  const [currentVersion, setCurrentVersionState] = useState("")
+  // The live version, mirrored for the cache-adoption path, which must not let
+  // an answer computed against another version stand (see `adoptCached`).
+  const liveVersionRef = useRef<string | null>(null)
+  const setCurrentVersion = useCallback((version: string) => {
+    if (!version) return
+    liveVersionRef.current = version
+    setCurrentVersionState(version)
+  }, [])
+  const [appVersion, setAppVersion] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
   const [checkError, setCheckError] = useState<string | null>(null)
   const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null)
@@ -275,6 +310,11 @@ export function UpdateProvider({
   // entry can be told apart from a re-read of the one we already hold. See
   // `adoptCached`.
   const appliedOfferRef = useRef<string | null>(null)
+  // `refreshLocalStatus`, for the callbacks declared above it (`adoptCached`,
+  // `runCheck`).
+  const refreshLocalStatusRef = useRef<() => Promise<void>>(() =>
+    Promise.resolve()
+  )
 
   /** Re-read which release the user waved away. Split out from `adoptCached`
    * because a dismissal moves independently of the check cache: the user can
@@ -313,17 +353,48 @@ export function UpdateProvider({
       ) {
         return
       }
+      // An answer worked out against another version than the one the
+      // backend reports running now is about a different install: an update
+      // or a relaunch happened since it was written. It must not stand in for
+      // the live version, nor offer what it offered. Read the backend again
+      // instead: the refresh drops the entry if it is the stale one (and asks
+      // anew), or brings our own reading up to the version a sibling already
+      // checked against, whose answer the next read of the cache then takes.
+      const live = liveVersionRef.current
+      if (live && cached.currentVersion && cached.currentVersion !== live) {
+        void refreshLocalStatusRef.current()
+        return
+      }
       appliedAtRef.current = cached.at
       appliedOfferRef.current = cached.info?.version ?? null
       setLastCheckedAt(new Date(cached.at))
       setAvailable(cached.info)
+      // The entry's version is only the baseline its offer was computed
+      // against. It is never shown as the running version: that comes from
+      // the backend alone, so a cache written before a relaunch can't keep
+      // naming the version that ran then.
       if (cached.currentVersion) {
         appliedBaselineRef.current = cached.currentVersion
-        setCurrentVersion(cached.currentVersion)
       }
     },
     [syncDismissed]
   )
+
+  // This app's own version, straight from the desktop runtime. It cannot
+  // change without a relaunch, which remounts this provider, so one read is
+  // enough.
+  useEffect(() => {
+    if (!isDesktop()) return
+    let cancelled = false
+    void getCurrentAppVersion("local").then((version) => {
+      if (!cancelled && version && version !== "unknown") {
+        setAppVersion(version)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Seed from the persisted result once on mount, so a reload shows the badge
   // immediately rather than going quiet until the next check. Reading storage
@@ -472,10 +543,6 @@ export function UpdateProvider({
   // The single follow-up pass owed to callers who arrived while that round-trip
   // was already running. See `refreshLocalStatus`.
   const trailingRefreshRef = useRef<Promise<void> | null>(null)
-  // `refreshLocalStatus`, for `runCheck` above its declaration.
-  const refreshLocalStatusRef = useRef<() => Promise<void>>(() =>
-    Promise.resolve()
-  )
 
   const runCheck = useCallback(
     async (silent: boolean) => {
@@ -537,7 +604,7 @@ export function UpdateProvider({
         if (mountedRef.current) setChecking(false)
       }
     },
-    [t, target]
+    [setCurrentVersion, t, target]
   )
 
   const checkNow = useCallback(
@@ -642,7 +709,7 @@ export function UpdateProvider({
     if (!running || !mountedRef.current) return
     setCurrentVersion(running)
     discardStaleAvailability(running)
-  }, [discardStaleAvailability, target])
+  }, [discardStaleAvailability, setCurrentVersion, target])
 
   const startRefresh = useCallback((): Promise<void> => {
     const p = runRefresh().finally(() => {
@@ -797,6 +864,16 @@ export function UpdateProvider({
             ? window.location.host
             : null
           : null
+
+  // The remote codeg a remote-desktop window works against, for the
+  // two-version label. Its saved name, else the host it is reached at — a
+  // remote-desktop window always has one of them.
+  const serverName =
+    target === "active" && isDesktop() && isRemoteDesktopMode()
+      ? remoteConnection?.connection?.name?.trim() ||
+        hostOf(remoteConnection?.connection?.base_url) ||
+        ""
+      : null
 
   const startUpdate = useCallback(
     async (opts?: { mode?: UpdateMode }) => {
@@ -1104,6 +1181,7 @@ export function UpdateProvider({
     state.status,
     discardStaleAvailability,
     refreshLocalStatus,
+    setCurrentVersion,
     t,
   ])
 
@@ -1147,6 +1225,8 @@ export function UpdateProvider({
       isBusy,
       available,
       currentVersion,
+      appVersion,
+      serverName,
       checking,
       checkError,
       lastCheckedAt,
@@ -1179,6 +1259,8 @@ export function UpdateProvider({
       isBusy,
       available,
       currentVersion,
+      appVersion,
+      serverName,
       checking,
       checkError,
       lastCheckedAt,

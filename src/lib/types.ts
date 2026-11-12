@@ -1080,6 +1080,46 @@ export interface DbConversationDetail {
    * than this bound (its persisted twin is then provably inside the window).
    */
   uncovered_prefix_max_ts?: string | null
+  /**
+   * Set when the agent's own record of this session is gone (its transcript
+   * file was deleted): the session can be neither resumed nor forked, so it
+   * opens read-only, from the text codeg's search index kept of it. Absent on
+   * every readable session, and from older servers.
+   */
+  history_unavailable?: HistoryUnavailable | null
+}
+
+/** Why a session's history is gone, as far as the server can tell:
+ *  `agent_cleanup` — the agent deletes sessions past an age, and this one was
+ *  past it (`retention_days`); `missing` — the file is gone for a reason it
+ *  cannot tell. Unknown values from a newer server read as `missing`. */
+export type HistoryUnavailableReason = "agent_cleanup" | "missing"
+
+export interface HistoryUnavailable {
+  reason: HistoryUnavailableReason | (string & {})
+  /** The age past which the agent deletes a session, in days
+   *  (`agent_cleanup` only). */
+  retention_days?: number | null
+  /** How many turns of the session the search index kept (their text only). */
+  saved_turns: number
+}
+
+/** One turn's text as the message search kept it. */
+export interface SavedTurn {
+  /** The turn's position in the session as it was last read. */
+  turn_idx: number
+  role: "user" | "assistant" | "system"
+  content: string
+}
+
+/** A session's saved text, ready to hand to a new session: `markdown` inline
+ *  when it is short enough to sit in the composer, otherwise `path` — a file
+ *  on the machine the agent runs on — and `chars` either way. */
+export interface SavedHistoryExport {
+  markdown?: string | null
+  path?: string | null
+  chars: number
+  turns: number
 }
 
 /** One page of older history for reverse infinite scroll:

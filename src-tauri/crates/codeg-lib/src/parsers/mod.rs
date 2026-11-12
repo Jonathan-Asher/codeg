@@ -324,6 +324,91 @@ pub trait AgentParser {
     fn caches_details(&self) -> bool {
         false
     }
+
+    /// Whether the agent's own record of session `id` is still where this
+    /// parser reads it. Asked once a lookup came back
+    /// [`ParseError::ConversationNotFound`], to tell a record the agent
+    /// deleted (Claude Code removes sessions past its retention period) from
+    /// one this parser simply cannot see.
+    ///
+    /// [`TranscriptPresence::Missing`] claims the agent's store is where this
+    /// parser looks and holds nothing for `id`. It never claims history
+    /// existed — a session not written yet is missing too, which callers rule
+    /// out from codeg's own records. The default, `Unknown`, is right for
+    /// every agent whose not-found can mean something else (an id the parser
+    /// resolves by scanning or matching, a store it opens rather than lists,
+    /// a location the agent's launch environment can move).
+    fn transcript_presence(&self, id: &str) -> TranscriptPresence {
+        let _ = id;
+        TranscriptPresence::Unknown
+    }
+}
+
+/// See [`AgentParser::transcript_presence`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TranscriptPresence {
+    /// The agent keeps a record of the session where this parser reads.
+    Present,
+    /// The agent's store is there, and holds nothing for the session.
+    Missing,
+    /// Can't be told: the store is not there to look in, or this agent's
+    /// records can't be checked this way.
+    Unknown,
+}
+
+/// [`TranscriptPresence`] of a store that files each session one level down,
+/// in a bucket of its own (a project directory, a working-directory key):
+/// `<root>/<bucket>/<leaf>`. `Present` when some bucket holds `leaf` — a file,
+/// or with `leaf_is_dir` a directory — `Missing` when `root` is a directory
+/// that can be read and none does, `Unknown` when it can't be read (absent,
+/// unreadable) or `id` is not a safe path segment.
+pub(crate) fn presence_in_buckets(
+    root: &std::path::Path,
+    id: &str,
+    leaf: &std::path::Path,
+    leaf_is_dir: bool,
+) -> TranscriptPresence {
+    if id.is_empty() || !is_safe_subagent_id(id) {
+        return TranscriptPresence::Unknown;
+    }
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return TranscriptPresence::Unknown;
+    };
+    for entry in entries.flatten() {
+        let bucket = entry.path();
+        if !bucket.is_dir() {
+            continue;
+        }
+        let candidate = bucket.join(leaf);
+        let found = if leaf_is_dir {
+            candidate.is_dir()
+        } else {
+            candidate.is_file()
+        };
+        if found {
+            return TranscriptPresence::Present;
+        }
+    }
+    TranscriptPresence::Missing
+}
+
+/// [`TranscriptPresence`] of a store that keeps each session at a path of its
+/// own under `root`: `Present` when `path` is a file, `Missing` when it is not
+/// but `root` is a directory, `Unknown` when `root` is not one or `id` is not a
+/// safe path segment.
+pub(crate) fn presence_of_file(
+    root: &std::path::Path,
+    id: &str,
+    path: &std::path::Path,
+) -> TranscriptPresence {
+    if id.is_empty() || !is_safe_subagent_id(id) || !root.is_dir() {
+        return TranscriptPresence::Unknown;
+    }
+    if path.is_file() {
+        TranscriptPresence::Present
+    } else {
+        TranscriptPresence::Missing
+    }
 }
 
 /// Whether a read may add the transcript it parses to the cache.
@@ -452,6 +537,10 @@ impl AgentParser for RouteSanitized {
 
     fn caches_details(&self) -> bool {
         self.0.caches_details()
+    }
+
+    fn transcript_presence(&self, id: &str) -> TranscriptPresence {
+        self.0.transcript_presence(id)
     }
 }
 
@@ -2484,5 +2573,176 @@ mod tests {
             "C:\\Users\\demo\\workspace\\codeg",
             "C:/Users/demo/workspace/codeg"
         ));
+    }
+}
+
+#[cfg(test)]
+mod transcript_presence_tests {
+    //! Whether an agent's record of a session is still where its parser reads
+    //! it ([`AgentParser::transcript_presence`]) — the half of the lost-history
+    //! check (`commands::lost_history`) that looks at the agent's own store.
+
+    use super::*;
+    use std::fs;
+    use std::path::Path;
+
+    use super::TranscriptPresence::{Missing, Present, Unknown};
+
+    fn touch(path: &Path) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "{}\n").unwrap();
+    }
+
+    #[test]
+    fn buckets_tell_present_from_missing_only_where_the_store_is() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("projects");
+        let leaf = Path::new("abc.jsonl");
+
+        // No store to look in: can't tell.
+        assert_eq!(presence_in_buckets(&root, "abc", leaf, false), Unknown);
+
+        // A store with nothing for the session: missing.
+        fs::create_dir_all(root.join("-tmp-other")).unwrap();
+        touch(&root.join("-tmp-other").join("zzz.jsonl"));
+        assert_eq!(presence_in_buckets(&root, "abc", leaf, false), Missing);
+
+        // In any bucket: present. A directory of that name is not the file.
+        fs::create_dir_all(root.join("-tmp-proj").join("abc.jsonl.d")).unwrap();
+        assert_eq!(presence_in_buckets(&root, "abc", leaf, false), Missing);
+        touch(&root.join("-tmp-proj").join("abc.jsonl"));
+        assert_eq!(presence_in_buckets(&root, "abc", leaf, false), Present);
+
+        // The directory form.
+        fs::create_dir_all(root.join("-tmp-proj").join("session-dir")).unwrap();
+        assert_eq!(
+            presence_in_buckets(&root, "session-dir", Path::new("session-dir"), true),
+            Present
+        );
+        assert_eq!(
+            presence_in_buckets(&root, "other-dir", Path::new("other-dir"), true),
+            Missing
+        );
+
+        // Ids that would walk out of the store never reach the filesystem.
+        for unsafe_id in ["", "../abc", "a/b", "a\\b", "c:abc"] {
+            assert_eq!(
+                presence_in_buckets(&root, unsafe_id, leaf, false),
+                Unknown,
+                "{unsafe_id:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_file_of_its_own_is_present_or_missing_inside_an_existing_store() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("conversations");
+        let path = root.join("abc.db");
+        assert_eq!(presence_of_file(&root, "abc", &path), Unknown);
+        fs::create_dir_all(&root).unwrap();
+        assert_eq!(presence_of_file(&root, "abc", &path), Missing);
+        touch(&path);
+        assert_eq!(presence_of_file(&root, "abc", &path), Present);
+        assert_eq!(presence_of_file(&root, "../abc", &path), Unknown);
+    }
+
+    #[test]
+    fn claude_code_reports_a_deleted_transcript_as_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let projects = tmp.path().join("projects");
+        let parser = RouteSanitized(Box::new(claude::ClaudeParser::with_base_dir(
+            projects.clone(),
+        )));
+        assert_eq!(parser.transcript_presence("febad1ac"), Unknown);
+
+        fs::create_dir_all(projects.join("-Users-me-Work-legalix")).unwrap();
+        touch(&projects.join("-Users-me-Work-legalix").join("kept.jsonl"));
+        // What Claude Code's cleanup leaves: the project directory, without
+        // the session's file. The lookup and the presence check agree.
+        assert!(matches!(
+            parser.get_conversation("febad1ac"),
+            Err(ParseError::ConversationNotFound(_))
+        ));
+        assert_eq!(parser.transcript_presence("febad1ac"), Missing);
+        assert_eq!(parser.transcript_presence("kept"), Present);
+    }
+
+    #[test]
+    fn each_file_based_agent_looks_where_its_lookup_does() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = |name: &str| {
+            let dir = tmp.path().join(name);
+            fs::create_dir_all(dir.join("bucket")).unwrap();
+            dir
+        };
+
+        let codebuddy_dir = base("codebuddy");
+        touch(&codebuddy_dir.join("bucket").join("kept.jsonl"));
+        let qoder_dir = base("qoder");
+        touch(&qoder_dir.join("bucket").join("kept.jsonl"));
+        let grok_dir = base("grok");
+        touch(&grok_dir.join("bucket").join("kept").join("updates.jsonl"));
+        let kimi_dir = base("kimi");
+        fs::create_dir_all(kimi_dir.join("bucket").join("kept")).unwrap();
+        let deepseek_dir = base("deepseek");
+        fs::create_dir_all(deepseek_dir.join("bucket").join("kept")).unwrap();
+        let antigravity_dir = base("antigravity");
+        touch(&antigravity_dir.join("kept.db"));
+
+        let parsers: Vec<(&str, Box<dyn AgentParser>)> = vec![
+            (
+                "codebuddy",
+                Box::new(codebuddy::CodeBuddyParser::with_base_dir(codebuddy_dir)),
+            ),
+            ("qoder", Box::new(qoder::QoderParser::with_base_dir(qoder_dir))),
+            ("grok", Box::new(grok::GrokParser::with_base_dir(grok_dir))),
+            (
+                "kimi",
+                Box::new(kimi_code::KimiCodeParser::with_base_dir(kimi_dir)),
+            ),
+            (
+                "deepseek",
+                Box::new(deepseek::DeepSeekParser::with_base_dir(deepseek_dir)),
+            ),
+            (
+                "antigravity",
+                Box::new(antigravity::AntigravityParser::with_base_dir(
+                    antigravity_dir,
+                )),
+            ),
+        ];
+        for (name, parser) in &parsers {
+            assert_eq!(parser.transcript_presence("kept"), Present, "{name}");
+            assert_eq!(parser.transcript_presence("gone"), Missing, "{name}");
+        }
+
+        // Their stores absent: can't tell.
+        let nowhere = tmp.path().join("nowhere");
+        assert_eq!(
+            claude::ClaudeParser::with_base_dir(nowhere.clone()).transcript_presence("gone"),
+            Unknown
+        );
+        assert_eq!(
+            grok::GrokParser::with_base_dir(nowhere.clone()).transcript_presence("gone"),
+            Unknown
+        );
+        assert_eq!(
+            antigravity::AntigravityParser::with_base_dir(nowhere).transcript_presence("gone"),
+            Unknown
+        );
+    }
+
+    #[test]
+    fn agents_whose_not_found_can_mean_something_else_never_say_missing() {
+        // Codex resolves a thread by scanning (and archives rollouts outside
+        // the tree it scans); its store being there proves nothing about one
+        // session, so it does not claim one is gone.
+        let tmp = tempfile::tempdir().unwrap();
+        let sessions = tmp.path().join("sessions");
+        fs::create_dir_all(sessions.join("2026").join("09").join("24")).unwrap();
+        let codex = codex::CodexParser::with_base_dir(sessions);
+        assert!(codex.get_conversation("gone").is_err());
+        assert_eq!(codex.transcript_presence("gone"), Unknown);
     }
 }

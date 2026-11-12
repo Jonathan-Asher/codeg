@@ -914,6 +914,16 @@ fn is_human_prompt(value: &Value) -> bool {
 }
 
 impl AgentParser for QoderParser {
+    /// `projects/<encoded cwd>/<id>.jsonl`, what `transcript_path_for` finds.
+    fn transcript_presence(&self, id: &str) -> crate::parsers::TranscriptPresence {
+        crate::parsers::presence_in_buckets(
+            &self.base_dir,
+            id,
+            Path::new(&format!("{id}.jsonl")),
+            false,
+        )
+    }
+
     fn list_conversations(&self) -> Result<Vec<ConversationSummary>, ParseError> {
         let mut conversations = Vec::new();
         if !self.base_dir.exists() {

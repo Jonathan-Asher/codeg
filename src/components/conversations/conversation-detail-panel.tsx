@@ -43,6 +43,13 @@ import {
   parkAskSelectionPrompt,
   type AskSelectionParkedDetail,
 } from "@/lib/ask-selection-handoff"
+import {
+  COMPOSER_PREFILL_PARKED_EVENT,
+  type ComposerPrefillParkedDetail,
+  takeComposerPrefill,
+} from "@/lib/composer-prefill-handoff"
+import { startSessionFromSavedHistory } from "@/lib/saved-history"
+import { HistoryUnavailableView } from "@/components/conversations/history-unavailable-view"
 import { useConnectionLifecycle } from "@/hooks/use-connection-lifecycle"
 import {
   newClientMessageId,
@@ -745,9 +752,18 @@ const ConversationTabView = memo(function ConversationTabView({
       true,
     [acpAgents, selectedAgent]
   )
+  // The agent no longer has this session's history (its transcript file is
+  // gone): it can be neither resumed nor forked, so the session opens
+  // read-only from the text the message search kept, and nothing connects —
+  // a connect would only fail to load it, and must not quietly start a new
+  // session in its place.
+  const historyUnavailable = hasPersistedConversation
+    ? (detail?.history_unavailable ?? null)
+    : null
   const canAutoConnect =
     (hasPersistedConversation || (agentsLoaded && usableAgentCount > 0)) &&
     !awaitingHistoricalSessionId &&
+    historyUnavailable == null &&
     // Skip the doomed auto-connect for a not-installed agent ONLY in the draft
     // surfaces, where the persistent install banner explains it instead. A
     // persisted conversation keeps its existing connect-and-surface-the-error
@@ -1097,7 +1113,15 @@ const ConversationTabView = memo(function ConversationTabView({
       autoReconnectsRef.current = 0
       return
     }
-    if (!unsentHeadRetries || connIsForOtherAgent || outsideWriterHeld) return
+    if (
+      !unsentHeadRetries ||
+      connIsForOtherAgent ||
+      outsideWriterHeld ||
+      // A session whose history is gone takes no message: one left in its
+      // outbox from before must not keep reconnecting it.
+      historyUnavailable != null
+    )
+      return
     // No connection at all (dropped when the transport reconnected to a
     // server that no longer has it) counts as gone too.
     if (
@@ -1124,6 +1148,7 @@ const ConversationTabView = memo(function ConversationTabView({
     connIsForOtherAgent,
     unsentHeadRetries,
     outsideWriterHeld,
+    historyUnavailable,
     autoReconnectTick,
   ])
   // While the session waits for the account pool, the composer says so.
@@ -1238,7 +1263,10 @@ const ConversationTabView = memo(function ConversationTabView({
   // nor while the connection still belongs to another agent.
   const actionsUnreachable =
     !actionsLive &&
-    (Boolean(acpLoadError) || Boolean(detailError) || selectedAgentNotInstalled)
+    (Boolean(acpLoadError) ||
+      Boolean(detailError) ||
+      selectedAgentNotInstalled ||
+      historyUnavailable != null)
   const actionsCanWait =
     !actionsLive &&
     hasPersistedConversation &&
@@ -3118,6 +3146,36 @@ const ConversationTabView = memo(function ConversationTabView({
       window.removeEventListener(ASK_SELECTION_PARKED_EVENT, onParked)
   }, [folderId, mqEnqueue, selectedAgent, tabId])
 
+  // Receiving end of "Start a new session from this" (a session whose history
+  // is gone): the saved text lands in THIS draft's composer — added after
+  // whatever is drafted there, never replacing it — and waits there for the
+  // person to send it. Matched on agent and folder like the ask hand-off
+  // above, and for the same reason.
+  useEffect(() => {
+    if (dbConversationId != null) return
+    const drain = () => {
+      const entry = takeComposerPrefill(tabId, {
+        agentType: selectedAgent,
+        folderId,
+      })
+      if (!entry) return
+      setComposerInject({
+        text: entry.text,
+        mode: "append",
+        ...(entry.files?.length ? { files: entry.files } : {}),
+      })
+    }
+    drain()
+    const onParked = (event: Event) => {
+      const detail = (event as CustomEvent<ComposerPrefillParkedDetail>).detail
+      if (detail?.tabId !== tabId) return
+      drain()
+    }
+    window.addEventListener(COMPOSER_PREFILL_PARKED_EVENT, onParked)
+    return () =>
+      window.removeEventListener(COMPOSER_PREFILL_PARKED_EVENT, onParked)
+  }, [dbConversationId, folderId, selectedAgent, tabId])
+
   const canShowDetailErrorActions =
     hasPersistedConversation && dbConversationId != null && !!folder
   const handleReloadDetail = useCallback(() => {
@@ -3147,6 +3205,59 @@ const ConversationTabView = memo(function ConversationTabView({
     })
     closeTab(tabId)
   }, [closeTab, folder, openNewConversationTab, tabId, workingDirForConnection])
+
+  // "Start a new session from this", for a session whose history is gone: a
+  // new conversation on the same agent, in the same folder and directory, its
+  // composer holding a short preamble and the saved text (inline when short,
+  // else as an attached file). Nothing is sent: the person reads, edits and
+  // sends it. This tab stays open, read-only, beside it.
+  const [startingFromSaved, setStartingFromSaved] = useState(false)
+  const conversationTitle = detail?.summary.title ?? null
+  const tHistoryUnavailable = useTranslations("Folder.chat.historyUnavailable")
+  const handleStartFromSaved = useCallback(async () => {
+    if (!folder || dbConversationId == null) return
+    setStartingFromSaved(true)
+    try {
+      const preambleValues = {
+        title: conversationTitle?.trim() || tHistoryUnavailable("untitled"),
+        agent: getAgentLabel(selectedAgent),
+      }
+      await startSessionFromSavedHistory(
+        {
+          conversationId: dbConversationId,
+          folderId: folder.id,
+          workingDir: workingDirForConnection ?? folder.path,
+          agentType: selectedAgent,
+          targetGroup: groupId,
+          inlinePreamble: tHistoryUnavailable("prefillInline", preambleValues),
+          attachedPreamble: tHistoryUnavailable(
+            "prefillAttached",
+            preambleValues
+          ),
+        },
+        { openNewConversationTab }
+      )
+    } catch (err) {
+      notify({
+        level: "error",
+        key: `history-unavailable-start:${tabId}`,
+        title: tHistoryUnavailable("startNewFailed"),
+        description: toErrorMessage(err),
+      })
+    } finally {
+      if (mountedRef.current) setStartingFromSaved(false)
+    }
+  }, [
+    conversationTitle,
+    dbConversationId,
+    folder,
+    groupId,
+    openNewConversationTab,
+    selectedAgent,
+    tHistoryUnavailable,
+    tabId,
+    workingDirForConnection,
+  ])
 
   // Some load failures come with a shell command that undoes them (today:
   // `codex unarchive <id>`). The banner names it in prose, but prose here is
@@ -3870,15 +3981,22 @@ const ConversationTabView = memo(function ConversationTabView({
       availableCommands={connectionCommands}
       attachmentTabId={tabId}
       draftStorageKey={draftStorageKey}
-      hideInput={isWelcomeMode || Boolean(acpLoadError)}
+      hideInput={
+        isWelcomeMode || Boolean(acpLoadError) || historyUnavailable != null
+      }
       injectContent={composerInject}
       onInjectConsumed={handleComposerInjectConsumed}
       composerBanner={
-        acpLoadErrorBanner ??
-        outsideWriterBanner ??
-        limitPausedBanner ??
-        interruptedBanner ??
-        emptyTurnBanner
+        // A session whose history is gone takes no message, so none of the
+        // banners that lead to one (Continue, Retry) applies; its own view
+        // says what can be done instead.
+        historyUnavailable != null
+          ? null
+          : (acpLoadErrorBanner ??
+            outsideWriterBanner ??
+            limitPausedBanner ??
+            interruptedBanner ??
+            emptyTurnBanner)
       }
       feedbackList={
         feedback.showList || feedback.carriedNotes.length > 0 ? (
@@ -4119,6 +4237,18 @@ const ConversationTabView = memo(function ConversationTabView({
           </div>
           <div className="min-h-0 flex-1">{transcriptNode}</div>
         </div>
+      ) : historyUnavailable && dbConversationId != null ? (
+        <HistoryUnavailableView
+          conversationId={dbConversationId}
+          info={historyUnavailable}
+          agentLabel={getAgentLabel(selectedAgent)}
+          onStartNew={
+            canShowDetailErrorActions
+              ? () => void handleStartFromSaved()
+              : undefined
+          }
+          starting={startingFromSaved}
+        />
       ) : (
         transcriptNode
       )}

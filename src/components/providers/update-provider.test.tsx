@@ -799,6 +799,117 @@ describe("UpdateProvider — stale cache after an upgrade", () => {
   })
 })
 
+describe("UpdateProvider — the running version is always read live", () => {
+  const status = (currentVersion: string) => ({
+    currentVersion,
+    selfUpdateSupported: true,
+    capability: "supervised",
+    runtime: "standalone",
+    restartDelayMs: 2000,
+    rollbackAvailable: false,
+    liveProgress: true,
+  })
+
+  it("never shows a cached check's version as the running one", async () => {
+    // Written before a relaunch: it names the build that ran then. The offer
+    // may be restored for the badge, but its version is no reading of what
+    // runs now — that waits for the backend.
+    localStorage.setItem(
+      LAST_CHECK_KEY,
+      JSON.stringify({
+        at: Date.now(),
+        currentVersion: "0.21.5",
+        info: { version: "0.21.9", body: "", date: null },
+      })
+    )
+    // The first status read (the mount's) is held, so the cached entry is
+    // all there is while it waits; later reads answer at once.
+    let answerStatus: (value: unknown) => void = () => {}
+    let statusReads = 0
+    callImpl = async (endpoint: string) => {
+      if (endpoint === "app_update_state") return snapshot
+      if (endpoint === "app_update_status") {
+        statusReads += 1
+        if (statusReads > 1) return status("0.21.7")
+        return new Promise((resolve) => {
+          answerStatus = resolve
+        })
+      }
+      if (endpoint === "check_app_update") {
+        return {
+          currentVersion: "0.21.7",
+          update: { version: "0.21.9", body: "", date: null },
+        }
+      }
+      throw new Error(`unexpected endpoint: ${endpoint}`)
+    }
+
+    render(availabilityTree())
+    await waitFor(() =>
+      expect(screen.getByTestId("available").textContent).toBe("0.21.9")
+    )
+    expect(screen.getByTestId("current").textContent).toBe("none")
+
+    await act(async () => {
+      answerStatus(status("0.21.7"))
+      await Promise.resolve()
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId("current").textContent).toBe("0.21.7")
+    )
+    // The entry was about another build: dropped and asked again.
+    await waitFor(() => expect(checkCalls()).toBe(1))
+    await waitFor(() =>
+      expect(
+        JSON.parse(localStorage.getItem(LAST_CHECK_KEY)!).currentVersion
+      ).toBe("0.21.7")
+    )
+  })
+
+  it("does not adopt a sibling's answer worked out against another version", async () => {
+    // This window already reads 0.21.9 live. A window still on the old build
+    // records what it found against 0.21.7 — offering the very release that
+    // runs here. Taking it would put the stale offer (and, before, the stale
+    // version) on screen.
+    callImpl = async (endpoint: string) => {
+      if (endpoint === "app_update_state") return snapshot
+      if (endpoint === "app_update_status") return status("0.21.9")
+      if (endpoint === "check_app_update") {
+        return { currentVersion: "0.21.9", update: null }
+      }
+      throw new Error(`unexpected endpoint: ${endpoint}`)
+    }
+    render(availabilityTree())
+    await waitFor(() =>
+      expect(screen.getByTestId("current").textContent).toBe("0.21.9")
+    )
+
+    const stale = JSON.stringify({
+      at: Date.now() + 1000,
+      currentVersion: "0.21.7",
+      info: { version: "0.21.9", body: "", date: null },
+    })
+    localStorage.setItem(LAST_CHECK_KEY, stale)
+    await act(async () => {
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: LAST_CHECK_KEY, newValue: stale })
+      )
+      await Promise.resolve()
+    })
+
+    expect(screen.getByTestId("available").textContent).toBe("none")
+    expect(screen.getByTestId("current").textContent).toBe("0.21.9")
+    // The backend is read again, which finds the entry stale, drops it and
+    // records a fresh answer for the build that runs.
+    await waitFor(() =>
+      expect(
+        JSON.parse(localStorage.getItem(LAST_CHECK_KEY)!).currentVersion
+      ).toBe("0.21.9")
+    )
+    expect(screen.getByTestId("available").textContent).toBe("none")
+  })
+})
+
 describe("UpdateProvider — cross-window cache", () => {
   beforeEach(() => {
     vi.useFakeTimers()

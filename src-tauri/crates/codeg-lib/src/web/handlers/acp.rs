@@ -108,6 +108,17 @@ pub async fn acp_connect(
         .await
         .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
 
+    // A session whose history the agent deleted is not resumed: the attempt
+    // could only fail to load it (see `commands::lost_history`).
+    crate::commands::lost_history::refuse_lost_history(
+        &db.conn,
+        params.agent_type,
+        params.session_id.as_deref(),
+        &runtime_env,
+    )
+    .await
+    .map_err(|e| AppCommandError::not_found(e.to_string()))?;
+
     // A resume re-establishes the conversation's own selectors, not the
     // client's per-agent picks (see `resolve_connect_selector_prefs`).
     let (preferred_mode_id, preferred_config_values) =

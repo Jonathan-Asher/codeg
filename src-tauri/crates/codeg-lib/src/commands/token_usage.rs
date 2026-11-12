@@ -1381,6 +1381,7 @@ mod tests {
             assistant_turns_before_offset: None,
             prefix_hash: None,
             uncovered_prefix_max_ts: None,
+            history_unavailable: None,
         }
     }
 

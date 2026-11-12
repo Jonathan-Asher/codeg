@@ -544,6 +544,11 @@ impl Default for AntigravityParser {
 }
 
 impl AgentParser for AntigravityParser {
+    /// `<id>.db` in the sessions directory, what `get_conversation` checks.
+    fn transcript_presence(&self, id: &str) -> crate::parsers::TranscriptPresence {
+        crate::parsers::presence_of_file(&self.base_dir, id, &self.db_path(id))
+    }
+
     fn list_conversations(&self) -> Result<Vec<ConversationSummary>, ParseError> {
         let mut conversations = Vec::new();
         let Ok(entries) = std::fs::read_dir(&self.base_dir) else {

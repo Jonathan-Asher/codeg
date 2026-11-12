@@ -287,6 +287,9 @@
     "versionTitle": "소프트웨어 업데이트",
     "updateDescription": "설정된 릴리스 소스에서 새 버전을 확인하고 가능하면 바로 설치합니다.",
     "currentVersion": "현재 버전",
+    "versionThisApp": "이 앱",
+    "versionServer": "서버 {name}",
+    "runningVersions": "이 앱: {app} · 서버 {name}: {server}",
     "upgradableVersion": "최신 버전",
     "none": "없음",
     "lastChecked": "마지막 확인: {time}",
@@ -4500,6 +4503,26 @@
         "elapsedMinutes": "{minutes}분 {seconds}초",
         "withElapsed": "{step} · {elapsed}",
         "slowHint": "{agent}이(가) 아직 시작 중입니다. 세션을 열기 전에 SessionStart 훅과 설정을 실행하므로, 느리거나 연결할 수 없는 훅이 있으면 이렇게 기다리게 됩니다."
+      },
+      "historyUnavailable": {
+        "title": "기록을 사용할 수 없음",
+        "reasonAgentCleanup": "{agent}이(가) {days}일이 지난 이 세션의 기록을 삭제했습니다.",
+        "reasonMissing": "이 세션의 에이전트 기록 파일이 더 이상 존재하지 않습니다.",
+        "consequence": "재개하거나 포크할 수 없습니다. 아래는 codeg가 검색용으로 저장한 텍스트입니다. 메시지만 담긴 부분 사본이며 도구 출력은 없습니다.",
+        "startNew": "이것으로 새 세션 시작",
+        "startNewHint": "이 폴더에서 새 {agent} 세션을 열고 저장된 텍스트를 입력창에 넣습니다. 보내기 전까지는 아무것도 전송되지 않습니다.",
+        "startNewHintNothingSaved": "이 폴더에서 새 {agent} 세션을 엽니다. 가져올 저장된 텍스트가 없습니다.",
+        "startNewFailed": "저장된 텍스트를 준비하지 못했습니다",
+        "savedCopyLabel": "저장된 사본 · {count, plural, =0 {메시지 없음} other {메시지 #개}} · 텍스트만",
+        "savedCopyAria": "저장된 메시지",
+        "loadingSaved": "저장된 사본을 불러오는 중…",
+        "loadFailed": "저장된 사본을 불러오지 못했습니다: {message}",
+        "nothingSaved": "codeg에 이 세션의 저장된 텍스트가 없습니다.",
+        "roleUser": "나",
+        "roleSystem": "시스템",
+        "untitled": "제목 없음",
+        "prefillInline": "이것은 {agent}에 더 이상 기록이 남아 있지 않은 이전 {agent} 세션 \"{title}\"의 연속입니다. 아래는 codeg가 그 세션에서 저장한 텍스트입니다. 메시지만 있고 도구 호출과 그 출력은 없습니다. 다음 요청의 맥락으로 참고해 주세요.",
+        "prefillAttached": "이것은 {agent}에 더 이상 기록이 남아 있지 않은 이전 {agent} 세션 \"{title}\"의 연속입니다. 첨부 파일에 codeg가 그 세션에서 저장한 텍스트가 있습니다. 메시지만 있고 도구 호출과 그 출력은 없습니다. 다음 요청의 맥락으로 참고해 주세요."
       }
     },
     "diffPreview": {
