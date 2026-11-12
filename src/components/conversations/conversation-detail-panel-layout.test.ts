@@ -43,8 +43,8 @@ const messageListViewSource = readFileSync(
 
 describe("ConversationDetailPanel new conversation layout", () => {
   it("keeps the new-conversation input in the welcome panel with the original scroll layout", () => {
-    expect(source).toContain(
-      "hideInput={isWelcomeMode || Boolean(acpLoadError)}"
+    expect(source).toMatch(
+      /hideInput=\{\s*isWelcomeMode \|\| Boolean\(acpLoadError\) \|\| historyUnavailable != null\s*\}/
     )
 
     const welcomeBranchStart = source.indexOf("{isWelcomeMode ? (")
@@ -638,8 +638,8 @@ describe("ConversationDetailPanel session-load failure surface", () => {
 
   it("docks the load error at the composer with the recovery actions", () => {
     // The composer input stays hidden (a send can't reach the dead session)…
-    expect(source).toContain(
-      "hideInput={isWelcomeMode || Boolean(acpLoadError)}"
+    expect(source).toMatch(
+      /hideInput=\{\s*isWelcomeMode \|\| Boolean\(acpLoadError\) \|\| historyUnavailable != null\s*\}/
     )
     // …and the banner takes its place, explaining why and offering recovery.
     // It outranks the outside-writer, usage-limit, interrupted-turn and
@@ -869,8 +869,8 @@ describe("ConversationDetailPanel while another process runs the session", () =>
     expect(source).toMatch(
       /awaitingHistoricalSessionId \|\| connectHeld \|\| outsideWriterHeld\)/
     )
-    expect(source).toContain(
-      "if (!unsentHeadRetries || connIsForOtherAgent || outsideWriterHeld) return"
+    expect(source).toMatch(
+      /!unsentHeadRetries \|\|\s+connIsForOtherAgent \|\|\s+outsideWriterHeld \|\|[\s\S]{0,200}?historyUnavailable != null\s*\)\s*return/
     )
   })
 
