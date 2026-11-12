@@ -6,6 +6,10 @@ import { ArrowUpCircle, Check, Sparkles } from "lucide-react"
 import { useLocale, useTranslations } from "next-intl"
 import { useAppUpdate } from "@/components/providers/update-provider"
 import { BusySessionList } from "@/components/layout/remote-update-confirm-dialog"
+import {
+  formatVersion,
+  useRunningVersions,
+} from "@/components/layout/running-versions"
 import { Button } from "@/components/ui/button"
 import {
   Popover,
@@ -135,6 +139,7 @@ export function StatusBarUpdate({
   const locale = useLocale()
   const [open, setOpen] = useState(false)
   const update = useAppUpdate(target)
+  const versions = useRunningVersions()
 
   if (!update) return null
 
@@ -271,6 +276,7 @@ export function StatusBarUpdate({
   // ─── Popover body ────────────────────────────────────────────────────────
 
   const targetVersion = available?.version ?? state.version
+  const arrow = targetVersion && !justUpdated ? ` → v${targetVersion}` : ""
   const formattedDate = (() => {
     if (!available?.date) return null
     const parsed = new Date(available.date)
@@ -351,13 +357,42 @@ export function StatusBarUpdate({
                   ? t("updateAvailableTitle")
                   : t("updateTitle")}
           </div>
-          <div className="flex items-center justify-between gap-2 text-2xs text-muted-foreground">
-            <span className="font-mono">
-              {currentVersion ? `v${currentVersion}` : "—"}
-              {targetVersion && !justUpdated ? ` → v${targetVersion}` : ""}
-            </span>
-            {formattedDate && <span>{formattedDate}</span>}
-          </div>
+          {versions.server ? (
+            // A remote window runs two builds — this app, and the server it
+            // works against — so both are named, and the one this popover
+            // updates carries the arrow. Each side's own controller supplies
+            // the version it updates.
+            <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-2 gap-y-0.5 text-2xs text-muted-foreground">
+              <dt>{t("versionThisApp")}</dt>
+              <dd className="flex items-baseline justify-between gap-2">
+                <span className="font-mono">
+                  {formatVersion(local ? currentVersion : versions.app)}
+                  {local ? arrow : ""}
+                </span>
+                {local && formattedDate && <span>{formattedDate}</span>}
+              </dd>
+              <dt className="max-w-[9rem] truncate">
+                {t("versionServer", { name: versions.server.name })}
+              </dt>
+              <dd className="flex items-baseline justify-between gap-2">
+                <span className="font-mono">
+                  {formatVersion(
+                    local ? versions.server.version : currentVersion
+                  )}
+                  {local ? "" : arrow}
+                </span>
+                {!local && formattedDate && <span>{formattedDate}</span>}
+              </dd>
+            </dl>
+          ) : (
+            <div className="flex items-center justify-between gap-2 text-2xs text-muted-foreground">
+              <span className="font-mono">
+                {formatVersion(currentVersion)}
+                {arrow}
+              </span>
+              {formattedDate && <span>{formattedDate}</span>}
+            </div>
+          )}
         </div>
 
         {showRail && (

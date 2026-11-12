@@ -57,6 +57,7 @@ import type { AppLocale } from "@/lib/types"
 import { readLastCheck } from "@/lib/update-check-storage"
 import { describeAppUpdateError, usesTauriUpdater } from "@/lib/updater"
 import { useAppUpdate } from "@/components/providers/update-provider"
+import { useRunningVersionsLine } from "@/components/layout/running-versions"
 import { APP_LOCALES } from "@/lib/i18n"
 import { toErrorMessage } from "@/lib/app-error"
 import type { AppCommandError } from "@/lib/types"
@@ -139,6 +140,7 @@ export function SystemNetworkSettings() {
   // workspace status bar always agree and only one manifest fetch happens. It
   // is always mounted inside the provider, hence the non-null assertion.
   const update = useAppUpdate()!
+  const runningVersionsLine = useRunningVersionsLine()
   const {
     state: updateState,
     isUpdating,
@@ -487,8 +489,15 @@ export function SystemNetworkSettings() {
           <div className="rounded-md border bg-muted/20 px-3 py-3 text-xs space-y-2">
             <div className="flex items-center justify-between gap-3">
               <p className="text-muted-foreground">
-                {t("currentVersion")}：
-                {currentVersion ? `v${currentVersion}` : "-"}
+                {/* A remote window's settings are about the server it works
+                    against: name both builds, or the server's version reads
+                    as this app's. */}
+                {runningVersionsLine ?? (
+                  <>
+                    {t("currentVersion")}：
+                    {currentVersion ? `v${currentVersion}` : "-"}
+                  </>
+                )}
               </p>
               {checkingUpdate ? (
                 <Button
