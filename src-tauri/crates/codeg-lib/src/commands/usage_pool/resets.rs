@@ -350,7 +350,7 @@ fn with_key(request: reqwest::RequestBuilder, config: &PoolConfig) -> reqwest::R
 
 /// Ask the pool for its accounts' resets, unless it is known not to have
 /// the route.
-pub(crate) async fn read_resets(config: &PoolConfig, version: Option<&str>, now: i64) -> ResetsRead {
+pub(super) async fn read_resets(config: &PoolConfig, version: Option<&str>, now: i64) -> ResetsRead {
     let pool = config.status_url.as_str();
     if support_known(pool, version) == Some(false) {
         return ResetsRead::Unsupported;
@@ -586,7 +586,7 @@ fn checked_name(raw: &str) -> Result<String, AppCommandError> {
         .ok_or_else(|| AppCommandError::invalid_input("Unknown account name."))
 }
 
-pub(crate) async fn redeem_with(
+pub(super) async fn redeem_with(
     config: &PoolConfig,
     name: &str,
     grant_id: Option<&str>,
@@ -613,7 +613,7 @@ pub(crate) async fn redeem_with(
     }
 }
 
-pub(crate) async fn recheck_with(config: &PoolConfig, name: &str) -> Result<(bool, bool), AppCommandError> {
+pub(super) async fn recheck_with(config: &PoolConfig, name: &str) -> Result<(bool, bool), AppCommandError> {
     let path = format!(
         "/maxpool/accounts/{}/recheck",
         url::form_urlencoded::byte_serialize(name.as_bytes())
