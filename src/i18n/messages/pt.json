@@ -1852,6 +1852,8 @@
   "AutoResumeSettings": {
     "title": "Retomar sessões interrompidas após reiniciar",
     "description": "Se o codeg fechar, travar ou reiniciar para uma atualização no meio de um turno, essas sessões são retomadas na próxima inicialização. Cada interrupção é retomada no máximo uma vez.",
+    "backgroundTitle": "Retomar também sessões cujo trabalho em segundo plano foi interrompido",
+    "backgroundDescription": "Uma sessão cujo turno tinha terminado, mas cujos subagentes, shells em segundo plano ou monitores ainda rodavam, fica sabendo o que o reinício interrompeu, para relançar o que ainda precisar.",
     "saveFailed": "Não foi possível salvar a configuração: {message}"
   },
   "LimitContinueSettings": {
@@ -1880,6 +1882,7 @@
     "stateStopped": "Parada",
     "stateSkipped": "Já continuada",
     "failedHint": "Ela continua interrompida; use Continuar para retomá-la manualmente.",
+    "failedHintBackground": "O trabalho em segundo plano continua parado; envie uma mensagem para retomá-la manualmente.",
     "dismiss": "Fechar"
   },
   "EditMessageSettings": {
@@ -3993,6 +3996,8 @@
         "outputLimitContinueHint": "Enviar “continue” para o agente retomar de onde a resposta parou",
         "resumedAfterRestart": "Retomada após reinício",
         "resumedAfterRestartHint": "O codeg reiniciou no meio deste turno e retomou a sessão por conta própria",
+        "resumedAfterRestartBackground": "Retomada após reinício · o trabalho em segundo plano foi interrompido",
+        "resumedAfterRestartBackgroundHint": "O turno já tinha terminado, mas o codeg reiniciou enquanto um trabalho em segundo plano iniciado por ele ainda rodava, e retomou a sessão por conta própria",
         "continuedAfterLimit": "Continuado após o limite ser redefinido",
         "continuedAfterLimitHint": "O limite de uso da conta foi redefinido e o codeg continuou a sessão sozinho"
       },

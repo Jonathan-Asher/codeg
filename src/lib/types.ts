@@ -4351,10 +4351,19 @@ export interface CloseRequestPayload {
 
 // --- Resume after restart ---
 
-/** "Resume interrupted sessions after restart" (Rust `AutoResumeSettings`). */
+/** "Resume interrupted sessions after restart" (Rust `AutoResumeSettings`),
+ *  and under it "Also resume sessions whose background work was stopped". */
 export interface AutoResumeSettings {
   enabled: boolean
+  /** Absent from a server that predates it, which never resumes them. */
+  background?: boolean
 }
+
+/** Why a session is in the resume batch (Rust
+ *  `ConversationAutoResumeReason`): `turn` — a turn was cut off;
+ *  `background` — the turn had ended and only its background work was
+ *  stopped. */
+export type AutoResumeReason = "turn" | "background"
 
 /** Where one conversation of a resume batch stands (Rust
  *  `AutoResumeItemState`). */
@@ -4373,6 +4382,8 @@ export interface AutoResumeItem {
   title: string | null
   state: AutoResumeItemState
   error: string | null
+  /** Absent from a server that predates it (every item was a turn). */
+  reason?: AutoResumeReason
 }
 
 /** The backend's resume batch for this start (Rust `AutoResumeStatus`).

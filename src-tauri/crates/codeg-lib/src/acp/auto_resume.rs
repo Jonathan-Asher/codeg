@@ -555,7 +555,7 @@ async fn resume_one(
         return;
     }
     let claimed = conversation_service::claim_auto_resume(&db.conn, cid).await;
-    if matches!(claimed, Ok(_)) {
+    if claimed.is_ok() {
         // Claimed, the work it names goes into this resume's prompt; taken by
         // someone else, it is history. Either way the row is left to record
         // what the session runs from now on.

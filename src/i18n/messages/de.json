@@ -1852,6 +1852,8 @@
   "AutoResumeSettings": {
     "title": "Unterbrochene Sitzungen nach einem Neustart fortsetzen",
     "description": "Wird codeg mitten in einer Runde beendet, stürzt ab oder startet für ein Update neu, werden diese Sitzungen beim nächsten Start fortgesetzt. Jede Unterbrechung wird höchstens einmal fortgesetzt.",
+    "backgroundTitle": "Auch Sitzungen fortsetzen, deren Hintergrundarbeit gestoppt wurde",
+    "backgroundDescription": "Eine Sitzung, deren Runde beendet war, deren Sub-Agenten, Hintergrund-Shells oder Monitore aber noch liefen, erfährt, was der Neustart gestoppt hat, und kann neu starten, was sie noch braucht.",
     "saveFailed": "Die Einstellung konnte nicht gespeichert werden: {message}"
   },
   "LimitContinueSettings": {
@@ -1880,6 +1882,7 @@
     "stateStopped": "Gestoppt",
     "stateSkipped": "Bereits fortgesetzt",
     "failedHint": "Sie bleibt unterbrochen; mit „Fortsetzen“ machst du von Hand weiter.",
+    "failedHintBackground": "Die Hintergrundarbeit bleibt gestoppt; mit einer Nachricht machst du von Hand weiter.",
     "dismiss": "Schließen"
   },
   "EditMessageSettings": {
@@ -3993,6 +3996,8 @@
         "outputLimitContinueHint": "„continue“ senden, damit der Agent dort weitermacht, wo die Antwort abbrach",
         "resumedAfterRestart": "Nach Neustart fortgesetzt",
         "resumedAfterRestartHint": "codeg wurde mitten in dieser Runde neu gestartet und hat die Sitzung von selbst fortgesetzt",
+        "resumedAfterRestartBackground": "Nach Neustart fortgesetzt · Hintergrundarbeit wurde gestoppt",
+        "resumedAfterRestartBackgroundHint": "Die Runde war beendet, aber codeg wurde neu gestartet, während von ihr gestartete Hintergrundarbeit noch lief, und hat die Sitzung von selbst fortgesetzt",
         "continuedAfterLimit": "Nach Zurücksetzen des Limits fortgesetzt",
         "continuedAfterLimitHint": "Das Nutzungslimit des Kontos wurde zurückgesetzt und codeg hat die Sitzung von selbst fortgesetzt"
       },

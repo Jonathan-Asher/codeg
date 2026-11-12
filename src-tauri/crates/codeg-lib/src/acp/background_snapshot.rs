@@ -469,21 +469,15 @@ impl SnapshotWriter {
                 (Some(fresh), Some(previous)) => previous.same_work(fresh),
                 _ => false,
             };
-            match fresh {
-                Some(fresh) => {
-                    running += 1;
-                    // Unchanged work keeps the time it was last confirmed
-                    // at until the heartbeat; changed work is seen now.
-                    if (refresh || !unchanged) && self.write(db, id, Some(&fresh)).await {
-                        written.insert(id, fresh);
-                    }
+            if let Some(fresh) = fresh {
+                running += 1;
+                // Unchanged work keeps the time it was last confirmed at
+                // until the heartbeat; changed work is seen now.
+                if (refresh || !unchanged) && self.write(db, id, Some(&fresh)).await {
+                    written.insert(id, fresh);
                 }
-                None if written.contains_key(&id) => {
-                    if self.write(db, id, None).await {
-                        written.remove(&id);
-                    }
-                }
-                None => {}
+            } else if written.contains_key(&id) && self.write(db, id, None).await {
+                written.remove(&id);
             }
         }
         running
