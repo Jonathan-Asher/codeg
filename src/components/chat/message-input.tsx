@@ -76,9 +76,15 @@ import type {
   PromptCapabilitiesInfo,
   PromptDraft,
   PromptInputBlock,
+  PromptSuggestionInfo,
   SessionConfigOptionInfo,
   SessionModeInfo,
 } from "@/lib/types"
+import {
+  parseSideQuestionCommand,
+  SIDE_QUESTION_COMMAND,
+  withSideQuestionCommand,
+} from "@/lib/side-question"
 import {
   ATTACH_FILE_TO_SESSION_EVENT,
   ATTACH_PAGE_TO_SESSION_EVENT,
@@ -345,6 +351,27 @@ interface MessageInputProps {
   injectContent?: ComposerInjectContent | null
   onInjectConsumed?: () => void
   /**
+   * `/btw` side questions (see `lib/side-question`), present only on a session
+   * that can answer one. The composer offers `/btw` in its `/` menu and hands
+   * a `/btw …` message here instead of sending it: it never goes to the agent
+   * as a prompt, into the message queue or into the running turn. An empty
+   * question (a bare `/btw`) reopens the answers.
+   */
+  onSideQuestion?: (question: string) => void
+  /** The side-question panel is open: Esc in the composer closes it. */
+  sideQuestionOpen?: boolean
+  onCloseSideQuestion?: () => void
+  /**
+   * The prompt Claude Code predicts the user sends next, shown as ghost text
+   * while the composer is empty. Tab takes it into the composer; typing hides
+   * it; a send drops it.
+   */
+  promptSuggestion?: PromptSuggestionInfo | null
+  /** The ghost text was on screen (reported once per prediction). */
+  onPromptSuggestionShown?: (id: number) => void
+  /** Tab took the prediction into the composer. */
+  onPromptSuggestionAccepted?: (id: number) => void
+  /**
    * Give the composer box the roomier floor, for the welcome (new-conversation)
    * input; active and historical conversations keep the compact default. Owned
    * here rather than passed as a `min-h-*` in `className` because the box's
@@ -515,6 +542,12 @@ export function MessageInput({
   injectContent,
   onInjectConsumed,
   getSentHistory,
+  onSideQuestion,
+  sideQuestionOpen = false,
+  onCloseSideQuestion,
+  promptSuggestion = null,
+  onPromptSuggestionShown,
+  onPromptSuggestionAccepted,
   tall = false,
 }: MessageInputProps) {
   const t = useTranslations("Folder.chat.messageInput")
@@ -534,13 +567,26 @@ export function MessageInput({
   // only ever saw global skills in the `$` autocomplete.
   const availableSkills = useAgentSkills(skillAgentType, defaultPath ?? null)
   const skillPrefix = agentType === "codex" ? "$" : "/"
+  // The `/` menu's commands: the agent's own, plus `/btw` on a session that
+  // answers side questions (codeg's entry — the agent does not list it).
+  const sideQuestionsOffered = onSideQuestion != null
+  const menuCommands = useMemo(
+    () =>
+      sideQuestionsOffered
+        ? withSideQuestionCommand(availableCommands, {
+            name: SIDE_QUESTION_COMMAND,
+            description: t("btwDescription"),
+            input_hint: t("btwHint"),
+          })
+        : availableCommands,
+    [sideQuestionsOffered, availableCommands, t]
+  )
   // Exactly what the `/`·`$` menu below can offer. Seeding or pasting text turns
   // a bare `/cmd`·`$skill` token into a badge only when it is on this list, so
   // prose the agent has no command for stays prose.
   const knownInvocations = useMemo(
-    () =>
-      buildKnownInvocations(availableCommands, availableSkills, skillPrefix),
-    [availableCommands, availableSkills, skillPrefix]
+    () => buildKnownInvocations(menuCommands, availableSkills, skillPrefix),
+    [menuCommands, availableSkills, skillPrefix]
   )
   // The hydration effects below read the list through this ref inside their
   // deferred frame, never from their dependency array. `buildKnownInvocations`
@@ -583,6 +629,11 @@ export function MessageInput({
   // The editor owns the content now; this mirror of its empty state drives the
   // send button and `hasSendableContent`.
   const [composerEmpty, setComposerEmpty] = useState(true)
+  // The prediction a send went past: hidden at once, before the turn's start
+  // clears it for every client (see `promptSuggestion`).
+  const [dismissedSuggestionId, setDismissedSuggestionId] = useState<
+    number | null
+  >(null)
   // Flips true once the RichComposer's async (immediatelyRender:false) editor has
   // mounted, so the hydration effect can use the imperative handle.
   const [composerReady, setComposerReady] = useState(false)
@@ -1088,10 +1139,7 @@ export function MessageInput({
     null
   )
   const [slashFilter, setSlashFilter] = useState("")
-  const slashCommands = useMemo(
-    () => availableCommands ?? [],
-    [availableCommands]
-  )
+  const slashCommands = useMemo(() => menuCommands ?? [], [menuCommands])
   const filteredSlashCommands = useMemo(() => {
     if (!slashMenuOpen || slashCommands.length === 0) return []
     if (slashTriggerChar !== "/") return []
@@ -1124,6 +1172,44 @@ export function MessageInput({
   // loading row, and that is also what makes it own the editor's nav keys.
   const slashMenuVisible =
     slashMenuOpen && (slashAutocompleteCount > 0 || slashLoading)
+
+  // ── Prompt suggestion (ghost text) ──
+  //
+  // Claude Code's predicted next prompt, drawn in the empty composer. Only
+  // where a prompt could be typed and sent from scratch: nothing typed or
+  // attached, no turn running, no queue item open, no menu over it.
+  const ghostSuggestion =
+    promptSuggestion &&
+    promptSuggestion.id !== dismissedSuggestionId &&
+    composerEmpty &&
+    !hasAttachments &&
+    !isPrompting &&
+    !disabled &&
+    !isEditingQueueItem &&
+    !slashMenuVisible
+      ? promptSuggestion
+      : null
+  const ghostSuggestionId = ghostSuggestion?.id ?? null
+  // Reported once per prediction, and only from the tab in front: a hidden
+  // tab's composer shows nothing to anyone.
+  const shownSuggestionIdRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (ghostSuggestionId == null || !isActive) return
+    if (shownSuggestionIdRef.current === ghostSuggestionId) return
+    shownSuggestionIdRef.current = ghostSuggestionId
+    onPromptSuggestionShown?.(ghostSuggestionId)
+  }, [ghostSuggestionId, isActive, onPromptSuggestionShown])
+  // Tab: the prediction becomes the composer's text, caret at its end, for
+  // the user to send or change.
+  const acceptGhostSuggestion = useCallback((): boolean => {
+    const handle = editorRef.current
+    if (!ghostSuggestion || !handle) return false
+    handle.setText(ghostSuggestion.text)
+    handle.focus()
+    syncComposerEmpty()
+    onPromptSuggestionAccepted?.(ghostSuggestion.id)
+    return true
+  }, [ghostSuggestion, syncComposerEmpty, onPromptSuggestionAccepted])
 
   // Keep the highlighted row inside the current result window. As the user
   // types and the filter narrows, the previously-highlighted index can point
@@ -1666,6 +1752,36 @@ export function MessageInput({
     historyDraftRef.current = null
   }, [clearAttachments, closeSlashMenu])
 
+  // `/btw …` is a side question, not a message: it goes to `onSideQuestion`
+  // whatever the session is doing — never to the agent as a prompt, into the
+  // queue or into the running turn — and the text leaves the composer. An
+  // attachment stays: it was put there for a message. True when the
+  // composer's text was a side question.
+  const takeSideQuestion = useCallback((): boolean => {
+    if (!onSideQuestion || isEditingQueueItem) return false
+    const editor = editorRef.current?.getEditor()
+    if (!editor) return false
+    const command = parseSideQuestionCommand(
+      serializeDocToDisplayText(editor.state.doc)
+    )
+    if (!command) return false
+    onSideQuestion(command.question)
+    editorRef.current?.clear()
+    setComposerEmpty(true)
+    closeSlashMenu()
+    historyIndexRef.current = null
+    historyDraftRef.current = null
+    if (effectiveDraftStorageKey) {
+      clearMessageInputDraftV2(effectiveDraftStorageKey)
+    }
+    return true
+  }, [
+    onSideQuestion,
+    isEditingQueueItem,
+    closeSlashMenu,
+    effectiveDraftStorageKey,
+  ])
+
   // Deliver a draft into a turn held open for background work (see
   // `lib/background-idle.ts`). Awaited like the mid-turn insert below: the
   // draft clears only once the backend confirms delivery. If the turn ended
@@ -1743,6 +1859,9 @@ export function MessageInput({
   )
 
   const handleSend = useCallback(() => {
+    // Before every gate below: a side question goes while the agent works,
+    // and while the session is still opening.
+    if (takeSideQuestion()) return
     // The editor stays editable while `disabled` (the agent is busy) so the user
     // can keep typing, but a plain send is blocked — only enqueue / queue-edit
     // save go through. Mirrors the legacy textarea's keydown guard.
@@ -1758,6 +1877,8 @@ export function MessageInput({
     }
     const draft = buildDraft()
     if (!draft) return
+    // Whatever goes out now replaces the prediction it was offered.
+    if (promptSuggestion) setDismissedSuggestionId(promptSuggestion.id)
 
     // Edit mode: save back to queue item
     if (isEditingQueueItem && onSaveQueueEdit) {
@@ -1794,6 +1915,8 @@ export function MessageInput({
     }
     resetComposer()
   }, [
+    takeSideQuestion,
+    promptSuggestion,
     disabled,
     hasUploadingImage,
     tAttach,
@@ -1817,6 +1940,7 @@ export function MessageInput({
   // sending now: the message waits for the whole turn, background work
   // included, instead of being delivered while the agent is idle.
   const handleQueueUntilTurnEnd = useCallback(() => {
+    if (takeSideQuestion()) return
     if (!onEnqueue) return
     if (hasUploadingImage) {
       toast.error(tAttach("attachUploadInProgress"))
@@ -1829,6 +1953,7 @@ export function MessageInput({
     })
     resetComposer()
   }, [
+    takeSideQuestion,
     onEnqueue,
     hasUploadingImage,
     tAttach,
@@ -1855,6 +1980,7 @@ export function MessageInput({
   // hydrate from yet), since the enqueue fallback below bypasses its gate.
   const [steering, setSteering] = useState(false)
   const handleSteerClick = useCallback(async () => {
+    if (takeSideQuestion()) return
     if (!onSteer || steering) return
     if (hasUploadingImage) {
       toast.error(tAttach("attachUploadInProgress"))
@@ -1904,6 +2030,7 @@ export function MessageInput({
       setSteering(false)
     }
   }, [
+    takeSideQuestion,
     onSteer,
     steering,
     hasUploadingImage,
@@ -2074,9 +2201,28 @@ export function MessageInput({
       ) {
         e.preventDefault()
         onCancelQueueEdit()
+        return
+      }
+      // Esc closes the side-question panel above the composer. Marked handled,
+      // so the window-level Esc (taking back a pending action, stopping read
+      // aloud) leaves it alone.
+      if (
+        sideQuestionOpen &&
+        e.key === "Escape" &&
+        !slashMenuVisible &&
+        onCloseSideQuestion
+      ) {
+        e.preventDefault()
+        onCloseSideQuestion()
       }
     },
-    [isEditingQueueItem, slashMenuVisible, onCancelQueueEdit]
+    [
+      isEditingQueueItem,
+      slashMenuVisible,
+      onCancelQueueEdit,
+      sideQuestionOpen,
+      onCloseSideQuestion,
+    ]
   )
 
   // Clicking (or tapping) the input's empty chrome — its padding, the blank
@@ -2613,8 +2759,14 @@ export function MessageInput({
               />
               <RichComposer
                 ref={editorRef}
-                placeholder={resolvedPlaceholder}
+                // The ghost text takes the placeholder's place while it shows.
+                placeholder={ghostSuggestion ? "" : resolvedPlaceholder}
                 ariaLabel={resolvedPlaceholder}
+                ghostText={ghostSuggestion?.text ?? null}
+                ghostHint={t("suggestionTabHint")}
+                onTabAccept={
+                  ghostSuggestion ? acceptGhostSuggestion : undefined
+                }
                 autoFocus={autoFocus}
                 referenceSearch={referenceSearch}
                 mentionUiLabels={mentionUiLabels}

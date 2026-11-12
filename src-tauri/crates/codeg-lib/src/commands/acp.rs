@@ -10442,6 +10442,11 @@ pub(crate) async fn build_session_runtime_env(
         runtime_env.insert(OPENCLAW_RESET_SESSION_ENV.into(), "1".into());
     }
 
+    // "Claude prompt suggestions" off: the session's requests ask Claude Code
+    // for no prediction (see `acp::prompt_suggestions`). Read at every
+    // connect, so a change reaches each session the next time it connects.
+    crate::acp::prompt_suggestions::stamp_launch(&db.conn, agent_type, &mut runtime_env).await;
+
     // The conversation's title as the Claude Code or Pi session's display name
     // (see `acp::session_name`). Only when reopening a session a row is bound
     // to: a brand-new session has no title yet and keeps the agent's own name
@@ -10478,6 +10483,9 @@ fn is_volatile_fingerprint_key(key: &str) -> bool {
     key == OPENCLAW_RESET_SESSION_ENV
         || key == crate::acp::session_persistence::SESSION_PERSISTENCE_ENV
         || key == crate::acp::session_name::SESSION_NAME_ENV
+        // Applies at the next connect by design (the setting says so), so it
+        // must not flag running sessions as stale either.
+        || key == crate::acp::prompt_suggestions::PROMPT_SUGGESTIONS_ENV
 }
 
 /// Fingerprint the effective config a spawned agent process is locked to: the
@@ -16633,6 +16641,14 @@ wire_api = "chat"
             let mut env_volatile = env.clone();
             env_volatile.insert("OPENCLAW_RESET_SESSION".to_string(), "1".to_string());
             assert_eq!(fp1, fingerprint_config(agent, &env_volatile));
+
+            // Turning prompt suggestions off applies at the next connect, as
+            // the setting says: it must not flag running sessions as stale.
+            let mut env_suggestions_off = env.clone();
+            crate::acp::prompt_suggestions::PromptSuggestions::mark_off(
+                &mut env_suggestions_off,
+            );
+            assert_eq!(fp1, fingerprint_config(agent, &env_suggestions_off));
         });
     }
 

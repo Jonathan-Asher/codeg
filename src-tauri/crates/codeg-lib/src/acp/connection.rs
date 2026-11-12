@@ -50,6 +50,7 @@ use crate::acp::file_system_runtime::{
     FileSystemRuntime, FileSystemRuntimeError, FsAccessPolicy, FS_POLICY_ENV,
 };
 use crate::acp::host_tools_policy::{HostToolsPolicy, HOST_TOOLS_ENV};
+use crate::acp::prompt_suggestions::{PromptSuggestions, SuggestingSession};
 use crate::acp::registry::{self, AgentDistribution};
 use crate::acp::session_persistence::SessionPersistence;
 use crate::acp::session_state::SessionState;
@@ -1301,7 +1302,51 @@ pub enum ConnectionCommand {
         task_id: String,
         reply: tokio::sync::oneshot::Sender<Result<bool, AcpError>>,
     },
+    /// Ask a side question (`_codeg/side_question`, Claude Code's `/btw`; see
+    /// `acp::side_question`). Handled in BOTH loops, and never awaited by the
+    /// loop itself: the request runs in a task of its own
+    /// ([`spawn_side_question`]), because an answer can take a minute and the
+    /// running turn's permission replies, steers and cancel must not wait
+    /// behind it. It starts no turn and the turn in flight goes on.
+    SideQuestion {
+        question: String,
+        history: Vec<crate::acp::side_question::SideQuestionExchange>,
+        reply: tokio::sync::oneshot::Sender<
+            Result<crate::acp::side_question::SideQuestionReply, AcpError>,
+        >,
+    },
     Disconnect,
+}
+
+/// Run a side question in a task of its own and hand its outcome to `reply`
+/// (see [`ConnectionCommand::SideQuestion`]). The task owns a clone of the
+/// connection, so it outlives neither the agent process nor the runtime: a
+/// connection that goes away fails the request, and the reply says so.
+fn spawn_side_question(
+    cx: &ConnectionTo<Agent>,
+    session_id: &SessionId,
+    question: String,
+    history: Vec<crate::acp::side_question::SideQuestionExchange>,
+    reply: tokio::sync::oneshot::Sender<
+        Result<crate::acp::side_question::SideQuestionReply, AcpError>,
+    >,
+    timeout: std::time::Duration,
+) {
+    let cx = cx.clone();
+    let session_id = session_id.clone();
+    tokio::spawn(async move {
+        let outcome = crate::acp::side_question::send_side_question(
+            &cx,
+            &session_id,
+            &question,
+            &history,
+            timeout,
+        )
+        .await;
+        // A dead receiver is fine: whoever asked went away, and the
+        // question is already answered or cancelled.
+        let _ = reply.send(outcome);
+    });
 }
 
 /// Sentinel string embedded in a `agent_client_protocol::Error` when the Initialize
@@ -3270,6 +3315,10 @@ pub async fn spawn_agent_connection(
         env_pinned_config_option_ids(agent_type, &runtime_env);
     initial_state.keeps_transcript =
         SessionPersistence::from_env(&runtime_env) == SessionPersistence::Default;
+    // The prompt-suggestion setting as it stands at this connect (stamped by
+    // `build_session_runtime_env`); `run_connection` puts it on every request
+    // that opens the session.
+    initial_state.prompt_suggestions = PromptSuggestions::from_env(&runtime_env);
     // A speculative connection has no owner until a client opens the session
     // and claims it through the connect dedup.
     initial_state.speculative = speculative;
@@ -6655,6 +6704,10 @@ async fn run_connection(
             ))),
     );
     let cwd_string = cwd.to_string_lossy().to_string();
+    // Whether this launch asks Claude Code for prompt suggestions, stamped on
+    // the state at spawn (see `acp::prompt_suggestions`): every request that
+    // opens the session carries it.
+    let prompt_suggestions = state.read().await.prompt_suggestions;
     // The connection's security posture in one place, so what a live session
     // actually enforces is readable from the log rather than inferred.
     tracing::info!(
@@ -7501,6 +7554,31 @@ async fn run_connection(
             )
             .await;
 
+            // codeg's own extensions (`agentCapabilities._meta.codeg`): only
+            // codeg's claude-agent-acp build offers them, so every other
+            // adapter emits nothing here and its snapshot stays as it was.
+            let codeg_extensions = crate::acp::side_question::CodegExtensions::from_agent_capabilities_meta(
+                init_resp.agent_capabilities.meta.as_ref(),
+            );
+            if codeg_extensions != crate::acp::side_question::CodegExtensions::default() {
+                tracing::info!(
+                    "[ACP][{}] codeg extensions: side_question={}, prompt_suggestions={} (requested: {})",
+                    agent_type,
+                    codeg_extensions.side_question,
+                    codeg_extensions.prompt_suggestions,
+                    state.read().await.prompt_suggestions.describe()
+                );
+                emit_with_state(
+                    &state,
+                    &emitter_clone,
+                    AcpEvent::CodegExtensions {
+                        side_question: codeg_extensions.side_question,
+                        prompt_suggestions: codeg_extensions.prompt_suggestions,
+                    },
+                )
+                .await;
+            }
+
             // Emit connected status early so the frontend can show cached
             // selectors and enable sending while the session initialises.
             // Prompts sent before run_conversation_loop are buffered in
@@ -7536,7 +7614,8 @@ async fn run_connection(
                         &cwd,
                         mcp_servers.clone(),
                     )
-                    .named_for(agent_type, session_name.as_deref());
+                    .named_for(agent_type, session_name.as_deref())
+                    .prompt_suggestions(prompt_suggestions);
                     attach.enter(AttachPhase::Resuming).await;
                     let resume_result = match attach.run(send_resume_session(&cx, resume_req)).await {
                         Ok(result) => result,
@@ -7682,7 +7761,8 @@ async fn run_connection(
                         &cwd,
                         mcp_servers.clone(),
                     )
-                    .named_for(agent_type, session_name.as_deref());
+                    .named_for(agent_type, session_name.as_deref())
+                    .prompt_suggestions(prompt_suggestions);
                     attach.enter(AttachPhase::Loading).await;
                     match attach
                         .run(cx.send_request_to(Agent, load_req).block_task())
@@ -8011,7 +8091,8 @@ async fn run_connection(
                                     mcp_servers.clone(),
                                     session_persistence,
                                 )
-                                .named_for(agent_type, session_name.as_deref()),
+                                .named_for(agent_type, session_name.as_deref())
+                                .prompt_suggestions(prompt_suggestions),
                             ))
                             .await
                         {
@@ -8129,7 +8210,8 @@ async fn run_connection(
                             mcp_servers.clone(),
                             session_persistence,
                         )
-                        .named_for(agent_type, session_name.as_deref()),
+                        .named_for(agent_type, session_name.as_deref())
+                        .prompt_suggestions(prompt_suggestions),
                     ))
                     .await
                 {
@@ -10984,12 +11066,14 @@ async fn handle_fork_or_exit(
     // fork response exactly as before. Neither is worse off than it was before
     // this call existed.
     let resumed = if supports_resume {
+        let prompt_suggestions = state.read().await.prompt_suggestions;
         let resume_req = build_resume_session_request(
             agent_type,
             SessionId::new(new_sid.clone()),
             cwd,
             mcp_servers.to_vec(),
-        );
+        )
+        .prompt_suggestions(prompt_suggestions);
         match send_resume_session(&cx, resume_req).await {
             Ok(pair) => Some(pair),
             Err(e) => {
@@ -12834,6 +12918,26 @@ async fn run_conversation_loop(
                                         send_stop_async_task_request(&cx, &sid, &task_id).await,
                                     );
                                 }
+                                Some(ConnectionCommand::SideQuestion {
+                                    question,
+                                    history,
+                                    reply,
+                                }) => {
+                                    // The case `/btw` exists for: asked while
+                                    // the agent works. Not awaited here, unlike
+                                    // the controls above: an answer can take a
+                                    // minute, and this turn's permission
+                                    // replies, steers and cancel must not queue
+                                    // behind it. The turn is not touched.
+                                    spawn_side_question(
+                                        &cx,
+                                        &sid,
+                                        question,
+                                        history,
+                                        reply,
+                                        crate::acp::side_question::side_question_timeout(),
+                                    );
+                                }
                                 Some(ConnectionCommand::Cancel) => {
                                     flush_held_auth_failures(state, emitter, &mut cb_state).await;
                                     // Send CancelNotification to agent to stop the current turn
@@ -13086,6 +13190,22 @@ async fn run_conversation_loop(
                 let cx = session.connection();
                 let sid = session.session_id().clone();
                 let _ = reply.send(send_stop_async_task_request(&cx, &sid, &task_id).await);
+            }
+            Some(ConnectionCommand::SideQuestion {
+                question,
+                history,
+                reply,
+            }) => {
+                // Between turns: the same task of its own as mid-turn, so a
+                // prompt sent while the answer is on its way starts at once.
+                spawn_side_question(
+                    &session.connection(),
+                    session.session_id(),
+                    question,
+                    history,
+                    reply,
+                    crate::acp::side_question::side_question_timeout(),
+                );
             }
             Some(ConnectionCommand::Cancel) => {
                 let cx = session.connection();
@@ -16644,6 +16764,36 @@ async fn maybe_emit_ext_notification(
             return;
         }
     };
+
+    // codeg's own claude-agent-acp: the prompt Claude Code predicts next. It
+    // lands a few seconds after a turn ends, so it reaches the idle loop as
+    // often as this one.
+    if notification.method() == crate::acp::prompt_suggestions::PROMPT_SUGGESTION_METHOD {
+        match crate::acp::prompt_suggestions::parse_notification(&notification.params) {
+            Some(text) => {
+                let conversation_id = state.read().await.conversation_id;
+                let suggestion =
+                    text.map(|text| crate::acp::prompt_suggestions::PromptSuggestion {
+                        id: crate::acp::prompt_suggestions::next_suggestion_id(),
+                        text,
+                    });
+                emit_with_state(
+                    state,
+                    emitter,
+                    AcpEvent::PromptSuggestion {
+                        suggestion,
+                        conversation_id,
+                    },
+                )
+                .await;
+            }
+            None => tracing::debug!(
+                agent = %agent_type,
+                "[ACP] ignoring a prompt suggestion with unreadable params"
+            ),
+        }
+        return;
+    }
 
     // The CURRENT connection status decides whether a grok `subagent_progress`
     // tick may touch the live tool call — the same Prompting predicate the
@@ -24733,6 +24883,84 @@ mod tests {
         assert!(codex.meta.is_none());
     }
 
+    /// "Claude prompt suggestions" off reaches Claude Code on every request
+    /// that opens a session — new, load and resume, the requests the adapter
+    /// builds its options from — next to the session name and the private
+    /// session's option, exactly as the call sites in `run_connection` chain
+    /// them. On, the requests are what they always were.
+    #[test]
+    fn the_prompt_suggestion_setting_reaches_every_session_opening_request() {
+        let cwd = std::path::PathBuf::from("/tmp/codeg");
+        let off = |meta: Option<&agent_client_protocol::schema::v1::Meta>| {
+            let meta = serde_json::Value::Object(meta.cloned().expect("claude meta"));
+            assert_eq!(
+                meta["claudeCode"]["options"]["promptSuggestions"],
+                serde_json::json!(false),
+                "{meta}"
+            );
+            assert_eq!(
+                meta["claudeCode"]["options"]["extraArgs"]["name"],
+                serde_json::json!("Release prep")
+            );
+            assert_eq!(meta["claudeCode"]["emitRawSDKMessages"], serde_json::json!(true));
+        };
+        let new_req = build_new_session_request(
+            AgentType::ClaudeCode,
+            &cwd,
+            Vec::new(),
+            SessionPersistence::Off,
+        )
+        .named_for(AgentType::ClaudeCode, Some("Release prep"))
+        .prompt_suggestions(PromptSuggestions::Off);
+        off(new_req.meta.as_ref());
+        assert_eq!(
+            serde_json::to_value(&new_req).unwrap()["_meta"]["claudeCode"]["options"]
+                ["persistSession"],
+            serde_json::json!(false)
+        );
+        let load_req = build_load_session_request(
+            AgentType::ClaudeCode,
+            SessionId::new("abc".to_string()),
+            &cwd,
+            Vec::new(),
+        )
+        .named_for(AgentType::ClaudeCode, Some("Release prep"))
+        .prompt_suggestions(PromptSuggestions::Off);
+        off(load_req.meta.as_ref());
+        let resume_req = build_resume_session_request(
+            AgentType::ClaudeCode,
+            SessionId::new("abc".to_string()),
+            &cwd,
+            Vec::new(),
+        )
+        .named_for(AgentType::ClaudeCode, Some("Release prep"))
+        .prompt_suggestions(PromptSuggestions::Off);
+        off(resume_req.meta.as_ref());
+
+        // On (the default): nothing changes, so a session keeps its warm
+        // process when the setting was never touched.
+        let plain = build_resume_session_request(
+            AgentType::ClaudeCode,
+            SessionId::new("abc".to_string()),
+            &cwd,
+            Vec::new(),
+        );
+        assert_eq!(
+            serde_json::to_value(plain.clone().prompt_suggestions(PromptSuggestions::Default))
+                .unwrap(),
+            serde_json::to_value(plain).unwrap()
+        );
+        // Other agents never get it.
+        let codex = build_load_session_request(
+            AgentType::Codex,
+            SessionId::new("abc".to_string()),
+            &cwd,
+            Vec::new(),
+        )
+        .prompt_suggestions(PromptSuggestions::Off);
+        assert!(codex.meta.is_none());
+    }
+
     /// Pi takes the conversation title as `_meta.piAcp.sessionName` on every
     /// session-establishing request, and nothing without a name.
     #[test]
@@ -30328,5 +30556,383 @@ mod claude_auth_retry_tests {
         state.write().await.turn_in_flight = true;
         end_stranded_auth_retry(&state, &EventEmitter::Noop, AgentType::ClaudeCode).await;
         assert!(state.read().await.turn_in_flight);
+    }
+}
+
+/// Side questions (`/btw`, see `acp::side_question`) against a mock agent over
+/// the real runtime: the request on the wire, its cancellation when codeg
+/// stops waiting, an adapter that has no such method, and — over the real
+/// conversation loop — a question asked while a turn runs.
+#[cfg(test)]
+mod side_question_tests {
+    use super::*;
+    use crate::acp::side_question::{send_side_question, SideQuestionExchange};
+    use std::sync::atomic::AtomicUsize;
+    use std::time::Duration;
+
+    /// `_codeg/side_question` as the mock agent receives it.
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, JsonRpcRequest)]
+    #[request(method = "_codeg/side_question", response = serde_json::Value)]
+    #[serde(transparent)]
+    struct SideQuestionWire(serde_json::Value);
+
+    #[tokio::test]
+    async fn a_side_question_goes_out_with_its_history_and_the_answer_comes_back() {
+        let (client_end, agent_end) = agent_client_protocol::Channel::duplex();
+        let seen: Arc<std::sync::Mutex<Option<serde_json::Value>>> = Arc::default();
+        let agent = tokio::spawn({
+            let seen = Arc::clone(&seen);
+            Agent
+                .builder()
+                .on_receive_request(
+                    async move |req: SideQuestionWire,
+                                responder: Responder<serde_json::Value>,
+                                _cx: ConnectionTo<Client>| {
+                        *seen.lock().unwrap() = Some(req.0);
+                        responder.respond(serde_json::json!({
+                            "response": "Because the cache is warm.",
+                            "synthetic": false,
+                        }))
+                    },
+                    on_receive_request!(),
+                )
+                .connect_to(agent_end)
+        });
+
+        let reply = Client
+            .builder()
+            .connect_with(client_end, async |cx: ConnectionTo<Agent>| {
+                let history = [SideQuestionExchange {
+                    question: "what changed?".into(),
+                    answer: "the parser".into(),
+                }];
+                Ok(send_side_question(
+                    &cx,
+                    &SessionId::new("s1"),
+                    "why is it fast?",
+                    &history,
+                    Duration::from_secs(5),
+                )
+                .await)
+            })
+            .await
+            .expect("client connection");
+        agent.abort();
+
+        let reply = reply.expect("answered");
+        assert_eq!(reply.answer.as_deref(), Some("Because the cache is warm."));
+        assert!(!reply.synthetic);
+        assert_eq!(
+            seen.lock().unwrap().clone().expect("the agent got the question"),
+            serde_json::json!({
+                "sessionId": "s1",
+                "question": "why is it fast?",
+                "history": [{"question": "what changed?", "answer": "the parser"}],
+            })
+        );
+    }
+
+    /// Claude Code would wait 11 minutes; codeg stops at its own timeout and
+    /// tells the adapter with `$/cancel_request`, so the question is aborted
+    /// rather than left running.
+    #[tokio::test]
+    async fn a_side_question_past_the_timeout_is_cancelled_on_the_wire() {
+        let (client_end, agent_end) = agent_client_protocol::Channel::duplex();
+        let (cancelled_tx, cancelled_rx) = oneshot::channel::<()>();
+        let cancelled_tx = Arc::new(std::sync::Mutex::new(Some(cancelled_tx)));
+        let agent = tokio::spawn(
+            Agent
+                .builder()
+                .on_receive_request(
+                    async move |_req: SideQuestionWire,
+                                responder: Responder<serde_json::Value>,
+                                _cx: ConnectionTo<Client>| {
+                        // Never answers on its own: only a cancellation ends it.
+                        let cancellation = responder.cancellation();
+                        let told = cancelled_tx.lock().unwrap().take();
+                        tokio::spawn(async move {
+                            cancellation.cancelled().await;
+                            if let Some(told) = told {
+                                let _ = told.send(());
+                            }
+                            let _ = responder.respond_with_error(
+                                agent_client_protocol::Error::request_cancelled(),
+                            );
+                        });
+                        Ok(())
+                    },
+                    on_receive_request!(),
+                )
+                .connect_to(agent_end),
+        );
+
+        let (outcome, told) = Client
+            .builder()
+            .connect_with(client_end, async move |cx: ConnectionTo<Agent>| {
+                let outcome = send_side_question(
+                    &cx,
+                    &SessionId::new("s1"),
+                    "still there?",
+                    &[],
+                    Duration::from_millis(200),
+                )
+                .await;
+                // Keep the connection up until the cancellation reached the
+                // agent (or clearly never will).
+                let told = tokio::time::timeout(Duration::from_secs(5), cancelled_rx)
+                    .await
+                    .is_ok();
+                Ok((outcome, told))
+            })
+            .await
+            .expect("client connection");
+        agent.abort();
+
+        assert!(
+            matches!(outcome, Err(AcpError::SideQuestionTimedOut { .. })),
+            "{outcome:?}"
+        );
+        assert!(told, "the agent must be told to stop the question");
+    }
+
+    /// An adapter that does not know the method (the registry's
+    /// claude-agent-acp, an older build) answers -32601: that session cannot
+    /// answer side questions at all.
+    #[tokio::test]
+    async fn an_adapter_without_the_method_cannot_answer() {
+        let (client_end, agent_end) = agent_client_protocol::Channel::duplex();
+        let agent = tokio::spawn(Agent.builder().connect_to(agent_end));
+        let outcome = Client
+            .builder()
+            .connect_with(client_end, async |cx: ConnectionTo<Agent>| {
+                Ok(send_side_question(
+                    &cx,
+                    &SessionId::new("s1"),
+                    "anyone?",
+                    &[],
+                    Duration::from_secs(3),
+                )
+                .await)
+            })
+            .await
+            .expect("client connection");
+        agent.abort();
+        assert!(
+            matches!(outcome, Err(AcpError::SideQuestionUnsupported)),
+            "{outcome:?}"
+        );
+    }
+
+    /// The case `/btw` exists for, over the real conversation loop: asked while
+    /// a turn runs, it is answered while the prompt is still pending, the agent
+    /// is never told to cancel the turn, and the turn then ends on its own.
+    /// Asked again between turns, it is answered there too.
+    ///
+    /// On a thread with the connection's stack (see
+    /// `ACP_CONNECTION_STACK_SIZE`): the loop's debug poll frame does not fit a
+    /// test thread's default stack.
+    #[test]
+    fn a_side_question_mid_turn_is_answered_and_leaves_the_turn_alone() {
+        std::thread::Builder::new()
+            .name("side-question-mid-turn".into())
+            .stack_size(ACP_CONNECTION_STACK_SIZE)
+            .spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("runtime")
+                    .block_on(side_question_mid_turn())
+            })
+            .expect("thread")
+            .join()
+            .expect("the scenario passed");
+    }
+
+    async fn side_question_mid_turn() {
+        use agent_client_protocol::schema::v1::PromptResponse;
+
+        let (client_end, agent_end) = agent_client_protocol::Channel::duplex();
+        let (turn_started_tx, turn_started_rx) = oneshot::channel::<()>();
+        let (release_tx, release_rx) = oneshot::channel::<()>();
+        let turn_started_tx = Arc::new(std::sync::Mutex::new(Some(turn_started_tx)));
+        let release_rx = Arc::new(std::sync::Mutex::new(Some(release_rx)));
+        let cancels = Arc::new(AtomicUsize::new(0));
+        let questions = Arc::new(AtomicUsize::new(0));
+
+        let agent = tokio::spawn({
+            let cancels = Arc::clone(&cancels);
+            let questions = Arc::clone(&questions);
+            Agent
+                .builder()
+                .on_receive_request(
+                    async move |_req: PromptRequest,
+                                responder: Responder<PromptResponse>,
+                                _cx: ConnectionTo<Client>| {
+                        if let Some(started) = turn_started_tx.lock().unwrap().take() {
+                            let _ = started.send(());
+                        }
+                        // The turn runs until the test releases it.
+                        let release = release_rx.lock().unwrap().take();
+                        tokio::spawn(async move {
+                            if let Some(release) = release {
+                                let _ = release.await;
+                            }
+                            let _ = responder.respond(PromptResponse::new(StopReason::EndTurn));
+                        });
+                        Ok(())
+                    },
+                    on_receive_request!(),
+                )
+                .on_receive_request(
+                    async move |_req: SideQuestionWire,
+                                responder: Responder<serde_json::Value>,
+                                _cx: ConnectionTo<Client>| {
+                        questions.fetch_add(1, Ordering::SeqCst);
+                        responder.respond(serde_json::json!({
+                            "response": "It is reading the config.",
+                            "synthetic": false,
+                        }))
+                    },
+                    on_receive_request!(),
+                )
+                .on_receive_notification(
+                    async move |_notification: CancelNotification, _cx: ConnectionTo<Client>| {
+                        cancels.fetch_add(1, Ordering::SeqCst);
+                        Ok(())
+                    },
+                    on_receive_notification!(),
+                )
+                .connect_to(agent_end)
+        });
+
+        let state = Arc::new(RwLock::new(SessionState::new(
+            "conn-btw".to_string(),
+            AgentType::ClaudeCode,
+            None,
+            "win".to_string(),
+            None,
+        )));
+        let (cmd_tx, mut cmd_rx) = mpsc::channel::<ConnectionCommand>(8);
+
+        // The test's side of the session, in a task of its own: the loop below
+        // runs on this thread (its future is not `Send`). A failed assertion
+        // drops `cmd_tx`, which ends the loop instead of hanging the test.
+        let driver = tokio::spawn({
+            let state = Arc::clone(&state);
+            let cancels = Arc::clone(&cancels);
+            let questions = Arc::clone(&questions);
+            async move {
+                let ask = |question: &str| {
+                    let (reply_tx, reply_rx) = oneshot::channel();
+                    (
+                        ConnectionCommand::SideQuestion {
+                            question: question.to_string(),
+                            history: Vec::new(),
+                            reply: reply_tx,
+                        },
+                        reply_rx,
+                    )
+                };
+                let within = Duration::from_secs(5);
+
+                cmd_tx
+                    .send(ConnectionCommand::Prompt {
+                        blocks: vec![PromptInputBlock::Text {
+                            text: "refactor the parser".into(),
+                        }],
+                        user_message: None,
+                        talk: PromptTalk::default(),
+                    })
+                    .await
+                    .expect("the loop takes the prompt");
+                tokio::time::timeout(within, turn_started_rx)
+                    .await
+                    .expect("the turn reached the agent")
+                    .expect("signal");
+                assert_eq!(state.read().await.status, ConnectionStatus::Prompting);
+
+                let (command, reply) = ask("what is it doing?");
+                cmd_tx.send(command).await.expect("the loop takes it mid-turn");
+                let answer = tokio::time::timeout(within, reply)
+                    .await
+                    .expect("answered while the turn runs")
+                    .expect("a reply")
+                    .expect("an answer");
+                assert_eq!(answer.answer.as_deref(), Some("It is reading the config."));
+                assert_eq!(
+                    state.read().await.status,
+                    ConnectionStatus::Prompting,
+                    "the turn is still running"
+                );
+                assert_eq!(cancels.load(Ordering::SeqCst), 0, "the turn was not cancelled");
+
+                // The turn ends on its own.
+                release_tx.send(()).expect("release the turn");
+                tokio::time::timeout(within, async {
+                    while state.read().await.status == ConnectionStatus::Prompting {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .expect("the turn ended");
+                assert_eq!(state.read().await.status, ConnectionStatus::Connected);
+                assert_eq!(cancels.load(Ordering::SeqCst), 0);
+
+                // Between turns it is answered too.
+                let (command, reply) = ask("and now?");
+                cmd_tx.send(command).await.expect("the idle loop takes it");
+                let answer = tokio::time::timeout(within, reply)
+                    .await
+                    .expect("answered between turns")
+                    .expect("a reply")
+                    .expect("an answer");
+                assert!(answer.answer.is_some());
+                assert_eq!(questions.load(Ordering::SeqCst), 2);
+
+                cmd_tx
+                    .send(ConnectionCommand::Disconnect)
+                    .await
+                    .expect("disconnect");
+            }
+        });
+
+        let loop_state = Arc::clone(&state);
+        let ended = tokio::time::timeout(
+            Duration::from_secs(30),
+            Client
+                .builder()
+                .connect_with(client_end, async move |cx: ConnectionTo<Agent>| {
+                    let mut session =
+                        AgentSession::attach(&cx, NewSessionResponse::new(SessionId::new("s1")))?;
+                    let perms = PendingPermissions::default();
+                    let ledger = background_watch::PromptLedger::shared();
+                    let stderr_tail = Arc::new(StderrTail::new());
+                    let terminal_runtime =
+                        Arc::new(TerminalRuntime::with_base_env(BTreeMap::new()));
+                    let exit = run_conversation_loop(
+                        &mut session,
+                        "conn-btw",
+                        &EventEmitter::Noop,
+                        &loop_state,
+                        AgentType::ClaudeCode,
+                        &perms,
+                        &mut cmd_rx,
+                        terminal_runtime,
+                        "/tmp",
+                        false,
+                        &ledger,
+                        None,
+                        &stderr_tail,
+                    )
+                    .await?;
+                    Ok(exit.is_none())
+                }),
+        )
+        .await
+        .expect("the loop ended")
+        .expect("client connection");
+        driver.await.expect("the scenario's assertions held");
+        assert!(ended, "a plain exit, no fork");
+        agent.abort();
     }
 }

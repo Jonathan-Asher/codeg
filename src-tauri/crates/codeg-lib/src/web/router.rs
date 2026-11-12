@@ -1109,6 +1109,34 @@ pub fn build_router(
             post(handlers::acp::acp_stop_async_task),
         )
         .route(
+            "/acp_side_question",
+            post(handlers::side_question::acp_side_question),
+        )
+        .route(
+            "/acp_list_side_questions",
+            post(handlers::side_question::acp_list_side_questions),
+        )
+        .route(
+            "/acp_clear_side_questions",
+            post(handlers::side_question::acp_clear_side_questions),
+        )
+        .route(
+            "/acp_report_prompt_suggestion",
+            post(handlers::side_question::acp_report_prompt_suggestion),
+        )
+        .route(
+            "/get_prompt_suggestion_settings",
+            post(handlers::side_question::get_prompt_suggestion_settings),
+        )
+        .route(
+            "/update_prompt_suggestion_settings",
+            post(handlers::side_question::update_prompt_suggestion_settings),
+        )
+        .route(
+            "/get_prompt_suggestion_stats",
+            post(handlers::side_question::get_prompt_suggestion_stats),
+        )
+        .route(
             "/acp_respond_permission",
             post(handlers::acp::acp_respond_permission),
         )

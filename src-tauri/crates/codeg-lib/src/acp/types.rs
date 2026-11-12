@@ -508,6 +508,25 @@ pub enum AcpEvent {
         #[serde(default)]
         while_running: bool,
     },
+    /// The codeg extensions the adapter offers
+    /// (`agentCapabilities._meta.codeg`, see
+    /// `acp::side_question::CodegExtensions`). Emitted once at initialize, and
+    /// only by an adapter that offers one: the composer offers `/btw` only on a
+    /// session that can answer it.
+    CodegExtensions {
+        side_question: bool,
+        prompt_suggestions: bool,
+    },
+    /// The prompt Claude Code expects the user to send next, predicted after a
+    /// turn (see `acp::prompt_suggestions`), or `None`: the prediction shown so
+    /// far no longer applies. The session keeps the latest for the snapshot.
+    /// `conversation_id` is the conversation the session served when it
+    /// arrived, for clients that track predictions by conversation.
+    PromptSuggestion {
+        suggestion: Option<crate::acp::prompt_suggestions::PromptSuggestion>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        conversation_id: Option<i32>,
+    },
     /// Current session mode changed
     ModeChanged { mode_id: String },
     /// Agent reported plan update for current turn

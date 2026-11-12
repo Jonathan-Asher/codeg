@@ -11,6 +11,7 @@ import type {
   PendingPlanApprovalState,
   PendingQuestionState,
   PromptCapabilitiesInfo,
+  PromptSuggestionInfo,
   SessionConfigOptionInfo,
   SessionFailureRecord,
   SessionModeStateInfo,
@@ -67,6 +68,11 @@ export interface SnapshotPatch {
   supportsFork: boolean
   forkStrictPoint: boolean
   forkWhileRunning: boolean
+  /** The adapter answers `/btw` side questions. `false` when the server
+   *  omitted it. */
+  sideQuestion: boolean
+  /** The latest prompt suggestion, `null` when there is none. */
+  promptSuggestion: PromptSuggestionInfo | null
   /** Whether the running session is on stale (launch-time) config — recovered
    *  from the snapshot so a reconnect/refresh/new tile sees the banner state
    *  that the one-shot `session_config_stale` event won't replay. */
@@ -179,6 +185,8 @@ export function denormalizeSnapshot(wire: LiveSessionSnapshot): SnapshotPatch {
     supportsFork: wire.fork_supported,
     forkStrictPoint: wire.fork_strict_point ?? false,
     forkWhileRunning: wire.fork_while_running ?? false,
+    sideQuestion: wire.side_question_supported ?? false,
+    promptSuggestion: wire.prompt_suggestion ?? null,
     configStale: wire.config_stale ?? false,
     configStaleKind: wire.config_stale_kind ?? null,
     backgroundOutstanding: wire.background_outstanding ?? 0,

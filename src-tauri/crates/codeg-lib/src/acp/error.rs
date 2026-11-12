@@ -147,6 +147,24 @@ pub enum AcpError {
     /// message (Tauri hands a command's error over as its message alone).
     #[error("{0} [history_unavailable]")]
     HistoryUnavailable(String),
+    /// A side question (`/btw`) was asked of a session whose agent cannot
+    /// answer one: its adapter did not advertise `_codeg/side_question`
+    /// (`agentCapabilities._meta.codeg.sideQuestion`), which only codeg's own
+    /// claude-agent-acp build does.
+    #[error("this agent cannot answer side questions")]
+    SideQuestionUnsupported,
+    /// A side question got no answer in time (see `acp::side_question`).
+    /// codeg cancelled it with `$/cancel_request`; the session is untouched.
+    #[error("The side question got no answer within {secs} seconds, so codeg cancelled it. Try again, or ask in the conversation.")]
+    SideQuestionTimedOut { secs: u64 },
+    /// The agent could not answer the side question. Carries its own words:
+    /// Claude Code not running for the session, the question failing, a
+    /// cancellation.
+    #[error("{0}")]
+    SideQuestionFailed(String),
+    /// The side question is empty or too long. Carries which.
+    #[error("invalid side question: {0}")]
+    InvalidSideQuestion(String),
 }
 
 impl AcpError {
@@ -209,6 +227,10 @@ impl AcpError {
             Self::PoolExhausted { .. } => Some("pool_exhausted"),
             Self::SessionRunningElsewhere { .. } => Some("session_running_elsewhere"),
             Self::HistoryUnavailable(_) => Some("history_unavailable"),
+            Self::SideQuestionUnsupported => Some("side_question_unsupported"),
+            Self::SideQuestionTimedOut { .. } => Some("side_question_timed_out"),
+            Self::SideQuestionFailed(_) => Some("side_question_failed"),
+            Self::InvalidSideQuestion(_) => Some("invalid_side_question"),
             Self::Protocol(_) => None,
         }
     }

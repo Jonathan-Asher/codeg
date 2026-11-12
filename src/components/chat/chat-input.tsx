@@ -9,10 +9,13 @@ import type {
   PromptCapabilitiesInfo,
   PromptDraft,
   PromptInputBlock,
+  PromptSuggestionInfo,
   SessionConfigOptionInfo,
   SessionModeInfo,
   AvailableCommandInfo,
 } from "@/lib/types"
+import type { SideQuestionController } from "@/hooks/use-side-question"
+import { SideQuestionPanel } from "@/components/chat/side-question-panel"
 import type { QueuedMessage, RequeueOptions } from "@/hooks/use-message-queue"
 import {
   MessageInput,
@@ -130,6 +133,14 @@ interface ChatInputProps {
   allowOfflineCompose?: boolean
   injectContent?: ComposerInjectContent | null
   onInjectConsumed?: () => void
+  /** `/btw` side questions on this session (see `useSideQuestion`): the panel
+   *  above the composer and the composer's `/btw`. Absent where the session
+   *  cannot answer one. */
+  sideQuestion?: SideQuestionController | null
+  /** Pass-through: see `MessageInput.promptSuggestion`. */
+  promptSuggestion?: PromptSuggestionInfo | null
+  onPromptSuggestionShown?: (id: number) => void
+  onPromptSuggestionAccepted?: (id: number) => void
   /** Drop the input's own horizontal padding when an ancestor already supplies
    *  the gutter (the welcome column wraps this in its own `px-4`). */
   flush?: boolean
@@ -192,6 +203,10 @@ export const ChatInput = memo(function ChatInput({
   allowOfflineCompose = false,
   injectContent,
   onInjectConsumed,
+  sideQuestion = null,
+  promptSuggestion = null,
+  onPromptSuggestionShown,
+  onPromptSuggestionAccepted,
   flush = false,
   tall = false,
 }: ChatInputProps) {
@@ -258,6 +273,17 @@ export const ChatInput = memo(function ChatInput({
             steerChannel={steerChannel}
           />
         )}
+      {sideQuestion && (
+        <SideQuestionPanel
+          panel={sideQuestion.panel}
+          onClose={sideQuestion.close}
+          onStep={sideQuestion.step}
+          onRetry={sideQuestion.retry}
+          onCopy={sideQuestion.copy}
+          onClear={sideQuestion.clear}
+          onContinueInFork={sideQuestion.continueInFork}
+        />
+      )}
       <MessageInput
         onSend={onSend}
         promptCapabilities={promptCapabilities}
@@ -305,6 +331,12 @@ export const ChatInput = memo(function ChatInput({
         feedbackAddDisabled={feedbackAddDisabled}
         injectContent={injectContent}
         onInjectConsumed={onInjectConsumed}
+        onSideQuestion={sideQuestion?.ask}
+        sideQuestionOpen={sideQuestion?.panel.open ?? false}
+        onCloseSideQuestion={sideQuestion?.close}
+        promptSuggestion={promptSuggestion}
+        onPromptSuggestionShown={onPromptSuggestionShown}
+        onPromptSuggestionAccepted={onPromptSuggestionAccepted}
         placeholder={
           isConnecting
             ? connectingReason

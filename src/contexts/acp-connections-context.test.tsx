@@ -7410,3 +7410,98 @@ describe("AcpConnectionsProvider last stop reason", () => {
     expect(h.store!.getConnection(TAB)?.lastStopReason).toBe("max_tokens")
   })
 })
+
+// `/btw` side questions and prompt suggestions on the connection state: the
+// capability latches from its one-time event or a snapshot, and the latest
+// prediction is kept until a prompt goes out.
+describe("codeg extensions and prompt suggestions", () => {
+  async function connectOwner(): Promise<AttachHandlers> {
+    h.acpFindConnectionForConversation.mockResolvedValue(null)
+    h.acpGetAgentStatus.mockResolvedValue({
+      agent_type: "claude_code",
+      enabled: true,
+      available: true,
+      installed_version: "1.0.0",
+      host_tools_agent_mode: false,
+      is_acp_adapter: true,
+    })
+    await mountProvider()
+    await act(async () => {
+      await h.actions!.connect(TAB, "claude_code", "/tmp/x", "sess-1", 42)
+    })
+    return latestAttachHandlers()
+  }
+
+  const prediction = (seq: number, id: number, text: string) =>
+    ({
+      seq,
+      connection_id: "spawned-conn",
+      type: "prompt_suggestion",
+      suggestion: { id, text },
+    }) as unknown as EventEnvelope
+
+  it("offers side questions once the adapter says it answers them", async () => {
+    const handlers = await connectOwner()
+    expect(h.store!.getConnection(TAB)?.sideQuestion ?? false).toBe(false)
+    emitAcpEvent(handlers, {
+      seq: 1,
+      connection_id: "spawned-conn",
+      type: "codeg_extensions",
+      side_question: true,
+      prompt_suggestions: true,
+    } as unknown as EventEnvelope)
+    expect(h.store!.getConnection(TAB)?.sideQuestion).toBe(true)
+  })
+
+  it("keeps the latest prediction until a prompt goes out", async () => {
+    const handlers = await connectOwner()
+    emitAcpEvent(handlers, prediction(1, 4, "run the tests"))
+    expect(h.store!.getConnection(TAB)?.promptSuggestion).toEqual({
+      id: 4,
+      text: "run the tests",
+    })
+    emitAcpEvent(handlers, prediction(2, 5, "commit it"))
+    expect(h.store!.getConnection(TAB)?.promptSuggestion?.id).toBe(5)
+    emitAcpEvent(handlers, {
+      seq: 3,
+      connection_id: "spawned-conn",
+      type: "status_changed",
+      status: "prompting",
+    })
+    expect(h.store!.getConnection(TAB)?.promptSuggestion).toBeNull()
+    // One that lands while the turn is held open (the agent is idle, its
+    // background work runs) is kept for when the turn ends.
+    emitAcpEvent(handlers, prediction(4, 6, "check the build"))
+    expect(h.store!.getConnection(TAB)?.promptSuggestion?.id).toBe(6)
+  })
+
+  it("clears the prediction when the agent says it no longer applies", async () => {
+    const handlers = await connectOwner()
+    emitAcpEvent(handlers, prediction(1, 4, "run the tests"))
+    emitAcpEvent(handlers, {
+      seq: 2,
+      connection_id: "spawned-conn",
+      type: "prompt_suggestion",
+      suggestion: null,
+    } as unknown as EventEnvelope)
+    expect(h.store!.getConnection(TAB)?.promptSuggestion).toBeNull()
+  })
+
+  it("recovers both from a snapshot for a client that attached later", async () => {
+    const handlers = await connectOwner()
+    h.denormalizeSnapshot.mockReturnValue({
+      ...snapshotBase(),
+      eventSeq: 5,
+      sideQuestion: true,
+      promptSuggestion: { id: 9, text: "run the tests" },
+    })
+    hydrateSnapshot(handlers, {
+      event_seq: 5,
+    } as unknown as LiveSessionSnapshot)
+    expect(h.store!.getConnection(TAB)?.sideQuestion).toBe(true)
+    expect(h.store!.getConnection(TAB)?.promptSuggestion).toEqual({
+      id: 9,
+      text: "run the tests",
+    })
+  })
+})

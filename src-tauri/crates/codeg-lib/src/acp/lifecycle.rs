@@ -161,6 +161,12 @@ fn is_lifecycle_relevant(event: &AcpEvent) -> bool {
                 activity_at: Some(_),
                 ..
             }
+            // A prompt suggestion arrived: counted (see
+            // `acp::prompt_suggestions`). At most one per turn.
+            | AcpEvent::PromptSuggestion {
+                suggestion: Some(_),
+                ..
+            }
     )
 }
 
@@ -613,6 +619,17 @@ pub(crate) async fn handle_event(
         }
         // Other events don't need cross-connection DB persistence today; extend
         // this dispatcher with new arms as the lifecycle scope grows.
+        AcpEvent::PromptSuggestion {
+            suggestion: Some(_),
+            ..
+        } => {
+            crate::acp::prompt_suggestions::bump(
+                db_conn,
+                &[crate::acp::prompt_suggestions::RECEIVED_COUNTER_KEY],
+            )
+            .await;
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
@@ -2252,6 +2269,37 @@ mod tests {
         }
     }
 
+    /// Every prompt suggestion that arrives adds one to the `received`
+    /// counter; a clear adds nothing.
+    #[tokio::test]
+    async fn handle_event_counts_prompt_suggestions_received() {
+        use crate::acp::prompt_suggestions::{load_stats, PromptSuggestion};
+        let db = test_helpers::fresh_in_memory_db().await;
+        let mgr = ConnectionManager::new();
+        let event = |suggestion: Option<PromptSuggestion>| EventEnvelope {
+            seq: 1,
+            connection_id: "c1".to_string(),
+            payload: AcpEvent::PromptSuggestion {
+                suggestion,
+                conversation_id: None,
+            },
+        };
+        let prediction = || {
+            Some(PromptSuggestion {
+                id: 1,
+                text: "run the tests".into(),
+            })
+        };
+        handle_event(&db.conn, &mgr, &event(prediction()), None)
+            .await
+            .unwrap();
+        handle_event(&db.conn, &mgr, &event(None), None).await.unwrap();
+        handle_event(&db.conn, &mgr, &event(prediction()), None)
+            .await
+            .unwrap();
+        assert_eq!(load_stats(&db.conn).await.received, 2);
+    }
+
     #[tokio::test]
     async fn handle_event_writes_external_id_when_conversation_bound() {
         let db = test_helpers::fresh_in_memory_db().await;
@@ -3403,6 +3451,18 @@ mod tests {
         }));
         assert!(!is_lifecycle_relevant(&AcpEvent::StatusChanged {
             status: ConnectionStatus::Connected,
+        }));
+        // A prompt suggestion is counted when it arrives; a clear is not.
+        assert!(is_lifecycle_relevant(&AcpEvent::PromptSuggestion {
+            suggestion: Some(crate::acp::prompt_suggestions::PromptSuggestion {
+                id: 1,
+                text: "run the tests".into(),
+            }),
+            conversation_id: None,
+        }));
+        assert!(!is_lifecycle_relevant(&AcpEvent::PromptSuggestion {
+            suggestion: None,
+            conversation_id: None,
         }));
         // ToolCall / ToolCallUpdate are NO LONGER worker-relevant: delegation
         // tool_call_id capture moved to the dispatcher loop

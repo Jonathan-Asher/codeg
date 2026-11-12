@@ -9,6 +9,7 @@ import type {
   PromptCapabilitiesInfo,
   PromptDraft,
   PromptInputBlock,
+  PromptSuggestionInfo,
   QuestionAnswer,
   SessionConfigOptionInfo,
   SessionFailureRecord,
@@ -33,6 +34,7 @@ import { QuestionDialog } from "@/components/chat/question-dialog"
 import { AskQuestionCard } from "@/components/chat/ask-question-card"
 import { PlanApprovalCard } from "@/components/chat/plan-approval-card"
 import type { PromptCardDock } from "@/hooks/use-prompt-card-resize"
+import type { SideQuestionController } from "@/hooks/use-side-question"
 
 interface ConversationShellProps {
   status: ConnectionStatus | null
@@ -177,6 +179,12 @@ interface ConversationShellProps {
    *  once the composer has taken it. */
   injectContent?: ComposerInjectContent | null
   onInjectConsumed?: () => void
+  /** Pass-through: see `ChatInputProps.sideQuestion`. */
+  sideQuestion?: SideQuestionController | null
+  /** Pass-through: see `MessageInput.promptSuggestion`. */
+  promptSuggestion?: PromptSuggestionInfo | null
+  onPromptSuggestionShown?: (id: number) => void
+  onPromptSuggestionAccepted?: (id: number) => void
 }
 
 export function ConversationShell({
@@ -248,6 +256,10 @@ export function ConversationShell({
   topBanner,
   injectContent,
   onInjectConsumed,
+  sideQuestion,
+  promptSuggestion,
+  onPromptSuggestionShown,
+  onPromptSuggestionAccepted,
 }: ConversationShellProps) {
   // The blocking cards below the thread grow upwards into it, and only by
   // what it can spare (see `usePromptCardResize`).
@@ -384,6 +396,10 @@ export function ConversationShell({
               feedbackAddDisabled={feedbackAddDisabled}
               injectContent={injectContent}
               onInjectConsumed={onInjectConsumed}
+              sideQuestion={sideQuestion}
+              promptSuggestion={promptSuggestion}
+              onPromptSuggestionShown={onPromptSuggestionShown}
+              onPromptSuggestionAccepted={onPromptSuggestionAccepted}
             />
           </div>
         )}

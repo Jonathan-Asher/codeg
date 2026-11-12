@@ -1864,6 +1864,13 @@
     "description": "Wenn eine Runde stoppt, weil dein Konto sein Nutzungslimit erreicht hat, wird die Sitzung kurz nach dem Zurücksetzen von selbst fortgesetzt – ohne offenes Fenster und auch nach einem Neustart. Höchstens 3 Versuche pro Pause.",
     "saveFailed": "Die Einstellung konnte nicht gespeichert werden: {message}"
   },
+  "PromptSuggestionSettings": {
+    "title": "Prompt-Vorschläge von Claude",
+    "description": "Nach jeder Runde sagt Claude Code den Prompt voraus, den Sie wahrscheinlich als Nächstes senden, und zeigt ihn grau im leeren Eingabefeld; mit Tab übernehmen Sie ihn. Jeder Vorschlag kostet in jeder Runde eine zusätzliche Anfrage mit dem gesamten Kontext der Unterhaltung.",
+    "appliesNextConnect": "Eine Änderung gilt für jede Sitzung ab ihrer nächsten Verbindung; bereits offene Sitzungen behalten bis dahin ihre aktuelle Einstellung.",
+    "stats": "Bisher: {received} erhalten, {shown} angezeigt, {accepted} übernommen.",
+    "saveFailed": "Die Einstellung konnte nicht gespeichert werden: {message}"
+  },
   "LimitContinueSession": {
     "heading": "Nutzungslimit",
     "toggle": "Fortsetzen, wenn das Nutzungslimit zurückgesetzt wird",
@@ -3646,7 +3653,10 @@
         "mentionGroupAgent": "Agenten",
         "mentionGroupSession": "Sitzungen",
         "mentionGroupCommit": "Commits",
-        "mentionGroupSkill": "Fähigkeiten"
+        "mentionGroupSkill": "Fähigkeiten",
+        "btwDescription": "Eine Nebenfrage stellen: aus dieser Unterhaltung ohne Werkzeuge beantwortet, während der Agent weiterarbeitet, und nicht Teil der Unterhaltung",
+        "btwHint": "Frage",
+        "suggestionTabHint": "Tab"
       },
       "messageQueue": {
         "outsideWriter": "Wird gesendet, sobald der andere Prozess fertig ist und codeg verbunden ist.",
@@ -3674,6 +3684,31 @@
         "notSentGaveUp": "Schlägt weiter fehl — tippe auf Wiederholen",
         "retryItem": "Jetzt erneut senden",
         "retry": "Erneut versuchen"
+      },
+      "sideQuestion": {
+        "title": "Nebenfrage",
+        "notInConversation": "Nicht Teil der Unterhaltung",
+        "previous": "Frühere Nebenfrage",
+        "next": "Spätere Nebenfrage",
+        "position": "{current} / {total}",
+        "copy": "Antwort kopieren",
+        "copied": "Antwort kopiert",
+        "copyFailed": "Die Antwort konnte nicht kopiert werden",
+        "continueInFork": "In einer Abzweigung fortsetzen",
+        "continueInForkHint": "Diese Unterhaltung in eine neue abzweigen, mit dieser Frage und Antwort im Eingabefeld, wo der Agent seine Werkzeuge hat",
+        "clearHistory": "Nebenfragen löschen",
+        "clearConfirm": "Alle Nebenfragen dieser Unterhaltung löschen?",
+        "clear": "Löschen",
+        "cancel": "Abbrechen",
+        "clearFailed": "Die Nebenfragen konnten nicht gelöscht werden: {error}",
+        "close": "Schließen",
+        "closeHint": "Schließen (Esc)",
+        "empty": "Noch keine Nebenfragen. Tippen Sie /btw und eine Frage.",
+        "thinking": "Denkt nach…",
+        "failed": "Die Nebenfrage konnte nicht beantwortet werden.",
+        "retry": "Erneut versuchen",
+        "notice": "Hinweis von Claude Code",
+        "noAnswer": "Claude Code hat nicht geantwortet."
       },
       "welcomeInputPanel": {
         "agentsSettingsPath": "Einstellungen > Agenten",

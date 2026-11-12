@@ -55,6 +55,7 @@ import { TalkSettingsSection } from "@/components/settings/talk-settings"
 import { TalkMacSettingsSection } from "@/components/settings/talk-mac-settings"
 import { ResumeAfterRestartSettingsSection } from "@/components/settings/resume-after-restart-settings"
 import { LimitContinueSettingsSection } from "@/components/settings/limit-continue-settings"
+import { PromptSuggestionSettingsSection } from "@/components/settings/prompt-suggestion-settings"
 import { QuickAskSettingsSection } from "@/components/settings/quick-ask-settings"
 import { SearchSettingsSection } from "@/components/settings/search-settings"
 
@@ -540,6 +541,9 @@ export function GeneralSettings() {
 
         {/* What the account's usage limit does to the turns it stops. */}
         <LimitContinueSettingsSection />
+
+        {/* Claude Code's predicted next prompt in the empty composer. */}
+        <PromptSuggestionSettingsSection />
 
         {/* The two halves of "how Codeg gets my attention", adjacent on
             purpose: one leaves the window, one does not. */}

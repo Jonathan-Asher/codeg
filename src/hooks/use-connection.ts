@@ -23,6 +23,7 @@ import type {
   PendingPlanApprovalState,
   PendingQuestionState,
   PromptCapabilitiesInfo,
+  PromptSuggestionInfo,
   QuestionAnswer,
   SessionConfigOptionInfo,
   AsyncTaskRecord,
@@ -80,6 +81,12 @@ export interface UseConnectionReturn {
   forkStrictPoint: boolean
   /** See `ConnectionState.forkWhileRunning`. */
   forkWhileRunning: boolean
+  /** The session answers `/btw` side questions (see
+   *  `ConnectionState.sideQuestion`). */
+  sideQuestionSupported: boolean
+  /** The predicted next prompt for the empty composer, or null (see
+   *  `ConnectionState.promptSuggestion`). */
+  promptSuggestion: PromptSuggestionInfo | null
   selectorsReady: boolean
   hasCachedSelectors: boolean
   sessionId: string | null
@@ -307,6 +314,8 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   const supportsFork = connection?.supportsFork ?? false
   const forkStrictPoint = connection?.forkStrictPoint ?? false
   const forkWhileRunning = connection?.forkWhileRunning ?? false
+  const sideQuestionSupported = connection?.sideQuestion ?? false
+  const promptSuggestion = connection?.promptSuggestion ?? null
   const selectorsReady = connection?.selectorsReady ?? false
   const sessionId = connection?.sessionId ?? null
   const cached = connection?.agentType
@@ -454,6 +463,8 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       supportsFork,
       forkStrictPoint,
       forkWhileRunning,
+      sideQuestionSupported,
+      promptSuggestion,
       selectorsReady,
       hasCachedSelectors,
       sessionId,
@@ -507,6 +518,8 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       supportsFork,
       forkStrictPoint,
       forkWhileRunning,
+      sideQuestionSupported,
+      promptSuggestion,
       selectorsReady,
       hasCachedSelectors,
       sessionId,

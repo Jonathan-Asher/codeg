@@ -11,6 +11,10 @@ import {
   forkTabAnchor,
   type ConversationForkBlock,
 } from "@/lib/fork-conversation"
+import {
+  buildConversationDraftStorageKey,
+  saveMessageInputDraft,
+} from "@/lib/message-input-draft"
 import { notify } from "@/lib/notify"
 import type { AgentType } from "@/lib/types"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
@@ -42,24 +46,43 @@ export function useForkBlockLabel(): (block: ConversationForkBlock) => string {
  * goes when the forked conversation's tab opens, or turns into why the fork
  * was refused (a passing notice) or failed (an error, kept in the alerts).
  */
-export function useForkConversation(): (conversation: {
-  id: number
-  agent_type: AgentType
-}) => void {
+export function useForkConversation(): (
+  conversation: {
+    id: number
+    agent_type: AgentType
+  },
+  options?: {
+    /** What the forked conversation's composer starts with (the side
+     *  question's "Continue in a fork"). Saved as its draft before its tab
+     *  opens, so the composer loads it like any draft. */
+    draft?: string
+  }
+) => void {
   const t = useTranslations("Folder.conversationCard")
   const blockLabel = useForkBlockLabel()
   const refreshConversations = useAppWorkspaceStore(
     (s) => s.refreshConversations
   )
   return useCallback(
-    (conversation: { id: number; agent_type: AgentType }) => {
+    (
+      conversation: { id: number; agent_type: AgentType },
+      options?: { draft?: string }
+    ) => {
       const key = `fork-conversation:${conversation.id}`
       toast.loading(t("forking"), { id: key })
       forkConversation({
         conversationId: conversation.id,
         agentType: conversation.agent_type,
         besideTabId: forkTabAnchor(conversation.id),
-        onNewConversation: () => void refreshConversations(),
+        onNewConversation: (result) => {
+          if (options?.draft) {
+            saveMessageInputDraft(
+              buildConversationDraftStorageKey(result.conversationId),
+              options.draft
+            )
+          }
+          void refreshConversations()
+        },
       })
         .then(() => toast.dismiss(key))
         .catch((err: unknown) => {

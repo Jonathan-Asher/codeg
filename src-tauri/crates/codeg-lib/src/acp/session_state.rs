@@ -823,6 +823,27 @@ pub struct SessionState {
     /// is still running as far as every client knows, so the restart's
     /// attach keeps quiet about the connection going back to `Connected`.
     pub claude_auth_respawning: bool,
+
+    /// The codeg extensions this connection's adapter advertised at
+    /// initialize (`/btw` side questions, prompt suggestions; see
+    /// `acp::side_question::CodegExtensions`). Set by `CodegExtensions`;
+    /// carried on `to_snapshot()` so the composer offers `/btw` only where a
+    /// side question can be answered.
+    pub codeg_extensions: crate::acp::side_question::CodegExtensions,
+    /// Whether this launch asks Claude Code for prompt suggestions (the
+    /// setting as it stood at connect, see `acp::prompt_suggestions`). Read
+    /// when the session's requests are built. Backend-internal.
+    pub prompt_suggestions: crate::acp::prompt_suggestions::PromptSuggestions,
+    /// The latest prompt suggestion, until a prompt, a clear or another
+    /// session replaces it (`PromptSuggestion`). Carried on `to_snapshot()` so
+    /// a client that attaches after it arrived still shows it.
+    pub prompt_suggestion: Option<crate::acp::prompt_suggestions::PromptSuggestion>,
+    /// The newest prediction id this connection published: a report naming a
+    /// later one is ignored. Backend-internal.
+    pub prompt_suggestion_latest_id: u64,
+    /// Which predictions have been counted as shown and accepted, so several
+    /// clients count one prediction once. Backend-internal.
+    pub prompt_suggestion_reports: crate::acp::prompt_suggestions::SuggestionReports,
 }
 
 impl SessionState {
@@ -915,7 +936,24 @@ impl SessionState {
             claude_auth_respawn: None,
             claude_auth_retry_prompt: None,
             claude_auth_respawning: false,
+            codeg_extensions: crate::acp::side_question::CodegExtensions::default(),
+            prompt_suggestions: crate::acp::prompt_suggestions::PromptSuggestions::Default,
+            prompt_suggestion: None,
+            prompt_suggestion_latest_id: 0,
+            prompt_suggestion_reports: Default::default(),
         }
+    }
+
+    /// Count a client's report about prediction `id` (see
+    /// `acp::prompt_suggestions::SuggestionReports`): the `app_metadata`
+    /// counters it adds to, none for a repeat.
+    pub fn record_prompt_suggestion_report(
+        &mut self,
+        id: u64,
+        action: crate::acp::prompt_suggestions::SuggestionAction,
+    ) -> Vec<&'static str> {
+        let latest = self.prompt_suggestion_latest_id;
+        self.prompt_suggestion_reports.record(id, action, latest)
     }
 
     /// A context compaction that completed summarized the talk rules away
@@ -1034,6 +1072,8 @@ impl SessionState {
                     // accepted between turns.
                     self.async_tasks.clear();
                     self.async_task_activity_at = None;
+                    // A prediction was for the session we just left.
+                    self.prompt_suggestion = None;
                 }
                 self.external_id = Some(session_id.clone());
                 self.status = ConnectionStatus::Connected;
@@ -1059,6 +1099,9 @@ impl SessionState {
                     // Same scope: the previous turn's ending no longer
                     // describes the session.
                     self.last_stop_reason = None;
+                    // The prediction was for the prompt that has now been
+                    // sent (or outrun); Claude Code clears it too, a beat later.
+                    self.prompt_suggestion = None;
                 }
                 if matches!(
                     status,
@@ -1130,6 +1173,22 @@ impl SessionState {
                 self.fork_supported = *supported;
                 self.fork_strict_point = *supported && *strict_point;
                 self.fork_while_running = *supported && *while_running;
+            }
+            AcpEvent::CodegExtensions {
+                side_question,
+                prompt_suggestions,
+            } => {
+                self.codeg_extensions = crate::acp::side_question::CodegExtensions {
+                    side_question: *side_question,
+                    prompt_suggestions: *prompt_suggestions,
+                };
+            }
+            AcpEvent::PromptSuggestion { suggestion, .. } => {
+                if let Some(suggestion) = suggestion {
+                    self.prompt_suggestion_latest_id =
+                        self.prompt_suggestion_latest_id.max(suggestion.id);
+                }
+                self.prompt_suggestion = suggestion.clone();
             }
             AcpEvent::AvailableCommands { commands } => {
                 self.available_commands = commands.clone();
@@ -2383,6 +2442,9 @@ impl SessionState {
             attach_phase: self.attach_phase,
             attach_elapsed_ms: self.attach_elapsed_ms(),
             pool_resumes_at: self.attach_pool_resumes_at,
+            side_question_supported: self.codeg_extensions.side_question,
+            prompt_suggestions_supported: self.codeg_extensions.prompt_suggestions,
+            prompt_suggestion: self.prompt_suggestion.clone(),
             event_seq: self.event_seq,
         }
     }
@@ -2560,6 +2622,19 @@ pub struct LiveSessionSnapshot {
     /// held-back account frees up (epoch seconds), if known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pool_resumes_at: Option<i64>,
+    /// The adapter answers `/btw` side questions (see
+    /// `SessionState.codeg_extensions`). Skipped when `false` so every other
+    /// session's snapshot keeps its shape; `#[serde(default)]` for older
+    /// payloads.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub side_question_supported: bool,
+    /// The adapter publishes prompt suggestions. Same treatment.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub prompt_suggestions_supported: bool,
+    /// The latest prompt suggestion (see `SessionState.prompt_suggestion`),
+    /// omitted while there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_suggestion: Option<crate::acp::prompt_suggestions::PromptSuggestion>,
     pub event_seq: u64,
 }
 
@@ -5901,6 +5976,113 @@ mod tests {
         assert!(
             !empty.contains("\"feedback\":"),
             "no-feedback snapshot must omit the notes array"
+        );
+    }
+
+    fn prediction(id: u64, text: &str) -> AcpEvent {
+        AcpEvent::PromptSuggestion {
+            suggestion: Some(crate::acp::prompt_suggestions::PromptSuggestion {
+                id,
+                text: text.to_string(),
+            }),
+            conversation_id: Some(7),
+        }
+    }
+
+    #[test]
+    fn the_latest_prompt_suggestion_is_kept_for_a_client_that_attaches_later() {
+        let mut s = fresh_state();
+        s.apply_event(&prediction(3, "run the tests"));
+        s.apply_event(&prediction(4, "commit it"));
+        let snap = s.to_snapshot();
+        assert_eq!(
+            snap.prompt_suggestion,
+            Some(crate::acp::prompt_suggestions::PromptSuggestion {
+                id: 4,
+                text: "commit it".into()
+            })
+        );
+        assert_eq!(s.prompt_suggestion_latest_id, 4);
+        let json = serde_json::to_value(&snap).unwrap();
+        assert_eq!(
+            json["prompt_suggestion"],
+            serde_json::json!({"id": 4, "text": "commit it"})
+        );
+        // A clear empties it, and the field leaves the wire.
+        s.apply_event(&AcpEvent::PromptSuggestion {
+            suggestion: None,
+            conversation_id: None,
+        });
+        assert!(s.prompt_suggestion.is_none());
+        let cleared = serde_json::to_string(&s.to_snapshot()).unwrap();
+        assert!(!cleared.contains("prompt_suggestion\":"), "{cleared}");
+        // The newest published id stays: a late report about #4 still counts.
+        assert_eq!(s.prompt_suggestion_latest_id, 4);
+    }
+
+    #[test]
+    fn a_new_prompt_or_another_session_drops_the_prediction() {
+        let mut s = fresh_state();
+        s.apply_event(&prediction(1, "run the tests"));
+        s.apply_event(&AcpEvent::StatusChanged {
+            status: ConnectionStatus::Prompting,
+        });
+        assert!(s.prompt_suggestion.is_none(), "the prompt went out");
+
+        s.apply_event(&AcpEvent::SessionStarted {
+            session_id: "s1".into(),
+        });
+        s.apply_event(&prediction(2, "next"));
+        s.apply_event(&AcpEvent::SessionStarted {
+            session_id: "s1".into(),
+        });
+        assert!(s.prompt_suggestion.is_some(), "same session: still current");
+        s.apply_event(&AcpEvent::SessionStarted {
+            session_id: "s2-fork".into(),
+        });
+        assert!(s.prompt_suggestion.is_none(), "it was the old session's");
+    }
+
+    #[test]
+    fn the_snapshot_says_which_codeg_extensions_the_adapter_offers() {
+        let mut s = fresh_state();
+        let plain = serde_json::to_string(&s.to_snapshot()).unwrap();
+        assert!(!plain.contains("side_question_supported"));
+        assert!(!plain.contains("prompt_suggestions_supported"));
+        s.apply_event(&AcpEvent::CodegExtensions {
+            side_question: true,
+            prompt_suggestions: true,
+        });
+        let snap = s.to_snapshot();
+        assert!(snap.side_question_supported);
+        assert!(snap.prompt_suggestions_supported);
+        let back: LiveSessionSnapshot =
+            serde_json::from_str(&serde_json::to_string(&snap).unwrap()).unwrap();
+        assert!(back.side_question_supported);
+    }
+
+    #[test]
+    fn suggestion_reports_count_only_published_predictions_once() {
+        use crate::acp::prompt_suggestions::{
+            SuggestionAction, ACCEPTED_COUNTER_KEY, SHOWN_COUNTER_KEY,
+        };
+        let mut s = fresh_state();
+        assert!(
+            s.record_prompt_suggestion_report(1, SuggestionAction::Shown)
+                .is_empty(),
+            "nothing was published yet"
+        );
+        s.apply_event(&prediction(6, "run the tests"));
+        assert_eq!(
+            s.record_prompt_suggestion_report(6, SuggestionAction::Shown),
+            [SHOWN_COUNTER_KEY]
+        );
+        assert!(s
+            .record_prompt_suggestion_report(6, SuggestionAction::Shown)
+            .is_empty());
+        assert_eq!(
+            s.record_prompt_suggestion_report(6, SuggestionAction::Accepted),
+            [ACCEPTED_COUNTER_KEY]
         );
     }
 }

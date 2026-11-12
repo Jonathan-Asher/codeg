@@ -1864,6 +1864,13 @@
     "description": "アカウントが使用量の上限に達してターンが止まったとき、上限がリセットされた少し後にセッションを自動で再開します。ウィンドウを開いていなくても、再起動をまたいでも動作します。一時停止ごとに最大 3 回まで試行します。",
     "saveFailed": "設定を保存できませんでした: {message}"
   },
+  "PromptSuggestionSettings": {
+    "title": "Claude のプロンプト候補",
+    "description": "各ターンの後、Claude Code が次に送りそうなプロンプトを予測し、空の入力欄に灰色の文字で表示します。Tab キーで取り込めます。候補は毎ターン、会話の全コンテキストを含むリクエストを 1 回余分に使います。",
+    "appliesNextConnect": "変更は各セッションが次に接続したときに反映されます。開いているセッションはそれまで現在の設定のままです。",
+    "stats": "これまで: 受信 {received} 件、表示 {shown} 件、採用 {accepted} 件。",
+    "saveFailed": "設定を保存できませんでした: {message}"
+  },
   "LimitContinueSession": {
     "heading": "使用量の上限",
     "toggle": "使用量の上限がリセットされたら再開",
@@ -3646,7 +3653,10 @@
         "mentionGroupAgent": "エージェント",
         "mentionGroupSession": "セッション",
         "mentionGroupCommit": "コミット",
-        "mentionGroupSkill": "スキル"
+        "mentionGroupSkill": "スキル",
+        "btwDescription": "サイド質問をする：エージェントが作業を続けたまま、この会話の内容からツールなしで答えます。会話には追加されません",
+        "btwHint": "質問",
+        "suggestionTabHint": "Tab"
       },
       "messageQueue": {
         "outsideWriter": "別のプロセスが終了し、codeg が接続すると送信されます。",
@@ -3674,6 +3684,31 @@
         "notSentGaveUp": "失敗が続いています — 再試行をタップしてください",
         "retryItem": "今すぐ再送信",
         "retry": "再試行"
+      },
+      "sideQuestion": {
+        "title": "サイド質問",
+        "notInConversation": "会話には追加されません",
+        "previous": "前のサイド質問",
+        "next": "次のサイド質問",
+        "position": "{current} / {total}",
+        "copy": "回答をコピー",
+        "copied": "回答をコピーしました",
+        "copyFailed": "回答をコピーできませんでした",
+        "continueInFork": "分岐して続ける",
+        "continueInForkHint": "この会話を新しい会話に分岐し、この質問と回答を入力欄に入れます。そこではエージェントがツールを使えます",
+        "clearHistory": "サイド質問を消去",
+        "clearConfirm": "この会話のサイド質問をすべて消去しますか？",
+        "clear": "消去",
+        "cancel": "キャンセル",
+        "clearFailed": "サイド質問を消去できませんでした: {error}",
+        "close": "閉じる",
+        "closeHint": "閉じる (Esc)",
+        "empty": "サイド質問はまだありません。/btw に続けて質問を入力してください。",
+        "thinking": "考えています…",
+        "failed": "サイド質問に回答できませんでした。",
+        "retry": "再試行",
+        "notice": "Claude Code からのお知らせ",
+        "noAnswer": "Claude Code は回答しませんでした。"
       },
       "welcomeInputPanel": {
         "agentsSettingsPath": "設定 > エージェント",

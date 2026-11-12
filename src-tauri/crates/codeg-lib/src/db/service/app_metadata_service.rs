@@ -1,7 +1,7 @@
 use chrono::Utc;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveValue::NotSet, ColumnTrait, EntityTrait, QueryFilter, Set};
-use sea_orm::{ConnectionTrait, DatabaseConnection};
+use sea_orm::{ConnectionTrait, DatabaseConnection, Statement};
 
 use crate::db::entities::app_metadata;
 use crate::db::error::DbError;
@@ -50,6 +50,33 @@ pub async fn get_value_conn<C: ConnectionTrait>(
     Ok(model.map(|m| m.value))
 }
 
+/// Add one to the integer counter stored under `key` and return the new count.
+/// A missing row starts at 0, and so does a value that is not a number. One
+/// statement, so two increments racing each other never lose a count.
+pub async fn increment_counter<C: ConnectionTrait>(conn: &C, key: &str) -> Result<i64, DbError> {
+    let now = Utc::now();
+    conn.execute(Statement::from_sql_and_values(
+        conn.get_database_backend(),
+        "INSERT INTO app_metadata (key, value, created_at, updated_at) VALUES (?, '1', ?, ?) \
+         ON CONFLICT(key) DO UPDATE SET \
+           value = CAST(CAST(app_metadata.value AS INTEGER) + 1 AS TEXT), \
+           updated_at = excluded.updated_at, \
+           deleted_at = NULL",
+        [key.into(), now.into(), now.into()],
+    ))
+    .await?;
+    read_counter(conn, key).await
+}
+
+/// The integer counter stored under `key`: 0 when there is none yet (or the
+/// value is not a number).
+pub async fn read_counter<C: ConnectionTrait>(conn: &C, key: &str) -> Result<i64, DbError> {
+    Ok(get_value_conn(conn, key)
+        .await?
+        .and_then(|value| value.trim().parse::<i64>().ok())
+        .unwrap_or(0))
+}
+
 pub async fn update_app_version(
     conn: &DatabaseConnection,
     app_version: &str,
@@ -90,4 +117,33 @@ pub async fn update_app_version(
     .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::test_helpers::fresh_in_memory_db;
+
+    #[tokio::test]
+    async fn counters_start_at_zero_and_count_up() {
+        let db = fresh_in_memory_db().await;
+        assert_eq!(read_counter(&db.conn, "test.counter").await.unwrap(), 0);
+        assert_eq!(increment_counter(&db.conn, "test.counter").await.unwrap(), 1);
+        assert_eq!(increment_counter(&db.conn, "test.counter").await.unwrap(), 2);
+        assert_eq!(read_counter(&db.conn, "test.counter").await.unwrap(), 2);
+        // Other keys are their own counters, and the row still reads as a value.
+        assert_eq!(increment_counter(&db.conn, "test.other").await.unwrap(), 1);
+        assert_eq!(
+            get_value(&db.conn, "test.counter").await.unwrap().as_deref(),
+            Some("2")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_value_that_is_not_a_number_restarts_the_count() {
+        let db = fresh_in_memory_db().await;
+        upsert_value(&db.conn, "test.counter", "garbage").await.unwrap();
+        assert_eq!(read_counter(&db.conn, "test.counter").await.unwrap(), 0);
+        assert_eq!(increment_counter(&db.conn, "test.counter").await.unwrap(), 1);
+    }
 }
