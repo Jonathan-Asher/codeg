@@ -10726,6 +10726,16 @@ pub async fn acp_connect(
     // can prompt the user to install it from Agent Settings.
     verify_agent_installed(agent_type).await?;
 
+    // A session whose history the agent deleted is not resumed: the attempt
+    // could only fail to load it (see `commands::lost_history`).
+    crate::commands::lost_history::refuse_lost_history(
+        &db.conn,
+        agent_type,
+        session_id.as_deref(),
+        &runtime_env,
+    )
+    .await?;
+
     let (preferred_mode_id, preferred_config_values) = resolve_connect_selector_prefs(
         &db.conn,
         agent_type,
@@ -10989,14 +10999,23 @@ pub(crate) async fn acp_fork_conversation_core(
     owner_window_label: String,
     emitter: EventEmitter,
 ) -> Result<crate::acp::types::ForkToNewConversationInfo, AcpError> {
-    let agent_type = crate::db::service::conversation_service::get_by_id(&db.conn, conversation_id)
+    let summary = crate::db::service::conversation_service::get_by_id(&db.conn, conversation_id)
         .await
-        .map_err(|e| AcpError::protocol(e.to_string()))?
-        .agent_type;
+        .map_err(|e| AcpError::protocol(e.to_string()))?;
+    let agent_type = summary.agent_type;
     // The fork launches an agent process; like a connect, it never installs
     // one.
     verify_agent_installed(agent_type).await?;
     let runtime_env = build_session_runtime_env(db, agent_type, None, data_dir).await?;
+    // Nor does it start one for a session whose history the agent deleted:
+    // there is nothing left to fork (see `commands::lost_history`).
+    crate::commands::lost_history::refuse_lost_history(
+        &db.conn,
+        agent_type,
+        summary.external_id.as_deref(),
+        &runtime_env,
+    )
+    .await?;
     manager
         .fork_conversation_to_new_conversation(
             db,
@@ -11198,6 +11217,19 @@ pub(crate) async fn acp_preconnect_core(
     }
     verify_agent_installed(agent_type).await?;
     let runtime_env = build_session_runtime_env(db, agent_type, Some(session_id.as_str()), data_dir).await?;
+    // Nothing to open ahead of time for a session whose history the agent
+    // deleted: it can't be resumed (see `commands::lost_history`).
+    if crate::commands::lost_history::refuse_lost_history(
+        &db.conn,
+        agent_type,
+        Some(session_id.as_str()),
+        &runtime_env,
+    )
+    .await
+    .is_err()
+    {
+        return Ok(crate::acp::manager::PreconnectOutcome::Skipped);
+    }
     let (preferred_mode_id, preferred_config_values) = resolve_connect_selector_prefs(
         &db.conn,
         agent_type,

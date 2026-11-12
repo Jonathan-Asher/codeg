@@ -37,6 +37,7 @@ import {
   sweepOrphanDraftKeys,
 } from "@/lib/message-input-draft"
 import { discardAskSelectionPrompts } from "@/lib/ask-selection-handoff"
+import { discardComposerPrefill } from "@/lib/composer-prefill-handoff"
 import {
   batchCloseSlots,
   pushClosedTab,
@@ -1324,6 +1325,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
       // the rest of the session — the tab id is never reused, so it could only
       // sit there.
       discardAskSelectionPrompts(closingTab.id)
+      discardComposerPrefill(closingTab.id)
 
       let draftKeyHandedOver = false
 

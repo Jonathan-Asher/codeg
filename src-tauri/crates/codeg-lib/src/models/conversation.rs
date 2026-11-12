@@ -234,6 +234,37 @@ pub struct DbConversationDetail {
     /// bound (i.e. its persisted twin is provably inside the window).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uncovered_prefix_max_ts: Option<DateTime<Utc>>,
+    /// Set when the agent's own record of this session is gone — its
+    /// transcript was deleted — while codeg's records show it had one: the
+    /// session can be neither resumed nor forked, and opens read-only from the
+    /// text the message search kept (see `commands::lost_history`). Absent on
+    /// every readable session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history_unavailable: Option<HistoryUnavailable>,
+}
+
+/// Why a session's history is gone, as far as codeg can tell.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryUnavailableReason {
+    /// The agent deletes sessions past an age, and this one was past it:
+    /// Claude Code removes transcripts older than its `cleanupPeriodDays`.
+    AgentCleanup,
+    /// The record is gone for a reason codeg can't tell.
+    Missing,
+}
+
+/// See [`DbConversationDetail::history_unavailable`].
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct HistoryUnavailable {
+    pub reason: HistoryUnavailableReason,
+    /// The age past which the agent deletes a session, in days
+    /// (`AgentCleanup` only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retention_days: Option<u32>,
+    /// How many of the session's turns the message search kept — their text,
+    /// without tool calls or tool output.
+    pub saved_turns: u32,
 }
 
 /// One page of older history for the reverse-infinite-scroll path:

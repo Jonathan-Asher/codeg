@@ -4494,6 +4494,25 @@
         "elapsedMinutes": "{minutes} min {seconds} s",
         "withElapsed": "{step} · {elapsed}",
         "slowHint": "{agent} sigue iniciándose. Ejecuta tus hooks de SessionStart y tu configuración antes de abrir la sesión, así que un hook lento o inaccesible se nota como esta espera."
+      },
+      "historyUnavailable": {
+        "title": "Historial no disponible",
+        "reasonAgentCleanup": "{agent} borró el historial de esta sesión porque tenía más de {days} días.",
+        "reasonMissing": "El archivo de historial del agente para esta sesión ya no existe.",
+        "consequence": "No se puede reanudar ni bifurcar. Abajo está el texto que codeg guardó para la búsqueda: una copia parcial, solo con los mensajes y sin la salida de las herramientas.",
+        "startNew": "Iniciar una sesión nueva a partir de esta",
+        "startNewHint": "Abre una sesión nueva de {agent} en esta carpeta con el texto guardado en el editor. No se envía nada hasta que lo envíes tú.",
+        "startNewFailed": "No se pudo preparar el texto guardado",
+        "savedCopyLabel": "Copia guardada · {count, plural, =0 {sin mensajes} one {# mensaje} other {# mensajes}} · solo texto",
+        "savedCopyAria": "Mensajes guardados",
+        "loadingSaved": "Cargando la copia guardada…",
+        "loadFailed": "No se pudo cargar la copia guardada: {message}",
+        "nothingSaved": "codeg no guardó texto de esta sesión.",
+        "roleUser": "Tú",
+        "roleSystem": "Sistema",
+        "untitled": "sin título",
+        "prefillInline": "Esto continúa una sesión anterior de {agent}, «{title}», cuyo historial {agent} ya no tiene. Abajo está el texto que codeg guardó de ella: solo los mensajes, sin las llamadas a herramientas ni su salida. Tómalo como contexto de lo que pida a continuación.",
+        "prefillAttached": "Esto continúa una sesión anterior de {agent}, «{title}», cuyo historial {agent} ya no tiene. El archivo adjunto contiene el texto que codeg guardó de ella: solo los mensajes, sin las llamadas a herramientas ni su salida. Tómalo como contexto de lo que pida a continuación."
       }
     },
     "diffPreview": {

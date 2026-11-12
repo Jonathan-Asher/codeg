@@ -5,8 +5,12 @@
 //!   * **write** — [`index_conversation`] swaps one conversation's rows for a
 //!     freshly parsed set inside a transaction and stamps the
 //!     `conversation.updated_at` they reflect; [`mark_indexed`] drops the rows
-//!     and stamps, for a transcript that could not be read. The indexer
-//!     driving both lives in `commands::message_search`.
+//!     and stamps, for a transcript that could not be read, and
+//!     [`mark_indexed_keeping_rows`] stamps and keeps them, for one that is not
+//!     there at all (the rows are then the last copy of its text). The indexer
+//!     driving them lives in `commands::message_search`.
+//!   * **saved text** — [`saved_turns`] reads one conversation's rows back,
+//!     for the read-only view of a session whose agent deleted its history.
 //!   * **read** — [`search_messages`] finds every word of a query anywhere in a
 //!     message: words of three or more characters through the trigram index,
 //!     shorter ones (common in Chinese: 登录, 修复) with LIKE.
@@ -290,6 +294,93 @@ pub async fn mark_indexed(
 ) -> Result<(), DbError> {
     index_conversation(conn, conversation_id, source_updated_at, &[]).await?;
     Ok(())
+}
+
+/// Stamp a conversation as indexed at `source_updated_at` and leave its rows as
+/// they are — for one whose transcript was not found at all: not written yet,
+/// or deleted by the agent (Claude Code removes sessions past its retention
+/// period). What an earlier read indexed is then the only copy of its text
+/// left, and the session's read-only view shows it (see
+/// `commands::lost_history`), so it must outlive the file. The stamp's turn
+/// count and fingerprint stay those of the rows, so a transcript that comes
+/// back is indexed against them like any other re-read. The stamp keeps the
+/// indexer from looking for the file every minute; the conversation's next
+/// change looks again.
+pub async fn mark_indexed_keeping_rows(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    source_updated_at: DateTime<Utc>,
+) -> Result<(), DbError> {
+    conn.execute(Statement::from_sql_and_values(
+        conn.get_database_backend(),
+        "INSERT INTO message_fts_state \
+           (conversation_id, indexed_updated_at, indexed_at) \
+         VALUES (?, ?, ?) \
+         ON CONFLICT(conversation_id) DO UPDATE SET \
+           indexed_updated_at = excluded.indexed_updated_at, \
+           indexed_at = excluded.indexed_at",
+        [
+            conversation_id.into(),
+            source_updated_at.to_rfc3339().into(),
+            Utc::now().to_rfc3339().into(),
+        ],
+    ))
+    .await?;
+    Ok(())
+}
+
+/// One turn's text as the index holds it.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SavedTurn {
+    /// The turn's position in the conversation as it was last read.
+    pub turn_idx: i32,
+    /// `user`, `assistant` or `system`.
+    pub role: String,
+    pub content: String,
+}
+
+/// The text the index holds of one conversation, oldest turn first: its text
+/// blocks only (see [`turn_text`]), and not the turns too long to index.
+pub async fn saved_turns(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+) -> Result<Vec<SavedTurn>, DbError> {
+    let rows = conn
+        .query_all(Statement::from_sql_and_values(
+            conn.get_database_backend(),
+            "SELECT turn_idx, role, content FROM message_fts \
+             WHERE conversation_id = ? ORDER BY turn_idx",
+            [conversation_id.into()],
+        ))
+        .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            Some(SavedTurn {
+                turn_idx: row.try_get_by_index::<i32>(0).ok()?,
+                role: row.try_get_by_index::<String>(1).ok()?,
+                content: row.try_get_by_index::<String>(2).ok()?,
+            })
+        })
+        .collect())
+}
+
+/// How many turns of one conversation the index holds.
+pub async fn saved_turn_count(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+) -> Result<u32, DbError> {
+    let row = conn
+        .query_one(Statement::from_sql_and_values(
+            conn.get_database_backend(),
+            "SELECT COUNT(*) FROM message_fts WHERE conversation_id = ?",
+            [conversation_id.into()],
+        ))
+        .await?;
+    Ok(row
+        .and_then(|row| row.try_get_by_index::<i64>(0).ok())
+        .and_then(|count| u32::try_from(count).ok())
+        .unwrap_or(0))
 }
 
 /// Drop one conversation's rows AND its stamp, leaving it as if never indexed.

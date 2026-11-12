@@ -37,6 +37,8 @@ import type { FollowUpIntent } from "./task-follow-up"
 import type {
   LeakedTempReclaim,
   LeakedTempScan,
+  SavedHistoryExport,
+  SavedTurn,
   AgentType,
   AgentDelegationDefaults,
   AgentOptionsSnapshot,
@@ -4062,6 +4064,28 @@ export async function searchMessages(
   limit?: number
 ): Promise<MessageSearchHit[]> {
   return getTransport().call("message_search", { query, limit })
+}
+
+/** The text the message search kept of a conversation, oldest turn first —
+ *  what a session whose agent history is gone can still show (see
+ *  `HistoryUnavailable`). Messages only: no tool calls, no tool output. */
+export async function getConversationSavedTurns(
+  conversationId: number
+): Promise<SavedTurn[]> {
+  return getTransport().call("get_conversation_saved_turns", {
+    conversationId,
+  })
+}
+
+/** That saved text, ready to hand to a new session: inline when short, else
+ *  written to a file on the machine the agent runs on (see
+ *  `SavedHistoryExport`). */
+export async function exportConversationSavedHistory(
+  conversationId: number
+): Promise<SavedHistoryExport> {
+  return getTransport().call("export_conversation_saved_history", {
+    conversationId,
+  })
 }
 
 /** Persist a manual order for the sidebar's "Pinned" section. `orderedIds` is

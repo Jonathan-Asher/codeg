@@ -1551,6 +1551,27 @@ impl ClaudeParser {
     }
 }
 
+/// Claude Code's own default for `cleanupPeriodDays`: a session's transcript
+/// is deleted once it has seen no activity for this many days.
+pub(crate) const DEFAULT_CLEANUP_PERIOD_DAYS: u32 = 30;
+
+/// `cleanupPeriodDays` as `settings.json` in Claude Code's config dir sets it:
+/// how many days a session's transcript is kept after its last activity —
+/// Claude Code deletes older ones each time it starts. `None` when the file or
+/// the key is not there (Claude Code then keeps [`DEFAULT_CLEANUP_PERIOD_DAYS`])
+/// or can't be read.
+pub(crate) fn configured_cleanup_period_days() -> Option<u32> {
+    configured_cleanup_period_days_in(&resolve_claude_config_dir())
+}
+
+/// [`configured_cleanup_period_days`] for an explicit config dir (test seam).
+pub(crate) fn configured_cleanup_period_days_in(config_dir: &Path) -> Option<u32> {
+    let raw = fs::read_to_string(config_dir.join("settings.json")).ok()?;
+    let settings: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let days = settings.get("cleanupPeriodDays")?.as_u64()?;
+    u32::try_from(days).ok()
+}
+
 pub(crate) fn resolve_claude_config_dir() -> PathBuf {
     resolve_claude_config_dir_from(std::env::var_os("CLAUDE_CONFIG_DIR"), dirs::home_dir())
 }
@@ -1566,6 +1587,18 @@ fn resolve_claude_config_dir_from(
 }
 
 impl AgentParser for ClaudeParser {
+    /// `projects/<encoded cwd>/<id>.jsonl`, the layout `locate_transcript`
+    /// scans. A `/clear` successor is not looked for: it is found from the
+    /// file it continues, so with that file gone it can't be reached either.
+    fn transcript_presence(&self, id: &str) -> crate::parsers::TranscriptPresence {
+        crate::parsers::presence_in_buckets(
+            &self.base_dir,
+            id,
+            Path::new(&format!("{id}.jsonl")),
+            false,
+        )
+    }
+
     fn list_conversations(&self) -> Result<Vec<ConversationSummary>, ParseError> {
         let mut conversations = Vec::new();
 

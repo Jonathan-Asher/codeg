@@ -4494,6 +4494,25 @@
         "elapsedMinutes": "{minutes} 分 {seconds} 秒",
         "withElapsed": "{step} · {elapsed}",
         "slowHint": "{agent} はまだ起動中です。セッションを開く前に SessionStart フックと設定を実行するため、遅いフックや到達できないフックがあるとこの待ち時間になります。"
+      },
+      "historyUnavailable": {
+        "title": "履歴を利用できません",
+        "reasonAgentCleanup": "{agent} は {days} 日より古くなったため、このセッションの履歴を削除しました。",
+        "reasonMissing": "このセッションのエージェントの履歴ファイルはもう存在しません。",
+        "consequence": "再開もフォークもできません。以下は codeg が検索用に保存したテキストです。メッセージのみの部分的なコピーで、ツールの出力は含まれません。",
+        "startNew": "これを元に新しいセッションを開始",
+        "startNewHint": "このフォルダーで新しい {agent} セッションを開き、保存されたテキストを入力欄に入れます。送信するまで何も送られません。",
+        "startNewFailed": "保存されたテキストを準備できませんでした",
+        "savedCopyLabel": "保存されたコピー · {count, plural, =0 {メッセージなし} other {# 件のメッセージ}} · テキストのみ",
+        "savedCopyAria": "保存されたメッセージ",
+        "loadingSaved": "保存されたコピーを読み込んでいます…",
+        "loadFailed": "保存されたコピーを読み込めませんでした: {message}",
+        "nothingSaved": "codeg はこのセッションのテキストを保存していません。",
+        "roleUser": "あなた",
+        "roleSystem": "システム",
+        "untitled": "無題",
+        "prefillInline": "これは、{agent} が履歴を保持していない以前の {agent} セッション「{title}」の続きです。以下は codeg がそこから保存したテキストです（メッセージのみで、ツール呼び出しとその出力は含みません）。次の依頼の背景として扱ってください。",
+        "prefillAttached": "これは、{agent} が履歴を保持していない以前の {agent} セッション「{title}」の続きです。添付ファイルには codeg がそこから保存したテキストが入っています（メッセージのみで、ツール呼び出しとその出力は含みません）。次の依頼の背景として扱ってください。"
       }
     },
     "diffPreview": {

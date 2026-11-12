@@ -139,6 +139,14 @@ pub enum AcpError {
     /// since the epoch.
     #[error("This session is running in another process (pid {pid}); codeg connects once it finishes. {}", running_elsewhere_marker(.pid, .started_at))]
     SessionRunningElsewhere { pid: u32, started_at: Option<i64> },
+    /// The agent deleted the session's history (its transcript is gone, see
+    /// `commands::lost_history`), so the session can't be resumed: refused
+    /// before an agent is started for it, which could only fail to load it.
+    /// Clients open such a session read-only instead; they recognize this by
+    /// its code or by the `[history_unavailable]` marker that ends the
+    /// message (Tauri hands a command's error over as its message alone).
+    #[error("{0} [history_unavailable]")]
+    HistoryUnavailable(String),
 }
 
 impl AcpError {
@@ -200,6 +208,7 @@ impl AcpError {
             Self::ForkSessionMismatch(_) => Some("fork_session_mismatch"),
             Self::PoolExhausted { .. } => Some("pool_exhausted"),
             Self::SessionRunningElsewhere { .. } => Some("session_running_elsewhere"),
+            Self::HistoryUnavailable(_) => Some("history_unavailable"),
             Self::Protocol(_) => None,
         }
     }

@@ -669,6 +669,37 @@ describe("MessageInput injectContent", () => {
       expect(serializeDocToText(editor.state.doc)).toBe("quick action prompt")
     )
   })
+
+  // "Start a new session from this" on a session whose history is gone: the
+  // preamble, then the saved text attached as a file badge — added after a
+  // draft already there, never in place of it — and nothing sent.
+  it("attaches the files it carries after its text, keeping the draft", async () => {
+    const onSend = vi.fn()
+    const { view, editor } = await mount({ onSend })
+    act(() => {
+      editor.commands.setContent("my own draft")
+    })
+    view.rerender(
+      tree({
+        onSend,
+        injectContent: {
+          text: "This continues an earlier session.",
+          mode: "append",
+          files: ["/data/saved-history/conversation-76.md"],
+        },
+      })
+    )
+    await waitFor(() =>
+      expect(serializeDocToText(editor.state.doc)).toContain(
+        "[conversation-76.md](file:///data/saved-history/conversation-76.md)"
+      )
+    )
+    const text = serializeDocToText(editor.state.doc)
+    expect(text.startsWith("my own draft\n\nThis continues an earlier session.")).toBe(
+      true
+    )
+    expect(onSend).not.toHaveBeenCalled()
+  })
 })
 
 // The sidebar's "add to session" drops a session mention — the same reference the

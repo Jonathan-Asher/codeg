@@ -40,6 +40,9 @@ pub mod conversation_export;
 /// "New folder" in the directory browser (both runtimes).
 pub mod create_directory;
 pub mod message_search;
+/// Sessions whose agent deleted their history: detection, the saved text, and
+/// the connect guard (both runtimes; the iPhone app reads the verdict too).
+pub mod lost_history;
 pub mod conversations;
 pub mod custom_agents;
 pub mod custom_skills;

@@ -4494,6 +4494,25 @@
         "elapsedMinutes": "{minutes}m {seconds}s",
         "withElapsed": "{step} · {elapsed}",
         "slowHint": "{agent} is still starting up. It runs your SessionStart hooks and settings before it opens the session, so a slow or unreachable hook shows up as this wait."
+      },
+      "historyUnavailable": {
+        "title": "History unavailable",
+        "reasonAgentCleanup": "{agent} deleted this session's history because it was older than {days} days.",
+        "reasonMissing": "The agent's history file for this session no longer exists.",
+        "consequence": "It can't be resumed or forked. Below is the text codeg saved for search: a partial copy, with the messages only and no tool output.",
+        "startNew": "Start a new session from this",
+        "startNewHint": "Opens a new {agent} session in this folder with the saved text in its composer. Nothing is sent until you send it.",
+        "startNewFailed": "Couldn't prepare the saved text",
+        "savedCopyLabel": "Saved copy · {count, plural, =0 {no messages} one {# message} other {# messages}} · text only",
+        "savedCopyAria": "Saved messages",
+        "loadingSaved": "Loading the saved copy…",
+        "loadFailed": "Couldn't load the saved copy: {message}",
+        "nothingSaved": "codeg kept no text of this session.",
+        "roleUser": "You",
+        "roleSystem": "System",
+        "untitled": "untitled",
+        "prefillInline": "This continues an earlier {agent} session, \"{title}\", whose history {agent} no longer has. Below is the text codeg saved from it: the messages only, without tool calls or their output. Take it as context for what I ask next.",
+        "prefillAttached": "This continues an earlier {agent} session, \"{title}\", whose history {agent} no longer has. The attached file holds the text codeg saved from it: the messages only, without tool calls or their output. Take it as context for what I ask next."
       }
     },
     "diffPreview": {

@@ -190,6 +190,10 @@ export interface ComposerInjectContent {
    *   which is only ever the *start* of what the user is about to write.
    */
   mode?: "replace" | "append"
+  /** Files to attach after the text, by path on the machine the agent runs
+   *  on — inline file badges, sent as resource links like a file picked from
+   *  the tree. */
+  files?: string[]
 }
 
 interface MessageInputProps {
@@ -608,6 +612,7 @@ export function MessageInput({
     hasUploadingImage,
     hydrateFromBlocks,
     imagePromptBlocks,
+    appendResourceAttachments,
   } = attach
   const menuShortcuts = useComposerShortcuts({
     editorRef,
@@ -874,6 +879,9 @@ export function MessageInput({
                 : "\n\n"
           handle.focus()
           handle.insertTextAtCursor(`${gap}${payload.text}\n\n`)
+          if (payload.files?.length) {
+            appendResourceAttachments(payload.files, { atCaret: true })
+          }
         } else {
           handle.setText(payload.text)
           // Prepend the skill as the leading invocation badge, so the sent
@@ -890,6 +898,9 @@ export function MessageInput({
               })
             }
           }
+          if (payload.files?.length) {
+            appendResourceAttachments(payload.files)
+          }
           handle.focus()
         }
         setComposerEmpty(false)
@@ -897,7 +908,13 @@ export function MessageInput({
       onInjectConsumed?.()
     })
     return () => cancelAnimationFrame(raf)
-  }, [injectContent, composerReady, skillPrefix, onInjectConsumed])
+  }, [
+    injectContent,
+    composerReady,
+    skillPrefix,
+    onInjectConsumed,
+    appendResourceAttachments,
+  ])
 
   // A skill / expert badge freezes its invocation prefix (`$` for Codex, `/`
   // elsewhere) at insert time. On the welcome page users routinely click a

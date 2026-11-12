@@ -4494,6 +4494,25 @@
         "elapsedMinutes": "{minutes} 分 {seconds} 秒",
         "withElapsed": "{step} · {elapsed}",
         "slowHint": "{agent} 仍在启动。它会在打开会话前运行你的 SessionStart 钩子和设置，钩子缓慢或无法访问时就会出现这段等待。"
+      },
+      "historyUnavailable": {
+        "title": "历史记录不可用",
+        "reasonAgentCleanup": "{agent} 已删除此会话的历史记录，因为它已超过 {days} 天。",
+        "reasonMissing": "该会话在智能体中的历史文件已不存在。",
+        "consequence": "它无法恢复或分叉。下方是 codeg 为搜索保存的文本：仅包含消息的部分副本，不含工具输出。",
+        "startNew": "基于此开始新会话",
+        "startNewHint": "在此文件夹中打开一个新的 {agent} 会话，并将保存的文本放入输入框。在你发送之前不会发送任何内容。",
+        "startNewFailed": "无法准备保存的文本",
+        "savedCopyLabel": "已保存的副本 · {count, plural, =0 {无消息} other {# 条消息}} · 仅文本",
+        "savedCopyAria": "已保存的消息",
+        "loadingSaved": "正在加载已保存的副本…",
+        "loadFailed": "无法加载已保存的副本：{message}",
+        "nothingSaved": "codeg 没有保存此会话的任何文本。",
+        "roleUser": "你",
+        "roleSystem": "系统",
+        "untitled": "未命名",
+        "prefillInline": "这是之前一个 {agent} 会话“{title}”的延续，{agent} 已不再保留其历史记录。下面是 codeg 从中保存的文本：仅包含消息，不含工具调用及其输出。请把它作为我接下来请求的背景。",
+        "prefillAttached": "这是之前一个 {agent} 会话“{title}”的延续，{agent} 已不再保留其历史记录。附件中是 codeg 从中保存的文本：仅包含消息，不含工具调用及其输出。请把它作为我接下来请求的背景。"
       }
     },
     "diffPreview": {

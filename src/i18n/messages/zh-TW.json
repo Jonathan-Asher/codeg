@@ -4494,6 +4494,25 @@
         "elapsedMinutes": "{minutes} 分 {seconds} 秒",
         "withElapsed": "{step} · {elapsed}",
         "slowHint": "{agent} 仍在啟動。它會在開啟工作階段前執行你的 SessionStart 鉤子與設定，鉤子緩慢或無法連線時就會出現這段等待。"
+      },
+      "historyUnavailable": {
+        "title": "歷史記錄無法使用",
+        "reasonAgentCleanup": "{agent} 已刪除此工作階段的歷史記錄，因為它已超過 {days} 天。",
+        "reasonMissing": "此工作階段在代理程式中的歷史檔案已不存在。",
+        "consequence": "它無法恢復或分支。下方是 codeg 為搜尋保存的文字：僅包含訊息的部分副本，不含工具輸出。",
+        "startNew": "以此開始新的工作階段",
+        "startNewHint": "在此資料夾中開啟新的 {agent} 工作階段，並將保存的文字放入輸入框。在你送出之前不會傳送任何內容。",
+        "startNewFailed": "無法準備保存的文字",
+        "savedCopyLabel": "已保存的副本 · {count, plural, =0 {沒有訊息} other {# 則訊息}} · 僅文字",
+        "savedCopyAria": "已保存的訊息",
+        "loadingSaved": "正在載入已保存的副本…",
+        "loadFailed": "無法載入已保存的副本：{message}",
+        "nothingSaved": "codeg 沒有保存此工作階段的任何文字。",
+        "roleUser": "你",
+        "roleSystem": "系統",
+        "untitled": "未命名",
+        "prefillInline": "這是先前一個 {agent} 工作階段「{title}」的延續，{agent} 已不再保留其歷史記錄。以下是 codeg 從中保存的文字：僅包含訊息，不含工具呼叫及其輸出。請將它作為我接下來請求的背景。",
+        "prefillAttached": "這是先前一個 {agent} 工作階段「{title}」的延續，{agent} 已不再保留其歷史記錄。附件是 codeg 從中保存的文字：僅包含訊息，不含工具呼叫及其輸出。請將它作為我接下來請求的背景。"
       }
     },
     "diffPreview": {

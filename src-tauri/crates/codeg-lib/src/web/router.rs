@@ -278,6 +278,14 @@ pub fn build_router(
             post(handlers::message_search::message_search),
         )
         .route(
+            "/get_conversation_saved_turns",
+            post(handlers::message_search::get_conversation_saved_turns),
+        )
+        .route(
+            "/export_conversation_saved_history",
+            post(handlers::message_search::export_conversation_saved_history),
+        )
+        .route(
             "/get_folder_conversation_turns",
             post(handlers::conversations::get_folder_conversation_turns),
         )

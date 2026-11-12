@@ -247,6 +247,11 @@ impl Default for KimiCodeParser {
 }
 
 impl AgentParser for KimiCodeParser {
+    /// `<work dir key>/<id>/`, what `find_session_dir` looks for.
+    fn transcript_presence(&self, id: &str) -> crate::parsers::TranscriptPresence {
+        crate::parsers::presence_in_buckets(&self.base_dir, id, Path::new(id), true)
+    }
+
     fn list_conversations(&self) -> Result<Vec<ConversationSummary>, ParseError> {
         let mut conversations = Vec::new();
         if !self.base_dir.is_dir() {
