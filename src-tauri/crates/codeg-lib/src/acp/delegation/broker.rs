@@ -127,7 +127,23 @@ pub struct ChildStatusRecord {
     /// the limit's reset. Such a task is reported as running (paused), never
     /// as finished or failed.
     pub paused_until: Option<chrono::DateTime<chrono::Utc>>,
+    /// The child's last turn was cut off (`turn_state = interrupted`): codeg
+    /// exited under it, or its agent died. Nothing runs it, whatever its
+    /// status still says — reported as interrupted, with `resume_delegation`
+    /// as the way back.
+    pub interrupted: bool,
 }
+
+/// `error_code` of a task whose child was cut off mid-turn and that nothing
+/// runs any more (see [`ChildStatusRecord::interrupted`]).
+pub const INTERRUPTED_CODE: &str = "interrupted";
+
+/// What `get_delegation_status` says about such a task. Read by the parent
+/// agent after a restart, so it says what happened and what to do.
+pub const INTERRUPTED_NOTE: &str = "This task's sub-agent was cut off before it finished \
+     (codeg restarted, or the sub-agent's agent stopped), and nothing is running it now. \
+     Call resume_delegation with this task_id to continue it where it stopped, then collect \
+     it here as usual; or start a new delegate_to_agent call.";
 
 /// Everything `resume_delegation` needs to know about an interrupted child
 /// before it can bring the session back: where it ran, which agent, which
@@ -1135,6 +1151,22 @@ fn db_report(task_id: &str, rec: &ChildStatusRecord) -> DelegationTaskReport {
             &outcome,
             None,
         );
+    }
+    if rec.interrupted && matches!(rec.status, TaskStatus::Running | TaskStatus::Canceled) {
+        // Cut off mid-turn and not running: an `in_progress` row would read
+        // as still running forever (nothing will ever finish it), and a
+        // `cancelled` one as a result that aged out. Say it was interrupted.
+        return DelegationTaskReport {
+            task_id: Some(task_id.to_string()),
+            status: TaskStatus::Canceled,
+            child_conversation_id: Some(rec.child_conversation_id),
+            agent_type: Some(rec.agent_type),
+            text: None,
+            error_code: Some(INTERRUPTED_CODE.to_string()),
+            message: Some(INTERRUPTED_NOTE.to_string()),
+            duration_ms: None,
+            blocked_on: None,
+        };
     }
     if crate::acp::delegation::limit_delivery::result_waiting(task_id) {
         // Continued after a pause and finished; the result is delivered to the
@@ -4799,6 +4831,8 @@ impl ChildStatusLookup for DbChildStatusLookup {
             agent_type: summary.agent_type,
             parent_id: summary.parent_id,
             paused_until: paused_until_of(&summary),
+            interrupted: summary.turn_state
+                == Some(crate::db::entities::conversation::ConversationTurnState::Interrupted),
         })
     }
 
@@ -5149,6 +5183,7 @@ mod tests {
             agent_type: AgentType::ClaudeCode,
             parent_id: Some(1),
             paused_until: Some(chrono::Utc::now() + chrono::Duration::hours(2)),
+            interrupted: false,
         };
         let report = db_report("t-1", &rec);
         assert_eq!(report.status, TaskStatus::Running);
@@ -9728,6 +9763,7 @@ mod tests {
                 agent_type: c.agent_type,
                 parent_id: c.parent_id,
                 paused_until: c.paused_until,
+                interrupted: false,
             })
         }
         async fn find_resume_context_by_call_id(
@@ -10245,5 +10281,173 @@ mod tests {
             .lock()
             .await
             .contains(&"child-conn-2".to_string()));
+    }
+
+    /// codeg restarts while a delegated child works: the exit cuts the
+    /// child's turn off, and the new process has no memory of the task. The
+    /// parent, resumed after the restart, asks for it — and is told it was
+    /// interrupted (an `in_progress` row would otherwise read as running
+    /// forever, since nothing is ever going to finish it). `resume_delegation`
+    /// from the parent's new connection brings it back under the same id, and
+    /// its result reaches the parent as any result does.
+    #[tokio::test]
+    async fn a_delegation_cut_off_by_a_restart_says_so_and_resumes_to_its_result() {
+        use crate::db::entities::conversation;
+        use crate::db::service::conversation_service;
+        use crate::db::test_helpers::{fresh_in_memory_db, seed_folder};
+        use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+
+        let db = Arc::new(fresh_in_memory_db().await);
+        let folder = seed_folder(&db, "/tmp/delegation-restart").await;
+        let parent =
+            conversation_service::create(&db.conn, folder, AgentType::ClaudeCode, None, None)
+                .await
+                .unwrap()
+                .id;
+        let child = conversation_service::create_with_delegation(
+            &db.conn,
+            folder,
+            AgentType::Codex,
+            Some("run the tests".into()),
+            None,
+            Some(DelegationLink {
+                parent_conversation_id: parent,
+                parent_tool_use_id: "pt-restart".into(),
+                delegation_call_id: "task-restart".into(),
+            }),
+        )
+        .await
+        .unwrap()
+        .id;
+        let row = conversation::Entity::find_by_id(child)
+            .one(&db.conn)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut active: conversation::ActiveModel = row.into();
+        active.external_id = Set(Some("child-session".into()));
+        active.update(&db.conn).await.unwrap();
+        // The child's turn is running when codeg exits; the next start sweeps.
+        assert!(conversation_service::mark_turn_running(&db.conn, child)
+            .await
+            .unwrap());
+        conversation_service::interrupt_orphaned_turns(&db.conn)
+            .await
+            .unwrap();
+
+        // The new process: a broker that never heard of the task.
+        let mock = Arc::new(MockSpawner::new());
+        let broker =
+            DelegationBroker::new(mock.clone() as Arc<dyn ConnectionSpawner>, shallow_lookup())
+                .with_status_lookup(
+                    Arc::new(DbChildStatusLookup { db: db.clone() }) as Arc<dyn ChildStatusLookup>
+                );
+        enable_delegation(&broker).await;
+
+        let report = broker
+            .get_task_status(
+                "parent-conn-new",
+                Some(parent),
+                "task-restart",
+                StatusWait::Bounded(50),
+            )
+            .await;
+        assert_eq!(report.status, TaskStatus::Canceled);
+        assert_eq!(report.error_code.as_deref(), Some(INTERRUPTED_CODE));
+        assert!(report.message.unwrap().contains("resume_delegation"));
+        assert_eq!(report.child_conversation_id, Some(child));
+        // Another conversation still learns nothing.
+        let other = broker
+            .get_task_status(
+                "x",
+                Some(parent + 100),
+                "task-restart",
+                StatusWait::Immediate,
+            )
+            .await;
+        assert_eq!(other.status, TaskStatus::Unknown);
+
+        mock.queue_resume_spawn(Ok(ResumedSpawn::fresh("child-conn-new")))
+            .await;
+        mock.queue_resume_send(Ok(())).await;
+        let ack = broker
+            .resume_delegation(ResumeDelegationRequest {
+                parent_connection_id: "parent-conn-new".into(),
+                parent_conversation_id: parent,
+                task_id: "task-restart".into(),
+                reason: Some("codeg restarted".into()),
+                external_handle: None,
+            })
+            .await;
+        assert_eq!(ack.status, TaskStatus::Running, "{:?}", ack.message);
+        assert_eq!(
+            mock.resume_spawn_args.lock().await[0].external_session_id,
+            "child-session"
+        );
+        broker
+            .complete_call(
+                "task-restart",
+                DelegationOutcome::Ok(DelegationSuccess {
+                    text: "all tests pass".into(),
+                    child_conversation_id: child,
+                    child_agent_type: AgentType::Codex,
+                    turn_count: 1,
+                    duration_ms: 5,
+                    token_usage: None,
+                }),
+            )
+            .await;
+        let report = broker
+            .get_task_status(
+                "parent-conn-new",
+                Some(parent),
+                "task-restart",
+                StatusWait::Immediate,
+            )
+            .await;
+        assert_eq!(report.status, TaskStatus::Completed);
+        assert_eq!(report.text.as_deref(), Some("all tests pass"));
+    }
+
+    /// A child that ended its turn normally before the restart keeps its
+    /// status: only a cut-off turn reads as interrupted.
+    #[test]
+    fn db_report_of_an_interrupted_child_says_so_and_of_a_finished_one_does_not() {
+        let rec = ChildStatusRecord {
+            child_conversation_id: 9,
+            status: TaskStatus::Running,
+            agent_type: AgentType::Codex,
+            parent_id: Some(1),
+            paused_until: None,
+            interrupted: true,
+        };
+        let report = db_report("t", &rec);
+        assert_eq!(report.status, TaskStatus::Canceled);
+        assert_eq!(report.error_code.as_deref(), Some(INTERRUPTED_CODE));
+        let canceled = db_report(
+            "t",
+            &ChildStatusRecord {
+                status: TaskStatus::Canceled,
+                ..rec.clone()
+            },
+        );
+        assert_eq!(canceled.error_code.as_deref(), Some(INTERRUPTED_CODE));
+        let finished = db_report(
+            "t",
+            &ChildStatusRecord {
+                status: TaskStatus::Completed,
+                ..rec.clone()
+            },
+        );
+        assert_eq!(finished.status, TaskStatus::Completed);
+        assert_eq!(finished.error_code, None);
+        let running = db_report(
+            "t",
+            &ChildStatusRecord {
+                interrupted: false,
+                ..rec
+            },
+        );
+        assert_eq!(running.status, TaskStatus::Running);
     }
 }

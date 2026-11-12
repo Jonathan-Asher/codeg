@@ -1386,6 +1386,16 @@ mod tauri_app {
                     tauri::async_runtime::spawn(crate::work_task::run_task_engine(engine));
                 }
 
+                // Keep each session's background work recorded on its row,
+                // so the next start knows what an exit stopped. Mirrored in
+                // `bin/codeg_server.rs`.
+                tauri::async_runtime::spawn(
+                    crate::acp::background_snapshot::run_background_snapshot_writer(
+                        app.state::<crate::db::AppDatabase>().conn.clone(),
+                        app.state::<ConnectionManager>().clone_ref(),
+                    ),
+                );
+
                 // Pick the turns the last exit cut off back up — after the
                 // lifecycle subscriber above, which records the resumed turn as
                 // running. Mirrored in `bin/codeg_server.rs`.
@@ -2533,11 +2543,26 @@ mod tauri_app {
             .run(|app, event| match event {
                 tauri::RunEvent::ExitRequested { .. } => {
                     APP_QUITTING.store(true, Ordering::Relaxed);
+                    // Record the background work this exit is about to stop,
+                    // as the sessions run it now, BEFORE the connections are
+                    // torn down (their teardown clears every live status).
+                    // Every restart goes through here too: an update's, the
+                    // remote window's, the menu's.
+                    if let (Some(db), Some(cm)) = (
+                        app.try_state::<crate::db::AppDatabase>(),
+                        app.try_state::<ConnectionManager>(),
+                    ) {
+                        tauri::async_runtime::block_on(
+                            crate::acp::background_snapshot::flush_for_exit(&db.conn, &cm),
+                        );
+                    }
                     // Record the turns this exit is about to cut off BEFORE the
                     // connections are torn down: as interrupted by codeg's exit
                     // (due an automatic resume on the next start), not as
                     // agents that died while codeg ran — which is how the
                     // lifecycle subscriber would read the disconnects below.
+                    // The same sweep marks the sessions whose background work
+                    // the exit stops.
                     if let Some(db) = app.try_state::<crate::db::AppDatabase>() {
                         match tauri::async_runtime::block_on(
                             crate::db::service::conversation_service::interrupt_orphaned_turns(&db.conn),

@@ -59,6 +59,25 @@ pub enum ConversationAutoResume {
     Cancelled,
 }
 
+/// Why a row marked `auto_resume = pending` is due an automatic resume
+/// (`acp::auto_resume`). Set with the mark; meaningless without one. `None` on
+/// a pending row (one marked before the reason was recorded) reads as
+/// [`Self::Turn`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::None)")]
+#[serde(rename_all = "snake_case")]
+pub enum ConversationAutoResumeReason {
+    /// A turn was cut off: one codeg sent, or one the agent ran on its own
+    /// (woken by its background work). `turn_state` reads `interrupted`.
+    #[sea_orm(string_value = "turn")]
+    Turn,
+    /// The turn had ended, but background work the session started (see
+    /// `acp::background_snapshot`) was still running and was stopped.
+    /// `turn_state` stays NULL: the turn itself finished.
+    #[sea_orm(string_value = "background")]
+    Background,
+}
+
 /// Where a conversation paused by the account's usage limit stands with
 /// respect to the automatic continuation (`acp::limit_continue`). `None` on
 /// the row means no pause.
@@ -228,6 +247,19 @@ pub struct Model {
     /// (see `crate::session_move`), then this clears. Not activity: written
     /// only through `conversation_service`, never with `updated_at`.
     pub moved_from_cwd: Option<String>,
+    /// What the session's live connection runs in the background, as JSON
+    /// (`acp::background_snapshot::BackgroundSnapshot`), kept current while
+    /// codeg runs, so the next start knows what an exit stopped. `None` when
+    /// nothing runs. Bookkeeping: never written with `updated_at`.
+    #[sea_orm(column_type = "Text", nullable)]
+    pub background_snapshot: Option<String>,
+    /// Why a pending automatic resume is due; see
+    /// [`ConversationAutoResumeReason`].
+    pub auto_resume_reason: Option<ConversationAutoResumeReason>,
+    /// Automatic resumes since the user last sent a turn (claimed resumes
+    /// count; the next turn anyone but the automatic resume asks for resets
+    /// it). Caps a resume that keeps re-launching work an exit keeps stopping.
+    pub auto_resume_count: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
