@@ -9,10 +9,10 @@
 //!   (`details.id`); the job is over once its completion report lands (a user
 //!   message `✅|🛑|❌ Background job … [<id>]`), a `bgj_status` / `bgj_wait` /
 //!   `bgj_kill` result shows it ended, or the extension's registry
-//!   (`~/.pi/agent/bg-jobs/jobs.json`) records its exit. With a registry, a
-//!   job only counts while the registry still lists it running and its
-//!   process is alive. These jobs are detached and outlive Pi, but a restart
-//!   takes away the session that waits for their reports.
+//!   (`~/.pi/agent/bg-jobs/jobs.json`) records its exit — and only while its
+//!   process (the registry's pid, else the launch's) is alive. These jobs are
+//!   detached and outlive Pi, but a restart takes away the session that waits
+//!   for their reports.
 //! * **pi-subagents async runs** (`subagent` with `async: true`): the
 //!   launch's result names the run (`details.asyncId`); it is over once a
 //!   `subagent-notify` notice mentions it. Its state lives under the
@@ -55,9 +55,6 @@ const JOB_REPORT_HEADS: [&str; 3] = [
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct JobsRegistry {
     jobs: HashMap<String, RegistryJob>,
-    /// Whether a registry file was there at all. Without one the transcript
-    /// alone decides.
-    present: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,10 +78,7 @@ impl JobsRegistry {
                 jobs.insert(id, RegistryJob { exited, pid });
             }
         }
-        Self {
-            jobs,
-            present: true,
-        }
+        Self { jobs }
     }
 
     pub fn load(path: &Path) -> Self {
@@ -94,15 +88,19 @@ impl JobsRegistry {
         }
     }
 
-    /// Whether `id` may still run: the registry has not recorded its end and
-    /// its process is alive. `alive` answers for a pid.
-    fn may_run(&self, id: &str, alive: &dyn Fn(i32) -> bool) -> bool {
-        if !self.present {
-            return true;
+    /// Whether job `id` may still run: the registry has not recorded its end,
+    /// and its process — the registry's pid, else the one its launch reported
+    /// — is alive (`alive` answers for a pid). Every Pi process rewrites the
+    /// registry from its own copy, so a job missing from it says nothing; its
+    /// process still does.
+    fn may_run(&self, id: &str, launch_pid: Option<i32>, alive: &dyn Fn(i32) -> bool) -> bool {
+        let job = self.jobs.get(id);
+        if job.is_some_and(|j| j.exited) {
+            return false;
         }
-        match self.jobs.get(id) {
-            Some(job) if !job.exited => job.pid.is_none_or(alive),
-            _ => false,
+        match job.and_then(|j| j.pid).or(launch_pid) {
+            Some(pid) => alive(pid),
+            None => true,
         }
     }
 }
@@ -201,8 +199,8 @@ pub(crate) fn pending_work<'a>(
 ) -> Vec<BackgroundSnapshotItem> {
     // Launch calls, by tool-call id: (tool, label).
     let mut calls: HashMap<String, (String, String)> = HashMap::new();
-    // In launch order.
-    let mut jobs: Vec<BackgroundSnapshotItem> = Vec::new();
+    // In launch order, with the pid each launch reported.
+    let mut jobs: Vec<(BackgroundSnapshotItem, Option<i32>)> = Vec::new();
     let mut runs: Vec<BackgroundSnapshotItem> = Vec::new();
     let mut ended: HashSet<String> = HashSet::new();
     let mut notices: Vec<String> = Vec::new();
@@ -282,7 +280,12 @@ pub(crate) fn pending_work<'a>(
                             let mut item = BackgroundSnapshotItem::new(KIND_PI_JOB, label);
                             item.id = Some(id);
                             item.started_at = at;
-                            jobs.push(item);
+                            let pid = details
+                                .and_then(|d| d.get("pid"))
+                                .and_then(Value::as_i64)
+                                .and_then(|p| i32::try_from(p).ok())
+                                .filter(|p| *p > 0);
+                            jobs.push((item, pid));
                         }
                     }
                     "subagent" => {
@@ -327,10 +330,11 @@ pub(crate) fn pending_work<'a>(
     let oldest_run = now - chrono::Duration::hours(RUN_MAX_AGE_HOURS);
     let mut out: Vec<BackgroundSnapshotItem> = jobs
         .into_iter()
-        .filter(|job| {
+        .filter(|(job, pid)| {
             let id = job.id.as_deref().unwrap_or("");
-            !ended.contains(id) && registry.may_run(id, alive)
+            !ended.contains(id) && registry.may_run(id, *pid, alive)
         })
+        .map(|(job, _)| job)
         .collect();
     out.extend(runs.into_iter().filter(|run| {
         let id = run.id.as_deref().unwrap_or("");
@@ -628,9 +632,12 @@ mod tests {
             now(),
         );
         assert!(dead.is_empty(), "a job whose process is gone runs nothing");
-        // A registry that lists no such job: it is not running anywhere.
+        // A registry another Pi process rewrote without these jobs: their
+        // processes decide.
         let empty = JobsRegistry::parse("{}");
-        assert!(scan(&lines, &empty).is_empty());
+        assert_eq!(scan(&lines, &empty).len(), 2);
+        let gone = pending_work(lines.iter().map(String::as_str), &empty, &|_| false, now());
+        assert!(gone.is_empty());
     }
 
     #[test]
