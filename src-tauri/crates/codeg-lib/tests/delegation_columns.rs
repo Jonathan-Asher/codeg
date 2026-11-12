@@ -52,6 +52,9 @@ async fn delegation_columns_round_trip() {
         last_viewed_at: Set(None),
         talk_state: Set(None),
         moved_from_cwd: Set(None),
+        background_snapshot: Set(None),
+        auto_resume_reason: Set(None),
+        auto_resume_count: Set(0),
     };
     let inserted = active.insert(&db.conn).await.expect("insert");
     let id = inserted.id;
