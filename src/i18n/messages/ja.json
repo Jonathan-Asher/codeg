@@ -7116,16 +7116,29 @@
       "reserveSummaryDynamic": "予備 {percent}%（リセット前に解放）",
       "position": "{position} 番目",
       "resets": {
-        "available": "{count, plural, other {リセット # 回}}",
-        "availableUntil": "{count, plural, other {リセット # 回}} · {date} に期限切れ",
+        "group": {
+          "session": "{count, plural, other {5 時間のリセット # 回 · 5 時間の上限を回復}}",
+          "weekly": "{count, plural, other {週間のリセット # 回 · 週間の上限を回復}}",
+          "modelWeekly": "{count, plural, other {{model} のリセット # 回 · {model} の週間上限だけを回復}}",
+          "full": "{count, plural, other {フルリセット # 回 · 5 時間と週間の上限を回復}}",
+          "other": "{count, plural, other {リセット # 回 · 何が回復するかは不明}}"
+        },
+        "expires": "{date} に期限切れ",
         "auto": "上限に達するとプールが自動で使います",
         "cooldownUntil": "次に使えるのは {time}",
+        "wontHelp": {
+          "weekly": "今は効果なし: このアカウントは全体の週間上限に達しており、このリセットでは回復しません",
+          "session": "今は効果なし: このアカウントは 5 時間の上限に達しており、このリセットでは回復しません"
+        },
+        "givesBackOnly": "全体の週間上限では、今週 {model} が使った分しか戻りません",
+        "givesBackOnlyNote": "このアカウントは全体の週間上限に達しています。このリセットで戻るのは、今週 {model} モデルが使った分だけです。",
         "confirmBody": "<b>{name}</b> でリセットを 1 回使いますか？{refills}が今すぐ回復します。元に戻すことはできません。",
+        "confirmBodyModel": "<b>{name}</b> で {model} のリセットを 1 回使いますか？回復するのは {model} モデルの週間上限だけで、全体の週間上限は回復しません。元に戻すことはできません。",
         "refills": {
           "session": "5 時間の上限",
           "weekly": "週間の上限",
           "full": "5 時間と週間の上限",
-          "other": "使用量上限"
+          "other": "対象の上限"
         },
         "outcome": {
           "reset": "{name} でリセットを使いました。上限が回復しました。",

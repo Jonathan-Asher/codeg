@@ -9,12 +9,16 @@ import {
   groupLimitResets,
   hasUsableReset,
   isQuietResetError,
+  modelFamilyOf,
+  poolGrantFit,
+  poolLimitsReached,
   poolOffersRecheck,
   poolRefillsKey,
   poolResetErrorKey,
   poolResetForPause,
+  poolResetGroupKey,
+  poolResetGroups,
   poolResetOutcomeKey,
-  poolResetsExpiry,
   poolResetToUse,
   resetErrorKey,
   resetErrorKeyFromApp,
@@ -26,11 +30,13 @@ import {
 } from "@/lib/limit-resets"
 import type {
   LimitResetItem,
+  LimitResetKind,
   LimitResetOutcome,
   PlanUsagePool,
   PlanUsagePoolAccount,
   PlanUsagePoolAccountState,
   PlanUsagePoolResetGrant,
+  PlanUsageWindow,
   ProviderLimitResets,
 } from "@/lib/types"
 
@@ -135,6 +141,28 @@ describe("words for kinds, outcomes and errors", () => {
       expect(typeof message(resetRefillsKey(kind))).toBe("string")
       expect(typeof message(poolRefillsKey(kind))).toBe("string")
     }
+    const kinds: LimitResetKind[] = [
+      "session",
+      "weekly",
+      "model_weekly",
+      "full",
+      "other",
+    ]
+    for (const kind of kinds) {
+      expect(typeof message(poolResetGroupKey(kind))).toBe("string")
+    }
+    // One model's own reset is not a Codex kind: Codex rows read it as other.
+    expect(resetKindKey("model_weekly")).toBe("resets.kind.other")
+    for (const key of [
+      "pool.resets.expires",
+      "pool.resets.wontHelp.weekly",
+      "pool.resets.wontHelp.session",
+      "pool.resets.givesBackOnly",
+      "pool.resets.givesBackOnlyNote",
+      "pool.resets.confirmBodyModel",
+    ]) {
+      expect(typeof message(key)).toBe("string")
+    }
     const outcomes: LimitResetOutcome[] = [
       "reset",
       "nothing_to_reset",
@@ -207,12 +235,65 @@ function grant(
     id: "g1",
     label: null,
     kind: "weekly",
+    model: null,
+    refills: ["seven_day"],
     count: 1,
     expires_at: NOW + 5 * DAY,
     usable_now: true,
     requires_limit: false,
+    gives_back_weekly: false,
     ...over,
   }
+}
+
+/** One of the November launch's Fable resets, as the pool lists it. */
+function fableGrant(
+  over: Partial<PlanUsagePoolResetGrant> = {}
+): PlanUsagePoolResetGrant {
+  return grant({
+    id: "launch-2610-fable",
+    label:
+      "New model launch: one Fable reset for Max, Team Premium and Enterprise Premium",
+    kind: "model_weekly",
+    model: "Fable",
+    refills: ["seven_day_fable"],
+    expires_at: NOW + 117 * DAY,
+    gives_back_weekly: true,
+    ...over,
+  })
+}
+
+function window(
+  id: string,
+  used: number,
+  resetsIn: number = 3 * DAY
+): PlanUsageWindow {
+  return {
+    id,
+    kind:
+      id === "five_hour"
+        ? "session"
+        : id === "seven_day"
+          ? "weekly"
+          : "weekly_model",
+    label: id,
+    used_percent: used,
+    resets_at: NOW + resetsIn,
+    window_minutes: null,
+    observed_at: NOW,
+  }
+}
+
+/** An account at the limits `reached`, with its windows reading so. */
+function heldAt(
+  name: string,
+  grants: PlanUsagePoolResetGrant[],
+  reached: string[],
+  windows: PlanUsageWindow[] = reached.map((id) => window(id, 100))
+): PlanUsagePoolAccount {
+  const a = account(name, grants, { state: "exhausted", windows })
+  a.resets!.limits_reached = reached
+  return a
 }
 
 function account(
@@ -245,6 +326,7 @@ function account(
       eligible: true,
       auto_redeem: false,
       checked_at: NOW,
+      limits_reached: [],
     },
     ...over,
   }
@@ -285,7 +367,6 @@ describe("a pool account's resets", () => {
     expect(poolResetToUse(p, a, "available", NOW)?.id).toBe("soon")
     a.resets!.next_grant_id = "late"
     expect(poolResetToUse(p, a, "available", NOW)?.id).toBe("late")
-    expect(poolResetsExpiry(a)).toBe(NOW + DAY)
   })
 
   it("holds back what the pool or the provider can't use now", () => {
@@ -304,6 +385,128 @@ describe("a pool account's resets", () => {
     expect(poolResetToUse(p, off, "exhausted", NOW)).toBeNull()
     const older = pool([atLimitOnly], { resets_supported: false })
     expect(poolResetToUse(older, atLimitOnly, "exhausted", NOW)).toBeNull()
+    // What it refills isn't known: shown, never used from here.
+    const unknown = account("u", [grant({ kind: "other", refills: [] })])
+    expect(
+      poolResetToUse(pool([unknown]), unknown, "exhausted", NOW)
+    ).toBeNull()
+  })
+
+  it("puts an account's grants in one row per kind, each with its soonest expiry", () => {
+    const a = account("a", [
+      fableGrant({ id: "f1", expires_at: NOW + 2 * DAY }),
+      grant({ id: "w1", count: 2, expires_at: NOW + 3 * DAY }),
+      fableGrant({ id: "f2", expires_at: NOW + 4 * DAY }),
+      fableGrant({ id: "f3", expires_at: NOW + DAY }),
+      grant({ id: "u1", kind: "other", refills: [] }),
+      grant({ id: "spent", count: 0 }),
+    ])
+    const groups = poolResetGroups(a)
+    expect(groups.map((g) => [g.kind, g.model, g.count, g.expires_at])).toEqual(
+      [
+        ["model_weekly", "Fable", 3, NOW + DAY],
+        ["weekly", null, 2, NOW + 3 * DAY],
+        ["other", null, 1, NOW + 5 * DAY],
+      ]
+    )
+    expect(groups[0].grants.map((g) => g.id)).toEqual(["f1", "f2", "f3"])
+    // A row's button takes the provider's next grant when it is in that
+    // row, else the row's first usable one.
+    const p = pool([a])
+    a.resets!.next_grant_id = "f2"
+    expect(poolResetToUse(p, a, "available", NOW, groups[0].grants)?.id).toBe(
+      "f2"
+    )
+    expect(poolResetToUse(p, a, "available", NOW, groups[1].grants)?.id).toBe(
+      "w1"
+    )
+    expect(poolResetToUse(p, a, "available", NOW, groups[2].grants)).toBeNull()
+  })
+
+  it("reads the limits an account is at, less a window that has reset since", () => {
+    const a = heldAt(
+      "a",
+      [],
+      ["five_hour", "seven_day"],
+      [window("five_hour", 100, -60), window("seven_day", 100)]
+    )
+    expect(poolLimitsReached(a, NOW)).toEqual(["seven_day"])
+    expect(poolLimitsReached(account("b", []), NOW)).toEqual([])
+  })
+
+  it("says a Fable reset won't help an account at a general limit, unless it gives back Fable's own use", () => {
+    const fable = fableGrant()
+    // The general weekly limit spent, Fable's own not in effect (the pool's
+    // listing of jonathanashur's resets, 2026-11-12): nothing to give back.
+    expect(
+      poolGrantFit(heldAt("a", [fable], ["seven_day"]), fable, NOW)
+    ).toEqual({ kind: "wont_help", model: "Fable", limit: "weekly" })
+    // Fable's weekly window in effect, unused this week.
+    expect(
+      poolGrantFit(
+        heldAt(
+          "a",
+          [fable],
+          ["seven_day"],
+          [window("seven_day", 100), window("seven_day_fable", 0)]
+        ),
+        fable,
+        NOW
+      )
+    ).toMatchObject({ kind: "wont_help", limit: "weekly" })
+    // Fable used some of it this week: that much comes back, no more.
+    const fableUsed = [window("seven_day", 100), window("seven_day_fable", 40)]
+    expect(
+      poolGrantFit(heldAt("a", [fable], ["seven_day"], fableUsed), fable, NOW)
+    ).toEqual({ kind: "gives_back_only", model: "Fable" })
+    // ...but not for a grant that gives nothing back, nor while the 5-hour
+    // limit holds the account too.
+    const noGiveBack = fableGrant({ gives_back_weekly: false })
+    expect(
+      poolGrantFit(
+        heldAt("a", [noGiveBack], ["seven_day"], fableUsed),
+        noGiveBack,
+        NOW
+      ).kind
+    ).toBe("wont_help")
+    expect(
+      poolGrantFit(
+        heldAt(
+          "a",
+          [fable],
+          ["five_hour", "seven_day"],
+          [window("five_hour", 100), ...fableUsed]
+        ),
+        fable,
+        NOW
+      ).kind
+    ).toBe("wont_help")
+    expect(
+      poolGrantFit(heldAt("a", [fable], ["five_hour"]), fable, NOW)
+    ).toEqual({ kind: "wont_help", model: "Fable", limit: "session" })
+
+    // At Fable's own weekly limit, or at none, it does what it says.
+    expect(
+      poolGrantFit(heldAt("a", [fable], ["seven_day_fable"]), fable, NOW).kind
+    ).toBe("fits")
+    expect(poolGrantFit(account("a", [fable]), fable, NOW).kind).toBe("fits")
+    // A limit whose window has reset since holds nothing.
+    expect(
+      poolGrantFit(
+        heldAt("a", [fable], ["seven_day"], [window("seven_day", 100, -60)]),
+        fable,
+        NOW
+      ).kind
+    ).toBe("fits")
+    // The general resets refill what they say; an unknown one is unknown.
+    const weekly = grant()
+    expect(
+      poolGrantFit(heldAt("a", [weekly], ["seven_day"]), weekly, NOW).kind
+    ).toBe("fits")
+    const unknown = grant({ kind: "other", refills: [] })
+    expect(poolGrantFit(account("a", [unknown]), unknown, NOW).kind).toBe(
+      "unknown"
+    )
   })
 
   it("offers Recheck beside a hold a reset or a rollover may have made old", () => {
@@ -321,33 +524,104 @@ describe("a pool account's resets", () => {
     ).toBe(false)
   })
 
-  it("picks, for a paused session, an account held by its limit first", () => {
+  it("offers a paused session only a reset that clears what holds an account", () => {
     const free = account("free", [grant({ id: "f", expires_at: NOW + DAY })])
-    const heldLate = account("held-late", [
-      grant({ id: "hl", expires_at: NOW + 8 * DAY }),
-    ])
-    const heldSoon = account("held-soon", [
-      grant({ id: "hs", expires_at: NOW + 3 * DAY }),
-    ])
-    const stateOf = (a: PlanUsagePoolAccount): PlanUsagePoolAccountState =>
-      a.name.startsWith("held") ? "exhausted" : "available"
-    const pick = poolResetForPause(
-      pool([free, heldLate, heldSoon]),
-      NOW,
-      stateOf
+    const heldLate = heldAt(
+      "held-late",
+      [grant({ id: "hl", expires_at: NOW + 8 * DAY })],
+      ["seven_day"]
     )
+    const heldSoon = heldAt(
+      "held-soon",
+      [grant({ id: "hs", expires_at: NOW + 3 * DAY })],
+      ["seven_day"]
+    )
+    const pick = poolResetForPause(pool([free, heldLate, heldSoon]), NOW)
     expect(pick?.account.name).toBe("held-soon")
     expect(pick?.grant.id).toBe("hs")
+    // An account at no limit has nothing a reset clears.
+    expect(poolResetForPause(pool([free]), NOW)).toBeNull()
+    expect(poolResetForPause(pool([heldSoon], { stale: true }), NOW)).toBeNull()
+    expect(poolResetForPause(null, NOW)).toBeNull()
     expect(
-      poolResetForPause(pool([free]), NOW, () => "available")?.account.name
-    ).toBe("free")
-    expect(
-      poolResetForPause(pool([free], { stale: true }), NOW, stateOf)
+      poolResetForPause(pool([heldAt("none", [], ["seven_day"])]), NOW)
     ).toBeNull()
-    expect(poolResetForPause(null, NOW, stateOf)).toBeNull()
-    expect(
-      poolResetForPause(pool([account("none", [])]), NOW, stateOf)
-    ).toBeNull()
+  })
+
+  it("never offers a Fable reset for the general weekly limit", () => {
+    // What spent a Fable reset for nothing: the accounts at their general
+    // weekly limit hold only Fable resets, another has headroom.
+    const walled = heldAt("walled", [fableGrant()], ["seven_day"])
+    const spare = account("spare", [fableGrant({ id: "spare-fable" })])
+    expect(poolResetForPause(pool([walled, spare]), NOW)).toBeNull()
+    expect(poolResetForPause(pool([walled, spare]), NOW, "fable")).toBeNull()
+    // A weekly reset there clears it.
+    const weekly = heldAt(
+      "weekly",
+      [fableGrant(), grant({ id: "w" })],
+      ["seven_day"]
+    )
+    expect(poolResetForPause(pool([walled, weekly]), NOW)?.grant.id).toBe("w")
+  })
+
+  it("offers a Fable reset only to a Fable session held by Fable's own limit", () => {
+    const fableWalled = heldAt("fw", [fableGrant()], ["seven_day_fable"])
+    expect(poolResetForPause(pool([fableWalled]), NOW, "fable")?.grant.id).toBe(
+      "launch-2610-fable"
+    )
+    // Another model's session isn't held by it; an unknown model can't say.
+    expect(poolResetForPause(pool([fableWalled]), NOW, "opus")).toBeNull()
+    expect(poolResetForPause(pool([fableWalled]), NOW)).toBeNull()
+    // At the general weekly limit too, a Fable reset alone doesn't free it.
+    const both = heldAt(
+      "both",
+      [fableGrant()],
+      ["seven_day", "seven_day_fable"]
+    )
+    expect(poolResetForPause(pool([both]), NOW, "fable")).toBeNull()
+  })
+
+  it("prefers the reset that refills least beyond the limits reached", () => {
+    const sessionAndWeekly = heldAt(
+      "both",
+      [
+        grant({ id: "weekly", expires_at: NOW + DAY }),
+        grant({
+          id: "full",
+          kind: "full",
+          refills: ["five_hour", "seven_day"],
+          expires_at: NOW + 2 * DAY,
+        }),
+      ],
+      ["five_hour", "seven_day"]
+    )
+    // The weekly reset alone leaves the 5-hour limit holding it.
+    expect(poolResetForPause(pool([sessionAndWeekly]), NOW)?.grant.id).toBe(
+      "full"
+    )
+    const weeklyOnly = heldAt(
+      "weekly",
+      [
+        grant({
+          id: "full",
+          kind: "full",
+          refills: ["five_hour", "seven_day"],
+          expires_at: NOW + DAY,
+        }),
+        grant({ id: "weekly", expires_at: NOW + 9 * DAY }),
+      ],
+      ["seven_day"]
+    )
+    expect(poolResetForPause(pool([weeklyOnly]), NOW)?.grant.id).toBe("weekly")
+  })
+
+  it("reads a session's model family the way the pool reads a request's", () => {
+    expect(modelFamilyOf("claude-fable-5-1")).toBe("fable")
+    expect(modelFamilyOf("claude-opus-5-5")).toBe("opus")
+    expect(modelFamilyOf("claude-sonnet-5-5")).toBe("sonnet")
+    expect(modelFamilyOf("claude-haiku-5-5")).toBe("haiku")
+    expect(modelFamilyOf("gpt-5.5")).toBeNull()
+    expect(modelFamilyOf(null)).toBeNull()
   })
 })
 

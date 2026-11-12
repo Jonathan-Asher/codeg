@@ -7116,16 +7116,29 @@
       "reserveSummaryDynamic": "預留 {percent}%，接近重設時釋出",
       "position": "第 {position} 位",
       "resets": {
-        "available": "{count, plural, other {# 次重設}}",
-        "availableUntil": "{count, plural, other {# 次重設}} · {date} 到期",
+        "group": {
+          "session": "{count, plural, other {# 次 5 小時重設 · 恢復你的 5 小時上限}}",
+          "weekly": "{count, plural, other {# 次每週重設 · 恢復你的每週上限}}",
+          "modelWeekly": "{count, plural, other {# 次 {model} 重設 · 只恢復你的 {model} 每週上限}}",
+          "full": "{count, plural, other {# 次完整重設 · 恢復你的 5 小時上限和每週上限}}",
+          "other": "{count, plural, other {# 次重設 · 不清楚會恢復什麼}}"
+        },
+        "expires": "{date} 到期",
         "auto": "達到上限時帳號池會自動使用一次",
         "cooldownUntil": "下一次可在 {time} 使用",
+        "wontHelp": {
+          "weekly": "現在沒用：此帳號已達到整體每週上限，這次重設不會恢復它",
+          "session": "現在沒用：此帳號已達到 5 小時上限，這次重設不會恢復它"
+        },
+        "givesBackOnly": "在整體每週上限時，只會退回本週 {model} 用掉的部分",
+        "givesBackOnlyNote": "此帳號已達到整體每週上限：這次重設只會退回本週 {model} 模型用掉的部分。",
         "confirmBody": "要在 <b>{name}</b> 上使用 1 次重設嗎？這會立即恢復{refills}，且無法復原。",
+        "confirmBodyModel": "要在 <b>{name}</b> 上使用 1 次 {model} 重設嗎？它只恢復 {model} 模型的每週上限，不恢復你整體的每週上限，且無法復原。",
         "refills": {
           "session": "5 小時上限",
           "weekly": "每週上限",
           "full": "5 小時上限和每週上限",
-          "other": "用量上限"
+          "other": "它涵蓋的上限"
         },
         "outcome": {
           "reset": "已在 {name} 上使用重設：上限已恢復。",

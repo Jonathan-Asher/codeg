@@ -7116,16 +7116,29 @@
       "reserveSummaryDynamic": "Reserva de {percent}%, liberada perto da redefinição",
       "position": "Posição {position}",
       "resets": {
-        "available": "{count, plural, one {# redefinição} other {# redefinições}}",
-        "availableUntil": "{count, plural, one {# redefinição} other {# redefinições}} · expira em {date}",
+        "group": {
+          "session": "{count, plural, one {# redefinição de 5 horas · recarrega seu limite de 5 horas} other {# redefinições de 5 horas · cada uma recarrega seu limite de 5 horas}}",
+          "weekly": "{count, plural, one {# redefinição semanal · recarrega seu limite semanal} other {# redefinições semanais · cada uma recarrega seu limite semanal}}",
+          "modelWeekly": "{count, plural, one {# redefinição do {model} · recarrega só o seu limite semanal do {model}} other {# redefinições do {model} · cada uma recarrega só o seu limite semanal do {model}}}",
+          "full": "{count, plural, one {# redefinição completa · recarrega seus limites de 5 horas e semanal} other {# redefinições completas · cada uma recarrega seus limites de 5 horas e semanal}}",
+          "other": "{count, plural, one {# redefinição · não se sabe o que ela recarrega} other {# redefinições · não se sabe o que elas recarregam}}"
+        },
+        "expires": "expira em {date}",
         "auto": "o pool usa uma ao atingir o limite",
         "cooldownUntil": "a próxima pode ser usada {time}",
+        "wontHelp": {
+          "weekly": "não ajuda agora: a conta está no limite semanal geral, que esta não recarrega",
+          "session": "não ajuda agora: a conta está no limite de 5 horas, que esta não recarrega"
+        },
+        "givesBackOnly": "no limite semanal geral, libera só o que o {model} usou nesta semana",
+        "givesBackOnlyNote": "Esta conta está no limite semanal geral: esta redefinição libera dele só o que os modelos {model} usaram nesta semana.",
         "confirmBody": "Usar 1 redefinição em <b>{name}</b>? Ela recarrega o {refills} agora e não dá para desfazer.",
+        "confirmBodyModel": "Usar 1 redefinição do {model} em <b>{name}</b>? Ela recarrega só o limite semanal dos modelos {model}, não o seu limite semanal geral, e não dá para desfazer.",
         "refills": {
           "session": "limite de 5 horas",
           "weekly": "limite semanal",
           "full": "limite de 5 horas e o semanal",
-          "other": "limite de uso"
+          "other": "limite que ela cobre"
         },
         "outcome": {
           "reset": "Redefinição usada em {name}: os limites foram recarregados.",

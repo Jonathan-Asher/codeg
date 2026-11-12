@@ -7116,16 +7116,29 @@
       "reserveSummaryDynamic": "Reserva {percent} %, liberada cerca del reinicio",
       "position": "Posición {position}",
       "resets": {
-        "available": "{count, plural, one {# reinicio} other {# reinicios}}",
-        "availableUntil": "{count, plural, one {# reinicio} other {# reinicios}} · caduca el {date}",
+        "group": {
+          "session": "{count, plural, one {# reinicio de 5 horas · recarga tu límite de 5 horas} other {# reinicios de 5 horas · cada uno recarga tu límite de 5 horas}}",
+          "weekly": "{count, plural, one {# reinicio semanal · recarga tu límite semanal} other {# reinicios semanales · cada uno recarga tu límite semanal}}",
+          "modelWeekly": "{count, plural, one {# reinicio de {model} · recarga solo tu límite semanal de {model}} other {# reinicios de {model} · cada uno recarga solo tu límite semanal de {model}}}",
+          "full": "{count, plural, one {# reinicio completo · recarga tu límite de 5 horas y el semanal} other {# reinicios completos · cada uno recarga tu límite de 5 horas y el semanal}}",
+          "other": "{count, plural, one {# reinicio · no se sabe qué recarga} other {# reinicios · no se sabe qué recargan}}"
+        },
+        "expires": "caduca el {date}",
         "auto": "el pool usa uno al llegar al límite",
         "cooldownUntil": "el siguiente se puede usar {time}",
+        "wontHelp": {
+          "weekly": "no sirve ahora: la cuenta está en su límite semanal general, que este no recarga",
+          "session": "no sirve ahora: la cuenta está en su límite de 5 horas, que este no recarga"
+        },
+        "givesBackOnly": "en el límite semanal general solo libera lo que {model} usó esta semana",
+        "givesBackOnlyNote": "Esta cuenta está en su límite semanal general: este reinicio solo libera lo que los modelos {model} usaron de él esta semana.",
         "confirmBody": "¿Usar 1 reinicio en <b>{name}</b>? Recarga el {refills} ahora y no se puede deshacer.",
+        "confirmBodyModel": "¿Usar 1 reinicio de {model} en <b>{name}</b>? Recarga solo el límite semanal de los modelos {model}, no tu límite semanal general, y no se puede deshacer.",
         "refills": {
           "session": "límite de 5 horas",
           "weekly": "límite semanal",
           "full": "límite de 5 horas y el semanal",
-          "other": "límite de uso"
+          "other": "límite que cubre"
         },
         "outcome": {
           "reset": "Reinicio usado en {name}: sus límites están recargados.",

@@ -2706,8 +2706,15 @@ export interface PlanUsageReport {
 
 // ─── Usage-limit resets (mirrors `commands/limit_resets.rs`) ───
 
-/** What a reset refills: the short window, the weekly one, or every limit. */
-export type LimitResetKind = "session" | "weekly" | "full" | "other"
+/** What a reset refills: the short window, the weekly one, every limit, or
+ *  — a pool grant only — one model family's own weekly limit and not the
+ *  general one (`model_weekly`). `other`: what it refills isn't known. */
+export type LimitResetKind =
+  | "session"
+  | "weekly"
+  | "model_weekly"
+  | "full"
+  | "other"
 
 /** One Codex reset credit. Claude Code offers its resets only in its own
  *  apps; a pool's Claude accounts carry theirs on the pool reading
@@ -2794,6 +2801,13 @@ export interface PlanUsagePoolResetGrant {
   label: string | null
   /** What it refills. */
   kind: LimitResetKind
+  /** The model family whose own weekly limit a `model_weekly` grant
+   *  refills ("Fable"). */
+  model: string | null
+  /** The account's windows it refills, by id in its `windows`
+   *  (`five_hour`, `seven_day`, `seven_day_fable`). Empty when what it
+   *  refills isn't known: such a grant is never used from here. */
+  refills: string[]
   /** Resets it still holds. */
   count: number
   /** Epoch seconds. */
@@ -2802,6 +2816,9 @@ export interface PlanUsagePoolResetGrant {
   usable_now: boolean
   /** It only works once a limit it refills is reached. */
   requires_limit: boolean
+  /** Using it also gives back to the general weekly limit what the model
+   *  used of it this week — only that much. */
+  gives_back_weekly: boolean
 }
 
 /** A pool account's resets, as the pool last listed them. */
@@ -2820,6 +2837,10 @@ export interface PlanUsagePoolResets {
   auto_redeem: boolean
   /** Epoch seconds. */
   checked_at: number | null
+  /** The account's windows at their limit at this reading, by id in its
+   *  `windows` (`five_hour`, `seven_day`, a model's `seven_day_<family>`):
+   *  what a reset has to refill to free it. */
+  limits_reached: string[]
 }
 
 /** `unconfirmed`: no answer came; it may have gone through. */

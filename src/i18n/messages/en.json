@@ -7116,16 +7116,29 @@
       "reserveSummaryDynamic": "Reserve {percent}%, released near the reset",
       "position": "Position {position}",
       "resets": {
-        "available": "{count, plural, one {# reset} other {# resets}}",
-        "availableUntil": "{count, plural, one {# reset} other {# resets}} · expires {date}",
+        "group": {
+          "session": "{count, plural, one {# 5-hour reset · refills your 5-hour limit} other {# 5-hour resets · each refills your 5-hour limit}}",
+          "weekly": "{count, plural, one {# weekly reset · refills your weekly limit} other {# weekly resets · each refills your weekly limit}}",
+          "modelWeekly": "{count, plural, one {# {model} reset · refills only your {model} weekly limit} other {# {model} resets · each refills only your {model} weekly limit}}",
+          "full": "{count, plural, one {# full reset · refills your 5-hour and weekly limits} other {# full resets · each refills your 5-hour and weekly limits}}",
+          "other": "{count, plural, one {# reset · what it refills isn't known} other {# resets · what they refill isn't known}}"
+        },
+        "expires": "expires {date}",
         "auto": "the pool uses one at its limit",
         "cooldownUntil": "next one usable {time}",
+        "wontHelp": {
+          "weekly": "won't help now: the account is at its general weekly limit, which this doesn't refill",
+          "session": "won't help now: the account is at its 5-hour limit, which this doesn't refill"
+        },
+        "givesBackOnly": "at the general weekly limit it frees up only what {model} used this week",
+        "givesBackOnlyNote": "This account is at its general weekly limit: this reset frees up only what {model} models used of it this week.",
         "confirmBody": "Use 1 reset on <b>{name}</b>? It refills the {refills} now and can't be undone.",
+        "confirmBodyModel": "Use 1 {model} reset on <b>{name}</b>? It refills only the weekly limit for {model} models, not your general weekly limit, and can't be undone.",
         "refills": {
           "session": "5-hour limit",
           "weekly": "weekly limit",
           "full": "5-hour and weekly limits",
-          "other": "usage limits"
+          "other": "limits it covers"
         },
         "outcome": {
           "reset": "Reset used on {name}: its limits are refilled.",

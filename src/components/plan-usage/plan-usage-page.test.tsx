@@ -1185,10 +1185,13 @@ describe("PlanUsagePage account pool resets", () => {
           id: "g-weekly",
           label: null,
           kind: "weekly",
+          model: null,
+          refills: ["seven_day"],
           count: 2,
           expires_at: now() + 9 * 86_400,
           usable_now: true,
           requires_limit: true,
+          gives_back_weekly: false,
         },
       ],
       next_grant_id: "g-weekly",
@@ -1196,8 +1199,37 @@ describe("PlanUsagePage account pool resets", () => {
       eligible: true,
       auto_redeem: false,
       checked_at: now() - 30,
+      limits_reached: [],
       ...overrides,
     }
+  }
+
+  /** The November launch's Fable resets as the pool lists them: each
+   *  refills only Fable's own weekly limit and gives back what Fable used of
+   *  the general one. */
+  function fableResets(count: number): PlanUsagePoolResets {
+    const ids = [
+      "launch-2610-fable",
+      "launch-2610-fable-12mo",
+      "launch-2610-fable-6mo",
+    ]
+    return resets({
+      available: count,
+      grants: ids.slice(0, count).map((id) => ({
+        id,
+        label:
+          "New model launch: one Fable reset for Max, Team Premium and Enterprise Premium",
+        kind: "model_weekly",
+        model: "Fable",
+        refills: ["seven_day_fable"],
+        count: 1,
+        expires_at: now() + 117 * 86_400,
+        usable_now: true,
+        requires_limit: false,
+        gives_back_weekly: true,
+      })),
+      next_grant_id: ids[0],
+    })
   }
 
   /** `primary` at its limit with two weekly resets, `backup` serving with
@@ -1215,7 +1247,10 @@ describe("PlanUsagePage account pool resets", () => {
       ...base,
       resets_supported: true,
       accounts: [
-        { ...base.accounts[0], resets: resets() },
+        {
+          ...base.accounts[0],
+          resets: resets({ limits_reached: ["five_hour"] }),
+        },
         {
           ...base.accounts[1],
           resets: resets({
@@ -1225,10 +1260,13 @@ describe("PlanUsagePage account pool resets", () => {
                 id: "g-full",
                 label: "One full limit reset",
                 kind: "full",
+                model: null,
+                refills: ["five_hour", "seven_day"],
                 count: 1,
                 expires_at: now() + 20 * 86_400,
                 usable_now: true,
                 requires_limit: true,
+                gives_back_weekly: false,
               },
             ],
             next_grant_id: null,
@@ -1262,11 +1300,15 @@ describe("PlanUsagePage account pool resets", () => {
     await mountWith(resetsPool())
     const primary = accountRow("primary")
     const line = primary.querySelector('[data-slot="pool-resets"]')!
-    expect(line).toHaveTextContent(/^2 resets · expires \w{3} \d{1,2}/)
+    expect(line).toHaveTextContent(
+      /^2 weekly resets · each refills your weekly limit · expires \w{3} \d{1,2}/
+    )
     // Backup's only reset works at a limit, and backup is serving.
     expect(
-      accountRow("backup").querySelector('[data-slot="pool-resets"]')
-    ).toHaveTextContent(/1 reset · expires .+ · Usable once you reach a limit/)
+      within(accountRow("backup")).getByTestId("pool-resets-available")
+    ).toHaveTextContent(
+      /^1 full reset · refills your 5-hour and weekly limits · expires .+ · Usable once you reach a limit$/
+    )
     expect(
       within(accountRow("backup")).queryByTestId("pool-reset-use")
     ).toBeNull()
@@ -1302,10 +1344,137 @@ describe("PlanUsagePage account pool resets", () => {
     await mountWith(p)
     expect(
       accountRow("primary").querySelector('[data-slot="pool-resets"]')
-    ).toHaveTextContent(/2 resets · expires .+ · next one usable/)
+    ).toHaveTextContent(
+      /2 weekly resets · each refills your weekly limit · expires .+ · next one usable/
+    )
     expect(
       within(accountRow("primary")).queryByTestId("pool-reset-use")
     ).toBeNull()
+  })
+
+  it("names a Fable reset's limit on the row and in the confirmation", async () => {
+    manage.usagePoolRedeemReset.mockResolvedValue({
+      account: "backup",
+      outcome: "reset",
+      pool: null,
+      continued: null,
+    })
+    const p = resetsPool()
+    p.accounts[1] = { ...p.accounts[1], resets: fableResets(1) }
+    await mountWith(p)
+    const backup = accountRow("backup")
+    expect(
+      within(backup).getByTestId("pool-resets-available")
+    ).toHaveTextContent(
+      /^1 Fable reset · refills only your Fable weekly limit · expires \w{3} \d{1,2}(, \d{4})?$/
+    )
+    fireEvent.click(within(backup).getByTestId("pool-reset-use"))
+    expect(screen.getByTestId("pool-reset-confirm-body")).toHaveTextContent(
+      "Use 1 Fable reset on backup? It refills only the weekly limit for Fable models, not your general weekly limit, and can't be undone."
+    )
+    expect(screen.queryByTestId("pool-reset-confirm-note")).toBeNull()
+    const calls = getPlanUsage.mock.calls.length
+    fireEvent.click(screen.getByTestId("pool-reset-confirm-use"))
+    await vi.waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "Reset used on backup: its limits are refilled."
+      )
+    )
+    expect(manage.usagePoolRedeemReset).toHaveBeenCalledWith({
+      name: "backup",
+      grantId: "launch-2610-fable",
+      conversationId: undefined,
+    })
+    await vi.waitFor(() =>
+      expect(getPlanUsage.mock.calls.length).toBeGreaterThan(calls)
+    )
+  })
+
+  it("holds back a Fable reset on an account at its general weekly limit, and says why", async () => {
+    const p = resetsPool()
+    p.accounts[1] = {
+      ...p.accounts[1],
+      state: "exhausted",
+      resets: { ...fableResets(3), limits_reached: ["seven_day"] },
+    }
+    await mountWith(p)
+    const backup = accountRow("backup")
+    expect(
+      within(backup).getByTestId("pool-resets-available")
+    ).toHaveTextContent(
+      /^3 Fable resets · each refills only your Fable weekly limit · expires .+ · won't help now: the account is at its general weekly limit, which this doesn't refill$/
+    )
+    const use = within(backup).getByTestId("pool-reset-use")
+    expect(use).toBeDisabled()
+    expect(use).toHaveAttribute(
+      "title",
+      "won't help now: the account is at its general weekly limit, which this doesn't refill"
+    )
+    fireEvent.click(use)
+    expect(screen.queryByTestId("pool-reset-confirm")).toBeNull()
+    expect(manage.usagePoolRedeemReset).not.toHaveBeenCalled()
+  })
+
+  it("lets a Fable reset give back Fable's own use at the general weekly limit, saying that's all it frees", async () => {
+    const p = resetsPool()
+    const windows = p.accounts[1].windows.map((w) =>
+      w.id === "seven_day" ? { ...w, used_percent: 100 } : w
+    )
+    p.accounts[1] = {
+      ...p.accounts[1],
+      state: "exhausted",
+      windows: [
+        ...windows,
+        {
+          ...windows[1],
+          id: "seven_day_fable",
+          kind: "weekly_model",
+          label: "Fable",
+          used_percent: 35,
+        },
+      ],
+      resets: { ...fableResets(1), limits_reached: ["seven_day"] },
+    }
+    await mountWith(p)
+    const backup = accountRow("backup")
+    expect(
+      within(backup).getByTestId("pool-resets-available")
+    ).toHaveTextContent(
+      /· at the general weekly limit it frees up only what Fable used this week$/
+    )
+    fireEvent.click(within(backup).getByTestId("pool-reset-use"))
+    expect(screen.getByTestId("pool-reset-confirm-note")).toHaveTextContent(
+      "This account is at its general weekly limit: this reset frees up only what Fable models used of it this week."
+    )
+  })
+
+  it("shows a reset whose limit isn't known, with nothing to use it", async () => {
+    const p = resetsPool()
+    p.accounts[1] = {
+      ...p.accounts[1],
+      resets: resets({
+        available: 1,
+        grants: [
+          {
+            ...resets().grants[0],
+            id: "g-unknown",
+            kind: "other",
+            refills: [],
+            count: 1,
+            requires_limit: false,
+          },
+        ],
+        next_grant_id: null,
+      }),
+    }
+    await mountWith(p)
+    const backup = accountRow("backup")
+    expect(
+      within(backup).getByTestId("pool-resets-available")
+    ).toHaveTextContent(
+      /^1 reset · what it refills isn't known · expires \w{3} \d{1,2}(, \d{4})?$/
+    )
+    expect(within(backup).queryByTestId("pool-reset-use")).toBeNull()
   })
 
   it("offers Recheck now beside a cooling-down, reserved or over-threshold account, and nowhere else", async () => {

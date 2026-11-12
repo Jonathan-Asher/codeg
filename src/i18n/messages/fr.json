@@ -7116,16 +7116,29 @@
       "reserveSummaryDynamic": "Réserve {percent} %, libérée avant la réinitialisation",
       "position": "Position {position}",
       "resets": {
-        "available": "{count, plural, one {# réinitialisation} other {# réinitialisations}}",
-        "availableUntil": "{count, plural, one {# réinitialisation} other {# réinitialisations}} · expire le {date}",
+        "group": {
+          "session": "{count, plural, one {# réinitialisation 5 heures · recharge votre limite de 5 heures} other {# réinitialisations 5 heures · chacune recharge votre limite de 5 heures}}",
+          "weekly": "{count, plural, one {# réinitialisation hebdomadaire · recharge votre limite hebdomadaire} other {# réinitialisations hebdomadaires · chacune recharge votre limite hebdomadaire}}",
+          "modelWeekly": "{count, plural, one {# réinitialisation {model} · recharge uniquement votre limite hebdomadaire {model}} other {# réinitialisations {model} · chacune recharge uniquement votre limite hebdomadaire {model}}}",
+          "full": "{count, plural, one {# réinitialisation complète · recharge vos limites de 5 heures et hebdomadaire} other {# réinitialisations complètes · chacune recharge vos limites de 5 heures et hebdomadaire}}",
+          "other": "{count, plural, one {# réinitialisation · on ne sait pas ce qu'elle recharge} other {# réinitialisations · on ne sait pas ce qu'elles rechargent}}"
+        },
+        "expires": "expire le {date}",
         "auto": "le pool en utilise une à la limite",
         "cooldownUntil": "la prochaine utilisable {time}",
+        "wontHelp": {
+          "weekly": "inutile pour l'instant : le compte est à sa limite hebdomadaire générale, qu'elle ne recharge pas",
+          "session": "inutile pour l'instant : le compte est à sa limite de 5 heures, qu'elle ne recharge pas"
+        },
+        "givesBackOnly": "à la limite hebdomadaire générale, elle ne libère que ce que {model} a utilisé cette semaine",
+        "givesBackOnlyNote": "Ce compte est à sa limite hebdomadaire générale : cette réinitialisation n'en libère que ce que les modèles {model} ont utilisé cette semaine.",
         "confirmBody": "Utiliser 1 réinitialisation sur <b>{name}</b> ? Elle recharge la {refills} maintenant. C'est irréversible.",
+        "confirmBodyModel": "Utiliser 1 réinitialisation {model} sur <b>{name}</b> ? Elle recharge uniquement la limite hebdomadaire des modèles {model}, pas votre limite hebdomadaire générale. C'est irréversible.",
         "refills": {
           "session": "limite de 5 heures",
           "weekly": "limite hebdomadaire",
           "full": "limite de 5 heures et la limite hebdomadaire",
-          "other": "limite d'utilisation"
+          "other": "limite qu'elle couvre"
         },
         "outcome": {
           "reset": "Réinitialisation utilisée sur {name} : ses limites sont rechargées.",

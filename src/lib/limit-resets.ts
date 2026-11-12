@@ -144,18 +144,24 @@ export function resetOutcomeKey(
   return OUTCOME_KEYS[outcome]
 }
 
+/** The kinds a Codex reset comes in; one model's own weekly limit is a
+ *  pool grant's alone, and reads as `other` here. */
+type CodexResetKind = Exclude<LimitResetKind, "model_weekly">
+
 const KIND_KEYS = {
   session: "resets.kind.session",
   weekly: "resets.kind.weekly",
   full: "resets.kind.full",
   other: "resets.kind.other",
-} as const satisfies Record<LimitResetKind, string>
+} as const satisfies Record<CodexResetKind, string>
 
 /** A reset's name when the provider gives none. */
 export function resetKindKey(
   kind: LimitResetKind
-): (typeof KIND_KEYS)[LimitResetKind] {
-  return KIND_KEYS[kind] ?? KIND_KEYS.other
+): (typeof KIND_KEYS)[CodexResetKind] {
+  return kind === "model_weekly"
+    ? KIND_KEYS.other
+    : (KIND_KEYS[kind] ?? KIND_KEYS.other)
 }
 
 const REFILLS_KEYS = {
@@ -163,13 +169,15 @@ const REFILLS_KEYS = {
   weekly: "resets.refills.weekly",
   full: "resets.refills.full",
   other: "resets.refills.other",
-} as const satisfies Record<LimitResetKind, string>
+} as const satisfies Record<CodexResetKind, string>
 
 /** What a reset refills, for the confirmation ("your weekly limit"). */
 export function resetRefillsKey(
   kind: LimitResetKind
-): (typeof REFILLS_KEYS)[LimitResetKind] {
-  return REFILLS_KEYS[kind] ?? REFILLS_KEYS.other
+): (typeof REFILLS_KEYS)[CodexResetKind] {
+  return kind === "model_weekly"
+    ? REFILLS_KEYS.other
+    : (REFILLS_KEYS[kind] ?? REFILLS_KEYS.other)
 }
 
 /** How an outcome is shown: it went through, nothing happened, or nobody
@@ -235,70 +243,241 @@ export function poolOffersRecheck(
   return pool.resets_supported === true && RECHECK_STATES.has(state)
 }
 
-/** The grant a "Use reset" takes on a pool account: the provider's next
- *  one when it can be used, else the usable one that expires first. A grant
- *  that only works at a limit is skipped while the account isn't held by
- *  one. `null` when none can be used now. */
+/** An account's limits that hold every request back, whatever its model:
+ *  the 5-hour window and the general weekly one. A model's own weekly
+ *  window (`seven_day_<family>`) holds back only that model's requests. */
+const GENERAL_WINDOWS: ReadonlySet<string> = new Set(["five_hour", "seven_day"])
+
+/** The window a model family's own weekly limit has in a pool reading. */
+export function modelWindowId(family: string): string {
+  return `seven_day_${family}`
+}
+
+/** The model family a session's model belongs to, for the limits that hold
+ *  back only that model's requests — read the way the pool reads a
+ *  request's model (`claude-fable-5-1` is `fable`). `null` for a model it
+ *  names no family for, or none. */
+export function modelFamilyOf(model: string | null | undefined): string | null {
+  const id = (model ?? "").toLowerCase()
+  if (id.includes("fable") || id.includes("mythos")) return "fable"
+  if (id.includes("opus")) return "opus"
+  if (id.includes("sonnet")) return "sonnet"
+  if (id.includes("haiku")) return "haiku"
+  return null
+}
+
+/** The windows a pool account is at its limit in now (ids in its
+ *  `windows`): what its last reading found, less any window that has reset
+ *  since. */
+export function poolLimitsReached(
+  account: PlanUsagePoolAccount,
+  now: number
+): string[] {
+  return (account.resets?.limits_reached ?? []).filter((id) => {
+    const resetsAt = account.windows.find((w) => w.id === id)?.resets_at
+    return resetsAt == null || resetsAt > now
+  })
+}
+
+/** Whether a grant can go to the pool now: the pool lists resets, the
+ *  account takes them (enabled, offered resets, no cooldown), the grant is
+ *  usable, in date and known to refill something — and, for one that only
+ *  works at a limit, the account is at one (`atLimit`). */
+function poolGrantUsable(
+  pool: PlanUsagePool,
+  account: PlanUsagePoolAccount,
+  grant: PlanUsagePoolResetGrant,
+  now: number,
+  atLimit: boolean
+): boolean {
+  const resets = account.resets
+  if (!pool.resets_supported || !resets || !account.enabled) return false
+  if (account.provider || resets.eligible === false) return false
+  if (resets.cooldown_until != null && resets.cooldown_until > now) return false
+  return (
+    grant.usable_now &&
+    grant.count > 0 &&
+    grant.refills.length > 0 &&
+    (grant.expires_at == null || grant.expires_at > now) &&
+    (!grant.requires_limit || atLimit)
+  )
+}
+
+/** The grant a "Use reset" takes on a pool account, from `grants` (all of
+ *  the account's by default): the provider's next one when it can be used,
+ *  else the usable one that expires first. A grant that only works at a
+ *  limit is skipped while the account isn't held by one, and one whose
+ *  refill isn't known is never taken. `null` when none can be used now. */
 export function poolResetToUse(
   pool: PlanUsagePool,
   account: PlanUsagePoolAccount,
   state: PlanUsagePoolAccountState,
-  now: number
+  now: number,
+  grants?: PlanUsagePoolResetGrant[]
 ): PlanUsagePoolResetGrant | null {
   const resets = account.resets
-  if (!pool.resets_supported || !resets || !account.enabled) return null
-  if (account.provider || resets.eligible === false) return null
-  if (resets.cooldown_until != null && resets.cooldown_until > now) return null
+  if (!resets) return null
   const atLimit = HELD_BY_LIMIT.has(state)
-  const usable = resets.grants.filter(
-    (g) =>
-      g.usable_now &&
-      g.count > 0 &&
-      (g.expires_at == null || g.expires_at > now) &&
-      (!g.requires_limit || atLimit)
+  const usable = (grants ?? resets.grants).filter((g) =>
+    poolGrantUsable(pool, account, g, now, atLimit)
   )
   return usable.find((g) => g.id === resets.next_grant_id) ?? usable[0] ?? null
 }
 
-/** The soonest expiry among a pool account's grants left. */
-export function poolResetsExpiry(account: PlanUsagePoolAccount): number | null {
-  let soonest: number | null = null
-  for (const g of account.resets?.grants ?? []) {
-    if (g.count <= 0 || g.expires_at == null) continue
-    if (soonest == null || g.expires_at < soonest) soonest = g.expires_at
+/** How a grant stands against the limits its account is at now. */
+export type PoolGrantFit =
+  /** Nothing against using it. */
+  | { kind: "fits" }
+  /** What it refills isn't known: it is shown, never used from here. */
+  | { kind: "unknown" }
+  /** It refills only one model's own weekly limit while the account is at a
+   *  limit every request meets — its general weekly limit, else its 5-hour
+   *  one (`limit`): using it gains nothing now. */
+  | { kind: "wont_help"; model: string; limit: "weekly" | "session" }
+  /** The same at the general weekly limit alone, for a grant that also gives
+   *  back what the model used of it this week: it frees up that much, and
+   *  no more. */
+  | { kind: "gives_back_only"; model: string }
+
+export function poolGrantFit(
+  account: PlanUsagePoolAccount,
+  grant: PlanUsagePoolResetGrant,
+  now: number
+): PoolGrantFit {
+  if (grant.refills.length === 0) return { kind: "unknown" }
+  if (grant.kind !== "model_weekly") return { kind: "fits" }
+  const general = poolLimitsReached(account, now).filter((id) =>
+    GENERAL_WINDOWS.has(id)
+  )
+  if (general.length === 0) return { kind: "fits" }
+  const model = grant.model ?? ""
+  // What the model used this week, as its own weekly window reads it; a
+  // model without one (its limit not in effect) has nothing measured.
+  const modelUsed = grant.refills.some(
+    (id) => (account.windows.find((w) => w.id === id)?.used_percent ?? 0) > 0
+  )
+  if (
+    grant.gives_back_weekly &&
+    modelUsed &&
+    general.length === 1 &&
+    general[0] === "seven_day"
+  ) {
+    return { kind: "gives_back_only", model }
   }
-  return soonest
+  return {
+    kind: "wont_help",
+    model,
+    limit: general.includes("seven_day") ? "weekly" : "session",
+  }
 }
 
-/** For a session paused at the pool's limit: the account (and grant) whose
- *  reset frees the most, i.e. an account held by its limit whose grant
- *  expires first; else any account with a usable grant. `null` when the
- *  pool has none. `stateOf` gives each account's state at `now`. */
+/** A pool account's grants of one kind (and model), shown as one row. */
+export interface PoolResetGroup {
+  key: string
+  kind: LimitResetKind
+  /** The model family of a `model_weekly` row ("Fable"). */
+  model: string | null
+  /** Resets left over its grants. */
+  count: number
+  /** The soonest expiry among them (epoch seconds). */
+  expires_at: number | null
+  /** Its grants, soonest to expire first. */
+  grants: PlanUsagePoolResetGrant[]
+}
+
+/** A pool account's grants by what they refill, in the order the first of
+ *  each kind appears (the pool lists them soonest to expire first). */
+export function poolResetGroups(
+  account: PlanUsagePoolAccount
+): PoolResetGroup[] {
+  const groups: PoolResetGroup[] = []
+  for (const grant of account.resets?.grants ?? []) {
+    if (grant.count <= 0) continue
+    const model = grant.kind === "model_weekly" ? (grant.model ?? null) : null
+    const key = `${grant.kind}|${model ?? ""}`
+    let group = groups.find((g) => g.key === key)
+    if (!group) {
+      group = {
+        key,
+        kind: grant.kind,
+        model,
+        count: 0,
+        expires_at: null,
+        grants: [],
+      }
+      groups.push(group)
+    }
+    group.count += grant.count
+    group.grants.push(grant)
+    if (
+      grant.expires_at != null &&
+      (group.expires_at == null || grant.expires_at < group.expires_at)
+    ) {
+      group.expires_at = grant.expires_at
+    }
+  }
+  return groups
+}
+
+const POOL_GROUP_KEYS = {
+  session: "pool.resets.group.session",
+  weekly: "pool.resets.group.weekly",
+  model_weekly: "pool.resets.group.modelWeekly",
+  full: "pool.resets.group.full",
+  other: "pool.resets.group.other",
+} as const satisfies Record<LimitResetKind, string>
+
+/** A row of a pool account's resets: how many, and what each refills ("1
+ *  Fable reset · refills only your Fable weekly limit"). Takes `count` and,
+ *  for a model's own reset, `model`. */
+export function poolResetGroupKey(
+  kind: LimitResetKind
+): (typeof POOL_GROUP_KEYS)[LimitResetKind] {
+  return POOL_GROUP_KEYS[kind] ?? POOL_GROUP_KEYS.other
+}
+
+/** For a session paused at its usage limit: the account and grant whose
+ *  reset clears what stopped it — an account held back by its limits, and a
+ *  grant that refills every one of them. A model's own weekly limit counts
+ *  only for a session on that model (`modelFamily`); a grant that refills
+ *  only some of the limits, or none (one model's limit while the general
+ *  weekly one holds the account), is never offered. Of those that clear it,
+ *  the grant that refills the least beyond what holds the account goes
+ *  first, then the one that expires first. `null` when no reset clears it. */
 export function poolResetForPause(
   pool: PlanUsagePool | null,
   now: number,
-  stateOf: (account: PlanUsagePoolAccount) => PlanUsagePoolAccountState
+  modelFamily: string | null = null
 ): { account: PlanUsagePoolAccount; grant: PlanUsagePoolResetGrant } | null {
   if (!pool || pool.stale || !pool.resets_supported) return null
+  const modelWindow = modelFamily ? modelWindowId(modelFamily) : null
   const candidates: {
     account: PlanUsagePoolAccount
     grant: PlanUsagePoolResetGrant
-    held: boolean
+    beyond: number
   }[] = []
   for (const account of pool.accounts) {
     if (account.provider || !account.enabled) continue
-    const state = stateOf(account)
-    const grant = poolResetToUse(pool, account, state, now)
-    if (grant)
-      candidates.push({ account, grant, held: HELD_BY_LIMIT.has(state) })
-  }
-  candidates.sort((a, b) => {
-    if (a.held !== b.held) return a.held ? -1 : 1
-    return (
-      (a.grant.expires_at ?? Number.MAX_SAFE_INTEGER) -
-      (b.grant.expires_at ?? Number.MAX_SAFE_INTEGER)
+    const holding = poolLimitsReached(account, now).filter(
+      (id) => GENERAL_WINDOWS.has(id) || id === modelWindow
     )
-  })
+    if (holding.length === 0) continue
+    for (const grant of account.resets?.grants ?? []) {
+      if (!poolGrantUsable(pool, account, grant, now, true)) continue
+      if (!holding.every((id) => grant.refills.includes(id))) continue
+      candidates.push({
+        account,
+        grant,
+        beyond: grant.refills.length - holding.length,
+      })
+    }
+  }
+  candidates.sort(
+    (a, b) =>
+      a.beyond - b.beyond ||
+      (a.grant.expires_at ?? Number.MAX_SAFE_INTEGER) -
+        (b.grant.expires_at ?? Number.MAX_SAFE_INTEGER)
+  )
   const first = candidates[0]
   return first ? { account: first.account, grant: first.grant } : null
 }
@@ -308,13 +487,13 @@ const POOL_REFILLS_KEYS = {
   weekly: "pool.resets.refills.weekly",
   full: "pool.resets.refills.full",
   other: "pool.resets.refills.other",
-} as const satisfies Record<LimitResetKind, string>
+} as const satisfies Record<Exclude<LimitResetKind, "model_weekly">, string>
 
 /** What a pool account's grant refills, for its confirmation ("the weekly
- *  limit"). */
+ *  limit"). A model's own reset has a sentence of its own. */
 export function poolRefillsKey(
-  kind: LimitResetKind
-): (typeof POOL_REFILLS_KEYS)[LimitResetKind] {
+  kind: Exclude<LimitResetKind, "model_weekly">
+): (typeof POOL_REFILLS_KEYS)[Exclude<LimitResetKind, "model_weekly">] {
   return POOL_REFILLS_KEYS[kind] ?? POOL_REFILLS_KEYS.other
 }
 

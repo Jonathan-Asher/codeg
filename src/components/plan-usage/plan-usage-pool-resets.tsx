@@ -2,14 +2,16 @@
 
 /**
  * A pool account's usage-limit resets and its "Recheck now", through the
- * pool's own routes (`commands/usage_pool/resets.rs`): "2 resets · first
- * expires Dec 10" with a "Use reset" that asks first (it can't be undone),
- * and, beside a hold that a reset or a rollover may have made old, a
- * "Recheck now" that has the pool read the account again. Shared by the pool
- * card and a paused session's banner.
+ * pool's own routes (`commands/usage_pool/resets.rs`): a row per kind of
+ * reset saying which limit it refills ("1 Fable reset · refills only your
+ * Fable weekly limit · expires Dec 10") with a "Use reset" that asks first
+ * (it can't be undone) — held back, with the reason, where it would gain
+ * nothing — and, beside a hold that a reset or a rollover may have made
+ * old, a "Recheck now" that has the pool read the account again. Shared by
+ * the pool card and a paused session's banner.
  */
 
-import { useCallback, useState } from "react"
+import { useCallback, useState, type ReactNode } from "react"
 import { useLocale, useTranslations } from "next-intl"
 import { Loader2, RefreshCw, RotateCcw } from "lucide-react"
 import { toast } from "sonner"
@@ -29,12 +31,15 @@ import { usagePoolRecheck, usagePoolRedeemReset } from "@/lib/api"
 import { extractAppCommandError, toErrorMessage } from "@/lib/app-error"
 import {
   formatResetDate,
+  poolGrantFit,
   poolResetErrorKey,
+  poolResetGroupKey,
+  poolResetGroups,
   poolResetOutcomeKey,
-  poolResetsExpiry,
   poolRefillsKey,
   poolResetToUse,
   resetOutcomeTone,
+  type PoolGrantFit,
 } from "@/lib/limit-resets"
 import type {
   PlanUsagePool,
@@ -102,21 +107,27 @@ export function usePoolResetRun(onChanged?: () => void) {
 }
 
 /** "Use 1 reset on primary? It refills the weekly limit now and can't be
- *  undone." */
+ *  undone." — and for one model's own reset, "Use 1 Fable reset on primary?
+ *  It refills only the weekly limit for Fable models, not your general
+ *  weekly limit, and can't be undone." */
 export function PoolResetConfirmDialog({
   open,
   onOpenChange,
   account,
   grant,
+  fit,
   onConfirm,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   account: string
   grant: PlanUsagePoolResetGrant
+  /** How it stands against the account's limits now, when known. */
+  fit?: PoolGrantFit | null
   onConfirm: () => void
 }) {
   const t = useTranslations("PlanUsage")
+  const b = (chunks: ReactNode) => <bdi className="font-medium">{chunks}</bdi>
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent data-testid="pool-reset-confirm">
@@ -124,13 +135,24 @@ export function PoolResetConfirmDialog({
           <AlertDialogTitle>{t("resets.confirm.title")}</AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div className="space-y-2">
-              <p>
-                {t.rich("pool.resets.confirmBody", {
-                  name: account,
-                  refills: t(poolRefillsKey(grant.kind)),
-                  b: (chunks) => <bdi className="font-medium">{chunks}</bdi>,
-                })}
+              <p data-testid="pool-reset-confirm-body">
+                {grant.kind === "model_weekly"
+                  ? t.rich("pool.resets.confirmBodyModel", {
+                      name: account,
+                      model: grant.model ?? "",
+                      b,
+                    })
+                  : t.rich("pool.resets.confirmBody", {
+                      name: account,
+                      refills: t(poolRefillsKey(grant.kind)),
+                      b,
+                    })}
               </p>
+              {fit?.kind === "gives_back_only" && (
+                <p className="text-xs" data-testid="pool-reset-confirm-note">
+                  {t("pool.resets.givesBackOnlyNote", { model: fit.model })}
+                </p>
+              )}
               {grant.label && (
                 <p className="text-xs text-muted-foreground">{grant.label}</p>
               )}
@@ -155,9 +177,12 @@ export function PoolResetConfirmDialog({
 }
 
 /**
- * "2 resets · first expires Dec 10" and "Use reset" on a pool account's
- * row. Nothing for an account without resets, or a pool that doesn't list
- * them.
+ * A pool account's resets on its row: one line per kind of reset — how
+ * many, which limit each refills, when they expire — with its own "Use
+ * reset". A reset that would gain nothing now (one model's own, while the
+ * account is at a limit every request meets) has its button held back with
+ * the reason; one whose refill isn't known is shown, never used. Nothing
+ * for an account without resets, or a pool that doesn't list them.
  */
 export function PoolAccountResetsLine({
   pool,
@@ -176,71 +201,124 @@ export function PoolAccountResetsLine({
   const t = useTranslations("PlanUsage")
   const locale = useLocale()
   const { busy, run } = usePoolResetRun(onChanged)
-  const [confirming, setConfirming] = useState(false)
+  const [confirming, setConfirming] = useState<PlanUsagePoolResetGrant | null>(
+    null
+  )
+  // The grant last sent to the pool: its row shows the attempt.
+  const [sent, setSent] = useState<string | null>(null)
   const resets = account.resets
   if (!pool.resets_supported || !resets || account.provider) return null
   if (resets.available <= 0) return null
-  const grant = poolResetToUse(pool, account, state, now)
-  const expiry = poolResetsExpiry(account)
+  const groups = poolResetGroups(account)
+  if (groups.length === 0) return null
   const cooling =
     resets.cooldown_until != null && resets.cooldown_until > now
       ? resets.cooldown_until
       : null
-  const held = grant
-    ? null
-    : cooling != null
-      ? t("pool.resets.cooldownUntil", {
-          time: formatResetDate(cooling, locale, now),
-        })
-      : resets.grants.some((g) => g.usable_now && g.requires_limit)
-        ? t("resets.needsLimit")
-        : t("resets.notUsableNow")
   return (
-    <div
-      data-slot="pool-resets"
-      className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1"
-    >
-      <p
-        className="text-[0.6875rem] text-muted-foreground tabular-nums"
-        data-testid="pool-resets-available"
-      >
-        {expiry != null
-          ? t("pool.resets.availableUntil", {
-              count: resets.available,
-              date: formatResetDate(expiry, locale, now),
-            })
-          : t("pool.resets.available", { count: resets.available })}
-        {held && <> · {held}</>}
-        {resets.auto_redeem && <> · {t("pool.resets.auto")}</>}
-      </p>
-      {grant && (
-        <Button
-          type="button"
-          size="xs"
-          variant="outline"
-          className="h-6 gap-1 px-2 text-[0.6875rem]"
-          disabled={busy}
-          onClick={() => setConfirming(true)}
-          data-testid="pool-reset-use"
-        >
-          {busy ? (
-            <Loader2 aria-hidden className="size-3 animate-spin" />
-          ) : (
-            <RotateCcw aria-hidden className="size-3" />
-          )}
-          {busy ? t("resets.using") : t("resets.use")}
-        </Button>
-      )}
-      {confirming && grant && (
+    <div data-slot="pool-resets" className="mt-1.5 space-y-1">
+      {groups.map((group, index) => {
+        const grant = poolResetToUse(pool, account, state, now, group.grants)
+        const fit = grant ? poolGrantFit(account, grant, now) : null
+        const advice =
+          fit?.kind === "wont_help"
+            ? t(
+                fit.limit === "weekly"
+                  ? "pool.resets.wontHelp.weekly"
+                  : "pool.resets.wontHelp.session"
+              )
+            : fit?.kind === "gives_back_only"
+              ? t("pool.resets.givesBackOnly", { model: fit.model })
+              : null
+        // Why there is no button, for a kind whose refill is known.
+        const held =
+          grant || group.kind === "other"
+            ? null
+            : cooling != null
+              ? t("pool.resets.cooldownUntil", {
+                  time: formatResetDate(cooling, locale, now),
+                })
+              : group.grants.some((g) => g.usable_now && g.requires_limit)
+                ? t("resets.needsLimit")
+                : t("resets.notUsableNow")
+        const wontHelp = fit?.kind === "wont_help"
+        const usingThis = busy && grant != null && sent === grant.id
+        return (
+          <div
+            key={group.key}
+            className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1"
+            data-reset-kind={group.kind}
+            data-reset-fit={fit?.kind}
+          >
+            <p
+              className="text-[0.6875rem] text-muted-foreground tabular-nums"
+              data-testid="pool-resets-available"
+            >
+              {t(poolResetGroupKey(group.kind), {
+                count: group.count,
+                model: group.model ?? "",
+              })}
+              {group.expires_at != null && (
+                <>
+                  {" · "}
+                  {t("pool.resets.expires", {
+                    date: formatResetDate(group.expires_at, locale, now),
+                  })}
+                </>
+              )}
+              {held && <> · {held}</>}
+              {advice && (
+                <>
+                  {" · "}
+                  <span
+                    className={
+                      wontHelp ? "text-amber-700 dark:text-amber-400" : ""
+                    }
+                    data-testid="pool-reset-advice"
+                  >
+                    {advice}
+                  </span>
+                </>
+              )}
+              {index === 0 && resets.auto_redeem && (
+                <> · {t("pool.resets.auto")}</>
+              )}
+            </p>
+            {grant && (
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                className="h-6 gap-1 px-2 text-[0.6875rem]"
+                disabled={busy || wontHelp}
+                title={wontHelp ? (advice ?? undefined) : undefined}
+                onClick={() => setConfirming(grant)}
+                data-testid="pool-reset-use"
+              >
+                {usingThis ? (
+                  <Loader2 aria-hidden className="size-3 animate-spin" />
+                ) : (
+                  <RotateCcw aria-hidden className="size-3" />
+                )}
+                {usingThis ? t("resets.using") : t("resets.use")}
+              </Button>
+            )}
+          </div>
+        )
+      })}
+      {confirming && (
         <PoolResetConfirmDialog
           open
           onOpenChange={(open) => {
-            if (!open) setConfirming(false)
+            if (!open) setConfirming(null)
           }}
           account={account.name}
-          grant={grant}
+          grant={confirming}
+          fit={poolGrantFit(account, confirming, now)}
           onConfirm={() => {
-            setConfirming(false)
+            const grant = confirming
+            setConfirming(null)
+            setSent(grant.id)
             void run({ account: account.name, grantId: grant.id })
           }}
         />
