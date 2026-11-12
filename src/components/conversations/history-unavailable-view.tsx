@@ -51,9 +51,7 @@ export function HistoryUnavailableView({
   // move) starts over rather than showing the previous one's text.
   const [saved, setSaved] = useState<{ id: number; state: SavedState }>(() => ({
     id: conversationId,
-    state: nothingSaved
-      ? { phase: "loaded", turns: [] }
-      : { phase: "loading" },
+    state: nothingSaved ? { phase: "loaded", turns: [] } : { phase: "loading" },
   }))
   const state: SavedState =
     saved.id === conversationId
@@ -96,7 +94,11 @@ export function HistoryUnavailableView({
   const turns = state.phase === "loaded" ? state.turns : []
 
   return (
-    <ScrollArea className="relative isolate h-full min-h-0" x="hidden" y="scroll">
+    <ScrollArea
+      className="relative isolate h-full min-h-0"
+      x="hidden"
+      y="scroll"
+    >
       <div className="mx-auto flex w-full max-w-(--session-column-max-width) flex-col gap-4 px-4 py-4">
         <section
           role="status"

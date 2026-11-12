@@ -695,9 +695,9 @@ describe("MessageInput injectContent", () => {
       )
     )
     const text = serializeDocToText(editor.state.doc)
-    expect(text.startsWith("my own draft\n\nThis continues an earlier session.")).toBe(
-      true
-    )
+    expect(
+      text.startsWith("my own draft\n\nThis continues an earlier session.")
+    ).toBe(true)
     expect(onSend).not.toHaveBeenCalled()
   })
 })

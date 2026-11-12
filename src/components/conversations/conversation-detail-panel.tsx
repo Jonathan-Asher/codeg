@@ -3986,11 +3986,16 @@ const ConversationTabView = memo(function ConversationTabView({
       injectContent={composerInject}
       onInjectConsumed={handleComposerInjectConsumed}
       composerBanner={
-        acpLoadErrorBanner ??
-        outsideWriterBanner ??
-        limitPausedBanner ??
-        interruptedBanner ??
-        emptyTurnBanner
+        // A session whose history is gone takes no message, so none of the
+        // banners that lead to one (Continue, Retry) applies; its own view
+        // says what can be done instead.
+        historyUnavailable != null
+          ? null
+          : (acpLoadErrorBanner ??
+            outsideWriterBanner ??
+            limitPausedBanner ??
+            interruptedBanner ??
+            emptyTurnBanner)
       }
       feedbackList={
         feedback.showList || feedback.carriedNotes.length > 0 ? (

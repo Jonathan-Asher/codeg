@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { HistoryUnavailable, SavedTurn } from "@/lib/types"
@@ -66,13 +66,18 @@ function renderView(
   )
 }
 
+// The saved copy loads after the first paint; tests about the rest of the view
+// wait for it, so it does not land after they end.
+const savedCopyLoaded = () =>
+  screen.findByRole("list", { name: "Saved messages" })
+
 beforeEach(() => {
   getConversationSavedTurns.mockReset()
   getConversationSavedTurns.mockResolvedValue(SAVED)
 })
 
 describe("HistoryUnavailableView", () => {
-  it("says the agent's cleanup deleted the history, and how old it was", () => {
+  it("says the agent's cleanup deleted the history, and how old it was", async () => {
     renderView()
     expect(
       screen.getByRole("heading", { name: "History unavailable" })
@@ -83,9 +88,10 @@ describe("HistoryUnavailableView", () => {
       )
     ).toBeVisible()
     expect(screen.getByText(/It can't be resumed or forked/)).toBeVisible()
+    await savedCopyLoaded()
   })
 
-  it("falls back to the plain reason when it can't tell why", () => {
+  it("falls back to the plain reason when it can't tell why", async () => {
     renderView({
       info: { reason: "missing", retention_days: null, saved_turns: 3 },
     })
@@ -94,9 +100,10 @@ describe("HistoryUnavailableView", () => {
         "The agent's history file for this session no longer exists."
       )
     ).toBeVisible()
+    await savedCopyLoaded()
   })
 
-  it("reads an unknown reason from a newer server as the plain one", () => {
+  it("reads an unknown reason from a newer server as the plain one", async () => {
     renderView({
       info: { reason: "something_new", saved_turns: 3 },
     })
@@ -105,6 +112,7 @@ describe("HistoryUnavailableView", () => {
         "The agent's history file for this session no longer exists."
       )
     ).toBeVisible()
+    await savedCopyLoaded()
   })
 
   it("shows the saved turns, read-only and labelled as a partial copy", async () => {
@@ -138,7 +146,9 @@ describe("HistoryUnavailableView", () => {
     renderView({
       info: { reason: "agent_cleanup", retention_days: 30, saved_turns: 0 },
     })
-    expect(screen.getByText("codeg kept no text of this session.")).toBeVisible()
+    expect(
+      screen.getByText("codeg kept no text of this session.")
+    ).toBeVisible()
     expect(getConversationSavedTurns).not.toHaveBeenCalled()
   })
 
@@ -164,18 +174,20 @@ describe("HistoryUnavailableView", () => {
       screen.getByRole("button", { name: "Start a new session from this" })
     )
     expect(onStartNew).toHaveBeenCalledTimes(1)
+    await savedCopyLoaded()
   })
 
-  it("holds the button while the new session is being prepared", () => {
+  it("holds the button while the new session is being prepared", async () => {
     renderView({ onStartNew: vi.fn(), starting: true })
     expect(
       screen.getByRole("button", { name: "Start a new session from this" })
     ).toBeDisabled()
+    await savedCopyLoaded()
   })
 
   it("leaves the action out where no new session can be opened", async () => {
     renderView({ onStartNew: undefined })
-    await waitFor(() => expect(getConversationSavedTurns).toHaveBeenCalled())
+    await savedCopyLoaded()
     expect(
       screen.queryByRole("button", { name: "Start a new session from this" })
     ).toBeNull()

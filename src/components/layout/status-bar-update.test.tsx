@@ -501,7 +501,9 @@ describe("StatusBarUpdate — versions in a remote window", () => {
         available: { version: "0.32.3-fork.230", body: "", date: null },
       })
       fireEvent.click(
-        screen.getByRole("button", { name: /This Mac · New v0\.32\.3-fork\.230/ })
+        screen.getByRole("button", {
+          name: /This Mac · New v0\.32\.3-fork\.230/,
+        })
       )
       expect(
         await screen.findByText("v0.32.3-fork.229 → v0.32.3-fork.230")
