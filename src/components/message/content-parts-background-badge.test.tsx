@@ -155,3 +155,44 @@ describe("command card — claude's parsed launch badge is unaffected", () => {
     expect(container.textContent).toContain(BADGE)
   })
 })
+
+describe("command card — a Pi background job's end", () => {
+  /** A `bgj_run` as the Pi parser hands it over: renamed `bash`, with the
+   *  exit its notice reported folded into `_meta["codeg.backgroundJob"]`. */
+  function piJob(job: Record<string, unknown>): AdaptedToolCallPart {
+    return {
+      type: "tool-call",
+      toolCallId: "call-job",
+      toolName: "bash",
+      input: JSON.stringify({ command: "sleep 1; echo done" }),
+      state: "output-available",
+      output:
+        "Command running in background with ID: jb-1 (pid 7).\nOutput file: /tmp/jb-1.log\n\nCompleted (exit 0) after 58s.",
+      meta: { "codeg.backgroundJob": { version: 1, id: "jb-1", ...job } },
+    }
+  }
+
+  it("replaces the Background badge with how the job ended", () => {
+    const { container, getByTestId } = renderPart(
+      piJob({ state: "completed", exitCode: 0, duration: "58s" })
+    )
+    expect(getByTestId("background-job-chip").textContent).toBe("Exit 0 · 58s")
+    expect(container.textContent).not.toContain(BADGE)
+  })
+
+  it("names how a killed job was stopped", () => {
+    const { getByTestId } = renderPart(
+      piJob({ state: "killed", killedBy: "timeout", duration: "15m" })
+    )
+    expect(getByTestId("background-job-chip").textContent).toBe(
+      "Killed (timeout) · 15m"
+    )
+  })
+
+  it("does not claim a job with no recorded end is still running", () => {
+    const { getByTestId } = renderPart(piJob({ state: "pending" }))
+    expect(getByTestId("background-job-chip").textContent).toBe(
+      "Background · no exit recorded"
+    )
+  })
+})

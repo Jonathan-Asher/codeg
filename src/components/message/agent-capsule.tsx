@@ -57,6 +57,12 @@ interface AgentCapsuleProps {
   statusLabel?: string
   /** Initial open state; defaults to open on error so failures are visible. */
   defaultOpen?: boolean
+  /**
+   * Classes for the body's scroll area, merged over its default height cap —
+   * for a body that lists several things (a Pi run's child rows) and would
+   * otherwise scroll inside a 18rem window.
+   */
+  bodyClassName?: string
   children: ReactNode
 }
 
@@ -70,6 +76,7 @@ export function AgentCapsule({
   headerAction,
   statusLabel,
   defaultOpen,
+  bodyClassName,
   children,
 }: AgentCapsuleProps) {
   // Whether there's any real body content. `Children.toArray` flattens the
@@ -186,7 +193,7 @@ export function AgentCapsule({
         )}
       >
         <div className="mt-3 w-full overflow-hidden rounded-md border border-border/60">
-          <ScrollArea className="max-h-72">
+          <ScrollArea className={cn("max-h-72", bodyClassName)}>
             <div className="space-y-3 px-3.5 py-2">{children}</div>
           </ScrollArea>
         </div>

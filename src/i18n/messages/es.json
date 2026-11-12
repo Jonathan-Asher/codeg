@@ -4006,7 +4006,16 @@
         "resumedAfterRestartBackground": "Reanudada tras el reinicio · se detuvo el trabajo en segundo plano",
         "resumedAfterRestartBackgroundHint": "Su turno había terminado, pero codeg se reinició mientras seguía en marcha trabajo en segundo plano que había iniciado, y retomó la sesión por su cuenta",
         "continuedAfterLimit": "Continuado tras restablecerse el límite",
-        "continuedAfterLimitHint": "El límite de uso de la cuenta se restableció y codeg continuó la sesión por su cuenta"
+        "continuedAfterLimitHint": "El límite de uso de la cuenta se restableció y codeg continuó la sesión por su cuenta",
+        "agentWake": {
+          "continued": "Continuó por su cuenta",
+          "wokenByQuestion": "despertado por la pregunta de un subagente",
+          "wokenBySettled": "despertado por un subagente que terminó",
+          "wokenByAttention": "despertado por una alerta de un subagente",
+          "wokenByJob": "despertado por el fin de un trabajo en segundo plano",
+          "wokenByExtension": "despertado por un mensaje de una extensión",
+          "andMore": "{reason} y {count, plural, one {# aviso más} other {# avisos más}}"
+        }
       },
       "liveTurnStats": {
         "thinking": "Pensando...",
@@ -4265,6 +4274,43 @@
           "outputMissing": "Codex truncó la salida del script y eliminó el separador de este comando, por lo que no se le pudo atribuir ninguna salida.",
           "sharedWith": "También contiene la salida de {commands}: codex truncó sus separadores.",
           "truncated": "truncado"
+        },
+        "agentRun": {
+          "children": "{count, plural, one {# subagente} other {# subagentes}}",
+          "statusCompleted": "Completado",
+          "statusFailed": "Fallido",
+          "statusPaused": "En pausa",
+          "statusStopped": "Detenido",
+          "statusRunning": "En ejecución",
+          "statusPending": "Lanzado · resultado pendiente",
+          "asked": "Preguntó:",
+          "answered": "Respuesta:",
+          "noAnswer": "sin respuesta registrada",
+          "turns": "{count, plural, one {# turno} other {# turnos}}",
+          "tokens": "{count} tokens",
+          "transcript": "Transcripción",
+          "task": "Tarea",
+          "error": "Error",
+          "result": "Resultado",
+          "more": "Más",
+          "less": "Menos",
+          "modelNotes": "Lo que vio el modelo",
+          "noteLaunch": "Lanzamiento",
+          "noteQuestion": "Pregunta",
+          "noteChild": "Hijo terminado",
+          "noteResult": "Ejecución terminada",
+          "noteAttention": "Alerta",
+          "noteJobExit": "Fin del trabajo",
+          "noteNotice": "Aviso"
+        },
+        "backgroundJob": {
+          "completed": "Salida {code}",
+          "failedWithCode": "Fallido · salida {code}",
+          "failed": "Fallido",
+          "killedBy": "Terminado ({reason})",
+          "killed": "Terminado",
+          "ended": "Finalizado",
+          "pending": "En segundo plano · sin salida registrada"
         }
       },
       "messageNav": {

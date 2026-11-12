@@ -47,6 +47,7 @@ import { getConversation } from "@/lib/api"
 import { CHAT_TEXT_SCOPE_CLASS } from "@/lib/chat-text-scale"
 import { usePageHandoffName } from "@/lib/browser/use-page-handoff-name"
 import { toolStatusUnsettled } from "@/lib/tool-call-lifecycle"
+import { TranscriptAgentTypeProvider } from "@/components/message/transcript-agent-context"
 import type { AgentType, MessageTurn } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -234,25 +235,28 @@ export function SubagentSessionDialog({
             </p>
           ) : messages && messages.length > 0 ? (
             // A transcript like any other, so it follows the chat text size.
-            <div className={cn(CHAT_TEXT_SCOPE_CLASS, "flex flex-col gap-4")}>
-              {messages.map((message, i) => (
-                <div
-                  key={`${message.id ?? "turn"}-${i}`}
-                  className={cn(
-                    "flex flex-col gap-2",
-                    // The kickoff prompt (and any later user turn) reads as an
-                    // aside — the child's own work is the content here.
-                    message.role === "user" &&
-                      "rounded-lg bg-muted/50 px-3 py-2 text-sm"
-                  )}
-                >
-                  <ContentPartsRenderer
-                    parts={message.content}
-                    role={message.role}
-                  />
-                </div>
-              ))}
-            </div>
+            // Its own sub-agents are sessions of the same agent.
+            <TranscriptAgentTypeProvider value={agentType}>
+              <div className={cn(CHAT_TEXT_SCOPE_CLASS, "flex flex-col gap-4")}>
+                {messages.map((message, i) => (
+                  <div
+                    key={`${message.id ?? "turn"}-${i}`}
+                    className={cn(
+                      "flex flex-col gap-2",
+                      // The kickoff prompt (and any later user turn) reads as an
+                      // aside — the child's own work is the content here.
+                      message.role === "user" &&
+                        "rounded-lg bg-muted/50 px-3 py-2 text-sm"
+                    )}
+                  >
+                    <ContentPartsRenderer
+                      parts={message.content}
+                      role={message.role}
+                    />
+                  </div>
+                ))}
+              </div>
+            </TranscriptAgentTypeProvider>
           ) : (
             <p className="text-xs text-muted-foreground">
               {t("agentSessionEmpty")}

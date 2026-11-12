@@ -4006,7 +4006,16 @@
         "resumedAfterRestartBackground": "再起動後に再開 · バックグラウンド処理は停止",
         "resumedAfterRestartBackgroundHint": "ターンは終わっていましたが、開始したバックグラウンド処理の実行中に codeg が再起動したため、セッションを自動的に再開しました",
         "continuedAfterLimit": "上限リセット後に再開",
-        "continuedAfterLimitHint": "アカウントの使用量の上限がリセットされ、codeg がセッションを自動で再開しました"
+        "continuedAfterLimitHint": "アカウントの使用量の上限がリセットされ、codeg がセッションを自動で再開しました",
+        "agentWake": {
+          "continued": "自動で続行",
+          "wokenByQuestion": "サブエージェントの質問で再開",
+          "wokenBySettled": "サブエージェントの終了で再開",
+          "wokenByAttention": "サブエージェントの警告で再開",
+          "wokenByJob": "バックグラウンドジョブの終了で再開",
+          "wokenByExtension": "拡張機能のメッセージで再開",
+          "andMore": "{reason}（ほか {count} 件の通知）"
+        }
       },
       "liveTurnStats": {
         "thinking": "考え中...",
@@ -4265,6 +4274,43 @@
           "outputMissing": "codex がスクリプト出力を切り詰めた際にこのコマンドの区切り行が失われたため、出力を割り当てられませんでした。",
           "sharedWith": "この範囲には {commands} の出力も含まれます — 区切り行が codex により切り捨てられました。",
           "truncated": "切り詰め済み"
+        },
+        "agentRun": {
+          "children": "サブエージェント {count} 件",
+          "statusCompleted": "完了",
+          "statusFailed": "失敗",
+          "statusPaused": "一時停止",
+          "statusStopped": "停止",
+          "statusRunning": "実行中",
+          "statusPending": "起動済み · 結果待ち",
+          "asked": "質問:",
+          "answered": "回答:",
+          "noAnswer": "回答の記録なし",
+          "turns": "{count} ターン",
+          "tokens": "{count} トークン",
+          "transcript": "トランスクリプト",
+          "task": "タスク",
+          "error": "エラー",
+          "result": "結果",
+          "more": "さらに表示",
+          "less": "折りたたむ",
+          "modelNotes": "モデルが受け取った内容",
+          "noteLaunch": "起動",
+          "noteQuestion": "質問",
+          "noteChild": "子の終了",
+          "noteResult": "実行の終了",
+          "noteAttention": "警告",
+          "noteJobExit": "ジョブ終了",
+          "noteNotice": "通知"
+        },
+        "backgroundJob": {
+          "completed": "終了コード {code}",
+          "failedWithCode": "失敗 · 終了コード {code}",
+          "failed": "失敗",
+          "killedBy": "強制終了（{reason}）",
+          "killed": "強制終了",
+          "ended": "終了",
+          "pending": "バックグラウンド · 終了の記録なし"
         }
       },
       "messageNav": {

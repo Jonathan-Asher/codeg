@@ -4006,7 +4006,16 @@
         "resumedAfterRestartBackground": "استُؤنفت بعد إعادة التشغيل · توقّف العمل في الخلفية",
         "resumedAfterRestartBackgroundHint": "كان الدور قد انتهى، لكن codeg أُعيد تشغيله بينما كان عمل في الخلفية بدأه لا يزال يعمل، فاستأنف الجلسة من تلقاء نفسه",
         "continuedAfterLimit": "استُؤنفت بعد إعادة تعيين الحد",
-        "continuedAfterLimitHint": "أُعيد تعيين حد استخدام الحساب وتابع codeg الجلسة تلقائيًا"
+        "continuedAfterLimitHint": "أُعيد تعيين حد استخدام الحساب وتابع codeg الجلسة تلقائيًا",
+        "agentWake": {
+          "continued": "واصل من تلقاء نفسه",
+          "wokenByQuestion": "أُوقظ بسؤال من وكيل فرعي",
+          "wokenBySettled": "أُوقظ بانتهاء وكيل فرعي",
+          "wokenByAttention": "أُوقظ بتنبيه من وكيل فرعي",
+          "wokenByJob": "أُوقظ بانتهاء مهمة في الخلفية",
+          "wokenByExtension": "أُوقظ برسالة من إضافة",
+          "andMore": "{reason} و{count, plural, one {إشعار آخر} two {إشعاران آخران} few {# إشعارات أخرى} many {# إشعارًا آخر} other {# إشعار آخر}}"
+        }
       },
       "liveTurnStats": {
         "thinking": "جارٍ التفكير...",
@@ -4265,6 +4274,43 @@
           "outputMissing": "اقتطع codex مُخرَج النص البرمجي وأزال الفاصل الخاص بهذا الأمر، لذا تعذّر نسب أي مُخرَج إليه.",
           "sharedWith": "يحتوي هذا المقطع أيضًا على مُخرَج {commands} — إذ اقتطع codex الفواصل الخاصة بها.",
           "truncated": "مقتطع"
+        },
+        "agentRun": {
+          "children": "{count, plural, one {وكيل فرعي واحد} two {وكيلان فرعيان} few {# وكلاء فرعيين} many {# وكيلًا فرعيًا} other {# وكيل فرعي}}",
+          "statusCompleted": "مكتمل",
+          "statusFailed": "فشل",
+          "statusPaused": "متوقف مؤقتًا",
+          "statusStopped": "متوقف",
+          "statusRunning": "قيد التشغيل",
+          "statusPending": "تم الإطلاق · النتيجة معلّقة",
+          "asked": "سأل:",
+          "answered": "الإجابة:",
+          "noAnswer": "لم تُسجَّل إجابة",
+          "turns": "{count, plural, one {دورة واحدة} two {دورتان} few {# دورات} many {# دورة} other {# دورة}}",
+          "tokens": "{count} رمز",
+          "transcript": "السجل",
+          "task": "المهمة",
+          "error": "خطأ",
+          "result": "النتيجة",
+          "more": "المزيد",
+          "less": "أقل",
+          "modelNotes": "ما رآه النموذج",
+          "noteLaunch": "الإطلاق",
+          "noteQuestion": "سؤال",
+          "noteChild": "انتهاء فرع",
+          "noteResult": "انتهاء التشغيل",
+          "noteAttention": "تنبيه",
+          "noteJobExit": "انتهاء المهمة",
+          "noteNotice": "إشعار"
+        },
+        "backgroundJob": {
+          "completed": "رمز الخروج {code}",
+          "failedWithCode": "فشل · رمز الخروج {code}",
+          "failed": "فشل",
+          "killedBy": "أُنهي ({reason})",
+          "killed": "أُنهي",
+          "ended": "انتهى",
+          "pending": "في الخلفية · لم يُسجَّل انتهاء"
         }
       },
       "messageNav": {

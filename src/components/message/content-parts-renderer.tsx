@@ -83,6 +83,9 @@ import { DelegatedSubThread } from "./delegated-sub-thread"
 import { DelegationStatusCard } from "./delegation-status-card"
 import { DelegationStatusGroupCard } from "./delegation-status-group-card"
 import { BackgroundTaskCard } from "./background-task-card"
+import { BackgroundJobChip } from "./background-job-chip"
+import { ModelNotesToggle } from "./model-notes-toggle"
+import { parseBackgroundJob } from "@/lib/agent-run-meta"
 import { GeneratedImagesBlock } from "./generated-images-block"
 import { GoalRunPart, GoalToolCallPart } from "./goal-tool-call"
 import { HookFeedbackMarker } from "./hook-feedback-marker"
@@ -2358,6 +2361,13 @@ const ToolCallPart = memo(function ToolCallPart({
     () => toolCallMovedToBackground(part.meta) && isUnsettledToolCall(part),
     [part]
   )
+  // A Pi `bgj_run` whose end the parser folded into the launch
+  // (`_meta["codeg.backgroundJob"]`): the card says how the job went instead of
+  // "Background" forever, and shows the job's last output.
+  const backgroundJob = useMemo(
+    () => (isCommandTool ? parseBackgroundJob(part.meta) : null),
+    [isCommandTool, part.meta]
+  )
   const title = useMemo(() => {
     // claude-agent-acp ≥0.63 supplies the human-readable description as
     // `_meta.claudeCode.title` (ACP `title` stays the raw command). It wins
@@ -2461,6 +2471,7 @@ const ToolCallPart = memo(function ToolCallPart({
       !wallTime &&
       !backgroundLaunch &&
       !airBackgrounded &&
+      !backgroundJob &&
       !announcedSessionId &&
       !codexScript?.label
     ) {
@@ -2494,14 +2505,18 @@ const ToolCallPart = memo(function ToolCallPart({
         {/* One badge, two sources — a parsed launch notice (claude/grok) or the
             AIR marker (codex). They never coexist on one call, and the claim
             they make is the same, so the AIR arm reuses the existing copy. */}
-        {(backgroundLaunch || airBackgrounded) && (
-          <span
-            className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-3xs font-medium text-muted-foreground"
-            title={backgroundLaunch?.taskId ?? part.toolCallId}
-          >
-            <TerminalIcon className="size-3" />
-            {t("backgroundTask.runningInBackground")}
-          </span>
+        {backgroundJob ? (
+          <BackgroundJobChip job={backgroundJob} />
+        ) : (
+          (backgroundLaunch || airBackgrounded) && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-3xs font-medium text-muted-foreground"
+              title={backgroundLaunch?.taskId ?? part.toolCallId}
+            >
+              <TerminalIcon className="size-3" />
+              {t("backgroundTask.runningInBackground")}
+            </span>
+          )
         )}
         {hasStats && lineChangeStats.additions > 0 && (
           <span className="inline-flex items-center gap-0.5 text-green-600 dark:text-green-400">
@@ -2527,6 +2542,7 @@ const ToolCallPart = memo(function ToolCallPart({
     wallTime,
     backgroundLaunch,
     airBackgrounded,
+    backgroundJob,
     part.toolCallId,
     announcedSessionId,
     codexScript,
@@ -2631,10 +2647,12 @@ const ToolCallPart = memo(function ToolCallPart({
     if (!shouldRenderCommandTerminal) return ""
     if (backgroundLaunch) {
       // Replace the verbose "Output is being written to <tmp path>…" notice
-      // with a concise localized line; the real run shows in its own card.
+      // with a concise localized line; the real run shows in its own card. A
+      // Pi job whose end is known shows how its output ended instead.
       return buildCommandTerminalOutput(
         displayCommand,
-        t("backgroundTask.launchNote", { id: backgroundLaunch.taskId }),
+        backgroundJob?.tail ??
+          t("backgroundTask.launchNote", { id: backgroundLaunch.taskId }),
         false
       )
     }
@@ -2643,6 +2661,7 @@ const ToolCallPart = memo(function ToolCallPart({
   }, [
     shouldRenderCommandTerminal,
     backgroundLaunch,
+    backgroundJob,
     t,
     hasLiveOutput,
     liveOutput,
@@ -2963,6 +2982,12 @@ const ToolCallPart = memo(function ToolCallPart({
                   <div className="text-2xs text-muted-foreground">
                     {t("showingTailOutput")}
                   </div>
+                )}
+                {backgroundJob?.notice && (
+                  <ModelNotesToggle
+                    className="mt-2"
+                    notes={[{ kind: "jobExit", text: backgroundJob.notice }]}
+                  />
                 )}
               </div>
             ) : searchOutput !== null ? (

@@ -4006,7 +4006,16 @@
         "resumedAfterRestartBackground": "重启后已恢复 · 后台任务已停止",
         "resumedAfterRestartBackgroundHint": "这一轮已结束，但 codeg 重启时它启动的后台任务仍在运行，已自动恢复此会话",
         "continuedAfterLimit": "额度重置后已继续",
-        "continuedAfterLimitHint": "账户的用量额度已重置，codeg 自动继续了此会话"
+        "continuedAfterLimitHint": "账户的用量额度已重置，codeg 自动继续了此会话",
+        "agentWake": {
+          "continued": "自行继续",
+          "wokenByQuestion": "因子代理的提问而唤醒",
+          "wokenBySettled": "因子代理结束而唤醒",
+          "wokenByAttention": "因子代理的提醒而唤醒",
+          "wokenByJob": "因后台作业结束而唤醒",
+          "wokenByExtension": "因扩展消息而唤醒",
+          "andMore": "{reason}，另有 {count} 条通知"
+        }
       },
       "liveTurnStats": {
         "thinking": "思考中...",
@@ -4265,6 +4274,43 @@
           "outputMissing": "codex 截断脚本输出时丢掉了这条命令的分隔行，因此没有输出可以归属给它。",
           "sharedWith": "本段还包含 {commands} 的输出——它们的分隔行被 codex 截断丢弃了。",
           "truncated": "已截断"
+        },
+        "agentRun": {
+          "children": "{count} 个子代理",
+          "statusCompleted": "已完成",
+          "statusFailed": "失败",
+          "statusPaused": "已暂停",
+          "statusStopped": "已停止",
+          "statusRunning": "运行中",
+          "statusPending": "已启动 · 结果待定",
+          "asked": "提问：",
+          "answered": "回答：",
+          "noAnswer": "未记录回答",
+          "turns": "{count} 轮",
+          "tokens": "{count} 个令牌",
+          "transcript": "对话记录",
+          "task": "任务",
+          "error": "错误",
+          "result": "结果",
+          "more": "展开",
+          "less": "收起",
+          "modelNotes": "模型看到的内容",
+          "noteLaunch": "启动",
+          "noteQuestion": "提问",
+          "noteChild": "子任务结束",
+          "noteResult": "运行结束",
+          "noteAttention": "提醒",
+          "noteJobExit": "作业结束",
+          "noteNotice": "通知"
+        },
+        "backgroundJob": {
+          "completed": "退出码 {code}",
+          "failedWithCode": "失败 · 退出码 {code}",
+          "failed": "失败",
+          "killedBy": "已终止（{reason}）",
+          "killed": "已终止",
+          "ended": "已结束",
+          "pending": "后台 · 未记录结束"
         }
       },
       "messageNav": {

@@ -30,7 +30,16 @@ import {
   isAsyncLaunchAckText,
   parseBackgroundTaskMarker,
 } from "@/lib/background-agent"
+import {
+  firstLine,
+  parseSubagentRun,
+  type SubagentRun,
+  type SubagentRunChild,
+} from "@/lib/agent-run-meta"
 import { detectTextDirection } from "@/lib/text-direction"
+import { ModelNotesToggle } from "./model-notes-toggle"
+import { SubagentExchanges, SubagentRunChildren } from "./subagent-run-children"
+import { useTranscriptAgentType } from "./transcript-agent-context"
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
@@ -184,15 +193,18 @@ function parseGrokSubagentProgress(
  * `parsers/codex.rs::inject_agent_id_into_input` on reload), alongside the
  * launch marker that identifies the producer.
  *
- * The agent type is pinned per branch rather than read from the conversation:
- * the card has no conversation-level agent type of its own, and a parent's
- * child is a session of the parent's own kind in both cases. A third producer
- * of `child_session_id` is the line to revisit.
+ * Pi is the third producer of `child_session_id` (`parsers/pi/fold.rs`, for a
+ * run with one child), so the parsed stats name a session of the transcript's
+ * own agent: a parent's child is a session of the parent's kind. The
+ * transcript says which (`useTranscriptAgentType`); without one above the
+ * card, grok — the producer this was first written for — is assumed. The live
+ * grok meta and the codex branch name their agent themselves.
  */
 function parseChildSessionId(
   meta: Record<string, unknown> | null | undefined,
   statsChildSessionId: string | null | undefined,
-  codexSubagentId: string | null
+  codexSubagentId: string | null,
+  transcriptAgentType: AgentType | null
 ): { sessionId: string; agentType: AgentType } | null {
   const raw = meta?.grokSubagentSession
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
@@ -202,7 +214,10 @@ function parseChildSessionId(
     }
   }
   if (statsChildSessionId && statsChildSessionId.length > 0) {
-    return { sessionId: statsChildSessionId, agentType: "grok" }
+    return {
+      sessionId: statsChildSessionId,
+      agentType: transcriptAgentType ?? "grok",
+    }
   }
   return codexSubagentId
     ? { sessionId: codexSubagentId, agentType: "codex" }
@@ -262,6 +277,8 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
   const tTool = useTranslations("Folder.chat.tool")
   const tBg = useTranslations("Folder.chat.backgroundTasks")
   const tProvider = useTranslations("Folder.chat.providerError")
+  const tRun = useTranslations("Folder.chat.contentParts.agentRun")
+  const transcriptAgentType = useTranscriptAgentType()
 
   const isRunning =
     part.state === "input-available" || part.state === "input-streaming"
@@ -271,6 +288,14 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
     () => (part.input ? tryParseJson(part.input) : null),
     [part.input]
   )
+
+  // A Pi sub-agent run, folded by the parser from the notices its children
+  // sent (`parsers/pi/fold.rs`): status, result and one row per child. Takes
+  // over from the raw result text, which is a plain-text copy of the same for
+  // clients that cannot read it.
+  const subagentRun = useMemo(() => parseSubagentRun(part.meta), [part.meta])
+  const runChildren = subagentRun?.children ?? NO_RUN_CHILDREN
+  const soleChild = runChildren.length === 1 ? runChildren[0] : null
 
   // Background sub-agent lifecycle. Historical/refetched turns carry the
   // parser's structured marker (settled state + summary + result folded from
@@ -345,8 +370,10 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
   const prompt = useMemo(
     () =>
       asText(parsed?.prompt) ??
-      (part.input ? extractJsonField(part.input, "prompt") : null),
-    [parsed, part.input]
+      (part.input ? extractJsonField(part.input, "prompt") : null) ??
+      subagentRun?.task ??
+      null,
+    [parsed, part.input, subagentRun]
   )
 
   const model = useMemo(
@@ -381,45 +408,55 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
   )
 
   const title = useMemo(() => {
+    // A run with several children says how many, after the agent they share.
+    const children =
+      runChildren.length > 1
+        ? tRun("children", { count: runChildren.length })
+        : null
     if (subagentType) {
-      return description ? `${subagentType}: ${description}` : subagentType
+      const base = description
+        ? `${subagentType}: ${description}`
+        : subagentType
+      return children ? `${base} · ${children}` : base
     }
     // The sub-agent type hasn't streamed in yet. Prefer the description if it
     // has already arrived, and only fall back to the "starting…" placeholder
     // when there's genuinely nothing to show — never prepend it to a title
     // that already carries real content.
-    return description || t("agentFallbackTitle")
-  }, [subagentType, description, t])
+    return description || children || t("agentFallbackTitle")
+  }, [subagentType, description, runChildren.length, t, tRun])
 
-  const statusLabel = providerError
-    ? tProvider("subagentStopped", {
-        reason: tProvider(`reason.${providerError.kind}`),
-      })
-    : backgroundLifecycle
-      ? backgroundFailed
-        ? tBg("cardFinishedWithStatus", {
-            status: backgroundLifecycle.status ?? "",
-          })
-        : backgroundSettled
-          ? tBg("cardCompleted")
-          : tBg("cardLaunchedPending")
-      : isLiveBackgroundLaunch
-        ? tBg("cardRunning")
-        : outcomeError
-          ? // Cursor reports a failed task with wire status "completed"; the
-            // error envelope is the only failure signal.
-            tTool("status.outputError")
-          : outcomeBackground
-            ? // A background task's completion envelope only acknowledges the
-              // launch — the sub-agent is still running.
-              tBg("cardRunning")
-            : part.state === "input-available"
-              ? tTool("status.inputAvailable")
-              : part.state === "input-streaming"
-                ? tTool("status.inputStreaming")
-                : part.state === "output-available"
-                  ? tTool("status.outputAvailable")
-                  : tTool("status.outputError")
+  const statusLabel = subagentRun
+    ? tRun(RUN_STATUS_LABEL_KEYS[subagentRun.status])
+    : providerError
+      ? tProvider("subagentStopped", {
+          reason: tProvider(`reason.${providerError.kind}`),
+        })
+      : backgroundLifecycle
+        ? backgroundFailed
+          ? tBg("cardFinishedWithStatus", {
+              status: backgroundLifecycle.status ?? "",
+            })
+          : backgroundSettled
+            ? tBg("cardCompleted")
+            : tBg("cardLaunchedPending")
+        : isLiveBackgroundLaunch
+          ? tBg("cardRunning")
+          : outcomeError
+            ? // Cursor reports a failed task with wire status "completed"; the
+              // error envelope is the only failure signal.
+              tTool("status.outputError")
+            : outcomeBackground
+              ? // A background task's completion envelope only acknowledges the
+                // launch — the sub-agent is still running.
+                tBg("cardRunning")
+              : part.state === "input-available"
+                ? tTool("status.inputAvailable")
+                : part.state === "input-streaming"
+                  ? tTool("status.inputStreaming")
+                  : part.state === "output-available"
+                    ? tTool("status.outputAvailable")
+                    : tTool("status.outputError")
 
   const agentStats = part.agentStats ?? null
   const adaptedToolCalls = useMemo(
@@ -445,12 +482,43 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
       parseChildSessionId(
         part.meta,
         agentStats?.child_session_id,
-        isCodexSubagent ? agentId : null
+        isCodexSubagent ? agentId : null,
+        transcriptAgentType
       ),
-    [part.meta, agentStats?.child_session_id, isCodexSubagent, agentId]
+    [
+      part.meta,
+      agentStats?.child_session_id,
+      isCodexSubagent,
+      agentId,
+      transcriptAgentType,
+    ]
   )
   const viewerHost = useSessionViewerHost()
   const [sessionOpen, setSessionOpen] = useState(false)
+  // A row's child, opened in a drawer this card owns when there is no host.
+  const [openRunChild, setOpenRunChild] = useState<SubagentRunChild | null>(
+    null
+  )
+  // Pi is the only producer of run rows, and its children are Pi sessions.
+  const runChildAgentType: AgentType = transcriptAgentType ?? "pi"
+  const openRunChildSession = useMemo(() => {
+    if (!runChildren.some((child) => child.sessionId)) return undefined
+    return (child: SubagentRunChild) => {
+      if (!child.sessionId) return
+      if (viewerHost) {
+        viewerHost.open({
+          kind: "agentSession",
+          sessionId: child.sessionId,
+          agentType: runChildAgentType,
+          subagentType: child.agent,
+          description: child.label,
+          live: false,
+        })
+      } else {
+        setOpenRunChild(child)
+      }
+    }
+  }, [runChildren, viewerHost, runChildAgentType])
   const grokProgressLine = useMemo(() => {
     if (!grokProgress) return null
     const pieces: string[] = []
@@ -545,6 +613,8 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
           ) : null
         }
         statusLabel={statusLabel}
+        // A run's rows are its content: room for them, not an inner scroll.
+        bodyClassName={runChildren.length > 1 ? "max-h-[40rem]" : undefined}
       >
         {/* Model summary */}
         {model && (
@@ -575,6 +645,24 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
             </CollapsibleContent>
           </Collapsible>
         )}
+
+        {/* Pi run: one row per child when there are several; the single
+          child's questions and alerts otherwise (its session is the header
+          action, as for any one-child Agent card). */}
+        {runChildren.length > 1 && (
+          <SubagentRunChildren
+            items={runChildren}
+            onOpenSession={openRunChildSession}
+          />
+        )}
+        {soleChild &&
+          (soleChild.exchanges.length > 0 ||
+            soleChild.attention.length > 0) && (
+            <SubagentExchanges
+              exchanges={soleChild.exchanges}
+              attention={soleChild.attention}
+            />
+          )}
 
         {/* Subagent tool calls — rendered with the same ToolCallPart
       as the outer conversation for consistent appearance */}
@@ -668,8 +756,17 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
           <ProviderErrorNotice error={providerError} scope="subagent" />
         )}
 
+        {/* Pi run outcome: the run's own error and result, in place of the
+          plain-text report the result carries. */}
+        {subagentRun && (
+          <SubagentRunOutcome
+            run={subagentRun}
+            pendingLabel={tBg("cardResultPending")}
+          />
+        )}
+
         {/* Error output */}
-        {isError && part.errorText && !providerError && (
+        {isError && part.errorText && !providerError && !subagentRun && (
           <div className="rounded-md bg-destructive/10 p-3">
             <pre className="whitespace-pre-wrap break-words text-xs text-destructive">
               {part.errorText}
@@ -717,7 +814,8 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
           !providerError &&
           !taskOutcome &&
           !backgroundLifecycle &&
-          !isLiveBackgroundLaunch && (
+          !isLiveBackgroundLaunch &&
+          !subagentRun && (
             <div className="text-sm prose prose-sm dark:prose-invert max-w-none [&_ul]:list-inside [&_ol]:list-inside">
               <MessageResponse>{part.output}</MessageResponse>
             </div>
@@ -742,6 +840,86 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
           live={isRunning || isLiveBackgroundLaunch}
         />
       )}
+      {openRunChild?.sessionId && viewerHost == null && (
+        <SubagentSessionDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setOpenRunChild(null)
+          }}
+          sessionId={openRunChild.sessionId}
+          agentType={runChildAgentType}
+          subagentType={openRunChild.agent}
+          description={openRunChild.label}
+        />
+      )}
     </>
   )
 })
+
+const NO_RUN_CHILDREN: SubagentRunChild[] = []
+
+const RUN_STATUS_LABEL_KEYS = {
+  completed: "statusCompleted",
+  failed: "statusFailed",
+  paused: "statusPaused",
+  stopped: "statusStopped",
+  running: "statusRunning",
+  pending: "statusPending",
+} as const satisfies Record<SubagentRun["status"], string>
+
+/**
+ * A Pi run's own outcome: its error (first line, the rest on demand), its
+ * result, or — for a background run whose end never reached the transcript —
+ * a note that there is none; then the text the model was given, behind a
+ * toggle.
+ */
+function SubagentRunOutcome({
+  run,
+  pendingLabel,
+}: {
+  run: SubagentRun
+  pendingLabel: string
+}) {
+  const tRun = useTranslations("Folder.chat.contentParts.agentRun")
+  const [errorOpen, setErrorOpen] = useState(false)
+  const errorHead = run.error ? firstLine(run.error) : null
+  const errorHasMore = Boolean(run.error && run.error.trim() !== errorHead)
+
+  return (
+    <div className="space-y-2">
+      {run.error && (
+        <div className="rounded-md bg-destructive/10 p-3 text-xs text-destructive">
+          <div className="flex items-start gap-2">
+            <span
+              dir={detectTextDirection(run.error)}
+              className="min-w-0 flex-1 whitespace-pre-wrap break-words"
+            >
+              {errorOpen ? run.error : errorHead}
+            </span>
+            {errorHasMore && (
+              <button
+                type="button"
+                onClick={() => setErrorOpen((open) => !open)}
+                className="shrink-0 font-medium underline-offset-2 hover:underline"
+              >
+                {errorOpen ? tRun("less") : tRun("more")}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+      {run.result && (
+        <div className="text-sm prose prose-sm dark:prose-invert max-w-none [&_ul]:list-inside [&_ol]:list-inside">
+          <MessageResponse>{run.result}</MessageResponse>
+        </div>
+      )}
+      {!run.error && !run.result && run.status === "pending" && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Clock3 className="size-3.5 shrink-0" />
+          {pendingLabel}
+        </div>
+      )}
+      <ModelNotesToggle notes={run.notes} />
+    </div>
+  )
+}
