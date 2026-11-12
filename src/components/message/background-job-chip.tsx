@@ -79,7 +79,10 @@ export const BackgroundJobChip = memo(function BackgroundJobChip({
       className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-3xs font-medium text-muted-foreground"
       title={job.id ?? undefined}
     >
-      <Icon aria-hidden className={cn("size-3", tone, spin && "animate-spin")} />
+      <Icon
+        aria-hidden
+        className={cn("size-3", tone, spin && "animate-spin")}
+      />
       {text}
     </span>
   )

@@ -701,13 +701,11 @@ async fn custom_message(
     let prompting = state.read().await.status == ConnectionStatus::Prompting;
 
     // Pi is idle: whatever wakes it next, this notice is part of it.
-    if pi.turn.is_none() && !prompting {
-        if pi.idle_notices.len() < LIVE_NOTES_MAX {
-            pi.idle_notices.push(WakeTrigger {
-                kind: live::wake_kind(custom_type, legacy_job),
-                text: text.to_string(),
-            });
-        }
+    if pi.turn.is_none() && !prompting && pi.idle_notices.len() < LIVE_NOTES_MAX {
+        pi.idle_notices.push(WakeTrigger {
+            kind: live::wake_kind(custom_type, legacy_job),
+            text: text.to_string(),
+        });
     }
 
     // What woke the run, while it has not said anything yet. A notice naming

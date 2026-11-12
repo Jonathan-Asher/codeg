@@ -218,7 +218,10 @@ function parseChildSessionId(
     }
   }
   if (piRunChildSession) {
-    return { sessionId: piRunChildSession, agentType: transcriptAgentType ?? "pi" }
+    return {
+      sessionId: piRunChildSession,
+      agentType: transcriptAgentType ?? "pi",
+    }
   }
   if (statsChildSessionId && statsChildSessionId.length > 0) {
     return {

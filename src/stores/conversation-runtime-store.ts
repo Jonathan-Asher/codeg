@@ -39,10 +39,7 @@ import { collapseLiveCollabBlocks } from "@/lib/collab-collapse"
 import { kimiTodoWriteEntries } from "@/lib/plan-parse"
 import { toErrorMessage } from "@/lib/app-error"
 import { BACKGROUND_TASK_MARKER } from "@/lib/background-agent"
-import {
-  AGENT_WAKE_META_KEY,
-  SYSTEM_NOTE_META_KEY,
-} from "@/lib/agent-run-meta"
+import { AGENT_WAKE_META_KEY, SYSTEM_NOTE_META_KEY } from "@/lib/agent-run-meta"
 import { imageCardLabel } from "@/lib/image-tool-label"
 import { perfMark } from "@/lib/perf-marks"
 import { leftDetailCache } from "@/stores/left-detail-cache"

@@ -114,7 +114,9 @@ describe("a live run card", () => {
       <AgentToolCallPart part={launchPart()} renderToolCall={() => null} />,
       null
     )
-    expect(screen.getByLabelText("Launched · result pending")).toBeInTheDocument()
+    expect(
+      screen.getByLabelText("Launched · result pending")
+    ).toBeInTheDocument()
   })
 
   it("draws the live card over it: running, one row per child, the current tool", () => {
@@ -122,7 +124,7 @@ describe("a live run card", () => {
       <AgentToolCallPart part={launchPart()} renderToolCall={() => null} />,
       new Map([[LAUNCH, LIVE_CARD]])
     )
-    expect(screen.getByLabelText("Running")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Running" }))
     const rows = screen.getAllByTestId("subagent-run-child")
     expect(rows).toHaveLength(2)
     expect(rows[0].textContent).toContain("task-1")
@@ -157,8 +159,11 @@ describe("a live run card", () => {
         </SessionViewerHostContext.Provider>
       </NextIntlClientProvider>
     )
-    expect(screen.getByLabelText("Completed")).toBeInTheDocument()
-    expect(screen.getAllByTestId("subagent-run-child")).toHaveLength(2)
+    fireEvent.click(screen.getByRole("button", { name: "Completed" }))
+    const rows = screen.getAllByTestId("subagent-run-child")
+    expect(rows).toHaveLength(2)
+    expect(rows[0].textContent).not.toContain("bash")
+    expect(screen.getByText("16 and 9")).toBeInTheDocument()
   })
 
   it("opens a one-child run's transcript as a Pi session with no transcript agent above it", () => {
@@ -167,7 +172,10 @@ describe("a live run card", () => {
       <AgentToolCallPart
         part={{
           ...launchPart(),
-          input: JSON.stringify({ subagent_type: "scout", description: "count" }),
+          input: JSON.stringify({
+            subagent_type: "scout",
+            description: "count",
+          }),
           meta: null,
         }}
         renderToolCall={() => null}
@@ -196,7 +204,9 @@ describe("a live run card", () => {
       ]),
       open
     )
-    fireEvent.click(screen.getByRole("button", { name: /View sub-agent session/ }))
+    fireEvent.click(
+      screen.getByRole("button", { name: /View sub-agent session/ })
+    )
     expect(open).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: "01a1d126-b3e8",

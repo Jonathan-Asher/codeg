@@ -2675,7 +2675,9 @@ export function MessageListView({
     >
       <ModelLabelProvider value={modelLabel}>
         <TranscriptAgentTypeProvider value={agentType}>
-          <LiveToolCardsProvider value={toolCards}>{thread}</LiveToolCardsProvider>
+          <LiveToolCardsProvider value={toolCards}>
+            {thread}
+          </LiveToolCardsProvider>
         </TranscriptAgentTypeProvider>
       </ModelLabelProvider>
     </MarkdownImageProvider>

@@ -97,7 +97,11 @@ describe("live System turns", () => {
         { type: "text", text: "Noted." },
       ])
     )
-    expect(turns.map((t) => t.role)).toEqual(["assistant", "system", "assistant"])
+    expect(turns.map((t) => t.role)).toEqual([
+      "assistant",
+      "system",
+      "assistant",
+    ])
     expect(turns[1].blocks).toEqual([
       { type: "text", text: "Deploy window opens at 5pm" },
     ])
@@ -106,7 +110,9 @@ describe("live System turns", () => {
   it("leaves every other call alone", () => {
     expect(liveSystemTurnBlocks(call("c", null))).toBeNull()
     expect(
-      liveSystemTurnBlocks(call("c", { "codeg.subagentRun": { status: "running" } }))
+      liveSystemTurnBlocks(
+        call("c", { "codeg.subagentRun": { status: "running" } })
+      )
     ).toBeNull()
   })
 })
@@ -120,7 +126,10 @@ function turn(
   return { id, role, blocks, timestamp }
 }
 
-function detail(turns: MessageTurn[], inFlight: string | null): DbConversationDetail {
+function detail(
+  turns: MessageTurn[],
+  inFlight: string | null
+): DbConversationDetail {
   return {
     summary: {
       id: CID,
@@ -183,14 +192,27 @@ afterEach(() => {
 
 describe("a detail fetched while a woken run streams", () => {
   const history = [
-    turn("u1", "user", [{ type: "text", text: "launch a scout" }], "2026-11-12T19:05:35.000Z"),
-    turn("a1", "assistant", [{ type: "text", text: "LAUNCHED" }], "2026-11-12T19:05:36.000Z"),
+    turn(
+      "u1",
+      "user",
+      [{ type: "text", text: "launch a scout" }],
+      "2026-11-12T19:05:35.000Z"
+    ),
+    turn(
+      "a1",
+      "assistant",
+      [{ type: "text", text: "LAUNCHED" }],
+      "2026-11-12T19:05:36.000Z"
+    ),
     // The run Pi started by itself, as far as Pi has written it.
     turn(
       "pi-wake-row",
       "system",
       [
-        { type: "text", text: "Pi continued on its own, woken by a sub-agent finishing." },
+        {
+          type: "text",
+          text: "Pi continued on its own, woken by a sub-agent finishing.",
+        },
         {
           type: "tool_use",
           tool_use_id: "pi-wake-caad67a7",
@@ -207,7 +229,12 @@ describe("a detail fetched while a woken run streams", () => {
       ],
       "2026-11-12T19:05:40.000Z"
     ),
-    turn("a2", "assistant", [{ type: "text", text: "The scout" }], "2026-11-12T19:05:41.000Z"),
+    turn(
+      "a2",
+      "assistant",
+      [{ type: "text", text: "The scout" }],
+      "2026-11-12T19:05:41.000Z"
+    ),
   ]
   const live = liveMessage([
     { type: "tool_call", info: call("pi-wake-t1", WAKE_META) },
