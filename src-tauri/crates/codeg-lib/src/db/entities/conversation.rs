@@ -222,6 +222,12 @@ pub struct Model {
     /// written only through `conversation_service::set_talk_state`, never
     /// with `updated_at`.
     pub talk_state: Option<ConversationTalkState>,
+    /// The working directory the agent ran this session in before a move to
+    /// another project changed it, while the agent has not been told yet: the
+    /// next message carries a one-line note naming the old and the new folder
+    /// (see `crate::session_move`), then this clears. Not activity: written
+    /// only through `conversation_service`, never with `updated_at`.
+    pub moved_from_cwd: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

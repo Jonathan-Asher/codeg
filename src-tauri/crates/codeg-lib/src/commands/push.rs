@@ -36,6 +36,7 @@ pub async fn register_push_device(
     bundle_id: Option<String>,
     name: Option<String>,
     platform: Option<String>,
+    sounds: Option<serde_json::Value>,
     db: State<'_, AppDatabase>,
 ) -> Result<RegisteredDevice, AppCommandError> {
     push::register_device(
@@ -46,6 +47,7 @@ pub async fn register_push_device(
             bundle_id,
             name,
             platform,
+            sounds,
         },
     )
     .await

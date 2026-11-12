@@ -3067,7 +3067,7 @@ pub async fn create_chat_dir(app: tauri::AppHandle) -> Result<CreateChatDirResul
     Ok(CreateChatDirResult { path })
 }
 
-async fn detect_git_branch(path: &str) -> Option<String> {
+pub(crate) async fn detect_git_branch(path: &str) -> Option<String> {
     let output = crate::process::tokio_command("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(path)
@@ -3623,6 +3623,7 @@ mod tests {
             parent_tool_use_id: Some(parent_tool_use_id.into()),
             delegation_call_id: Some("call-1".into()),
             origin_cwd: None,
+            working_dir: None,
             turn_state: None,
             critical: false,
             critical_stall: true,
@@ -7503,6 +7504,7 @@ mod tests {
                 parent_tool_use_id: None,
                 delegation_call_id: None,
                 origin_cwd: None,
+                working_dir: None,
                 turn_state: None,
                 critical: false,
                 critical_stall: true,

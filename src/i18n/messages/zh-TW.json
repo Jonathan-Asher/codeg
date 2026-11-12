@@ -2134,6 +2134,8 @@
       "attentionCountBadge": "{count} 個會話在等你處理",
       "statusCancelledBadge": "已取消",
       "worktreeRemovedBadge": "來源 worktree 已刪除",
+      "runsInBadge": "在 {path} 中執行",
+      "runsInLabel": "執行於",
       "criticalBadge": "關鍵對話",
       "criticalToggleFailed": "無法更新關鍵標記：{message}",
       "talkBadge": "語音對話模式已開啟",
@@ -2402,6 +2404,43 @@
       "forkUnsupported": "此代理無法分叉對話",
       "forkAfterReply": "請在目前回覆完成後再分叉",
       "forkNoReply": "暫無可分叉的內容：還沒有已完成的回覆"
+    },
+    "moveSession": {
+      "menuLabel": "移動到專案…",
+      "title": "移動到專案",
+      "description": "將「{title}」移動到另一個專案。代理按資料夾保存的檔案會一起移動。",
+      "untitledSession": "未命名工作階段",
+      "pickProject": "選擇專案",
+      "noProjects": "沒有其他開啟的專案。",
+      "checking": "正在檢查…",
+      "fullNote": "工作階段及其檔案將移動到 {project}，代理會在那裡繼續。它的下一則訊息會重新讀取一次工作階段。",
+      "listedOnly": {
+        "agent_unsupported": "{agent} 的工作階段綁定在執行時所在的資料夾，因此這個工作階段只能列在 {project} 下，仍在 {path} 中執行。",
+        "claude_adapter_outdated": "已安裝的 Claude Code 轉接器版本過舊，無法移動工作階段檔案，因此此工作階段只能列在 {project} 下，仍在 {path} 中執行。",
+        "session_files_not_found": "此工作階段的檔案不在 {agent} 保存它們的位置，因此只能列在 {project} 下，仍在 {path} 中執行。"
+      },
+      "children": "它的 {count} 個子工作階段會一起移動。",
+      "cancel": "取消",
+      "move": "移動",
+      "moving": "正在移動…",
+      "moved": "已移動到 {project}",
+      "movedListedOnly": "已列在 {project} 下；仍在 {path} 中執行",
+      "failed": "無法移動工作階段：{message}",
+      "errors": {
+        "conversation_not_found": "此工作階段已不存在。",
+        "folder_not_found": "該專案已不在工作區中。",
+        "same_folder": "工作階段已在該專案中。",
+        "chat_conversation": "聊天工作階段沒有可移出的專案。",
+        "chat_folder": "工作階段不能移動到聊天中。",
+        "subsession": "子工作階段會隨啟動它的工作階段一起移動。",
+        "unsupported_conversation": "此類工作階段無法移動。",
+        "work_task_linked": "此工作階段由工作任務執行，會留在該任務的專案中。",
+        "conversation_running": "工作階段正在工作，請在回覆完成後再移動。",
+        "resume_pending": "工作階段即將自動繼續。請在完成後再移動，或關閉它的自動繼續。",
+        "running_elsewhere": "Claude Code 正在 codeg 之外執行此工作階段。請在該程序結束後再移動。",
+        "session_closing": "工作階段的代理仍在關閉，請稍後再試。",
+        "move_failed": "無法移動工作階段的檔案，因此未做任何變更。"
+      }
     },
     "search": {
       "dialogTitle": "搜尋",

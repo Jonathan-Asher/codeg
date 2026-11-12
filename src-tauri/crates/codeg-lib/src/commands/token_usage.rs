@@ -1361,6 +1361,7 @@ mod tests {
                 parent_tool_use_id: None,
                 delegation_call_id: None,
                 origin_cwd: None,
+                working_dir: None,
                 turn_state: None,
                 critical: false,
                 critical_stall: true,

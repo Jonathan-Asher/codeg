@@ -465,6 +465,17 @@ fn prune_reaped(draining: &mut DrainingChildren) {
     });
 }
 
+/// A connection holding a conversation open
+/// (`ConnectionManager::connections_holding_conversation`).
+#[derive(Debug, Clone)]
+pub(crate) struct HeldConnection {
+    pub connection_id: String,
+    /// A turn or background work runs in it.
+    pub busy: bool,
+    /// Its agent process; 0 once reaped.
+    pub child_pid: Arc<std::sync::atomic::AtomicU32>,
+}
+
 /// Everything the separate agent process of a mid-run fork needs, settled
 /// before it is launched (see
 /// `ConnectionManager::fork_session_to_new_conversation`).
@@ -1853,6 +1864,71 @@ impl ConnectionManager {
         None
     }
 
+    /// Every connection that holds `conversation_id` open: linked to its row,
+    /// or — linked to no row yet — running its session (`session_id`). What a
+    /// move to another project closes first, and what makes it refuse while
+    /// one is busy (see `crate::session_move`).
+    ///
+    /// Busy: a turn in flight (or the connection prompting), or background
+    /// work still running in it — closing either would cut that work off.
+    pub(crate) async fn connections_holding_conversation(
+        &self,
+        conversation_id: i32,
+        agent_type: AgentType,
+        session_id: Option<&str>,
+    ) -> Vec<HeldConnection> {
+        let now = chrono::Utc::now();
+        let connections = self.connections.lock().await;
+        let mut held = Vec::new();
+        for (id, conn) in connections.iter() {
+            if conn.agent_type != agent_type {
+                continue;
+            }
+            let state = conn.state.read().await;
+            let holds = match state.conversation_id {
+                Some(linked) => linked == conversation_id,
+                None => session_id.is_some_and(|sid| state.represents_session(sid)),
+            };
+            if !holds {
+                continue;
+            }
+            held.push(HeldConnection {
+                connection_id: id.clone(),
+                busy: state.turn_in_flight
+                    || state.status == ConnectionStatus::Prompting
+                    || state.has_active_background_work(now),
+                child_pid: Arc::clone(&conn.child_pid),
+            });
+        }
+        held
+    }
+
+    /// Close `held` and wait until its agent process has been reaped, so
+    /// nothing of it writes to the session's files afterwards. `false` when
+    /// the process was still there at `timeout`.
+    pub(crate) async fn disconnect_and_wait(
+        &self,
+        held: &HeldConnection,
+        timeout: std::time::Duration,
+    ) -> bool {
+        use std::sync::atomic::Ordering;
+        let _ = self.disconnect(&held.connection_id).await;
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let pid = held.child_pid.load(Ordering::SeqCst);
+            if pid == 0
+                || crate::acp::scratch_dir::probe_pid(pid)
+                    == crate::acp::scratch_dir::PidState::Dead
+            {
+                return true;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+
     /// The pids of the agent processes codeg runs: every connection's, and
     /// those of connections still exiting. claude-agent-acp starts each
     /// Claude Code process as its own child, so a Claude Code process whose
@@ -3099,11 +3175,36 @@ impl ConnectionManager {
         // for a prompt that never reached the agent, so without this the
         // lifecycle subscriber's PendingReview write also never fires and the
         // row would be stuck until a follow-up `send_prompt_linked` re-flipped it.
+        //
+        // A session just moved to another project with its files tells the
+        // agent so with the first message after the move (see
+        // `crate::session_move`): a note in front of the talk frame, at the
+        // agent boundary only. Not on a delegation child's task, and not on a
+        // slash command or a message without text (the talk frame's rule).
+        let move_note = match conversation_id_for_status {
+            Some(cid) if delegation.is_none() && crate::talk::carries_frame(&blocks) => {
+                crate::session_move::pending_note(&db.conn, cid, &state_arc).await
+            }
+            _ => None,
+        };
+        let talk = match &move_note {
+            Some(note) => PromptTalk {
+                frame: Some(match talk.frame {
+                    Some(talk_frame) => format!("{}{talk_frame}", note.frame),
+                    None => note.frame.clone(),
+                }),
+                spoken: talk.spoken,
+            },
+            None => talk,
+        };
         match self
             .send_prompt_inner(conn_id, blocks, user_message, talk)
             .await
         {
             Ok(()) => {
+                if let (Some(note), Some(cid)) = (&move_note, conversation_id_for_status) {
+                    crate::session_move::note_delivered(&db.conn, cid, note).await;
+                }
                 // The prompt reached the agent: surface it to the chat-channel
                 // "user message" event feed. Notification-only — never gates the
                 // send result.
@@ -4152,6 +4253,7 @@ impl ConnectionManager {
                         limit_resume_reason: Set(None),
                         last_viewed_at: Set(None),
                         talk_state: Set(None),
+                        moved_from_cwd: Set(None),
                     };
                     let inserted = sibling.insert(txn).await?;
                     Ok(inserted.id)
@@ -4335,8 +4437,11 @@ impl ConnectionManager {
         {
             Some(conn_id) => self.live_fork_source(&conn_id, Some(conversation_id), true).await?,
             None => {
-                // The directory a connection would open it in.
-                let working_dir = match row.origin_cwd.clone() {
+                // The directory a connection would open it in: `working_dir`
+                // on the summary — `origin_cwd` only while that directory is
+                // still there (a removed worktree falls back to the folder,
+                // where the agent would look for the transcript anyway).
+                let working_dir = match row.working_dir.clone() {
                     Some(cwd) => Some(cwd),
                     None => crate::db::service::folder_service::get_folder_by_id(
                         &db.conn,
@@ -4759,6 +4864,7 @@ impl ConnectionManager {
             limit_resume_reason: Set(None),
             last_viewed_at: Set(None),
             talk_state: Set(None),
+            moved_from_cwd: Set(None),
         };
         row.insert(db_conn)
             .await
@@ -13545,6 +13651,51 @@ mod tests {
             .await
             .unwrap()
             .unwrap()
+    }
+
+    /// A session moved to another project without its files forks where it
+    /// still runs (`working_dir`); a worktree it once ran in that is gone
+    /// falls back to its folder, where the agent would look for it anyway —
+    /// not the missing directory the fork used to be sent to.
+    #[tokio::test]
+    async fn conversation_fork_with_nothing_open_runs_where_the_session_runs() {
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let mgr = ConnectionManager::new();
+        let pre = seed_closed_conversation(&db, AgentType::ClaudeCode).await;
+        let runs_in = tempfile::tempdir().unwrap();
+        let runs_in = runs_in.path().to_string_lossy().to_string();
+        for (origin, expected, forked) in [
+            (runs_in.clone(), runs_in.as_str(), "session-S2"),
+            (
+                "/tmp/fork-conversation-removed-worktree".to_string(),
+                "/tmp/fork-conversation",
+                "session-S3",
+            ),
+        ] {
+            let mut active: conversation::ActiveModel = conversation::Entity::find_by_id(pre.id)
+                .one(&db.conn)
+                .await
+                .unwrap()
+                .unwrap()
+                .into();
+            active.origin_cwd = Set(Some(origin));
+            active.update(&db.conn).await.unwrap();
+            // Each fork answers a session of its own: a row holds one.
+            let (read, fork, seen) = mid_run_io(mid_run_transcript(), Ok(forked));
+            mgr.fork_conversation_to_new_conversation_with(
+                &db,
+                pre.id,
+                "window-a".into(),
+                EventEmitter::Noop,
+                read,
+                fork,
+            )
+            .await
+            .expect("forks");
+            let job = seen.lock().unwrap().take().expect("forked");
+            assert_eq!(job.working_dir.as_deref(), Some(expected));
+        }
     }
 
     #[tokio::test]

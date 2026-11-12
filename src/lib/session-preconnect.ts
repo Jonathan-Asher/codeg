@@ -127,14 +127,17 @@ export function createPreconnectScheduler({
  * nothing to resume or its tab's working directory cannot be known up front.
  * Mirrors what the conversation's tab connects with
  * (`conversation-detail-panel`): `sessionId` is the row's `external_id`
- * (never for cline), and `workingDir` is its folder's path. Chat-mode folders
- * are skipped: their tabs connect from a per-tab directory.
+ * (never for cline), and `workingDir` is where the session runs — the row's
+ * `working_dir` (its folder's path, or the folder a session moved without
+ * its files still runs in), else its folder's path. Chat-mode folders are
+ * skipped: their tabs connect from a per-tab directory.
  */
 export function preconnectTargetFor(
   conversation: {
     agent_type: AgentType
     external_id: string | null
     folder_id: number
+    working_dir?: string | null
   },
   folders: ReadonlyArray<{ id: number; path: string; kind?: string }>
 ): PreconnectTarget | null {
@@ -145,7 +148,7 @@ export function preconnectTargetFor(
   if (!folder || !folder.path || folder.kind === "chat") return null
   return {
     agentType: conversation.agent_type,
-    workingDir: folder.path,
+    workingDir: conversation.working_dir || folder.path,
     sessionId,
   }
 }

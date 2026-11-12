@@ -2835,6 +2835,21 @@ pub async fn template_delete(conn: &DatabaseConnection, id: i32) -> Result<(), D
     Ok(())
 }
 
+/// Whether a live (non-deleted) work task drives `conversation_id`: such a
+/// conversation belongs to the task's run and its worktree, and is not moved
+/// to another project on its own.
+pub async fn conversation_has_live_task(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+) -> Result<bool, DbError> {
+    Ok(work_task::Entity::find()
+        .filter(work_task::Column::ConversationId.eq(conversation_id))
+        .filter(work_task::Column::DeletedAt.is_null())
+        .count(conn)
+        .await?
+        > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5037,3 +5052,4 @@ mod tests {
         let _ = replacement;
     }
 }
+

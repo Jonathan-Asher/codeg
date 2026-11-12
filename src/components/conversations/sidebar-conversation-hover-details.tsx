@@ -153,10 +153,17 @@ export function SidebarConversationHoverDetails({
         <InfoItem label={t("folderPath")}>
           <LtrValue>{folder?.path || none}</LtrValue>
         </InfoItem>
-        {/* Re-parented out of a removed worktree: the path above is where the
-            conversation lives NOW, so surface where it originally ran. */}
+        {/* The path above is the project the conversation is filed under;
+            this is where its session runs (moved here without its files), or
+            ran (re-parented out of a removed worktree). */}
         {conversation.origin_cwd && (
-          <InfoItem label={tSidebar("worktreeRemovedBadge")}>
+          <InfoItem
+            label={
+              conversation.working_dir === conversation.origin_cwd
+                ? tSidebar("runsInLabel")
+                : tSidebar("worktreeRemovedBadge")
+            }
+          >
             <LtrValue>{conversation.origin_cwd}</LtrValue>
           </InfoItem>
         )}

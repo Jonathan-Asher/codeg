@@ -2134,6 +2134,8 @@
       "attentionCountBadge": "{count} 件の会話が対応待ち",
       "statusCancelledBadge": "キャンセル済み",
       "worktreeRemovedBadge": "元の worktree は削除済み",
+      "runsInBadge": "{path} で実行",
+      "runsInLabel": "実行場所",
       "criticalBadge": "重要セッション",
       "criticalToggleFailed": "重要マークを更新できませんでした: {message}",
       "talkBadge": "トークモード オン",
@@ -2402,6 +2404,43 @@
       "forkUnsupported": "このエージェントは会話を分岐できません",
       "forkAfterReply": "現在の返信が終わってから分岐してください",
       "forkNoReply": "まだ分岐できるものがありません：完了した返信がありません"
+    },
+    "moveSession": {
+      "menuLabel": "プロジェクトへ移動…",
+      "title": "プロジェクトへ移動",
+      "description": "「{title}」を別のプロジェクトへ移動します。エージェントがフォルダーごとに保存しているファイルも一緒に移動します。",
+      "untitledSession": "無題のセッション",
+      "pickProject": "プロジェクトを選択",
+      "noProjects": "ほかに開いているプロジェクトはありません。",
+      "checking": "確認しています…",
+      "fullNote": "セッションとそのファイルは {project} へ移動し、エージェントはそこで作業を続けます。次のメッセージでセッションを一度読み直します。",
+      "listedOnly": {
+        "agent_unsupported": "{agent} のセッションは実行したフォルダーに結び付いているため、このセッションは {project} に一覧表示されるだけです。{path} で実行を続けます。",
+        "claude_adapter_outdated": "インストールされている Claude Code アダプターが古くセッションファイルを移動できないため、このセッションは {project} に一覧表示されるだけです。{path} で実行を続けます。",
+        "session_files_not_found": "このセッションのファイルが {agent} の保存場所にないため、{project} に一覧表示されるだけです。{path} で実行を続けます。"
+      },
+      "children": "{count} 件のサブセッションも一緒に移動します。",
+      "cancel": "キャンセル",
+      "move": "移動",
+      "moving": "移動しています…",
+      "moved": "{project} へ移動しました",
+      "movedListedOnly": "{project} に一覧表示しました。{path} で実行を続けます",
+      "failed": "セッションを移動できませんでした: {message}",
+      "errors": {
+        "conversation_not_found": "このセッションはもう存在しません。",
+        "folder_not_found": "そのプロジェクトはもうワークスペースにありません。",
+        "same_folder": "セッションはすでにそのプロジェクトにあります。",
+        "chat_conversation": "チャットのセッションには移動元のプロジェクトがありません。",
+        "chat_folder": "セッションをチャットへ移動することはできません。",
+        "subsession": "サブセッションは、それを開始したセッションと一緒に移動します。",
+        "unsupported_conversation": "この種類のセッションは移動できません。",
+        "work_task_linked": "このセッションはワークタスクが実行しているため、タスクのプロジェクトに残ります。",
+        "conversation_running": "セッションは作業中です。返信が終わってから移動してください。",
+        "resume_pending": "セッションはまもなく自動で続行します。続行が終わってから移動するか、自動続行をオフにしてください。",
+        "running_elsewhere": "Claude Code が codeg の外でこのセッションを実行しています。そのプロセスが終わってから移動してください。",
+        "session_closing": "セッションのエージェントがまだ終了処理中です。少ししてからもう一度お試しください。",
+        "move_failed": "セッションのファイルを移動できなかったため、何も変更していません。"
+      }
     },
     "search": {
       "dialogTitle": "検索",

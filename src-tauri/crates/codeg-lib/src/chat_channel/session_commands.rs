@@ -886,12 +886,17 @@ pub async fn handle_resume(
         }
     };
 
-    // Spawn agent with session_id for resume
+    // Spawn agent with session_id for resume, where the session runs: the
+    // folder's path, or where one moved without its files keeps running.
     let owner_label = owner_label_for(channel_id, sender_id, target);
     let connection_id = match conn_mgr
         .spawn_agent(
             conv.agent_type,
-            Some(folder.path.clone()),
+            Some(
+                conv.working_dir
+                    .clone()
+                    .unwrap_or_else(|| folder.path.clone()),
+            ),
             conv.external_id.clone(),
             runtime_env,
             owner_label,
@@ -1548,10 +1553,16 @@ async fn spawn_chat_connection_for_conversation(
             .await
             .map_err(|e| e.to_string())?;
     let owner_label = owner_label_for(channel_id, sender_id, target);
+    // Where the session runs (`working_dir`): the folder's path, or where one
+    // moved without its files keeps running.
     let connection_id = conn_mgr
         .spawn_agent(
             conv.agent_type,
-            Some(folder.path.clone()),
+            Some(
+                conv.working_dir
+                    .clone()
+                    .unwrap_or_else(|| folder.path.clone()),
+            ),
             conv.external_id.clone(),
             runtime_env,
             owner_label,

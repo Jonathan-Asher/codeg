@@ -12,6 +12,7 @@ use serde::Deserialize;
 
 use super::jwt::TokenCache;
 use super::payload::PushMessage;
+use super::prefs::SoundChoice;
 use super::ApnsEnvironment;
 
 /// Overrides both APNs hosts (tests, a local mock).
@@ -101,13 +102,15 @@ impl std::fmt::Debug for Credentials {
     }
 }
 
-/// Where one notification goes.
+/// Where one notification goes, and what it plays there.
 #[derive(Debug, Clone)]
 pub struct Target<'a> {
     pub device_id: i32,
     pub token: &'a str,
     pub topic: &'a str,
     pub environment: ApnsEnvironment,
+    /// The device's sound for this notification (`PushMessage::sound_for`).
+    pub sound: &'a SoundChoice,
 }
 
 #[derive(Deserialize)]
@@ -208,7 +211,7 @@ impl ApnsSender {
         server_id: &str,
     ) -> SendOutcome {
         let url = self.url(target);
-        let body = message.body_json(server_id);
+        let body = message.body_json_for(server_id, target.sound);
         let collapse_id = message.collapse_id(server_id);
         let hint = token_hint(target.token);
         let mut refreshed = false;

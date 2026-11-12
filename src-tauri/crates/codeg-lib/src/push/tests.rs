@@ -465,6 +465,270 @@ async fn registration_normalizes_the_token_and_defaults_from_settings() {
     assert!(list_devices(conn).await.unwrap().is_empty());
 }
 
+fn register_with(token: &str, sounds: Option<Value>) -> RegisterDevice {
+    RegisterDevice {
+        token: token.into(),
+        environment: Some("sandbox".into()),
+        bundle_id: Some("org.example.codeg".into()),
+        name: Some("Phone".into()),
+        sounds,
+        ..RegisterDevice::default()
+    }
+}
+
+/// What each device's last push played: `None` for no sound.
+fn sounds_heard(mock: &Mock) -> Vec<(String, Option<Value>)> {
+    let seen = mock.seen.lock().unwrap().drain(..).collect::<Vec<_>>();
+    seen.into_iter()
+        .map(|s| {
+            assert!(s.body["aps"]["alert"]["title"].is_string(), "{:?}", s.body);
+            (s.token, s.body["aps"].get("sound").cloned())
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn each_device_hears_its_own_sounds_session_over_project_over_critical_over_kind() {
+    use crate::db::service::{conversation_service, folder_service};
+    use crate::models::AgentType;
+    let db = test_helpers::fresh_in_memory_db().await;
+    let conn = &db.conn;
+    let (sender, mock) = mock_apns().await;
+    let quiet_folder = test_helpers::seed_folder(&db, "/tmp/codeg-push-sounds-a").await;
+    let loud_folder = test_helpers::seed_folder(&db, "/tmp/codeg-push-sounds-b").await;
+    let gone_folder = test_helpers::seed_folder(&db, "/tmp/codeg-push-sounds-c").await;
+    let critical = test_helpers::seed_conversation(&db, quiet_folder, AgentType::ClaudeCode).await;
+    conversation_service::update_critical(conn, critical, true, None)
+        .await
+        .unwrap();
+    let plain = test_helpers::seed_conversation(&db, quiet_folder, AgentType::ClaudeCode).await;
+    let critical_in_loud =
+        test_helpers::seed_conversation(&db, loud_folder, AgentType::ClaudeCode).await;
+    conversation_service::update_critical(conn, critical_in_loud, true, None)
+        .await
+        .unwrap();
+    let own = test_helpers::seed_conversation(&db, loud_folder, AgentType::ClaudeCode).await;
+    let worktree = folder_service::add_folder_with_parent(
+        conn,
+        "/tmp/codeg-push-sounds-b-wt",
+        Some(loud_folder),
+    )
+    .await
+    .unwrap()
+    .id;
+    let in_worktree = test_helpers::seed_conversation(&db, worktree, AgentType::ClaudeCode).await;
+
+    let phone_token = "aaaa1111aaaa1111aaaa1111aaaa1111";
+    let ipad_token = "bbbb2222bbbb2222bbbb2222bbbb2222";
+    let chosen = json!({
+        "kinds": {
+            "turn_finished": "codeg-pop.caf",
+            "needs_you": "none",
+            "reminder": "../x.caf",
+        },
+        "critical": "codeg-bell.caf",
+        "projects": {
+            loud_folder.to_string(): "codeg-chime.caf",
+            gone_folder.to_string(): "codeg-glass.caf",
+            "999999": "codeg-glass.caf",
+        },
+        "sessions": { own.to_string(): "codeg-ping.caf", "888888": "none" },
+    });
+    folder_service::soft_delete_folder(conn, gone_folder)
+        .await
+        .unwrap();
+    let phone = register_device(conn, register_with(phone_token, Some(chosen.clone())))
+        .await
+        .unwrap();
+    // The bad name and the folders and session this server lacks are gone.
+    assert_eq!(
+        phone.device.sounds,
+        json!({
+            "kinds": { "turn_finished": "codeg-pop.caf", "needs_you": "none" },
+            "critical": "codeg-bell.caf",
+            "projects": { loud_folder.to_string(): "codeg-chime.caf" },
+            "sessions": { own.to_string(): "codeg-ping.caf" },
+        })
+    );
+    let ipad = register_device(conn, register_with(ipad_token, None))
+        .await
+        .unwrap();
+    assert_eq!(
+        ipad.device.sounds,
+        json!({ "kinds": {}, "projects": {}, "sessions": {} })
+    );
+
+    let away = looking(false, &[]);
+    let in_folder = |conversation_id: i32, folder_id: i32, msg: PushMessage| PushMessage {
+        conversation_id: Some(conversation_id),
+        folder_id: Some(folder_id),
+        ..msg
+    };
+    let phone_heard = |heard: Vec<(String, Option<Value>)>| {
+        let ipad_heard = heard.iter().find(|(t, _)| t == ipad_token).cloned();
+        // A device that chose nothing always plays the default sound.
+        assert_eq!(ipad_heard.and_then(|(_, s)| s), Some(json!("default")));
+        heard
+            .into_iter()
+            .find(|(t, _)| t == phone_token)
+            .and_then(|(_, sound)| sound)
+    };
+
+    // A finished turn of a plain session: the kind's sound.
+    deliver_with(
+        &sender,
+        conn,
+        &setup(),
+        &in_folder(plain, quiet_folder, turn_finished(plain)),
+        &away,
+    )
+    .await;
+    assert_eq!(
+        phone_heard(sounds_heard(&mock)),
+        Some(json!("codeg-pop.caf"))
+    );
+    // Of a critical session: the critical sessions' sound.
+    deliver_with(
+        &sender,
+        conn,
+        &setup(),
+        &in_folder(critical, quiet_folder, turn_finished(critical)),
+        &away,
+    )
+    .await;
+    assert_eq!(
+        phone_heard(sounds_heard(&mock)),
+        Some(json!("codeg-bell.caf"))
+    );
+    // Of a critical session in a project with a sound: the project's.
+    deliver_with(
+        &sender,
+        conn,
+        &setup(),
+        &in_folder(
+            critical_in_loud,
+            loud_folder,
+            turn_finished(critical_in_loud),
+        ),
+        &away,
+    )
+    .await;
+    assert_eq!(
+        phone_heard(sounds_heard(&mock)),
+        Some(json!("codeg-chime.caf"))
+    );
+    // Of a session in a worktree of that project: the project's too.
+    deliver_with(
+        &sender,
+        conn,
+        &setup(),
+        &in_folder(in_worktree, worktree, turn_finished(in_worktree)),
+        &away,
+    )
+    .await;
+    assert_eq!(
+        phone_heard(sounds_heard(&mock)),
+        Some(json!("codeg-chime.caf"))
+    );
+    // Of a session with its own sound: the session's.
+    deliver_with(
+        &sender,
+        conn,
+        &setup(),
+        &in_folder(own, loud_folder, turn_finished(own)),
+        &away,
+    )
+    .await;
+    assert_eq!(
+        phone_heard(sounds_heard(&mock)),
+        Some(json!("codeg-ping.caf"))
+    );
+    // A question: "none" keeps the banner and drops the sound.
+    deliver_with(
+        &sender,
+        conn,
+        &setup(),
+        &in_folder(plain, quiet_folder, question_push(plain, false)),
+        &away,
+    )
+    .await;
+    assert_eq!(phone_heard(sounds_heard(&mock)), None);
+    // A reminder: its bad name was left out, so the default sound.
+    deliver_with(
+        &sender,
+        conn,
+        &setup(),
+        &in_folder(plain, quiet_folder, question_push(plain, true)),
+        &away,
+    )
+    .await;
+    assert_eq!(phone_heard(sounds_heard(&mock)), Some(json!("default")));
+
+    // The desktop changing the preferences keeps the sounds.
+    let updated = update_device_prefs(
+        conn,
+        phone.device.id,
+        DevicePrefs {
+            errors: true,
+            ..DevicePrefs::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(updated.prefs.errors);
+    assert_eq!(updated.sounds, phone.device.sounds);
+    // Registering without sounds (an app that predates them), or with
+    // something that is not an object, keeps them too.
+    for kept in [None, Some(json!("loud"))] {
+        let again = register_device(conn, register_with(phone_token, kept))
+            .await
+            .unwrap();
+        assert_eq!(again.device.id, phone.device.id);
+        assert_eq!(again.device.sounds, phone.device.sounds);
+        assert!(again.device.prefs.errors);
+    }
+    // A session deleted since is dropped at the next registration.
+    conversation_service::soft_delete(conn, own).await.unwrap();
+    let again = register_device(conn, register_with(phone_token, Some(chosen)))
+        .await
+        .unwrap();
+    assert_eq!(again.device.sounds["sessions"], json!({}));
+    assert!(again.device.prefs.errors);
+    // New sounds replace the old; none clears them.
+    let replaced = register_device(
+        conn,
+        register_with(
+            phone_token,
+            Some(json!({ "kinds": { "turn_finished": "codeg-knock.caf" } })),
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        replaced.device.sounds,
+        json!({ "kinds": { "turn_finished": "codeg-knock.caf" }, "projects": {}, "sessions": {} })
+    );
+    // The test push sounds like a finished turn.
+    send_test_with(&sender, conn, &setup(), Some(phone.device.id))
+        .await
+        .unwrap();
+    let heard = sounds_heard(&mock);
+    assert_eq!(
+        heard,
+        [(phone_token.to_string(), Some(json!("codeg-knock.caf")))]
+    );
+    let cleared = register_device(conn, register_with(phone_token, Some(json!({}))))
+        .await
+        .unwrap();
+    assert_eq!(cleared.device.sounds, ipad.device.sounds);
+    let row = push_device_service::find(conn, phone.device.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(DevicePrefs::from_json(&row.prefs), updated.prefs);
+    assert!(!row.prefs.contains("sounds"));
+}
+
 #[test]
 fn settings_are_trimmed_and_checked() {
     let settings = PushSettings {

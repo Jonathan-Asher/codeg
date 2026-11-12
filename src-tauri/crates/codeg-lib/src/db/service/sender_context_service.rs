@@ -99,3 +99,34 @@ pub async fn update_auto_approve(
     active.updated_at = Set(Utc::now());
     Ok(active.update(conn).await?)
 }
+
+/// Point every chat-channel sender whose current session is one of
+/// `conversation_ids` at `folder_id`: the sessions moved to another project,
+/// and a `/task` sent next should start there too. Returns how many senders
+/// were updated.
+pub async fn retarget_folder_for_conversations(
+    conn: &DatabaseConnection,
+    conversation_ids: &[i32],
+    folder_id: i32,
+) -> Result<u64, DbError> {
+    use sea_orm::sea_query::Expr;
+    if conversation_ids.is_empty() {
+        return Ok(0);
+    }
+    let res = chat_channel_sender_context::Entity::update_many()
+        .col_expr(
+            chat_channel_sender_context::Column::CurrentFolderId,
+            Expr::value(Some(folder_id)),
+        )
+        .col_expr(
+            chat_channel_sender_context::Column::UpdatedAt,
+            Expr::value(Utc::now()),
+        )
+        .filter(
+            chat_channel_sender_context::Column::CurrentConversationId
+                .is_in(conversation_ids.iter().copied()),
+        )
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected)
+}
