@@ -4502,6 +4502,7 @@
         "consequence": "It can't be resumed or forked. Below is the text codeg saved for search: a partial copy, with the messages only and no tool output.",
         "startNew": "Start a new session from this",
         "startNewHint": "Opens a new {agent} session in this folder with the saved text in its composer. Nothing is sent until you send it.",
+        "startNewHintNothingSaved": "Opens a new {agent} session in this folder. There is no saved text to carry over.",
         "startNewFailed": "Couldn't prepare the saved text",
         "savedCopyLabel": "Saved copy · {count, plural, =0 {no messages} one {# message} other {# messages}} · text only",
         "savedCopyAria": "Saved messages",

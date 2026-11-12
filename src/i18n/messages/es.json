@@ -4502,6 +4502,7 @@
         "consequence": "No se puede reanudar ni bifurcar. Abajo está el texto que codeg guardó para la búsqueda: una copia parcial, solo con los mensajes y sin la salida de las herramientas.",
         "startNew": "Iniciar una sesión nueva a partir de esta",
         "startNewHint": "Abre una sesión nueva de {agent} en esta carpeta con el texto guardado en el editor. No se envía nada hasta que lo envíes tú.",
+        "startNewHintNothingSaved": "Abre una sesión nueva de {agent} en esta carpeta. No hay texto guardado que llevar.",
         "startNewFailed": "No se pudo preparar el texto guardado",
         "savedCopyLabel": "Copia guardada · {count, plural, =0 {sin mensajes} one {# mensaje} other {# mensajes}} · solo texto",
         "savedCopyAria": "Mensajes guardados",

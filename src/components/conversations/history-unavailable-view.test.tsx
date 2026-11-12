@@ -145,7 +145,13 @@ describe("HistoryUnavailableView", () => {
   it("does not ask for saved text the index never had", () => {
     renderView({
       info: { reason: "agent_cleanup", retention_days: 30, saved_turns: 0 },
+      onStartNew: vi.fn(),
     })
+    expect(
+      screen.getByText(
+        "Opens a new Claude Code session in this folder. There is no saved text to carry over."
+      )
+    ).toBeVisible()
     expect(
       screen.getByText("codeg kept no text of this session.")
     ).toBeVisible()

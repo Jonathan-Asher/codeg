@@ -4502,6 +4502,7 @@
         "consequence": "它无法恢复或分叉。下方是 codeg 为搜索保存的文本：仅包含消息的部分副本，不含工具输出。",
         "startNew": "基于此开始新会话",
         "startNewHint": "在此文件夹中打开一个新的 {agent} 会话，并将保存的文本放入输入框。在你发送之前不会发送任何内容。",
+        "startNewHintNothingSaved": "在此文件夹中打开一个新的 {agent} 会话。没有可带入的已保存文本。",
         "startNewFailed": "无法准备保存的文本",
         "savedCopyLabel": "已保存的副本 · {count, plural, =0 {无消息} other {# 条消息}} · 仅文本",
         "savedCopyAria": "已保存的消息",

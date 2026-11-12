@@ -4502,6 +4502,7 @@
         "consequence": "Elle ne peut être ni reprise ni dupliquée. Ci-dessous, le texte que codeg a conservé pour la recherche : une copie partielle, avec les messages seulement, sans la sortie des outils.",
         "startNew": "Démarrer une nouvelle session à partir de celle-ci",
         "startNewHint": "Ouvre une nouvelle session {agent} dans ce dossier, avec le texte conservé dans la zone de saisie. Rien n'est envoyé tant que vous ne l'envoyez pas.",
+        "startNewHintNothingSaved": "Ouvre une nouvelle session {agent} dans ce dossier. Il n'y a aucun texte conservé à reprendre.",
         "startNewFailed": "Impossible de préparer le texte conservé",
         "savedCopyLabel": "Copie conservée · {count, plural, =0 {aucun message} one {# message} other {# messages}} · texte seul",
         "savedCopyAria": "Messages conservés",

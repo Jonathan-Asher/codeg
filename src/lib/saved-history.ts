@@ -79,10 +79,18 @@ export async function startSessionFromSavedHistory(
     ...(targetGroup != null ? { targetGroup } : {}),
     forceAgent: agentType,
   })
-  park(target.tabId, {
-    ...buildSavedHistoryPrefill({ exported, inlinePreamble, attachedPreamble }),
-    agentType: target.agentType,
-    folderId: target.folderId,
-  })
+  // Nothing was saved: a preamble promising text that isn't there would only
+  // mislead, so the new session starts with an empty composer.
+  if (exported.turns > 0) {
+    park(target.tabId, {
+      ...buildSavedHistoryPrefill({
+        exported,
+        inlinePreamble,
+        attachedPreamble,
+      }),
+      agentType: target.agentType,
+      folderId: target.folderId,
+    })
+  }
   return target
 }

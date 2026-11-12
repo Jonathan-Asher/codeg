@@ -4502,6 +4502,7 @@
         "consequence": "재개하거나 포크할 수 없습니다. 아래는 codeg가 검색용으로 저장한 텍스트입니다. 메시지만 담긴 부분 사본이며 도구 출력은 없습니다.",
         "startNew": "이것으로 새 세션 시작",
         "startNewHint": "이 폴더에서 새 {agent} 세션을 열고 저장된 텍스트를 입력창에 넣습니다. 보내기 전까지는 아무것도 전송되지 않습니다.",
+        "startNewHintNothingSaved": "이 폴더에서 새 {agent} 세션을 엽니다. 가져올 저장된 텍스트가 없습니다.",
         "startNewFailed": "저장된 텍스트를 준비하지 못했습니다",
         "savedCopyLabel": "저장된 사본 · {count, plural, =0 {메시지 없음} other {메시지 #개}} · 텍스트만",
         "savedCopyAria": "저장된 메시지",

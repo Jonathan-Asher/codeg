@@ -125,7 +125,9 @@ export function HistoryUnavailableView({
                 {t("startNew")}
               </Button>
               <p className="text-xs text-muted-foreground">
-                {t("startNewHint", { agent: agentLabel })}
+                {nothingSaved
+                  ? t("startNewHintNothingSaved", { agent: agentLabel })
+                  : t("startNewHint", { agent: agentLabel })}
               </p>
             </div>
           )}

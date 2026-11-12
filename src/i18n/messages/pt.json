@@ -4502,6 +4502,7 @@
         "consequence": "Ela não pode ser retomada nem ramificada. Abaixo está o texto que o codeg guardou para a busca: uma cópia parcial, só com as mensagens e sem a saída das ferramentas.",
         "startNew": "Iniciar uma nova sessão a partir desta",
         "startNewHint": "Abre uma nova sessão do {agent} nesta pasta com o texto guardado no campo de mensagem. Nada é enviado até você enviar.",
+        "startNewHintNothingSaved": "Abre uma nova sessão do {agent} nesta pasta. Não há texto guardado para levar.",
         "startNewFailed": "Não foi possível preparar o texto guardado",
         "savedCopyLabel": "Cópia guardada · {count, plural, =0 {nenhuma mensagem} one {# mensagem} other {# mensagens}} · só texto",
         "savedCopyAria": "Mensagens guardadas",

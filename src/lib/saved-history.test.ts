@@ -167,6 +167,26 @@ describe("startSessionFromSavedHistory", () => {
     })
   })
 
+  it("opens the new session with an empty composer when nothing was saved", async () => {
+    const openNewConversationTab = vi.fn(() => ({
+      tabId: "draft-9",
+      agentType: "claude_code" as const,
+      folderId: 14,
+    }))
+    const park = vi.fn()
+    await startSessionFromSavedHistory(request, {
+      openNewConversationTab,
+      exportSaved: async () => ({
+        markdown: "# Paid plan users and revenue\n",
+        chars: 30,
+        turns: 0,
+      }),
+      park,
+    })
+    expect(openNewConversationTab).toHaveBeenCalledTimes(1)
+    expect(park).not.toHaveBeenCalled()
+  })
+
   it("leaves no new session behind when the export fails", async () => {
     const openNewConversationTab = vi.fn()
     const park = vi.fn()

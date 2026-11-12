@@ -4502,6 +4502,7 @@
         "consequence": "它無法恢復或分支。下方是 codeg 為搜尋保存的文字：僅包含訊息的部分副本，不含工具輸出。",
         "startNew": "以此開始新的工作階段",
         "startNewHint": "在此資料夾中開啟新的 {agent} 工作階段，並將保存的文字放入輸入框。在你送出之前不會傳送任何內容。",
+        "startNewHintNothingSaved": "在此資料夾中開啟新的 {agent} 工作階段。沒有可帶入的已保存文字。",
         "startNewFailed": "無法準備保存的文字",
         "savedCopyLabel": "已保存的副本 · {count, plural, =0 {沒有訊息} other {# 則訊息}} · 僅文字",
         "savedCopyAria": "已保存的訊息",
