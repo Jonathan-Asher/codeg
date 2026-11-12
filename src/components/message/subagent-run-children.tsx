@@ -294,8 +294,13 @@ const ChildRow = memo(function ChildRow({
           )}
           {item.result && (
             <Section label={t("result")}>
-              <div className="prose prose-sm max-w-none text-sm dark:prose-invert [&_ol]:list-inside [&_ul]:list-inside">
-                <MessageResponse>{item.result}</MessageResponse>
+              {/* A written report, in the compact type the background-task
+                  card gives a sub-agent's: headings must not outshout the
+                  transcript around the card. */}
+              <div className="max-h-72 overflow-auto rounded-md border border-border/60 px-2.5 py-2">
+                <div className="prose prose-sm max-w-none break-words text-xs dark:prose-invert [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-xs [&_h4]:text-xs [&_ol]:list-inside [&_ul]:list-inside">
+                  <MessageResponse>{item.result}</MessageResponse>
+                </div>
               </div>
             </Section>
           )}

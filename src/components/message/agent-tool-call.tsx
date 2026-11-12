@@ -613,6 +613,8 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
           ) : null
         }
         statusLabel={statusLabel}
+        // A run's rows are its content: room for them, not an inner scroll.
+        bodyClassName={runChildren.length > 1 ? "max-h-[40rem]" : undefined}
       >
         {/* Model summary */}
         {model && (
