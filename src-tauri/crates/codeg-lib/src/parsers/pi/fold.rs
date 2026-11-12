@@ -62,7 +62,7 @@ pub(crate) const AGENT_WAKE_META_KEY: &str = "codeg.agentWake";
 const NOTE_MAX_CHARS: usize = 6_000;
 /// Raw notices kept per card.
 const NOTES_MAX: usize = 40;
-/// A run's result (mirrors `claude::BACKGROUND_RESULT_MAX_CHARS`).
+/// A run's result (the cap the other parsers give a background result).
 const RESULT_MAX_CHARS: usize = 16_000;
 /// A child's task, result or error on its row.
 const ROW_TEXT_MAX_CHARS: usize = 4_000;
