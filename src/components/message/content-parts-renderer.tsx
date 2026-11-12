@@ -85,7 +85,10 @@ import { DelegationStatusGroupCard } from "./delegation-status-group-card"
 import { BackgroundTaskCard } from "./background-task-card"
 import { BackgroundJobChip } from "./background-job-chip"
 import { ModelNotesToggle } from "./model-notes-toggle"
-import { parseBackgroundJob } from "@/lib/agent-run-meta"
+import {
+  BACKGROUND_JOB_META_KEY,
+  parseBackgroundJob,
+} from "@/lib/agent-run-meta"
 import { useToolCardMeta } from "./live-tool-cards-context"
 import { GeneratedImagesBlock } from "./generated-images-block"
 import { GoalRunPart, GoalToolCallPart } from "./goal-tool-call"
@@ -2367,7 +2370,11 @@ const ToolCallPart = memo(function ToolCallPart({
   // "Background" forever, and shows the job's last output. Live, the job's
   // newest card (`live-tool-cards-context`) wins: the job keeps running after
   // the turn that started it.
-  const jobMeta = useToolCardMeta(part.toolCallId, part.meta)
+  const jobMeta = useToolCardMeta(
+    part.toolCallId,
+    part.meta,
+    BACKGROUND_JOB_META_KEY
+  )
   const backgroundJob = useMemo(
     () => (isCommandTool ? parseBackgroundJob(jobMeta) : null),
     [isCommandTool, jobMeta]

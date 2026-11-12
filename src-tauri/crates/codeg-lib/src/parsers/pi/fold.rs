@@ -872,6 +872,23 @@ impl RunNotice {
     }
 }
 
+/// What each child of a settled run printed, by its workflow key (else its run
+/// id), as the run's final notice previews it (`Child outputs:`): the result a
+/// workflow lane's row shows (`fold_run`).
+pub(super) fn run_notice_previews(text: &str) -> Vec<(String, String)> {
+    let Some(run) = RunNotice::parse(text) else {
+        return Vec::new();
+    };
+    run.outputs
+        .into_iter()
+        .filter_map(|output| {
+            let key = output.key.or(output.run_id)?;
+            let preview = output.preview.trim();
+            (!preview.is_empty()).then(|| (key, truncate_str(preview, ROW_TEXT_MAX_CHARS)))
+        })
+        .collect()
+}
+
 /// `mina=<id> (failed), uma=<id> (failed)` — the child run list.
 fn parse_child_runs(value: &str) -> Vec<ChildRun> {
     value

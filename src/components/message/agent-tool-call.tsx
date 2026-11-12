@@ -33,6 +33,7 @@ import {
 import {
   firstLine,
   parseSubagentRun,
+  SUBAGENT_RUN_META_KEY,
   type SubagentRun,
   type SubagentRunChild,
 } from "@/lib/agent-run-meta"
@@ -304,7 +305,11 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
   // over from the raw result text, which is a plain-text copy of the same for
   // clients that cannot read it. Live, the run's newest card wins: it keeps
   // changing after the turn that launched it (`live-tool-cards-context`).
-  const runMeta = useToolCardMeta(part.toolCallId, part.meta)
+  const runMeta = useToolCardMeta(
+    part.toolCallId,
+    part.meta,
+    SUBAGENT_RUN_META_KEY
+  )
   const subagentRun = useMemo(() => parseSubagentRun(runMeta), [runMeta])
   // A live run still going (history never says `running`: a run whose end the
   // transcript lacks reads `pending`).

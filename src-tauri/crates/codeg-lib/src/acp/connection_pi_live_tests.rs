@@ -314,16 +314,18 @@ fn live_wake_kinds(events: &[AcpEvent]) -> Vec<String> {
 }
 
 /// The fields of a run card both views know, for comparing them.
+/// A row's result only counts where rows are drawn (a run of several): a
+/// one-child run shows the run's result instead.
 fn run_digest(meta: &Value) -> Value {
     let run = &meta["codeg.subagentRun"];
-    let rows: Vec<Value> = run["children"]
-        .as_array()
-        .unwrap()
+    let children = run["children"].as_array().unwrap();
+    let rows: Vec<Value> = children
         .iter()
         .map(|row| {
             json!({
                 "key": row["key"], "label": row["label"], "agent": row["agent"],
                 "status": row["status"], "sessionId": row["sessionId"],
+                "result": if children.len() > 1 { row["result"].clone() } else { Value::Null },
             })
         })
         .collect();

@@ -13,6 +13,8 @@
 //! run started) ride along under their own names; the history renderer reads
 //! none of them, the live one shows them while a run is still going.
 
+use std::collections::HashMap;
+
 use serde_json::{Map, Value};
 
 use crate::parsers::truncate_str;
@@ -23,6 +25,13 @@ use super::fold::{
     DESCRIPTION_MAX_CHARS, NOTES_MAX, NOTE_MAX_CHARS, RESULT_MAX_CHARS, ROW_TEXT_MAX_CHARS,
     SUBAGENT_RUN_META_KEY,
 };
+
+/// Each child's printed result, read off a run's final notice the way the
+/// history pass reads it (`fold::run_notice_previews`): pi-subagents keeps a
+/// workflow lane's result out of the details pi-acp's rows come from.
+pub(crate) fn run_notice_previews(text: &str) -> Vec<(String, String)> {
+    super::fold::run_notice_previews(text)
+}
 
 /// Text a live System note keeps, as the history parser cuts a displayed
 /// custom message.
@@ -219,7 +228,7 @@ fn row_label(key: &str, agent: Option<&str>) -> String {
     }
 }
 
-fn row(live: &Value) -> Option<Value> {
+fn row(live: &Value, child_results: &HashMap<String, String>) -> Option<Value> {
     let key = text(live, "key")?;
     let agent = text(live, "agent");
     let status = live_status(live.get("status").and_then(Value::as_str));
@@ -288,7 +297,15 @@ fn row(live: &Value) -> Option<Value> {
             text(live, "error")
                 .map(|e| Value::from(truncate_str(&clean_error(&e), ROW_TEXT_MAX_CHARS))),
         ),
-        ("result", capped("result")),
+        (
+            "result",
+            capped("result").or_else(|| {
+                child_results
+                    .get(&key)
+                    .or_else(|| text(live, "runId").and_then(|run| child_results.get(&run)))
+                    .map(|result| Value::from(result.as_str()))
+            }),
+        ),
         ("sessionId", text(live, "sessionId").map(Value::from)),
         ("model", text(live, "model").map(Value::from)),
         ("tokens", number(live, "tokens")),
@@ -329,7 +346,12 @@ fn outcome(live: &Value, status: Option<&str>, agent: &str) -> (Option<String>, 
 /// `_meta` of a live run card: `{"codeg.subagentRun": …}` in the history
 /// card's shape (`Launch::card`), notes included. `args` are the launch's
 /// arguments, when known.
-pub(crate) fn run_meta(live: &Value, args: Option<&Value>, notes: &[LiveNote]) -> Value {
+pub(crate) fn run_meta(
+    live: &Value,
+    args: Option<&Value>,
+    notes: &[LiveNote],
+    child_results: &HashMap<String, String>,
+) -> Value {
     let status = live_status(live.get("status").and_then(Value::as_str)).unwrap_or("pending");
     let agent = run_agent_label(live, args);
     let (result, error) = outcome(live, Some(status), &agent);
@@ -339,7 +361,7 @@ pub(crate) fn run_meta(live: &Value, args: Option<&Value>, notes: &[LiveNote]) -
     let children: Vec<Value> = live
         .get("children")
         .and_then(Value::as_array)
-        .map(|rows| rows.iter().filter_map(row).collect())
+        .map(|rows| rows.iter().filter_map(|r| row(r, child_results)).collect())
         .unwrap_or_default();
     let notes: Vec<Value> = notes
         .iter()
@@ -382,7 +404,10 @@ pub(crate) fn run_meta(live: &Value, args: Option<&Value>, notes: &[LiveNote]) -
             ("error", error.map(Value::from)),
             ("children", Some(Value::Array(children))),
             ("notes", Some(Value::Array(notes))),
-            // Live only.
+            // Live only. `live` says the card came from the live channel,
+            // which the history card cannot say: a client holding both
+            // prefers the transcript's once that one has settled.
+            ("live", Some(Value::Bool(true))),
             ("startedAt", number(live, "startedAt")),
             ("toolCount", number(live, "toolCount")),
             ("turnCount", number(live, "turnCount")),
@@ -467,7 +492,8 @@ pub(crate) fn job_meta(live: &Value) -> Value {
                 "notice",
                 notice.map(|n| Value::from(truncate_str(&n, NOTE_MAX_CHARS))),
             ),
-            // Live only.
+            // Live only (see `run_meta`).
+            ("live", Some(Value::Bool(true))),
             ("startedAt", number(live, "startedAt")),
         ]),
     )
@@ -541,6 +567,7 @@ mod tests {
             &live,
             Some(&args),
             &[LiveNote::new("result", "Background task completed")],
+            &HashMap::new(),
         );
         let run = &meta[SUBAGENT_RUN_META_KEY];
         assert_eq!(run["status"], "completed");
@@ -572,7 +599,12 @@ mod tests {
                 {"key": "task-1", "agent": "scout", "status": "running",
                  "activity": {"currentTool": "bash", "toolCount": 1, "lastActivityAt": 5}},
                 {"key": "task-2", "agent": "scout", "status": "pending"}]});
-        let meta = run_meta(&live, Some(&json!({"workflow": "parallel"})), &[]);
+        let meta = run_meta(
+            &live,
+            Some(&json!({"workflow": "parallel"})),
+            &[],
+            &HashMap::new(),
+        );
         let run = &meta[SUBAGENT_RUN_META_KEY];
         assert_eq!(run["status"], "running");
         assert_eq!(run["agent"], "scout", "the agent both children share");
@@ -589,7 +621,12 @@ mod tests {
     fn a_failed_run_result_becomes_its_error() {
         let live = json!({"mode": "single", "status": "failed",
             "result": "Error: Run fan-out: 1/64 used, 63 remaining\nboom\n    at f (x:1:2)"});
-        let meta = run_meta(&live, Some(&json!({"agent": "worker", "task": "t"})), &[]);
+        let meta = run_meta(
+            &live,
+            Some(&json!({"agent": "worker", "task": "t"})),
+            &[],
+            &HashMap::new(),
+        );
         let run = &meta[SUBAGENT_RUN_META_KEY];
         assert_eq!(run["error"], "boom");
         assert!(run.get("result").is_none());

@@ -184,6 +184,9 @@ struct Card {
     /// The launch result Pi got (the history's `launch` note).
     launch: Option<String>,
     notes: Vec<LiveNote>,
+    /// Each child's result as the run's final notice previews it, by workflow
+    /// key or run id: a workflow lane's row has none otherwise.
+    child_results: HashMap<String, String>,
 }
 
 impl Card {
@@ -194,6 +197,7 @@ impl Card {
             args: None,
             launch: None,
             notes: Vec::new(),
+            child_results: HashMap::new(),
         }
     }
 
@@ -210,7 +214,12 @@ impl Card {
     fn meta(&self) -> Option<Value> {
         let live = self.live.as_ref()?;
         Some(match self.kind {
-            CardKind::Run => live::run_meta(live, self.args.as_ref(), &self.all_notes()),
+            CardKind::Run => live::run_meta(
+                live,
+                self.args.as_ref(),
+                &self.all_notes(),
+                &self.child_results,
+            ),
             CardKind::Job => live::job_meta(live),
         })
     }
@@ -772,6 +781,9 @@ async fn custom_message(
         };
         if card.notes.len() < LIVE_NOTES_MAX {
             card.notes.push(LiveNote::new(kind, text));
+        }
+        if custom_type == "subagent-notify" {
+            card.child_results.extend(live::run_notice_previews(text));
         }
         if let Some(meta) = card.meta() {
             emit_with_state(

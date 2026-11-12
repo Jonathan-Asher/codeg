@@ -217,6 +217,58 @@ describe("a live run card", () => {
   })
 })
 
+describe("which card a run draws from", () => {
+  const settledHistory = {
+    "codeg.subagentRun": {
+      version: 1,
+      mode: "workflow",
+      async: true,
+      status: "completed",
+      agent: "scout",
+      result: "from the transcript",
+      children: [],
+    },
+  }
+
+  it("ends as the transcript draws it once the transcript has the end", () => {
+    renderWith(
+      <AgentToolCallPart
+        part={{ ...launchPart(), meta: settledHistory }}
+        renderToolCall={() => null}
+      />,
+      new Map([[LAUNCH, LIVE_CARD]])
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Completed" }))
+    expect(screen.getByText("from the transcript")).toBeInTheDocument()
+    expect(screen.queryAllByTestId("subagent-run-child")).toHaveLength(0)
+  })
+
+  it("prefers the connection's card over a live copy the call carries", () => {
+    const liveCopy = {
+      "codeg.subagentRun": {
+        ...settledHistory["codeg.subagentRun"],
+        live: true,
+        result: "the live copy",
+      },
+    }
+    const newest = {
+      "codeg.subagentRun": {
+        ...liveCopy["codeg.subagentRun"],
+        result: "the newest card",
+      },
+    }
+    renderWith(
+      <AgentToolCallPart
+        part={{ ...launchPart(), meta: liveCopy }}
+        renderToolCall={() => null}
+      />,
+      new Map([[LAUNCH, newest]])
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Completed" }))
+    expect(screen.getByText("the newest card")).toBeInTheDocument()
+  })
+})
+
 describe("a live job chip", () => {
   const JOB = "chatcmpl-tool-98a8944ceb08426cb832b7b6c1b6e120"
 
