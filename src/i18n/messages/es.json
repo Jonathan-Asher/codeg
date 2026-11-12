@@ -2370,7 +2370,11 @@
       "limitPoolBannerTitle": "En pausa por límites de uso",
       "limitStopped": "Detenida por límites de uso",
       "limitStoppedHint": "El último turno se detuvo por un límite de uso y ya no continúa solo. Continúalo cuando el límite lo permita.",
-      "workingWithItems": "Trabajando · {count} en ejecución"
+      "workingWithItems": "Trabajando · {count} en ejecución",
+      "useReset": "Usar un reinicio y continuar",
+      "useResetTitle": "{count, plural, =1 {Usa tu reinicio del límite de uso para recargar el límite ahora y continuar} other {Usa uno de tus # reinicios del límite de uso para recargar el límite ahora y continuar}}",
+      "resetContinued": "Reinicio usado. La sesión continúa ahora.",
+      "usePoolResetTitle": "Usa uno de los reinicios del límite de uso de {name} para recargar su límite ahora y continuar"
     },
     "conversationCard": {
       "untitledConversation": "Conversación sin título",
@@ -6940,7 +6944,8 @@
     "source": {
       "claudeLive": "De los turnos de Claude Code en codeg",
       "claudeSaved": "Último dato guardado antes de reiniciar codeg",
-      "codexLog": "Del registro de sesión más reciente de Codex"
+      "codexLog": "Del registro de sesión más reciente de Codex",
+      "codexLive": "Leído directamente de Codex"
     },
     "window": {
       "session5h": "Sesión de 5 horas",
@@ -7081,7 +7086,104 @@
       "routingOrdered": "Orden: las solicitudes nuevas van a la primera cuenta que pueda atenderlas, de arriba abajo",
       "reserveSummary": "Reserva {percent} %",
       "reserveSummaryDynamic": "Reserva {percent} %, liberada cerca del reinicio",
-      "position": "Posición {position}"
+      "position": "Posición {position}",
+      "resets": {
+        "available": "{count, plural, one {# reinicio} other {# reinicios}}",
+        "availableUntil": "{count, plural, one {# reinicio} other {# reinicios}} · caduca el {date}",
+        "auto": "el pool usa uno al llegar al límite",
+        "cooldownUntil": "el siguiente se puede usar {time}",
+        "confirmBody": "¿Usar 1 reinicio en <b>{name}</b>? Recarga el {refills} ahora y no se puede deshacer.",
+        "refills": {
+          "session": "límite de 5 horas",
+          "weekly": "límite semanal",
+          "full": "límite de 5 horas y el semanal",
+          "other": "límite de uso"
+        },
+        "outcome": {
+          "reset": "Reinicio usado en {name}: sus límites están recargados.",
+          "alreadyUsed": "Ese reinicio en {name} ya se había usado. No ha cambiado nada ahora.",
+          "unconfirmed": "No se pudo confirmar que el reinicio en {name} se aplicara. Vuelve a comprobarla antes de intentarlo de nuevo."
+        },
+        "continued": "Reinicio usado en {name}. La sesión continúa ahora.",
+        "recheck": "Comprobar ahora",
+        "recheckTitle": "Hacer que el pool vuelva a leer ahora el uso de esta cuenta",
+        "recheckLifted": "{name} se puede usar de nuevo.",
+        "recheckSame": "{name} leída de nuevo: todavía no hay nada que levantar.",
+        "recheckUnread": "El pool no pudo leer el uso de {name} ahora mismo.",
+        "error": {
+          "recentlyUsed": "Se acaba de usar un reinicio en esta cuenta.",
+          "inProgress": "Ya se está usando un reinicio en esta cuenta.",
+          "cooldown": "Todavía no se puede usar otro reinicio en esta cuenta.",
+          "noUsableReset": "Esta cuenta no tiene ningún reinicio que pueda usar ahora.",
+          "notEligible": "A esta cuenta no se le ofrecen reinicios.",
+          "disabled": "Esta cuenta está en pausa en el pool, así que sus reinicios no se usan.",
+          "needsLogin": "Esta cuenta tiene que volver a iniciar sesión primero.",
+          "noAccount": "El pool no tiene ninguna cuenta con ese nombre.",
+          "tooSoon": "Esta cuenta se acaba de comprobar. Inténtalo de nuevo en unos segundos.",
+          "failed": "No ha funcionado. Inténtalo de nuevo en un momento.",
+          "unsupported": "Este pool de cuentas no puede usar reinicios desde codeg. Actualiza maxpool.",
+          "unreachable": "El pool de cuentas no responde."
+        }
+      }
+    },
+    "resets": {
+      "title": "Reinicios del límite de uso",
+      "checking": "Buscando reinicios…",
+      "available": "{count, plural, one {# reinicio disponible} other {# reinicios disponibles}}",
+      "availableUntil": "{count, plural, one {# reinicio disponible} other {# reinicios disponibles}} · el primero caduca el {date}",
+      "none": "No hay ninguno disponible",
+      "account": "Para {account}",
+      "expires": "Caduca el {date}",
+      "noExpiry": "No caduca",
+      "times": "×{count}",
+      "use": "Usar reinicio",
+      "using": "Usando…",
+      "needsLimit": "Se puede usar al llegar a un límite",
+      "notUsableNow": "No se puede usar ahora",
+      "left": "{count, plural, =0 {No quedan reinicios.} one {Queda # reinicio.} other {Quedan # reinicios.}}",
+      "pausedSessions": "{count, plural, one {# sesión en pausa por el límite puede continuar ahora.} other {# sesiones en pausa por el límite pueden continuar ahora.}}",
+      "continuePaused": "Continuar ahora",
+      "continuedPaused": "{count, plural, one {Continuando # sesión.} other {Continuando # sesiones.}}",
+      "continuePausedFailed": "No todas las sesiones en pausa pudieron continuar. Usa Continuar ahora en la sesión.",
+      "kind": {
+        "session": "Reinicio de sesión",
+        "weekly": "Reinicio semanal",
+        "full": "Reinicio completo",
+        "other": "Reinicio del límite"
+      },
+      "refills": {
+        "session": "tu límite de sesión de 5 horas",
+        "weekly": "tu límite semanal",
+        "full": "todos tus límites de uso",
+        "other": "tus límites de uso"
+      },
+      "confirm": {
+        "title": "¿Usar un reinicio?",
+        "body": "{count, plural, =1 {¿Usar tu único reinicio?} other {¿Usar 1 de # reinicios?}} Esto recarga {refills} ahora. No se puede deshacer.",
+        "use": "Usar reinicio",
+        "cancel": "Cancelar"
+      },
+      "outcome": {
+        "reset": "Reinicio usado: tus límites están recargados.",
+        "nothingToReset": "No se usó nada: este reinicio solo funciona al llegar a un límite.",
+        "noReset": "No se usó nada: ese reinicio ya no está disponible.",
+        "alreadyUsed": "Ese reinicio ya se había usado. No cambió nada ahora.",
+        "unconfirmed": "No se pudo confirmar que el reinicio se aplicara. Si en un minuto sigues en el límite, inténtalo de nuevo: no usará un segundo reinicio."
+      },
+      "error": {
+        "notInstalled": "No está instalado en este equipo.",
+        "notLoggedIn": "No hay sesión iniciada en este equipo, así que no se pueden leer sus reinicios.",
+        "notEligible": "A esta cuenta no se le ofrecen reinicios del límite de uso aquí.",
+        "unsupportedVersion": "Esta versión no puede usar reinicios. Actualiza el agente.",
+        "network": "No se pudo contactar con el proveedor. Inténtalo de nuevo en un momento.",
+        "busy": "Ya se está usando un reinicio en esta cuenta.",
+        "failed": "No se pudieron comprobar los reinicios."
+      },
+      "claude": {
+        "elsewhere": "Claude ofrece sus reinicios del límite de uso en la app de terminal de Claude Code y en claude.ai.",
+        "open": "Abrir el uso en claude.ai",
+        "hint": "O ejecuta <code>/limit-reset</code> en Claude Code."
+      }
     }
   },
   "Forge": {

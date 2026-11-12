@@ -2664,6 +2664,145 @@ export interface PlanUsageReport {
   pool?: PlanUsagePool | null
 }
 
+// ─── Usage-limit resets (mirrors `commands/limit_resets.rs`) ───
+
+/** What a reset refills: the short window, the weekly one, or every limit. */
+export type LimitResetKind = "session" | "weekly" | "full" | "other"
+
+/** One Codex reset credit. Claude Code offers its resets only in its own
+ *  apps; a pool's Claude accounts carry theirs on the pool reading
+ *  ({@link PlanUsagePoolResets}). */
+export interface LimitResetItem {
+  /** The provider's id, which `use_limit_reset` takes. `null` when only a
+   *  count is known and the provider picks. */
+  id: string | null
+  kind: LimitResetKind
+  /** The provider's own name for it ("Full reset"). */
+  label: string | null
+  description: string | null
+  /** Resets it holds; a Codex credit is one. */
+  count: number
+  /** Epoch seconds. */
+  expires_at: number | null
+}
+
+export type LimitResetSource = "codex_app_server"
+
+export type LimitResetErrorCode =
+  | "not_installed"
+  | "not_logged_in"
+  | "not_eligible"
+  | "unsupported_version"
+  | "network"
+  | "busy"
+  | "failed"
+
+export interface LimitResetError {
+  code: LimitResetErrorCode
+  /** English; the UI shows its own words for `code`. */
+  message: string
+  /** The provider's reason code (e.g. the sign-in type that has none). */
+  reason?: string | null
+}
+
+export interface ProviderLimitResets {
+  provider: PlanUsageAgent
+  /** Resets left (Codex's `availableCount`). */
+  available: number
+  /** Soonest to expire first. */
+  items: LimitResetItem[]
+  source: LimitResetSource
+  /** The account they belong to, when known. */
+  account: string | null
+  error: LimitResetError | null
+  /** Epoch seconds. */
+  fetched_at: number
+}
+
+export interface LimitResetsReport {
+  providers: ProviderLimitResets[]
+}
+
+/** `reset`: it went through. `unconfirmed`: no answer came; a retry reuses
+ *  the same attempt, so it can't use a second reset. The rest used nothing. */
+export type LimitResetOutcome =
+  | "reset"
+  | "nothing_to_reset"
+  | "no_reset"
+  | "already_used"
+  | "unconfirmed"
+
+export interface UseLimitResetResult {
+  provider: PlanUsageAgent
+  outcome: LimitResetOutcome
+  /** The resets read again after the attempt. */
+  resets: ProviderLimitResets | null
+  /** Codex sessions paused at their limit, which could continue now — not
+   *  counting `continued`. */
+  paused_conversations: number[]
+  /** The paused session whose continuation went out with the reset. */
+  continued: number | null
+}
+
+// ─── A pool account's usage-limit resets (mirrors
+// `commands/usage_pool/resets.rs`) ───
+
+/** One reset grant of a pool account. */
+export interface PlanUsagePoolResetGrant {
+  /** The pool's id for it, which a redeem takes. */
+  id: string
+  label: string | null
+  /** What it refills. */
+  kind: LimitResetKind
+  /** Resets it still holds. */
+  count: number
+  /** Epoch seconds. */
+  expires_at: number | null
+  /** It can be used now (not paused, in date, offered now). */
+  usable_now: boolean
+  /** It only works once a limit it refills is reached. */
+  requires_limit: boolean
+}
+
+/** A pool account's resets, as the pool last listed them. */
+export interface PlanUsagePoolResets {
+  /** Resets left over its grants still in date. */
+  available: number
+  /** Soonest to expire first. */
+  grants: PlanUsagePoolResetGrant[]
+  /** The grant the provider would use next, when it says. */
+  next_grant_id: string | null
+  /** No reset can be used on the account before then (epoch seconds). */
+  cooldown_until: number | null
+  /** Offered resets at all; `null` before the pool has listed them. */
+  eligible: boolean | null
+  /** The pool would use one by itself at its next check. */
+  auto_redeem: boolean
+  /** Epoch seconds. */
+  checked_at: number | null
+}
+
+/** `unconfirmed`: no answer came; it may have gone through. */
+export type PlanUsagePoolResetOutcome = "reset" | "already_used" | "unconfirmed"
+
+export interface PlanUsagePoolRedeemResult {
+  account: string
+  outcome: PlanUsagePoolResetOutcome
+  /** The pool read again after it. */
+  pool: PlanUsagePool | null
+  /** The paused session sent on, when one was named and the reset landed. */
+  continued: number | null
+}
+
+export interface PlanUsagePoolRecheckResult {
+  account: string
+  /** The pool read the account's usage. */
+  read: boolean
+  /** A hold the new reading no longer justified was lifted. */
+  lifted: boolean
+  pool: PlanUsagePool | null
+}
+
 /** What the pool says of an account's own health. */
 export type PlanUsagePoolAccountStatus =
   | "active"
@@ -2732,6 +2871,8 @@ export interface PlanUsagePoolAccount {
   priority?: number | null
   /** The part of each window (5h and weekly) it keeps back, if any. */
   reserve?: PlanUsagePoolReserve | null
+  /** Its usage-limit resets, when the pool lists them. */
+  resets?: PlanUsagePoolResets | null
 }
 
 /** An account's reserve: the pool stops sending it new requests at
@@ -2763,6 +2904,9 @@ export interface PlanUsagePool {
   stale: boolean
   error: PlanUsagePoolError | null
   error_status: number | null
+  /** The pool lists its accounts' resets and can use one or read an account
+   *  again on request; absent for an older pool. */
+  resets_supported?: boolean
 }
 
 /** Why a pasted sign-in code did not work — fixed codes, never the CLI's

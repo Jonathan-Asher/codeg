@@ -221,10 +221,15 @@ import type {
   OfficecliInfo,
   OfficecliSkill,
   SkillSyncReport,
+  LimitResetsReport,
+  PlanUsagePoolRecheckResult,
+  PlanUsagePoolRedeemResult,
+  PlanUsageAgent,
   PlanUsagePool,
   PlanUsagePoolReserve,
   PlanUsageReport,
   PlanUsageSnapshot,
+  UseLimitResetResult,
   ClaudeAuthStatus,
   PoolChange,
   PoolManageInfo,
@@ -4217,6 +4222,40 @@ export async function getPlanUsage(force = false): Promise<PlanUsageReport> {
   return getTransport().call("get_plan_usage", { force })
 }
 
+/** Codex's usage-limit resets (Claude Code offers its own only in its apps;
+ *  a pool's Claude accounts carry theirs on the pool reading). `force` asks
+ *  Codex again instead of reusing the backend's one-minute listing. Reading
+ *  them starts Codex's own app-server, hence the longer timeout. */
+export async function getLimitResets(
+  force = false
+): Promise<LimitResetsReport> {
+  return getTransport().call(
+    "get_limit_resets",
+    { force },
+    { timeoutMs: 120_000 }
+  )
+}
+
+/** Use one usage-limit reset: `id`, or the provider's next one. It can't be
+ *  undone. With `conversationId`, that session — paused at its limit —
+ *  continues as soon as the reset lands. (Not named `use…`: it is not a
+ *  React hook.) */
+export async function consumeLimitReset(args: {
+  provider: PlanUsageAgent
+  id?: string | null
+  conversationId?: number | null
+}): Promise<UseLimitResetResult> {
+  return getTransport().call(
+    "use_limit_reset",
+    {
+      provider: args.provider,
+      id: args.id ?? null,
+      conversationId: args.conversationId ?? null,
+    },
+    { timeoutMs: 150_000 }
+  )
+}
+
 // Managing the account pool (maxpool) — host-side, and only where one is
 // configured. See `commands/usage_pool/manage.rs`.
 
@@ -4306,6 +4345,39 @@ export async function usagePoolSetReserve(
 
 export async function usagePoolRemove(name: string): Promise<PoolChange> {
   return getTransport().call("usage_pool_remove", { name })
+}
+
+/** Use one of a pool account's usage-limit resets (`grantId`, or the
+ *  provider's next) through the pool. It can't be undone. With
+ *  `conversationId`, that session — paused at its limit — continues once the
+ *  reset lands. The pool lists the grants, claims one and reads the account
+ *  again, hence the longer timeout. */
+export async function usagePoolRedeemReset(args: {
+  name: string
+  grantId?: string | null
+  conversationId?: number | null
+}): Promise<PlanUsagePoolRedeemResult> {
+  return getTransport().call(
+    "usage_pool_redeem_reset",
+    {
+      name: args.name,
+      grantId: args.grantId ?? null,
+      conversationId: args.conversationId ?? null,
+    },
+    { timeoutMs: 100_000 }
+  )
+}
+
+/** Have the pool read an account's usage now; a hold the new reading no
+ *  longer justifies is lifted. Never uses a reset. */
+export async function usagePoolRecheck(
+  name: string
+): Promise<PlanUsagePoolRecheckResult> {
+  return getTransport().call(
+    "usage_pool_recheck",
+    { name },
+    { timeoutMs: 60_000 }
+  )
 }
 
 /** Restart the pool's server now to apply a waiting change. */

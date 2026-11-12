@@ -3288,6 +3288,7 @@ const ConversationTabView = memo(function ConversationTabView({
         conversationId={dbConversationId}
         pause={waitingPause}
         reason={persistedLimitReason ?? "usage_limit"}
+        agentType={selectedAgent}
       />
     ) : null
 

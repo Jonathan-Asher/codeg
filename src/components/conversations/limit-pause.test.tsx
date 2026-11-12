@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -10,18 +11,50 @@ import { NextIntlClientProvider } from "next-intl"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import enMessages from "@/i18n/messages/en.json"
-import type { DbConversationSummary, LimitPause } from "@/lib/types"
+import type {
+  DbConversationSummary,
+  LimitPause,
+  LimitResetsReport,
+  PlanUsagePool,
+  PlanUsagePoolAccount,
+  PlanUsageReport,
+  ProviderLimitResets,
+} from "@/lib/types"
 
 const h = vi.hoisted(() => ({
   cancelLimitContinue: vi.fn(),
   continueLimitNow: vi.fn(),
+  getLimitResets: vi.fn(),
+  consumeLimitReset: vi.fn(),
+  getPlanUsage: vi.fn(),
+  usagePoolRedeemReset: vi.fn(),
+  toast: {
+    success: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    warning: vi.fn(),
+  },
 }))
 
 vi.mock("@/lib/api", () => ({
   cancelLimitContinue: h.cancelLimitContinue,
   continueLimitNow: h.continueLimitNow,
+  getLimitResets: h.getLimitResets,
+  consumeLimitReset: h.consumeLimitReset,
+  getPlanUsage: h.getPlanUsage,
+  usagePoolRedeemReset: h.usagePoolRedeemReset,
+  subscribePlanUsageChanged: () => Promise.resolve(() => {}),
+  subscribePlanUsagePoolChanged: () => Promise.resolve(() => {}),
 }))
 
+vi.mock("@/lib/platform", () => ({
+  onTransportReconnect: () => null,
+  openUrl: vi.fn(),
+}))
+
+vi.mock("sonner", () => ({ toast: h.toast }))
+
+import { resetLimitResetsCacheForTests } from "@/hooks/use-limit-resets"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 
 import { LimitPauseHeaderBadge, LimitPausedBanner } from "./limit-pause"
@@ -72,9 +105,125 @@ function wrap(node: ReactNode) {
   )
 }
 
+function codexResets(available: number): ProviderLimitResets {
+  return {
+    provider: "codex",
+    available,
+    items: Array.from({ length: available }, (_, i) => ({
+      id: `credit-${i}`,
+      kind: "full" as const,
+      label: "Full reset",
+      description: null,
+      count: 1,
+      expires_at: Math.floor(Date.now() / 1000) + (i + 10) * 86_400,
+    })),
+    source: "codex_app_server",
+    account: null,
+    error: null,
+    fetched_at: Math.floor(Date.now() / 1000),
+  }
+}
+
+function listing(...providers: ProviderLimitResets[]): LimitResetsReport {
+  return { providers }
+}
+
+const nowSecs = () => Math.floor(Date.now() / 1000)
+
+function poolAccount(
+  over: Partial<PlanUsagePoolAccount> = {}
+): PlanUsagePoolAccount {
+  return {
+    name: "backup",
+    enabled: true,
+    status: "active",
+    state: "available",
+    blocked_until: null,
+    serving: true,
+    preferred: false,
+    windows: [],
+    limit_status: "allowed",
+    weekly_state: "normal",
+    cooling_until: null,
+    in_flight: 0,
+    probe_failures: 0,
+    probe_error_status: null,
+    refresh_failed: false,
+    observed_at: nowSecs() - 60,
+    ...over,
+  }
+}
+
+/** A pool whose `primary` is at its weekly limit with a weekly reset it can
+ *  use (`backup` serves, with none). */
+function resetsPool(over: Partial<PlanUsagePool> = {}): PlanUsagePool {
+  return {
+    kind: "maxpool",
+    agent: "claude_code",
+    version: "1.24.90",
+    accounts: [
+      poolAccount({
+        name: "primary",
+        state: "exhausted",
+        serving: false,
+        limit_status: "rejected",
+        blocked_until: nowSecs() + 2 * 86_400,
+        resets: {
+          available: 1,
+          grants: [
+            {
+              id: "g-weekly",
+              label: null,
+              kind: "weekly",
+              count: 1,
+              expires_at: nowSecs() + 9 * 86_400,
+              usable_now: true,
+              requires_limit: true,
+            },
+          ],
+          next_grant_id: "g-weekly",
+          cooldown_until: null,
+          eligible: true,
+          auto_redeem: false,
+          checked_at: nowSecs() - 30,
+        },
+      }),
+      poolAccount(),
+    ],
+    current_account: "backup",
+    preferred_account: null,
+    routing_mode: "automatic",
+    switch_threshold: 99,
+    exhausted: false,
+    resumes_at: null,
+    observed_at: nowSecs() - 60,
+    checked_at: nowSecs() - 10,
+    stale: false,
+    error: null,
+    error_status: null,
+    resets_supported: true,
+    ...over,
+  }
+}
+
+function planReport(pool: PlanUsagePool | null): PlanUsageReport {
+  return {
+    snapshots: [],
+    codex_sessions_dir: null,
+    codex_rollouts_found: false,
+    ...(pool ? { pool } : {}),
+  }
+}
+
 beforeEach(() => {
+  resetLimitResetsCacheForTests()
   h.cancelLimitContinue.mockReset().mockResolvedValue(true)
   h.continueLimitNow.mockReset().mockResolvedValue(true)
+  h.getLimitResets.mockReset().mockResolvedValue(listing())
+  h.consumeLimitReset.mockReset()
+  h.getPlanUsage.mockReset().mockResolvedValue(planReport(null))
+  h.usagePoolRedeemReset.mockReset()
+  for (const fn of Object.values(h.toast)) fn.mockReset()
 })
 
 afterEach(() => cleanup())
@@ -109,6 +258,214 @@ describe("LimitPausedBanner", () => {
     expect(banner).toHaveTextContent(L.limitBannerClaimed)
     expect(screen.queryByTestId("limit-cancel-auto-continue")).toBeNull()
     expect(screen.queryByTestId("limit-continue-now")).toBeNull()
+  })
+})
+
+describe("LimitPausedBanner with a usage-limit reset", () => {
+  it("offers Use a reset and continue, asks first, and continues the session", async () => {
+    h.getLimitResets.mockResolvedValue(listing(codexResets(2)))
+    h.consumeLimitReset.mockResolvedValue({
+      provider: "codex",
+      outcome: "reset",
+      resets: codexResets(1),
+      paused_conversations: [],
+      continued: 7,
+    })
+    wrap(
+      <LimitPausedBanner conversationId={7} pause={pause()} agentType="codex" />
+    )
+    const button = await screen.findByTestId("limit-use-reset")
+    expect(button).toHaveTextContent(L.useReset)
+    expect(button).toHaveAttribute(
+      "title",
+      "Use one of your 2 usage-limit resets to refill the limit now and continue"
+    )
+
+    fireEvent.click(button)
+    const dialog = screen.getByTestId("limit-reset-confirm")
+    expect(dialog).toHaveTextContent(
+      "Use 1 of 2 resets? This refills all your usage limits now. It can't be undone."
+    )
+    expect(h.consumeLimitReset).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId("limit-reset-confirm-use"))
+
+    await waitFor(() =>
+      expect(h.toast.success).toHaveBeenCalledWith(L.resetContinued)
+    )
+    expect(h.consumeLimitReset).toHaveBeenCalledWith({
+      provider: "codex",
+      id: "credit-0",
+      conversationId: 7,
+    })
+  })
+
+  it("reports what came of it when the session didn't continue", async () => {
+    h.getLimitResets.mockResolvedValue(listing(codexResets(1)))
+    h.consumeLimitReset.mockResolvedValue({
+      provider: "codex",
+      outcome: "already_used",
+      resets: codexResets(0),
+      paused_conversations: [],
+      continued: null,
+    })
+    wrap(
+      <LimitPausedBanner conversationId={7} pause={pause()} agentType="codex" />
+    )
+    fireEvent.click(await screen.findByTestId("limit-use-reset"))
+    fireEvent.click(screen.getByTestId("limit-reset-confirm-use"))
+    await waitFor(() =>
+      expect(h.toast.info).toHaveBeenCalledWith(
+        enMessages.PlanUsage.resets.outcome.alreadyUsed
+      )
+    )
+    // The listing read after the attempt has none left: the offer goes.
+    await waitFor(() =>
+      expect(screen.queryByTestId("limit-use-reset")).toBeNull()
+    )
+  })
+
+  it("offers nothing without a usable reset, for a pool pause, or another agent", async () => {
+    h.getLimitResets.mockResolvedValue(listing(codexResets(0)))
+    wrap(
+      <LimitPausedBanner conversationId={7} pause={pause()} agentType="codex" />
+    )
+    await waitFor(() => expect(h.getLimitResets).toHaveBeenCalled())
+    expect(screen.queryByTestId("limit-use-reset")).toBeNull()
+    cleanup()
+
+    resetLimitResetsCacheForTests()
+    h.getLimitResets.mockClear().mockResolvedValue(listing(codexResets(2)))
+    wrap(
+      <>
+        <LimitPausedBanner
+          conversationId={7}
+          pause={pause()}
+          reason="pool_capacity"
+          agentType="codex"
+        />
+        <LimitPausedBanner
+          conversationId={8}
+          pause={pause()}
+          agentType="gemini"
+        />
+        <LimitPausedBanner
+          conversationId={9}
+          pause={pause({ state: "claimed" })}
+          agentType="codex"
+        />
+      </>
+    )
+    expect(screen.getAllByTestId("limit-paused-banner")).toHaveLength(3)
+    expect(screen.queryByTestId("limit-use-reset")).toBeNull()
+    // Nothing even asked for the listing.
+    expect(h.getLimitResets).not.toHaveBeenCalled()
+  })
+})
+
+describe("LimitPausedBanner with a pool account's reset", () => {
+  it("offers Use a reset and continue on the account it frees, asks first, and continues the session", async () => {
+    h.getPlanUsage.mockResolvedValue(planReport(resetsPool()))
+    h.usagePoolRedeemReset.mockResolvedValue({
+      account: "primary",
+      outcome: "reset",
+      pool: null,
+      continued: 7,
+    })
+    wrap(
+      <LimitPausedBanner
+        conversationId={7}
+        pause={pause()}
+        reason="pool_capacity"
+        agentType="claude_code"
+      />
+    )
+    const button = await screen.findByTestId("limit-use-reset")
+    expect(button).toHaveTextContent(L.useReset)
+    expect(button).toHaveAttribute("data-reset-account", "primary")
+    expect(button).toHaveAttribute(
+      "title",
+      "Use one of primary's usage-limit resets to refill its limit now and continue"
+    )
+
+    fireEvent.click(button)
+    expect(screen.getByTestId("pool-reset-confirm")).toHaveTextContent(
+      "Use 1 reset on primary? It refills the weekly limit now and can't be undone."
+    )
+    expect(h.usagePoolRedeemReset).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId("pool-reset-confirm-use"))
+
+    await waitFor(() =>
+      expect(h.toast.success).toHaveBeenCalledWith(
+        "Reset used on primary. The session continues now."
+      )
+    )
+    expect(h.usagePoolRedeemReset).toHaveBeenCalledWith({
+      name: "primary",
+      grantId: "g-weekly",
+      conversationId: 7,
+    })
+  })
+
+  it("offers it on the account's own limit pause too, and says what came of it when the session didn't continue", async () => {
+    h.getPlanUsage.mockResolvedValue(planReport(resetsPool()))
+    h.usagePoolRedeemReset.mockResolvedValue({
+      account: "primary",
+      outcome: "unconfirmed",
+      pool: null,
+      continued: null,
+    })
+    wrap(
+      <LimitPausedBanner
+        conversationId={7}
+        pause={pause()}
+        agentType="claude_code"
+      />
+    )
+    fireEvent.click(await screen.findByTestId("limit-use-reset"))
+    fireEvent.click(screen.getByTestId("pool-reset-confirm-use"))
+    await waitFor(() =>
+      expect(h.toast.warning).toHaveBeenCalledWith(
+        "Couldn't confirm the reset on primary went through. Recheck it before trying again."
+      )
+    )
+  })
+
+  it("offers nothing without the pool's reset routes, without a usable grant, or once the continuation is going out", async () => {
+    const noGrant = resetsPool()
+    noGrant.accounts[0] = { ...noGrant.accounts[0], resets: null }
+    for (const pool of [
+      resetsPool({ resets_supported: false }),
+      resetsPool({ stale: true }),
+      noGrant,
+      null,
+    ]) {
+      h.getPlanUsage.mockResolvedValue(planReport(pool))
+      wrap(
+        <LimitPausedBanner
+          conversationId={7}
+          pause={pause()}
+          reason="pool_capacity"
+          agentType="claude_code"
+        />
+      )
+      await waitFor(() => expect(h.getPlanUsage).toHaveBeenCalled())
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(screen.queryByTestId("limit-use-reset")).toBeNull()
+      cleanup()
+      h.getPlanUsage.mockClear()
+    }
+    h.getPlanUsage.mockResolvedValue(planReport(resetsPool()))
+    wrap(
+      <LimitPausedBanner
+        conversationId={7}
+        pause={pause({ state: "claimed" })}
+        agentType="claude_code"
+      />
+    )
+    expect(screen.queryByTestId("limit-use-reset")).toBeNull()
+    expect(h.getPlanUsage).not.toHaveBeenCalled()
   })
 })
 

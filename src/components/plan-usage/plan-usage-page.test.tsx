@@ -3,14 +3,28 @@ import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type {
+  LimitResetsReport,
   PlanUsagePool,
   PlanUsagePoolAccount,
+  PlanUsagePoolRecheckResult,
+  PlanUsagePoolRedeemResult,
+  PlanUsagePoolResets,
   PlanUsageReport,
   PlanUsageSnapshot,
   PlanUsageWindow,
+  UseLimitResetResult,
 } from "@/lib/types"
 
 const getPlanUsage = vi.fn<(force?: boolean) => Promise<PlanUsageReport>>()
+const getLimitResets = vi.fn<(force?: boolean) => Promise<LimitResetsReport>>()
+const consumeLimitReset =
+  vi.fn<
+    (args: {
+      provider: string
+      id?: string | null
+      conversationId?: number | null
+    }) => Promise<UseLimitResetResult>
+  >()
 let pushHandler: ((snapshot: PlanUsageSnapshot) => void) | null = null
 let poolHandler: ((pool: PlanUsagePool | null) => void) | null = null
 
@@ -61,12 +75,29 @@ const manage = vi.hoisted(() => {
     usagePoolRestartNow: vi.fn<
       () => Promise<{ available: boolean; reload: string }>
     >(() => Promise.resolve({ available: true, reload: "idle" })),
+    usagePoolRedeemReset:
+      vi.fn<
+        (args: {
+          name: string
+          grantId?: string | null
+          conversationId?: number | null
+        }) => Promise<PlanUsagePoolRedeemResult>
+      >(),
+    usagePoolRecheck:
+      vi.fn<(name: string) => Promise<PlanUsagePoolRecheckResult>>(),
   }
 })
 
 vi.mock("@/lib/api", () => ({
   ...manage,
   getPlanUsage: (force?: boolean) => getPlanUsage(force),
+  getLimitResets: (force?: boolean) => getLimitResets(force),
+  consumeLimitReset: (args: {
+    provider: string
+    id?: string | null
+    conversationId?: number | null
+  }) => consumeLimitReset(args),
+  continueLimitNow: () => Promise.resolve(true),
   subscribePlanUsageChanged: (handler: (s: PlanUsageSnapshot) => void) => {
     pushHandler = handler
     return Promise.resolve(() => {
@@ -88,8 +119,15 @@ vi.mock("@/lib/platform", () => ({
   openUrl: vi.fn(),
 }))
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+  warning: vi.fn(),
+}))
+vi.mock("sonner", () => ({ toast }))
 
+import { resetLimitResetsCacheForTests } from "@/hooks/use-limit-resets"
 import { PlanUsagePage } from "./plan-usage-page"
 import enMessages from "@/i18n/messages/en.json"
 
@@ -302,9 +340,13 @@ const card = (name: "Claude Code" | "Codex") =>
 
 beforeEach(() => {
   getPlanUsage.mockReset()
+  resetLimitResetsCacheForTests()
+  getLimitResets.mockReset().mockResolvedValue({ providers: [] })
+  consumeLimitReset.mockReset()
   pushHandler = null
   poolHandler = null
   for (const fn of Object.values(manage)) fn.mockClear()
+  for (const fn of Object.values(toast)) fn.mockClear()
   manage.usagePoolManageInfo.mockImplementation(() =>
     Promise.resolve({ available: false, reload: "idle" })
   )
@@ -1042,5 +1084,259 @@ describe("PlanUsagePage account pool management", () => {
       await Promise.resolve()
     })
     expect(manage.usagePoolRestartNow).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("PlanUsagePage usage-limit resets", () => {
+  const codexResets = (available: number) => ({
+    provider: "codex" as const,
+    available,
+    items: Array.from({ length: available }, (_, i) => ({
+      id: `credit-${i}`,
+      kind: "full" as const,
+      label: "Full reset",
+      description: null,
+      count: 1,
+      expires_at: now() + (10 + i) * 86_400,
+    })),
+    source: "codex_app_server" as const,
+    account: "me@example.com",
+    error: null,
+    fetched_at: now(),
+  })
+
+  it("shows Codex's resets on its card, points the subscription card to its usage page, and a used one re-reads the bars", async () => {
+    getPlanUsage.mockResolvedValue(report([claudeSnapshot(), codexSnapshot()]))
+    getLimitResets.mockResolvedValue({ providers: [codexResets(2)] })
+    consumeLimitReset.mockResolvedValue({
+      provider: "codex",
+      outcome: "reset",
+      resets: codexResets(1),
+      paused_conversations: [],
+      continued: null,
+    })
+    await mount()
+
+    const codex = card("Codex")
+    const resets = await within(codex).findByText(/2 resets available/)
+    expect(resets).toHaveTextContent(/first expires/)
+    expect(
+      within(card("Claude Code")).getByText(
+        enMessages.PlanUsage.resets.claude.elsewhere
+      )
+    ).toBeInTheDocument()
+    expect(
+      within(card("Claude Code")).getByTestId("claude-resets-open")
+    ).toHaveTextContent(enMessages.PlanUsage.resets.claude.open)
+    expect(getLimitResets).toHaveBeenCalledWith(false)
+
+    getPlanUsage.mockClear()
+    fireEvent.click(within(codex).getByRole("button", { name: "Use reset" }))
+    fireEvent.click(await screen.findByTestId("limit-reset-confirm-use"))
+    expect(
+      await within(codex).findByText(
+        /Reset used: your limits are refilled\. 1 reset left\./
+      )
+    ).toBeInTheDocument()
+    expect(consumeLimitReset).toHaveBeenCalledWith({
+      provider: "codex",
+      id: "credit-0",
+      conversationId: undefined,
+    })
+    // The bars are read again past the cache, and the count follows.
+    expect(getPlanUsage).toHaveBeenCalledWith(true)
+    expect(within(codex).getByText(/1 reset available/)).toBeInTheDocument()
+  })
+
+  it("says when the Codex reading came from Codex itself", async () => {
+    getPlanUsage.mockResolvedValue(
+      report([claudeSnapshot(), codexSnapshot({ source: "live" })])
+    )
+    await mount()
+    const codex = within(card("Codex"))
+    expect(
+      codex.getByText(enMessages.PlanUsage.source.codexLive)
+    ).toBeInTheDocument()
+    expect(codex.queryByText(/newest Codex session log/)).toBeNull()
+  })
+
+  it("asks the providers again on Refresh", async () => {
+    getPlanUsage.mockResolvedValue(report([claudeSnapshot(), codexSnapshot()]))
+    await mount()
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(getLimitResets).toHaveBeenCalledWith(true)
+  })
+})
+
+describe("PlanUsagePage account pool resets", () => {
+  const accountRow = (name: string) =>
+    card("Claude Code").querySelector<HTMLElement>(`[data-account="${name}"]`)!
+
+  function resets(
+    overrides: Partial<PlanUsagePoolResets> = {}
+  ): PlanUsagePoolResets {
+    return {
+      available: 2,
+      grants: [
+        {
+          id: "g-weekly",
+          label: null,
+          kind: "weekly",
+          count: 2,
+          expires_at: now() + 9 * 86_400,
+          usable_now: true,
+          requires_limit: true,
+        },
+      ],
+      next_grant_id: "g-weekly",
+      cooldown_until: null,
+      eligible: true,
+      auto_redeem: false,
+      checked_at: now() - 30,
+      ...overrides,
+    }
+  }
+
+  /** `primary` at its limit with two weekly resets, `backup` serving with
+   *  one that only works at a limit, and three accounts held for a while. */
+  function resetsPool(overrides: Partial<PlanUsagePool> = {}): PlanUsagePool {
+    const base = pool()
+    const held = (name: string, state: PlanUsagePoolAccount["state"]) =>
+      poolAccount({
+        name,
+        state,
+        blocked_until: now() + 3600,
+        cooling_until: state === "cooling_down" ? now() + 3600 : null,
+      })
+    return {
+      ...base,
+      resets_supported: true,
+      accounts: [
+        { ...base.accounts[0], resets: resets() },
+        {
+          ...base.accounts[1],
+          resets: resets({
+            available: 1,
+            grants: [
+              {
+                id: "g-full",
+                label: "One full limit reset",
+                kind: "full",
+                count: 1,
+                expires_at: now() + 20 * 86_400,
+                usable_now: true,
+                requires_limit: true,
+              },
+            ],
+            next_grant_id: null,
+          }),
+        },
+        base.accounts[2],
+        held("cool", "cooling_down"),
+        held("keep", "reserved"),
+        held("near", "at_threshold"),
+      ],
+      ...overrides,
+    }
+  }
+
+  async function mountWith(p: PlanUsagePool) {
+    manage.usagePoolManageInfo.mockImplementation(() =>
+      Promise.resolve({ available: true, reload: "idle" })
+    )
+    getPlanUsage.mockResolvedValue(report([claudeSnapshot()], { pool: p }))
+    await mount()
+    await screen.findByRole("button", { name: "Add account" })
+  }
+
+  it("shows each account's resets; Use reset asks first, uses it through the pool, and reads the pool again", async () => {
+    manage.usagePoolRedeemReset.mockResolvedValue({
+      account: "primary",
+      outcome: "reset",
+      pool: null,
+      continued: null,
+    })
+    await mountWith(resetsPool())
+    const primary = accountRow("primary")
+    const line = primary.querySelector('[data-slot="pool-resets"]')!
+    expect(line).toHaveTextContent(/^2 resets · expires \w{3} \d{1,2}/)
+    // Backup's only reset works at a limit, and backup is serving.
+    expect(
+      accountRow("backup").querySelector('[data-slot="pool-resets"]')
+    ).toHaveTextContent(/1 reset · expires .+ · Usable once you reach a limit/)
+    expect(
+      within(accountRow("backup")).queryByTestId("pool-reset-use")
+    ).toBeNull()
+
+    const calls = getPlanUsage.mock.calls.length
+    fireEvent.click(within(primary).getByTestId("pool-reset-use"))
+    expect(screen.getByTestId("pool-reset-confirm")).toHaveTextContent(
+      "Use 1 reset on primary? It refills the weekly limit now and can't be undone."
+    )
+    expect(manage.usagePoolRedeemReset).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId("pool-reset-confirm-use"))
+    await vi.waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "Reset used on primary: its limits are refilled."
+      )
+    )
+    expect(manage.usagePoolRedeemReset).toHaveBeenCalledWith({
+      name: "primary",
+      grantId: "g-weekly",
+      conversationId: undefined,
+    })
+    await vi.waitFor(() =>
+      expect(getPlanUsage.mock.calls.length).toBeGreaterThan(calls)
+    )
+  })
+
+  it("says why an account's reset can't be used yet, and maps a refusal to its words", async () => {
+    const p = resetsPool()
+    p.accounts[0] = {
+      ...p.accounts[0],
+      resets: resets({ cooldown_until: now() + 3 * 86_400 }),
+    }
+    await mountWith(p)
+    expect(
+      accountRow("primary").querySelector('[data-slot="pool-resets"]')
+    ).toHaveTextContent(/2 resets · expires .+ · next one usable/)
+    expect(
+      within(accountRow("primary")).queryByTestId("pool-reset-use")
+    ).toBeNull()
+  })
+
+  it("offers Recheck now beside a cooling-down, reserved or over-threshold account, and nowhere else", async () => {
+    manage.usagePoolRecheck.mockResolvedValue({
+      account: "cool",
+      read: true,
+      lifted: true,
+      pool: null,
+    })
+    await mountWith(resetsPool())
+    for (const name of ["cool", "keep", "near"]) {
+      expect(
+        within(accountRow(name)).getByTestId("pool-recheck")
+      ).toHaveTextContent("Recheck now")
+    }
+    for (const name of ["primary", "backup", "spare"]) {
+      expect(within(accountRow(name)).queryByTestId("pool-recheck")).toBeNull()
+    }
+    fireEvent.click(within(accountRow("cool")).getByTestId("pool-recheck"))
+    await vi.waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("cool is usable again.")
+    )
+    expect(manage.usagePoolRecheck).toHaveBeenCalledWith("cool")
+    expect(manage.usagePoolRedeemReset).not.toHaveBeenCalled()
+  })
+
+  it("shows neither resets nor Recheck when the pool lacks the routes", async () => {
+    await mountWith(resetsPool({ resets_supported: false }))
+    const claude = card("Claude Code")
+    expect(claude.querySelector('[data-slot="pool-resets"]')).toBeNull()
+    expect(within(claude).queryByTestId("pool-recheck")).toBeNull()
+    expect(within(claude).queryByTestId("pool-reset-use")).toBeNull()
   })
 })

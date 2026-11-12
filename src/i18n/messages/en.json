@@ -2370,7 +2370,11 @@
       "limitPoolBannerTitle": "Paused by usage limits",
       "limitStopped": "Stopped by usage limits",
       "limitStoppedHint": "The last turn stopped on a usage limit and no longer continues by itself. Continue it once the limit allows.",
-      "workingWithItems": "Working · {count} running"
+      "workingWithItems": "Working · {count} running",
+      "useReset": "Use a reset and continue",
+      "useResetTitle": "{count, plural, =1 {Use your usage-limit reset to refill the limit now and continue} other {Use one of your # usage-limit resets to refill the limit now and continue}}",
+      "resetContinued": "Reset used. The session continues now.",
+      "usePoolResetTitle": "Use one of {name}'s usage-limit resets to refill its limit now and continue"
     },
     "conversationCard": {
       "untitledConversation": "Untitled conversation",
@@ -6940,7 +6944,8 @@
     "source": {
       "claudeLive": "From Claude Code turns in codeg",
       "claudeSaved": "Last reading saved before codeg restarted",
-      "codexLog": "From the newest Codex session log"
+      "codexLog": "From the newest Codex session log",
+      "codexLive": "Read from Codex itself"
     },
     "window": {
       "session5h": "5-hour session",
@@ -7081,7 +7086,104 @@
       "routingOrdered": "Order: new requests go to the first account that can take them, from the top",
       "reserveSummary": "Reserve {percent}%",
       "reserveSummaryDynamic": "Reserve {percent}%, released near the reset",
-      "position": "Position {position}"
+      "position": "Position {position}",
+      "resets": {
+        "available": "{count, plural, one {# reset} other {# resets}}",
+        "availableUntil": "{count, plural, one {# reset} other {# resets}} · expires {date}",
+        "auto": "the pool uses one at its limit",
+        "cooldownUntil": "next one usable {time}",
+        "confirmBody": "Use 1 reset on <b>{name}</b>? It refills the {refills} now and can't be undone.",
+        "refills": {
+          "session": "5-hour limit",
+          "weekly": "weekly limit",
+          "full": "5-hour and weekly limits",
+          "other": "usage limits"
+        },
+        "outcome": {
+          "reset": "Reset used on {name}: its limits are refilled.",
+          "alreadyUsed": "That reset on {name} was already used. Nothing changed just now.",
+          "unconfirmed": "Couldn't confirm the reset on {name} went through. Recheck it before trying again."
+        },
+        "continued": "Reset used on {name}. The session continues now.",
+        "recheck": "Recheck now",
+        "recheckTitle": "Have the pool read this account's usage again now",
+        "recheckLifted": "{name} is usable again.",
+        "recheckSame": "Read {name} again: nothing to lift yet.",
+        "recheckUnread": "The pool couldn't read {name}'s usage just now.",
+        "error": {
+          "recentlyUsed": "A reset was just used on this account.",
+          "inProgress": "A reset is already being used on this account.",
+          "cooldown": "Another reset can't be used on this account yet.",
+          "noUsableReset": "This account has no reset it can use right now.",
+          "notEligible": "This account isn't offered resets.",
+          "disabled": "This account is paused in the pool, so its resets aren't used.",
+          "needsLogin": "This account needs to sign in again first.",
+          "noAccount": "The pool has no account by that name.",
+          "tooSoon": "This account was just checked. Try again in a few seconds.",
+          "failed": "That didn't work. Try again in a moment.",
+          "unsupported": "This account pool can't use resets from codeg. Update maxpool.",
+          "unreachable": "The account pool isn't answering."
+        }
+      }
+    },
+    "resets": {
+      "title": "Usage-limit resets",
+      "checking": "Checking for resets…",
+      "available": "{count, plural, one {# reset available} other {# resets available}}",
+      "availableUntil": "{count, plural, one {# reset available} other {# resets available}} · first expires {date}",
+      "none": "None available",
+      "account": "For {account}",
+      "expires": "Expires {date}",
+      "noExpiry": "Doesn't expire",
+      "times": "×{count}",
+      "use": "Use reset",
+      "using": "Using…",
+      "needsLimit": "Usable once you reach a limit",
+      "notUsableNow": "Can't be used right now",
+      "left": "{count, plural, =0 {No resets left.} one {# reset left.} other {# resets left.}}",
+      "pausedSessions": "{count, plural, one {# session paused at the limit can continue now.} other {# sessions paused at the limit can continue now.}}",
+      "continuePaused": "Continue now",
+      "continuedPaused": "{count, plural, one {Continuing # session.} other {Continuing # sessions.}}",
+      "continuePausedFailed": "Not every paused session could continue. Use Continue now on the session.",
+      "kind": {
+        "session": "Session reset",
+        "weekly": "Weekly reset",
+        "full": "Full reset",
+        "other": "Limit reset"
+      },
+      "refills": {
+        "session": "your 5-hour session limit",
+        "weekly": "your weekly limit",
+        "full": "all your usage limits",
+        "other": "your usage limits"
+      },
+      "confirm": {
+        "title": "Use a reset?",
+        "body": "{count, plural, =1 {Use your only reset?} other {Use 1 of # resets?}} This refills {refills} now. It can't be undone.",
+        "use": "Use reset",
+        "cancel": "Cancel"
+      },
+      "outcome": {
+        "reset": "Reset used: your limits are refilled.",
+        "nothingToReset": "Nothing was used: this reset only works once you reach a limit.",
+        "noReset": "Nothing was used: that reset isn't available any more.",
+        "alreadyUsed": "That reset was already used. Nothing changed just now.",
+        "unconfirmed": "Couldn't confirm the reset went through. If you're still at the limit in a minute, try again: it won't use a second reset."
+      },
+      "error": {
+        "notInstalled": "Not installed on this machine.",
+        "notLoggedIn": "Not signed in on this machine, so its resets can't be read.",
+        "notEligible": "This account isn't offered usage-limit resets here.",
+        "unsupportedVersion": "This version can't use resets. Update the agent.",
+        "network": "Couldn't reach the provider. Try again in a moment.",
+        "busy": "A reset is already being used for this account.",
+        "failed": "Couldn't check for resets."
+      },
+      "claude": {
+        "elsewhere": "Claude offers its usage-limit resets in Claude Code's terminal app and on claude.ai.",
+        "open": "Open claude.ai usage",
+        "hint": "Or run <code>/limit-reset</code> in Claude Code."
+      }
     }
   },
   "Forge": {

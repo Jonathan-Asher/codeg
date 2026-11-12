@@ -1,5 +1,6 @@
 "use client"
 
+import type { ReactNode } from "react"
 import { useLocale, useTranslations } from "next-intl"
 import {
   ChevronDown,
@@ -13,8 +14,10 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { WorkbenchPageTitle } from "@/components/workbench/workbench-page-title"
+import { useLimitResets } from "@/hooks/use-limit-resets"
 import { usePlanUsageReport } from "@/hooks/use-plan-usage-report"
 import { getAgentLabel } from "@/lib/custom-agents"
+import { findProviderResets } from "@/lib/limit-resets"
 import {
   activePool,
   findSnapshot,
@@ -34,6 +37,7 @@ import type {
   PlanUsageReport,
   PlanUsageSnapshot,
   PlanUsageWindow,
+  ProviderLimitResets,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import {
@@ -44,6 +48,10 @@ import {
   WindowResetText,
   WindowUsageBar,
 } from "./plan-usage-parts"
+import {
+  ClaudeResetsElsewhere,
+  ProviderResetsSection,
+} from "./plan-usage-resets"
 import {
   PoolAccountList,
   PoolNotices,
@@ -90,6 +98,7 @@ export function PlanUsagePageTitle() {
 export function PlanUsagePage() {
   const t = useTranslations("PlanUsage")
   const { report, loading, refreshing, error, load } = usePlanUsageReport()
+  const resets = useLimitResets()
   const now = useNowSeconds(TICK_MS)
 
   const showCards = report != null || (!loading && error == null)
@@ -108,11 +117,17 @@ export function PlanUsagePage() {
                 size="sm"
                 variant="outline"
                 className="gap-1.5"
-                disabled={refreshing}
-                onClick={() => void load(true)}
+                disabled={refreshing || resets.refreshing}
+                onClick={() => {
+                  void load(true)
+                  void resets.load(true)
+                }}
               >
                 <RefreshCw
-                  className={cn("size-3.5", refreshing && "animate-spin")}
+                  className={cn(
+                    "size-3.5",
+                    (refreshing || resets.refreshing) && "animate-spin"
+                  )}
                   aria-hidden="true"
                 />
                 {t("refresh")}
@@ -143,6 +158,9 @@ export function PlanUsagePage() {
                     report={report}
                     now={now}
                     onPoolChanged={() => void load(true)}
+                    resets={findProviderResets(resets.report, agent)}
+                    resetsLoading={resets.loading}
+                    onResetUsed={() => void load(true)}
                   />
                 ))}
               </div>
@@ -171,12 +189,20 @@ function ProviderCard({
   report,
   now,
   onPoolChanged,
+  resets,
+  resetsLoading,
+  onResetUsed,
 }: {
   agent: PlanUsageAgent
   snapshot: PlanUsageSnapshot | null
   report: PlanUsageReport | null
   now: number
   onPoolChanged?: () => void
+  /** The agent's usage-limit resets, once listed. */
+  resets: ProviderLimitResets | null
+  resetsLoading: boolean
+  /** A reset was used: re-read the bars. */
+  onResetUsed?: () => void
 }) {
   const t = useTranslations("PlanUsage")
   const label = getAgentLabel(agent)
@@ -186,6 +212,20 @@ function ProviderCard({
     hasData && !stale && snapshot.status && snapshot.status in STATUS_KEYS
       ? (snapshot.status as keyof typeof STATUS_KEYS)
       : null
+  // Claude Code's own resets are used in its apps; a pool's accounts show
+  // theirs on their rows, where the pool can use them.
+  const resetsSection =
+    agent === "claude_code" ? (
+      <ClaudeResetsElsewhere />
+    ) : (
+      <ProviderResetsSection
+        agent={agent}
+        resets={resets}
+        loading={resetsLoading}
+        now={now}
+        onUsed={onResetUsed}
+      />
+    )
   const pool = activePool(report)
   if (pool && pool.agent === agent) {
     return (
@@ -196,6 +236,11 @@ function ProviderCard({
         snapshot={hasData ? snapshot : null}
         now={now}
         onPoolChanged={onPoolChanged}
+        resetsSection={
+          agent === "claude_code" && pool.resets_supported
+            ? undefined
+            : resetsSection
+        }
       />
     )
   }
@@ -257,6 +302,7 @@ function ProviderCard({
       ) : (
         <EmptyState agent={agent} report={report} />
       )}
+      {resetsSection}
     </section>
   )
 }
@@ -273,6 +319,7 @@ function PoolProviderCard({
   snapshot,
   now,
   onPoolChanged,
+  resetsSection,
 }: {
   agent: PlanUsageAgent
   label: string
@@ -281,6 +328,8 @@ function PoolProviderCard({
   now: number
   /** Re-read the report after an account change. */
   onPoolChanged?: () => void
+  /** The agent's own resets, when the pool's rows don't carry them. */
+  resetsSection?: ReactNode
 }) {
   const t = useTranslations("PlanUsage")
   const stale = isPoolStale(pool, now)
@@ -358,6 +407,7 @@ function PoolProviderCard({
           </ul>
         </details>
       )}
+      {resetsSection}
     </section>
   )
 }
@@ -374,7 +424,9 @@ function ObservedLine({
   const locale = useLocale()
   const source =
     snapshot.agent === "codex"
-      ? t("source.codexLog")
+      ? snapshot.source === "live"
+        ? t("source.codexLive")
+        : t("source.codexLog")
       : snapshot.source === "saved"
         ? t("source.claudeSaved")
         : t("source.claudeLive")

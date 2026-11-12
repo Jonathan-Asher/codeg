@@ -59,6 +59,8 @@ pub mod folder_commands;
 pub mod folder_links;
 pub mod folders;
 pub mod forge;
+/// Usage-limit resets for Claude Code and Codex (both runtimes).
+pub mod limit_resets;
 pub mod logging;
 pub mod client_diagnostics;
 pub mod mcp;

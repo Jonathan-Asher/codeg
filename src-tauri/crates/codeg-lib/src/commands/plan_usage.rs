@@ -26,7 +26,11 @@
 //!   found by tailing the most recently written rollouts — never parsing a
 //!   whole file — and cached for [`CODEX_CACHE_TTL`].
 //!
-//! Neither source spawns a process or touches credentials.
+//! Neither source spawns a process or touches credentials. The usage-limit
+//! reset flow ([`crate::commands::limit_resets`]) starts Codex's app-server,
+//! and hands the Codex reading it gets on the way back here
+//! ([`observe_codex_live_snapshot`]), so the bars move as soon as a reset
+//! lands.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -547,6 +551,42 @@ pub(crate) struct CodexScan {
 
 static CODEX_CACHE: Mutex<Option<(Instant, CodexScan)>> = Mutex::new(None);
 
+/// The newest Codex reading taken from Codex's app-server (the usage-limit
+/// reset flow reads it there). Rollouts only move when a Codex turn runs, so
+/// right after a reset this is newer than any of them; whichever reading is
+/// newer is the one shown.
+static CODEX_LIVE: Mutex<Option<PlanUsageSnapshot>> = Mutex::new(None);
+
+/// Keep a Codex reading from its app-server and push it to every window.
+pub fn observe_codex_live_snapshot(emitter: &EventEmitter, snapshot: PlanUsageSnapshot) {
+    *CODEX_LIVE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(snapshot.clone());
+    emit_event(emitter, PLAN_USAGE_CHANGED_EVENT, &snapshot);
+}
+
+/// The newer of a rollout reading and an app-server one.
+pub(crate) fn newest_codex_snapshot(
+    rollout: Option<PlanUsageSnapshot>,
+    live: Option<PlanUsageSnapshot>,
+) -> Option<PlanUsageSnapshot> {
+    match (rollout, live) {
+        (Some(rollout), Some(live)) => Some(if live.observed_at > rollout.observed_at {
+            live
+        } else {
+            rollout
+        }),
+        (rollout, live) => rollout.or(live),
+    }
+}
+
+fn codex_live_snapshot() -> Option<PlanUsageSnapshot> {
+    CODEX_LIVE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+}
+
 fn codex_plan_label(plan_type: &str) -> String {
     match plan_type {
         "free" => "Free".into(),
@@ -810,7 +850,8 @@ async fn codex_scan(force: bool) -> CodexScan {
 /// is always the latest one held.
 pub async fn get_plan_usage_core(force: bool) -> Result<PlanUsageReport, AppCommandError> {
     let (codex, pool) = tokio::join!(codex_scan(force), usage_pool::report_reading(force));
-    let snapshots = [claude_snapshot(), codex.snapshot]
+    let codex_snapshot = newest_codex_snapshot(codex.snapshot, codex_live_snapshot());
+    let snapshots = [claude_snapshot(), codex_snapshot]
         .into_iter()
         .flatten()
         .collect();

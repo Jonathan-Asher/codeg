@@ -2370,7 +2370,11 @@
       "limitPoolBannerTitle": "因用量上限暫停",
       "limitStopped": "因用量上限停止",
       "limitStoppedHint": "上一輪因用量上限而停止，且不會再自動繼續。待額度允許時請手動繼續。",
-      "workingWithItems": "執行中 · {count} 個進行中"
+      "workingWithItems": "執行中 · {count} 個進行中",
+      "useReset": "使用重設並繼續",
+      "useResetTitle": "{count, plural, =1 {使用你的用量上限重設，立即恢復上限並繼續} other {使用 # 次用量上限重設中的一次，立即恢復上限並繼續}}",
+      "resetContinued": "已使用重設，工作階段現在繼續。",
+      "usePoolResetTitle": "使用 {name} 的一次用量上限重設，立即恢復其上限並繼續"
     },
     "conversationCard": {
       "untitledConversation": "未命名會話",
@@ -6940,7 +6944,8 @@
     "source": {
       "claudeLive": "來自 codeg 中的 Claude Code 對話輪次",
       "claudeSaved": "codeg 重新啟動前儲存的最後一筆資料",
-      "codexLog": "來自最新的 Codex 工作階段日誌"
+      "codexLog": "來自最新的 Codex 工作階段日誌",
+      "codexLive": "直接從 Codex 讀取"
     },
     "window": {
       "session5h": "5 小時工作階段",
@@ -7081,7 +7086,104 @@
       "routingOrdered": "順序：新請求由上往下送往第一個能接收的帳號",
       "reserveSummary": "預留 {percent}%",
       "reserveSummaryDynamic": "預留 {percent}%，接近重設時釋出",
-      "position": "第 {position} 位"
+      "position": "第 {position} 位",
+      "resets": {
+        "available": "{count, plural, other {# 次重設}}",
+        "availableUntil": "{count, plural, other {# 次重設}} · {date} 到期",
+        "auto": "達到上限時帳號池會自動使用一次",
+        "cooldownUntil": "下一次可在 {time} 使用",
+        "confirmBody": "要在 <b>{name}</b> 上使用 1 次重設嗎？這會立即恢復{refills}，且無法復原。",
+        "refills": {
+          "session": "5 小時上限",
+          "weekly": "每週上限",
+          "full": "5 小時上限和每週上限",
+          "other": "用量上限"
+        },
+        "outcome": {
+          "reset": "已在 {name} 上使用重設：上限已恢復。",
+          "alreadyUsed": "{name} 上的這次重設先前已用過。剛才沒有任何變化。",
+          "unconfirmed": "無法確認 {name} 上的重設是否生效。再試之前請先重新檢查。"
+        },
+        "continued": "已在 {name} 上使用重設，工作階段現在繼續。",
+        "recheck": "立即重新檢查",
+        "recheckTitle": "讓帳號池立即重新讀取此帳號的用量",
+        "recheckLifted": "{name} 已可再次使用。",
+        "recheckSame": "已重新讀取 {name}：暫時沒有可解除的限制。",
+        "recheckUnread": "帳號池剛才無法讀取 {name} 的用量。",
+        "error": {
+          "recentlyUsed": "此帳號剛剛使用過一次重設。",
+          "inProgress": "此帳號正在使用一次重設。",
+          "cooldown": "此帳號暫時還不能再使用重設。",
+          "noUsableReset": "此帳號現在沒有可用的重設。",
+          "notEligible": "此帳號不提供重設。",
+          "disabled": "此帳號在帳號池中已暫停，因此不會使用它的重設。",
+          "needsLogin": "此帳號需要先重新登入。",
+          "noAccount": "帳號池中沒有這個名稱的帳號。",
+          "tooSoon": "此帳號剛剛檢查過。請過幾秒再試。",
+          "failed": "操作沒有成功。請稍後再試。",
+          "unsupported": "此帳號池無法透過 codeg 使用重設。請更新 maxpool。",
+          "unreachable": "帳號池沒有回應。"
+        }
+      }
+    },
+    "resets": {
+      "title": "用量上限重設",
+      "checking": "正在檢查重設…",
+      "available": "{count, plural, other {可用重設 # 次}}",
+      "availableUntil": "{count, plural, other {可用重設 # 次}} · 最早 {date} 到期",
+      "none": "目前沒有可用的重設",
+      "account": "帳號：{account}",
+      "expires": "{date} 到期",
+      "noExpiry": "不會過期",
+      "times": "×{count}",
+      "use": "使用重設",
+      "using": "正在使用…",
+      "needsLimit": "達到上限後才能使用",
+      "notUsableNow": "目前無法使用",
+      "left": "{count, plural, =0 {已無剩餘重設。} other {剩餘 # 次重設。}}",
+      "pausedSessions": "{count, plural, other {有 # 個因上限暫停的工作階段現在可以繼續。}}",
+      "continuePaused": "立即繼續",
+      "continuedPaused": "{count, plural, other {正在繼續 # 個工作階段。}}",
+      "continuePausedFailed": "部分暫停的工作階段未能繼續。請在該工作階段中按「立即繼續」。",
+      "kind": {
+        "session": "工作階段重設",
+        "weekly": "每週重設",
+        "full": "完整重設",
+        "other": "上限重設"
+      },
+      "refills": {
+        "session": "你的 5 小時工作階段上限",
+        "weekly": "你的每週上限",
+        "full": "你所有的用量上限",
+        "other": "你的用量上限"
+      },
+      "confirm": {
+        "title": "使用一次重設？",
+        "body": "{count, plural, =1 {要使用你唯一的一次重設嗎？} other {要使用 # 次重設中的 1 次嗎？}}這會立即恢復{refills}。此操作無法復原。",
+        "use": "使用重設",
+        "cancel": "取消"
+      },
+      "outcome": {
+        "reset": "已使用重設：用量上限已恢復。",
+        "nothingToReset": "未使用任何重設：這個重設只能在達到上限後使用。",
+        "noReset": "未使用任何重設：該重設已無法使用。",
+        "alreadyUsed": "該重設已被使用，剛才沒有任何變更。",
+        "unconfirmed": "無法確認重設是否成功。如果一分鐘後仍在上限，請再試一次：不會額外用掉第二次重設。"
+      },
+      "error": {
+        "notInstalled": "這台機器上未安裝。",
+        "notLoggedIn": "這台機器上未登入，無法讀取其重設。",
+        "notEligible": "這個帳號在這裡無法使用用量上限重設。",
+        "unsupportedVersion": "此版本無法使用重設，請更新該代理程式。",
+        "network": "無法連線到服務提供者，請稍後再試。",
+        "busy": "這個帳號正在使用一次重設。",
+        "failed": "無法檢查重設。"
+      },
+      "claude": {
+        "elsewhere": "Claude 的用量上限重設可在 Claude Code 終端機應用程式和 claude.ai 上使用。",
+        "open": "開啟 claude.ai 用量頁面",
+        "hint": "或在 Claude Code 中執行 <code>/limit-reset</code>。"
+      }
     }
   },
   "Forge": {
