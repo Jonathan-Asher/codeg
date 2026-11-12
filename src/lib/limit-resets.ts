@@ -257,9 +257,7 @@ export function poolResetToUse(
       (g.expires_at == null || g.expires_at > now) &&
       (!g.requires_limit || atLimit)
   )
-  return (
-    usable.find((g) => g.id === resets.next_grant_id) ?? usable[0] ?? null
-  )
+  return usable.find((g) => g.id === resets.next_grant_id) ?? usable[0] ?? null
 }
 
 /** The soonest expiry among a pool account's grants left. */
@@ -291,7 +289,8 @@ export function poolResetForPause(
     if (account.provider || !account.enabled) continue
     const state = stateOf(account)
     const grant = poolResetToUse(pool, account, state, now)
-    if (grant) candidates.push({ account, grant, held: HELD_BY_LIMIT.has(state) })
+    if (grant)
+      candidates.push({ account, grant, held: HELD_BY_LIMIT.has(state) })
   }
   candidates.sort((a, b) => {
     if (a.held !== b.held) return a.held ? -1 : 1

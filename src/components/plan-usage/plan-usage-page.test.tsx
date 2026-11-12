@@ -75,14 +75,16 @@ const manage = vi.hoisted(() => {
     usagePoolRestartNow: vi.fn<
       () => Promise<{ available: boolean; reload: string }>
     >(() => Promise.resolve({ available: true, reload: "idle" })),
-    usagePoolRedeemReset: vi.fn<
-      (args: {
-        name: string
-        grantId?: string | null
-        conversationId?: number | null
-      }) => Promise<PlanUsagePoolRedeemResult>
-    >(),
-    usagePoolRecheck: vi.fn<(name: string) => Promise<PlanUsagePoolRecheckResult>>(),
+    usagePoolRedeemReset:
+      vi.fn<
+        (args: {
+          name: string
+          grantId?: string | null
+          conversationId?: number | null
+        }) => Promise<PlanUsagePoolRedeemResult>
+      >(),
+    usagePoolRecheck:
+      vi.fn<(name: string) => Promise<PlanUsagePoolRecheckResult>>(),
   }
 })
 
@@ -1096,10 +1098,6 @@ describe("PlanUsagePage usage-limit resets", () => {
       description: null,
       count: 1,
       expires_at: now() + (10 + i) * 86_400,
-      usable_now: true,
-      requires_limit: false,
-      clears: [],
-      unavailable_reason: null,
     })),
     source: "codex_app_server" as const,
     account: "me@example.com",
@@ -1107,26 +1105,12 @@ describe("PlanUsagePage usage-limit resets", () => {
     fetched_at: now(),
   })
 
-  it("shows each provider's resets on its card, and a used one re-reads the bars", async () => {
+  it("shows Codex's resets on its card, points Claude Code's to its apps, and a used one re-reads the bars", async () => {
     getPlanUsage.mockResolvedValue(report([claudeSnapshot(), codexSnapshot()]))
-    getLimitResets.mockResolvedValue({
-      providers: [
-        {
-          provider: "claude_code",
-          available: 0,
-          items: [],
-          source: "claude_oauth",
-          account: "me@example.com",
-          error: { code: "not_eligible", message: "x", reason: "surface" },
-          fetched_at: now(),
-        },
-        codexResets(2),
-      ],
-    })
+    getLimitResets.mockResolvedValue({ providers: [codexResets(2)] })
     consumeLimitReset.mockResolvedValue({
       provider: "codex",
       outcome: "reset",
-      cleared: [],
       resets: codexResets(1),
       paused_conversations: [],
       continued: null,
@@ -1138,9 +1122,12 @@ describe("PlanUsagePage usage-limit resets", () => {
     expect(resets).toHaveTextContent(/first expires/)
     expect(
       within(card("Claude Code")).getByText(
-        enMessages.PlanUsage.resets.error.surface
+        enMessages.PlanUsage.resets.claude.elsewhere
       )
     ).toBeInTheDocument()
+    expect(
+      within(card("Claude Code")).getByTestId("claude-resets-open")
+    ).toHaveTextContent(enMessages.PlanUsage.resets.claude.open)
     expect(getLimitResets).toHaveBeenCalledWith(false)
 
     getPlanUsage.mockClear()
