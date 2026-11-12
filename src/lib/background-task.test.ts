@@ -897,3 +897,90 @@ describe("buildBackgroundTaskRows", () => {
     expect(rows[0].command).toBe("cd /x; echo hi")
   })
 })
+
+describe("Pi bg-jobs polls (bgj_status / bgj_wait / bgj_kill)", () => {
+  function poll(
+    toolName: string,
+    output: string,
+    id = "jb-mwc8zz2b-8l1v"
+  ): AdaptedToolCallPart {
+    return {
+      type: "tool-call",
+      toolCallId: `call-${toolName}-${output.length}`,
+      toolName,
+      input: JSON.stringify({ id, timeoutSec: 120 }),
+      state: "output-available",
+      output,
+    }
+  }
+
+  it("reads the job line and its output tail, in both pi-bg-jobs spellings", () => {
+    expect(
+      parseBackgroundTaskEnvelope(
+        '[jb-a] completed exit 0 · 3m 52s · ocr page 12\n\n--- output tail ---\n{"ok":1}'
+      )
+    ).toMatchObject({
+      kind: "poll",
+      taskId: "jb-a",
+      status: "completed",
+      exitCode: 0,
+      output: '{"ok":1}',
+      command: "ocr page 12",
+    })
+    expect(
+      parseBackgroundTaskEnvelope(
+        "[jb-b] failed (exit 2) · 5s · false\n\n--- output tail ---\n(no output)"
+      )
+    ).toMatchObject({ status: "failed", exitCode: 2, output: null })
+    expect(
+      parseBackgroundTaskEnvelope("[jb-c] running · 14s · sleep 9")
+    ).toMatchObject({ kind: "poll", status: "running" })
+    expect(
+      parseBackgroundTaskEnvelope(
+        "[jb-d] killed killed (bgj_kill) · 13m 34s · curl x"
+      )
+    ).toMatchObject({ kind: "stop", status: "stopped", taskId: "jb-d" })
+  })
+
+  it("reads a kill acknowledgement, parentheses in the command included", () => {
+    expect(
+      parseBackgroundTaskEnvelope(
+        "Sent SIGTERM to jb-e (cd /tmp; try(){ curl x; })"
+      )
+    ).toMatchObject({
+      kind: "stop",
+      taskId: "jb-e",
+      command: "cd /tmp; try(){ curl x; }",
+    })
+    expect(
+      parseBackgroundTaskEnvelope(
+        "Sent SIGTERM to jb-f (sleep 9); SIGKILL follows in 3s if it is still running. No separate notice will follow."
+      )
+    ).toMatchObject({ kind: "stop", taskId: "jb-f", command: "sleep 9" })
+  })
+
+  it("folds a job's polls into one row with its latest state", () => {
+    const polls = [
+      poll("bgj_status", "[jb-mwc8zz2b-8l1v] running · 14s · ocr"),
+      poll("bgj_wait", "[jb-mwc8zz2b-8l1v] running · 3m 13s · ocr"),
+      poll(
+        "bgj_wait",
+        "[jb-mwc8zz2b-8l1v] completed exit 0 · 3m 52s · ocr\n\n--- output tail ---\ndone"
+      ),
+    ]
+    expect(polls.every(isBackgroundTaskToolCall)).toBe(true)
+    const rows = buildBackgroundTaskRows(polls)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      taskId: "jb-mwc8zz2b-8l1v",
+      badge: "completed",
+      pollCount: 3,
+      output: "done",
+      command: "ocr",
+    })
+  })
+
+  it("leaves ordinary output alone", () => {
+    expect(parseBackgroundTaskEnvelope("[note] fine · ok · done")).toBeNull()
+  })
+})

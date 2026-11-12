@@ -3994,7 +3994,16 @@
         "resumedAfterRestart": "Nach Neustart fortgesetzt",
         "resumedAfterRestartHint": "codeg wurde mitten in dieser Runde neu gestartet und hat die Sitzung von selbst fortgesetzt",
         "continuedAfterLimit": "Nach Zurücksetzen des Limits fortgesetzt",
-        "continuedAfterLimitHint": "Das Nutzungslimit des Kontos wurde zurückgesetzt und codeg hat die Sitzung von selbst fortgesetzt"
+        "continuedAfterLimitHint": "Das Nutzungslimit des Kontos wurde zurückgesetzt und codeg hat die Sitzung von selbst fortgesetzt",
+        "agentWake": {
+          "continued": "Selbstständig fortgesetzt",
+          "wokenByQuestion": "geweckt durch die Frage eines Sub-Agenten",
+          "wokenBySettled": "geweckt durch einen fertigen Sub-Agenten",
+          "wokenByAttention": "geweckt durch einen Hinweis eines Sub-Agenten",
+          "wokenByJob": "geweckt durch das Ende eines Hintergrund-Jobs",
+          "wokenByExtension": "geweckt durch eine Erweiterungsnachricht",
+          "andMore": "{reason} und {count, plural, one {# weitere Mitteilung} other {# weitere Mitteilungen}}"
+        }
       },
       "liveTurnStats": {
         "thinking": "Denkt nach...",
@@ -4253,6 +4262,43 @@
           "outputMissing": "Codex hat die Skriptausgabe gekürzt und dabei das Trennzeichen dieses Befehls entfernt, sodass ihm keine Ausgabe zugeordnet werden konnte.",
           "sharedWith": "Enthält auch die Ausgabe von {commands} – codex hat deren Trennzeichen abgeschnitten.",
           "truncated": "gekürzt"
+        },
+        "agentRun": {
+          "children": "{count, plural, one {# Sub-Agent} other {# Sub-Agenten}}",
+          "statusCompleted": "Abgeschlossen",
+          "statusFailed": "Fehlgeschlagen",
+          "statusPaused": "Pausiert",
+          "statusStopped": "Gestoppt",
+          "statusRunning": "Läuft",
+          "statusPending": "Gestartet · Ergebnis ausstehend",
+          "asked": "Frage:",
+          "answered": "Antwort:",
+          "noAnswer": "keine Antwort aufgezeichnet",
+          "turns": "{count, plural, one {# Runde} other {# Runden}}",
+          "tokens": "{count} Tokens",
+          "transcript": "Verlauf",
+          "task": "Aufgabe",
+          "error": "Fehler",
+          "result": "Ergebnis",
+          "more": "Mehr",
+          "less": "Weniger",
+          "modelNotes": "Was das Modell gesehen hat",
+          "noteLaunch": "Start",
+          "noteQuestion": "Frage",
+          "noteChild": "Kind beendet",
+          "noteResult": "Lauf beendet",
+          "noteAttention": "Hinweis",
+          "noteJobExit": "Job-Ende",
+          "noteNotice": "Mitteilung"
+        },
+        "backgroundJob": {
+          "completed": "Exit {code}",
+          "failedWithCode": "Fehlgeschlagen · Exit {code}",
+          "failed": "Fehlgeschlagen",
+          "killedBy": "Beendet ({reason})",
+          "killed": "Beendet",
+          "ended": "Abgeschlossen",
+          "pending": "Hintergrund · kein Ende aufgezeichnet"
         }
       },
       "messageNav": {

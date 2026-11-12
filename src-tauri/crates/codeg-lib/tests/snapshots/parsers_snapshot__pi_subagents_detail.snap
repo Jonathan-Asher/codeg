@@ -1,0 +1,284 @@
+---
+source: crates/codeg-lib/tests/parsers_snapshot.rs
+expression: detail
+---
+{
+  "summary": {
+    "id": "pi-parent-001",
+    "agent_type": "pi",
+    "folder_path": "/Users/demo/work",
+    "folder_name": "work",
+    "title": "compare menu prices",
+    "started_at": "[ts]",
+    "ended_at": "[ts]",
+    "message_count": 7,
+    "model": null,
+    "git_branch": null
+  },
+  "turns": [
+    {
+      "id": "turn-0",
+      "role": "user",
+      "blocks": [
+        {
+          "type": "text",
+          "text": "compare menu prices"
+        }
+      ],
+      "timestamp": "[ts]",
+      "completed_at": "[ts]"
+    },
+    {
+      "id": "turn-1",
+      "role": "assistant",
+      "blocks": [
+        {
+          "type": "text",
+          "text": "Dispatching two researchers."
+        },
+        {
+          "type": "tool_use",
+          "tool_use_id": "call-wf",
+          "tool_name": "Agent",
+          "input_preview": "{\"subagent_type\":\"researcher\",\"async\":true,\"workflowScript\":\"return runs.all([])\"}",
+          "meta": {
+            "codeg.subagentRun": {
+              "version": 1,
+              "mode": "workflow",
+              "async": true,
+              "status": "failed",
+              "agent": "researcher",
+              "runId": "wf-1",
+              "durationMs": 28700,
+              "error": "Cannot read runs.all result property 'mina'.",
+              "children": [
+                {
+                  "key": "mina",
+                  "label": "mina",
+                  "agent": "researcher",
+                  "status": "failed",
+                  "runId": "f544d3f9-5f36-4c29-8ad2-3b64bfbd5f5e",
+                  "result": "Task closed per supervisor decision.",
+                  "sessionId": "pi-child-mina"
+                },
+                {
+                  "key": "uma",
+                  "label": "uma",
+                  "agent": "researcher",
+                  "status": "failed",
+                  "runId": "42960108-49ef-4be8-8f62-5cd19733a13e",
+                  "error": "Agent 'researcher' requested unavailable child tools: web_search.",
+                  "sessionId": "pi-child-uma",
+                  "exchanges": [
+                    {
+                      "question": "No web tools. Options?",
+                      "answer": "Close the task."
+                    }
+                  ]
+                }
+              ],
+              "notes": [
+                {
+                  "kind": "launch",
+                  "text": "Run fan-out: 0/64 used, 64 remaining\nAsync workflow [wf-1]\n\nReturn control to the user now."
+                },
+                {
+                  "kind": "question",
+                  "text": "Subagent needs a supervisor decision.\nRun: 42960108-49ef-4be8-8f62-5cd19733a13e\nAgent: researcher\nChild index: 0\n\nNo web tools. Options?\n\nReply with: subagent_supervisor({ action: \"reply\", replyTo: \"req-1\" })"
+                },
+                {
+                  "kind": "child",
+                  "text": "Workflow child failed: **uma**\nWorkflow run: wf-1\nChild run: 42960108-49ef-4be8-8f62-5cd19733a13e\nError: Run fan-out: 2/64 used, 62 remaining\nAgent 'researcher' requested unavailable child tools: web_search.\nStatus: workflow still running"
+                },
+                {
+                  "kind": "result",
+                  "text": "Background task failed: **workflow**\n\nError: Cannot read runs.all result property 'mina'.\n    at get ([worker eval]:285:35)\n\nChild outputs:\n- key=mina run=f544d3f9-5f36-4c29-8ad2-3b64bfbd5f5e status=failed\n  Saved output: unavailable\n  Preview:\n    | Task closed per supervisor decision.\n\nRetention-managed async directory: /tmp/runs/wf-1\nWorkflow run: wf-1\nChild runs: mina=f544d3f9-5f36-4c29-8ad2-3b64bfbd5f5e (failed), uma=42960108-49ef-4be8-8f62-5cd19733a13e (failed)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool_use_id": "call-wf",
+          "output_preview": "- **mina** (researcher) — failed: Task closed per supervisor decision.\n- **uma** (researcher) — failed: Agent 'researcher' requested unavailable child tools: web_search.\n\nError: Cannot read runs.all result property 'mina'.",
+          "is_error": true,
+          "agent_stats": {
+            "agent_type": "researcher",
+            "status": "failed",
+            "total_duration_ms": 28700
+          }
+        }
+      ],
+      "timestamp": "[ts]",
+      "duration_ms": 60300,
+      "completed_at": "[ts]",
+      "agent_message_id": "a1"
+    },
+    {
+      "id": "turn-2",
+      "role": "assistant",
+      "blocks": [
+        {
+          "type": "text",
+          "text": "Both are running."
+        }
+      ],
+      "timestamp": "[ts]",
+      "duration_ms": 700,
+      "completed_at": "[ts]",
+      "agent_message_id": "a2"
+    },
+    {
+      "id": "turn-3",
+      "role": "system",
+      "blocks": [
+        {
+          "type": "text",
+          "text": "Pi continued on its own, woken by a sub-agent's question."
+        },
+        {
+          "type": "tool_use",
+          "tool_use_id": "pi-wake-a3",
+          "tool_name": "agent_wake",
+          "input_preview": null,
+          "meta": {
+            "codeg.agentWake": {
+              "version": 1,
+              "triggers": [
+                {
+                  "kind": "subagentQuestion",
+                  "text": "Subagent needs a supervisor decision.\nRun: 42960108-49ef-4be8-8f62-5cd19733a13e\nAgent: researcher\nChild index: 0\n\nNo web tools. Options?\n\nReply with: subagent_supervisor({ action: \"reply\", replyTo: \"req-1\" })"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool_use_id": "pi-wake-a3",
+          "output_preview": null,
+          "is_error": false
+        }
+      ],
+      "timestamp": "[ts]",
+      "completed_at": "[ts]"
+    },
+    {
+      "id": "turn-4",
+      "role": "assistant",
+      "blocks": [
+        {
+          "type": "thinking",
+          "text": "answer the child"
+        }
+      ],
+      "timestamp": "[ts]",
+      "duration_ms": 3000,
+      "completed_at": "[ts]",
+      "agent_message_id": "a3"
+    },
+    {
+      "id": "turn-5",
+      "role": "assistant",
+      "blocks": [
+        {
+          "type": "tool_use",
+          "tool_use_id": "call-job",
+          "tool_name": "bash",
+          "input_preview": "{\"command\":\"sleep 1; echo done\"}",
+          "meta": {
+            "codeg.backgroundJob": {
+              "version": 1,
+              "tool": "bgj_run",
+              "id": "jb-1",
+              "state": "completed",
+              "exitCode": 0,
+              "duration": "58s",
+              "logFile": "/tmp/jb-1.log",
+              "tail": "done",
+              "notice": "✅ Background job finished (exit 0, ran 58s)\n[jb-1] completed exit 0 · 58s · sleep 1; echo done\ncwd: /Users/demo/work\nlog: /tmp/jb-1.log\n\n--- last output ---\ndone"
+            }
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool_use_id": "call-job",
+          "output_preview": "Command running in background with ID: jb-1 (pid 7).\nOutput file: /tmp/jb-1.log\n\nCompleted (exit 0) after 58s.\n\n--- last output ---\ndone",
+          "is_error": false
+        }
+      ],
+      "timestamp": "[ts]",
+      "duration_ms": 2100,
+      "completed_at": "[ts]",
+      "agent_message_id": "a4"
+    },
+    {
+      "id": "turn-6",
+      "role": "assistant",
+      "blocks": [
+        {
+          "type": "text",
+          "text": "I'll research it myself."
+        }
+      ],
+      "timestamp": "[ts]",
+      "duration_ms": 21900,
+      "completed_at": "[ts]",
+      "agent_message_id": "a5"
+    },
+    {
+      "id": "turn-7",
+      "role": "system",
+      "blocks": [
+        {
+          "type": "text",
+          "text": "Pi continued on its own, woken by a background job ending."
+        },
+        {
+          "type": "tool_use",
+          "tool_use_id": "pi-wake-a6",
+          "tool_name": "agent_wake",
+          "input_preview": null,
+          "meta": {
+            "codeg.agentWake": {
+              "version": 1,
+              "triggers": [
+                {
+                  "kind": "jobExit",
+                  "text": "✅ Background job finished (exit 0, ran 58s)\n[jb-1] completed exit 0 · 58s · sleep 1; echo done\ncwd: /Users/demo/work\nlog: /tmp/jb-1.log\n\n--- last output ---\ndone"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "tool_result",
+          "tool_use_id": "pi-wake-a6",
+          "output_preview": null,
+          "is_error": false
+        }
+      ],
+      "timestamp": "[ts]",
+      "completed_at": "[ts]"
+    },
+    {
+      "id": "turn-8",
+      "role": "assistant",
+      "blocks": [
+        {
+          "type": "text",
+          "text": "That was the earlier job."
+        }
+      ],
+      "timestamp": "[ts]",
+      "duration_ms": 1000,
+      "completed_at": "[ts]",
+      "agent_message_id": "a6"
+    }
+  ],
+  "session_stats": {
+    "total_usage": null,
+    "total_duration_ms": 89000
+  }
+}

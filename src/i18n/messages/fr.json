@@ -3994,7 +3994,16 @@
         "resumedAfterRestart": "Reprise après redémarrage",
         "resumedAfterRestartHint": "codeg a redémarré au milieu de ce tour et a repris la session de lui-même",
         "continuedAfterLimit": "Repris après réinitialisation de la limite",
-        "continuedAfterLimitHint": "La limite d'utilisation du compte a été réinitialisée et codeg a repris la session de lui-même"
+        "continuedAfterLimitHint": "La limite d'utilisation du compte a été réinitialisée et codeg a repris la session de lui-même",
+        "agentWake": {
+          "continued": "A continué de lui-même",
+          "wokenByQuestion": "réveillé par la question d'un sous-agent",
+          "wokenBySettled": "réveillé par la fin d'un sous-agent",
+          "wokenByAttention": "réveillé par une alerte d'un sous-agent",
+          "wokenByJob": "réveillé par la fin d'une tâche en arrière-plan",
+          "wokenByExtension": "réveillé par un message d'extension",
+          "andMore": "{reason} et {count, plural, one {# autre avis} other {# autres avis}}"
+        }
       },
       "liveTurnStats": {
         "thinking": "Réflexion...",
@@ -4253,6 +4262,43 @@
           "outputMissing": "Codex a tronqué la sortie du script et supprimé le séparateur de cette commande ; aucune sortie n'a donc pu lui être attribuée.",
           "sharedWith": "Contient aussi la sortie de {commands} — codex en a tronqué les séparateurs.",
           "truncated": "tronqué"
+        },
+        "agentRun": {
+          "children": "{count, plural, one {# sous-agent} other {# sous-agents}}",
+          "statusCompleted": "Terminé",
+          "statusFailed": "Échec",
+          "statusPaused": "En pause",
+          "statusStopped": "Arrêté",
+          "statusRunning": "En cours",
+          "statusPending": "Lancé · résultat en attente",
+          "asked": "Question :",
+          "answered": "Réponse :",
+          "noAnswer": "aucune réponse enregistrée",
+          "turns": "{count, plural, one {# tour} other {# tours}}",
+          "tokens": "{count} jetons",
+          "transcript": "Transcription",
+          "task": "Tâche",
+          "error": "Erreur",
+          "result": "Résultat",
+          "more": "Plus",
+          "less": "Moins",
+          "modelNotes": "Ce que le modèle a vu",
+          "noteLaunch": "Lancement",
+          "noteQuestion": "Question",
+          "noteChild": "Enfant terminé",
+          "noteResult": "Exécution terminée",
+          "noteAttention": "Alerte",
+          "noteJobExit": "Fin de tâche",
+          "noteNotice": "Avis"
+        },
+        "backgroundJob": {
+          "completed": "Sortie {code}",
+          "failedWithCode": "Échec · sortie {code}",
+          "failed": "Échec",
+          "killedBy": "Interrompu ({reason})",
+          "killed": "Interrompu",
+          "ended": "Terminé",
+          "pending": "Arrière-plan · aucune fin enregistrée"
         }
       },
       "messageNav": {

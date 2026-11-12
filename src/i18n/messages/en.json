@@ -3994,7 +3994,16 @@
         "resumedAfterRestart": "Resumed after restart",
         "resumedAfterRestartHint": "codeg restarted in the middle of this turn and picked the session back up on its own",
         "continuedAfterLimit": "Continued after limit reset",
-        "continuedAfterLimitHint": "The account's usage limit reset and codeg continued the session on its own"
+        "continuedAfterLimitHint": "The account's usage limit reset and codeg continued the session on its own",
+        "agentWake": {
+          "continued": "Continued on its own",
+          "wokenByQuestion": "woken by a sub-agent's question",
+          "wokenBySettled": "woken by a sub-agent finishing",
+          "wokenByAttention": "woken by a sub-agent alert",
+          "wokenByJob": "woken by a background job ending",
+          "wokenByExtension": "woken by an extension's message",
+          "andMore": "{reason} and {count, plural, one {# more notice} other {# more notices}}"
+        }
       },
       "liveTurnStats": {
         "thinking": "Thinking...",
@@ -4253,6 +4262,43 @@
           "outputMissing": "Codex truncated the script output and dropped this command's separator, so none of the output could be attributed to it.",
           "sharedWith": "Also contains the output of {commands} — codex truncated their separators away.",
           "truncated": "truncated"
+        },
+        "agentRun": {
+          "children": "{count, plural, one {# sub-agent} other {# sub-agents}}",
+          "statusCompleted": "Completed",
+          "statusFailed": "Failed",
+          "statusPaused": "Paused",
+          "statusStopped": "Stopped",
+          "statusRunning": "Running",
+          "statusPending": "Launched · result pending",
+          "asked": "Asked:",
+          "answered": "Answer:",
+          "noAnswer": "no answer recorded",
+          "turns": "{count, plural, one {# turn} other {# turns}}",
+          "tokens": "{count} tokens",
+          "transcript": "Transcript",
+          "task": "Task",
+          "error": "Error",
+          "result": "Result",
+          "more": "More",
+          "less": "Less",
+          "modelNotes": "What the model saw",
+          "noteLaunch": "Launch",
+          "noteQuestion": "Question",
+          "noteChild": "Child settled",
+          "noteResult": "Run finished",
+          "noteAttention": "Alert",
+          "noteJobExit": "Job exit",
+          "noteNotice": "Notice"
+        },
+        "backgroundJob": {
+          "completed": "Exit {code}",
+          "failedWithCode": "Failed · exit {code}",
+          "failed": "Failed",
+          "killedBy": "Killed ({reason})",
+          "killed": "Killed",
+          "ended": "Ended",
+          "pending": "Background · no exit recorded"
         }
       },
       "messageNav": {

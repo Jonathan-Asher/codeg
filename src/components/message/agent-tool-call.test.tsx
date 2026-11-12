@@ -1,9 +1,11 @@
 import { type ReactElement } from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import { AgentToolCallPart } from "./agent-tool-call"
+import { SessionViewerHostContext } from "./session-viewer-host-context"
+import { TranscriptAgentTypeProvider } from "./transcript-agent-context"
 import type { AdaptedContentPart } from "@/lib/adapters/ai-elements-adapter"
 import enMessages from "@/i18n/messages/en.json"
 
@@ -634,6 +636,197 @@ describe("AgentToolCallPart stopped at the model provider", () => {
     ).not.toBeInTheDocument()
     expect(
       screen.getByRole("button", { name: "Completed" })
+    ).toBeInTheDocument()
+  })
+})
+
+describe("AgentToolCallPart Pi sub-agent run", () => {
+  /** A failed async workflow of two researchers, as `parsers/pi/fold.rs`
+   *  folds it from session 304's notices. */
+  const RUN_META = {
+    "codeg.subagentRun": {
+      version: 1,
+      mode: "workflow",
+      async: true,
+      status: "failed",
+      agent: "researcher",
+      durationMs: 28700,
+      error:
+        "Cannot read runs.all result property 'mina'.\nUse results[0] instead.",
+      children: [
+        {
+          key: "mina",
+          label: "mina",
+          agent: "researcher",
+          status: "failed",
+          result: "Task closed per supervisor decision.",
+          sessionId: "child-mina",
+        },
+        {
+          key: "uma",
+          label: "uma",
+          agent: "researcher",
+          status: "failed",
+          error:
+            "Agent 'researcher' requested unavailable child tools: web_search.",
+          sessionId: "child-uma",
+          tokens: 7921,
+          turns: 3,
+          exchanges: [
+            { question: "No web tools. Options?", answer: "Close the task." },
+          ],
+        },
+      ],
+      notes: [{ kind: "launch", text: "Run fan-out: 0/64 used, 64 remaining" }],
+    },
+  }
+  const REPORT =
+    "- **mina** (researcher) — failed: Task closed\n\nError: Cannot read"
+
+  function piPart(meta: Record<string, unknown> = RUN_META): ToolCallPart {
+    return {
+      ...basePart(
+        JSON.stringify({
+          subagent_type: "researcher",
+          async: true,
+          workflowScript: "return runs.all([])",
+        }),
+        "output-error"
+      ),
+      output: REPORT,
+      errorText: REPORT,
+      agentStats: { status: "failed", total_duration_ms: 28700 },
+      meta,
+    }
+  }
+
+  function renderPi(part: ToolCallPart, open = vi.fn()) {
+    return render(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <TranscriptAgentTypeProvider value="pi">
+          <SessionViewerHostContext.Provider value={{ open }}>
+            <AgentToolCallPart part={part} renderToolCall={() => null} />
+          </SessionViewerHostContext.Provider>
+        </TranscriptAgentTypeProvider>
+      </NextIntlClientProvider>
+    )
+  }
+
+  it("titles the run by its agent and how many children it had", () => {
+    renderPi(piPart())
+    expect(screen.getByText("researcher · 2 sub-agents")).toBeInTheDocument()
+    expect(screen.getByLabelText("Failed")).toBeInTheDocument()
+  })
+
+  it("gives each child a row with its outcome and the question it asked", () => {
+    renderPi(piPart())
+    const rows = screen.getAllByTestId("subagent-run-child")
+    expect(rows).toHaveLength(2)
+    expect(rows[0].textContent).toContain(
+      "Task closed per supervisor decision."
+    )
+    expect(rows[1].textContent).toContain("3 turns · 7.9K tokens")
+    expect(rows[1].textContent).toContain(
+      "Agent 'researcher' requested unavailable child tools: web_search."
+    )
+    expect(rows[1].textContent).toContain("No web tools. Options?")
+    expect(rows[1].textContent).toContain("Close the task.")
+    // The run's own error (its first line), never the plain-text report.
+    expect(
+      screen.getByText("Cannot read runs.all result property 'mina'.")
+    ).toBeInTheDocument()
+    expect(screen.queryByText(REPORT)).not.toBeInTheDocument()
+  })
+
+  it("keeps what the model was told one click away", () => {
+    renderPi(piPart())
+    expect(
+      screen.queryByText("Run fan-out: 0/64 used, 64 remaining")
+    ).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("model-notes-toggle"))
+    expect(
+      screen.getByText("Run fan-out: 0/64 used, 64 remaining")
+    ).toBeInTheDocument()
+  })
+
+  it("opens a child's transcript as a session of the transcript's agent", () => {
+    const open = vi.fn()
+    renderPi(piPart(), open)
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "View sub-agent session" })[1]
+    )
+    expect(open).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "agentSession",
+        sessionId: "child-uma",
+        agentType: "pi",
+        description: "uma",
+      })
+    )
+  })
+
+  it("draws a one-child run like any Agent card, its session in the header", () => {
+    const open = vi.fn()
+    renderPi(
+      {
+        ...basePart(
+          JSON.stringify({ subagent_type: "worker", description: "fix it" }),
+          "output-available"
+        ),
+        output: "Done.",
+        agentStats: { status: "completed", child_session_id: "child-1" },
+        meta: {
+          "codeg.subagentRun": {
+            version: 1,
+            mode: "single",
+            async: true,
+            status: "completed",
+            result: "Done: 3 files changed.",
+            children: [
+              {
+                key: "#0",
+                label: "worker",
+                status: "completed",
+                exchanges: [{ question: "Commit?", answer: "No." }],
+              },
+            ],
+          },
+        },
+      },
+      open
+    )
+    expect(screen.getByText("worker: fix it")).toBeInTheDocument()
+    expect(
+      screen.queryByTestId("subagent-run-children")
+    ).not.toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole("button", { name: /View sub-agent session/ })
+    )
+    expect(open).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "child-1", agentType: "pi" })
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Completed" }))
+    expect(screen.getByText("Done: 3 files changed.")).toBeInTheDocument()
+    expect(screen.getByText("Commit?")).toBeInTheDocument()
+  })
+
+  it("says a background run's result never reached the transcript", () => {
+    renderPi({
+      ...piPart({
+        "codeg.subagentRun": {
+          version: 1,
+          mode: "single",
+          async: true,
+          status: "pending",
+          children: [{ key: "#0", label: "worker" }],
+          notes: [{ kind: "launch", text: "Async: worker [r-1]" }],
+        },
+      }),
+      state: "output-available",
+      errorText: undefined,
+    })
+    expect(
+      screen.getByLabelText("Launched · result pending")
     ).toBeInTheDocument()
   })
 })

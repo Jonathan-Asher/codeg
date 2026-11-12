@@ -3994,7 +3994,16 @@
         "resumedAfterRestart": "재시작 후 재개됨",
         "resumedAfterRestartHint": "이 턴 도중 codeg가 재시작되어 세션을 자동으로 재개했습니다",
         "continuedAfterLimit": "한도 초기화 후 계속함",
-        "continuedAfterLimitHint": "계정의 사용량 한도가 초기화되어 codeg가 세션을 자동으로 계속했습니다"
+        "continuedAfterLimitHint": "계정의 사용량 한도가 초기화되어 codeg가 세션을 자동으로 계속했습니다",
+        "agentWake": {
+          "continued": "스스로 계속함",
+          "wokenByQuestion": "하위 에이전트의 질문으로 재개",
+          "wokenBySettled": "하위 에이전트 종료로 재개",
+          "wokenByAttention": "하위 에이전트 알림으로 재개",
+          "wokenByJob": "백그라운드 작업 종료로 재개",
+          "wokenByExtension": "확장 메시지로 재개",
+          "andMore": "{reason} 외 알림 {count}개"
+        }
       },
       "liveTurnStats": {
         "thinking": "생각 중...",
@@ -4253,6 +4262,43 @@
           "outputMissing": "codex가 스크립트 출력을 잘라내면서 이 명령의 구분선이 사라져 출력을 귀속시킬 수 없습니다.",
           "sharedWith": "이 구간에는 {commands}의 출력도 포함됩니다 — 구분선이 codex에 의해 잘렸습니다.",
           "truncated": "잘림"
+        },
+        "agentRun": {
+          "children": "하위 에이전트 {count}개",
+          "statusCompleted": "완료",
+          "statusFailed": "실패",
+          "statusPaused": "일시 중지",
+          "statusStopped": "중지됨",
+          "statusRunning": "실행 중",
+          "statusPending": "시작됨 · 결과 대기 중",
+          "asked": "질문:",
+          "answered": "답변:",
+          "noAnswer": "기록된 답변 없음",
+          "turns": "{count}턴",
+          "tokens": "{count} 토큰",
+          "transcript": "대화 기록",
+          "task": "작업",
+          "error": "오류",
+          "result": "결과",
+          "more": "더 보기",
+          "less": "접기",
+          "modelNotes": "모델이 받은 내용",
+          "noteLaunch": "시작",
+          "noteQuestion": "질문",
+          "noteChild": "하위 작업 종료",
+          "noteResult": "실행 종료",
+          "noteAttention": "알림",
+          "noteJobExit": "작업 종료",
+          "noteNotice": "공지"
+        },
+        "backgroundJob": {
+          "completed": "종료 코드 {code}",
+          "failedWithCode": "실패 · 종료 코드 {code}",
+          "failed": "실패",
+          "killedBy": "강제 종료({reason})",
+          "killed": "강제 종료",
+          "ended": "종료됨",
+          "pending": "백그라운드 · 종료 기록 없음"
         }
       },
       "messageNav": {

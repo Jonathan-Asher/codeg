@@ -3994,7 +3994,16 @@
         "resumedAfterRestart": "重新啟動後已恢復",
         "resumedAfterRestartHint": "codeg 在這一輪進行中重新啟動，已自動恢復此會話",
         "continuedAfterLimit": "額度重置後已繼續",
-        "continuedAfterLimitHint": "帳戶的用量額度已重置，codeg 自動繼續了此對話"
+        "continuedAfterLimitHint": "帳戶的用量額度已重置，codeg 自動繼續了此對話",
+        "agentWake": {
+          "continued": "自行繼續",
+          "wokenByQuestion": "因子代理的提問而喚醒",
+          "wokenBySettled": "因子代理結束而喚醒",
+          "wokenByAttention": "因子代理的提醒而喚醒",
+          "wokenByJob": "因背景工作結束而喚醒",
+          "wokenByExtension": "因擴充功能訊息而喚醒",
+          "andMore": "{reason}，另有 {count} 則通知"
+        }
       },
       "liveTurnStats": {
         "thinking": "思考中...",
@@ -4253,6 +4262,43 @@
           "outputMissing": "codex 截斷指令碼輸出時捨棄了這個命令的分隔行，因此沒有輸出可歸屬給它。",
           "sharedWith": "本段還包含 {commands} 的輸出——它們的分隔行已被 codex 截斷捨棄。",
           "truncated": "已截斷"
+        },
+        "agentRun": {
+          "children": "{count} 個子代理",
+          "statusCompleted": "已完成",
+          "statusFailed": "失敗",
+          "statusPaused": "已暫停",
+          "statusStopped": "已停止",
+          "statusRunning": "執行中",
+          "statusPending": "已啟動 · 結果待定",
+          "asked": "提問：",
+          "answered": "回答：",
+          "noAnswer": "未記錄回答",
+          "turns": "{count} 輪",
+          "tokens": "{count} 個權杖",
+          "transcript": "對話記錄",
+          "task": "任務",
+          "error": "錯誤",
+          "result": "結果",
+          "more": "展開",
+          "less": "收合",
+          "modelNotes": "模型看到的內容",
+          "noteLaunch": "啟動",
+          "noteQuestion": "提問",
+          "noteChild": "子任務結束",
+          "noteResult": "執行結束",
+          "noteAttention": "提醒",
+          "noteJobExit": "工作結束",
+          "noteNotice": "通知"
+        },
+        "backgroundJob": {
+          "completed": "結束碼 {code}",
+          "failedWithCode": "失敗 · 結束碼 {code}",
+          "failed": "失敗",
+          "killedBy": "已終止（{reason}）",
+          "killed": "已終止",
+          "ended": "已結束",
+          "pending": "背景 · 未記錄結束"
         }
       },
       "messageNav": {

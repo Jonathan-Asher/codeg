@@ -20,6 +20,7 @@ import { CompletedTurnContent } from "./completed-turn-content"
 import { ContextCompactionCard } from "./context-compaction-card"
 import { CollapsibleUserMessage } from "./collapsible-user-message"
 import { CollapsibleSystemMessage } from "./collapsible-system-message"
+import { AgentWakeDivider, agentWakeFromParts } from "./agent-wake-divider"
 import {
   contextCompactionPayload,
   contextCompactionSummary,
@@ -41,6 +42,7 @@ import {
 import { TurnStats } from "./turn-stats"
 import { LiveTurnStats } from "./live-turn-stats"
 import { ModelLabelProvider } from "./model-label-context"
+import { TranscriptAgentTypeProvider } from "./transcript-agent-context"
 import { ReplyArtifacts } from "./reply-artifacts"
 import { UserResourceLinks } from "./user-resource-links"
 import { SteerStateCaption } from "./steer-state-caption"
@@ -1180,6 +1182,10 @@ const HistoricalMessageGroup = memo(function HistoricalMessageGroup({
   readAloudScope?: string
 }) {
   if (group.role === "system") {
+    // A run the agent started by itself (Pi, woken by a notice): a divider
+    // between its replies, not a system note.
+    const wake = agentWakeFromParts(group.parts)
+    if (wake) return <AgentWakeDivider wake={wake} />
     return <CollapsibleSystemMessage parts={group.parts} />
   }
 
@@ -2640,7 +2646,11 @@ export function MessageListView({
     <MarkdownImageProvider
       rootPath={imageRoot === undefined ? storedImageRoot : imageRoot}
     >
-      <ModelLabelProvider value={modelLabel}>{thread}</ModelLabelProvider>
+      <ModelLabelProvider value={modelLabel}>
+        <TranscriptAgentTypeProvider value={agentType}>
+          {thread}
+        </TranscriptAgentTypeProvider>
+      </ModelLabelProvider>
     </MarkdownImageProvider>
   )
 }

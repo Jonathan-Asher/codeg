@@ -433,11 +433,79 @@ function parseGrokTaskOutputEnvelopes(text: string): BackgroundTaskEnvelope[] {
     .filter((e): e is BackgroundTaskEnvelope => e !== null)
 }
 
+/**
+ * Parse a Pi `bgj_status` / `bgj_wait` / `bgj_kill` result (pi-bg-jobs). Each
+ * reports one job as a line, then (status / wait) its output tail:
+ *
+ *   [jb-x] completed (exit 0) · 3m 52s · <command preview>
+ *
+ *   --- output tail ---
+ *   …
+ *
+ * Older builds spell the state `completed exit 0` / `killed killed (bgj_kill)`
+ * / `failed exit 1`; current ones `completed (exit 0)` / `killed (bgj_kill)` /
+ * `failed (exit 1)` / `stopping (bgj_kill)` / `ended (exit code unknown)`. A
+ * kill answers `Sent SIGTERM to <id> (<command>)…`, or `Already finished:`
+ * and the job line. The `[jb-…]` id anchors both shapes, so ordinary output
+ * cannot be read as one.
+ */
+const PI_JOB_LINE_RE =
+  /^(?:Already finished: )?\[(jb-[A-Za-z0-9_.-]+)\] ([^·\n]+?) · ([^·\n]+?) · ([^\n]*)/
+const PI_JOB_KILL_RE =
+  /^Sent SIGTERM to (jb-[A-Za-z0-9_.-]+) \(([\s\S]*)\)(?:; SIGKILL follows[\s\S]*)?$/
+
+function parsePiJobEnvelope(text: string): BackgroundTaskEnvelope | null {
+  const kill = text.match(PI_JOB_KILL_RE)
+  if (kill) {
+    return {
+      kind: "stop",
+      retrievalStatus: null,
+      taskId: kill[1],
+      taskType: "local_bash",
+      status: "stopped",
+      exitCode: null,
+      output: null,
+      command: kill[2],
+      message: null,
+    }
+  }
+  const line = text.match(PI_JOB_LINE_RE)
+  if (!line) return null
+  const state = line[2].trim()
+  const exit = state.match(/exit (-?\d+)/)
+  const exitCode = exit ? parseInt(exit[1], 10) : null
+  const tail = text.split("\n--- output tail ---\n")[1]
+  const output =
+    tail != null && tail.trim() !== "" && tail.trim() !== "(no output)"
+      ? tail.replace(/\n+$/, "")
+      : null
+  const base = {
+    retrievalStatus: null,
+    taskId: line[1],
+    taskType: "local_bash",
+    exitCode,
+    output,
+    command: line[4].trim() || null,
+    message: null,
+  }
+  if (state.startsWith("killed")) {
+    return { ...base, kind: "stop", status: "stopped" }
+  }
+  const status = state.startsWith("completed")
+    ? "completed"
+    : state.startsWith("failed")
+      ? "failed"
+      : state.startsWith("ended")
+        ? "completed"
+        : "running"
+  return { ...base, kind: "poll", status }
+}
+
 /** Every task reported by one background-task tool result: a single envelope for
- *  Claude Code's poll/stop and CodeBuddy's plain-text snapshot shapes, and one
- *  per task for Grok's `TaskOutput` (whose `MultiResult` variant can cover
- *  several). Empty when the text is none of them (callers fall back to generic
- *  rendering). */
+ *  Claude Code's poll/stop, CodeBuddy's plain-text snapshot and Pi's job-line
+ *  shapes, and one per task for Grok's `TaskOutput` (whose `MultiResult`
+ *  variant can cover several). Empty when the text is none of them (callers
+ *  fall back to generic rendering). */
 export function parseBackgroundTaskEnvelopes(
   text: string | null | undefined
 ): BackgroundTaskEnvelope[] {
@@ -446,7 +514,8 @@ export function parseBackgroundTaskEnvelopes(
   const single =
     parsePollEnvelope(raw) ??
     parseStopEnvelope(raw) ??
-    parseCodeBuddySnapshot(raw)
+    parseCodeBuddySnapshot(raw) ??
+    parsePiJobEnvelope(raw)
   if (single) return [single]
   return parseGrokTaskOutputEnvelopes(raw)
 }
@@ -479,6 +548,10 @@ const BACKGROUND_TASK_NAMES: ReadonlySet<string> = new Set([
   "taskstop",
   "task_output",
   "task_stop",
+  // Pi (pi-bg-jobs): its jobs are started by `bgj_run`, a command card.
+  "bgj_status",
+  "bgj_wait",
+  "bgj_kill",
 ])
 
 function parseInputObject(
@@ -625,6 +698,10 @@ function inputTaskId(input: string | null | undefined): string | null {
   if (!obj) return null
   if (typeof obj.task_id === "string" && obj.task_id.length > 0) {
     return obj.task_id
+  }
+  // Pi's bgj_status / bgj_wait / bgj_kill name their job `id`.
+  if (typeof obj.id === "string" && obj.id.startsWith("jb-")) {
+    return obj.id
   }
   // Grok polls by list; a single-task poll still identifies its row, which is
   // what lets an in-flight poll merge into the same row as its settled sibling.

@@ -3994,7 +3994,16 @@
         "resumedAfterRestart": "Retomada após reinício",
         "resumedAfterRestartHint": "O codeg reiniciou no meio deste turno e retomou a sessão por conta própria",
         "continuedAfterLimit": "Continuado após o limite ser redefinido",
-        "continuedAfterLimitHint": "O limite de uso da conta foi redefinido e o codeg continuou a sessão sozinho"
+        "continuedAfterLimitHint": "O limite de uso da conta foi redefinido e o codeg continuou a sessão sozinho",
+        "agentWake": {
+          "continued": "Continuou por conta própria",
+          "wokenByQuestion": "acordado pela pergunta de um subagente",
+          "wokenBySettled": "acordado por um subagente que terminou",
+          "wokenByAttention": "acordado por um alerta de um subagente",
+          "wokenByJob": "acordado pelo fim de um job em segundo plano",
+          "wokenByExtension": "acordado por uma mensagem de extensão",
+          "andMore": "{reason} e mais {count, plural, one {# aviso} other {# avisos}}"
+        }
       },
       "liveTurnStats": {
         "thinking": "Pensando...",
@@ -4253,6 +4262,43 @@
           "outputMissing": "O codex truncou a saída do script e removeu o separador deste comando, então nenhuma saída pôde ser atribuída a ele.",
           "sharedWith": "Também contém a saída de {commands} — o codex truncou os separadores delas.",
           "truncated": "truncado"
+        },
+        "agentRun": {
+          "children": "{count, plural, one {# subagente} other {# subagentes}}",
+          "statusCompleted": "Concluído",
+          "statusFailed": "Falhou",
+          "statusPaused": "Pausado",
+          "statusStopped": "Parado",
+          "statusRunning": "Em execução",
+          "statusPending": "Iniciado · resultado pendente",
+          "asked": "Perguntou:",
+          "answered": "Resposta:",
+          "noAnswer": "nenhuma resposta registrada",
+          "turns": "{count, plural, one {# turno} other {# turnos}}",
+          "tokens": "{count} tokens",
+          "transcript": "Transcrição",
+          "task": "Tarefa",
+          "error": "Erro",
+          "result": "Resultado",
+          "more": "Mais",
+          "less": "Menos",
+          "modelNotes": "O que o modelo viu",
+          "noteLaunch": "Início",
+          "noteQuestion": "Pergunta",
+          "noteChild": "Filho concluído",
+          "noteResult": "Execução concluída",
+          "noteAttention": "Alerta",
+          "noteJobExit": "Fim do job",
+          "noteNotice": "Aviso"
+        },
+        "backgroundJob": {
+          "completed": "Saída {code}",
+          "failedWithCode": "Falhou · saída {code}",
+          "failed": "Falhou",
+          "killedBy": "Encerrado ({reason})",
+          "killed": "Encerrado",
+          "ended": "Finalizado",
+          "pending": "Em segundo plano · nenhuma saída registrada"
         }
       },
       "messageNav": {
