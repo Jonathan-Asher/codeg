@@ -1474,9 +1474,10 @@ impl SessionState {
                     self.last_assistant_text = None;
                 }
                 if let Some(live) = self.live_message.as_ref() {
-                    // A compaction card is not the agent's work: one that
-                    // lands after the reply (Pi compacts once a turn ends)
-                    // must not blank the reply that preceded it.
+                    // A compaction card, or a marker codeg draws for Pi (what
+                    // woke a run, an unclaimed notice), is not the agent's
+                    // work: one that lands after the reply (Pi compacts once
+                    // a turn ends) must not blank the reply before it.
                     let after_last_tool_call = live
                         .content
                         .iter()
@@ -1484,7 +1485,7 @@ impl SessionState {
                             LiveContentBlock::ToolCallRef { tool_call_id } => !self
                                 .active_tool_calls
                                 .get(tool_call_id)
-                                .is_some_and(|call| is_compaction_call(call.meta.as_ref())),
+                                .is_some_and(|call| is_marker_call(call.meta.as_ref())),
                             _ => false,
                         })
                         .map(|i| i + 1)
@@ -2548,11 +2549,18 @@ pub struct ToolCardState {
     pub meta: serde_json::Value,
 }
 
-/// Whether a call is a context-compaction card (`_meta.contextCompaction`,
-/// the shared marker every agent's compaction renders through).
-fn is_compaction_call(meta: Option<&serde_json::Value>) -> bool {
-    meta.and_then(|meta| meta.get("contextCompaction"))
+/// Whether a call is a card codeg draws rather than work the agent did: a
+/// context compaction (`_meta.contextCompaction`, the shared marker every
+/// agent's compaction renders through), or Pi's "woken by" marker and
+/// unclaimed-notice note (`acp::pi_meta`).
+fn is_marker_call(meta: Option<&serde_json::Value>) -> bool {
+    let Some(meta) = meta else {
+        return false;
+    };
+    meta.get("contextCompaction")
         .is_some_and(|value| !value.is_null() && value.as_bool() != Some(false))
+        || meta.get("codeg.agentWake").is_some()
+        || meta.get("codeg.systemNote").is_some()
 }
 
 /// `to_snapshot()` 的输出——前端可消费的 wire shape。

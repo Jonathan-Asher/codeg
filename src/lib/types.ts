@@ -1053,6 +1053,9 @@ export interface DbConversationDetail {
    * timeline uses it to locate — and, while the live reply is in hand, hide — the
    * partial assistant turn some agents (OpenCode, Gemini) persist after the prompt
    * mid-stream, which would otherwise double-render against the live reply.
+   * For a run Pi started by itself (no prompt) it names the System turn of its
+   * "woken by" divider, or an id no turn carries before Pi wrote the run's
+   * first reply.
    */
   in_flight_user_turn_id?: string | null
   /**

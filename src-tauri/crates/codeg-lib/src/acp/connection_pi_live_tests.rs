@@ -669,10 +669,42 @@ fn the_detail_names_a_woken_runs_divider_as_its_in_flight_turn() {
     // The run began as the notice that woke it was written.
     let since = wake.timestamp;
     assert_eq!(pi_agent_turn_anchor(&detail.turns, since), wake.id);
-    // A divider from long before belongs to an earlier run.
+    // A divider whose replies are older than the run belongs to an earlier one.
     let later = since + chrono::Duration::minutes(5);
     assert_eq!(
         pi_agent_turn_anchor(&detail.turns, later),
         format!("pi-agent-turn-{}", later.timestamp_millis())
+    );
+    // Before Pi has written the run's first reply there is no divider yet:
+    // the walk stops at the earlier reply.
+    let unwritten: Vec<_> = detail
+        .turns
+        .iter()
+        .take_while(|t| !matches!(t.role, TurnRole::System))
+        .cloned()
+        .collect();
+    let now = chrono::Utc::now();
+    assert_eq!(
+        pi_agent_turn_anchor(&unwritten, now),
+        format!("pi-agent-turn-{}", now.timestamp_millis())
+    );
+
+    // Notices that arrived while Pi was idle date the divider seconds before
+    // the run (a workflow's lanes finishing one by one): it is still this run's.
+    let detail = history("01a1d12b-1b05-769f-b592-48fbdf920a53");
+    let at = detail
+        .turns
+        .iter()
+        .position(|t| matches!(t.role, TurnRole::System))
+        .expect("the workflow run's divider");
+    let reply = detail.turns[at + 1..]
+        .iter()
+        .find(|t| matches!(t.role, TurnRole::Assistant))
+        .expect("the woken run's reply");
+    let since = reply.timestamp - chrono::Duration::milliseconds(100);
+    assert!(detail.turns[at].timestamp < since - chrono::Duration::seconds(1));
+    assert_eq!(
+        pi_agent_turn_anchor(&detail.turns, since),
+        detail.turns[at].id
     );
 }

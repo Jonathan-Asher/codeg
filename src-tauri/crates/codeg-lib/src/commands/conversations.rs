@@ -2340,18 +2340,23 @@ pub async fn get_folder_conversation_with_live_core(
 /// A detail fetch or transcript parse this slow is logged with its timings.
 const SLOW_DETAIL: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// How far before a woken run's start the notice that woke it may be stamped
-/// (Pi writes the notice, then starts the run).
-const PI_WAKE_SLACK: chrono::Duration = chrono::Duration::seconds(1);
+/// How far before a woken run's start (as pi-acp saw it) Pi may stamp the
+/// run's own replies. They are written after the run starts; this only
+/// absorbs the two processes reading the same clock a moment apart.
+const PI_RUN_SLACK: chrono::Duration = chrono::Duration::milliseconds(250);
 
 /// The in-flight id of a run Pi started by itself, which began at `since`
 /// (Pi's clock, the transcript's): the System turn the history draws as its
 /// "woken by" divider once Pi has written the run's first reply, else a
 /// marker no turn carries. Either way the response says a turn is running,
 /// which is what keeps the client's live copy through the fetch; only the
-/// divider lets it hide the persisted half the live copy re-shows. The
-/// divider must be the newest one, after the user's last message and no
-/// older than the run, or an earlier run's would be taken for it.
+/// divider lets it hide the persisted half the live copy re-shows.
+///
+/// The divider is the newest one after the user's last message, with only
+/// this run's replies after it: a reply older than the run belongs to an
+/// earlier one, whose divider this is not. (The divider's own time is the
+/// first notice that woke it, which can be well before the run when several
+/// arrived while Pi was idle.)
 pub(crate) fn pi_agent_turn_anchor(
     turns: &[MessageTurn],
     since: chrono::DateTime<chrono::Utc>,
@@ -2359,12 +2364,8 @@ pub(crate) fn pi_agent_turn_anchor(
     for turn in turns.iter().rev() {
         match turn.role {
             TurnRole::User => break,
-            TurnRole::System if is_pi_wake_turn(turn) => {
-                if turn.timestamp >= since - PI_WAKE_SLACK {
-                    return turn.id.clone();
-                }
-                break;
-            }
+            TurnRole::Assistant if turn.timestamp < since - PI_RUN_SLACK => break,
+            TurnRole::System if is_pi_wake_turn(turn) => return turn.id.clone(),
             _ => {}
         }
     }

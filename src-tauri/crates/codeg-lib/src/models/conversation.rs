@@ -207,6 +207,11 @@ pub struct DbConversationDetail {
     /// locate — and, while the live reply is in hand, hide — the partial
     /// assistant turn some agents (OpenCode, Gemini) persist after the prompt
     /// mid-stream, which would otherwise double-render against the live reply.
+    ///
+    /// A run Pi started by itself has no prompt: for it this names the System
+    /// turn of its "woken by" marker once Pi has written the run's first reply,
+    /// else an id no turn carries, which still says a turn is running
+    /// (`pi_agent_turn_anchor`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub in_flight_user_turn_id: Option<String>,
     /// Turn-window metadata, present only when the request asked for a window
