@@ -1817,6 +1817,14 @@ pub fn build_router(
             "/usage_pool_restart_now",
             post(handlers::plan_usage::usage_pool_restart_now),
         )
+        .route(
+            "/usage_pool_redeem_reset",
+            post(handlers::plan_usage::usage_pool_redeem_reset),
+        )
+        .route(
+            "/usage_pool_recheck",
+            post(handlers::plan_usage::usage_pool_recheck),
+        )
         // ─── Claude Code sign-in ───
         .route(
             "/claude_auth_status",

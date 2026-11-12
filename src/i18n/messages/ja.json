@@ -2371,7 +2371,8 @@
       "workingWithItems": "作業中 · {count} 件実行中",
       "useReset": "リセットを使って再開",
       "useResetTitle": "{count, plural, =1 {使用量上限のリセットを使って上限を回復し、今すぐ再開します} other {# 回ある使用量上限のリセットを 1 回使って上限を回復し、今すぐ再開します}}",
-      "resetContinued": "リセットを使いました。セッションを再開します。"
+      "resetContinued": "リセットを使いました。セッションを再開します。",
+      "usePoolResetTitle": "{name} の使用量上限のリセットを 1 回使って上限を回復し、今すぐ再開します"
     },
     "conversationCard": {
       "untitledConversation": "無題の会話",
@@ -7046,7 +7047,45 @@
       "routingOrdered": "順序：新しいリクエストは上から順に、受け付けられる最初のアカウントに送られます",
       "reserveSummary": "予備 {percent}%",
       "reserveSummaryDynamic": "予備 {percent}%（リセット前に解放）",
-      "position": "{position} 番目"
+      "position": "{position} 番目",
+      "resets": {
+        "available": "{count, plural, other {リセット # 回}}",
+        "availableUntil": "{count, plural, other {リセット # 回}} · {date} に期限切れ",
+        "auto": "上限に達するとプールが自動で使います",
+        "cooldownUntil": "次に使えるのは {time}",
+        "confirmBody": "<b>{name}</b> でリセットを 1 回使いますか？{refills}が今すぐ回復します。元に戻すことはできません。",
+        "refills": {
+          "session": "5 時間の上限",
+          "weekly": "週間の上限",
+          "full": "5 時間と週間の上限",
+          "other": "使用量上限"
+        },
+        "outcome": {
+          "reset": "{name} でリセットを使いました。上限が回復しました。",
+          "alreadyUsed": "{name} のそのリセットは既に使われていました。今回は何も変わっていません。",
+          "unconfirmed": "{name} のリセットが通ったか確認できませんでした。もう一度試す前に再確認してください。"
+        },
+        "continued": "{name} でリセットを使いました。セッションを再開します。",
+        "recheck": "今すぐ再確認",
+        "recheckTitle": "このアカウントの使用量をプールに今すぐ読み直させます",
+        "recheckLifted": "{name} が再び使えるようになりました。",
+        "recheckSame": "{name} を読み直しました。解除できるものはまだありません。",
+        "recheckUnread": "プールは今 {name} の使用量を読めませんでした。",
+        "error": {
+          "recentlyUsed": "このアカウントではたった今リセットが使われました。",
+          "inProgress": "このアカウントでは既にリセットを使用中です。",
+          "cooldown": "このアカウントではまだ次のリセットを使えません。",
+          "noUsableReset": "このアカウントには今使えるリセットがありません。",
+          "notEligible": "このアカウントにはリセットが提供されていません。",
+          "disabled": "このアカウントはプールで一時停止中のため、リセットは使われません。",
+          "needsLogin": "このアカウントは先にサインインし直す必要があります。",
+          "noAccount": "プールにその名前のアカウントはありません。",
+          "tooSoon": "このアカウントはたった今確認されました。数秒後にもう一度お試しください。",
+          "failed": "うまくいきませんでした。しばらくしてからもう一度お試しください。",
+          "unsupported": "このアカウントプールは codeg からリセットを使えません。maxpool を更新してください。",
+          "unreachable": "アカウントプールが応答していません。"
+        }
+      }
     },
     "resets": {
       "title": "使用量上限のリセット",
@@ -7061,8 +7100,6 @@
       "use": "リセットを使う",
       "using": "使用中…",
       "needsLimit": "上限に達すると使えます",
-      "paused": "一時停止中",
-      "notStarted": "まだ使えません",
       "notUsableNow": "今は使えません",
       "left": "{count, plural, =0 {残りのリセットはありません。} other {残り # 回。}}",
       "pausedSessions": "{count, plural, other {上限で一時停止中のセッション # 件を今すぐ再開できます。}}",
@@ -7073,14 +7110,12 @@
         "session": "セッションのリセット",
         "weekly": "週間のリセット",
         "full": "フルリセット",
-        "fable": "Fable のリセット",
         "other": "上限のリセット"
       },
       "refills": {
         "session": "5 時間のセッション上限",
         "weekly": "週間の上限",
         "full": "すべての使用量上限",
-        "fable": "Fable の上限",
         "other": "使用量の上限"
       },
       "confirm": {
@@ -7094,19 +7129,21 @@
         "nothingToReset": "何も使われていません。このリセットは上限に達したときだけ使えます。",
         "noReset": "何も使われていません。そのリセットはもう利用できません。",
         "alreadyUsed": "そのリセットはすでに使われています。今回は何も変わっていません。",
-        "cooldown": "このアカウントで別のリセットを処理中です。何も使われていません。1 分後にもう一度お試しください。",
         "unconfirmed": "リセットが完了したか確認できませんでした。1 分たっても上限のままなら、もう一度お試しください。2 回目のリセットが使われることはありません。"
       },
       "error": {
         "notInstalled": "このマシンにインストールされていません。",
         "notLoggedIn": "このマシンでサインインしていないため、リセットを読み取れません。",
-        "loginExpired": "サインインの期限が切れています。セッションの次のリクエストで更新されるので、その後にお試しください。",
         "notEligible": "このアカウントはここでは使用量上限のリセットを利用できません。",
-        "surface": "Claude はこのリセットを Claude Code のターミナルアプリ（/limit-reset）と claude.ai でのみ提供しており、ほかのアプリには提供していません。",
         "unsupportedVersion": "このバージョンではリセットを使えません。エージェントを更新してください。",
         "network": "提供元に接続できませんでした。しばらくしてからお試しください。",
         "busy": "このアカウントではすでにリセットを使用中です。",
         "failed": "リセットを確認できませんでした。"
+      },
+      "claude": {
+        "elsewhere": "Claude の使用量上限のリセットは、Claude Code のターミナルアプリと claude.ai で使えます。",
+        "open": "claude.ai の使用状況を開く",
+        "hint": "または Claude Code で <code>/limit-reset</code> を実行します。"
       }
     }
   },

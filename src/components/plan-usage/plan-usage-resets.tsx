@@ -1,17 +1,19 @@
 "use client"
 
 /**
- * Usage-limit resets on the Subscription usage cards
- * (`commands/limit_resets.rs`): how many are left and until when, and a
+ * Usage-limit resets on the Subscription usage cards: Codex's
+ * (`commands/limit_resets.rs`) — how many are left and until when, and a
  * "Use reset" that asks first (it can't be undone), shows the attempt, says
- * what came of it and offers to continue the sessions paused at the limit.
- * The confirmation and the attempt are shared with a paused session's
- * banner (`conversations/limit-pause.tsx`).
+ * what came of it and offers to continue the sessions paused at the limit —
+ * and, on Claude Code's own card, where Claude's resets are used (its
+ * terminal app and claude.ai; a pool's accounts show theirs on the pool
+ * card). The confirmation and the attempt are shared with a paused
+ * session's banner (`conversations/limit-pause.tsx`).
  */
 
 import { useCallback, useState } from "react"
 import { useLocale, useTranslations } from "next-intl"
-import { Loader2, Play, RotateCcw } from "lucide-react"
+import { ExternalLink, Loader2, Play, RotateCcw } from "lucide-react"
 
 import {
   AlertDialog,
@@ -27,13 +29,14 @@ import { Button } from "@/components/ui/button"
 import { publishProviderResets } from "@/hooks/use-limit-resets"
 import { consumeLimitReset, continueLimitNow } from "@/lib/api"
 import { extractAppCommandError, toErrorMessage } from "@/lib/app-error"
+import { openInSystemBrowser } from "@/lib/link-open"
 import {
+  CLAUDE_USAGE_URL,
   formatResetDate,
   groupLimitResets,
   isQuietResetError,
   resetErrorKey,
   resetErrorKeyFromApp,
-  resetHeldKey,
   resetKindKey,
   resetOutcomeKey,
   resetOutcomeTone,
@@ -288,7 +291,6 @@ export function ProviderResetsSection({
       {groups.length > 0 && (
         <ul className="mt-2 space-y-2">
           {groups.map((group) => {
-            const held = resetHeldKey(group)
             const usingThis = busy && busyId === group.id
             return (
               <li
@@ -314,7 +316,6 @@ export function ProviderResetsSection({
                           date: formatResetDate(group.expires_at, locale, now),
                         })
                       : t("resets.noExpiry")}
-                    {held && <> · {t(held)}</>}
                   </p>
                 </div>
                 <Button
@@ -322,8 +323,7 @@ export function ProviderResetsSection({
                   size="xs"
                   variant="outline"
                   className="shrink-0"
-                  disabled={!group.usable_now || busy}
-                  title={held ? t(held) : undefined}
+                  disabled={busy}
                   onClick={() => setPending(group)}
                   data-testid="limit-reset-use"
                 >
@@ -396,6 +396,46 @@ export function ProviderResetsSection({
           }}
         />
       )}
+    </div>
+  )
+}
+
+/**
+ * Claude Code's resets on its own card (no pool in between): Claude offers
+ * them only in Claude Code's terminal app (`/limit-reset`) and on claude.ai,
+ * so the card says so and opens claude.ai's usage page.
+ */
+export function ClaudeResetsElsewhere() {
+  const t = useTranslations("PlanUsage")
+  return (
+    <div
+      data-slot="limit-resets"
+      data-agent="claude_code"
+      className="mt-4 border-t border-border pt-3"
+    >
+      <h3 className="text-xs font-medium">{t("resets.title")}</h3>
+      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+        {t("resets.claude.elsewhere")}
+      </p>
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          onClick={() => void openInSystemBrowser(CLAUDE_USAGE_URL)}
+          data-testid="claude-resets-open"
+        >
+          <ExternalLink aria-hidden />
+          {t("resets.claude.open")}
+        </Button>
+        <span className="text-[0.6875rem] text-muted-foreground">
+          {t.rich("resets.claude.hint", {
+            code: (chunks) => (
+              <code className="rounded bg-muted px-1 font-mono">{chunks}</code>
+            ),
+          })}
+        </span>
+      </div>
     </div>
   )
 }

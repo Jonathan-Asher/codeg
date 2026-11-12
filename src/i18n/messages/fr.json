@@ -2371,7 +2371,8 @@
       "workingWithItems": "En cours · {count} en cours d'exécution",
       "useReset": "Utiliser une réinitialisation et continuer",
       "useResetTitle": "{count, plural, =1 {Utiliser votre réinitialisation de la limite d'utilisation pour recharger la limite maintenant et continuer} other {Utiliser l'une de vos # réinitialisations de la limite d'utilisation pour recharger la limite maintenant et continuer}}",
-      "resetContinued": "Réinitialisation utilisée. La session reprend maintenant."
+      "resetContinued": "Réinitialisation utilisée. La session reprend maintenant.",
+      "usePoolResetTitle": "Utiliser l'une des réinitialisations de la limite d'utilisation de {name} pour recharger sa limite maintenant et continuer"
     },
     "conversationCard": {
       "untitledConversation": "Conversation sans titre",
@@ -7046,7 +7047,45 @@
       "routingOrdered": "Ordre : les nouvelles requêtes vont au premier compte qui peut les prendre, en partant du haut",
       "reserveSummary": "Réserve {percent} %",
       "reserveSummaryDynamic": "Réserve {percent} %, libérée avant la réinitialisation",
-      "position": "Position {position}"
+      "position": "Position {position}",
+      "resets": {
+        "available": "{count, plural, one {# réinitialisation} other {# réinitialisations}}",
+        "availableUntil": "{count, plural, one {# réinitialisation} other {# réinitialisations}} · expire le {date}",
+        "auto": "le pool en utilise une à la limite",
+        "cooldownUntil": "la prochaine utilisable {time}",
+        "confirmBody": "Utiliser 1 réinitialisation sur <b>{name}</b> ? Elle recharge la {refills} maintenant. C'est irréversible.",
+        "refills": {
+          "session": "limite de 5 heures",
+          "weekly": "limite hebdomadaire",
+          "full": "limite de 5 heures et la limite hebdomadaire",
+          "other": "limite d'utilisation"
+        },
+        "outcome": {
+          "reset": "Réinitialisation utilisée sur {name} : ses limites sont rechargées.",
+          "alreadyUsed": "Cette réinitialisation sur {name} avait déjà été utilisée. Rien n'a changé à l'instant.",
+          "unconfirmed": "Impossible de confirmer que la réinitialisation sur {name} est passée. Revérifiez le compte avant de réessayer."
+        },
+        "continued": "Réinitialisation utilisée sur {name}. La session reprend maintenant.",
+        "recheck": "Revérifier",
+        "recheckTitle": "Faire relire maintenant par le pool l'utilisation de ce compte",
+        "recheckLifted": "{name} est de nouveau utilisable.",
+        "recheckSame": "{name} relu : rien à lever pour l'instant.",
+        "recheckUnread": "Le pool n'a pas pu lire l'utilisation de {name} pour le moment.",
+        "error": {
+          "recentlyUsed": "Une réinitialisation vient d'être utilisée sur ce compte.",
+          "inProgress": "Une réinitialisation est déjà en cours d'utilisation sur ce compte.",
+          "cooldown": "Une autre réinitialisation ne peut pas encore être utilisée sur ce compte.",
+          "noUsableReset": "Ce compte n'a aucune réinitialisation utilisable pour le moment.",
+          "notEligible": "Aucune réinitialisation n'est proposée à ce compte.",
+          "disabled": "Ce compte est en pause dans le pool, ses réinitialisations ne sont donc pas utilisées.",
+          "needsLogin": "Ce compte doit d'abord se reconnecter.",
+          "noAccount": "Le pool n'a aucun compte de ce nom.",
+          "tooSoon": "Ce compte vient d'être vérifié. Réessayez dans quelques secondes.",
+          "failed": "Cela n'a pas fonctionné. Réessayez dans un instant.",
+          "unsupported": "Ce pool de comptes ne peut pas utiliser de réinitialisations depuis codeg. Mettez maxpool à jour.",
+          "unreachable": "Le pool de comptes ne répond pas."
+        }
+      }
     },
     "resets": {
       "title": "Réinitialisations de la limite d'utilisation",
@@ -7061,8 +7100,6 @@
       "use": "Utiliser",
       "using": "Utilisation…",
       "needsLimit": "Utilisable une fois une limite atteinte",
-      "paused": "En pause pour l'instant",
-      "notStarted": "Pas encore utilisable",
       "notUsableNow": "Inutilisable pour le moment",
       "left": "{count, plural, =0 {Plus aucune réinitialisation.} one {# réinitialisation restante.} other {# réinitialisations restantes.}}",
       "pausedSessions": "{count, plural, one {# session en pause à la limite peut reprendre maintenant.} other {# sessions en pause à la limite peuvent reprendre maintenant.}}",
@@ -7073,14 +7110,12 @@
         "session": "Réinitialisation de session",
         "weekly": "Réinitialisation hebdomadaire",
         "full": "Réinitialisation complète",
-        "fable": "Réinitialisation Fable",
         "other": "Réinitialisation de limite"
       },
       "refills": {
         "session": "votre limite de session de 5 heures",
         "weekly": "votre limite hebdomadaire",
         "full": "toutes vos limites d'utilisation",
-        "fable": "votre limite Fable",
         "other": "vos limites d'utilisation"
       },
       "confirm": {
@@ -7094,19 +7129,21 @@
         "nothingToReset": "Rien n'a été utilisé : cette réinitialisation ne fonctionne qu'une fois une limite atteinte.",
         "noReset": "Rien n'a été utilisé : cette réinitialisation n'est plus disponible.",
         "alreadyUsed": "Cette réinitialisation avait déjà été utilisée. Rien n'a changé à l'instant.",
-        "cooldown": "Une autre réinitialisation est en cours sur ce compte. Rien n'a été utilisé ; réessayez dans une minute.",
         "unconfirmed": "Impossible de confirmer que la réinitialisation a abouti. Si vous êtes toujours à la limite dans une minute, réessayez : cela n'utilisera pas une deuxième réinitialisation."
       },
       "error": {
         "notInstalled": "Non installé sur cette machine.",
         "notLoggedIn": "Aucune connexion sur cette machine : ses réinitialisations ne peuvent pas être lues.",
-        "loginExpired": "La connexion a expiré. Elle se renouvelle à la prochaine requête de la session ; réessayez ensuite.",
         "notEligible": "Ce compte ne se voit pas proposer de réinitialisations de la limite d'utilisation ici.",
-        "surface": "Claude ne propose ces réinitialisations que dans l'app de terminal de Claude Code (/limit-reset) et sur claude.ai, pas aux autres apps.",
         "unsupportedVersion": "Cette version ne peut pas utiliser de réinitialisations. Mettez l'agent à jour.",
         "network": "Impossible de joindre le fournisseur. Réessayez dans un instant.",
         "busy": "Une réinitialisation est déjà en cours d'utilisation pour ce compte.",
         "failed": "Impossible de vérifier les réinitialisations."
+      },
+      "claude": {
+        "elsewhere": "Claude propose ses réinitialisations de la limite d'utilisation dans l'app de terminal de Claude Code et sur claude.ai.",
+        "open": "Ouvrir l'utilisation sur claude.ai",
+        "hint": "Ou lancez <code>/limit-reset</code> dans Claude Code."
       }
     }
   },

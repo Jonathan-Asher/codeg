@@ -245,10 +245,6 @@ pub(crate) fn parse_credits(summary: Option<&Value>, now: i64) -> (u32, Vec<Limi
                 description: None,
                 count: available,
                 expires_at: None,
-                usable_now: true,
-                requires_limit: false,
-                clears: Vec::new(),
-                unavailable_reason: None,
             }]
         } else {
             Vec::new()
@@ -278,10 +274,6 @@ pub(crate) fn parse_credits(summary: Option<&Value>, now: i64) -> (u32, Vec<Limi
                 description: text(credit.get("description")),
                 count: 1,
                 expires_at,
-                usable_now: true,
-                requires_limit: false,
-                clears: Vec::new(),
-                unavailable_reason: None,
             })
         })
         .collect();

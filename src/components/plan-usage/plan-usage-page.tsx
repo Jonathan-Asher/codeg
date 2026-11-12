@@ -48,7 +48,10 @@ import {
   WindowResetText,
   WindowUsageBar,
 } from "./plan-usage-parts"
-import { ProviderResetsSection } from "./plan-usage-resets"
+import {
+  ClaudeResetsElsewhere,
+  ProviderResetsSection,
+} from "./plan-usage-resets"
 import {
   PoolAccountList,
   PoolNotices,
@@ -209,15 +212,20 @@ function ProviderCard({
     hasData && !stale && snapshot.status && snapshot.status in STATUS_KEYS
       ? (snapshot.status as keyof typeof STATUS_KEYS)
       : null
-  const resetsSection = (
-    <ProviderResetsSection
-      agent={agent}
-      resets={resets}
-      loading={resetsLoading}
-      now={now}
-      onUsed={onResetUsed}
-    />
-  )
+  // Claude Code's own resets are used in its apps; a pool's accounts show
+  // theirs on their rows, where the pool can use them.
+  const resetsSection =
+    agent === "claude_code" ? (
+      <ClaudeResetsElsewhere />
+    ) : (
+      <ProviderResetsSection
+        agent={agent}
+        resets={resets}
+        loading={resetsLoading}
+        now={now}
+        onUsed={onResetUsed}
+      />
+    )
   const pool = activePool(report)
   if (pool && pool.agent === agent) {
     return (
@@ -228,7 +236,11 @@ function ProviderCard({
         snapshot={hasData ? snapshot : null}
         now={now}
         onPoolChanged={onPoolChanged}
-        resetsSection={resetsSection}
+        resetsSection={
+          agent === "claude_code" && pool.resets_supported
+            ? undefined
+            : resetsSection
+        }
       />
     )
   }
@@ -316,7 +328,7 @@ function PoolProviderCard({
   now: number
   /** Re-read the report after an account change. */
   onPoolChanged?: () => void
-  /** The resets of the account the CLI itself is signed in with. */
+  /** The agent's own resets, when the pool's rows don't carry them. */
   resetsSection?: ReactNode
 }) {
   const t = useTranslations("PlanUsage")

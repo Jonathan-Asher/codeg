@@ -2371,7 +2371,8 @@
       "workingWithItems": "工作中 · {count} 个运行中",
       "useReset": "使用重置并继续",
       "useResetTitle": "{count, plural, =1 {使用你的用量上限重置，立即恢复上限并继续} other {使用 # 次用量上限重置中的一次，立即恢复上限并继续}}",
-      "resetContinued": "已使用重置，会话现在继续。"
+      "resetContinued": "已使用重置，会话现在继续。",
+      "usePoolResetTitle": "使用 {name} 的一次用量上限重置，立即恢复其上限并继续"
     },
     "conversationCard": {
       "untitledConversation": "未命名会话",
@@ -7046,7 +7047,45 @@
       "routingOrdered": "顺序：新请求从上往下发往第一个能接收的账号",
       "reserveSummary": "预留 {percent}%",
       "reserveSummaryDynamic": "预留 {percent}%，临近重置时释放",
-      "position": "第 {position} 位"
+      "position": "第 {position} 位",
+      "resets": {
+        "available": "{count, plural, other {# 次重置}}",
+        "availableUntil": "{count, plural, other {# 次重置}} · {date} 到期",
+        "auto": "达到上限时账号池会自动使用一次",
+        "cooldownUntil": "下一次可在 {time} 使用",
+        "confirmBody": "要在 <b>{name}</b> 上使用 1 次重置吗？这会立即恢复{refills}，且无法撤销。",
+        "refills": {
+          "session": "5 小时上限",
+          "weekly": "每周上限",
+          "full": "5 小时上限和每周上限",
+          "other": "用量上限"
+        },
+        "outcome": {
+          "reset": "已在 {name} 上使用重置：上限已恢复。",
+          "alreadyUsed": "{name} 上的这次重置之前已用过。刚才没有任何变化。",
+          "unconfirmed": "无法确认 {name} 上的重置是否生效。再试之前请先重新检查。"
+        },
+        "continued": "已在 {name} 上使用重置，会话现在继续。",
+        "recheck": "立即重新检查",
+        "recheckTitle": "让账号池立即重新读取此账号的用量",
+        "recheckLifted": "{name} 已可再次使用。",
+        "recheckSame": "已重新读取 {name}：暂时没有可解除的限制。",
+        "recheckUnread": "账号池刚才无法读取 {name} 的用量。",
+        "error": {
+          "recentlyUsed": "此账号刚刚使用过一次重置。",
+          "inProgress": "此账号正在使用一次重置。",
+          "cooldown": "此账号暂时还不能再使用重置。",
+          "noUsableReset": "此账号现在没有可用的重置。",
+          "notEligible": "此账号不提供重置。",
+          "disabled": "此账号在账号池中已暂停，因此不会使用它的重置。",
+          "needsLogin": "此账号需要先重新登录。",
+          "noAccount": "账号池中没有这个名称的账号。",
+          "tooSoon": "此账号刚刚检查过。请过几秒再试。",
+          "failed": "操作没有成功。请稍后再试。",
+          "unsupported": "此账号池无法通过 codeg 使用重置。请更新 maxpool。",
+          "unreachable": "账号池没有响应。"
+        }
+      }
     },
     "resets": {
       "title": "用量上限重置",
@@ -7061,8 +7100,6 @@
       "use": "使用重置",
       "using": "正在使用…",
       "needsLimit": "达到上限后才能使用",
-      "paused": "暂时停用",
-      "notStarted": "尚未开放",
       "notUsableNow": "当前无法使用",
       "left": "{count, plural, =0 {已无剩余重置。} other {剩余 # 次重置。}}",
       "pausedSessions": "{count, plural, other {有 # 个因上限暂停的会话现在可以继续。}}",
@@ -7073,14 +7110,12 @@
         "session": "会话重置",
         "weekly": "每周重置",
         "full": "完整重置",
-        "fable": "Fable 重置",
         "other": "上限重置"
       },
       "refills": {
         "session": "你的 5 小时会话上限",
         "weekly": "你的每周上限",
         "full": "你的所有用量上限",
-        "fable": "你的 Fable 上限",
         "other": "你的用量上限"
       },
       "confirm": {
@@ -7094,19 +7129,21 @@
         "nothingToReset": "未使用任何重置：此重置只能在达到上限后使用。",
         "noReset": "未使用任何重置：该重置已不可用。",
         "alreadyUsed": "该重置已被使用，刚才没有任何变化。",
-        "cooldown": "此账号上另一次重置正在进行中。未使用任何重置，请一分钟后再试。",
         "unconfirmed": "无法确认重置是否成功。如果一分钟后仍处于上限，请重试：不会额外消耗第二次重置。"
       },
       "error": {
         "notInstalled": "此机器上未安装。",
         "notLoggedIn": "此机器上未登录，无法读取其重置。",
-        "loginExpired": "登录已过期。会话下次发出请求时会自动续期，之后再试。",
         "notEligible": "此账号在这里无法使用用量上限重置。",
-        "surface": "Claude 只在 Claude Code 终端应用（/limit-reset）和 claude.ai 中提供这些重置，不向其他应用提供。",
         "unsupportedVersion": "此版本无法使用重置，请更新该智能体。",
         "network": "无法连接到服务方，请稍后再试。",
         "busy": "此账号正在使用一次重置。",
         "failed": "无法检查重置。"
+      },
+      "claude": {
+        "elsewhere": "Claude 的用量上限重置可在 Claude Code 终端应用和 claude.ai 上使用。",
+        "open": "打开 claude.ai 用量页面",
+        "hint": "或在 Claude Code 中运行 <code>/limit-reset</code>。"
       }
     }
   },

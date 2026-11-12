@@ -5,9 +5,10 @@
  * resets, kept current while it is shown, and what the user can do about it —
  * continue now (ahead of the reset; it may hit the limit again), cancel the
  * automatic continuation (the turn is left interrupted, with the manual
- * Continue), or, when the account has one, use a usage-limit reset and
- * continue right away (`lib/limit-resets.ts`). Shared by the composer banner
- * and the Session Details activity line.
+ * Continue), or, when one can be used, use a usage-limit reset and continue
+ * right away (`lib/limit-resets.ts`): a Codex credit, or a grant of one of
+ * the account pool's Claude accounts. Shared by the composer banner and the
+ * Session Details activity line.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react"
@@ -22,12 +23,18 @@ import {
 import { useLocale, useTranslations } from "next-intl"
 import { toast } from "sonner"
 
+import { useNowSeconds } from "@/components/plan-usage/plan-usage-parts"
+import {
+  PoolResetConfirmDialog,
+  usePoolResetRun,
+} from "@/components/plan-usage/plan-usage-pool-resets"
 import {
   LimitResetConfirmDialog,
   useLimitResetRun,
 } from "@/components/plan-usage/plan-usage-resets"
 import { Button } from "@/components/ui/button"
 import { useLimitResets } from "@/hooks/use-limit-resets"
+import { usePlanUsageReport } from "@/hooks/use-plan-usage-report"
 import { cancelLimitContinue, continueLimitNow } from "@/lib/api"
 import { toErrorMessage } from "@/lib/app-error"
 import {
@@ -36,7 +43,12 @@ import {
   waitingLimitPause,
   type LimitResetParts,
 } from "@/lib/limit-continue"
-import { defaultUsableReset, findProviderResets } from "@/lib/limit-resets"
+import {
+  defaultUsableReset,
+  findProviderResets,
+  poolResetForPause,
+} from "@/lib/limit-resets"
+import { poolAccountState } from "@/lib/plan-usage"
 import type {
   AgentType,
   LimitPause,
@@ -216,9 +228,10 @@ export function resetProviderOf(
 }
 
 /**
- * "Use a reset and continue": shown only while the account has a reset it
- * can use now. Asks first, like the Subscription usage screen; once the
- * reset lands, the backend sends the session's continuation right away.
+ * "Use a reset and continue" for a Codex session: shown only while Codex has
+ * a reset it can use now. Asks first, like the Subscription usage screen;
+ * once the reset lands, the backend sends the session's continuation right
+ * away.
  */
 export function LimitResetContinueButton({
   conversationId,
@@ -289,6 +302,74 @@ export function LimitResetContinueButton({
   )
 }
 
+/** How often the pool's holds are re-judged while the banner shows. */
+const POOL_TICK_MS = 30_000
+
+/**
+ * "Use a reset and continue" for a Claude Code session behind the account
+ * pool: shown while one of the pool's accounts has a reset it can use now.
+ * It asks first ("Use 1 reset on primary?"), has the pool use it on the
+ * account it frees most (one held by its limit, the grant that expires
+ * first), and sends the session's continuation once it lands.
+ */
+export function PoolResetContinueButton({
+  conversationId,
+  buttonClassName,
+}: {
+  conversationId: number
+  buttonClassName?: string
+}) {
+  const t = useTranslations("Folder.sessionActivity")
+  const { report, load } = usePlanUsageReport()
+  const now = useNowSeconds(POOL_TICK_MS)
+  const reload = useCallback(() => void load(true), [load])
+  const { busy, run } = usePoolResetRun(reload)
+  const [confirming, setConfirming] = useState(false)
+  const pick = poolResetForPause(report?.pool ?? null, now, (account) =>
+    poolAccountState(account, now)
+  )
+  if (!pick) return null
+  return (
+    <>
+      <Button
+        size="xs"
+        variant="outline"
+        className={buttonClassName}
+        title={t("usePoolResetTitle", { name: pick.account.name })}
+        disabled={busy}
+        onClick={() => setConfirming(true)}
+        data-testid="limit-use-reset"
+        data-reset-account={pick.account.name}
+      >
+        {busy ? (
+          <Loader2 aria-hidden className="animate-spin" />
+        ) : (
+          <RotateCcw aria-hidden />
+        )}
+        {t("useReset")}
+      </Button>
+      {confirming && (
+        <PoolResetConfirmDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setConfirming(false)
+          }}
+          account={pick.account.name}
+          grant={pick.grant}
+          onConfirm={() => {
+            setConfirming(false)
+            void run({
+              account: pick.account.name,
+              grantId: pick.grant.id,
+              conversationId,
+            })
+          }}
+        />
+      )}
+    </>
+  )
+}
+
 /**
  * Docked above the composer of a conversation paused on the usage limit:
  * says when it continues by itself, and offers Cancel auto-continue and
@@ -311,10 +392,10 @@ export function LimitPausedBanner({
   const t = useTranslations("Folder.sessionActivity")
   const parts = useLimitResetParts(pause.resets_at)
   const claimed = pause.state === "claimed"
-  // A reset refills the agent CLI's own account; a pool's pause waits on
-  // other accounts, so it is offered for the account's own limit only.
-  const resetProvider =
-    !claimed && reason === "usage_limit" ? resetProviderOf(agentType) : null
+  // Codex's reset refills its own account, so it is offered for that
+  // account's limit; a Claude session's comes from the account pool, which
+  // is also what a pool's pause waits on.
+  const provider = claimed ? null : resetProviderOf(agentType)
   const buttonClassName =
     "border-violet-500/40 bg-transparent text-violet-700 hover:bg-violet-500/15 hover:text-violet-800 dark:text-violet-300 dark:hover:text-violet-200"
   return (
@@ -342,10 +423,16 @@ export function LimitPausedBanner({
               })}
         </span>
       </span>
-      {resetProvider && (
+      {provider === "codex" && reason === "usage_limit" && (
         <LimitResetContinueButton
           conversationId={conversationId}
-          provider={resetProvider}
+          provider={provider}
+          buttonClassName={buttonClassName}
+        />
+      )}
+      {provider === "claude_code" && (
+        <PoolResetContinueButton
+          conversationId={conversationId}
           buttonClassName={buttonClassName}
         />
       )}

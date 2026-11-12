@@ -30,9 +30,15 @@ vi.mock("@/lib/api", () => ({
   getLimitResets: h.getLimitResets,
 }))
 
+const openInSystemBrowser = vi.hoisted(() => vi.fn())
+vi.mock("@/lib/link-open", () => ({ openInSystemBrowser }))
+
 import { resetLimitResetsCacheForTests } from "@/hooks/use-limit-resets"
 
-import { ProviderResetsSection } from "./plan-usage-resets"
+import {
+  ClaudeResetsElsewhere,
+  ProviderResetsSection,
+} from "./plan-usage-resets"
 
 const R = enMessages.PlanUsage.resets
 /** 2026-11-12T18:00:00Z. */
@@ -46,10 +52,6 @@ function item(over: Partial<LimitResetItem> = {}): LimitResetItem {
     description: "Thanks for using Codex!",
     count: 1,
     expires_at: Date.UTC(2026, 10, 30, 12) / 1000,
-    usable_now: true,
-    requires_limit: false,
-    clears: [],
-    unavailable_reason: null,
     ...over,
   }
 }
@@ -76,7 +78,6 @@ function used(over: Partial<UseLimitResetResult> = {}): UseLimitResetResult {
   return {
     provider: "codex",
     outcome: "reset",
-    cleared: [],
     resets: codexResets({ available: 1, items: [item({ id: "credit-late" })] }),
     paused_conversations: [],
     continued: null,
@@ -265,57 +266,18 @@ describe("ProviderResetsSection", () => {
     expect(h.continueLimitNow).toHaveBeenCalledWith(6)
   })
 
-  it("explains why Claude's resets aren't offered here, with no button", () => {
-    wrap(
-      <ProviderResetsSection
-        agent="claude_code"
-        resets={{
-          provider: "claude_code",
-          available: 0,
-          items: [],
-          source: "claude_oauth",
-          account: "me@example.com",
-          error: {
-            code: "not_eligible",
-            message: "not offered",
-            reason: "surface",
-          },
-          fetched_at: NOW,
-        }}
-        loading={false}
-        now={NOW}
-      />
-    )
-    expect(screen.getByRole("note")).toHaveTextContent(R.error.surface)
+  it("points Claude's own resets to its apps: claude.ai and /limit-reset", () => {
+    openInSystemBrowser.mockReset().mockResolvedValue(undefined)
+    wrap(<ClaudeResetsElsewhere />)
+    expect(screen.getByText(R.claude.elsewhere)).toBeInTheDocument()
+    expect(screen.getByText("/limit-reset").tagName).toBe("CODE")
     expect(screen.queryByTestId("limit-reset-use")).toBeNull()
-    expect(screen.queryByTestId("limit-resets-available")).toBeNull()
-  })
-
-  it("keeps a reset that can't be used now visible, with its reason", () => {
-    wrap(
-      <ProviderResetsSection
-        agent="claude_code"
-        resets={codexResets({
-          provider: "claude_code",
-          available: 1,
-          items: [
-            item({
-              id: "saved",
-              kind: "weekly",
-              label: "One full limit reset (November 2026)",
-              usable_now: false,
-              requires_limit: true,
-            }),
-          ],
-        })}
-        loading={false}
-        now={NOW}
-      />
+    fireEvent.click(screen.getByTestId("claude-resets-open"))
+    expect(openInSystemBrowser).toHaveBeenCalledWith(
+      "https://claude.ai/settings/usage"
     )
-    const button = screen.getByTestId("limit-reset-use")
-    expect(button).toBeDisabled()
-    expect(button).toHaveAttribute("title", R.needsLimit)
-    expect(screen.getByRole("listitem")).toHaveTextContent(R.needsLimit)
+    expect(h.getLimitResets).not.toHaveBeenCalled()
+    expect(h.consumeLimitReset).not.toHaveBeenCalled()
   })
 
   it("says nothing for an agent that isn't installed, and waits quietly", () => {

@@ -171,3 +171,44 @@ pub async fn usage_pool_remove(
 pub async fn usage_pool_restart_now() -> Result<Json<PoolManageInfo>, AppCommandError> {
     manage::restart_now().await.map(Json)
 }
+
+// ─── The pool's usage-limit resets ──────────────────────────────────────
+
+use std::sync::Arc;
+
+use axum::extract::Extension;
+
+use crate::app_state::AppState;
+use crate::commands::usage_pool::resets::{self, PoolRecheckResult, PoolRedeemResult};
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PoolRedeemResetParams {
+    pub name: String,
+    /// The grant to use; the provider's next one when absent.
+    #[serde(default)]
+    pub grant_id: Option<String>,
+    /// A session paused at its limit, to continue once the reset lands.
+    #[serde(default)]
+    pub conversation_id: Option<i32>,
+}
+
+pub async fn usage_pool_redeem_reset(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<PoolRedeemResetParams>,
+) -> Result<Json<PoolRedeemResult>, AppCommandError> {
+    resets::redeem_reset(
+        &state.db,
+        &params.name,
+        params.grant_id,
+        params.conversation_id,
+    )
+    .await
+    .map(Json)
+}
+
+pub async fn usage_pool_recheck(
+    Json(params): Json<PoolAccountParams>,
+) -> Result<Json<PoolRecheckResult>, AppCommandError> {
+    resets::recheck_account(&params.name).await.map(Json)
+}

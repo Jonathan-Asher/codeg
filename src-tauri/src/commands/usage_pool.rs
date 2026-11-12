@@ -666,6 +666,9 @@ pub struct PoolAccount {
     /// the running pool applies, which follows within seconds).
     #[serde(default, rename = "reserve")]
     pub reserve_setting: Option<PoolReserveSetting>,
+    /// Its usage-limit resets, when the pool lists them ([`resets`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets: Option<resets::PoolAccountResets>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -773,6 +776,10 @@ pub struct PlanUsagePool {
     pub stale: bool,
     pub error: Option<PoolError>,
     pub error_status: Option<u16>,
+    /// The pool lists its accounts' usage-limit resets and can use one and
+    /// read an account again on request ([`resets`]); older pools can't.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub resets_supported: bool,
 }
 
 fn usage_window(
@@ -1109,6 +1116,7 @@ impl PoolAccount {
                 Some(settings) => settings.reserve,
                 None => PoolReserveSetting::from_cap(raw.cap_utilization, raw.cap_mode.as_deref()),
             },
+            resets: None,
         };
         account.state = account.state_at(now, threshold);
         account.blocked_until = match account.availability(now, threshold, None) {
@@ -1208,6 +1216,7 @@ fn build_pool(raw: RawStatus, config: &PoolConfig, now: i64) -> PlanUsagePool {
         stale: false,
         error: None,
         error_status: None,
+        resets_supported: false,
     };
     if let Some(PoolLimit::Exhausted { resumes_at }) = pool_limit(&pool, now, None) {
         pool.exhausted = true;
@@ -1248,6 +1257,7 @@ impl PlanUsagePool {
             stale: true,
             error: Some(error.kind),
             error_status: error.status,
+            resets_supported: false,
         }
     }
 }
@@ -1379,7 +1389,12 @@ async fn next_reading(previous: Option<PlanUsagePool>, now: i64) -> Option<PlanU
             .filter(|p| !p.accounts.is_empty())
             .map(|p| p.into_stale(FetchError::of(PoolError::ConfigUnreadable), now)),
         Discovery::Found(config) => match fetch_status(&config).await {
-            Ok(raw) => Some(build_pool(raw, &config, now)),
+            Ok(raw) => {
+                let mut pool = build_pool(raw, &config, now);
+                let read = resets::read_resets(&config, pool.version.as_deref(), now).await;
+                resets::attach(&mut pool, read, previous.as_ref());
+                Some(pool)
+            }
             Err(error) => Some(match previous.filter(|p| !p.accounts.is_empty()) {
                 Some(previous) => previous.into_stale(error, now),
                 None => PlanUsagePool::unanswered(&config, error, now),
@@ -1584,6 +1599,7 @@ pub(crate) fn resume_at_from(
 }
 
 pub(crate) mod manage;
+pub mod resets;
 
 #[cfg(test)]
 mod tests;

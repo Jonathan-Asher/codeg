@@ -26,6 +26,7 @@ import type {
   PlanUsagePoolAccountState,
   PlanUsageWindow,
 } from "@/lib/types"
+import { poolOffersRecheck } from "@/lib/limit-resets"
 import { cn } from "@/lib/utils"
 import {
   LEVEL_TEXT,
@@ -39,6 +40,10 @@ import {
   PoolReserveButton,
   usePoolOrder,
 } from "./plan-usage-pool-manage"
+import {
+  PoolAccountResetsLine,
+  PoolRecheckButton,
+} from "./plan-usage-pool-resets"
 
 /**
  * The account pool's reading — every account the agent's requests are spread
@@ -511,6 +516,9 @@ function PoolAccountRow({
                   })}
             </span>
           )}
+          {onManaged && poolOffersRecheck(pool, state) && (
+            <PoolRecheckButton account={account} onChanged={onManaged} />
+          )}
         </div>
         {onManaged && (
           <div className="flex shrink-0 items-center gap-0.5">
@@ -555,6 +563,13 @@ function PoolAccountRow({
       {onManaged ? (
         <div className={cn("mt-1.5", ordering && "ps-5")}>
           <PoolReserveButton account={account} onChanged={onManaged} />
+          <PoolAccountResetsLine
+            pool={pool}
+            account={account}
+            state={state}
+            now={now}
+            onChanged={onManaged}
+          />
         </div>
       ) : (
         reserve &&
