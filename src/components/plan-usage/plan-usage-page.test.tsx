@@ -1105,7 +1105,7 @@ describe("PlanUsagePage usage-limit resets", () => {
     fetched_at: now(),
   })
 
-  it("shows Codex's resets on its card, points Claude Code's to its apps, and a used one re-reads the bars", async () => {
+  it("shows Codex's resets on its card, points the subscription card to its usage page, and a used one re-reads the bars", async () => {
     getPlanUsage.mockResolvedValue(report([claudeSnapshot(), codexSnapshot()]))
     getLimitResets.mockResolvedValue({ providers: [codexResets(2)] })
     consumeLimitReset.mockResolvedValue({
