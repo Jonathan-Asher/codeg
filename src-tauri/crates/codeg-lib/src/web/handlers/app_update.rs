@@ -368,7 +368,7 @@ fn restart_impl(state: Arc<AppState>) -> Result<UpdateActionResult, AppCommandEr
             busy()
         })?;
     let restart_delay_ms = crate::update::runtime::restart_delay_ms();
-    crate::update::schedule_restart(guard);
+    crate::update::schedule_restart(guard, record_background_work(state));
     Ok(UpdateActionResult {
         version: None,
         need_restart: false,
@@ -376,6 +376,15 @@ fn restart_impl(state: Arc<AppState>) -> Result<UpdateActionResult, AppCommandEr
         trial_seconds: trial_seconds_value(),
         capability: crate::update::runtime::capability(),
     })
+}
+
+/// Before the server restarts itself: write what each session runs in the
+/// background, so the new process knows what the restart stopped (the
+/// continuous writes would miss the last few seconds).
+#[cfg(not(feature = "tauri-runtime"))]
+async fn record_background_work(state: Arc<AppState>) {
+    crate::acp::background_snapshot::flush_for_exit(&state.db.conn, &state.connection_manager)
+        .await;
 }
 
 #[cfg(not(feature = "tauri-runtime"))]
@@ -417,7 +426,7 @@ async fn rollback_impl(state: Arc<AppState>) -> Result<UpdateActionResult, AppCo
     }
     // Responds first, then exits/re-execs after a short flush delay — the lock
     // is held until the process dies, so nothing can race the relaunch.
-    crate::update::schedule_restart(guard);
+    crate::update::schedule_restart(guard, record_background_work(state));
     Ok(UpdateActionResult {
         version: None,
         // Restart is already scheduled server-side; the client must not issue a

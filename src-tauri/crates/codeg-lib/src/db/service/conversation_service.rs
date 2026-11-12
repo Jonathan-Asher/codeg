@@ -134,6 +134,9 @@ async fn create_inner(
         last_viewed_at: Set(None),
         talk_state: Set(None),
         moved_from_cwd: Set(None),
+        background_snapshot: Set(None),
+        auto_resume_reason: Set(None),
+        auto_resume_count: Set(0),
     };
     Ok(model.insert(conn).await?)
 }
@@ -193,11 +196,24 @@ fn no_auto_resume() -> sea_orm::Value {
 const AUTO_RESUME_ON_TURN_START: &str =
     "CASE WHEN auto_resume IN ('claimed', 'attempted') THEN 'attempted' ELSE NULL END";
 
+/// `background_snapshot` for a turn that just started: a `pending` mark the
+/// turn spends was the only reader of the snapshot the exit left (the work it
+/// would have named); any other snapshot is the live writer's and stays.
+const SNAPSHOT_ON_TURN_START: &str =
+    "CASE WHEN auto_resume = 'pending' THEN NULL ELSE background_snapshot END";
+
 /// `auto_resume` for a running turn that codeg's exit cut off: due to be
 /// resumed, unless it is the automatic resume itself (`attempted`), the user
 /// had already stopped it (`cancelled`), or a resume had claimed it.
 const AUTO_RESUME_ON_EXIT: &str =
     "CASE WHEN auto_resume IS NULL OR auto_resume = 'pending' THEN 'pending' ELSE auto_resume END";
+
+/// `auto_resume_reason` next to [`AUTO_RESUME_ON_EXIT`]: a turn was cut off.
+/// Written in the same UPDATE, so it reads the row's old `auto_resume` (SQLite
+/// evaluates every SET expression on the row as it was).
+const AUTO_RESUME_REASON_ON_EXIT: &str =
+    "CASE WHEN auto_resume IS NULL OR auto_resume = 'pending' THEN 'turn' \
+     ELSE auto_resume_reason END";
 
 /// The usage-limit pause columns for a turn that just started. The turn the
 /// continuation claimed becomes `continuing` (and stays so through the
@@ -270,6 +286,12 @@ pub async fn mark_turn_running(
         .col_expr(
             conversation::Column::AutoResume,
             Expr::cust(AUTO_RESUME_ON_TURN_START),
+        )
+        // A pending resume this turn spends takes the background work it was
+        // to name with it; the live writer records what runs from now on.
+        .col_expr(
+            conversation::Column::BackgroundSnapshot,
+            Expr::cust(SNAPSHOT_ON_TURN_START),
         )
         .col_expr(
             conversation::Column::LimitResumeState,
@@ -419,12 +441,23 @@ pub async fn clear_interrupted_turn(
 /// tears the connections down, so the lifecycle subscriber's connection-died
 /// mark (which leaves `auto_resume` alone) finds nothing left running and the
 /// exit is recorded as the cause.
+///
+/// The exit also stopped the background work the sessions' last snapshots
+/// list (`acp::background_snapshot`); see [`mark_background_cut_off`]. Returns
+/// how many turns were cut off: the running ones, and the turns agents ran on
+/// their own.
 pub async fn interrupt_orphaned_turns(conn: &DatabaseConnection) -> Result<u64, DbError> {
     use sea_orm::sea_query::Expr;
     let res = conversation::Entity::update_many()
         .col_expr(
             conversation::Column::TurnState,
             Expr::value(conversation::ConversationTurnState::Interrupted),
+        )
+        // Before `auto_resume` in the statement only for reading's sake: both
+        // read the row's old values.
+        .col_expr(
+            conversation::Column::AutoResumeReason,
+            Expr::cust(AUTO_RESUME_REASON_ON_EXIT),
         )
         .col_expr(
             conversation::Column::AutoResume,
@@ -441,18 +474,174 @@ pub async fn interrupt_orphaned_turns(conn: &DatabaseConnection) -> Result<u64, 
         .filter(conversation::Column::TurnState.eq(conversation::ConversationTurnState::Running))
         .exec(conn)
         .await?;
-    Ok(res.rows_affected)
+    let background = mark_background_cut_off(conn).await?;
+    if background.stopped > 0 {
+        tracing::info!(
+            "[conversation] {} session(s) had background work running at the last exit; \
+             marked for resume",
+            background.stopped
+        );
+    }
+    Ok(res.rows_affected + background.woken)
+}
+
+/// What [`mark_background_cut_off`] marked.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct BackgroundCutOff {
+    /// Turns the agent ran on its own (woken by its background work), now
+    /// interrupted like any running turn.
+    pub woken: u64,
+    /// Sessions whose turn had ended while background work they started ran.
+    pub stopped: u64,
+}
+
+/// The exit half of the background snapshot (`acp::background_snapshot`):
+/// every row whose last snapshot lists work still running when codeg exited
+/// is marked for the automatic resume.
+///
+/// * A turn the agent was running on its own (woken by a task notification
+///   or a cron prompt) is a turn cut off like any other: `interrupted`,
+///   `auto_resume = pending`, reason `turn`.
+/// * With no turn running, the turn had ended and only its background work
+///   was stopped: `auto_resume = pending`, reason `background`, and
+///   `turn_state` stays NULL — the turn itself finished.
+///
+/// Only a row with no turn state and no automatic-resume mark is marked here,
+/// and a row paused on the usage limit is left to `acp::limit_continue`. A row
+/// due a resume keeps its snapshot, whose list the resume's prompt names;
+/// every other snapshot is dropped, so no later start reads stale work into a
+/// session. Rows are few: only sessions with background work at the exit hold
+/// one.
+pub async fn mark_background_cut_off(
+    conn: &DatabaseConnection,
+) -> Result<BackgroundCutOff, DbError> {
+    use crate::acp::background_snapshot::BackgroundSnapshot;
+    use conversation::{ConversationAutoResume as A, ConversationAutoResumeReason as R};
+    use sea_orm::sea_query::Expr;
+    let rows = conversation::Entity::find()
+        .filter(conversation::Column::BackgroundSnapshot.is_not_null())
+        .all(conn)
+        .await?;
+    let mut out = BackgroundCutOff::default();
+    for row in rows {
+        let raw = row.background_snapshot.clone().unwrap_or_default();
+        let snapshot = BackgroundSnapshot::parse(Some(raw.as_str()));
+        let unmarked = row.deleted_at.is_none()
+            && row.turn_state.is_none()
+            && row.auto_resume.is_none()
+            && row.limit_resume_state.is_none();
+        let keep = match snapshot {
+            Some(snapshot) if unmarked && snapshot.has_work() => {
+                let woken = snapshot.had_turn_of_its_own();
+                let mut update = conversation::Entity::update_many()
+                    .col_expr(conversation::Column::AutoResume, Expr::value(A::Pending))
+                    .col_expr(
+                        conversation::Column::AutoResumeReason,
+                        Expr::value(if woken { R::Turn } else { R::Background }),
+                    );
+                if woken {
+                    update = update.col_expr(
+                        conversation::Column::TurnState,
+                        Expr::value(conversation::ConversationTurnState::Interrupted),
+                    );
+                }
+                let marked = update
+                    .filter(conversation::Column::Id.eq(row.id))
+                    .filter(conversation::Column::TurnState.is_null())
+                    .filter(conversation::Column::AutoResume.is_null())
+                    .exec(conn)
+                    .await?
+                    .rows_affected;
+                if woken {
+                    out.woken += marked;
+                } else {
+                    out.stopped += marked;
+                }
+                marked > 0
+            }
+            // Already due a resume — a turn the running-turn sweep just
+            // marked, or a graceful quit's sweep before this start: the list
+            // goes into its prompt.
+            Some(_) => row.deleted_at.is_none() && row.auto_resume == Some(A::Pending),
+            None => false,
+        };
+        if !keep {
+            clear_background_snapshot_if(conn, row.id, &raw).await?;
+        }
+    }
+    Ok(out)
+}
+
+/// Record what a session's live connection runs in the background (`None`:
+/// nothing). Written by `acp::background_snapshot`'s writer only; bookkeeping,
+/// so `updated_at` is left alone. Returns `true` when a row was written.
+pub async fn set_background_snapshot(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    snapshot: Option<String>,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::Expr;
+    let res = conversation::Entity::update_many()
+        .col_expr(
+            conversation::Column::BackgroundSnapshot,
+            Expr::value(sea_orm::Value::String(snapshot.map(Box::new))),
+        )
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected > 0)
+}
+
+/// Drop a row's snapshot if it is still exactly `raw` — the one a resume read
+/// to name the stopped work — so a newer one a live connection wrote since is
+/// kept. Returns `true` when it was dropped.
+pub async fn clear_background_snapshot_if(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    raw: &str,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::Expr;
+    let res = conversation::Entity::update_many()
+        .col_expr(
+            conversation::Column::BackgroundSnapshot,
+            Expr::value(sea_orm::Value::String(None)),
+        )
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .filter(conversation::Column::BackgroundSnapshot.eq(raw))
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected > 0)
+}
+
+/// One conversation the automatic resume may pick back up, with what it needs
+/// to word the prompt.
+#[derive(Debug, Clone)]
+pub struct AutoResumeCandidate {
+    pub conversation: DbConversationSummary,
+    /// Why it is due: a turn was cut off, or only its background work was.
+    pub reason: conversation::ConversationAutoResumeReason,
+    /// The background work the exit stopped, when the session had any.
+    pub background: Option<crate::acp::background_snapshot::BackgroundSnapshot>,
+    /// The stored snapshot text, so the resume drops exactly that one
+    /// ([`clear_background_snapshot_if`]).
+    pub background_raw: Option<String>,
+    /// Automatic resumes since the user last sent a turn.
+    pub resumes_in_a_row: i32,
 }
 
 /// The conversations whose turn codeg's last exit cut off and that the
 /// automatic resume should pick back up, most recently active first.
 ///
 /// A candidate is a row that is:
-/// * interrupted and marked `auto_resume = pending` — cut off by the exit
-///   itself (not by an agent dying while codeg ran), not stopped by the user,
-///   and not an automatic resume already;
+/// * marked `auto_resume = pending` by the exit — cut off by the exit itself
+///   (not by an agent dying while codeg ran), not stopped by the user, and not
+///   an automatic resume already — and either `interrupted` (a turn was cut
+///   off) or, with no turn state, marked for its background work (reason
+///   `background`: the turn had ended);
 /// * active within `max_age` of `now` (`updated_at`, which a running turn's
-///   heartbeat keeps current): a turn cut off long ago is stale work;
+///   heartbeat keeps current, or the background snapshot's time, which the
+///   writer keeps current while the work runs): a turn cut off long ago is
+///   stale work;
 /// * not deleted, and a top-level session — a delegation child is resumed
 ///   through its parent, if at all;
 /// * bound to an agent session (`external_id`), which is what gets resumed;
@@ -463,12 +652,23 @@ pub async fn list_auto_resume_candidates(
     conn: &DatabaseConnection,
     now: chrono::DateTime<Utc>,
     max_age: chrono::Duration,
-) -> Result<Vec<DbConversationSummary>, DbError> {
+) -> Result<Vec<AutoResumeCandidate>, DbError> {
+    use crate::acp::background_snapshot::BackgroundSnapshot;
     use crate::db::entities::{automation_run, work_task};
+    use conversation::ConversationAutoResumeReason as R;
     use sea_orm::sea_query::Query;
     let rows = conversation::Entity::find()
         .filter(
-            conversation::Column::TurnState.eq(conversation::ConversationTurnState::Interrupted),
+            Condition::any()
+                .add(
+                    conversation::Column::TurnState
+                        .eq(conversation::ConversationTurnState::Interrupted),
+                )
+                .add(
+                    Condition::all()
+                        .add(conversation::Column::TurnState.is_null())
+                        .add(conversation::Column::AutoResumeReason.eq(R::Background)),
+                ),
         )
         .filter(
             conversation::Column::AutoResume.eq(conversation::ConversationAutoResume::Pending),
@@ -479,7 +679,6 @@ pub async fn list_auto_resume_candidates(
             conversation::Column::Kind.is_in([ConversationKind::Regular, ConversationKind::Chat]),
         )
         .filter(conversation::Column::ExternalId.is_not_null())
-        .filter(conversation::Column::UpdatedAt.gte(now - max_age))
         .filter(
             conversation::Column::Id.not_in_subquery(
                 Query::select()
@@ -501,14 +700,46 @@ pub async fn list_auto_resume_candidates(
         .order_by_desc(conversation::Column::UpdatedAt)
         .all(conn)
         .await?;
-    Ok(rows.into_iter().map(conv_to_summary).collect())
+    let cutoff = now - max_age;
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            let background = BackgroundSnapshot::parse(row.background_snapshot.as_deref());
+            // The snapshot's time is the last moment the work was seen
+            // running, which for a session whose turn had ended is the only
+            // sign of life `updated_at` does not carry.
+            let last_active = background
+                .as_ref()
+                .map_or(row.updated_at, |s| s.at.max(row.updated_at));
+            if last_active < cutoff {
+                return None;
+            }
+            // An interrupted turn is a turn, whatever was recorded with it.
+            let reason = if row.turn_state.is_some() {
+                R::Turn
+            } else {
+                R::Background
+            };
+            let background_raw = row.background_snapshot.clone();
+            let resumes_in_a_row = row.auto_resume_count;
+            Some(AutoResumeCandidate {
+                conversation: conv_to_summary(row),
+                reason,
+                background,
+                background_raw,
+                resumes_in_a_row,
+            })
+        })
+        .collect())
 }
 
 /// Drop every `pending` automatic-resume mark except those on `keep`: the rows
 /// this start will not resume (too old, deleted, a delegation child, owned by
 /// an engine, the setting is off, the user said stop) go back to being plain
 /// interruptions with a manual Continue, so no later start resumes them out of
-/// the blue. Returns how many marks were dropped.
+/// the blue — and a row due one only for its background work goes back to
+/// what it was, a finished turn. The background work they list is dropped
+/// with the mark. Returns how many marks were dropped.
 pub async fn discard_pending_auto_resumes(
     conn: &DatabaseConnection,
     keep: &[i32],
@@ -518,6 +749,14 @@ pub async fn discard_pending_auto_resumes(
         .col_expr(
             conversation::Column::AutoResume,
             Expr::value(no_auto_resume()),
+        )
+        .col_expr(
+            conversation::Column::AutoResumeReason,
+            Expr::value(sea_orm::Value::String(None)),
+        )
+        .col_expr(
+            conversation::Column::BackgroundSnapshot,
+            Expr::value(sea_orm::Value::String(None)),
         )
         .filter(
             conversation::Column::AutoResume.eq(conversation::ConversationAutoResume::Pending),
@@ -530,11 +769,13 @@ pub async fn discard_pending_auto_resumes(
 }
 
 /// Claim a candidate for this start's automatic resume: `pending → claimed`,
-/// as a compare-and-set on a row that is still interrupted and not deleted.
+/// as a compare-and-set on a row that is still interrupted (or, due a resume
+/// for its background work, still has no turn running) and not deleted.
 /// `false` means someone got there first — the user continued it by hand (the
 /// new turn spent the mark), settled it, or deleted it — and it must be left
 /// alone. The claim is what makes a resume happen at most once: the turn the
-/// resume starts turns it into `attempted`, which no later exit re-arms.
+/// resume starts turns it into `attempted`, which no later exit re-arms. It
+/// also counts the resume (`auto_resume_count`).
 pub async fn claim_auto_resume(
     conn: &DatabaseConnection,
     conversation_id: i32,
@@ -545,12 +786,28 @@ pub async fn claim_auto_resume(
             conversation::Column::AutoResume,
             Expr::value(conversation::ConversationAutoResume::Claimed),
         )
+        .col_expr(
+            conversation::Column::AutoResumeCount,
+            Expr::cust("auto_resume_count + 1"),
+        )
         .filter(conversation::Column::Id.eq(conversation_id))
         .filter(
             conversation::Column::AutoResume.eq(conversation::ConversationAutoResume::Pending),
         )
         .filter(
-            conversation::Column::TurnState.eq(conversation::ConversationTurnState::Interrupted),
+            Condition::any()
+                .add(
+                    conversation::Column::TurnState
+                        .eq(conversation::ConversationTurnState::Interrupted),
+                )
+                .add(
+                    Condition::all()
+                        .add(conversation::Column::TurnState.is_null())
+                        .add(
+                            conversation::Column::AutoResumeReason
+                                .eq(conversation::ConversationAutoResumeReason::Background),
+                        ),
+                ),
         )
         .filter(conversation::Column::DeletedAt.is_null())
         .exec(conn)
@@ -560,7 +817,8 @@ pub async fn claim_auto_resume(
 
 /// Give up a claim before the resumed turn started (the user said stop, the
 /// session could not be reopened, the prompt was refused): the row stays a
-/// plain interruption with a manual Continue, and is not resumed again.
+/// plain interruption with a manual Continue (or, resumed for its background
+/// work, a finished turn), and is not resumed again.
 pub async fn release_auto_resume(
     conn: &DatabaseConnection,
     conversation_id: i32,
@@ -570,6 +828,10 @@ pub async fn release_auto_resume(
         .col_expr(
             conversation::Column::AutoResume,
             Expr::value(no_auto_resume()),
+        )
+        .col_expr(
+            conversation::Column::AutoResumeReason,
+            Expr::value(sea_orm::Value::String(None)),
         )
         .filter(conversation::Column::Id.eq(conversation_id))
         .filter(
@@ -604,20 +866,36 @@ pub async fn mark_turn_cancelled_by_user(
 /// A new turn was asked for on this conversation by anyone but the automatic
 /// resume (whose own prompt goes out while the row is `claimed`): an
 /// `attempted` mark left by an earlier resume is spent, so an exit during the
-/// new turn is a new interruption, due its own single resume.
+/// new turn is a new interruption, due its own single resume — and the count
+/// of automatic resumes in a row starts over.
 pub async fn clear_spent_auto_resume(
     conn: &DatabaseConnection,
     conversation_id: i32,
 ) -> Result<bool, DbError> {
+    use conversation::ConversationAutoResume as A;
     use sea_orm::sea_query::Expr;
     let res = conversation::Entity::update_many()
         .col_expr(
             conversation::Column::AutoResume,
-            Expr::value(no_auto_resume()),
+            Expr::cust("CASE WHEN auto_resume = 'attempted' THEN NULL ELSE auto_resume END"),
+        )
+        .col_expr(
+            conversation::Column::AutoResumeCount,
+            Expr::cust("CASE WHEN auto_resume = 'claimed' THEN auto_resume_count ELSE 0 END"),
         )
         .filter(conversation::Column::Id.eq(conversation_id))
         .filter(
-            conversation::Column::AutoResume.eq(conversation::ConversationAutoResume::Attempted),
+            Condition::any()
+                .add(conversation::Column::AutoResume.eq(A::Attempted))
+                .add(
+                    Condition::all()
+                        .add(conversation::Column::AutoResumeCount.gt(0))
+                        .add(
+                            Condition::any()
+                                .add(conversation::Column::AutoResume.is_null())
+                                .add(conversation::Column::AutoResume.ne(A::Claimed)),
+                        ),
+                ),
         )
         .exec(conn)
         .await?;
@@ -2299,6 +2577,9 @@ impl CarriedOverRow {
             last_viewed_at: Set(None),
             talk_state: Set(None),
             moved_from_cwd: Set(None),
+            background_snapshot: Set(None),
+            auto_resume_reason: Set(None),
+            auto_resume_count: Set(0),
         }
     }
 }

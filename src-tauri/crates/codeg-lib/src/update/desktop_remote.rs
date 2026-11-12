@@ -583,7 +583,8 @@ struct TauriRelauncher(tauri::AppHandle);
 
 impl Relauncher for TauriRelauncher {
     fn relaunch(&self) {
-        // Goes through `RunEvent::ExitRequested`, which marks the turns being
+        // Goes through `RunEvent::ExitRequested`, which records each session's
+        // background work and marks the turns (and the background work) being
         // cut off for the automatic resume, exactly like a quit.
         self.0.request_restart();
     }

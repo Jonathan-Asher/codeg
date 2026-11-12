@@ -80,7 +80,12 @@ import {
   resetConversationRuntimeStore,
   useConversationRuntimeStore,
 } from "@/stores/conversation-runtime-store"
-import { RESUME_AFTER_RESTART_PROMPT } from "@/lib/auto-resume"
+import {
+  RESUME_AFTER_RESTART_PROMPT,
+  RESUME_BACKGROUND_PROMPT_HEAD,
+  RESUME_BACKGROUND_PROMPT_TAIL,
+  RESUME_TURN_BACKGROUND_HEADER,
+} from "@/lib/auto-resume"
 import { LIMIT_CONTINUE_PROMPT } from "@/lib/limit-continue"
 import { CONTINUE_PROMPT } from "@/lib/session-activity"
 import type {
@@ -332,6 +337,59 @@ describe("MessageListView: resumed after restart", () => {
         "user-bubble"
       )
     ).toBeInTheDocument()
+  })
+
+  it("labels a resume of stopped background work, and lists that work in its tooltip", async () => {
+    const prompt = [
+      RESUME_BACKGROUND_PROMPT_HEAD,
+      "- sub-agent: Review the parser (started 13:02)",
+      "- background shell: sleep 900",
+      RESUME_BACKGROUND_PROMPT_TAIL,
+    ].join("\n")
+    await seed([
+      userTurn("turn-0", "audit the repo in the background"),
+      replyTurn("turn-1", "launched"),
+      userTurn("turn-2", prompt),
+      replyTurn("turn-3", "re-launched"),
+    ])
+    const { container } = renderList()
+
+    const row = rowFor(container, "persisted-user-turn-2")
+    const marker = row.querySelector("[data-resume-marker]")
+    expect(marker).toBeInTheDocument()
+    expect(marker).toHaveAttribute("data-resume-background", "true")
+    const label = within(row).getByText(L.resumedAfterRestartBackground)
+    expect(within(row).queryByText(L.resumedAfterRestart)).toBeNull()
+    // One line per stopped item under the hint (the title keeps the breaks).
+    expect(label.getAttribute("title")).toBe(
+      [
+        L.resumedAfterRestartBackgroundHint,
+        "• sub-agent: Review the parser (started 13:02)",
+        "• background shell: sleep 900",
+      ].join("\n")
+    )
+    expect(within(row).queryByTestId("user-bubble")).toBeNull()
+  })
+
+  it("keeps the plain label for a cut-off turn that also listed its background work", async () => {
+    await seed([
+      userTurn("turn-0", "build it"),
+      replyTurn("turn-1", "building"),
+      userTurn(
+        "turn-2",
+        `${RESUME_AFTER_RESTART_PROMPT}\n\n${RESUME_TURN_BACKGROUND_HEADER}\n- monitor: main run: errors`
+      ),
+      replyTurn("turn-3", "built"),
+    ])
+    const { container } = renderList()
+
+    const row = rowFor(container, "persisted-user-turn-2")
+    const marker = row.querySelector("[data-resume-marker]")
+    expect(marker).toBeInTheDocument()
+    expect(marker).not.toHaveAttribute("data-resume-background")
+    expect(
+      within(row).getByText(L.resumedAfterRestart).getAttribute("title")
+    ).toBe(`${L.resumedAfterRestartHint}\n• monitor: main run: errors`)
   })
 })
 

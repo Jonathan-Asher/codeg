@@ -641,6 +641,10 @@ where
         emit_event(emitter, CONVERSATION_ATTENTION_EVENT, change);
     }
     // And for background work: every session list needs it, attached or not.
+    // The row records it too, so a restart knows what it stopped.
+    if !background_changes.is_empty() {
+        crate::acp::background_snapshot::note_changed();
+    }
     for change in background_changes {
         emit_event(emitter, CONVERSATION_BACKGROUND_EVENT, change);
     }
@@ -660,6 +664,9 @@ pub async fn refresh_background_broadcast(
         return;
     }
     let changes = state.write().await.take_background_changes(now);
+    if !changes.is_empty() {
+        crate::acp::background_snapshot::note_changed();
+    }
     for change in changes {
         emit_event(emitter, CONVERSATION_BACKGROUND_EVENT, change);
     }

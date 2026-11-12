@@ -1852,6 +1852,8 @@
   "AutoResumeSettings": {
     "title": "再起動後に中断されたセッションを再開",
     "description": "ターンの途中で codeg が終了、クラッシュ、またはアップデートのために再起動した場合、次回の起動時にそのセッションを再開します。各中断の再開は最大 1 回です。",
+    "backgroundTitle": "バックグラウンド処理が停止されたセッションも再開",
+    "backgroundDescription": "ターンは終わっていてもサブエージェント、バックグラウンドシェル、モニターが実行中だったセッションに、再起動で何が停止したかを伝え、必要な処理を再開できるようにします。",
     "saveFailed": "設定を保存できませんでした: {message}"
   },
   "LimitContinueSettings": {
@@ -1880,6 +1882,7 @@
     "stateStopped": "停止済み",
     "stateSkipped": "すでに続行済み",
     "failedHint": "中断されたままです。「続行」で手動で再開できます。",
+    "failedHintBackground": "バックグラウンド処理は停止したままです。メッセージを送ると手動で続けられます。",
     "dismiss": "閉じる"
   },
   "EditMessageSettings": {
@@ -3997,6 +4000,8 @@
         "outputLimitContinueHint": "「continue」を送信して、返信が止まったところからエージェントに続けてもらいます",
         "resumedAfterRestart": "再起動後に再開",
         "resumedAfterRestartHint": "このターンの途中で codeg が再起動したため、セッションを自動的に再開しました",
+        "resumedAfterRestartBackground": "再起動後に再開 · バックグラウンド処理は停止",
+        "resumedAfterRestartBackgroundHint": "ターンは終わっていましたが、開始したバックグラウンド処理の実行中に codeg が再起動したため、セッションを自動的に再開しました",
         "continuedAfterLimit": "上限リセット後に再開",
         "continuedAfterLimitHint": "アカウントの使用量の上限がリセットされ、codeg がセッションを自動で再開しました"
       },

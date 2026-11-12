@@ -1852,6 +1852,8 @@
   "AutoResumeSettings": {
     "title": "Resume interrupted sessions after restart",
     "description": "When codeg quits, crashes or restarts for an update in the middle of a turn, pick those sessions back up on the next start. Each interruption is resumed at most once.",
+    "backgroundTitle": "Also resume sessions whose background work was stopped",
+    "backgroundDescription": "A session whose turn had finished but whose sub-agents, background shells or monitors were still running is told what the restart stopped, so it can re-launch what it still needs.",
     "saveFailed": "Failed to save the setting: {message}"
   },
   "LimitContinueSettings": {
@@ -1880,6 +1882,7 @@
     "stateStopped": "Stopped",
     "stateSkipped": "Already continued",
     "failedHint": "It stays interrupted; use Continue to pick it up by hand.",
+    "failedHintBackground": "Its background work stays stopped; send a message to pick it up by hand.",
     "dismiss": "Dismiss"
   },
   "EditMessageSettings": {
@@ -3997,6 +4000,8 @@
         "outputLimitContinueHint": "Send “continue” so the agent picks up where the reply stopped",
         "resumedAfterRestart": "Resumed after restart",
         "resumedAfterRestartHint": "codeg restarted in the middle of this turn and picked the session back up on its own",
+        "resumedAfterRestartBackground": "Resumed after restart · background work was stopped",
+        "resumedAfterRestartBackgroundHint": "Its turn had finished, but codeg restarted while background work it started was still running, and picked the session back up on its own",
         "continuedAfterLimit": "Continued after limit reset",
         "continuedAfterLimitHint": "The account's usage limit reset and codeg continued the session on its own"
       },

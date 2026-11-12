@@ -102,6 +102,7 @@ import {
 import { isRetryNudge } from "@/lib/retry-nudge"
 import { editActionTarget, RETRY_ACTION_TARGET } from "@/lib/pending-actions"
 import { usePendingActionsContext } from "@/components/message/pending-actions-context"
+import { resumeAfterRestartItems } from "@/lib/auto-resume"
 import { continuationVariant } from "@/lib/continue-turn"
 import { Button } from "@/components/ui/button"
 import { useTranslations } from "next-intl"
@@ -1963,15 +1964,21 @@ export function MessageListView({
             isRetryNudge(extractFindableText(item))
           // A Continue turn (the composer's Continue, the interrupted banner's,
           // or a bare "continue" typed by hand — see `lib/continue-turn`), or
-          // the prompt codeg sent itself to resume a turn a restart cut off
-          // (`lib/auto-resume`) or to continue once the usage limit reset
+          // the prompt codeg sent itself to resume a session a restart cut off
+          // — its turn, or the background work a finished turn left running
+          // (`lib/auto-resume`) — or to continue once the usage limit reset
           // (`lib/limit-continue`): nobody said anything, the agent was asked to
           // keep going, so it reads as a divider in the reply, not as a user
-          // bubble. Matched on the exact text, which is all a reload keeps.
+          // bubble. Matched on the text, which is all a reload keeps.
           const continuation = isRetryMarker
             ? null
             : continuationVariant(item.group)
           const isContinueMarker = continuation !== null
+          // What a resume says was stopped, for its divider's tooltip.
+          const resumedItems =
+            continuation === "resumed" || continuation === "resumed_background"
+              ? resumeAfterRestartItems(extractFindableText(item))
+              : []
           // Retry affordance: a trailing user turn that got NO assistant
           // response (agent died, turn cut off, connection dropped) — offered
           // again once the connection is not mid-stream.
@@ -2058,19 +2065,30 @@ export function MessageListView({
                   </span>
                   <span aria-hidden="true" className="h-px flex-1 bg-border" />
                 </div>
-              ) : continuation === "resumed" ? (
+              ) : continuation === "resumed" ||
+                continuation === "resumed_background" ? (
                 <div
                   data-continue-marker
                   data-resume-marker
+                  data-resume-background={
+                    continuation === "resumed_background" || undefined
+                  }
                   className="flex items-center gap-2 px-1 py-1"
                 >
                   <span aria-hidden="true" className="h-px flex-1 bg-border" />
                   <span
-                    title={t("resumedAfterRestartHint")}
+                    title={[
+                      continuation === "resumed_background"
+                        ? t("resumedAfterRestartBackgroundHint")
+                        : t("resumedAfterRestartHint"),
+                      ...resumedItems.map((line) => `• ${line}`),
+                    ].join("\n")}
                     className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[0.625rem] font-medium leading-none text-muted-foreground"
                   >
                     <RotateCw className="h-2.5 w-2.5" aria-hidden />
-                    {t("resumedAfterRestart")}
+                    {continuation === "resumed_background"
+                      ? t("resumedAfterRestartBackground")
+                      : t("resumedAfterRestart")}
                   </span>
                   <span aria-hidden="true" className="h-px flex-1 bg-border" />
                 </div>

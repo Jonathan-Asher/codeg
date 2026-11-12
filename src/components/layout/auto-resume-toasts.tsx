@@ -74,7 +74,16 @@ function AutoResumeRow({ item }: { item: AutoResumeItem }) {
         )}
         title={
           item.state === "failed"
-            ? [item.error, t("failedHint")].filter(Boolean).join(" — ")
+            ? [
+                item.error,
+                // A session resumed for its background work had finished its
+                // turn: a failure leaves it as it was, not interrupted.
+                item.reason === "background"
+                  ? t("failedHintBackground")
+                  : t("failedHint"),
+              ]
+                .filter(Boolean)
+                .join(" — ")
             : undefined
         }
       >

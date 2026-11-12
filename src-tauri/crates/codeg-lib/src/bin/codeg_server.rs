@@ -678,6 +678,17 @@ async fn async_main() -> ExitCode {
         tokio::spawn(codeg_lib::work_task::run_task_engine(engine));
     }
 
+    // Keep each session's background work recorded on its row, so the next
+    // start knows what an exit stopped (mirrors lib.rs setup). The server
+    // has no graceful quit of its own: these continuous writes are what a
+    // kill leaves behind.
+    tokio::spawn(
+        codeg_lib::acp::background_snapshot::run_background_snapshot_writer(
+            state.db.conn.clone(),
+            state.connection_manager.clone_ref(),
+        ),
+    );
+
     // Pick the turns the last exit cut off back up (mirrors lib.rs setup) —
     // after the lifecycle subscriber above, which records the resumed turn as
     // running.

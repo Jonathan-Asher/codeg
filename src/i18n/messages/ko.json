@@ -1852,6 +1852,8 @@
   "AutoResumeSettings": {
     "title": "재시작 후 중단된 세션 재개",
     "description": "턴 도중 codeg가 종료되거나, 충돌하거나, 업데이트를 위해 재시작되면 다음 시작 시 해당 세션을 재개합니다. 각 중단은 최대 한 번만 재개됩니다.",
+    "backgroundTitle": "백그라운드 작업이 중지된 세션도 재개",
+    "backgroundDescription": "턴은 끝났지만 하위 에이전트, 백그라운드 셸 또는 모니터가 실행 중이던 세션에 재시작으로 무엇이 중지되었는지 알려 필요한 작업을 다시 시작할 수 있게 합니다.",
     "saveFailed": "설정을 저장하지 못했습니다: {message}"
   },
   "LimitContinueSettings": {
@@ -1880,6 +1882,7 @@
     "stateStopped": "중지됨",
     "stateSkipped": "이미 계속함",
     "failedHint": "중단된 상태로 남습니다. 계속을 눌러 직접 재개할 수 있습니다.",
+    "failedHintBackground": "백그라운드 작업은 중지된 상태로 남습니다. 메시지를 보내 직접 이어갈 수 있습니다.",
     "dismiss": "닫기"
   },
   "EditMessageSettings": {
@@ -3997,6 +4000,8 @@
         "outputLimitContinueHint": "“continue”를 보내 에이전트가 답변이 멈춘 곳부터 이어서 작성하게 합니다",
         "resumedAfterRestart": "재시작 후 재개됨",
         "resumedAfterRestartHint": "이 턴 도중 codeg가 재시작되어 세션을 자동으로 재개했습니다",
+        "resumedAfterRestartBackground": "재시작 후 재개됨 · 백그라운드 작업이 중지됨",
+        "resumedAfterRestartBackgroundHint": "턴은 끝났지만 시작한 백그라운드 작업이 실행 중일 때 codeg가 재시작되어 세션을 자동으로 재개했습니다",
         "continuedAfterLimit": "한도 초기화 후 계속함",
         "continuedAfterLimitHint": "계정의 사용량 한도가 초기화되어 codeg가 세션을 자동으로 계속했습니다"
       },

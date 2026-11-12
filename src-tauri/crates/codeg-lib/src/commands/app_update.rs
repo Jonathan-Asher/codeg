@@ -108,7 +108,9 @@ async fn run_download(
 
 /// Relaunch into the freshly-installed bytes. Flips the shared snapshot to
 /// `Restarting` first so the UI (and any other window) reflects it, then
-/// restarts after a short flush delay. `restart()` never returns.
+/// restarts after a short flush delay. `restart()` never returns; called off
+/// the main thread it goes through `RunEvent::ExitRequested`, which records
+/// what the restart cuts off for the automatic resume, like a quit.
 #[tauri::command]
 pub async fn restart_app(
     app: tauri::AppHandle,

@@ -244,6 +244,32 @@ describe("AutoResumeToasts", () => {
     expect(screen.queryByText("[B-STEPS] Use the Bash tool")).toBeNull()
   })
 
+  it("says a failed background resume leaves the session finished, not interrupted", async () => {
+    getStatus.mockResolvedValue(
+      batch([
+        { ...item(1, "a", "pending"), reason: "turn" },
+        { ...item(2, "b", "pending"), reason: "background" },
+      ])
+    )
+    await mount()
+    await act(async () => {
+      emit?.(
+        batch([
+          { ...item(1, "a", "failed", "timed out"), reason: "turn" },
+          { ...item(2, "b", "failed", "timed out"), reason: "background" },
+        ])
+      )
+    })
+    renderLatestToast()
+    const rows = document.querySelectorAll<HTMLElement>(
+      "[data-auto-resume-item]"
+    )
+    const hint = (row: HTMLElement) =>
+      within(row).getByText(L.stateFailed).getAttribute("title")
+    expect(hint(rows[0])).toBe(`timed out — ${L.failedHint}`)
+    expect(hint(rows[1])).toBe(`timed out — ${L.failedHintBackground}`)
+  })
+
   it("opens a session from its row", async () => {
     const user = userEvent.setup()
     getStatus.mockResolvedValue(batch([item(4, "Open me", "resumed")]))

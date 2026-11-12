@@ -1852,6 +1852,8 @@
   "AutoResumeSettings": {
     "title": "重新啟動後恢復被中斷的會話",
     "description": "當 codeg 在一輪進行中結束、當機或因更新而重新啟動時，下次啟動會恢復這些會話。每次中斷最多恢復一次。",
+    "backgroundTitle": "同時恢復背景工作被停止的會話",
+    "backgroundDescription": "如果某個會話的這一輪已結束，但其子代理、背景 shell 或監視器仍在執行，codeg 會告訴它重新啟動停止了哪些工作，以便它重新啟動仍需要的工作。",
     "saveFailed": "儲存設定失敗：{message}"
   },
   "LimitContinueSettings": {
@@ -1880,6 +1882,7 @@
     "stateStopped": "已停止",
     "stateSkipped": "已繼續",
     "failedHint": "它仍處於中斷狀態；點擊「繼續」可手動恢復。",
+    "failedHintBackground": "它的背景工作仍處於停止狀態；傳送訊息即可手動繼續。",
     "dismiss": "關閉"
   },
   "EditMessageSettings": {
@@ -3997,6 +4000,8 @@
         "outputLimitContinueHint": "傳送「continue」，讓智能體從回覆中斷處接著寫",
         "resumedAfterRestart": "重新啟動後已恢復",
         "resumedAfterRestartHint": "codeg 在這一輪進行中重新啟動，已自動恢復此會話",
+        "resumedAfterRestartBackground": "重新啟動後已恢復 · 背景工作已停止",
+        "resumedAfterRestartBackgroundHint": "這一輪已結束，但 codeg 重新啟動時它啟動的背景工作仍在執行，已自動恢復此會話",
         "continuedAfterLimit": "額度重置後已繼續",
         "continuedAfterLimitHint": "帳戶的用量額度已重置，codeg 自動繼續了此對話"
       },

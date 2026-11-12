@@ -35,11 +35,19 @@ pub use state::{new_handle as new_update_state_handle, AppUpdateState, AppUpdate
 /// responding and exiting only to be killed mid-operation. `restart_now` never
 /// returns, so the guard dies with the process — there is no path that leaks
 /// the lock and wedges future operations.
-pub fn schedule_restart(hold: tokio::sync::OwnedMutexGuard<()>) {
+///
+/// `before` runs once the response is out and before the process goes: what
+/// the restart is about to cut off is recorded there (each session's
+/// background work, see `acp::background_snapshot::flush_for_exit`).
+pub fn schedule_restart<F>(hold: tokio::sync::OwnedMutexGuard<()>, before: F)
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
     tokio::spawn(async move {
         // Give axum a moment to write the response body to the client.
         tokio::time::sleep(Duration::from_millis(400)).await;
         let _hold = hold;
+        before.await;
         restart_now();
     });
 }
