@@ -514,9 +514,9 @@ mod tests {
         // the evidence, its row's age the explanation.
         set_row(&db, id, conversation::ConversationStatus::PendingReview, 88).await;
         let summary = conversation_service::get_by_id(&db.conn, id).await.unwrap();
-        let verdict = verdict(&db.conn, &summary, Utc::now(), None).await.unwrap();
+        let found = verdict(&db.conn, &summary, Utc::now(), None).await.unwrap();
         assert_eq!(
-            verdict,
+            found,
             Some(HistoryUnavailable {
                 reason: HistoryUnavailableReason::AgentCleanup,
                 retention_days: Some(30),
