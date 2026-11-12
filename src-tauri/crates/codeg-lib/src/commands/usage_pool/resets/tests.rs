@@ -145,11 +145,178 @@ fn an_answer_that_is_not_a_listing_reads_as_none() {
 
 #[test]
 fn what_a_grant_refills_follows_the_windows_it_clears() {
-    let w = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-    assert_eq!(grant_kind(&w(&["five_hour", "seven_day"])), LimitResetKind::Full);
-    assert_eq!(grant_kind(&w(&["seven_day"])), LimitResetKind::Weekly);
-    assert_eq!(grant_kind(&w(&["five_hour"])), LimitResetKind::Session);
-    assert_eq!(grant_kind(&w(&[])), LimitResetKind::Other);
+    let scope = |list: &[&str]| grant_scope(&list.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+    let refills = |list: &[&str]| scope(list).refills;
+
+    assert_eq!(scope(&["five_hour", "seven_day"]).kind, LimitResetKind::Full);
+    assert_eq!(refills(&["five_hour", "seven_day"]), ["five_hour", "seven_day"]);
+    assert_eq!(scope(&["seven_day"]).kind, LimitResetKind::Weekly);
+    assert_eq!(scope(&["five_hour"]).kind, LimitResetKind::Session);
+    assert_eq!(refills(&["five_hour"]), ["five_hour"]);
+
+    // Fable's own weekly limit, and nothing else.
+    let fable = scope(&["seven_day_overage_included"]);
+    assert_eq!(fable.kind, LimitResetKind::ModelWeekly);
+    assert_eq!(fable.model.as_deref(), Some("Fable"));
+    assert_eq!(fable.refills, ["seven_day_fable"]);
+    // With the general weekly limit it is a weekly reset that refills both.
+    let both = scope(&["seven_day", "seven_day_overage_included"]);
+    assert_eq!(both.kind, LimitResetKind::Weekly);
+    assert_eq!(both.model, None);
+    assert_eq!(both.refills, ["seven_day", "seven_day_fable"]);
+    assert_eq!(
+        scope(&["five_hour", "seven_day", "seven_day_overage_included"]).kind,
+        LimitResetKind::Full
+    );
+
+    // A window not known here is not guessed at, whatever its name starts
+    // with: alone it is an unknown reset that refills nothing named.
+    let unknowns: [&[&str]; 4] = [&["seven_day_cowork"], &["seven_day_opus"], &["overage"], &[]];
+    for unknown in unknowns {
+        let s = scope(unknown);
+        assert_eq!(s.kind, LimitResetKind::Other, "{unknown:?}");
+        assert!(s.refills.is_empty(), "{unknown:?}");
+        assert_eq!(s.model, None);
+    }
+    assert_eq!(scope(&["seven_day", "seven_day_cowork"]).refills, ["seven_day"]);
+}
+
+/// The pool's listing of an account holding the three Fable resets of the
+/// November launch, as `GET /maxpool/resets` sent it (account name
+/// changed): each clears only `seven_day_overage_included`, and the pool's
+/// `appliesTo` also names `general` because `givesBackWeekly` is set.
+fn fable_launch_listing() -> Value {
+    let grant = |id: &str, label: &str| {
+        json!({
+            "id": id, "label": label, "resetsLeft": 1, "resetsTotal": 1,
+            "startsAt": 1_794_247_200_000_i64, "endsAt": 1_804_579_140_000_i64,
+            "clears": ["seven_day_overage_included"], "appliesTo": ["fable", "general"],
+            "givesBackWeekly": true, "usableNow": true, "paused": false, "requiresLimit": false,
+            "blocking": false, "unavailableReason": null, "expired": false
+        })
+    };
+    json!({
+        "ok": true,
+        "generatedAt": ms(NOW),
+        "autoRedeem": { "enabled": true, "wouldAct": false },
+        "accounts": [
+            { "name": "launch@example.com", "enabled": true, "provider": "anthropic", "type": "oauth",
+              "grants": [
+                  grant("launch-2610-fable", "New model launch: one Fable reset for Max, Team Premium and Enterprise Premium"),
+                  grant("launch-2610-fable-12mo", "New model launch: one more Fable reset at 12 months' tenure"),
+                  grant("launch-2610-fable-6mo", "New model launch: one more Fable reset at 6 months' tenure"),
+              ],
+              "nextGrantId": "launch-2610-fable", "cooldownUntil": null, "eligible": true,
+              "checkedAt": ms(NOW - 60), "stale": false, "lastError": null, "lastClaimAt": null,
+              "resetSettling": false,
+              "autoRedeem": { "wouldAct": false, "grantId": null, "scope": null, "reason": "below wall" } },
+            { "name": "spent@example.com", "enabled": true, "provider": "anthropic", "type": "oauth",
+              "grants": [], "nextGrantId": null, "cooldownUntil": null, "eligible": true,
+              "autoRedeem": { "wouldAct": false, "reason": "no grant held" } }
+        ]
+    })
+}
+
+#[test]
+fn a_fable_reset_refills_only_fables_weekly_limit_whatever_the_pool_applies_it_to() {
+    let listed = parse_resets(fable_launch_listing().to_string().as_bytes(), NOW).unwrap();
+    let launch = &listed[0].1;
+    assert_eq!(launch.available, 3);
+    assert_eq!(launch.next_grant_id.as_deref(), Some("launch-2610-fable"));
+    for grant in &launch.grants {
+        assert_eq!(grant.kind, LimitResetKind::ModelWeekly, "{}", grant.id);
+        assert_eq!(grant.model.as_deref(), Some("Fable"));
+        assert_eq!(grant.refills, ["seven_day_fable"], "never the general weekly");
+        assert!(grant.gives_back_weekly);
+        assert!(grant.usable_now && !grant.requires_limit);
+        assert_eq!(grant.count, 1);
+        assert_eq!(grant.expires_at, Some(1_804_579_140));
+    }
+    assert_eq!(
+        launch.grants[0].label.as_deref(),
+        Some("New model launch: one Fable reset for Max, Team Premium and Enterprise Premium"),
+        "the provider's name is kept whole"
+    );
+    assert!(listed[1].1.grants.is_empty());
+
+    let json = serde_json::to_value(&launch.grants[0]).unwrap();
+    assert_eq!(json["kind"], "model_weekly");
+    assert_eq!(json["model"], "Fable");
+    assert_eq!(json["refills"], json!(["seven_day_fable"]));
+    assert_eq!(json["gives_back_weekly"], true);
+}
+
+/// A status in which `walled` has spent its general weekly limit (the pool
+/// still lets it serve), `fable-walled` its Fable one, `busy` is past the
+/// switch threshold of its 5-hour window, `rolled` spent a weekly window
+/// that has since reset, and `free` has headroom everywhere.
+fn status_at_limits() -> RawStatus {
+    let account = |name: &str, quota: Value| {
+        json!({ "name": name, "enabled": true, "status": "active", "type": "oauth", "quota": quota,
+                "weekly": { "state": "normal", "rawState": "normal" } })
+    };
+    let fable = |utilization: f64, active: bool| {
+        json!({ "fable": { "utilization": utilization, "resetAt": ms(NOW + 2 * DAY), "severity": "normal",
+                           "isActive": active } })
+    };
+    serde_json::from_value(json!({
+        "runningVersion": "1.24.90",
+        "switchThreshold": 0.9,
+        "accounts": [
+            account("walled", json!({ "unified5h": 0.1, "unified5hReset": ms(NOW + 3600),
+                "unified7d": 1.0, "unified7dReset": ms(NOW + 3 * DAY), "unifiedStatus": "allowed_warning",
+                "scopedWeekly": fable(0.0, false) })),
+            account("fable-walled", json!({ "unified5h": 0.1, "unified5hReset": ms(NOW + 3600),
+                "unified7d": 0.4, "unified7dReset": ms(NOW + 3 * DAY), "unifiedStatus": "allowed",
+                "scopedWeekly": fable(1.0, true) })),
+            account("busy", json!({ "unified5h": 0.95, "unified5hReset": ms(NOW + 3600),
+                "unified7d": 0.4, "unified7dReset": ms(NOW + 3 * DAY), "unifiedStatus": "allowed" })),
+            account("rolled", json!({ "unified5h": 0.1, "unified5hReset": ms(NOW + 3600),
+                "unified7d": 1.0, "unified7dReset": ms(NOW - 60), "unifiedStatus": "allowed" })),
+            account("free", json!({ "unified5h": 0.1, "unified5hReset": ms(NOW + 3600),
+                "unified7d": 0.4, "unified7dReset": ms(NOW + 3 * DAY), "unifiedStatus": "allowed",
+                "scopedWeekly": fable(0.3, true) })),
+        ]
+    }))
+    .unwrap()
+}
+
+#[test]
+fn each_accounts_reached_limits_come_with_its_resets_from_the_new_reading() {
+    let names = ["walled", "fable-walled", "busy", "rolled", "free"];
+    let accounts: Vec<Value> = names
+        .iter()
+        .map(|name| json!({ "name": name, "enabled": true, "provider": "anthropic", "type": "oauth",
+            "grants": [{ "id": "g", "resetsLeft": 1, "endsAt": ms(NOW + 9 * DAY),
+                         "clears": ["seven_day_overage_included"], "usableNow": true }] }))
+        .collect();
+    let body = json!({ "ok": true, "accounts": accounts }).to_string();
+    let config = config_at("http://127.0.0.1:9");
+    let mut pool = build_pool(status_at_limits(), &config, NOW);
+    attach(&mut pool, ResetsRead::Listed(parse_resets(body.as_bytes(), NOW).unwrap()), None);
+    let reached = |name: &str| {
+        pool.accounts
+            .iter()
+            .find(|a| a.name == name)
+            .and_then(|a| a.resets.as_ref())
+            .map(|r| r.limits_reached.clone())
+            .unwrap()
+    };
+    assert_eq!(reached("walled"), ["seven_day"], "the general weekly is spent");
+    assert_eq!(reached("fable-walled"), ["seven_day_fable"], "only Fable's own");
+    assert_eq!(reached("busy"), ["five_hour"]);
+    assert!(reached("rolled").is_empty(), "a window that reset holds nothing");
+    assert!(reached("free").is_empty());
+    let json = serde_json::to_value(&pool).unwrap();
+    assert_eq!(json["accounts"][0]["resets"]["limits_reached"], json!(["seven_day"]));
+
+    // A later reading the pool's listing didn't answer: the resets stay,
+    // what is reached is read again.
+    let mut later = build_pool(status_with(&["walled"]), &config, NOW + 60);
+    attach(&mut later, ResetsRead::Unavailable, Some(&pool));
+    let resets = later.accounts[0].resets.as_ref().unwrap();
+    assert_eq!(resets.grants.len(), 1);
+    assert!(resets.limits_reached.is_empty(), "this reading has it at half its week");
 }
 
 fn status_with(names: &[&str]) -> RawStatus {

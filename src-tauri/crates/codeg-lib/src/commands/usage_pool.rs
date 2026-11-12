@@ -50,6 +50,9 @@ const DEFAULT_SWITCH_THRESHOLD: f64 = 0.9;
 /// maxpool's weekly bench: an account (or one model's weekly window) this
 /// full takes no more requests until the window resets.
 const WEEKLY_EXHAUSTED_PERCENT: f64 = 99.9;
+/// maxpool's wall for using a reset on a weekly window (general or one
+/// model's): this full, the window is spent.
+const RESET_WALL_PERCENT: f64 = 99.0;
 /// Where maxpool's rising reserve starts to rise: this share of the way
 /// through the window (its `capRampStart` default).
 const RESERVE_RAMP_START: f64 = 0.5;
@@ -849,6 +852,9 @@ struct QuotaHold {
     full: bool,
     /// The account's own reserve is what holds it.
     reserved: bool,
+    /// The windows that hold it (`five_hour`, `seven_day`); a rejection no
+    /// full window explains names none.
+    windows: Vec<&'static str>,
 }
 
 impl PoolAccount {
@@ -893,6 +899,7 @@ impl PoolAccount {
         let mut blockers = Vec::new();
         let mut full = false;
         let mut reserved = false;
+        let mut windows = Vec::new();
         let five_hour = self.window("five_hour");
         let seven_day = self.window("seven_day");
         // The 5-hour window is benched at the switch threshold, or at the
@@ -910,6 +917,7 @@ impl PoolAccount {
             );
             full |= five_hour.is_some_and(|w| w.used_percent >= 100.0);
             reserved |= five_hour.is_some_and(|w| w.used_percent < threshold);
+            windows.push("five_hour");
         }
         let weekly_full = seven_day.is_some_and(|w| w.used_percent >= WEEKLY_EXHAUSTED_PERCENT);
         // Held by its reserve: the pool says "capped", or, where it gives no
@@ -949,6 +957,7 @@ impl PoolAccount {
                     } else {
                         full = true;
                     }
+                    windows.push("seven_day");
                 }
             }
         }
@@ -970,7 +979,33 @@ impl PoolAccount {
             blockers,
             full,
             reserved,
+            windows,
         }
+    }
+
+    /// The account's windows at their limit at `now`, by id in its
+    /// `windows`: what holds it back (the 5-hour window past `threshold` or
+    /// its reserve, the weekly one full or held by its reserve), and each
+    /// weekly window spent to the wall the pool uses a reset at — the
+    /// general one, and each model's own, which holds back only requests to
+    /// that model. A rejection no full window explains names none.
+    pub(crate) fn limits_reached(&self, now: i64, threshold: f64) -> Vec<String> {
+        let mut reached: Vec<String> = self
+            .quota_blockers(now, threshold)
+            .windows
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        for window in &self.windows {
+            let weekly = window.id == "seven_day" || scope_for_window(&window.id).is_some();
+            if weekly
+                && !reached.contains(&window.id)
+                && window_blocker(Some(window), RESET_WALL_PERCENT, now).is_some()
+            {
+                reached.push(window.id.clone());
+            }
+        }
+        reached
     }
 
     /// Mirrors the pool's own routing gate: switched off, failed, cooling

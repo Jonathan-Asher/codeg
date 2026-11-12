@@ -7116,16 +7116,29 @@
       "reserveSummaryDynamic": "예비 {percent}%, 초기화 전에 해제",
       "position": "{position}번째",
       "resets": {
-        "available": "{count, plural, other {초기화 #회}}",
-        "availableUntil": "{count, plural, other {초기화 #회}} · {date} 만료",
+        "group": {
+          "session": "{count, plural, other {5시간 초기화 #회 · 5시간 한도를 다시 채움}}",
+          "weekly": "{count, plural, other {주간 초기화 #회 · 주간 한도를 다시 채움}}",
+          "modelWeekly": "{count, plural, other {{model} 초기화 #회 · {model} 주간 한도만 다시 채움}}",
+          "full": "{count, plural, other {전체 초기화 #회 · 5시간 한도와 주간 한도를 다시 채움}}",
+          "other": "{count, plural, other {초기화 #회 · 무엇을 채우는지 알 수 없음}}"
+        },
+        "expires": "{date} 만료",
         "auto": "한도에 도달하면 풀이 하나를 사용합니다",
         "cooldownUntil": "다음 초기화는 {time}부터 사용 가능",
+        "wontHelp": {
+          "weekly": "지금은 소용없음: 이 계정은 전체 주간 한도에 도달했고, 이 초기화로는 채워지지 않습니다",
+          "session": "지금은 소용없음: 이 계정은 5시간 한도에 도달했고, 이 초기화로는 채워지지 않습니다"
+        },
+        "givesBackOnly": "전체 주간 한도에서는 이번 주 {model} 사용분만 돌려받습니다",
+        "givesBackOnlyNote": "이 계정은 전체 주간 한도에 도달했습니다. 이 초기화로 돌려받는 것은 이번 주 {model} 모델이 사용한 만큼뿐입니다.",
         "confirmBody": "<b>{name}</b>에서 초기화 1회를 사용할까요? {refills}가 지금 다시 채워지며 되돌릴 수 없습니다.",
+        "confirmBodyModel": "<b>{name}</b>에서 {model} 초기화 1회를 사용할까요? {model} 모델의 주간 한도만 다시 채워지며 전체 주간 한도는 채워지지 않습니다. 되돌릴 수 없습니다.",
         "refills": {
           "session": "5시간 한도",
           "weekly": "주간 한도",
           "full": "5시간 한도와 주간 한도",
-          "other": "사용량 한도"
+          "other": "적용되는 한도"
         },
         "outcome": {
           "reset": "{name}에서 초기화를 사용했습니다. 한도가 다시 채워졌습니다.",

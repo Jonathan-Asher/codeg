@@ -46,9 +46,9 @@ import {
 import {
   defaultUsableReset,
   findProviderResets,
+  modelFamilyOf,
   poolResetForPause,
 } from "@/lib/limit-resets"
-import { poolAccountState } from "@/lib/plan-usage"
 import type {
   AgentType,
   LimitPause,
@@ -307,10 +307,12 @@ const POOL_TICK_MS = 30_000
 
 /**
  * "Use a reset and continue" for a Claude Code session behind the account
- * pool: shown while one of the pool's accounts has a reset it can use now.
- * It asks first ("Use 1 reset on primary?"), has the pool use it on the
- * account it frees most (one held by its limit, the grant that expires
- * first), and sends the session's continuation once it lands.
+ * pool: shown only while a reset can clear the limit that stopped it — an
+ * account held back by its limits with a grant that refills every one of
+ * them (one model's own weekly limit counting only for a session on that
+ * model, so a Fable reset is never offered for the general weekly limit).
+ * It asks first ("Use 1 reset on primary?"), has the pool use it, and sends
+ * the session's continuation once it lands.
  */
 export function PoolResetContinueButton({
   conversationId,
@@ -325,8 +327,13 @@ export function PoolResetContinueButton({
   const reload = useCallback(() => void load(true), [load])
   const { busy, run } = usePoolResetRun(reload)
   const [confirming, setConfirming] = useState(false)
-  const pick = poolResetForPause(report?.pool ?? null, now, (account) =>
-    poolAccountState(account, now)
+  const model = useAppWorkspaceStore(
+    (s) => s.conversations.find((c) => c.id === conversationId)?.model ?? null
+  )
+  const pick = poolResetForPause(
+    report?.pool ?? null,
+    now,
+    modelFamilyOf(model)
   )
   if (!pick) return null
   return (

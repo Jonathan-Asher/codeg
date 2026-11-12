@@ -39,6 +39,10 @@ const RECHECK_TIMEOUT: Duration = Duration::from_secs(40);
 const UNSUPPORTED_BACKOFF: Duration = Duration::from_secs(30 * 60);
 const MAX_GRANTS: usize = 16;
 const GRANT_ID_MAX_CHARS: usize = 128;
+/// The provider's names for grants run longer than an account name ("New
+/// model launch: one Fable reset for Max, Team Premium and Enterprise
+/// Premium").
+const GRANT_LABEL_MAX_CHARS: usize = 160;
 
 impl PoolConfig {
     /// A route next to the status endpoint, on the same address.
@@ -116,6 +120,8 @@ struct RawGrant {
     requires_limit: Option<bool>,
     #[serde(deserialize_with = "lenient_list")]
     clears: Vec<String>,
+    #[serde(deserialize_with = "lenient")]
+    gives_back_weekly: Option<bool>,
 }
 
 // ─── What the screen gets ───────────────────────────────────────────────
@@ -129,6 +135,15 @@ pub struct PoolResetGrant {
     pub label: Option<String>,
     /// What it refills.
     pub kind: LimitResetKind,
+    /// The model family whose own weekly limit a `model_weekly` grant
+    /// refills ("Fable"); `None` for any other kind.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// The account's windows it refills, by id in the pool reading
+    /// (`five_hour`, `seven_day`, `seven_day_fable`). Empty when what it
+    /// refills isn't known: such a grant is shown, never used from here.
+    #[serde(default)]
+    pub refills: Vec<String>,
     /// Resets it still holds.
     pub count: u32,
     /// Epoch seconds.
@@ -137,6 +152,10 @@ pub struct PoolResetGrant {
     pub usable_now: bool,
     /// It only works once a limit it refills is reached.
     pub requires_limit: bool,
+    /// Using it also gives back to the general weekly limit what the model
+    /// used of it this week — only that much.
+    #[serde(default)]
+    pub gives_back_weekly: bool,
 }
 
 /// A pool account's usage-limit resets, as the pool last listed them.
@@ -157,18 +176,78 @@ pub struct PoolAccountResets {
     pub auto_redeem: bool,
     /// When the pool last listed them (epoch seconds).
     pub checked_at: Option<i64>,
+    /// The account's windows at their limit at this reading, by id in its
+    /// `windows` (`five_hour`, `seven_day`, a model's `seven_day_<family>`):
+    /// what a reset has to refill to free it. Read from the account each
+    /// reading, not from the listing.
+    #[serde(default)]
+    pub limits_reached: Vec<String>,
 }
 
+/// The window a grant's `clears` names for the 5-hour limit.
+const SESSION_CLEARS: &str = "five_hour";
+/// The window it names for the general weekly limit.
+const WEEKLY_CLEARS: &str = "seven_day";
+/// The windows it names for one model family's own weekly limit, and the
+/// family (the pool's key for it; its window in a reading is
+/// `seven_day_<family>`).
+const MODEL_WEEKLY_CLEARS: &[(&str, &str)] = &[("seven_day_overage_included", "fable")];
+
 /// What a grant refills, from the windows it clears.
-pub(crate) fn grant_kind(clears: &[String]) -> LimitResetKind {
-    let session = clears.iter().any(|w| w == "five_hour");
-    let weekly = clears.iter().any(|w| w.starts_with("seven_day"));
-    match (session, weekly) {
-        (true, true) => LimitResetKind::Full,
-        (true, false) => LimitResetKind::Session,
-        (false, true) => LimitResetKind::Weekly,
-        (false, false) => LimitResetKind::Other,
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct GrantScope {
+    pub kind: LimitResetKind,
+    /// The model family, for a `model_weekly` grant ("Fable").
+    pub model: Option<String>,
+    /// The account's windows it refills, by id in the pool reading.
+    pub refills: Vec<String>,
+}
+
+/// What a grant refills, read the way the pool reads it: `five_hour` is
+/// the 5-hour limit, `seven_day` the general weekly one, and
+/// `seven_day_overage_included` Fable's own weekly limit only. Any other
+/// window is not known here: it adds nothing, so a grant that clears only
+/// such windows is `Other` — never taken for the weekly limit because its
+/// name starts like it.
+pub(crate) fn grant_scope(clears: &[String]) -> GrantScope {
+    let clears_window = |window: &str| clears.iter().any(|w| w == window);
+    let session = clears_window(SESSION_CLEARS);
+    let weekly = clears_window(WEEKLY_CLEARS);
+    let families: Vec<&str> = MODEL_WEEKLY_CLEARS
+        .iter()
+        .filter(|(window, _)| clears_window(window))
+        .map(|(_, family)| *family)
+        .collect();
+    let mut refills = Vec::new();
+    if session {
+        refills.push(SESSION_CLEARS.to_string());
     }
+    if weekly {
+        refills.push(WEEKLY_CLEARS.to_string());
+    }
+    refills.extend(families.iter().map(|family| format!("seven_day_{family}")));
+    let kind = match (session, weekly, families.is_empty()) {
+        (true, true, _) => LimitResetKind::Full,
+        (false, true, _) => LimitResetKind::Weekly,
+        (true, false, _) => LimitResetKind::Session,
+        (false, false, false) => LimitResetKind::ModelWeekly,
+        (false, false, true) => LimitResetKind::Other,
+    };
+    let model = if kind == LimitResetKind::ModelWeekly {
+        families.first().copied().map(model_name)
+    } else {
+        None
+    };
+    GrantScope {
+        kind,
+        model,
+        refills,
+    }
+}
+
+/// A model family's name as its own weekly window is labelled ("Fable").
+fn model_name(family: &str) -> String {
+    crate::commands::plan_usage::claude_window(&format!("seven_day_{family}"), 0.0, None).label
 }
 
 fn grant_id(value: Option<&Value>) -> Option<String> {
@@ -181,6 +260,14 @@ fn grant_id(value: Option<&Value>) -> Option<String> {
         && id.chars().count() <= GRANT_ID_MAX_CHARS
         && !id.chars().any(char::is_control);
     fine.then_some(id)
+}
+
+/// The provider's name for a grant: control characters dropped, trimmed,
+/// capped.
+fn grant_label(raw: Option<String>) -> Option<String> {
+    let cleaned: String = raw?.chars().filter(|c| !c.is_control()).collect();
+    let cleaned: String = cleaned.trim().chars().take(GRANT_LABEL_MAX_CHARS).collect();
+    (!cleaned.is_empty()).then_some(cleaned)
 }
 
 fn grant_from(raw: RawGrant, now: i64) -> Option<PoolResetGrant> {
@@ -197,14 +284,18 @@ fn grant_from(raw: RawGrant, now: i64) -> Option<PoolResetGrant> {
         .into_iter()
         .filter_map(|w| clean_label(Some(w)))
         .collect();
+    let scope = grant_scope(&clears);
     Some(PoolResetGrant {
         id,
-        label: clean_label(raw.label),
-        kind: grant_kind(&clears),
+        label: grant_label(raw.label),
+        kind: scope.kind,
+        model: scope.model,
+        refills: scope.refills,
         count,
         expires_at: raw.ends_at,
         usable_now: raw.usable_now.unwrap_or(false) && !raw.paused.unwrap_or(false),
         requires_limit: raw.requires_limit.unwrap_or(false),
+        gives_back_weekly: raw.gives_back_weekly.unwrap_or(false),
     })
 }
 
@@ -269,6 +360,7 @@ pub(crate) fn parse_resets(body: &[u8], now: i64) -> Option<Vec<(String, PoolAcc
                         .and_then(|a| a.would_act)
                         .unwrap_or(false),
                 checked_at: account.checked_at,
+                limits_reached: Vec::new(),
             },
         ));
     }
@@ -393,8 +485,20 @@ pub(super) async fn read_resets(config: &PoolConfig, version: Option<&str>, now:
 }
 
 /// Put what the ask came to on a new reading. With no answer, the previous
-/// reading's resets stay.
+/// reading's resets stay. Either way, what holds each account back is read
+/// from the new reading.
 pub(crate) fn attach(pool: &mut PlanUsagePool, read: ResetsRead, previous: Option<&PlanUsagePool>) {
+    put_resets(pool, read, previous);
+    let (now, threshold) = (pool.checked_at, pool.switch_threshold);
+    for account in pool.accounts.iter_mut() {
+        let reached = account.limits_reached(now, threshold);
+        if let Some(resets) = account.resets.as_mut() {
+            resets.limits_reached = reached;
+        }
+    }
+}
+
+fn put_resets(pool: &mut PlanUsagePool, read: ResetsRead, previous: Option<&PlanUsagePool>) {
     match read {
         ResetsRead::Listed(listed) => {
             pool.resets_supported = true;

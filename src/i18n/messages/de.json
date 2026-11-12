@@ -7116,16 +7116,29 @@
       "reserveSummaryDynamic": "Reserve {percent} %, kurz vor dem Reset freigegeben",
       "position": "Position {position}",
       "resets": {
-        "available": "{count, plural, one {# Zurücksetzung} other {# Zurücksetzungen}}",
-        "availableUntil": "{count, plural, one {# Zurücksetzung} other {# Zurücksetzungen}} · läuft ab am {date}",
+        "group": {
+          "session": "{count, plural, one {# 5-Stunden-Zurücksetzung · füllt dein 5-Stunden-Limit auf} other {# 5-Stunden-Zurücksetzungen · jede füllt dein 5-Stunden-Limit auf}}",
+          "weekly": "{count, plural, one {# Wochen-Zurücksetzung · füllt dein Wochenlimit auf} other {# Wochen-Zurücksetzungen · jede füllt dein Wochenlimit auf}}",
+          "modelWeekly": "{count, plural, one {# {model}-Zurücksetzung · füllt nur dein {model}-Wochenlimit auf} other {# {model}-Zurücksetzungen · jede füllt nur dein {model}-Wochenlimit auf}}",
+          "full": "{count, plural, one {# vollständige Zurücksetzung · füllt dein 5-Stunden- und Wochenlimit auf} other {# vollständige Zurücksetzungen · jede füllt dein 5-Stunden- und Wochenlimit auf}}",
+          "other": "{count, plural, one {# Zurücksetzung · was sie auffüllt, ist nicht bekannt} other {# Zurücksetzungen · was sie auffüllen, ist nicht bekannt}}"
+        },
+        "expires": "läuft ab am {date}",
         "auto": "der Pool nutzt eine am Limit",
         "cooldownUntil": "nächste nutzbar {time}",
+        "wontHelp": {
+          "weekly": "hilft jetzt nicht: Das Konto ist an seinem allgemeinen Wochenlimit, das hiermit nicht aufgefüllt wird",
+          "session": "hilft jetzt nicht: Das Konto ist an seinem 5-Stunden-Limit, das hiermit nicht aufgefüllt wird"
+        },
+        "givesBackOnly": "am allgemeinen Wochenlimit gibt sie nur frei, was {model} diese Woche verbraucht hat",
+        "givesBackOnlyNote": "Dieses Konto ist an seinem allgemeinen Wochenlimit: Diese Zurücksetzung gibt davon nur frei, was {model}-Modelle diese Woche verbraucht haben.",
         "confirmBody": "1 Zurücksetzung für <b>{name}</b> nutzen? Damit wird das {refills} jetzt aufgefüllt. Das lässt sich nicht rückgängig machen.",
+        "confirmBodyModel": "1 {model}-Zurücksetzung für <b>{name}</b> nutzen? Damit wird nur das Wochenlimit für {model}-Modelle aufgefüllt, nicht dein allgemeines Wochenlimit. Das lässt sich nicht rückgängig machen.",
         "refills": {
           "session": "5-Stunden-Limit",
           "weekly": "Wochenlimit",
           "full": "5-Stunden- und Wochenlimit",
-          "other": "Nutzungslimit"
+          "other": "Limit, das sie abdeckt"
         },
         "outcome": {
           "reset": "Zurücksetzung für {name} genutzt: Die Limits sind aufgefüllt.",

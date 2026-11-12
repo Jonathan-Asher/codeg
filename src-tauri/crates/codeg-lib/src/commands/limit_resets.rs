@@ -47,8 +47,12 @@ pub enum LimitResetKind {
     Session,
     /// The weekly window.
     Weekly,
+    /// One model family's own weekly window only (a pool grant that refills
+    /// Fable's weekly limit), not the account's general weekly one.
+    ModelWeekly,
     /// Every limit at once (Codex's "Full reset").
     Full,
+    /// What it refills isn't known.
     Other,
 }
 

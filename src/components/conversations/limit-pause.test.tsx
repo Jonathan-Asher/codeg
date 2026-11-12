@@ -17,7 +17,10 @@ import type {
   LimitResetsReport,
   PlanUsagePool,
   PlanUsagePoolAccount,
+  PlanUsagePoolResetGrant,
+  PlanUsagePoolResets,
   PlanUsageReport,
+  PlanUsageWindow,
   ProviderLimitResets,
 } from "@/lib/types"
 
@@ -154,6 +157,62 @@ function poolAccount(
   }
 }
 
+function weeklyWindow(id: string, used: number): PlanUsageWindow {
+  return {
+    id,
+    kind: id === "seven_day" ? "weekly" : "weekly_model",
+    label: id === "seven_day" ? "7d" : "Fable",
+    used_percent: used,
+    resets_at: nowSecs() + 2 * 86_400,
+    window_minutes: 10_080,
+    observed_at: nowSecs() - 60,
+  }
+}
+
+const weeklyGrant: PlanUsagePoolResetGrant = {
+  id: "g-weekly",
+  label: null,
+  kind: "weekly",
+  model: null,
+  refills: ["seven_day"],
+  count: 1,
+  expires_at: nowSecs() + 9 * 86_400,
+  usable_now: true,
+  requires_limit: true,
+  gives_back_weekly: false,
+}
+
+/** One of the November launch's Fable resets, as the pool lists it. */
+const fableGrant: PlanUsagePoolResetGrant = {
+  id: "launch-2610-fable",
+  label:
+    "New model launch: one Fable reset for Max, Team Premium and Enterprise Premium",
+  kind: "model_weekly",
+  model: "Fable",
+  refills: ["seven_day_fable"],
+  count: 1,
+  expires_at: nowSecs() + 117 * 86_400,
+  usable_now: true,
+  requires_limit: false,
+  gives_back_weekly: true,
+}
+
+function grants(
+  list: PlanUsagePoolResetGrant[],
+  limitsReached: string[] = []
+): PlanUsagePoolResets {
+  return {
+    available: list.reduce((n, g) => n + g.count, 0),
+    grants: list,
+    next_grant_id: list[0]?.id ?? null,
+    cooldown_until: null,
+    eligible: true,
+    auto_redeem: false,
+    checked_at: nowSecs() - 30,
+    limits_reached: limitsReached,
+  }
+}
+
 /** A pool whose `primary` is at its weekly limit with a weekly reset it can
  *  use (`backup` serves, with none). */
 function resetsPool(over: Partial<PlanUsagePool> = {}): PlanUsagePool {
@@ -168,25 +227,8 @@ function resetsPool(over: Partial<PlanUsagePool> = {}): PlanUsagePool {
         serving: false,
         limit_status: "rejected",
         blocked_until: nowSecs() + 2 * 86_400,
-        resets: {
-          available: 1,
-          grants: [
-            {
-              id: "g-weekly",
-              label: null,
-              kind: "weekly",
-              count: 1,
-              expires_at: nowSecs() + 9 * 86_400,
-              usable_now: true,
-              requires_limit: true,
-            },
-          ],
-          next_grant_id: "g-weekly",
-          cooldown_until: null,
-          eligible: true,
-          auto_redeem: false,
-          checked_at: nowSecs() - 30,
-        },
+        windows: [weeklyWindow("seven_day", 100)],
+        resets: grants([weeklyGrant], ["seven_day"]),
       }),
       poolAccount(),
     ],
@@ -466,6 +508,86 @@ describe("LimitPausedBanner with a pool account's reset", () => {
     )
     expect(screen.queryByTestId("limit-use-reset")).toBeNull()
     expect(h.getPlanUsage).not.toHaveBeenCalled()
+  })
+})
+
+describe("LimitPausedBanner and a Fable reset", () => {
+  async function bannerFor(pool: PlanUsagePool, model: string | null) {
+    useAppWorkspaceStore.setState({
+      conversations: [summary({ id: 7, model })],
+    })
+    h.getPlanUsage.mockResolvedValue(planReport(pool))
+    wrap(
+      <LimitPausedBanner
+        conversationId={7}
+        pause={pause()}
+        reason="pool_capacity"
+        agentType="claude_code"
+      />
+    )
+    await waitFor(() => expect(h.getPlanUsage).toHaveBeenCalled())
+    await act(async () => {
+      await Promise.resolve()
+    })
+  }
+
+  afterEach(() => {
+    cleanup()
+    useAppWorkspaceStore.setState({ conversations: [] })
+  })
+
+  it("never offers it for the general weekly limit, even with an account that holds one", async () => {
+    // As on 2026-11-12: the account at its general weekly limit holds a
+    // Fable reset, another account with headroom holds more.
+    await bannerFor(
+      resetsPool({
+        accounts: [
+          poolAccount({
+            name: "walled",
+            state: "exhausted",
+            serving: false,
+            windows: [weeklyWindow("seven_day", 100)],
+            resets: grants([fableGrant], ["seven_day"]),
+          }),
+          poolAccount({
+            name: "spare",
+            windows: [weeklyWindow("seven_day", 37)],
+            resets: grants([{ ...fableGrant, id: "launch-2610-fable-6mo" }]),
+          }),
+        ],
+      }),
+      "claude-fable-5-1"
+    )
+    expect(screen.queryByTestId("limit-use-reset")).toBeNull()
+  })
+
+  it("offers it to a Fable session the Fable limit stopped, saying it refills only that limit", async () => {
+    const pool = resetsPool({
+      accounts: [
+        poolAccount({
+          name: "fable-walled",
+          state: "available",
+          windows: [
+            weeklyWindow("seven_day", 40),
+            weeklyWindow("seven_day_fable", 100),
+          ],
+          resets: grants([fableGrant], ["seven_day_fable"]),
+        }),
+      ],
+    })
+    await bannerFor(pool, "claude-fable-5-1")
+    const button = await screen.findByTestId("limit-use-reset")
+    expect(button).toHaveAttribute("data-reset-account", "fable-walled")
+    fireEvent.click(button)
+    expect(screen.getByTestId("pool-reset-confirm-body")).toHaveTextContent(
+      "Use 1 Fable reset on fable-walled? It refills only the weekly limit for Fable models, not your general weekly limit, and can't be undone."
+    )
+    cleanup()
+
+    // An Opus session isn't held by Fable's limit: nothing to offer.
+    h.getPlanUsage.mockClear()
+    await bannerFor(pool, "claude-opus-5-5")
+    expect(screen.queryByTestId("limit-use-reset")).toBeNull()
   })
 })
 

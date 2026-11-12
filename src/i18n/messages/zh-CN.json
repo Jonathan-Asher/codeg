@@ -7116,16 +7116,29 @@
       "reserveSummaryDynamic": "预留 {percent}%，临近重置时释放",
       "position": "第 {position} 位",
       "resets": {
-        "available": "{count, plural, other {# 次重置}}",
-        "availableUntil": "{count, plural, other {# 次重置}} · {date} 到期",
+        "group": {
+          "session": "{count, plural, other {# 次 5 小时重置 · 恢复你的 5 小时上限}}",
+          "weekly": "{count, plural, other {# 次每周重置 · 恢复你的每周上限}}",
+          "modelWeekly": "{count, plural, other {# 次 {model} 重置 · 只恢复你的 {model} 每周上限}}",
+          "full": "{count, plural, other {# 次完整重置 · 恢复你的 5 小时上限和每周上限}}",
+          "other": "{count, plural, other {# 次重置 · 不清楚会恢复什么}}"
+        },
+        "expires": "{date} 到期",
         "auto": "达到上限时账号池会自动使用一次",
         "cooldownUntil": "下一次可在 {time} 使用",
+        "wontHelp": {
+          "weekly": "现在没用：该账号已达到总的每周上限，这次重置不会恢复它",
+          "session": "现在没用：该账号已达到 5 小时上限，这次重置不会恢复它"
+        },
+        "givesBackOnly": "在总的每周上限时，只会退回本周 {model} 用掉的部分",
+        "givesBackOnlyNote": "该账号已达到总的每周上限：这次重置只会退回本周 {model} 模型用掉的部分。",
         "confirmBody": "要在 <b>{name}</b> 上使用 1 次重置吗？这会立即恢复{refills}，且无法撤销。",
+        "confirmBodyModel": "要在 <b>{name}</b> 上使用 1 次 {model} 重置吗？它只恢复 {model} 模型的每周上限，不恢复你总的每周上限，且无法撤销。",
         "refills": {
           "session": "5 小时上限",
           "weekly": "每周上限",
           "full": "5 小时上限和每周上限",
-          "other": "用量上限"
+          "other": "它涵盖的上限"
         },
         "outcome": {
           "reset": "已在 {name} 上使用重置：上限已恢复。",
