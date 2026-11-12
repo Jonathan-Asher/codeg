@@ -19,6 +19,8 @@ use crate::parsers::{
     title_from_user_text, truncate_str, AgentParser, ParseError,
 };
 
+mod fold;
+
 /// Resolve the `pi` coding agent's sessions directory, honoring (highest
 /// precedence first):
 ///   1. `PI_CODING_AGENT_SESSION_DIR` — the sessions dir directly;
@@ -380,7 +382,7 @@ impl PiParser {
         path: &Path,
         conversation_id: &str,
     ) -> Result<ConversationDetail, ParseError> {
-        let parsed = parse_session(path);
+        let parsed = parse_session_with(path, Some(&self.base_dir));
 
         let mut turns = group_into_turns(parsed.messages);
         relocate_orphaned_tool_results(&mut turns);
@@ -440,8 +442,18 @@ impl AgentParser for PiParser {
             return Ok(conversations);
         }
 
+        // Pi's own session lists (`SessionManager.list` / `listAll`) read the
+        // files directly inside a bucket, or directly inside a custom
+        // `sessionDir`, and nothing deeper. What sits deeper belongs to a
+        // session: its sub-agents' runs (`<stem>/<id>/run-N/session.jsonl`),
+        // their forked contexts (`<stem>/forks/`), and pi-subagents' records
+        // (`subagent-artifacts/`). Walking all of it listed every child as a
+        // conversation of its own; they are reached through the parent's
+        // sub-agent card, and `get_conversation` still finds them by id.
         for entry in WalkDir::new(&self.base_dir)
+            .max_depth(2)
             .into_iter()
+            .filter_entry(|entry| entry.file_name() != SUBAGENT_ARTIFACTS_DIR)
             .filter_map(|e| e.ok())
         {
             let path = entry.path();
@@ -485,6 +497,10 @@ impl AgentParser for PiParser {
     }
 }
 
+/// pi-subagents' per-run records next to the sessions of a bucket: inputs,
+/// outputs and a transcript COPY per child, none of them a session.
+const SUBAGENT_ARTIFACTS_DIR: &str = "subagent-artifacts";
+
 /// The accumulated result of scanning one session `.jsonl`.
 #[derive(Default)]
 struct SessionParse {
@@ -525,6 +541,13 @@ struct SessionRecord {
 /// the type docs). Unknown / malformed lines are skipped so a forward-compatible
 /// or partially-written log never panics.
 fn parse_session(path: &Path) -> SessionParse {
+    parse_session_with(path, None)
+}
+
+/// [`parse_session`], resolving sub-agent children to their sessions when
+/// `sessions_root` (the parser's sessions directory) is given — the detail
+/// view's card needs them, the session list does not.
+fn parse_session_with(path: &Path, sessions_root: Option<&Path>) -> SessionParse {
     let mut sp = SessionParse::default();
     let Ok(file) = fs::File::open(path) else {
         return sp;
@@ -563,14 +586,55 @@ fn parse_session(path: &Path) -> SessionParse {
     // Pass 2 — replay the active branch in file order (which IS path order:
     // every entry on the path was appended after its parent).
     let active = active_branch(&entries);
-    for (index, record) in entries.iter().enumerate() {
-        if !keeps_record(active.as_ref(), index, record) {
-            continue;
-        }
+    let kept: Vec<usize> = (0..entries.len())
+        .filter(|&index| keeps_record(active.as_ref(), index, &entries[index]))
+        .collect();
+    let kept = &kept[inherited_context_end(header.as_ref(), &entries, &kept)..];
+
+    // Sub-agent runs and background jobs fold their notices into the call that
+    // started them, which needs the whole branch read first (`fold`).
+    let links = sessions_root.map(|root| fold::ChildLinks::for_session(path, root));
+    let fold = fold::Fold::scan(
+        kept.iter().map(|&index| (index, &entries[index].value)),
+        links.as_ref(),
+    );
+
+    for &index in kept {
+        let record = &entries[index];
         let value = &record.value;
         let idx = record.line_idx;
         let record_type = value.get("type").and_then(Value::as_str).unwrap_or("");
         let ts = note_ts(&mut sp, record_iso_ts(value));
+
+        // A run Pi started by itself, because a notice arrived after it had
+        // gone idle: marked, so it does not read as an answer to the user.
+        if let Some(wake) = fold.wake_before(index) {
+            sp.messages.push(text_message(
+                format!("pi-wake-{idx}"),
+                MessageRole::System,
+                wake.blocks(),
+                wake.at.unwrap_or(ts),
+                None,
+                None,
+            ));
+        }
+        if fold.hides(index) {
+            continue;
+        }
+        if let Some(note) = fold.note(index) {
+            sp.content_events += 1;
+            sp.messages.push(text_message(
+                format!("pi-notice-{idx}"),
+                MessageRole::System,
+                vec![ContentBlock::Text {
+                    text: truncate_str(note, 4000),
+                }],
+                ts,
+                None,
+                None,
+            ));
+            continue;
+        }
 
         match record_type {
             // `session_info` is resolved up front over ALL entries — see
@@ -581,7 +645,7 @@ fn parse_session(path: &Path) -> SessionParse {
                     sp.provider = string_field(value, "provider");
                 }
             }
-            "message" => parse_message_record(&mut sp, value, ts, idx),
+            "message" => parse_message_record(&mut sp, value, ts, idx, &fold),
             "bashExecution" => parse_bash_execution(&mut sp, value, ts, idx),
             "compaction" => parse_compaction(&mut sp, value, ts, idx),
             "branch_summary" => parse_branch_summary(&mut sp, value, ts, idx),
@@ -593,6 +657,38 @@ fn parse_session(path: &Path) -> SessionParse {
     }
 
     sp
+}
+
+/// Where a forked sub-agent's own transcript starts, as a position in `kept`.
+///
+/// A sub-agent launched with a forked context (pi-subagents `context: "fork"`)
+/// runs in a session that begins with a COPY of its parent's history up to the
+/// launch — every message the parent had, often thousands of lines — and only
+/// then gets its name (`subagent-<agent>-<run id>-<n>`) and its task. Opened
+/// from the parent's card, that copy would bury the child's work under the
+/// conversation the reader just came from. A fork says so in its header
+/// (`parentSession`); the name record is where the child's own part begins.
+/// `0` (everything) for every other session.
+fn inherited_context_end(
+    header: Option<&Value>,
+    entries: &[SessionRecord],
+    kept: &[usize],
+) -> usize {
+    let forked = header
+        .and_then(|header| header.get("parentSession"))
+        .and_then(Value::as_str)
+        .is_some_and(|parent| !parent.trim().is_empty());
+    if !forked {
+        return 0;
+    }
+    kept.iter()
+        .rposition(|&index| {
+            let value = &entries[index].value;
+            value.get("type").and_then(Value::as_str) == Some("session_info")
+                && string_field(value, "name")
+                    .is_some_and(|name| fold::is_subagent_session_name(&name))
+        })
+        .unwrap_or(0)
 }
 
 /// The session's display name, ported from pi's `getSessionName()`:
@@ -758,7 +854,13 @@ fn entry_id(value: &Value) -> Option<&str> {
 }
 
 /// Parse a `message` record (nested `message` object keyed by `role`).
-fn parse_message_record(sp: &mut SessionParse, value: &Value, ts: DateTime<Utc>, idx: usize) {
+fn parse_message_record(
+    sp: &mut SessionParse,
+    value: &Value,
+    ts: DateTime<Utc>,
+    idx: usize,
+    fold: &fold::Fold,
+) {
     let Some(message) = value.get("message") else {
         return;
     };
@@ -802,6 +904,7 @@ fn parse_message_record(sp: &mut SessionParse, value: &Value, ts: DateTime<Utc>,
             }
 
             let mut blocks = assistant_content_blocks(message.get("content"));
+            fold.decorate_calls(&mut blocks);
             // `stopReason: "error"` is the only record a failed turn leaves. Its
             // content is usually empty or half-written, so without this the turn
             // renders as a blank assistant bubble (or vanishes at the
@@ -832,22 +935,27 @@ fn parse_message_record(sp: &mut SessionParse, value: &Value, ts: DateTime<Utc>,
                 .get("toolCallId")
                 .and_then(Value::as_str)
                 .map(String::from);
+            if fold.hides_call(tool_call_id.as_deref()) {
+                return;
+            }
             let output_preview = tool_result_output_text(message).map(|s| truncate_str(&s, 4000));
             let is_error = message
                 .get("isError")
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
+            let mut result = ContentBlock::ToolResult {
+                tool_use_id: tool_call_id,
+                output_preview,
+                is_error,
+                agent_stats: None,
+                images: content_images(message.get("content")),
+            };
+            fold.decorate_result(&mut result);
             sp.content_events += 1;
             sp.messages.push(text_message(
                 format!("pi-toolresult-{idx}"),
                 MessageRole::Tool,
-                vec![ContentBlock::ToolResult {
-                    tool_use_id: tool_call_id,
-                    output_preview,
-                    is_error,
-                    agent_stats: None,
-                    images: content_images(message.get("content")),
-                }],
+                vec![result],
                 ts,
                 None,
                 None,
@@ -2993,5 +3101,447 @@ mod tests {
                 "contents: {contents}"
             );
         }
+    }
+
+    // ── Sub-agents and background jobs ───────────────────────────────────
+
+    const UMA_RUN: &str = "42960108-49ef-4be8-8f62-5cd19733a13e";
+    const MINA_RUN: &str = "f544d3f9-5f36-4c29-8ad2-3b64bfbd5f5e";
+
+    fn write_jsonl(path: &Path, records: &[Value]) {
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("dirs");
+        let mut file = std::fs::File::create(path).expect("create jsonl");
+        for record in records {
+            writeln!(
+                file,
+                "{}",
+                serde_json::to_string(record).expect("serialize")
+            )
+            .expect("write line");
+        }
+    }
+
+    fn notice(
+        id: &str,
+        parent: &str,
+        at: &str,
+        custom_type: &str,
+        content: &str,
+        details: Value,
+    ) -> Value {
+        json!({"type":"custom_message","id":id,"parentId":parent,"timestamp":at,
+               "customType":custom_type,"content":content,"display":true,"details":details})
+    }
+
+    /// Session 304's shape, cut down: an async workflow of two researchers that
+    /// both fail, one asking for a decision first (which wakes Pi), and two
+    /// background jobs — one reported by an older pi-bg-jobs as a user message
+    /// (which wakes Pi again), one by the current one as a `bg-job-exit` notice.
+    fn subagent_records(id: &str) -> Vec<Value> {
+        vec![
+            json!({"type":"session","version":3,"id":id,"timestamp":"2026-11-11T14:56:48.000Z","cwd":"/Users/demo/work"}),
+            json!({"type":"message","id":"u1","parentId":null,"timestamp":"2026-11-11T14:57:40.000Z",
+                   "message":{"role":"user","content":[{"type":"text","text":"compare menu prices"}]}}),
+            json!({"type":"message","id":"a1","parentId":"u1","timestamp":"2026-11-11T14:58:40.000Z",
+                   "message":{"role":"assistant","stopReason":"toolUse","content":[
+                       {"type":"text","text":"Dispatching two researchers."},
+                       {"type":"toolCall","id":"call-wf","name":"subagent","arguments":{"async":true,"workflowScript":"return runs.all([])"}}]}}),
+            json!({"type":"message","id":"r1","parentId":"a1","timestamp":"2026-11-11T14:58:40.300Z",
+                   "message":{"role":"toolResult","toolCallId":"call-wf","toolName":"subagent","isError":false,
+                     "content":[{"type":"text","text":"Run fan-out: 0/64 used, 64 remaining\nAsync workflow [wf-1]\n\nThe async run is detached and running in the background.\nReturn control to the user now."}],
+                     "details":{"mode":"workflow","runId":"wf-1","asyncId":"wf-1","asyncDir":"/tmp/runs/wf-1","results":[],
+                                "workflowChildren":{"version":1,"parentToolCallId":"call-wf","workflowRunId":"wf-1","children":[]}}}}),
+            json!({"type":"message","id":"a2","parentId":"r1","timestamp":"2026-11-11T14:58:41.000Z",
+                   "message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"Both are running."}]}}),
+            notice("n1", "a2", "2026-11-11T14:58:45.000Z", "subagent_supervisor_request",
+                &format!("Subagent needs a supervisor decision.\nRun: {UMA_RUN}\nAgent: researcher\nChild index: 0\n\nNo web tools. Options?\n\nReply with: subagent_supervisor({{ action: \"reply\", replyTo: \"req-1\", message: \"...\" }})"),
+                json!({"requestId":"req-1","runId":UMA_RUN,"agent":"researcher","childIndex":0,"requestBody":"No web tools. Options?"})),
+            json!({"type":"message","id":"a3","parentId":"n1","timestamp":"2026-11-11T14:58:48.000Z",
+                   "message":{"role":"assistant","stopReason":"toolUse","content":[
+                       {"type":"thinking","thinking":"answer the child"},
+                       {"type":"toolCall","id":"call-reply","name":"subagent_supervisor","arguments":{"action":"reply","replyTo":"req-1","message":"Close the task."}}]}}),
+            json!({"type":"custom","id":"c1","parentId":"a3","timestamp":"2026-11-11T14:58:48.100Z","customType":"subagent_supervisor_reply",
+                   "data":{"requestId":"req-1","runId":UMA_RUN,"message":"Close the task."}}),
+            json!({"type":"message","id":"r2","parentId":"c1","timestamp":"2026-11-11T14:58:48.200Z",
+                   "message":{"role":"toolResult","toolCallId":"call-reply","toolName":"subagent_supervisor","isError":false,
+                     "content":[{"type":"text","text":"Replied to supervisor request req-1."}]}}),
+            json!({"type":"message","id":"a4","parentId":"r2","timestamp":"2026-11-11T14:58:50.000Z",
+                   "message":{"role":"assistant","stopReason":"toolUse","content":[
+                       {"type":"toolCall","id":"call-job","name":"bgj_run","arguments":{"command":"sleep 1; echo done"}}]}}),
+            json!({"type":"message","id":"r3","parentId":"a4","timestamp":"2026-11-11T14:58:50.100Z",
+                   "message":{"role":"toolResult","toolCallId":"call-job","toolName":"bgj_run","isError":false,
+                     "content":[{"type":"text","text":"Command running in background with ID: jb-1 (pid 7).\nOutput file: /tmp/jb-1.log\nYou will be notified when it completes.\n\nThe conversation is free — end your turn or continue other work; do NOT sleep-poll."}],
+                     "details":{"id":"jb-1","pid":7,"logFile":"/tmp/jb-1.log"}}}),
+            // Steered into the running reply: no wake.
+            notice("n2", "r3", "2026-11-11T14:58:53.000Z", "subagent-incremental-child-notify",
+                &format!("Workflow child failed: **uma**\nWorkflow run: wf-1\nChild run: {UMA_RUN}\nOutput: /tmp/runs/{UMA_RUN}\nError: Run fan-out: 2/64 used, 62 remaining\nAgent 'researcher' requested unavailable child tools: web_search.\nStatus: workflow still running"),
+                Value::Null),
+            json!({"type":"message","id":"a5","parentId":"n2","timestamp":"2026-11-11T14:58:55.000Z",
+                   "message":{"role":"assistant","stopReason":"toolUse","content":[
+                       {"type":"toolCall","id":"call-job2","name":"bgj_run","arguments":{"command":"false"}}]}}),
+            json!({"type":"message","id":"r4","parentId":"a5","timestamp":"2026-11-11T14:58:55.100Z",
+                   "message":{"role":"toolResult","toolCallId":"call-job2","toolName":"bgj_run","isError":false,
+                     "content":[{"type":"text","text":"Command running in background with ID: jb-2 (pid 8).\nOutput file: /tmp/jb-2.log"}],
+                     "details":{"id":"jb-2","pid":8,"logFile":"/tmp/jb-2.log","toolCallId":"call-job2"}}}),
+            notice("n3", "r4", "2026-11-11T14:59:09.000Z", "subagent-notify",
+                &format!("Background task failed: **workflow**\nWorkflow receipt: /tmp/runs/wf-1/workflow-receipt.json\n\nError: Cannot read runs.all result property 'mina'.\n    at get ([worker eval]:285:35)\n\nChild outputs:\n- key=mina run={MINA_RUN} status=failed\n  Saved output: unavailable\n  Preview:\n    | Task closed per supervisor decision.\n- key=uma run={UMA_RUN} status=failed\n  Saved output: unavailable\n  Preview:\n    | No tools, nothing researched.\n\nRetention-managed async directory: /tmp/runs/wf-1\nWorkflow run: wf-1\nChild runs: mina={MINA_RUN} (failed), uma={UMA_RUN} (failed)"),
+                Value::Null),
+            notice("n4", "n3", "2026-11-11T14:59:10.000Z", "bg-job-exit",
+                "[bg-jobs] Background job jb-2 failed (exit 2) after 5s.\nCommand: false\nLog: /tmp/jb-2.log\n\n--- last output ---\nboom",
+                json!({"v":1,"id":"jb-2","toolCallId":"call-job2","state":"failed","exitCode":2,"durationMs":5000,"command":"false","delivery":"woke"})),
+            json!({"type":"message","id":"a6","parentId":"n4","timestamp":"2026-11-11T14:59:12.000Z",
+                   "message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"I'll research it myself. Here is the table."}]}}),
+            // An older pi-bg-jobs: the exit report poses as the user, and wakes Pi.
+            json!({"type":"message","id":"u2","parentId":"a6","timestamp":"2026-11-11T15:27:45.000Z",
+                   "message":{"role":"user","content":[{"type":"text","text":"✅ Background job finished (exit 0, ran 58s)\n[jb-1] completed exit 0 · 58s · sleep 1; echo done\ncwd: /Users/demo/work\nlog: /tmp/jb-1.log\n\n--- last output ---\ndone"}]}}),
+            json!({"type":"message","id":"a7","parentId":"u2","timestamp":"2026-11-11T15:27:46.000Z",
+                   "message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"That was the earlier job."}]}}),
+        ]
+    }
+
+    /// A finished sub-agent's own session, as pi-subagents names it.
+    fn child_session(id: &str, run_id: &str, task: &str) -> Vec<Value> {
+        vec![
+            json!({"type":"session","version":3,"id":id,"timestamp":"2026-11-11T14:58:43.000Z","cwd":"/Users/demo/work"}),
+            json!({"type":"session_info","id":"s1","parentId":null,"timestamp":"2026-11-11T14:58:43.001Z",
+                   "name":format!("subagent-researcher-{run_id}-1")}),
+            json!({"type":"message","id":"m1","parentId":"s1","timestamp":"2026-11-11T14:58:43.002Z",
+                   "message":{"role":"user","content":task}}),
+            json!({"type":"message","id":"m2","parentId":"m1","timestamp":"2026-11-11T14:58:44.000Z",
+                   "message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"No tools."}]}}),
+        ]
+    }
+
+    /// A child launched with a forked context: a copy of the parent's history,
+    /// then its own name, task and work.
+    fn forked_child_session() -> Vec<Value> {
+        vec![
+            json!({"type":"session","version":3,"id":"child-mina","timestamp":"2026-11-11T14:58:43.000Z",
+                   "cwd":"/Users/demo/work","parentSession":"/Users/demo/.pi/agent/sessions/x/parent.jsonl"}),
+            json!({"type":"message","id":"u1","parentId":null,"timestamp":"2026-11-11T14:57:40.000Z",
+                   "message":{"role":"user","content":[{"type":"text","text":"compare menu prices"}]}}),
+            json!({"type":"message","id":"a1","parentId":"u1","timestamp":"2026-11-11T14:58:40.000Z",
+                   "message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"inherited reply"}]}}),
+            json!({"type":"session_info","id":"s1","parentId":"a1","timestamp":"2026-11-11T14:58:43.001Z",
+                   "name":format!("subagent-researcher-{MINA_RUN}-1")}),
+            json!({"type":"message","id":"m1","parentId":"s1","timestamp":"2026-11-11T14:58:43.002Z",
+                   "message":{"role":"user","content":"Task: find Mina's prices"}}),
+            json!({"type":"message","id":"m2","parentId":"m1","timestamp":"2026-11-11T14:58:44.000Z",
+                   "message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"Task closed per supervisor decision."}]}}),
+        ]
+    }
+
+    /// The parent, its two children where pi-subagents puts them, and
+    /// pi-subagents' records next to the bucket. Returns the parent's id.
+    fn write_subagent_fixture(base: &Path) -> &'static str {
+        let bucket = base.join("--Users-demo-work--");
+        let stem = "2026-11-11T14-56-48-000Z_parent-1";
+        write_jsonl(
+            &bucket.join(format!("{stem}.jsonl")),
+            &subagent_records("parent-1"),
+        );
+        write_jsonl(
+            &bucket
+                .join(stem)
+                .join("1f0c")
+                .join("run-0")
+                .join("session.jsonl"),
+            &child_session("child-uma", UMA_RUN, "Find UMA's prices"),
+        );
+        write_jsonl(
+            &bucket
+                .join(stem)
+                .join("forks")
+                .join("2026-11-11T14-58-43-000Z_child-mina.jsonl"),
+            &forked_child_session(),
+        );
+        let artifacts = bucket.join("subagent-artifacts");
+        write_jsonl(
+            &artifacts.join(format!("{UMA_RUN}_researcher_transcript.jsonl")),
+            &[json!({"version":1,"recordType":"message","runId":UMA_RUN})],
+        );
+        std::fs::write(
+            artifacts.join(format!("{UMA_RUN}_researcher_meta.json")),
+            json!({"runId":UMA_RUN,"agent":"researcher","model":"glm-flash",
+                   "usage":{"input":2701,"output":804,"cacheRead":4416,"cacheWrite":0,"turns":3}})
+            .to_string(),
+        )
+        .expect("meta");
+        "parent-1"
+    }
+
+    fn fixture_detail(base: &Path) -> ConversationDetail {
+        let parent = write_subagent_fixture(base);
+        PiParser::with_base_dir(base.to_path_buf())
+            .get_conversation(parent)
+            .expect("detail")
+    }
+
+    /// The tool call with this id, and its result.
+    fn call_and_result<'a>(
+        detail: &'a ConversationDetail,
+        id: &str,
+    ) -> (Option<&'a ContentBlock>, Option<&'a ContentBlock>) {
+        let blocks = || detail.turns.iter().flat_map(|t| &t.blocks);
+        let call = blocks()
+            .find(|b| matches!(b, ContentBlock::ToolUse { tool_use_id: Some(x), .. } if x == id));
+        let result = blocks().find(
+            |b| matches!(b, ContentBlock::ToolResult { tool_use_id: Some(x), .. } if x == id),
+        );
+        (call, result)
+    }
+
+    /// Children live in the parent's folder (`<stem>/<id>/run-0/`, `forks/`)
+    /// and pi-subagents keeps records next to the sessions. None of it is a
+    /// conversation of its own, but each child still opens by id from the card.
+    #[test]
+    fn sub_agent_children_are_reached_through_their_parent_not_listed() {
+        let dir = tempdir().expect("tempdir");
+        let parent = write_subagent_fixture(dir.path());
+        let parser = PiParser::with_base_dir(dir.path().to_path_buf());
+        let listed: Vec<String> = parser
+            .list_conversations()
+            .expect("list")
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(listed, [parent]);
+        let child = parser.get_conversation("child-uma").expect("child");
+        assert!(text_blocks(&child).iter().any(|t| t == "No tools."));
+    }
+
+    #[test]
+    fn a_sub_agent_run_folds_into_one_card() {
+        let dir = tempdir().expect("tempdir");
+        let detail = fixture_detail(dir.path());
+
+        // No notice of the run stands on its own any more.
+        let texts = text_blocks(&detail);
+        for gone in [
+            "Subagent needs a supervisor decision",
+            "Workflow child failed",
+            "Background task failed",
+            "Background job finished",
+            "[bg-jobs]",
+        ] {
+            assert!(
+                !texts.iter().any(|t| t.contains(gone)),
+                "{gone} is still rendered"
+            );
+        }
+        // Pi's answer is on the card rather than a card of its own.
+        let (reply, reply_result) = call_and_result(&detail, "call-reply");
+        assert!(reply.is_none() && reply_result.is_none());
+
+        let (call, result) = call_and_result(&detail, "call-wf");
+        let Some(ContentBlock::ToolUse {
+            tool_name,
+            input_preview: Some(input),
+            meta: Some(meta),
+            ..
+        }) = call
+        else {
+            panic!("no card: {call:?}");
+        };
+        assert_eq!(tool_name, "Agent");
+        let input: Value = serde_json::from_str(input).expect("input json");
+        assert_eq!(input["subagent_type"], "researcher");
+        assert_eq!(input["workflowScript"], "return runs.all([])");
+
+        let run = &meta["codeg.subagentRun"];
+        assert_eq!(run["status"], "failed");
+        assert_eq!(run["mode"], "workflow");
+        assert_eq!(run["error"], "Cannot read runs.all result property 'mina'.");
+        assert_eq!(run["durationMs"], 28_700);
+        let children = run["children"].as_array().expect("children");
+        let keys: Vec<&str> = children.iter().filter_map(|c| c["key"].as_str()).collect();
+        assert_eq!(keys, ["mina", "uma"], "the workflow's own order");
+        let (mina, uma) = (&children[0], &children[1]);
+        assert_eq!(mina["sessionId"], "child-mina");
+        assert_eq!(mina["agent"], "researcher", "named by its session");
+        assert_eq!(mina["result"], "Task closed per supervisor decision.");
+        assert_eq!(uma["status"], "failed");
+        assert_eq!(
+            uma["error"],
+            "Agent 'researcher' requested unavailable child tools: web_search."
+        );
+        assert_eq!(
+            uma["exchanges"],
+            json!([{"question": "No web tools. Options?", "answer": "Close the task."}])
+        );
+        assert_eq!(uma["sessionId"], "child-uma");
+        assert_eq!(uma["tokens"], 7921);
+        assert_eq!(uma["turns"], 3);
+        let kinds: Vec<&str> = run["notes"]
+            .as_array()
+            .expect("notes")
+            .iter()
+            .filter_map(|note| note["kind"].as_str())
+            .collect();
+        assert_eq!(kinds, ["launch", "question", "child", "result"]);
+
+        let Some(ContentBlock::ToolResult {
+            is_error,
+            output_preview: Some(output),
+            agent_stats: Some(stats),
+            ..
+        }) = result
+        else {
+            panic!("no result: {result:?}");
+        };
+        assert!(*is_error);
+        assert!(
+            output.contains("- **uma** (researcher) — failed: Agent 'researcher' requested"),
+            "{output}"
+        );
+        assert!(
+            output.ends_with("Error: Cannot read runs.all result property 'mina'."),
+            "{output}"
+        );
+        assert_eq!(stats.status.as_deref(), Some("failed"));
+        assert_eq!(stats.total_duration_ms, Some(28_700));
+        assert_eq!(stats.child_session_id, None, "each row opens its own child");
+    }
+
+    #[test]
+    fn runs_pi_starts_on_its_own_are_marked_with_what_woke_it() {
+        let dir = tempdir().expect("tempdir");
+        let detail = fixture_detail(dir.path());
+        let wakes: Vec<(String, String)> = detail
+            .turns
+            .iter()
+            .filter(|t| matches!(t.role, TurnRole::System))
+            .flat_map(|t| &t.blocks)
+            .filter_map(|b| match b {
+                ContentBlock::ToolUse {
+                    meta: Some(meta), ..
+                } => {
+                    let trigger = &meta.get("codeg.agentWake")?["triggers"][0];
+                    Some((
+                        trigger["kind"].as_str()?.to_string(),
+                        trigger["text"].as_str()?.to_string(),
+                    ))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(wakes.len(), 2, "{wakes:?}");
+        assert_eq!(wakes[0].0, "subagentQuestion");
+        assert!(wakes[0]
+            .1
+            .starts_with("Subagent needs a supervisor decision."));
+        assert_eq!(wakes[1].0, "jobExit");
+        assert!(wakes[1].1.starts_with("✅ Background job finished"));
+        assert!(text_blocks(&detail)
+            .iter()
+            .any(|t| t == "Pi continued on its own, woken by a sub-agent's question."));
+
+        // The only user turn is the one the user wrote.
+        let users: Vec<String> = detail
+            .turns
+            .iter()
+            .filter(|t| matches!(t.role, TurnRole::User))
+            .flat_map(|t| &t.blocks)
+            .filter_map(|b| match b {
+                ContentBlock::Text { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(users, ["compare menu prices"]);
+    }
+
+    #[test]
+    fn a_background_job_carries_its_exit() {
+        let dir = tempdir().expect("tempdir");
+        let detail = fixture_detail(dir.path());
+
+        // Reported by an older pi-bg-jobs as a user message: matched by job id.
+        let (call, result) = call_and_result(&detail, "call-job");
+        let Some(ContentBlock::ToolUse {
+            tool_name,
+            meta: Some(meta),
+            ..
+        }) = call
+        else {
+            panic!("no job card: {call:?}");
+        };
+        assert_eq!(tool_name, "bash", "drawn as the command it runs, as live");
+        let job = &meta["codeg.backgroundJob"];
+        assert_eq!(job["state"], "completed");
+        assert_eq!(job["exitCode"], 0);
+        assert_eq!(job["duration"], "58s");
+        assert_eq!(job["tail"], "done");
+        let Some(ContentBlock::ToolResult {
+            output_preview: Some(output),
+            ..
+        }) = result
+        else {
+            panic!("no job result: {result:?}");
+        };
+        assert_eq!(
+            output,
+            "Command running in background with ID: jb-1 (pid 7).\nOutput file: /tmp/jb-1.log\n\nCompleted (exit 0) after 58s.\n\n--- last output ---\ndone"
+        );
+
+        // Reported by the current one as a notice: matched by its call id.
+        let (call, _) = call_and_result(&detail, "call-job2");
+        let Some(ContentBlock::ToolUse {
+            meta: Some(meta), ..
+        }) = call
+        else {
+            panic!("no job card: {call:?}");
+        };
+        let job = &meta["codeg.backgroundJob"];
+        assert_eq!(job["state"], "failed");
+        assert_eq!(job["exitCode"], 2);
+        assert_eq!(job["duration"], "5s");
+        assert_eq!(job["tail"], "boom");
+    }
+
+    #[test]
+    fn a_forked_sub_agent_opens_at_its_own_task() {
+        let dir = tempdir().expect("tempdir");
+        write_subagent_fixture(dir.path());
+        let child = PiParser::with_base_dir(dir.path().to_path_buf())
+            .get_conversation("child-mina")
+            .expect("child");
+        assert_eq!(
+            text_blocks(&child),
+            [
+                "Task: find Mina's prices",
+                "Task closed per supervisor decision."
+            ]
+        );
+    }
+
+    /// A notice no run on this branch claims still shows, as a System note, but
+    /// without the tool-call syntax addressed to the model.
+    #[test]
+    fn an_unclaimed_notice_stays_a_note_without_its_instructions() {
+        let id = "orphan-0001";
+        let detail = parse_one(
+            &[
+                header(id),
+                json!({"type":"custom_message","id":"n1","parentId":null,"timestamp":"2026-06-27T10:00:01.000Z",
+                       "customType":"subagent_supervisor_request","display":true,
+                       "content":"Subagent needs a supervisor decision.\nRun: r-9\nAgent: worker\nChild index: 0\n\nWhich branch?\n\nReply with: subagent_supervisor({ action: \"reply\" })",
+                       "details":{"requestId":"q","runId":"r-9","agent":"worker","requestBody":"Which branch?"}}),
+            ],
+            id,
+        );
+        let system: Vec<String> = detail
+            .turns
+            .iter()
+            .filter(|t| matches!(t.role, TurnRole::System))
+            .flat_map(|t| &t.blocks)
+            .filter_map(|b| match b {
+                ContentBlock::Text { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            system,
+            ["Subagent needs a supervisor decision.\nRun: r-9\nAgent: worker\nChild index: 0\n\nWhich branch?"]
+        );
     }
 }

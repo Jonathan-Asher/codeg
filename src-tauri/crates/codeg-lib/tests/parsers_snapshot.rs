@@ -17,7 +17,7 @@ use codeg_lib::models::{ContentBlock, TurnRole};
 use codeg_lib::parsers::{
     claude::ClaudeParser, cline::ClineParser, codex::CodexParser, gemini::GeminiParser,
     hermes::HermesParser, kimi_code::KimiCodeParser, openclaw::OpenClawParser,
-    opencode::OpenCodeParser, AgentParser,
+    opencode::OpenCodeParser, pi::PiParser, AgentParser,
 };
 use insta::assert_json_snapshot;
 use serde_json::json;
@@ -1647,6 +1647,120 @@ fn kimi_code_minimal_session_snapshot() {
         ".**.ended_at" => "[ts]",
     });
     assert_json_snapshot!("kimi_code_detail", detail, {
+        ".**.started_at" => "[ts]",
+        ".**.ended_at" => "[ts]",
+        ".**.timestamp" => "[ts]",
+        ".**.completed_at" => "[ts]",
+    });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Pi
+// ────────────────────────────────────────────────────────────────────────────
+
+/// A Pi session that delegated: an async `subagent` workflow of two children
+/// (one asks its parent for a decision, both fail) and a background job whose
+/// exit an older pi-bg-jobs reported as a user message. Shaped after a real
+/// session and cut down. The notices fold into the `Agent` card and the job's
+/// command card; the runs Pi started on its own carry a wake marker; the
+/// children are not listed, and each row names its child's session.
+#[test]
+fn pi_subagents_session_snapshot() {
+    const UMA: &str = "42960108-49ef-4be8-8f62-5cd19733a13e";
+    const MINA: &str = "f544d3f9-5f36-4c29-8ad2-3b64bfbd5f5e";
+    let temp = tempfile::tempdir().expect("create tempdir");
+    let base = temp.path().to_path_buf();
+    let bucket = base.join("--Users-demo-work--");
+    let stem = "2026-11-11T14-56-48-000Z_pi-parent-001";
+    let jsonl = |records: &[serde_json::Value]| {
+        records
+            .iter()
+            .map(|record| format!("{record}\n"))
+            .collect::<String>()
+    };
+    let parent = [
+        json!({"type":"session","version":3,"id":"pi-parent-001","timestamp":"2026-11-11T14:56:48.000Z","cwd":"/Users/demo/work"}),
+        json!({"type":"message","id":"u1","parentId":null,"timestamp":"2026-11-11T14:57:40.000Z",
+               "message":{"role":"user","content":[{"type":"text","text":"compare menu prices"}]}}),
+        json!({"type":"message","id":"a1","parentId":"u1","timestamp":"2026-11-11T14:58:40.000Z",
+               "message":{"role":"assistant","stopReason":"toolUse","content":[
+                   {"type":"text","text":"Dispatching two researchers."},
+                   {"type":"toolCall","id":"call-wf","name":"subagent","arguments":{"async":true,"workflowScript":"return runs.all([])"}}]}}),
+        json!({"type":"message","id":"r1","parentId":"a1","timestamp":"2026-11-11T14:58:40.300Z",
+               "message":{"role":"toolResult","toolCallId":"call-wf","toolName":"subagent","isError":false,
+                 "content":[{"type":"text","text":"Run fan-out: 0/64 used, 64 remaining\nAsync workflow [wf-1]\n\nReturn control to the user now."}],
+                 "details":{"mode":"workflow","runId":"wf-1","asyncId":"wf-1","asyncDir":"/tmp/runs/wf-1","results":[]}}}),
+        json!({"type":"message","id":"a2","parentId":"r1","timestamp":"2026-11-11T14:58:41.000Z",
+               "message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"Both are running."}]}}),
+        json!({"type":"custom_message","id":"n1","parentId":"a2","timestamp":"2026-11-11T14:58:45.000Z",
+               "customType":"subagent_supervisor_request","display":true,
+               "content":format!("Subagent needs a supervisor decision.\nRun: {UMA}\nAgent: researcher\nChild index: 0\n\nNo web tools. Options?\n\nReply with: subagent_supervisor({{ action: \"reply\", replyTo: \"req-1\" }})"),
+               "details":{"requestId":"req-1","runId":UMA,"agent":"researcher","childIndex":0,"requestBody":"No web tools. Options?"}}),
+        json!({"type":"message","id":"a3","parentId":"n1","timestamp":"2026-11-11T14:58:48.000Z",
+               "message":{"role":"assistant","stopReason":"toolUse","content":[
+                   {"type":"thinking","thinking":"answer the child"},
+                   {"type":"toolCall","id":"call-reply","name":"subagent_supervisor","arguments":{"action":"reply","replyTo":"req-1","message":"Close the task."}}]}}),
+        json!({"type":"custom","id":"c1","parentId":"a3","timestamp":"2026-11-11T14:58:48.100Z","customType":"subagent_supervisor_reply",
+               "data":{"requestId":"req-1","runId":UMA,"message":"Close the task."}}),
+        json!({"type":"message","id":"r2","parentId":"c1","timestamp":"2026-11-11T14:58:48.200Z",
+               "message":{"role":"toolResult","toolCallId":"call-reply","toolName":"subagent_supervisor","isError":false,
+                 "content":[{"type":"text","text":"Replied to supervisor request req-1."}]}}),
+        json!({"type":"message","id":"a4","parentId":"r2","timestamp":"2026-11-11T14:58:50.000Z",
+               "message":{"role":"assistant","stopReason":"toolUse","content":[
+                   {"type":"toolCall","id":"call-job","name":"bgj_run","arguments":{"command":"sleep 1; echo done"}}]}}),
+        json!({"type":"message","id":"r3","parentId":"a4","timestamp":"2026-11-11T14:58:50.100Z",
+               "message":{"role":"toolResult","toolCallId":"call-job","toolName":"bgj_run","isError":false,
+                 "content":[{"type":"text","text":"Command running in background with ID: jb-1 (pid 7).\nOutput file: /tmp/jb-1.log\nThe conversation is free — do NOT sleep-poll."}],
+                 "details":{"id":"jb-1","pid":7,"logFile":"/tmp/jb-1.log"}}}),
+        json!({"type":"custom_message","id":"n2","parentId":"r3","timestamp":"2026-11-11T14:58:53.000Z",
+               "customType":"subagent-incremental-child-notify","display":true,
+               "content":format!("Workflow child failed: **uma**\nWorkflow run: wf-1\nChild run: {UMA}\nError: Run fan-out: 2/64 used, 62 remaining\nAgent 'researcher' requested unavailable child tools: web_search.\nStatus: workflow still running")}),
+        json!({"type":"custom_message","id":"n3","parentId":"n2","timestamp":"2026-11-11T14:59:09.000Z",
+               "customType":"subagent-notify","display":true,
+               "content":format!("Background task failed: **workflow**\n\nError: Cannot read runs.all result property 'mina'.\n    at get ([worker eval]:285:35)\n\nChild outputs:\n- key=mina run={MINA} status=failed\n  Saved output: unavailable\n  Preview:\n    | Task closed per supervisor decision.\n\nRetention-managed async directory: /tmp/runs/wf-1\nWorkflow run: wf-1\nChild runs: mina={MINA} (failed), uma={UMA} (failed)")}),
+        json!({"type":"message","id":"a5","parentId":"n3","timestamp":"2026-11-11T14:59:12.000Z",
+               "message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"I'll research it myself."}]}}),
+        json!({"type":"message","id":"u2","parentId":"a5","timestamp":"2026-11-11T15:27:45.000Z",
+               "message":{"role":"user","content":[{"type":"text","text":"✅ Background job finished (exit 0, ran 58s)\n[jb-1] completed exit 0 · 58s · sleep 1; echo done\ncwd: /Users/demo/work\nlog: /tmp/jb-1.log\n\n--- last output ---\ndone"}]}}),
+        json!({"type":"message","id":"a6","parentId":"u2","timestamp":"2026-11-11T15:27:46.000Z",
+               "message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"That was the earlier job."}]}}),
+    ];
+    write(&bucket.join(format!("{stem}.jsonl")), &jsonl(&parent));
+    let child = |id: &str, run: &str| {
+        jsonl(&[
+            json!({"type":"session","version":3,"id":id,"timestamp":"2026-11-11T14:58:43.000Z","cwd":"/Users/demo/work"}),
+            json!({"type":"session_info","id":"s1","parentId":null,"timestamp":"2026-11-11T14:58:43.001Z",
+                   "name":format!("subagent-researcher-{run}-1")}),
+            json!({"type":"message","id":"m1","parentId":"s1","timestamp":"2026-11-11T14:58:43.002Z",
+                   "message":{"role":"user","content":"Find the prices."}}),
+        ])
+    };
+    write(
+        &bucket
+            .join(stem)
+            .join("a1")
+            .join("run-0")
+            .join("session.jsonl"),
+        &child("pi-child-uma", UMA),
+    );
+    write(
+        &bucket
+            .join(stem)
+            .join("b2")
+            .join("run-0")
+            .join("session.jsonl"),
+        &child("pi-child-mina", MINA),
+    );
+
+    let parser = PiParser::with_base_dir(base);
+    let summaries = parser.list_conversations().expect("list pi");
+    let detail = parser.get_conversation("pi-parent-001").expect("detail pi");
+
+    assert_json_snapshot!("pi_subagents_list", summaries, {
+        ".**.started_at" => "[ts]",
+        ".**.ended_at" => "[ts]",
+    });
+    assert_json_snapshot!("pi_subagents_detail", detail, {
         ".**.started_at" => "[ts]",
         ".**.ended_at" => "[ts]",
         ".**.timestamp" => "[ts]",
