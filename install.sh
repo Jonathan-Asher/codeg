@@ -25,8 +25,9 @@ fi
 # Names of binaries this installer manages. `codeg-server` is the user-facing
 # entry point; `codeg-mcp` is the stdio MCP companion that the server's ACP
 # layer spawns per session for delegation. Both must live in the same
-# directory — `locate_codeg_mcp_binary()` in src-tauri/src/acp/connection.rs
-# resolves the companion as a sibling of the running server executable.
+# directory — `locate_codeg_mcp_binary()` in
+# src-tauri/crates/codeg-lib/src/acp/connection.rs resolves the companion as a
+# sibling of the running server executable.
 MANAGED_BINS=(codeg-server codeg-mcp)
 
 # ── Parse arguments ──

@@ -2134,6 +2134,8 @@
       "attentionCountBadge": "{count, plural, one {# Sitzung wartet auf dich} other {# Sitzungen warten auf dich}}",
       "statusCancelledBadge": "Abgebrochen",
       "worktreeRemovedBadge": "Quell-Worktree entfernt",
+      "runsInBadge": "Läuft in {path}",
+      "runsInLabel": "Läuft in",
       "criticalBadge": "Kritische Sitzung",
       "criticalToggleFailed": "Die Kritisch-Markierung konnte nicht aktualisiert werden: {message}",
       "talkBadge": "Sprechmodus an",
@@ -2406,6 +2408,43 @@
       "forkUnsupported": "Dieser Agent kann keine Unterhaltungen verzweigen",
       "forkAfterReply": "Verzweige, sobald die aktuelle Antwort fertig ist",
       "forkNoReply": "Noch nichts zu verzweigen: keine Antwort ist fertig"
+    },
+    "moveSession": {
+      "menuLabel": "In Projekt verschieben…",
+      "title": "In Projekt verschieben",
+      "description": "„{title}“ in ein anderes Projekt verschieben. Ihre Dateien kommen mit, wo der Agent sie nach Ordner ablegt.",
+      "untitledSession": "Unbenannte Sitzung",
+      "pickProject": "Projekt wählen",
+      "noProjects": "Kein anderes Projekt ist geöffnet.",
+      "checking": "Wird geprüft…",
+      "fullNote": "Die Sitzung und ihre Dateien ziehen nach {project}, und der Agent arbeitet dort weiter. Seine nächste Nachricht liest die Sitzung einmal neu ein.",
+      "listedOnly": {
+        "agent_unsupported": "{agent} bindet seine Sitzungen an den Ordner, in dem sie liefen, daher kann diese nur unter {project} aufgeführt werden. Sie läuft weiter in {path}.",
+        "claude_adapter_outdated": "Der installierte Claude-Code-Adapter ist zu alt, um Sitzungsdateien zu verschieben, daher kann diese Sitzung nur unter {project} aufgeführt werden. Sie läuft weiter in {path}.",
+        "session_files_not_found": "Die Dateien dieser Sitzung liegen nicht dort, wo {agent} sie ablegt, daher kann sie nur unter {project} aufgeführt werden. Sie läuft weiter in {path}."
+      },
+      "children": "{count, plural, one {Ihre Untersitzung zieht mit.} other {Ihre # Untersitzungen ziehen mit.}}",
+      "cancel": "Abbrechen",
+      "move": "Verschieben",
+      "moving": "Wird verschoben…",
+      "moved": "Nach {project} verschoben",
+      "movedListedOnly": "Unter {project} aufgeführt; läuft weiter in {path}",
+      "failed": "Die Sitzung konnte nicht verschoben werden: {message}",
+      "errors": {
+        "conversation_not_found": "Diese Sitzung gibt es nicht mehr.",
+        "folder_not_found": "Dieses Projekt ist nicht mehr im Arbeitsbereich.",
+        "same_folder": "Die Sitzung ist bereits in diesem Projekt.",
+        "chat_conversation": "Chat-Sitzungen haben kein Projekt, aus dem sie verschoben werden könnten.",
+        "chat_folder": "Eine Sitzung kann nicht in einen Chat verschoben werden.",
+        "subsession": "Eine Untersitzung zieht mit der Sitzung um, die sie gestartet hat.",
+        "unsupported_conversation": "Diese Art von Sitzung kann nicht verschoben werden.",
+        "work_task_linked": "Eine Aufgabe führt diese Sitzung aus; sie bleibt im Projekt der Aufgabe.",
+        "conversation_running": "Die Sitzung arbeitet. Verschiebe sie, wenn ihre Antwort fertig ist.",
+        "resume_pending": "Die Sitzung setzt gleich von selbst fort. Verschiebe sie danach, oder schalte ihre automatische Fortsetzung aus.",
+        "running_elsewhere": "Claude Code führt diese Sitzung außerhalb von codeg aus. Verschiebe sie, wenn dieser Prozess beendet ist.",
+        "session_closing": "Der Agent der Sitzung wird noch beendet. Versuche es gleich noch einmal.",
+        "move_failed": "Die Dateien der Sitzung konnten nicht verschoben werden, daher wurde nichts geändert."
+      }
     },
     "search": {
       "dialogTitle": "Suchen",

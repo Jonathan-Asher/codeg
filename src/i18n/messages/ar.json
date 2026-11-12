@@ -2134,6 +2134,8 @@
       "attentionCountBadge": "{count} جلسة بانتظارك",
       "statusCancelledBadge": "ملغى",
       "worktreeRemovedBadge": "تمت إزالة شجرة العمل الأصلية",
+      "runsInBadge": "تعمل في {path}",
+      "runsInLabel": "تعمل في",
       "criticalBadge": "جلسة حرجة",
       "criticalToggleFailed": "تعذّر تحديث العلامة الحرجة: {message}",
       "talkBadge": "وضع المحادثة الصوتية مفعّل",
@@ -2406,6 +2408,43 @@
       "forkUnsupported": "لا يمكن لهذا الوكيل تفريع المحادثات",
       "forkAfterReply": "فرِّع بعد انتهاء الرد الحالي",
       "forkNoReply": "لا يوجد ما يمكن تفريعه بعد: لم يكتمل أي رد"
+    },
+    "moveSession": {
+      "menuLabel": "نقل إلى مشروع…",
+      "title": "نقل إلى مشروع",
+      "description": "نقل «{title}» إلى مشروع آخر. تنتقل ملفاتها معها حيثما يحفظها الوكيل حسب المجلد.",
+      "untitledSession": "جلسة بلا عنوان",
+      "pickProject": "اختر مشروعًا",
+      "noProjects": "لا يوجد مشروع آخر مفتوح.",
+      "checking": "جارٍ التحقق…",
+      "fullNote": "تنتقل الجلسة وملفاتها إلى {project}، ويتابع الوكيل العمل هناك. تعيد رسالته التالية قراءة الجلسة مرة واحدة.",
+      "listedOnly": {
+        "agent_unsupported": "يربط {agent} جلساته بالمجلد الذي عملت فيه، لذا لا يمكن إلا إدراج هذه الجلسة ضمن {project}. ستواصل العمل في {path}.",
+        "claude_adapter_outdated": "محوّل Claude Code المثبّت أقدم من أن ينقل ملفات الجلسات، لذا لا يمكن إلا إدراج هذه الجلسة ضمن {project}. ستواصل العمل في {path}.",
+        "session_files_not_found": "ملفات هذه الجلسة ليست حيث يحفظها {agent}، لذا لا يمكن إلا إدراجها ضمن {project}. ستواصل العمل في {path}."
+      },
+      "children": "{count, plural, one {تنتقل جلستها الفرعية معها.} other {تنتقل جلساتها الفرعية الـ # معها.}}",
+      "cancel": "إلغاء",
+      "move": "نقل",
+      "moving": "جارٍ النقل…",
+      "moved": "نُقلت إلى {project}",
+      "movedListedOnly": "أُدرجت ضمن {project}؛ وتواصل العمل في {path}",
+      "failed": "تعذّر نقل الجلسة: {message}",
+      "errors": {
+        "conversation_not_found": "لم تعد هذه الجلسة موجودة.",
+        "folder_not_found": "لم يعد هذا المشروع في مساحة العمل.",
+        "same_folder": "الجلسة موجودة بالفعل في هذا المشروع.",
+        "chat_conversation": "لا مشروع لجلسات الدردشة يمكن النقل منه.",
+        "chat_folder": "لا يمكن نقل جلسة إلى دردشة.",
+        "subsession": "تنتقل الجلسة الفرعية مع الجلسة التي بدأتها.",
+        "unsupported_conversation": "لا يمكن نقل هذا النوع من الجلسات.",
+        "work_task_linked": "تشغّل مهمة عمل هذه الجلسة؛ فتبقى في مشروع المهمة.",
+        "conversation_running": "الجلسة تعمل الآن. انقلها بعد انتهاء ردها.",
+        "resume_pending": "الجلسة على وشك المتابعة من تلقاء نفسها. انقلها بعد ذلك، أو أوقف متابعتها التلقائية.",
+        "running_elsewhere": "يشغّل Claude Code هذه الجلسة خارج codeg. انقلها بعد انتهاء تلك العملية.",
+        "session_closing": "لا يزال وكيل الجلسة يُغلق. حاول مرة أخرى بعد قليل.",
+        "move_failed": "تعذّر نقل ملفات الجلسة، لذا لم يتغير شيء."
+      }
     },
     "search": {
       "dialogTitle": "بحث",

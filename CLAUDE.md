@@ -31,6 +31,8 @@ pnpm build                     # 静态导出构建
 ### 后端 Rust（在 `src-tauri/` 目录下执行）
 
 ```bash
+# 不带 `-p`/`--workspace` 时作用于 `codeg` 与 `codeg-lib` 两个包（`default-members`），
+# 所以下面的命令照样覆盖库的测试和 codeg-server 二进制
 # 桌面模式（默认 feature；`--workspace` 连同 codeg-mcp 与 codeg-mcp-protocol 两个成员一起）
 cargo check
 cargo test --workspace --features test-utils
@@ -56,8 +58,8 @@ INSTA_UPDATE=auto cargo test --features test-utils     # 自动写新 .snap
 
 项目通过 Cargo feature flags 支持三种二进制：
 
-- **`codeg`**（`tauri-runtime`，默认）：完整桌面应用，包含 Tauri 窗口管理、系统通知、自动更新等
-- **`codeg-server`**（`--no-default-features --features server`）：独立服务器模式，仅编译 Axum HTTP API + WebSocket。`server` feature 不在默认 feature 里，所以桌面构建（`tauri build`）不编译、也不打包它
+- **`codeg`**（`tauri-runtime`，默认）：完整桌面应用，包含 Tauri 窗口管理、系统通知、自动更新等。`src-tauri/` 下的 `codeg` 包很薄，只有 `src/main.rs`、`build.rs`（tauri-build）和 `tauri::generate_context!()`；代码全部在库 `crates/codeg-lib`（crate 名仍是 `codeg_lib`，所以 insta 快照名和日志 target 不变）。界面不编译进二进制：`web/app_assets.rs` 让窗口从安装包里的 `web/` 目录读取（macOS 为 `Contents/Resources/web`，由 `bundle.resources` 从 `out/` 复制），`frontendDist` 只是一页占位（`src-tauri/frontend-placeholder`）。因此只改界面或版本号时，发布只需重新编译这个薄包
+- **`codeg-server`**（`--no-default-features --features server`）：独立服务器模式，仅编译 Axum HTTP API + WebSocket。它的 `[[bin]]` 在 `crates/codeg-lib` 包里；`server` feature 不在默认 feature 里，所以桌面构建（`tauri build`）不编译、也不打包它
 - **`codeg-mcp`**（独立 crate `src-tauri/crates/codeg-mcp`）：per-launch stdio MCP 伴生进程，被注入到代理 CLI 的 MCP 配置中，向 LLM 暴露**异步**子智能体委托工具。它只依赖 `crates/codeg-mcp-protocol`（broker socket 协议、工具请求类型、共享的名称与上限），不链接主库，所以几秒就能编译完；主库在原来的路径（`acp::delegation::transport`、`acp::question` 等）重新导出这些类型。
 
 ### 共享核心
@@ -67,7 +69,7 @@ INSTA_UPDATE=auto cargo test --features test-utils     # 自动写新 .snap
 - **`web/router.rs`** — Axum 路由，接受 `Arc<AppState>`
 - **`web/handlers/`** — HTTP API 端点，全部使用 `Extension<Arc<AppState>>`
 
-### Rust 后端（`src-tauri/src/`）
+### Rust 后端（`src-tauri/crates/codeg-lib/src/`）
 
 后端负责读取和解析本地文件系统上的代理会话文件：
 

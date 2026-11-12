@@ -69,6 +69,14 @@ vi.mock("@/lib/fork-conversation", () => ({
 vi.mock("./session-details-dialog", () => ({
   SessionDetailsDialog: () => null,
 }))
+// The picker is covered on its own (`move-to-project-dialog.test.tsx`); here
+// only which session the menu opens it for.
+vi.mock("./move-to-project-dialog", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./move-to-project-dialog")>()),
+  MoveToProjectDialog: (props: { conversation: { id: number } }) => (
+    <div data-testid="move-dialog">{props.conversation.id}</div>
+  ),
+}))
 // The header now embeds the folder picker (self-contained, store-driven); stub
 // it so these tests exercise only the header's own menu/dialog logic.
 vi.mock("@/components/chat/conversation-context-bar", () => ({
@@ -102,6 +110,44 @@ function withIntl(ui: ReactElement) {
     </NextIntlClientProvider>
   )
 }
+
+describe("ConversationDetailHeader move to project", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    h.conversations = []
+  })
+
+  it("opens the picker for the conversation the menu was opened for", async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    h.conversations = [
+      { id: 1, agent_type: "claude_code", external_id: "s1", kind: "regular" },
+    ]
+    const { getByLabelText, getByRole, findByTestId } = render(
+      withIntl(<ConversationDetailHeader {...A} />)
+    )
+    await user.click(getByLabelText("More actions"))
+    await user.click(getByRole("menuitem", { name: "Move to project…" }))
+    expect((await findByTestId("move-dialog")).textContent).toBe("1")
+  })
+
+  it("is not offered for a sub-session", async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    h.conversations = [
+      {
+        id: 1,
+        agent_type: "claude_code",
+        external_id: "s1",
+        kind: "delegate",
+        parent_id: 9,
+      },
+    ]
+    const { getByLabelText, queryByRole } = render(
+      withIntl(<ConversationDetailHeader {...A} />)
+    )
+    await user.click(getByLabelText("More actions"))
+    expect(queryByRole("menuitem", { name: "Move to project…" })).toBeNull()
+  })
+})
 
 describe("ConversationDetailHeader fork", () => {
   beforeEach(() => {

@@ -13,6 +13,7 @@ fn main() {
             ensure_sidecar_placeholder("codeg-talk");
             ensure_framework_placeholder("whisper");
         }
+        ensure_interface_placeholder();
         tauri_build::build();
     }
 }
@@ -105,6 +106,32 @@ fn ensure_framework_placeholder(name: &str) {
     println!(
         "cargo:warning={name}.framework missing at {}; created an empty placeholder. \
          Run `pnpm tauri:prepare-sidecars` before `tauri build` to ship Talk on the Mac.",
+        path.display()
+    );
+}
+
+/// `bundle.resources` maps the Next export (`../out`) into the bundle's
+/// `web/`, and tauri-build fails at build.rs time when a resource path is
+/// missing. The export only exists after `next build` (`beforeBuildCommand`),
+/// so plain `cargo check` / clippy on a fresh checkout get an empty
+/// placeholder directory, the interface counterpart of the placeholders
+/// above. A bundle built from it opens the "cannot find its interface" page
+/// rather than a blank window, which makes skipping `next build` loud.
+#[cfg(feature = "tauri-runtime")]
+fn ensure_interface_placeholder() {
+    use std::fs;
+    use std::path::Path;
+
+    let path = Path::new("../out");
+    if path.exists() {
+        return;
+    }
+    if let Err(e) = fs::create_dir_all(path) {
+        panic!("failed to create interface placeholder {}: {e}", path.display());
+    }
+    println!(
+        "cargo:warning=interface export missing at {}; created an empty placeholder. \
+         Run `next build` (pnpm build) before `tauri build` to ship the interface.",
         path.display()
     );
 }

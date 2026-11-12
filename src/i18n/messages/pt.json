@@ -2134,6 +2134,8 @@
       "attentionCountBadge": "{count, plural, one {# sessão aguardando você} other {# sessões aguardando você}}",
       "statusCancelledBadge": "Cancelado",
       "worktreeRemovedBadge": "Worktree de origem removida",
+      "runsInBadge": "Roda em {path}",
+      "runsInLabel": "Roda em",
       "criticalBadge": "Sessão crítica",
       "criticalToggleFailed": "Não foi possível atualizar a marca crítica: {message}",
       "talkBadge": "Modo conversa ativado",
@@ -2406,6 +2408,43 @@
       "forkUnsupported": "Este agente não pode bifurcar conversas",
       "forkAfterReply": "Bifurque quando a resposta atual terminar",
       "forkNoReply": "Ainda não há nada para bifurcar: nenhuma resposta terminou"
+    },
+    "moveSession": {
+      "menuLabel": "Mover para projeto…",
+      "title": "Mover para projeto",
+      "description": "Mover “{title}” para outro projeto. Os arquivos vão junto onde o agente os guarda por pasta.",
+      "untitledSession": "Sessão sem título",
+      "pickProject": "Escolha um projeto",
+      "noProjects": "Nenhum outro projeto está aberto.",
+      "checking": "Verificando…",
+      "fullNote": "A sessão e seus arquivos vão para {project}, e o agente continua lá. A próxima mensagem relê a sessão uma vez.",
+      "listedOnly": {
+        "agent_unsupported": "{agent} mantém as sessões presas à pasta onde rodaram, então esta só pode ser listada em {project}. Ela continua rodando em {path}.",
+        "claude_adapter_outdated": "O adaptador do Claude Code instalado é antigo demais para mover arquivos de sessão, então esta sessão só pode ser listada em {project}. Ela continua rodando em {path}.",
+        "session_files_not_found": "Os arquivos desta sessão não estão onde {agent} os guarda, então ela só pode ser listada em {project}. Ela continua rodando em {path}."
+      },
+      "children": "{count, plural, one {Sua subsessão vai junto.} other {Suas # subsessões vão junto.}}",
+      "cancel": "Cancelar",
+      "move": "Mover",
+      "moving": "Movendo…",
+      "moved": "Movida para {project}",
+      "movedListedOnly": "Listada em {project}; continua rodando em {path}",
+      "failed": "Não foi possível mover a sessão: {message}",
+      "errors": {
+        "conversation_not_found": "Esta sessão não existe mais.",
+        "folder_not_found": "Esse projeto não está mais no espaço de trabalho.",
+        "same_folder": "A sessão já está nesse projeto.",
+        "chat_conversation": "Sessões de chat não têm projeto de onde sair.",
+        "chat_folder": "Uma sessão não pode ser movida para um chat.",
+        "subsession": "Uma subsessão vai junto com a sessão que a iniciou.",
+        "unsupported_conversation": "Este tipo de sessão não pode ser movido.",
+        "work_task_linked": "Uma tarefa executa esta sessão; ela fica no projeto da tarefa.",
+        "conversation_running": "A sessão está trabalhando. Mova-a quando a resposta terminar.",
+        "resume_pending": "A sessão está prestes a continuar sozinha. Mova-a quando terminar, ou desative a continuação automática.",
+        "running_elsewhere": "O Claude Code está executando esta sessão fora do codeg. Mova-a quando esse processo terminar.",
+        "session_closing": "O agente da sessão ainda está fechando. Tente de novo em instantes.",
+        "move_failed": "Os arquivos da sessão não puderam ser movidos, então nada foi alterado."
+      }
     },
     "search": {
       "dialogTitle": "Buscar",

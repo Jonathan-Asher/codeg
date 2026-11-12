@@ -43,8 +43,9 @@ jobs:
         run: pnpm lint .
 
       - name: Browser agent bundle matches its source
-        # `src-tauri/src/browser/js/agent.bundle.js` is committed so that a
-        # cargo build needs no node — `include_str!` reads it at compile time.
+        # `src-tauri/crates/codeg-lib/src/browser/js/agent.bundle.js` is
+        # committed so that a cargo build needs no node — `include_str!` reads
+        # it at compile time.
         # A committed artifact is only worth anything if it is the one the
         # source produces, and nothing else in the build would notice a stale
         # one: the Rust side would happily embed last week's bundle.
@@ -122,10 +123,11 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev
 
-      - name: Prepare Tauri frontendDist placeholder
-        # Tauri's build script validates `frontendDist` and bundled resource
-        # paths during Rust compilation. The frontend job owns the real static
-        # export; Rust desktop cells only need the path to exist for tests.
+      - name: Prepare the interface export path
+        # Tauri's build script copies the bundled resources (`out/` → `web/`)
+        # during Rust compilation and fails on a missing path. The frontend job
+        # owns the real static export; Rust desktop cells only need the path to
+        # exist for tests.
         if: matrix.mode == 'desktop'
         shell: bash
         run: |
@@ -170,8 +172,8 @@ jobs:
         working-directory: src-tauri
         run: |
           if grep -nE 'folder_service::|conversation_service::|tab_service::|import_service::' \
-             src/web/handlers/folders.rs \
-             src/web/handlers/conversations.rs; then
+             crates/codeg-lib/src/web/handlers/folders.rs \
+             crates/codeg-lib/src/web/handlers/conversations.rs; then
             echo "::error::Web handlers must call commands/*_core, not services directly."
             exit 1
           fi

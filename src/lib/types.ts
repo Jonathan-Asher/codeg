@@ -547,10 +547,16 @@ export interface DbConversationSummary {
   parent_id?: number | null
   parent_tool_use_id?: string | null
   delegation_call_id?: string | null
-  /** Set when the conversation was re-parented out of a removed worktree: the
-   *  worktree path it originally ran in. Drives the "source worktree removed"
-   *  badge. */
+  /** The directory the session really ran in when that is not its folder's
+   *  path: a removed worktree's sessions re-filed under their project, or a
+   *  session moved to another project without its files (it keeps running
+   *  there). See `working_dir` for whether that directory still exists. */
   origin_cwd?: string | null
+  /** Where an agent session of this conversation runs: `origin_cwd` while
+   *  that directory still exists, else its folder's path. Every reopen
+   *  connects with it. Absent from a server that predates it (use the
+   *  folder's path then). */
+  working_dir?: string | null
   /** Where the latest turn stands, persisted by the backend: `running` while
    *  one is in flight, `interrupted` when it was cut off (codeg exited, or the
    *  agent process or its connection died mid-turn), `null` otherwise. Absent

@@ -158,7 +158,7 @@ describe("a terminal card crossing a route switch", () => {
     ]) {
       expect(canvas).not.toContain(gone)
     }
-    const command = read("src-tauri/src/commands/canvas.rs")
+    const command = read("src-tauri/crates/codeg-lib/src/commands/canvas.rs")
     expect(command).toContain("fn kill_canvas_terminals(")
     // Both delete commands, and the batch only for what it really deleted.
     expect(command).toContain("kill_canvas_terminals(terminals, &[node_id])")
@@ -172,7 +172,7 @@ describe("a terminal card crossing a route switch", () => {
     expect(read("src/components/canvas/canvas-model.ts")).toContain(
       "`canvas-term-${dbId}`"
     )
-    expect(read("src-tauri/src/commands/canvas.rs")).toContain(
+    expect(read("src-tauri/crates/codeg-lib/src/commands/canvas.rs")).toContain(
       'format!("canvas-term-{node_id}")'
     )
   })

@@ -373,7 +373,11 @@ export function CanvasConversationSurface({
       : null
   })
 
+  // A bound conversation connects where its session runs (`working_dir`:
+  // its folder's path, or the folder a session moved without its files
+  // still runs in).
   const workingDir =
+    summary?.working_dir ??
     folderPath ??
     (draftTarget?.kind === "folder" ? draftTarget.workingDir : null) ??
     chatDir ??

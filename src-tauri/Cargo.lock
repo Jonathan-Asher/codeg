@@ -1100,6 +1100,26 @@ checksum = "c3e64b0cc0439b12df2fa678eae89a1c56a529fd067a9115f7827f1fffd22b32"
 name = "codeg"
 version = "0.32.2"
 dependencies = [
+ "codeg-lib",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-deep-link",
+ "tauri-plugin-dialog",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-notification",
+ "tauri-plugin-opener",
+ "tauri-plugin-process",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-updater",
+ "tauri-plugin-window-state",
+]
+
+[[package]]
+name = "codeg-lib"
+version = "0.32.2"
+dependencies = [
  "aes-gcm",
  "agent-client-protocol",
  "argon2",
@@ -1165,7 +1185,6 @@ dependencies = [
  "socket2",
  "tar",
  "tauri",
- "tauri-build",
  "tauri-plugin-autostart",
  "tauri-plugin-deep-link",
  "tauri-plugin-dialog",
