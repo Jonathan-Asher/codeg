@@ -3043,9 +3043,10 @@ function connectionsReducer(
     case "PROMPT_SUGGESTION": {
       const conn = state.get(action.contextKey)
       if (!conn) return state
-      // A prediction that lands while a turn runs is for a prompt that has
-      // already gone out: Claude Code drops those, and so does this.
-      const suggestion = conn.status === "prompting" ? null : action.suggestion
+      // Kept as the backend keeps it. One that lands while the turn is held
+      // open for background work waits for the turn to end: the composer
+      // shows none while a turn runs, and the next prompt clears it.
+      const suggestion = action.suggestion
       if ((conn.promptSuggestion ?? null) === null && suggestion === null)
         return state
       if (conn.promptSuggestion?.id === suggestion?.id) return state

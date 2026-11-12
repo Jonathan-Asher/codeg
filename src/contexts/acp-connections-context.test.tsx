@@ -7469,9 +7469,10 @@ describe("codeg extensions and prompt suggestions", () => {
       status: "prompting",
     })
     expect(h.store!.getConnection(TAB)?.promptSuggestion).toBeNull()
-    // One that lands while the turn runs was outrun by its prompt.
-    emitAcpEvent(handlers, prediction(4, 6, "late"))
-    expect(h.store!.getConnection(TAB)?.promptSuggestion).toBeNull()
+    // One that lands while the turn is held open (the agent is idle, its
+    // background work runs) is kept for when the turn ends.
+    emitAcpEvent(handlers, prediction(4, 6, "check the build"))
+    expect(h.store!.getConnection(TAB)?.promptSuggestion?.id).toBe(6)
   })
 
   it("clears the prediction when the agent says it no longer applies", async () => {

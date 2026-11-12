@@ -563,9 +563,6 @@ export function MessageInput({
   // only ever saw global skills in the `$` autocomplete.
   const availableSkills = useAgentSkills(skillAgentType, defaultPath ?? null)
   const skillPrefix = agentType === "codex" ? "$" : "/"
-  // Exactly what the `/`·`$` menu below can offer. Seeding or pasting text turns
-  // a bare `/cmd`·`$skill` token into a badge only when it is on this list, so
-  // prose the agent has no command for stays prose.
   // The `/` menu's commands: the agent's own, plus `/btw` on a session that
   // answers side questions (codeg's entry — the agent does not list it).
   const sideQuestionsOffered = onSideQuestion != null
@@ -580,6 +577,9 @@ export function MessageInput({
         : availableCommands,
     [sideQuestionsOffered, availableCommands, t]
   )
+  // Exactly what the `/`·`$` menu below can offer. Seeding or pasting text turns
+  // a bare `/cmd`·`$skill` token into a badge only when it is on this list, so
+  // prose the agent has no command for stays prose.
   const knownInvocations = useMemo(
     () => buildKnownInvocations(menuCommands, availableSkills, skillPrefix),
     [menuCommands, availableSkills, skillPrefix]
