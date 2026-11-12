@@ -315,7 +315,7 @@ impl Scan {
                         let text = user_content_text(message.get("content"));
                         match legacy_job_report(&text) {
                             Some(exit) => {
-                                self.notice(index, at, text, NoticeKind::Job(Box::new(exit)))
+                                self.notice(index, at, text, NoticeKind::Job(Box::new(exit)), true)
                             }
                             None => {
                                 self.run_open = true;
@@ -443,13 +443,20 @@ impl Scan {
     }
 
     fn custom_message(&mut self, index: usize, at: Option<DateTime<Utc>>, value: &Value) {
-        // What an extension hides in its own UI stays out of codeg's too, and
-        // does not count as waking the agent.
-        if !value
+        let custom_type = value
+            .get("customType")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let displayed = value
             .get("display")
             .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
+            .unwrap_or(false);
+        // What an extension hides in its own UI stays out of codeg's too, and
+        // does not count as waking the agent. Except a run's results: since
+        // 0.80, pi-subagents hides a run that completed without trouble (and a
+        // workflow child that did) because its own run widget shows it there,
+        // yet the notice still wakes Pi, and here the run's card is that widget.
+        if !displayed && !is_run_result(custom_type) {
             return;
         }
         let text = user_content_text(value.get("content"));
@@ -457,10 +464,6 @@ impl Scan {
             return;
         }
         let details = value.get("details").filter(|details| details.is_object());
-        let custom_type = value
-            .get("customType")
-            .and_then(Value::as_str)
-            .unwrap_or("");
         let kind = match custom_type {
             "subagent_supervisor_request" => {
                 NoticeKind::Question(Box::new(Question::parse(details, &text)))
@@ -485,7 +488,7 @@ impl Scan {
             }
             _ => NoticeKind::Other,
         };
-        self.notice(index, at, text, kind);
+        self.notice(index, at, text, kind, displayed);
     }
 
     fn custom_entry(&mut self, value: &Value) {
@@ -512,13 +515,21 @@ impl Scan {
         }
     }
 
-    fn notice(&mut self, index: usize, at: Option<DateTime<Utc>>, text: String, kind: NoticeKind) {
+    fn notice(
+        &mut self,
+        index: usize,
+        at: Option<DateTime<Utc>>,
+        text: String,
+        kind: NoticeKind,
+        displayed: bool,
+    ) {
         let n = self.notices.len();
         self.notices.push(Notice {
             index,
             at,
             text,
             kind,
+            displayed,
         });
         if !self.run_open {
             self.pending.push(n);
@@ -577,6 +588,16 @@ impl Scan {
     }
 }
 
+/// The pi-subagents notices that carry a run's (or a workflow child's) result.
+/// pi-subagents 0.80 and later write them hidden (`display: false`) when the
+/// run completed without trouble, and still wake Pi with them.
+fn is_run_result(custom_type: &str) -> bool {
+    matches!(
+        custom_type,
+        "subagent-notify" | "subagent-incremental-child-notify"
+    )
+}
+
 /// Whether a `subagent` call runs something (rather than managing runs).
 /// pi-subagents: "`action`: management/control only; omit for execution", and
 /// an execution names what to run.
@@ -603,7 +624,8 @@ fn is_launch(args: &Value) -> bool {
 // Notices
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// A displayed notice an extension wrote for the model.
+/// A notice an extension wrote for the model: a displayed one, or a run's
+/// result the extension hides (see [`is_run_result`]).
 struct Notice {
     /// Its index among the session's entries.
     index: usize,
@@ -611,6 +633,9 @@ struct Notice {
     /// What the model read, verbatim.
     text: String,
     kind: NoticeKind,
+    /// Whether the extension shows it in Pi's own chat. A hidden one that no
+    /// card claims stays hidden instead of becoming a System note.
+    displayed: bool,
 }
 
 enum NoticeKind {
@@ -1766,7 +1791,7 @@ fn attribute(launches: &mut [Launch], jobs: &mut [Job], notices: &[Notice], fold
         };
         if attributed {
             fold.hidden.insert(notice.index);
-        } else if !matches!(notice.kind, NoticeKind::Other) {
+        } else if notice.displayed && !matches!(notice.kind, NoticeKind::Other) {
             fold.notes.insert(notice.index, clean_notice(&notice.text));
         }
     }

@@ -3544,4 +3544,211 @@ mod tests {
             ["Subagent needs a supervisor decision.\nRun: r-9\nAgent: worker\nChild index: 0\n\nWhich branch?"]
         );
     }
+
+    // ── Pi 1.x with pi-subagents 0.88 ────────────────────────────────────
+
+    const SCOUT_RUN: &str = "3c7c8554-7306-4ded-9f1e-6c2d768770e6";
+
+    /// A Pi 1.5 / pi-subagents 0.88 / pi-bg-jobs session, from a live run: the
+    /// request's prompt and tools persisted as a leading `system` message, an
+    /// async scout and a background job, both reporting back after Pi went idle.
+    /// 0.88 hides an async run that completed without trouble in Pi's own chat
+    /// (`display: false`, its widget shows the run instead), but the notice
+    /// still wakes Pi, and carries `details.runs`.
+    fn pi_088_records(id: &str, child_file: &str) -> Vec<Value> {
+        let async_dir = format!("/tmp/subagents-tmp/async-subagent-runs/{SCOUT_RUN}");
+        vec![
+            json!({"type":"session","version":3,"id":id,"timestamp":"2026-11-12T16:21:05.750Z","cwd":"/private/tmp/demo"}),
+            json!({"type":"model_change","id":"mc1","parentId":null,"timestamp":"2026-11-12T16:21:08.581Z",
+                   "provider":"baseten","modelId":"zai-org/GLM-5.3-Fast"}),
+            json!({"type":"thinking_level_change","id":"tl1","parentId":"mc1","timestamp":"2026-11-12T16:21:08.590Z","thinkingLevel":"low"}),
+            json!({"type":"message","id":"sys1","parentId":"tl1","timestamp":"2026-11-12T16:21:08.600Z",
+                   "message":{"role":"system","content":"",
+                     "sections":{"preamble":"You are an expert coding assistant operating inside pi.","cwd":"Current working directory: /private/tmp/demo"},
+                     "toolsAdded":[{"name":"bash","description":"Run a command","parameters":{}},
+                                   {"name":"subagent","description":"Delegate to a sub-agent","parameters":{}},
+                                   {"name":"bgj_run","description":"Run a background job","parameters":{}}],
+                     "timestamp":1794500468600_u64}}),
+            json!({"type":"message","id":"u1","parentId":"sys1","timestamp":"2026-11-12T16:21:31.000Z",
+                   "message":{"role":"user","content":[{"type":"text","text":"count the files with a scout and run a job"}],"timestamp":1794500491000_u64}}),
+            json!({"type":"message","id":"a1","parentId":"u1","timestamp":"2026-11-12T16:21:35.700Z",
+                   "message":{"role":"assistant","stopReason":"toolUse","provider":"baseten","model":"zai-org/GLM-5.3-Fast","thinkingLevel":"low",
+                     "content":[
+                       {"type":"toolCall","id":"call-sub","name":"subagent","arguments":{"agent":"scout","async":true,"task":"Count the files in the current directory with ls and reply with just the number."}},
+                       {"type":"toolCall","id":"call-bg","name":"bgj_run","arguments":{"command":"sleep 4; echo bg-job-done"}}]}}),
+            json!({"type":"message","id":"r1","parentId":"a1","timestamp":"2026-11-12T16:21:35.776Z",
+                   "message":{"role":"toolResult","toolCallId":"call-sub","toolName":"subagent","isError":false,
+                     "content":[{"type":"text","text":format!("Run fan-out: 1/64 used, 63 remaining\nAsync: scout [{SCOUT_RUN}]\n\nDetached. Return control now: native completion wakes you, so do not sleep, poll, or call bg_wait for it.\nOne-shot check: subagent({{ action: \"status\", id: \"...\" }}).\nMission: 0496195f-8742-46ce-b60d-7398b3ab0274")}],
+                     "details":{"mode":"single","runId":SCOUT_RUN,"toolCallId":"call-sub","results":[],"asyncId":SCOUT_RUN,"asyncDir":async_dir,
+                                "context":"fresh","timeoutMs":1_800_000,"runFanoutBudget":{"used":1,"limit":64,"remaining":63}}}}),
+            json!({"type":"message","id":"r2","parentId":"r1","timestamp":"2026-11-12T16:21:35.780Z",
+                   "message":{"role":"toolResult","toolCallId":"call-bg","toolName":"bgj_run","isError":false,
+                     "content":[{"type":"text","text":"Command running in background with ID: jb-mwdr9g90-kmwm (pid 72022).\nOutput file: /tmp/bg-jobs/jb-mwdr9g90-kmwm.log"}],
+                     "details":{"id":"jb-mwdr9g90-kmwm","pid":72022,"logFile":"/tmp/bg-jobs/jb-mwdr9g90-kmwm.log","toolCallId":"call-bg"}}}),
+            json!({"type":"message","id":"a2","parentId":"r2","timestamp":"2026-11-12T16:21:36.400Z",
+                   "message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"LAUNCHED"}]}}),
+            json!({"type":"custom_message","id":"n1","parentId":"a2","timestamp":"2026-11-12T16:21:39.800Z","customType":"bg-job-exit","display":true,
+                   "content":"[bg-jobs] Background job jb-mwdr9g90-kmwm completed (exit 0) after 4s.\nCommand: sleep 4; echo bg-job-done\nLog: /tmp/bg-jobs/jb-mwdr9g90-kmwm.log\n\n--- last output ---\nbg-job-done",
+                   "details":{"v":1,"id":"jb-mwdr9g90-kmwm","toolCallId":"call-bg","state":"completed","exitCode":0,"durationMs":4015,
+                              "command":"sleep 4; echo bg-job-done","logFile":"/tmp/bg-jobs/jb-mwdr9g90-kmwm.log","delivery":"woke"}}),
+            json!({"type":"message","id":"a3","parentId":"n1","timestamp":"2026-11-12T16:21:41.000Z",
+                   "message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"The job printed bg-job-done. The scout is still running."}]}}),
+            json!({"type":"custom_message","id":"n2","parentId":"a3","timestamp":"2026-11-12T16:21:42.000Z","customType":"subagent-notify","display":false,
+                   "content":format!("Background task completed: **scout**\n\nscout:\n0\n\nOutput saved to: /tmp/demo/subagent-artifacts/outputs/{SCOUT_RUN}/context.md (1 B, 1 line). Read this file if needed.\n\nRetention-managed async directory: {async_dir}\n\nSession file: {child_file}\n\nParent action: Read the saved results above and resume the already-authorized parent task, or report completion. If approval is required, explicitly ask the user. Do not silently yield, rerun completed work, or infer new authorization."),
+                   "details":{"runs":[{"agent":"scout","status":"completed","asyncDir":async_dir,"durationMs":2069,"runId":SCOUT_RUN,
+                                       "sessionLabel":"Session file","sessionValue":child_file}]}}),
+            json!({"type":"message","id":"a4","parentId":"n2","timestamp":"2026-11-12T16:21:44.000Z",
+                   "message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"The scout found 0 files."}]}}),
+        ]
+    }
+
+    /// The scout's own session where pi-subagents 0.88 puts it, its header
+    /// naming the parent's file (`parentSession`, 0.77+).
+    fn pi_088_child(parent_file: &str) -> Vec<Value> {
+        vec![
+            json!({"type":"session","version":3,"id":"child-scout","timestamp":"2026-11-12T16:21:36.000Z",
+                   "cwd":"/private/tmp/demo","parentSession":parent_file}),
+            json!({"type":"model_change","id":"m0","parentId":null,"timestamp":"2026-11-12T16:21:36.001Z","provider":"baseten","modelId":"zai-org/GLM-5.3-Fast"}),
+            json!({"type":"session_info","id":"s1","parentId":"m0","timestamp":"2026-11-12T16:21:36.002Z",
+                   "name":format!("subagent-scout-{SCOUT_RUN}-1")}),
+            json!({"type":"message","id":"sys","parentId":"s1","timestamp":"2026-11-12T16:21:36.003Z",
+                   "message":{"role":"system","content":"","sections":{"preamble":"You are a scout."},"toolsAdded":[]}}),
+            json!({"type":"message","id":"m1","parentId":"sys","timestamp":"2026-11-12T16:21:36.004Z",
+                   "message":{"role":"user","content":"Task: Count the files in the current directory with ls and reply with just the number."}}),
+            json!({"type":"message","id":"m2","parentId":"m1","timestamp":"2026-11-12T16:21:37.500Z",
+                   "message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"0"}]}}),
+        ]
+    }
+
+    fn pi_088_detail(base: &Path) -> ConversationDetail {
+        let bucket = base.join("--private-tmp-demo--");
+        let stem = "2026-11-12T16-21-05-750Z_parent-088";
+        let parent_file = bucket.join(format!("{stem}.jsonl"));
+        let child_file = bucket
+            .join(stem)
+            .join(SCOUT_RUN)
+            .join("run-0")
+            .join("session.jsonl");
+        let (parent_path, child_path) = (
+            parent_file.to_string_lossy().into_owned(),
+            child_file.to_string_lossy().into_owned(),
+        );
+        write_jsonl(&parent_file, &pi_088_records("parent-088", &child_path));
+        write_jsonl(&child_file, &pi_088_child(&parent_path));
+        PiParser::with_base_dir(base.to_path_buf())
+            .get_conversation("parent-088")
+            .expect("detail")
+    }
+
+    /// pi-subagents 0.88 hides an async run's completion when it went well, yet
+    /// it is still the run's result and still what woke Pi: the card settles
+    /// from it, and the run it started is marked as Pi's own.
+    #[test]
+    fn a_hidden_completion_from_pi_subagents_088_settles_its_card() {
+        let dir = tempdir().expect("tempdir");
+        let detail = pi_088_detail(dir.path());
+
+        let texts = text_blocks(&detail);
+        for gone in [
+            "Background task completed",
+            "[bg-jobs]",
+            "You are an expert coding assistant",
+        ] {
+            assert!(
+                !texts.iter().any(|t| t.contains(gone)),
+                "{gone} is rendered: {texts:?}"
+            );
+        }
+
+        let (call, result) = call_and_result(&detail, "call-sub");
+        let Some(ContentBlock::ToolUse {
+            tool_name,
+            meta: Some(meta),
+            ..
+        }) = call
+        else {
+            panic!("no card: {call:?}");
+        };
+        assert_eq!(tool_name, "Agent");
+        let run = &meta["codeg.subagentRun"];
+        assert_eq!(run["status"], "completed", "{run}");
+        let children = run["children"].as_array().expect("children");
+        assert_eq!(children.len(), 1, "{children:?}");
+        assert_eq!(children[0]["status"], "completed");
+        assert_eq!(children[0]["sessionId"], "child-scout");
+        let Some(ContentBlock::ToolResult {
+            is_error,
+            agent_stats: Some(stats),
+            ..
+        }) = result
+        else {
+            panic!("no result: {result:?}");
+        };
+        assert!(!*is_error);
+        assert_eq!(stats.status.as_deref(), Some("completed"));
+        assert_eq!(stats.child_session_id.as_deref(), Some("child-scout"));
+
+        let (job, _) = call_and_result(&detail, "call-bg");
+        let Some(ContentBlock::ToolUse {
+            meta: Some(meta), ..
+        }) = job
+        else {
+            panic!("no job card: {job:?}");
+        };
+        assert_eq!(meta["codeg.backgroundJob"]["state"], "completed");
+        assert_eq!(meta["codeg.backgroundJob"]["tail"], "bg-job-done");
+
+        let wakes: Vec<String> = detail
+            .turns
+            .iter()
+            .filter(|t| matches!(t.role, TurnRole::System))
+            .flat_map(|t| &t.blocks)
+            .filter_map(|b| match b {
+                ContentBlock::ToolUse {
+                    meta: Some(meta), ..
+                } => Some(
+                    meta.get("codeg.agentWake")?["triggers"][0]["kind"]
+                        .as_str()?
+                        .to_string(),
+                ),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(wakes, ["jobExit", "subagentSettled"]);
+        let users: Vec<String> = detail
+            .turns
+            .iter()
+            .filter(|t| matches!(t.role, TurnRole::User))
+            .flat_map(|t| &t.blocks)
+            .filter_map(|b| match b {
+                ContentBlock::Text { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(users, ["count the files with a scout and run a job"]);
+    }
+
+    /// A hidden notice no card claims stays hidden, as Pi keeps it.
+    #[test]
+    fn an_unclaimed_hidden_completion_stays_hidden() {
+        let id = "orphan-0002";
+        let detail = parse_one(
+            &[
+                header(id),
+                json!({"type":"custom_message","id":"n1","parentId":null,"timestamp":"2026-06-27T10:00:01.000Z",
+                       "customType":"subagent-notify","display":false,
+                       "content":"Background task completed: **scout**\n\nscout:\n0",
+                       "details":{"runs":[{"agent":"scout","status":"completed","runId":"r-unknown"}]}}),
+            ],
+            id,
+        );
+        assert!(
+            !detail
+                .turns
+                .iter()
+                .any(|t| matches!(t.role, TurnRole::System)),
+            "{:?}",
+            detail.turns
+        );
+    }
 }
