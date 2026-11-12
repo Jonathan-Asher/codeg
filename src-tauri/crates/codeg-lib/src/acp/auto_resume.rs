@@ -495,6 +495,52 @@ pub(crate) async fn reopen_and_send(
     message_id_prefix: &str,
     abort: impl Fn() -> bool,
 ) -> Result<Sent, String> {
+    let conn_id = reopen_conversation(db, manager, emitter, data_dir, target, owner_label).await?;
+
+    if abort() {
+        // Reopened but not prompted: an idle connection, which the idle sweep
+        // reaps unless a tab picks it up.
+        return Ok(Sent::Aborted);
+    }
+
+    let blocks = vec![PromptInputBlock::Text {
+        text: prompt.to_string(),
+    }];
+    let message_id = format!("{message_id_prefix}-{}", uuid::Uuid::new_v4());
+    match manager
+        .send_prompt_linked_with_message_id(
+            db,
+            &conn_id,
+            blocks,
+            Some(target.folder_id),
+            Some(target.conversation_id),
+            None,
+            Some(message_id),
+        )
+        .await
+    {
+        Ok(_) => Ok(Sent::Prompted),
+        // A turn is already running on it — someone sent one by hand in the
+        // moment between the claim and now.
+        Err(AcpError::TurnInProgress) => Ok(Sent::Busy),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// The reopening half of [`reopen_and_send`]: open the conversation's session
+/// the way a tab's connect does, or share the connection that already has it,
+/// and wait until it takes prompts; the connection's id. A connection this
+/// call opened is stopped again when the session does not come up. Also what
+/// a side question uses to reach a conversation nothing has open
+/// (`acp::side_question`).
+pub(crate) async fn reopen_conversation(
+    db: &AppDatabase,
+    manager: &ConnectionManager,
+    emitter: &EventEmitter,
+    data_dir: &Path,
+    target: &ReopenTarget,
+    owner_label: &str,
+) -> Result<String, String> {
     let agent_type = target.agent_type;
     let session_id = target
         .external_id
@@ -567,35 +613,7 @@ pub(crate) async fn reopen_and_send(
         }
         return Err(reason.to_string());
     }
-
-    if abort() {
-        // Reopened but not prompted: an idle connection, which the idle sweep
-        // reaps unless a tab picks it up.
-        return Ok(Sent::Aborted);
-    }
-
-    let blocks = vec![PromptInputBlock::Text {
-        text: prompt.to_string(),
-    }];
-    let message_id = format!("{message_id_prefix}-{}", uuid::Uuid::new_v4());
-    match manager
-        .send_prompt_linked_with_message_id(
-            db,
-            &conn_id,
-            blocks,
-            Some(target.folder_id),
-            Some(target.conversation_id),
-            None,
-            Some(message_id),
-        )
-        .await
-    {
-        Ok(_) => Ok(Sent::Prompted),
-        // A turn is already running on it — someone sent one by hand in the
-        // moment between the claim and now.
-        Err(AcpError::TurnInProgress) => Ok(Sent::Busy),
-        Err(e) => Err(e.to_string()),
-    }
+    Ok(conn_id)
 }
 
 /// Whether the connection holds the conversation's own session, not a fresh

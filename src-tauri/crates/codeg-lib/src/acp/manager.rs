@@ -81,6 +81,12 @@ const SIGKILL_SETTLE: Duration = Duration::from_millis(200);
 /// for its agent process to exit after the disconnect, before it is ended.
 const HOLDER_EXIT_GRACE: Duration = Duration::from_secs(3);
 
+/// How long a side question waits for a connection that is still opening its
+/// session before it says so. A resume normally takes seconds; one that takes
+/// longer is better reported than waited on, since the question can be asked
+/// again in a moment.
+const SIDE_QUESTION_ATTACH_WAIT: Duration = Duration::from_secs(90);
+
 /// What one pass of [`kill_tree_pass`] established about the target itself.
 #[derive(Debug, PartialEq, Eq)]
 enum KillPass {
@@ -3441,6 +3447,88 @@ impl ConnectionManager {
         reply_rx
             .await
             .map_err(|_| AcpError::protocol("Async task stop reply channel closed".to_string()))?
+    }
+
+    /// Ask a side question (`/btw`) on a live connection: the agent answers it
+    /// from the session's context without tools, and nothing of it reaches
+    /// the transcript (see `acp::side_question`).
+    ///
+    /// Takes no prompt lock and checks no turn on purpose: a side question
+    /// runs beside whatever the session is doing — mid-turn is the case it
+    /// exists for — and the connection loop hands it to a task of its own, so
+    /// the running turn goes on undisturbed. A connection still opening is
+    /// waited for (bounded): only an open session can answer, and whether its
+    /// adapter can is known only after `initialize`.
+    pub async fn side_question(
+        &self,
+        conn_id: &str,
+        question: String,
+        history: Vec<crate::acp::side_question::SideQuestionExchange>,
+    ) -> Result<crate::acp::side_question::SideQuestionReply, AcpError> {
+        match self
+            .wait_until_attached(conn_id, SIDE_QUESTION_ATTACH_WAIT)
+            .await
+        {
+            None => return Err(AcpError::ConnectionNotFound(conn_id.into())),
+            Some(AttachPhase::Ready) => {}
+            Some(AttachPhase::Failed) => {
+                return Err(AcpError::SideQuestionFailed(
+                    "The session could not be opened, so nothing can answer the side question."
+                        .to_string(),
+                ))
+            }
+            Some(_) => {
+                return Err(AcpError::SideQuestionFailed(
+                    "The session is still opening. Ask again in a moment.".to_string(),
+                ))
+            }
+        }
+        let (cmd_tx, state) = {
+            let connections = self.connections.lock().await;
+            let conn = connections
+                .get(conn_id)
+                .ok_or_else(|| AcpError::ConnectionNotFound(conn_id.into()))?;
+            (conn.cmd_tx.clone(), conn.state.clone())
+        };
+        if !state.read().await.codeg_extensions.side_question {
+            return Err(AcpError::SideQuestionUnsupported);
+        }
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        cmd_tx
+            .send(ConnectionCommand::SideQuestion {
+                question,
+                history,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| AcpError::ProcessExited)?;
+        reply_rx.await.map_err(|_| {
+            AcpError::SideQuestionFailed(
+                "The session closed before the side question was answered.".to_string(),
+            )
+        })?
+    }
+
+    /// Record a client's report that it showed (or the user accepted) the
+    /// connection's prompt suggestion `id`, and return the `app_metadata`
+    /// counters it adds to: none for a prediction already counted, a stale
+    /// one, or one this connection never published (see
+    /// `acp::prompt_suggestions::SuggestionReports`).
+    pub async fn record_prompt_suggestion_report(
+        &self,
+        conn_id: &str,
+        id: u64,
+        action: crate::acp::prompt_suggestions::SuggestionAction,
+    ) -> Result<Vec<&'static str>, AcpError> {
+        let state = self
+            .get_state(conn_id)
+            .await
+            .ok_or_else(|| AcpError::ConnectionNotFound(conn_id.into()))?;
+        let counters = state
+            .write()
+            .await
+            .record_prompt_suggestion_report(id, action);
+        Ok(counters)
     }
 
     pub async fn cancel(&self, db: &DatabaseConnection, conn_id: &str) -> Result<(), AcpError> {
