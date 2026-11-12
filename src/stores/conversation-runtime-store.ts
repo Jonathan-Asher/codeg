@@ -39,6 +39,7 @@ import { collapseLiveCollabBlocks } from "@/lib/collab-collapse"
 import { kimiTodoWriteEntries } from "@/lib/plan-parse"
 import { toErrorMessage } from "@/lib/app-error"
 import { BACKGROUND_TASK_MARKER } from "@/lib/background-agent"
+import { AGENT_WAKE_META_KEY, SYSTEM_NOTE_META_KEY } from "@/lib/agent-run-meta"
 import { imageCardLabel } from "@/lib/image-tool-label"
 import { perfMark } from "@/lib/perf-marks"
 import { leftDetailCache } from "@/stores/left-detail-cache"
@@ -679,7 +680,7 @@ interface BuiltStreamingTurns {
 /** One turn under construction inside a live message. Assistant groups are the
  *  reply's rounds; a `user` group is a message the user sent mid-turn. */
 interface StreamingGroup {
-  role: "assistant" | "user"
+  role: "assistant" | "user" | "system"
   blocks: MessageTurn["blocks"]
   /**
    * Overrides the live message's start for this group. Only a `user` group sets
@@ -1135,6 +1136,48 @@ export function isLiveTurnId(id: string): boolean {
   return id.startsWith(LIVE_TURN_ID_PREFIX)
 }
 
+/**
+ * The blocks of the System turn a live Pi marker call stands for, or `null`
+ * for any other call (`acp::pi_meta` sends both):
+ *
+ * - `codeg.agentWake` — the head of a run Pi started by itself; history puts
+ *   the same marker call (and its settled result) on a System turn;
+ * - `codeg.systemNote` — a displayed notice no card claims; history shows it
+ *   as a System turn holding its text.
+ */
+export function liveSystemTurnBlocks(
+  info: Pick<ToolCallInfo, "tool_call_id" | "meta">
+): MessageTurn["blocks"] | null {
+  const meta = info.meta as Record<string, unknown> | null | undefined
+  if (!meta || typeof meta !== "object") return null
+  if (AGENT_WAKE_META_KEY in meta) {
+    return [
+      {
+        type: "tool_use",
+        tool_use_id: info.tool_call_id,
+        tool_name: "agent_wake",
+        input_preview: null,
+        status: "completed",
+        meta: info.meta,
+      },
+      {
+        type: "tool_result",
+        tool_use_id: info.tool_call_id,
+        output_preview: null,
+        is_error: false,
+      },
+    ]
+  }
+  const note = meta[SYSTEM_NOTE_META_KEY]
+  if (note && typeof note === "object" && !Array.isArray(note)) {
+    const text = (note as Record<string, unknown>).text
+    return typeof text === "string" && text.trim().length > 0
+      ? [{ type: "text", text }]
+      : []
+  }
+  return null
+}
+
 export function buildStreamingTurnsFromLiveMessage(
   conversationId: number,
   liveMessage: LiveMessage,
@@ -1446,6 +1489,18 @@ export function buildStreamingTurnsFromLiveMessage(
       case "tool_call": {
         // Skip child tool calls — they are nested inside Agent cards
         if (childToolCallIds.has(block.info.tool_call_id)) break
+
+        // A run Pi started by itself opens with the marker of what woke it,
+        // and a notice no card claims is a System note: both are System turns
+        // of their own in history (`parsers/pi/fold.rs`), so they are here
+        // too, built the same way, and draw through the same components.
+        const systemBlocks = liveSystemTurnBlocks(block.info)
+        if (systemBlocks) {
+          groups.push({ role: "system", blocks: systemBlocks })
+          groups.push({ role: "assistant", blocks: [] })
+          currentGroupHasCompletedTool = false
+          break
+        }
 
         // codex-acp v0.14+ image generation surfaces as a `ToolCall` whose
         // ACP-wire shape is `(title="Image generation", kind=Other,
@@ -3493,6 +3548,30 @@ function collectInFlightPersistedToolCalls(
   return out
 }
 
+/** A System turn carrying the marker of a run Pi started by itself. */
+function isWakeMarkerTurn(turn: MessageTurn): boolean {
+  return (
+    turn.role === "system" &&
+    turn.blocks.some(
+      (block) =>
+        block.type === "tool_use" &&
+        !!block.meta &&
+        typeof block.meta === "object" &&
+        AGENT_WAKE_META_KEY in block.meta
+    )
+  )
+}
+
+/**
+ * Whether a persisted turn can be the one `in_flight_user_turn_id` names: the
+ * prompt of a turn codeg sent, or — for a run Pi started by itself, which has
+ * no prompt — the System turn marking what woke it (the history's "woken by"
+ * divider; see `pi_agent_turn_anchor` in `commands/conversations.rs`).
+ */
+function isInFlightAnchor(turn: MessageTurn): boolean {
+  return turn.role === "user" || turn.role === "system"
+}
+
 /**
  * @param liveShowsReply whether the live message this session holds actually
  * produced an assistant turn — see [`computeTimeline`], which derives it from
@@ -3659,7 +3738,7 @@ function computeTimelinePrefix(
   let inFlightPromptIdx = -1
   if (canSuppressInFlightPartial && inFlightPromptId !== null) {
     inFlightPromptIdx = persistedTurns.findIndex(
-      (t) => t.role === "user" && t.id === inFlightPromptId
+      (t) => isInFlightAnchor(t) && t.id === inFlightPromptId
     )
   } else if (canSuppressInFlightPartial && roundAnchorSkipIds) {
     for (let i = persistedTurns.length - 1; i >= 0; i--) {
@@ -3698,7 +3777,7 @@ function computeTimelinePrefix(
     inFlightPromptId === null
       ? -1
       : visiblePersistedTurns.findIndex(
-          (t) => t.role === "user" && t.id === inFlightPromptId
+          (t) => isInFlightAnchor(t) && t.id === inFlightPromptId
         )
 
   const inFlightToolCallIdsByIndex = collectInFlightPersistedToolCalls(
@@ -3988,11 +4067,21 @@ function computeTimeline(
     liveStreamedRoundStart
   )
 
+  // A run Pi started by itself streams the marker of what woke it. A detail
+  // fetched mid-run names the persisted copy of that marker as the in-flight
+  // turn (`pi_agent_turn_anchor`), and the prefix keeps it: it stands for the
+  // live one, which would otherwise draw the same divider twice.
+  const inFlightId = session.detail?.in_flight_user_turn_id ?? null
+  const tailTurns =
+    built && inFlightId !== null && prefixKeys.has(`system ${inFlightId}`)
+      ? built.turns.filter((turn) => !isWakeMarkerTurn(turn))
+      : built?.turns
+
   let deduped: ConversationTimelineTurn[]
-  if (!built || built.turns.length === 0) {
+  if (!built || !tailTurns || tailTurns.length === 0) {
     deduped = prefix
   } else {
-    const tail: ConversationTimelineTurn[] = built.turns.map((turn, i) => ({
+    const tail: ConversationTimelineTurn[] = tailTurns.map((turn, i) => ({
       key: `streaming-${conversationId}-${streamingMessage?.id ?? "unknown"}-${i}`,
       turn,
       phase: "streaming" as const,

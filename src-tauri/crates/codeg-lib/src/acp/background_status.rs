@@ -359,6 +359,11 @@ impl SessionState {
             .async_task_activity_at
             .is_some_and(|at| now.signed_duration_since(at) < background_keepalive_max_age());
         let mut items = merge_tasks(&self.async_tasks, async_fresh, &self.background_tasks);
+        // A run Pi started by itself is drawn as a turn (`acp::pi_meta`), so
+        // pi-acp's `turn` task for it would count the same work twice.
+        if self.pi_live.is_some_and(|caps| caps.agent_turns) {
+            items.retain(|task| task.kind != "turn");
+        }
         for delegation in self.active_delegations.values() {
             let id = if delegation.task_id.is_empty() {
                 &delegation.parent_tool_use_id

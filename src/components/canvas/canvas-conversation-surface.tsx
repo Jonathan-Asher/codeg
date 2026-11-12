@@ -1216,6 +1216,7 @@ export function CanvasConversationSurface({
             agentType={agentType}
             connStatus={connStatus}
             asyncTasks={conn.asyncTasks}
+            toolCards={conn.toolCards}
             onStopAsyncTask={handleStopAsyncTask}
             isActive={isActive}
             sendSignal={sendSignal}

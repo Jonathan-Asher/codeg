@@ -19,8 +19,11 @@
 //!   connection's scratch directory, which a restart removes.
 //!
 //! Only the transcript's tail is read, and only again once it changed.
-//! Structured events from pi-acp are planned
-//! (`~/.claude/plans/pi-subagents-ux.md`); this is the stop-gap.
+//!
+//! A pi-acp that publishes its jobs and async runs as AIR async tasks
+//! (0.0.34-steering.6, `acp::pi_meta::PiLiveCaps::async_tasks`) says what runs
+//! directly: for its sessions the connection's own task table is read instead
+//! of the transcript ([`wire_items`]), under the same kinds.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
@@ -403,20 +406,35 @@ impl PiScanner {
         Self::new(crate::parsers::pi::resolve_pi_sessions_dir(), registry)
     }
 
-    /// The work each live, bound Pi session has running, by conversation.
+    /// The work each live, bound Pi session has running, by conversation:
+    /// from pi-acp's async tasks where it publishes them, else from the
+    /// transcript.
     pub async fn scan_live(
         &self,
         manager: &ConnectionManager,
         now: DateTime<Utc>,
     ) -> HashMap<i32, Vec<BackgroundSnapshotItem>> {
-        let sessions = live_pi_sessions(manager).await;
+        let mut out = HashMap::new();
+        let mut sessions = Vec::new();
+        for session in live_pi_sessions(manager, now).await {
+            match session.wire {
+                Some(items) => {
+                    if !items.is_empty() {
+                        out.insert(session.conversation_id, items);
+                    }
+                }
+                None => sessions.push((session.conversation_id, session.session_id)),
+            }
+        }
         if sessions.is_empty() {
-            return HashMap::new();
+            return out;
         }
         let scanner = self.clone();
-        tokio::task::spawn_blocking(move || scanner.scan(&sessions, now, &pid_alive))
+        let scanned = tokio::task::spawn_blocking(move || scanner.scan(&sessions, now, &pid_alive))
             .await
-            .unwrap_or_default()
+            .unwrap_or_default();
+        out.extend(scanned);
+        out
     }
 
     /// The blocking half of [`Self::scan_live`]: `(conversation id, session
@@ -505,7 +523,15 @@ impl PiScanner {
 
 /// `(conversation id, Pi session id)` of every open Pi connection bound to a
 /// conversation.
-async fn live_pi_sessions(manager: &ConnectionManager) -> Vec<(i32, String)> {
+/// A live, bound Pi session, and what it runs when pi-acp says so itself.
+struct LivePi {
+    conversation_id: i32,
+    session_id: String,
+    /// `Some` when pi-acp publishes its jobs and runs as AIR async tasks.
+    wire: Option<Vec<BackgroundSnapshotItem>>,
+}
+
+async fn live_pi_sessions(manager: &ConnectionManager, now: DateTime<Utc>) -> Vec<LivePi> {
     let mut out = Vec::new();
     for info in manager.list_connections().await {
         if info.agent_type != AgentType::Pi {
@@ -524,10 +550,53 @@ async fn live_pi_sessions(manager: &ConnectionManager) -> Vec<(i32, String)> {
         if let (Some(conversation_id), Some(session_id)) =
             (s.conversation_id, s.external_id.clone())
         {
-            out.push((conversation_id, session_id));
+            let wire = s
+                .pi_live
+                .is_some_and(|caps| caps.async_tasks)
+                .then(|| wire_items(&s, now));
+            out.push(LivePi {
+                conversation_id,
+                session_id,
+                wire,
+            });
         }
     }
     out
+}
+
+/// What a Pi session with pi-acp's async tasks runs, read off its task
+/// table: each job (`shell`, id = job id) and async run (`subagent` /
+/// `workflow`, id = run id) still going, as the snapshot names them. The run
+/// Pi started by itself (`turn`) is not listed: it is a turn, recorded as one.
+/// Rows the adapter went quiet about past the keep-alive window are not
+/// running for the snapshot either, exactly as for the session lists.
+pub(crate) fn wire_items(
+    state: &crate::acp::session_state::SessionState,
+    now: DateTime<Utc>,
+) -> Vec<BackgroundSnapshotItem> {
+    if !state.has_live_async_task(now) {
+        return Vec::new();
+    }
+    state
+        .async_tasks
+        .values()
+        .filter(|task| !crate::acp::types::async_task_state_is_terminal(&task.state))
+        .filter_map(|task| {
+            let kind = match task.task_type.as_str() {
+                "shell" => KIND_PI_JOB,
+                "subagent" | "workflow" => KIND_PI_SUBAGENT,
+                _ => return None,
+            };
+            let label = if task.name.trim().is_empty() {
+                task.description.as_str()
+            } else {
+                task.name.as_str()
+            };
+            let mut item = BackgroundSnapshotItem::new(kind, label);
+            item.id = Some(task.task_id.clone()).filter(|id| !id.trim().is_empty());
+            Some(item)
+        })
+        .collect()
 }
 
 #[cfg(test)]

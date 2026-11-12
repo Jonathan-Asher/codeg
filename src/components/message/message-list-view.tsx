@@ -43,6 +43,10 @@ import { TurnStats } from "./turn-stats"
 import { LiveTurnStats } from "./live-turn-stats"
 import { ModelLabelProvider } from "./model-label-context"
 import { TranscriptAgentTypeProvider } from "./transcript-agent-context"
+import {
+  LiveToolCardsProvider,
+  type LiveToolCards,
+} from "./live-tool-cards-context"
 import { ReplyArtifacts } from "./reply-artifacts"
 import { UserResourceLinks } from "./user-resource-links"
 import { SteerStateCaption } from "./steer-state-caption"
@@ -173,6 +177,10 @@ interface MessageListViewProps {
    *  Running panel offers their output and stop. */
   asyncTasks?: AsyncTaskRecord[]
   onStopAsyncTask?: (taskId: string) => Promise<boolean>
+  /** The live connection's newest card per Pi sub-agent run and background
+   *  job (`tool_card`): the cards in the thread read theirs from here first,
+   *  whichever turn they sit in. */
+  toolCards?: LiveToolCards | null
   isActive?: boolean
   sendSignal?: number
   detailLoading?: boolean
@@ -1333,6 +1341,7 @@ export function MessageListView({
   heldBackgroundTasks = null,
   asyncTasks,
   onStopAsyncTask,
+  toolCards = null,
   isActive = true,
   sendSignal = 0,
   detailLoading = false,
@@ -2666,7 +2675,9 @@ export function MessageListView({
     >
       <ModelLabelProvider value={modelLabel}>
         <TranscriptAgentTypeProvider value={agentType}>
-          {thread}
+          <LiveToolCardsProvider value={toolCards}>
+            {thread}
+          </LiveToolCardsProvider>
         </TranscriptAgentTypeProvider>
       </ModelLabelProvider>
     </MarkdownImageProvider>

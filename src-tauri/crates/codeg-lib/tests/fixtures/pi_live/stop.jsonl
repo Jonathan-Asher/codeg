@@ -1,0 +1,80 @@
+{"prompt":"Use the bgj_run tool to run exactly `sleep 4; echo first-done`. Reply with the single word STARTED and end your turn. Later, when you are notified that this job finished, use the bash tool to run exac"}
+{"update":{"sessionUpdate":"session_info_update","_meta":{"piAcp":{"queueDepth":0,"running":true}}}}
+{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"STARTED"}}}
+{"update":{"sessionUpdate":"tool_call","toolCallId":"chatcmpl-tool-599708123fae487d9834758ea514c285","title":"bgj_run","kind":"other","status":"pending","rawInput":{"command":"sleep 4; echo first-done"},"_meta":{"piAcp":{"backgroundJob":{"version":1,"tool":"bgj_run","toolCallId":"chatcmpl-tool-599708123fae487d9834758ea514c285","state":"pending","command":"sleep 4; echo first-done"}}}}}
+{"update":{"sessionUpdate":"tool_call_update","toolCallId":"chatcmpl-tool-599708123fae487d9834758ea514c285","status":"in_progress","rawInput":{"command":"sleep 4; echo first-done"},"_meta":{"piAcp":{"backgroundJob":{"version":1,"tool":"bgj_run","toolCallId":"chatcmpl-tool-599708123fae487d9834758ea514c285","state":"pending","command":"sleep 4; echo first-done"}}}}}
+{"update":{"sessionUpdate":"tool_call_update","toolCallId":"chatcmpl-tool-599708123fae487d9834758ea514c285","_meta":{"piAcp":{"backgroundJob":{"version":1,"tool":"bgj_run","toolCallId":"chatcmpl-tool-599708123fae487d9834758ea514c285","state":"running","command":"sleep 4; echo first-done","cwd":"/private/tmp/pi-acp-live-codeg","id":"jb-mwdx4ywp-ga0c","pid":58860,"logFile":"/Users/dev/.pi/agent/bg-jobs/jb-mwdx4ywp-ga0c.log","startedAt":1794510364345}}}}}
+{"update":{"sessionUpdate":"tool_call_update","toolCallId":"chatcmpl-tool-599708123fae487d9834758ea514c285","status":"completed","content":[{"type":"content","content":{"type":"text","text":"Command running in background with ID: jb-mwdx4ywp-ga0c (pid 58860).\nOutput file: /Users/dev/.pi/agent/bg-jobs/jb-mwdx4ywp-ga0c.log\nWhen it exits you get a [bg-jobs] notice, unless you already read its result with bgj_wait/bgj_status or killed it. To check interim output, use bgj_status with this id, or Read the output file.\n\nThe conversation is free — end your turn or continue other work; do NOT sleep-poll."}}],"rawOutput":{"content":[{"type":"text","text":"Command running in background with ID: jb-mwdx4ywp-ga0c (pid 58860).\nOutput file: /Users/dev/.pi/agent/bg-jobs/jb-mwdx4ywp-ga0c.log\nWhen it exits you get a [bg-jobs] notice, unless you already read its result with bgj_wait/bgj_status or killed it. To check interim output, use bgj_status with this id, or Read the output file.\n\nThe conversation is free — end your turn or continue other work; do NOT sleep-poll."}],"details":{"id":"jb-mwdx4ywp-ga0c","pid":58860,"logFile":"/Users/dev/.pi/agent/bg-jobs/jb-mwdx4ywp-ga0c.log","toolCallId":"chatcmpl-tool-599708123fae487d9834758ea514c285"}},"_meta":{"piAcp":{"backgroundJob":{"version":1,"tool":"bgj_run","toolCallId":"chatcmpl-tool-599708123fae487d9834758ea514c285","state":"running","command":"sleep 4; echo first-done","cwd":"/private/tmp/pi-acp-live-codeg","id":"jb-mwdx4ywp-ga0c","pid":58860,"logFile":"/Users/dev/.pi/agent/bg-jobs/jb-mwdx4ywp-ga0c.log","startedAt":1794510364345}}}}}
+{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"STARTED"}}}
+{"update":{"sessionUpdate":"session_info_update","_meta":{"piAcp":{"queueDepth":0,"running":false}}}}
+{"promptEnd":"end_turn"}
+{"update":{"sessionUpdate":"session_info_update","_meta":{"piAcp":{"backgroundJob":{"version":1,"tool":"bgj_run","toolCallId":"chatcmpl-tool-599708123fae487d9834758ea514c285","state":"completed","command":"sleep 4; echo first-done","cwd":"/private/tmp/pi-acp-live-codeg","id":"jb-mwdx4ywp-ga0c","pid":58860,"logFile":"/Users/dev/.pi/agent/bg-jobs/jb-mwdx4ywp-ga0c.log","startedAt":1794510364345,"exitedAt":1794510368354,"durationMs":4009,"exitCode":0}}}}}
+{"update":{"sessionUpdate":"session_info_update","_meta":{"piAcp":{"backgroundJob":{"version":1,"tool":"bgj_run","toolCallId":"chatcmpl-tool-599708123fae487d9834758ea514c285","state":"completed","command":"sleep 4; echo first-done","cwd":"/private/tmp/pi-acp-live-codeg","id":"jb-mwdx4ywp-ga0c","pid":58860,"logFile":"/Users/dev/.pi/agent/bg-jobs/jb-mwdx4ywp-ga0c.log","startedAt":1794510364345,"exitedAt":1794510368354,"delivery":"woke","durationMs":4009,"exitCode":0}}}}}
+{"update":{"sessionUpdate":"session_info_update","_meta":{"piAcp":{"running":true,"agentTurn":{"version":1,"id":"pi-turn-e37ae358-4604-46cb-967f-434178f8f9f7","state":"running","startedAt":1794510369364,"trigger":{"kind":"jobExit","reason":"Woken by job exit","customType":"bg-job-exit","summary":"jb-mwdx4ywp-ga0c completed (exit 0)","toolCallIds":["chatcmpl-tool-599708123fae487d9834758ea514c285"]}}}}}}
+{"update":{"sessionUpdate":"session_info_update","_meta":{"piAcp":{"customMessage":{"version":1,"role":"custom","customType":"bg-job-exit","display":true,"details":{"v":1,"id":"jb-mwdx4ywp-ga0c","toolCallId":"chatcmpl-tool-599708123fae487d9834758ea514c285","sessionId":"01a1d127-0b43-7601-8b3b-99012b0b9cc5","state":"completed","exitCode":0,"startedAtMs":1794510364345,"exitedAtMs":1794510368354,"durationMs":4009,"command":"sleep 4; echo first-done","cwd":"/private/tmp/pi-acp-live-codeg","logFile":"/Users/dev/.pi/agent/bg-jobs/jb-mwdx4ywp-ga0c.log","delivery":"woke"},"text":"[bg-jobs] Background job jb-mwdx4ywp-ga0c completed (exit 0) after 4s.\nCommand: sleep 4; echo first-done\nLog: /Users/dev/.pi/agent/bg-jobs/jb-mwdx4ywp-ga0c.log\n\n--- last output ---\nfirst-done","timestamp":1794510369360,"toolCallIds":["chatcmpl-tool-599708123fae487d9834758ea514c285"],"agentTurnId":"pi-turn-e37ae358-4604-46cb-967f-434178f8f9f7"}}}}}
+{"update":{"sessionUpdate":"session_info_update","_meta":{"piAcp":{"backgroundJob":{"version":1,"tool":"bgj_run","toolCallId":"chatcmpl-tool-599708123fae487d9834758ea514c285","state":"completed","command":"sleep 4; echo first-done","cwd":"/private/tmp/pi-acp-live-codeg","id":"jb-mwdx4ywp-ga0c","pid":58860,"logFile":"/Users/dev/.pi/agent/bg-jobs/jb-mwdx4ywp-ga0c.log","startedAt":1794510364345,"exitedAt":1794510368354,"delivery":"woke","durationMs":4009,"exitCode":0,"notice":"[bg-jobs] Background job jb-mwdx4ywp-ga0c completed (exit 0) after 4s.\nCommand: sleep 4; echo first-done\nLog: /Users/dev/.pi/agent/bg-jobs/jb-mwdx4ywp-ga0c.log\n\n--- last output ---\nfirst-done"}}}}}
+{"update":{"sessionUpdate":"tool_call","toolCallId":"chatcmpl-tool-afeae45aaf244b9bb609bb560516a2d2","title":"sleep 40; echo second","kind":"execute","status":"pending","content":[{"type":"terminal","terminalId":"chatcmpl-tool-afeae45aaf244b9bb609bb560516a2d2"}],"_meta":{"terminal_info":{"terminal_id":"chatcmpl-tool-afeae45aaf244b9bb609bb560516a2d2","cwd":"/tmp/pi-acp-live-codeg"}}}}
+{"update":{"sessionUpdate":"tool_call_update","toolCallId":"chatcmpl-tool-afeae45aaf244b9bb609bb560516a2d2","title":"sleep 40; echo second","kind":"execute","status":"in_progress"}}
+{"update":{"sessionUpdate":"tool_call_update","toolCallId":"chatcmpl-tool-afeae45aaf244b9bb609bb560516a2d2","status":"failed","_meta":{"terminal_output":{"terminal_id":"chatcmpl-tool-afeae45aaf244b9bb609bb560516a2d2","data":"Blocked: standalone sleep 40. To wait for a command you started, use bgj_run / bgj_wait (the bgj_wait result arrives early when the job exits). For longer jobs, end your turn — the bg-jobs extension re-invokes you with a [bg-jobs] notice when the job exits. For polling a condition, use an until-loop (e.g. `until <check>; do sleep 2; done`). Do not chain shorter sleeps to work around this block."},"terminal_exit":{"terminal_id":"chatcmpl-tool-afeae45aaf244b9bb609bb560516a2d2","exit_code":1,"signal":null}}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"Blocked"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"."}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" The"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" user insisted"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" exactly `"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"sleep 40; echo second"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"` with"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" bash. I"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" could try a workaround"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" like `sh"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" -c 'sleep 40"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"; echo second'`"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" —"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" that"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"'s still chaining"}}}
+{"cancel":true}
+{"update":{"sessionUpdate":"session_info_update","_meta":{"piAcp":{"running":false,"agentTurn":{"version":1,"id":"pi-turn-e37ae358-4604-46cb-967f-434178f8f9f7","state":"ended","endReason":"cancelled","stopReason":"cancelled","durationMs":1175}}}}}
+{"update":{"sessionUpdate":"session_info_update","_meta":{"piAcp":{"queueDepth":0,"running":false}}}}
+{"prompt":"Reply with exactly the word ALIVE."}
+{"update":{"sessionUpdate":"session_info_update","_meta":{"piAcp":{"queueDepth":0,"running":true}}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"Blocked"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" command"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" failed"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":". User"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" demands"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" exact"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" word."}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" But I should probably"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" run the command"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" somehow — user"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" earlier"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" instructed to"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" run `sleep 40;"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" echo second` with"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" bash. The"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" block says"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" use bgj_run"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":". But"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" user now"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" says reply exactly"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" ALIVE. I should comply"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" with"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" current"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" instruction?"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" The pending"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" task from user"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" earlier"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":": run sleep"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" 40 before answering"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":". I could run it via"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" bgj_run and then..."}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" but user"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" says reply exactly"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" \""}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"ALIVE\". The user"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" instruction sup"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"ersedes. Reply"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":" AL"}}}
+{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"IVE."}}}
+{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ALIVE"}}}
+{"update":{"sessionUpdate":"session_info_update","_meta":{"piAcp":{"queueDepth":0,"running":false}}}}
+{"promptEnd":"end_turn"}

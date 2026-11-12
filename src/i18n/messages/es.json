@@ -4345,7 +4345,8 @@
           "killedBy": "Terminado ({reason})",
           "killed": "Terminado",
           "ended": "Finalizado",
-          "pending": "En segundo plano · sin salida registrada"
+          "pending": "En segundo plano · sin salida registrada",
+          "running": "En ejecución"
         }
       },
       "messageNav": {

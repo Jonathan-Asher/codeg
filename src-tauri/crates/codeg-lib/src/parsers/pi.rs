@@ -20,6 +20,7 @@ use crate::parsers::{
 };
 
 mod fold;
+pub(crate) mod live;
 
 /// Resolve the `pi` coding agent's sessions directory, honoring (highest
 /// precedence first):

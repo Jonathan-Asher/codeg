@@ -209,6 +209,7 @@ beforeEach(() => {
     lastErrorLevel: "error",
     eventSeq: 0,
     activeDelegations: [],
+    toolCards: [],
   })
   // Agent is installed + available so the connect preflight passes.
   h.acpGetAgentStatus.mockResolvedValue({
@@ -291,6 +292,7 @@ function snapshotBase() {
     awaitingBackground: false,
     nativeSteering: false,
     activeDelegations: [],
+    toolCards: [],
     lastError: null as string | null,
     lastErrorCode: null as string | null,
     lastErrorLevel: "error",
@@ -1643,6 +1645,7 @@ describe("AcpConnectionsProvider reconnect (status-icon button)", () => {
       lastError: null,
       eventSeq: 7,
       activeDelegations: [],
+      toolCards: [],
     })
     h.acpFindConnectionForConversation.mockResolvedValue(null)
     await mountProvider()
@@ -2150,6 +2153,7 @@ describe("AcpConnectionsProvider permission request details", () => {
       lastError: null,
       eventSeq: 5,
       activeDelegations: [],
+      toolCards: [],
     })
     hydrateSnapshot(handlers, {
       connection_id: "spawned-conn",
@@ -3069,6 +3073,7 @@ describe("streaming flush window widens with the run it re-renders", () => {
         lastError: null,
         eventSeq: 9,
         activeDelegations: [],
+        toolCards: [],
       })
       hydrateSnapshot(handlers, {
         event_seq: 9,
@@ -3126,6 +3131,7 @@ describe("streaming flush window widens with the run it re-renders", () => {
         lastError: null,
         eventSeq: 2,
         activeDelegations: [],
+        toolCards: [],
       })
       hydrateSnapshot(handlers, {
         event_seq: 2,
@@ -4594,6 +4600,7 @@ describe("delegation-child attach: mid-turn hydration", () => {
       lastError: null,
       eventSeq: 7,
       activeDelegations: [],
+      toolCards: [],
     })
   })
 
@@ -4668,6 +4675,7 @@ describe("delegation-child attach: mid-turn hydration", () => {
       lastError: null,
       eventSeq: 7,
       activeDelegations: active,
+      toolCards: [],
     })
     await mountProvider()
 
@@ -4823,6 +4831,7 @@ describe("routing survives every surface watching one connection", () => {
       lastError: null,
       eventSeq: 0,
       activeDelegations: [],
+      toolCards: [],
     })
   })
 
@@ -5322,6 +5331,7 @@ describe("connect() teardown races", () => {
       lastError: null,
       eventSeq: 0,
       activeDelegations: [],
+      toolCards: [],
     })
     await act(async () => {
       await h.actions!.connect(TAB, "claude_code", "/tmp/x", "sess-1", 42)
@@ -6250,6 +6260,7 @@ describe("AcpConnectionsProvider mid-turn steering messages", () => {
       awaitingBackground: false,
       nativeSteering: false,
       activeDelegations: [],
+      toolCards: [],
       lastError: null,
       eventSeq: 9,
     })

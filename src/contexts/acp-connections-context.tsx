@@ -407,6 +407,11 @@ export interface ConnectionState {
    *  because the adapter keeps revising a finished task; the strip filters to
    *  the live ones itself. */
   asyncTasks: AsyncTaskRecord[]
+  /** The newest card of each Pi sub-agent run and background job, by the call
+   *  that started it (`tool_card` events, the snapshot's `tool_cards`; see
+   *  `acp::pi_meta`). The thread's cards read theirs from here first, since a
+   *  run keeps changing after its turn. Absent until the first card. */
+  toolCards?: ReadonlyMap<string, Record<string, unknown>> | null
   /**
    * One-line localized message for this session's current turn / connection
    * error — what the connection-status popover shows. Only `session`-kind
@@ -694,6 +699,14 @@ type Action =
       type: "ASYNC_TASK"
       contextKey: string
       delta: AsyncTaskDelta
+    }
+  | {
+      // A Pi run's or job's newest card (`tool_card` event): replaces the
+      // previous one for that call.
+      type: "TOOL_CARD"
+      contextKey: string
+      toolCallId: string
+      meta: Record<string, unknown>
     }
   | {
       // Lifecycle settle for the AIR failure table (mirrors
@@ -1669,6 +1682,37 @@ export function carrySteeringBlocks(
   return { ...next, content }
 }
 
+/**
+ * A snapshot's run and job cards (`tool_cards`) merged into the connection's
+ * (see `ConnectionState.toolCards`). A fresh snapshot is the backend's newest
+ * card per call, so it replaces ours; a stale one predates cards this client
+ * already applied, so it only adds calls we have none for. The same reference
+ * when nothing changes — including a snapshot without the field, as
+ * `mergeAsyncTasks` treats one.
+ */
+export function mergeToolCards(
+  current: ReadonlyMap<string, Record<string, unknown>> | null,
+  incoming:
+    | ReadonlyArray<{
+        tool_call_id: string
+        meta: Record<string, unknown>
+      }>
+    | null
+    | undefined,
+  stale: boolean
+): ReadonlyMap<string, Record<string, unknown>> | null {
+  if (!incoming || incoming.length === 0) return current
+  let next: Map<string, Record<string, unknown>> | null = null
+  for (const card of incoming) {
+    if (!card?.tool_call_id) continue
+    if (stale && current?.has(card.tool_call_id)) continue
+    if (current?.get(card.tool_call_id) === card.meta) continue
+    next ??= new Map(current ?? [])
+    next.set(card.tool_call_id, card.meta)
+  }
+  return next ?? current
+}
+
 /** The steering ids a live message shows (see `steeredMessageIds`). */
 function steeringIdsOf(message: LiveMessage | null): string[] {
   const ids = (message?.content ?? []).flatMap((b) =>
@@ -2084,6 +2128,14 @@ function connectionsReducer(
         : isStaleSnapshot
           ? adoptUnknownAsyncTasks(current.asyncTasks, action.patch.asyncTasks)
           : mergeAsyncTasks(current.asyncTasks, action.patch.asyncTasks)
+      // The run and job cards, by the same rule: a fresh snapshot is the
+      // backend's newest card per call, a stale one may only add calls this
+      // client has not heard of.
+      const mergedToolCards = mergeToolCards(
+        current.toolCards ?? null,
+        sameSession ? action.patch.toolCards : [],
+        isStaleSnapshot
+      )
 
       if (isStaleSnapshot) {
         if (
@@ -2097,7 +2149,8 @@ function connectionsReducer(
           mergedAvailableCommands === current.availableCommands &&
           mergedPromptCapabilities === current.promptCapabilities &&
           mergedSessionFailures === current.sessionFailures &&
-          mergedAsyncTasks === current.asyncTasks
+          mergedAsyncTasks === current.asyncTasks &&
+          mergedToolCards === (current.toolCards ?? null)
         ) {
           return state
         }
@@ -2115,6 +2168,7 @@ function connectionsReducer(
           sideQuestion: mergedSideQuestion,
           sessionFailures: mergedSessionFailures,
           asyncTasks: mergedAsyncTasks,
+          toolCards: mergedToolCards,
         })
         return next
       }
@@ -2195,6 +2249,7 @@ function connectionsReducer(
         nativeSteering: action.patch.nativeSteering,
         sessionFailures: mergedSessionFailures,
         asyncTasks: mergedAsyncTasks,
+        toolCards: mergedToolCards,
         // Current state, like `status`: the session's error as the backend
         // holds it. Never a notification — that fired when it happened.
         error: action.patch.lastError,
@@ -2912,6 +2967,8 @@ function connectionsReducer(
         ...conn,
         sessionId: action.sessionId,
         asyncTasks: forked ? [] : conn.asyncTasks,
+        // The same for the cards of the runs and jobs it launched.
+        toolCards: forked ? null : conn.toolCards,
       })
       return next
     }
@@ -3281,6 +3338,16 @@ function connectionsReducer(
       if (merged === conn.asyncTasks) return state
       const next = new Map(state)
       next.set(action.contextKey, { ...conn, asyncTasks: merged })
+      return next
+    }
+
+    case "TOOL_CARD": {
+      const conn = state.get(action.contextKey)
+      if (!conn) return state
+      const cards = new Map(conn.toolCards ?? [])
+      cards.set(action.toolCallId, action.meta)
+      const next = new Map(state)
+      next.set(action.contextKey, { ...conn, toolCards: cards })
       return next
     }
 
@@ -5821,13 +5888,26 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
           break
         }
         case "async_task": {
-          // JetBrains AIR async-task delta (claude only) — Claude's background
-          // shells / workflows / monitors. Merged into the connection's task
-          // table; the live rows render in the transcript's Running panel.
+          // JetBrains AIR async-task delta — Claude's background shells /
+          // workflows / monitors, codex's background terminals, Pi's jobs and
+          // async sub-agent runs. Merged into the connection's task table; the
+          // live rows render in the transcript's Running panel.
           dispatch({
             type: "ASYNC_TASK",
             contextKey,
             delta: e.delta,
+          })
+          break
+        }
+        case "tool_card": {
+          // A Pi run's or job's newest card (`acp::pi_meta`). Not a streaming
+          // delta: it targets a call wherever it is drawn, in this turn, an
+          // earlier one or history, so it is applied whatever the status.
+          dispatch({
+            type: "TOOL_CARD",
+            contextKey,
+            toolCallId: e.tool_call_id,
+            meta: e.meta,
           })
           break
         }

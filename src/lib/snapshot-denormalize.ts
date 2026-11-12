@@ -17,6 +17,7 @@ import type {
   SessionModeStateInfo,
   SessionUsageUpdateInfo,
   ToolCallState,
+  ToolCardState,
 } from "@/lib/types"
 
 import { routeAcpError, type AcpErrorLevel } from "@/lib/acp-error-presentation"
@@ -101,6 +102,10 @@ export interface SnapshotPatch {
    *  Terminal rows included — they are the ids subsequent live deltas revise.
    *  `[]` when the server omitted the field. */
   asyncTasks: AsyncTaskRecord[]
+  /** The newest card of each Pi sub-agent run and background job
+   *  (`tool_cards`, see `acp::pi_meta`), by the call that started it. `[]`
+   *  when the server omitted the field. */
+  toolCards: ToolCardState[]
   /** Latest ACP runtime error carried by the snapshot. `null` means none.
    *  Raw backend text here; the connections provider localizes it by
    *  `lastErrorCode` before hydrating, exactly as the live `error` event is. */
@@ -194,6 +199,7 @@ export function denormalizeSnapshot(wire: LiveSessionSnapshot): SnapshotPatch {
     nativeSteering: wire.native_steering_available ?? false,
     sessionFailures: wire.session_failures ?? [],
     asyncTasks: wire.async_tasks ?? [],
+    toolCards: wire.tool_cards ?? [],
     lastError,
     lastErrorCode,
     lastErrorLevel: routeAcpError(lastErrorCode).level,

@@ -1,0 +1,5 @@
+{"prompt":"/jobs"}
+{"update":{"sessionUpdate":"session_info_update","_meta":{"piAcp":{"queueDepth":0,"running":true}}}}
+{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"(other session) [jb-mwdx4ywp-ga0c] completed (exit 0) · 4s · sleep 4; echo first-done\n(other session) [jb-mwdx4odn-5ox8] completed (exit 0) · 6s · sleep 6; echo bg-done\n(other session) [jb-mwdwzgsh-4g8l] completed (exit 0) · 4s · sleep 4; echo first-done\n(other session) [jb-mwdwzaq9-belo] killed (user) · 1s · sleep 120; echo never\n(other session) [jb-mwdwyco7-l6ae] completed (exit 0) · 8s · sleep 8; echo bg-done\n(other session) [jb-mwdro3ov-5xem] completed (exit 0) · 4s · sleep 4; echo bg-job-done\n(other session) [jb-mwdr9g90-kmwm] completed (exit 0) · 4s · sleep 4; echo bg-job-done"},"_meta":{"piAcp":{"commandReply":{"version":1,"command":"jobs","source":"notify","level":"info"}}}}}
+{"update":{"sessionUpdate":"session_info_update","_meta":{"piAcp":{"queueDepth":0,"running":false}}}}
+{"promptEnd":"end_turn"}
