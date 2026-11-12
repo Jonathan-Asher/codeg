@@ -3702,6 +3702,7 @@ const ConversationTabView = memo(function ConversationTabView({
         connStatus={connStatus}
         heldBackgroundTasks={awaitingBackground ? heldBackgroundTasks : null}
         asyncTasks={conn.asyncTasks}
+        toolCards={conn.toolCards}
         onStopAsyncTask={
           // Owners of a live connection only — same gate as the failure
           // actions: a viewer has no connection to send the stop on.

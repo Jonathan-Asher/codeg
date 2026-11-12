@@ -1,7 +1,10 @@
 /**
  * The cards codeg's Pi parser folds delegated work into
  * (`src-tauri/crates/codeg-lib/src/parsers/pi/fold.rs`), read off a tool
- * call's `_meta`:
+ * call's `_meta`. A live Pi connection sends the same cards
+ * (`parsers/pi/live.rs` reshapes pi-acp's own), on the call while its turn
+ * runs and as `tool_card` updates after (`live-tool-cards-context`), plus a few
+ * fields only a run still going has (`activity`, `running`):
  *
  * - `codeg.subagentRun` on the `Agent` call that started a pi-subagents run:
  *   its status, its result, and one row per child;
@@ -16,6 +19,9 @@
 export const SUBAGENT_RUN_META_KEY = "codeg.subagentRun"
 export const BACKGROUND_JOB_META_KEY = "codeg.backgroundJob"
 export const AGENT_WAKE_META_KEY = "codeg.agentWake"
+/** A displayed notice no card claims, live (`acp::pi_meta`): drawn as the
+ *  System note history shows for it. */
+export const SYSTEM_NOTE_META_KEY = "codeg.systemNote"
 
 export type SubagentRunStatus =
   | "completed"
@@ -48,6 +54,8 @@ export interface SubagentRunChild {
   turns: number | null
   exchanges: SubagentRunExchange[]
   attention: string[]
+  /** Live only, while the child works: its current tool. */
+  currentTool: string | null
 }
 
 /** Text the model was given that the card now shows as structure. */
@@ -79,11 +87,12 @@ export type BackgroundJobState =
   | "killed"
   | "unknown"
   | "pending"
+  | "running"
 
 export interface BackgroundJob {
   id: string | null
   /** `pending` = no exit recorded in the transcript; `unknown` = it ended
-   *  with no exit code. */
+   *  with no exit code; `running` = live, the job is still going. */
   state: BackgroundJobState
   exitCode: number | null
   killedBy: string | null
@@ -176,6 +185,7 @@ function child(value: unknown): SubagentRunChild | null {
     turns: count(row.turns),
     exchanges,
     attention,
+    currentTool: text(record(row.activity)?.currentTool),
   }
 }
 
@@ -207,6 +217,7 @@ const JOB_STATES: ReadonlySet<string> = new Set([
   "killed",
   "unknown",
   "pending",
+  "running",
 ])
 
 /** How the background job a `bgj_run` started ended, or `null`. */

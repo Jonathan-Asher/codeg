@@ -3091,6 +3091,13 @@ export interface BackgroundSettledInfo {
   result?: string | null
 }
 
+/** One entry of a live snapshot's `tool_cards`: a call and its card's
+ *  `_meta` (`SessionState::tool_cards` in `acp/session_state.rs`). */
+export interface ToolCardState {
+  tool_call_id: string
+  meta: Record<string, unknown>
+}
+
 export type AcpEvent =
   /**
    * `parent_tool_use_id` = subagent attribution (claude-agent-acp ≥0.63 with
@@ -3355,6 +3362,17 @@ export type AcpEvent =
   | {
       type: "async_task"
       delta: AsyncTaskDelta
+    }
+  /**
+   * A Pi sub-agent run's or background job's newest card (`acp::pi_meta`):
+   * `meta` is the call's whole card `_meta` in the history parser's shape
+   * (`codeg.subagentRun` / `codeg.backgroundJob`) and replaces the previous
+   * one. The call may sit in an earlier turn or in history.
+   */
+  | {
+      type: "tool_card"
+      tool_call_id: string
+      meta: Record<string, unknown>
     }
   | {
       type: "session_load_failed"
@@ -3930,6 +3948,9 @@ export interface LiveSessionSnapshot {
    *  re-create a settled task as a running one on its next correction. Absent
    *  while empty (the common case). */
   async_tasks?: AsyncTaskRecord[]
+  /** The newest card per Pi sub-agent run and background job (see the
+   *  `tool_card` event). Omitted when empty and by older servers. */
+  tool_cards?: ToolCardState[]
   /** Goal-control action vocabulary the goal card gates its buttons on: the
    *  advertised `_meta.goal.actions` for neutral-goal adapters (claude has no
    *  "pause"), else the legacy ["pause","clear"] pair. `null` while the

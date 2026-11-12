@@ -193,6 +193,8 @@ const ChildRow = memo(function ChildRow({
 
   const facts = [
     item.agent && item.agent !== item.label ? item.agent : null,
+    // Live: what a child still working is doing right now.
+    item.status === "running" ? item.currentTool : null,
     item.turns != null ? t("turns", { count: item.turns }) : null,
     item.tokens != null
       ? t("tokens", { count: compactCount(item.tokens) })

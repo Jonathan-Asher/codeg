@@ -4345,7 +4345,8 @@
           "killedBy": "已终止（{reason}）",
           "killed": "已终止",
           "ended": "已结束",
-          "pending": "后台 · 未记录结束"
+          "pending": "后台 · 未记录结束",
+          "running": "运行中"
         }
       },
       "messageNav": {

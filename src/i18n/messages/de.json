@@ -4345,7 +4345,8 @@
           "killedBy": "Beendet ({reason})",
           "killed": "Beendet",
           "ended": "Abgeschlossen",
-          "pending": "Hintergrund · kein Ende aufgezeichnet"
+          "pending": "Hintergrund · kein Ende aufgezeichnet",
+          "running": "Läuft"
         }
       },
       "messageNav": {

@@ -114,6 +114,9 @@ export interface UseConnectionReturn {
    *  (see `lib/async-tasks.ts`). Retained after they settle; the strip filters
    *  to the live ones. `[]` when the connection has none. */
   asyncTasks: AsyncTaskRecord[]
+  /** The newest card per Pi sub-agent run and background job (see
+   *  `ConnectionState.toolCards`); `null` until the first. */
+  toolCards: ReadonlyMap<string, Record<string, unknown>> | null
   error: string | null
   /** The stable code of `error` (e.g. `turn_failed_empty`), when it had one. */
   errorCode: string | null
@@ -342,6 +345,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   const claudeApiRetry = connection?.claudeApiRetry ?? null
   const sessionFailures = connection?.sessionFailures ?? EMPTY_SESSION_FAILURES
   const asyncTasks = connection?.asyncTasks ?? EMPTY_ASYNC_TASKS
+  const toolCards = connection?.toolCards ?? null
   const error = connection?.error ?? null
   const errorCode = connection?.errorCode ?? null
   const lastStopReason = connection?.lastStopReason ?? null
@@ -481,6 +485,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       claudeApiRetry,
       sessionFailures,
       asyncTasks,
+      toolCards,
       error,
       errorCode,
       lastStopReason,
@@ -536,6 +541,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       claudeApiRetry,
       sessionFailures,
       asyncTasks,
+      toolCards,
       error,
       errorCode,
       lastStopReason,

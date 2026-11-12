@@ -4345,7 +4345,8 @@
           "killedBy": "강제 종료({reason})",
           "killed": "강제 종료",
           "ended": "종료됨",
-          "pending": "백그라운드 · 종료 기록 없음"
+          "pending": "백그라운드 · 종료 기록 없음",
+          "running": "실행 중"
         }
       },
       "messageNav": {

@@ -4345,7 +4345,8 @@
           "killedBy": "強制終了（{reason}）",
           "killed": "強制終了",
           "ended": "終了",
-          "pending": "バックグラウンド · 終了の記録なし"
+          "pending": "バックグラウンド · 終了の記録なし",
+          "running": "実行中"
         }
       },
       "messageNav": {

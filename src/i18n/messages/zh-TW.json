@@ -4345,7 +4345,8 @@
           "killedBy": "已終止（{reason}）",
           "killed": "已終止",
           "ended": "已結束",
-          "pending": "背景 · 未記錄結束"
+          "pending": "背景 · 未記錄結束",
+          "running": "執行中"
         }
       },
       "messageNav": {

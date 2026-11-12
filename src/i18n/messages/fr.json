@@ -4345,7 +4345,8 @@
           "killedBy": "Interrompu ({reason})",
           "killed": "Interrompu",
           "ended": "Terminé",
-          "pending": "Arrière-plan · aucune fin enregistrée"
+          "pending": "Arrière-plan · aucune fin enregistrée",
+          "running": "En cours"
         }
       },
       "messageNav": {

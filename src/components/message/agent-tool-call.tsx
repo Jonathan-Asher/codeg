@@ -40,6 +40,7 @@ import { detectTextDirection } from "@/lib/text-direction"
 import { ModelNotesToggle } from "./model-notes-toggle"
 import { SubagentExchanges, SubagentRunChildren } from "./subagent-run-children"
 import { useTranscriptAgentType } from "./transcript-agent-context"
+import { useToolCardMeta } from "./live-tool-cards-context"
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
@@ -196,15 +197,18 @@ function parseGrokSubagentProgress(
  * Pi is the third producer of `child_session_id` (`parsers/pi/fold.rs`, for a
  * run with one child), so the parsed stats name a session of the transcript's
  * own agent: a parent's child is a session of the parent's kind. The
- * transcript says which (`useTranscriptAgentType`); without one above the
- * card, grok — the producer this was first written for — is assumed. The live
- * grok meta and the codex branch name their agent themselves.
+ * transcript says which (`useTranscriptAgentType`). A Pi run's card names its
+ * one child's session itself, live as well as in history (`piRunChildSession`):
+ * a session of Pi's, whatever is or is not above the card. Without either,
+ * grok — the producer this was first written for — is assumed. The live grok
+ * meta and the codex branch name their agent themselves.
  */
 function parseChildSessionId(
   meta: Record<string, unknown> | null | undefined,
   statsChildSessionId: string | null | undefined,
   codexSubagentId: string | null,
-  transcriptAgentType: AgentType | null
+  transcriptAgentType: AgentType | null,
+  piRunChildSession: string | null = null
 ): { sessionId: string; agentType: AgentType } | null {
   const raw = meta?.grokSubagentSession
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
@@ -212,6 +216,9 @@ function parseChildSessionId(
     if (typeof live === "string" && live.length > 0) {
       return { sessionId: live, agentType: "grok" }
     }
+  }
+  if (piRunChildSession) {
+    return { sessionId: piRunChildSession, agentType: transcriptAgentType ?? "pi" }
   }
   if (statsChildSessionId && statsChildSessionId.length > 0) {
     return {
@@ -292,8 +299,13 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
   // A Pi sub-agent run, folded by the parser from the notices its children
   // sent (`parsers/pi/fold.rs`): status, result and one row per child. Takes
   // over from the raw result text, which is a plain-text copy of the same for
-  // clients that cannot read it.
-  const subagentRun = useMemo(() => parseSubagentRun(part.meta), [part.meta])
+  // clients that cannot read it. Live, the run's newest card wins: it keeps
+  // changing after the turn that launched it (`live-tool-cards-context`).
+  const runMeta = useToolCardMeta(part.toolCallId, part.meta)
+  const subagentRun = useMemo(() => parseSubagentRun(runMeta), [runMeta])
+  // A live run still going (history never says `running`: a run whose end the
+  // transcript lacks reads `pending`).
+  const runRunning = subagentRun?.status === "running"
   const runChildren = subagentRun?.children ?? NO_RUN_CHILDREN
   const soleChild = runChildren.length === 1 ? runChildren[0] : null
 
@@ -483,7 +495,8 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
         part.meta,
         agentStats?.child_session_id,
         isCodexSubagent ? agentId : null,
-        transcriptAgentType
+        transcriptAgentType,
+        soleChild?.sessionId ?? null
       ),
     [
       part.meta,
@@ -491,6 +504,7 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
       isCodexSubagent,
       agentId,
       transcriptAgentType,
+      soleChild?.sessionId,
     ]
   )
   const viewerHost = useSessionViewerHost()
@@ -512,7 +526,8 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
           agentType: runChildAgentType,
           subagentType: child.agent,
           description: child.label,
-          live: false,
+          // A child still working keeps writing its transcript.
+          live: child.status === "running",
         })
       } else {
         setOpenRunChild(child)
@@ -574,7 +589,7 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
             // Keep re-reading the child's transcript from disk while its launch
             // call is unsettled or the background child is still out. A snapshot
             // once handed over — see the note on `AgentSessionRequest.live`.
-            live: isRunning || isLiveBackgroundLaunch,
+            live: isRunning || isLiveBackgroundLaunch || runRunning,
           })
         : setSessionOpen(true)
   }, [
@@ -584,13 +599,16 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
     description,
     isRunning,
     isLiveBackgroundLaunch,
+    runRunning,
   ])
 
   return (
     <>
       <AgentCapsule
         title={title}
-        isRunning={isRunning || isLiveBackgroundLaunch || outcomeBackground}
+        isRunning={
+          isRunning || isLiveBackgroundLaunch || outcomeBackground || runRunning
+        }
         isError={
           isError ||
           backgroundFailed ||
@@ -837,7 +855,7 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
           agentType={childSession.agentType}
           subagentType={subagentType}
           description={description}
-          live={isRunning || isLiveBackgroundLaunch}
+          live={isRunning || isLiveBackgroundLaunch || runRunning}
         />
       )}
       {openRunChild?.sessionId && viewerHost == null && (
@@ -850,6 +868,7 @@ export const AgentToolCallPart = memo(function AgentToolCallPart({
           agentType={runChildAgentType}
           subagentType={openRunChild.agent}
           description={openRunChild.label}
+          live={openRunChild.status === "running"}
         />
       )}
     </>

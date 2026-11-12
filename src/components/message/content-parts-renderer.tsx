@@ -86,6 +86,7 @@ import { BackgroundTaskCard } from "./background-task-card"
 import { BackgroundJobChip } from "./background-job-chip"
 import { ModelNotesToggle } from "./model-notes-toggle"
 import { parseBackgroundJob } from "@/lib/agent-run-meta"
+import { useToolCardMeta } from "./live-tool-cards-context"
 import { GeneratedImagesBlock } from "./generated-images-block"
 import { GoalRunPart, GoalToolCallPart } from "./goal-tool-call"
 import { HookFeedbackMarker } from "./hook-feedback-marker"
@@ -2363,10 +2364,13 @@ const ToolCallPart = memo(function ToolCallPart({
   )
   // A Pi `bgj_run` whose end the parser folded into the launch
   // (`_meta["codeg.backgroundJob"]`): the card says how the job went instead of
-  // "Background" forever, and shows the job's last output.
+  // "Background" forever, and shows the job's last output. Live, the job's
+  // newest card (`live-tool-cards-context`) wins: the job keeps running after
+  // the turn that started it.
+  const jobMeta = useToolCardMeta(part.toolCallId, part.meta)
   const backgroundJob = useMemo(
-    () => (isCommandTool ? parseBackgroundJob(part.meta) : null),
-    [isCommandTool, part.meta]
+    () => (isCommandTool ? parseBackgroundJob(jobMeta) : null),
+    [isCommandTool, jobMeta]
   )
   const title = useMemo(() => {
     // claude-agent-acp ≥0.63 supplies the human-readable description as

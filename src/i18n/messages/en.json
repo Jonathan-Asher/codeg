@@ -4345,7 +4345,8 @@
           "killedBy": "Killed ({reason})",
           "killed": "Killed",
           "ended": "Ended",
-          "pending": "Background · no exit recorded"
+          "pending": "Background · no exit recorded",
+          "running": "Running"
         }
       },
       "messageNav": {
