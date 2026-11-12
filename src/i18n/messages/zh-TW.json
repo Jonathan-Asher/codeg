@@ -1859,6 +1859,13 @@
     "description": "當某一輪因帳戶達到用量上限而停止時，在額度重置後不久自動繼續該對話 — 無需開啟視窗，重新啟動後依然有效。每次暫停最多嘗試 3 次。",
     "saveFailed": "儲存設定失敗：{message}"
   },
+  "PromptSuggestionSettings": {
+    "title": "Claude 提示建議",
+    "description": "每輪結束後，Claude Code 會預測你接下來可能傳送的提示，並在空白輸入框中以灰色文字顯示；按 Tab 即可採用。每則建議在每輪都會額外傳送一次帶有完整對話脈絡的請求。",
+    "appliesNextConnect": "變更會在每個會話下次連線時生效；已開啟的會話在此之前維持目前設定。",
+    "stats": "目前：收到 {received} 則，顯示 {shown} 則，採用 {accepted} 則。",
+    "saveFailed": "儲存設定失敗：{message}"
+  },
   "LimitContinueSession": {
     "heading": "用量上限",
     "toggle": "用量額度重置後繼續",
@@ -3636,7 +3643,10 @@
         "mentionGroupAgent": "智能體",
         "mentionGroupSession": "工作階段",
         "mentionGroupCommit": "提交",
-        "mentionGroupSkill": "技能"
+        "mentionGroupSkill": "技能",
+        "btwDescription": "提出一個旁支問題：根據目前對話作答，不使用工具，智能體繼續工作，且不會加入對話",
+        "btwHint": "問題",
+        "suggestionTabHint": "Tab"
       },
       "messageQueue": {
         "outsideWriter": "另一個行程結束且 codeg 連線後送出。",
@@ -3664,6 +3674,31 @@
         "notSentGaveUp": "仍然失敗 — 請點選重試",
         "retryItem": "立即重新傳送",
         "retry": "重試"
+      },
+      "sideQuestion": {
+        "title": "旁支問題",
+        "notInConversation": "不會加入對話",
+        "previous": "上一個旁支問題",
+        "next": "下一個旁支問題",
+        "position": "{current} / {total}",
+        "copy": "複製回答",
+        "copied": "已複製回答",
+        "copyFailed": "無法複製回答",
+        "continueInFork": "在分叉中繼續",
+        "continueInForkHint": "將此對話分叉為新對話，並把這個問題和回答放進它的輸入框，智能體在那裡可以使用工具",
+        "clearHistory": "清除旁支問題",
+        "clearConfirm": "清除此對話的所有旁支問題？",
+        "clear": "清除",
+        "cancel": "取消",
+        "clearFailed": "無法清除旁支問題：{error}",
+        "close": "關閉",
+        "closeHint": "關閉 (Esc)",
+        "empty": "還沒有旁支問題。輸入 /btw 和問題。",
+        "thinking": "思考中…",
+        "failed": "無法回答這個旁支問題。",
+        "retry": "重試",
+        "notice": "來自 Claude Code 的提示",
+        "noAnswer": "Claude Code 沒有給出回答。"
       },
       "welcomeInputPanel": {
         "agentsSettingsPath": "設定 > Agents",

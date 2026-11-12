@@ -2625,3 +2625,179 @@ describe("MessageInput folder data arriving after mount", () => {
     expect(handle.getText()).toBe("")
   })
 })
+
+// `/btw` side questions and Claude Code's predicted prompt (ghost text): the
+// composer's half of `lib/side-question` and `acp::prompt_suggestions`.
+describe("MessageInput side questions and prompt suggestions", () => {
+  afterEach(() => {
+    cleanup()
+    composerHandle.current = null
+  })
+
+  const MI = enMessages.Folder.chat.messageInput
+  const COMMANDS = [{ name: "compact", description: "Compact the thread" }]
+
+  async function mount(
+    props: Partial<React.ComponentProps<typeof MessageInput>> = {}
+  ) {
+    const onSend = vi.fn()
+    const view = renderInput({
+      onSend,
+      availableCommands: COMMANDS,
+      ...props,
+    })
+    await waitFor(
+      () => expect(composerHandle.current?.getEditor()).toBeTruthy(),
+      { timeout: 5000 }
+    )
+    const handle = composerHandle.current
+    const editor = handle?.getEditor()
+    if (!handle || !editor) throw new Error("composer editor not mounted")
+    return { handle, editor, onSend, view }
+  }
+
+  function press(editor: Editor, key: string) {
+    act(() => {
+      ;(editor.view.dom as HTMLElement).dispatchEvent(
+        new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })
+      )
+    })
+  }
+
+  it("offers /btw in the / menu on a session that answers side questions", async () => {
+    const { editor } = await mount({ onSideQuestion: vi.fn() })
+    act(() => {
+      editor.commands.insertContent("/")
+    })
+    const menu = await screen.findByTestId("slash-menu")
+    expect(within(menu).getByText("/btw")).toBeInTheDocument()
+    expect(within(menu).getByText(MI.btwDescription)).toBeInTheDocument()
+    // The agent's own commands are still there.
+    expect(within(menu).getByText("/compact")).toBeInTheDocument()
+  })
+
+  it("does not offer /btw anywhere else", async () => {
+    const { editor } = await mount()
+    act(() => {
+      editor.commands.insertContent("/")
+    })
+    const menu = await screen.findByTestId("slash-menu")
+    expect(within(menu).queryByText("/btw")).toBeNull()
+  })
+
+  it("asks /btw <question> instead of sending it, even while a turn runs", async () => {
+    const onSideQuestion = vi.fn()
+    const onEnqueue = vi.fn()
+    const { handle, editor, onSend } = await mount({
+      onSideQuestion,
+      onEnqueue,
+      isPrompting: true,
+    })
+    act(() => handle.setText("/btw what is it doing?"))
+    press(editor, "Enter")
+    expect(onSideQuestion).toHaveBeenCalledWith("what is it doing?")
+    expect(onSend).not.toHaveBeenCalled()
+    expect(onEnqueue).not.toHaveBeenCalled()
+    await waitFor(() => expect(handle.getText()).toBe(""))
+  })
+
+  it("asks a /btw picked from the menu, and a bare /btw reopens the answers", async () => {
+    const onSideQuestion = vi.fn()
+    const { handle, editor, onSend } = await mount({ onSideQuestion })
+    act(() => {
+      editor.commands.insertContent("/bt")
+    })
+    await screen.findByTestId("slash-menu")
+    press(editor, "Enter")
+    await waitFor(() => expect(handle.getText()).toBe("/btw "))
+    press(editor, "Enter")
+    expect(onSideQuestion).toHaveBeenCalledWith("")
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it("sends /btw as an ordinary message where side questions are off", async () => {
+    const { handle, editor, onSend } = await mount()
+    act(() => handle.setText("/btw hello"))
+    press(editor, "Enter")
+    expect(onSend).toHaveBeenCalledTimes(1)
+  })
+
+  it("closes the side-question panel on Esc", async () => {
+    const onCloseSideQuestion = vi.fn()
+    const { editor } = await mount({
+      onSideQuestion: vi.fn(),
+      sideQuestionOpen: true,
+      onCloseSideQuestion,
+    })
+    press(editor, "Escape")
+    expect(onCloseSideQuestion).toHaveBeenCalledTimes(1)
+  })
+
+  const SUGGESTION = { id: 3, text: "run the tests" }
+
+  it("shows the predicted prompt as ghost text in the empty composer and reports it once", async () => {
+    const onPromptSuggestionShown = vi.fn()
+    const { view } = await mount({
+      promptSuggestion: SUGGESTION,
+      isActive: true,
+      onPromptSuggestionShown,
+    })
+    const ghost = await screen.findByTestId("composer-ghost-text")
+    expect(ghost).toHaveTextContent("run the tests")
+    expect(ghost).toHaveTextContent(MI.suggestionTabHint)
+    expect(ghost).toHaveAttribute("aria-hidden", "true")
+    expect(ghost.querySelector("[dir='auto']")).not.toBeNull()
+    await waitFor(() => expect(onPromptSuggestionShown).toHaveBeenCalledWith(3))
+    // A re-render with the same prediction does not report it again.
+    view.rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <MessageInput
+          onSend={vi.fn()}
+          promptCapabilities={CAPS}
+          availableCommands={COMMANDS}
+          promptSuggestion={SUGGESTION}
+          isActive
+          onPromptSuggestionShown={onPromptSuggestionShown}
+        />
+      </NextIntlClientProvider>
+    )
+    expect(onPromptSuggestionShown).toHaveBeenCalledTimes(1)
+  })
+
+  it("takes the prediction into the composer on Tab", async () => {
+    const onPromptSuggestionAccepted = vi.fn()
+    const { handle, editor, onSend } = await mount({
+      promptSuggestion: SUGGESTION,
+      onPromptSuggestionAccepted,
+    })
+    await screen.findByTestId("composer-ghost-text")
+    press(editor, "Tab")
+    expect(onPromptSuggestionAccepted).toHaveBeenCalledWith(3)
+    await waitFor(() => expect(handle.getText()).toBe("run the tests"))
+    expect(screen.queryByTestId("composer-ghost-text")).toBeNull()
+    // Taken, not sent: the user sends it.
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it("hides the ghost text as soon as anything is typed", async () => {
+    const { editor } = await mount({ promptSuggestion: SUGGESTION })
+    await screen.findByTestId("composer-ghost-text")
+    act(() => {
+      editor.commands.insertContent("x")
+    })
+    await waitFor(() =>
+      expect(screen.queryByTestId("composer-ghost-text")).toBeNull()
+    )
+  })
+
+  it("shows no ghost text while a turn runs", async () => {
+    await mount({ promptSuggestion: SUGGESTION, isPrompting: true })
+    expect(screen.queryByTestId("composer-ghost-text")).toBeNull()
+  })
+
+  it("leaves Tab alone when there is no prediction", async () => {
+    const { handle, editor } = await mount()
+    press(editor, "Tab")
+    expect(handle.getText()).toBe("")
+  })
+})

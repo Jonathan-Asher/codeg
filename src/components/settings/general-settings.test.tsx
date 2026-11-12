@@ -56,6 +56,13 @@ vi.mock("@/lib/api", () => ({
   updateAutoResumeSettings: vi.fn(async (v: unknown) => v),
   getLimitContinueSettings: vi.fn(async () => ({ enabled: true })),
   updateLimitContinueSettings: vi.fn(async (v: unknown) => v),
+  getPromptSuggestionSettings: vi.fn(async () => ({ enabled: true })),
+  updatePromptSuggestionSettings: vi.fn(async (v: unknown) => v),
+  getPromptSuggestionStats: vi.fn(async () => ({
+    received: 0,
+    shown: 0,
+    accepted: 0,
+  })),
   getCriticalSessionSettings: vi.fn(async () => ({
     idle_secs: 60,
     repeat_secs: 300,

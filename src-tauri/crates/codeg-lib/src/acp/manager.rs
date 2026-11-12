@@ -3465,10 +3465,15 @@ impl ConnectionManager {
         question: String,
         history: Vec<crate::acp::side_question::SideQuestionExchange>,
     ) -> Result<crate::acp::side_question::SideQuestionReply, AcpError> {
-        match self
-            .wait_until_attached(conn_id, SIDE_QUESTION_ATTACH_WAIT)
-            .await
-        {
+        let phase = match self.attach_phase_of(conn_id).await {
+            None => None,
+            Some(phase) if !phase.is_attaching() => Some(phase),
+            Some(_) => {
+                self.wait_until_attached(conn_id, SIDE_QUESTION_ATTACH_WAIT)
+                    .await
+            }
+        };
+        match phase {
             None => return Err(AcpError::ConnectionNotFound(conn_id.into())),
             Some(AttachPhase::Ready) => {}
             Some(AttachPhase::Failed) => {

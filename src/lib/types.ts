@@ -3040,6 +3040,23 @@ export type AcpEvent =
       while_running?: boolean
     }
   | {
+      /** The codeg extensions the adapter offers (codeg's claude-agent-acp
+       *  build): `/btw` side questions and prompt suggestions. Emitted once at
+       *  initialize, only by an adapter that offers one. */
+      type: "codeg_extensions"
+      side_question: boolean
+      prompt_suggestions: boolean
+    }
+  | {
+      /** The prompt Claude Code expects the user to send next, predicted a
+       *  few seconds after a turn ends, or `null`: the one shown no longer
+       *  applies. */
+      type: "prompt_suggestion"
+      suggestion: PromptSuggestionInfo | null
+      /** The conversation the session served when it arrived. */
+      conversation_id?: number
+    }
+  | {
       type: "mode_changed"
       mode_id: string
     }
@@ -3680,6 +3697,13 @@ export interface LiveSessionSnapshot {
   fork_strict_point?: boolean
   /** See the `fork_supported` event's `while_running`. */
   fork_while_running?: boolean
+  /** The adapter answers `/btw` side questions (see the `codeg_extensions`
+   *  event). Absent → `false`. */
+  side_question_supported?: boolean
+  /** The adapter publishes prompt suggestions. Absent → `false`. */
+  prompt_suggestions_supported?: boolean
+  /** The latest prompt suggestion, absent while there is none. */
+  prompt_suggestion?: PromptSuggestionInfo | null
   available_commands: AvailableCommandInfo[]
   selectors_ready: boolean
   /** Whether the running session is on stale (launch-time) config after a later
@@ -4350,6 +4374,45 @@ export interface CloseRequestPayload {
 }
 
 // --- Resume after restart ---
+
+/** One prompt suggestion (Rust `prompt_suggestions::PromptSuggestion`).
+ *  `id` grows with every prediction the backend receives, so a report names
+ *  exactly the one on screen. */
+export interface PromptSuggestionInfo {
+  id: number
+  text: string
+}
+
+/** What a client reports about the prediction on its screen. */
+export type PromptSuggestionAction = "shown" | "accepted"
+
+/** "Claude prompt suggestions" (Rust `PromptSuggestionSettings`). */
+export interface PromptSuggestionSettings {
+  enabled: boolean
+}
+
+/** How the predictions have been used (Rust `PromptSuggestionStats`). */
+export interface PromptSuggestionStats {
+  received: number
+  shown: number
+  accepted: number
+}
+
+/** One `/btw` exchange (Rust `side_question::SideQuestionRecord`). `id` and
+ *  `conversationId` are null for one asked of a connection no conversation was
+ *  bound to: answered, and kept nowhere. */
+export interface SideQuestionRecord {
+  id: number | null
+  conversationId: number | null
+  question: string
+  /** Null when the agent answered with nothing at all. */
+  answer: string | null
+  /** The answer is a notice from Claude Code, not the model's own words. */
+  synthetic: boolean
+  /** Claude Code's note that a fallback model answered after a refusal. */
+  fallbackNotice: string | null
+  createdAt: string
+}
 
 /** "Resume interrupted sessions after restart" (Rust `AutoResumeSettings`). */
 export interface AutoResumeSettings {

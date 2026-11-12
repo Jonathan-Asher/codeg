@@ -169,6 +169,10 @@ import type {
   SystemProxySettings,
   AutoResumeSettings,
   AutoResumeStatus,
+  PromptSuggestionAction,
+  PromptSuggestionSettings,
+  PromptSuggestionStats,
+  SideQuestionRecord,
   LimitContinueSettings,
   ClaudePlanSettings,
   CriticalAlertsSnapshot,
@@ -633,6 +637,80 @@ export async function acpStopAsyncTask(
   taskId: string
 ): Promise<boolean> {
   return getTransport().call("acp_stop_async_task", { connectionId, taskId })
+}
+
+/**
+ * How long a side question may take on the client's side: the backend's own
+ * answer timeout (3 minutes, after which it cancels the question) plus, for a
+ * conversation nothing has open, the time to reopen its session — so the
+ * backend always answers first, with its own message.
+ */
+const SIDE_QUESTION_CALL_TIMEOUT_MS = 8 * 60_000 + 30_000
+
+/**
+ * Ask a side question (Claude Code's `/btw`): answered from the session's
+ * context with no tools, while a turn runs or between turns, and kept out of
+ * the transcript and the message queue. Runs on `connectionId` when it is the
+ * conversation's live connection, else on the conversation's own (opening its
+ * session if nothing has it open). Resolves with the stored exchange.
+ */
+export async function acpSideQuestion(params: {
+  connectionId?: string | null
+  conversationId?: number | null
+  question: string
+}): Promise<SideQuestionRecord> {
+  return getTransport().call(
+    "acp_side_question",
+    {
+      connectionId: params.connectionId ?? null,
+      conversationId: params.conversationId ?? null,
+      question: params.question,
+    },
+    { timeoutMs: SIDE_QUESTION_CALL_TIMEOUT_MS }
+  )
+}
+
+/** The conversation's side questions, oldest first. */
+export async function acpListSideQuestions(
+  conversationId: number
+): Promise<SideQuestionRecord[]> {
+  return getTransport().call("acp_list_side_questions", { conversationId })
+}
+
+/** Forget the conversation's side questions; how many there were. */
+export async function acpClearSideQuestions(
+  conversationId: number
+): Promise<number> {
+  return getTransport().call("acp_clear_side_questions", { conversationId })
+}
+
+/** The composer showed prompt suggestion `suggestionId` of the connection, or
+ *  the user accepted it with Tab. The backend counts each one once, however
+ *  many clients report it. */
+export async function acpReportPromptSuggestion(
+  connectionId: string,
+  suggestionId: number,
+  action: PromptSuggestionAction
+): Promise<void> {
+  return getTransport().call("acp_report_prompt_suggestion", {
+    connectionId,
+    suggestionId,
+    action,
+  })
+}
+
+export async function getPromptSuggestionSettings(): Promise<PromptSuggestionSettings> {
+  return getTransport().call("get_prompt_suggestion_settings")
+}
+
+export async function updatePromptSuggestionSettings(
+  settings: PromptSuggestionSettings
+): Promise<PromptSuggestionSettings> {
+  return getTransport().call("update_prompt_suggestion_settings", { settings })
+}
+
+export async function getPromptSuggestionStats(): Promise<PromptSuggestionStats> {
+  return getTransport().call("get_prompt_suggestion_stats")
 }
 
 export async function acpRespondPermission(

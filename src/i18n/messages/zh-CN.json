@@ -1859,6 +1859,13 @@
     "description": "当某一轮因账户达到用量上限而停止时，在额度重置后不久自动继续该会话 — 无需打开窗口，重启后依然有效。每次暂停最多尝试 3 次。",
     "saveFailed": "保存设置失败：{message}"
   },
+  "PromptSuggestionSettings": {
+    "title": "Claude 提示建议",
+    "description": "每轮结束后，Claude Code 会预测你接下来可能发送的提示，并在空输入框中以灰色文字显示；按 Tab 即可采用。每条建议在每轮都会额外发送一次带有完整对话上下文的请求。",
+    "appliesNextConnect": "更改会在每个会话下次连接时生效；已打开的会话在此之前保持当前设置。",
+    "stats": "目前：收到 {received} 条，显示 {shown} 条，采用 {accepted} 条。",
+    "saveFailed": "保存设置失败：{message}"
+  },
   "LimitContinueSession": {
     "heading": "用量上限",
     "toggle": "用量额度重置后继续",
@@ -3636,7 +3643,10 @@
         "mentionGroupAgent": "智能体",
         "mentionGroupSession": "会话",
         "mentionGroupCommit": "提交",
-        "mentionGroupSkill": "技能"
+        "mentionGroupSkill": "技能",
+        "btwDescription": "提一个旁支问题：根据当前对话作答，不使用工具，智能体继续工作，且不会加入对话",
+        "btwHint": "问题",
+        "suggestionTabHint": "Tab"
       },
       "messageQueue": {
         "outsideWriter": "另一个进程结束且 codeg 连接后发送。",
@@ -3664,6 +3674,31 @@
         "notSentGaveUp": "仍然失败 — 请点击重试",
         "retryItem": "立即重新发送",
         "retry": "重试"
+      },
+      "sideQuestion": {
+        "title": "旁支问题",
+        "notInConversation": "不会加入对话",
+        "previous": "上一个旁支问题",
+        "next": "下一个旁支问题",
+        "position": "{current} / {total}",
+        "copy": "复制回答",
+        "copied": "已复制回答",
+        "copyFailed": "无法复制回答",
+        "continueInFork": "在分叉中继续",
+        "continueInForkHint": "将此对话分叉为新对话，并把这个问题和回答放进它的输入框，智能体在那里可以使用工具",
+        "clearHistory": "清除旁支问题",
+        "clearConfirm": "清除此对话的所有旁支问题？",
+        "clear": "清除",
+        "cancel": "取消",
+        "clearFailed": "无法清除旁支问题：{error}",
+        "close": "关闭",
+        "closeHint": "关闭 (Esc)",
+        "empty": "还没有旁支问题。输入 /btw 和问题。",
+        "thinking": "思考中…",
+        "failed": "无法回答这个旁支问题。",
+        "retry": "重试",
+        "notice": "来自 Claude Code 的提示",
+        "noAnswer": "Claude Code 没有给出回答。"
       },
       "welcomeInputPanel": {
         "agentsSettingsPath": "设置 > Agents",

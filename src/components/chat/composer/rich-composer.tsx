@@ -204,6 +204,21 @@ export interface RichComposerProps {
    */
   onExternalMenuKeyDown?: (event: KeyboardEvent) => boolean
   /**
+   * Ghost text for the empty composer: a suggested prompt drawn in place of the
+   * placeholder (the host passes an empty `placeholder` meanwhile and `null`
+   * once anything is typed). Its own direction (`dir="auto"`), so a Hebrew
+   * suggestion reads right to left in an English UI. Decorative: the editor
+   * holds nothing until `onTabAccept` takes it in.
+   */
+  ghostText?: string | null
+  /** The key hint drawn after the ghost text ("Tab"). */
+  ghostHint?: string
+  /**
+   * A bare Tab with no menu open. Return true when the host took it (accepted
+   * the ghost text); false lets the editor do what it does with Tab.
+   */
+  onTabAccept?: () => boolean
+  /**
    * Arrow-key prompt history (the chat composer's Up/Down recall). Called for a
    * bare ArrowUp/ArrowDown BEFORE the caret moves, but ONLY when the collapsed
    * selection already sits at the document's first (`"older"`) or last
@@ -287,6 +302,9 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(
       onDropFiles,
       onPlainPaste,
       onContinueShortcut,
+      ghostText = null,
+      ghostHint,
+      onTabAccept,
     },
     ref
   ) {
@@ -314,6 +332,7 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(
     const onDropFilesRef = useRef(onDropFiles)
     const onPlainPasteRef = useRef(onPlainPaste)
     const onContinueShortcutRef = useRef(onContinueShortcut)
+    const onTabAcceptRef = useRef(onTabAccept)
     // The live editor, captured for command access inside editorProps handlers
     // (which are created before `editor` is assigned in this closure).
     const editorInstanceRef = useRef<Editor | null>(null)
@@ -336,6 +355,7 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(
       onDropFilesRef.current = onDropFiles
       onPlainPasteRef.current = onPlainPaste
       onContinueShortcutRef.current = onContinueShortcut
+      onTabAcceptRef.current = onTabAccept
     })
 
     // ── Unified `@` mention panel state bridge ──
@@ -430,6 +450,17 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(
           // list) to let the inline token keep growing.
           if (isExternalMenuOpenRef.current) {
             return onExternalMenuKeyDownRef.current?.(event) ?? false
+          }
+          // A bare Tab, no menu open: the host's ghost text, if it shows one.
+          if (
+            event.key === "Tab" &&
+            !event.shiftKey &&
+            !event.altKey &&
+            !event.ctrlKey &&
+            !event.metaKey &&
+            onTabAcceptRef.current?.() === true
+          ) {
+            return true
           }
           // Prompt history (chat composer only): a bare Up/Down at the
           // document's first/last position steps through sent prompts; anywhere
@@ -712,7 +743,10 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(
     return (
       <div
         ref={rootRef}
-        className={cn("codeg-composer flex min-h-0 flex-col", className)}
+        className={cn(
+          "codeg-composer relative flex min-h-0 flex-col",
+          className
+        )}
         style={style}
         data-disabled={disabled || undefined}
       >
@@ -741,6 +775,31 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(
             followChatTextSize && CHAT_TEXT_SCOPE_CLASS
           )}
         />
+        {ghostText && (
+          // Over the empty editor, on the same padding and type, so the text
+          // sits where typing starts. `aria-hidden`: the editor itself is
+          // empty, and the host announces nothing it has not taken in.
+          <div
+            aria-hidden="true"
+            data-testid="composer-ghost-text"
+            className={cn(
+              "pointer-events-none absolute inset-x-0 top-0 px-3 py-2 text-base md:text-sm",
+              followChatTextSize && CHAT_TEXT_SCOPE_CLASS
+            )}
+          >
+            <div
+              dir="auto"
+              className="line-clamp-3 whitespace-pre-wrap break-words leading-[1.55] text-muted-foreground/60"
+            >
+              {ghostText}
+              {ghostHint && (
+                <kbd className="ms-2 inline-flex h-[1.5em] items-center rounded border border-current/25 px-1 align-middle font-sans text-3xs leading-none font-medium opacity-80 pointer-coarse:hidden">
+                  {ghostHint}
+                </kbd>
+              )}
+            </div>
+          </div>
+        )}
         {referenceSearch && mentionState && (
           <SuggestionPopup
             // Remount per `@` session so panel state (active/pinned tab,

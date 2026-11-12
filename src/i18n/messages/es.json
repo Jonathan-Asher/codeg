@@ -1859,6 +1859,13 @@
     "description": "Cuando un turno se detiene porque tu cuenta alcanzó su límite de uso, continúa la sesión sola poco después de que el límite se restablezca, sin ninguna ventana abierta y también tras reiniciar. Como máximo 3 intentos por pausa.",
     "saveFailed": "No se pudo guardar el ajuste: {message}"
   },
+  "PromptSuggestionSettings": {
+    "title": "Sugerencias de prompt de Claude",
+    "description": "Después de cada turno, Claude Code predice el prompt que probablemente enviarás a continuación y lo muestra en gris en el cuadro de texto vacío; pulsa Tab para usarlo. Cada sugerencia cuesta, en cada turno, una solicitud adicional con todo el contexto de la conversación.",
+    "appliesNextConnect": "Un cambio se aplica a cada sesión la próxima vez que se conecta; las sesiones ya abiertas mantienen su ajuste actual hasta entonces.",
+    "stats": "Hasta ahora: {received} recibidas, {shown} mostradas, {accepted} aceptadas.",
+    "saveFailed": "No se pudo guardar el ajuste: {message}"
+  },
   "LimitContinueSession": {
     "heading": "Límite de uso",
     "toggle": "Continuar cuando se restablezca el límite de uso",
@@ -3636,7 +3643,10 @@
         "mentionGroupAgent": "Agentes",
         "mentionGroupSession": "Sesiones",
         "mentionGroupCommit": "Commits",
-        "mentionGroupSkill": "Habilidades"
+        "mentionGroupSkill": "Habilidades",
+        "btwDescription": "Hacer una pregunta aparte: se responde desde esta conversación, sin herramientas, mientras el agente sigue trabajando, y no se añade a la conversación",
+        "btwHint": "pregunta",
+        "suggestionTabHint": "Tab"
       },
       "messageQueue": {
         "outsideWriter": "Se envía cuando el otro proceso termine y codeg se conecte.",
@@ -3664,6 +3674,31 @@
         "notSentGaveUp": "Sigue fallando — pulsa Reintentar",
         "retryItem": "Enviar de nuevo ahora",
         "retry": "Reintentar"
+      },
+      "sideQuestion": {
+        "title": "Pregunta aparte",
+        "notInConversation": "No se añade a la conversación",
+        "previous": "Pregunta aparte anterior",
+        "next": "Pregunta aparte siguiente",
+        "position": "{current} / {total}",
+        "copy": "Copiar la respuesta",
+        "copied": "Respuesta copiada",
+        "copyFailed": "No se pudo copiar la respuesta",
+        "continueInFork": "Continuar en una bifurcación",
+        "continueInForkHint": "Bifurcar esta conversación en una nueva, con esta pregunta y su respuesta en el cuadro de texto, donde el agente tiene sus herramientas",
+        "clearHistory": "Borrar las preguntas aparte",
+        "clearConfirm": "¿Olvidar todas las preguntas aparte de esta conversación?",
+        "clear": "Borrar",
+        "cancel": "Cancelar",
+        "clearFailed": "No se pudieron borrar las preguntas aparte: {error}",
+        "close": "Cerrar",
+        "closeHint": "Cerrar (Esc)",
+        "empty": "Aún no hay preguntas aparte. Escribe /btw y una pregunta.",
+        "thinking": "Pensando…",
+        "failed": "No se pudo responder la pregunta aparte.",
+        "retry": "Reintentar",
+        "notice": "Aviso de Claude Code",
+        "noAnswer": "Claude Code no dio ninguna respuesta."
       },
       "welcomeInputPanel": {
         "agentsSettingsPath": "Ajustes > Agentes",

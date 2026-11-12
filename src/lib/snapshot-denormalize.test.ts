@@ -204,6 +204,26 @@ describe("denormalizeSnapshot — fork capabilities", () => {
   })
 })
 
+describe("denormalizeSnapshot — side questions and prompt suggestions", () => {
+  it("carries the codeg extensions and the latest prediction into the patch", () => {
+    const patch = denormalizeSnapshot(
+      baseSnapshot({
+        side_question_supported: true,
+        prompt_suggestions_supported: true,
+        prompt_suggestion: { id: 4, text: "run the tests" },
+      })
+    )
+    expect(patch.sideQuestion).toBe(true)
+    expect(patch.promptSuggestion).toEqual({ id: 4, text: "run the tests" })
+  })
+
+  it("defaults to neither when the fields are absent (any other adapter)", () => {
+    const patch = denormalizeSnapshot(baseSnapshot())
+    expect(patch.sideQuestion).toBe(false)
+    expect(patch.promptSuggestion).toBeNull()
+  })
+})
+
 describe("denormalizeSnapshot — tool call raw output", () => {
   function snapshotWithOutput(
     output: ToolCallState["output"]

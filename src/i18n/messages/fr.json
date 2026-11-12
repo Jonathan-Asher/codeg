@@ -1859,6 +1859,13 @@
     "description": "Quand un tour s'arrête parce que votre compte a atteint sa limite d'utilisation, la session reprend d'elle-même peu après la réinitialisation, sans fenêtre ouverte et même après un redémarrage. Au plus 3 tentatives par pause.",
     "saveFailed": "Impossible d'enregistrer le réglage : {message}"
   },
+  "PromptSuggestionSettings": {
+    "title": "Suggestions de prompt de Claude",
+    "description": "Après chaque tour, Claude Code prédit le prompt que vous enverrez probablement ensuite et l'affiche en gris dans la zone de saisie vide ; appuyez sur Tab pour le reprendre. Chaque suggestion coûte, à chaque tour, une requête supplémentaire avec tout le contexte de la conversation.",
+    "appliesNextConnect": "Un changement s'applique à chaque session lors de sa prochaine connexion ; les sessions déjà ouvertes gardent leur réglage actuel jusque-là.",
+    "stats": "Jusqu'ici : {received} reçues, {shown} affichées, {accepted} acceptées.",
+    "saveFailed": "Impossible d'enregistrer le réglage : {message}"
+  },
   "LimitContinueSession": {
     "heading": "Limite d'utilisation",
     "toggle": "Reprendre à la réinitialisation de la limite d'utilisation",
@@ -3636,7 +3643,10 @@
         "mentionGroupAgent": "Agents",
         "mentionGroupSession": "Sessions",
         "mentionGroupCommit": "Commits",
-        "mentionGroupSkill": "Compétences"
+        "mentionGroupSkill": "Compétences",
+        "btwDescription": "Poser une question annexe : réponse tirée de cette conversation, sans outils, pendant que l'agent continue de travailler, et non ajoutée à la conversation",
+        "btwHint": "question",
+        "suggestionTabHint": "Tab"
       },
       "messageQueue": {
         "outsideWriter": "Partira quand l’autre processus aura terminé et que codeg sera connecté.",
@@ -3664,6 +3674,31 @@
         "notSentGaveUp": "Échec persistant — touchez Réessayer",
         "retryItem": "Renvoyer maintenant",
         "retry": "Réessayer"
+      },
+      "sideQuestion": {
+        "title": "Question annexe",
+        "notInConversation": "Non ajoutée à la conversation",
+        "previous": "Question annexe précédente",
+        "next": "Question annexe suivante",
+        "position": "{current} / {total}",
+        "copy": "Copier la réponse",
+        "copied": "Réponse copiée",
+        "copyFailed": "Impossible de copier la réponse",
+        "continueInFork": "Continuer dans une bifurcation",
+        "continueInForkHint": "Bifurquer cette conversation vers une nouvelle, avec cette question et sa réponse dans la zone de saisie, où l'agent dispose de ses outils",
+        "clearHistory": "Effacer les questions annexes",
+        "clearConfirm": "Oublier toutes les questions annexes de cette conversation ?",
+        "clear": "Effacer",
+        "cancel": "Annuler",
+        "clearFailed": "Impossible d'effacer les questions annexes : {error}",
+        "close": "Fermer",
+        "closeHint": "Fermer (Échap)",
+        "empty": "Aucune question annexe pour l'instant. Tapez /btw suivi d'une question.",
+        "thinking": "Réflexion…",
+        "failed": "La question annexe n'a pas pu recevoir de réponse.",
+        "retry": "Réessayer",
+        "notice": "Message de Claude Code",
+        "noAnswer": "Claude Code n'a pas répondu."
       },
       "welcomeInputPanel": {
         "agentsSettingsPath": "Paramètres > Agents",

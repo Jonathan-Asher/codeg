@@ -74,6 +74,7 @@ import type {
   SessionUsageUpdateInfo,
   PromptCapabilitiesInfo,
   PromptInputBlock,
+  PromptSuggestionInfo,
   ToolCallImageWire,
   UserMessageBlock,
 } from "@/lib/types"
@@ -354,6 +355,13 @@ export interface ConnectionState {
   /** The adapter forks into a new conversation mid-turn (see
    *  `supportsForkWhileRunning`). */
   forkWhileRunning: boolean
+  /** The adapter answers `/btw` side questions (codeg's claude-agent-acp
+   *  build; backend `codeg_extensions`). Absent: no. */
+  sideQuestion?: boolean
+  /** The prompt Claude Code predicts the user sends next, shown as ghost
+   *  text in an empty composer until a prompt goes out, a clear arrives or
+   *  another prediction replaces it. Absent: none. */
+  promptSuggestion?: PromptSuggestionInfo | null
   selectorsReady: boolean
   sessionId: string | null
   modes: SessionModeStateInfo | null
@@ -874,6 +882,16 @@ type Action =
       supported: boolean
       strictPoint: boolean
       whileRunning: boolean
+    }
+  | {
+      type: "CODEG_EXTENSIONS"
+      contextKey: string
+      sideQuestion: boolean
+    }
+  | {
+      type: "PROMPT_SUGGESTION"
+      contextKey: string
+      suggestion: PromptSuggestionInfo | null
     }
   | { type: "MODE_CHANGED"; contextKey: string; modeId: string }
   | {
@@ -2008,6 +2026,10 @@ function connectionsReducer(
         action.patch.forkStrictPoint || current.forkStrictPoint
       const mergedForkWhileRunning =
         action.patch.forkWhileRunning || current.forkWhileRunning
+      // Latched like `supportsFork`: the `codeg_extensions` event fires once
+      // at initialize, so the snapshot is how a later client learns it.
+      const mergedSideQuestion =
+        action.patch.sideQuestion || (current.sideQuestion ?? false)
       const mergedModes = current.modes ?? action.patch.modes
       const mergedConfigOptions =
         current.configOptions ?? action.patch.configOptions
@@ -2069,6 +2091,7 @@ function connectionsReducer(
           mergedSupportsFork === current.supportsFork &&
           mergedForkStrictPoint === current.forkStrictPoint &&
           mergedForkWhileRunning === current.forkWhileRunning &&
+          mergedSideQuestion === (current.sideQuestion ?? false) &&
           mergedModes === current.modes &&
           mergedConfigOptions === current.configOptions &&
           mergedAvailableCommands === current.availableCommands &&
@@ -2089,6 +2112,7 @@ function connectionsReducer(
           supportsFork: mergedSupportsFork,
           forkStrictPoint: mergedForkStrictPoint,
           forkWhileRunning: mergedForkWhileRunning,
+          sideQuestion: mergedSideQuestion,
           sessionFailures: mergedSessionFailures,
           asyncTasks: mergedAsyncTasks,
         })
@@ -2150,6 +2174,10 @@ function connectionsReducer(
         supportsFork: mergedSupportsFork,
         forkStrictPoint: mergedForkStrictPoint,
         forkWhileRunning: mergedForkWhileRunning,
+        sideQuestion: mergedSideQuestion,
+        // Current state, like `status`: a client that attaches after the
+        // prediction arrived still shows it.
+        promptSuggestion: action.patch.promptSuggestion,
         // Staleness is a current-state field (like status): apply the snapshot's
         // value on the fresh path. `configStaleDismissed` is client-local and
         // preserved via `...current`.
@@ -2270,6 +2298,8 @@ function connectionsReducer(
         updated.errorCode = null
         // A new turn: how the previous one ended no longer applies.
         updated.lastStopReason = null
+        // The predicted prompt was for this one (or it was outrun by it).
+        updated.promptSuggestion = null
         // Steering adoptions belong to the turn whose stream they split.
         updated.steeredMessageIds = EMPTY_STEERED_MESSAGE_IDS
         // Starting a prompt past an active AIR failure acknowledges it —
@@ -2995,6 +3025,32 @@ function connectionsReducer(
         forkStrictPoint: strictPoint,
         forkWhileRunning: whileRunning,
       })
+      return next
+    }
+
+    case "CODEG_EXTENSIONS": {
+      const conn = state.get(action.contextKey)
+      if (!conn) return state
+      if ((conn.sideQuestion ?? false) === action.sideQuestion) return state
+      const next = new Map(state)
+      next.set(action.contextKey, {
+        ...conn,
+        sideQuestion: action.sideQuestion,
+      })
+      return next
+    }
+
+    case "PROMPT_SUGGESTION": {
+      const conn = state.get(action.contextKey)
+      if (!conn) return state
+      // A prediction that lands while a turn runs is for a prompt that has
+      // already gone out: Claude Code drops those, and so does this.
+      const suggestion = conn.status === "prompting" ? null : action.suggestion
+      if ((conn.promptSuggestion ?? null) === null && suggestion === null)
+        return state
+      if (conn.promptSuggestion?.id === suggestion?.id) return state
+      const next = new Map(state)
+      next.set(action.contextKey, { ...conn, promptSuggestion: suggestion })
       return next
     }
 
@@ -5613,6 +5669,24 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
             supported: e.supported,
             strictPoint: e.strict_point ?? false,
             whileRunning: e.while_running ?? false,
+          })
+          break
+        case "codeg_extensions":
+          // Whether `/btw` can be offered on this session (codeg's own
+          // claude-agent-acp build). Once, at initialize.
+          dispatch({
+            type: "CODEG_EXTENSIONS",
+            contextKey,
+            sideQuestion: e.side_question,
+          })
+          break
+        case "prompt_suggestion":
+          // The predicted next prompt (or its clear), shown as ghost text in
+          // the empty composer. Arrives a few seconds after a turn ends.
+          dispatch({
+            type: "PROMPT_SUGGESTION",
+            contextKey,
+            suggestion: e.suggestion ?? null,
           })
           break
         case "mode_changed":

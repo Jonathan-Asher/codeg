@@ -117,6 +117,7 @@ import { useZoomLevel } from "@/hooks/use-appearance"
 import { isDesktop } from "@/lib/platform"
 import { leftChromeReserve, rightChromeReserve } from "@/lib/window-chrome"
 import {
+  acpReportPromptSuggestion,
   acpStopAsyncTask,
   createChatConversation,
   createChatDir,
@@ -125,6 +126,8 @@ import {
   openSettingsWindow,
 } from "@/lib/api"
 import { isWindowedDetail } from "@/lib/turn-window"
+import { useSideQuestion } from "@/hooks/use-side-question"
+import type { PromptSuggestionAction } from "@/lib/types"
 import {
   hasTranscriptOverlay,
   isOutOfTurnContentEvent,
@@ -877,6 +880,39 @@ const ConversationTabView = memo(function ConversationTabView({
     newSession: dbConversationId == null,
   })
   const { status: connStatus, sessionId: connSessionId } = conn
+
+  // `/btw` side questions: only on a Claude Code session whose adapter answers
+  // them (codeg's own claude-agent-acp build). The panel's state lives with
+  // the conversation, so it survives the tab being hidden or remounted.
+  const sideQuestionSupported =
+    selectedAgent === "claude_code" && conn.sideQuestionSupported
+  const sideQuestion = useSideQuestion({
+    scope:
+      dbConversationId != null ? `conv:${dbConversationId}` : `tab:${tabId}`,
+    connectionId: conn.connectionId,
+    conversationId: dbConversationId ?? null,
+    agentType: selectedAgent,
+    supported: sideQuestionSupported,
+  })
+  // What the composer did with the predicted prompt, counted on the backend
+  // (once per prediction, whichever client reports it). Best effort.
+  const reportPromptSuggestion = useCallback(
+    (id: number, action: PromptSuggestionAction) => {
+      if (!conn.connectionId) return
+      acpReportPromptSuggestion(conn.connectionId, id, action).catch((err) =>
+        console.warn("[PromptSuggestion] report failed:", err)
+      )
+    },
+    [conn.connectionId]
+  )
+  const handlePromptSuggestionShown = useCallback(
+    (id: number) => reportPromptSuggestion(id, "shown"),
+    [reportPromptSuggestion]
+  )
+  const handlePromptSuggestionAccepted = useCallback(
+    (id: number) => reportPromptSuggestion(id, "accepted"),
+    [reportPromptSuggestion]
+  )
   // Says so only while no connection of codeg's runs the session: one that
   // does (another client connected anyway) is what the tab shows instead.
   const outsideWriterShown =
@@ -3872,6 +3908,10 @@ const ConversationTabView = memo(function ConversationTabView({
       hideInput={isWelcomeMode || Boolean(acpLoadError)}
       injectContent={composerInject}
       onInjectConsumed={handleComposerInjectConsumed}
+      sideQuestion={sideQuestionSupported ? sideQuestion : null}
+      promptSuggestion={conn.promptSuggestion}
+      onPromptSuggestionShown={handlePromptSuggestionShown}
+      onPromptSuggestionAccepted={handlePromptSuggestionAccepted}
       composerBanner={
         acpLoadErrorBanner ??
         outsideWriterBanner ??

@@ -1859,6 +1859,13 @@
     "description": "계정이 사용량 한도에 도달해 턴이 멈추면, 한도가 초기화되고 잠시 후 세션을 자동으로 계속합니다. 창이 열려 있지 않아도, 재시작 후에도 동작합니다. 일시 중지마다 최대 3번 시도합니다.",
     "saveFailed": "설정을 저장하지 못했습니다: {message}"
   },
+  "PromptSuggestionSettings": {
+    "title": "Claude 프롬프트 제안",
+    "description": "각 턴이 끝나면 Claude Code가 다음에 보낼 만한 프롬프트를 예측해 빈 입력란에 회색 글자로 보여 줍니다. Tab 키로 가져올 수 있습니다. 제안 하나당 매 턴 대화 전체 컨텍스트를 담은 요청이 한 번 더 듭니다.",
+    "appliesNextConnect": "변경 사항은 각 세션이 다음에 연결될 때 적용됩니다. 이미 열린 세션은 그때까지 현재 설정을 유지합니다.",
+    "stats": "지금까지: 받음 {received}개, 표시 {shown}개, 수락 {accepted}개.",
+    "saveFailed": "설정을 저장하지 못했습니다: {message}"
+  },
   "LimitContinueSession": {
     "heading": "사용량 한도",
     "toggle": "사용량 한도가 초기화되면 계속",
@@ -3636,7 +3643,10 @@
         "mentionGroupAgent": "에이전트",
         "mentionGroupSession": "세션",
         "mentionGroupCommit": "커밋",
-        "mentionGroupSkill": "스킬"
+        "mentionGroupSkill": "스킬",
+        "btwDescription": "곁가지 질문하기: 에이전트가 작업을 계속하는 동안 이 대화의 내용으로 도구 없이 답하며, 대화에는 추가되지 않습니다",
+        "btwHint": "질문",
+        "suggestionTabHint": "Tab"
       },
       "messageQueue": {
         "outsideWriter": "다른 프로세스가 끝나고 codeg가 연결되면 전송됩니다.",
@@ -3664,6 +3674,31 @@
         "notSentGaveUp": "계속 실패함 — 다시 시도를 누르세요",
         "retryItem": "지금 다시 보내기",
         "retry": "다시 시도"
+      },
+      "sideQuestion": {
+        "title": "곁가지 질문",
+        "notInConversation": "대화에 추가되지 않음",
+        "previous": "이전 곁가지 질문",
+        "next": "다음 곁가지 질문",
+        "position": "{current} / {total}",
+        "copy": "답변 복사",
+        "copied": "답변을 복사했습니다",
+        "copyFailed": "답변을 복사하지 못했습니다",
+        "continueInFork": "분기에서 계속",
+        "continueInForkHint": "이 대화를 새 대화로 분기하고 이 질문과 답변을 입력란에 넣습니다. 그곳에서는 에이전트가 도구를 쓸 수 있습니다",
+        "clearHistory": "곁가지 질문 지우기",
+        "clearConfirm": "이 대화의 곁가지 질문을 모두 지울까요?",
+        "clear": "지우기",
+        "cancel": "취소",
+        "clearFailed": "곁가지 질문을 지우지 못했습니다: {error}",
+        "close": "닫기",
+        "closeHint": "닫기 (Esc)",
+        "empty": "아직 곁가지 질문이 없습니다. /btw 다음에 질문을 입력하세요.",
+        "thinking": "생각하는 중…",
+        "failed": "곁가지 질문에 답하지 못했습니다.",
+        "retry": "다시 시도",
+        "notice": "Claude Code 알림",
+        "noAnswer": "Claude Code가 답하지 않았습니다."
       },
       "welcomeInputPanel": {
         "agentsSettingsPath": "설정 > 에이전트",

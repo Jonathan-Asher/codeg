@@ -1859,6 +1859,13 @@
     "description": "When a turn stops because your account hit its usage limit, continue the session by itself shortly after the limit resets — with no window open, and across restarts. At most 3 tries per pause.",
     "saveFailed": "Failed to save the setting: {message}"
   },
+  "PromptSuggestionSettings": {
+    "title": "Claude prompt suggestions",
+    "description": "After each turn, Claude Code predicts the prompt you are likely to send next and shows it as grey text in the empty composer; press Tab to take it. Each suggestion costs one extra request with the conversation's full context, every turn.",
+    "appliesNextConnect": "A change applies to each session the next time it connects; sessions already open keep their current setting until then.",
+    "stats": "So far: {received} received, {shown} shown, {accepted} accepted.",
+    "saveFailed": "Failed to save the setting: {message}"
+  },
   "LimitContinueSession": {
     "heading": "Usage limit",
     "toggle": "Continue when the usage limit resets",
@@ -3636,7 +3643,10 @@
         "mentionGroupAgent": "Agents",
         "mentionGroupSession": "Sessions",
         "mentionGroupCommit": "Commits",
-        "mentionGroupSkill": "Skills"
+        "mentionGroupSkill": "Skills",
+        "btwDescription": "Ask a side question: answered from this conversation without tools while the agent keeps working, and not added to the conversation",
+        "btwHint": "question",
+        "suggestionTabHint": "Tab"
       },
       "messageQueue": {
         "outsideWriter": "Sends once the other process finishes and codeg connects.",
@@ -3664,6 +3674,31 @@
         "notSentGaveUp": "Still failing — tap Retry",
         "retryItem": "Send again now",
         "retry": "Retry"
+      },
+      "sideQuestion": {
+        "title": "Side question",
+        "notInConversation": "Not added to the conversation",
+        "previous": "Earlier side question",
+        "next": "Later side question",
+        "position": "{current} / {total}",
+        "copy": "Copy answer",
+        "copied": "Answer copied",
+        "copyFailed": "Could not copy the answer",
+        "continueInFork": "Continue in a fork",
+        "continueInForkHint": "Fork this conversation into a new one with this question and answer in its composer, where the agent has its tools",
+        "clearHistory": "Clear side questions",
+        "clearConfirm": "Forget every side question of this conversation?",
+        "clear": "Clear",
+        "cancel": "Cancel",
+        "clearFailed": "Could not clear the side questions: {error}",
+        "close": "Close",
+        "closeHint": "Close (Esc)",
+        "empty": "No side questions yet. Type /btw and a question.",
+        "thinking": "Thinking…",
+        "failed": "The side question could not be answered.",
+        "retry": "Retry",
+        "notice": "Notice from Claude Code",
+        "noAnswer": "Claude Code gave no answer."
       },
       "welcomeInputPanel": {
         "agentsSettingsPath": "Settings > Agents",
