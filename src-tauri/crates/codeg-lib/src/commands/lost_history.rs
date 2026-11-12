@@ -612,7 +612,7 @@ mod tests {
                 .join(EXPORT_DIR)
                 .join(format!("conversation-{id}.md"))
         );
-        let written = std::fs::read_to_string(&path).unwrap();
+        let written = std::fs::read_to_string(path).unwrap();
         assert!(written.contains("## User\n\nCompare the prices\n"));
         assert!(written.contains(long.trim()));
         assert_eq!(export.chars, written.chars().count());
