@@ -516,6 +516,9 @@ struct NewConversationForkSource {
         crate::acp::session_state::PendingUserMessage,
         Option<chrono::DateTime<chrono::Utc>>,
     )>,
+    /// When the running turn began, for a run Pi started by itself, which has
+    /// no prompt (`SessionState::pi_agent_turn_started_at`).
+    pi_agent_turn_started_at: Option<chrono::DateTime<chrono::Utc>>,
     /// The connection's prompt lock, held for the whole fork by an adapter
     /// that cannot fork while a turn runs.
     turn_gate: Option<tokio::sync::OwnedMutexGuard<()>>,
@@ -4557,6 +4560,7 @@ impl ConnectionManager {
                     live_session_id: Some(session_id),
                     running: false,
                     pending: None,
+                    pi_agent_turn_started_at: None,
                     turn_gate: None,
                 }
             }
@@ -4637,10 +4641,11 @@ impl ConnectionManager {
             return Err(AcpError::ForkNeedsIdle);
         };
 
-        // Whether a turn runs, and the prompt that started it — read BEFORE
-        // the transcript: a turn starting in between only adds a prompt the
-        // parse may show, it can never move a finished reply past one.
-        let (linked, running, pending, working_dir, live_session_id) = {
+        // Whether a turn runs, and what started it (a prompt, or Pi waking by
+        // itself) — read BEFORE the transcript: a turn starting in between
+        // only adds a prompt the parse may show, it can never move a finished
+        // reply past one.
+        let (linked, running, pending, pi_agent_turn_started_at, working_dir, live_session_id) = {
             let s = state_arc.read().await;
             (
                 s.conversation_id,
@@ -4648,6 +4653,7 @@ impl ConnectionManager {
                 s.pending_user_message
                     .clone()
                     .map(|pending| (pending, s.pending_user_message_started_at)),
+                s.pi_agent_turn_started_at,
                 s.working_dir.clone(),
                 s.external_id.clone(),
             )
@@ -4665,6 +4671,7 @@ impl ConnectionManager {
             live_session_id,
             running,
             pending,
+            pi_agent_turn_started_at,
             turn_gate,
         })
     }
@@ -4698,6 +4705,7 @@ impl ConnectionManager {
             live_session_id,
             running,
             pending,
+            pi_agent_turn_started_at,
             turn_gate,
         } = source;
 
@@ -4712,15 +4720,21 @@ impl ConnectionManager {
                 (Err(e), None)
             }
         };
-        // The running turn's prompt in that parse, matched the way the detail
-        // endpoint matches it for a viewer; unmatched falls back to the last
-        // user turn (see `settle_mid_run_fork_point`).
-        let in_flight_prompt = match (&mut turns, pending) {
-            (Ok(turns), Some((pending, started_at))) if running => {
+        // Where the running turn starts in that parse, named the way the
+        // detail endpoint names it for a viewer (`in_flight_user_turn_id`):
+        // the prompt of a turn codeg sent, matched to the parse (unmatched
+        // falls back to the last user turn, see `settle_mid_run_fork_point`),
+        // or, for a run Pi started by itself, which has no prompt, its
+        // "woken by" divider, or a marker while none of the run is written.
+        let in_flight_turn = match (&mut turns, pending, pi_agent_turn_started_at) {
+            (Ok(turns), Some((pending, started_at)), _) if running => {
                 crate::commands::conversations::apply_in_flight_message_id(
                     turns, &pending, started_at,
                 )
             }
+            (Ok(turns), None, Some(since)) if running => Some(
+                crate::commands::conversations::pi_agent_turn_anchor(turns, since),
+            ),
             _ => None,
         };
         let turns = turns.as_deref().map_err(String::as_str);
@@ -4730,13 +4744,13 @@ impl ConnectionManager {
                 turn_id,
                 adapter,
                 running,
-                in_flight_prompt.as_deref(),
+                in_flight_turn.as_deref(),
             )?),
             None => crate::acp::fork::settle_latest_reply_fork_point(
                 turns,
                 adapter,
                 running,
-                in_flight_prompt.as_deref(),
+                in_flight_turn.as_deref(),
             )?,
         };
 
@@ -14076,6 +14090,170 @@ mod tests {
         assert_eq!(info.title.as_deref(), Some("[Fork] Topic"));
         let after = conversation::Entity::find_by_id(pre.id).one(&db.conn).await.unwrap();
         assert_eq!(after, Some(pre));
+    }
+
+    // --- Fork while Pi runs a turn it started by itself -----------------------
+    //
+    // A sub-agent finishing or a job exiting wakes Pi with no prompt
+    // (`acp::pi_meta`). The connection shows that run as its turn, so a fork
+    // now is a mid-run fork, and the run starts where the detail endpoint
+    // says it does (`pi_agent_turn_anchor`), not at the user's last message.
+
+    /// The captured async sub-agent session (`tests/fixtures/pi_live`): Pi
+    /// replied "LAUNCHED" (entry `e8e63c45`), then the sub-agent's completion
+    /// woke it into a run whose reply is `caad67a7`.
+    const PI_WOKEN_SESSION: &str = "01a1d126-9ac9-7728-9fa5-401873fae038";
+    /// pi-acp's `startedAt` for that run (`async_run.jsonl`).
+    const PI_WOKEN_STARTED_AT_MS: i64 = 1_794_510_341_024;
+
+    /// A Pi conversation whose connection is running the run Pi started by
+    /// itself, on a pi-acp that forks while a turn runs.
+    async fn seed_woken_pi_run(
+        db: &AppDatabase,
+        mgr: &ConnectionManager,
+        conn_id: &str,
+    ) -> (
+        conversation::Model,
+        tokio::sync::mpsc::Receiver<crate::acp::connection::ConnectionCommand>,
+    ) {
+        let (pre, cmd_rx) = seed_running_conversation(db, mgr, conn_id, AgentType::Pi).await;
+        let state = mgr.get_state(conn_id).await.unwrap();
+        let mut s = state.write().await;
+        s.fork_strict_point = true;
+        s.fork_while_running = true;
+        s.pi_agent_turn_started_at =
+            chrono::DateTime::from_timestamp_millis(PI_WOKEN_STARTED_AT_MS);
+        assert!(s.pending_user_message.is_none(), "no prompt started it");
+        drop(s);
+        (pre, cmd_rx)
+    }
+
+    #[tokio::test]
+    async fn fork_during_a_run_pi_started_by_itself_lands_before_its_wake() {
+        use crate::db::test_helpers;
+        use crate::models::message::TurnRole;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let mgr = ConnectionManager::new();
+        let conn_id = "c-pi-woken";
+        let (pre, mut cmd_rx) = seed_woken_pi_run(&db, &mgr, conn_id).await;
+        // The run has written its reply and not ended.
+        let turns = crate::acp::connection::pi_live_tests::history(PI_WOKEN_SESSION).turns;
+        let wake = turns
+            .iter()
+            .position(|t| matches!(t.role, TurnRole::System))
+            .expect("the run's divider");
+        let named = |entry: &str| {
+            turns
+                .iter()
+                .find(|t| t.agent_message_id.as_deref() == Some(entry))
+                .map(|t| t.id.clone())
+                .unwrap()
+        };
+        let (before_wake, woken_reply) = (named("e8e63c45"), named("caad67a7"));
+        assert_eq!(turns[wake - 1].id, before_wake);
+
+        // "Fork from here" on the reply before the wake: what the phone's
+        // Fork Session picks too.
+        let (read, fork, seen) = mid_run_io(turns.clone(), Ok("session-S2"));
+        mgr.fork_to_new_conversation_with(&db, conn_id, None, &before_wake, read, fork)
+            .await
+            .expect("the reply before the wake finished");
+        let job = seen.lock().unwrap().take().expect("forked");
+        assert_eq!(job.agent_type, AgentType::Pi);
+        let point = job.fork_point.expect("a named reply");
+        assert_eq!(point.message_id, "e8e63c45");
+
+        // The run's own reply is still being written.
+        let (read, fork, seen) = mid_run_io(turns.clone(), Ok("session-S3"));
+        let err = mgr
+            .fork_to_new_conversation_with(&db, conn_id, None, &woken_reply, read, fork)
+            .await
+            .expect_err("the woken run's reply is not a fork point");
+        assert!(
+            matches!(err, AcpError::ForkPointUnresolved(_)),
+            "got {err:?}"
+        );
+        assert!(
+            seen.lock().unwrap().is_none(),
+            "no agent process was asked to fork"
+        );
+
+        // "Fork" on the whole conversation lands on the same reply.
+        let (read, fork, seen) = mid_run_io(turns, Ok("session-S4"));
+        mgr.fork_conversation_to_new_conversation_with(
+            &db,
+            pre.id,
+            "w".into(),
+            EventEmitter::Noop,
+            read,
+            fork,
+        )
+        .await
+        .expect("Fork forks while Pi runs");
+        let job = seen.lock().unwrap().take().expect("forked");
+        let point = job.fork_point.expect("a named reply");
+        assert_eq!(point.message_id, "e8e63c45");
+
+        // The run goes on, untouched.
+        assert!(
+            cmd_rx.try_recv().is_err(),
+            "nothing is sent to the running turn"
+        );
+        let state = mgr.get_state(conn_id).await.unwrap();
+        let s = state.read().await;
+        assert!(s.turn_in_flight);
+        assert!(s.pi_agent_turn_started_at.is_some());
+        let after = conversation::Entity::find_by_id(pre.id)
+            .one(&db.conn)
+            .await
+            .unwrap();
+        assert_eq!(
+            after,
+            Some(pre),
+            "the running conversation's row is not touched"
+        );
+    }
+
+    #[tokio::test]
+    async fn fork_before_a_woken_pi_run_wrote_anything_takes_the_last_reply() {
+        // No divider yet: none of the run is in the transcript, so every
+        // reply there finished before it.
+        use crate::db::test_helpers;
+        let db = test_helpers::fresh_in_memory_db().await;
+        let mgr = ConnectionManager::new();
+        let conn_id = "c-pi-woken-early";
+        let (pre, _cmd_rx) = seed_woken_pi_run(&db, &mgr, conn_id).await;
+        let turns =
+            crate::acp::connection::pi_live_tests::history_before(PI_WOKEN_SESSION, "caad67a7")
+                .turns;
+        let last_reply = turns
+            .iter()
+            .rfind(|t| t.agent_message_id.is_some())
+            .map(|t| t.id.clone())
+            .unwrap();
+
+        let (read, fork, seen) = mid_run_io(turns.clone(), Ok("session-S2"));
+        mgr.fork_conversation_to_new_conversation_with(
+            &db,
+            pre.id,
+            "w".into(),
+            EventEmitter::Noop,
+            read,
+            fork,
+        )
+        .await
+        .expect("Fork forks while Pi runs");
+        let job = seen.lock().unwrap().take().expect("forked");
+        let point = job.fork_point.expect("a named reply");
+        assert_eq!(point.message_id, "e8e63c45");
+
+        let (read, fork, seen) = mid_run_io(turns, Ok("session-S3"));
+        mgr.fork_to_new_conversation_with(&db, conn_id, None, &last_reply, read, fork)
+            .await
+            .expect("the last reply finished before the run");
+        let job = seen.lock().unwrap().take().expect("forked");
+        let point = job.fork_point.expect("a named reply");
+        assert_eq!(point.message_id, "e8e63c45");
     }
 
     // --- wait_for_session_options polling ----------------------------------

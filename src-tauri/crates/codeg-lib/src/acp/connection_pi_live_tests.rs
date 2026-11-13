@@ -215,14 +215,39 @@ fn find_launch(events: &[AcpEvent], title: &str) -> Option<(String, Option<Strin
 }
 
 /// The history parser's reading of a fixture session, copied to a fresh dir.
-fn history(session_id: &str) -> ConversationDetail {
+pub(crate) fn history(session_id: &str) -> ConversationDetail {
+    history_with(session_id, None)
+}
+
+/// [`history`] as it read before Pi wrote the session's entry `entry_id`:
+/// that line and every one after it are left out.
+pub(crate) fn history_before(session_id: &str, entry_id: &str) -> ConversationDetail {
+    history_with(session_id, Some(entry_id))
+}
+
+fn history_with(session_id: &str, cut_at: Option<&str>) -> ConversationDetail {
     let dir = tempfile::tempdir().expect("tempdir");
     let src = fixture_dir().join("sessions");
+    let session_file = format!("_{session_id}.jsonl");
     for entry in walkdir::WalkDir::new(&src) {
         let entry = entry.expect("walk");
         let to = dir.path().join(entry.path().strip_prefix(&src).unwrap());
+        let is_session = entry.file_name().to_string_lossy().ends_with(&session_file);
         if entry.file_type().is_dir() {
             std::fs::create_dir_all(&to).unwrap();
+        } else if let Some(cut) = cut_at.filter(|_| is_session) {
+            let text = std::fs::read_to_string(entry.path()).unwrap();
+            let names_cut = |line: &str| {
+                serde_json::from_str::<Value>(line)
+                    .ok()
+                    .is_some_and(|v| v.get("id").and_then(Value::as_str) == Some(cut))
+            };
+            let kept: Vec<&str> = text.lines().take_while(|line| !names_cut(line)).collect();
+            assert!(
+                kept.len() < text.lines().count(),
+                "{cut} is in {session_id}"
+            );
+            std::fs::write(&to, kept.join("\n") + "\n").unwrap();
         } else {
             std::fs::copy(entry.path(), &to).unwrap();
         }
@@ -709,4 +734,160 @@ fn the_detail_names_a_woken_runs_divider_as_its_in_flight_turn() {
         pi_agent_turn_anchor(&detail.turns, since),
         detail.turns[at].id
     );
+}
+
+/// The captured runs Pi started by itself: the live capture, the session it
+/// wrote, the reply that finished before Pi woke and the woken run's reply
+/// (both by session entry id, the name the fork goes by).
+const WOKEN_RUNS: [(&str, &str, &str, &str); 3] = [
+    (
+        "async_run.jsonl",
+        "01a1d126-9ac9-7728-9fa5-401873fae038",
+        "e8e63c45",
+        "caad67a7",
+    ),
+    (
+        "job.jsonl",
+        "01a1d126-d580-70f4-bfff-dcf3ac55f192",
+        "ceaf2f65",
+        "c7018b22",
+    ),
+    (
+        "workflow_air.jsonl",
+        "01a1d12b-1b05-769f-b592-48fbdf920a53",
+        "c4e77d49",
+        "bbbf4d8f",
+    ),
+];
+
+/// When the run Pi started by itself in a live capture began, as the
+/// connection keeps it once the run shows as a turn.
+async fn woken_run_started_at(fixture_name: &str) -> chrono::DateTime<chrono::Utc> {
+    let mut h = Harness::new();
+    for record in fixture(fixture_name) {
+        h.feed(&record).await;
+        if let Some(at) = h.state.read().await.pi_agent_turn_started_at {
+            return at;
+        }
+    }
+    panic!("{fixture_name}: Pi never started a run by itself");
+}
+
+/// pi-acp from 0.0.34-steering.3, which forks while a turn runs.
+fn pi_forking_mid_run() -> crate::acp::fork::ForkAdapter {
+    crate::acp::fork::ForkAdapter {
+        agent_type: AgentType::Pi,
+        caps: crate::acp::fork::ForkCapabilities {
+            strict_point: true,
+            while_running: true,
+        },
+    }
+}
+
+fn turn_of_entry<'a>(
+    turns: &'a [crate::models::MessageTurn],
+    entry_id: &str,
+) -> &'a crate::models::MessageTurn {
+    turns
+        .iter()
+        .find(|t| t.agent_message_id.as_deref() == Some(entry_id))
+        .unwrap_or_else(|| panic!("no reply named {entry_id}"))
+}
+
+/// A woken run has no prompt: it starts at the "woken by" divider, so the
+/// reply that finished before Pi woke is the session's latest finished reply
+/// and a fork point, and the run's own reply is still being written.
+#[tokio::test]
+async fn a_fork_during_a_woken_run_takes_the_reply_that_finished_before_the_wake() {
+    use crate::acp::fork::{settle_latest_reply_fork_point, settle_mid_run_fork_point};
+    use crate::commands::conversations::pi_agent_turn_anchor;
+    for (fixture_name, session, before_wake, woken_reply) in WOKEN_RUNS {
+        let since = woken_run_started_at(fixture_name).await;
+        // The run has written its reply and has not ended.
+        let turns = history(session).turns;
+        let anchor = pi_agent_turn_anchor(&turns, since);
+        let wake = turns
+            .iter()
+            .position(|t| t.id == anchor)
+            .unwrap_or_else(|| panic!("{fixture_name}: the run's divider is its start"));
+        assert!(
+            matches!(turns[wake].role, TurnRole::System),
+            "{fixture_name}"
+        );
+
+        let latest = settle_latest_reply_fork_point(
+            Ok(turns.as_slice()),
+            pi_forking_mid_run(),
+            true,
+            Some(&anchor),
+        )
+        .unwrap_or_else(|e| panic!("{fixture_name}: {e}"))
+        .expect("a named reply");
+        assert_eq!(latest.message_id, before_wake, "{fixture_name}");
+
+        let settle = |turn_id: &str, in_flight: Option<&str>| {
+            settle_mid_run_fork_point(
+                Ok(turns.as_slice()),
+                turn_id,
+                pi_forking_mid_run(),
+                true,
+                in_flight,
+            )
+        };
+        let finished = turn_of_entry(&turns, before_wake);
+        let point = settle(&finished.id, Some(&anchor))
+            .unwrap_or_else(|e| panic!("{fixture_name}: the reply before the wake: {e}"));
+        assert_eq!(point.message_id, before_wake, "{fixture_name}");
+        let running = turn_of_entry(&turns, woken_reply);
+        assert!(wake < turns.iter().position(|t| t.id == running.id).unwrap());
+        let err = settle(&running.id, Some(&anchor))
+            .expect_err("the woken run's reply is not a fork point");
+        assert!(
+            matches!(&err, AcpError::ForkPointUnresolved(m) if m.contains("still being written")),
+            "{fixture_name}: {err:?}"
+        );
+        // With the user's last message standing in for the start, the
+        // finished reply was refused as still being written.
+        assert!(settle(&finished.id, None).is_err(), "{fixture_name}");
+    }
+}
+
+/// Before Pi has written the woken run's first reply there is no divider: the
+/// run's id is a marker no turn carries, and every reply in the transcript
+/// finished before it.
+#[tokio::test]
+async fn a_fork_before_a_woken_run_wrote_anything_takes_the_last_reply() {
+    use crate::acp::fork::{settle_latest_reply_fork_point, settle_mid_run_fork_point};
+    use crate::commands::conversations::{pi_agent_turn_anchor, pi_agent_turn_marker_since};
+    for (fixture_name, session, before_wake, woken_reply) in WOKEN_RUNS {
+        let since = woken_run_started_at(fixture_name).await;
+        let turns = history_before(session, woken_reply).turns;
+        let anchor = pi_agent_turn_anchor(&turns, since);
+        assert_eq!(
+            pi_agent_turn_marker_since(&anchor),
+            Some(since),
+            "{fixture_name}: {anchor}"
+        );
+        assert!(!turns.iter().any(|t| t.id == anchor), "{fixture_name}");
+
+        let latest = settle_latest_reply_fork_point(
+            Ok(turns.as_slice()),
+            pi_forking_mid_run(),
+            true,
+            Some(&anchor),
+        )
+        .unwrap_or_else(|e| panic!("{fixture_name}: {e}"))
+        .expect("a named reply");
+        assert_eq!(latest.message_id, before_wake, "{fixture_name}");
+        let finished = turn_of_entry(&turns, before_wake);
+        let point = settle_mid_run_fork_point(
+            Ok(turns.as_slice()),
+            &finished.id,
+            pi_forking_mid_run(),
+            true,
+            Some(&anchor),
+        )
+        .unwrap_or_else(|e| panic!("{fixture_name}: {e}"));
+        assert_eq!(point.message_id, before_wake, "{fixture_name}");
+    }
 }

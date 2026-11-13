@@ -2345,12 +2345,19 @@ const SLOW_DETAIL: std::time::Duration = std::time::Duration::from_secs(1);
 /// absorbs the two processes reading the same clock a moment apart.
 const PI_RUN_SLACK: chrono::Duration = chrono::Duration::milliseconds(250);
 
+/// How [`pi_agent_turn_anchor`]'s marker starts; the run's start in Unix
+/// milliseconds follows.
+const PI_AGENT_TURN_MARKER_PREFIX: &str = "pi-agent-turn-";
+
 /// The in-flight id of a run Pi started by itself, which began at `since`
 /// (Pi's clock, the transcript's): the System turn the history draws as its
 /// "woken by" divider once Pi has written the run's first reply, else a
 /// marker no turn carries. Either way the response says a turn is running,
 /// which is what keeps the client's live copy through the fetch; only the
-/// divider lets it hide the persisted half the live copy re-shows.
+/// divider lets it hide the persisted half the live copy re-shows. A fork
+/// taken during the run starts the running turn at the same place
+/// (`acp::fork::settle_mid_run_fork_point`), reading the marker back with
+/// [`pi_agent_turn_marker_since`].
 ///
 /// The divider is the newest one after the user's last message, with only
 /// this run's replies after it: a reply older than the run belongs to an
@@ -2369,12 +2376,21 @@ pub(crate) fn pi_agent_turn_anchor(
             _ => {}
         }
     }
-    format!("pi-agent-turn-{}", since.timestamp_millis())
+    format!("{PI_AGENT_TURN_MARKER_PREFIX}{}", since.timestamp_millis())
+}
+
+/// When the run named by a [`pi_agent_turn_anchor`] marker began, to the
+/// millisecond; `None` for any other id.
+pub(crate) fn pi_agent_turn_marker_since(id: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    id.strip_prefix(PI_AGENT_TURN_MARKER_PREFIX)?
+        .parse::<i64>()
+        .ok()
+        .and_then(chrono::DateTime::from_timestamp_millis)
 }
 
 /// Whether a System turn is the history's "woken by" marker
 /// (`parsers/pi/fold.rs`, `codeg.agentWake`).
-fn is_pi_wake_turn(turn: &MessageTurn) -> bool {
+pub(crate) fn is_pi_wake_turn(turn: &MessageTurn) -> bool {
     turn.blocks.iter().any(|block| {
         matches!(block, ContentBlock::ToolUse { meta: Some(meta), .. }
             if meta.get("codeg.agentWake").is_some())
