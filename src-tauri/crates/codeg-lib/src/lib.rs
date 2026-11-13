@@ -819,9 +819,7 @@ mod tauri_app {
                     tracing::warn!("[startup] {err}; starting without the data dir owner lock");
                 }
 
-                // Without a window macOS would nap the app: timers coalesced,
-                // network deprioritised — the web service, the agents and the
-                // reminders all slowed. Held off before anything starts.
+                // Windowless or not, as `run()` decided it (`crate::windowless`).
                 let windowless = crate::windowless::active();
                 match windowless.source {
                     Some(source) if !crate::windowless::supported() => tracing::warn!(
@@ -836,6 +834,9 @@ mod tauri_app {
                     ),
                     None => {}
                 }
+                // Without a window macOS would nap the app: timers coalesced,
+                // network deprioritised — the web service, the agents and the
+                // reminders all slowed. Held off before anything starts.
                 #[cfg(target_os = "macos")]
                 if windowless.windowless {
                     crate::windowless::hold_app_nap_off();
