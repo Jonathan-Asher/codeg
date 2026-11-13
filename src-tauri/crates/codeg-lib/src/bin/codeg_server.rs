@@ -30,6 +30,25 @@ Options:
   -V, --version     print the version and exit
 ";
 
+/// The version this build was released as, stamped by the release build
+/// (`CODEG_BUILD_VERSION=<x.y.z>-fork.<N> cargo build … --bin codeg-server`),
+/// the same number the desktop bundle of that commit carries. It is what
+/// `--version`, `/health` and update checks report. Unstamped builds report the
+/// crate version. Read here, in the binary, and not in the library: a new stamp
+/// then recompiles only this file, while the library keeps its incremental
+/// cache (see `update::version::RUNNING_APP_VERSION`).
+const BUILD_VERSION: Option<&str> = option_env!("CODEG_BUILD_VERSION");
+
+/// The stamped version, if the build was stamped with a non-blank one.
+fn stamped_version(stamp: Option<&'static str>) -> Option<&'static str> {
+    stamp.map(str::trim).filter(|v| !v.is_empty())
+}
+
+/// The version this binary reports: the stamp, else the crate version.
+fn release_version(stamp: Option<&'static str>) -> &'static str {
+    stamped_version(stamp).unwrap_or(env!("CARGO_PKG_VERSION"))
+}
+
 /// The command line, parsed. Flags only: configuration is the environment.
 #[derive(Debug, PartialEq, Eq)]
 enum Cli {
@@ -96,7 +115,7 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         Cli::Version => {
-            println!("{}", env!("CARGO_PKG_VERSION"));
+            println!("{}", release_version(BUILD_VERSION));
             return ExitCode::SUCCESS;
         }
         Cli::Unknown(arg) => {
@@ -104,6 +123,13 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+
+    // The released version, for `/health` and update checks (the desktop app
+    // registers its bundle version the same way). The database keeps recording
+    // the crate version, as the desktop app does.
+    if let Some(version) = stamped_version(BUILD_VERSION) {
+        codeg_lib::update::version::set_running_app_version(version.to_string());
+    }
 
     // `--supervise`: run as the process supervisor that owns the worker's
     // lifecycle (PID 1 in Docker). It spawns `codeg-server` without this
@@ -322,7 +348,10 @@ async fn async_main() -> ExitCode {
         let _ = codeg_lib::update::install::take_upgrade_staged();
     }
 
-    tracing::info!("[SERVER] codeg-server v{}", app_version);
+    tracing::info!(
+        "[SERVER] codeg-server v{}",
+        codeg_lib::update::version::running_app_version()
+    );
     tracing::info!("[SERVER] Data directory: {}", data_dir.display());
     tracing::info!("[SERVER] Static directory: {}", static_dir.display());
 
@@ -911,6 +940,27 @@ mod tests {
         );
         assert_eq!(parse(&["-v"]), Cli::Unknown("-v".into()));
         assert_eq!(parse(&[""]), Cli::Unknown(String::new()));
+    }
+
+    #[test]
+    fn a_stamped_build_reports_its_stamp() {
+        assert_eq!(
+            stamped_version(Some("0.32.3-fork.236")),
+            Some("0.32.3-fork.236")
+        );
+        assert_eq!(release_version(Some("0.32.3-fork.236")), "0.32.3-fork.236");
+        assert_eq!(
+            release_version(Some(" 0.32.3-fork.236\n")),
+            "0.32.3-fork.236"
+        );
+    }
+
+    #[test]
+    fn an_unstamped_build_reports_the_crate_version() {
+        for stamp in [None, Some(""), Some("  \n")] {
+            assert_eq!(stamped_version(stamp), None);
+            assert_eq!(release_version(stamp), env!("CARGO_PKG_VERSION"));
+        }
     }
 
     #[test]
