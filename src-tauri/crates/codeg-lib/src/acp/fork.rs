@@ -15,6 +15,7 @@ use serde::Deserialize;
 use crate::acp::connection::send_capturing_models;
 
 use crate::acp::error::AcpError;
+use crate::commands::conversations::{is_pi_wake_turn, PI_AGENT_TURN_MARKER_PREFIX};
 use crate::models::agent::AgentType;
 use crate::models::message::{ContentBlock, MessageTurn, TurnRole};
 
@@ -403,6 +404,38 @@ pub fn forks_while_running(agent_type: AgentType) -> bool {
     matches!(agent_type, AgentType::ClaudeCode)
 }
 
+/// Where the running turn starts in `turns`: the turn `in_flight_turn_id`
+/// names, else the last user turn. `None` when neither is there.
+///
+/// The id is the one the detail endpoint reports for the same transcript as
+/// `in_flight_user_turn_id`:
+///
+/// * a turn codeg sent: its prompt, when the caller matched it;
+/// * a run Pi started by itself, which has no prompt
+///   (`commands::conversations::pi_agent_turn_anchor`): the "woken by" System
+///   turn history opens the run with, or, before Pi has written the run's
+///   first reply, a marker no turn carries. With the marker, nothing in the
+///   transcript belongs to the run, so the start is after all of it.
+///
+/// Only a user turn or a "woken by" divider can start a turn; an id naming any
+/// other turn, or none, falls back to the last user turn.
+fn running_turn_start(turns: &[MessageTurn], in_flight_turn_id: Option<&str>) -> Option<usize> {
+    if let Some(id) = in_flight_turn_id {
+        let starts_a_turn = |t: &MessageTurn| match t.role {
+            TurnRole::User => true,
+            TurnRole::System => is_pi_wake_turn(t),
+            TurnRole::Assistant => false,
+        };
+        if let Some(start) = turns.iter().position(|t| t.id == id && starts_a_turn(t)) {
+            return Some(start);
+        }
+        if id.starts_with(PI_AGENT_TURN_MARKER_PREFIX) {
+            return Some(turns.len());
+        }
+    }
+    turns.iter().rposition(|t| matches!(t.role, TurnRole::User))
+}
+
 /// Settle the fork point for a fork taken in a separate process while the
 /// session may be running a turn ([`forks_while_running`]).
 ///
@@ -411,18 +444,19 @@ pub fn forks_while_running(agent_type: AgentType) -> bool {
 /// cannot be named is refused instead.
 ///
 /// While a turn runs (`running`), the point must also lie BEFORE the turn's
-/// prompt: only a reply that finished is a fork point. The prompt is the turn
-/// `in_flight_prompt_turn_id` names when the caller could match it to the
-/// live turn; otherwise the last user turn in the transcript stands in for it.
-/// Neither existing means the prompt has not reached the transcript yet, and
-/// nothing can be shown to have finished — refused, and the user retries a
-/// moment later.
+/// start: only a reply that finished is a fork point. The start is the turn
+/// `in_flight_turn_id` names when the caller could place it — the prompt of a
+/// turn codeg sent, or the "woken by" divider of a run Pi started by itself
+/// (see `running_turn_start`); otherwise the last user turn in the
+/// transcript stands in for it. No start at all means the prompt has not
+/// reached the transcript yet, and nothing can be shown to have finished —
+/// refused, and the user retries a moment later.
 pub fn settle_mid_run_fork_point(
     turns: Result<&[MessageTurn], &str>,
     turn_id: &str,
     adapter: impl Into<ForkAdapter>,
     running: bool,
-    in_flight_prompt_turn_id: Option<&str>,
+    in_flight_turn_id: Option<&str>,
 ) -> Result<ForkPoint, AcpError> {
     let ForkAdapter { agent_type, caps } = adapter.into();
     if !caps.while_running {
@@ -437,18 +471,12 @@ pub fn settle_mid_run_fork_point(
         .ok_or_else(|| {
             AcpError::ForkPointUnresolved("this reply is not in the conversation".to_string())
         })?;
-    if running {
-        let is_user = |t: &MessageTurn| matches!(t.role, TurnRole::User);
-        let prompt_idx = in_flight_prompt_turn_id
-            .and_then(|id| turns.iter().position(|t| t.id == id && is_user(t)))
-            .or_else(|| turns.iter().rposition(is_user));
-        if !prompt_idx.is_some_and(|prompt| idx < prompt) {
-            return Err(AcpError::ForkPointUnresolved(
-                "this reply is still being written; fork from an earlier one, or wait for \
-                 the turn to finish"
-                    .to_string(),
-            ));
-        }
+    if running && !running_turn_start(turns, in_flight_turn_id).is_some_and(|start| idx < start) {
+        return Err(AcpError::ForkPointUnresolved(
+            "this reply is still being written; fork from an earlier one, or wait for \
+             the turn to finish"
+                .to_string(),
+        ));
     }
     resolve_fork_point(turns, turn_id, agent_type).ok_or_else(|| {
         AcpError::ForkPointUnresolved("the agent cannot fork at this reply".to_string())
@@ -462,10 +490,11 @@ pub const NO_FINISHED_REPLY: &str = "this conversation has no finished reply to 
 /// Settle where "Fork" on a whole conversation lands: its latest FINISHED
 /// reply. `None` is a tail fork.
 ///
-/// While a turn runs (`running`), that is the last reply before the turn's
-/// prompt — found as [`settle_mid_run_fork_point`] finds the prompt, and
-/// settled the way it settles a reply picked by hand: named, never the tail,
-/// and only for an adapter that forks while a turn runs.
+/// While a turn runs (`running`), that is the last reply before the running
+/// turn starts — its prompt, or the "woken by" divider of a run Pi started by
+/// itself, found as [`settle_mid_run_fork_point`] finds it — and settled the
+/// way it settles a reply picked by hand: named, never the tail, and only for
+/// an adapter that forks while a turn runs.
 ///
 /// Between turns it is the last reply in the transcript, and nothing is
 /// writing to the session, so a reply the agent cannot name forks at the
@@ -475,7 +504,7 @@ pub fn settle_latest_reply_fork_point(
     turns: Result<&[MessageTurn], &str>,
     adapter: impl Into<ForkAdapter>,
     running: bool,
-    in_flight_prompt_turn_id: Option<&str>,
+    in_flight_turn_id: Option<&str>,
 ) -> Result<Option<ForkPoint>, AcpError> {
     let adapter = adapter.into();
     if running && !adapter.caps.while_running {
@@ -484,13 +513,8 @@ pub fn settle_latest_reply_fork_point(
     let turns = turns.map_err(|reason| {
         AcpError::ForkPointUnresolved(format!("the conversation could not be read ({reason})"))
     })?;
-    let is_user = |t: &MessageTurn| matches!(t.role, TurnRole::User);
     let finished = if running {
-        let prompt = in_flight_prompt_turn_id
-            .and_then(|id| turns.iter().position(|t| t.id == id && is_user(t)))
-            .or_else(|| turns.iter().rposition(is_user))
-            .unwrap_or(0);
-        &turns[..prompt]
+        &turns[..running_turn_start(turns, in_flight_turn_id).unwrap_or(0)]
     } else {
         turns
     };
@@ -500,14 +524,8 @@ pub fn settle_latest_reply_fork_point(
         .find(|t| matches!(t.role, TurnRole::Assistant) && !t.blocks.is_empty())
         .ok_or_else(|| AcpError::ForkPointUnresolved(NO_FINISHED_REPLY.to_string()))?;
     if running {
-        return settle_mid_run_fork_point(
-            Ok(turns),
-            &reply.id,
-            adapter,
-            true,
-            in_flight_prompt_turn_id,
-        )
-        .map(Some);
+        return settle_mid_run_fork_point(Ok(turns), &reply.id, adapter, true, in_flight_turn_id)
+            .map(Some);
     }
     Ok(resolve_fork_point(turns, &reply.id, adapter.agent_type))
 }
@@ -1370,6 +1388,69 @@ mod tests {
             Some("turn-2"),
         );
         assert!(matches!(unnamed, Err(AcpError::ForkPointUnresolved(_))));
+    }
+
+    /// A finished exchange, then a run Pi started by itself: its "woken by"
+    /// divider (a System turn) and the first half of its reply.
+    fn woken_history() -> Vec<MessageTurn> {
+        let mut wake = turn("turn-2", TurnRole::System, "Pi continued on its own", None);
+        wake.blocks.push(ContentBlock::ToolUse {
+            tool_use_id: Some("pi-wake-e1".into()),
+            tool_name: "agent_wake".into(),
+            input_preview: None,
+            status: None,
+            meta: Some(serde_json::json!({ "codeg.agentWake": { "version": 1 } })),
+        });
+        vec![
+            turn("turn-0", TurnRole::User, "launch a scout", None),
+            turn("turn-1", TurnRole::Assistant, "LAUNCHED", Some("msg_01")),
+            wake,
+            turn(
+                "turn-3",
+                TurnRole::Assistant,
+                "the scout found",
+                Some("msg_02"),
+            ),
+        ]
+    }
+
+    /// A woken run starts at the divider the caller names, or after the whole
+    /// transcript while the run has written nothing (the marker). A System
+    /// turn that is not a divider, or a reply, starts nothing: the last user
+    /// turn stands in, as for an unmatched prompt.
+    #[test]
+    fn a_woken_run_starts_at_its_divider() {
+        let turns = woken_history();
+        assert_eq!(running_turn_start(&turns, Some("turn-2")), Some(2));
+        assert_eq!(
+            running_turn_start(&turns, Some("pi-agent-turn-1794510341024")),
+            Some(4)
+        );
+        assert_eq!(running_turn_start(&turns, Some("turn-3")), Some(0));
+        assert_eq!(running_turn_start(&turns, None), Some(0));
+        let mut note = woken_history();
+        note[2].blocks.truncate(1);
+        assert_eq!(running_turn_start(&note, Some("turn-2")), Some(0));
+
+        let pi = ForkAdapter {
+            agent_type: AgentType::Pi,
+            caps: ForkCapabilities {
+                strict_point: true,
+                while_running: true,
+            },
+        };
+        let latest = settle_latest_reply_fork_point(Ok(turns.as_slice()), pi, true, Some("turn-2"))
+            .unwrap()
+            .expect("a named reply");
+        assert_eq!(latest.message_id, "msg_01");
+        let settle = |turn_id| {
+            settle_mid_run_fork_point(Ok(turns.as_slice()), turn_id, pi, true, Some("turn-2"))
+        };
+        assert_eq!(settle("turn-1").unwrap().message_id, "msg_01");
+        assert!(matches!(
+            settle("turn-3"),
+            Err(AcpError::ForkPointUnresolved(_))
+        ));
     }
 
     /// Only Claude Code is known to fork from a transcript another process is

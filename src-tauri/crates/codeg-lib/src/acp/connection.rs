@@ -18393,7 +18393,7 @@ async fn emit_conversation_update(
 
 #[cfg(test)]
 #[path = "connection_pi_live_tests.rs"]
-mod pi_live_tests;
+pub(crate) mod pi_live_tests;
 
 #[cfg(test)]
 mod tests {
