@@ -17,8 +17,10 @@
 //! - Within one `connection_id`, multiple webviews (main + remote-settings
 //!   child window, etc.) share **one** underlying WS connection but each
 //!   event is dispatched only to the webview labels that have explicitly
-//!   subscribed. We never `app.emit(...)` globally — every emit is
-//!   `app.emit_to(EventTarget::webview(label), ...)`.
+//!   subscribed. We never `app.emit(...)` globally: a frame for every
+//!   subscriber goes out as ONE `emit_filter` over their labels
+//!   (`emit_to_subscribers`), and the JS transport listens on its own label,
+//!   so each window receives each frame exactly once.
 //! - When the last subscriber for a connection unsubscribes (or its window
 //!   is destroyed), the WS task shuts down and the entry is removed from
 //!   the proxy state.
@@ -2680,10 +2682,8 @@ async fn forward_text_message(
     }
 
     let labels = snapshot_subscribers(entry).await;
-    for label in labels {
-        if let Err(e) = app.emit_to(EventTarget::webview(&label), event_name, &envelope) {
-            tracing::error!("[RemoteProxy] emit_to {label} for {event_name} failed: {e}");
-        }
+    if let Err(e) = emit_to_subscribers(app, &labels, event_name, &envelope) {
+        tracing::error!("[RemoteProxy] emit for {event_name} failed: {e}");
     }
     Ok(())
 }
@@ -2697,11 +2697,53 @@ async fn emit_internal(
     channel: &'static str,
 ) {
     let labels = snapshot_subscribers(entry).await;
-    for label in labels {
-        emit_internal_to_label(app, &label, event_name, channel);
+    let envelope = serde_json::json!({
+        "channel": channel,
+        "payload": Value::Null,
+    });
+    if let Err(e) = emit_to_subscribers(app, &labels, event_name, &envelope) {
+        tracing::error!("[RemoteProxy] emit for {event_name} ({channel}) failed: {e}");
     }
 }
 
+/// Emit one frame to the subscribed webviews — once.
+///
+/// Not one `emit_to` per label: Tauri hands a targeted emit to every listener
+/// whose own target is `Any` too, in every webview (`match_any_or_filter` in
+/// tauri's `event/listener.rs`), so a loop over N subscribed windows reached
+/// such a listener N times. That was the remote terminal printing every byte
+/// twice whenever a second window (settings, git, the hidden Quick Ask) was on
+/// the same connection. A single filtered emit reaches each listener at most
+/// once, whatever target it registered with.
+fn emit_to_subscribers(
+    app: &AppHandle,
+    labels: &[String],
+    event_name: &str,
+    envelope: &Value,
+) -> tauri::Result<()> {
+    if labels.is_empty() {
+        return Ok(());
+    }
+    app.emit_filter(event_name, envelope, |target| is_subscriber_target(target, labels))
+}
+
+/// A listener registered for `target` belongs to one of the subscribed
+/// webviews. `Any` listeners never get here: tauri delivers to them without
+/// asking the filter.
+fn is_subscriber_target(target: &EventTarget, labels: &[String]) -> bool {
+    match target {
+        EventTarget::AnyLabel { label }
+        | EventTarget::Webview { label }
+        | EventTarget::WebviewWindow { label }
+        | EventTarget::Window { label } => labels.iter().any(|l| l == label),
+        _ => false,
+    }
+}
+
+/// One window only: a window joining a socket that is already up gets its own
+/// `__ready__`. The others must not see it (it would re-attach and resync them
+/// for nothing), which holds because the JS transport listens on its own label
+/// rather than on `Any`.
 fn emit_internal_to_label(app: &AppHandle, label: &str, event_name: &str, channel: &'static str) {
     let envelope = serde_json::json!({
         "channel": channel,
@@ -2862,6 +2904,34 @@ mod tests {
             streaming: std::sync::Mutex::new(HashSet::new()),
             streaming_changed: Notify::new(),
         })
+    }
+
+    // ─── Fan-out ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn one_emit_reaches_every_subscribed_window_and_no_other() {
+        // The workspace window and the hidden Quick Ask window on one
+        // connection, the workspace subscribed twice (a reloaded page).
+        let entry = test_entry(HashMap::from([
+            ("a".to_string(), subscriber("remote-workspace-1", "rw-1")),
+            ("b".to_string(), subscriber("remote-workspace-1", "rw-1")),
+            ("c".to_string(), subscriber("quick-ask", "rw-q")),
+        ]));
+        let labels = snapshot_subscribers(&entry).await;
+        assert_eq!(labels, ["quick-ask", "remote-workspace-1"]);
+
+        let webview = |label: &str| EventTarget::webview(label);
+        assert!(is_subscriber_target(&webview("remote-workspace-1"), &labels));
+        assert!(is_subscriber_target(&webview("quick-ask"), &labels));
+        assert!(is_subscriber_target(&EventTarget::labeled("quick-ask"), &labels));
+        assert!(is_subscriber_target(
+            &EventTarget::webview_window("remote-workspace-1"),
+            &labels
+        ));
+        // A window on another backend, and targets that name no window.
+        assert!(!is_subscriber_target(&webview("main"), &labels));
+        assert!(!is_subscriber_target(&webview("remote-workspace-2"), &labels));
+        assert!(!is_subscriber_target(&EventTarget::App, &labels));
     }
 
     // ─── Heartbeat (dead-socket detection) ──────────────────────────────

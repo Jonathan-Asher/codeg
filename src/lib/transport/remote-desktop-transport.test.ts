@@ -3,21 +3,35 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 // The transport talks to the Rust proxy through two Tauri APIs: `invoke` for
 // commands and `listen` for the `remote-ws-event-{id}` frames. Capture the
 // frame handler so tests can play the proxy's side.
+type ListenTarget = { kind: string; label?: string }
+type FrameHandler = (event: { payload: unknown }) => void
 const tauri = vi.hoisted(() => ({
   invoke: vi.fn(),
-  onFrame: null as ((event: { payload: unknown }) => void) | null,
+  onFrame: null as FrameHandler | null,
+  /** Live listeners with the target each registered for. */
+  listeners: [] as { target: ListenTarget; handler: FrameHandler }[],
 }))
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke }))
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(
-    async (_event: string, handler: (event: { payload: unknown }) => void) => {
+    async (
+      _event: string,
+      handler: FrameHandler,
+      options?: { target?: ListenTarget }
+    ) => {
+      const entry = { target: options?.target ?? { kind: "Any" }, handler }
+      tauri.listeners.push(entry)
       tauri.onFrame = handler
       return () => {
-        tauri.onFrame = null
+        tauri.listeners = tauri.listeners.filter((l) => l !== entry)
+        if (tauri.onFrame === handler) tauri.onFrame = null
       }
     }
   ),
+}))
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({ label: "remote-workspace-7" }),
 }))
 
 import { RemoteDesktopTransport } from "./remote-desktop-transport"
@@ -55,6 +69,7 @@ beforeEach(() => {
   tauri.invoke.mockReset()
   tauri.invoke.mockResolvedValue(undefined)
   tauri.onFrame = null
+  tauri.listeners = []
 })
 
 describe("RemoteDesktopTransport connection health", () => {
@@ -275,5 +290,88 @@ describe("RemoteDesktopTransport liveness hints", () => {
     await transport.call("list_folders")
 
     expect(timeouts()).toEqual([8_000, undefined, 60_000, undefined])
+  })
+})
+
+describe("RemoteDesktopTransport delivery with several windows on one connection", () => {
+  // Tauri's rule for `emit_to(EventTarget::webview(label))`: a listener gets
+  // the emit when its target is `Any`, or names that same label. The proxy
+  // addresses frames per subscribed window (`emit_internal_to_label` still
+  // does), so this is what the transport has to hold up against.
+  function emitToWindows(labels: string[], payload: unknown) {
+    for (const label of labels) {
+      for (const { target, handler } of tauri.listeners) {
+        if (target.kind === "Any" || target.label === label) {
+          handler({ payload })
+        }
+      }
+    }
+  }
+  const WINDOWS = ["quick-ask", "remote-workspace-7"]
+  const output = (seq: number) => ({
+    channel: "terminal://output/t1",
+    payload: { terminal_id: "t1", data: "l", seq },
+  })
+
+  async function subscribed(transport: RemoteDesktopTransport) {
+    const got = vi.fn()
+    const pending = transport.subscribe("terminal://output/t1", got)
+    await vi.waitFor(() => expect(tauri.listeners).toHaveLength(1))
+    emitToWindows(WINDOWS, { channel: "__ready__", payload: null })
+    await pending
+    return got
+  }
+
+  it("listens on its own window only", async () => {
+    await subscribed(makeTransport())
+    expect(tauri.listeners[0].target).toEqual({
+      kind: "Webview",
+      label: "remote-workspace-7",
+    })
+  })
+
+  it("takes one copy of a frame addressed to every window", async () => {
+    const got = await subscribed(makeTransport())
+
+    emitToWindows(WINDOWS, output(1))
+    emitToWindows(WINDOWS, output(2))
+
+    expect(got.mock.calls.map(([p]) => p.seq)).toEqual([1, 2])
+  })
+
+  it("still takes one copy after the link reconnects", async () => {
+    const got = await subscribed(makeTransport())
+    emitToWindows(WINDOWS, output(1))
+
+    emitToWindows(WINDOWS, { channel: "__disconnected__", payload: null })
+    emitToWindows(WINDOWS, { channel: "__ready__", payload: null })
+    emitToWindows(WINDOWS, output(2))
+    emitToWindows(WINDOWS, output(3))
+
+    expect(tauri.listeners).toHaveLength(1)
+    expect(got.mock.calls.map(([p]) => p.seq)).toEqual([1, 2, 3])
+  })
+
+  it("leaves nothing behind when the window rebinds to a new transport", async () => {
+    const first = makeTransport()
+    const stale = await subscribed(first)
+    first.destroy()
+    const got = await subscribed(makeTransport())
+
+    emitToWindows(WINDOWS, output(1))
+
+    expect(stale).not.toHaveBeenCalled()
+    expect(got).toHaveBeenCalledTimes(1)
+  })
+
+  it("ignores the __ready__ another window gets when it joins", async () => {
+    const transport = makeTransport()
+    const recovered = vi.fn()
+    transport.onReconnect(recovered)
+    await subscribed(transport)
+
+    emitToWindows(["quick-ask"], { channel: "__ready__", payload: null })
+
+    expect(recovered).not.toHaveBeenCalled()
   })
 })

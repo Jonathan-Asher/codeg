@@ -14,6 +14,13 @@ export default defineConfig({
         __dirname,
         "./browser-agent/vendor/playwright/isomorphic"
       ),
+      // Its `main` names a CommonJS build the package does not ship (lib/ has
+      // only the ES module), and the test resolver reads `main`, so any test
+      // importing the terminal view failed to load it.
+      "@xterm/addon-ligatures": path.resolve(
+        __dirname,
+        "./node_modules/@xterm/addon-ligatures/lib/addon-ligatures.mjs"
+      ),
     },
   },
   test: {

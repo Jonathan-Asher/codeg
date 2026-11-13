@@ -1,5 +1,10 @@
 import { invoke } from "@tauri-apps/api/core"
-import { listen, type UnlistenFn } from "@tauri-apps/api/event"
+import {
+  listen,
+  type EventTarget,
+  type UnlistenFn,
+} from "@tauri-apps/api/event"
+import { getCurrentWebview } from "@tauri-apps/api/webview"
 import { WS_READY_CHANNEL, WS_RESYNC_CHANNEL } from "./constants"
 import type { AttachTransportHost } from "./web-event-stream"
 import { WebEventStream } from "./web-event-stream"
@@ -64,6 +69,33 @@ function isAttachFrame(
 interface LegacyEnvelope {
   channel: string
   payload: unknown
+}
+
+/**
+ * Listen target for the proxy's frames: this webview only.
+ *
+ * The Rust proxy addresses its frames to the subscribed webviews by label.
+ * Tauri's default listen target is `Any`, and an `Any` listener matches every
+ * targeted emit, whatever label it names. When the proxy sent one `emit_to`
+ * per subscribed window, two windows on one connection — the workspace plus
+ * its settings, git or (pre-created, hidden) Quick Ask window — meant each
+ * window took every frame twice: every terminal byte twice. It also still
+ * sends a joining window its own `__ready__`, which must not reach the others.
+ * Pinning the listener to this webview's label takes only what is addressed
+ * here.
+ *
+ * Falls back to `Any` only where there is no webview metadata (tests).
+ */
+function ownWebviewTarget(): EventTarget {
+  try {
+    return { kind: "Webview", label: getCurrentWebview().label }
+  } catch (err) {
+    console.warn(
+      "[RemoteDesktopTransport] no current webview label; listening to any target:",
+      err
+    )
+    return { kind: "Any" }
+  }
 }
 
 interface RustError {
@@ -478,7 +510,8 @@ export class RemoteDesktopTransport
     try {
       this.unlistenWsEvent = await listen<WsFrame>(
         `remote-ws-event-${this.config.id}`,
-        (event) => this.handleWsEvent(event.payload)
+        (event) => this.handleWsEvent(event.payload),
+        { target: ownWebviewTarget() }
       )
     } catch (err) {
       this.wsStarted = false

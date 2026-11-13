@@ -81,7 +81,7 @@ describe("a terminal card crossing a route switch", () => {
     const snapshotAt = view.indexOf("terminalSnapshot(terminalId)")
     expect(subscribeAt).toBeGreaterThan(-1)
     expect(snapshotAt).toBeGreaterThan(subscribeAt)
-    expect(view).toContain("seq <= snapshotSeq")
+    expect(view).toContain("if (seq <= writtenSeq) return")
   })
 
   it("does not let ReactFlow cull a mounted terminal off-screen", () => {
@@ -129,11 +129,17 @@ describe("a terminal card crossing a route switch", () => {
     // callback AFTER the buffer was released. A gate that only existed during
     // the handshake would let exactly that one through and print it twice.
     const view = read(VIEW)
-    expect(view).toContain("let snapshotSeqFloor = 0")
-    expect(view).toContain("if (seq > 0 && seq <= snapshotSeqFloor) return")
-    // Raised by snapshots only: live events are ordered and delivered once, so
-    // raising the floor on them could only ever swallow output.
-    expect(view.match(/snapshotSeqFloor = snapshotSeq/g)?.length ?? 0).toBe(1)
+    expect(view).toContain("let writtenSeq = 0")
+    expect(view).toContain("if (seq <= writtenSeq) return")
+    // Raised by the snapshot AND by every live event written: a chunk delivered
+    // twice (a remote window once got one copy per window on its connection)
+    // must not be written again. seq 0/missing is still always written.
+    expect(view).toContain(
+      "if (snapshotSeq != null && snapshotSeq > writtenSeq)"
+    )
+    expect(view).toContain("writtenSeq = seq")
+    // It starts over with the next PTY on the same id.
+    expect(view.match(/writtenSeq = 0/g)?.length ?? 0).toBeGreaterThanOrEqual(2)
   })
 
   it("reaps the shell where the delete is authoritative — on the backend", () => {
