@@ -7233,6 +7233,13 @@
         "recheckLifted": "{name} pode ser usada de novo.",
         "recheckSame": "{name} lida de novo: ainda não há nada a liberar.",
         "recheckUnread": "O pool não conseguiu ler o uso de {name} agora.",
+        "recommended": "Redefinição disponível: <b>{name}</b> está no limite",
+        "renewsSoon": "Seu limite se renova sozinho em {duration}, então uma redefinição agora seria quase toda desperdiçada.",
+        "renewsSoonUnknown": "Seu limite se renova sozinho em breve, então uma redefinição agora seria quase toda desperdiçada.",
+        "renewsSoonConfirm": "Seu limite se renova sozinho de qualquer forma às {time} (em {duration}), então uma redefinição agora seria quase toda desperdiçada.",
+        "renewsSoonConfirmUnknown": "Seu limite se renova sozinho em breve de qualquer forma, então uma redefinição agora seria quase toda desperdiçada.",
+        "renewsSoonGuard": "O pool segura as redefinições a menos de {hours, plural, one {# hora} other {# horas}} da renovação própria de uma conta; esta só segue porque você pediu.",
+        "useAnyway": "Usar redefinição mesmo assim",
         "error": {
           "recentlyUsed": "Uma redefinição acabou de ser usada nesta conta.",
           "inProgress": "Uma redefinição já está sendo usada nesta conta.",
@@ -7243,6 +7250,8 @@
           "needsLogin": "Esta conta precisa entrar de novo primeiro.",
           "noAccount": "O pool não tem nenhuma conta com esse nome.",
           "tooSoon": "Esta conta acabou de ser verificada. Tente de novo em alguns segundos.",
+          "renewsSoon": "O limite desta conta se renova sozinho em breve, então o pool segurou a redefinição.",
+          "renewsSoonAt": "O limite desta conta se renova sozinho às {time}, então o pool segurou a redefinição.",
           "failed": "Não funcionou. Tente de novo em instantes.",
           "unsupported": "Este pool de contas não pode usar redefinições pelo codeg. Atualize o maxpool.",
           "unreachable": "O pool de contas não está respondendo."

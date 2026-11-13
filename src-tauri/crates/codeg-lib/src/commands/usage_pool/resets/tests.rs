@@ -81,8 +81,12 @@ fn listing() -> Value {
     })
 }
 
+fn read_listing(body: Value) -> ResetsListing {
+    parse_resets(body.to_string().as_bytes(), NOW).expect("a listing parses")
+}
+
 fn listed() -> Vec<(String, PoolAccountResets)> {
-    parse_resets(listing().to_string().as_bytes(), NOW).expect("a listing parses")
+    read_listing(listing()).accounts
 }
 
 #[test]
@@ -129,7 +133,7 @@ fn each_claude_accounts_resets_are_read_from_the_listing() {
 fn automatic_use_is_reported_only_while_the_pool_does_it() {
     let mut body = listing();
     body["autoRedeem"]["enabled"] = json!(false);
-    let listed = parse_resets(body.to_string().as_bytes(), NOW).unwrap();
+    let listed = read_listing(body).accounts;
     assert!(!listed[0].1.auto_redeem);
 }
 
@@ -219,7 +223,7 @@ fn fable_launch_listing() -> Value {
 
 #[test]
 fn a_fable_reset_refills_only_fables_weekly_limit_whatever_the_pool_applies_it_to() {
-    let listed = parse_resets(fable_launch_listing().to_string().as_bytes(), NOW).unwrap();
+    let listed = read_listing(fable_launch_listing()).accounts;
     let launch = &listed[0].1;
     assert_eq!(launch.available, 3);
     assert_eq!(launch.next_grant_id.as_deref(), Some("launch-2610-fable"));
@@ -332,7 +336,7 @@ fn status_with(names: &[&str]) -> RawStatus {
 fn resets_go_on_the_accounts_and_stay_while_the_pool_does_not_answer() {
     let config = config_at("http://127.0.0.1:9");
     let mut pool = build_pool(status_with(&["primary", "other"]), &config, NOW);
-    attach(&mut pool, ResetsRead::Listed(listed()), None);
+    attach(&mut pool, ResetsRead::Listed(read_listing(listing())), None);
     assert!(pool.resets_supported);
     assert_eq!(pool.accounts[0].resets.as_ref().map(|r| r.available), Some(4));
     assert!(pool.accounts[1].resets.is_none(), "an account the listing doesn't name has none");
@@ -353,6 +357,192 @@ fn resets_go_on_the_accounts_and_stay_while_the_pool_does_not_answer() {
     let json = serde_json::to_value(&old).unwrap();
     assert!(json.get("resets_supported").is_none(), "an older pool's reading is unchanged");
     assert!(json["accounts"][0].get("resets").is_none());
+}
+
+// ─── The pool's advice on using them ────────────────────────────────────
+
+/// What a pool with the reset advice adds to its listing: `primary` is at
+/// its general weekly limit and the pool would use its `soon` grant on it;
+/// `spare@example.com` is at its 5-hour limit, which renews by itself within
+/// the pool's 12-hour claim guard; `off` is paused.
+fn advised_listing() -> Value {
+    let mut body = listing();
+    body["claimGuardMs"] = json!(43_200_000);
+    body["recommended"] = json!([
+        { "account": "primary", "grantId": "soon", "scope": "general" },
+        { "account": "off", "grantId": "x", "scope": "general" },
+        "primary",
+        { "account": 7 },
+    ]);
+    let primary = &mut body["accounts"][0];
+    primary["atWall"] = json!(true);
+    primary["wall"] = json!(["general", "Fable", " session ", "general", 5, "two words"]);
+    primary["weeklyUtilization"] = json!(1.0);
+    primary["weeklyRenewsAt"] = json!(ms(NOW + 3 * DAY));
+    primary["renewsSoon"] = json!(false);
+    primary["recommended"] = json!(true);
+    primary["recommendedGrantId"] = json!("soon");
+    primary["advice"] = json!("  at the weekly wall\n; renews in 3d: use the weekly reset  ");
+    let spare = &mut body["accounts"][1];
+    spare["atWall"] = json!(true);
+    spare["wall"] = json!(["session"]);
+    spare["weeklyUtilization"] = json!(0.42);
+    spare["weeklyRenewsAt"] = json!(ms(NOW + 2 * DAY));
+    spare["renewsSoon"] = json!(true);
+    spare["recommended"] = json!(false);
+    spare["recommendedGrantId"] = Value::Null;
+    spare["advice"] = json!("session limit renews by itself in 2h");
+    body["accounts"][2]["recommended"] = json!(true);
+    body
+}
+
+#[test]
+fn the_pools_advice_on_each_account_is_read_with_its_resets() {
+    let advised = read_listing(advised_listing());
+    assert_eq!(advised.claim_guard_secs, Some(43_200), "milliseconds become seconds");
+
+    let primary = &advised.accounts[0].1;
+    assert!(primary.at_wall);
+    assert_eq!(
+        primary.wall,
+        ["general", "fable", "session"],
+        "short words only, lower case, each once"
+    );
+    assert_eq!(primary.weekly_utilization, Some(1.0));
+    assert_eq!(primary.weekly_renews_at, Some(NOW + 3 * DAY));
+    assert!(!primary.renews_soon);
+    assert!(primary.recommended);
+    assert_eq!(primary.recommended_grant_id.as_deref(), Some("soon"));
+    assert_eq!(
+        primary.advice.as_deref(),
+        Some("at the weekly wall; renews in 3d: use the weekly reset")
+    );
+    assert_eq!(primary.available, 4, "the grants are read as before");
+
+    let spare = &advised.accounts[1].1;
+    assert!(spare.at_wall && spare.renews_soon);
+    assert_eq!(spare.wall, ["session"]);
+    assert_eq!(spare.weekly_utilization, Some(0.42));
+    assert_eq!(spare.weekly_renews_at, Some(NOW + 2 * DAY));
+    assert!(!spare.recommended);
+    assert_eq!(spare.recommended_grant_id, None);
+
+    let off = &advised.accounts[2].1;
+    assert!(!off.recommended, "a paused account's resets aren't the pool's to use");
+    assert_eq!(off.recommended_grant_id, None);
+}
+
+#[test]
+fn an_account_the_pools_list_recommends_takes_the_grant_it_names() {
+    let mut body = listing();
+    body["recommended"] = json!([{ "account": "primary", "grantId": "late", "scope": "general" }]);
+    let listed = read_listing(body).accounts;
+    let primary = &listed[0].1;
+    assert!(primary.recommended);
+    assert_eq!(primary.recommended_grant_id.as_deref(), Some("late"));
+    assert!(!listed[1].1.recommended);
+
+    // The account's own entry names the grant first.
+    let mut body = advised_listing();
+    body["recommended"] = json!([{ "account": "primary", "grantId": "late" }]);
+    let listed = read_listing(body).accounts;
+    assert_eq!(listed[0].1.recommended_grant_id.as_deref(), Some("soon"));
+}
+
+#[test]
+fn advice_that_is_absent_or_junk_reads_as_none() {
+    // An older pool's listing: no advice, nothing recommended.
+    let older = read_listing(listing());
+    assert_eq!(older.claim_guard_secs, None);
+    for (name, resets) in &older.accounts {
+        assert!(!resets.at_wall && !resets.renews_soon && !resets.recommended, "{name}");
+        assert!(resets.wall.is_empty(), "{name}");
+        assert_eq!(resets.weekly_utilization, None, "{name}");
+        assert_eq!(resets.weekly_renews_at, None, "{name}");
+        assert_eq!(resets.recommended_grant_id, None, "{name}");
+        assert_eq!(resets.advice, None, "{name}");
+    }
+
+    // Fields of the wrong type: each reads as nothing, the listing stands.
+    let junk = read_listing(listing_value_with_junk());
+    assert_eq!(junk.claim_guard_secs, None);
+    let primary = &junk.accounts[0].1;
+    assert_eq!(primary.available, 4);
+    assert!(!primary.at_wall && !primary.renews_soon && !primary.recommended);
+    assert!(primary.wall.is_empty());
+    assert_eq!(primary.weekly_utilization, None);
+    assert_eq!(primary.weekly_renews_at, None);
+    assert_eq!(primary.recommended_grant_id, None);
+    assert_eq!(primary.advice, None);
+    // Values out of range: a share past the whole is all of it, a renewal
+    // already past is none, blank words are none.
+    let spare = &junk.accounts[1].1;
+    assert_eq!(spare.weekly_utilization, Some(1.0));
+    assert_eq!(spare.weekly_renews_at, None);
+    assert!(spare.wall.is_empty());
+    assert_eq!(spare.advice, None);
+
+    assert_eq!(utilization(Some(-0.5)), None);
+    assert_eq!(utilization(Some(0.3)), Some(0.3));
+    assert_eq!(claim_guard_secs(Some(43_200_000.0)), Some(43_200));
+    for junk in [-1.0, 0.0, 999.0, f64::NAN, f64::INFINITY, 8.0 * 86_400_000.0] {
+        assert_eq!(claim_guard_secs(Some(junk)), None, "{junk}");
+    }
+}
+
+/// [`listing`] with the advice fields of the wrong type (`primary`) or out
+/// of range (`spare@example.com`), and a junk claim guard and list.
+fn listing_value_with_junk() -> Value {
+    let mut body = listing();
+    body["claimGuardMs"] = json!("12h");
+    body["recommended"] = json!("primary");
+    let primary = &mut body["accounts"][0];
+    primary["atWall"] = json!("yes");
+    primary["wall"] = json!("general");
+    primary["weeklyUtilization"] = json!("high");
+    primary["weeklyRenewsAt"] = json!("soon");
+    primary["renewsSoon"] = json!(1);
+    primary["recommended"] = json!("true");
+    primary["recommendedGrantId"] = json!({ "id": 1 });
+    primary["advice"] = json!(42);
+    let spare = &mut body["accounts"][1];
+    spare["weeklyUtilization"] = json!(1.7);
+    spare["weeklyRenewsAt"] = json!(ms(NOW - 60));
+    spare["wall"] = json!([null, "", "x".repeat(40)]);
+    spare["advice"] = json!("   ");
+    body
+}
+
+#[test]
+fn the_claim_guard_and_advice_reach_the_screen_and_stay_while_the_pool_does_not_answer() {
+    let config = config_at("http://127.0.0.1:9");
+    let names = ["primary", "spare@example.com"];
+    let mut pool = build_pool(status_with(&names), &config, NOW);
+    attach(&mut pool, ResetsRead::Listed(read_listing(advised_listing())), None);
+    assert_eq!(pool.reset_claim_guard_secs, Some(43_200));
+    let json = serde_json::to_value(&pool).unwrap();
+    assert_eq!(json["reset_claim_guard_secs"], 43_200);
+    let primary = &json["accounts"][0]["resets"];
+    assert_eq!(primary["at_wall"], true);
+    assert_eq!(primary["wall"], json!(["general", "fable", "session"]));
+    assert_eq!(primary["recommended"], true);
+    assert_eq!(primary["recommended_grant_id"], "soon");
+    assert_eq!(primary["weekly_renews_at"], NOW + 3 * DAY);
+    let spare = &json["accounts"][1]["resets"];
+    assert_eq!(spare["renews_soon"], true);
+    assert_eq!(spare["weekly_utilization"], 0.42);
+    assert_eq!(spare["advice"], "session limit renews by itself in 2h");
+
+    let mut next = build_pool(status_with(&names), &config, NOW + 60);
+    attach(&mut next, ResetsRead::Unavailable, Some(&pool));
+    assert_eq!(next.reset_claim_guard_secs, Some(43_200));
+    assert_eq!(next.accounts[1].resets, pool.accounts[1].resets);
+
+    let mut old = build_pool(status_with(&names), &config, NOW);
+    attach(&mut old, ResetsRead::Unsupported, Some(&pool));
+    assert_eq!(old.reset_claim_guard_secs, None);
+    let json = serde_json::to_value(&old).unwrap();
+    assert!(json.get("reset_claim_guard_secs").is_none(), "an older pool's reading is unchanged");
 }
 
 // ─── A stand-in pool ────────────────────────────────────────────────────
@@ -395,6 +585,12 @@ async fn stand_in_pool(listing_status: StatusCode) -> (String, Shared) {
         }
         seen.lock().unwrap().redeems.push(body.clone());
         match body["account"].as_str() {
+            Some("renewing") if body["force"] != json!(true) => (StatusCode::CONFLICT, axum::Json(json!({
+                "ok": false, "error": "renews_soon",
+                "message": "This account's limit renews by itself within 12 h; pass force to claim anyway.",
+                "renewsAt": ms(NOW + 3 * 3600) }))).into_response(),
+            Some("renewing") => axum::Json(json!({ "ok": true, "account": "renewing", "grantId": "g",
+                "alreadyUsed": false, "probe": { "ok": true } })).into_response(),
             Some("primary") => axum::Json(json!({ "ok": true, "account": "primary", "grantId": "soon",
                 "alreadyUsed": false, "cleared": ["rateLimitedUntil"], "probe": { "ok": true } })).into_response(),
             Some("again") => (StatusCode::CONFLICT, axum::Json(json!({ "ok": false, "error": "recently_claimed",
@@ -439,14 +635,14 @@ async fn a_reset_is_used_and_an_account_read_again_through_the_pool_with_its_key
     let (base, seen) = stand_in_pool(StatusCode::OK).await;
     let config = config_at(&base);
 
-    let outcome = redeem_with(&config, "primary", Some("soon")).await.unwrap();
+    let outcome = redeem_with(&config, "primary", Some("soon"), false).await.unwrap();
     assert_eq!(outcome, PoolResetOutcome::Reset);
     assert_eq!(
         seen.lock().unwrap().redeems[0],
         json!({ "account": "primary", "grantId": "soon" })
     );
 
-    let refused = redeem_with(&config, "again", None).await.unwrap_err();
+    let refused = redeem_with(&config, "again", None, false).await.unwrap_err();
     assert_eq!(refused.i18n_key.as_deref(), Some("pool.resets.error.recentlyUsed"));
     assert_eq!(
         refused.i18n_params.as_ref().and_then(|p| p.get("reason")).map(String::as_str),
@@ -458,7 +654,7 @@ async fn a_reset_is_used_and_an_account_read_again_through_the_pool_with_its_key
         "no grant named: the pool picks"
     );
     assert_eq!(
-        redeem_with(&config, "slow", None).await.unwrap(),
+        redeem_with(&config, "slow", None, false).await.unwrap(),
         PoolResetOutcome::Unconfirmed,
         "the pool's own wait ran out: it may have gone through"
     );
@@ -470,8 +666,39 @@ async fn a_reset_is_used_and_an_account_read_again_through_the_pool_with_its_key
     assert_eq!(seen.lock().unwrap().rechecks, ["a b@example.com", "primary"]);
 
     let keyless = PoolConfig { key: None, ..config.clone() };
-    assert!(redeem_with(&keyless, "primary", None).await.is_err());
+    assert!(redeem_with(&keyless, "primary", None, false).await.is_err());
     assert_eq!(seen.lock().unwrap().redeems.len(), 3, "a refused key reached no handler");
+}
+
+#[tokio::test]
+async fn a_reset_on_an_account_whose_limit_renews_soon_goes_through_only_when_forced() {
+    let (base, seen) = stand_in_pool(StatusCode::OK).await;
+    let config = config_at(&base);
+
+    let refused = redeem_with(&config, "renewing", Some("g"), false).await.unwrap_err();
+    assert_eq!(refused.i18n_key.as_deref(), Some("pool.resets.error.renewsSoon"));
+    let param = |key: &str| {
+        refused
+            .i18n_params
+            .as_ref()
+            .and_then(|p| p.get(key))
+            .cloned()
+    };
+    assert_eq!(param("reason").as_deref(), Some("renews_soon"));
+    let renews_at = (NOW + 3 * 3600).to_string();
+    assert_eq!(param("renews_at").as_deref(), Some(renews_at.as_str()), "in epoch seconds");
+    assert_eq!(
+        seen.lock().unwrap().redeems[0],
+        json!({ "account": "renewing", "grantId": "g" }),
+        "not forced unless asked"
+    );
+
+    let outcome = redeem_with(&config, "renewing", Some("g"), true).await.unwrap();
+    assert_eq!(outcome, PoolResetOutcome::Reset);
+    assert_eq!(
+        seen.lock().unwrap().redeems[1],
+        json!({ "account": "renewing", "grantId": "g", "force": true })
+    );
 }
 
 #[tokio::test]
@@ -483,7 +710,7 @@ async fn the_listing_is_read_once_per_version_from_a_pool_without_the_routes() {
     let ResetsRead::Listed(listed) = read_resets(&config, Some("test-patched"), NOW).await else {
         panic!("a pool with the route lists its resets");
     };
-    assert_eq!(listed.len(), 3);
+    assert_eq!(listed.accounts.len(), 3);
     assert!(known_supported(&config.status_url, Some("test-patched")));
 
     let (old_base, old_seen) = stand_in_pool(StatusCode::NOT_FOUND).await;

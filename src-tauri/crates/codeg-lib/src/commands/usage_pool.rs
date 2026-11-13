@@ -783,6 +783,10 @@ pub struct PlanUsagePool {
     /// read an account again on request ([`resets`]); older pools can't.
     #[serde(default, skip_serializing_if = "is_false")]
     pub resets_supported: bool,
+    /// How close to an account's own renewal the pool holds a reset back
+    /// unless asked to go ahead (seconds), when it says ([`resets`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_claim_guard_secs: Option<i64>,
 }
 
 fn usage_window(
@@ -1252,6 +1256,7 @@ fn build_pool(raw: RawStatus, config: &PoolConfig, now: i64) -> PlanUsagePool {
         error: None,
         error_status: None,
         resets_supported: false,
+        reset_claim_guard_secs: None,
     };
     if let Some(PoolLimit::Exhausted { resumes_at }) = pool_limit(&pool, now, None) {
         pool.exhausted = true;
@@ -1293,6 +1298,7 @@ impl PlanUsagePool {
             error: Some(error.kind),
             error_status: error.status,
             resets_supported: false,
+            reset_claim_guard_secs: None,
         }
     }
 }

@@ -64,6 +64,7 @@ import {
   PoolReloadNotice,
   usePoolManage,
 } from "./plan-usage-pool-manage"
+import { PoolResetRecommendations } from "./plan-usage-pool-resets"
 
 /** How often relative times ("resets in 2h 14m") re-render. */
 const TICK_MS = 30_000
@@ -370,6 +371,9 @@ function PoolProviderCard({
       <PoolSummaryLine pool={pool} now={now} className="mt-1.5" />
       <PoolRoutingLine pool={pool} className="mt-0.5" />
       <div className="mt-3 space-y-2 empty:hidden">
+        {managed && (
+          <PoolResetRecommendations pool={pool} now={now} onChanged={managed} />
+        )}
         <PoolNotices pool={pool} now={now} />
         {manage?.available && managed && (
           <PoolReloadNotice info={manage} onChanged={managed} />

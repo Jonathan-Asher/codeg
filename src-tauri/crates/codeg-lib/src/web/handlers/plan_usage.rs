@@ -191,6 +191,9 @@ pub struct PoolRedeemResetParams {
     /// A session paused at its limit, to continue once the reset lands.
     #[serde(default)]
     pub conversation_id: Option<i32>,
+    /// Go ahead though the account's limit renews by itself soon.
+    #[serde(default)]
+    pub force: Option<bool>,
 }
 
 pub async fn usage_pool_redeem_reset(
@@ -202,6 +205,7 @@ pub async fn usage_pool_redeem_reset(
         &params.name,
         params.grant_id,
         params.conversation_id,
+        params.force.unwrap_or(false),
     )
     .await
     .map(Json)

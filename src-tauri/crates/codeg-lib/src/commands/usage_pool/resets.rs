@@ -13,6 +13,11 @@
 //! answered as a listing: a pool that answers anything else is not asked
 //! again for half an hour unless its version changes, and is never sent a
 //! redeem or a recheck.
+//!
+//! The pool also says which accounts it would use a reset on now (one at
+//! its limit, with a grant that frees it) and which are at a limit that
+//! renews by itself soon: it refuses a reset on those unless asked to go
+//! ahead (`force`), which codeg sends only after its own warning.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -21,7 +26,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{
-    clean_label, lenient, lenient_list, lenient_time, PlanUsagePool, PoolConfig, ProxyKey, CLIENT,
+    clean_label, clean_word, lenient, lenient_list, lenient_time, PlanUsagePool, PoolConfig,
+    ProxyKey, CLIENT,
 };
 use crate::app_error::{AppCommandError, AppErrorCode};
 use crate::commands::limit_resets::LimitResetKind;
@@ -43,6 +49,14 @@ const GRANT_ID_MAX_CHARS: usize = 128;
 /// model launch: one Fable reset for Max, Team Premium and Enterprise
 /// Premium").
 const GRANT_LABEL_MAX_CHARS: usize = 160;
+/// The pool's reason for its advice on an account is a short sentence.
+const ADVICE_MAX_CHARS: usize = 240;
+/// Limits an account can be at: the 5-hour one, the weekly one and a few
+/// models' own.
+const MAX_WALL: usize = 8;
+/// The longest claim guard taken from the pool: a guard past the weekly
+/// window would hold back every reset.
+const CLAIM_GUARD_MAX_MS: f64 = 7.0 * 86_400_000.0;
 
 impl PoolConfig {
     /// A route next to the status endpoint, on the same address.
@@ -67,6 +81,22 @@ struct RawResets {
     /// Required: a body without it is not a listing.
     #[serde(deserialize_with = "lenient")]
     accounts: Option<Vec<Value>>,
+    /// How close to an account's own renewal the pool refuses a reset
+    /// unless forced (milliseconds).
+    #[serde(deserialize_with = "lenient")]
+    claim_guard_ms: Option<f64>,
+    /// The accounts it would use a reset on now, and with which grant.
+    #[serde(deserialize_with = "lenient_list")]
+    recommended: Vec<RawRecommendation>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct RawRecommendation {
+    #[serde(deserialize_with = "lenient")]
+    account: Option<String>,
+    #[serde(deserialize_with = "lenient")]
+    grant_id: Option<Value>,
 }
 
 #[derive(Default, Deserialize)]
@@ -99,6 +129,22 @@ struct RawResetAccount {
     checked_at: Option<i64>,
     #[serde(deserialize_with = "lenient")]
     auto_redeem: Option<RawAutoRedeem>,
+    #[serde(deserialize_with = "lenient")]
+    at_wall: Option<bool>,
+    #[serde(deserialize_with = "lenient_list")]
+    wall: Vec<String>,
+    #[serde(deserialize_with = "lenient")]
+    weekly_utilization: Option<f64>,
+    #[serde(deserialize_with = "lenient_time")]
+    weekly_renews_at: Option<i64>,
+    #[serde(deserialize_with = "lenient")]
+    renews_soon: Option<bool>,
+    #[serde(deserialize_with = "lenient")]
+    recommended: Option<bool>,
+    #[serde(deserialize_with = "lenient")]
+    recommended_grant_id: Option<Value>,
+    #[serde(deserialize_with = "lenient")]
+    advice: Option<String>,
 }
 
 #[derive(Default, Deserialize)]
@@ -182,6 +228,44 @@ pub struct PoolAccountResets {
     /// reading, not from the listing.
     #[serde(default)]
     pub limits_reached: Vec<String>,
+    /// The pool finds the account at a limit it can't serve past.
+    #[serde(default)]
+    pub at_wall: bool,
+    /// The limits it is at, as the pool names them: `general` (the weekly
+    /// limit), `session` (the 5-hour one) or a model family (`fable`).
+    #[serde(default)]
+    pub wall: Vec<String>,
+    /// The share of its general weekly limit used (0 to 1), when known.
+    #[serde(default)]
+    pub weekly_utilization: Option<f64>,
+    /// When its own weekly limit renews by itself, at no cost (epoch
+    /// seconds; only a time still ahead).
+    #[serde(default)]
+    pub weekly_renews_at: Option<i64>,
+    /// The limit it is at renews by itself within the pool's claim guard
+    /// (`PlanUsagePool::reset_claim_guard_secs`): the pool refuses a reset
+    /// on it unless asked to go ahead.
+    #[serde(default)]
+    pub renews_soon: bool,
+    /// The pool would use a reset on it now.
+    #[serde(default)]
+    pub recommended: bool,
+    /// The grant it would use for that; the provider's next when `None`.
+    #[serde(default)]
+    pub recommended_grant_id: Option<String>,
+    /// The pool's reason, in English: shown only as a hint.
+    #[serde(default)]
+    pub advice: Option<String>,
+}
+
+/// A `GET /maxpool/resets` body, as read.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ResetsListing {
+    /// Each Claude account's resets, by name.
+    pub accounts: Vec<(String, PoolAccountResets)>,
+    /// How close to an account's own renewal the pool holds a reset back
+    /// unless asked to go ahead (seconds), when it says.
+    pub claim_guard_secs: Option<i64>,
 }
 
 /// The window a grant's `clears` names for the 5-hour limit.
@@ -299,9 +383,42 @@ fn grant_from(raw: RawGrant, now: i64) -> Option<PoolResetGrant> {
     })
 }
 
-/// Each Claude account's resets in a `GET /maxpool/resets` body, by name.
-/// `None` for a body that isn't a listing.
-pub(crate) fn parse_resets(body: &[u8], now: i64) -> Option<Vec<(String, PoolAccountResets)>> {
+/// The limits an account is at, as the pool names them: short words only,
+/// lower case, each once.
+fn wall_list(raw: Vec<String>) -> Vec<String> {
+    let mut wall: Vec<String> = Vec::new();
+    for word in raw.into_iter().filter_map(|w| clean_word(Some(w))) {
+        let word = word.to_ascii_lowercase();
+        if !wall.contains(&word) && wall.len() < MAX_WALL {
+            wall.push(word);
+        }
+    }
+    wall
+}
+
+/// The pool's reason for its advice: control characters dropped, trimmed,
+/// capped.
+fn advice_text(raw: Option<String>) -> Option<String> {
+    let cleaned: String = raw?.chars().filter(|c| !c.is_control()).collect();
+    let cleaned: String = cleaned.trim().chars().take(ADVICE_MAX_CHARS).collect();
+    (!cleaned.is_empty()).then_some(cleaned)
+}
+
+/// A share used, 0 to 1: past the whole of it reads as all of it.
+fn utilization(raw: Option<f64>) -> Option<f64> {
+    raw.filter(|u| u.is_finite() && *u >= 0.0)
+        .map(|u| u.min(1.0))
+}
+
+/// The claim guard in seconds, from the pool's milliseconds.
+fn claim_guard_secs(raw: Option<f64>) -> Option<i64> {
+    raw.filter(|ms| ms.is_finite() && *ms >= 1000.0 && *ms <= CLAIM_GUARD_MAX_MS)
+        .map(|ms| (ms / 1000.0).round() as i64)
+}
+
+/// Each Claude account's resets in a `GET /maxpool/resets` body, by name,
+/// with the pool's advice on them. `None` for a body that isn't a listing.
+pub(crate) fn parse_resets(body: &[u8], now: i64) -> Option<ResetsListing> {
     let value = serde_json::from_slice::<Value>(body).ok()?;
     if !value.is_object() {
         return None;
@@ -315,6 +432,15 @@ pub(crate) fn parse_resets(body: &[u8], now: i64) -> Option<Vec<(String, PoolAcc
         .as_ref()
         .and_then(|a| a.enabled)
         .unwrap_or(false);
+    // The pool's own list of the accounts it would use a reset on now.
+    let listed_recommended: Vec<(String, Option<String>)> = raw
+        .recommended
+        .iter()
+        .filter_map(|r| {
+            let name = clean_label(r.account.clone())?;
+            Some((name, grant_id(r.grant_id.as_ref())))
+        })
+        .collect();
     let mut out = Vec::new();
     for entry in raw.accounts? {
         let Ok(account) = serde_json::from_value::<RawResetAccount>(entry) else {
@@ -345,6 +471,16 @@ pub(crate) fn parse_resets(body: &[u8], now: i64) -> Option<Vec<(String, PoolAcc
         let available = grants
             .iter()
             .fold(0u32, |sum, g| sum.saturating_add(g.count));
+        // Recommended by the account's own entry or by the pool's list; a
+        // paused account's resets aren't the pool's to use.
+        let listed = listed_recommended.iter().find(|(n, _)| *n == name);
+        let recommended = enabled && (account.recommended == Some(true) || listed.is_some());
+        let recommended_grant_id = if recommended {
+            grant_id(account.recommended_grant_id.as_ref())
+                .or_else(|| listed.and_then(|(_, id)| id.clone()))
+        } else {
+            None
+        };
         out.push((
             name,
             PoolAccountResets {
@@ -361,10 +497,21 @@ pub(crate) fn parse_resets(body: &[u8], now: i64) -> Option<Vec<(String, PoolAcc
                         .unwrap_or(false),
                 checked_at: account.checked_at,
                 limits_reached: Vec::new(),
+                at_wall: account.at_wall.unwrap_or(false),
+                wall: wall_list(account.wall),
+                weekly_utilization: utilization(account.weekly_utilization),
+                weekly_renews_at: account.weekly_renews_at.filter(|t| *t > now),
+                renews_soon: account.renews_soon.unwrap_or(false),
+                recommended,
+                recommended_grant_id,
+                advice: advice_text(account.advice),
             },
         ));
     }
-    Some(out)
+    Some(ResetsListing {
+        accounts: out,
+        claim_guard_secs: claim_guard_secs(raw.claim_guard_ms),
+    })
 }
 
 // ─── Reading them with the status ───────────────────────────────────────
@@ -372,7 +519,7 @@ pub(crate) fn parse_resets(body: &[u8], now: i64) -> Option<Vec<(String, PoolAcc
 /// What asking `GET /maxpool/resets` came to.
 pub(crate) enum ResetsRead {
     /// The routes are there: each Claude account's resets, by name.
-    Listed(Vec<(String, PoolAccountResets)>),
+    Listed(ResetsListing),
     /// A pool without the routes.
     Unsupported,
     /// No answer this time: keep what was shown.
@@ -502,19 +649,25 @@ fn put_resets(pool: &mut PlanUsagePool, read: ResetsRead, previous: Option<&Plan
     match read {
         ResetsRead::Listed(listed) => {
             pool.resets_supported = true;
+            pool.reset_claim_guard_secs = listed.claim_guard_secs;
             for account in pool.accounts.iter_mut().filter(|a| !a.provider) {
                 account.resets = listed
+                    .accounts
                     .iter()
                     .find(|(name, _)| *name == account.name)
                     .map(|(_, resets)| resets.clone());
             }
         }
-        ResetsRead::Unsupported => pool.resets_supported = false,
+        ResetsRead::Unsupported => {
+            pool.resets_supported = false;
+            pool.reset_claim_guard_secs = None;
+        }
         ResetsRead::Unavailable => {
             let Some(previous) = previous else {
                 return;
             };
             pool.resets_supported = previous.resets_supported;
+            pool.reset_claim_guard_secs = previous.reset_claim_guard_secs;
             for account in pool.accounts.iter_mut().filter(|a| !a.provider) {
                 account.resets = previous
                     .accounts
@@ -577,6 +730,10 @@ struct RawAnswer {
     probe: Option<RawProbe>,
     #[serde(deserialize_with = "lenient")]
     recovered: Option<Value>,
+    /// With a `renews_soon` refusal: when the account's limit renews by
+    /// itself.
+    #[serde(deserialize_with = "lenient_time")]
+    renews_at: Option<i64>,
 }
 
 #[derive(Default, Deserialize)]
@@ -600,6 +757,7 @@ fn refusal_key(code: &str) -> &'static str {
         "needs_login" | "subscription_gone" => "pool.resets.error.needsLogin",
         "account_not_found" => "pool.resets.error.noAccount",
         "too_soon" => "pool.resets.error.tooSoon",
+        "renews_soon" => "pool.resets.error.renewsSoon",
         _ => "pool.resets.error.failed",
     }
 }
@@ -625,6 +783,10 @@ fn pool_error(status: u16, answer: &RawAnswer) -> AppCommandError {
     };
     let mut params = std::collections::BTreeMap::new();
     params.insert("reason".to_string(), code.clone());
+    if let Some(at) = answer.renews_at {
+        // Epoch seconds, for the screen to say when.
+        params.insert("renews_at".to_string(), at.to_string());
+    }
     AppCommandError::new(app_code, message).with_i18n(refusal_key(&code), params)
 }
 
@@ -690,14 +852,20 @@ fn checked_name(raw: &str) -> Result<String, AppCommandError> {
         .ok_or_else(|| AppCommandError::invalid_input("Unknown account name."))
 }
 
+/// `force` asks the pool to use it even though the account's limit renews
+/// by itself soon (it refuses with `renews_soon` otherwise).
 pub(super) async fn redeem_with(
     config: &PoolConfig,
     name: &str,
     grant_id: Option<&str>,
+    force: bool,
 ) -> Result<PoolResetOutcome, AppCommandError> {
     let mut body = serde_json::json!({ "account": name });
     if let Some(id) = grant_id {
         body["grantId"] = Value::String(id.to_string());
+    }
+    if force {
+        body["force"] = Value::Bool(true);
     }
     match post(config, "/maxpool/resets/redeem", Some(body), REDEEM_TIMEOUT).await {
         Ok((200, answer)) if answer.ok == Some(true) => Ok(if answer.already_used == Some(true) {
@@ -737,12 +905,14 @@ pub(super) async fn recheck_with(config: &PoolConfig, name: &str) -> Result<(boo
 
 /// Use one of a pool account's resets (`grant_id`, or the provider's next).
 /// It can't be undone. With `conversation_id`, that session — paused at its
-/// limit — continues once the reset landed.
+/// limit — continues once the reset landed. `force` goes ahead on an
+/// account whose limit renews by itself soon, once the user was told so.
 pub async fn redeem_reset(
     db: &AppDatabase,
     name: &str,
     grant_id: Option<String>,
     conversation_id: Option<i32>,
+    force: bool,
 ) -> Result<PoolRedeemResult, AppCommandError> {
     let name = checked_name(name)?;
     let grant_id = grant_id
@@ -754,8 +924,8 @@ pub async fn redeem_reset(
         return Err(AppCommandError::invalid_input("Unknown reset."));
     }
     let config = pool_with_routes().await?;
-    let outcome = redeem_with(&config, &name, grant_id.as_deref()).await?;
-    tracing::info!("[usage-pool] a pool reset was used from codeg: {outcome:?}");
+    let outcome = redeem_with(&config, &name, grant_id.as_deref(), force).await?;
+    tracing::info!("[usage-pool] a pool reset was used from codeg: {outcome:?} (force: {force})");
     let pool = super::refresh(Duration::ZERO).await;
     let mut continued = None;
     if outcome == PoolResetOutcome::Reset {
@@ -803,8 +973,16 @@ pub async fn usage_pool_redeem_reset(
     name: String,
     grant_id: Option<String>,
     conversation_id: Option<i32>,
+    force: Option<bool>,
 ) -> Result<PoolRedeemResult, AppCommandError> {
-    redeem_reset(&db, &name, grant_id, conversation_id).await
+    redeem_reset(
+        &db,
+        &name,
+        grant_id,
+        conversation_id,
+        force.unwrap_or(false),
+    )
+    .await
 }
 
 #[cfg(feature = "tauri-runtime")]

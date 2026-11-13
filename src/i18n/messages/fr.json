@@ -7233,6 +7233,13 @@
         "recheckLifted": "{name} est de nouveau utilisable.",
         "recheckSame": "{name} relu : rien à lever pour l'instant.",
         "recheckUnread": "Le pool n'a pas pu lire l'utilisation de {name} pour le moment.",
+        "recommended": "Réinitialisation disponible : <b>{name}</b> est à sa limite",
+        "renewsSoon": "Sa limite se renouvelle d'elle-même dans {duration} : une réinitialisation maintenant serait presque entièrement perdue.",
+        "renewsSoonUnknown": "Sa limite se renouvelle d'elle-même bientôt : une réinitialisation maintenant serait presque entièrement perdue.",
+        "renewsSoonConfirm": "Sa limite se renouvelle de toute façon d'elle-même à {time} (dans {duration}) : une réinitialisation maintenant serait presque entièrement perdue.",
+        "renewsSoonConfirmUnknown": "Sa limite se renouvelle de toute façon d'elle-même bientôt : une réinitialisation maintenant serait presque entièrement perdue.",
+        "renewsSoonGuard": "Le pool retient les réinitialisations à moins de {hours, plural, one {# heure} other {# heures}} du renouvellement propre d'un compte ; celle-ci n'a lieu que parce que vous le demandez.",
+        "useAnyway": "Utiliser quand même",
         "error": {
           "recentlyUsed": "Une réinitialisation vient d'être utilisée sur ce compte.",
           "inProgress": "Une réinitialisation est déjà en cours d'utilisation sur ce compte.",
@@ -7243,6 +7250,8 @@
           "needsLogin": "Ce compte doit d'abord se reconnecter.",
           "noAccount": "Le pool n'a aucun compte de ce nom.",
           "tooSoon": "Ce compte vient d'être vérifié. Réessayez dans quelques secondes.",
+          "renewsSoon": "La limite de ce compte se renouvelle d'elle-même bientôt, le pool a donc retenu la réinitialisation.",
+          "renewsSoonAt": "La limite de ce compte se renouvelle d'elle-même à {time}, le pool a donc retenu la réinitialisation.",
           "failed": "Cela n'a pas fonctionné. Réessayez dans un instant.",
           "unsupported": "Ce pool de comptes ne peut pas utiliser de réinitialisations depuis codeg. Mettez maxpool à jour.",
           "unreachable": "Le pool de comptes ne répond pas."

@@ -7233,6 +7233,13 @@
         "recheckLifted": "{name} 已可再次使用。",
         "recheckSame": "已重新讀取 {name}：暫時沒有可解除的限制。",
         "recheckUnread": "帳號池剛才無法讀取 {name} 的用量。",
+        "recommended": "有可用的重設：<b>{name}</b> 已達到上限",
+        "renewsSoon": "其上限將在 {duration} 後自動恢復，現在使用重設大多是浪費。",
+        "renewsSoonUnknown": "其上限很快會自動恢復，現在使用重設大多是浪費。",
+        "renewsSoonConfirm": "其上限本來就會在 {time}（{duration} 後）自動恢復，現在使用重設大多是浪費。",
+        "renewsSoonConfirmUnknown": "其上限本來很快就會自動恢復，現在使用重設大多是浪費。",
+        "renewsSoonGuard": "帳號池在帳號自行恢復前 {hours} 小時內會暫緩使用重設；這次只因你的要求才會繼續。",
+        "useAnyway": "仍要使用重設",
         "error": {
           "recentlyUsed": "此帳號剛剛使用過一次重設。",
           "inProgress": "此帳號正在使用一次重設。",
@@ -7243,6 +7250,8 @@
           "needsLogin": "此帳號需要先重新登入。",
           "noAccount": "帳號池中沒有這個名稱的帳號。",
           "tooSoon": "此帳號剛剛檢查過。請過幾秒再試。",
+          "renewsSoon": "此帳號的上限很快會自動恢復，因此帳號池暫緩了這次重設。",
+          "renewsSoonAt": "此帳號的上限將在 {time} 自動恢復，因此帳號池暫緩了這次重設。",
           "failed": "操作沒有成功。請稍後再試。",
           "unsupported": "此帳號池無法透過 codeg 使用重設。請更新 maxpool。",
           "unreachable": "帳號池沒有回應。"
