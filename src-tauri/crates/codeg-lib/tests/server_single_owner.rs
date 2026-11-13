@@ -96,7 +96,12 @@ fn describe(out: &Output) -> String {
 
 #[test]
 fn help_and_version_print_and_touch_nothing() {
-    let version = env!("CARGO_PKG_VERSION");
+    // The binary's release stamp when this build has one (same environment as
+    // the binary's compile), else the crate version.
+    let version = option_env!("CODEG_BUILD_VERSION")
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or(env!("CARGO_PKG_VERSION"));
     let cases: [(&[&str], &str); 5] = [
         (&["--help"], "Usage: codeg-server"),
         (&["-h"], "Usage: codeg-server"),

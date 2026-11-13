@@ -322,7 +322,7 @@ pub async fn perform_update(
     // the running version over itself — which moves the *current* binary into
     // `.bak`, destroying the genuine previous version that rollback depends on,
     // for no benefit. The check mirrors `check_app_update`'s availability test.
-    if !version::is_newer(&manifest.version, env!("CARGO_PKG_VERSION")) {
+    if !version::is_newer(&manifest.version, version::running_app_version()) {
         return Err(AppCommandError::already_exists(
             "The server is already running the latest version",
         ));

@@ -20,8 +20,9 @@ use crate::app_error::AppCommandError;
 /// version (`CARGO_PKG_VERSION`) is deliberately NOT stamped per build: a
 /// version change alters the crate's metadata hash, which throws away every
 /// incremental-compilation artifact and forces a from-scratch compile of the
-/// whole crate on each build. Server builds, which register nothing, report
-/// the crate version as before.
+/// whole crate on each build. Server builds register the version their
+/// release build stamped into the `codeg-server` binary (`CODEG_BUILD_VERSION`);
+/// unstamped server builds register nothing and report the crate version.
 static RUNNING_APP_VERSION: OnceLock<String> = OnceLock::new();
 
 /// Record the running app's version (desktop startup). First call wins.
