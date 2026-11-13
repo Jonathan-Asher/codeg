@@ -38,11 +38,29 @@ pub(crate) const WINDOW_STATE_FLAGS: StateFlags =
 /// What a launch builds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct StartupPlan {
+    /// Whether `main` is built at all. False only for a windowless launch
+    /// (`crate::windowless`): a Dock click or the menu bar icon builds it on
+    /// demand instead.
+    pub build_main: bool,
     /// Saved remote connection whose window opens at launch.
     pub remote_connection_id: Option<i32>,
     /// Whether `main` is built hidden. Only ever true alongside a remote
     /// window that leads instead.
     pub hide_main: bool,
+    /// Whether Quick Ask's hidden window is pre-built a few seconds after
+    /// launch, so the first shortcut press opens it instantly.
+    pub prebuild_quick_ask: bool,
+    /// Whether the global shortcuts (Quick Ask, Talk on this Mac) are
+    /// registered. Each opens a window or acts on one.
+    pub register_shortcuts: bool,
+}
+
+impl StartupPlan {
+    /// Whether the launch builds any window by itself. Quick Ask's pre-built
+    /// window counts: it is a webview like any other, hidden or not.
+    pub(crate) fn builds_any_window(&self) -> bool {
+        self.build_main || self.remote_connection_id.is_some() || self.prebuild_quick_ask
+    }
 }
 
 /// Decide what a launch opens.
@@ -54,19 +72,38 @@ pub(crate) struct StartupPlan {
 /// * `can_hide_main` — whether a hidden `main` stays reachable, i.e. whether
 ///   the tray is usable ([`windows::can_hide_to_tray`]). On Linux it is not,
 ///   so `main` stays on screen and the remote window opens on top of it.
+/// * `windowless` — the launch runs without a window (`crate::windowless`):
+///   nothing is built, nothing pre-built, no shortcut registered, whatever
+///   the other inputs say.
 pub(crate) fn plan_startup(
     local_link: bool,
     startup_remote: Option<i32>,
     can_hide_main: bool,
+    windowless: bool,
 ) -> StartupPlan {
-    match startup_remote {
-        Some(id) if !local_link => StartupPlan {
-            remote_connection_id: Some(id),
-            hide_main: can_hide_main,
-        },
-        _ => StartupPlan {
+    if windowless {
+        return StartupPlan {
+            build_main: false,
             remote_connection_id: None,
             hide_main: false,
+            prebuild_quick_ask: false,
+            register_shortcuts: false,
+        };
+    }
+    match startup_remote {
+        Some(id) if !local_link => StartupPlan {
+            build_main: true,
+            remote_connection_id: Some(id),
+            hide_main: can_hide_main,
+            prebuild_quick_ask: true,
+            register_shortcuts: true,
+        },
+        _ => StartupPlan {
+            build_main: true,
+            remote_connection_id: None,
+            hide_main: false,
+            prebuild_quick_ask: true,
+            register_shortcuts: true,
         },
     }
 }
@@ -291,25 +328,28 @@ mod tests {
         ReopenTarget::Remote(label.to_string())
     }
 
+    /// Everything a windowed launch builds besides the windows the plan
+    /// names: `main`, Quick Ask's pre-built window, the shortcuts.
+    fn windowed(remote_connection_id: Option<i32>, hide_main: bool) -> StartupPlan {
+        StartupPlan {
+            build_main: true,
+            remote_connection_id,
+            hide_main,
+            prebuild_quick_ask: true,
+            register_shortcuts: true,
+        }
+    }
+
     #[test]
     fn a_launch_without_a_startup_workspace_opens_main_alone() {
-        assert_eq!(
-            plan_startup(false, None, true),
-            StartupPlan {
-                remote_connection_id: None,
-                hide_main: false,
-            }
-        );
+        assert_eq!(plan_startup(false, None, true, false), windowed(None, false));
     }
 
     #[test]
     fn a_startup_workspace_opens_with_main_hidden_behind_it() {
         assert_eq!(
-            plan_startup(false, Some(7), true),
-            StartupPlan {
-                remote_connection_id: Some(7),
-                hide_main: true,
-            }
+            plan_startup(false, Some(7), true, false),
+            windowed(Some(7), true)
         );
     }
 
@@ -318,11 +358,8 @@ mod tests {
     #[test]
     fn a_link_to_a_local_conversation_wins_over_the_startup_workspace() {
         assert_eq!(
-            plan_startup(true, Some(7), true),
-            StartupPlan {
-                remote_connection_id: None,
-                hide_main: false,
-            }
+            plan_startup(true, Some(7), true, false),
+            windowed(None, false)
         );
     }
 
@@ -331,12 +368,50 @@ mod tests {
     #[test]
     fn without_a_usable_tray_main_stays_on_screen() {
         assert_eq!(
-            plan_startup(false, Some(7), false),
-            StartupPlan {
-                remote_connection_id: Some(7),
-                hide_main: false,
-            }
+            plan_startup(false, Some(7), false, false),
+            windowed(Some(7), false)
         );
+    }
+
+    /// A windowless launch builds no window of any kind and registers no
+    /// shortcut, whatever else asks for one: a startup remote workspace, a
+    /// link to a local conversation, a tray or none.
+    #[test]
+    fn a_windowless_launch_builds_no_window_at_all() {
+        for local_link in [false, true] {
+            for startup_remote in [None, Some(7)] {
+                for can_hide_main in [false, true] {
+                    let plan = plan_startup(local_link, startup_remote, can_hide_main, true);
+                    assert!(
+                        !plan.builds_any_window(),
+                        "{local_link} {startup_remote:?} {can_hide_main}: {plan:?}"
+                    );
+                    assert!(!plan.build_main);
+                    assert_eq!(plan.remote_connection_id, None);
+                    assert!(!plan.prebuild_quick_ask);
+                    assert!(!plan.register_shortcuts);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_windowed_launch_builds_main() {
+        for local_link in [false, true] {
+            for startup_remote in [None, Some(7)] {
+                for can_hide_main in [false, true] {
+                    let plan = plan_startup(local_link, startup_remote, can_hide_main, false);
+                    assert!(plan.build_main && plan.builds_any_window(), "{plan:?}");
+                    assert!(plan.register_shortcuts);
+                }
+            }
+        }
+    }
+
+    /// After a windowless launch, a Dock click finds no `main` and builds it.
+    #[test]
+    fn a_dock_click_with_no_window_builds_main() {
+        assert_eq!(reopen_target(None, &[]), ReopenTarget::Main);
     }
 
     #[test]

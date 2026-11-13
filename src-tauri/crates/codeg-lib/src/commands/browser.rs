@@ -2701,6 +2701,15 @@ fn address_refusal(app: &AppHandle, raw: &str) -> Result<Url, AppCommandError> {
     Ok(url)
 }
 
+/// Whether a workspace window (`main` or a remote workspace) is open to take an
+/// agent's tab.
+fn workspace_window_open(app: &AppHandle) -> bool {
+    app.webview_windows().keys().any(|label| {
+        label == "main"
+            || label.starts_with(crate::commands::remote_workspace::REMOTE_WORKSPACE_LABEL_PREFIX)
+    })
+}
+
 /// Open a tab on `url` and answer with the tab once it holds a page.
 ///
 /// The tab is opened by the workspace, not here: see
@@ -2716,6 +2725,13 @@ pub async fn agent_open_tab_core(
     raw_url: &str,
 ) -> Result<(agent::AgentTabSummary, Option<String>), AppCommandError> {
     let url = address_refusal(app, raw_url)?;
+    // Windowless (`crate::windowless`) with no window opened: nobody could
+    // answer, so say why now instead of after the answer timeout.
+    if crate::windowless::is_active() && !workspace_window_open(app) {
+        return Err(open_failed(
+            "codeg is running without a window, so there is no workspace to put a tab in",
+        ));
+    }
     let request_id = uuid::Uuid::new_v4().to_string();
     let answer = requests.arm(&request_id);
     events::emit_open_request(

@@ -780,12 +780,12 @@ pub mod desktop {
     }
 
     /// Startup, from `setup` with the settings already loaded: register the
-    /// saved shortcut, and pre-create the hidden window so the first press
-    /// opens it instantly. The window is built a few seconds later so it does
-    /// not compete with the workspace window for the first paint.
-    pub fn init_quick_ask(app: &AppHandle, settings: &QuickAskSettings) {
+    /// saved shortcut, and (`prebuild`) pre-create the hidden window so the
+    /// first press opens it instantly. The window is built a few seconds later
+    /// so it does not compete with the workspace window for the first paint.
+    pub fn init_quick_ask(app: &AppHandle, settings: &QuickAskSettings, prebuild: bool) {
         apply_quick_ask_settings(app, settings);
-        if !settings.enabled {
+        if !settings.enabled || !prebuild {
             return;
         }
         let app = app.clone();
