@@ -410,9 +410,10 @@ fn utilization(raw: Option<f64>) -> Option<f64> {
         .map(|u| u.min(1.0))
 }
 
-/// The claim guard in seconds, from the pool's milliseconds.
+/// The claim guard in seconds, from the pool's milliseconds (at least a
+/// second; not a number or past the cap reads as none).
 fn claim_guard_secs(raw: Option<f64>) -> Option<i64> {
-    raw.filter(|ms| ms.is_finite() && *ms >= 1000.0 && *ms <= CLAIM_GUARD_MAX_MS)
+    raw.filter(|ms| (1000.0..=CLAIM_GUARD_MAX_MS).contains(ms))
         .map(|ms| (ms / 1000.0).round() as i64)
 }
 
