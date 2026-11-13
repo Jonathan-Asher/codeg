@@ -1502,10 +1502,186 @@ describe("PlanUsagePage account pool resets", () => {
   })
 
   it("shows neither resets nor Recheck when the pool lacks the routes", async () => {
-    await mountWith(resetsPool({ resets_supported: false }))
+    const p = resetsPool({ resets_supported: false })
+    p.accounts[0] = {
+      ...p.accounts[0],
+      resets: resets({ at_wall: true, recommended: true }),
+    }
+    await mountWith(p)
     const claude = card("Claude Code")
     expect(claude.querySelector('[data-slot="pool-resets"]')).toBeNull()
     expect(within(claude).queryByTestId("pool-recheck")).toBeNull()
     expect(within(claude).queryByTestId("pool-reset-use")).toBeNull()
+    expect(
+      claude.querySelector('[data-slot="pool-reset-recommended"]')
+    ).toBeNull()
+  })
+
+  it("highlights each account the pool would use a reset on, and uses it after the same confirmation", async () => {
+    manage.usagePoolRedeemReset.mockResolvedValue({
+      account: "primary",
+      outcome: "reset",
+      pool: null,
+      continued: null,
+    })
+    const p = resetsPool()
+    p.accounts[0] = {
+      ...p.accounts[0],
+      resets: resets({
+        limits_reached: ["seven_day"],
+        at_wall: true,
+        wall: ["general"],
+        weekly_utilization: 1,
+        recommended: true,
+        recommended_grant_id: "g-weekly",
+        advice: "at the general weekly limit; renews in 3d",
+      }),
+    }
+    await mountWith(p)
+    const claude = card("Claude Code")
+    const highlight = claude.querySelector<HTMLElement>(
+      '[data-slot="pool-reset-recommended"]'
+    )!
+    // At the top of the card, above the accounts.
+    expect(
+      highlight.compareDocumentPosition(
+        claude.querySelector('[data-slot="pool-accounts"]')!
+      ) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    const lines = within(highlight).getAllByTestId(
+      "pool-reset-recommended-text"
+    )
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toHaveTextContent(
+      "Reset available: primary is at its limit"
+    )
+    expect(lines[0]).toHaveAttribute(
+      "title",
+      "at the general weekly limit; renews in 3d"
+    )
+
+    fireEvent.click(within(highlight).getByTestId("pool-reset-recommended-use"))
+    expect(screen.getByTestId("pool-reset-confirm-body")).toHaveTextContent(
+      "Use 1 reset on primary? It refills the weekly limit now and can't be undone."
+    )
+    expect(screen.queryByTestId("pool-reset-confirm-renews")).toBeNull()
+    expect(manage.usagePoolRedeemReset).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId("pool-reset-confirm-use"))
+    await vi.waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "Reset used on primary: its limits are refilled."
+      )
+    )
+    expect(manage.usagePoolRedeemReset).toHaveBeenCalledTimes(1)
+    expect(manage.usagePoolRedeemReset.mock.calls[0][0]).toEqual({
+      name: "primary",
+      grantId: "g-weekly",
+      conversationId: undefined,
+    })
+  })
+
+  it("highlights nothing the pool's reading can't use: a grant it doesn't hold, or a limit that renews soon", async () => {
+    const p = resetsPool()
+    p.accounts[0] = {
+      ...p.accounts[0],
+      resets: resets({ at_wall: true, recommended: true, renews_soon: true }),
+    }
+    p.accounts[1] = {
+      ...p.accounts[1],
+      state: "exhausted",
+      resets: resets({
+        at_wall: true,
+        recommended: true,
+        recommended_grant_id: "g-gone",
+      }),
+    }
+    await mountWith(p)
+    expect(
+      card("Claude Code").querySelector('[data-slot="pool-reset-recommended"]')
+    ).toBeNull()
+  })
+
+  it("says when a limit renews by itself, and uses its reset only after a warning, going ahead anyway", async () => {
+    manage.usagePoolRedeemReset.mockResolvedValue({
+      account: "primary",
+      outcome: "reset",
+      pool: null,
+      continued: null,
+    })
+    const p = resetsPool({ reset_claim_guard_secs: 43_200 })
+    p.accounts[0] = {
+      ...p.accounts[0],
+      resets: resets({
+        limits_reached: ["seven_day"],
+        at_wall: true,
+        wall: ["general"],
+        weekly_renews_at: now() + 5 * 3600 + 20 * 60 + 30,
+        renews_soon: true,
+        recommended: true,
+        advice: "weekly renews in 5h; not worth a reset",
+      }),
+    }
+    await mountWith(p)
+    const primary = accountRow("primary")
+    const renews = within(primary).getByTestId("pool-renews-soon")
+    expect(renews).toHaveTextContent(
+      "Its limit renews by itself in 5h 20m, so a reset now is mostly wasted."
+    )
+    expect(renews).toHaveAttribute(
+      "title",
+      "weekly renews in 5h; not worth a reset"
+    )
+    // Never highlighted while its limit renews by itself soon.
+    expect(
+      card("Claude Code").querySelector('[data-slot="pool-reset-recommended"]')
+    ).toBeNull()
+
+    fireEvent.click(within(primary).getByTestId("pool-reset-use"))
+    const confirm = screen.getByTestId("pool-reset-confirm")
+    expect(confirm).toHaveAttribute("data-renews-soon", "true")
+    expect(screen.getByTestId("pool-reset-confirm-body")).toHaveTextContent(
+      "Use 1 reset on primary? It refills the weekly limit now and can't be undone."
+    )
+    expect(screen.getByTestId("pool-reset-confirm-renews")).toHaveTextContent(
+      /^Its limit renews by itself at .+ \(in 5h 20m\) anyway, so a reset now is mostly wasted\. The pool holds resets back within 12 hours of an account's own renewal; this one goes ahead only because you ask\.$/
+    )
+    const use = screen.getByTestId("pool-reset-confirm-use")
+    expect(use).toHaveTextContent("Use reset anyway")
+    expect(manage.usagePoolRedeemReset).not.toHaveBeenCalled()
+    fireEvent.click(use)
+    await vi.waitFor(() =>
+      expect(manage.usagePoolRedeemReset).toHaveBeenCalledWith({
+        name: "primary",
+        grantId: "g-weekly",
+        conversationId: undefined,
+        force: true,
+      })
+    )
+  })
+
+  it("says when an account's limit renews by itself if the pool holds its reset back", async () => {
+    manage.usagePoolRedeemReset.mockRejectedValue({
+      code: "invalid_input",
+      message: "This account's limit renews by itself within 12 h.",
+      i18n_key: "pool.resets.error.renewsSoon",
+      i18n_params: {
+        reason: "renews_soon",
+        renews_at: String(now() + 3 * 3600),
+      },
+    })
+    await mountWith(resetsPool())
+    fireEvent.click(within(accountRow("primary")).getByTestId("pool-reset-use"))
+    expect(screen.queryByTestId("pool-reset-confirm-renews")).toBeNull()
+    fireEvent.click(screen.getByTestId("pool-reset-confirm-use"))
+    await vi.waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /^This account's limit renews by itself at .+, so the pool held the reset back\.$/
+        )
+      )
+    )
+    expect(manage.usagePoolRedeemReset.mock.calls[0][0]).not.toHaveProperty(
+      "force"
+    )
   })
 })

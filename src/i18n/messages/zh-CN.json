@@ -7233,6 +7233,13 @@
         "recheckLifted": "{name} 已可再次使用。",
         "recheckSame": "已重新读取 {name}：暂时没有可解除的限制。",
         "recheckUnread": "账号池刚才无法读取 {name} 的用量。",
+        "recommended": "有可用的重置：<b>{name}</b> 已达到上限",
+        "renewsSoon": "其上限将在 {duration} 后自动恢复，现在使用重置基本是浪费。",
+        "renewsSoonUnknown": "其上限很快会自动恢复，现在使用重置基本是浪费。",
+        "renewsSoonConfirm": "其上限本来就会在 {time}（{duration} 后）自动恢复，现在使用重置基本是浪费。",
+        "renewsSoonConfirmUnknown": "其上限本来很快就会自动恢复，现在使用重置基本是浪费。",
+        "renewsSoonGuard": "账号池在账号自行恢复前 {hours} 小时内会暂缓使用重置；这次只因你的要求才会继续。",
+        "useAnyway": "仍然使用重置",
         "error": {
           "recentlyUsed": "此账号刚刚使用过一次重置。",
           "inProgress": "此账号正在使用一次重置。",
@@ -7243,6 +7250,8 @@
           "needsLogin": "此账号需要先重新登录。",
           "noAccount": "账号池中没有这个名称的账号。",
           "tooSoon": "此账号刚刚检查过。请过几秒再试。",
+          "renewsSoon": "此账号的上限很快会自动恢复，因此账号池暂缓了这次重置。",
+          "renewsSoonAt": "此账号的上限将在 {time} 自动恢复，因此账号池暂缓了这次重置。",
           "failed": "操作没有成功。请稍后再试。",
           "unsupported": "此账号池无法通过 codeg 使用重置。请更新 maxpool。",
           "unreachable": "账号池没有响应。"

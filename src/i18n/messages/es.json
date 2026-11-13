@@ -7233,6 +7233,13 @@
         "recheckLifted": "{name} se puede usar de nuevo.",
         "recheckSame": "{name} leída de nuevo: todavía no hay nada que levantar.",
         "recheckUnread": "El pool no pudo leer el uso de {name} ahora mismo.",
+        "recommended": "Reinicio disponible: <b>{name}</b> está en su límite",
+        "renewsSoon": "Su límite se renueva solo en {duration}, así que un reinicio ahora se desperdicia casi por completo.",
+        "renewsSoonUnknown": "Su límite se renueva solo pronto, así que un reinicio ahora se desperdicia casi por completo.",
+        "renewsSoonConfirm": "Su límite se renueva solo de todos modos a las {time} (en {duration}), así que un reinicio ahora se desperdicia casi por completo.",
+        "renewsSoonConfirmUnknown": "Su límite se renueva solo pronto de todos modos, así que un reinicio ahora se desperdicia casi por completo.",
+        "renewsSoonGuard": "El pool retiene los reinicios a menos de {hours, plural, one {# hora} other {# horas}} de la renovación propia de una cuenta; este sigue adelante solo porque lo pides.",
+        "useAnyway": "Usar reinicio igualmente",
         "error": {
           "recentlyUsed": "Se acaba de usar un reinicio en esta cuenta.",
           "inProgress": "Ya se está usando un reinicio en esta cuenta.",
@@ -7243,6 +7250,8 @@
           "needsLogin": "Esta cuenta tiene que volver a iniciar sesión primero.",
           "noAccount": "El pool no tiene ninguna cuenta con ese nombre.",
           "tooSoon": "Esta cuenta se acaba de comprobar. Inténtalo de nuevo en unos segundos.",
+          "renewsSoon": "El límite de esta cuenta se renueva solo pronto, así que el pool retuvo el reinicio.",
+          "renewsSoonAt": "El límite de esta cuenta se renueva solo a las {time}, así que el pool retuvo el reinicio.",
           "failed": "No ha funcionado. Inténtalo de nuevo en un momento.",
           "unsupported": "Este pool de cuentas no puede usar reinicios desde codeg. Actualiza maxpool.",
           "unreachable": "El pool de cuentas no responde."

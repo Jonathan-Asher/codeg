@@ -441,9 +441,12 @@ export function poolResetGroupKey(
  *  grant that refills every one of them. A model's own weekly limit counts
  *  only for a session on that model (`modelFamily`); a grant that refills
  *  only some of the limits, or none (one model's limit while the general
- *  weekly one holds the account), is never offered. Of those that clear it,
- *  the grant that refills the least beyond what holds the account goes
- *  first, then the one that expires first. `null` when no reset clears it. */
+ *  weekly one holds the account), is never offered, nor one on an account
+ *  whose limit renews by itself soon (the pool holds those back). Of those
+ *  that clear it, the pool's own pick goes first ({@link
+ *  poolPicksGrant}), then the grant that refills the least beyond what
+ *  holds the account, then the one that expires first. `null` when no reset
+ *  clears it. */
 export function poolResetForPause(
   pool: PlanUsagePool | null,
   now: number,
@@ -454,10 +457,12 @@ export function poolResetForPause(
   const candidates: {
     account: PlanUsagePoolAccount
     grant: PlanUsagePoolResetGrant
+    picked: boolean
     beyond: number
   }[] = []
   for (const account of pool.accounts) {
     if (account.provider || !account.enabled) continue
+    if (account.resets?.renews_soon) continue
     const holding = poolLimitsReached(account, now).filter(
       (id) => GENERAL_WINDOWS.has(id) || id === modelWindow
     )
@@ -468,18 +473,117 @@ export function poolResetForPause(
       candidates.push({
         account,
         grant,
+        picked: poolPicksGrant(account, grant),
         beyond: grant.refills.length - holding.length,
       })
     }
   }
   candidates.sort(
     (a, b) =>
+      Number(b.picked) - Number(a.picked) ||
       a.beyond - b.beyond ||
       (a.grant.expires_at ?? Number.MAX_SAFE_INTEGER) -
         (b.grant.expires_at ?? Number.MAX_SAFE_INTEGER)
   )
   const first = candidates[0]
   return first ? { account: first.account, grant: first.grant } : null
+}
+
+// ─── The pool's advice on using them ────────────────────────────────────
+
+/** Whether the pool would use this grant on the account now: it recommends
+ *  the account (and its limit doesn't renew by itself soon), and names this
+ *  grant or none. */
+export function poolPicksGrant(
+  account: PlanUsagePoolAccount,
+  grant: PlanUsagePoolResetGrant
+): boolean {
+  const resets = account.resets
+  if (!resets?.recommended || resets.renews_soon) return false
+  const id = resets.recommended_grant_id ?? null
+  return id == null || id === grant.id
+}
+
+/** The grant the pool would use on an account now, for "Reset available":
+ *  the one it names, else the provider's next, else the usable one that
+ *  expires first — only one that can be used now and helps. `null` when
+ *  the pool doesn't recommend the account, or recommends a grant this
+ *  reading can't use. */
+export function poolRecommendedGrant(
+  pool: PlanUsagePool,
+  account: PlanUsagePoolAccount,
+  now: number
+): PlanUsagePoolResetGrant | null {
+  const resets = account.resets
+  if (!resets?.recommended || resets.renews_soon) return null
+  // The pool recommends only an account at its limit.
+  const usable = resets.grants.filter(
+    (g) =>
+      poolGrantUsable(pool, account, g, now, true) &&
+      poolGrantFit(account, g, now).kind !== "wont_help"
+  )
+  const id = resets.recommended_grant_id ?? null
+  if (id != null) return usable.find((g) => g.id === id) ?? null
+  return usable.find((g) => g.id === resets.next_grant_id) ?? usable[0] ?? null
+}
+
+/** Each account the pool would use a reset on now, with the grant, in the
+ *  pool's order. Empty for a pool that doesn't list resets or isn't
+ *  answering. */
+export function poolResetRecommendations(
+  pool: PlanUsagePool | null,
+  now: number
+): { account: PlanUsagePoolAccount; grant: PlanUsagePoolResetGrant }[] {
+  if (!pool || pool.stale || !pool.resets_supported) return []
+  const out: {
+    account: PlanUsagePoolAccount
+    grant: PlanUsagePoolResetGrant
+  }[] = []
+  for (const account of pool.accounts) {
+    if (account.provider || !account.enabled) continue
+    const grant = poolRecommendedGrant(pool, account, now)
+    if (grant) out.push({ account, grant })
+  }
+  return out
+}
+
+/** The pool says the limit the account is at renews by itself within its
+ *  claim guard: it holds a reset back unless asked to go ahead. */
+export function poolRenewsSoon(account: PlanUsagePoolAccount): boolean {
+  return account.resets?.renews_soon === true
+}
+
+/** A limit as the pool names it (`general`, `session`, a model family), as
+ *  the window it is in the account's reading. */
+function wallWindowId(wall: string): string {
+  if (wall === "general") return "seven_day"
+  if (wall === "session") return "five_hour"
+  return modelWindowId(wall)
+}
+
+/** When the limits an account is at renew by themselves (epoch seconds):
+ *  the last of them, as its reading has them — the general weekly one as
+ *  the pool says, when it does. The limits are the pool's (`wall`), else
+ *  those the reading finds reached. `null` when not known. */
+export function poolRenewsAt(
+  account: PlanUsagePoolAccount,
+  now: number
+): number | null {
+  const resets = account.resets
+  if (!resets) return null
+  const ids = resets.wall?.length
+    ? resets.wall.map(wallWindowId)
+    : poolLimitsReached(account, now)
+  let latest: number | null = null
+  for (const id of ids) {
+    const fromReading = account.windows.find((w) => w.id === id)?.resets_at
+    const at =
+      id === "seven_day"
+        ? (resets.weekly_renews_at ?? fromReading)
+        : fromReading
+    if (at != null && at > now && (latest == null || at > latest)) latest = at
+  }
+  return latest
 }
 
 const POOL_REFILLS_KEYS = {
@@ -519,6 +623,7 @@ const POOL_ERROR_KEYS = [
   "pool.resets.error.needsLogin",
   "pool.resets.error.noAccount",
   "pool.resets.error.tooSoon",
+  "pool.resets.error.renewsSoon",
   "pool.resets.error.failed",
   "pool.resets.error.unsupported",
   "pool.resets.error.unreachable",

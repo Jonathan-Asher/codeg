@@ -4458,6 +4458,9 @@ export async function usagePoolRedeemReset(args: {
   name: string
   grantId?: string | null
   conversationId?: number | null
+  /** Go ahead though the account's limit renews by itself soon: only after
+   *  the user was told so. */
+  force?: boolean
 }): Promise<PlanUsagePoolRedeemResult> {
   return getTransport().call(
     "usage_pool_redeem_reset",
@@ -4465,6 +4468,7 @@ export async function usagePoolRedeemReset(args: {
       name: args.name,
       grantId: args.grantId ?? null,
       conversationId: args.conversationId ?? null,
+      force: args.force === true,
     },
     { timeoutMs: 100_000 }
   )

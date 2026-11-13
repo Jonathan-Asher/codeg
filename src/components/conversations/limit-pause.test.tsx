@@ -511,6 +511,121 @@ describe("LimitPausedBanner with a pool account's reset", () => {
   })
 })
 
+describe("LimitPausedBanner and the pool's advice", () => {
+  /** Two accounts at their weekly limit, each with a weekly reset: `early`'s
+   *  expires first, so it would go first on its own. */
+  function twoWalled(
+    picked: Partial<PlanUsagePoolResets>,
+    early: Partial<PlanUsagePoolResets> = {}
+  ): PlanUsagePool {
+    const walled = (name: string, grant: PlanUsagePoolResetGrant) =>
+      poolAccount({
+        name,
+        state: "exhausted",
+        serving: false,
+        limit_status: "rejected",
+        windows: [weeklyWindow("seven_day", 100)],
+        resets: grants([grant], ["seven_day"]),
+      })
+    const earlyAccount = walled("early", {
+      ...weeklyGrant,
+      id: "g-early",
+      expires_at: nowSecs() + 2 * 86_400,
+    })
+    const pickedAccount = walled("picked", {
+      ...weeklyGrant,
+      id: "g-picked",
+      expires_at: nowSecs() + 20 * 86_400,
+    })
+    return resetsPool({
+      accounts: [
+        { ...earlyAccount, resets: { ...earlyAccount.resets!, ...early } },
+        { ...pickedAccount, resets: { ...pickedAccount.resets!, ...picked } },
+        poolAccount(),
+      ],
+    })
+  }
+
+  async function bannerWith(pool: PlanUsagePool) {
+    h.getPlanUsage.mockResolvedValue(planReport(pool))
+    wrap(
+      <LimitPausedBanner
+        conversationId={7}
+        pause={pause()}
+        reason="pool_capacity"
+        agentType="claude_code"
+      />
+    )
+    await waitFor(() => expect(h.getPlanUsage).toHaveBeenCalled())
+    await act(async () => {
+      await Promise.resolve()
+    })
+  }
+
+  afterEach(() => cleanup())
+
+  it("prefers the account and grant the pool recommends", async () => {
+    h.usagePoolRedeemReset.mockResolvedValue({
+      account: "picked",
+      outcome: "reset",
+      pool: null,
+      continued: 7,
+    })
+    await bannerWith(
+      twoWalled({
+        at_wall: true,
+        wall: ["general"],
+        recommended: true,
+        recommended_grant_id: "g-picked",
+      })
+    )
+    const button = await screen.findByTestId("limit-use-reset")
+    expect(button).toHaveAttribute("data-reset-account", "picked")
+    fireEvent.click(button)
+    expect(screen.getByTestId("pool-reset-confirm")).toHaveTextContent(
+      "Use 1 reset on picked? It refills the weekly limit now and can't be undone."
+    )
+    fireEvent.click(screen.getByTestId("pool-reset-confirm-use"))
+    await waitFor(() =>
+      expect(h.usagePoolRedeemReset).toHaveBeenCalledWith({
+        name: "picked",
+        grantId: "g-picked",
+        conversationId: 7,
+      })
+    )
+    expect(h.usagePoolRedeemReset.mock.calls[0][0]).not.toHaveProperty("force")
+  })
+
+  it("keeps its own pick without a recommendation, and never offers an account whose limit renews soon", async () => {
+    await bannerWith(twoWalled({}))
+    expect(await screen.findByTestId("limit-use-reset")).toHaveAttribute(
+      "data-reset-account",
+      "early"
+    )
+    cleanup()
+    h.getPlanUsage.mockClear()
+
+    // The pool's pick is held back by its own renewal: the other account.
+    await bannerWith(
+      twoWalled({}, { at_wall: true, renews_soon: true, recommended: true })
+    )
+    expect(await screen.findByTestId("limit-use-reset")).toHaveAttribute(
+      "data-reset-account",
+      "picked"
+    )
+    cleanup()
+    h.getPlanUsage.mockClear()
+
+    await bannerWith(
+      twoWalled(
+        { at_wall: true, renews_soon: true },
+        { at_wall: true, renews_soon: true }
+      )
+    )
+    expect(screen.queryByTestId("limit-use-reset")).toBeNull()
+  })
+})
+
 describe("LimitPausedBanner and a Fable reset", () => {
   async function bannerFor(pool: PlanUsagePool, model: string | null) {
     useAppWorkspaceStore.setState({

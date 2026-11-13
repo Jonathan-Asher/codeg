@@ -13,12 +13,17 @@ import {
   poolGrantFit,
   poolLimitsReached,
   poolOffersRecheck,
+  poolPicksGrant,
+  poolRecommendedGrant,
   poolRefillsKey,
+  poolRenewsAt,
+  poolRenewsSoon,
   poolResetErrorKey,
   poolResetForPause,
   poolResetGroupKey,
   poolResetGroups,
   poolResetOutcomeKey,
+  poolResetRecommendations,
   poolResetToUse,
   resetErrorKey,
   resetErrorKeyFromApp,
@@ -160,6 +165,14 @@ describe("words for kinds, outcomes and errors", () => {
       "pool.resets.givesBackOnly",
       "pool.resets.givesBackOnlyNote",
       "pool.resets.confirmBodyModel",
+      "pool.resets.recommended",
+      "pool.resets.renewsSoon",
+      "pool.resets.renewsSoonUnknown",
+      "pool.resets.renewsSoonConfirm",
+      "pool.resets.renewsSoonConfirmUnknown",
+      "pool.resets.renewsSoonGuard",
+      "pool.resets.useAnyway",
+      "pool.resets.error.renewsSoonAt",
     ]) {
       expect(typeof message(key)).toBe("string")
     }
@@ -210,6 +223,10 @@ describe("words for kinds, outcomes and errors", () => {
       "pool.resets.error.recentlyUsed"
     )
     expect(typeof message("pool.resets.error.recentlyUsed")).toBe("string")
+    expect(poolResetErrorKey("pool.resets.error.renewsSoon")).toBe(
+      "pool.resets.error.renewsSoon"
+    )
+    expect(typeof message("pool.resets.error.renewsSoon")).toBe("string")
     expect(poolResetErrorKey("pool.resets.error.other")).toBeNull()
     expect(poolResetErrorKey(undefined)).toBeNull()
   })
@@ -622,6 +639,153 @@ describe("a pool account's resets", () => {
     expect(modelFamilyOf("claude-haiku-5-5")).toBe("haiku")
     expect(modelFamilyOf("gpt-5.5")).toBeNull()
     expect(modelFamilyOf(null)).toBeNull()
+  })
+})
+
+describe("the pool's advice on a pool account's resets", () => {
+  /** An account at its general weekly limit with what the pool says of it. */
+  function advised(
+    name: string,
+    grants: PlanUsagePoolResetGrant[],
+    advice: Partial<NonNullable<PlanUsagePoolAccount["resets"]>>,
+    windows?: PlanUsageWindow[]
+  ): PlanUsagePoolAccount {
+    const a = heldAt(name, grants, ["seven_day"], windows)
+    a.resets = { ...a.resets!, at_wall: true, wall: ["general"], ...advice }
+    return a
+  }
+
+  it("finds the grant the pool recommends, only one it can use now and that helps", () => {
+    const named = advised("named", [grant({ id: "a" }), grant({ id: "b" })], {
+      recommended: true,
+      recommended_grant_id: "b",
+    })
+    const next = advised("next", [grant({ id: "a" }), grant({ id: "b" })], {
+      recommended: true,
+    })
+    next.resets!.next_grant_id = "b"
+    const p = pool([named, next])
+    expect(poolRecommendedGrant(p, named, NOW)?.id).toBe("b")
+    expect(poolRecommendedGrant(p, next, NOW)?.id).toBe("b")
+    expect(
+      poolResetRecommendations(p, NOW).map((r) => [r.account.name, r.grant.id])
+    ).toEqual([
+      ["named", "b"],
+      ["next", "b"],
+    ])
+
+    // A grant this reading doesn't hold, one paused, one that won't help,
+    // an account whose limit renews by itself soon, or one not recommended.
+    const gone = advised("gone", [grant()], {
+      recommended: true,
+      recommended_grant_id: "elsewhere",
+    })
+    const paused = advised("paused", [grant({ usable_now: false })], {
+      recommended: true,
+    })
+    const fableOnly = advised("fable", [fableGrant()], { recommended: true })
+    const renewing = advised("renewing", [grant()], {
+      recommended: true,
+      renews_soon: true,
+    })
+    const plain = advised("plain", [grant()], {})
+    const none = pool([gone, paused, fableOnly, renewing, plain])
+    expect(poolResetRecommendations(none, NOW)).toEqual([])
+    // Nor from a pool that isn't answering or doesn't list resets.
+    expect(
+      poolResetRecommendations(pool([named], { stale: true }), NOW)
+    ).toEqual([])
+    expect(
+      poolResetRecommendations(pool([named], { resets_supported: false }), NOW)
+    ).toEqual([])
+    expect(poolResetRecommendations(null, NOW)).toEqual([])
+  })
+
+  it("knows which grant is the pool's pick", () => {
+    const named = advised("a", [], {
+      recommended: true,
+      recommended_grant_id: "b",
+    })
+    expect(poolPicksGrant(named, grant({ id: "b" }))).toBe(true)
+    expect(poolPicksGrant(named, grant({ id: "c" }))).toBe(false)
+    const any = advised("a", [], { recommended: true })
+    expect(poolPicksGrant(any, grant({ id: "c" }))).toBe(true)
+    expect(
+      poolPicksGrant(
+        advised("a", [], { recommended: true, renews_soon: true }),
+        grant()
+      )
+    ).toBe(false)
+    expect(poolPicksGrant(account("a", []), grant())).toBe(false)
+  })
+
+  it("says when the limits an account is at renew by themselves", () => {
+    // The general weekly limit as the pool says, else as the reading has it.
+    const weekly = advised("w", [], {
+      renews_soon: true,
+      weekly_renews_at: NOW + 3 * 3600,
+    })
+    expect(poolRenewsSoon(weekly)).toBe(true)
+    expect(poolRenewsAt(weekly, NOW)).toBe(NOW + 3 * 3600)
+    const fromReading = advised("r", [], { renews_soon: true })
+    expect(poolRenewsAt(fromReading, NOW)).toBe(NOW + 3 * DAY)
+
+    // The 5-hour and a model's own limits from the reading; the last of them.
+    const both = advised("b", [], { wall: ["session", "fable"] }, [
+      window("five_hour", 100, 3600),
+      window("seven_day_fable", 100, 7200),
+    ])
+    expect(poolRenewsAt(both, NOW)).toBe(NOW + 7200)
+
+    // Without the pool's words, the limits the reading finds reached.
+    const older = heldAt(
+      "o",
+      [],
+      ["five_hour"],
+      [window("five_hour", 100, 900)]
+    )
+    expect(poolRenewsSoon(older)).toBe(false)
+    expect(poolRenewsAt(older, NOW)).toBe(NOW + 900)
+
+    // Nothing known, or only times already past.
+    const unknown = advised("u", [], { wall: ["opus"] })
+    expect(poolRenewsAt(unknown, NOW)).toBeNull()
+    expect(
+      poolRenewsAt(
+        heldAt("p", [], ["five_hour"], [window("five_hour", 100, -60)]),
+        NOW
+      )
+    ).toBeNull()
+    expect(poolRenewsAt(account("n", []), NOW)).toBeNull()
+  })
+
+  it("offers a paused session the pool's pick first, and never an account whose limit renews soon", () => {
+    const early = heldAt(
+      "early",
+      [grant({ id: "e", expires_at: NOW + DAY })],
+      ["seven_day"]
+    )
+    const picked = advised(
+      "picked",
+      [grant({ id: "p1", expires_at: NOW + 2 * DAY }), grant({ id: "p2" })],
+      { recommended: true, recommended_grant_id: "p2" }
+    )
+    const pick = poolResetForPause(pool([early, picked]), NOW)
+    expect(pick?.account.name).toBe("picked")
+    expect(pick?.grant.id).toBe("p2")
+
+    // The pool's pick must still clear what stopped the session: a Fable
+    // reset is never offered for the general weekly limit.
+    const fablePick = advised("fable", [fableGrant()], { recommended: true })
+    expect(poolResetForPause(pool([early, fablePick]), NOW)?.grant.id).toBe("e")
+
+    // An account whose limit renews by itself soon is left to it.
+    const renewing = advised("renewing", [grant({ id: "r" })], {
+      renews_soon: true,
+      recommended: true,
+    })
+    expect(poolResetForPause(pool([renewing]), NOW)).toBeNull()
+    expect(poolResetForPause(pool([renewing, early]), NOW)?.grant.id).toBe("e")
   })
 })
 

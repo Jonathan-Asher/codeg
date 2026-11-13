@@ -7233,6 +7233,13 @@
         "recheckLifted": "{name} is usable again.",
         "recheckSame": "Read {name} again: nothing to lift yet.",
         "recheckUnread": "The pool couldn't read {name}'s usage just now.",
+        "recommended": "Reset available: <b>{name}</b> is at its limit",
+        "renewsSoon": "Its limit renews by itself in {duration}, so a reset now is mostly wasted.",
+        "renewsSoonUnknown": "Its limit renews by itself soon, so a reset now is mostly wasted.",
+        "renewsSoonConfirm": "Its limit renews by itself at {time} (in {duration}) anyway, so a reset now is mostly wasted.",
+        "renewsSoonConfirmUnknown": "Its limit renews by itself soon anyway, so a reset now is mostly wasted.",
+        "renewsSoonGuard": "The pool holds resets back within {hours, plural, one {# hour} other {# hours}} of an account's own renewal; this one goes ahead only because you ask.",
+        "useAnyway": "Use reset anyway",
         "error": {
           "recentlyUsed": "A reset was just used on this account.",
           "inProgress": "A reset is already being used on this account.",
@@ -7243,6 +7250,8 @@
           "needsLogin": "This account needs to sign in again first.",
           "noAccount": "The pool has no account by that name.",
           "tooSoon": "This account was just checked. Try again in a few seconds.",
+          "renewsSoon": "This account's limit renews by itself soon, so the pool held the reset back.",
+          "renewsSoonAt": "This account's limit renews by itself at {time}, so the pool held the reset back.",
           "failed": "That didn't work. Try again in a moment.",
           "unsupported": "This account pool can't use resets from codeg. Update maxpool.",
           "unreachable": "The account pool isn't answering."

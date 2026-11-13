@@ -7233,6 +7233,13 @@
         "recheckLifted": "{name} ist wieder nutzbar.",
         "recheckSame": "{name} neu gelesen: Noch nichts aufzuheben.",
         "recheckUnread": "Der Pool konnte die Nutzung von {name} gerade nicht lesen.",
+        "recommended": "Zurücksetzung verfügbar: <b>{name}</b> ist am Limit",
+        "renewsSoon": "Sein Limit erneuert sich in {duration} von selbst, eine Zurücksetzung jetzt wäre also größtenteils verschwendet.",
+        "renewsSoonUnknown": "Sein Limit erneuert sich bald von selbst, eine Zurücksetzung jetzt wäre also größtenteils verschwendet.",
+        "renewsSoonConfirm": "Sein Limit erneuert sich ohnehin um {time} (in {duration}) von selbst, eine Zurücksetzung jetzt wäre also größtenteils verschwendet.",
+        "renewsSoonConfirmUnknown": "Sein Limit erneuert sich ohnehin bald von selbst, eine Zurücksetzung jetzt wäre also größtenteils verschwendet.",
+        "renewsSoonGuard": "Der Pool hält Zurücksetzungen zurück, wenn sich das Limit eines Kontos in weniger als {hours, plural, one {# Stunde} other {# Stunden}} von selbst erneuert; diese wird nur auf deinen Wunsch genutzt.",
+        "useAnyway": "Zurücksetzung trotzdem nutzen",
         "error": {
           "recentlyUsed": "Für dieses Konto wurde gerade eine Zurücksetzung genutzt.",
           "inProgress": "Für dieses Konto wird bereits eine Zurücksetzung genutzt.",
@@ -7243,6 +7250,8 @@
           "needsLogin": "Dieses Konto muss sich zuerst neu anmelden.",
           "noAccount": "Der Pool hat kein Konto mit diesem Namen.",
           "tooSoon": "Dieses Konto wurde gerade geprüft. Versuche es in ein paar Sekunden erneut.",
+          "renewsSoon": "Das Limit dieses Kontos erneuert sich bald von selbst, daher hat der Pool die Zurücksetzung zurückgehalten.",
+          "renewsSoonAt": "Das Limit dieses Kontos erneuert sich um {time} von selbst, daher hat der Pool die Zurücksetzung zurückgehalten.",
           "failed": "Das hat nicht geklappt. Versuche es gleich noch einmal.",
           "unsupported": "Dieser Konten-Pool kann keine Zurücksetzungen aus codeg nutzen. Aktualisiere maxpool.",
           "unreachable": "Der Konten-Pool antwortet nicht."

@@ -2844,6 +2844,26 @@ export interface PlanUsagePoolResets {
    *  `windows` (`five_hour`, `seven_day`, a model's `seven_day_<family>`):
    *  what a reset has to refill to free it. */
   limits_reached: string[]
+  /** The pool finds the account at a limit it can't serve past. Absent from
+   *  an older pool, as are the fields below. */
+  at_wall?: boolean
+  /** The limits it is at, as the pool names them: `general` (the weekly
+   *  limit), `session` (the 5-hour one) or a model family (`fable`). */
+  wall?: string[]
+  /** The share of its general weekly limit used, 0 to 1, when known. */
+  weekly_utilization?: number | null
+  /** When its own weekly limit renews by itself (epoch seconds, ahead). */
+  weekly_renews_at?: number | null
+  /** The limit it is at renews by itself within the pool's claim guard
+   *  ({@link PlanUsagePool.reset_claim_guard_secs}): the pool refuses a
+   *  reset on it unless asked to go ahead (`force`). */
+  renews_soon?: boolean
+  /** The pool would use a reset on it now. */
+  recommended?: boolean
+  /** The grant it would use for that; the provider's next when null. */
+  recommended_grant_id?: string | null
+  /** The pool's reason, in English: shown only as a hint. */
+  advice?: string | null
 }
 
 /** `unconfirmed`: no answer came; it may have gone through. */
@@ -2971,6 +2991,9 @@ export interface PlanUsagePool {
   /** The pool lists its accounts' resets and can use one or read an account
    *  again on request; absent for an older pool. */
   resets_supported?: boolean
+  /** How close to an account's own renewal the pool holds a reset back
+   *  unless asked to go ahead (seconds), when it says. */
+  reset_claim_guard_secs?: number | null
 }
 
 /** Why a pasted sign-in code did not work — fixed codes, never the CLI's
