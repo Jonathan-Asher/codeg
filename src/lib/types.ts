@@ -4592,6 +4592,27 @@ export interface SystemCloseBehaviorSettingsView {
   tray_available: boolean
 }
 
+/** What decided whether the running codeg has a window. */
+export type WindowlessSource = "flag" | "env" | "file"
+
+/**
+ * "Run without a window" (Rust `windowless::WindowlessSettingsView`). Answered
+ * by whichever codeg the transport reaches, so a remote workspace shows the
+ * switch of the machine it is connected to.
+ */
+export interface WindowlessSettingsView {
+  /** False where the switch does nothing (codeg-server, Windows, Linux). */
+  supported: boolean
+  /** The persisted switch, which the next start follows. */
+  enabled: boolean
+  /** Whether the running codeg has no window. */
+  active: boolean
+  /** What decided the running codeg's mode; `null` when nothing did. */
+  source: WindowlessSource | null
+  /** Whether the web service starts with the app (else nothing reaches it). */
+  web_service_auto_start: boolean
+}
+
 /**
  * `ask` — offer both actions plus "remember my choice".
  * `confirm_terminals` — the action is already pinned to exit; confirm the loss

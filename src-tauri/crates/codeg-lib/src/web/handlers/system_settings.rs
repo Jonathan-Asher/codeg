@@ -168,11 +168,8 @@ pub async fn get_windowless_settings(
     Extension(state): Extension<Arc<AppState>>,
 ) -> Result<Json<crate::windowless::WindowlessSettingsView>, AppCommandError> {
     Ok(Json(
-        crate::commands::windowless::get_windowless_settings_core(
-            &state.db.conn,
-            &state.data_dir,
-        )
-        .await,
+        crate::commands::windowless::get_windowless_settings_core(&state.db.conn, &state.data_dir)
+            .await,
     ))
 }
 

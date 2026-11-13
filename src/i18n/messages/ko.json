@@ -1852,6 +1852,18 @@
     "behaviorExit": "codeg 종료",
     "saveFailed": "닫기 동작 저장 실패: {message}"
   },
+  "WindowlessSettings": {
+    "title": "창 없이 실행(항상 켜져 있는 서버 컴퓨터용)",
+    "description": "항상 켜 두고 다른 기기에서 접속하는 Mac용입니다. codeg는 모든 서비스를 계속 실행하지만 창을 열지 않아, 창이 차지하는 메모리와 프로세서 시간을 아낍니다. Mac과 iPhone은 웹 서비스를 통해 원격으로 연결합니다. 필요할 때 Dock의 codeg 아이콘을 클릭하면 창이 열리고, 창을 닫으면 다시 창 없는 상태로 돌아갑니다.",
+    "pendingOn": "다음에 codeg를 시작할 때 적용됩니다.",
+    "pendingOff": "codeg는 지금 창 없이 실행 중입니다. 다음 시작 때 창이 다시 열립니다.",
+    "activeNow": "codeg는 지금 창 없이 실행 중입니다.",
+    "setByFlag": "이번 실행은 --windowless로 시작되었으며, 이 스위치보다 우선합니다.",
+    "setByEnvOn": "CODEG_WINDOWLESS 때문에 이번 실행은 창 없이 동작하며, 이 스위치보다 우선합니다.",
+    "setByEnvOff": "CODEG_WINDOWLESS 때문에 이번 실행에는 창이 있으며, 이 스위치보다 우선합니다.",
+    "webServiceOff": "웹 서비스가 codeg와 함께 시작되지 않으므로 창이 없으면 어디서도 접속할 수 없습니다. 설정 → 웹 서비스에서 자동 시작을 켜세요.",
+    "saveFailed": "창 설정을 저장하지 못했습니다: {message}"
+  },
   "AutoResumeSettings": {
     "title": "재시작 후 중단된 세션 재개",
     "description": "턴 도중 codeg가 종료되거나, 충돌하거나, 업데이트를 위해 재시작되면 다음 시작 시 해당 세션을 재개합니다. 각 중단은 최대 한 번만 재개됩니다.",

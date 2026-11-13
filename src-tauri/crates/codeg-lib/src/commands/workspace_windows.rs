@@ -342,7 +342,10 @@ mod tests {
 
     #[test]
     fn a_launch_without_a_startup_workspace_opens_main_alone() {
-        assert_eq!(plan_startup(false, None, true, false), windowed(None, false));
+        assert_eq!(
+            plan_startup(false, None, true, false),
+            windowed(None, false)
+        );
     }
 
     #[test]

@@ -29,7 +29,7 @@
 //! click or the menu bar icon builds the workspace window on demand. Every
 //! background service runs exactly as with a window.
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -252,6 +252,8 @@ pub fn hold_app_nap_off() {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
+
     use super::*;
 
     fn args(list: &[&str]) -> Vec<OsString> {
@@ -301,7 +303,11 @@ mod tests {
             &["--Windowless"][..],
             &["codeg://windowless"][..],
         ] {
-            assert_eq!(decide(args(list), None, false), Decision::default(), "{list:?}");
+            assert_eq!(
+                decide(args(list), None, false),
+                Decision::default(),
+                "{list:?}"
+            );
         }
     }
 
@@ -309,7 +315,7 @@ mod tests {
     fn the_flag_wins_over_an_env_value_that_says_off() {
         let off = OsString::from("0");
         assert_eq!(
-            decide(args(&["--windowless"]), Some(&off), false),
+            decide(args(&["--windowless"]), Some(off.as_os_str()), false),
             Decision {
                 windowless: true,
                 source: Some(Source::Flag),
@@ -322,7 +328,7 @@ mod tests {
         for value in ["1", "true", "TRUE", "yes", "on", " 1 "] {
             let value = OsString::from(value);
             assert_eq!(
-                decide(args(&[]), Some(&value), false),
+                decide(args(&[]), Some(value.as_os_str()), false),
                 Decision {
                     windowless: true,
                     source: Some(Source::Env),
@@ -338,7 +344,7 @@ mod tests {
         for value in ["0", "false", "no", "off", "OFF"] {
             let value = OsString::from(value);
             assert_eq!(
-                decide(args(&[]), Some(&value), true),
+                decide(args(&[]), Some(value.as_os_str()), true),
                 Decision {
                     windowless: false,
                     source: Some(Source::Env),
@@ -353,12 +359,12 @@ mod tests {
         for value in ["", "  ", "maybe", "2"] {
             let value = OsString::from(value);
             assert_eq!(
-                decide(args(&[]), Some(&value), false),
+                decide(args(&[]), Some(value.as_os_str()), false),
                 Decision::default(),
                 "{value:?}"
             );
             assert_eq!(
-                decide(args(&[]), Some(&value), true),
+                decide(args(&[]), Some(value.as_os_str()), true),
                 Decision {
                     windowless: true,
                     source: Some(Source::File),

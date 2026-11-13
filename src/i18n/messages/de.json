@@ -1852,6 +1852,18 @@
     "behaviorExit": "codeg beenden",
     "saveFailed": "Schließverhalten konnte nicht gespeichert werden: {message}"
   },
+  "WindowlessSettings": {
+    "title": "Ohne Fenster ausführen (für einen ständig laufenden Server-Rechner)",
+    "description": "Für einen Mac, der eingeschaltet bleibt und den du von anderen Geräten aus nutzt: codeg lässt alle Dienste laufen, öffnet aber kein Fenster und spart so den Arbeitsspeicher und die Rechenzeit, die ein Fenster kostet. Dein Mac und dein iPhone verbinden sich über den Webdienst aus der Ferne. Klicke auf das codeg-Symbol im Dock, um bei Bedarf ein Fenster zu öffnen; schließt du es, läuft codeg wieder ohne Fenster.",
+    "pendingOn": "Wird beim nächsten Start von codeg wirksam.",
+    "pendingOff": "codeg läuft gerade ohne Fenster; der nächste Start öffnet wieder eines.",
+    "activeNow": "codeg läuft gerade ohne Fenster.",
+    "setByFlag": "Dieser Start erfolgte mit --windowless, das Vorrang vor diesem Schalter hat.",
+    "setByEnvOn": "Dieser Start läuft wegen CODEG_WINDOWLESS ohne Fenster; das hat Vorrang vor diesem Schalter.",
+    "setByEnvOff": "Dieser Start hat wegen CODEG_WINDOWLESS ein Fenster; das hat Vorrang vor diesem Schalter.",
+    "webServiceOff": "Der Webdienst startet nicht mit codeg, ohne Fenster könnte also nichts codeg erreichen. Aktiviere den automatischen Start unter Einstellungen → Webdienst.",
+    "saveFailed": "Die Fenstereinstellung konnte nicht gespeichert werden: {message}"
+  },
   "AutoResumeSettings": {
     "title": "Unterbrochene Sitzungen nach einem Neustart fortsetzen",
     "description": "Wird codeg mitten in einer Runde beendet, stürzt ab oder startet für ein Update neu, werden diese Sitzungen beim nächsten Start fortgesetzt. Jede Unterbrechung wird höchstens einmal fortgesetzt.",

@@ -1852,6 +1852,18 @@
     "behaviorExit": "Sair do codeg",
     "saveFailed": "Falha ao salvar o comportamento de fechamento: {message}"
   },
+  "WindowlessSettings": {
+    "title": "Executar sem janela (para uma máquina servidora sempre ligada)",
+    "description": "Para um Mac que fica ligado e que você acessa de outros dispositivos: o codeg mantém todos os serviços em execução, mas não abre nenhuma janela, economizando a memória e o tempo de processador que uma janela custa. Seu Mac e seu iPhone se conectam a ele remotamente pelo serviço web. Clique no ícone do codeg no Dock para abrir uma janela quando precisar; ao fechá-la, ele volta a ficar sem janela.",
+    "pendingOn": "Entra em vigor na próxima vez que o codeg iniciar.",
+    "pendingOff": "O codeg está sendo executado sem janela agora; a próxima inicialização abrirá uma novamente.",
+    "activeNow": "O codeg está sendo executado sem janela agora.",
+    "setByFlag": "Esta inicialização usou --windowless, que tem prioridade sobre esta opção.",
+    "setByEnvOn": "Esta inicialização roda sem janela por causa de CODEG_WINDOWLESS, que tem prioridade sobre esta opção.",
+    "setByEnvOff": "Esta inicialização tem janela por causa de CODEG_WINDOWLESS, que tem prioridade sobre esta opção.",
+    "webServiceOff": "O serviço web não inicia com o codeg, então sem janela nada conseguiria alcançá-lo. Ative a inicialização automática em Configurações → Serviço web.",
+    "saveFailed": "Falha ao salvar a configuração da janela: {message}"
+  },
   "AutoResumeSettings": {
     "title": "Retomar sessões interrompidas após reiniciar",
     "description": "Se o codeg fechar, travar ou reiniciar para uma atualização no meio de um turno, essas sessões são retomadas na próxima inicialização. Cada interrupção é retomada no máximo uma vez.",

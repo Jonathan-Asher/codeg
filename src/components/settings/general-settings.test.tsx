@@ -81,6 +81,8 @@ vi.mock("@/lib/api", () => ({
   getTalkSettings: vi.fn(() => new Promise(() => {})),
   // And the reminders section.
   getPendingReminderSettings: vi.fn(() => new Promise(() => {})),
+  // And the run-without-a-window section (its own test covers it).
+  getWindowlessSettings: vi.fn(() => new Promise(() => {})),
 }))
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))

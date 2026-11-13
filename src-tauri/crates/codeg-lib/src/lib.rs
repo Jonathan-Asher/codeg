@@ -1612,6 +1612,12 @@ mod tauri_app {
                 // it. A launch into a remote workspace only builds it hidden,
                 // behind that window; a windowless launch does not build it at
                 // all — the Dock or the menu bar icon builds it when asked.
+                if !startup_plan.builds_any_window() {
+                    tracing::info!(
+                        "[windowless] no window built at startup; the Dock icon or the menu \
+                         bar icon opens one"
+                    );
+                }
                 if startup_plan.build_main {
                     workspace_windows::ensure_main_window(
                         app.handle(),

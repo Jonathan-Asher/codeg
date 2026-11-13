@@ -54,7 +54,8 @@ pub async fn update_windowless_settings_core(
 fn desktop_data_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, AppCommandError> {
     use tauri::Manager;
     let base = app.path().app_data_dir().map_err(|e| {
-        AppCommandError::io_error("Failed to resolve the app data directory").with_detail(e.to_string())
+        AppCommandError::io_error("Failed to resolve the app data directory")
+            .with_detail(e.to_string())
     })?;
     Ok(crate::paths::resolve_effective_data_dir(&base))
 }
