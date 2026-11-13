@@ -397,21 +397,25 @@ export function TerminalView({
       // 两者靠 seq 区分——见下面的 writeEvent 与 `TerminalEvent.seq`。
       let replayBuffer: TerminalEvent[] | null = attach ? [] : null
 
-      // 已被快照画进这块屏幕的最高游标。缓冲**不足以**当闸门：事件走的通道
-      // （Tauri IPC / WebSocket）和快照那次请求-响应之间没有任何顺序保证，
-      // 所以一个已经被快照收录的 chunk 完全可能在快照应用之后才到达回调，
-      // 那时缓冲已经放行、拦不住它。地板因此是永久的：seq 在一个终端内单调，
-      // 所以「不高于快照游标」在这块 xterm 的整个生命周期都成立。
-      // 只由快照抬高，不由实时事件抬高——实时事件本来就有序且各到一次，拿它们
-      // 抬地板只会在万一乱序时白白吞掉输出。
-      let snapshotSeqFloor = 0
+      // 已经画进这块屏幕的最高游标，由快照和实时事件共同抬高。缓冲**不足以**
+      // 当闸门：事件走的通道（Tauri IPC / WebSocket）和快照那次请求-响应之间
+      // 没有任何顺序保证，所以一个已经被快照收录的 chunk 完全可能在快照应用
+      // 之后才到达回调，那时缓冲已经放行、拦不住它。
+      // 实时事件也抬它：同一个 chunk 被送达两次时（远程窗口曾经每帧收到
+      // 「同一连接上的窗口数」份），第二份不能再写一遍。seq 在一个 PTY 内
+      // 单调，且由唯一的读线程按序发出，所以「不高于已写游标」= 已经写过。
+      // PTY 退出时归零：同一个 id 上的下一个 PTY 从 1 重新计数。
+      let writtenSeq = 0
 
       /** 写一个输出事件，丢弃已经画过的那一段。 */
       const writeEvent = (event: TerminalEvent) => {
         // seq 为 0/缺失 = 后端没能给出可比较的游标（旧后端、锁中毒）。此时
         // 宁可重复也不能丢：多打一行远比吞掉一行输出容易发现和容忍。
         const seq = event.seq ?? 0
-        if (seq > 0 && seq <= snapshotSeqFloor) return
+        if (seq > 0) {
+          if (seq <= writtenSeq) return
+          writtenSeq = seq
+        }
         term.write(event.data)
       }
 
@@ -431,8 +435,8 @@ export function TerminalView({
       const flushReplay = (snapshotSeq: number | null) => {
         const buffered = replayBuffer ?? []
         replayBuffer = null
-        if (snapshotSeq != null && snapshotSeq > snapshotSeqFloor) {
-          snapshotSeqFloor = snapshotSeq
+        if (snapshotSeq != null && snapshotSeq > writtenSeq) {
+          writtenSeq = snapshotSeq
         }
         for (const event of buffered) writeEvent(event)
       }
@@ -443,6 +447,7 @@ export function TerminalView({
           // PTY is gone — stop the input pump (the reliable terminal-gone
           // signal; the queue's error-string match is only a fast-path).
           writeQueue.dispose()
+          writtenSeq = 0
           onProcessExitedRef.current?.(terminalId)
           term.write("\r\n\x1b[90m[Process exited]\x1b[0m\r\n")
         }
