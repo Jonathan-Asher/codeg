@@ -1852,6 +1852,18 @@
     "behaviorExit": "Quitter codeg",
     "saveFailed": "Échec de l'enregistrement du comportement de fermeture : {message}"
   },
+  "WindowlessSettings": {
+    "title": "Fonctionner sans fenêtre (pour une machine serveur toujours allumée)",
+    "description": "Pour un Mac qui reste allumé et auquel vous accédez depuis d'autres appareils : codeg garde tous ses services en marche mais n'ouvre aucune fenêtre, ce qui économise la mémoire et le temps processeur qu'une fenêtre coûte. Votre Mac et votre iPhone s'y connectent à distance via le service web. Cliquez sur l'icône de codeg dans le Dock pour ouvrir une fenêtre au besoin ; la fermer ramène codeg sans fenêtre.",
+    "pendingOn": "Prend effet au prochain démarrage de codeg.",
+    "pendingOff": "codeg fonctionne actuellement sans fenêtre ; le prochain démarrage en rouvrira une.",
+    "activeNow": "codeg fonctionne actuellement sans fenêtre.",
+    "setByFlag": "Ce lancement a été fait avec --windowless, qui l'emporte sur ce réglage.",
+    "setByEnvOn": "Ce lancement fonctionne sans fenêtre à cause de CODEG_WINDOWLESS, qui l'emporte sur ce réglage.",
+    "setByEnvOff": "Ce lancement a une fenêtre à cause de CODEG_WINDOWLESS, qui l'emporte sur ce réglage.",
+    "webServiceOff": "Le service web ne démarre pas avec codeg : sans fenêtre, rien ne pourrait l'atteindre. Activez le démarrage automatique dans Réglages → Service web.",
+    "saveFailed": "Impossible d'enregistrer le réglage de la fenêtre : {message}"
+  },
   "AutoResumeSettings": {
     "title": "Reprendre les sessions interrompues après un redémarrage",
     "description": "Si codeg se ferme, plante ou redémarre pour une mise à jour au milieu d'un tour, ces sessions reprennent au démarrage suivant. Chaque interruption est reprise une fois au plus.",

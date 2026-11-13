@@ -1852,6 +1852,18 @@
     "behaviorExit": "Exit codeg",
     "saveFailed": "Failed to save close behavior: {message}"
   },
+  "WindowlessSettings": {
+    "title": "Run without a window (for an always-on server machine)",
+    "description": "For a Mac that stays on and that you reach from other devices: codeg keeps every service running but opens no window, saving the memory and processor time a window costs. Your Mac and iPhone connect to it remotely through the web service. Click codeg's Dock icon to open a window when you need one; closing it goes back to no window.",
+    "pendingOn": "Takes effect the next time codeg starts.",
+    "pendingOff": "codeg is running without a window now; the next start opens one again.",
+    "activeNow": "codeg is running without a window now.",
+    "setByFlag": "This launch was started with --windowless, which wins over this switch.",
+    "setByEnvOn": "This launch runs without a window because of CODEG_WINDOWLESS, which wins over this switch.",
+    "setByEnvOff": "This launch has a window because of CODEG_WINDOWLESS, which wins over this switch.",
+    "webServiceOff": "The web service does not start with codeg, so nothing could reach it without a window. Turn on Auto-start under Settings → Web Service.",
+    "saveFailed": "Failed to save the window setting: {message}"
+  },
   "AutoResumeSettings": {
     "title": "Resume interrupted sessions after restart",
     "description": "When codeg quits, crashes or restarts for an update in the middle of a turn, pick those sessions back up on the next start. Each interruption is resumed at most once.",

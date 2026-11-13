@@ -152,3 +152,36 @@ pub async fn update_system_terminal_settings(
     .await?;
     Ok(Json(settings))
 }
+
+// ---------------------------------------------------------------------------
+// Run without a window (`crate::windowless`)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct UpdateWindowlessSettingsParams {
+    pub enabled: bool,
+}
+
+/// What the machine behind this web service does about its window. A remote
+/// client is how an always-on Mac nobody sits at gets switched.
+pub async fn get_windowless_settings(
+    Extension(state): Extension<Arc<AppState>>,
+) -> Result<Json<crate::windowless::WindowlessSettingsView>, AppCommandError> {
+    Ok(Json(
+        crate::commands::windowless::get_windowless_settings_core(&state.db.conn, &state.data_dir)
+            .await,
+    ))
+}
+
+pub async fn update_windowless_settings(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<UpdateWindowlessSettingsParams>,
+) -> Result<Json<crate::windowless::WindowlessSettingsView>, AppCommandError> {
+    crate::commands::windowless::update_windowless_settings_core(
+        &state.db.conn,
+        &state.data_dir,
+        params.enabled,
+    )
+    .await
+    .map(Json)
+}

@@ -101,6 +101,9 @@ pub mod token_usage;
 pub mod turn_window;
 pub mod usage_pool;
 pub mod version_control;
+/// "Run without a window": the persisted switch (both runtimes answer; only
+/// the macOS app supports it).
+pub mod windowless;
 #[cfg(feature = "tauri-runtime")]
 pub mod windows;
 pub mod work_task;

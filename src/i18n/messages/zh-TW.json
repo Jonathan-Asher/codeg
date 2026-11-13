@@ -1852,6 +1852,18 @@
     "behaviorExit": "結束 codeg",
     "saveFailed": "儲存關閉行為失敗：{message}"
   },
+  "WindowlessSettings": {
+    "title": "無視窗執行（適用於常開的伺服器機器）",
+    "description": "適用於一直開著、從其他裝置存取的 Mac：codeg 保持所有服務執行，但不開啟任何視窗，省下視窗佔用的記憶體和處理器時間。你的 Mac 和 iPhone 透過 Web 服務遠端連線到它。需要時按一下 codeg 的 Dock 圖示開啟視窗；關閉視窗後即恢復無視窗狀態。",
+    "pendingOn": "下次啟動 codeg 時生效。",
+    "pendingOff": "codeg 目前正在無視窗執行；下次啟動時會重新開啟視窗。",
+    "activeNow": "codeg 目前正在無視窗執行。",
+    "setByFlag": "本次啟動使用了 --windowless，它優先於此開關。",
+    "setByEnvOn": "由於 CODEG_WINDOWLESS，本次啟動無視窗執行，它優先於此開關。",
+    "setByEnvOff": "由於 CODEG_WINDOWLESS，本次啟動帶有視窗，它優先於此開關。",
+    "webServiceOff": "Web 服務不會隨 codeg 一起啟動，因此在沒有視窗時任何裝置都無法存取它。請在「設定 → Web 服務」中開啟「自動啟動」。",
+    "saveFailed": "儲存視窗設定失敗：{message}"
+  },
   "AutoResumeSettings": {
     "title": "重新啟動後恢復被中斷的會話",
     "description": "當 codeg 在一輪進行中結束、當機或因更新而重新啟動時，下次啟動會恢復這些會話。每次中斷最多恢復一次。",

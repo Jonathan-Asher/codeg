@@ -337,10 +337,12 @@ pub fn apply_shortcut(app: &AppHandle, prefs: &TalkVoicePrefs) {
     }
 }
 
-/// Startup: the host, and the saved shortcut.
-pub fn init_talk_voice(app: &AppHandle, prefs: &TalkVoicePrefs) {
+/// Startup: the host, and (`register_shortcut`) the saved shortcut.
+pub fn init_talk_voice(app: &AppHandle, prefs: &TalkVoicePrefs, register_shortcut: bool) {
     desktop_service(app);
-    apply_shortcut(app, prefs);
+    if register_shortcut {
+        apply_shortcut(app, prefs);
+    }
 }
 
 /// The preferences, and whether the shortcut is registered.

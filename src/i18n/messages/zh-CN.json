@@ -1852,6 +1852,18 @@
     "behaviorExit": "退出 codeg",
     "saveFailed": "保存关闭行为失败：{message}"
   },
+  "WindowlessSettings": {
+    "title": "无窗口运行（适用于常开的服务器机器）",
+    "description": "适用于一直开着、从其他设备访问的 Mac：codeg 保持所有服务运行，但不打开任何窗口，省下窗口占用的内存和处理器时间。你的 Mac 和 iPhone 通过 Web 服务远程连接到它。需要时点击 codeg 的程序坞图标打开窗口；关闭窗口后即恢复无窗口状态。",
+    "pendingOn": "下次启动 codeg 时生效。",
+    "pendingOff": "codeg 当前正在无窗口运行；下次启动时会重新打开窗口。",
+    "activeNow": "codeg 当前正在无窗口运行。",
+    "setByFlag": "本次启动使用了 --windowless，它优先于此开关。",
+    "setByEnvOn": "由于 CODEG_WINDOWLESS，本次启动无窗口运行，它优先于此开关。",
+    "setByEnvOff": "由于 CODEG_WINDOWLESS，本次启动带有窗口，它优先于此开关。",
+    "webServiceOff": "Web 服务不会随 codeg 一起启动，因此在没有窗口时任何设备都无法访问它。请在“设置 → Web 服务”中开启“自动启动”。",
+    "saveFailed": "保存窗口设置失败：{message}"
+  },
   "AutoResumeSettings": {
     "title": "重启后恢复被中断的会话",
     "description": "当 codeg 在一轮进行中退出、崩溃或因更新而重启时，下次启动会恢复这些会话。每次中断最多恢复一次。",

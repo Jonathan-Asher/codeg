@@ -68,6 +68,8 @@ pub mod tts;
 pub mod turn_timings;
 pub mod update;
 pub mod web;
+/// Windowless mode: the desktop app running with no window (macOS).
+pub mod windowless;
 pub mod work_task;
 pub mod workspace_media;
 pub mod workspace_state;
@@ -188,6 +190,20 @@ mod tauri_app {
         use tauri::Emitter;
 
         let app = window.app_handle().clone();
+
+        // Windowless (`crate::windowless`): the window was opened on demand,
+        // and closing it is going back to no window at all. Destroyed, not
+        // hidden, so its WebKit processes go with it; never an exit, which
+        // would take the web service and every agent down. No prompt either:
+        // nothing here is lost — terminals and sessions live in the backend.
+        if crate::windowless::is_active() {
+            let window = window.clone();
+            windows::with_macos_fullscreen_drained(&app, move || {
+                let _ = window.destroy();
+            });
+            return;
+        }
+
         let behavior = if windows::can_hide_to_tray() {
             system_settings::cached_close_behavior()
         } else {
@@ -559,6 +575,14 @@ mod tauri_app {
             )
         });
 
+        // Windowless or not (`windowless`), decided once from the command
+        // line, the environment and the switch file in the data dir resolved
+        // just above — before setup, which builds (or does not build) the
+        // windows. Logged by setup, once a logger runs.
+        crate::windowless::set_active(crate::windowless::decide_for_process(
+            crate::paths::desktop_database_dir().as_deref(),
+        ));
+
         // Install the logging subscriber next so it captures everything from
         // here on. The file appender's logs dir is resolved from env (no DB
         // needed); hold the guard for the whole process so buffered file lines
@@ -793,6 +817,29 @@ mod tauri_app {
                 }
                 if let Err(err) = claim {
                     tracing::warn!("[startup] {err}; starting without the data dir owner lock");
+                }
+
+                // Windowless or not, as `run()` decided it (`crate::windowless`).
+                let windowless = crate::windowless::active();
+                match windowless.source {
+                    Some(source) if !crate::windowless::supported() => tracing::warn!(
+                        "[windowless] set by {source:?}, but this platform has no windowless \
+                         mode; starting with a window"
+                    ),
+                    Some(source) if windowless.windowless => {
+                        tracing::info!("[windowless] running without a window (set by {source:?})")
+                    }
+                    Some(source) => tracing::info!(
+                        "[windowless] turned off for this launch (set by {source:?})"
+                    ),
+                    None => {}
+                }
+                // Without a window macOS would nap the app: timers coalesced,
+                // network deprioritised — the web service, the agents and the
+                // reminders all slowed. Held off before anything starts.
+                #[cfg(target_os = "macos")]
+                if windowless.windowless {
+                    crate::windowless::hold_app_nap_off();
                 }
 
                 // `CODEG_HOME` overrides `CODEG_DATA_DIR` inside
@@ -1326,6 +1373,11 @@ mod tauri_app {
                             notify_web_auto_start_failed(app.handle(), port, &err);
                         }
                     }
+                    // Nothing else can reach a codeg that has no window.
+                    Ok(_) if windowless.windowless => tracing::warn!(
+                        "[windowless] the web service is not set to start automatically, so \
+                         nothing can reach this codeg until a window is opened (Dock icon)"
+                    ),
                     Ok(_) => {}
                     Err(err) => tracing::error!("[WEB] failed to load auto-start config: {err}"),
                 }
@@ -1539,6 +1591,7 @@ mod tauri_app {
                     startup_focus.is_some(),
                     startup_remote.as_ref().map(|connection| connection.id),
                     windows::can_hide_to_tray(),
+                    windowless.windowless,
                 );
                 let workspace_path = startup_focus.as_ref().map_or_else(
                     || workspace_windows::MAIN_WORKSPACE_PATH.to_string(),
@@ -1555,15 +1608,24 @@ mod tauri_app {
                 #[cfg(target_os = "macos")]
                 crate::browser::shim::macos::prefer_detached_inspector();
 
-                // The main window always exists: it hosts the local workspace,
-                // whose state (open folders, opened tabs, active tab) the
-                // frontend restores inside it. A launch into a remote
-                // workspace only builds it hidden, behind that window.
-                workspace_windows::ensure_main_window(
-                    app.handle(),
-                    std::path::Path::new(&workspace_path),
-                    !startup_plan.hide_main,
-                );
+                // The main window hosts the local workspace, whose state (open
+                // folders, opened tabs, active tab) the frontend restores inside
+                // it. A launch into a remote workspace only builds it hidden,
+                // behind that window; a windowless launch does not build it at
+                // all — the Dock or the menu bar icon builds it when asked.
+                if !startup_plan.builds_any_window() {
+                    tracing::info!(
+                        "[windowless] no window built at startup; the Dock icon or the menu \
+                         bar icon opens one"
+                    );
+                }
+                if startup_plan.build_main {
+                    workspace_windows::ensure_main_window(
+                        app.handle(),
+                        std::path::Path::new(&workspace_path),
+                        !startup_plan.hide_main,
+                    );
+                }
                 if let Some(connection) = startup_remote
                     .filter(|connection| startup_plan.remote_connection_id == Some(connection.id))
                 {
@@ -1584,8 +1646,9 @@ mod tauri_app {
                 }
 
                 // Quick Ask: register the saved global shortcut now, and build
-                // its window (hidden) shortly after the workspace is up.
-                {
+                // its window (hidden) shortly after the workspace is up. Neither
+                // on a windowless launch: the shortcut would open a window.
+                if startup_plan.register_shortcuts {
                     let db_for_quick_ask = app.state::<db::AppDatabase>().conn.clone();
                     let quick_ask_settings = tauri::async_runtime::block_on(async move {
                         quick_ask_commands::desktop::load_quick_ask_settings(&db_for_quick_ask)
@@ -1594,16 +1657,22 @@ mod tauri_app {
                     quick_ask_commands::desktop::init_quick_ask(
                         app.handle(),
                         &quick_ask_settings,
+                        startup_plan.prebuild_quick_ask,
                     );
                 }
 
-                // Talk on this Mac: the relay's host, and its global shortcut.
+                // Talk on this Mac: the relay's host, and its global shortcut
+                // (not on a windowless launch: a Talk needs a workspace window).
                 {
                     let db_for_talk = app.state::<db::AppDatabase>().conn.clone();
                     let talk_prefs = tauri::async_runtime::block_on(async move {
                         crate::talk::voice::prefs::load_prefs(&db_for_talk).await
                     });
-                    talk_voice_commands::init_talk_voice(app.handle(), &talk_prefs);
+                    talk_voice_commands::init_talk_voice(
+                        app.handle(),
+                        &talk_prefs,
+                        startup_plan.register_shortcuts,
+                    );
                 }
 
                 // Clicks on notifications posted before this launch (an update
@@ -2211,6 +2280,8 @@ mod tauri_app {
                 system_settings::resolve_close_request,
                 system_settings::get_system_startup_workspace_settings,
                 system_settings::update_system_startup_workspace_settings,
+                crate::commands::windowless::get_windowless_settings,
+                crate::commands::windowless::update_windowless_settings,
                 logging_commands::get_log_settings,
                 logging_commands::set_log_settings,
                 logging_commands::get_recent_logs,
@@ -2556,6 +2627,18 @@ mod tauri_app {
             .build(context)
             .expect("error while building tauri application")
             .run(|app, event| match event {
+                // The last window closed: a windowless codeg goes back to no
+                // window and keeps serving. A real quit (the menu, the tray,
+                // an update's restart) carries an exit code and goes on below.
+                tauri::RunEvent::ExitRequested { code, api, .. }
+                    if crate::windowless::keeps_running_after_last_window(
+                        crate::windowless::is_active(),
+                        code,
+                    ) =>
+                {
+                    api.prevent_exit();
+                    tracing::info!("[windowless] last window closed; running on without one");
+                }
                 tauri::RunEvent::ExitRequested { .. } => {
                     APP_QUITTING.store(true, Ordering::Relaxed);
                     // Record the background work this exit is about to stop,

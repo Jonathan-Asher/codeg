@@ -1852,6 +1852,18 @@
     "behaviorExit": "codeg を終了",
     "saveFailed": "閉じる動作の保存に失敗しました: {message}"
   },
+  "WindowlessSettings": {
+    "title": "ウインドウなしで実行（常時稼働のサーバーマシン向け）",
+    "description": "電源を入れたままにして他のデバイスから使う Mac 向けです。codeg はすべてのサービスを動かし続けますが、ウインドウは開かず、ウインドウが使うメモリと CPU 時間を節約します。Mac や iPhone は Web サービス経由でリモート接続します。必要なときは Dock の codeg アイコンをクリックするとウインドウが開き、閉じるとウインドウなしの状態に戻ります。",
+    "pendingOn": "次回 codeg を起動したときに反映されます。",
+    "pendingOff": "codeg は現在ウインドウなしで実行中です。次回の起動ではウインドウが開きます。",
+    "activeNow": "codeg は現在ウインドウなしで実行中です。",
+    "setByFlag": "今回の起動は --windowless 付きで、このスイッチより優先されます。",
+    "setByEnvOn": "CODEG_WINDOWLESS により今回の起動はウインドウなしです。このスイッチより優先されます。",
+    "setByEnvOff": "CODEG_WINDOWLESS により今回の起動はウインドウありです。このスイッチより優先されます。",
+    "webServiceOff": "Web サービスが codeg と一緒に起動しないため、ウインドウなしではどこからも接続できません。「設定 → Web サービス」で「自動起動」をオンにしてください。",
+    "saveFailed": "ウインドウ設定を保存できませんでした: {message}"
+  },
   "AutoResumeSettings": {
     "title": "再起動後に中断されたセッションを再開",
     "description": "ターンの途中で codeg が終了、クラッシュ、またはアップデートのために再起動した場合、次回の起動時にそのセッションを再開します。各中断の再開は最大 1 回です。",

@@ -194,6 +194,7 @@ import type {
   CloseRequestPayload,
   CloseWindowBehavior,
   SystemCloseBehaviorSettingsView,
+  WindowlessSettingsView,
   SystemRenderingSettings,
   SystemAutostartSettings,
   SystemTerminalSettings,
@@ -2502,6 +2503,19 @@ export async function updateSystemCloseBehaviorSettings(
   return getTransport().call("update_system_close_behavior_settings", {
     behavior,
   })
+}
+
+// --- Run without a window ---
+
+export async function getWindowlessSettings(): Promise<WindowlessSettingsView> {
+  return getTransport().call("get_windowless_settings")
+}
+
+/** Takes effect the next time that codeg starts. */
+export async function updateWindowlessSettings(
+  enabled: boolean
+): Promise<WindowlessSettingsView> {
+  return getTransport().call("update_windowless_settings", { enabled })
 }
 
 /**

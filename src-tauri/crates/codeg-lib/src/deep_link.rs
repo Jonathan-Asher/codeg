@@ -254,7 +254,11 @@ pub fn urls_from_argv(argv: &[impl AsRef<str>]) -> Vec<String> {
 
 #[cfg(feature = "tauri-runtime")]
 pub fn handle_raw_urls(app: &tauri::AppHandle, urls: &[String]) {
-    use crate::commands::windows;
+    // Rebuilds `main` when it is gone — a windowless launch never built it, a
+    // close destroyed it — and is `show_main_window` when it exists. A link
+    // that lands on no window would otherwise do nothing visible and leave its
+    // target parked for whenever a window opens next.
+    use crate::commands::workspace_windows::show_local_workspace_window;
     use tauri::{Emitter, Manager};
 
     // No link at all is codeg launched again while it runs (Windows / Linux):
@@ -270,7 +274,7 @@ pub fn handle_raw_urls(app: &tauri::AppHandle, urls: &[String]) {
             "[deep-link] database not ready; showing workspace for {} url(s)",
             urls.len()
         );
-        windows::show_main_window(app);
+        show_local_workspace_window(app);
         return;
     };
     let db = AppDatabase {
@@ -290,7 +294,7 @@ pub fn handle_raw_urls(app: &tauri::AppHandle, urls: &[String]) {
                     // see `PENDING_FOCUS` for why the slot has to be the only
                     // channel.
                     set_pending_focus(target);
-                    windows::show_main_window(&app);
+                    show_local_workspace_window(&app);
                     if let Err(err) = app.emit_to("main", PENDING_EVENT, ()) {
                         tracing::warn!("[deep-link] failed to signal main window: {err}");
                     }
@@ -305,7 +309,7 @@ pub fn handle_raw_urls(app: &tauri::AppHandle, urls: &[String]) {
             }
         }
         if !focused {
-            windows::show_main_window(&app);
+            show_local_workspace_window(&app);
         }
     });
 }
