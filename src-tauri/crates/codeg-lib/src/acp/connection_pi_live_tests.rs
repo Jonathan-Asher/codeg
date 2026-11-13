@@ -858,13 +858,14 @@ async fn a_fork_during_a_woken_run_takes_the_reply_that_finished_before_the_wake
 #[tokio::test]
 async fn a_fork_before_a_woken_run_wrote_anything_takes_the_last_reply() {
     use crate::acp::fork::{settle_latest_reply_fork_point, settle_mid_run_fork_point};
-    use crate::commands::conversations::{pi_agent_turn_anchor, PI_AGENT_TURN_MARKER_PREFIX};
+    use crate::commands::conversations::{pi_agent_turn_anchor, pi_agent_turn_marker_since};
     for (fixture_name, session, before_wake, woken_reply) in WOKEN_RUNS {
         let since = woken_run_started_at(fixture_name).await;
         let turns = history_before(session, woken_reply).turns;
         let anchor = pi_agent_turn_anchor(&turns, since);
-        assert!(
-            anchor.starts_with(PI_AGENT_TURN_MARKER_PREFIX),
+        assert_eq!(
+            pi_agent_turn_marker_since(&anchor),
+            Some(since),
             "{fixture_name}: {anchor}"
         );
         assert!(!turns.iter().any(|t| t.id == anchor), "{fixture_name}");

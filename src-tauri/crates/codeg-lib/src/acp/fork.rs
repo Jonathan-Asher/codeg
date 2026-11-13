@@ -15,7 +15,7 @@ use serde::Deserialize;
 use crate::acp::connection::send_capturing_models;
 
 use crate::acp::error::AcpError;
-use crate::commands::conversations::{is_pi_wake_turn, PI_AGENT_TURN_MARKER_PREFIX};
+use crate::commands::conversations::{is_pi_wake_turn, pi_agent_turn_marker_since};
 use crate::models::agent::AgentType;
 use crate::models::message::{ContentBlock, MessageTurn, TurnRole};
 
@@ -414,8 +414,11 @@ pub fn forks_while_running(agent_type: AgentType) -> bool {
 /// * a run Pi started by itself, which has no prompt
 ///   (`commands::conversations::pi_agent_turn_anchor`): the "woken by" System
 ///   turn history opens the run with, or, before Pi has written the run's
-///   first reply, a marker no turn carries. With the marker, nothing in the
-///   transcript belongs to the run, so the start is after all of it.
+///   first reply, a marker no turn carries, which says when the run began.
+///   With the marker, the run starts at the first turn written since then,
+///   or after the whole transcript when there is none. Normally there is
+///   none; a message the user steered in before the run's first reply is
+///   one, and leaves history no divider.
 ///
 /// Only a user turn or a "woken by" divider can start a turn; an id naming any
 /// other turn, or none, falls back to the last user turn.
@@ -429,8 +432,10 @@ fn running_turn_start(turns: &[MessageTurn], in_flight_turn_id: Option<&str>) ->
         if let Some(start) = turns.iter().position(|t| t.id == id && starts_a_turn(t)) {
             return Some(start);
         }
-        if id.starts_with(PI_AGENT_TURN_MARKER_PREFIX) {
-            return Some(turns.len());
+        if let Some(since) = pi_agent_turn_marker_since(id) {
+            let since_then =
+                |t: &MessageTurn| !matches!(t.role, TurnRole::System) && t.timestamp >= since;
+            return Some(turns.iter().position(since_then).unwrap_or(turns.len()));
         }
     }
     turns.iter().rposition(|t| matches!(t.role, TurnRole::User))
@@ -1414,18 +1419,13 @@ mod tests {
         ]
     }
 
-    /// A woken run starts at the divider the caller names, or after the whole
-    /// transcript while the run has written nothing (the marker). A System
-    /// turn that is not a divider, or a reply, starts nothing: the last user
-    /// turn stands in, as for an unmatched prompt.
+    /// A woken run starts at the divider the caller names. A System turn that
+    /// is not a divider, or a reply, starts nothing: the last user turn stands
+    /// in, as for an unmatched prompt.
     #[test]
     fn a_woken_run_starts_at_its_divider() {
         let turns = woken_history();
         assert_eq!(running_turn_start(&turns, Some("turn-2")), Some(2));
-        assert_eq!(
-            running_turn_start(&turns, Some("pi-agent-turn-1794510341024")),
-            Some(4)
-        );
         assert_eq!(running_turn_start(&turns, Some("turn-3")), Some(0));
         assert_eq!(running_turn_start(&turns, None), Some(0));
         let mut note = woken_history();
@@ -1451,6 +1451,49 @@ mod tests {
             settle("turn-3"),
             Err(AcpError::ForkPointUnresolved(_))
         ));
+    }
+
+    /// With no divider the run is named by a marker carrying when it began.
+    /// Everything written before that finished; what was written after it is
+    /// the run's own, such as a message the user steered in before its first
+    /// reply, after which history draws no divider.
+    #[test]
+    fn a_woken_run_with_no_divider_starts_at_what_it_wrote() {
+        let since = Utc::now();
+        let marker = format!("pi-agent-turn-{}", since.timestamp_millis());
+        // Seconds from the run's start, per turn.
+        let stamp = |turns: &mut [MessageTurn], secs: &[i64]| {
+            for (t, s) in turns.iter_mut().zip(secs) {
+                t.timestamp = since + chrono::Duration::seconds(*s);
+            }
+        };
+        let mut written = vec![
+            turn("turn-0", TurnRole::User, "launch a scout", None),
+            turn("turn-1", TurnRole::Assistant, "LAUNCHED", Some("msg_01")),
+        ];
+        stamp(&mut written, &[-60, -50]);
+        assert_eq!(running_turn_start(&written, Some(&marker)), Some(2));
+
+        let mut steered = written.clone();
+        steered.push(turn("turn-2", TurnRole::User, "check the logs too", None));
+        steered.push(turn("turn-3", TurnRole::Assistant, "found", Some("msg_02")));
+        stamp(&mut steered, &[-60, -50, 5, 9]);
+        assert_eq!(running_turn_start(&steered, Some(&marker)), Some(2));
+        let pi = ForkAdapter {
+            agent_type: AgentType::Pi,
+            caps: ForkCapabilities {
+                strict_point: true,
+                while_running: true,
+            },
+        };
+        let settle = |turn_id| {
+            settle_mid_run_fork_point(Ok(steered.as_slice()), turn_id, pi, true, Some(&marker))
+        };
+        assert_eq!(settle("turn-1").unwrap().message_id, "msg_01");
+        assert!(
+            settle("turn-3").is_err(),
+            "the run's reply is still being written"
+        );
     }
 
     /// Only Claude Code is known to fork from a transcript another process is
