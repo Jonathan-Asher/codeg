@@ -712,7 +712,9 @@ mod tests {
                 "codex dropped {gone} — regenerate the snapshot"
             );
         }
-        assert_eq!(fallback_base_slug(&models).as_deref(), Some("gpt-6-astra"));
+        // The fallback clone base is the highest-priority entry, and 0.166.0
+        // gives GPT-6.1 Sol priority 1 (GPT-6 Astra moves to 2).
+        assert_eq!(fallback_base_slug(&models).as_deref(), Some("gpt-6.1-sol"));
     }
 
     #[test]

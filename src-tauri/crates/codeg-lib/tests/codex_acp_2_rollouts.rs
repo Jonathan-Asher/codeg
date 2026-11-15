@@ -115,38 +115,104 @@ fn codex_acp_2_6_rollouts_list_with_lineage() {
     );
 }
 
+/// One line per turn — its role, then each block as `type:name|text` cut
+/// short — for failure messages that show what the parser made of a rollout.
+fn turn_summary(value: &serde_json::Value) -> String {
+    let mut out = String::new();
+    for turn in value["turns"].as_array().into_iter().flatten() {
+        let blocks: Vec<String> = turn["blocks"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|b| {
+                let kind = b["type"].as_str().unwrap_or("?");
+                let label = b["tool_name"]
+                    .as_str()
+                    .or_else(|| b["text"].as_str())
+                    .unwrap_or("");
+                let label: String = label.chars().take(48).collect();
+                format!("{kind}:{label}")
+            })
+            .collect();
+        out.push_str(&format!("{}: {}\n", turn["role"], blocks.join(" | ")));
+    }
+    out
+}
+
+/// The text a user turn opens with.
+fn user_prompts(value: &serde_json::Value) -> Vec<String> {
+    turns_of(value, "user")
+        .iter()
+        .map(|t| {
+            t["blocks"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find_map(|b| b["text"].as_str())
+                .unwrap_or("")
+                .chars()
+                .take(40)
+                .collect()
+        })
+        .collect()
+}
+
+/// The same scenario recorded through codex-acp 1.13.1 (`@openai/codex`
+/// 0.156.1), the parity baseline for the main rollout.
+fn baseline_1_13_1() -> serde_json::Value {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let day = temp.path().join("2026").join("11").join("15");
+    fs::create_dir_all(&day).expect("day dir");
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/acp-1.13.1");
+    for entry in fs::read_dir(src).expect("baseline dir") {
+        let path = entry.expect("entry").path();
+        fs::copy(&path, day.join(path.file_name().unwrap())).expect("copy baseline");
+    }
+    let parser = CodexParser::with_base_dir(temp.path().to_path_buf());
+    detail_json(&parser, "01a1e0a3-0612-73f1-820d-561e0f15f29e")
+}
+
 #[test]
 fn codex_acp_2_6_main_rollout_keeps_every_turn() {
     let (_temp, parser) = sessions();
     let detail = detail_json(&parser, MAIN);
+    let summary = turn_summary(&detail);
 
-    // Four prompts: the edit, the network command, the plan question and the
-    // goal's continuation.
-    let users = turns_of(&detail, "user");
-    assert!(users.len() >= 3, "user turns: {}", users.len());
-    assert!(mentions(&detail, "create hello.txt with three lines"));
-    assert!(mentions(&detail, "curl -sI https://example.com"));
-    assert!(mentions(&detail, "ask me exactly one multiple-choice question"));
+    // The same prompts reach the transcript as from a 0.156.1 rollout of the
+    // same scenario (edit, network command, plan question, goal).
+    let baseline = baseline_1_13_1();
+    assert_eq!(
+        user_prompts(&detail),
+        user_prompts(&baseline),
+        "2.6.0:\n{summary}\n1.13.1:\n{}",
+        turn_summary(&baseline)
+    );
+    assert!(mentions(&detail, "create hello.txt with three lines"), "{summary}");
+    assert!(mentions(&detail, "curl -sI https://example.com"), "{summary}");
+    assert!(
+        mentions(&detail, "ask me exactly one multiple-choice question"),
+        "{summary}"
+    );
 
     // The code-mode tool calls reach the transcript with their effects.
-    assert!(mentions(&detail, "BETA"), "the patch");
-    assert!(mentions(&detail, "./hello.txt:2:BETA"), "the command output");
+    assert!(mentions(&detail, "BETA"), "the patch\n{summary}");
+    assert!(mentions(&detail, "./hello.txt:2:BETA"), "the command output\n{summary}");
 
     // The Plan-mode question and the option that answered it. 0.166.0 also
-    // writes a `retained_context` record for the answer; it must not double it.
-    assert!(mentions(
-        &detail,
-        "Which language should the tiny greeting script use?"
-    ));
-    assert!(mentions(&detail, "Python (Recommended)"));
+    // writes a `retained_context` record for the answer.
+    assert!(
+        mentions(&detail, "Which language should the tiny greeting script use?"),
+        "{summary}"
+    );
+    assert!(mentions(&detail, "Python (Recommended)"), "{summary}");
 
     // The final answers.
     let assistant_text: Vec<String> = turns_of(&detail, "assistant")
         .iter()
         .flat_map(|t| strings(t))
         .collect();
-    assert!(assistant_text.iter().any(|s| s == "done"));
-    assert!(assistant_text.iter().any(|s| s.contains("Hi.")));
+    assert!(assistant_text.iter().any(|s| s == "done"), "{summary}");
+    assert!(assistant_text.iter().any(|s| s.contains("Hi.")), "{summary}");
 
     // Nothing of the stripped tool catalog leaks in as a message.
     assert!(!mentions(&detail, "Run JavaScript code to orchestrate"));
