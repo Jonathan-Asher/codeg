@@ -38,6 +38,7 @@ import {
 } from "@/lib/message-input-draft"
 import { discardAskSelectionPrompts } from "@/lib/ask-selection-handoff"
 import { discardComposerPrefill } from "@/lib/composer-prefill-handoff"
+import { noteTabActivation, requestComposerFocus } from "@/lib/composer-focus"
 import {
   batchCloseSlots,
   pushClosedTab,
@@ -374,6 +375,10 @@ let runtime: TabRuntime = defaultRuntime()
 let version = 0
 let applyingRemote = false
 let remoteActivationPending = false
+// True while `applyRemoteSnapshot` writes the store: an activeTabId change made
+// then mirrors another client's focus, and must not move this window's keyboard
+// (see `noteTabActivation`).
+let applyingRemoteFocus = false
 let pendingRemote: TabsChanged | null = null
 let lastSavedPayload: string | null = null
 let saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -1051,6 +1056,23 @@ function applyGroupInvariants() {
   persistGroupState()
 }
 
+/** The user asked for a tab: when it is already the one in front, no
+ *  activeTabId change will hand its composer the keyboard, so ask for it (see
+ *  `requestComposerFocus`). Call before the write. */
+function noteTabRequested(tabId: string) {
+  if (useTabStore.getState().activeTabId === tabId) requestComposerFocus()
+}
+
+/** Write state from another client's snapshot (see `applyingRemoteFocus`). */
+function setRemoteTabState(partial: Partial<TabStoreState>) {
+  applyingRemoteFocus = true
+  try {
+    useTabStore.setState(partial)
+  } finally {
+    applyingRemoteFocus = false
+  }
+}
+
 /** Focus a tab and realign the per-group selection with it. The shared path
  *  for every activeTabId-only write (rawTabs writes get the same invariant
  *  pass via `recomputeTabs`). */
@@ -1213,6 +1235,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
 
     if (existingIndex >= 0) {
       const activateTabId = prevState.rawTabs[existingIndex].id
+      noteTabRequested(activateTabId)
       if (pin && !prevState.rawTabs[existingIndex].isPinned) {
         const updated = [...prevState.rawTabs]
         updated[existingIndex] = { ...updated[existingIndex], isPinned: true }
@@ -1479,6 +1502,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
 
   switchTab: (tabId) => {
     if (!get().rawTabs.some((t) => t.id === tabId)) return
+    noteTabRequested(tabId)
     focusTab(tabId)
     runtime.activateConversationPane()
   },
@@ -1827,6 +1851,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
       runtime.activateConversationPane()
       return { tabId, agentType: targetAgent, folderId }
     }
+    noteTabRequested(existingTab.id)
 
     const folderChanged = existingTab.folderId !== folderId
     const workingDirChanged = existingTab.workingDir !== workingDir
@@ -1919,6 +1944,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
       (t) => t.conversationId == null && inTargetGroup(t)
     )
 
+    if (existingTab) noteTabRequested(existingTab.id)
     if (!existingTab) {
       const newTab: TabItemInternal = {
         id: tabId,
@@ -2813,6 +2839,15 @@ function followConversationFolders(
   if (changed) useTabStore.setState({ rawTabs: next })
 }
 
+// Every change of the tab in front, for the composer focus: one this client
+// made hands the new tab's composer the keyboard, one mirrored from another
+// client's snapshot does not (see `noteTabActivation`).
+useTabStore.subscribe((state, prev) => {
+  if (state.activeTabId !== prev.activeTabId) {
+    noteTabActivation(applyingRemoteFocus)
+  }
+})
+
 useAppWorkspaceStore.subscribe(() => {
   const c = useAppWorkspaceStore.getState().conversations
   if (c !== lastConversations) {
@@ -2879,6 +2914,7 @@ export function resetTabStore() {
   version = 0
   applyingRemote = false
   remoteActivationPending = false
+  applyingRemoteFocus = false
   pendingRemote = null
   lastSavedPayload = null
   serverKnownTabKeys = new Set()
@@ -3024,7 +3060,7 @@ function applyRemoteSnapshot(change: TabsChanged) {
   if (nextTabs.length === 0) {
     if (folders.length === 0) {
       lastSavedPayload = diverged ? null : JSON.stringify([])
-      useTabStore.setState({ rawTabs: [], activeTabId: null })
+      setRemoteTabState({ rawTabs: [], activeTabId: null })
       recomputeTabs()
       return
     }
@@ -3032,7 +3068,7 @@ function applyRemoteSnapshot(change: TabsChanged) {
     lastSavedPayload = diverged
       ? null
       : JSON.stringify(buildPersistItems([replacement], replacement.id))
-    useTabStore.setState({
+    setRemoteTabState({
       rawTabs: [replacement],
       activeTabId: replacement.id,
     })
@@ -3089,6 +3125,6 @@ function applyRemoteSnapshot(change: TabsChanged) {
   lastSavedPayload = diverged
     ? null
     : JSON.stringify(buildPersistItems(nextTabs, nextActiveId))
-  useTabStore.setState({ rawTabs: nextTabs, activeTabId: nextActiveId })
+  setRemoteTabState({ rawTabs: nextTabs, activeTabId: nextActiveId })
   recomputeTabs()
 }

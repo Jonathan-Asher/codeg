@@ -277,7 +277,9 @@ export function ConversationShell({
     >
       {topBanner}
 
-      <div ref={threadRef} className="flex-1 min-h-0">
+      {/* The transcript: focus left here is nobody typing, and a window
+          coming back moves it to the composer (see `lib/composer-focus`). */}
+      <div ref={threadRef} className="flex-1 min-h-0" data-composer-thread="">
         {children}
       </div>
 

@@ -48,6 +48,7 @@ import { AgentIcon } from "@/components/agent-icon"
 import { cn, copyTextFromMenu } from "@/lib/utils"
 import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import { useIsMac } from "@/hooks/use-is-mac"
+import { useComposerAutoFocus } from "@/hooks/use-composer-auto-focus"
 import {
   formatShortcutLabel,
   shortcutsConflict,
@@ -841,24 +842,23 @@ export function MessageInput({
     hydrateFromBlocks,
   ])
 
-  // Focus the composer the moment the editor exists and this tab is active, so
-  // the caret lands as soon as the chat opens — without waiting for the ACP
-  // connection to come up. The editor is always editable (RichComposer receives
-  // no `disabled`; sends are gated in `handleSend`, not editability), so the old
-  // `!disabled` gate only postponed the caret until "connected" for no real
-  // reason. Deliberately NOT keyed on `disabled`: once focus lands on open, a
-  // later connect (disabled → false) must never re-run this and yank focus back.
-  // Keyed on `composerReady` because `immediatelyRender: false` builds the
-  // editor a tick after mount (mirrors the hydration effect's gate). Ordered
-  // after that hydration effect so this rAF runs after its setContent, landing
-  // the caret at the end of a restored draft rather than before it.
-  useEffect(() => {
-    if (isActive && composerReady && !isPrompting) {
-      requestAnimationFrame(() => {
-        editorRef.current?.focus()
-      })
-    }
-  }, [isActive, composerReady, isPrompting])
+  // The caret lands in the composer whenever the user goes to this chat (and,
+  // from somewhere useless, when its window comes back to the front) — the
+  // moment the editor exists, without waiting for the ACP connection: the
+  // editor is always editable (sends are gated in `handleSend`), during a reply
+  // too, where typing queues. So neither `disabled` nor `isPrompting` gates it,
+  // and a connect or a reply finishing never yanks the keyboard back here.
+  // `composerReady` because `immediatelyRender: false` builds the editor a tick
+  // after mount. Called after the hydration effect so its frame runs after the
+  // draft's setContent, landing the caret at the end of a restored draft.
+  const focusComposerAtEnd = useCallback(() => {
+    editorRef.current?.focus({ preventScroll: true })
+  }, [])
+  useComposerAutoFocus(containerRef, {
+    active: isActive,
+    ready: composerReady,
+    focus: focusComposerAtEnd,
+  })
 
   // Re-hydrate when the user (re)edits a *different* queue item after the
   // initial mount hydration above. Keyed on the item id (not display text) so

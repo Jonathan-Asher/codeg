@@ -12,6 +12,7 @@ import { NextIntlClientProvider } from "next-intl"
 import { toast } from "sonner"
 import type { ComponentProps } from "react"
 import type { Editor } from "@tiptap/core"
+import { TextSelection } from "@tiptap/pm/state"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { RichComposerHandle } from "./composer/rich-composer"
@@ -22,6 +23,7 @@ import {
 import {
   clearMessageInputDraftV2,
   loadMessageInputDraftV2,
+  saveMessageInputDraftV2,
 } from "@/lib/message-input-draft"
 import {
   emitAttachFileToSession,
@@ -2830,5 +2832,104 @@ describe("MessageInput side questions and prompt suggestions", () => {
     const { handle, editor } = await mount()
     press(editor, "Tab")
     expect(handle.getText()).toBe("")
+  })
+})
+
+describe("MessageInput keyboard focus", () => {
+  afterEach(() => cleanup())
+
+  function ui(props: Partial<React.ComponentProps<typeof MessageInput>>) {
+    return (
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <MessageInput onSend={vi.fn()} promptCapabilities={CAPS} {...props} />
+      </NextIntlClientProvider>
+    )
+  }
+
+  async function mountComposer(
+    props: Partial<React.ComponentProps<typeof MessageInput>>
+  ) {
+    const view = render(ui(props))
+    await waitFor(
+      () => expect(composerHandle.current?.getEditor()).toBeTruthy(),
+      { timeout: 5000 }
+    )
+    const editable = view.container.querySelector<HTMLElement>(
+      ".codeg-composer-content"
+    )
+    if (!editable) throw new Error("composer editable not mounted")
+    return { view, editable }
+  }
+
+  /** Lets the frames the focus waits for go by. */
+  async function frames(n: number) {
+    for (let i = 0; i < n; i++) {
+      await act(async () => {
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => resolve())
+        )
+      })
+    }
+  }
+
+  it("takes the keyboard when its chat comes to the front, mid-reply too", async () => {
+    const { view, editable } = await mountComposer({
+      isActive: false,
+      isPrompting: true,
+    })
+    await frames(2)
+    expect(editable).not.toHaveFocus()
+
+    // Typing during a reply queues a message, so a running reply is no reason
+    // to leave the user without a caret.
+    view.rerender(ui({ isActive: true, isPrompting: true }))
+    await waitFor(() => expect(editable).toHaveFocus())
+  })
+
+  it("never takes the keyboard back when the reply finishes", async () => {
+    const { view, editable } = await mountComposer({
+      isActive: true,
+      isPrompting: true,
+    })
+    await waitFor(() => expect(editable).toHaveFocus())
+    const terminal = document.createElement("textarea")
+    document.body.appendChild(terminal)
+    try {
+      act(() => terminal.focus())
+      view.rerender(ui({ isActive: true, isPrompting: false }))
+      await frames(3)
+      expect(terminal).toHaveFocus()
+    } finally {
+      terminal.remove()
+    }
+  })
+
+  it("lands the caret at the end of the restored draft", async () => {
+    const key = "test:focus-restored-draft"
+    saveMessageInputDraftV2(key, {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: "half a thought" }],
+        },
+      ],
+    })
+    try {
+      const { editable } = await mountComposer({
+        isActive: true,
+        draftStorageKey: key,
+      })
+      await waitFor(() => expect(editable).toHaveFocus())
+      const editor = composerHandle.current?.getEditor()
+      if (!editor) throw new Error("composer editor not mounted")
+      expect(serializeDocToText(editor.state.doc)).toBe("half a thought")
+      expect(editor.state.selection.empty).toBe(true)
+      expect(editor.state.selection.from).toBe(
+        TextSelection.atEnd(editor.state.doc).from
+      )
+    } finally {
+      clearMessageInputDraftV2(key)
+    }
   })
 })

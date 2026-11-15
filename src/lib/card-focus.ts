@@ -215,6 +215,23 @@ export function focusCardEntry(card: Element | null): boolean {
   return true
 }
 
+/** The entry of the card waiting nearest the composer in `scope` (the last one
+ *  in document order), when it is on screen. */
+export function pendingCardEntry(scope: Element | null): HTMLElement | null {
+  const entries = scope?.querySelectorAll<HTMLElement>(ENTRY_SELECTOR)
+  const entry = entries?.[entries.length - 1]
+  return entry && isShown(entry) ? entry : null
+}
+
+/** Focus the card waiting nearest the composer in `scope`. Returns false when
+ *  no card there is waiting on screen. */
+export function focusPendingCard(scope: Element | null): boolean {
+  const entry = pendingCardEntry(scope)
+  if (!entry) return false
+  focusEntry(entry)
+  return true
+}
+
 /** Let go of the keyboard if it is in the card, which is going off screen or
  *  already is: a key must never answer a card nobody can see. */
 export function releaseKeyboard(card: Element | null): void {
@@ -225,9 +242,14 @@ export function releaseKeyboard(card: Element | null): void {
   }
 }
 
+/** The composer input inside `root`, if there is one. */
+export function composerInputIn(root: Element | null): HTMLElement | null {
+  return root?.querySelector<HTMLElement>(COMPOSER_SELECTOR) ?? null
+}
+
 /** The composer input of the card's conversation, if it has one. */
 export function composerFor(card: Element | null): HTMLElement | null {
-  return scopeOf(card)?.querySelector<HTMLElement>(COMPOSER_SELECTOR) ?? null
+  return composerInputIn(scopeOf(card))
 }
 
 /** Esc from a card: hand the keyboard back to its conversation's composer.
@@ -277,9 +299,8 @@ export function handleComposerArrowUp(
   if (!composer || !scope.contains(composer) || !isComposerEmpty(composer)) {
     return false
   }
-  const entries = scope.querySelectorAll<HTMLElement>(ENTRY_SELECTOR)
-  const entry = entries[entries.length - 1]
-  if (!entry || !isShown(entry)) return false
+  const entry = pendingCardEntry(scope)
+  if (!entry) return false
   event.preventDefault()
   event.stopPropagation()
   focusEntry(entry)

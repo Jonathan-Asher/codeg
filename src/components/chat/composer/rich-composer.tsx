@@ -74,8 +74,12 @@ export interface RichComposerHandle {
   setDoc: (doc: JSONContent) => void
   /** Clear the document. */
   clear: () => void
-  /** Focus the editor at the end of the document. */
-  focus: () => void
+  /**
+   * Focus the editor at the end of the document. `preventScroll` keeps every
+   * scroller outside the composer where it is (the transcript, a tiled row);
+   * only the composer's own text scrolls, to show the caret.
+   */
+  focus: (options?: { preventScroll?: boolean }) => void
   /**
    * Focus the editor and place the caret at the document position nearest the
    * given viewport coordinates (native-textarea behavior). Falls back to the
@@ -624,7 +628,21 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(
           editor?.commands.setContent(textToSeededDoc(text, known())),
         setDoc: (doc) => editor?.commands.setContent(doc),
         clear: () => editor?.commands.clearContent(true),
-        focus: () => editor?.commands.focus("end"),
+        focus: (options) => {
+          if (!editor) return
+          if (!options?.preventScroll) {
+            editor.commands.focus("end")
+            return
+          }
+          // Tiptap's scroll-into-view walks every ancestor of the caret, the
+          // transcript and tile row included; with it off, bring the caret
+          // into view in the composer's own scroller only.
+          editor.commands.focus("end", { scrollIntoView: false })
+          const scroller = editor.view.dom.closest<HTMLElement>(
+            ".codeg-composer-scroll"
+          )
+          if (scroller) scroller.scrollTop = scroller.scrollHeight
+        },
         focusAtCoords: (clientX, clientY) => {
           if (!editor) return
           const view = editor.view
