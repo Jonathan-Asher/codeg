@@ -350,3 +350,24 @@ describe("TurnStats zeroed counters", () => {
     expect(screen.getByLabelText(tokenStatsLabel)).toBeInTheDocument()
   })
 })
+
+describe("TurnStats completed-at label", () => {
+  const completedLabel = enMessages.Folder.chat.messageList.completedAt
+
+  it("shows the date with the time, without the year in the current year", () => {
+    const at = new Date(new Date().getFullYear(), 2, 7, 9, 5)
+    renderStats(<TurnStats copyText="hello" completedAt={at.toISOString()} />)
+    const button = screen.getByLabelText(new RegExp(`^${completedLabel}:`))
+    expect(button).toHaveTextContent(/Mar 7/)
+    expect(button).toHaveTextContent(/09:05/)
+    expect(button).not.toHaveTextContent(String(at.getFullYear()))
+  })
+
+  it("adds the year for a reply from another year", () => {
+    const at = new Date(2024, 10, 3, 17, 40)
+    renderStats(<TurnStats copyText="hello" completedAt={at.toISOString()} />)
+    const button = screen.getByLabelText(new RegExp(`^${completedLabel}:`))
+    expect(button).toHaveTextContent(/Nov 3, 2024/)
+    expect(button).toHaveTextContent(/05:40/)
+  })
+})

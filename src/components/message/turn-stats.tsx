@@ -98,12 +98,24 @@ export function TurnStats({
   const modelLabel = useModelLabel()
   const [isCopied, setIsCopied] = useState(false)
   const timeoutRef = useRef<number>(0)
-  const shortTimeFormatter = useMemo(
-    () =>
-      new Intl.DateTimeFormat(locale, {
+  // Date and time, so a reply read days later still says when it ended; the
+  // year shows only when it isn't the current one.
+  const shortFormatters = useMemo(
+    () => ({
+      thisYear: new Intl.DateTimeFormat(locale, {
+        month: "short",
+        day: "numeric",
         hour: "2-digit",
         minute: "2-digit",
       }),
+      otherYear: new Intl.DateTimeFormat(locale, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    }),
     [locale]
   )
   const fullTimeFormatter = useMemo(
@@ -123,7 +135,10 @@ export function TurnStats({
     return new Date(ms)
   }, [completedAt, isResponseComplete])
   const completedLabel = completedAtDate
-    ? shortTimeFormatter.format(completedAtDate)
+    ? (completedAtDate.getFullYear() === new Date().getFullYear()
+        ? shortFormatters.thisYear
+        : shortFormatters.otherYear
+      ).format(completedAtDate)
     : null
   const completedTooltip = completedAtDate
     ? fullTimeFormatter.format(completedAtDate)
