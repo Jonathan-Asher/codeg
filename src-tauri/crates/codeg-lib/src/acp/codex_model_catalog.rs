@@ -68,7 +68,7 @@ struct EnumSpec {
 
 // Authoritative value sets + nullability, extracted from the codex binary itself
 // by feeding it candidate catalogs and reading the full `unknown variant …,
-// expected …` / `invalid type: null, expected …` errors (re-probed on 0.156.1,
+// expected …` / `invalid type: null, expected …` errors (re-probed on 0.166.0,
 // unchanged since 0.147 — treat these as version-specific and re-probe when
 // codex moves).
 fn enum_spec_for(key: &str) -> Option<EnumSpec> {
@@ -121,6 +121,12 @@ fn enum_spec_for(key: &str) -> Option<EnumSpec> {
 /// (`"priority"` on GPT-6 Sol and Luna), is an optional string rather than an
 /// enum — an unknown tier name parses and only a non-string is refused — so
 /// it needs no entry in either list.
+///
+/// 0.166.0 (codex-acp 2.6.0) adds no key at all. It re-confirmed every entry
+/// here and every enum set above, and starts filling `availability_nux` (an
+/// optional `{message}` struct, on GPT-6.1 Sol): a string there is refused
+/// like a malformed boolean, but the editor offers no control for it and it
+/// is copied verbatim from the official base, so it needs no entry either.
 const BOOL_FIELDS: &[&str] = &[
     "use_responses_lite",
     "supported_in_api",
@@ -651,12 +657,13 @@ mod tests {
         let models = snap();
         assert_eq!(
             models.len(),
-            11,
-            "snapshot should carry codex 0.156.1's catalog"
+            12,
+            "snapshot should carry codex 0.166.0's catalog"
         );
         assert!(models.iter().any(|m| slug_of(m) == Some("gpt-6-astra")));
-        // 0.156.1 adds GPT-6 Sol and Luna, both listed.
-        for added in ["gpt-6-sol", "gpt-6-luna"] {
+        // 0.156.1 added GPT-6 Sol and Luna; 0.166.0 adds GPT-6.1 Sol and Terra
+        // (the reason for codex-acp 2.6.0). All listed.
+        for added in ["gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol", "gpt-6.1-terra"] {
             let m = models
                 .iter()
                 .find(|m| slug_of(m) == Some(added))
@@ -665,6 +672,8 @@ mod tests {
         }
         assert!(models.iter().any(|m| slug_of(m) == Some("gpt-5.6-sol")));
         assert!(models.iter().any(|m| slug_of(m) == Some("gpt-5.5")));
+        // 0.166.0 DELETED gpt-5.4 (it was a hidden retirement stub before).
+        assert!(models.iter().all(|m| slug_of(m) != Some("gpt-5.4")));
         // codex-auto-review ships hidden.
         let review = models
             .iter()
@@ -720,8 +729,8 @@ mod tests {
             default: None,
         };
         let cat = expand_to_catalog(&config, &snap());
-        // All 11 officials auto-included + 1 custom = 12.
-        assert_eq!(slugs(&cat).len(), 12);
+        // All 12 officials auto-included + 1 custom = 13.
+        assert_eq!(slugs(&cat).len(), 13);
         // Custom is first (top of picker) and forced list + api.
         let c = find(&cat, "gw/opus").expect("custom present");
         assert_eq!(c.get("visibility").unwrap(), "list");
@@ -729,6 +738,7 @@ mod tests {
         assert_eq!(c.get("priority").unwrap().as_i64(), Some(0));
         assert!(c.get("base_instructions").and_then(Value::as_str).is_some());
         // codex 0.156.1 points gpt-5.6-sol at gpt-6-sol through an `upgrade`
+        // (still so in 0.166.0, which adds no upgrade to the 6.1 pair)
         // block, which codex's TUI raises as a model-migration prompt. A custom
         // that clones it must not inherit a migration offer for a model it is
         // not, so the base's block is cleared — the official itself keeps it
@@ -770,18 +780,24 @@ mod tests {
     #[test]
     fn expand_keeps_hidden_officials_even_when_excluded() {
         let s = snap();
-        // gpt-5.4 and the two daybreak builds ship hidden; codex-auto-review
-        // always is.
-        for slug in ["gpt-5.4", "gpt-daybreak-blue-latest", "codex-auto-review"] {
+        // The two daybreak builds ship hidden; codex-auto-review always is.
+        for slug in [
+            "gpt-daybreak-red-latest",
+            "gpt-daybreak-blue-latest",
+            "codex-auto-review",
+        ] {
             let hidden = s
                 .iter()
                 .find(|m| slug_of(m) == Some(slug))
                 .expect("in snapshot");
             assert_eq!(hidden.get("visibility").unwrap(), "hide", "{slug}");
         }
-        let cat = expand_to_catalog(&excluding(&["gpt-5.4", "gpt-daybreak-blue-latest"]), &s);
+        let cat = expand_to_catalog(
+            &excluding(&["gpt-daybreak-red-latest", "gpt-daybreak-blue-latest"]),
+            &s,
+        );
         let out = slugs(&cat);
-        assert!(out.iter().any(|x| x == "gpt-5.4"));
+        assert!(out.iter().any(|x| x == "gpt-daybreak-red-latest"));
         assert!(out.iter().any(|x| x == "gpt-daybreak-blue-latest"));
         assert_eq!(out.len(), s.len(), "nothing dropped");
     }
@@ -789,7 +805,8 @@ mod tests {
     #[test]
     fn effectively_empty_ignores_ghost_exclusions() {
         let s = snap();
-        // Only stale removals of now-hidden officials → hand control back.
+        // Only stale removals of now-hidden (daybreak) or since-deleted
+        // (gpt-5.4, gone in 0.166.0) officials → hand control back.
         assert!(is_effectively_empty(
             &excluding(&["gpt-5.4", "gpt-daybreak-blue-latest"]),
             &s
@@ -1105,7 +1122,7 @@ mod tests {
         assert!(find(&cat, "gpt-5.2").is_none());
         // …while hidden ones survive: they were never inferred-excluded, and
         // expansion would keep them regardless (they back codex internals).
-        assert!(find(&cat, "gpt-5.4").is_some());
+        assert!(find(&cat, "gpt-daybreak-blue-latest").is_some());
         assert!(find(&cat, "codex-auto-review").is_some());
     }
 

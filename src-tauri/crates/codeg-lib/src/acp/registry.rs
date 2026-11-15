@@ -390,10 +390,10 @@ const ACP_ADAPTER_DOCS_URL: &str = "https://docs.codeg.app/guide/supported-agent
 /// `_meta.steering.supported`: an adapter that ignores the opt-in falls back
 /// to `startedNewTurn` on the turn-end race — a detached turn no host request
 /// owns, which codeg's turn-scoped runtime must never trigger. codex-acp
-/// ships `_session/steering` but not `promptRequired` — re-verified against
-/// the published 1.3.0 tarball (zero hits, same as 1.1.9) — so it stays
-/// `None` until a release implements the opt-in — then this is a one-line
-/// flip plus tests. Upstream pi-acp has no `_session/steering` at all (0.0.34
+/// shipped `_session/steering` without `promptRequired` through 1.13.1;
+/// 2.4.0 (#593) implements the opt-in, but codex stays `None` until its ACTIVE
+/// path is verified to keep the owning prompt in flight (below) — then this is
+/// a one-line flip plus tests. Upstream pi-acp has no `_session/steering` at all (0.0.34
 /// neither advertises nor handles it); the floor below is the fork release that
 /// adds it, and any build without it still fails the advertisement gate.
 ///
@@ -2057,9 +2057,123 @@ pub fn get_agent_meta(agent_type: AgentType) -> AcpAgentMeta {
             // `disabledPluginIds`, `availableAccessPrograms`, MCP
             // `serverCapabilities`) are additive, and the parser reads rollouts
             // as untyped JSON.
+            //
+            // 2.6.0 is the 2.x line in one step (2.0.0 … 2.6.0, eleven
+            // releases), bundling `@openai/codex` ^0.166.0. The reason for the
+            // bump is the catalog: 0.166.0 lists **GPT-6.1 Sol** and **GPT-6.1
+            // Terra** (`gpt-6.1-sol`, `gpt-6.1-terra`) and retires `gpt-5.4`.
+            // 1.13.1 could run gpt-6.1-sol as a config default but did not list
+            // it, so once codeg replayed a remembered model at attach it could
+            // not be picked again (and it had no effort or Fast options). The
+            // new models carry a sixth effort, `ultra`, which the generic select
+            // path renders as it is. ACP v1 is still served in full —
+            // `initialize` answers `protocolVersion: 1` to codeg's v1 request,
+            // and every flow below was probed over v1; 2.1/2.3's "ACP v2
+            // support" is an ADDITIONAL protocol, picked by the client's
+            // `initialize`. `engines` is still absent (its strictest dependency,
+            // `open@11`, wants node >= 20), so the 20.0.0 floor stays.
+            //
+            // codeg declares `_meta.jetbrains.air`, which makes it an AIR
+            // client, and on ACP v1 AIR gets 2.0.0's BREAKING "AIR tool call
+            // contract" (#530). What that moved, and what codeg does about it:
+            //
+            // (m) Keys moved into `_meta.jetbrains.air` and no longer sent to
+            // ANY client under their old names: the goal advertisement and its
+            // `session_info_update` snapshots (`_meta.goal`), the permission
+            // presentation record (`_meta.permission`, request and option
+            // level), `commandAction` on available commands, the agent message
+            // `phase`, and the mode `kind`. Read through `air_meta_entry` in
+            // connection.rs: without it the goal channel would pin the LEGACY
+            // spelling at initialize (no goal card), permission cards would lose
+            // their heading, and `/plan` would come back as a slash command.
+            // codeg never read `phase` or the mode `kind`.
+            //
+            // (n) Dropped outright: `_meta.codex.subagent` /
+            // `_meta.codex.collaboration`, the plan review's `_meta.codex.kind`
+            // / `planItemId`, and `diffStats` (never read). The plan review is
+            // now known by its tool call alone (`plan-review:<itemId>` +
+            // `switch_mode`, see `codex_plan_review_item`); a sub-agent activity
+            // by its `rawInput` (`agentThreadId` / `agentPath` /
+            // `activityKind`, unchanged), see `classify_codex_subagent_activity`.
+            // A `spawnAgent` collaboration call keeps the `rawInput` trio
+            // `isCodexCollabInput` keys on; it loses only `status` (a failed op
+            // still fails the tool call) and gains a copy of the prompt in
+            // `content`, which the collab card does not render.
+            //
+            // (o) Updates carry only what changed. A `tool_call_update` omits
+            // unchanged top-level fields — and, for AIR, unchanged `_meta` keys
+            // — so a follow-up can be a bare `{toolCallId, status}`; dropped
+            // sub-agent markers are therefore tracked by id
+            // (`codex_dropped_subagent_ids`). The tool call of a permission
+            // request is likewise an update MERGED into the stored call: for a
+            // started command or file change it omits `kind`/`status` and the
+            // diff, for an MCP approval everything but the id.
+            // `handle_permission_request` fills the gaps from the session state
+            // (`fill_permission_tool_call_from_known`).
+            //
+            // (p) "Exact diff patches". Without a patch every client now gets
+            // one `diff` block PER HUNK of an update (context plus changed
+            // lines, no line numbers), so a multi-hunk file arrived as several
+            // blocks of one path and `synthesize_edit_input_from_diffs` kept
+            // only the last. codeg now advertises AIR `diffPatch` to Codex and
+            // reads the per-file Git patch (`air_diff_patch`), which carries
+            // codex's real hunks and line numbers; per-hunk blocks that still
+            // arrive (empty or binary files, oversize patches) are joined per
+            // path instead of overwritten. See `build_client_capabilities`.
+            //
+            // (q) **Predicted follow-up prompt** (2.5.0 #703, 2.6.0 #740/#709):
+            // after every completed turn the adapter runs `thread/sample` at
+            // `high` effort on an ephemeral fork and publishes the guess as
+            // `session_info_update._meta.promptSuggestions` — for any AIR
+            // client, unless `CODEX_ACP_PROMPT_SUGGESTIONS=false`. That is one
+            // extra model request per turn codeg never shows, so
+            // `apply_codex_env_policy` always sets the variable (measured on
+            // 2.6.0 over stdio: unset → one `thread/sample` per turn plus a
+            // `promptSuggestions` update; `false` → neither).
+            //
+            // (r) Modes: `read-only` is a real read-only sandbox again (2.0.0
+            // #480, "Read-only"), `workspace-write` ("Workspace access") is the
+            // old ask-for-approval preset, `agent` is "Auto review" and
+            // `agent-full-access` "Full access" — all four ids are accepted by
+            // `set_config_option`. 2.6.0 (#395) adds the user's allowed Codex
+            // permission profiles as `permission-profile:<id>` modes, and the
+            // `mode` select then GROUPS its options ("Sandbox Modes" /
+            // "Permission Profiles"), which `map_session_config_option` already
+            // reads. `codex_initial_agent_mode` (commands/acp.rs) still maps
+            // config `read-only` → `read-only`, now exactly.
+            //
+            // (s) Inert for codeg, each behind a gate it does not open:
+            // native subagent sessions (#682/#684 — `subagents` or
+            // `nativeSubagentSessions`; the agent now lists
+            // `sessionCapabilities.subagents`, which takes both sides), the
+            // session index (#590/#669, AIR `sessionIndex`), the
+            // `agentFileChangeReport`, plan streaming (top-level `plan`), hook
+            // trust (`codexHooks`) and custom instructions. Async questions
+            // (#707) need codex's `send_message_to_user_async` feature, which
+            // 0.166.0 ships off ("under development"); turned on, they arrive
+            // as `elicitation/create` with `_meta.codex.delivery: "async"` and
+            // are withdrawn with `$/cancel_request` when their turn ends, which
+            // codeg already honours for codex questions. Steering keeps
+            // `_meta.steering.supported`; 2.4.0 (#593) finally implements the
+            // `promptRequired` idle opt-in, but codex stays on the pull channel
+            // (the arm in `steering_prompt_required_min_version` stays None)
+            // until its active path is verified the way claude's was.
+            //
+            // (t) Unchanged and re-probed live on 2.6.0: `set_config_option`
+            // for model / `reasoning_effort` / `fast-mode` / mode, fork with
+            // the AIR fork point, `session/resume` and `session/load`,
+            // `session/list`, the Plan-mode `request_user_input` form (for AIR
+            // no injected "None of the above"; codeg's own "Other" text in the
+            // main field is decoded as a custom answer), elicitation and
+            // session-failure records, `_auth/status_update`, compaction and
+            // notices. Rollouts from codex 0.166.0 add `retained_context` /
+            // `verified_answer` and `response_item.additional_tools` records
+            // and `session_meta.thread_source` / `parent_thread_id`;
+            // `parsers::codex` reads them as before (fixture test in
+            // `tests/codex_acp_2_rollouts.rs`).
             distribution: AgentDistribution::Npx {
-                version: "1.13.1",
-                package: "@agentclientprotocol/codex-acp@1.13.1",
+                version: "2.6.0",
+                package: "@agentclientprotocol/codex-acp@2.6.0",
                 cmd: "codex-acp",
                 args: &[],
                 env: &[],
@@ -3371,8 +3485,8 @@ mod tests {
         );
         assert_npx_version(
             AgentType::Codex,
-            "1.13.1",
-            "@agentclientprotocol/codex-acp@1.13.1",
+            "2.6.0",
+            "@agentclientprotocol/codex-acp@2.6.0",
             Some("20.0.0"),
         );
         assert_npx_version(AgentType::Pi, "0.0.33", "pi-acp@0.0.33", Some("22.0.0"));

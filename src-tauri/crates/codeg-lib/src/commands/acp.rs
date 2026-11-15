@@ -4409,13 +4409,25 @@ pub(crate) fn grok_launch_permission_mode() -> Option<String> {
 /// the sandbox axis and neutral on the approval axis; the panel discloses the
 /// approval loss to the user rather than pretending it away.
 ///
-/// **The read-only sandbox, on codex-acp ≥1.7.0.** No preset carries one any
+/// **The read-only sandbox, on codex-acp 1.7–1.x.** No preset carries one any
 /// more, and the adapter re-sends the selected preset's `sandboxPolicy` on every
 /// `runTurn`, so neither `config.toml` nor the `CODEX_CONFIG` session-config
 /// channel can put it back. `read-only` is still the right target for a
-/// read-only config — it is the tightest preset on both adapter generations —
-/// but on ≥1.7.0 the session really is workspace-writable, which the panel says
+/// read-only config — it is the tightest preset on every adapter generation —
+/// but on 1.7–1.x the session really is workspace-writable, which the panel says
 /// out loud rather than papering over.
+///
+/// **codex-acp 2.0+** (#480) has four presets: `read-only` is a genuinely
+/// read-only sandbox again ("Read-only"), `workspace-write` ("Workspace
+/// access") is 1.7's user-reviewed workspace preset, `agent` ("Auto review")
+/// and `agent-full-access` ("Full access") are unchanged. The mapping below
+/// stays as it is: `read-only` → `read-only` is now exact, and a
+/// `workspace-write` config keeps `agent` for the reason above — the reviewer
+/// axis is not ours to pick, and `workspace-write` does not exist on a 1.x pin
+/// (an unknown `INITIAL_AGENT_MODE` falls back to the default there). 2.6.0's
+/// permission-profile modes (`permission-profile:<id>`) are selected by codex
+/// itself from the active profile; `default_permissions` below already keeps
+/// codeg out of that case.
 fn codex_initial_agent_mode(settings: &CodexSandboxSettings) -> Option<&'static str> {
     // `default_permissions` makes codex resolve everything through that named
     // profile and IGNORE the root sandbox/approval keys entirely (the panel

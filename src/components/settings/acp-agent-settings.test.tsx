@@ -2113,4 +2113,23 @@ describe("codex ACP preset disclosures", () => {
       expect(showsCodexReadOnlyAcpWarning(mode, true)).toBe(false)
     }
   })
+
+  it("drops the read-only warning for codex-acp 2.x, which honors read-only again", () => {
+    // 1.7–1.x: the preset carries a workspace-write sandbox, so it warns.
+    expect(showsCodexReadOnlyAcpWarning("read-only", false, "1.13.1")).toBe(
+      true
+    )
+    // 2.0.0 (#480) restored a real read-only sandbox.
+    for (const version of ["2.0.0", "2.6.0", "v2.6.0", "10.0.0"]) {
+      expect(showsCodexReadOnlyAcpWarning("read-only", false, version)).toBe(
+        false
+      )
+    }
+    // An unknown or non-comparable version keeps the conservative warning.
+    for (const version of [null, "", "latest"]) {
+      expect(showsCodexReadOnlyAcpWarning("read-only", false, version)).toBe(
+        true
+      )
+    }
+  })
 })

@@ -2035,11 +2035,23 @@ export function codexSandboxSeedsAcpPreset(shadowed: boolean): boolean {
  * a model forwards only what it judges unsafe). Showing it for a shadowed
  * config would pair "your sandbox key is ignored" with "you will be asked about
  * everything" — the second being a guarantee codeg is not making.
+ *
+ * Only for codex-acp 1.7–1.x: 2.0.0 (#480) gave the `read-only` preset its
+ * read-only sandbox back (and added `workspace-write` for the old behavior), so
+ * on an installed 2.x the warning's first half is false. An unknown version
+ * keeps the warning, the conservative reading.
  */
 export function showsCodexReadOnlyAcpWarning(
   mode: CodexSandboxModeChoice,
-  shadowed: boolean
+  shadowed: boolean,
+  adapterVersion: string | null = null
 ): boolean {
+  if (
+    hasComparableVersion(adapterVersion) &&
+    compareVersion(adapterVersion, "2.0.0") >= 0
+  ) {
+    return false
+  }
   return mode === "read-only" && codexSandboxSeedsAcpPreset(shadowed)
 }
 
@@ -8667,13 +8679,15 @@ export function AcpAgentSettings() {
                         {/* codex-acp 1.7.0 redefined its `read-only` preset to
                             carry a workspace-write sandbox, and it re-sends
                             that policy every turn — so an ACP session cannot
-                            honor a read-only sandbox at all any more. This
+                            honor a read-only sandbox at all on 1.7–1.x. This
                             control keeps working for codex CLI/IDE sessions,
                             which is exactly why the divergence has to be said
-                            out loud rather than left to look effective. */}
+                            out loud rather than left to look effective. 2.0.0
+                            restored the read-only sandbox. */}
                         {showsCodexReadOnlyAcpWarning(
                           selectedDraft.codexSandboxMode,
-                          selectedDraft.codexSandboxShadowed
+                          selectedDraft.codexSandboxShadowed,
+                          selectedAgent.installed_version ?? null
                         ) ? (
                           <p className="text-3xs text-yellow-500">
                             {t("codex.sandboxModeReadOnlyAcpWarning")}
