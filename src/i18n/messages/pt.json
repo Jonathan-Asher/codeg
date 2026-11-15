@@ -4975,7 +4975,7 @@
     "agentTypeRequired": "O tipo de agente é obrigatório.",
     "agentTypeImmutableHint": "O tipo de agente não pode ser alterado após a criação.",
     "model": "Modelo",
-    "modelPlaceholderCodex": "gpt-6-sol / gpt-6-luna",
+    "modelPlaceholderCodex": "gpt-6.1-sol / gpt-6.1-terra",
     "modelPlaceholderGemini": "gemini-3-pro-preview",
     "claudeMainModel": "Modelo Principal",
     "claudeReasoningModel": "Modelo de Raciocínio (pensamento)",
