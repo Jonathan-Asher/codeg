@@ -994,10 +994,11 @@ fn merge_antigravity_settings(
 }
 
 /// Variables the codex launch path sets on top of the merged env: the MCP
-/// filtering override and the initial-mode preset from
-/// [`apply_codex_env_policy`], and the adapter log directory set under
+/// filtering override, the prompt-suggestion switch and the initial-mode preset
+/// from [`apply_codex_env_policy`], and the adapter log directory set under
 /// `CODEG_ACP_DEBUG`.
 pub(crate) const CODEX_MCP_FILTERING_ENV: &str = "DISABLE_MCP_CONFIG_FILTERING";
+pub(crate) const CODEX_PROMPT_SUGGESTIONS_ENV: &str = "CODEX_ACP_PROMPT_SUGGESTIONS";
 pub(crate) const CODEX_INITIAL_MODE_ENV: &str = "INITIAL_AGENT_MODE";
 pub(crate) const CODEX_APP_SERVER_LOGS_ENV: &str = "APP_SERVER_LOGS";
 
@@ -1055,6 +1056,21 @@ fn apply_codex_env_policy(
     let key = CODEX_MCP_FILTERING_ENV;
     merged.retain(|(k, _)| k != key);
     merged.push((key.to_string(), "true".to_string()));
+
+    // codex-acp 2.5.0 (#703, moved onto the session thread by #740 in 2.6.0)
+    // predicts the user's next message after EVERY completed turn: a
+    // `thread/sample` call on an ephemeral fork of the thread, at `high`
+    // effort, published as `session_info_update._meta.promptSuggestions`. It
+    // runs for any client that declares `_meta.jetbrains.air` — which codeg
+    // does for its other AIR capabilities — so it is on unless this variable
+    // says `false`. That is one extra model request per turn that codeg never
+    // shows (it reads no `promptSuggestions`), the same cost the Claude
+    // adapter's `promptSuggestions: false` turns off. Forced like the MCP
+    // override above, so a user `runtime_env` twin cannot switch it back on.
+    // Older adapters ignore the variable.
+    let key = CODEX_PROMPT_SUGGESTIONS_ENV;
+    merged.retain(|(k, _)| k != key);
+    merged.push((key.to_string(), "false".to_string()));
 
     // Make `~/.codex/config.toml`'s sandbox/approval choice mean something.
     // codex-acp re-sends its own approvalPolicy + sandboxPolicy every turn from
@@ -5760,8 +5776,33 @@ fn build_client_capabilities(
     // shapes, the effort trade that drop accepts, and why the stale-`"default"`
     // preference is healed on the frontend rather than here; and the codex
     // entry (a) for the 1.11.0 wire trace.
+    //
+    // codex alone also takes "diffPatch" (codex-acp 2.0.0, #530). From 2.0 on
+    // the adapter no longer sends a file change as whole-file `oldText` /
+    // `newText`: without a patch, an update is ONE `diff` block PER HUNK, each
+    // holding only that hunk's context and changed lines — for every client.
+    // Several blocks then share a path, carry no line numbers, and the edit
+    // card could only show them relative to line 1. With "diffPatch" each
+    // changed file is one block whose `_meta.jetbrains.air.diffPatch.text` is a
+    // Git patch built from codex's own hunks, real line numbers included, and
+    // `oldText: null` / `newText: ""` are placeholders. Its reader is
+    // `air_diff_patch` (see `synthesize_edit_input_from_diffs`), which hands the
+    // patch to the edit card as a ready-made unified diff. Live 2.6.0 capture of
+    // one `apply_patch` that changes two lines of a 40-line file, adds one file
+    // and deletes another:
+    //
+    //   without: big.txt ×2 (`line 2\nline 3\nline 4\n` → …, `line 29…`),
+    //            gone.txt (`bye\n` → ``), new.txt (null → `hi\n`)
+    //   with:    big.txt (`@@ -2,3 +2,3 @@ … @@ -29,3 +29,3 @@ …`),
+    //            gone.txt (`deleted file mode 100644`), new.txt (`new file mode`)
+    //
+    // An adapter that does not know the capability (every 1.x) ignores it and
+    // keeps sending whole-file text, which the same reader leaves alone.
     if matches!(agent_type, AgentType::ClaudeCode | AgentType::Codex) {
-        let capabilities = ["sessionFailure", "asyncTasks", "recommendedValue"];
+        let mut capabilities = vec!["sessionFailure", "asyncTasks", "recommendedValue"];
+        if agent_type == AgentType::Codex {
+            capabilities.push("diffPatch");
+        }
         meta.insert(
             "jetbrains".to_string(),
             serde_json::json!({
@@ -9338,11 +9379,16 @@ async fn handle_permission_request(
     // Codex Plan-mode review gate: seed the tool call codex never announced, so
     // its follow-up `tool_call_update` (status + rawOutput only) merges into a
     // card that has an identity instead of creating an untitled orphan. See
-    // `is_codex_plan_review`. `raw_input` is deliberately omitted: the plan text
+    // `codex_plan_review_item`. `raw_input` is deliberately omitted: the plan text
     // is already in the transcript (codex emits the plan as an
     // `agent_message_chunk` before this) and the permission card renders it from
     // the request's own `rawInput.plan` — a third copy would be noise.
-    if is_codex_plan_review(agent_type, req.meta.as_ref()) {
+    if let Some(plan_item_id) = codex_plan_review_item(
+        agent_type,
+        req.meta.as_ref(),
+        &req.tool_call.tool_call_id.to_string(),
+        req.tool_call.fields.kind.as_ref(),
+    ) {
         emit_with_state(
             state,
             emitter,
@@ -9355,10 +9401,7 @@ async fn handle_permission_request(
                 raw_input: None,
                 raw_output: None,
                 locations: None,
-                meta: req
-                    .meta
-                    .as_ref()
-                    .map(|m| serde_json::Value::Object(m.clone())),
+                meta: Some(codex_plan_review_meta(req.meta.as_ref(), &plan_item_id)),
                 images: None,
             },
         )
@@ -9379,15 +9422,33 @@ async fn handle_permission_request(
                 _ => "unknown".into(),
             },
             // Opaque passthrough — the frontend reads codex-acp ≥1.1.8's
-            // `_meta.permission.changes[].description` off this.
-            meta: opt
-                .meta
-                .as_ref()
-                .map(|m| serde_json::Value::Object(m.clone())),
+            // `_meta.permission.changes[].description` off this. codex-acp 2.x
+            // moved the option record into the AIR namespace; it is copied
+            // back to `_meta.permission`, the one place the card looks.
+            meta: opt.meta.as_ref().map(|m| {
+                let mut meta = m.clone();
+                lift_air_permission_record(&mut meta);
+                serde_json::Value::Object(meta)
+            }),
         })
         .collect();
 
     let mut tool_call_value = serde_json::to_value(&req.tool_call).unwrap_or_default();
+
+    // codex-acp 2.x sends the request's tool call as a ToolCallUpdate MERGED
+    // into the tool call the client already holds: for a started command or
+    // file change it omits `kind` and `status`, a file change carries no diff,
+    // and an MCP approval carries only its id. The card is built from this
+    // value alone, so the missing fields come from the stored tool call.
+    if agent_type == AgentType::Codex {
+        let known = state
+            .read()
+            .await
+            .active_tool_calls
+            .get(&req.tool_call.tool_call_id.to_string())
+            .cloned();
+        fill_permission_tool_call_from_known(&mut tool_call_value, known.as_ref());
+    }
 
     // Claude Code's plan card sorts "Yes, manually approve edits" first. Lead
     // with the mode to continue in instead — every client renders the first
@@ -13457,6 +13518,12 @@ pub(crate) fn serialize_tool_call_content(
                 }
             }
             ToolCallContent::Diff(diff) if include_diffs => {
+                // A patch-mode block (codex-acp 2.x `diffPatch`) holds only
+                // placeholders in its text fields; the patch is the change.
+                if let Some(patch) = air_diff_patch(diff) {
+                    parts.push(patch.trim_end().to_string());
+                    continue;
+                }
                 let path = diff.path.display();
                 let mut diff_text = format!("--- {path}\n+++ {path}\n");
                 if let Some(old) = &diff.old_text {
@@ -13511,58 +13578,147 @@ pub(crate) fn synthesize_edit_input_from_diffs(content: &[ToolCallContent]) -> O
     // makes the frontend build a `--- a/<path>` diff, which `isAddedFileDiff`
     // does NOT match, so a freshly created file mis-renders as a modification
     // (the historical apply_patch `*** Add File:` path classifies it correctly).
-    let diffs: Vec<(String, Option<String>, String)> = content
-        .iter()
-        .filter_map(|item| match item {
-            ToolCallContent::Diff(diff) => Some((
-                diff.path.display().to_string(),
-                diff.old_text.clone(),
-                diff.new_text.clone(),
-            )),
-            _ => None,
-        })
-        .collect();
+    //
+    // One entry per PATH, in first-seen order. codex-acp 2.x sends an update
+    // without a patch as one block per hunk, so a path can repeat; keying the
+    // `changes` map by path used to keep only the LAST hunk of such a file.
+    // The hunks of one file are joined instead (see `EditChange::absorb`).
+    let mut order: Vec<String> = Vec::new();
+    let mut by_path: HashMap<String, EditChange> = HashMap::new();
+    for item in content {
+        let ToolCallContent::Diff(diff) = item else {
+            continue;
+        };
+        let path = diff.path.display().to_string();
+        let change = match air_diff_patch(diff) {
+            Some(patch) => EditChange::Patch(patch.to_string()),
+            None => EditChange::Text {
+                old: diff.old_text.clone(),
+                new: diff.new_text.clone(),
+            },
+        };
+        match by_path.get_mut(&path) {
+            Some(existing) => existing.absorb(change),
+            None => {
+                order.push(path.clone());
+                by_path.insert(path, change);
+            }
+        }
+    }
 
-    match diffs.as_slice() {
+    match order.as_slice() {
         [] => None,
-        // New file (old_text absent) → write shape. `inferFromInput` classifies
-        // `{file_path, content}` as `write`, whose diff builder emits the
-        // `--- /dev/null` header `isAddedFileDiff` keys on → renders as a new
-        // file, matching the reloaded-from-DB path.
-        [(path, None, new)] => Some(
-            serde_json::json!({
-                "file_path": path,
-                "content": new,
-            })
-            .to_string(),
-        ),
-        // Edit → canonical `{old_string,new_string}` for the frontend's
-        // `generateUnifiedDiff` (a real hunk diff, minimal even for full-file
-        // old/new).
-        [(path, Some(old), new)] => Some(
-            serde_json::json!({
-                "file_path": path,
-                "old_string": old,
-                "new_string": new,
-            })
-            .to_string(),
-        ),
-        many => {
+        // One file with whole texts (every 1.x adapter): the single-file shapes.
+        [path] if matches!(by_path.get(path), Some(EditChange::Text { .. })) => {
+            match by_path.remove(path) {
+                // New file (old_text absent) → write shape. `inferFromInput`
+                // classifies `{file_path, content}` as `write`, whose diff
+                // builder emits the `--- /dev/null` header `isAddedFileDiff`
+                // keys on → renders as a new file, matching the
+                // reloaded-from-DB path.
+                Some(EditChange::Text { old: None, new }) => Some(
+                    serde_json::json!({
+                        "file_path": path,
+                        "content": new,
+                    })
+                    .to_string(),
+                ),
+                // Edit → canonical `{old_string,new_string}` for the frontend's
+                // `generateUnifiedDiff` (a real hunk diff, minimal even for
+                // full-file old/new).
+                Some(EditChange::Text { old: Some(old), new }) => Some(
+                    serde_json::json!({
+                        "file_path": path,
+                        "old_string": old,
+                        "new_string": new,
+                    })
+                    .to_string(),
+                ),
+                _ => None,
+            }
+        }
+        paths => {
             let mut changes = serde_json::Map::new();
-            for (path, old, new) in many {
+            for path in paths {
                 // Per-entry, mirror the single-diff split: a new file gets a
                 // ready-made creation diff (`buildChunkFromEditChange` returns
                 // it verbatim → `--- /dev/null` → new file); an edit hands
-                // old/new text to the frontend to diff.
-                let entry = match old {
-                    None => serde_json::json!({ "diff": build_new_file_diff(path, new) }),
-                    Some(old) => serde_json::json!({ "old_text": old, "new_text": new }),
+                // old/new text to the frontend to diff; a patch IS the
+                // ready-made diff, real line numbers and all.
+                let entry = match by_path.remove(path) {
+                    Some(EditChange::Patch(patch)) => serde_json::json!({ "diff": patch }),
+                    Some(EditChange::Text { old: None, new }) => {
+                        serde_json::json!({ "diff": build_new_file_diff(path, &new) })
+                    }
+                    Some(EditChange::Text { old: Some(old), new }) => {
+                        serde_json::json!({ "old_text": old, "new_text": new })
+                    }
+                    None => continue,
                 };
                 changes.insert(path.clone(), entry);
             }
             Some(serde_json::json!({ "changes": changes }).to_string())
         }
     }
+}
+
+/// One file's change, as [`synthesize_edit_input_from_diffs`] gathers it from
+/// the `Diff` blocks that name it.
+enum EditChange {
+    /// The Git patch of a patch-mode block ([`air_diff_patch`]).
+    Patch(String),
+    /// Standard ACP text: whole files from 1.x, one hunk per block from 2.x
+    /// when no patch could be built.
+    Text { old: Option<String>, new: String },
+}
+
+impl EditChange {
+    /// Fold a later block of the same file into this one. A patch is the
+    /// authority over text; two text blocks are hunks of one update, in file
+    /// order and without overlap (codex-acp checks both before it sends them),
+    /// so their texts are joined. The line numbers between them are lost — the
+    /// adapter never sends them — but no hunk is.
+    fn absorb(&mut self, later: EditChange) {
+        match later {
+            EditChange::Patch(patch) => {
+                if !matches!(self, EditChange::Patch(_)) {
+                    *self = EditChange::Patch(patch);
+                }
+            }
+            EditChange::Text {
+                old: later_old,
+                new: later_new,
+            } => {
+                if let EditChange::Text { old, new } = self {
+                    if let (Some(old), Some(later_old)) = (old.as_mut(), later_old) {
+                        old.push_str(&later_old);
+                    }
+                    new.push_str(&later_new);
+                }
+            }
+        }
+    }
+}
+
+/// The Git patch of a patch-mode `Diff` block (codex-acp 2.x with the AIR
+/// `diffPatch` capability, see `build_client_capabilities`):
+/// `_meta.jetbrains.air.diffPatch = {version: 1, format: "git_patch", text}`.
+///
+/// Validated the way the AIR contract asks of a receiver — a well-formed AIR
+/// envelope, payload version 1, format `git_patch`, and a text that holds at
+/// least one `@@` hunk header — and ignored otherwise, in which case the
+/// block's own `oldText` / `newText` are read as usual. A patch-mode block's
+/// text fields (`oldText: null`, `newText: ""`) are placeholders, not content.
+fn air_diff_patch(diff: &agent_client_protocol::schema::v1::Diff) -> Option<&str> {
+    let patch = air_meta_entry(diff.meta.as_ref(), "diffPatch")?;
+    if patch.get("version").and_then(serde_json::Value::as_i64) != Some(1)
+        || patch.get("format").and_then(serde_json::Value::as_str) != Some("git_patch")
+    {
+        return None;
+    }
+    let text = patch.get("text").and_then(serde_json::Value::as_str)?;
+    let has_hunk = text.starts_with("@@ ") || text.contains("\n@@ ");
+    has_hunk.then_some(text)
 }
 
 /// Drop every `Terminal` block from a tool call's `content`, keeping the rest
@@ -14944,26 +15100,51 @@ enum CodexSubagentActivity {
 /// say so later, with a `completed` / `interrupted` activity of its own — see
 /// [`CodexSubagentActivity::Terminal`], which is routed back onto the launch
 /// capsule rather than rendered.
+///
+/// The activity is read from `_meta.codex.subagent = {threadId, path,
+/// activity}` (codex-acp 1.x), else from the call's `rawInput = {agentThreadId,
+/// agentPath, activityKind}`. codex-acp 2.0.0 (#530) stopped sending the
+/// `_meta.codex` block to any client and marks the call with
+/// `_meta.jetbrains.air.subagent: true` instead — a marker a `spawnAgent`
+/// collaboration call carries too, so it decides nothing here; the `rawInput`
+/// it rides with is the same one 1.x sent, and only an activity has
+/// `activityKind`.
 fn classify_codex_subagent_activity(
     agent_type: AgentType,
     meta: Option<&serde_json::Map<String, serde_json::Value>>,
+    raw_input: Option<&serde_json::Value>,
 ) -> CodexSubagentActivity {
     if agent_type != AgentType::Codex {
         return CodexSubagentActivity::None;
     }
-    let Some(subagent) = meta
+    let legacy = meta
         .and_then(|m| m.get("codex"))
-        .and_then(|codex| codex.get("subagent"))
-    else {
-        return CodexSubagentActivity::None;
-    };
-    let thread_id = subagent
-        .get("threadId")
+        .and_then(|codex| codex.get("subagent"));
+    fn pick<'a>(
+        legacy: Option<&'a serde_json::Value>,
+        raw_input: Option<&'a serde_json::Value>,
+        legacy_key: &str,
+        input_key: &str,
+    ) -> Option<&'a str> {
+        match legacy {
+            Some(subagent) => subagent.get(legacy_key),
+            None => raw_input.and_then(|input| input.get(input_key)),
+        }
         .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty());
-    // A status-only follow-up carries the same meta with the same `activity`,
-    // so this classification is stable across the call's whole lifetime.
-    match subagent.get("activity").and_then(|v| v.as_str()) {
+    }
+    let field = |legacy_key: &str, input_key: &str| pick(legacy, raw_input, legacy_key, input_key);
+    let is_activity = legacy.is_some()
+        || raw_input
+            .and_then(|input| input.get("activityKind"))
+            .is_some_and(serde_json::Value::is_string);
+    if !is_activity {
+        return CodexSubagentActivity::None;
+    }
+    let thread_id = field("threadId", "agentThreadId").filter(|s| !s.is_empty());
+    // A 1.x status-only follow-up carries the same meta with the same
+    // `activity`, so this classification is stable across the call's whole
+    // lifetime; a 2.x one carries neither (see `codex_dropped_subagent_ids`).
+    match field("activity", "activityKind") {
         Some("started") => {}
         // Without a thread id there is no capsule to attribute the outcome to,
         // so it degrades to the old drop rather than opening a stray card.
@@ -14978,9 +15159,7 @@ fn classify_codex_subagent_activity(
         }
         _ => return CodexSubagentActivity::Other,
     }
-    let name = subagent
-        .get("path")
-        .and_then(|v| v.as_str())
+    let name = field("path", "agentPath")
         .unwrap_or("")
         .rsplit('/')
         .find(|segment| !segment.is_empty())
@@ -15072,9 +15251,8 @@ async fn settle_codex_subagent_launch(
     .await;
 }
 
-/// True when a `session/request_permission` is codex's Plan-mode review gate
-/// (codex-acp #351, v1.1.8+): `_meta.codex = {kind: "plan_review", planItemId}`
-/// on the REQUEST (sibling of `options`), not on the tool call.
+/// The plan item of codex's Plan-mode review gate (codex-acp #351, v1.1.8+), or
+/// `None` when a `session/request_permission` is not one.
 ///
 /// codex-acp raises this once a plan item settles while `collaboration_mode` is
 /// `plan`, asking whether to implement the plan (`implement_plan`) or stay in
@@ -15083,18 +15261,70 @@ async fn settle_codex_subagent_launch(
 /// `tool_call_update` carrying just a status and `rawOutput`. Without seeding a
 /// tool call from this request that update lands on an unknown id and renders as
 /// an untitled generic tool card, so `handle_permission_request` emits one.
+///
+/// Two generations mark it:
+/// * 1.1.8–1.13: `_meta.codex = {kind: "plan_review", planItemId}` on the
+///   REQUEST (sibling of `options`), not on the tool call.
+/// * 2.0+ (#530): no `_meta` at all — "the adapter does not send these keys to
+///   any client". What is left is the tool call's own identity, which every
+///   client gets: `toolCallId = "plan-review:<planItemId>"` and
+///   `kind = switch_mode`. Both must hold; the id prefix alone is a string any
+///   agent could produce.
+///
 /// Gated on Codex, mirroring [`classify_codex_subagent_activity`].
-fn is_codex_plan_review(
+fn codex_plan_review_item(
     agent_type: AgentType,
     meta: Option<&serde_json::Map<String, serde_json::Value>>,
-) -> bool {
+    tool_call_id: &str,
+    kind: Option<&ToolKind>,
+) -> Option<String> {
     if agent_type != AgentType::Codex {
-        return false;
+        return None;
     }
-    meta.and_then(|m| m.get("codex"))
-        .and_then(|codex| codex.get("kind"))
-        .and_then(serde_json::Value::as_str)
-        == Some("plan_review")
+    let legacy = meta
+        .and_then(|m| m.get("codex"))
+        .filter(|codex| codex.get("kind").and_then(serde_json::Value::as_str) == Some("plan_review"));
+    if let Some(codex) = legacy {
+        let item = codex
+            .get("planItemId")
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| tool_call_id.strip_prefix(CODEX_PLAN_REVIEW_ID_PREFIX))
+            .unwrap_or_default();
+        return Some(item.to_string());
+    }
+    if !matches!(kind, Some(ToolKind::SwitchMode)) {
+        return None;
+    }
+    tool_call_id
+        .strip_prefix(CODEX_PLAN_REVIEW_ID_PREFIX)
+        .filter(|item| !item.is_empty())
+        .map(str::to_string)
+}
+
+/// The id prefix codex-acp gives the tool call of its plan review gate.
+const CODEX_PLAN_REVIEW_ID_PREFIX: &str = "plan-review:";
+
+/// The `_meta` of the tool call seeded for a plan review gate. The frontend
+/// tells the card apart by `_meta.codex.kind = "plan_review"`
+/// (`codexMarksPlanReview`), which 1.x put on the request and 2.x sends nowhere,
+/// so it is written here for both: the request `_meta` as it came when it
+/// already carries the marker, else the marker alone.
+fn codex_plan_review_meta(
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+    plan_item_id: &str,
+) -> serde_json::Value {
+    let marked = meta.is_some_and(|m| {
+        m.get("codex")
+            .and_then(|codex| codex.get("kind"))
+            .and_then(serde_json::Value::as_str)
+            == Some("plan_review")
+    });
+    match meta {
+        Some(m) if marked => serde_json::Value::Object(m.clone()),
+        _ => serde_json::json!({
+            "codex": {"kind": "plan_review", "planItemId": plan_item_id}
+        }),
+    }
 }
 
 /// Copy a permission request's REQUEST-level `_meta.permission` onto the card's
@@ -15133,11 +15363,19 @@ fn is_codex_plan_review(
 /// only `claudeCode` (nothing at all since 0.73.0). An existing
 /// `_meta.permission` is therefore never
 /// overwritten: the insert is skipped if the key is already present.
+///
+/// codex-acp 2.0.0 (#530) moved the record to
+/// `_meta.jetbrains.air.permission` (same `{version, title, description?}`
+/// shape) and sends the old key to no client, so the AIR spelling is hoisted to
+/// the same place when the plain one is absent.
 fn hoist_request_permission_meta(
     tool_call: &mut serde_json::Value,
     request_meta: Option<&serde_json::Map<String, serde_json::Value>>,
 ) {
-    let Some(permission) = request_meta.and_then(|m| m.get("permission")) else {
+    let Some(permission) = request_meta
+        .and_then(|m| m.get("permission"))
+        .or_else(|| air_meta_entry(request_meta, "permission"))
+    else {
         return;
     };
     let Some(obj) = tool_call.as_object_mut() else {
@@ -15152,6 +15390,66 @@ fn hoist_request_permission_meta(
         return;
     };
     meta.entry("permission").or_insert_with(|| permission.clone());
+}
+
+/// Copy an option's AIR permission record (codex-acp 2.x,
+/// `_meta.jetbrains.air.permission = {version: 1, description}` on an MCP
+/// elicitation option) to the plain `_meta.permission` the card reads. An
+/// existing plain record is never overwritten.
+fn lift_air_permission_record(meta: &mut serde_json::Map<String, serde_json::Value>) {
+    if meta.contains_key("permission") {
+        return;
+    }
+    if let Some(record) = air_meta_entry(Some(&*meta), "permission").cloned() {
+        meta.insert("permission".to_string(), record);
+    }
+}
+
+/// Fill the top-level fields a permission request's tool call leaves out from
+/// the tool call codeg already holds under the same id.
+///
+/// ACP types that tool call as a `ToolCallUpdate`, and codex-acp 2.x sends it
+/// as one: "the client merges it into the stored tool call". For a command or
+/// file change that already started it omits `kind` and `status`, a file
+/// change carries only `locations` (its diff went out with the `tool_call`),
+/// and an MCP approval carries only `toolCallId`. 1.x repeated everything.
+///
+/// Only ABSENT fields are filled, so a full request is untouched. The diff
+/// comes back as the stored `rawInput` (the edit input synthesized from the
+/// tool call's diff blocks), and only when the request brings neither its own
+/// `rawInput` nor `content`. `status` is left alone: the card is pending by
+/// definition.
+fn fill_permission_tool_call_from_known(
+    tool_call: &mut serde_json::Value,
+    known: Option<&crate::acp::session_state::ToolCallState>,
+) {
+    let (Some(obj), Some(known)) = (tool_call.as_object_mut(), known) else {
+        return;
+    };
+    let absent = |obj: &serde_json::Map<String, serde_json::Value>, key: &str| {
+        obj.get(key).is_none_or(serde_json::Value::is_null)
+    };
+    if absent(obj, "kind") {
+        if let Ok(kind) = serde_json::to_value(&known.kind) {
+            obj.insert("kind".to_string(), kind);
+        }
+    }
+    if absent(obj, "title") && !known.label.is_empty() {
+        obj.insert(
+            "title".to_string(),
+            serde_json::Value::String(known.label.clone()),
+        );
+    }
+    if absent(obj, "rawInput") && absent(obj, "content") {
+        if let Some(input) = &known.input {
+            obj.insert("rawInput".to_string(), input.clone());
+        }
+    }
+    if absent(obj, "locations") {
+        if let Some(locations) = &known.locations {
+            obj.insert("locations".to_string(), locations.clone());
+        }
+    }
 }
 
 /// True when an `initialize` response advertises the ACP steering extension —
@@ -15180,11 +15478,33 @@ fn init_advertises_steering(meta: Option<&serde_json::Map<String, serde_json::Va
 /// arrival order, so a transitional adapter double-publishing one goal
 /// transition through both namespaces can never produce two goal cards.
 /// Non-integer or sub-1 versions fail closed onto the legacy channel.
+///
+/// codex-acp 2.0.0 (#530) moved the whole extension into the AIR namespace —
+/// `_meta.jetbrains.air.goal` in the `initialize` response and on every
+/// `session_info_update` — and sends the top-level key to nobody any more.
+/// Both spellings advertise the same channel (see [`init_goal_advertisement`]);
+/// without the AIR one, a 2.x connection would pin the LEGACY channel and the
+/// goal card would never open.
 fn init_advertises_goal(meta: Option<&serde_json::Map<String, serde_json::Value>>) -> bool {
+    init_goal_advertisement(meta).is_some()
+}
+
+/// The goal advertisement of an `initialize` response: top-level `_meta.goal`
+/// (claude-agent-acp 0.66+, codex-acp 1.2–1.13), else the AIR-namespaced
+/// `_meta.jetbrains.air.goal` (codex-acp 2.0+), each only when its own
+/// `version` is an integer `>= 1`. The AIR envelope must be well-formed too
+/// (see [`air_meta_entry`]).
+fn init_goal_advertisement(
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> Option<&serde_json::Value> {
+    fn versioned(goal: &serde_json::Value) -> bool {
+        goal.get("version")
+            .and_then(serde_json::Value::as_i64)
+            .is_some_and(|version| version >= 1)
+    }
     meta.and_then(|m| m.get("goal"))
-        .and_then(|g| g.get("version"))
-        .and_then(serde_json::Value::as_i64)
-        .is_some_and(|version| version >= 1)
+        .filter(|goal| versioned(goal))
+        .or_else(|| air_meta_entry(meta, "goal").filter(|goal| versioned(goal)))
 }
 
 /// The goal-control surface an `initialize` response advertises:
@@ -15200,10 +15520,7 @@ fn init_advertises_goal(meta: Option<&serde_json::Map<String, serde_json::Value>
 fn goal_advertised_control(
     meta: Option<&serde_json::Map<String, serde_json::Value>>,
 ) -> Option<(String, Vec<String>)> {
-    if !init_advertises_goal(meta) {
-        return None;
-    }
-    let goal = meta?.get("goal")?;
+    let goal = init_goal_advertisement(meta)?;
     let method = goal
         .get("controlMethod")
         .and_then(serde_json::Value::as_str)
@@ -15252,19 +15569,46 @@ fn resolve_goal_control(
 
 /// Pick the goal payload out of a `session_info_update`'s `_meta` according to
 /// the channel pinned at initialize (see [`init_advertises_goal`]): the
-/// neutral `_meta.goal` for advertising connections, the legacy
+/// neutral snapshot for advertising connections, the legacy
 /// `_meta.codex.goal` otherwise — never both. Pure so the either/or contract
 /// is unit-tested without the connection machinery.
+///
+/// The neutral snapshot has two spellings: `_meta.goal` (claude-agent-acp,
+/// codex-acp 1.2–1.13) and `_meta.jetbrains.air.goal` (codex-acp 2.0+, where
+/// the extension moved into the AIR namespace). A clear is `null` in either.
+/// The top-level key wins when both are present.
 fn session_info_goal_value(
     neutral_goal_channel: bool,
     meta: Option<&serde_json::Map<String, serde_json::Value>>,
 ) -> Option<&serde_json::Value> {
-    let meta = meta?;
+    let map = meta?;
     if neutral_goal_channel {
-        meta.get("goal")
+        map.get("goal").or_else(|| air_meta_entry(meta, "goal"))
     } else {
-        meta.get("codex").and_then(|codex| codex.get("goal"))
+        map.get("codex").and_then(|codex| codex.get("goal"))
     }
+}
+
+/// One payload out of a `_meta.jetbrains.air` envelope, the envelope validated
+/// the way [`air_session_failure`] does (integer `version >= 1`). A `null`
+/// payload is still a payload: codex-acp 2.x clears a goal with
+/// `_meta.jetbrains.air.goal = null`.
+///
+/// codex-acp 2.0.0 (#530) moved several keys codeg reads into this namespace
+/// and sends the old spelling to no client: the goal advertisement and
+/// snapshots, the permission presentation record, `commandAction` and the
+/// subagent marker. Each reader takes the new spelling through here and keeps
+/// the old one for 1.x adapters.
+fn air_meta_entry<'a>(
+    meta: Option<&'a serde_json::Map<String, serde_json::Value>>,
+    key: &str,
+) -> Option<&'a serde_json::Value> {
+    let air = meta?.get("jetbrains")?.get("air")?;
+    let version = air.get("version").and_then(serde_json::Value::as_i64)?;
+    if version < 1 {
+        return None;
+    }
+    air.get(key)
 }
 
 /// The raw `sessionFailure` value out of a `_meta.jetbrains.air` envelope —
@@ -15489,6 +15833,10 @@ fn codex_retry_indicator(
 /// other action kind (e.g. `/goal`'s `prefixPrompt`, which takes an objective
 /// argument) are real commands and kept. Gated on Codex — `commandAction` is a
 /// codex-private `_meta` extension (the ACP schema has no such type).
+///
+/// codex-acp 2.0.0 (#530) moved the action to
+/// `_meta.jetbrains.air.commandAction` (same shape) and sends the plain key to
+/// no client; without the AIR spelling `/plan` would come back as a command.
 fn is_config_option_state_command(
     agent_type: AgentType,
     meta: Option<&serde_json::Map<String, serde_json::Value>>,
@@ -15497,6 +15845,7 @@ fn is_config_option_state_command(
         return false;
     }
     meta.and_then(|m| m.get("commandAction"))
+        .or_else(|| air_meta_entry(meta, "commandAction"))
         .and_then(|action| action.get("kind"))
         .and_then(|kind| kind.as_str())
         == Some("setConfigOption")
@@ -15798,6 +16147,15 @@ struct CodeBuddyLiveState {
     /// NOT cleared per turn, for the same reason the grok sub-agent map is not:
     /// a child legitimately outlives the turn that launched it.
     codex_subagent_launches: HashMap<String, (String, String)>,
+    /// Codex `subAgentActivity` tool-call ids whose frames are NOT rendered (a
+    /// terminal marker folded onto its launch, or a mid-life marker).
+    ///
+    /// codex-acp 2.x reports only what changed: the completion of such an
+    /// activity is a bare `{toolCallId, status}` with neither the `rawInput` nor
+    /// the `_meta` that identified it, so it cannot be classified on its own and
+    /// would be materialized as a stray card by `upsert_tool_call`. Tracked by
+    /// id, like `grok_ask_tool_ids`.
+    codex_dropped_subagent_ids: HashSet<String>,
     /// Grok `spawn_subagent` tool_call ids ever announced on this connection
     /// (dedupe for the pending queue + status tracking on meta-less updates).
     grok_spawn_seen: HashSet<String>,
@@ -17507,18 +17865,29 @@ async fn emit_conversation_update(
             // terminal marker is folded back onto that capsule; the rest stay
             // dropped. See `classify_codex_subagent_activity`.
             let mut codex_subagent_thread = None;
-            let codex_subagent = match classify_codex_subagent_activity(agent_type, tc.meta.as_ref())
-            {
+            let codex_subagent = match classify_codex_subagent_activity(
+                agent_type,
+                tc.meta.as_ref(),
+                tc.raw_input.as_ref(),
+            ) {
                 CodexSubagentActivity::None => None,
                 CodexSubagentActivity::Started { thread_id, input } => {
                     codex_subagent_thread = thread_id;
                     Some(input)
                 }
                 CodexSubagentActivity::Terminal { thread_id, kind } => {
+                    cb_state
+                        .codex_dropped_subagent_ids
+                        .insert(tc.tool_call_id.to_string());
                     settle_codex_subagent_launch(state, emitter, cb_state, &thread_id, &kind).await;
                     return;
                 }
-                CodexSubagentActivity::Other => return,
+                CodexSubagentActivity::Other => {
+                    cb_state
+                        .codex_dropped_subagent_ids
+                        .insert(tc.tool_call_id.to_string());
+                    return;
+                }
             };
             let tool_call_id = tc.tool_call_id.to_string();
             // Pi calls a run's card already shows (`acp::pi_meta`): a
@@ -17791,21 +18160,36 @@ async fn emit_conversation_update(
             // completion is forwarded (settling its capsule), any other
             // lifecycle marker's is dropped like its opening frame was. A
             // terminal marker can arrive on either frame, so both route it.
+            //
+            // codex-acp 2.x omits what did not change, so a follow-up may carry
+            // neither the `rawInput` nor the `_meta` the opening frame was
+            // classified by. A launch's bare completion then falls through to
+            // the ordinary update path and settles its capsule; a dropped
+            // marker's is recognized by id.
+            if cb_state
+                .codex_dropped_subagent_ids
+                .contains(&tcu.tool_call_id.to_string())
+            {
+                return;
+            }
             let mut codex_subagent_thread = None;
-            let codex_subagent =
-                match classify_codex_subagent_activity(agent_type, tcu.meta.as_ref()) {
-                    CodexSubagentActivity::None => None,
-                    CodexSubagentActivity::Started { thread_id, input } => {
-                        codex_subagent_thread = thread_id;
-                        Some(input)
-                    }
-                    CodexSubagentActivity::Terminal { thread_id, kind } => {
-                        settle_codex_subagent_launch(state, emitter, cb_state, &thread_id, &kind)
-                            .await;
-                        return;
-                    }
-                    CodexSubagentActivity::Other => return,
-                };
+            let codex_subagent = match classify_codex_subagent_activity(
+                agent_type,
+                tcu.meta.as_ref(),
+                tcu.fields.raw_input.as_ref(),
+            ) {
+                CodexSubagentActivity::None => None,
+                CodexSubagentActivity::Started { thread_id, input } => {
+                    codex_subagent_thread = thread_id;
+                    Some(input)
+                }
+                CodexSubagentActivity::Terminal { thread_id, kind } => {
+                    settle_codex_subagent_launch(state, emitter, cb_state, &thread_id, &kind)
+                        .await;
+                    return;
+                }
+                CodexSubagentActivity::Other => return,
+            };
             let tool_call_id = tcu.tool_call_id.to_string();
             if agent_type == AgentType::Pi
                 && cb_state.pi.enabled()
@@ -19545,7 +19929,7 @@ mod tests {
         agent_type: AgentType,
         meta: Option<&serde_json::Map<String, serde_json::Value>>,
     ) -> Option<serde_json::Value> {
-        match classify_codex_subagent_activity(agent_type, meta) {
+        match classify_codex_subagent_activity(agent_type, meta, None) {
             CodexSubagentActivity::Started { input, .. } => {
                 Some(serde_json::from_str(&input).expect("valid JSON"))
             }
@@ -19599,7 +19983,7 @@ mod tests {
         }));
         // Only Codex is gated — the same meta never reshapes another agent's call.
         assert!(matches!(
-            classify_codex_subagent_activity(AgentType::ClaudeCode, Some(&started)),
+            classify_codex_subagent_activity(AgentType::ClaudeCode, Some(&started), None),
             CodexSubagentActivity::None
         ));
         // A mid-life marker stays dropped: it carries no content and would open
@@ -19608,7 +19992,7 @@ mod tests {
             "codex": { "subagent": { "threadId": "t1", "path": "/root/x", "activity": "interacted" } }
         }));
         assert!(matches!(
-            classify_codex_subagent_activity(AgentType::Codex, Some(&interacted)),
+            classify_codex_subagent_activity(AgentType::Codex, Some(&interacted), None),
             CodexSubagentActivity::Other
         ));
         // A terminal marker is not dropped — it is the only live signal that the
@@ -19619,7 +20003,7 @@ mod tests {
             let terminal = meta_map(serde_json::json!({
                 "codex": { "subagent": { "threadId": "t1", "path": "/root/x", "activity": kind } }
             }));
-            match classify_codex_subagent_activity(AgentType::Codex, Some(&terminal)) {
+            match classify_codex_subagent_activity(AgentType::Codex, Some(&terminal), None) {
                 CodexSubagentActivity::Terminal {
                     thread_id,
                     kind: got,
@@ -19635,26 +20019,84 @@ mod tests {
                 "codex": { "subagent": { "path": "/root/x", "activity": kind } }
             }));
             assert!(matches!(
-                classify_codex_subagent_activity(AgentType::Codex, Some(&anonymous)),
+                classify_codex_subagent_activity(AgentType::Codex, Some(&anonymous), None),
                 CodexSubagentActivity::Other
             ));
         }
         // Absent meta and sibling codex meta keys (goal / collaboration) are not
         // subagent activity and must render normally.
         assert!(matches!(
-            classify_codex_subagent_activity(AgentType::Codex, None),
+            classify_codex_subagent_activity(AgentType::Codex, None, None),
             CodexSubagentActivity::None
         ));
         let goal = meta_map(serde_json::json!({ "codex": { "goal": { "objective": "x" } } }));
         assert!(matches!(
-            classify_codex_subagent_activity(AgentType::Codex, Some(&goal)),
+            classify_codex_subagent_activity(AgentType::Codex, Some(&goal), None),
             CodexSubagentActivity::None
         ));
         let collab = meta_map(serde_json::json!({
             "codex": { "collaboration": { "tool": "spawnAgent" } }
         }));
         assert!(matches!(
-            classify_codex_subagent_activity(AgentType::Codex, Some(&collab)),
+            classify_codex_subagent_activity(AgentType::Codex, Some(&collab), None),
+            CodexSubagentActivity::None
+        ));
+    }
+
+    /// codex-acp 2.0.0 dropped `_meta.codex.subagent`; the activity is read off
+    /// the call's `rawInput` (the shape both generations send), and the AIR
+    /// `subagent` marker alone — which a `spawnAgent` collaboration call also
+    /// carries — classifies nothing.
+    #[test]
+    fn codex_2x_subagent_activity_is_read_from_its_raw_input() {
+        let air = meta_map(serde_json::json!({"jetbrains": {"air": {"version": 1, "subagent": true}}}));
+        let activity = |kind: &str| {
+            serde_json::json!({
+                "agentThreadId": "01a0098a-7e8a", "agentPath": "/root/pnpm_build", "activityKind": kind
+            })
+        };
+        match classify_codex_subagent_activity(AgentType::Codex, Some(&air), Some(&activity("started"))) {
+            CodexSubagentActivity::Started { thread_id, input } => {
+                assert_eq!(thread_id.as_deref(), Some("01a0098a-7e8a"));
+                let input: serde_json::Value = serde_json::from_str(&input).unwrap();
+                assert_eq!(input["subagent_type"], "pnpm_build");
+                assert_eq!(input["agent_id"], "01a0098a-7e8a");
+            }
+            other => panic!("expected a launch, got {other:?}"),
+        }
+        // A non-AIR 2.x client gets the same rawInput with no `_meta` at all.
+        assert!(matches!(
+            classify_codex_subagent_activity(AgentType::Codex, None, Some(&activity("started"))),
+            CodexSubagentActivity::Started { .. }
+        ));
+        assert!(matches!(
+            classify_codex_subagent_activity(AgentType::Codex, Some(&air), Some(&activity("completed"))),
+            CodexSubagentActivity::Terminal { ref thread_id, ref kind }
+                if thread_id == "01a0098a-7e8a" && kind == "completed"
+        ));
+        assert!(matches!(
+            classify_codex_subagent_activity(AgentType::Codex, Some(&air), Some(&activity("interacted"))),
+            CodexSubagentActivity::Other
+        ));
+        // The live 2.6.0 `spawnAgent` frame: same AIR marker, collaboration
+        // rawInput → rendered as the collab card, untouched.
+        let spawn = serde_json::json!({
+            "prompt": "Run `echo from-sub` and report the output.",
+            "senderThreadId": "01a1e0a5-d66c-7161-a1df-98cedf30d702",
+            "receiverThreadIds": [], "agentsStates": {}, "model": "", "reasoningEffort": "medium"
+        });
+        assert!(matches!(
+            classify_codex_subagent_activity(AgentType::Codex, Some(&air), Some(&spawn)),
+            CodexSubagentActivity::None
+        ));
+        // A bare 2.x follow-up classifies as nothing; the id set handles it.
+        assert!(matches!(
+            classify_codex_subagent_activity(AgentType::Codex, None, None),
+            CodexSubagentActivity::None
+        ));
+        // Still codex-only.
+        assert!(matches!(
+            classify_codex_subagent_activity(AgentType::ClaudeCode, Some(&air), Some(&activity("started"))),
             CodexSubagentActivity::None
         ));
     }
@@ -19700,25 +20142,95 @@ mod tests {
 
     #[test]
     fn codex_plan_review_detected_only_for_codex_plan_review_meta() {
+        let review_id = "plan-review:item-7";
+        let switch = Some(&ToolKind::SwitchMode);
+        let detect = |agent, meta: Option<&serde_json::Map<String, serde_json::Value>>, id, kind| {
+            codex_plan_review_item(agent, meta, id, kind)
+        };
         // codex-acp #351: `_meta.codex.kind = "plan_review"` on the permission
         // REQUEST marks the Plan-mode review gate whose tool call was never
         // announced.
         let review = meta_map(serde_json::json!({
             "codex": { "kind": "plan_review", "planItemId": "item-7" }
         }));
-        assert!(is_codex_plan_review(AgentType::Codex, Some(&review)));
+        assert_eq!(
+            detect(AgentType::Codex, Some(&review), review_id, switch),
+            Some("item-7".to_string())
+        );
         // Gated on Codex: an identical meta from another agent seeds nothing.
-        assert!(!is_codex_plan_review(AgentType::ClaudeCode, Some(&review)));
+        assert_eq!(detect(AgentType::ClaudeCode, Some(&review), review_id, switch), None);
         // Ordinary permission requests carry no meta at all.
-        assert!(!is_codex_plan_review(AgentType::Codex, None));
+        assert_eq!(detect(AgentType::Codex, None, "exec-1", Some(&ToolKind::Execute)), None);
         // Sibling `codex` keys and other `kind` values must not seed a card.
         let other_kind = meta_map(serde_json::json!({ "codex": { "kind": "mcp_tool_call" } }));
-        assert!(!is_codex_plan_review(AgentType::Codex, Some(&other_kind)));
+        assert_eq!(detect(AgentType::Codex, Some(&other_kind), "exec-1", None), None);
         let sub = meta_map(serde_json::json!({ "codex": { "subagent": { "threadId": "t1" } } }));
-        assert!(!is_codex_plan_review(AgentType::Codex, Some(&sub)));
+        assert_eq!(detect(AgentType::Codex, Some(&sub), "exec-1", None), None);
         // A non-string `kind` must not be coerced into a match.
         let numeric = meta_map(serde_json::json!({ "codex": { "kind": 1 } }));
-        assert!(!is_codex_plan_review(AgentType::Codex, Some(&numeric)));
+        assert_eq!(detect(AgentType::Codex, Some(&numeric), "exec-1", None), None);
+    }
+
+    /// codex-acp 2.0.0 dropped the request `_meta` of the plan review gate.
+    /// Request verbatim off a live 2.6.0 stdio session.
+    #[test]
+    fn codex_2x_plan_review_is_known_by_its_tool_call_identity() {
+        let request: RequestPermissionRequest = serde_json::from_value(serde_json::json!({
+            "sessionId": "01a1e0a3-02d0-7752-8b73-8894880ea5c3",
+            "toolCall": {
+                "toolCallId": "plan-review:01a1e0a3-4d48-7040-b1ce-027bb21832d1-plan",
+                "kind": "switch_mode",
+                "status": "pending",
+                "title": "Implement this plan?",
+                "rawInput": {"plan": "1. Create `greeting.py` in the current folder.\n"}
+            },
+            "options": [
+                {"optionId": "implement_plan", "name": "Yes, implement this plan", "kind": "allow_once"},
+                {"optionId": "revise_plan", "name": "No, and tell Codex what to do differently", "kind": "reject_once"}
+            ]
+        }))
+        .expect("2.6.0 plan review request");
+        assert!(request.meta.is_none());
+        let item = codex_plan_review_item(
+            AgentType::Codex,
+            request.meta.as_ref(),
+            &request.tool_call.tool_call_id.to_string(),
+            request.tool_call.fields.kind.as_ref(),
+        )
+        .expect("detected without any _meta");
+        assert_eq!(item, "01a1e0a3-4d48-7040-b1ce-027bb21832d1-plan");
+        // The seeded card gets the marker the frontend keys on.
+        assert_eq!(
+            codex_plan_review_meta(request.meta.as_ref(), &item),
+            serde_json::json!({"codex": {
+                "kind": "plan_review",
+                "planItemId": "01a1e0a3-4d48-7040-b1ce-027bb21832d1-plan"
+            }})
+        );
+        // A 1.x request keeps its own `_meta` verbatim.
+        let legacy = meta_map(serde_json::json!({
+            "codex": {"kind": "plan_review", "planItemId": "p1"}, "other": 1
+        }));
+        assert_eq!(
+            codex_plan_review_meta(Some(&legacy), "p1"),
+            serde_json::Value::Object(legacy.clone())
+        );
+        // The id prefix alone is not enough: it must be a mode switch.
+        for kind in [None, Some(&ToolKind::Execute), Some(&ToolKind::Other)] {
+            assert_eq!(
+                codex_plan_review_item(AgentType::Codex, None, "plan-review:x", kind),
+                None,
+                "{kind:?}"
+            );
+        }
+        assert_eq!(
+            codex_plan_review_item(AgentType::Codex, None, "plan-review:", Some(&ToolKind::SwitchMode)),
+            None
+        );
+        assert_eq!(
+            codex_plan_review_item(AgentType::ClaudeCode, None, "plan-review:x", Some(&ToolKind::SwitchMode)),
+            None
+        );
     }
 
     #[test]
@@ -19753,6 +20265,30 @@ mod tests {
             AgentType::Codex,
             Some(&plain)
         ));
+    }
+
+    /// codex-acp 2.0.0 moved `commandAction` into the AIR namespace. `/plan`'s
+    /// meta verbatim off a live 2.6.0 `available_commands_update`.
+    #[test]
+    fn codex_2x_command_action_rides_the_air_namespace() {
+        let plan = meta_map(serde_json::json!({"jetbrains": {"air": {
+            "version": 1,
+            "commandAction": {
+                "kind": "setConfigOption", "configId": "collaboration_mode",
+                "value": "plan", "resetValue": "default", "presentation": "state"
+            }
+        }}}));
+        assert!(is_config_option_state_command(AgentType::Codex, Some(&plan)));
+        assert!(!is_config_option_state_command(AgentType::ClaudeCode, Some(&plan)));
+        let goal = meta_map(serde_json::json!({"jetbrains": {"air": {
+            "version": 1, "commandAction": {"kind": "prefixPrompt", "presentation": "state"}
+        }}}));
+        assert!(!is_config_option_state_command(AgentType::Codex, Some(&goal)));
+        // A `$skill` command carries only `skillPath`, no action.
+        let skill = meta_map(serde_json::json!({"jetbrains": {"air": {
+            "version": 1, "skillPath": "/Users/x/.codex/skills/a/SKILL.md"
+        }}}));
+        assert!(!is_config_option_state_command(AgentType::Codex, Some(&skill)));
     }
 
     #[test]
@@ -19863,6 +20399,68 @@ mod tests {
         ));
         assert!(session_info_goal_value(false, Some(&cleared)).is_none());
         assert!(session_info_goal_value(true, None).is_none());
+    }
+
+    /// codex-acp 2.0.0 moved the goal extension into the AIR namespace and
+    /// stopped sending the top-level key. Frames verbatim off a live 2.6.0
+    /// stdio session (set, the autonomous cycle completing it, pause, clear).
+    #[test]
+    fn codex_2x_goal_extension_rides_the_air_namespace() {
+        let init = meta_map(serde_json::json!({
+            "steering": {"supported": true},
+            "jetbrains": {"air": {
+                "version": 1,
+                "goal": {
+                    "version": 1,
+                    "controlMethod": "_session/goal",
+                    "actions": ["set", "pause", "resume", "clear"]
+                },
+                "capabilities": ["sessionFailure", "diffPatch", "asyncTasks", "recommendedValue"]
+            }}
+        }));
+        assert!(init_advertises_goal(Some(&init)), "the AIR spelling advertises the channel");
+        assert_eq!(
+            goal_advertised_control(Some(&init)),
+            Some((
+                "_session/goal".to_string(),
+                ["set", "pause", "resume", "clear"].map(String::from).to_vec()
+            ))
+        );
+        // A malformed envelope advertises nothing, exactly like a malformed
+        // top-level block.
+        for envelope in [serde_json::json!(0), serde_json::json!("1"), serde_json::Value::Null] {
+            let bad = meta_map(serde_json::json!({"jetbrains": {"air": {
+                "version": envelope.clone(),
+                "goal": {"version": 1, "controlMethod": "_session/goal", "actions": ["set"]}
+            }}}));
+            assert!(!init_advertises_goal(Some(&bad)), "{envelope}");
+        }
+        let unversioned_goal = meta_map(serde_json::json!({"jetbrains": {"air": {
+            "version": 1, "goal": {"controlMethod": "_session/goal"}
+        }}}));
+        assert!(!init_advertises_goal(Some(&unversioned_goal)));
+
+        let active = meta_map(serde_json::json!({"jetbrains": {"air": {"version": 1, "goal": {
+            "objective": "Say hi once", "status": "active", "tokenBudget": null,
+            "tokensUsed": 0, "timeUsedSeconds": 0, "createdAt": 1794770165000u64,
+            "updatedAt": 1794770165000u64, "controlMethod": "_session/goal"
+        }}}}));
+        let goal = session_info_goal_value(true, Some(&active)).expect("AIR snapshot");
+        assert_eq!(goal["objective"], "Say hi once");
+        assert_eq!(goal["status"], "active");
+        // Still exactly one channel: a legacy-pinned connection reads none.
+        assert!(session_info_goal_value(false, Some(&active)).is_none());
+
+        let cleared = meta_map(serde_json::json!({"jetbrains": {"air": {"version": 1, "goal": null}}}));
+        assert!(matches!(
+            session_info_goal_value(true, Some(&cleared)),
+            Some(v) if v.is_null()
+        ));
+        // Every other AIR session update (a failure record, say) carries no goal.
+        let failure_only = meta_map(serde_json::json!({"jetbrains": {"air": {
+            "version": 1, "sessionFailure": {"id": "f1"}
+        }}}));
+        assert!(session_info_goal_value(true, Some(&failure_only)).is_none());
     }
 
     // --- live ACP session title (`session_info_update.title`) --------------
@@ -20290,11 +20888,17 @@ mod tests {
             // rendering around, replacing it with an announcement that carries
             // no parent tool-use id to rebuild it from. See the reasoning at
             // the advertisement site before relaxing this.
-            let expected: Vec<serde_json::Value> = vec![
+            //
+            // "diffPatch" is codex-only (codex-acp 2.0.0): it turns the per-hunk
+            // standard diff blocks of 2.x into one exact Git patch per file.
+            let mut expected: Vec<serde_json::Value> = vec![
                 "sessionFailure".into(),
                 "asyncTasks".into(),
                 "recommendedValue".into(),
             ];
+            if agent == AgentType::Codex {
+                expected.push("diffPatch".into());
+            }
             assert_eq!(
                 capabilities, &expected,
                 "{agent:?} advertises an unexpected AIR capability set"
@@ -20786,6 +21390,130 @@ mod tests {
         );
         // Untouched otherwise — the standard fields stay the authority.
         assert_eq!(tool_call["title"], serde_json::json!("Run command"));
+    }
+
+    /// codex-acp 2.x: the record moved into the AIR namespace, and the tool
+    /// call of a started file change is a bare update. Request verbatim off a
+    /// live 2.6.0 stdio session (`read-only` preset, one `apply_patch`).
+    #[test]
+    fn codex_2x_edit_approval_gets_its_record_and_its_diff_back() {
+        let request: RequestPermissionRequest = serde_json::from_value(serde_json::json!({
+            "sessionId": "01a1e0a9-5beb-7fb3-a6c5-a5d4895e713a",
+            "toolCall": {
+                "toolCallId": "exec-90c6eb3c-1092-4b23-b658-2d7b99e5120f",
+                "title": "Editing files",
+                "locations": [{"path": "/tmp/p/big.txt"}]
+            },
+            "options": [
+                {"optionId": "allow_once", "name": "Yes, proceed", "kind": "allow_once"},
+                {"optionId": "allow_for_session", "name": "Yes, and don't ask again for these files", "kind": "allow_always"},
+                {"optionId": "cancel", "name": "No, and tell Codex what to do differently", "kind": "reject_once"}
+            ],
+            "_meta": {"jetbrains": {"air": {"version": 1, "permission": {"version": 1, "title": "Make edits?"}}}}
+        }))
+        .expect("2.6.0 edit approval");
+        let mut tool_call = serde_json::to_value(&request.tool_call).unwrap();
+        assert!(tool_call.get("kind").is_none() && tool_call.get("rawInput").is_none());
+
+        let patch = "diff --git a/tmp/p/big.txt b/tmp/p/big.txt\n--- a/tmp/p/big.txt\n+++ b/tmp/p/big.txt\n@@ -9,3 +9,3 @@\n line 9\n-line 10\n+LINE TEN\n line 11\n";
+        let known = crate::acp::session_state::ToolCallState {
+            id: "exec-90c6eb3c-1092-4b23-b658-2d7b99e5120f".to_string(),
+            kind: crate::acp::session_state::ToolKind::Edit,
+            label: "Editing files".to_string(),
+            status: crate::acp::session_state::ToolCallStatus::InProgress,
+            input: Some(serde_json::json!({"changes": {"/tmp/p/big.txt": {"diff": patch}}})),
+            output: None,
+            content: None,
+            locations: None,
+            meta: None,
+            images: Vec::new(),
+            raw_input_chunks: Vec::new(),
+        };
+        fill_permission_tool_call_from_known(&mut tool_call, Some(&known));
+        hoist_request_permission_meta(&mut tool_call, request.meta.as_ref());
+
+        assert_eq!(tool_call["kind"], "edit");
+        assert_eq!(tool_call["rawInput"]["changes"]["/tmp/p/big.txt"]["diff"], patch);
+        // The request's own fields stay the authority.
+        assert_eq!(tool_call["title"], "Editing files");
+        assert_eq!(tool_call["locations"], serde_json::json!([{"path": "/tmp/p/big.txt"}]));
+        assert!(tool_call.get("status").is_none(), "status is not invented");
+        assert_eq!(
+            tool_call["_meta"]["permission"],
+            serde_json::json!({"version": 1, "title": "Make edits?"})
+        );
+    }
+
+    #[test]
+    fn known_tool_call_fills_only_what_the_request_left_out() {
+        let known = crate::acp::session_state::ToolCallState {
+            id: "c1".to_string(),
+            kind: crate::acp::session_state::ToolKind::Execute,
+            label: "curl -sI https://example.com".to_string(),
+            status: crate::acp::session_state::ToolCallStatus::InProgress,
+            input: Some(serde_json::json!({"command": "curl -sI https://example.com", "cwd": "/w"})),
+            output: None,
+            content: None,
+            locations: Some(serde_json::json!([{"path": "/w"}])),
+            meta: None,
+            images: Vec::new(),
+            raw_input_chunks: Vec::new(),
+        };
+        // A full 1.x request is untouched.
+        let full = serde_json::json!({
+            "toolCallId": "c1", "kind": "execute", "status": "pending", "title": "Run command",
+            "rawInput": {"command": "curl -sI https://example.com", "cwd": "/w"}
+        });
+        let mut same = full.clone();
+        fill_permission_tool_call_from_known(&mut same, Some(&known));
+        assert_eq!(same["kind"], full["kind"]);
+        assert_eq!(same["title"], full["title"]);
+        assert_eq!(same["rawInput"], full["rawInput"]);
+        assert_eq!(same["locations"], known.locations.clone().unwrap(), "only the gap is filled");
+
+        // A 2.x MCP approval of a started call: only the id and a status.
+        let mut bare = serde_json::json!({"toolCallId": "c1", "status": "pending"});
+        fill_permission_tool_call_from_known(&mut bare, Some(&known));
+        assert_eq!(bare["kind"], "execute");
+        assert_eq!(bare["title"], "curl -sI https://example.com");
+        assert_eq!(bare["rawInput"]["command"], "curl -sI https://example.com");
+
+        // A request with its own content keeps it and gets no stored input.
+        let mut with_content = serde_json::json!({
+            "toolCallId": "c1",
+            "content": [{"type": "content", "content": {"type": "text", "text": "host example.com"}}]
+        });
+        fill_permission_tool_call_from_known(&mut with_content, Some(&known));
+        assert!(with_content.get("rawInput").is_none());
+
+        // Nothing known: nothing changes.
+        let mut unknown = serde_json::json!({"toolCallId": "zz"});
+        fill_permission_tool_call_from_known(&mut unknown, None);
+        assert_eq!(unknown, serde_json::json!({"toolCallId": "zz"}));
+    }
+
+    #[test]
+    fn air_permission_option_record_is_lifted_to_the_plain_key() {
+        let mut option = meta_map(serde_json::json!({
+            "jetbrains": {"air": {"version": 1, "permission": {"version": 1, "description": "Allow for this session"}}}
+        }));
+        lift_air_permission_record(&mut option);
+        assert_eq!(
+            option["permission"],
+            serde_json::json!({"version": 1, "description": "Allow for this session"})
+        );
+        // A plain record wins; a malformed envelope lifts nothing.
+        let mut plain = meta_map(serde_json::json!({
+            "permission": {"version": 1, "description": "plain"},
+            "jetbrains": {"air": {"version": 1, "permission": {"version": 1, "description": "air"}}}
+        }));
+        lift_air_permission_record(&mut plain);
+        assert_eq!(plain["permission"]["description"], "plain");
+        let mut malformed = meta_map(serde_json::json!({
+            "jetbrains": {"air": {"version": 0, "permission": {"version": 1, "description": "air"}}}
+        }));
+        lift_air_permission_record(&mut malformed);
+        assert!(!malformed.contains_key("permission"));
     }
 
     #[test]
@@ -21921,6 +22649,37 @@ mod tests {
     }
 
     #[test]
+    fn codex_env_policy_always_turns_predicted_prompts_off() {
+        // codex-acp 2.5+ samples a predicted follow-up after every turn for an
+        // AIR client unless this says `false` — an extra model request codeg
+        // never shows. It is sent on every launch, with or without a preset.
+        let switch = |env: &[(String, String)]| {
+            env.iter()
+                .filter(|(k, _)| k == CODEX_PROMPT_SUGGESTIONS_ENV)
+                .map(|(_, v)| v.clone())
+                .collect::<Vec<_>>()
+        };
+        let mut env = vec![("PATH".to_string(), "/usr/bin".to_string())];
+        apply_codex_env_policy(AgentType::Codex, &mut env, None);
+        assert_eq!(switch(&env), vec!["false".to_string()]);
+
+        // An explicit preset in the runtime env returns early from the mode
+        // half; the switch is set before that and must survive it.
+        let mut preset = vec![(
+            "INITIAL_AGENT_MODE".to_string(),
+            "agent-full-access".to_string(),
+        )];
+        apply_codex_env_policy(AgentType::Codex, &mut preset, Some("read-only"));
+        assert_eq!(switch(&preset), vec!["false".to_string()]);
+
+        // A user twin cannot opt back in: replaced, not duplicated.
+        let mut twin = vec![(CODEX_PROMPT_SUGGESTIONS_ENV.to_string(), "true".to_string())];
+        apply_codex_env_policy(AgentType::Codex, &mut twin, None);
+        assert_eq!(switch(&twin), vec!["false".to_string()]);
+        assert_eq!(CODEX_PROMPT_SUGGESTIONS_ENV, "CODEX_ACP_PROMPT_SUGGESTIONS");
+    }
+
+    #[test]
     fn codex_env_policy_is_noop_for_other_agents() {
         for agent in [AgentType::Grok, AgentType::ClaudeCode, AgentType::Gemini] {
             let mut env = vec![("PATH".to_string(), "/usr/bin".to_string())];
@@ -21928,6 +22687,10 @@ mod tests {
             assert!(
                 !env.iter().any(|(k, _)| k == "DISABLE_MCP_CONFIG_FILTERING"),
                 "{agent:?} must not receive the codex-only flag"
+            );
+            assert!(
+                !env.iter().any(|(k, _)| k == CODEX_PROMPT_SUGGESTIONS_ENV),
+                "{agent:?} must not receive codex's prompt-suggestion switch"
             );
             assert!(
                 !env.iter().any(|(k, _)| k == "INITIAL_AGENT_MODE"),
@@ -22083,6 +22846,104 @@ mod tests {
     fn synthesize_edit_returns_none_without_diff() {
         // No Diff block -> None, so callers keep the agent's own raw_input.
         assert!(synthesize_edit_input_from_diffs(&[]).is_none());
+    }
+
+    /// The `content` of one live codex-acp 2.6.0 `apply_patch` tool call (two
+    /// lines of a 40-line file changed, one file deleted, one added), as it
+    /// arrives with and without the AIR `diffPatch` capability.
+    fn codex_260_edit_content(diff_patch: bool) -> Vec<ToolCallContent> {
+        let frame = if diff_patch {
+            serde_json::json!([
+                {"type": "diff", "oldText": null, "newText": "", "path": "/w/big.txt",
+                 "_meta": {"kind": "update", "jetbrains": {"air": {"version": 1, "diffPatch": {
+                    "version": 1, "format": "git_patch",
+                    "text": "diff --git a/w/big.txt b/w/big.txt\n--- a/w/big.txt\n+++ b/w/big.txt\n@@ -2,3 +2,3 @@\n line 2\n-line 3\n+LINE THREE\n line 4\n@@ -29,3 +29,3 @@\n line 29\n-line 30\n+LINE THIRTY\n line 31\n"}}}}},
+                {"type": "diff", "oldText": null, "newText": "", "path": "/w/gone.txt",
+                 "_meta": {"kind": "delete", "jetbrains": {"air": {"version": 1, "diffPatch": {
+                    "version": 1, "format": "git_patch",
+                    "text": "diff --git a/w/gone.txt b/w/gone.txt\ndeleted file mode 100644\n--- a/w/gone.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-bye\n"}}}}},
+                {"type": "diff", "oldText": null, "newText": "", "path": "/w/new.txt",
+                 "_meta": {"kind": "add", "jetbrains": {"air": {"version": 1, "diffPatch": {
+                    "version": 1, "format": "git_patch",
+                    "text": "diff --git a/w/new.txt b/w/new.txt\nnew file mode 100644\n--- /dev/null\n+++ b/w/new.txt\n@@ -0,0 +1 @@\n+hi\n"}}}}}
+            ])
+        } else {
+            serde_json::json!([
+                {"type": "diff", "oldText": "line 2\nline 3\nline 4\n", "newText": "line 2\nLINE THREE\nline 4\n", "path": "/w/big.txt", "_meta": {"kind": "update"}},
+                {"type": "diff", "oldText": "line 29\nline 30\nline 31\n", "newText": "line 29\nLINE THIRTY\nline 31\n", "path": "/w/big.txt", "_meta": {"kind": "update"}},
+                {"type": "diff", "oldText": "bye\n", "newText": "", "path": "/w/gone.txt", "_meta": {"kind": "delete"}},
+                {"type": "diff", "oldText": null, "newText": "hi\n", "path": "/w/new.txt", "_meta": {"kind": "add"}}
+            ])
+        };
+        serde_json::from_value(frame).expect("2.6.0 diff content")
+    }
+
+    #[test]
+    fn codex_2x_patch_blocks_become_ready_made_diffs() {
+        let content = codex_260_edit_content(true);
+        let v: serde_json::Value =
+            serde_json::from_str(&synthesize_edit_input_from_diffs(&content).unwrap()).unwrap();
+        let changes = v["changes"].as_object().expect("a changes map");
+        assert_eq!(
+            changes.keys().collect::<Vec<_>>(),
+            ["/w/big.txt", "/w/gone.txt", "/w/new.txt"],
+            "one entry per file, in order"
+        );
+        let big = changes["/w/big.txt"]["diff"].as_str().unwrap();
+        assert!(big.contains("@@ -2,3 +2,3 @@") && big.contains("@@ -29,3 +29,3 @@"));
+        assert!(big.contains("+LINE THREE") && big.contains("+LINE THIRTY"));
+        assert!(changes["/w/gone.txt"]["diff"].as_str().unwrap().contains("deleted file mode"));
+        assert!(changes["/w/new.txt"]["diff"].as_str().unwrap().contains("new file mode"));
+        // The placeholders never leak in as text.
+        assert!(changes.values().all(|c| c.get("old_text").is_none() && c.get("new_text").is_none()));
+
+        // A single patch-mode file still gets the patch, not its placeholders.
+        let single = vec![content[0].clone()];
+        let v: serde_json::Value =
+            serde_json::from_str(&synthesize_edit_input_from_diffs(&single).unwrap()).unwrap();
+        assert!(v["changes"]["/w/big.txt"]["diff"].as_str().unwrap().contains("@@ -29,3 +29,3 @@"));
+        assert!(v.get("file_path").is_none());
+        // And the serialized output carries the patch.
+        let out = serialize_tool_call_content(&single, true).unwrap();
+        assert!(out.starts_with("diff --git a/w/big.txt") && out.contains("+LINE THIRTY"));
+    }
+
+    #[test]
+    fn codex_2x_hunk_blocks_of_one_file_are_joined_not_dropped() {
+        // Without a patch, 2.x splits an update into one block per hunk. Keyed
+        // by path, the second hunk used to overwrite the first.
+        let content = codex_260_edit_content(false);
+        let v: serde_json::Value =
+            serde_json::from_str(&synthesize_edit_input_from_diffs(&content).unwrap()).unwrap();
+        let big = &v["changes"]["/w/big.txt"];
+        assert_eq!(big["old_text"], "line 2\nline 3\nline 4\nline 29\nline 30\nline 31\n");
+        assert_eq!(big["new_text"], "line 2\nLINE THREE\nline 4\nline 29\nLINE THIRTY\nline 31\n");
+        assert_eq!(v["changes"]["/w/gone.txt"]["old_text"], "bye\n");
+        assert!(v["changes"]["/w/new.txt"]["diff"].as_str().unwrap().contains("--- /dev/null"));
+    }
+
+    #[test]
+    fn a_malformed_diff_patch_falls_back_to_the_block_text() {
+        let block = |patch: serde_json::Value| -> ToolCallContent {
+            serde_json::from_value(serde_json::json!({
+                "type": "diff", "oldText": "a\n", "newText": "b\n", "path": "/w/x.txt",
+                "_meta": {"jetbrains": {"air": {"version": 1, "diffPatch": patch}}}
+            }))
+            .unwrap()
+        };
+        for patch in [
+            serde_json::json!({"version": 2, "format": "git_patch", "text": "@@ -1 +1 @@\n-a\n+b\n"}),
+            serde_json::json!({"version": 1, "format": "unified", "text": "@@ -1 +1 @@\n-a\n+b\n"}),
+            serde_json::json!({"version": 1, "format": "git_patch", "text": "no hunk here"}),
+            serde_json::json!({"version": 1, "format": "git_patch"}),
+        ] {
+            let v: serde_json::Value = serde_json::from_str(
+                &synthesize_edit_input_from_diffs(&[block(patch.clone())]).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(v["old_string"], "a\n", "{patch}");
+            assert_eq!(v["new_string"], "b\n", "{patch}");
+        }
     }
 
     #[test]

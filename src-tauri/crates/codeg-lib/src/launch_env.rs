@@ -126,7 +126,7 @@ const AGENT_GIT_EDITOR: (&str, &str) = ("GIT_EDITOR", "true");
 fn injected_keys() -> Vec<&'static str> {
     use crate::acp::connection::{
         CODEX_APP_SERVER_LOGS_ENV, CODEX_INITIAL_MODE_ENV, CODEX_MCP_FILTERING_ENV,
-        DEFAULT_COMMAND_COLOR_ENV,
+        CODEX_PROMPT_SUGGESTIONS_ENV, DEFAULT_COMMAND_COLOR_ENV,
     };
     use crate::acp::registry::{builtin_acp_agents, get_agent_meta, AgentDistribution};
 
@@ -141,6 +141,7 @@ fn injected_keys() -> Vec<&'static str> {
     }
     keys.extend([
         CODEX_MCP_FILTERING_ENV,
+        CODEX_PROMPT_SUGGESTIONS_ENV,
         CODEX_INITIAL_MODE_ENV,
         CODEX_APP_SERVER_LOGS_ENV,
         crate::acp::session_persistence::SESSION_PERSISTENCE_ENV,

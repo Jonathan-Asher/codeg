@@ -286,6 +286,56 @@ describe("extractReplyFileChanges", () => {
     expect(files[0].diff).toBeTruthy()
   })
 
+  // codex-acp 2.x with the AIR `diffPatch` capability: the backend turns each
+  // patch-mode diff block into `changes[path].diff` holding codex's own Git
+  // patch (headers name the absolute path without its leading slash). One
+  // live 2.6.0 `apply_patch`: two hunks in big.txt, a delete and an add.
+  it("reads codex 2.x Git patches per file with real hunks and no phantom rows", () => {
+    const turn: MessageTurn = {
+      id: "a1",
+      role: "assistant",
+      blocks: [
+        {
+          type: "tool_use",
+          tool_use_id: "exec-c125d53c",
+          tool_name: "edit",
+          input_preview: JSON.stringify({
+            changes: {
+              "/tmp/w/big.txt": {
+                diff: "diff --git a/tmp/w/big.txt b/tmp/w/big.txt\n--- a/tmp/w/big.txt\n+++ b/tmp/w/big.txt\n@@ -2,3 +2,3 @@\n line 2\n-line 3\n+LINE THREE\n line 4\n@@ -29,3 +29,3 @@\n line 29\n-line 30\n+LINE THIRTY\n line 31\n",
+              },
+              "/tmp/w/gone.txt": {
+                diff: "diff --git a/tmp/w/gone.txt b/tmp/w/gone.txt\ndeleted file mode 100644\n--- a/tmp/w/gone.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-bye\n",
+              },
+              "/tmp/w/new.txt": {
+                diff: "diff --git a/tmp/w/new.txt b/tmp/w/new.txt\nnew file mode 100644\n--- /dev/null\n+++ b/tmp/w/new.txt\n@@ -0,0 +1 @@\n+hi\n",
+              },
+            },
+          }),
+        },
+      ],
+      timestamp: "2024-01-01T00:00:01Z",
+    }
+
+    const files = extractReplyFileChanges([turn])
+    expect(files.map((f) => f.path)).toEqual([
+      "/tmp/w/big.txt",
+      "/tmp/w/gone.txt",
+      "/tmp/w/new.txt",
+    ])
+    const byPath = Object.fromEntries(files.map((f) => [f.path, f]))
+    const big = byPath["/tmp/w/big.txt"]
+    expect(big.additions).toBe(2)
+    expect(big.deletions).toBe(2)
+    expect(big.diff ?? "").toContain("@@ -2,3 +2,3 @@")
+    expect(big.diff ?? "").toContain("@@ -29,3 +29,3 @@")
+    expect(isAddedFileDiff(big.diff)).toBe(false)
+    expect(isRemovedFileDiff(big.diff)).toBe(false)
+    expect(isRemovedFileDiff(byPath["/tmp/w/gone.txt"].diff)).toBe(true)
+    expect(isAddedFileDiff(byPath["/tmp/w/new.txt"].diff)).toBe(true)
+    expect(byPath["/tmp/w/new.txt"].additions).toBe(1)
+  })
+
   it("keeps per-file diffs distinct in a multi-file changes payload (no leakage)", () => {
     const turn: MessageTurn = {
       id: "a1",
