@@ -6766,7 +6766,7 @@ impl ConnectionManager {
     pub async fn register_question(
         &self,
         conn_id: &str,
-        mut questions: Vec<QuestionSpec>,
+        questions: Vec<QuestionSpec>,
     ) -> Option<RegisteredQuestion> {
         self.register_question_with(conn_id, questions, false).await
     }
@@ -6785,7 +6785,7 @@ impl ConnectionManager {
     async fn register_question_with(
         &self,
         conn_id: &str,
-        questions: Vec<QuestionSpec>,
+        mut questions: Vec<QuestionSpec>,
         yields_to_newer: bool,
     ) -> Option<RegisteredQuestion> {
         // Defense-in-depth: the companion validates, but the broker socket is

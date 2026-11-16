@@ -1187,7 +1187,7 @@ fn apply_codex_env_policy(
 
 /// codex-acp's switch for its predicted follow-up prompt (2.5.0, #703): the
 /// adapter predicts unless it reads `false` here.
-const CODEX_PROMPT_SUGGESTIONS_ENV: &str = "CODEX_ACP_PROMPT_SUGGESTIONS";
+pub(crate) const CODEX_PROMPT_SUGGESTIONS_ENV: &str = "CODEX_ACP_PROMPT_SUGGESTIONS";
 
 /// Codex-only: turn codex-acp's predicted follow-up prompt off for a
 /// connection nobody types into, or for every connection when the user turned

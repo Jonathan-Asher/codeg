@@ -4,12 +4,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 /**
  * The script the server-mode proxy injects into officecli's watch page
- * (src-tauri/src/web/handlers/office_watch_shim.js), run against a stand-in
+ * (src-tauri/crates/codeg-lib/src/web/handlers/office_watch_shim.js), run against a stand-in
  * page: its own `window`, `fetch`, `EventSource` and `XMLHttpRequest`, so
  * every test gets a fresh one.
  */
 const SHIM = readFileSync(
-  join(process.cwd(), "src-tauri/src/web/handlers/office_watch_shim.js"),
+  join(
+    process.cwd(),
+    "src-tauri/crates/codeg-lib/src/web/handlers/office_watch_shim.js"
+  ),
   "utf8"
 )
   .replace("__PFX__", "/api/office-watch-proxy/26315")

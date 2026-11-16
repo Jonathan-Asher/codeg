@@ -1583,7 +1583,8 @@ mod tests {
     /// must agree with what codeg looks for and launches.
     #[test]
     fn the_helper_ships_as_codeg_looks_for_it() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        // src-tauri, where the app package's configuration lives.
+        let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
         let plist =
             std::fs::read_to_string(root.join("macos/codeg-computer-helper.plist")).unwrap();
         let value = |key: &str| -> Option<String> {

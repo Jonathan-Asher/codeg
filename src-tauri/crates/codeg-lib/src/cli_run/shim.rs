@@ -406,7 +406,7 @@ mod tests {
     /// one changed here alone would have it delete the app's own.
     #[test]
     fn install_sh_knows_the_shims_and_copies_by_the_same_marks() {
-        let script = include_str!("../../../install.sh");
+        let script = include_str!("../../../../../install.sh");
         assert!(script.contains(&format!("DESKTOP_SHIM_MARKER=\"{MARKER}\"")));
         assert!(script.contains(SHA_FILE));
     }

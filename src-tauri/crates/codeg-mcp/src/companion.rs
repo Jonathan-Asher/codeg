@@ -7663,6 +7663,7 @@ mod tests {
         )
         .await;
         assert_eq!(*beats.lock().await, 0);
+    }
 
     // ── computer use ───────────────────────────────────────────────────────
 

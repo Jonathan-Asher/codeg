@@ -62,7 +62,7 @@ pub(crate) const SKILL_ID: &str = "ui-render";
 
 /// Generated from the frontend catalog (`src/lib/json-render/skill.ts`);
 /// `skill.test.ts` keeps the two equal.
-const SKILL_MD: &str = include_str!("../../genui/ui-render/SKILL.md");
+const SKILL_MD: &str = include_str!("../../../../genui/ui-render/SKILL.md");
 
 /// Written into the central copy before anything else: says Codeg made it.
 pub(crate) const MARKER_FILE: &str = ".codeg-managed";

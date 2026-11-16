@@ -184,7 +184,10 @@ describe("the backend's message navigator outline", () => {
   // `nav_outline_turns` makes of it — the Rust test checks that side.
   const vector = JSON.parse(
     readFileSync(
-      join(process.cwd(), "src-tauri/tests/fixtures/nav_outline_vector.json"),
+      join(
+        process.cwd(),
+        "src-tauri/crates/codeg-lib/tests/fixtures/nav_outline_vector.json"
+      ),
       "utf8"
     )
   ) as { full: MessageTurn[]; outline: MessageTurn[] }

@@ -543,6 +543,7 @@ fn agent_stats_bytes(s: &AgentExecutionStats) -> usize {
 pub(crate) fn block_bytes(b: &ContentBlock) -> usize {
     match b {
         ContentBlock::Text { text } | ContentBlock::Thinking { text } => string_bytes(text),
+        ContentBlock::TurnError { message } => string_bytes(message),
         ContentBlock::Image {
             data,
             mime_type,

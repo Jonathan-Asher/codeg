@@ -201,7 +201,8 @@ mod tests {
     /// own, defined under `permissions/`, that does.
     #[test]
     fn no_webview_is_given_the_shortcut_plugin() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        // src-tauri, where the app package's configuration lives.
+        let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
         let mut capabilities = Vec::new();
         // `json5` only under tauri's `config-json5` feature; there is no
         // reader for it here, so one such file fails the test rather than

@@ -4,7 +4,7 @@ import { basename, dirname, resolve } from "node:path"
 import { buildUiRenderSkill, UI_RENDER_SKILL_NAME } from "./skill"
 
 // The copy the backend compiles in (`include_str!` in
-// `src-tauri/src/commands/generative_ui.rs`) and installs for agents.
+// `src-tauri/crates/codeg-lib/src/commands/generative_ui.rs`) and installs for agents.
 const COMMITTED = resolve(process.cwd(), "src-tauri/genui/ui-render/SKILL.md")
 
 describe("ui-render skill", () => {

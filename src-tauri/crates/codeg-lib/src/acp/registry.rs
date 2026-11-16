@@ -9331,7 +9331,7 @@ mod tests {
     /// upgrade message must name the same floor.
     #[test]
     fn pi_min_runtime_version_matches_the_settings_panel() {
-        let panel = include_str!("../../../src/lib/pi-config.ts");
+        let panel = include_str!("../../../../../src/lib/pi-config.ts");
         let declaration = format!("PI_MIN_RUNTIME_VERSION = \"{PI_MIN_RUNTIME_VERSION}\"");
         assert!(
             panel.contains(&declaration),

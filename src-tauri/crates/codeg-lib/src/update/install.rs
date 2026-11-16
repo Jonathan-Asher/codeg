@@ -2858,7 +2858,7 @@ mod tests {
         let workflow: serde_yaml::Value = serde_yaml::from_str(
             &std::fs::read_to_string(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../.github/workflows/release.yml"
+                "/../../../.github/workflows/release.yml"
             ))
             .unwrap(),
         )

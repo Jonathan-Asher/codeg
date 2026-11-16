@@ -50,7 +50,7 @@ describe("the synced key list", () => {
     const rust = readFileSync(
       resolve(
         process.cwd(),
-        "src-tauri/src/commands/config_sync/appearance.rs"
+        "src-tauri/crates/codeg-lib/src/commands/config_sync/appearance.rs"
       ),
       "utf8"
     )

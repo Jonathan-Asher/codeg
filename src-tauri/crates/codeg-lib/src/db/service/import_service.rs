@@ -71,7 +71,7 @@ fn build_parser(agent_type: AgentType, env: &AgentEnv) -> Box<dyn AgentParser> {
 /// [`collect_local_summaries_reporting`].
 pub(crate) async fn collect_local_summaries<F>(
     envs: &AgentEnvs,
-    mut on_agent_done: F,
+    on_agent_done: F,
 ) -> Vec<(AgentType, ConversationSummary)>
 where
     F: FnMut(AgentType, u32, u32, u32),

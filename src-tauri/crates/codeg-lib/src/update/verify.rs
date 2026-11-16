@@ -222,7 +222,7 @@ mod tests {
     fn the_release_workflow_signs_server_archives_for_their_version() {
         let workflow = std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../.github/workflows/release.yml"
+            "/../../../.github/workflows/release.yml"
         ))
         .unwrap();
         let signs: Vec<&str> = workflow

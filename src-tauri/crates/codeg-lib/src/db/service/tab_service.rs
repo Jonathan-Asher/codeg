@@ -1,6 +1,6 @@
 use chrono::Utc;
 use sea_orm::{
-    ActiveValue::NotSet, ColumnTrait, ConnectionTrait, DatabaseConnection,
+    ActiveModelTrait, ActiveValue::NotSet, ColumnTrait, ConnectionTrait, DatabaseConnection,
     EntityTrait, QueryFilter, QueryOrder, Set, TransactionTrait,
 };
 use std::sync::OnceLock;

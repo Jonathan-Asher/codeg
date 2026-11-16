@@ -1,18 +1,19 @@
 //! What `tauri build` puts in the desktop bundle besides codeg.
 //!
-//! The Tauri CLI bundles every binary target whose `required-features` are
-//! all among the features it builds with — its own `--features`,
-//! `tauri/custom-protocol` and the config's `build.features`, never the
-//! manifest's defaults — and then adds the `default-run` one. A target that
-//! requires no feature is bundled, compiled with the desktop's features: the
-//! standalone server would ride along whole, and the MCP companion's desktop
-//! build would replace the sidecar meant to ship in its place. So every binary
-//! target but codeg must require a feature `tauri build` is never given.
-
+//! The Tauri CLI bundles the binary targets of the app's own package (`codeg`,
+//! src-tauri) whose `required-features` it builds with, and adds the
+//! `default-run` one. In this layout that package has one binary, the app;
+//! everything else — the standalone server, the command-line client, the
+//! computer-use helper — is a binary of the library package (crates/codeg-lib),
+//! which `tauri build` never bundles, and the MCP companion is a package of its
+//! own (crates/codeg-mcp). The sidecars that do ship are the ones
+//! `prepare-sidecars` builds without the desktop features.
 use std::path::Path;
 
+/// src-tauri, where the app package, the Tauri configuration and the build
+/// scripts live.
 fn root() -> &'static Path {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
 }
 
 fn strings(value: Option<&toml::Value>) -> Vec<String> {
@@ -60,28 +61,37 @@ fn only_codeg_is_a_binary_target_tauri_build_bundles() {
         Some("codeg"),
         "the binary tauri build bundles as the app"
     );
-    let defaults = strings(manifest["features"].get("default"));
+    let bins: Vec<&str> = manifest["bin"]
+        .as_array()
+        .expect("[[bin]] targets")
+        .iter()
+        .map(|bin| bin["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(bins, ["codeg"], "the app package has the app alone");
+
+    // The library's binaries each need a feature off by default and never
+    // given to `tauri build`, so a plain build of the workspace compiles none
+    // of them with the desktop's features.
+    let library: toml::Table = std::fs::read_to_string(root().join("crates/codeg-lib/Cargo.toml"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    let defaults = strings(library["features"].get("default"));
     let given = features_tauri_build_is_given();
-    let bins = manifest["bin"].as_array().expect("[[bin]] targets");
-    let mut others = 0;
+    let bins = library["bin"].as_array().expect("[[bin]] targets");
     for bin in bins {
         let name = bin["name"].as_str().unwrap();
-        if name == "codeg" {
-            continue;
-        }
-        others += 1;
         let required = strings(bin.get("required-features"));
         assert!(
             required
                 .iter()
                 .any(|feature| !given.contains(feature) && !defaults.contains(feature)),
-            "`{name}` requires no feature tauri build lacks ({required:?}): it would be \
-             compiled with the desktop's features and put in the desktop bundle"
+            "`{name}` requires no feature tauri build lacks ({required:?})"
         );
     }
     assert!(
-        others >= 4,
-        "codeg-server, codeg-mcp, the helper and codeg-cli"
+        bins.len() >= 3,
+        "codeg-server, the computer-use helper and codeg-cli"
     );
 }
 
@@ -95,14 +105,14 @@ fn codeg_cli_is_a_sidecar_everywhere_the_desktop_build_looks() {
     let prepare = read("scripts/prepare-sidecars.mjs");
     let bin_names = prepare
         .lines()
-        .find(|l| l.starts_with("const BIN_NAMES"))
-        .expect("BIN_NAMES");
+        .find(|l| l.starts_with("const LIB_BIN_NAMES"))
+        .expect("LIB_BIN_NAMES");
     assert!(bin_names.contains("\"codeg-cli\""), "{bin_names}");
     let features = prepare
         .lines()
-        .find(|l| l.starts_with("const FEATURES"))
-        .expect("FEATURES");
-    for feature in ["mcp-bin", "computer-helper", "cli-bin"] {
+        .find(|l| l.starts_with("const LIB_FEATURES"))
+        .expect("LIB_FEATURES");
+    for feature in ["computer-helper", "cli-bin"] {
         assert!(features.contains(feature), "{features} lacks {feature}");
     }
     for config in ["tauri.conf.json", "tauri.macos.conf.json"] {
