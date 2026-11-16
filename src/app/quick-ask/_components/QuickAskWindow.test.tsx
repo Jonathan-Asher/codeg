@@ -1,6 +1,14 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type Mock,
+} from "vitest"
 
 import enMessages from "@/i18n/messages/en.json"
 
@@ -38,7 +46,7 @@ const h = vi.hoisted(() => {
   return {
     session,
     lastArgs: null as null | Record<string, unknown>,
-    openConversation: null as unknown as ReturnType<typeof vi.fn>,
+    openConversation: null as unknown as Mock<(...args: unknown[]) => unknown>,
     uploadAttachment: vi.fn(),
   }
 })

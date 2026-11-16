@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type Mock,
+} from "vitest"
 
 import {
   __resetQuickSwitchTypeaheadForTests,
@@ -23,7 +31,7 @@ describe("quick switch typeahead", () => {
   let composer: HTMLTextAreaElement
   let switcher: HTMLDivElement
   let switcherInput: HTMLInputElement
-  let composerKeys: ReturnType<typeof vi.fn>
+  let composerKeys: Mock<(event: Event) => void>
 
   beforeEach(() => {
     __resetQuickSwitchTypeaheadForTests()

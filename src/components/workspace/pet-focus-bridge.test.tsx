@@ -30,7 +30,7 @@ vi.mock("@/contexts/tab-context", () => ({
   useTabActions: () => tabs,
 }))
 let desktop = false
-let takePendingQuickAskFocus: ReturnType<typeof vi.fn>
+let takePendingQuickAskFocus: Mock<(...args: unknown[]) => unknown>
 const QUICK_ASK_PENDING = "quick-ask://focus-pending"
 
 vi.mock("@/lib/transport", () => ({

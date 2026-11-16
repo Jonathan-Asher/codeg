@@ -1,14 +1,20 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest"
 
 import enMessages from "@/i18n/messages/en.json"
 
 const h = vi.hoisted(() => ({
   desktop: true,
-  get: null as unknown as ReturnType<typeof vi.fn>,
-  update: null as unknown as ReturnType<typeof vi.fn>,
-  toggle: null as unknown as ReturnType<typeof vi.fn>,
+  get: null as unknown as Mock<(...args: unknown[]) => unknown>,
+  update: null as unknown as Mock<
+    (input: {
+      enabled: boolean
+      shortcut: string
+      hideOnBlur: boolean
+    }) => Promise<unknown>
+  >,
+  toggle: null as unknown as Mock<(...args: unknown[]) => unknown>,
 }))
 
 vi.mock("@/lib/platform", () => ({ isDesktop: () => h.desktop }))
@@ -16,7 +22,7 @@ vi.mock("@/hooks/use-is-mac", () => ({ useIsMac: () => true }))
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }))
 vi.mock("@/lib/quick-ask/desktop", () => ({
   getQuickAskSettings: () => h.get(),
-  updateQuickAskSettings: (input: unknown) => h.update(input),
+  updateQuickAskSettings: (input: never) => h.update(input),
   toggleQuickAskWindow: () => h.toggle(),
 }))
 
