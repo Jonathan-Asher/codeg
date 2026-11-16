@@ -124,17 +124,4 @@ describe("ContentPartsRenderer: a legacy Task sub-agent the provider stopped", (
     expect(screen.queryByTestId("reply-text")).not.toBeInTheDocument()
     expect(screen.queryByText(BLOCKED)).not.toBeInTheDocument()
   })
-
-  it("shows it under a shut tool group, which counts it as failed", () => {
-    const { container } = renderEn(
-      <ContentPartsRenderer
-        role="assistant"
-        parts={[{ type: "tool-group", items: [taskCall], isStreaming: false }]}
-      />
-    )
-    expect(container.querySelector("[data-group-stops]")).toHaveTextContent(
-      stopped
-    )
-    expect(screen.getByText(/1 failed/)).toBeInTheDocument()
-  })
 })

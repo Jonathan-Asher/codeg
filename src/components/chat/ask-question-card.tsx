@@ -1010,9 +1010,7 @@ export function AskQuestionCard({
               <span className="text-sm font-medium">{t("other")}</span>
             )}
         </div>
-        {q.allow_other !== false &&
-          s?.otherActive &&
-          field(t("other"), false)}
+        {q.allow_other !== false && s?.otherActive && field(t("other"), false)}
       </div>
     )
   }

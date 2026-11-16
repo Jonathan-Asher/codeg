@@ -165,6 +165,7 @@ function seed(d: DbConversationDetail, live: LiveMessage) {
     localTurns: [],
     backgroundTurns: [],
     pendingBackgroundSettlements: [],
+    pendingCancelledTurnReports: null,
     optimisticTurns: [],
     liveMessage: live,
     syncState: "idle" as const,

@@ -29,17 +29,11 @@ const call = (
 const PARTS: AdaptedContentPart[] = [
   { type: "text", text: "Starting." } as AdaptedContentPart,
   call("toolu_fg", null, "input-available"),
-  {
-    type: "tool-group",
-    items: [
-      call("toolu_ls"),
-      call(
-        "toolu_bg",
-        "Async agent launched successfully.\nagentId: a4dc31ff (use SendMessage…)"
-      ),
-    ],
-    isStreaming: false,
-  } as AdaptedContentPart,
+  call("toolu_ls"),
+  call(
+    "toolu_bg",
+    "Async agent launched successfully.\nagentId: a4dc31ff (use SendMessage…)"
+  ),
 ]
 
 describe("running-work", () => {

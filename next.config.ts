@@ -30,15 +30,13 @@ const withNextIntl = createNextIntlPlugin({
 const nextConfig: NextConfig = {
   // CI's build job sets this: its checks job already runs `tsc`, so `next
   // build` repeating the type check only lengthens every release build.
-  typescript: {
-    ignoreBuildErrors: process.env.CODEG_BUILD_SKIP_TYPECHECK === "1",
-  },
-  output: "export",
   // The build type-checks tsconfig.json minus the test files; that file says
   // why.
   typescript: {
+    ignoreBuildErrors: process.env.CODEG_BUILD_SKIP_TYPECHECK === "1",
     tsconfigPath: "tsconfig.build.json",
   },
+  output: "export",
   // Development-only pages (`page.gallery.tsx`, e.g. the activity timeline
   // gallery) are routes only when CODEG_GALLERY=1, so release builds never
   // ship them.

@@ -454,8 +454,7 @@ const PI_JOB_LINE_RE =
 const PI_JOB_KILL_RE =
   /^Sent SIGTERM to (jb-[A-Za-z0-9_.-]+) \(([\s\S]*)\)(?:; SIGKILL follows[\s\S]*)?$/
 /** How every Pi job result starts, so other output skips the parse. */
-const PI_JOB_START_RE =
-  /^(?:Already finished: \[jb-|\[jb-|Sent SIGTERM to jb-)/
+const PI_JOB_START_RE = /^(?:Already finished: \[jb-|\[jb-|Sent SIGTERM to jb-)/
 
 function parsePiJobEnvelope(text: string): BackgroundTaskEnvelope | null {
   const kill = text.match(PI_JOB_KILL_RE)

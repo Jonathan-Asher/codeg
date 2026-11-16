@@ -83,7 +83,7 @@ function* toolCalls(
   for (const part of parts) {
     if (part.type === "tool-call") {
       yield part
-    } else if (part.type === "tool-group" || part.type === "goal-run") {
+    } else if (part.type === "goal-run") {
       yield* toolCalls(part.items)
     } else if (
       part.type === "background-task-group" ||

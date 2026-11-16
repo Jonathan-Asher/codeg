@@ -197,9 +197,7 @@ describe("a reply a Stop hook reopened", () => {
       <CompletedTurnContent parts={parts} durationMs={9_000} completed />
     )
 
-    expect(
-      toggle()
-    ).toHaveAttribute("aria-expanded", "false")
+    expect(toggle()).toHaveAttribute("aria-expanded", "false")
     expect(screen.getByText(/Decision for you:/)).toBeInTheDocument()
     expect(screen.getByText(HOOK_REPLY)).toBeInTheDocument()
     expect(screen.queryByText("Neither file changed")).not.toBeInTheDocument()
@@ -1234,9 +1232,7 @@ describe("images in a folded reply", () => {
       />
     )
 
-    expect(
-      toggle()
-    ).toHaveAttribute("aria-expanded", "false")
+    expect(toggle()).toHaveAttribute("aria-expanded", "false")
     // The work is folded…
     expect(screen.queryByText(/python3 draw\.py/)).not.toBeInTheDocument()
     // …the drawing and the answer are not.
@@ -1271,9 +1267,7 @@ describe("images in a folded reply", () => {
       </NextIntlClientProvider>
     )
 
-    expect(
-      toggle()
-    ).toHaveAttribute("aria-expanded", "false")
+    expect(toggle()).toHaveAttribute("aria-expanded", "false")
     expect(screen.getByAltText("placement.png")).toBeInTheDocument()
   })
 
@@ -1330,9 +1324,7 @@ describe("a reply the reader opened", () => {
       />
     )
 
-    expect(
-      toggle()
-    ).toHaveAttribute("aria-expanded", "true")
+    expect(toggle()).toHaveAttribute("aria-expanded", "true")
     expect(screen.getByText(/python3 draw\.py/)).toBeInTheDocument()
   })
 
@@ -1357,9 +1349,7 @@ describe("a reply the reader opened", () => {
       />
     )
 
-    expect(
-      toggle()
-    ).toHaveAttribute("aria-expanded", "false")
+    expect(toggle()).toHaveAttribute("aria-expanded", "false")
     expect(screen.getByAltText("placement.png")).toBeInTheDocument()
   })
 })
@@ -1392,9 +1382,7 @@ describe("CompletedTurnContent: a sub-agent the provider stopped", () => {
         completed
       />
     )
-    expect(
-      toggle()
-    ).toHaveAttribute("aria-expanded", "false")
+    expect(toggle()).toHaveAttribute("aria-expanded", "false")
     const surfaced = container.querySelector("[data-provider-error]")
     expect(surfaced).not.toBeNull()
     expect(surfaced).toHaveTextContent(stopped)

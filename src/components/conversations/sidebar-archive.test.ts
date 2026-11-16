@@ -164,7 +164,6 @@ describe("selectRecentConversationsWithReuse — archive filter", () => {
     const rows = selectRecentConversationsWithReuse(
       conversations,
       true,
-      "updated",
       open,
       []
     )

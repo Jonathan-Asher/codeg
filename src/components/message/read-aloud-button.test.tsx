@@ -31,7 +31,9 @@ const labels = enMessages.Folder.chat.messageList
 function renderStats(ui: ReactNode) {
   return render(
     <NextIntlClientProvider locale="en" messages={enMessages}>
-      <MessageScrollProvider value={{ scrollToIndex: vi.fn() }}>
+      <MessageScrollProvider
+        value={{ scrollToIndex: vi.fn(), revealFromAbove: vi.fn() }}
+      >
         {ui}
       </MessageScrollProvider>
     </NextIntlClientProvider>

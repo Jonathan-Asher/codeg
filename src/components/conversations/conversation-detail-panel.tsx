@@ -26,6 +26,7 @@ import {
   extractPermissionToolCallId,
   useAcpActions,
   useAcpEvent,
+  useConnectionStore,
 } from "@/contexts/acp-connections-context"
 import { ActivityLiveProvider } from "@/components/message/activity/activity-live-context"
 import { useAcpAgents } from "@/hooks/use-acp-agents"
@@ -469,6 +470,9 @@ const ConversationTabView = memo(function ConversationTabView({
     setSyncState,
   } = useConversationRuntimeActions()
   const acpActions = useAcpActions()
+  // Stable store handle, for event-time reads of the live connection that
+  // must not go through an effect-refreshed ref.
+  const connectionStore = useConnectionStore()
 
   // Stable runtime session key — set once at mount, never changes.
   // For new conversations this is a virtual (negative) ID; for existing
@@ -4114,7 +4118,6 @@ const ConversationTabView = memo(function ConversationTabView({
       injectContent={composerInject}
       onInjectConsumed={handleComposerInjectConsumed}
       sideQuestion={sideQuestionSupported ? sideQuestion : null}
-      promptSuggestion={conn.promptSuggestion}
       onPromptSuggestionShown={handlePromptSuggestionShown}
       onPromptSuggestionAccepted={handlePromptSuggestionAccepted}
       composerBanner={

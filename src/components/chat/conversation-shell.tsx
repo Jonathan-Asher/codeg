@@ -384,9 +384,7 @@ export function ConversationShell({
         )}
 
         {talkDock && (
-          <div className="mx-auto w-full chat-content-w px-4">
-            {talkDock}
-          </div>
+          <div className="mx-auto w-full chat-content-w px-4">{talkDock}</div>
         )}
 
         {!hideInput && feedbackList && (
