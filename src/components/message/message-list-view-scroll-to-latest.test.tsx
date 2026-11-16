@@ -140,7 +140,7 @@ function renderList(props: ListProps = {}) {
         conversationId={CONVERSATION}
         agentType="claude_code"
         connStatus="connected"
-        showMessageNav={false}
+        availableCommands={[]}
         {...props}
         {...next}
       />

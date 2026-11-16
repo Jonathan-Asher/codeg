@@ -53,7 +53,7 @@ describe("tab close/navigation shortcuts live in the always-mounted controller",
   // without preventDefault, so the key went on to the native menu's Close
   // Window. It is claimed unconditionally now, and the native File › Close
   // Tab (what a focused browser page's mod+w reaches) closes the active tab.
-  it("claims mod+w even with no tab to close and answers the native Close Tab", () => {
+  it("claims mod+w even with no tab to close and answers the native ⌘W", () => {
     const start = controllerSource.indexOf(
       "matchShortcutEvent(e, shortcuts.close_current_tab)"
     )
@@ -63,11 +63,10 @@ describe("tab close/navigation shortcuts live in the always-mounted controller",
       controllerSource.indexOf("return", start)
     )
     expect(branch).toMatch(/e\.preventDefault\(\)/)
-    expect(branch).toMatch(/closeActiveTab\(\)/)
+    expect(branch).toMatch(/closeCurrentTab\(activePane\)/)
     expect(branch).not.toMatch(/if \(!activeTabId\) return/)
-    expect(controllerSource).toMatch(/"app:\/\/close-tab"/)
     expect(controllerSource).toMatch(
-      /getCurrentWebviewWindow\(\)\.listen\(CLOSE_TAB_MENU_EVENT/
+      /subscribe<CloseShortcutPayload>\(CLOSE_SHORTCUT_EVENT/
     )
   })
 

@@ -1,10 +1,12 @@
 pub mod agent_setting_service;
 pub mod app_metadata_service;
+pub mod assistant_service;
 pub mod automation_service;
 pub mod canvas_service;
 pub mod chat_channel_message_log_service;
 pub mod chat_channel_service;
 pub mod conversation_service;
+pub mod conversation_tag_service;
 pub mod custom_agent_service;
 pub mod folder_command_service;
 pub mod folder_group_service;
@@ -21,4 +23,5 @@ pub mod side_question_service;
 pub mod tab_service;
 pub mod thread_binding_service;
 pub mod token_usage_service;
+pub mod tool_approval_service;
 pub mod work_task_service;

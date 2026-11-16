@@ -1,7 +1,9 @@
+import { stripKimiMcpOAuth } from "@/lib/kimi-mcp-oauth"
 import type {
   ActiveDelegationState,
   AsyncTaskRecord,
   AttachPhase,
+  BackgroundOutstandingTask,
   AvailableCommandInfo,
   ConfigStaleKind,
   ConnectionStatus,
@@ -12,15 +14,18 @@ import type {
   PendingQuestionState,
   PromptCapabilitiesInfo,
   PromptSuggestionInfo,
+  RemoteControlInfo,
   SessionConfigOptionInfo,
   SessionFailureRecord,
   SessionModeStateInfo,
   SessionUsageUpdateInfo,
+  ToolApprovalInfo,
   ToolCallState,
   ToolCardState,
 } from "@/lib/types"
 
 import { routeAcpError, type AcpErrorLevel } from "@/lib/acp-error-presentation"
+import { replaceLiveToolRawOutput } from "@/lib/live-tool-output"
 import type {
   LiveContentBlock as LocalLiveContentBlock,
   LiveMessage as LocalLiveMessage,
@@ -44,11 +49,19 @@ export interface SnapshotPatch {
   // a freshly-started replacement at the same contextKey.
   connectionId: string
   status: ConnectionStatus
+  /** Whether a turn has run on the connection: it is mid-turn, or it is
+   *  linked to its conversation row (`conversation_id`), which the backend
+   *  does at the connection's first prompt (or a fork), never at connect.
+   *  Latched in `ConnectionState.hasPrompted`. */
+  hasPrompted: boolean
   sessionId: string | null
   modes: SessionModeStateInfo | null
   configOptions: SessionConfigOptionInfo[] | null
   availableCommands: AvailableCommandInfo[] | null
   usage: SessionUsageUpdateInfo | null
+  /** Claude Code's Remote Control while it is on, or `null`. Current state,
+   *  like `usage`: applied on the fresh hydrate branch only. */
+  remoteControl: RemoteControlInfo | null
   liveMessage: LocalLiveMessage | null
   pendingPermission: PendingPermission | null
   /** Awaiting-answer multiple-choice `ask_user_question` carried by the
@@ -72,7 +85,8 @@ export interface SnapshotPatch {
   /** The adapter answers `/btw` side questions. `false` when the server
    *  omitted it. */
   sideQuestion: boolean
-  /** The latest prompt suggestion, `null` when there is none. */
+  /** The follow-up prompt the agent last predicted (the latest prompt
+   *  suggestion), `null` when there is none. Current state, like `usage`. */
   promptSuggestion: PromptSuggestionInfo | null
   /** Whether the running session is on stale (launch-time) config — recovered
    *  from the snapshot so a reconnect/refresh/new tile sees the banner state
@@ -91,6 +105,9 @@ export interface SnapshotPatch {
   /** Whether messages ride the native `_session/steering` channel — how a
    *  message reaches a turn held open for background work. */
   nativeSteering: boolean
+  /** Those tasks one by one (`background_outstanding_tasks`), for the
+   *  composer's running list. Empty when the server omitted the field. */
+  backgroundTasks: readonly BackgroundOutstandingTask[]
   /** AIR typed session failure table carried by the snapshot — resolved
    *  entries and their revision watermarks included. MERGED into the in-memory
    *  table by the monotonic per-id rule (`mergeSessionFailures`) on BOTH
@@ -98,6 +115,10 @@ export interface SnapshotPatch {
    *  records, never clobber a fresher live one. `[]` when the server omitted
    *  the field. */
   sessionFailures: SessionFailureRecord[]
+  /** The connection's recent approval records. Merged into the in-memory map
+   *  on both hydrate branches by `mergeToolApprovals` (later decision per call
+   *  wins, so it can only add). `[]` when the server omitted the field. */
+  toolApprovals: ToolApprovalInfo[]
   /** AIR async tasks carried by the snapshot, already merged backend-side.
    *  Terminal rows included — they are the ids subsequent live deltas revise.
    *  `[]` when the server omitted the field. */
@@ -132,6 +153,9 @@ export interface SnapshotPatch {
   /** With `attachPhase === "pool_wait"`: when the account pool frees up
    *  (epoch seconds), if known. */
   poolResumesAt?: number | null
+  /** Child connection ids of every running codeg delegation — the parent's
+   *  busy signal (`ConnectionState.delegatedChildren`). `[]` when absent. */
+  delegatedChildren: string[]
 }
 
 const DEFAULT_PROMPT_CAPS: PromptCapabilitiesInfo = {
@@ -151,11 +175,15 @@ export function denormalizeSnapshot(wire: LiveSessionSnapshot): SnapshotPatch {
   return {
     connectionId: wire.connection_id,
     status: wire.status,
+    hasPrompted: wire.status === "prompting" || wire.conversation_id != null,
     sessionId: wire.external_id,
     modes: wire.modes,
     configOptions: wire.config_options,
     availableCommands: wire.available_commands ?? null,
     usage: wire.usage,
+    remoteControl: wire.remote_control
+      ? { session_url: wire.remote_control.session_url ?? null }
+      : null,
     liveMessage: wire.live_message
       ? denormalizeLiveMessage(wire.live_message, toolMap)
       : null,
@@ -197,7 +225,9 @@ export function denormalizeSnapshot(wire: LiveSessionSnapshot): SnapshotPatch {
     backgroundOutstanding: wire.background_outstanding ?? 0,
     awaitingBackground: wire.awaiting_background ?? false,
     nativeSteering: wire.native_steering_available ?? false,
+    backgroundTasks: wire.background_outstanding_tasks ?? [],
     sessionFailures: wire.session_failures ?? [],
+    toolApprovals: wire.tool_approvals ?? [],
     asyncTasks: wire.async_tasks ?? [],
     toolCards: wire.tool_cards ?? [],
     lastError,
@@ -209,6 +239,7 @@ export function denormalizeSnapshot(wire: LiveSessionSnapshot): SnapshotPatch {
     attachPhase: wire.attach_phase,
     attachElapsedMs: wire.attach_elapsed_ms,
     poolResumesAt: wire.pool_resumes_at ?? null,
+    delegatedChildren: wire.delegated_children ?? [],
   }
 }
 
@@ -324,13 +355,8 @@ function toolStateToInfo(tc: ToolCallState): ToolCallInfo {
   // Backend's structured output is collapsed into a single raw chunk for
   // hydration. Chunk history isn't recoverable from the snapshot — the
   // frontend's per-chunk delta tracking will resume from subsequent events.
-  const outputChunks: string[] = []
-  let outputBytes = 0
-  const rawOutput = toolOutputRawText(tc.output)
-  if (rawOutput !== null) {
-    outputChunks.push(rawOutput)
-    outputBytes = rawOutput.length
-  }
+  const output = replaceLiveToolRawOutput(toolOutputRawText(tc.output))
+
   return {
     tool_call_id: tc.id,
     title: tc.label,
@@ -338,10 +364,9 @@ function toolStateToInfo(tc: ToolCallState): ToolCallInfo {
     status: tc.status,
     content: tc.content,
     raw_input: tc.input == null ? null : JSON.stringify(tc.input),
-    raw_output_chunks: outputChunks,
-    raw_output_total_bytes: outputBytes,
+    ...output,
     locations: tc.locations ?? null,
-    meta: tc.meta ?? null,
+    meta: stripKimiMcpOAuth(tc.meta ?? null),
     images: tc.images ?? [],
   }
 }

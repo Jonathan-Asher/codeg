@@ -15,8 +15,10 @@ import type {
   SessionFailureRecord,
   SessionModeInfo,
   AvailableCommandInfo,
+  RemoteControlInfo,
 } from "@/lib/types"
 import { ComposerStatusStrips } from "@/components/chat/composer-status-strips"
+import { RemoteControlStrip } from "@/components/chat/remote-control-strip"
 import type {
   PendingPermission,
   PendingQuestion,
@@ -25,6 +27,9 @@ import type {
 import type { QueuedMessage, RequeueOptions } from "@/hooks/use-message-queue"
 import type { QueueNotice } from "@/components/chat/message-queue-display"
 import { ChatInput } from "@/components/chat/chat-input"
+import { ChatWidthHandles } from "@/components/chat/chat-width-handles"
+import { chatGutterStyle } from "@/lib/chat-content-width"
+import { cn } from "@/lib/utils"
 import type {
   ComposerInjectContent,
   ContinueBeforeReady,
@@ -35,6 +40,7 @@ import { AskQuestionCard } from "@/components/chat/ask-question-card"
 import { PlanApprovalCard } from "@/components/chat/plan-approval-card"
 import type { PromptCardDock } from "@/hooks/use-prompt-card-resize"
 import type { SideQuestionController } from "@/hooks/use-side-question"
+import { MarkdownImageProvider } from "@/components/ai-elements/markdown-local-image"
 
 interface ConversationShellProps {
   status: ConnectionStatus | null
@@ -53,6 +59,12 @@ interface ConversationShellProps {
    *  every surface with a live store — dismissing is client-local, so viewers
    *  get it too. */
   onSessionFailureDismiss?: (ids: string[]) => void
+  /** Claude Code's Remote Control while it is on; its strip shows the
+   *  session's link and QR code. Omit/`null` renders nothing. */
+  remoteControl?: RemoteControlInfo | null
+  /** Turns Remote Control off (sends `/remote-control off`). Omitted for
+   *  surfaces without a connection of their own — the button is then hidden. */
+  onRemoteControlOff?: () => void
   pendingPermission: PendingPermission | null
   pendingQuestion: PendingQuestion | null
   /** Awaiting-answer multiple-choice `ask_user_question`. */
@@ -185,6 +197,12 @@ interface ConversationShellProps {
   promptSuggestion?: PromptSuggestionInfo | null
   onPromptSuggestionShown?: (id: number) => void
   onPromptSuggestionAccepted?: (id: number) => void
+  /** Give the chat column drag handles on its edges (`ChatWidthHandles`) and
+   *  the window-edge gutter they need. Only for the conversation tab: a canvas
+   *  card renders this shell inside the board's zoom transform, where the
+   *  handles' layout maths would be off by the zoom factor, and a card has no
+   *  window edge to keep clear. */
+  resizableWidth?: boolean
 }
 
 export function ConversationShell({
@@ -195,6 +213,8 @@ export function ConversationShell({
   claudeApiRetry,
   sessionFailures,
   onSessionFailureDismiss,
+  remoteControl,
+  onRemoteControlOff,
   pendingPermission,
   pendingQuestion,
   pendingAskQuestion,
@@ -260,6 +280,7 @@ export function ConversationShell({
   promptSuggestion,
   onPromptSuggestionShown,
   onPromptSuggestionAccepted,
+  resizableWidth = false,
 }: ConversationShellProps) {
   // The blocking cards below the thread grow upwards into it, and only by
   // what it can spare (see `usePromptCardResize`).
@@ -271,25 +292,53 @@ export function ConversationShell({
   return (
     // The composer scope: the blocking cards below hand the keyboard to this
     // conversation's composer (Esc) and take it from there (↑ when empty).
+    // The gutter keeps the chat column (transcript and composer alike) off
+    // the window edge, so its width handles stay grabbable at any width.
     <div
       className="relative flex h-full min-h-0 flex-col"
+      style={resizableWidth ? chatGutterStyle : undefined}
       data-composer-scope=""
     >
       {topBanner}
 
+      {/* Above the transcript, not down in the composer dock: Remote Control
+          is the session's standing state, and pinning it here keeps it still
+          while the messages scroll under it. The dock below is for things that
+          come and go with the turn or the connection
+          (`ComposerStatusStrips`). Work running past a turn — background
+          tasks, sub-agents, delegations — is the transcript's live activity
+          row's "N running" (`MessageListView`'s `liveRuns`). */}
+      {remoteControl && (
+        <RemoteControlStrip
+          remoteControl={remoteControl}
+          onTurnOff={onRemoteControlOff}
+          canTurnOff={status === "connected"}
+        />
+      )}
+
       {/* The transcript: focus left here is nobody typing, and a window
           coming back moves it to the composer (see `lib/composer-focus`). */}
-      <div ref={threadRef} className="flex-1 min-h-0" data-composer-thread="">
+      <div
+        ref={threadRef}
+        className={cn("flex-1 min-h-0", resizableWidth && "relative")}
+        data-composer-thread=""
+      >
         {children}
+        {resizableWidth && <ChatWidthHandles />}
       </div>
 
-      <PermissionDialog
-        permission={pendingPermission}
-        onRespond={onRespondPermission}
-        agentType={agentType}
-        autoFocus={isActive ?? true}
-        dock={dock}
-      />
+      {/* Below the transcript, so outside its image scope: a request or a
+          plan names local images the way a reply does, against the same
+          folder. */}
+      <MarkdownImageProvider rootPath={defaultPath ?? null}>
+        <PermissionDialog
+          permission={pendingPermission}
+          onRespond={onRespondPermission}
+          agentType={agentType}
+          autoFocus={isActive ?? true}
+          dock={dock}
+        />
+      </MarkdownImageProvider>
 
       <QuestionDialog
         question={pendingQuestion}
@@ -303,7 +352,7 @@ export function ConversationShell({
           to the input width. */}
       <div>
         {pendingAskQuestion && pendingAskQuestion.questions.length > 0 && (
-          <div className="mx-auto w-full max-w-(--session-column-max-width) px-4">
+          <div className="mx-auto w-full chat-content-w px-4">
             <AskQuestionCard
               question={pendingAskQuestion}
               onAnswer={onAnswerAskQuestion}
@@ -313,39 +362,41 @@ export function ConversationShell({
           </div>
         )}
         {pendingPlanApproval && (
-          <div className="mx-auto w-full max-w-(--session-column-max-width) px-4">
+          <div className="mx-auto w-full chat-content-w px-4">
             {/* key on approval_id so the card always remounts (fresh in-flight /
                 feedback state) if the slot is ever reused for a new approval. */}
-            <PlanApprovalCard
-              key={pendingPlanApproval.approval_id}
-              approval={pendingPlanApproval}
-              onAnswer={onAnswerPlanApproval}
-              autoFocus={isActive ?? true}
-              dock={dock}
-            />
+            <MarkdownImageProvider rootPath={defaultPath ?? null}>
+              <PlanApprovalCard
+                key={pendingPlanApproval.approval_id}
+                approval={pendingPlanApproval}
+                onAnswer={onAnswerPlanApproval}
+                autoFocus={isActive ?? true}
+                dock={dock}
+              />
+            </MarkdownImageProvider>
           </div>
         )}
 
         {composerBanner && (
-          <div className="mx-auto w-full max-w-(--session-column-max-width) px-4 pb-2">
+          <div className="mx-auto w-full chat-content-w px-4 pb-2">
             {composerBanner}
           </div>
         )}
 
         {talkDock && (
-          <div className="mx-auto w-full max-w-(--session-column-max-width) px-4">
+          <div className="mx-auto w-full chat-content-w px-4">
             {talkDock}
           </div>
         )}
 
         {!hideInput && feedbackList && (
-          <div className="mx-auto w-full max-w-(--session-column-max-width) px-4">
+          <div className="mx-auto w-full chat-content-w px-4">
             {feedbackList}
           </div>
         )}
 
         {!hideInput && (
-          <div className="mx-auto w-full max-w-(--session-column-max-width)">
+          <div className="mx-auto w-full chat-content-w">
             <ChatInput
               status={status}
               promptCapabilities={promptCapabilities}

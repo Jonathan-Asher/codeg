@@ -87,6 +87,11 @@ export function probeTransportLiveness(): void {
   getTransport().probeLiveness?.()
 }
 
+/** Includes first server readiness after a page started while offline. */
+export function onTransportReady(callback: () => void): UnsubscribeFn | null {
+  return getTransport().onReady?.(callback) ?? null
+}
+
 /**
  * Per-connection Subscribe-with-Snapshot stream. Returns `null` only on
  * the desktop Tauri transport (which uses local IPC and is race-free, so

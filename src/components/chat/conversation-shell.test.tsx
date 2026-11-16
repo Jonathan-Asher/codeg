@@ -1,132 +1,177 @@
-import { render, screen } from "@testing-library/react"
-import { NextIntlClientProvider } from "next-intl"
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
 import type { ComponentProps } from "react"
+import { render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
-// The composer and the status strips are composer chrome with their own heavy
-// dependencies (editor, connections); the cards are what is under test here.
+// The shell's own children are not under test: stand each in with a marker.
 vi.mock("@/components/chat/chat-input", () => ({
   ChatInput: () => <div data-testid="composer" />,
 }))
-vi.mock("@/components/chat/composer-status-strips", () => ({
-  ComposerStatusStrips: () => <div data-testid="status-strips" />,
+vi.mock("@/components/chat/chat-width-handles", () => ({
+  ChatWidthHandles: () => <div data-testid="width-handles" />,
 }))
-// Plan markdown goes through Streamdown, which is beside the point here.
-vi.mock("@/components/ai-elements/message", () => ({
-  MessageResponse: ({ children }: { children: string }) => (
-    <div>{children}</div>
+vi.mock("@/components/chat/composer-status-strips", () => ({
+  ComposerStatusStrips: () => null,
+}))
+vi.mock("@/components/chat/remote-control-strip", () => ({
+  RemoteControlStrip: (props: {
+    remoteControl: { session_url: string | null }
+    onTurnOff?: () => void
+    canTurnOff: boolean
+  }) => (
+    <div
+      data-testid="remote-control-strip"
+      data-url={String(props.remoteControl.session_url)}
+      data-can-turn-off={String(props.canTurnOff)}
+      data-has-turn-off={String(props.onTurnOff !== undefined)}
+    />
   ),
 }))
+vi.mock("@/components/chat/permission-dialog", async () => {
+  const { useTranscriptRoot } =
+    await import("@/components/ai-elements/markdown-local-image")
+  return {
+    PermissionDialog: function PermissionDialog() {
+      const root = useTranscriptRoot()
+      return <div data-testid="permission" data-root={String(root)} />
+    },
+  }
+})
+vi.mock("@/components/chat/question-dialog", () => ({
+  QuestionDialog: () => null,
+}))
+vi.mock("@/components/chat/ask-question-card", () => ({
+  AskQuestionCard: () => null,
+}))
+vi.mock("@/components/chat/plan-approval-card", async () => {
+  const { useTranscriptRoot } =
+    await import("@/components/ai-elements/markdown-local-image")
+  return {
+    PlanApprovalCard: function PlanApprovalCard() {
+      const root = useTranscriptRoot()
+      return <div data-testid="plan-approval" data-root={String(root)} />
+    },
+  }
+})
 
 import { ConversationShell } from "./conversation-shell"
-import enMessages from "@/i18n/messages/en.json"
-import { CHAT_TEXT_SCOPE_CLASS } from "@/lib/chat-text-scale"
-
-const SCOPE = `.${CHAT_TEXT_SCOPE_CLASS}`
 
 type ShellProps = ComponentProps<typeof ConversationShell>
 
-function renderShell(over: Partial<ShellProps> = {}) {
-  const props: ShellProps = {
-    status: "connected",
-    promptCapabilities: { image: true, audio: false, embedded_context: true },
+function renderShell(extra: Partial<ShellProps> = {}) {
+  const noop = () => {}
+  const props = {
+    status: null,
+    promptCapabilities: {},
     claudeApiRetry: null,
-    pendingPermission: {
-      request_id: "req-1",
-      tool_call: {
-        title: "pnpm test",
-        kind: "execute",
-        rawInput: { command: "pnpm test" },
-      },
-      options: [
-        { option_id: "once", name: "Allow", kind: "allow_once" },
-        { option_id: "reject", name: "Reject", kind: "reject_once" },
-      ],
-    },
-    pendingQuestion: { tool_call_id: "tq-1", question: "Which branch?" },
-    pendingAskQuestion: {
-      question_id: "q-1",
-      created_at: "2026-01-01T00:00:00Z",
-      questions: [
-        {
-          id: "qa",
-          question: "Which approach?",
-          header: "Approach",
-          multi_select: false,
-          options: [
-            { label: "Incremental", description: "smaller diffs" },
-            { label: "Rewrite", description: "clean slate" },
-          ],
-        },
-      ],
-    },
-    pendingPlanApproval: {
-      approval_id: "ap-1",
-      tool_call_id: "call-1",
-      plan_markdown: "1. Migrate the table",
-      created_at: "2026-01-01T00:00:00Z",
-    },
-    onFocus: vi.fn(),
-    onSend: vi.fn(),
-    onCancel: vi.fn(),
-    onRespondPermission: vi.fn(),
-    onAnswerQuestion: vi.fn(),
-    onAnswerAskQuestion: vi.fn(),
-    onAnswerPlanApproval: vi.fn(),
-    children: <div data-testid="thread" />,
-    ...over,
-  }
+    pendingPermission: null,
+    pendingQuestion: null,
+    pendingAskQuestion: null,
+    pendingPlanApproval: null,
+    onFocus: noop,
+    onSend: noop,
+    onCancel: noop,
+    onRespondPermission: noop,
+    onAnswerQuestion: noop,
+    onAnswerAskQuestion: noop,
+    onAnswerPlanApproval: noop,
+    ...extra,
+  } as unknown as ShellProps
   return render(
-    <NextIntlClientProvider locale="en" messages={enMessages}>
-      <ConversationShell {...props} />
-    </NextIntlClientProvider>
+    <ConversationShell {...props}>
+      <div data-testid="transcript" />
+    </ConversationShell>
   )
 }
 
-describe("ConversationShell and the chat text size", () => {
-  // Workspace tabs, split panes and canvas cards all dock their blocking
-  // cards through this shell, so each card has to carry the chat text scope
-  // itself: the agent's question, plan or request is read like the transcript
-  // and grows with it.
-  it("puts every docked card in a chat text scope", () => {
+/** The shell's root: the transcript's host is its child. */
+const shellRoot = () =>
+  screen.getByTestId("transcript").parentElement!.parentElement!
+
+describe("ConversationShell chat-width handles", () => {
+  it("has neither handles nor a gutter by default (canvas cards)", () => {
     renderShell()
-
-    const askCard = screen.getByRole("group", {
-      name: "The agent needs your input",
-    })
-    const planCard = screen.getByRole("group", {
-      name: "The agent has a plan — review it",
-    })
-    const permissionCard = screen.getByRole("group", { name: "pnpm test" })
-    for (const card of [askCard, planCard, permissionCard]) {
-      expect(card).toHaveClass(CHAT_TEXT_SCOPE_CLASS)
-    }
-    expect(
-      screen.getByText("Agent is asking a question").closest(SCOPE)
-    ).toContainElement(screen.getByText("Which branch?"))
-
-    // The cards' text is inside their scope, not just their frames.
-    expect(screen.getByText("Which approach?").closest(SCOPE)).toBe(askCard)
-    expect(screen.getByText("1. Migrate the table").closest(SCOPE)).toBe(
-      planCard
-    )
+    expect(screen.queryByTestId("width-handles")).toBeNull()
+    expect(shellRoot().style.getPropertyValue("--chat-gutter")).toBe("")
   })
 
-  it("leaves the composer chrome around the cards at the app's size", () => {
+  it("adds the handles and the window-edge gutter when resizable", () => {
+    renderShell({ resizableWidth: true })
+    expect(screen.getByTestId("width-handles")).toBeInTheDocument()
+    // Mounted beside the transcript, in a positioned host spanning it.
+    const host = screen.getByTestId("transcript").parentElement!
+    expect(host).toContainElement(screen.getByTestId("width-handles"))
+    expect(host).toHaveClass("relative")
+    expect(shellRoot().style.getPropertyValue("--chat-gutter")).toBe("12px")
+  })
+})
+
+describe("who turns the handles on", () => {
+  const read = (path: string) =>
+    readFileSync(resolve(process.cwd(), path), "utf8")
+
+  it("is the conversation tab, not the zoomable canvas card", () => {
+    // Canvas cards render the shell under the board's scale transform, where
+    // the handles' pointer maths would be off by the zoom factor.
+    // Boolean shorthand only: `resizableWidth={false}` must not pass.
+    expect(
+      read("src/components/conversations/conversation-detail-panel.tsx")
+    ).toMatch(/<ConversationShell\s+resizableWidth\s/)
+    expect(
+      read("src/components/canvas/canvas-conversation-surface.tsx")
+    ).not.toContain("resizableWidth")
+  })
+})
+
+describe("ConversationShell Remote Control strip", () => {
+  it("shows Claude Code's Remote Control while it is on", () => {
+    renderShell()
+    expect(screen.queryByTestId("remote-control-strip")).toBeNull()
+
     renderShell({
-      composerBanner: <div data-testid="banner">Session interrupted</div>,
-      feedbackList: <div data-testid="feedback">a note</div>,
+      status: "connected",
+      remoteControl: { session_url: "https://claude.ai/code/session_01" },
+      onRemoteControlOff: () => {},
     })
-    // The composer opts its own input in (`followChatTextSize`); the dock,
-    // banners, feedback notes and status strips are chrome.
-    for (const id of [
-      "composer",
-      "banner",
-      "feedback",
-      "status-strips",
-      "thread",
-    ]) {
-      expect(screen.getByTestId(id).closest(SCOPE), id).toBeNull()
-    }
+    const strip = screen.getByTestId("remote-control-strip")
+    expect(strip).toHaveAttribute(
+      "data-url",
+      "https://claude.ai/code/session_01"
+    )
+    expect(strip).toHaveAttribute("data-has-turn-off", "true")
+    expect(strip).toHaveAttribute("data-can-turn-off", "true")
+  })
+
+  it("lets it be turned off only between turns", () => {
+    // The adapter refuses `/remote-control off` while Claude is working.
+    renderShell({
+      status: "prompting",
+      remoteControl: { session_url: null },
+      onRemoteControlOff: () => {},
+    })
+    expect(screen.getByTestId("remote-control-strip")).toHaveAttribute(
+      "data-can-turn-off",
+      "false"
+    )
+  })
+})
+
+describe("ConversationShell cards below the transcript", () => {
+  it("resolve local images against the conversation's folder", () => {
+    // Outside the transcript's own image scope, but the same agent wrote
+    // them: a plan or a permission request names images as a reply does.
+    renderShell({
+      defaultPath: "/repo",
+      pendingPlanApproval: { approval_id: "a1" } as never,
+    })
+    expect(screen.getByTestId("permission")).toHaveAttribute(
+      "data-root",
+      "/repo"
+    )
+    expect(screen.getByTestId("plan-approval")).toHaveAttribute(
+      "data-root",
+      "/repo"
+    )
   })
 })

@@ -47,9 +47,12 @@ let browserHandle: DirectoryBrowserHandle | null = null
 function Harness({
   allowCreateFolder = true,
   locale = "en",
+  keepOpen = false,
 }: {
   allowCreateFolder?: boolean
   locale?: "en" | "ar"
+  /** Report the dialog's close requests without acting on them. */
+  keepOpen?: boolean
 }) {
   const [open, setOpen] = useState(true)
   const [value, setValue] = useState("")
@@ -66,7 +69,7 @@ function Harness({
       <Dialog
         open={open}
         onOpenChange={(next) => {
-          setOpen(next)
+          if (!keepOpen) setOpen(next)
           onOpenChange(next)
         }}
       >
@@ -210,6 +213,93 @@ describe("DirectoryBrowser — new folder", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
+  it("keeps the row on Escape while the folder is being created", async () => {
+    let finish: (path: string) => void = () => {}
+    api.createDirectory.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          finish = resolve
+        })
+    )
+    render(<Harness />)
+    const input = await openNewFolderRow()
+    fireEvent.change(input, { target: { value: "slow" } })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" })
+    })
+    expect(onBusyChange).toHaveBeenLastCalledWith(true)
+    onBusyChange.mockClear()
+
+    fireEvent.keyDown(input, { key: "Escape" })
+
+    // The request can't be called back, so Escape does what the disabled X
+    // does: nothing. The row stays, the host stays busy, the dialog stays open.
+    expect(
+      screen.getByRole("textbox", { name: "Folder name" })
+    ).toBeInTheDocument()
+    expect(onBusyChange).not.toHaveBeenCalled()
+    expect(onOpenChange).not.toHaveBeenCalled()
+
+    listing.set("/home/me/slow", [])
+    await act(async () => {
+      finish("/home/me/slow")
+    })
+    await screen.findByDisplayValue("/home/me/slow")
+    expect(onBusyChange).toHaveBeenLastCalledWith(false)
+  })
+
+  it("still explains a failure that lands after Escape", async () => {
+    let fail: (reason: unknown) => void = () => {}
+    api.createDirectory.mockImplementation(
+      () =>
+        new Promise<string>((_, reject) => {
+          fail = reject
+        })
+    )
+    render(<Harness />)
+    const input = await openNewFolderRow()
+    fireEvent.change(input, { target: { value: "work" } })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" })
+    })
+    fireEvent.keyDown(input, { key: "Escape" })
+
+    await act(async () => {
+      fail(
+        appError("already_exists", "newFolder.errors.alreadyExists", {
+          name: "work",
+        })
+      )
+    })
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "“work” already exists here."
+    )
+    expect(input).toHaveValue("work")
+    expect(latestValue).toBe("/home/me")
+    // And the host gets its confirm back once the answer is in.
+    expect(onBusyChange).toHaveBeenLastCalledWith(false)
+  })
+
+  it("leaves Escape to the input method while the name is being composed", async () => {
+    // Held open: Escape that belongs to the IME goes past the row, as it does
+    // for every field, and only the row's handling is under test here.
+    render(<Harness keepOpen />)
+    const input = await openNewFolderRow()
+    // No in-event IME signal, as on engines that only send composition events.
+    fireEvent.compositionStart(input)
+    fireEvent.keyDown(input, { key: "Escape" })
+    expect(
+      screen.getByRole("textbox", { name: "Folder name" })
+    ).toBeInTheDocument()
+
+    fireEvent.compositionEnd(input)
+    fireEvent.keyDown(input, { key: "Escape" })
+    expect(
+      screen.queryByRole("textbox", { name: "Folder name" })
+    ).not.toBeInTheDocument()
+  })
+
   it("does nothing for a blank name", async () => {
     render(<Harness />)
     const input = await openNewFolderRow()
@@ -325,6 +415,53 @@ describe("DirectoryBrowser — new folder", () => {
     expect(
       screen.queryByRole("textbox", { name: "Folder name" })
     ).not.toBeInTheDocument()
+  })
+
+  it("holds navigation while the folder is being created", async () => {
+    listing.set("/home", [dir("me", "/home/me", true)])
+    let finish: (path: string) => void = () => {}
+    api.createDirectory.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          finish = resolve
+        })
+    )
+    render(<Harness />)
+    const input = await openNewFolderRow()
+    fireEvent.change(input, { target: { value: "slow" } })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" })
+    })
+
+    // Moving now would close the row and clear the busy flag, and the late
+    // answer would then override wherever the user went.
+    expect(
+      screen.getByRole("button", { name: "Go to parent directory" })
+    ).toBeDisabled()
+    expect(
+      screen.getByRole("button", { name: "Go to home directory" })
+    ).toBeDisabled()
+    const pathBox = screen.getByDisplayValue("/home/me")
+    fireEvent.change(pathBox, { target: { value: "/home" } })
+    await act(async () => {
+      fireEvent.keyDown(pathBox, { key: "Enter" })
+    })
+    expect(api.listDirectoryEntries).not.toHaveBeenCalledWith("/home")
+    expect(
+      screen.getByRole("textbox", { name: "Folder name" })
+    ).toBeInTheDocument()
+
+    listing.set("/home/me/slow", [])
+    await act(async () => {
+      finish("/home/me/slow")
+    })
+    await screen.findByDisplayValue("/home/me/slow")
+    expect(
+      screen.getByRole("button", { name: "Go to parent directory" })
+    ).toBeEnabled()
+    expect(
+      screen.getByRole("button", { name: "Go to home directory" })
+    ).toBeEnabled()
   })
 
   it("speaks the locale, right-to-left included", async () => {

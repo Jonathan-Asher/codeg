@@ -11,6 +11,10 @@ export interface ActiveSessionTabRef {
   /** Virtual (negative) runtime key a new conversation streams under before it
    *  reconciles to its persisted `conversationId`. */
   runtimeConversationId?: number
+  /** The live status the tab strip shows — decorated from the workspace list,
+   *  or from the child-summary cache for a sub-agent's conversation, which the
+   *  list doesn't hold. Both follow the backend's status events. */
+  status?: string
 }
 
 export interface ActiveSessionDetails {
@@ -77,6 +81,33 @@ export function withLiveSummaryFields(
 }
 
 /**
+ * `summary` with the columns that change while a conversation is open taken
+ * from where they are kept current. The loaded detail's summary is a snapshot
+ * of when the transcript was fetched, and nothing refreshes it as turns start
+ * and end (a completed turn deliberately never refetches), so its `status` —
+ * and its `title`, once renamed or auto-titled — would stay what they were
+ * when the conversation was opened, and so would the live fields
+ * `withLiveSummaryFields` names. The workspace list and the tab follow the
+ * backend's status/upsert events. Returns `summary` itself when nothing
+ * differs, so a caller comparing by identity sees no change.
+ */
+function withLiveColumns(
+  summary: DbConversationSummary | null,
+  listed: DbConversationSummary | null,
+  tabStatus: string | undefined
+): DbConversationSummary | null {
+  if (summary == null) return null
+  const live = listed != null && listed.id === summary.id ? listed : null
+  const next: DbConversationSummary = {
+    ...withLiveSummaryFields(summary, live),
+    status: tabStatus ?? live?.status ?? summary.status,
+    title: live?.title ?? summary.title,
+  }
+  const keys = Object.keys(next) as (keyof DbConversationSummary)[]
+  return keys.some((key) => next[key] !== summary[key]) ? next : summary
+}
+
+/**
  * Resolve the active conversation tab's summary + live token usage the same way
  * the tab view renders them.
  *
@@ -86,7 +117,8 @@ export function withLiveSummaryFields(
  * runs). So we key the runtime lookup on `runtimeConversationId ?? conversationId`,
  * read stats from `sessionStats` (falling back to the loaded `detail`), and fall
  * back to the workspace summary so the Session Details dialog can still open
- * before `detail` has loaded.
+ * before `detail` has loaded. Its status and title are the live ones (see
+ * `withLiveColumns`).
  */
 export function resolveActiveSessionDetails(
   tab: ActiveSessionTabRef | null,
@@ -95,14 +127,15 @@ export function resolveActiveSessionDetails(
 ): ActiveSessionDetails {
   const runtimeId = tab?.runtimeConversationId ?? tab?.conversationId ?? null
   const runtimeSession = runtimeId != null ? getSession(runtimeId) : null
-  const workspaceSummary =
+  const listed =
     tab?.conversationId != null
       ? (conversations.find((c) => c.id === tab.conversationId) ?? null)
       : null
-  const loadedSummary = runtimeSession?.detail?.summary ?? null
-  const summary = loadedSummary
-    ? withLiveSummaryFields(loadedSummary, workspaceSummary)
-    : workspaceSummary
+  const summary = withLiveColumns(
+    runtimeSession?.detail?.summary ?? listed,
+    listed,
+    tab?.status
+  )
   const stats =
     runtimeSession?.sessionStats ??
     runtimeSession?.detail?.session_stats ??

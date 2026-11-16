@@ -27,12 +27,25 @@ vi.mock("@xterm/xterm", () => ({
     onResize() {
       return { dispose() {} }
     }
-    write(data: string) {
+    cols = 80
+    rows = 24
+    resize(cols: number, rows: number) {
+      this.cols = cols
+      this.rows = rows
+    }
+    reset() {}
+    write(data: string, parsed?: () => void) {
       env.written.push(data)
+      parsed?.()
     }
   },
 }))
-vi.mock("@xterm/addon-fit", () => ({ FitAddon: class {} }))
+vi.mock("@xterm/addon-fit", () => ({
+  FitAddon: class {
+    activate() {}
+    fit() {}
+  },
+}))
 vi.mock("@xterm/addon-web-links", () => ({ WebLinksAddon: class {} }))
 vi.mock("@xterm/addon-ligatures", () => ({ LigaturesAddon: class {} }))
 vi.mock("@/lib/platform", () => ({
@@ -42,7 +55,14 @@ vi.mock("@/lib/platform", () => ({
       return () => env.handlers.delete(event)
     }
   ),
+  onTransportReady: () => () => {},
 }))
+vi.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => key,
+}))
+vi.mock("@/hooks/use-platform", () => ({ detectPlatform: () => "linux" }))
+vi.mock("@/lib/browser/browser-prefs", () => ({ getBrowserPrefs: () => ({}) }))
+vi.mock("@/components/terminal/term-keybar", () => ({ TermKeybar: () => null }))
 vi.mock("@/lib/api", () => ({
   terminalSpawn: env.spawn,
   terminalSnapshot: env.snapshot,

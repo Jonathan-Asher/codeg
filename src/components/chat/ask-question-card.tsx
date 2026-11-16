@@ -108,6 +108,12 @@ type FocusRequest =
 
 const DIGIT = /^[1-9]$/
 
+/** The keyboard rows of a question: its options, plus "Other" unless the
+ *  agent turned the free-text answer off (`allow_other: false`). */
+function rowCount(q: QuestionSpec): number {
+  return q.options.length + (q.allow_other === false ? 0 : 1)
+}
+
 /** A footer button's height follows its label, which follows the chat text
  *  size; `min-h-8` is the `size="sm"` height it has at 100%. */
 const FOOTER_BUTTON = "h-auto min-h-8"
@@ -333,7 +339,8 @@ export function AskQuestionCard({
 
   // Reserve one stable content height for the whole set so switching between a
   // few-option tab and a many-option tab never resizes the card. Sized to the
-  // tallest question (its option count plus the always-present "Other" row),
+  // tallest question (its option count plus the "Other" row, unless that
+  // question disallows free text),
   // capped to the viewport; a taller-than-estimated tab scrolls internally.
   //
   // In chat text units, as the rows are: a row is its padding and border
@@ -344,7 +351,7 @@ export function AskQuestionCard({
   // of pushing the composer off a short window. At 100% this is the
   // `min(<4 × rows + 1>rem, 50svh)` it always was.
   const maxRows = useMemo(
-    () => questions.reduce((m, q) => Math.max(m, q.options.length + 1), 1),
+    () => questions.reduce((m, q) => Math.max(m, rowCount(q)), 1),
     [questions]
   )
   const chatUnit = "var(--chat-rem, 1rem)"
@@ -579,9 +586,9 @@ export function AskQuestionCard({
   // recommended option, else the first.
   const highlightOf = (q: QuestionSpec): number => {
     const set = highlight[q.id]
-    if (set !== undefined && set <= q.options.length) return set
+    if (set !== undefined && set < rowCount(q)) return set
     const s = stateOf(q)
-    if (s.otherActive) return q.options.length
+    if (s.otherActive && q.allow_other !== false) return q.options.length
     const chosen = q.options.findIndex((o) => s.chosen.includes(o.label))
     if (chosen >= 0) return chosen
     return Math.max(
@@ -706,7 +713,7 @@ export function AskQuestionCard({
   ) => {
     if (locked || e.defaultPrevented || isImeCompositionKey(e)) return
     if (e.metaKey || e.ctrlKey || e.altKey) return
-    const rows = q.options.length + 1
+    const rows = rowCount(q)
     const hl = highlightOf(q)
     const { key } = e
     // A held key repeats; one press must never answer this question and then
@@ -766,7 +773,12 @@ export function AskQuestionCard({
       return
     }
     // Typing on the "Other" row starts its answer with that character.
-    if (hl === q.options.length && [...key].length === 1 && key !== " ") {
+    if (
+      q.allow_other !== false &&
+      hl === q.options.length &&
+      [...key].length === 1 &&
+      key !== " "
+    ) {
       e.preventDefault()
       const s = stateOf(q)
       commit(q, {
@@ -991,13 +1003,16 @@ export function AskQuestionCard({
               optionBody(text, recommended, opt.description)
             )
           })}
-          {row(
-            q.options.length,
-            s?.otherActive ?? false,
-            <span className="text-sm font-medium">{t("other")}</span>
-          )}
+          {q.allow_other !== false &&
+            row(
+              q.options.length,
+              s?.otherActive ?? false,
+              <span className="text-sm font-medium">{t("other")}</span>
+            )}
         </div>
-        {s?.otherActive && field(t("other"), false)}
+        {q.allow_other !== false &&
+          s?.otherActive &&
+          field(t("other"), false)}
       </div>
     )
   }

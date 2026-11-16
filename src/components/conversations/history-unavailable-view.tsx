@@ -99,7 +99,7 @@ export function HistoryUnavailableView({
       x="hidden"
       y="scroll"
     >
-      <div className="mx-auto flex w-full max-w-(--session-column-max-width) flex-col gap-4 px-4 py-4">
+      <div className="mx-auto flex w-full chat-content-w flex-col gap-4 px-4 py-4">
         <section
           role="status"
           aria-labelledby={`history-unavailable-${conversationId}`}

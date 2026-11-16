@@ -1,4 +1,5 @@
 pub mod agent_mentions;
+pub mod air_contract;
 pub mod agent_process;
 pub mod agent_session;
 pub mod antigravity_login;
@@ -12,9 +13,17 @@ pub mod claude_auth;
 pub mod claude_plan_mode;
 pub mod browser_tools;
 pub mod chat_authoring;
+pub mod claude_model_picker;
+pub mod codex_catalog_commit;
+pub mod codex_catalog_refresh;
 pub mod codex_catalog_source;
+pub mod codex_context;
+pub mod codex_endpoint_catalog;
 pub mod codex_goal;
 pub mod codex_model_catalog;
+pub mod codex_runtime;
+pub mod command_code;
+pub mod computer_tools;
 pub mod connection;
 pub mod cursor_acp_retry_compat;
 pub mod cursor_ext;
@@ -29,14 +38,22 @@ pub mod host_tools_policy;
 pub mod idle_sweep;
 pub mod internal_bus;
 pub mod internal_frames;
-pub mod move_frame;
+pub mod js_text;
+pub mod latest_release;
 pub mod lifecycle;
 pub mod limit_continue;
 pub mod manager;
 pub mod message_receipts;
+pub mod minimax_code;
+pub mod move_frame;
 pub mod one_session;
+pub mod one_shot;
 pub mod opencode_catalog;
+pub(crate) mod opencode_config;
+pub(crate) mod opencode_credentials;
+pub mod opencode_launch;
 pub mod opencode_plugins;
+pub(crate) mod opencode_skills;
 pub mod outside_activity;
 pub mod outside_writer;
 pub mod pi_meta;
@@ -44,10 +61,15 @@ pub mod plan_approval;
 pub mod preflight;
 pub mod prompt_hydration;
 pub mod prompt_suggestions;
+pub mod provider_models;
 pub mod question;
+pub(crate) mod qoder;
 pub mod registry;
 pub mod remote_registry;
+pub(crate) mod reported_usage;
+pub mod result_tool;
 pub mod scratch_dir;
+pub mod service_error;
 pub mod session_info;
 pub mod session_name;
 pub mod session_persistence;
@@ -58,8 +80,12 @@ pub mod stderr_tail;
 pub mod talk_frame;
 pub mod temp_reclaim;
 pub mod terminal_runtime;
+pub mod trae;
+pub(crate) mod turn_end_hold;
 pub mod types;
 pub mod work_task_tools;
+pub mod zcode;
+pub(crate) mod zcode_turn;
 
 pub use idle_sweep::{idle_sweep_task, idle_timeout_from_env, SWEEP_INTERVAL_SECS};
 pub use internal_bus::{EventBusMetrics, EventBusMetricsSnapshot, InternalEventBus};
@@ -89,11 +115,10 @@ pub use types::{
 /// sidebar on every restart. The second is codeg#500, where the split is the
 /// whole point.
 ///
-/// Empty — and free — for every built-in agent: their history lives in the
-/// agent's own store, codeg records no transcript, and so nothing can ever be
-/// carried forward. Only custom agents can produce a non-empty answer.
+/// Empty for agents with native history stores. Custom agents and ZCode
+/// use Codeg transcripts and can carry continuation ancestors forward.
 pub fn continued_session_ids(agent_type: crate::models::AgentType, session_id: &str) -> Vec<String> {
-    if agent_type.custom_id().is_none() {
+    if !agent_type.uses_acp_transcript() {
         return Vec::new();
     }
     crate::acp_transcript::continuation_ancestors(registry::registry_id_for(agent_type), session_id)

@@ -1,9 +1,11 @@
-import { act, render, screen } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import { useTranslations } from "next-intl"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { SystemLanguageSettings } from "@/lib/types"
+
 const api = vi.hoisted(() => ({
-  getSystemLanguageSettings: vi.fn(),
+  getSystemLanguageSettings: vi.fn<() => Promise<SystemLanguageSettings>>(),
   getMessagesForLocale: vi.fn(),
 }))
 
@@ -19,8 +21,10 @@ vi.mock("@/i18n/messages", async () => {
   }
 })
 
+import arMessages from "@/i18n/messages/ar.json"
 import enMessages from "@/i18n/messages/en.json"
 import jaMessages from "@/i18n/messages/ja.json"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AppI18nProvider, STARTUP_RETRY_DELAYS_MS } from "./i18n-provider"
 
 function Probe() {
@@ -36,24 +40,40 @@ function renderProvider() {
   )
 }
 
+function renderTabs() {
+  render(
+    <AppI18nProvider>
+      <Tabs defaultValue="one">
+        <TabsList>
+          <TabsTrigger value="one">One</TabsTrigger>
+        </TabsList>
+        <TabsContent value="one">Body</TabsContent>
+      </Tabs>
+    </AppI18nProvider>
+  )
+}
+
 const UNREACHABLE = { code: "network_error", message: "Failed to fetch" }
 
 beforeEach(() => {
-  vi.useFakeTimers()
   api.getSystemLanguageSettings.mockReset()
   api.getMessagesForLocale.mockReset()
   api.getMessagesForLocale.mockImplementation(async (locale: string) =>
-    locale === "ja" ? jaMessages : enMessages
+    locale === "ja" ? jaMessages : locale === "ar" ? arMessages : enMessages
   )
-  vi.spyOn(console, "warn").mockImplementation(() => {})
-})
-
-afterEach(() => {
-  vi.useRealTimers()
-  vi.restoreAllMocks()
 })
 
 describe("AppI18nProvider startup with the server unreachable", () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
   it("renders the app instead of staying on the boot screen, and loads the language once the server answers", async () => {
     api.getSystemLanguageSettings
       .mockRejectedValueOnce(UNREACHABLE)
@@ -106,5 +126,38 @@ describe("AppI18nProvider startup with the server unreachable", () => {
       STARTUP_RETRY_DELAYS_MS.length + 1
     )
     expect(screen.getByTestId("probe")).toHaveTextContent("Try again")
+  })
+})
+
+const tabsRoot = () => screen.getByText("Body").closest('[data-slot="tabs"]')
+
+describe("AppI18nProvider direction", () => {
+  afterEach(() => {
+    document.documentElement.dir = ""
+    window.localStorage.clear()
+  })
+
+  // Radix components read their direction from context, not from the page:
+  // without a provider a Tabs root stamps `dir="ltr"` on itself, and
+  // everything inside it — switches, rows, menus — stays left-to-right in an
+  // Arabic window whose page is right-to-left.
+  it("hands Radix components the page's right-to-left direction", async () => {
+    api.getSystemLanguageSettings.mockResolvedValue({
+      mode: "manual",
+      language: "ar",
+    })
+    renderTabs()
+    await waitFor(() => expect(tabsRoot()).toHaveAttribute("dir", "rtl"))
+    expect(document.documentElement.dir).toBe("rtl")
+  })
+
+  it("keeps them left-to-right otherwise", async () => {
+    api.getSystemLanguageSettings.mockResolvedValue({
+      mode: "manual",
+      language: "en",
+    })
+    renderTabs()
+    await waitFor(() => expect(tabsRoot()).toHaveAttribute("dir", "ltr"))
+    expect(document.documentElement.dir).toBe("ltr")
   })
 })

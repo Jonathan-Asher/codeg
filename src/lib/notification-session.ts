@@ -15,19 +15,27 @@ import { useTabStore } from "@/stores/tab-store"
  *
  * The connection's context key is its tab id. From the tab we reach the
  * persisted conversation (its title, its own folder), falling back to the
- * tab's label for a draft that has no row yet. A key no tab owns — a canvas
- * card, a delegated sub-agent's own connection — keeps the old active-folder
- * title.
+ * tab's label for a draft that has no row yet.
+ *
+ * A key no tab owns is reached through the conversation its connection serves
+ * instead. That is not only a canvas card: closing a tab whose agent is still
+ * busy keeps its connection (see `shouldDisconnectOnUnmount`), so the turn
+ * that finishes in the background — exactly when a notification is the only
+ * way to learn of it — arrives under a tab id that no longer exists. A
+ * connection with no known conversation (a delegated sub-agent's own
+ * connection) keeps the old active-folder title.
  */
-function resolveNotificationSession(contextKey: string) {
-  const tab = useTabStore.getState().tabs.find((t) => t.id === contextKey)
-  if (!tab) return null
-
+function resolveNotificationSession(
+  contextKey: string,
+  connectionConversationId: number | null | undefined
+) {
   const workspace = useAppWorkspaceStore.getState()
+  const tab = useTabStore.getState().tabs.find((t) => t.id === contextKey)
+
+  let conversationId = tab ? tab.conversationId : connectionConversationId
   // The runtime session learns the row id on the first send, which can be
   // before the draft's tab is bound to it.
-  let conversationId = tab.conversationId
-  if (conversationId == null && tab.runtimeConversationId != null) {
+  if (tab && conversationId == null && tab.runtimeConversationId != null) {
     conversationId =
       useConversationRuntimeStore
         .getState()
@@ -38,14 +46,24 @@ function resolveNotificationSession(contextKey: string) {
     conversationId != null
       ? workspace.conversations.find((c) => c.id === conversationId)
       : undefined
-  return { tab, conversationId, conversation, workspace }
+  if (!tab && !conversation) return null
+  return {
+    tab,
+    conversationId: conversationId ?? null,
+    conversation,
+    workspace,
+  }
 }
 
 function describeNotificationSession(
   contextKey: string,
+  connectionConversationId: number | null | undefined,
   activeFolderName: string | null | undefined
 ): { sessionTitle: string | null; folderName: string | null } {
-  const session = resolveNotificationSession(contextKey)
+  const session = resolveNotificationSession(
+    contextKey,
+    connectionConversationId
+  )
   if (!session) {
     return { sessionTitle: null, folderName: activeFolderName || null }
   }
@@ -54,13 +72,13 @@ function describeNotificationSession(
   // `allFolders`, not `folders`: a chat-mode conversation lives in a hidden
   // folder the sidebar's list leaves out. A chat draft has no folder at all,
   // and then no folder is named rather than the active one.
-  const folderId = conversation?.folder_id ?? tab.folderId
+  const folderId = conversation?.folder_id ?? tab?.folderId
   const folder = workspace.allFolders.find((f) => f.id === folderId)
 
   return {
     sessionTitle:
       formatConversationTitle(conversation?.title).trim() ||
-      tab.title.trim() ||
+      tab?.title.trim() ||
       null,
     folderName: folder?.alias || folder?.name || null,
   }
@@ -68,26 +86,37 @@ function describeNotificationSession(
 
 /**
  * The session behind a connection's context key, for a click to come back
- * to — or `null` when no tab owns the key (a canvas card, a delegated
- * sub-agent's own connection), which a click then only brings forward.
+ * to — or `null` when neither a tab owns the key nor its connection's
+ * conversation is known (a delegated sub-agent's own connection), which a
+ * click then only brings forward. A closed tab's session is reopened from its
+ * conversation.
  */
 export function notificationTargetFor(
-  contextKey: string
+  contextKey: string,
+  connectionConversationId?: number | null
 ): NotificationTarget | null {
-  const session = resolveNotificationSession(contextKey)
+  const session = resolveNotificationSession(
+    contextKey,
+    connectionConversationId
+  )
   if (!session) return null
   const { tab, conversationId, conversation } = session
   return {
     contextKey,
-    folderId: conversation?.folder_id ?? tab.folderId,
+    folderId: conversation?.folder_id ?? tab?.folderId ?? null,
     conversationId,
-    agentType: conversation?.agent_type ?? tab.agentType,
+    agentType: conversation?.agent_type ?? tab?.agentType ?? null,
   }
 }
 
 /**
  * Build an event notification that says which session it is about: the
  * session's title as the notification title, its folder ahead of the message.
+ * A click on it opens that session (see `notificationTargetFor`).
+ *
+ * `connectionConversationId` is the persisted conversation the connection
+ * serves, as far as the caller knows it — consulted only when no tab owns
+ * `contextKey`.
  *
  * With "hide notification contents" on, it reads as it always did —
  * `<folder> - Codeg` over the message alone — except that the folder is the
@@ -97,14 +126,16 @@ export function notificationTargetFor(
  */
 export function sessionNotificationPayload(
   contextKey: string,
+  connectionConversationId: number | null | undefined,
   activeFolderName: string | null | undefined,
   content: { body: string; redactedBody?: string }
 ): NotifyPayload {
   const { sessionTitle, folderName } = describeNotificationSession(
     contextKey,
+    connectionConversationId,
     activeFolderName
   )
-  const target = notificationTargetFor(contextKey)
+  const target = notificationTargetFor(contextKey, connectionConversationId)
   const routed = target ? { target } : {}
   const folderTitle = folderName ? `${folderName} - Codeg` : "Codeg"
   if (!sessionTitle) return { title: folderTitle, ...content, ...routed }

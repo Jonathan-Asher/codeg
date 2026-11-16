@@ -262,10 +262,11 @@ pub fn handle_raw_urls(app: &tauri::AppHandle, urls: &[String]) {
     use tauri::{Emitter, Manager};
 
     // No link at all is codeg launched again while it runs (Windows / Linux):
-    // the same "bring codeg back" as a macOS dock click, which after a launch
-    // into a remote workspace means that window, not the hidden main one.
+    // the same "bring codeg back" as a macOS dock click — the last-used
+    // workspace window, which after a launch into a remote workspace is that
+    // window, not the hidden main one.
     if urls.is_empty() {
-        crate::commands::workspace_windows::reopen_workspace(app);
+        crate::commands::workspace_windows::activate_workspace(app);
         return;
     }
 

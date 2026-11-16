@@ -187,7 +187,7 @@ const ChildRow = memo(function ChildRow({
   onOpenSession?: (child: SubagentRunChild) => void
 }) {
   const t = useTranslations("Folder.chat.contentParts.agentRun")
-  const tAgent = useTranslations("Folder.chat.contentParts")
+  const tDelegation = useTranslations("Folder.chat.delegation")
   const [open, setOpen] = useState(false)
   const panelId = useId()
 
@@ -243,8 +243,8 @@ const ChildRow = memo(function ChildRow({
           <button
             type="button"
             onClick={() => onOpenSession(item)}
-            title={tAgent("agentSessionAction")}
-            aria-label={tAgent("agentSessionAction")}
+            title={tDelegation("openDetail")}
+            aria-label={tDelegation("openDetail")}
             className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-2 py-1 text-3xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <MessagesSquare aria-hidden className="size-3 shrink-0" />

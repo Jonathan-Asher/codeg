@@ -1,5 +1,5 @@
-//! Claude Code's prompt suggestions: the prompt it expects the user to send
-//! next, predicted after each turn.
+//! Prompt suggestions: the prompt Claude Code (or Codex) expects the user to
+//! send next, predicted after each turn.
 //!
 //! codeg's own claude-agent-acp build publishes the prediction as the
 //! `_codeg/prompt_suggestion` notification (`{sessionId, suggestion}`, where
@@ -13,13 +13,24 @@
 //!
 //! Each prediction costs one extra request with the session's full context
 //! after every turn, so the setting (General → "Claude prompt suggestions",
-//! on unless the user turned it off) can stop them. Off rides the per-launch
+//! on unless the user turned it off) can stop them. It is the master switch for
+//! Codex's predictions too. Off rides the per-launch
 //! `runtime_env` like [`SessionPersistence`](crate::acp::session_persistence):
 //! `build_session_runtime_env` stamps it from the stored setting,
-//! `spawn_agent_connection` reads it back, and the session-establishing
-//! requests carry `promptSuggestions: false` in `_meta.claudeCode.options`,
-//! which makes Claude Code skip the prediction request entirely. A change
-//! therefore reaches a session the next time it connects.
+//! `spawn_agent_connection` reads it back, and
+//! `SessionState::claude_session_options` folds it into the
+//! `promptSuggestions: false` every session request of the connection carries
+//! in `_meta.claudeCode.options` (also set for a session nobody composes in),
+//! which makes Claude Code skip the prediction request entirely. For Codex the
+//! same effective value (setting on AND someone composes) forces
+//! `CODEX_ACP_PROMPT_SUGGESTIONS=false` into the launch environment
+//! (`connection::apply_codex_prompt_suggestion_policy`). A change therefore
+//! reaches a session the next time it connects.
+//!
+//! Upstream claude-agent-acp (0.92.0+) and codex-acp (2.5.0+) also send the
+//! prediction as `session_info_update._meta.promptSuggestions`; the connection
+//! turns that into the same event, except for a connection whose adapter
+//! advertised the `_codeg/prompt_suggestion` channel, which is read instead.
 //!
 //! Three counters in `app_metadata` record how the feature is used: the
 //! predictions that arrived, the ones a client showed, and the ones the user
@@ -30,9 +41,7 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use agent_client_protocol::schema::v1::{
-    LoadSessionRequest, Meta, NewSessionRequest, ResumeSessionRequest,
-};
+use agent_client_protocol::schema::v1::Meta;
 use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 
@@ -53,7 +62,7 @@ pub const SHOWN_COUNTER_KEY: &str = "prompt_suggestions.shown";
 pub const ACCEPTED_COUNTER_KEY: &str = "prompt_suggestions.accepted";
 
 /// Per-launch `runtime_env` key. Only [`PROMPT_SUGGESTIONS_OFF`] means
-/// anything; any other value (or none) leaves Claude Code's default (on).
+/// anything; any other value (or none) leaves the agent's default (on).
 pub(crate) const PROMPT_SUGGESTIONS_ENV: &str = "CODEG_PROMPT_SUGGESTIONS";
 
 /// The value that turns the predictions off for the launch.
@@ -102,7 +111,7 @@ pub async fn save_settings(
     Ok(settings)
 }
 
-/// Whether one launch asks Claude Code for predictions.
+/// Whether one launch asks Claude Code or Codex for predictions.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PromptSuggestions {
     /// Claude Code's default: a prediction after every turn.
@@ -139,13 +148,15 @@ impl PromptSuggestions {
 }
 
 /// Stamp the stored setting onto a launch's `runtime_env`. Only Claude Code
-/// makes predictions, so every other agent's launch is left as it is.
+/// and Codex make predictions (the AIR adapters, see
+/// [`crate::acp::air_contract::speaks_air_contract`]), so every other agent's
+/// launch is left as it is.
 pub async fn stamp_launch(
     conn: &DatabaseConnection,
     agent_type: AgentType,
     runtime_env: &mut BTreeMap<String, String>,
 ) {
-    if agent_type != AgentType::ClaudeCode {
+    if !crate::acp::air_contract::speaks_air_contract(agent_type) {
         return;
     }
     if !load_settings(conn).await.enabled {
@@ -176,26 +187,6 @@ pub fn apply_to_claude_meta(meta: Option<Meta>, setting: PromptSuggestions) -> O
     }
     Some(meta)
 }
-
-/// Applies a launch's [`PromptSuggestions`] to a session-establishing request
-/// (`session/new`, `load`, `resume`): the requests Claude Code reads its
-/// options from.
-pub(crate) trait SuggestingSession: Sized {
-    fn prompt_suggestions(self, setting: PromptSuggestions) -> Self;
-}
-
-macro_rules! impl_suggesting_session {
-    ($($request:ty),*) => {$(
-        impl SuggestingSession for $request {
-            fn prompt_suggestions(mut self, setting: PromptSuggestions) -> Self {
-                self.meta = apply_to_claude_meta(self.meta.take(), setting);
-                self
-            }
-        }
-    )*};
-}
-
-impl_suggesting_session!(NewSessionRequest, LoadSessionRequest, ResumeSessionRequest);
 
 /// One prediction as clients receive it. `id` is unique within this codeg
 /// process and grows with every prediction, so a client reports what it
@@ -361,7 +352,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_setting_defaults_to_on_and_stamps_only_claude_launches() {
+    async fn the_setting_defaults_to_on_and_stamps_only_predicting_launches() {
         let db = fresh_in_memory_db().await;
         assert!(load_settings(&db.conn).await.enabled);
 
@@ -381,7 +372,15 @@ mod tests {
 
         let mut codex = BTreeMap::new();
         stamp_launch(&db.conn, AgentType::Codex, &mut codex).await;
-        assert!(codex.is_empty(), "other agents make no predictions");
+        assert_eq!(
+            PromptSuggestions::from_env(&codex),
+            PromptSuggestions::Off,
+            "codex-acp predicts too, so the switch covers it"
+        );
+
+        let mut other = BTreeMap::new();
+        stamp_launch(&db.conn, AgentType::OpenCode, &mut other).await;
+        assert!(other.is_empty(), "other agents make no predictions");
     }
 
     #[test]

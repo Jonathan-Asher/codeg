@@ -1,9 +1,14 @@
 fn main() {
     #[cfg(feature = "tauri-runtime")]
     {
-        // The companion, built from its own package (crates/codeg-mcp) by
-        // prepare-sidecars on every platform.
-        ensure_sidecar_placeholder("codeg-mcp");
+        // The sidecars every platform bundles: the companion, built from its
+        // own package (crates/codeg-mcp), the command-line client and the
+        // computer-use helper, all by prepare-sidecars. (On macOS the helper
+        // ships as an app of its own; the staged binary is what
+        // `place_helper_for_development` copies for a development build.)
+        for name in ["codeg-mcp", "codeg-cli", "codeg-computer-helper"] {
+            ensure_sidecar_placeholder(name);
+        }
         // macOS only: the natural-voice sidecar (`native/codeg-tts`) and Talk
         // on the Mac's helper (`native/codeg-talk`) with the whisper.framework
         // it links, listed in tauri.macos.conf.json. Built by the same
@@ -14,19 +19,21 @@ fn main() {
             ensure_framework_placeholder("whisper");
         }
         ensure_interface_placeholder();
+        place_helper_for_development();
         tauri_build::build();
     }
 }
 
 /// Tauri's bundler validates that every `bundle.externalBin` path resolves
-/// to an existing file at build.rs time. The real sidecars are produced by
-/// `pnpm tauri:prepare-sidecars` (invoked from `beforeBuildCommand` /
-/// `beforeDevCommand` and the CI release matrix) — but plain
-/// `cargo check --features tauri-runtime` doesn't go through that path, so
-/// without a backstop every contributor would hit
+/// to an existing file at build.rs time. The real sidecars — `codeg-mcp`,
+/// `codeg-cli`, `codeg-computer-helper` and, on macOS, `codeg-tts` and
+/// `codeg-talk` — are produced by `pnpm tauri:prepare-sidecars` (invoked from
+/// `beforeBuildCommand` / `beforeDevCommand` and the CI release matrix) — but
+/// plain `cargo check --features tauri-runtime` doesn't go through that path,
+/// so without a backstop every contributor would hit
 /// `resource path ... doesn't exist` on first compile.
 ///
-/// We write a zero-byte placeholder when the sidecar is missing so
+/// We write a zero-byte placeholder when a sidecar is missing so
 /// `cargo check` / clippy / rust-analyzer succeed. Production paths
 /// overwrite the placeholder with the real binary before Tauri bundles it:
 ///   * `pnpm tauri build`  → `beforeBuildCommand` → `prepare-sidecars.mjs`
@@ -79,6 +86,42 @@ fn ensure_sidecar_placeholder(name: &str) {
             "cargo:warning={name} sidecar missing at {}; wrote 0-byte placeholder. \
              Run `pnpm tauri:prepare-sidecars` before `tauri build` to ship a working binary.",
             path.display()
+        );
+    }
+}
+
+/// On macOS the computer-use helper is no sidecar: a bundle carries it as an
+/// app of its own (`tauri.macos.conf.json`), so Tauri no longer copies it
+/// next to the build as it does `bundle.externalBin`. This does, for a
+/// development codeg, which is not bundled and looks for the helper beside
+/// itself. The staged file is already watched by `ensure_sidecar_placeholder`.
+#[cfg(feature = "tauri-runtime")]
+fn place_helper_for_development() {
+    use std::path::PathBuf;
+
+    let triple = std::env::var("TARGET").unwrap_or_default();
+    if !triple.contains("apple-darwin") {
+        return;
+    }
+    let staged = PathBuf::from(format!("binaries/codeg-computer-helper-{triple}"));
+    // `target/[<triple>/]<profile>/build/<pkg>-<hash>/out`, as tauri-build
+    // finds the same directory: there is no other way to it from here.
+    let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap_or_default());
+    let Some(profile_dir) = out_dir.ancestors().nth(3) else {
+        return;
+    };
+    let placed = profile_dir.join("codeg-computer-helper");
+    // Through a new file renamed into place: a helper still running from the
+    // old one keeps its own, where writing over it would kill it.
+    let incoming = profile_dir.join("codeg-computer-helper.incoming");
+    if let Err(e) =
+        std::fs::copy(&staged, &incoming).and_then(|_| std::fs::rename(&incoming, &placed))
+    {
+        let _ = std::fs::remove_file(&incoming);
+        println!(
+            "cargo:warning=could not place {} at {}: {e}",
+            staged.display(),
+            placed.display()
         );
     }
 }

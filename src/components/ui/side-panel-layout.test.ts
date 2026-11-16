@@ -67,8 +67,10 @@ describe("transcript inside a side panel", () => {
    */
   it("does not re-pad a transcript the virtualizer already insets", () => {
     // The layer that owns the gutter, and the reason the wrapper must not.
-    expect(virtualized).toContain(
-      '"mx-auto max-w-(--session-column-max-width) px-4"'
+    // Capped by the chat width (`chat-content-w`) or the session width
+    // (`--session-column-max-width`); either way the px-4 is here.
+    expect(virtualized).toMatch(
+      /"mx-auto (chat-content-w|max-w-\(--session-column-max-width\)) px-4"/
     )
     expect(virtualized).toContain("padding = 16")
 

@@ -26,12 +26,14 @@
  * drawer.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Loader2 } from "lucide-react"
 
 import { AgentIcon } from "@/components/agent-icon"
 import { ContentPartsRenderer } from "@/components/message/content-parts-renderer"
+import { DelegationStatusIndexProvider } from "@/components/message/delegation-status-index-context"
+import { useHistoryBackDismiss } from "@/hooks/use-history-back-dismiss"
 import {
   Drawer,
   DrawerContent,
@@ -45,6 +47,10 @@ import {
 } from "@/lib/adapters/ai-elements-adapter"
 import { getConversation } from "@/lib/api"
 import { CHAT_TEXT_SCOPE_CLASS } from "@/lib/chat-text-scale"
+import {
+  collectDelegationStatusTasks,
+  createDelegationStatusIndexer,
+} from "@/lib/delegation-status-index"
 import { usePageHandoffName } from "@/lib/browser/use-page-handoff-name"
 import { toolStatusUnsettled } from "@/lib/tool-call-lifecycle"
 import { TranscriptAgentTypeProvider } from "@/components/message/transcript-agent-context"
@@ -118,6 +124,9 @@ export function SubagentSessionDialog({
 }: Props) {
   const t = useTranslations("Folder.chat.contentParts")
   const sharedT = useTranslations("Folder.chat.shared")
+  // The dialog is a state toggle, not a route: without a history entry behind
+  // it, the back gesture unloads the whole page instead of closing the dialog.
+  useHistoryBackDismiss(open, () => onOpenChange(false))
   const pageHandoffName = usePageHandoffName()
   const [messages, setMessages] = useState<AdaptedMessage[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -190,6 +199,22 @@ export function SubagentSessionDialog({
     return () => window.clearInterval(timer)
   }, [open, live, load])
 
+  // The child's status rows answer to its own transcript's index, not to the
+  // thread this drawer is opened from (`@/lib/delegation-status-index`). The
+  // indexer keeps it across the refreshes that change no task's newest row.
+  const [indexDelegationStatus] = useState(() =>
+    createDelegationStatusIndexer()
+  )
+  const delegationStatusIndex = useMemo(
+    () =>
+      indexDelegationStatus(
+        (messages ?? []).map((message) =>
+          collectDelegationStatusTasks(message.content)
+        )
+      ),
+    [indexDelegationStatus, messages]
+  )
+
   const subtitle = [subagentType, description].filter(Boolean).join(" · ")
 
   return (
@@ -223,7 +248,10 @@ export function SubagentSessionDialog({
           ) : null}
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        {/* No native scroll anchoring: a long reply's timeline keeps the view
+            still itself as its rows are drawn and change height
+            (`useTimelineWindow`), as in the transcript's own port. */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 [overflow-anchor:none]">
           {loading && messages == null ? (
             <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
               <Loader2 className="mr-2 size-3.5 animate-spin" />
@@ -237,25 +265,30 @@ export function SubagentSessionDialog({
             // A transcript like any other, so it follows the chat text size.
             // Its own sub-agents are sessions of the same agent.
             <TranscriptAgentTypeProvider value={agentType}>
-              <div className={cn(CHAT_TEXT_SCOPE_CLASS, "flex flex-col gap-4")}>
-                {messages.map((message, i) => (
-                  <div
-                    key={`${message.id ?? "turn"}-${i}`}
-                    className={cn(
-                      "flex flex-col gap-2",
-                      // The kickoff prompt (and any later user turn) reads as an
-                      // aside — the child's own work is the content here.
-                      message.role === "user" &&
-                        "rounded-lg bg-muted/50 px-3 py-2 text-sm"
-                    )}
-                  >
-                    <ContentPartsRenderer
-                      parts={message.content}
-                      role={message.role}
-                    />
-                  </div>
-                ))}
-              </div>
+              <DelegationStatusIndexProvider value={delegationStatusIndex}>
+                <div
+                  className={cn(CHAT_TEXT_SCOPE_CLASS, "flex flex-col gap-4")}
+                >
+                  {messages.map((message, i) => (
+                    <div
+                      key={`${message.id ?? "turn"}-${i}`}
+                      className={cn(
+                        "flex flex-col gap-2",
+                        // The kickoff prompt (and any later user turn) reads
+                        // as an aside — the child's own work is the content
+                        // here.
+                        message.role === "user" &&
+                          "rounded-lg bg-muted/50 px-3 py-2 text-sm"
+                      )}
+                    >
+                      <ContentPartsRenderer
+                        parts={message.content}
+                        role={message.role}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </DelegationStatusIndexProvider>
             </TranscriptAgentTypeProvider>
           ) : (
             <p className="text-xs text-muted-foreground">

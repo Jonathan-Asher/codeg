@@ -5,7 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 // Controllable stand-in for the connection store. `vi.hoisted` guarantees the
 // shared object exists before the hoisted `vi.mock` factory runs.
 const store = vi.hoisted(() => {
-  type State = "connected" | "connecting" | "reconnecting" | "unauthorized"
+  type State =
+    | "connected"
+    | "connecting"
+    | "reconnecting"
+    | "unauthorized"
+    | "proxyUnauthorized"
   let state: State = "connected"
   const listeners = new Set<() => void>()
   return {
@@ -131,6 +136,27 @@ describe("WebConnectionGuard", () => {
     // No timer advance: a rejected token is surfaced at once.
     expect(screen.getByText("Session expired")).toBeInTheDocument()
 
+    fireEvent.click(screen.getByRole("button", { name: "Go to login" }))
+    expect(store.redirectToCodegLogin).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers a reload, not the token login, when the proxy's sign-in expired", () => {
+    const reload = vi.fn()
+    vi.stubGlobal("location", { ...window.location, reload })
+    renderGuard()
+    act(() => store.setState("proxyUnauthorized"))
+    // Surfaced at once, like unauthorized: a rejected session is definitive.
+    expect(screen.getByText("Sign-in expired")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }))
+    expect(reload).toHaveBeenCalledTimes(1)
+    expect(store.redirectToCodegLogin).not.toHaveBeenCalled()
+    vi.unstubAllGlobals()
+  })
+
+  it("still offers the token login from the proxy dialog", () => {
+    renderGuard()
+    act(() => store.setState("proxyUnauthorized"))
     fireEvent.click(screen.getByRole("button", { name: "Go to login" }))
     expect(store.redirectToCodegLogin).toHaveBeenCalledTimes(1)
   })

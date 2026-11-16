@@ -181,6 +181,18 @@ export const DirectoryBrowser = forwardRef<
       sessionGen.current += 1
     }
   }, [active])
+  // A host can also unmount the panel without ever flipping `active`: the
+  // workspace dialog moves on to its next step when a row is double-clicked.
+  // `sessionGen` never hears of that, yet a folder created or a listing loaded
+  // afterwards must not reach the host either: its `onValueChange` would land
+  // in whatever the host shows by then, a newer picker included.
+  const mountedRef = useRef(true)
+  useIsomorphicLayoutEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
   // Monotonic navigation id. Each navigateTo() bumps it and the open-time init()
   // captures it, so within a single session a slower earlier navigation (or a
   // late init) can't overwrite the destination of a newer one — the latest user
@@ -198,7 +210,10 @@ export const DirectoryBrowser = forwardRef<
     busyRef.current = onBusyChange
   }, [onBusyChange])
   // A folder being created counts as busy too: confirming meanwhile would
-  // commit the directory it is being created in, not the new one.
+  // commit the directory it is being created in, not the new one. The browser
+  // also holds still until the request settles (Home, Up, the path box's
+  // Enter, the row's Escape and X): moving would close the row, clear this
+  // flag, and leave the late answer to override wherever the user went.
   const creatingFolder = newFolder?.busy ?? false
   useEffect(() => {
     busyRef.current?.(confirming || creatingFolder)
@@ -242,8 +257,14 @@ export const DirectoryBrowser = forwardRef<
       const seq = (navSeq.current += 1)
       const result = await loadEntries(path)
       // Discard if a newer navigation started, or the load outlived its session
-      // (hide/show), so the most recent navigation wins.
-      if (gen !== sessionGen.current || seq !== navSeq.current) return
+      // (hide/show) or the panel itself, so the most recent navigation wins.
+      if (
+        gen !== sessionGen.current ||
+        seq !== navSeq.current ||
+        !mountedRef.current
+      ) {
+        return
+      }
       if (result !== null) {
         setRootPath(path)
         onValueChange(path)
@@ -393,7 +414,8 @@ export const DirectoryBrowser = forwardRef<
       setNewFolder((prev) => prev && { ...prev, error: message, busy: false })
       return
     }
-    if (gen !== sessionGen.current) return
+    // From here on the host hears of it, so a panel that is gone stays quiet.
+    if (gen !== sessionGen.current || !mountedRef.current) return
     // Every cached listing that could show the parent is now stale (its rows,
     // and its chevron one level up), so start the cache over.
     setEntries(new Map())
@@ -404,31 +426,17 @@ export const DirectoryBrowser = forwardRef<
     await navigateTo(created)
   }, [newFolder, rootPath, onValueChange, navigateTo, t])
 
-  // Escape belongs to the row while it is open. The host dialog dismisses on
-  // Escape from a capture listener on `document`, which runs before anything
-  // on the input itself, so the key is claimed on `window`, one step earlier.
-  const newFolderOpen = newFolder !== null
-  useEffect(() => {
-    if (!newFolderOpen) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || ime.isComposing(event)) return
-      if (event.target !== newFolderInputRef.current) return
-      event.preventDefault()
-      event.stopPropagation()
-      setNewFolder(null)
-    }
-    window.addEventListener("keydown", onKeyDown, true)
-    return () => window.removeEventListener("keydown", onKeyDown, true)
-  }, [newFolderOpen, ime])
+  // Stable, so the row's Escape listener is not re-registered on every render.
+  const closeNewFolder = useCallback(() => setNewFolder(null), [])
 
   const handlePathInputKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (ime.isComposing(e)) return
-      if (e.key === "Enter" && value.trim()) {
+      if (e.key === "Enter" && value.trim() && !creatingFolder) {
         navigateTo(value.trim())
       }
     },
-    [ime, value, navigateTo]
+    [ime, value, navigateTo, creatingFolder]
   )
 
   const selectedSet = new Set((selectedPaths ?? []).map(normalizeFsPath))
@@ -544,11 +552,17 @@ export const DirectoryBrowser = forwardRef<
       <TooltipProvider delayDuration={200}>
         <InputGroup className="h-8">
           <InputGroupAddon align="inline-start" className="gap-0.5 py-0">
-            <NavButton icon={Home} label={t("goHome")} onClick={handleGoHome} />
+            <NavButton
+              icon={Home}
+              label={t("goHome")}
+              onClick={handleGoHome}
+              disabled={creatingFolder}
+            />
             <NavButton
               icon={UndoDot}
               label={t("navigateUp")}
               onClick={handleNavigateUp}
+              disabled={creatingFolder}
             />
             {allowCreateFolder ? (
               <NavButton
@@ -586,7 +600,7 @@ export const DirectoryBrowser = forwardRef<
                 setNewFolder((prev) => prev && { ...prev, name, error: null })
               }
               onSubmit={handleCreateFolder}
-              onCancel={() => setNewFolder(null)}
+              onCancel={closeNewFolder}
             />
           ) : null}
           {renderEntries(rootPath, 0)}
@@ -638,9 +652,9 @@ function NavButton({
 
 /**
  * The name box "New folder" opens at the top of the listing. Enter creates;
- * Escape (claimed by the panel, see there) or the X cancels. The box stays
- * editable while the request runs, so a rejected name is fixed in place
- * without the caret jumping away.
+ * Escape or the X cancels. While the request runs the box is read-only rather
+ * than disabled, so it keeps focus and a rejected name is fixed in place
+ * without the caret jumping away; neither Escape nor the X cancels then.
  */
 function NewFolderRow({
   inputRef,
@@ -660,6 +674,26 @@ function NewFolderRow({
   const t = useTranslations("DirectoryBrowser")
   const ime = useImeGuard()
   const errorId = useId()
+
+  // Escape belongs to the row while it is open. The host dialog dismisses on
+  // Escape from a capture listener on `document`, which runs before anything
+  // on the input itself, so the key is claimed on `window`, one step earlier.
+  // It reads this row's own IME guard, the one spread on the input below.
+  // While the request runs the key is still claimed but, like the disabled X,
+  // cancels nothing: the folder is being made either way, and dropping the row
+  // would re-enable the host's confirm before the browser has moved into it.
+  const busy = draft.busy
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || ime.isComposing(event)) return
+      if (event.target !== inputRef.current) return
+      event.preventDefault()
+      event.stopPropagation()
+      if (!busy) onCancel()
+    }
+    window.addEventListener("keydown", onKeyDown, true)
+    return () => window.removeEventListener("keydown", onKeyDown, true)
+  }, [ime, inputRef, busy, onCancel])
 
   return (
     <div className="mb-1 space-y-1 rounded-md bg-muted/40 p-1.5">

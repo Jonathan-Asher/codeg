@@ -46,6 +46,7 @@ import { CloseBehaviorSettingsSection } from "@/components/settings/close-behavi
 import { WindowlessSettingsSection } from "@/components/settings/windowless-settings"
 import { EditMessageSettingsSection } from "@/components/settings/edit-message-settings"
 import { DesktopNotificationSettingsSection } from "@/components/settings/desktop-notification-settings"
+import { MentionPanelSettingsSection } from "@/components/settings/mention-panel-settings"
 import { NotificationSoundSettingsSection } from "@/components/settings/notification-sound-settings"
 import { ReadAloudSettingsSection } from "@/components/settings/read-aloud-settings"
 import { CriticalSessionSettingsSection } from "@/components/settings/critical-session-settings"
@@ -59,6 +60,7 @@ import { LimitContinueSettingsSection } from "@/components/settings/limit-contin
 import { PromptSuggestionSettingsSection } from "@/components/settings/prompt-suggestion-settings"
 import { QuickAskSettingsSection } from "@/components/settings/quick-ask-settings"
 import { SearchSettingsSection } from "@/components/settings/search-settings"
+import { WindowAttentionSettingsSection } from "@/components/settings/window-attention-settings"
 
 const TERMINAL_SHELL_OPTION_SYSTEM = "system"
 const TERMINAL_SHELL_OPTION_CUSTOM = "custom"
@@ -529,6 +531,8 @@ export function GeneralSettings() {
 
         <EditMessageSettingsSection />
 
+        <MentionPanelSettingsSection />
+
         {/* What the search dialog shows before anything is typed. */}
         <SearchSettingsSection />
 
@@ -549,9 +553,12 @@ export function GeneralSettings() {
         {/* Claude Code's predicted next prompt in the empty composer. */}
         <PromptSuggestionSettingsSection />
 
-        {/* The two halves of "how Codeg gets my attention", adjacent on
-            purpose: one leaves the window, one does not. */}
+        {/* "How Codeg gets my attention", adjacent on purpose: a banner in
+            the OS notification centre, the window's own taskbar entry or Dock
+            icon, and a sound from inside the window. */}
         <DesktopNotificationSettingsSection />
+
+        <WindowAttentionSettingsSection />
 
         <NotificationSoundSettingsSection />
 

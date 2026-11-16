@@ -1650,6 +1650,10 @@ mod tests {
             limit_reason: None,
             selector_state: None,
             background: None,
+            assistant_id: None,
+            assistant_name: None,
+            source: None,
+            tag_ids: Vec::new(),
         }
     }
 }

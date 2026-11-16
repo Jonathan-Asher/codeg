@@ -32,6 +32,7 @@ use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 
 use crate::acp::browser_tools::BrowserToolsRuntimeConfig;
+use crate::acp::computer_tools::ComputerToolsRuntimeConfig;
 use crate::acp::chat_authoring::ChatAuthoringRuntimeConfig;
 use crate::acp::delegation::broker::DelegationBroker;
 use crate::acp::delegation::listener::TokenRegistry;
@@ -139,6 +140,7 @@ pub struct CodegMcpStatusSources<'a> {
     pub session_info: &'a SessionInfoRuntimeConfig,
     pub authoring: &'a ChatAuthoringRuntimeConfig,
     pub browser: &'a BrowserToolsRuntimeConfig,
+    pub computer: &'a ComputerToolsRuntimeConfig,
 }
 
 /// Build the report. Probes the socket for real (one ping round-trip), so
@@ -190,6 +192,7 @@ pub async fn codeg_mcp_service_status_core(
             features::BROWSER,
             browser_cfg.enabled && browser_cfg.eval,
         ),
+        CodegMcpToolGroup::group("computer", sources.computer.is_enabled().await),
     ];
     // Only the groups proper. A dependent switch cannot be on with its group
     // off, so counting them changes nothing today — but "is anything live"
@@ -237,6 +240,7 @@ pub struct CodegMcpToolGroupTargets<'a> {
     pub session_info: &'a SessionInfoRuntimeConfig,
     pub authoring: &'a ChatAuthoringRuntimeConfig,
     pub browser: &'a BrowserToolsRuntimeConfig,
+    pub computer: &'a ComputerToolsRuntimeConfig,
 }
 
 /// Flip one tool group by the same slug [`codeg_mcp_service_status_core`]
@@ -264,7 +268,8 @@ pub async fn set_codeg_mcp_tool_group_core(
 ) -> Result<(), AppCommandError> {
     use crate::commands::chat_authoring::ChatAuthoringFlag;
     use crate::commands::{
-        browser_tools, chat_authoring, delegation, feedback, question, session_info,
+        browser_tools, chat_authoring, computer_tools, delegation, feedback, question,
+        session_info,
     };
 
     match key {
@@ -313,6 +318,15 @@ pub async fn set_codeg_mcp_tool_group_core(
             )
             .await?;
         }
+        "computer" => {
+            computer_tools::set_computer_tools_enabled_core(
+                conn,
+                targets.computer,
+                emitter,
+                enabled,
+            )
+            .await?;
+        }
         features::AUTOMATIONS | features::TASKBOARD => {
             let flag = if key == features::AUTOMATIONS {
                 ChatAuthoringFlag::Automations
@@ -357,6 +371,9 @@ pub async fn start_codeg_mcp_service_core() -> Result<(), AppCommandError> {
 
 // -------- Tauri commands -----------------------------------------------------
 
+// Seven sources, injected positionally as Tauri managed state — see the note
+// on `set_codeg_mcp_tool_group`.
+#[allow(clippy::too_many_arguments)]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn get_codeg_mcp_service_status(
     #[cfg(feature = "tauri-runtime")] broker: tauri::State<'_, Arc<DelegationBroker>>,
@@ -366,6 +383,7 @@ pub async fn get_codeg_mcp_service_status(
     #[cfg(feature = "tauri-runtime")] session_info: tauri::State<'_, SessionInfoRuntimeConfig>,
     #[cfg(feature = "tauri-runtime")] authoring: tauri::State<'_, ChatAuthoringRuntimeConfig>,
     #[cfg(feature = "tauri-runtime")] browser: tauri::State<'_, BrowserToolsRuntimeConfig>,
+    #[cfg(feature = "tauri-runtime")] computer: tauri::State<'_, ComputerToolsRuntimeConfig>,
 ) -> Result<CodegMcpServiceStatus, AppCommandError> {
     #[cfg(feature = "tauri-runtime")]
     {
@@ -377,6 +395,7 @@ pub async fn get_codeg_mcp_service_status(
             session_info: session_info.inner(),
             authoring: authoring.inner(),
             browser: browser.inner(),
+            computer: computer.inner(),
         })
         .await)
     }
@@ -392,7 +411,7 @@ pub async fn start_codeg_mcp_service() -> Result<(), AppCommandError> {
     start_codeg_mcp_service_core().await
 }
 
-// Six runtime configs plus the db, the app handle and the two payload fields.
+// Seven runtime configs plus the db, the app handle and the two payload fields.
 // Tauri injects managed state positionally, so these cannot be bundled the way
 // `CodegMcpToolGroupTargets` bundles them for the `_core` helper below.
 #[allow(clippy::too_many_arguments)]
@@ -406,6 +425,7 @@ pub async fn set_codeg_mcp_tool_group(
     #[cfg(feature = "tauri-runtime")] session_info: tauri::State<'_, SessionInfoRuntimeConfig>,
     #[cfg(feature = "tauri-runtime")] authoring: tauri::State<'_, ChatAuthoringRuntimeConfig>,
     #[cfg(feature = "tauri-runtime")] browser: tauri::State<'_, BrowserToolsRuntimeConfig>,
+    #[cfg(feature = "tauri-runtime")] computer: tauri::State<'_, ComputerToolsRuntimeConfig>,
     key: String,
     enabled: bool,
 ) -> Result<(), AppCommandError> {
@@ -423,6 +443,7 @@ pub async fn set_codeg_mcp_tool_group(
                 session_info: session_info.inner(),
                 authoring: authoring.inner(),
                 browser: browser.inner(),
+                computer: computer.inner(),
             },
             &emitter,
             &key,
@@ -466,6 +487,7 @@ mod tests {
         session_info: SessionInfoRuntimeConfig,
         authoring: ChatAuthoringRuntimeConfig,
         browser: BrowserToolsRuntimeConfig,
+        computer: ComputerToolsRuntimeConfig,
     }
 
     impl Fixture {
@@ -481,6 +503,7 @@ mod tests {
                 session_info: SessionInfoRuntimeConfig::new(),
                 authoring: ChatAuthoringRuntimeConfig::new(),
                 browser: BrowserToolsRuntimeConfig::new(),
+                computer: ComputerToolsRuntimeConfig::new(),
             }
         }
 
@@ -493,6 +516,7 @@ mod tests {
                 session_info: &self.session_info,
                 authoring: &self.authoring,
                 browser: &self.browser,
+                computer: &self.computer,
             }
         }
 
@@ -515,6 +539,7 @@ mod tests {
                     session_info: &self.session_info,
                     authoring: &self.authoring,
                     browser: &self.browser,
+                    computer: &self.computer,
                 },
                 &EventEmitter::Noop,
                 key,
@@ -798,6 +823,7 @@ mod tests {
                 .register(
                     token.into(),
                     TokenEntry {
+                        agent_hosts_tools: false,
                         parent_connection_id: "conn-a".into(),
                         working_dir: std::path::PathBuf::from("/tmp"),
                     },
@@ -808,6 +834,7 @@ mod tests {
             .register(
                 "t3".into(),
                 TokenEntry {
+                    agent_hosts_tools: false,
                     parent_connection_id: "conn-b".into(),
                     working_dir: std::path::PathBuf::from("/tmp"),
                 },

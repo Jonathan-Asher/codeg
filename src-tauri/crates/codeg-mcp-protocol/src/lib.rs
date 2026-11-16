@@ -10,8 +10,10 @@
 //! There is no protocol version: codeg and the companion ship from the same
 //! commit, in the same bundle, image or archive (see [`transport`]).
 
+pub mod assistants;
 pub mod authoring;
 pub mod browser;
+pub mod computer;
 pub mod question;
 pub mod transport;
 
@@ -38,6 +40,8 @@ pub mod features {
     /// `task_progress` / `task_complete`, for sessions the work-task engine
     /// launched.
     pub const TASKS: &str = "tasks";
+    /// `submit_result`, for a `codeg-cli --output-schema` run.
+    pub const RESULT: &str = "result";
     /// `create_automation`.
     pub const AUTOMATIONS: &str = "automations";
     /// `create_work_task`.
@@ -47,6 +51,13 @@ pub mod features {
     pub const BROWSER: &str = "browser";
     /// `browser_eval`; only ever together with [`BROWSER`].
     pub const BROWSER_EVAL: &str = "browser_eval";
+    /// Computer use's window, snapshot, capture, verify and action tools.
+    pub const COMPUTER: &str = "computer";
+    /// `computer_launch`; only ever together with [`COMPUTER`].
+    pub const COMPUTER_LAUNCH: &str = "computer_launch";
+    /// `computer_clipboard_read` / `computer_clipboard_write`; only ever
+    /// together with [`COMPUTER`].
+    pub const COMPUTER_CLIPBOARD: &str = "computer_clipboard";
 }
 
 /// The companion's command-line flags, as codeg passes them in the agent's

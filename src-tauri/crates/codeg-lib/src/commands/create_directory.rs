@@ -23,10 +23,12 @@ use crate::app_error::AppCommandError;
 const WINDOWS_RESERVED_CHARS: [char; 7] = ['<', '>', ':', '"', '|', '?', '*'];
 
 /// Device names Windows reserves in every directory, with or without an
-/// extension (`nul.txt` is the NUL device too).
-const WINDOWS_RESERVED_NAMES: [&str; 22] = [
+/// extension (`nul.txt` is the NUL device too). Windows also reads the
+/// superscript digits ¹ ² ³ as port numbers, so `COM¹` is a device as well.
+const WINDOWS_RESERVED_NAMES: [&str; 28] = [
     "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
-    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    "COM9", "COM¹", "COM²", "COM³", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8",
+    "LPT9", "LPT¹", "LPT²", "LPT³",
 ];
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -423,6 +425,9 @@ mod tests {
             "lpt9",
             "aux.txt",
             "nul .txt",
+            "COM¹",
+            "lpt³",
+            "Com².log",
             "trailing.",
         ] {
             assert!(

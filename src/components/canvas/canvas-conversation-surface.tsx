@@ -12,8 +12,12 @@ import { useTranslations } from "next-intl"
 import { AgentSelector } from "@/components/chat/agent-selector"
 import { ConversationShell } from "@/components/chat/conversation-shell"
 import type { ConversationFolderPickerOverride } from "@/components/chat/conversation-context-bar"
-import { MessageListView } from "@/components/message/message-list-view"
+import {
+  MessageListView,
+  type LiveRunsSource,
+} from "@/components/message/message-list-view"
 import { useAcpActions } from "@/contexts/acp-connections-context"
+import { useAcpAgents } from "@/hooks/use-acp-agents"
 import { useConnectionLifecycle } from "@/hooks/use-connection-lifecycle"
 import { useConversationDetail } from "@/hooks/use-conversation-detail"
 import {
@@ -22,12 +26,12 @@ import {
   type QueuedMessage,
   type RequeueOptions,
 } from "@/hooks/use-message-queue"
-import { useAcpAgents } from "@/hooks/use-acp-agents"
 import { durableSendCallbacks } from "@/lib/durable-send"
 import { outboxStorageKey } from "@/lib/outbox-storage"
 import { nextSendFailure, type SendFailure } from "@/lib/send-failure"
 import { useQueueAutoSend } from "@/hooks/use-queue-auto-send"
 import {
+  acpReportPromptSuggestion,
   acpStopAsyncTask,
   createChatConversation,
   createConversation,
@@ -72,6 +76,7 @@ import type {
   PlanApprovalAnswer,
   PromptDraft,
   PromptInputBlock,
+  PromptSuggestionAction,
   QuestionAnswer,
 } from "@/lib/types"
 import { cn, randomUUID } from "@/lib/utils"
@@ -467,15 +472,21 @@ export function CanvasConversationSurface({
   const connStatus = conn.status
   const connSessionId = conn.sessionId
 
-  // A draft can switch agents while its session is still on its way, and
-  // until the switch lands the card's connection is the PREVIOUS agent's:
-  // nothing of the card's may reach it (the workspace tab reconciles the
-  // same way — see conversation-detail-panel). Never true for a conversation,
-  // whose agent is fixed.
+  // A draft card can switch agents, and `connect()` tears the previous agent's
+  // connection down only once the new pick gets past its preflight. Until then
+  // — and for good when the pick can't connect at all — the connection under
+  // this key still belongs to the agent the user just left, often already
+  // `connected`. Never present it as the selected agent's: its mode and config
+  // chips are not this agent's, and a send would reach the agent the user left
+  // while the conversation row is filed under the one they picked. Same rule as
+  // the tab view's `connIsForOtherAgent` (conversation-detail-panel.tsx).
   const connIsForOtherAgent =
     conn.agentType != null && conn.agentType !== agentType
+  // Enabled and platform-available, yet nothing installed: the preflight
+  // refuses such an agent before it tears anything down, so a switch to one
+  // never gets past the old connection.
   const { agents: acpAgents } = useAcpAgents()
-  const agentNotInstalled = useMemo(() => {
+  const selectedAgentNotInstalled = useMemo(() => {
     const info = acpAgents.find((a) => a.agent_type === agentType)
     return (
       info != null && info.enabled && info.available && !info.installed_version
@@ -508,16 +519,19 @@ export function CanvasConversationSurface({
       ? connStatus
       : newChatComposerStatus({
           status: connIsForOtherAgent
-            ? agentNotInstalled
+            ? selectedAgentNotInstalled
               ? "disconnected"
               : "connecting"
             : connStatus === "connected" && !cardConnectionReady
               ? "connecting"
               : connStatus,
-          canConnect: isActive && !agentNotInstalled,
+          canConnect: isActive && !selectedAgentNotInstalled,
           settingUp: selectorsLoading || presetsPending,
           connectFailed: conn.connectFailed,
         })
+  // Not the selected agent's commands while the connection still belongs to
+  // the agent a draft just left.
+  const connectionCommands = connIsForOtherAgent ? null : conn.availableCommands
 
   /**
    * Re-entry repair: let the database have the last word on a session this
@@ -637,7 +651,9 @@ export function CanvasConversationSurface({
     (nextModeId: string) => {
       setModeId(nextModeId)
       // The preference stores the whole mode SHAPE, not just the id, so it can
-      // be shipped to the backend at connect time.
+      // be shipped to the backend at connect time. `displayModes` is the
+      // selected agent's, so a change made mid-switch can't save the previous
+      // agent's mode list under this one.
       if (displayModes) {
         saveModePreference(agentType, {
           ...displayModes,
@@ -1055,7 +1071,7 @@ export function CanvasConversationSurface({
   )
 
   /** Stop one AIR async task. `false` (the adapter declined) is surfaced —
-   *  a successful stop announces itself by the row leaving the strip, so
+   *  a successful stop announces itself by the row leaving the list, so
    *  silence would be indistinguishable from a click that did nothing. */
   const handleStopAsyncTask = useCallback(
     async (taskId: string) => {
@@ -1081,6 +1097,58 @@ export function CanvasConversationSurface({
       }
     },
     [conn.connectionId, tAsyncTasks]
+  )
+
+  // The work this connection has running beyond the turn, for the "N running"
+  // chip on the transcript's live activity row.
+  const runsAgentName = getAgentLabel(agentType)
+  const liveRuns = useMemo<LiveRunsSource>(
+    () => ({
+      connectionId: conn.connectionId,
+      asyncTasks: conn.asyncTasks,
+      backgroundTasks: conn.backgroundTasks,
+      delegatedChildren: conn.delegatedChildren,
+      onStopAsyncTask: handleStopAsyncTask,
+      agentName: runsAgentName,
+    }),
+    [
+      conn.connectionId,
+      conn.asyncTasks,
+      conn.backgroundTasks,
+      conn.delegatedChildren,
+      handleStopAsyncTask,
+      runsAgentName,
+    ]
+  )
+
+  /** Turn Claude Code's Remote Control off the way the user would: by sending
+   *  `/remote-control off`, which the adapter answers itself. */
+  const handleRemoteControlOff = useCallback(() => {
+    const command = "/remote-control off"
+    handleSend({
+      blocks: [{ type: "text", text: command }],
+      displayText: command,
+    })
+  }, [handleSend])
+
+  // What the composer did with the predicted prompt, counted on the backend
+  // (once per prediction, whichever client reports it). Best effort.
+  const reportPromptSuggestion = useCallback(
+    (id: number, action: PromptSuggestionAction) => {
+      if (!connectionId) return
+      acpReportPromptSuggestion(connectionId, id, action).catch((err) =>
+        console.warn("[PromptSuggestion] report failed:", err)
+      )
+    },
+    [connectionId]
+  )
+  const handlePromptSuggestionShown = useCallback(
+    (id: number) => reportPromptSuggestion(id, "shown"),
+    [reportPromptSuggestion]
+  )
+  const handlePromptSuggestionAccepted = useCallback(
+    (id: number) => reportPromptSuggestion(id, "accepted"),
+    [reportPromptSuggestion]
   )
 
   const connectionModes = useMemo(
@@ -1137,6 +1205,12 @@ export function CanvasConversationSurface({
           claudeApiRetry={conn.claudeApiRetry}
           sessionFailures={conn.sessionFailures}
           onSessionFailureDismiss={handleSessionFailureDismiss}
+          remoteControl={connIsForOtherAgent ? null : conn.remoteControl}
+          onRemoteControlOff={
+            conn.connectionId !== null && !conn.isViewer
+              ? handleRemoteControlOff
+              : undefined
+          }
           pendingPermission={conn.pendingPermission}
           pendingQuestion={conn.pendingQuestion}
           pendingAskQuestion={conn.pendingAskQuestion}
@@ -1158,9 +1232,10 @@ export function CanvasConversationSurface({
           onModeChange={handleModeChange}
           onConfigOptionChange={handleSetConfigOption}
           agentType={agentType}
-          availableCommands={
-            connIsForOtherAgent ? [] : (conn.availableCommands ?? [])
-          }
+          availableCommands={connectionCommands ?? []}
+          promptSuggestion={connIsForOtherAgent ? null : conn.promptSuggestion}
+          onPromptSuggestionShown={handlePromptSuggestionShown}
+          onPromptSuggestionAccepted={handlePromptSuggestionAccepted}
           draftStorageKey={`canvas-draft:${contextKey}`}
           getSentHistory={getSentHistory}
           // The card's own connection key doubles as its composer scope: the
@@ -1214,6 +1289,7 @@ export function CanvasConversationSurface({
             // wrong guess) leaves MessageListView's folder fallback in place.
             imageRoot={workingDir}
             agentType={agentType}
+            availableCommands={connectionCommands}
             connStatus={connStatus}
             asyncTasks={conn.asyncTasks}
             toolCards={conn.toolCards}
@@ -1224,8 +1300,8 @@ export function CanvasConversationSurface({
             detailError={detailError}
             acpLoadError={acpLoadError}
             hideEmptyState={isDraft}
-            showMessageNav={false}
             onSaveNoteSelection={onSaveSelectionAsNote}
+            liveRuns={liveRuns}
           />
         </ConversationShell>
       </div>

@@ -115,7 +115,6 @@ function sidebarRows(opts: {
     recentConversations: selectRecentConversationsWithReuse(
       opts.conversations,
       true,
-      sortMode,
       new Set(opts.folders.map((f) => f.id)),
       []
     ),

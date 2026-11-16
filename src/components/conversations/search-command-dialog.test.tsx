@@ -810,3 +810,107 @@ describe("SearchCommandDialog as an instant session switcher", () => {
     guard.remove()
   })
 })
+
+describe("SearchCommandDialog focus", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    __resetQuickSwitchTypeaheadForTests()
+    folders.active = null
+    store.conversations = []
+    tabState.tabs = []
+    tabState.activeTabId = null
+    h.listAllConversations.mockResolvedValue([])
+  })
+
+  function dialog(open: boolean) {
+    return (
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <SearchCommandDialog open={open} onOpenChange={() => {}} />
+      </NextIntlClientProvider>
+    )
+  }
+
+  it("opens with the cursor in the search box, so typing searches", async () => {
+    const user = userEvent.setup()
+    render(dialog(true))
+
+    const input = await screen.findByPlaceholderText(
+      enMessages.Folder.search.placeholder
+    )
+    expect(input).toHaveFocus()
+
+    await user.keyboard("auth")
+    expect(input).toHaveValue("auth")
+  })
+
+  it("keeps the cursor in the search box when switching tabs", async () => {
+    const user = userEvent.setup()
+    render(dialog(true))
+
+    await user.click(
+      screen.getByRole("button", { name: enMessages.Folder.search.tabFiles })
+    )
+
+    expect(
+      await screen.findByPlaceholderText(
+        enMessages.Folder.search.filePlaceholder
+      )
+    ).toHaveFocus()
+  })
+
+  it("keeps the cursor in the search box when picking an agent filter", async () => {
+    folders.active = folders.all[0]
+    store.conversations = [
+      conv(1, 3, "Release prep"),
+      conv(2, 3, "Legal brief", { agent_type: "codex" }),
+    ]
+    const user = userEvent.setup()
+    render(dialog(true))
+
+    const input = await screen.findByPlaceholderText(
+      enMessages.Folder.search.placeholder
+    )
+    await user.click(screen.getByRole("button", { name: "Codex" }))
+    expect(input).toHaveFocus()
+
+    await user.click(
+      screen.getByRole("button", { name: enMessages.Folder.search.allAgents })
+    )
+    expect(input).toHaveFocus()
+  })
+
+  it("pulls the cursor back when the chat composer behind it takes focus", async () => {
+    // The composer refocuses itself when an agent turn ends, whether or not
+    // the dialog is open over it. The dialog must bring the cursor back, or
+    // the rest of the query is typed into the composer.
+    const composer = document.createElement("textarea")
+    document.body.appendChild(composer)
+    try {
+      const user = userEvent.setup()
+      render(dialog(true))
+
+      const input = await screen.findByPlaceholderText(
+        enMessages.Folder.search.placeholder
+      )
+      act(() => composer.focus())
+      expect(input).toHaveFocus()
+
+      await user.keyboard("auth")
+      expect(input).toHaveValue("auth")
+      expect(composer).toHaveValue("")
+    } finally {
+      composer.remove()
+    }
+  })
+
+  it("asks for a native snapshot newer than each opening once it closes", () => {
+    const { rerender } = render(dialog(true))
+    h.resetFileTree.mockClear()
+    rerender(dialog(false))
+    // The reset waits for the frame that hid the dialog; opened again before
+    // then, it runs at once, inside the open.
+    rerender(dialog(true))
+    expect(h.resetFileTree).toHaveBeenCalledExactlyOnceWith(true)
+  })
+})

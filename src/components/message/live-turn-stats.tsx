@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { useLocale, useTranslations } from "next-intl"
 import type {
   LiveContentBlock,
@@ -13,8 +13,6 @@ import {
   estimateChangedLineStats,
 } from "@/lib/line-change-stats"
 import { FilePenLine, Plane, Split, Timer } from "lucide-react"
-import type { AgentType } from "@/lib/types"
-import { AgentIcon } from "@/components/agent-icon"
 import {
   Tooltip,
   TooltipContent,
@@ -24,13 +22,15 @@ import {
 import { useTokenOutputSpeed } from "@/hooks/use-token-output-speed"
 
 interface LiveTurnStatsProps {
-  message: LiveMessage
-  agentType: AgentType
-  isStreaming?: boolean
+  /** The running turn; `null` once it has ended while `trailing` still has
+   *  something to say (work the turn left running). */
+  message: LiveMessage | null
+  /** Drawn after the figures, at the row's end — the "N running" chip. */
+  trailing?: ReactNode
   /** The turn is held open only for background work: the agent answered and
-   *  is idle (`0` = task count unknown). Replaces "Streaming" with
-   *  "Idle — N background tasks running", and the pulse and output speed
-   *  go, since nothing is streaming. `null` otherwise. */
+   *  is idle (`0` = task count unknown). The row opens with "Idle — N
+   *  background tasks running", and the output speed goes, since nothing is
+   *  streaming. `null` otherwise. */
   heldBackgroundTasks?: number | null
   /** "Fork from here" works mid-turn on this surface, from any FINISHED reply
    *  (see `forkWhileRunning` on `MessageListView`). The reply being written
@@ -323,49 +323,28 @@ export function extractLiveEditStats(message: LiveMessage): LiveEditStats {
   return { files: files.size, additions, deletions }
 }
 
+/**
+ * The live activity row above the composer: the running turn's figures — how
+ * long the turn has run, the files it has changed and how fast it is writing —
+ * then whatever `trailing` adds (the "N running" chip), which can outlast the
+ * turn. That the agent is at work, and at what — thinking, running a step,
+ * writing — the transcript's own timeline says ("Working" on the reply's
+ * header, a shimmer on the step, a turning ring at the foot of its rail), so
+ * this row carries neither a word for it nor a pulsing mark. The one word it
+ * does carry is for a turn held open only for background work, which the
+ * timeline does not show as work: "Idle — N background tasks running".
+ *
+ * Narrow, the row sheds the edit figures first, then the speed; the time and
+ * the trailing chip stay.
+ */
 export function LiveTurnStats({
   message,
-  agentType,
-  isStreaming = true,
+  trailing,
   heldBackgroundTasks = null,
   forkInFlight = false,
 }: LiveTurnStatsProps) {
-  const locale = useLocale()
   const t = useTranslations("Folder.chat.liveTurnStats")
   const tList = useTranslations("Folder.chat.messageList")
-  const tConn = useTranslations("Folder.statusBar.connection")
-  const held = heldBackgroundTasks != null
-  const [elapsed, setElapsed] = useState(() => Date.now() - message.startedAt)
-  const editStats = useMemo(() => extractLiveEditStats(message), [message])
-  const tps = useTokenOutputSpeed(message)
-  const compactNumberFormatter = useMemo(
-    () =>
-      new Intl.NumberFormat(locale, {
-        notation: "compact",
-        maximumFractionDigits: 1,
-      }),
-    [locale]
-  )
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setElapsed(Date.now() - message.startedAt)
-    }, 1_000)
-    return () => clearInterval(timer)
-  }, [message.startedAt])
-
-  const hasThinkingBlock = message.content.some((b) => b.type === "thinking")
-
-  // Only active streams should show thinking/streaming state.
-  const lastBlock = message.content[message.content.length - 1]
-  const isThinking =
-    isStreaming &&
-    hasThinkingBlock &&
-    message.content.length <= 1 &&
-    lastBlock?.type === "thinking"
-
-  const elapsedLabel = formatElapsedLabel(elapsed, t)
-
   return (
     // Squeezed (a tall card docked under a short window leaves the message
     // list less than this row), the row gives way and clips instead of
@@ -373,59 +352,20 @@ export function LiveTurnStats({
     // only a shortfall shrinks a flex item.
     <div className="@container/turnstats min-h-0 overflow-clip">
       <div className="flex min-h-8 flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4 py-1 text-xs leading-none text-muted-foreground">
-        <AgentIcon
-          agentType={agentType}
-          className={held ? "h-3.5 w-3.5" : "h-3.5 w-3.5 animate-pulse"}
-        />
-        {held ? (
-          <span data-testid="live-turn-held">
-            {tConn("idleBackground", { count: heldBackgroundTasks })}
-          </span>
-        ) : isThinking ? (
-          <span>{t("thinking")}</span>
-        ) : (
-          <span>{t("streaming")}</span>
+        {/* Keyed by its turn: a turn that starts while the last one's figures
+            are still on screen gets figures of its own, its clock from zero. */}
+        {message && (
+          <LiveTurnFigures
+            key={message.id}
+            message={message}
+            heldBackgroundTasks={heldBackgroundTasks}
+          />
         )}
-        <span className="text-border leading-none">|</span>
-        <span className="inline-flex items-center gap-1 leading-none">
-          <Timer className="h-3 w-3 shrink-0" />
-          {elapsedLabel}
-        </span>
-        {editStats.files > 0 && (
-          <>
-            <span className="hidden text-border leading-none @[24rem]/turnstats:inline">
-              |
-            </span>
-            <span className="hidden items-center gap-1 leading-none @[24rem]/turnstats:inline-flex">
-              <FilePenLine className="h-3 w-3 shrink-0" />
-              {editStats.files}F +
-              {formatCompactInt(editStats.additions, compactNumberFormatter)}/-
-              {formatCompactInt(editStats.deletions, compactNumberFormatter)}
-            </span>
-          </>
-        )}
-        {tps != null && !held && (
-          <>
-            <span className="hidden text-border leading-none @[30rem]/turnstats:inline">
-              |
-            </span>
-            {/* `tabular-nums` so the digits stop shimmering as the rate moves. */}
-            <span
-              className="hidden items-center gap-1 leading-none tabular-nums @[30rem]/turnstats:inline-flex"
-              title={t("outputSpeedTooltip")}
-            >
-              {/* Name hangs off the icon, matching `ComposerContextUsage` —
-                  `aria-label` on the bare wrapper span carries no role and
-                  isn't reliably exposed. */}
-              <Plane
-                aria-label={t("outputSpeedAria")}
-                className="h-3 w-3 shrink-0"
-              />
-              {tps.toFixed(1)} tok/s
-            </span>
-          </>
-        )}
-        {forkInFlight && (
+        {message && trailing ? (
+          <span className="text-border leading-none">|</span>
+        ) : null}
+        {trailing}
+        {message && forkInFlight && (
           <>
             <span className="text-border leading-none">|</span>
             <TooltipProvider delayDuration={150}>
@@ -450,5 +390,89 @@ export function LiveTurnStats({
         )}
       </div>
     </div>
+  )
+}
+
+function LiveTurnFigures({
+  message,
+  heldBackgroundTasks,
+}: {
+  message: LiveMessage
+  heldBackgroundTasks: number | null
+}) {
+  const locale = useLocale()
+  const t = useTranslations("Folder.chat.liveTurnStats")
+  const tConn = useTranslations("Folder.statusBar.connection")
+  const held = heldBackgroundTasks != null
+  const [elapsed, setElapsed] = useState(() => Date.now() - message.startedAt)
+  const editStats = useMemo(() => extractLiveEditStats(message), [message])
+  const tps = useTokenOutputSpeed(message)
+  const compactNumberFormatter = useMemo(
+    () =>
+      new Intl.NumberFormat(locale, {
+        notation: "compact",
+        maximumFractionDigits: 1,
+      }),
+    [locale]
+  )
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setElapsed(Date.now() - message.startedAt)
+    }, 1_000)
+    return () => clearInterval(timer)
+  }, [message.startedAt])
+
+  const elapsedLabel = formatElapsedLabel(elapsed, t)
+
+  return (
+    <>
+      {held && (
+        <>
+          <span data-testid="live-turn-held">
+            {tConn("idleBackground", { count: heldBackgroundTasks })}
+          </span>
+          <span className="text-border leading-none">|</span>
+        </>
+      )}
+      <span className="inline-flex items-center gap-1 leading-none">
+        <Timer className="h-3 w-3 shrink-0" />
+        {elapsedLabel}
+      </span>
+      {editStats.files > 0 && (
+        <>
+          <span className="hidden text-border leading-none @[24rem]/turnstats:inline">
+            |
+          </span>
+          <span className="hidden items-center gap-1 leading-none @[24rem]/turnstats:inline-flex">
+            <FilePenLine className="h-3 w-3 shrink-0" />
+            {editStats.files}F +
+            {formatCompactInt(editStats.additions, compactNumberFormatter)}/-
+            {formatCompactInt(editStats.deletions, compactNumberFormatter)}
+          </span>
+        </>
+      )}
+      {tps != null && !held && (
+        <>
+          <span className="hidden text-border leading-none @[30rem]/turnstats:inline">
+            |
+          </span>
+          {/* `tabular-nums` so the digits stop shimmering as the rate moves. */}
+          <span
+            className="hidden items-center gap-1 leading-none tabular-nums @[30rem]/turnstats:inline-flex"
+            title={t("outputSpeedTooltip")}
+          >
+            {/* Name hangs off the icon, matching `ComposerContextUsage` —
+                  `aria-label` on the bare wrapper span carries no role and
+                  isn't reliably exposed. */}
+            <Plane
+              aria-label={t("outputSpeedAria")}
+              className="h-3 w-3 shrink-0"
+            />
+            {tps.toFixed(1)} tok/s
+          </span>
+        </>
+      )}
+    </>
   )
 }

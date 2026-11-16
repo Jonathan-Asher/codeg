@@ -79,7 +79,11 @@ export class ConnectionDisplayTracker {
     if (down && !this.wasDown) this.downAt = now
     this.wasDown = down
 
-    if (input.health === "unauthorized") {
+    // A rejected token, or an expired proxy session: its dialog says so.
+    if (
+      input.health === "unauthorized" ||
+      input.health === "proxyUnauthorized"
+    ) {
       this.shown = false
       return { display: { kind: "none" }, nextAt: null }
     }

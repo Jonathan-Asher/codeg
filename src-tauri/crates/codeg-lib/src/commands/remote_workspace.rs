@@ -10,6 +10,8 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 #[cfg(feature = "tauri-runtime")]
 use crate::app_error::AppCommandError;
 #[cfg(feature = "tauri-runtime")]
+use crate::commands::workspace_windows::WorkspaceWindow;
+#[cfg(feature = "tauri-runtime")]
 use crate::db::service::remote_workspace_connection_service;
 #[cfg(feature = "tauri-runtime")]
 use crate::db::AppDatabase;
@@ -20,9 +22,10 @@ use crate::models::{RemoteWorkspaceConnectionInfo, RemoteWorkspaceHeader, ToHead
 const REMOTE_HEALTH_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Label prefix of the window that hosts a saved connection's workspace —
-/// `remote-workspace-{id}`, one per connection.
+/// `remote-workspace-{id}`, one per connection. Defined with the other
+/// workspace window labels; re-exported for the callers that reach it here.
 #[cfg(feature = "tauri-runtime")]
-pub(crate) const REMOTE_WORKSPACE_LABEL_PREFIX: &str = "remote-workspace-";
+pub(crate) use crate::commands::workspace_windows::REMOTE_WORKSPACE_LABEL_PREFIX;
 
 #[cfg(feature = "tauri-runtime")]
 pub(crate) fn new_remote_window_instance_id() -> String {
@@ -41,8 +44,13 @@ pub struct RemoteWorkspaceConnectionInput {
     pub headers: Vec<RemoteWorkspaceHeader>,
 }
 
+/// The check a connection has to pass before it is saved or tested, and before
+/// the "Open remote workspace" menus open its window. The launch reopening the
+/// windows that were open at the last quit (`workspace_windows`) skips it on
+/// purpose: a server that is offline at launch comes back through the window's
+/// own transport instead of costing the window its place in the session.
 #[cfg(feature = "tauri-runtime")]
-async fn validate_remote_health(
+pub(crate) async fn validate_remote_health(
     base_url: &str,
     token: &str,
     headers: &[RemoteWorkspaceHeader],
@@ -214,41 +222,56 @@ pub async fn open_remote_workspace(
     // or rejects the token, gets an error where the user clicked instead of a
     // window that cannot load. A window that is already open is only brought
     // forward, so it needs none.
-    let label = remote_workspace_window_label(id);
-    if app.get_webview_window(&label).is_none() {
-        validate_remote_health(&connection.base_url, &connection.token, &connection.headers)
-            .await?;
+    let label = WorkspaceWindow::Remote { connection_id: id }.label();
+    if app.get_webview_window(&label).is_some() {
+        crate::commands::windows::show_and_focus_window(&app, &label);
+        return Ok(());
     }
 
-    show_remote_workspace_window(&app, &connection)
-}
+    validate_remote_health(&connection.base_url, &connection.token, &connection.headers).await?;
 
-#[cfg(feature = "tauri-runtime")]
-fn remote_workspace_window_label(id: i32) -> String {
-    format!("{REMOTE_WORKSPACE_LABEL_PREFIX}{id}")
+    // An overlapping open / restore may have built it during the health check.
+    if app.get_webview_window(&label).is_some() {
+        crate::commands::windows::show_and_focus_window(&app, &label);
+        return Ok(());
+    }
+    build_remote_workspace_window(&app, &connection, true)
 }
 
 /// Bring the connection's workspace window forward, building it if it is not
-/// open. No health check: `open_remote_workspace` runs one first, and a launch
-/// into the startup workspace deliberately does not — it has nowhere to show
-/// that error, and waiting out the check would hold the launch for up to
-/// `REMOTE_HEALTH_TIMEOUT` only to open nothing. The window reports an
-/// unreachable server itself.
+/// open. No health check: `open_remote_workspace` runs one first, and the other
+/// callers (a launch into the startup workspace, a notification click, Quick
+/// Ask) have nowhere to show that error — waiting out the check would hold
+/// them for up to `REMOTE_HEALTH_TIMEOUT` only to open nothing. The window
+/// reports an unreachable server itself.
 #[cfg(feature = "tauri-runtime")]
 pub(crate) fn show_remote_workspace_window(
     app: &AppHandle,
     connection: &RemoteWorkspaceConnectionInfo,
 ) -> Result<(), AppCommandError> {
-    let id = connection.id;
-    let label = remote_workspace_window_label(id);
-    if let Some(existing) = app.get_webview_window(&label) {
-        let _ = existing.unminimize();
-        existing.set_focus().map_err(|e| {
-            AppCommandError::window("Failed to focus remote workspace", e.to_string())
-        })?;
+    let label = WorkspaceWindow::Remote {
+        connection_id: connection.id,
+    }
+    .label();
+    if app.get_webview_window(&label).is_some() {
+        crate::commands::windows::show_and_focus_window(app, &label);
         return Ok(());
     }
+    build_remote_workspace_window(app, connection, true)
+}
 
+/// Build a workspace for a saved connection. Manual opens validate health;
+/// startup restoration also opens offline connections and lets the transport
+/// recover. Restored windows stay in the background until the session is back.
+#[cfg(feature = "tauri-runtime")]
+pub(crate) fn build_remote_workspace_window(
+    app: &AppHandle,
+    connection: &RemoteWorkspaceConnectionInfo,
+    focus: bool,
+) -> Result<(), AppCommandError> {
+    let id = connection.id;
+    let window = WorkspaceWindow::Remote { connection_id: id };
+    let label = window.label();
     let window_instance_id = new_remote_window_instance_id();
     let url = WebviewUrl::App(
         format!("workspace?remoteConnectionId={id}&remoteWindowId={window_instance_id}").into(),
@@ -257,15 +280,17 @@ pub(crate) fn show_remote_workspace_window(
         .title(format!("Codeg - {}", connection.name))
         .inner_size(1260.0, 860.0)
         .min_inner_size(400.0, 600.0)
+        .focused(focus)
         .center();
     let builder = crate::commands::windows::apply_platform_window_style(builder);
     // Remote workspace windows load the same `/workspace` route with the taller
     // h-10 title bar, so they get the workspace traffic-light position (not the
     // shorter auxiliary-window default).
     #[cfg(target_os = "macos")]
-    let builder = builder
-        .traffic_light_position(crate::commands::windows::workspace_window_traffic_light_position());
-    let window = builder
+    let builder = builder.traffic_light_position(
+        crate::commands::windows::workspace_window_traffic_light_position(),
+    );
+    let built = builder
         .build()
         .map_err(|e| AppCommandError::window("Failed to open remote workspace", e.to_string()))?;
     if let Some(proxy) =
@@ -273,8 +298,13 @@ pub(crate) fn show_remote_workspace_window(
     {
         proxy
             .inner()
-            .register_window_instance_cleanup(&window, window_instance_id);
+            .register_window_instance_cleanup(&built, window_instance_id);
     }
-    crate::commands::windows::post_window_setup(&window);
+    crate::commands::windows::post_window_setup(&built);
+    if focus {
+        crate::commands::workspace_windows::note_shown(app, &label);
+    } else {
+        crate::commands::workspace_windows::note_opened(app, window);
+    }
     Ok(())
 }

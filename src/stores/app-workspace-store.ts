@@ -55,6 +55,8 @@ export interface AppWorkspaceStoreState {
    * group hasn't arrived — would render a half-built sidebar.
    */
   folderGroups: FolderGroupDetail[]
+  /** True only after a successful folder snapshot, so an offline start cannot
+   * mistake an unknown folder list for deleted folders and prune drafts. */
   foldersHydrated: boolean
   foldersLoading: boolean
 
@@ -109,6 +111,7 @@ export interface AppWorkspaceStoreState {
         | "talk_mode"
         | "limit_auto_continue"
         | "last_viewed_at"
+        | "tag_ids"
       >
     >
   ) => void
@@ -420,11 +423,12 @@ export const useAppWorkspaceStore = create<AppWorkspaceStoreState>()(
           allFolders: allList,
           folderGroups: groupList,
           branches,
+          foldersHydrated: true,
         })
       } catch (err) {
         console.error("[AppWorkspace] fetchFolders failed:", err)
       } finally {
-        set({ foldersLoading: false, foldersHydrated: true })
+        set({ foldersLoading: false })
       }
     },
 
@@ -457,7 +461,8 @@ export const useAppWorkspaceStore = create<AppWorkspaceStoreState>()(
       // Marking a session critical is the same kind of preference, and so is
       // its continue-after-the-usage-limit switch; so is Talk mode, which the
       // backend sets without moving `updated_at`. Opening a session is not
-      // activity either (`mark_conversations_viewed`).
+      // activity either (`mark_conversations_viewed`), and neither is tagging
+      // (the backend never touches the row for it).
       const bumpUpdatedAt =
         !("pinned_at" in patch) &&
         !("pin_order" in patch) &&
@@ -465,7 +470,8 @@ export const useAppWorkspaceStore = create<AppWorkspaceStoreState>()(
         !("critical_stall" in patch) &&
         !("talk_mode" in patch) &&
         !("limit_auto_continue" in patch) &&
-        !("last_viewed_at" in patch)
+        !("last_viewed_at" in patch) &&
+        !("tag_ids" in patch)
       next[idx] = {
         ...next[idx],
         ...patch,
@@ -474,8 +480,8 @@ export const useAppWorkspaceStore = create<AppWorkspaceStoreState>()(
       // `stats` (computeStats) depends ONLY on the conversation count and each
       // row's agent_type/message_count. This path replaces a row IN PLACE (count
       // never changes), and the patch type is restricted to status/title/
-      // pinned_at/pin_order — none of which is a stat input — so a patch here
-      // can never move a stat.
+      // pinned_at/pin_order/tag_ids (and the per-session switches) — none of
+      // which is a stat input — so a patch here can never move a stat.
       // Reuse the existing `stats` reference instead of recomputing O(n) and
       // minting a fresh object: otherwise every turn-boundary
       // `conversation_status_changed` tick (one per turn start/stop, per running

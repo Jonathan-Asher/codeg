@@ -20,7 +20,7 @@ resolver = "2"
 # One version for all four: the companion and the app speak a protocol with no
 # version field, so they always ship from the same commit.
 [workspace.package]
-version = "0.32.2"
+version = "0.45.0"
 authors = ["feitao"]
 edition = "2021"
 
@@ -60,6 +60,8 @@ browser-child = ["codeg-lib/browser-child"]
 browser-smoke = ["codeg-lib/browser-smoke"]
 test-utils = ["codeg-lib/test-utils"]
 server = ["codeg-lib/server"]
+computer-helper = ["codeg-lib/computer-helper"]
+cli-bin = ["codeg-lib/cli-bin"]
 
 [[bin]]
 name = "codeg"
@@ -76,7 +78,10 @@ tauri-build = { version = "2", features = [], optional = true }
 codeg-lib = { path = "crates/codeg-lib", default-features = false }
 # The same tauri the library uses (one crate in the build). tauri-build checks
 # these features against tauri.conf.json, here, in the package it runs for.
-tauri = { version = "2.11", features = ["macos-private-api", "tray-icon", "devtools"], optional = true }
+# No `macos-private-api`: since tauri 2.12.1 the transparent windows need
+# neither it nor `macOSPrivateApi`, and `tauri build` drops it when the config
+# does not ask.
+tauri = { version = "2.12", features = ["tray-icon", "devtools"], optional = true }
 # `generate_context!` writes the plugin settings from tauri.conf.json as
 # `::serde_json::Value`s.
 serde_json = { version = "1", optional = true }
@@ -85,7 +90,10 @@ tauri-plugin-dialog = { version = "2", optional = true }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-window-state = { version = "2", optional = true }
-tauri-plugin-updater = { version = "2", optional = true }
+# `requireSignedVersion` (tauri.conf.json) needs 2.12 or later; 2.14 is the
+# minor `@tauri-apps/plugin-updater` is on, and `tauri build` refuses a JS
+# package and its crate on different minors.
+tauri-plugin-updater = { version = "2.14", optional = true }
 tauri-plugin-process = { version = "2", optional = true }
 tauri-plugin-notification = { version = "2", optional = true }
 tauri-plugin-single-instance = { version = "2", optional = true }

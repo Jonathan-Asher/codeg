@@ -33,7 +33,11 @@ const template = vi.hoisted(() => ({
 }))
 
 vi.mock("@/contexts/acp-connections-context", () => ({
-  useAcpActions: () => ({ setActiveKey: vi.fn(), touchActivity: vi.fn() }),
+  useAcpActions: () => ({
+    setActiveKey: vi.fn(),
+    releaseActiveKey: vi.fn(),
+    touchActivity: vi.fn(),
+  }),
   getCachedSelectors: () => template.value,
 }))
 
@@ -58,19 +62,25 @@ const tasks = vi.hoisted(() => ({
   },
 }))
 
-vi.mock("@/contexts/task-context", () => ({
-  useTaskContext: () => ({
+vi.mock("@/contexts/task-context", () => {
+  // One identity for the hook's whole life, like the real provider's
+  // `useCallback`s. A fresh `removeTask` per render re-runs the hook's
+  // unmount cleanup on every rerender, which retires the very row under test.
+  const context = {
     addTask: (id: string, label: string, description?: string) =>
       tasks.added.push({ id, label, description }),
     updateTask: (id: string, update: { status?: string }) =>
       tasks.updated.push({ id, ...update }),
     removeTask: (id: string) => tasks.removed.push(id),
-  }),
-}))
+  }
+  return { useTaskContext: () => context }
+})
 
 const conn = vi.hoisted(() => ({
   status: null as string | null,
   attachPhase: null as string | null,
+  /** The agent of the store entry at this key; null while there is none. */
+  agentType: null as string | null,
   selectorsReady: false,
   hasCachedSelectors: false,
 }))
@@ -79,6 +89,7 @@ vi.mock("@/hooks/use-connection", () => ({
   useConnection: () => ({
     status: conn.status,
     attachPhase: conn.attachPhase,
+    agentType: conn.agentType,
     selectorsReady: conn.selectorsReady,
     hasCachedSelectors: conn.hasCachedSelectors,
     connect: vi.fn().mockResolvedValue(undefined),
@@ -93,12 +104,15 @@ vi.mock("@/hooks/use-connection", () => ({
     configOptions: null,
     isViewer: false,
     backgroundOutstanding: 0,
+    asyncTasks: [],
+    remoteControl: null,
+    delegatedChildren: [],
   }),
 }))
 
 import { useConnectionLifecycle } from "@/hooks/use-connection-lifecycle"
 import type { SelectorValues } from "@/lib/selector-display"
-import type { SessionConfigOptionInfo } from "@/lib/types"
+import type { AgentType, SessionConfigOptionInfo } from "@/lib/types"
 
 function renderLifecycle(
   preparing: boolean,
@@ -161,6 +175,7 @@ describe("useConnectionLifecycle opening legs", () => {
     tasks.reset()
     conn.status = null
     conn.attachPhase = null
+    conn.agentType = null
     conn.selectorsReady = false
     conn.hasCachedSelectors = false
     template.value = null
@@ -204,6 +219,49 @@ describe("useConnectionLifecycle opening legs", () => {
     act(() => rerender({ preparing: false }))
 
     expect(tasks.live()).toEqual([])
+  })
+
+  it("renames the connect row when a draft switches agents before it connects", () => {
+    // A draft's agent picker stays usable while it connects, and the status
+    // reads `connecting` straight through the switch: the old agent's entry,
+    // then the new one's in-flight marker, then its entry. The row has to
+    // follow the agent coming up rather than the status, or it goes on naming
+    // the agent the user just left.
+    conn.status = "connecting"
+    conn.agentType = "claude_code"
+    const { rerender } = renderHook(
+      (props: { agentType: AgentType }) =>
+        useConnectionLifecycle({
+          contextKey: "ctx-1",
+          agentType: props.agentType,
+          // In front: only the view on screen puts rows in the status bar.
+          // (No working dir, so nothing auto-connects.)
+          isActive: true,
+        }),
+      { initialProps: { agentType: "claude_code" as AgentType } }
+    )
+    const first = tasks.live()[0]
+    expect(first.label).toBe('tasks.connectingTitle:{"agent":"Claude Code"}')
+
+    // Picked, but the old agent's entry is still the one coming up: the
+    // switch has not torn it down yet (or Codex's preflight failed and left
+    // it running). The row keeps naming what is actually connecting.
+    act(() => rerender({ agentType: "codex" }))
+    expect(tasks.live()).toEqual([first])
+
+    // The old entry is gone; Codex's in-flight marker carries the status.
+    conn.agentType = null
+    act(() => rerender({ agentType: "codex" }))
+    expect(tasks.removed).toContain(first.id)
+    const second = tasks.live()[0]
+    expect(tasks.live().map((t) => t.label)).toEqual([
+      'tasks.connectingTitle:{"agent":"Codex"}',
+    ])
+
+    // Codex's own entry lands, still connecting: same agent, same row.
+    conn.agentType = "codex"
+    act(() => rerender({ agentType: "codex" }))
+    expect(tasks.live()).toEqual([second])
   })
 
   it("adds nothing while idle — a settled, disconnected tab is not opening", () => {

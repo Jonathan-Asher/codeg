@@ -386,9 +386,13 @@ fn resolve_settings_route(section: Option<&str>) -> &'static str {
         Some("office-tools") => "settings/office-tools",
         Some("collaboration") => "settings/collaboration",
         Some("browser") => "settings/browser",
+        Some("computer-use") => "settings/computer-use",
         Some("version-control") => "settings/version-control",
         Some("shortcuts") => "settings/shortcuts",
         Some("system") => "settings/system",
+        // Desktop only, like the page itself: the web nav hides it, so the web
+        // `open_settings_window` deliberately has no arm for it.
+        Some("web-service") => "settings/web-service",
         _ => "settings/appearance",
     }
 }
@@ -890,12 +894,14 @@ pub async fn open_import_sessions_window(
 /// focus alone then left the app with nothing on screen once settings was
 /// closed too.
 ///
-/// Single source of truth for the sequence: the tray / dock / single-instance
-/// path (`show_main_window`) and the auxiliary-window owner restores must not
-/// drift apart again. `unminimize` is inert when the window isn't minimized
-/// (macOS returns early; Windows first syncs the flag from `IsIconic`, so the
-/// diff it applies is empty), and `show` preserves the maximized flag — a
-/// tray-hidden maximized workspace comes back maximized.
+/// Single source of truth for the sequence: the tray (`show_main_window`,
+/// through `workspace_windows::show_local_workspace_window`), Dock /
+/// second-launch activation (`workspace_windows::activate_workspace`) and the
+/// auxiliary-window owner restores must not drift apart again. `unminimize`
+/// is inert when the window isn't minimized (macOS returns early; Windows
+/// first syncs the flag from `IsIconic`, so the diff it applies is empty), and
+/// `show` preserves the maximized flag — a tray-hidden maximized workspace
+/// comes back maximized.
 pub(crate) fn show_and_focus_window(app: &AppHandle, label: &str) {
     let Some(window) = app.get_webview_window(label) else {
         return;
@@ -903,6 +909,10 @@ pub(crate) fn show_and_focus_window(app: &AppHandle, label: &str) {
     let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
+    // A `main` hidden to the tray is back, so the next launch reopens it too.
+    // Not left to the focus event: `set_focus` is skipped where the app is not
+    // allowed to take focus, and the window is open all the same.
+    crate::commands::workspace_windows::note_shown(app, label);
 }
 
 pub fn restore_windows_after_settings(
@@ -2341,12 +2351,27 @@ fn wait_for_macos_fullscreen_space_release(window: &tauri::WebviewWindow) {
 /// foreground. A no-op once a close destroyed it — callers that must rebuild
 /// it go through `workspace_windows::show_local_workspace_window`. Used by:
 ///   * `codeg://` links and the pet panel, which focus a local conversation
-///   * tray icon left-click and "Show Workspace" menu item, the macOS dock
-///     and a second launch (all through `workspace_windows`)
+///   * "Open Local Workspace" (the macOS Window menu, `open_local_workspace`),
+///     tray icon left-click and "Show Workspace" menu item, the macOS Dock and
+///     a second launch (all through `workspace_windows`)
 ///   * the last remote workspace window closing over a hidden `main`
 #[cfg(feature = "tauri-runtime")]
 pub fn show_main_window(app: &AppHandle) {
     show_and_focus_window(app, "main");
+}
+
+/// The frontend's "Open local workspace": Quick actions in a remote workspace
+/// window, and the screens a remote window shows instead of its workspace
+/// when its connection cannot be used. Reached through the shell transport, so
+/// it needs nothing from the remote server. Rebuilds `main` when a close
+/// destroyed it or a windowless launch never built it, as
+/// `workspace_windows::show_local_workspace` does; async so that building a
+/// window never runs inside a synchronous command, which deadlocks on Windows.
+#[cfg(feature = "tauri-runtime")]
+#[tauri::command]
+pub async fn open_local_workspace(app: AppHandle) -> Result<(), AppCommandError> {
+    crate::commands::workspace_windows::show_local_workspace_window(&app);
+    Ok(())
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -2704,7 +2729,9 @@ mod settings_route_tests {
     /// the fallback below it is Appearance, so a caller wanting the General
     /// page must be able to name it and land there. `collaboration` is where
     /// the codeg-mcp tool switches live in full, and it is what the status-bar
-    /// popover links to.
+    /// codeg-mcp popover links to; `computer-use` is what the Computer use
+    /// popover links to; `web-service` is what the Web service popover links
+    /// to.
     #[test]
     fn every_named_settings_section_resolves_to_its_own_route() {
         for section in [
@@ -2718,9 +2745,11 @@ mod settings_route_tests {
             "office-tools",
             "collaboration",
             "browser",
+            "computer-use",
             "version-control",
             "shortcuts",
             "system",
+            "web-service",
         ] {
             assert_eq!(
                 resolve_settings_route(Some(section)),

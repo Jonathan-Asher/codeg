@@ -206,8 +206,9 @@ pub async fn create_file_tree_entry(
 
 /// Hard cap on a single uploaded attachment.
 ///
-/// This is the user-facing attachment ceiling for web / remote-workspace mode
-/// (oversize is rejected with a visible toast), sized to match the desktop
+/// This is the user-facing attachment ceiling for web / remote-workspace mode,
+/// and for a desktop paste with no file behind it (`store_attachment_bytes`);
+/// oversize is rejected with a visible toast. It is sized to match the desktop
 /// drag-drop image limit (`DRAG_DROP_IMAGE_MAX_BYTES`, 20 MB) so the same
 /// screenshot attaches in every mode. Uploaded images are re-inlined into the
 /// prompt server-side (`acp::prompt_hydration`), so this also bounds that
@@ -218,7 +219,10 @@ pub async fn create_file_tree_entry(
 /// oversized bodies before they stream.
 ///
 /// Mirrored by `UPLOAD_MAX_BYTES` in `commands/remote_proxy.rs` and
-/// `src/lib/api.ts` — keep the three in lockstep.
+/// `src/lib/api.ts` — keep the three in lockstep. The docs site also states
+/// this cap (Storage limits,
+/// <https://docs.codeg.app/getting-started/configuration#storage-limits>, in
+/// English and Chinese); update it there whenever the value changes.
 ///
 /// Video and audio files take [`UploadLimits::media_bytes`] instead: they are
 /// only ever linked by path, never read back into a prompt.
@@ -1039,6 +1043,12 @@ impl Drop for StagingCleanup {
     }
 }
 
+/// The error for an attachment over [`UPLOAD_MAX_BYTES`], whichever layer
+/// notices first; they all carry the same i18n key, so the toast reads alike.
+pub(crate) fn upload_too_large(size: u64) -> AppCommandError {
+    too_large_error(size, UPLOAD_MAX_BYTES)
+}
+
 /// Create `<uploads_root>/.tmp/` and confirm it is a real directory inside
 /// the root. Returns its path.
 pub(super) async fn prepare_staging_dir(
@@ -1075,6 +1085,101 @@ pub(super) async fn prepare_staging_dir(
     }
     ensure_path_inside(&tmp_dir, uploads_root).await?;
     Ok(tmp_dir)
+}
+
+/// Store an attachment whose bytes are already in memory: something pasted
+/// into the desktop composer with no file behind it. It lands exactly where
+/// and how [`upload_attachment`] puts a streamed one (same size cap, quota,
+/// staging jail, session bucket and free-name choice), so the composer links
+/// it like any other upload.
+pub async fn store_attachment_bytes(
+    file_name: &str,
+    mime_type: Option<String>,
+    session_id: Option<&str>,
+    bytes: &[u8],
+) -> Result<UploadAttachmentResult, AppCommandError> {
+    store_attachment_bytes_in(&codeg_uploads_root(), file_name, mime_type, session_id, bytes).await
+}
+
+/// [`store_attachment_bytes`] under an explicit uploads root.
+async fn store_attachment_bytes_in(
+    uploads_root: &std::path::Path,
+    file_name: &str,
+    mime_type: Option<String>,
+    session_id: Option<&str>,
+    bytes: &[u8],
+) -> Result<UploadAttachmentResult, AppCommandError> {
+    let size = bytes.len() as u64;
+    if size > UPLOAD_MAX_BYTES {
+        return Err(upload_too_large(size));
+    }
+    let env = UploadEnv {
+        uploads_root: uploads_root.to_path_buf(),
+        ..UploadEnv::live()
+    };
+    // Held to the end, like `upload_multipart`'s.
+    let _quota = env.reserve(size).await?;
+    let tmp_dir = prepare_staging_dir(uploads_root).await?;
+    if bytes.is_empty() {
+        return Err(AppCommandError::io_error("Uploaded file is empty"));
+    }
+    let staging_name = new_staging_name();
+    let mut cleanup = StagingCleanup::new(&tmp_dir, &staging_name);
+    let session_bucket = session_id
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(sanitize_session_bucket);
+    let result = write_and_finalize(
+        bytes,
+        uploads_root,
+        &tmp_dir,
+        &staging_name,
+        file_name,
+        session_bucket,
+        mime_type,
+    )
+    .await;
+    if result.is_ok() {
+        cleanup.disarm();
+    }
+    result
+}
+
+/// Write in-memory bytes to the staging file, then finalize them like a
+/// streamed upload. The handle is closed before the move into the bucket.
+async fn write_and_finalize(
+    bytes: &[u8],
+    uploads_root: &std::path::Path,
+    tmp_dir: &std::path::Path,
+    staging_name: &str,
+    file_name: &str,
+    session_bucket: Option<String>,
+    mime_type: Option<String>,
+) -> Result<UploadAttachmentResult, AppCommandError> {
+    {
+        let mut out = upload_jail::create_staging_file(tmp_dir, staging_name)
+            .await
+            .map_err(|e| {
+                AppCommandError::io_error("Failed to create staging file")
+                    .with_detail(e.to_string())
+            })?;
+        out.write_all(bytes).await.map_err(|e| {
+            AppCommandError::io_error("Failed to write staging file").with_detail(e.to_string())
+        })?;
+        out.flush().await.map_err(|e| {
+            AppCommandError::io_error("Failed to flush staging file").with_detail(e.to_string())
+        })?;
+    }
+    finalize_staged_upload(
+        uploads_root,
+        tmp_dir,
+        staging_name,
+        session_bucket,
+        Some(file_name),
+        bytes.len() as u64,
+        mime_type,
+    )
+    .await
 }
 
 pub(super) fn new_staging_name() -> String {
@@ -1444,6 +1549,81 @@ mod tests {
             b"new"
         );
         assert!(!tmp.join("upload.part").exists());
+    }
+
+    #[tokio::test]
+    async fn stored_bytes_land_in_the_session_bucket_like_an_upload() {
+        let root = tempfile::tempdir().unwrap();
+        let first = store_attachment_bytes_in(
+            root.path(),
+            "bundle.zip",
+            Some("application/zip".to_string()),
+            Some("tab-1"),
+            b"PK\x05\x06",
+        )
+        .await
+        .unwrap();
+        assert_eq!(first.name, "bundle.zip");
+        assert_eq!(first.size, 4);
+        assert_eq!(first.mime_type.as_deref(), Some("application/zip"));
+        assert_eq!(std::fs::read(&first.path).unwrap(), b"PK\x05\x06");
+        // The stored path drops Windows' verbatim prefix, so the expected
+        // parent drops it the same way.
+        let bucket = simplify_verbatim_path(&root.path().join("tab-1").canonicalize().unwrap());
+        assert_eq!(
+            std::path::Path::new(&first.path).parent(),
+            Some(bucket.as_path())
+        );
+
+        // The same name pasted again takes the next free one; the first stays.
+        let second =
+            store_attachment_bytes_in(root.path(), "bundle.zip", None, Some("tab-1"), b"other")
+                .await
+                .unwrap();
+        assert_eq!(second.name, "bundle (1).zip");
+        assert_eq!(std::fs::read(&first.path).unwrap(), b"PK\x05\x06");
+        assert_eq!(std::fs::read(&second.path).unwrap(), b"other");
+        // Nothing is left behind in staging.
+        let staged = std::fs::read_dir(root.path().join(".tmp")).unwrap().count();
+        assert_eq!(staged, 0);
+    }
+
+    #[tokio::test]
+    async fn stored_bytes_are_named_and_bucketed_as_safely_as_an_upload() {
+        let root = tempfile::tempdir().unwrap();
+        let stored =
+            store_attachment_bytes_in(root.path(), "../../etc/passwd", None, Some("  "), b"x")
+                .await
+                .unwrap();
+        assert_eq!(stored.name, "passwd");
+        let anon = simplify_verbatim_path(&root.path().join("anon").canonicalize().unwrap());
+        assert_eq!(
+            std::path::Path::new(&stored.path).parent(),
+            Some(anon.as_path())
+        );
+    }
+
+    #[tokio::test]
+    async fn stored_bytes_are_refused_when_empty_or_over_the_cap() {
+        let root = tempfile::tempdir().unwrap();
+        let empty = store_attachment_bytes_in(root.path(), "a.txt", None, None, b"")
+            .await
+            .unwrap_err();
+        assert_eq!(empty.message, "Uploaded file is empty");
+
+        let big = vec![0u8; UPLOAD_MAX_BYTES as usize + 1];
+        let too_large = store_attachment_bytes_in(root.path(), "big.bin", None, None, &big)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            too_large.i18n_key.as_deref(),
+            Some(UPLOAD_I18N_KEY_TOO_LARGE)
+        );
+
+        // Neither left a file anywhere under the root.
+        let staged = std::fs::read_dir(root.path().join(".tmp")).unwrap().count();
+        assert_eq!(staged, 0);
+        assert!(!root.path().join("anon").exists());
     }
 
     #[test]

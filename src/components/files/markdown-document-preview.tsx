@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { Streamdown, defaultRehypePlugins } from "streamdown"
 import { readFileBase64 } from "@/lib/api"
 import { normalizeMathDelimiters } from "@/components/ai-elements/message"
+import { scrollportComponents } from "@/components/ai-elements/markdown-scrollport"
 import { mermaidComponents } from "@/components/ai-elements/mermaid-block"
 import {
   STREAMDOWN_LOGICAL_QUOTE_CLASSES,
@@ -287,6 +288,7 @@ export function MarkdownDocumentPreview({
         parseIncompleteMarkdown={false}
         components={{
           ...mermaidComponents,
+          ...scrollportComponents,
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
           img: ({ node, ...imgProps }) => (
             <PreviewImage

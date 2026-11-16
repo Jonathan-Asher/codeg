@@ -237,6 +237,7 @@ function emptySession(): ConversationRuntimeSession {
     localTurns: [],
     backgroundTurns: [],
     pendingBackgroundSettlements: [],
+    pendingCancelledTurnReports: null,
     optimisticTurns: [],
     liveMessage: null,
     syncState: "idle",
@@ -433,36 +434,31 @@ describe("pairing the local copy with the transcript around user turns", () => {
   const a = (id: string, words: string, duration_ms?: number) =>
     turn(id, "assistant", [text(words)], 0, { duration_ms })
 
-  it("falls back to the whole-batch alignment when the cuts disagree", () => {
+  it("names no turn when the cuts disagree", () => {
     // The transcript has no record of the message sent mid-turn (an older
-    // server): one user turn there, two here.
+    // server): one user turn there, two here. No position can be proven, so
+    // "fork from here" falls back to a tail fork rather than a wrong reply.
     const localTurns = [u("p"), a("l1", "one"), u("s"), a("l2", "two")]
     const parsedTurns = [u("p"), a("t1", "one", 10), a("t2", "two", 20)]
-    const bySegment = computeTurnMetadataPatches({
-      localAssistantIndices: [1, 3],
-      parsedAssistantTurns: parsedTurns.filter((t) => t.role === "assistant"),
+    const patches = computeTurnMetadataPatches({
+      localTurns,
+      parsedTurns,
       persistedAssistantCount: 0,
-      parseEndsWithAssistant: true,
-      bySegment: { localTurns, parsedTurns },
-    })
-    const whole = computeTurnMetadataPatches({
-      localAssistantIndices: [1, 3],
-      parsedAssistantTurns: parsedTurns.filter((t) => t.role === "assistant"),
-      persistedAssistantCount: 0,
+      parseOpensAtBatch: true,
       parseEndsWithAssistant: true,
     })
-    expect(bySegment).toEqual(whole)
+    expect(patches.every((p) => p.source_turn_id === undefined)).toBe(true)
   })
 
   it("names each half of a split reply after its own transcript turn", () => {
     const localTurns = [u("p"), a("l1", "one"), u("s"), a("l2", "two")]
     const parsedTurns = [u("p"), a("t1", "one", 10), u("s"), a("t2", "two", 20)]
     const patches = computeTurnMetadataPatches({
-      localAssistantIndices: [1, 3],
-      parsedAssistantTurns: parsedTurns.filter((t) => t.role === "assistant"),
+      localTurns,
+      parsedTurns,
       persistedAssistantCount: 0,
+      parseOpensAtBatch: true,
       parseEndsWithAssistant: true,
-      bySegment: { localTurns, parsedTurns },
     })
     expect(
       patches.map((p) => [p.index, p.duration_ms, p.source_turn_id])

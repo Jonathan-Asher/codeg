@@ -9,10 +9,19 @@
 //      `src-tauri/`. The companion is its own workspace package
 //      (crates/codeg-mcp) and depends only on the protocol crate, so this
 //      takes seconds: it never compiles the app's library.
-//   3. Copies the produced binary to
-//      `src-tauri/binaries/codeg-mcp-<triple>{.exe}` so Tauri's externalBin
-//      bundler picks it up under the bare name `codeg-mcp` at install time.
-//   4. On macOS targets only: builds the natural-voice sidecar `codeg-tts`
+//   3. Runs `cargo build --release -p codeg-lib --no-default-features`, with
+//      the feature each binary target requires, for the library's sidecar
+//      bins (`codeg-computer-helper`, `codeg-cli`) for that triple.
+//   4. Copies each produced binary to
+//      `src-tauri/binaries/<bin>-<triple>{.exe}` so Tauri's externalBin
+//      bundler picks it up under its bare name at install time.
+//   5. For a macOS target, also wraps the helper in an app of its own,
+//      `src-tauri/binaries/codeg-computer-helper.app`, which the bundle
+//      carries as `Contents/Helpers/codeg-computer-helper.app` (see
+//      `tauri.macos.conf.json`). macOS charges an executable's permissions to
+//      the app bundle it sits in: a helper beside codeg in `Contents/MacOS/`
+//      would hold codeg's — every agent's shell's — and none of its own.
+//   6. On macOS targets only: builds the natural-voice sidecar `codeg-tts`
 //      (Swift package `native/codeg-tts`, BlueTTS 2.5 + RenikudPlus) with
 //      `swift build -c release` and stages it the same way. It is listed in
 //      tauri.macos.conf.json, so other platforms never look for it. The
@@ -20,7 +29,7 @@
 //      native/codeg-tts/README.md. `CODEG_SKIP_TTS_SIDECAR=1` skips it (the
 //      app then ships build.rs's empty placeholder and reads aloud with the
 //      system voices only).
-//   5. On macOS targets only: Talk on the Mac's helper `codeg-talk` (Swift
+//   7. On macOS targets only: Talk on the Mac's helper `codeg-talk` (Swift
 //      package `native/codeg-talk`), built for arm64 only with
 //      `swift build -c release --triple arm64-apple-macosx15.0` (its engines,
 //      whisper.framework's and sherpa-onnx's, are Apple Silicon only), and
@@ -37,13 +46,22 @@
 // by modification time), so rewriting an identical copy re-ran the build
 // script and recompiled the whole crate on every build.
 //
+// `codeg-computer-helper` takes its trust anchors from the environment at
+// compile time (`CODEG_COMPUTER_PEER_REQUIREMENT`): a release build sets it
+// for the macOS builds, and a local build without it is a development helper
+// that says so. Nothing here sets or defaults it.
+//
 // Why a separate script (not inline in beforeBuildCommand / GitHub Actions):
 //   - Cross-compile in release.yml passes `--target <triple>` so we honour
 //     the matrix triple rather than rebuilding for the host.
 //   - Local `pnpm tauri dev` / `pnpm tauri build` invoke it without args and
 //     get a host-triple build, so the externalBin lookup still finds a file.
 //   - Skippable: set `CODEG_SKIP_SIDECAR=1` when iterating on the frontend
-//     and you don't care about delegation.
+//     and you don't care about delegation or computer use: a development
+//     codeg refuses a computer helper built from other sources than its own,
+//     so after a change under `src-tauri/crates/codeg-lib/src/computer/` run
+//     this script once (it is what rebuilds the helper) and restart
+//     `pnpm tauri dev`.
 //
 // Intentionally Node-only (no shell): runs identically on macOS, Linux,
 // Windows GitHub runners.
@@ -61,6 +79,7 @@ import {
   lstatSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
@@ -71,6 +90,15 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
 const SRC_TAURI = resolve(SCRIPT_DIR, "..")
 const BINARIES_DIR = join(SRC_TAURI, "binaries")
 const BIN_NAME = "codeg-mcp"
+// The library's sidecars, in `bundle.externalBin` (on macOS the helper is
+// bundled as an app instead; see `stageHelperApp`), built in one cargo
+// invocation from crates/codeg-lib with the features their binary targets
+// require — all of them: naming only one would leave the other's target
+// disabled.
+const LIB_BIN_NAMES = ["codeg-computer-helper", "codeg-cli"]
+const LIB_FEATURES = "computer-helper,cli-bin"
+const HELPER = "codeg-computer-helper"
+const HELPER_APP = join(BINARIES_DIR, `${HELPER}.app`)
 const TTS_BIN_NAME = "codeg-tts"
 const TTS_PACKAGE = resolve(SRC_TAURI, "..", "native", "codeg-tts")
 const TALK_BIN_NAME = "codeg-talk"
@@ -177,9 +205,47 @@ function resolveHostTriple() {
   }
 }
 
+// The helper as an app: its Info.plist (identifier `app.codeg.computer-helper`,
+// no Dock icon), its executable, codeg's icon. Sealed ad hoc, so a bundle
+// signed around it accepts it; release.yml signs it again with the Developer
+// ID before `tauri build`.
+function stageHelperApp(built) {
+  const version = JSON.parse(
+    readFileSync(join(SRC_TAURI, "tauri.conf.json"), "utf8")
+  ).version
+  const plist = readFileSync(
+    join(SRC_TAURI, "macos", `${HELPER}.plist`),
+    "utf8"
+  ).replaceAll("{{version}}", version)
+  rmSync(HELPER_APP, { recursive: true, force: true })
+  const contents = join(HELPER_APP, "Contents")
+  mkdirSync(join(contents, "MacOS"), { recursive: true })
+  mkdirSync(join(contents, "Resources"), { recursive: true })
+  writeFileSync(join(contents, "Info.plist"), plist)
+  const exe = join(contents, "MacOS", HELPER)
+  copyFileSync(built, exe)
+  chmodSync(exe, 0o755)
+  copyFileSync(
+    join(SRC_TAURI, "icons", "icon.icns"),
+    join(contents, "Resources", "icon.icns")
+  )
+  if (process.platform === "darwin") {
+    execFileSync("codesign", ["--force", "--sign", "-", HELPER_APP], {
+      stdio: "inherit",
+    })
+  } else {
+    log(`not on macOS: ${HELPER_APP} is left unsigned`)
+  }
+  log(`helper app staged at ${HELPER_APP}`)
+}
+
 function main() {
   if (process.env.CODEG_SKIP_SIDECAR === "1") {
     log("CODEG_SKIP_SIDECAR=1 — skipping sidecar preparation")
+    log(
+      "computer use refuses a helper older than src-tauri/crates/codeg-lib/src/computer/; " +
+        "run `pnpm tauri:prepare-sidecars` after changing it"
+    )
     return
   }
 
@@ -188,6 +254,7 @@ function main() {
     cliTarget || process.env.TAURI_TARGET_TRIPLE || resolveHostTriple()
   log(`target triple: ${target}`)
   buildMcpSidecar(target)
+  buildLibSidecars(target)
   buildTtsSidecar(target)
   buildTalkSidecar(target)
 }
@@ -208,19 +275,52 @@ function buildMcpSidecar(target) {
     { stdio: "inherit", cwd: SRC_TAURI }
   )
 
-  const built = join(
-    SRC_TAURI,
-    "target",
-    target,
-    "release",
-    `${BIN_NAME}${ext}`
-  )
-  if (!existsSync(built)) {
-    die(`expected ${built} after cargo build, but it does not exist`)
-  }
-
   mkdirSync(BINARIES_DIR, { recursive: true })
   stageFile(built, join(BINARIES_DIR, `${BIN_NAME}-${target}${ext}`))
+}
+
+/**
+ * The library's sidecars: the computer-use helper and the command-line
+ * client, built from crates/codeg-lib without the desktop features, so they
+ * cross-compile without the Tauri runtime's WebKit / WebView2, in one cargo
+ * invocation so they share one dependency build. Each binary target needs its
+ * own feature (crates/codeg-lib/Cargo.toml), off by default. On a macOS
+ * target the helper is also wrapped in an app of its own (`stageHelperApp`).
+ */
+function buildLibSidecars(target) {
+  const isWindows = target.includes("windows")
+  const ext = isWindows ? ".exe" : ""
+  log(
+    `building ${LIB_BIN_NAMES.join(", ")} (--release -p codeg-lib --no-default-features --features ${LIB_FEATURES})`
+  )
+  execFileSync(
+    "cargo",
+    [
+      "build",
+      "--release",
+      "-p",
+      "codeg-lib",
+      ...LIB_BIN_NAMES.flatMap((name) => ["--bin", name]),
+      "--no-default-features",
+      "--features",
+      LIB_FEATURES,
+      "--target",
+      target,
+    ],
+    { stdio: "inherit", cwd: SRC_TAURI }
+  )
+
+  mkdirSync(BINARIES_DIR, { recursive: true })
+  for (const name of LIB_BIN_NAMES) {
+    const built = join(SRC_TAURI, "target", target, "release", `${name}${ext}`)
+    if (!existsSync(built)) {
+      die(`expected ${built} after cargo build, but it does not exist`)
+    }
+    stageFile(built, join(BINARIES_DIR, `${name}-${target}${ext}`))
+    if (name === HELPER && target.includes("apple-darwin")) {
+      stageHelperApp(built)
+    }
+  }
 }
 
 /** The Swift triple for a Rust darwin triple (`aarch64` → `arm64`). */

@@ -129,7 +129,7 @@ beforeEach(() => {
 })
 
 describe("QuickActionsDropdown", () => {
-  it("groups all nine actions under their headings on desktop", async () => {
+  it("groups desktop actions under their headings", async () => {
     await mountAndOpen()
 
     for (const group of ["Workspace", "Navigation", "More"]) {
@@ -212,6 +212,9 @@ describe("QuickActionsDropdown", () => {
     ).toBeVisible()
     expect(
       screen.queryByRole("menuitem", { name: "Open remote workspace" })
+    ).toBeNull()
+    expect(
+      screen.queryByRole("menuitem", { name: "Local workspace" })
     ).toBeNull()
     expect(screen.queryByRole("menuitem", { name: "Show pet" })).toBeNull()
     expect(screen.queryByText("More")).toBeNull()
