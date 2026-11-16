@@ -10,12 +10,16 @@ export type UnsubscribeFn = () => void
  *   - "connecting":   not connected yet since this window opened
  *   - "reconnecting": was connected, lost the link, retrying on its own
  *   - "unauthorized": the server rejected the token
+ *   - "proxyUnauthorized": a 401 that did not come from codeg — the session
+ *     of an identity-aware proxy in front of the server expired while the
+ *     codeg token is still good (browser client only)
  */
 export type ConnectionHealth =
   | "connected"
   | "connecting"
   | "reconnecting"
   | "unauthorized"
+  | "proxyUnauthorized"
 
 /** What a transport exposes so the connection dialog can follow its link. */
 export interface ConnectionHealthSource {
@@ -33,6 +37,11 @@ export interface RemoteTransportConfig {
   baseUrl: string
   token: string
   windowInstanceId: string
+  /**
+   * The remote server refused the connection's token: a 401 on an HTTP call
+   * or on the event socket's handshake. Network failures never call this:
+   * the event socket keeps retrying them.
+   */
   onUnauthorized?: () => void
 }
 
@@ -171,11 +180,15 @@ export interface Transport {
    * `receiver_count == 0`, so anything fired between `onclose` and the next
    * `__ready__` is lost. Re-fetching backend snapshots is the recovery path.
    *
-   * Not fired on the initial connect (consumers handle that separately).
+   * Not fired on a clean initial connect (consumers handle that separately).
+   * A transport may notify on its first successful connection if offline
+   * startup reads failed and the consumers need to retry hydration.
    * Returns an unsubscribe function. Optional — IPC-only transports (e.g.
    * Tauri) leave this undefined.
    */
   onReconnect?(callback: () => void): UnsubscribeFn
+  /** Fires after every server __ready__, including the first after offline startup. */
+  onReady?(callback: () => void): UnsubscribeFn
 
   /**
    * Verify the WebSocket link is actually alive. Meant for wake-up moments

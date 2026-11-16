@@ -52,16 +52,29 @@ mod m20260925_000001_message_fts_trigram;
 mod m20260926_000001_conversation_turn_state;
 mod m20260928_000001_conversation_selector_state;
 mod m20260928_000002_conversation_auto_resume;
+mod m20260929_000001_canvas_board;
+mod m20260930_000001_agent_setting_drop_adapter_channel;
 mod m20261001_000001_conversation_critical;
 mod m20261002_000001_conversation_limit_resume;
 mod m20261002_000001_push_devices;
+mod m20261006_000001_conversation_tag;
 mod m20261012_000001_folder_archived;
+mod m20261015_000001_kiro_builtin_agent;
+mod m20261015_000001_work_task_deferred_at;
+mod m20261016_000001_assistant;
+mod m20261016_000002_conversation_assistant;
+mod m20261017_000002_conversation_source;
+mod m20261020_000001_folder_command_run_local;
 mod m20261022_000001_conversation_limit_reason;
+mod m20261022_000001_tool_approval;
+mod m20261022_000001_work_task_delivery;
 mod m20261026_000001_conversation_last_viewed_at;
 mod m20261028_000001_message_fts_state_turns;
 mod m20261101_000001_conversation_talk_state;
+mod m20261106_000001_work_task_source_key;
 mod m20261111_000001_conversation_moved_from_cwd;
 mod m20261112_000001_conversation_background_resume;
+mod m20261112_000001_work_task_writeback_drafts;
 mod m20261112_000002_side_question;
 pub struct Migrator;
 
@@ -121,17 +134,56 @@ impl MigratorTrait for Migrator {
             Box::new(m20260926_000001_conversation_turn_state::Migration),
             Box::new(m20260928_000001_conversation_selector_state::Migration),
             Box::new(m20260928_000002_conversation_auto_resume::Migration),
+            Box::new(m20260929_000001_canvas_board::Migration),
+            Box::new(m20260930_000001_agent_setting_drop_adapter_channel::Migration),
             Box::new(m20261001_000001_conversation_critical::Migration),
             Box::new(m20261002_000001_conversation_limit_resume::Migration),
             Box::new(m20261002_000001_push_devices::Migration),
+            Box::new(m20261006_000001_conversation_tag::Migration),
             Box::new(m20261012_000001_folder_archived::Migration),
+            Box::new(m20261015_000001_kiro_builtin_agent::Migration),
+            Box::new(m20261015_000001_work_task_deferred_at::Migration),
+            Box::new(m20261016_000001_assistant::Migration),
+            Box::new(m20261016_000002_conversation_assistant::Migration),
+            Box::new(m20261017_000002_conversation_source::Migration),
+            Box::new(m20261020_000001_folder_command_run_local::Migration),
             Box::new(m20261022_000001_conversation_limit_reason::Migration),
+            Box::new(m20261022_000001_tool_approval::Migration),
+            Box::new(m20261022_000001_work_task_delivery::Migration),
             Box::new(m20261026_000001_conversation_last_viewed_at::Migration),
             Box::new(m20261028_000001_message_fts_state_turns::Migration),
             Box::new(m20261101_000001_conversation_talk_state::Migration),
+            Box::new(m20261106_000001_work_task_source_key::Migration),
             Box::new(m20261111_000001_conversation_moved_from_cwd::Migration),
             Box::new(m20261112_000001_conversation_background_resume::Migration),
+            Box::new(m20261112_000001_work_task_writeback_drafts::Migration),
             Box::new(m20261112_000002_side_question::Migration),
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sea_orm_migration::MigratorTrait;
+
+    use crate::db::migration::Migrator;
+
+    /// A backup records the last migration here as its schema version, and a
+    /// build refuses a backup naming a migration it does not know. A new
+    /// migration listed ahead of a released one (an easy slip when a rebase
+    /// conflicts on this list) leaves the released name last, so that release
+    /// accepts the newer backup and then cannot start on the migration the
+    /// restore brought in. Names are dated when written, so name order keeps
+    /// the newest migration last. A new migration whose name sorts before a
+    /// released one needs a later name, not an earlier place in the list.
+    #[test]
+    fn migrations_are_listed_in_name_order() {
+        let names: Vec<String> = Migrator::migrations()
+            .iter()
+            .map(|m| m.name().to_string())
+            .collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(names, sorted);
     }
 }

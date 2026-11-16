@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * "Claude prompt suggestions" — whether Claude Code predicts the next prompt
+ * "Prompt suggestions" — whether Claude Code and Codex predict the next prompt
  * after each turn, shown as ghost text in the empty composer (backend
  * `acp::prompt_suggestions`). Each prediction is one more request with the
  * session's whole context, so it can be turned off. Stored per data directory

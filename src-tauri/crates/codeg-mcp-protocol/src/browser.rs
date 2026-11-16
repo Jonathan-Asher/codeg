@@ -268,3 +268,39 @@ impl BrowserTabOp {
         }
     }
 }
+
+/// How much of a tab an agent may have.
+///
+/// `Control` is defined here rather than with the package that will act on a
+/// page, because the level a person picks is the level they picked: a UI that
+/// could only offer `Read` today would have to re-ask everyone the day
+/// actions land, and a stored `control` that silently behaved as `read` would
+/// be worse. Nothing in this build asks for `Control` yet — `allows` is how
+/// the asking will be spelled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum GrantLevel {
+    #[default]
+    None,
+    Read,
+    Control,
+}
+
+impl GrantLevel {
+    /// Whether a tab at this level may be asked for something that needs
+    /// `required`.
+    pub fn allows(self, required: GrantLevel) -> bool {
+        self.rank() >= required.rank()
+    }
+
+    /// Written as a match, not as a derived `Ord`, so that adding a level
+    /// forces someone to say where it sits rather than inheriting a position
+    /// from where it happened to be typed.
+    fn rank(self) -> u8 {
+        match self {
+            GrantLevel::None => 0,
+            GrantLevel::Read => 1,
+            GrantLevel::Control => 2,
+        }
+    }
+}

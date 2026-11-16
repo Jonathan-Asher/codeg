@@ -37,18 +37,21 @@ function CommandDialog({
   shouldFilter,
   value,
   onValueChange,
+  onOpenAutoFocus,
   ...props
-}: React.ComponentProps<typeof Dialog> & {
-  title?: string
-  shouldFilter?: boolean
-  value?: string
-  onValueChange?: (value: string) => void
-}) {
+}: React.ComponentProps<typeof Dialog> &
+  Pick<React.ComponentProps<typeof DialogContent>, "onOpenAutoFocus"> & {
+    title?: string
+    shouldFilter?: boolean
+    value?: string
+    onValueChange?: (value: string) => void
+  }) {
   return (
     <Dialog {...props}>
       <DialogContent
         className={COMMAND_DIALOG_CONTENT_CLASS}
         closeButtonClassName="top-1.5 z-10"
+        onOpenAutoFocus={onOpenAutoFocus}
       >
         <VisuallyHidden.Root>
           <DialogTitle>{title}</DialogTitle>
@@ -72,7 +75,7 @@ function CommandInput({
 }: React.ComponentProps<typeof CommandPrimitive.Input>) {
   return (
     <div className="flex items-center border-b px-3" cmdk-input-wrapper="">
-      <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
+      <Search className="me-2 h-4 w-4 shrink-0 opacity-50" />
       <CommandPrimitive.Input
         data-slot="command-input"
         className={cn(

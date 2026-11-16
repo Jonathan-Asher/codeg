@@ -31,10 +31,16 @@ import type {
   ConnectionHealthSource,
   Transport,
 } from "./types"
+import type { UnauthorizedSource } from "./web-auth"
+import type { WebTransport } from "./web-transport"
+
+/** What the guard follows: a transport's link health (`ConnectionHealth`,
+ *  including the browser transport's `proxyUnauthorized`). */
+export type WebConnectionState = ConnectionHealth
 
 // Module-level constant so `getServerSnapshot` returns a STABLE reference on
 // every call — React warns / loops if the server snapshot identity changes.
-const CONNECTED: ConnectionHealth = "connected"
+const CONNECTED: WebConnectionState = "connected"
 
 const noop = () => {}
 
@@ -45,6 +51,21 @@ function hasHealthSurface(
     typeof (transport as Partial<ConnectionHealthSource>)
       .subscribeConnection === "function"
   )
+}
+
+// The browser client's `WebTransport`, or null anywhere else (SSR, desktop,
+// remote-desktop windows).
+function webTransport(): WebTransport | null {
+  if (typeof window === "undefined") return null
+  if (detectEnvironment() !== "web" || isRemoteDesktopMode()) return null
+  const transport = getShellTransport()
+  if (
+    typeof (transport as Partial<WebTransport>).subscribeConnection !==
+    "function"
+  ) {
+    return null
+  }
+  return transport as WebTransport
 }
 
 // Resolve the transport whose link the dialog follows, or null when it must
@@ -63,6 +84,12 @@ function connectionSource(): ConnectionHealthSource | null {
   return hasHealthSurface(transport) ? transport : null
 }
 
+/** Whether this page was served by the server it talks to — false on desktop
+ *  and in remote-desktop windows, whose pages ship with the app. */
+export function usesWebTransport(): boolean {
+  return webTransport() !== null
+}
+
 export function subscribeWebConnection(callback: () => void): () => void {
   if (typeof window === "undefined") return noop
   let unsubscribeSource = connectionSource()?.subscribeConnection(callback)
@@ -77,8 +104,9 @@ export function subscribeWebConnection(callback: () => void): () => void {
   }
 }
 
-export function getWebConnectionSnapshot(): ConnectionHealth {
-  const state = connectionSource()?.getConnectionSnapshot() ?? CONNECTED
+export function getWebConnectionSnapshot(): WebConnectionState {
+  const state: WebConnectionState =
+    connectionSource()?.getConnectionSnapshot() ?? CONNECTED
   // A remote window's rejected token is shown by its own full-window screen
   // (RemoteConnectionGate): the dialog stays out of the way rather than
   // stacking a second, web-only "sign in again" prompt on top of it.
@@ -86,7 +114,7 @@ export function getWebConnectionSnapshot(): ConnectionHealth {
   return state
 }
 
-export function getWebConnectionServerSnapshot(): ConnectionHealth {
+export function getWebConnectionServerSnapshot(): WebConnectionState {
   return CONNECTED
 }
 
@@ -111,8 +139,13 @@ export function reconnectWebNow(): void {
  * Funnel a definitive HTTP 401 (e.g. from a raw file-upload fetch in
  * `lib/api.ts` that bypasses the transport's `call`) into the same
  * unauthorized handling the transport uses for its own calls, rather than an
- * abrupt redirect. No-op in a local desktop window.
+ * abrupt redirect. `source` tells a rejected codeg token from an expired proxy
+ * session (browser client only). No-op in a local desktop window.
  */
-export function notifyWebUnauthorized(): void {
-  connectionSource()?.markUnauthorized()
+export function notifyWebUnauthorized(
+  source: UnauthorizedSource = "codeg"
+): void {
+  const web = webTransport()
+  if (web) web.markUnauthorized(source)
+  else connectionSource()?.markUnauthorized()
 }

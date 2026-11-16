@@ -111,6 +111,8 @@ export interface UseMessageQueueReturn {
   dequeue: () => QueuedMessage | undefined
   remove: (id: string) => void
   reorder: (items: QueuedMessage[]) => void
+  /** Prioritize a still-queued item using its latest draft and mode. */
+  moveToFront: (id: string) => void
   updateItem: (id: string, draft: PromptDraft) => void
   /** Mark a queued message as not sent (see {@link QueuedMessage.failure}). */
   markFailed: (id: string, failure: SendFailure) => void
@@ -442,6 +444,16 @@ export function useMessageQueue(
     [commit]
   )
 
+  const moveToFront = useCallback(
+    (id: string) => {
+      const current = storeRef.current.state.queue
+      const index = current.findIndex((item) => item.id === id)
+      if (index <= 0) return
+      commit([current[index], ...current.filter((item) => item.id !== id)])
+    },
+    [commit]
+  )
+
   const trackSend = useCallback((entry: Omit<InFlightMessage, "startedAt">) => {
     const target = storeRef.current
     target.state.inflight.set(entry.clientMessageId, {
@@ -478,6 +490,7 @@ export function useMessageQueue(
     dequeue,
     remove,
     reorder,
+    moveToFront,
     updateItem,
     markFailed,
     retry,

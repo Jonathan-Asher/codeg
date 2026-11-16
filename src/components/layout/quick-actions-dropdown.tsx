@@ -52,14 +52,15 @@ import { WorkspaceFolderDialog } from "./workspace-folder-dialog"
  *
  * Every entry here already exists somewhere else (the sidebar's nav rows, the
  * folder-list context menu, the top-left chrome, the file tab strip's "+",
- * Settings › Appearance), but those homes are scattered and several of them
- * disappear with the sidebar collapsed — or, for the file strip, whenever no
- * file tab is open. The status bar never unmounts, so this menu is the one
- * always-on path to all of them. Items are grouped by what they act on rather
- * than by where they used to live: workspace (open/clone/boot/remote, plus —
- * in a remote workspace window — the way back to the local one),
- * navigation (every full-page workbench route), and then the two window-level
- * extras — a browser tab and the desktop pet. Search and the
+ * Settings › Appearance, the tray menu), but those homes are scattered and
+ * several of them disappear with the sidebar collapsed — or, for the file
+ * strip, whenever no file tab is open. The status bar never unmounts, so this
+ * menu is the one always-on path to all of them. Items are grouped by what
+ * they act on rather than by where they used to live: workspace
+ * (open/clone/boot/remote, plus — in a remote workspace window — the way back
+ * to the local one), navigation (every full-page workbench route), and then
+ * the two window-level extras — a browser tab and the desktop pet. Search and
+ * the
  * per-folder session actions (manage / import) are the deliberate omissions —
  * search has a permanent button in the window's top-left chrome, and the
  * session actions are folder-scoped, so they live where a folder is: "Manage
@@ -99,10 +100,11 @@ export function QuickActionsDropdown() {
     refresh: refreshRemote,
     open: handleOpenRemote,
   } = useRemoteWorkspaceConnections()
-
   // A remote workspace window's way back to this machine's own workspace —
   // the one on screen when a launch opened the remote workspace and kept the
-  // local window hidden (the tray's "Show Workspace" is the other).
+  // local window hidden (the tray's "Show Workspace" is the other). Only a
+  // remote workspace window has one; in the local one the row would just
+  // focus the window it was picked from.
   const remoteWindow = isRemoteDesktopWindow()
   const handleShowLocal = useCallback(() => {
     showLocalWorkspace().catch((err) => {

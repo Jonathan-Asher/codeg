@@ -6,6 +6,7 @@ import {
   useConnectionStore,
   getCachedSelectors,
   type ClaudeApiRetryState,
+  type ConnectErrorInfo,
   type ConnectOptions,
   type ConnectionState,
   type PendingPermission,
@@ -25,12 +26,18 @@ import type {
   PromptCapabilitiesInfo,
   PromptSuggestionInfo,
   QuestionAnswer,
+  RemoteControlInfo,
   SessionConfigOptionInfo,
   AsyncTaskRecord,
+  BackgroundOutstandingTask,
   SessionFailureRecord,
   SessionModeStateInfo,
   PromptInputBlock,
 } from "@/lib/types"
+import {
+  EMPTY_TOOL_APPROVALS,
+  type ToolApprovalMap,
+} from "@/lib/activity/approval"
 
 const DEFAULT_PROMPT_CAPABILITIES: PromptCapabilitiesInfo = {
   image: false,
@@ -44,6 +51,8 @@ const EMPTY_STEERED_MESSAGE_IDS: string[] = []
 // Stable empty reference: a new [] on every render would break the memo below
 // for every connection that has no async tasks — i.e. almost all of them.
 const EMPTY_ASYNC_TASKS: AsyncTaskRecord[] = []
+const EMPTY_DELEGATED_CHILDREN: string[] = []
+const EMPTY_BACKGROUND_TASKS: readonly BackgroundOutstandingTask[] = []
 
 export interface UseConnectionReturn {
   connectionId: string | null
@@ -75,6 +84,12 @@ export interface UseConnectionReturn {
    *  none on its way. `status` reads `null` then, as for a key never
    *  connected; this tells the two apart. */
   connectFailed: boolean
+  /** Why the last `connect()` for this contextKey failed, as the provider
+   *  published it (the toast and the status chip read the same record), or
+   *  null. Covers requests whose own promise never reported it: a request
+   *  parked behind another in-flight connect resolves at once and is run, and
+   *  can fail, later. */
+  connectError: ConnectErrorInfo | null
   promptCapabilities: PromptCapabilitiesInfo
   supportsFork: boolean
   /** See `ConnectionState.forkStrictPoint`. */
@@ -97,6 +112,9 @@ export interface UseConnectionReturn {
   modes: SessionModeStateInfo | null
   configOptions: SessionConfigOptionInfo[] | null
   availableCommands: AvailableCommandInfo[] | null
+  /** Claude Code's Remote Control while it is on, or `null`. See
+   *  `ConnectionState.remoteControl`. */
+  remoteControl: RemoteControlInfo | null
   pendingPermission: PendingPermission | null
   pendingUserMessage: PendingUserMessage | null
   /** Feedback-note ids this turn's live message adopted as mid-turn user turns
@@ -110,6 +128,9 @@ export interface UseConnectionReturn {
   /** AIR typed session failure table (active + resolved; see
    *  `lib/session-failures.ts`). `[]` when the connection has none. */
   sessionFailures: SessionFailureRecord[]
+  /** The connection's answered permission requests by tool call id, for the
+   *  chips on their rows. See `ConnectionState.toolApprovals`. */
+  toolApprovals: ToolApprovalMap
   /** AIR async tasks — Claude's background shells / workflows / monitors
    *  (see `lib/async-tasks.ts`). Retained after they settle; the strip filters
    *  to the live ones. `[]` when the connection has none. */
@@ -151,6 +172,15 @@ export interface UseConnectionReturn {
   /** Whether messages ride the native `_session/steering` channel — the
    *  path that delivers a message into a held turn right away. */
   nativeSteering: boolean
+  /** Those tasks one by one — the background sub-agents the composer's
+   *  running list shows after their turn ended. See
+   *  `ConnectionState.backgroundTasks`. */
+  backgroundTasks: readonly BackgroundOutstandingTask[]
+  /** The codeg delegations this connection still has running (their child
+   *  connection ids). Never rendered from here either — a busy signal, because
+   *  ending the parent cancels them. See
+   *  `ConnectionState.delegatedChildren`. */
+  delegatedChildren: string[]
   connect: (
     agentType: AgentType,
     workingDir?: string,
@@ -211,6 +241,12 @@ const CONN_NON_RENDER_KEYS = new Set<keyof ConnectionState>([
   // enrichment); no useConnection consumer renders it, and it can churn per
   // background tool event.
   "outOfTurnToolCalls",
+  // Read from the store at event time by the out-of-turn notice; never
+  // rendered.
+  "hasPrompted",
+  // A stopped turn with its late reports folded in: handed to the runtime
+  // store by the connection dispatch, never rendered from here.
+  "cancelledTurn",
 ])
 
 // Shallow-equal two connection snapshots for RENDER purposes: equal iff every
@@ -289,11 +325,12 @@ export function useConnection(contextKey: string): UseConnectionReturn {
     () => store.getConnectError(contextKey),
     [store, contextKey]
   )
-  const connectError = useSyncExternalStore(
-    subscribe,
-    getConnectErrorSnapshot,
-    getConnectErrorSnapshot
-  )
+  const connectError =
+    useSyncExternalStore(
+      subscribe,
+      getConnectErrorSnapshot,
+      getConnectErrorSnapshot
+    ) ?? null
 
   const connectionId = connection?.connectionId ?? null
   const agentType = connection?.agentType ?? null
@@ -335,6 +372,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   const modes = connection?.modes ?? null
   const configOptions = connection?.configOptions ?? null
   const availableCommands = connection?.availableCommands ?? null
+  const remoteControl = connection?.remoteControl ?? null
   const pendingPermission = connection?.pendingPermission ?? null
   const pendingUserMessage = connection?.pendingUserMessage ?? null
   const steeredMessageIds =
@@ -344,6 +382,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
   const pendingPlanApproval = connection?.pendingPlanApproval ?? null
   const claudeApiRetry = connection?.claudeApiRetry ?? null
   const sessionFailures = connection?.sessionFailures ?? EMPTY_SESSION_FAILURES
+  const toolApprovals = connection?.toolApprovals ?? EMPTY_TOOL_APPROVALS
   const asyncTasks = connection?.asyncTasks ?? EMPTY_ASYNC_TASKS
   const toolCards = connection?.toolCards ?? null
   const error = connection?.error ?? null
@@ -360,6 +399,9 @@ export function useConnection(contextKey: string): UseConnectionReturn {
     connection?.status === "prompting" &&
     (connection?.awaitingBackground ?? false)
   const nativeSteering = connection?.nativeSteering ?? false
+  const backgroundTasks = connection?.backgroundTasks ?? EMPTY_BACKGROUND_TASKS
+  const delegatedChildren =
+    connection?.delegatedChildren ?? EMPTY_DELEGATED_CHILDREN
 
   const connect = useCallback(
     (
@@ -463,6 +505,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       attachStartedAt,
       poolWait,
       connectFailed,
+      connectError,
       promptCapabilities,
       supportsFork,
       forkStrictPoint,
@@ -476,6 +519,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       modes,
       configOptions,
       availableCommands,
+      remoteControl,
       pendingPermission,
       pendingUserMessage,
       steeredMessageIds,
@@ -484,6 +528,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       pendingPlanApproval,
       claudeApiRetry,
       sessionFailures,
+      toolApprovals,
       asyncTasks,
       toolCards,
       error,
@@ -498,6 +543,8 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       backgroundOutstanding,
       awaitingBackground,
       nativeSteering,
+      backgroundTasks,
+      delegatedChildren,
       connect,
       disconnect,
       release,
@@ -519,6 +566,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       attachStartedAt,
       poolWait,
       connectFailed,
+      connectError,
       promptCapabilities,
       supportsFork,
       forkStrictPoint,
@@ -532,6 +580,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       modes,
       configOptions,
       availableCommands,
+      remoteControl,
       pendingPermission,
       pendingUserMessage,
       steeredMessageIds,
@@ -540,6 +589,7 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       pendingPlanApproval,
       claudeApiRetry,
       sessionFailures,
+      toolApprovals,
       asyncTasks,
       toolCards,
       error,
@@ -554,6 +604,8 @@ export function useConnection(contextKey: string): UseConnectionReturn {
       backgroundOutstanding,
       awaitingBackground,
       nativeSteering,
+      backgroundTasks,
+      delegatedChildren,
       connect,
       disconnect,
       release,

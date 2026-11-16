@@ -25,6 +25,7 @@ import {
   type KnownInvocations,
 } from "@/lib/invocation-token"
 import { matchShortcutEvent } from "@/lib/keyboard-shortcuts"
+import { useVisibleMentionTabs } from "@/lib/mention-panel-prefs"
 import { cn } from "@/lib/utils"
 
 import { buildComposerExtensions } from "./editor-config"
@@ -268,6 +269,16 @@ export interface RichComposerProps {
    * a line break.
    */
   onContinueShortcut?: () => boolean
+  /**
+   * Text a bare Tab fills the document with while it is empty — the follow-up
+   * prompt the agent predicted, which the host shows as the placeholder. The
+   * filled text is an ordinary edit (onChange fires, nothing is sent), and the
+   * caret lands after it. Ignored once the document has content, and Tab then
+   * keeps its default meaning. Read at key time, so a new prediction needs no
+   * editor rebuild. A host that draws the prediction as `ghostText` takes the
+   * Tab through `onTabAccept` instead, which is asked first.
+   */
+  promptSuggestion?: string | null
 }
 
 /**
@@ -309,6 +320,7 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(
       ghostText = null,
       ghostHint,
       onTabAccept,
+      promptSuggestion,
     },
     ref
   ) {
@@ -337,6 +349,7 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(
     const onPlainPasteRef = useRef(onPlainPaste)
     const onContinueShortcutRef = useRef(onContinueShortcut)
     const onTabAcceptRef = useRef(onTabAccept)
+    const promptSuggestionRef = useRef(promptSuggestion)
     // The live editor, captured for command access inside editorProps handlers
     // (which are created before `editor` is assigned in this closure).
     const editorInstanceRef = useRef<Editor | null>(null)
@@ -360,6 +373,7 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(
       onPlainPasteRef.current = onPlainPaste
       onContinueShortcutRef.current = onContinueShortcut
       onTabAcceptRef.current = onTabAccept
+      promptSuggestionRef.current = promptSuggestion
     })
 
     // ── Unified `@` mention panel state bridge ──
@@ -372,6 +386,10 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(
     // (so Enter defers to the panel without waiting for a re-render).
     const mentionOpenRef = useRef(false)
     const popupRef = useRef<SuggestionPopupHandle>(null)
+    // Which `@` tabs to show and in what order — the user's preference from
+    // Settings → General, the same for every host. Read here rather than by
+    // each host so none of them can forget it; live across windows.
+    const mentionTabs = useVisibleMentionTabs()
     // Stable controller created once (refs/setState are stable), so the editor
     // is built a single time with it.
     const mentionController = useMemo<MentionController>(
@@ -455,16 +473,29 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(
           if (isExternalMenuOpenRef.current) {
             return onExternalMenuKeyDownRef.current?.(event) ?? false
           }
-          // A bare Tab, no menu open: the host's ghost text, if it shows one.
+          // A bare Tab, no menu open: the host's ghost text, if it shows one;
+          // else, in the empty composer, the predicted follow-up prompt the
+          // placeholder shows, as AIR and Claude Code's own prompt do. Either
+          // fills the document and sends nothing. Ahead of the submit/newline
+          // bindings: either one bound to Tab would act on an empty document,
+          // which sends or breaks nothing useful.
           if (
             event.key === "Tab" &&
             !event.shiftKey &&
             !event.altKey &&
             !event.ctrlKey &&
-            !event.metaKey &&
-            onTabAcceptRef.current?.() === true
+            !event.metaKey
           ) {
-            return true
+            if (onTabAcceptRef.current?.() === true) return true
+            const suggestion = promptSuggestionRef.current?.trim()
+            const ed = editorInstanceRef.current
+            if (suggestion && ed?.isEmpty) {
+              ed.chain()
+                .setContent(textToSeededDoc(suggestion, known()))
+                .focus("end")
+                .run()
+              return true
+            }
           }
           // Prompt history (chat composer only): a bare Up/Down at the
           // document's first/last position steps through sent prompts; anywhere
@@ -837,6 +868,7 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(
             moreLabel={mentionUiLabels?.more}
             countLabel={mentionUiLabels?.count}
             tabLabels={tabLabels}
+            tabs={mentionTabs}
           />
         )}
       </div>

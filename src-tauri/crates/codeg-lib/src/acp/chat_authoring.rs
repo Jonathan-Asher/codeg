@@ -35,6 +35,20 @@ pub use codeg_mcp_protocol::authoring::{
     truncate_chars, NewAutomationSpec, NewWorkTaskSpec, MAX_PROMPT_CHARS, MAX_TITLE_CHARS,
 };
 
+/// Cap on how many files one `create_work_task` call may attach. A briefing
+/// needs a few screenshots or logs, not a directory dump; more is rejected so
+/// the LLM picks the ones that matter instead of silently losing the tail.
+pub const MAX_WORK_TASK_ATTACHMENTS: usize = 10;
+
+/// Cap on one attached image's bytes — the same ceiling the composer puts on a
+/// dropped local image (`DRAG_DROP_IMAGE_MAX_BYTES`), since the bytes are stored
+/// inline in the task exactly as that composer stores them.
+pub const MAX_ATTACHMENT_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
+
+/// Cap on the image bytes one task may carry in total. The images live inline in
+/// the task row's config JSON (as base64), so this bounds the row.
+pub const MAX_ATTACHMENT_IMAGE_TOTAL_BYTES: u64 = 40 * 1024 * 1024;
+
 /// Who is calling, resolved by the listener from the per-launch token. Both
 /// fields are hints for defaulting the target folder — an explicit
 /// `folder_path` on the spec wins over either.
@@ -45,6 +59,13 @@ pub struct AuthoringContext {
     pub conversation_id: Option<i32>,
     /// The working directory the companion was launched with.
     pub working_dir: PathBuf,
+    /// Whether codeg may read files on this caller's behalf (to store an
+    /// attached image in the task). `false` when the caller hosts its own file
+    /// access (`CODEG_ACP_HOST_TOOLS=agent`): codeg's process sits outside the
+    /// agent's sandbox, so a read here would hand the agent bytes its sandbox
+    /// denies it. Attachments are then only referenced by path, for the
+    /// executing agent to read itself.
+    pub host_reads_files: bool,
 }
 
 /// The outcome handed back to the tool. A refusal (`created: false`) is a SOFT

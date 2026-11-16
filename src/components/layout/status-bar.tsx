@@ -5,8 +5,10 @@ import { StatusBarStats } from "@/components/layout/status-bar-stats"
 import { StatusBarTasks } from "@/components/layout/status-bar-tasks"
 import { StatusBarAlerts } from "@/components/layout/status-bar-alerts"
 import { StatusBarMcp } from "@/components/layout/status-bar-mcp"
+import { StatusBarComputer } from "@/components/layout/status-bar-computer"
 import { StatusBarUpdate } from "@/components/layout/status-bar-update"
 import { StatusBarTransfers } from "@/components/layout/workspace-transfers"
+import { StatusBarWebService } from "@/components/layout/status-bar-web-service"
 import { CommandDropdown } from "@/components/layout/command-dropdown"
 import { ConnectionStatusPill } from "@/components/connection/connection-banner"
 import { QuickActionsDropdown } from "@/components/layout/quick-actions-dropdown"
@@ -33,7 +35,11 @@ export function StatusBar() {
           <StatusBarUpdate />
           <StatusBarUpdate target="local" />
           <CommandDropdown />
+          {/* Narrow is a viewport width, not a browser: a desktop window
+              shrunk below the breakpoint must still say the web service is
+              listening. Renders nothing outside the local desktop. */}
           <StatusBarMcp />
+          <StatusBarWebService />
           <StatusBarAlerts />
         </div>
       </div>
@@ -82,10 +88,15 @@ export function StatusBar() {
         {/* Command launcher (moved from the aux "session details" tab), taking
             the slot the old static branch label (StatusBarSessionInfo) held. */}
         <CommandDropdown />
-        {/* codeg-mcp service health. Sits next to the alerts bell because the
-            two answer adjacent questions — "is something wrong right now?" —
-            and both open a top-anchored popover from this corner. */}
+        {/* Computer use: which windows agents may see right now. Renders
+            nothing unless the desktop runtime has it switched on. */}
+        <StatusBarComputer />
+        {/* codeg-mcp service health. Opens a top-anchored popover from this
+            corner. */}
         <StatusBarMcp />
+        {/* Web service (remote access): whether the desktop is reachable over
+            HTTP right now, and how far. Local desktop only. */}
+        <StatusBarWebService />
         <StatusBarAlerts />
       </div>
     </div>

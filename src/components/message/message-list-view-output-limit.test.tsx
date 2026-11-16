@@ -137,7 +137,7 @@ function renderList(props: ListProps = {}) {
         conversationId={CONVERSATION}
         agentType="pi"
         connStatus="connected"
-        showMessageNav={false}
+        availableCommands={[]}
         {...props}
       />
     </NextIntlClientProvider>
@@ -205,7 +205,7 @@ describe("MessageListView: output-limit notice", () => {
           conversationId={CONVERSATION}
           agentType="pi"
           connStatus="connected"
-          showMessageNav={false}
+          availableCommands={[]}
           onContinueAfterOutputLimit={onContinue}
           hasQueuedMessages
         />

@@ -244,6 +244,7 @@ impl Wake {
                 is_error: false,
                 agent_stats: None,
                 images: Vec::new(),
+                exit_code: None,
             },
         ]
     }
@@ -1505,6 +1506,8 @@ impl Launch {
                 lines_removed: None,
                 other_tool_count: None,
                 tool_calls: Vec::new(),
+                timeline: Vec::new(),
+                recovered_result: None,
                 child_session_id: if sole {
                     self.rows[0].session_id.clone()
                 } else {

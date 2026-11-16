@@ -155,7 +155,7 @@ function renderList(props: ListProps = {}) {
         conversationId={CONVERSATION}
         agentType="claude_code"
         connStatus="connected"
-        showMessageNav={false}
+        availableCommands={[]}
         {...props}
       />
     </NextIntlClientProvider>
@@ -472,7 +472,7 @@ describe("MessageListView: the in-place editor", () => {
           conversationId={CONVERSATION}
           agentType="claude_code"
           connStatus="prompting"
-          showMessageNav={false}
+          availableCommands={[]}
           onEditUserMessage={view.onEditUserMessage}
         />
       </NextIntlClientProvider>

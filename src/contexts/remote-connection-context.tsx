@@ -94,6 +94,9 @@ export function RemoteConnectionGate({ children }: { children: ReactNode }) {
           baseUrl: next.base_url,
           token: next.token,
           windowInstanceId: remoteWindowId,
+          // Only a refused token. A socket that is down keeps the workspace
+          // mounted while it retries; the connection pill and banner
+          // (`WebConnectionGuard`) show that.
           onUnauthorized: () =>
             setState((prev) => ({ ...prev, expired: true })),
         })

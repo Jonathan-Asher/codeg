@@ -11,17 +11,24 @@ import {
 import { cn } from "@/lib/utils"
 
 import { FileReferenceActions } from "./file-reference-actions"
+import { useKnownInvocations } from "./known-invocations-context"
 import { parseUserMessageSegments } from "./user-message-segments"
 
 /**
  * One prose run: literal text with the five built-in reference kinds (file /
- * agent / session / commit / skill) resolved into inline colored badges.
+ * agent / session / commit / skill) resolved into inline colored badges. A bare
+ * `/word`·`$word` is a skill badge only when the transcript's agent offers it
+ * ({@link useKnownInvocations}); a path or any other slash word stays text.
  *
  * A fragment, not a wrapping element, so adjacent text and badges share one
  * inline flow and the caller's `whitespace-pre-wrap` collapses nothing.
  */
 const TextRun = memo(function TextRun({ text }: { text: string }) {
-  const segments = useMemo(() => parseUserMessageSegments(text), [text])
+  const knownInvocations = useKnownInvocations()
+  const segments = useMemo(
+    () => parseUserMessageSegments(text, { knownInvocations }),
+    [text, knownInvocations]
+  )
   return (
     <>
       {segments.map((segment, index) =>
@@ -128,7 +135,9 @@ function renderBlock(block: QuoteBlock, key: number) {
  *
  * `whitespace-pre-wrap` preserves the sender's newlines (replacing the old
  * `remark-breaks` path); `break-words` keeps long unbroken tokens from
- * overflowing the bubble.
+ * overflowing the bubble. Each run of lines reads in the direction of its own
+ * text ({@link DirectedText}), like everything else a person typed: an English
+ * message in the Arabic interface keeps its full stop at the end.
  */
 export const PlainTextWithBadges = memo(function PlainTextWithBadges({
   text,
@@ -152,7 +161,7 @@ export const PlainTextWithBadges = memo(function PlainTextWithBadges({
   }
 
   return (
-    <div className={cn("break-words", className)}>
+    <div className={cn("break-words", className)} dir="auto">
       {blocks.map(renderBlock)}
     </div>
   )

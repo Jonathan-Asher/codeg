@@ -13,7 +13,7 @@ import type { AgentType, PromptDraft, PromptInputBlock } from "@/lib/types"
  *    already (inactive tabs stay mounted, hidden) — hence the event as the
  *    already-mounted fast path.
  * Keying by tab id is what keeps a second group's draft panel from swallowing a
- * prompt meant for the first. Mirrors the `task-compose-events` idiom.
+ * prompt meant for the first.
  *
  * Editing a conversation's FIRST message rides the same hand-off: with no reply
  * before it to fork at, the edited message starts a new conversation on the

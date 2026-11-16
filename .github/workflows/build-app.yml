@@ -159,6 +159,22 @@ jobs:
           pkg.write_text(re.sub(r'"version": "[^"]+"', f'"version": "{fork}"', pkg.read_text(), count=1))
           print("fork version:", fork)
           PY
+      # Computer use on macOS: codeg and codeg-computer-helper each check the
+      # other's code signature at run time against a requirement compiled
+      # into the binary, and codeg launches the helper under a launch
+      # requirement naming the team. Both are compiled inside `tauri build`
+      # (the helper by prepare-sidecars), so the anchors are pinned before it,
+      # for the team scripts/ci-devid-sign.sh signs with. Only on the Mac: a
+      # hosted build is ad-hoc signed, never published, and builds a
+      # development helper instead.
+      - name: Pin computer-use trust anchors (Mac only)
+        if: runner.environment == 'self-hosted'
+        run: |
+          TEAM="${CODEG_SIGN_TEAM:-3L92BZK46V}"
+          anchor="anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = \"${TEAM}\""
+          echo "CODEG_COMPUTER_PEER_REQUIREMENT=identifier \"app.codeg\" and ${anchor}" >> "$GITHUB_ENV"
+          echo "CODEG_COMPUTER_HELPER_REQUIREMENT=identifier \"app.codeg.computer-helper\" and ${anchor}" >> "$GITHUB_ENV"
+          echo "CODEG_COMPUTER_TEAM_ID=${TEAM}" >> "$GITHUB_ENV"
       # `--bundles app`: the .app plus its signed updater archive — all the
       # update feed and the installer use. No DMG step.
       - name: Build app (signed for the fork update feed)
@@ -187,7 +203,10 @@ jobs:
         run: |
           MACOS_DIR=src-tauri/target/release/bundle/macos
           scripts/ci-devid-sign.sh "$MACOS_DIR"
-          pnpm tauri signer sign "$MACOS_DIR/codeg.app.tar.gz"
+          # The updater requires each update's signature to name the version
+          # it was signed for (`requireSignedVersion` in tauri.conf.json).
+          VERSION=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
+          pnpm tauri signer sign --app-version "$VERSION" "$MACOS_DIR/codeg.app.tar.gz"
           test -s "$MACOS_DIR/codeg.app.tar.gz.sig" || { echo "updater signature missing"; exit 1; }
           echo "signed=true" >> "$GITHUB_OUTPUT"
           {

@@ -17,7 +17,11 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { openUrl } from "@/lib/platform"
-import { describeAppUpdateError, type UpdateTarget } from "@/lib/updater"
+import {
+  describeAppUpdateError,
+  usesTauriUpdater,
+  type UpdateTarget,
+} from "@/lib/updater"
 import { cn } from "@/lib/utils"
 
 // The markdown stack is a settings-side dependency; keep it out of the
@@ -453,7 +457,11 @@ export function StatusBarUpdate({
                   ? t("restartingIn", { seconds: restartCountdown })
                   : remoteDesktop
                     ? t("remoteWaitingForReconnect")
-                    : t("waitingForServer")}
+                    : // The desktop app has no server to wait for: it
+                      // relaunches itself, on Windows through the installer.
+                      usesTauriUpdater(update.target)
+                      ? t("restarting")
+                      : t("waitingForServer")}
               </div>
             )}
             {ready && (

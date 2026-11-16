@@ -140,9 +140,9 @@ describe("selectRecentConversationsWithReuse — archive filter", () => {
     const rows = selectRecentConversationsWithReuse(
       conversations,
       true,
-      "updated",
       open,
       [],
+      "all",
       { folderIds: new Set([2]), keep: new Set<number>() }
     )
     expect(rows.map((c) => c.id)).toEqual([11, 31])
@@ -152,9 +152,9 @@ describe("selectRecentConversationsWithReuse — archive filter", () => {
     const rows = selectRecentConversationsWithReuse(
       conversations,
       true,
-      "updated",
       open,
       [],
+      "all",
       { folderIds: new Set([2]), keep: new Map([[22, "permission"]]) }
     )
     expect(rows.map((c) => c.id)).toEqual([11, 22, 31])

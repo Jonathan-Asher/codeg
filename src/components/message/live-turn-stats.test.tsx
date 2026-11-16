@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import enMessages from "@/i18n/messages/en.json"
 import { extractLiveEditStats, LiveTurnStats } from "./live-turn-stats"
@@ -113,24 +113,55 @@ describe("LiveTurnStats while the turn is held open for background work", () => 
       <NextIntlClientProvider locale="en" messages={enMessages}>
         <LiveTurnStats
           message={msg([textBlock("LAUNCHED")])}
-          agentType="claude_code"
           heldBackgroundTasks={heldBackgroundTasks}
         />
       </NextIntlClientProvider>
     )
   }
 
-  it("says the agent is idle with the work running, not streaming", () => {
+  it("says the agent is idle with the work running", () => {
     renderStats(2)
     expect(
       screen.getByText("Idle — 2 background tasks running")
     ).toBeInTheDocument()
-    expect(screen.queryByText("Streaming")).not.toBeInTheDocument()
   })
 
-  it("keeps reading streaming for an ordinary turn", () => {
+  it("carries no held word for an ordinary turn", () => {
     renderStats(null)
-    expect(screen.getByText("Streaming")).toBeInTheDocument()
     expect(screen.queryByTestId("live-turn-held")).not.toBeInTheDocument()
+  })
+})
+
+describe("LiveTurnStats", () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  // That the agent is at work, and at what — thinking, running a step,
+  // writing — is the transcript's to say: its header reads "Working", the step
+  // shimmers and a ring turns at the foot of its rail. The row above the
+  // composer keeps only its figures: no word, and no pulsing agent mark.
+  it("opens on the time, with no mark or word for what the agent is doing", () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(65_000)
+    for (const content of [
+      [{ type: "thinking", text: "Checking the logs" } as LiveContentBlock],
+      [textBlock("Writing the fix")],
+    ]) {
+      const view = render(
+        <NextIntlClientProvider locale="en" messages={enMessages}>
+          <LiveTurnStats message={msg(content)} />
+        </NextIntlClientProvider>
+      )
+      const row = view.container.firstElementChild!.firstElementChild!
+      expect(row.children).toHaveLength(1)
+      expect(
+        row.firstElementChild!.querySelector("svg.lucide-timer")
+      ).toBeTruthy()
+      expect(row.querySelectorAll("svg")).toHaveLength(1)
+      expect(row.querySelector(".animate-pulse")).toBeNull()
+      expect(row.textContent).toBe("1m 5s")
+      view.unmount()
+    }
   })
 })

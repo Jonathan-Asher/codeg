@@ -59,7 +59,9 @@ use super::{
     assemble_detail, feed_transcript_bytes, finish_session_stats, fold_subagent_spend,
     list_subagent_transcripts, parse_subagent_tool_calls, Assembled, ClaudeRecordAccumulator,
 };
-use crate::models::{AgentToolCall, AgentType, ConversationDetail, MessageTurn, TurnUsage};
+use crate::models::{
+    AgentTimelineEntry, AgentToolCall, AgentType, ConversationDetail, MessageTurn, TurnUsage,
+};
 use crate::parsers::detail_cache::{self, CachedValue, DetailCache, FileStamp, Limits};
 use crate::parsers::{sanitize_detail, CacheUse, Need, ParseError};
 
@@ -99,8 +101,12 @@ impl Policy {
 /// One sub-agent transcript, as the parent's detail uses it.
 pub(crate) struct SubagentParse {
     pub(crate) calls: Vec<AgentToolCall>,
+    /// The sub-agent's mixed thinking/text/tool timeline.
+    pub(crate) timeline: Vec<AgentTimelineEntry>,
     pub(crate) usage: Option<TurnUsage>,
     pub(crate) started_at: Option<DateTime<Utc>>,
+    /// First-to-last-timestamped-record span (`None` without a real interval).
+    pub(crate) duration_ms: Option<u64>,
 }
 
 impl SubagentParse {
@@ -114,6 +120,15 @@ impl SubagentParse {
                     detail_cache::string_bytes(&c.tool_name)
                         + detail_cache::opt_string_bytes(&c.input_preview)
                         + detail_cache::opt_string_bytes(&c.output_preview)
+                })
+                .sum::<usize>()
+            + detail_cache::vec_bytes(&self.timeline)
+            + self
+                .timeline
+                .iter()
+                .map(|e| {
+                    detail_cache::string_bytes(&e.entry_type)
+                        + detail_cache::opt_string_bytes(&e.text)
                 })
                 .sum::<usize>()
     }
@@ -144,11 +159,14 @@ impl SubagentMemo {
                 return (Some(stamp), Some(parsed.clone()));
             }
         }
-        let (calls, usage, started_at) = parse_subagent_tool_calls(&path.to_path_buf());
+        let (calls, timeline, usage, started_at, duration_ms) =
+            parse_subagent_tool_calls(&path.to_path_buf());
         let parsed = Arc::new(SubagentParse {
             calls,
+            timeline,
             usage,
             started_at,
+            duration_ms,
         });
         // Remember only a read the file did not change under. Either way the
         // caller records the stamp from BEFORE the read, so a write that raced
@@ -307,7 +325,8 @@ fn accumulator_bytes(acc: &ClaudeRecordAccumulator) -> usize {
             .keys()
             .map(string_bytes)
             .sum::<usize>()
-        + string_set_bytes(&acc.seen_compaction_uuids)
+        + string_set_bytes(&acc.seen_record_uuids)
+        + vec_bytes(&acc.turn_starts)
         + string_set_bytes(&acc.queued_prompt_ids)
         + (acc.background_acks.len() + acc.background_notifications.len()) * 160
         + acc.subagent_reads.len() * 160

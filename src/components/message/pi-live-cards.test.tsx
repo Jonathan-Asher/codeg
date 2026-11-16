@@ -12,24 +12,20 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { describe, expect, it, vi } from "vitest"
 
-vi.mock("@/components/ai-elements/link-safety", () => ({
-  FilePathLink: ({ children }: { children: ReactNode }) => (
-    <span>{children}</span>
-  ),
-  useStreamdownLinkSafety: () => ({ enabled: false }),
-}))
-
-vi.mock("@/components/ai-elements/code-block", () => ({
-  CodeBlock: ({ code }: { code: string }) => <pre>{code}</pre>,
-}))
-
 vi.mock("@/components/ai-elements/message", () => ({
   MessageResponse: ({ children }: { children: string }) => (
     <div>{children}</div>
   ),
 }))
 
-import { AgentToolCallPart } from "./agent-tool-call"
+import {
+  StaticConnectionStoreProvider,
+  type ConnectionStoreApi,
+} from "@/contexts/acp-connections-context"
+import {
+  StaticDelegationProvider,
+  type DelegationContextValue,
+} from "@/contexts/delegation-context"
 import { BackgroundJobChip } from "./background-job-chip"
 import { ContentPartsRenderer } from "./content-parts-renderer"
 import {
@@ -94,37 +90,72 @@ function launchPart(): ToolCallPart {
   }
 }
 
+const STORE: ConnectionStoreApi = {
+  getConnection: () => undefined,
+  getConnectPending: () => undefined,
+  getConnectError: () => undefined,
+  getActiveKey: () => null,
+  subscribeKey: () => () => {},
+  subscribeActiveKey: () => () => {},
+}
+const DELEGATION: DelegationContextValue = {
+  findByParentToolUseId: () => undefined,
+  findByChildConversationId: () => undefined,
+  findByTaskId: () => undefined,
+  bindingsForParent: () => [],
+}
+
+/** The reply as the thread draws it: the launch is the timeline's row. */
+function reply(part: ToolCallPart): ReactNode {
+  return <ContentPartsRenderer parts={[part]} role="assistant" />
+}
+
+function tree(ui: ReactNode, cards: LiveToolCards | null, open = vi.fn()) {
+  return (
+    <NextIntlClientProvider locale="en" messages={enMessages}>
+      <StaticConnectionStoreProvider store={STORE}>
+        <StaticDelegationProvider value={DELEGATION}>
+          <SessionViewerHostContext.Provider value={{ open }}>
+            <LiveToolCardsProvider value={cards}>{ui}</LiveToolCardsProvider>
+          </SessionViewerHostContext.Provider>
+        </StaticDelegationProvider>
+      </StaticConnectionStoreProvider>
+    </NextIntlClientProvider>
+  )
+}
+
 function renderWith(
   ui: ReactNode,
   cards: LiveToolCards | null,
   open = vi.fn()
 ) {
-  return render(
-    <NextIntlClientProvider locale="en" messages={enMessages}>
-      <SessionViewerHostContext.Provider value={{ open }}>
-        <LiveToolCardsProvider value={cards}>{ui}</LiveToolCardsProvider>
-      </SessionViewerHostContext.Provider>
-    </NextIntlClientProvider>
-  )
+  return render(tree(ui, cards, open))
+}
+
+/** The run's row in the timeline. */
+function row(): HTMLElement {
+  const li = document.querySelector("li")
+  if (!li) throw new Error("no row")
+  return li as HTMLElement
+}
+
+/** Open the row's panel (a failure is already open). */
+function openRow() {
+  const button = row().querySelector(":scope > button")
+  if (!button) throw new Error("the row has no panel to open")
+  if (button.getAttribute("aria-expanded") === "false") fireEvent.click(button)
 }
 
 describe("a live run card", () => {
   it("draws the transcript's card when no live one is known", () => {
-    renderWith(
-      <AgentToolCallPart part={launchPart()} renderToolCall={() => null} />,
-      null
-    )
-    expect(
-      screen.getByLabelText("Launched · result pending")
-    ).toBeInTheDocument()
+    renderWith(reply(launchPart()), null)
+    expect(row().textContent).toContain("Launched · result pending")
   })
 
   it("draws the live card over it: running, one row per child, the current tool", () => {
-    renderWith(
-      <AgentToolCallPart part={launchPart()} renderToolCall={() => null} />,
-      new Map([[LAUNCH, LIVE_CARD]])
-    )
-    fireEvent.click(screen.getByRole("button", { name: "Running" }))
+    renderWith(reply(launchPart()), new Map([[LAUNCH, LIVE_CARD]]))
+    expect(row()).toHaveAttribute("data-status", "running")
+    openRow()
     const rows = screen.getAllByTestId("subagent-run-child")
     expect(rows).toHaveLength(2)
     expect(rows[0].textContent).toContain("task-1")
@@ -134,10 +165,7 @@ describe("a live run card", () => {
 
   it("updates the same card in place as the run moves on", () => {
     const part = launchPart()
-    const view = renderWith(
-      <AgentToolCallPart part={part} renderToolCall={() => null} />,
-      new Map([[LAUNCH, LIVE_CARD]])
-    )
+    const view = renderWith(reply(part), new Map([[LAUNCH, LIVE_CARD]]))
     const done = {
       "codeg.subagentRun": {
         ...LIVE_CARD["codeg.subagentRun"],
@@ -150,16 +178,9 @@ describe("a live run card", () => {
         })),
       },
     }
-    view.rerender(
-      <NextIntlClientProvider locale="en" messages={enMessages}>
-        <SessionViewerHostContext.Provider value={{ open: vi.fn() }}>
-          <LiveToolCardsProvider value={new Map([[LAUNCH, done]])}>
-            <AgentToolCallPart part={part} renderToolCall={() => null} />
-          </LiveToolCardsProvider>
-        </SessionViewerHostContext.Provider>
-      </NextIntlClientProvider>
-    )
-    fireEvent.click(screen.getByRole("button", { name: "Completed" }))
+    view.rerender(tree(reply(part), new Map([[LAUNCH, done]])))
+    expect(row()).toHaveAttribute("data-status", "succeeded")
+    openRow()
     const rows = screen.getAllByTestId("subagent-run-child")
     expect(rows).toHaveLength(2)
     expect(rows[0].textContent).not.toContain("bash")
@@ -169,17 +190,14 @@ describe("a live run card", () => {
   it("opens a one-child run's transcript as a Pi session with no transcript agent above it", () => {
     const open = vi.fn()
     renderWith(
-      <AgentToolCallPart
-        part={{
-          ...launchPart(),
-          input: JSON.stringify({
-            subagent_type: "scout",
-            description: "count",
-          }),
-          meta: null,
-        }}
-        renderToolCall={() => null}
-      />,
+      reply({
+        ...launchPart(),
+        input: JSON.stringify({
+          subagent_type: "scout",
+          description: "count",
+        }),
+        meta: null,
+      }),
       new Map([
         [
           LAUNCH,
@@ -204,9 +222,7 @@ describe("a live run card", () => {
       ]),
       open
     )
-    fireEvent.click(
-      screen.getByRole("button", { name: /View sub-agent session/ })
-    )
+    fireEvent.click(screen.getByRole("button", { name: /Open conversation/ }))
     expect(open).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: "01a1d126-b3e8",
@@ -232,13 +248,10 @@ describe("which card a run draws from", () => {
 
   it("ends as the transcript draws it once the transcript has the end", () => {
     renderWith(
-      <AgentToolCallPart
-        part={{ ...launchPart(), meta: settledHistory }}
-        renderToolCall={() => null}
-      />,
+      reply({ ...launchPart(), meta: settledHistory }),
       new Map([[LAUNCH, LIVE_CARD]])
     )
-    fireEvent.click(screen.getByRole("button", { name: "Completed" }))
+    openRow()
     expect(screen.getByText("from the transcript")).toBeInTheDocument()
     expect(screen.queryAllByTestId("subagent-run-child")).toHaveLength(0)
   })
@@ -258,13 +271,10 @@ describe("which card a run draws from", () => {
       },
     }
     renderWith(
-      <AgentToolCallPart
-        part={{ ...launchPart(), meta: liveCopy }}
-        renderToolCall={() => null}
-      />,
+      reply({ ...launchPart(), meta: liveCopy }),
       new Map([[LAUNCH, newest]])
     )
-    fireEvent.click(screen.getByRole("button", { name: "Completed" }))
+    openRow()
     expect(screen.getByText("the newest card")).toBeInTheDocument()
   })
 })
@@ -288,36 +298,28 @@ describe("a live job chip", () => {
   }
 
   it("says the job is running, then how it ended", () => {
-    const view = renderWith(
-      <ContentPartsRenderer parts={[jobPart()]} role="assistant" />,
-      null
-    )
+    const view = renderWith(reply(jobPart()), null)
     expect(screen.getByTestId("background-job-chip").textContent).toBe(
       "Running"
     )
     view.rerender(
-      <NextIntlClientProvider locale="en" messages={enMessages}>
-        <LiveToolCardsProvider
-          value={
-            new Map([
-              [
-                JOB,
-                {
-                  "codeg.backgroundJob": {
-                    version: 1,
-                    id: "jb-1",
-                    state: "completed",
-                    exitCode: 0,
-                    duration: "6s",
-                  },
-                },
-              ],
-            ])
-          }
-        >
-          <ContentPartsRenderer parts={[jobPart()]} role="assistant" />
-        </LiveToolCardsProvider>
-      </NextIntlClientProvider>
+      tree(
+        reply(jobPart()),
+        new Map([
+          [
+            JOB,
+            {
+              "codeg.backgroundJob": {
+                version: 1,
+                id: "jb-1",
+                state: "completed",
+                exitCode: 0,
+                duration: "6s",
+              },
+            },
+          ],
+        ])
+      )
     )
     expect(screen.getByTestId("background-job-chip").textContent).toBe(
       "Exit 0 · 6s"

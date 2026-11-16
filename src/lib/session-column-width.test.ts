@@ -115,22 +115,29 @@ describe("the session column reads the variable", () => {
     // The dock: the question card, the plan card, the composer banner, the
     // Talk dock, the feedback notes and the composer.
     ["src/components/chat/conversation-shell.tsx", 6],
-    ["src/components/message/virtualized-message-thread.tsx", 2],
+    ["src/components/message/virtualized-message-thread.tsx", 3],
     ["src/components/conversations/conversation-detail-panel.tsx", 2],
     ["src/components/chat/pi-project-trust-banner.tsx", 1],
     ["src/components/chat/session-config-stale-banner.tsx", 1],
   ]
 
+  // Each wrapper caps itself with the `chat-content-w` utility, which reads
+  // the dragged chat width first and the session column width after it.
   it.each(COLUMN_FILES)("%s caps its column with the variable", (path, n) => {
     const source = read(path)
     expect(source).not.toContain("max-w-3xl")
-    expect(source.split("max-w-(--session-column-max-width)").length - 1).toBe(
-      n
-    )
+    expect(source.match(/\bchat-content-w(?!idth)/g)?.length ?? 0).toBe(n)
   })
 
   it("gives the variable the standard width when nothing is written", () => {
     const css = read("src/app/globals.css")
     expect(css).toMatch(/--session-column-max-width:\s*48rem;/)
+  })
+
+  it("falls back from the chat width to the session column width", () => {
+    const css = read("src/app/globals.css")
+    expect(css).toMatch(
+      /@utility chat-content-w\s*\{[^}]*var\(--chat-content-width,\s*var\(--session-column-max-width/
+    )
   })
 })

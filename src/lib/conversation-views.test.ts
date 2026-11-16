@@ -71,7 +71,6 @@ const sidebarRecent = () =>
   selectRecentConversationsWithReuse(
     useAppWorkspaceStore.getState().conversations,
     true,
-    "updated",
     new Set([1]),
     []
   ).map((c) => c.id)

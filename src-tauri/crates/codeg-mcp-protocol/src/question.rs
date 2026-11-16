@@ -41,6 +41,10 @@ pub struct QuestionOption {
     pub description: String,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 /// A single multiple-choice question.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QuestionSpec {
@@ -56,7 +60,7 @@ pub struct QuestionSpec {
     /// When true the user may select multiple options.
     pub multi_select: bool,
     /// The choices (0..=[`MAX_OPTIONS`]). Empty means free-text: the card
-    /// renders only its always-present "Other" input (codex `request_user_input`
+    /// renders only its free-text "Other" input (codex `request_user_input`
     /// and MCP-server elicitations both ask open questions this way; the
     /// codeg-mcp ask tool still requires [`MIN_OPTIONS`] at its own parse
     /// layer).
@@ -66,6 +70,13 @@ pub struct QuestionSpec {
     /// input. Default false — absent on the wire for every non-secret source.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_secret: bool,
+    /// When false, the question card hides the "Other" option and free-text input.
+    /// Defaults to true; false for native permission bridges (Antigravity, Pi select)
+    /// where only predetermined option IDs can be submitted. Only meaningful with
+    /// options: those bridges always carry at least [`MIN_OPTIONS`], and an
+    /// option-less question still renders its free-text input regardless.
+    #[serde(default = "default_true")]
+    pub allow_other: bool,
 }
 
 /// Validate + parse the MCP `ask_user_question` arguments into typed
@@ -173,6 +184,7 @@ pub fn parse_questions(arguments: &Value) -> Result<Vec<QuestionSpec>, String> {
             multi_select,
             options,
             is_secret: false,
+            allow_other: true,
         });
     }
     Ok(out)

@@ -4,11 +4,17 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { isDesktop } from "@/lib/platform"
+import {
+  codegAuthHeaders,
+  probeProxyAuthentication,
+  unauthorizedSource,
+} from "@/lib/transport/web-auth"
 import { clearHistoryCache } from "@/stores/history-cache"
 
 export default function LoginPage() {
   const router = useRouter()
   const t = useTranslations("LoginPage")
+  const tConnection = useTranslations("WebConnection")
   const [token, setToken] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
@@ -22,6 +28,19 @@ export default function LoginPage() {
   useEffect(() => {
     if (!isDesktop()) void clearHistoryCache("all")
   }, [])
+
+  // Signed in through a proxy in front of Codeg (CODEG_AUTH=proxy-jwt), there
+  // is no token to ask for.
+  useEffect(() => {
+    if (isDesktop()) return
+    let cancelled = false
+    void probeProxyAuthentication().then((result) => {
+      if (!cancelled && result === "proxy") router.replace("/workspace")
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [router])
 
   // Desktop users skip login entirely
   if (isDesktop()) {
@@ -40,7 +59,7 @@ export default function LoginPage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          ...codegAuthHeaders(token),
         },
         body: "{}",
       })
@@ -48,6 +67,12 @@ export default function LoginPage() {
       if (res.ok) {
         localStorage.setItem("codeg_token", token)
         router.replace("/workspace")
+      } else if (
+        res.status === 401 &&
+        unauthorizedSource(res.headers.get("www-authenticate")) === "proxy"
+      ) {
+        // The proxy in front of Codeg refused before the token was checked.
+        setError(tConnection("proxySignInDescription"))
       } else if (res.status === 401) {
         setError(t("invalidToken"))
       } else {

@@ -141,7 +141,7 @@ function renderList() {
         conversationId={CONVERSATION}
         agentType="open_code"
         connStatus="connected"
-        showMessageNav={false}
+        availableCommands={[]}
       />
     </NextIntlClientProvider>
   )

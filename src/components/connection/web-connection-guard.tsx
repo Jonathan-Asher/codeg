@@ -38,9 +38,10 @@ import { perfMark } from "@/lib/perf-marks"
  *   a window without one, in a corner;
  * - a link that stays down in front of the user becomes a banner over the
  *   content: offline, how old what is shown is, Retry;
- * - only a browser session whose token was rejected gets a blocking dialog,
- *   since nothing works until the user signs in again. A remote window's
- *   rejected token is shown by its own full-window screen instead.
+ * - only a browser session whose token was rejected, or whose sign-in at a
+ *   proxy in front of Codeg expired, gets a blocking dialog, since nothing
+ *   works until the user signs in again. A remote window's rejected token is
+ *   shown by its own full-window screen instead.
  *
  * Inert in a local desktop window — the store returns "connected" there.
  * The wake-time liveness probe below goes through whichever transport is
@@ -84,19 +85,25 @@ export function WebConnectionGuard() {
   }, [])
 
   const showUnauthorized = state === "unauthorized"
+  // A proxy in front of Codeg (e.g. Cloudflare Access) rejected the request:
+  // its session expired, not the Codeg token. A top-level reload lets the
+  // proxy run its own login flow and keeps the token; "Go to login" stays as
+  // the way out should the proxy keep refusing after the reload.
+  const showProxyUnauthorized = state === "proxyUnauthorized"
+  const signInBlocked = showUnauthorized || showProxyUnauthorized
 
   useEffect(() => {
     perfMark("ui:connection", { kind: display.kind })
   }, [display.kind])
   useEffect(() => {
-    perfMark("ui:dialog", { open: showUnauthorized, unauthorized: true })
-  }, [showUnauthorized])
+    perfMark("ui:dialog", { open: signInBlocked, unauthorized: true })
+  }, [signInBlocked])
 
   return (
     <>
       <FloatingConnectionPill />
       <OfflineBanner />
-      {showUnauthorized && (
+      {signInBlocked && (
         <AlertDialog open onOpenChange={() => {}}>
           <AlertDialogContent
             // Forced state: block Esc/outside dismissal. The dialog is driven
@@ -107,15 +114,35 @@ export function WebConnectionGuard() {
               <AlertDialogMedia>
                 <ShieldAlert className="text-destructive" />
               </AlertDialogMedia>
-              <AlertDialogTitle>{t("sessionExpiredTitle")}</AlertDialogTitle>
+              <AlertDialogTitle>
+                {showProxyUnauthorized
+                  ? t("proxySignInTitle")
+                  : t("sessionExpiredTitle")}
+              </AlertDialogTitle>
               <AlertDialogDescription>
-                {t("sessionExpiredDescription")}
+                {showProxyUnauthorized
+                  ? t("proxySignInDescription")
+                  : t("sessionExpiredDescription")}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <Button onClick={() => redirectToCodegLogin()}>
-                {t("goToLogin")}
-              </Button>
+              {showProxyUnauthorized ? (
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={() => redirectToCodegLogin()}
+                  >
+                    {t("goToLogin")}
+                  </Button>
+                  <Button onClick={() => window.location.reload()}>
+                    {t("reloadPage")}
+                  </Button>
+                </>
+              ) : (
+                <Button onClick={() => redirectToCodegLogin()}>
+                  {t("goToLogin")}
+                </Button>
+              )}
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>

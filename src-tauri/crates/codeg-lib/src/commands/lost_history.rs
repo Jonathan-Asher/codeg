@@ -220,8 +220,11 @@ pub(crate) async fn refuse_lost_history(
         return Ok(());
     };
     let id = session_id.to_string();
+    // Look where this launch's agent keeps its sessions: its environment can
+    // relocate the store (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, …).
+    let env = parsers::AgentEnv::from_overrides(runtime_env.clone());
     let presence = tokio::task::spawn_blocking(move || {
-        parsers::build_agent_parser(agent_type).transcript_presence(&id)
+        parsers::build_agent_parser(agent_type, &env).transcript_presence(&id)
     })
     .await
     .unwrap_or(TranscriptPresence::Unknown);

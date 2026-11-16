@@ -47,12 +47,10 @@ function live(content: LiveContentBlock[]): LiveMessage {
   }
 }
 
-const userTurns = (message: LiveMessage, promoted = false) =>
-  buildStreamingTurnsFromLiveMessage(
-    CID,
-    message,
-    promoted ? { attachAgentTranscripts: false } : undefined
-  ).turns.filter((turn) => turn.role === "user")
+const userTurns = (message: LiveMessage) =>
+  buildStreamingTurnsFromLiveMessage(CID, message).turns.filter(
+    (turn) => turn.role === "user"
+  )
 
 describe("a spoken message steered into the running reply", () => {
   it("is marked spoken, and a typed one beside it is not", () => {
@@ -81,7 +79,7 @@ describe("a spoken message steered into the running reply", () => {
         { type: "text", text: "Stopped." },
       ])
     )
-    const turns = userTurns(promoted, true)
+    const turns = userTurns(promoted)
     expect(turns).toHaveLength(1)
     expect(turns[0].spoken).toBe(true)
     // Read once its turn is over, like every native steer.

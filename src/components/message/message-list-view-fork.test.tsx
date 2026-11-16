@@ -158,7 +158,7 @@ function renderList(props: ListProps = {}) {
         conversationId={CONVERSATION}
         agentType="claude_code"
         connStatus="prompting"
-        showMessageNav={false}
+        availableCommands={[]}
         {...props}
       />
     </NextIntlClientProvider>

@@ -21,6 +21,8 @@ import {
 import { useForkingTurnId } from "@/components/message/fork-progress-context"
 import { usePendingActionsContext } from "@/components/message/pending-actions-context"
 import { useMessageScroll } from "@/components/message/message-scroll-context"
+import { useChatAnimationsEnabled } from "@/hooks/use-appearance"
+import { useArrivedOnCompletion } from "@/hooks/use-chat-motion"
 import { useModelLabel } from "@/components/message/model-label-context"
 import { ReadAloudButton } from "./read-aloud-button"
 import { useCreateTaskFromMessage } from "./use-create-task-from-message"
@@ -95,6 +97,7 @@ export function TurnStats({
   const forkInert = !forkWaiting && (forkDisabled || forkingTurnId !== null)
   const tTasks = useTranslations("Tasks")
   const scroll = useMessageScroll()
+  const chatAnimations = useChatAnimationsEnabled()
   const modelLabel = useModelLabel()
   const [isCopied, setIsCopied] = useState(false)
   const timeoutRef = useRef<number>(0)
@@ -184,8 +187,12 @@ export function TurnStats({
 
   const handleJump = useCallback(() => {
     if (typeof previousUserIndex !== "number") return
-    scroll?.scrollToIndex(previousUserIndex, { align: "start", smooth: true })
-  }, [previousUserIndex, scroll])
+    scroll?.scrollToIndex(previousUserIndex, {
+      align: "start",
+      // Settings → Appearance → "Chat animations" off jumps instead of gliding.
+      smooth: chatAnimations,
+    })
+  }, [previousUserIndex, scroll, chatAnimations])
 
   const getTaskText = useCallback(() => copyText ?? "", [copyText])
   const handleCreateTask = useCreateTaskFromMessage(getTaskText)
@@ -206,6 +213,8 @@ export function TurnStats({
     []
   )
 
+  const arrived = useArrivedOnCompletion(isResponseComplete)
+
   if (!isResponseComplete) return null
   // Deliberately not gated on `hasDuration`: nothing in this row renders a
   // duration any more, so a turn carrying only one would open an empty row.
@@ -213,7 +222,12 @@ export function TurnStats({
     return null
 
   return (
-    <div className="mt-2 -ms-[0.3125rem] flex items-center justify-start gap-1 text-xs text-muted-foreground">
+    <div
+      className={cn(
+        "mt-2 -ms-[0.3125rem] flex items-center justify-start gap-1 text-xs text-muted-foreground",
+        arrived && "chat-enter"
+      )}
+    >
       <TooltipProvider delayDuration={150}>
         {hasCopy && (
           <Tooltip>

@@ -511,7 +511,7 @@ async fn open_notification_route_with(
                 // bringing codeg forward.
                 tracing::warn!("[notification] cannot reopen the remote workspace: {err}");
                 let _ = take_parked(&plan.label);
-                crate::commands::workspace_windows::reopen_workspace(app);
+                crate::commands::workspace_windows::activate_workspace(app);
                 return;
             }
         }
@@ -812,7 +812,7 @@ mod macos {
                     // No session named (a test send, a notice from the app
                     // itself, a notification from an older build): the click
                     // still means "back to codeg".
-                    None => crate::commands::workspace_windows::reopen_workspace(&app),
+                    None => crate::commands::workspace_windows::activate_workspace(&app),
                 }
             }
 

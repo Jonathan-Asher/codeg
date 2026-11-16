@@ -8,17 +8,20 @@ vi.mock("streamdown", () => ({
     className,
     mode,
     parseIncompleteMarkdown,
+    dir,
   }: {
     children: ReactNode
     className?: string
     mode?: string
     parseIncompleteMarkdown?: boolean
+    dir?: string
   }) => (
     <div
       className={className}
       data-testid="streamdown-root"
       data-mode={mode}
       data-parse-incomplete={String(parseIncompleteMarkdown)}
+      data-dir={dir}
     >
       {children}
     </div>
@@ -32,18 +35,41 @@ vi.mock("@streamdown/math", () => ({
   createMathPlugin: () => ({}),
 }))
 vi.mock("@streamdown/mermaid", () => ({ mermaid: {} }))
-vi.mock("@streamdown/code", () => ({
-  code: {
+vi.mock("@/lib/code-highlighter", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/code-highlighter")>()),
+  createCodePlugin: async () => ({
+    name: "shiki",
+    type: "code-highlighter",
     highlight: vi.fn(),
     supportsLanguage: vi.fn(() => true),
-  },
+    getSupportedLanguages: () => [],
+    getThemes: () => ["github-light", "github-dark"],
+  }),
 }))
 
 vi.mock("@/components/ai-elements/link-safety", () => ({
   useStreamdownLinkSafety: () => ({ enabled: false }),
 }))
 
-import { MessageResponse, normalizeMathDelimiters } from "./message"
+import {
+  Message,
+  MessageContent,
+  MessageResponse,
+  normalizeMathDelimiters,
+} from "./message"
+
+describe("MessageContent", () => {
+  it("rounds a user's bubble into a capsule", () => {
+    render(
+      <Message from="user">
+        <MessageContent>Run the tests</MessageContent>
+      </Message>
+    )
+    const bubble = screen.getByText("Run the tests")
+    expect(bubble).toHaveClass("group-[.is-user]:rounded-3xl")
+    expect(bubble).not.toHaveClass("group-[.is-user]:rounded-lg")
+  })
+})
 
 describe("MessageResponse", () => {
   it("applies marker styles so ordered Markdown lists render as lists", () => {
@@ -51,7 +77,19 @@ describe("MessageResponse", () => {
 
     expect(screen.getByTestId("streamdown-root")).toHaveClass(
       "[&_ol]:list-decimal",
-      "[&_ol]:ps-3"
+      "[&_ol]:ps-2",
+      "[&_li]:text-start"
+    )
+  })
+
+  it("leaves each block's direction to rehype-block-direction", () => {
+    // Every block gets `dir` from its own text in the rehype pipeline (see
+    // message-direction.test); Streamdown's `dir="auto"` would hand a block
+    // with no letters `ltr` instead of letting it inherit.
+    render(<MessageResponse>{"Hello."}</MessageResponse>)
+
+    expect(screen.getByTestId("streamdown-root")).not.toHaveAttribute(
+      "data-dir"
     )
   })
 
@@ -81,7 +119,8 @@ describe("MessageResponse", () => {
     // Streamdown sets `border-l-4 border-muted-foreground/30 … italic` on
     // blockquotes from inside node_modules, which Tailwind v4 does not scan — so
     // those utilities generate no CSS and a quote renders with no rule at all.
-    // Declaring them here (scanned source) is what actually paints them.
+    // Declaring them here (scanned source) is what actually paints them — on
+    // the quote's start side, which follows the direction of its text.
     render(<MessageResponse>{"> quoted"}</MessageResponse>)
 
     // Logical, so a right-to-left quote draws its rule on the right; the
@@ -89,9 +128,9 @@ describe("MessageResponse", () => {
     expect(screen.getByTestId("streamdown-root")).toHaveClass(
       "[&_blockquote]:border-s-2",
       "[&_blockquote]:border-e-0",
+      "[&_blockquote]:border-border",
       "[&_blockquote]:ps-4",
       "[&_blockquote]:pe-0",
-      "[&_blockquote]:border-border",
       "[&_blockquote]:not-italic"
     )
   })
@@ -109,8 +148,7 @@ describe("normalizeMathDelimiters", () => {
   })
 
   it("does not rewrite currency or shell $ tokens", () => {
-    // This helper only rewrites `\(`/`\[`. The real `$` fix is
-    // `singleDollarTextMath: false` — covered in math-delimiters.parse.test.ts.
+    // Currency and unpaired shell variables must stay literal.
     const text = "Costs $25. Set $HOME and $1."
     expect(normalizeMathDelimiters(text)).toBe(text)
   })

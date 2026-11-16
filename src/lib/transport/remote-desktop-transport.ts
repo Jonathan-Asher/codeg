@@ -1,9 +1,5 @@
 import { invoke } from "@tauri-apps/api/core"
-import {
-  listen,
-  type EventTarget,
-  type UnlistenFn,
-} from "@tauri-apps/api/event"
+import type { UnlistenFn } from "@tauri-apps/api/event"
 import { getCurrentWebview } from "@tauri-apps/api/webview"
 import { WS_READY_CHANNEL, WS_RESYNC_CHANNEL } from "./constants"
 import type { AttachTransportHost } from "./web-event-stream"
@@ -37,6 +33,7 @@ const READ_COMMAND = /^(get|list|search|read|load|count|find|describe)_/
 /// the wire format exactly; we re-export `__ready__` via `WS_READY_CHANNEL`
 /// to keep the shared-constants invariant with `WebTransport`.
 const WS_DISCONNECTED_CHANNEL = "__disconnected__"
+/// The server refused the token on the socket's handshake (HTTP 401).
 const WS_UNAUTHORIZED_CHANNEL = "__unauthorized__"
 
 // Two wire shapes flow on the same `remote-ws-event-{id}` Tauri event:
@@ -44,7 +41,7 @@ const WS_UNAUTHORIZED_CHANNEL = "__unauthorized__"
 //      firehose (`__ready__`, folder/app channels, etc.).
 //   2. Top-level attach-protocol frames `{type, ...}` from the per-connection
 //      WS attach forwarders (`ServerMsg` in `web/ws_attach.rs`).
-// `forward_text_message` in the Rust proxy passes the parsed JSON through
+// `forward_frame` in the Rust proxy passes the parsed JSON through
 // without re-shaping, so the handler must discriminate on which top-level
 // field is present. Using `unknown` here forces that discrimination at the
 // call site rather than silently destructuring `undefined`.
@@ -69,33 +66,6 @@ function isAttachFrame(
 interface LegacyEnvelope {
   channel: string
   payload: unknown
-}
-
-/**
- * Listen target for the proxy's frames: this webview only.
- *
- * The Rust proxy addresses its frames to the subscribed webviews by label.
- * Tauri's default listen target is `Any`, and an `Any` listener matches every
- * targeted emit, whatever label it names. When the proxy sent one `emit_to`
- * per subscribed window, two windows on one connection — the workspace plus
- * its settings, git or (pre-created, hidden) Quick Ask window — meant each
- * window took every frame twice: every terminal byte twice. It also still
- * sends a joining window its own `__ready__`, which must not reach the others.
- * Pinning the listener to this webview's label takes only what is addressed
- * here.
- *
- * Falls back to `Any` only where there is no webview metadata (tests).
- */
-function ownWebviewTarget(): EventTarget {
-  try {
-    return { kind: "Webview", label: getCurrentWebview().label }
-  } catch (err) {
-    console.warn(
-      "[RemoteDesktopTransport] no current webview label; listening to any target:",
-      err
-    )
-    return { kind: "Any" }
-  }
 }
 
 interface RustError {
@@ -132,6 +102,15 @@ function isRemoteUnreachable(err: unknown): boolean {
   )
 }
 
+/** Any `network_error`, the remote server's own included. */
+function isNetworkError(err: unknown): boolean {
+  return (
+    !!err &&
+    typeof err === "object" &&
+    (err as RustError).code === "network_error"
+  )
+}
+
 /**
  * Transport that the desktop client uses when a window is bound to a
  * remote codeg-server. Every HTTP call and WebSocket event is routed
@@ -147,6 +126,13 @@ function isRemoteUnreachable(err: unknown): boolean {
  * webview labels that explicitly subscribed via this transport, never
  * `app.emit` broadcasting. Two remote workspaces opened side-by-side
  * see entirely separate event streams.
+ *
+ * That targeting only holds if the listener is scoped to this webview.
+ * Tauri delivers `emit_to(EventTarget::webview(label))` to every listener
+ * registered with the `Any` target, in every webview, so a global
+ * `listen()` here would also receive the copies addressed to other windows
+ * sharing this connection (duplicated terminal output, foreign ready /
+ * disconnected signals). Keep `getCurrentWebview().listen()`.
  */
 export class RemoteDesktopTransport
   implements Transport, ConnectionHealthSource
@@ -158,9 +144,18 @@ export class RemoteDesktopTransport
   /// Tracks whether `__ready__` has arrived since this transport was
   /// constructed. The first arrival is the initial connect; subsequent
   /// arrivals are reconnects (after `__disconnected__` reset the promise).
-  /// Reconnect callbacks fire only on subsequent arrivals.
+  /// A clean initial connect needs no refetch, but one preceded by failed
+  /// startup reads must refresh the workspace on its first ready too.
   private hasReadiedOnce = false
+  // Initial loads can fail while a restored remote is offline, and a call can
+  // fail for want of a link later on. Whatever the UI loaded then is an error
+  // state, so the next ready refetches even when it is the first one — a
+  // window opened while the server was down otherwise kept its errors until
+  // reloaded.
+  private recoveryNeeded = false
+  private recoveryTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectCallbacks = new Set<() => void>()
+  private readyCallbacks = new Set<() => void>()
   /// Listener handle for `remote-ws-event-{id}`. Null when not subscribed.
   private unlistenWsEvent: UnlistenFn | null = null
   /// Opaque ID generated at construction time, passed to `remote_ws_subscribe`
@@ -194,11 +189,6 @@ export class RemoteDesktopTransport
   /// (`RemoteConnectionGate`) owns, so the dialog stands down for it.
   private connState: ConnectionHealth = "connecting"
   private connListeners = new Set<() => void>()
-  /// A call failed because the remote was unreachable. Whatever the UI
-  /// loaded then is an error state, so the next `__ready__` fires the
-  /// reconnect callbacks even when it is the first one — a window opened
-  /// while the server was down otherwise kept its errors until reloaded.
-  private missedWhileDown = false
 
   constructor(config: RemoteTransportConfig) {
     this.config = {
@@ -229,6 +219,7 @@ export class RemoteDesktopTransport
     ])
     if (timeoutId !== undefined) clearTimeout(timeoutId)
     if (result === "timeout") {
+      this.recoveryNeeded = true
       console.warn(
         `[RemoteDesktopTransport] WS __ready__ frame did not arrive within ${READY_TIMEOUT_MS}ms; ` +
           "proceeding without server-side subscribe confirmation (initial-connect race may reopen)."
@@ -241,6 +232,7 @@ export class RemoteDesktopTransport
     args?: Record<string, unknown>,
     options?: CallOptions
   ): Promise<T> {
+    const initialRequest = !this.hasReadiedOnce
     try {
       // Forward `timeoutMs` through to `remote_http_call`. Without this,
       // the Rust client's 30s default fires before the backend can answer
@@ -259,23 +251,41 @@ export class RemoteDesktopTransport
       })
       return result
     } catch (err) {
+      if (this.destroyed) throw err
       // The Rust proxy returns 401 from the remote server as
       // `AppErrorCode::AuthenticationFailed`. Surface the connection-expired
       // UI in just the calling window (the rest stay live until they
       // themselves hit a 401 — per design we don't broadcast).
       if (isAuthenticationFailed(err)) {
         this.markUnauthorized()
-      } else if (isRemoteUnreachable(err)) {
-        this.missedWhileDown = true
-        // A failed request only asks the WS task to check the link now: a
-        // live socket answers the ping and nothing changes; a dead one is
-        // replaced, and the dialog follows the task's state from there.
-        // Only while the link is believed up, though: once the task knows
-        // it is down it is already retrying on its own backoff, and a probe
-        // per failed call (every poller fails as fast as it calls) cut each
-        // wait short — ten connect attempts a second against a server that
-        // was restarting.
-        if (this.connState === "connected") this.probeLivenessThrottled()
+      } else {
+        if (isRemoteUnreachable(err)) {
+          // Whatever the UI loaded then is an error state, so the next
+          // `__ready__` refetches even when it is the first one.
+          this.recoveryNeeded = true
+          // A failed request only asks the WS task to check the link now: a
+          // live socket answers the ping and nothing changes; a dead one is
+          // replaced, and the dialog follows the task's state from there.
+          // Only while the link is believed up, though: once the task knows
+          // it is down it is already retrying on its own backoff, and a
+          // probe per failed call (every poller fails as fast as it calls)
+          // cut each wait short — ten connect attempts a second against a
+          // server that was restarting.
+          if (this.connState === "connected") this.probeLivenessThrottled()
+        }
+        if (initialRequest && isNetworkError(err)) {
+          // Initial folder/conversation reads are not gated on the WS. If
+          // they failed offline, the first ready must retry their hydration.
+          this.recoveryNeeded = true
+          if (this.wsOpen && this.recoveryTimer === null) {
+            // A slow failed HTTP request can settle AFTER the first ready.
+            // Let its caller finish recording the failure before refreshing.
+            this.recoveryTimer = setTimeout(() => {
+              this.recoveryTimer = null
+              if (!this.destroyed && this.wsOpen) this.notifyReconnect()
+            }, 0)
+          }
+        }
       }
       throw err
     }
@@ -407,8 +417,29 @@ export class RemoteDesktopTransport
 
   markUnauthorized(): void {
     if (this.destroyed) return
+    // A rejected token refuses the socket too (the proxy stops retrying on
+    // its first 401): new subscribers wait for the `__ready__` of a fresh
+    // start.
+    this.recoveryNeeded = true
+    if (this.wsOpen) this.resetReady()
+    this.wsOpen = false
     this.setConnState("unauthorized")
     this.config.onUnauthorized?.()
+  }
+
+  private notifyReconnect(): void {
+    this.recoveryNeeded = false
+    if (this.recoveryTimer !== null) {
+      clearTimeout(this.recoveryTimer)
+      this.recoveryTimer = null
+    }
+    for (const callback of this.reconnectCallbacks) {
+      try {
+        callback()
+      } catch (err) {
+        console.error("[RemoteDesktopTransport] reconnect callback threw:", err)
+      }
+    }
   }
 
   private setConnState(next: ConnectionHealth) {
@@ -424,6 +455,13 @@ export class RemoteDesktopTransport
           err
         )
       }
+    }
+  }
+
+  onReady(callback: () => void): UnsubscribeFn {
+    this.readyCallbacks.add(callback)
+    return () => {
+      this.readyCallbacks.delete(callback)
     }
   }
 
@@ -506,18 +544,27 @@ export class RemoteDesktopTransport
 
   private async startWs() {
     this.wsStarted = true
-
     try {
-      this.unlistenWsEvent = await listen<WsFrame>(
+      const unlisten = await getCurrentWebview().listen<WsFrame>(
         `remote-ws-event-${this.config.id}`,
-        (event) => this.handleWsEvent(event.payload),
-        { target: ownWebviewTarget() }
+        (event) => this.handleWsEvent(event.payload)
       )
+      if (this.destroyed) {
+        unlisten()
+        this.wsStarted = false
+        return
+      }
+      this.unlistenWsEvent = unlisten
     } catch (err) {
       this.wsStarted = false
+      this.recoveryNeeded = true
       throw err
     }
 
+    await this.subscribeWs()
+  }
+
+  private async subscribeWs() {
     try {
       await invoke("remote_ws_subscribe", {
         connectionId: this.config.id,
@@ -537,6 +584,7 @@ export class RemoteDesktopTransport
       this.unlistenWsEvent?.()
       this.unlistenWsEvent = null
       this.wsStarted = false
+      this.recoveryNeeded = true
       throw err
     }
   }
@@ -560,10 +608,22 @@ export class RemoteDesktopTransport
     if (typeof channel !== "string") return
 
     if (channel === WS_READY_CHANNEL) {
+      // Rust may acknowledge another subscription in the same webview while
+      // the shared socket is already ready. This is not another reconnect.
+      if (this.wsOpen) return
       perfMark("ws:ready", { reconnect: this.hasReadiedOnce })
+      const shouldRefresh = this.hasReadiedOnce || this.recoveryNeeded
+      this.hasReadiedOnce = true
       this.wsOpen = true
       this.readyResolve()
       this.setConnState("connected")
+      for (const cb of this.readyCallbacks) {
+        try {
+          cb()
+        } catch (err) {
+          console.error("[RemoteDesktopTransport] ready callback threw:", err)
+        }
+      }
       // Notify EventStream so it can re-issue attach frames for any
       // active subscriptions. Fires on initial connect AND every reconnect.
       for (const cb of this.wsReadyCallbacks) {
@@ -576,28 +636,15 @@ export class RemoteDesktopTransport
       // A new socket starts as "not looking" on the server.
       if (this.presence) this.sendWsFrame(presenceFrame(this.presence))
       if (this.streamingOnScreen) this.sendStreamingFlag()
-      if (this.hasReadiedOnce || this.missedWhileDown) {
+      if (shouldRefresh) {
         // Reconnect path: server-side receiver_count was 0 during the
         // disconnect window, so any event fired in that gap was dropped.
         // Notify consumers to recover state (e.g. refetch snapshots).
         // Also the first connect after calls failed for want of a link: the
         // snapshots those calls should have loaded are missing.
         // Errors in user callbacks must not break sibling callbacks.
-        this.missedWhileDown = false
-        this.hasReadiedOnce = true
         perfMark("reconnect:fire", { callbacks: this.reconnectCallbacks.size })
-        for (const cb of this.reconnectCallbacks) {
-          try {
-            cb()
-          } catch (err) {
-            console.error(
-              "[RemoteDesktopTransport] reconnect callback threw:",
-              err
-            )
-          }
-        }
-      } else {
-        this.hasReadiedOnce = true
+        this.notifyReconnect()
       }
       return
     }
@@ -606,27 +653,23 @@ export class RemoteDesktopTransport
       // server's broadcast, or the server could not announce a change):
       // recover exactly as after a reconnect.
       perfMark("resync:hint", { callbacks: this.reconnectCallbacks.size })
-      for (const cb of this.reconnectCallbacks) {
-        try {
-          cb()
-        } catch (err) {
-          console.error("[RemoteDesktopTransport] resync callback threw:", err)
-        }
-      }
+      this.notifyReconnect()
       return
     }
     if (channel === WS_DISCONNECTED_CHANNEL) {
       perfMark("ws:close")
-      this.wsOpen = false
+      this.recoveryNeeded = true
       this.setConnState("reconnecting")
-      // New subscribers (and any concurrent subscribe() calls in flight)
-      // must wait for the next `__ready__` before resolving.
-      this.resetReady()
+      // Repeated failed handshakes share the same waiters. Replacing their
+      // promise again would strand them until the readiness timeout.
+      if (this.wsOpen) this.resetReady()
+      this.wsOpen = false
       return
     }
     if (channel === WS_UNAUTHORIZED_CHANNEL) {
-      // Rust gave up: the remote rejected the handshake's credentials
-      // WS_RECONNECT_FAIL_THRESHOLD times in a row. Surface as expired.
+      // The socket's handshake got an HTTP 401: the proxy stops retrying on
+      // the first one and drops this window's subscription — the same expiry
+      // an HTTP 401 on a call reports.
       this.markUnauthorized()
       return
     }
@@ -639,8 +682,13 @@ export class RemoteDesktopTransport
   }
 
   destroy() {
+    if (this.destroyed) return
     this.destroyed = true
     this.wsOpen = false
+    if (this.recoveryTimer !== null) {
+      clearTimeout(this.recoveryTimer)
+      this.recoveryTimer = null
+    }
     if (this.sendFailRetryTimer !== null) {
       clearTimeout(this.sendFailRetryTimer)
       this.sendFailRetryTimer = null
@@ -664,6 +712,7 @@ export class RemoteDesktopTransport
     this.handlers.clear()
     this.reconnectCallbacks.clear()
     this.connListeners.clear()
+    this.readyCallbacks.clear()
     this.wsReadyCallbacks.clear()
     this.eventStreamInstance?.destroy()
     this.eventStreamInstance = null

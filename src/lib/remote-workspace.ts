@@ -86,3 +86,11 @@ export async function updateStartupWorkspaceSettings(
     settings,
   })
 }
+
+/**
+ * Bring up the local workspace window from a remote workspace window that
+ * cannot carry on (its connection failed or expired).
+ */
+export async function openLocalWorkspace(): Promise<void> {
+  return getShellTransport().call("open_local_workspace")
+}

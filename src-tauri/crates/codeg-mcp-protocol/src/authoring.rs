@@ -15,6 +15,11 @@ pub const MAX_TITLE_CHARS: usize = 120;
 /// the config JSON.
 pub const MAX_PROMPT_CHARS: usize = 20_000;
 
+/// Cap on how many files one `create_work_task` call may attach. A briefing
+/// needs a few screenshots or logs, not a directory dump; more is rejected so
+/// the LLM picks the ones that matter instead of silently losing the tail.
+pub const MAX_WORK_TASK_ATTACHMENTS: usize = 10;
+
 /// What firing the automation does. Lives inside the config blob (not a
 /// column) so every pre-existing row deserializes as the legacy default —
 /// nothing queries automations by action.
@@ -67,6 +72,11 @@ pub struct NewWorkTaskSpec {
     /// Absolute path of the target project. `None` → the caller's own folder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder_path: Option<String>,
+    /// Files to attach, as paths (a relative one is read against the caller's
+    /// working directory). Images are read and stored inline; any other file is
+    /// referenced by its path. At most [`MAX_WORK_TASK_ATTACHMENTS`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<String>,
 }
 
 /// Truncate to at most `cap` characters (character-, not byte-counted, so a

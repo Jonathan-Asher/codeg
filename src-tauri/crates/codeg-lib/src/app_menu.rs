@@ -1,126 +1,216 @@
-//! The macOS app menu's close commands.
+//! The macOS application menu: Tauri's default one, except that ⌘W is not
+//! "Close Window".
 //!
-//! Tauri's default macOS menu binds ⌘W to "Close Window" (in both File and
-//! Window). The workspace answers ⌘W itself and cancels the key, which keeps
-//! the menu out of it — but only while the workspace's own document has the
-//! keystroke. Wherever it does not (a built-in browser page, which is a
-//! separate webview, or any key the page leaves alone), ⌘W fell through to the
-//! menu and closed the whole window.
+//! A key equivalent reaches the menu whenever the view holding keyboard focus
+//! did not claim the keystroke. The workspace claims ⌘W itself — its keydown
+//! listener closes the current tab and cancels the event — but only for
+//! keystrokes its own document receives. One pressed inside an iframe (an
+//! inline HTML preview) goes to that frame's document, and one pressed inside
+//! a built-in browser page or an HTML document view goes to another webview
+//! altogether. The workspace never saw those, WebKit handed them on, and the
+//! predefined item closed the whole window where a tab was meant to go.
 //!
-//! The menu here is Tauri's default with those two items swapped out:
+//! So ⌘W is an item of our own. Over a workspace window it leaves the decision
+//! to that window ([`CLOSE_SHORTCUT_EVENT`]), naming the browser surface that
+//! had keyboard focus if one did — only the native side can tell which of its
+//! views that was. Over any other window (settings, a commit window, an owned
+//! browser window, an inspector) it does what the predefined item did.
 //!
-//! - **Close Tab** (⌘W): in a workspace window (`main`, `remote-workspace-*`)
-//!   it asks that window's frontend to close its active tab
-//!   ([`CLOSE_TAB_EVENT`]); it never closes the window. Any other window
-//!   (settings, commit, Quick Ask, pets) is closed as ⌘W always closed it.
-//! - **Close Window** (⇧⌘W): closes the focused window, the same close as its
-//!   own close button (`CloseRequested`, so the main window's close-behaviour
-//!   preference and Quick Ask's hide still apply).
+//! "Close Window" in the Window menu carries ⇧⌘W and closes the key window
+//! the way its own close button does (`CloseRequested`, so the main window's
+//! close-behaviour preference and Quick Ask's hide still apply). Inside a
+//! workspace the keystroke is claimed first by the workspace's own
+//! `close_window` shortcut, which closes the file tabs when the file pane has
+//! focus and the window anywhere else; the menu item answers only when the
+//! workspace did not see the key (a built-in browser page, an iframe) or for
+//! any other window.
+//!
+//! The Window menu also opens the local workspace (`main`), which a launch
+//! that brings back only remote workspaces leaves hidden. The menu bar is
+//! there whatever the key window shows — a remote workspace whose server is
+//! down, or one whose credentials expired.
+//!
+//! Windows and Linux have no application menu, so nothing there turns an
+//! unclaimed Ctrl+W into closing the window.
 
-/// Menu id of File › Close Tab.
-pub const MENU_CLOSE_TAB: &str = "app:close-tab";
-/// Menu ids of File › Close Window and Window › Close Window.
-pub const MENU_CLOSE_WINDOW: &str = "app:close-window";
-pub const MENU_CLOSE_WINDOW_WINDOW_MENU: &str = "app:close-window:window-menu";
+use std::ffi::c_void;
 
-/// Event a workspace window's frontend gets for File › Close Tab.
-pub const CLOSE_TAB_EVENT: &str = "app://close-tab";
+use objc2::rc::Retained;
+use objc2::MainThreadMarker;
+use objc2_app_kit::{NSApplication, NSWindow};
+use serde::Serialize;
+use tauri::menu::{
+    AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu, HELP_SUBMENU_ID, WINDOW_SUBMENU_ID,
+};
+use tauri::{AppHandle, Emitter, Manager, Wry};
 
-/// The label muda gives the predefined close-window item.
-#[cfg(feature = "tauri-runtime")]
-const PREDEFINED_CLOSE_WINDOW_TEXT: &str = "Close Window";
+/// The File menu's "Close", bound to ⌘W.
+const CLOSE_ID: &str = "app-menu:close";
+/// The Window menu's "Close Window", bound to ⇧⌘W.
+const CLOSE_WINDOW_ID: &str = "app-menu:close-window";
+/// The Window menu's "Open Local Workspace": `main`, unminimized, shown and
+/// focused, as the tray's "Show Workspace" does.
+const OPEN_LOCAL_WORKSPACE_ID: &str = "app-menu:open-local-workspace";
 
-/// What ⌘W does in a window.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CloseTabTarget {
-    /// A workspace window: close its active tab, keep the window.
-    ActiveTab,
-    /// Any other window: close the window.
-    Window,
+/// Sent to a workspace window when ⌘W reached the menu while it was the key
+/// window. Mirrored by `CLOSE_SHORTCUT_EVENT` in `src/lib/menu-close-shortcut.ts`.
+pub const CLOSE_SHORTCUT_EVENT: &str = "app://close-shortcut";
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CloseShortcutPayload {
+    /// The workspace window the shortcut was pressed in. The frontend
+    /// subscribes with `EventTarget::Any`, so every webview hears the event
+    /// whatever it is addressed to; this is what the listener checks.
+    window: String,
+    /// The built-in browser surface (a browser tab's page, or a document view)
+    /// that had keyboard focus, by its backend tab id.
+    surface_tab_id: Option<String>,
 }
 
-pub fn close_tab_target(window_label: &str) -> CloseTabTarget {
-    if crate::commands::quick_ask::workspace_backend_of(window_label).is_some() {
-        CloseTabTarget::ActiveTab
-    } else {
-        CloseTabTarget::Window
-    }
-}
-
-/// Install the app menu: Tauri's default, with Close Tab (⌘W) and Close Window
-/// (⇧⌘W) in place of the predefined Close Window (⌘W).
-#[cfg(feature = "tauri-runtime")]
-pub fn install(app: &tauri::AppHandle) -> tauri::Result<()> {
-    use tauri::menu::{Menu, MenuItem, MenuItemKind};
-
-    let menu = Menu::default(app)?;
-    for top in menu.items()? {
-        let MenuItemKind::Submenu(submenu) = top else {
-            continue;
-        };
-        let in_window_menu = submenu.text()? == "Window";
-        let children = submenu.items()?;
-        let Some(position) = children.iter().position(|child| match child {
-            MenuItemKind::Predefined(item) => {
-                item.text().ok().as_deref() == Some(PREDEFINED_CLOSE_WINDOW_TEXT)
-            }
-            _ => false,
-        }) else {
-            continue;
-        };
-        submenu.remove_at(position)?;
-        if in_window_menu {
-            let close_window = MenuItem::with_id(
-                app,
-                MENU_CLOSE_WINDOW_WINDOW_MENU,
-                "Close Window",
-                true,
-                Some("CmdOrCtrl+Shift+W"),
-            )?;
-            submenu.insert(&close_window, position)?;
-        } else {
-            let close_tab =
-                MenuItem::with_id(app, MENU_CLOSE_TAB, "Close Tab", true, Some("CmdOrCtrl+W"))?;
-            let close_window = MenuItem::with_id(
-                app,
-                MENU_CLOSE_WINDOW,
-                "Close Window",
-                true,
-                Some("CmdOrCtrl+Shift+W"),
-            )?;
-            submenu.insert(&close_tab, position)?;
-            submenu.insert(&close_window, position + 1)?;
-        }
-    }
-    app.set_menu(menu)?;
-    Ok(())
-}
-
-/// Handle a click (or accelerator) on one of the items above. Returns whether
-/// `id` was one of them.
-#[cfg(feature = "tauri-runtime")]
-pub fn handle_menu_event(app: &tauri::AppHandle, id: &str) -> bool {
-    use tauri::{Emitter, Manager};
-
-    let closes_window = id == MENU_CLOSE_WINDOW || id == MENU_CLOSE_WINDOW_WINDOW_MENU;
-    if id != MENU_CLOSE_TAB && !closes_window {
-        return false;
-    }
-    let Some(window) = app
-        .webview_windows()
-        .into_values()
-        .find(|window| window.is_focused().unwrap_or(false))
-    else {
-        return true;
+/// Tauri's default macOS menu (`tauri::menu::Menu::default`), item for item,
+/// except for the close items and the local workspace entry.
+pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
+    let pkg_info = app.package_info();
+    let config = app.config();
+    let about_metadata = AboutMetadata {
+        name: Some(pkg_info.name.clone()),
+        version: Some(pkg_info.version.to_string()),
+        copyright: config.bundle.copyright.clone(),
+        authors: config.bundle.publisher.clone().map(|p| vec![p]),
+        ..Default::default()
     };
-    if !closes_window && close_tab_target(window.label()) == CloseTabTarget::ActiveTab {
-        if let Err(err) = app.emit_to(window.label(), CLOSE_TAB_EVENT, ()) {
-            tracing::warn!("[menu] close tab in {} failed: {err}", window.label());
+    let close = MenuItem::with_id(app, CLOSE_ID, "Close", true, Some("CmdOrCtrl+W"))?;
+    let close_window = MenuItem::with_id(
+        app,
+        CLOSE_WINDOW_ID,
+        "Close Window",
+        true,
+        Some("CmdOrCtrl+Shift+W"),
+    )?;
+    let open_local_workspace = MenuItem::with_id(
+        app,
+        OPEN_LOCAL_WORKSPACE_ID,
+        "Open Local Workspace",
+        true,
+        None::<&str>,
+    )?;
+    Menu::with_items(
+        app,
+        &[
+            &Submenu::with_items(
+                app,
+                pkg_info.name.clone(),
+                true,
+                &[
+                    &PredefinedMenuItem::about(app, None, Some(about_metadata))?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::services(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::hide(app, None)?,
+                    &PredefinedMenuItem::hide_others(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::quit(app, None)?,
+                ],
+            )?,
+            &Submenu::with_items(app, "File", true, &[&close])?,
+            &Submenu::with_items(
+                app,
+                "Edit",
+                true,
+                &[
+                    &PredefinedMenuItem::undo(app, None)?,
+                    &PredefinedMenuItem::redo(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::cut(app, None)?,
+                    &PredefinedMenuItem::copy(app, None)?,
+                    &PredefinedMenuItem::paste(app, None)?,
+                    &PredefinedMenuItem::select_all(app, None)?,
+                ],
+            )?,
+            &Submenu::with_items(
+                app,
+                "View",
+                true,
+                &[&PredefinedMenuItem::fullscreen(app, None)?],
+            )?,
+            &Submenu::with_id_and_items(
+                app,
+                WINDOW_SUBMENU_ID,
+                "Window",
+                true,
+                &[
+                    &open_local_workspace,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::minimize(app, None)?,
+                    &PredefinedMenuItem::maximize(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &close_window,
+                ],
+            )?,
+            &Submenu::with_id_and_items(app, HELP_SUBMENU_ID, "Help", true, &[])?,
+        ],
+    )
+}
+
+/// Act on one of this menu's items; `false` for any other id. Menu events
+/// are delivered on the main thread.
+pub fn handle_event(app: &AppHandle, id: &str) -> bool {
+    match id {
+        OPEN_LOCAL_WORKSPACE_ID => {
+            crate::commands::workspace_windows::show_local_workspace_window(app)
         }
-    } else if let Err(err) = window.close() {
-        tracing::warn!("[menu] close window {} failed: {err}", window.label());
+        CLOSE_ID => close_shortcut(app),
+        CLOSE_WINDOW_ID => {
+            if let Some(window) = key_window() {
+                window.performClose(None);
+            }
+        }
+        _ => return false,
     }
     true
+}
+
+fn key_window() -> Option<Retained<NSWindow>> {
+    NSApplication::sharedApplication(MainThreadMarker::new()?).keyWindow()
+}
+
+fn close_shortcut(app: &AppHandle) {
+    let Some(key) = key_window() else {
+        return;
+    };
+    let key_ptr = Retained::as_ptr(&key) as *mut c_void;
+    let workspace = app.webview_windows().into_values().find(|window| {
+        is_workspace_window(window.label()) && window.ns_window().is_ok_and(|ptr| ptr == key_ptr)
+    });
+    let Some(window) = workspace else {
+        // Not a workspace: what the predefined "Close Window" did. Also the
+        // path for windows tauri does not know about, such as an inspector.
+        key.performClose(None);
+        return;
+    };
+    let payload = CloseShortcutPayload {
+        window: window.label().to_string(),
+        surface_tab_id: focused_surface(&key),
+    };
+    if let Err(err) = window.emit_to(window.label(), CLOSE_SHORTCUT_EVENT, payload) {
+        tracing::warn!("[menu] ⌘W could not reach {}: {err}", window.label());
+    }
+}
+
+/// `main`, and the `remote-workspace-*` windows that load the same workspace.
+fn is_workspace_window(label: &str) -> bool {
+    label == "main" || label.starts_with("remote-workspace-")
+}
+
+#[cfg(feature = "browser-child")]
+fn focused_surface(window: &NSWindow) -> Option<String> {
+    crate::browser::surface_child::tab_with_keyboard_focus(window)
+}
+
+#[cfg(not(feature = "browser-child"))]
+fn focused_surface(_window: &NSWindow) -> Option<String> {
+    None
 }
 
 #[cfg(test)]
@@ -128,20 +218,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn workspace_windows_close_a_tab_and_other_windows_close() {
-        assert_eq!(close_tab_target("main"), CloseTabTarget::ActiveTab);
-        assert_eq!(
-            close_tab_target("remote-workspace-3"),
-            CloseTabTarget::ActiveTab
-        );
-        for label in [
-            "settings",
-            "quick-ask",
-            "commit-7",
-            "pet",
-            "remote-settings-3",
-        ] {
-            assert_eq!(close_tab_target(label), CloseTabTarget::Window, "{label}");
-        }
+    fn workspace_windows_are_main_and_remote_workspaces() {
+        assert!(is_workspace_window("main"));
+        assert!(is_workspace_window("remote-workspace-3"));
+        assert!(!is_workspace_window("settings"));
+        assert!(!is_workspace_window("remote-settings-3"));
+        assert!(!is_workspace_window("commit-1"));
+        assert!(!is_workspace_window("pet"));
     }
 }

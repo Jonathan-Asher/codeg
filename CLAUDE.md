@@ -43,6 +43,9 @@ cargo check --no-default-features --features server --bin codeg-server
 cargo test --no-default-features --features server --bin codeg-server --lib
 cargo clippy --no-default-features --features server --bin codeg-server --lib -- -D warnings
 
+# codeg-cli 命令行客户端（`cli-bin` feature）
+cargo clippy --no-default-features --features cli-bin --bin codeg-cli --lib -- -D warnings
+
 # codeg-mcp 协作伴生进程（多智能体委托），独立的 workspace 成员，只用自己的依赖 feature
 cargo clippy -p codeg-mcp -p codeg-mcp-protocol --all-targets -- -D warnings
 cargo test -p codeg-mcp -p codeg-mcp-protocol
@@ -61,6 +64,7 @@ INSTA_UPDATE=auto cargo test --features test-utils     # 自动写新 .snap
 - **`codeg`**（`tauri-runtime`，默认）：完整桌面应用，包含 Tauri 窗口管理、系统通知、自动更新等。`src-tauri/` 下的 `codeg` 包很薄，只有 `src/main.rs`、`build.rs`（tauri-build）和 `tauri::generate_context!()`；代码全部在库 `crates/codeg-lib`（crate 名仍是 `codeg_lib`，所以 insta 快照名和日志 target 不变）。界面不编译进二进制：`web/app_assets.rs` 让窗口从安装包里的 `web/` 目录读取（macOS 为 `Contents/Resources/web`，由 `bundle.resources` 从 `out/` 复制），`frontendDist` 只是一页占位（`src-tauri/frontend-placeholder`）。因此只改界面或版本号时，发布只需重新编译这个薄包
 - **`codeg-server`**（`--no-default-features --features server`）：独立服务器模式，仅编译 Axum HTTP API + WebSocket。它的 `[[bin]]` 在 `crates/codeg-lib` 包里；`server` feature 不在默认 feature 里，所以桌面构建（`tauri build`）不编译、也不打包它
 - **`codeg-mcp`**（独立 crate `src-tauri/crates/codeg-mcp`）：per-launch stdio MCP 伴生进程，被注入到代理 CLI 的 MCP 配置中，向 LLM 暴露**异步**子智能体委托工具。它只依赖 `crates/codeg-mcp-protocol`（broker socket 协议、工具请求类型、共享的名称与上限），不链接主库，所以几秒就能编译完；主库在原来的路径（`acp::delegation::transport`、`acp::question` 等）重新导出这些类型。
+- **`codeg-cli`**（`--no-default-features --features cli-bin`）与 **`codeg-computer-helper`**（`computer-helper`）：命令行客户端与电脑操作执行器，同样在 `crates/codeg-lib` 包里，由 `prepare-sidecars` 构建为伴生程序（macOS 上执行器打包成独立的 `Contents/Helpers/codeg-computer-helper.app`）。这些 feature 默认不开，`tauri build` 不会编译自己的副本。
 
 ### 共享核心
 

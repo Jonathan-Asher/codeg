@@ -1,6 +1,8 @@
 # Fork solution plan — codeg pains (Jonathan's fork)
 
-**Fork:** https://github.com/Jonathan-Asher/codeg (upstream `xintaofei/codeg`, v0.30.9, Apache-2.0)
+**Fork:** https://github.com/Jonathan-Asher/codeg (upstream `xintaofei/codeg`, Apache-2.0; forked at v0.30.9)
+**Current base:** upstream **v0.45.0** (`4991406e6`), merged into `fork/solution-plan` on 2026-11-16 by a real merge
+(previous base v0.32.2, `2774a7e02`). Fork builds are stamped `0.45.1-fork.<run>` (patch + 1 over the base).
 **Local clone:** `~/Work/codeg` · **Date:** 2026-09-17
 **Priority order agreed:** ① Search index ② Session tree UI ③ Resume/deep-link fork bug ④ Battery.
 Destructive-action safety nets: **not a priority**.

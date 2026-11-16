@@ -20,7 +20,7 @@ use crate::acp::talk_frame::{self, TalkFrameInfo};
 
 /// Whether `input` holds any complete frame of any kind.
 pub(crate) fn contains_any(input: &str) -> bool {
-    agent_mentions::contains_internal_agent_routes(input)
+    agent_mentions::contains_internal_frames(input)
         || talk_frame::contains(input)
         || move_frame::contains(input)
 }
@@ -37,8 +37,8 @@ pub(crate) fn strip_all_with_talk(input: &str) -> (String, Option<TalkFrameInfo>
     // frame, and their own finders never depend on what precedes them.
     let (text, talk) = talk_frame::strip(input);
     let text = move_frame::strip(&text);
-    let text = if agent_mentions::contains_internal_agent_routes(&text) {
-        agent_mentions::strip_internal_agent_routes(&text)
+    let text = if agent_mentions::contains_internal_frames(&text) {
+        agent_mentions::strip_internal_frames(&text)
     } else {
         text
     };
