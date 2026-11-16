@@ -314,7 +314,7 @@ describe("RemoteDesktopTransport lifecycle", () => {
     expect(onUnauthorized).not.toHaveBeenCalled()
     tokenRefused()
 
-    expect(transport.getConnectionSnapshot()).toBe("disconnected")
+    expect(transport.getConnectionSnapshot()).toBe("unauthorized")
     // The same callback, with the same (absent) arguments, as an HTTP 401.
     expect(onUnauthorized.mock.calls).toEqual([[]])
     stream.attach("agent-connection", {}, attachHandlers())
@@ -358,10 +358,10 @@ describe("RemoteDesktopTransport lifecycle", () => {
       await flush()
       emit({ channel, payload: null })
       if (channel === "__unauthorized__") {
+        // A refused token is retried through the probe, not by subscribing
+        // in place again: the socket the next ready arrives on is the same.
         transport.reconnectNow()
         await flush()
-        // The ready below answers this retry's subscription, not the first.
-        expect(commandCalls("remote_ws_subscribe")).toHaveLength(2)
       }
       await flush()
       expect(onReconnect).not.toHaveBeenCalled()
@@ -437,186 +437,6 @@ describe("RemoteDesktopTransport lifecycle", () => {
 // handshake puts it there, which also ends the proxy task that held the
 // subscription. Behind the status pill the usual way there is a subscription
 // the IPC layer failed to set up.
-describe("RemoteDesktopTransport manual retry", () => {
-  it("reuses handlers, stream, replay cursor, and readiness waiters when retrying in place", async () => {
-    const { transport, stream } = await connectReady()
-    const legacyHandler = vi.fn()
-    await transport.subscribe("acp://event", legacyHandler)
-    const handlers = attachHandlers()
-    const sub = stream.attach("agent-connection", {}, handlers)
-    emit({
-      type: "snapshot",
-      subscription_id: sub.subscriptionId,
-      connection_id: "agent-connection",
-      snapshot: snapshot(10),
-      event_seq: 10,
-    })
-    const onReconnect = vi.fn()
-    transport.onReconnect(onReconnect)
-    disconnect()
-    const readyWaiter = vi.fn()
-    void transport.waitForReady().then(readyWaiter)
-    tokenRefused()
-    const originalSubscription = commandCalls("remote_ws_subscribe")[0][1]
-
-    transport.reconnectNow()
-    await flush()
-
-    expect(transport.getConnectionSnapshot()).toBe("reconnecting")
-    expect(transport.eventStream()).toBe(stream)
-    expect(readyWaiter).not.toHaveBeenCalled()
-    expect(sentFrames()).toHaveLength(1)
-    expect(commandCalls("remote_ws_subscribe")).toHaveLength(2)
-    expect(commandCalls("remote_ws_subscribe")[1][1]).toEqual(
-      originalSubscription
-    )
-    expect(listenMock).toHaveBeenCalledTimes(1)
-    expect(unlisten).not.toHaveBeenCalled()
-
-    ready()
-    await flush()
-    expect(readyWaiter).toHaveBeenCalledTimes(1)
-    expect(onReconnect).toHaveBeenCalledTimes(1)
-    expect(lastSentFrame()).toEqual({
-      action: "attach",
-      subscription_id: sub.subscriptionId,
-      connection_id: "agent-connection",
-      since_seq: 10,
-    })
-    const replay = [envelope(11), envelope(12)]
-    emit({
-      type: "replay",
-      subscription_id: sub.subscriptionId,
-      connection_id: "agent-connection",
-      events: replay,
-      high_water_seq: 12,
-    })
-    emit({ channel: "acp://event", payload: "recovered event" })
-    expect(handlers.onReplay).toHaveBeenCalledWith(replay, 12)
-    expect(legacyHandler).toHaveBeenCalledWith("recovered event")
-    expect(vi.getTimerCount()).toBe(0)
-  })
-
-  it("awaits unsubscribe and coalesces repeated retry clicks into one subscribe", async () => {
-    const { transport } = await connectReady()
-    tokenRefused()
-    let finishUnsubscribe!: () => void
-    const unsubscribePending = new Promise<void>((resolve) => {
-      finishUnsubscribe = resolve
-    })
-    invokeMock.mockImplementation((command) => {
-      return command === "remote_ws_unsubscribe"
-        ? unsubscribePending
-        : Promise.resolve(undefined)
-    })
-
-    transport.reconnectNow()
-    transport.reconnectNow()
-    transport.reconnectNow()
-    await flush()
-
-    expect(commandCalls("remote_ws_unsubscribe")).toHaveLength(1)
-    expect(commandCalls("remote_ws_subscribe")).toHaveLength(1)
-    expect(transport.getConnectionSnapshot()).toBe("reconnecting")
-
-    finishUnsubscribe()
-    await flush()
-    transport.reconnectNow()
-    expect(commandCalls("remote_ws_subscribe")).toHaveLength(2)
-    expect(commandCalls("remote_ws_unsubscribe")).toHaveLength(1)
-  })
-
-  it("does not replace a healthy or automatically reconnecting proxy", async () => {
-    const transport = createTransport()
-    transport.reconnectNow()
-    expect(invokeMock).not.toHaveBeenCalled()
-    transport.eventStream()
-    await flush()
-    ready()
-    transport.reconnectNow()
-    disconnect()
-    transport.reconnectNow()
-    await flush()
-
-    expect(commandCalls("remote_ws_subscribe")).toHaveLength(1)
-    expect(commandCalls("remote_ws_unsubscribe")).toHaveLength(0)
-  })
-
-  it("does not resubscribe when destroyed while retry unsubscribe is pending", async () => {
-    const { transport } = await connectReady()
-    tokenRefused()
-    let finishUnsubscribe!: () => void
-    invokeMock.mockReturnValueOnce(
-      new Promise<void>((resolve) => {
-        finishUnsubscribe = resolve
-      })
-    )
-    transport.reconnectNow()
-    await flush()
-    // The retry, not destroy() below, is what is waiting on the unsubscribe.
-    expect(commandCalls("remote_ws_unsubscribe")).toHaveLength(1)
-    transport.destroy()
-    finishUnsubscribe()
-    await flush()
-    transport.reconnectNow()
-    await flush()
-
-    expect(commandCalls("remote_ws_subscribe")).toHaveLength(1)
-    expect(listenMock).toHaveBeenCalledTimes(1)
-    expect(unlisten).toHaveBeenCalledTimes(1)
-    expect(vi.getTimerCount()).toBe(0)
-  })
-
-  it.each(["remote_ws_unsubscribe", "remote_ws_subscribe"])(
-    "retains active streams and allows another retry after %s fails",
-    async (failedCommand) => {
-      const { transport, stream } = await connectReady()
-      vi.spyOn(console, "warn").mockImplementation(() => {})
-      const handlers = attachHandlers()
-      const sub = stream.attach("agent-connection", { sinceSeq: 22 }, handlers)
-      tokenRefused()
-      let failOnce = true
-      invokeMock.mockImplementation((command) => {
-        if (command === failedCommand && failOnce) {
-          failOnce = false
-          return Promise.reject(new Error("IPC unavailable"))
-        }
-        return Promise.resolve(undefined)
-      })
-
-      transport.reconnectNow()
-      await flush()
-
-      // The retry reached the failing command, and the failure ended it.
-      expect(failOnce).toBe(false)
-      expect(transport.getConnectionSnapshot()).toBe("disconnected")
-      expect(transport.eventStream()).toBe(stream)
-      expect(sentFrames()).toHaveLength(1)
-      const subscribesBefore = commandCalls("remote_ws_subscribe").length
-      transport.reconnectNow()
-      await flush()
-      expect(transport.getConnectionSnapshot()).toBe("reconnecting")
-      expect(commandCalls("remote_ws_subscribe")).toHaveLength(
-        subscribesBefore + 1
-      )
-      ready()
-      expect(transport.getConnectionSnapshot()).toBe("connected")
-      expect(lastSentFrame()).toEqual({
-        action: "attach",
-        subscription_id: sub.subscriptionId,
-        connection_id: "agent-connection",
-        since_seq: 22,
-      })
-      emit({
-        type: "event",
-        subscription_id: sub.subscriptionId,
-        envelope: envelope(23),
-      })
-      expect(handlers.onEvent).toHaveBeenCalledWith(envelope(23))
-    }
-  )
-})
-
 describe("RemoteDesktopTransport connection health", () => {
   it("publishes lifecycle snapshots once per state change", async () => {
     const transport = createTransport()
@@ -624,16 +444,17 @@ describe("RemoteDesktopTransport connection health", () => {
     transport.subscribeConnection(() => {
       states.push(transport.getConnectionSnapshot())
     })
-    expect(transport.getConnectionSnapshot()).toBe("reconnecting")
+    expect(transport.getConnectionSnapshot()).toBe("connecting")
     transport.eventStream()
     await flush()
 
+    // A drop before the first ready already counts as reconnecting.
     disconnect()
-    expect(states).toEqual([])
+    expect(states).toEqual(["reconnecting"])
     ready()
     ready()
     expect(transport.getConnectionSnapshot()).toBe("connected")
-    expect(states).toEqual(["connected"])
+    expect(states).toEqual(["reconnecting", "connected"])
 
     disconnect()
     disconnect()
@@ -642,12 +463,13 @@ describe("RemoteDesktopTransport connection health", () => {
     tokenRefused()
     tokenRefused()
 
-    expect(transport.getConnectionSnapshot()).toBe("disconnected")
+    expect(transport.getConnectionSnapshot()).toBe("unauthorized")
     expect(states).toEqual([
+      "reconnecting",
       "connected",
       "reconnecting",
       "connected",
-      "disconnected",
+      "unauthorized",
     ])
   })
 
@@ -685,7 +507,7 @@ describe("RemoteDesktopTransport connection health", () => {
     expect(sibling).toHaveBeenCalledTimes(1)
   })
 
-  it("marks confirmed HTTP credential rejection disconnected with the default callback source", async () => {
+  it("marks confirmed HTTP credential rejection unauthorized with the default callback source", async () => {
     const onUnauthorized = vi.fn()
     const transport = createTransport({ onUnauthorized })
     const stream = transport.eventStream()
@@ -701,7 +523,7 @@ describe("RemoteDesktopTransport connection health", () => {
 
     await expect(transport.call("get_status")).rejects.toBe(error)
 
-    expect(transport.getConnectionSnapshot()).toBe("disconnected")
+    expect(transport.getConnectionSnapshot()).toBe("unauthorized")
     expect(listener).toHaveBeenCalledTimes(1)
     expect(onUnauthorized.mock.calls).toEqual([[]])
     stream.attach("agent-connection", {}, attachHandlers())
