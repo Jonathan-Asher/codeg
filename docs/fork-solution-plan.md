@@ -289,6 +289,38 @@ Privacy & Security. In both Accessibility and Screen Recording, remove the old c
 
 ---
 
+## Upstream v0.45.0 merge (2026-11-16)
+
+A real merge of `upstream/main` 4991406e6 (v0.45.0) into `fork/solution-plan` (branch `merge/upstream-0.45`);
+1,068 upstream commits over the v0.32.2 base. What it changed for the fork:
+
+- **Layout.** Upstream still uses `src-tauri/src`; every upstream file landed in the fork layout (`crates/codeg-lib`,
+  thin `src-tauri` app crate, `crates/codeg-mcp` + `crates/codeg-mcp-protocol`). New upstream binaries
+  `codeg-cli` (feature `cli-bin`) and `codeg-computer-helper` (feature `computer-helper`) live in codeg-lib and are
+  built by `prepare-sidecars` (`buildLibSidecars`); the helper ships as `Contents/Helpers/codeg-computer-helper.app`.
+  codeg-lib got a small build script for the helper's source fingerprint. Computer use's wire types, the assistant
+  roster and the work-task attachment fields moved into `codeg-mcp-protocol` so the companion still builds without the
+  library. The server keeps the fork's `server` feature name (upstream: `server-bin`).
+- **Release builds.** `build-app.yml` pins computer use's trust anchors (team 3L92BZK46V) before `tauri build` and signs
+  the updater archive with `--app-version`, which `requireSignedVersion` now demands.
+- **Reply rendering** follows upstream's activity timeline; the fork's Pi run/job cards, provider-stopped sub-agents,
+  paused badge, Stop-hook stretches and images under folded work moved onto its rows. The composer's model/effort chips
+  gave way to upstream's single settings picker.
+- **Workspace windows.** Upstream reopens the windows open at the last quit; the fork's "When codeg starts, open"
+  preference now leads that restore with its remote workspace (main hidden behind it), a windowless launch restores
+  nothing, and a Dock click with no workspace window rebuilds main.
+- **Menu.** Upstream's ⌘W menu item (routed to the focused surface) plus the fork's ⇧⌘W on Window › Close Window.
+- **Prompt suggestions.** Upstream added its own for Claude Code and Codex (codex-acp 2.5+ `thread/sample`); the fork's
+  setting (now "Prompt suggestions") switches both off, and both reach one `{id, text}` ghost text.
+- **Adapters.** codex-acp 2.6.0 (upstream). claude-agent-acp stays pinned at 0.81.1 and pi-acp at 0.0.33: the machines
+  run the fork's own builds from the PATH, and a newer pin would offer an upgrade that replaces them.
+- **Database.** Upstream's thirteen new migrations are listed in name order between the fork's; nothing applied was
+  renamed or removed.
+- **Version.** Base 0.45.0; CI stamps `0.45.1-fork.<run>`.
+- **Open product calls.** Session menus offer both upstream's "Move to ▸" (rows only) and the fork's "Move to project…"
+  (moves the agent's files too). Upstream's draggable chat width and the fork's Session width coexist: picking a
+  Session width drops a dragged one.
+
 ## Working agreements for the fork
 
 - Branch per pain: `fork/search-index`, `fork/tree-ui`, `fork/resume-fix`, `fork/battery`.
