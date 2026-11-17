@@ -684,6 +684,7 @@ async fn a_rescan_neither_duplicates_nor_moves_it_back() {
         fx.old_folder,
         &[(AgentType::ClaudeCode, summary)],
         crate::db::service::import_service::DeletedPolicy::Skip,
+        &std::collections::HashSet::new(),
     )
     .await
     .unwrap();

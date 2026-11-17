@@ -11075,6 +11075,9 @@ mod tests {
             outstanding_tasks: vec![],
             settled: vec![],
             watermark: 0,
+            tasks: vec![],
+            out_of_turn: false,
+            activity_at: None,
         }
     }
 

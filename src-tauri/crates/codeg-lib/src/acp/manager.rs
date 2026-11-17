@@ -13565,7 +13565,7 @@ mod tests {
         let (mgr, join) =
             manager_with_fake_fork("c-fork-tags", pre.id, "session-S2", "session-S1").await;
         let result = mgr
-            .fork_session(&db, "c-fork-tags", None, None, None)
+            .fork_session(&db, "c-fork-tags", None, None, None, ForkMode::Branch)
             .await
             .expect("fork_session should succeed");
         let _ = join.await;
@@ -13622,7 +13622,7 @@ mod tests {
         )
         .await;
         let result = mgr
-            .fork_session(&db, "c-fork-origin", None, None, None)
+            .fork_session(&db, "c-fork-origin", None, None, None, ForkMode::Branch)
             .await
             .expect("fork_session should succeed");
         let _ = join.await;

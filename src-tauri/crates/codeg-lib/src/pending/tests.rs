@@ -316,6 +316,7 @@ fn asks_are_read_from_what_the_session_holds() {
                 },
             ],
             is_secret: false,
+            allow_other: true,
         }],
         created_at: at(5),
     });
@@ -849,6 +850,7 @@ async fn the_watch_pushes_reminds_and_clears_through_apns() {
                     },
                 ],
                 is_secret: false,
+                allow_other: true,
             }],
             created_at: asked,
         });

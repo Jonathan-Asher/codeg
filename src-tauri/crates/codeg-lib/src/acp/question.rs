@@ -3738,6 +3738,7 @@ mod tests {
                 },
             ],
             is_secret: false,
+            allow_other: true,
         };
         let mut specs = [
             spec("1", "Implementation approach"),

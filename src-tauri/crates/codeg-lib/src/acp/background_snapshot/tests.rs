@@ -53,6 +53,7 @@ async fn running(manager: &ConnectionManager, conn_id: &str, tasks: Vec<Backgrou
         tasks,
         out_of_turn: false,
         activity_at: None,
+        outstanding_tasks: vec![],
     });
 }
 

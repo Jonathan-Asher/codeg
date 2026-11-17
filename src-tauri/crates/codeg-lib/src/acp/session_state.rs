@@ -3577,6 +3577,8 @@ mod tests {
         assert_eq!(s.attention_kind(), Some(AttentionKind::Permission));
         s.apply_event(&AcpEvent::PermissionResolved {
             request_id: "p-1".into(),
+            option_id: None,
+            origin: None,
         });
         assert_eq!(s.attention_kind(), None);
 
@@ -3606,6 +3608,8 @@ mod tests {
         // Answering the permission falls back to what is still pending.
         s.apply_event(&AcpEvent::PermissionResolved {
             request_id: "p-1".into(),
+            option_id: None,
+            origin: None,
         });
         assert_eq!(s.attention_kind(), Some(AttentionKind::Question));
     }

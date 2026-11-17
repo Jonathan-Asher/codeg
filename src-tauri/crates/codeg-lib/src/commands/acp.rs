@@ -21050,6 +21050,7 @@ wire_api = "chat"
         use crate::web::event_bridge::EventEmitter;
 
         let mgr = ConnectionManager::new();
+        let db = crate::db::test_helpers::fresh_in_memory_db().await;
         mgr.insert_test_connection("c1", AgentType::ClaudeCode, None, EventEmitter::Noop)
             .await;
         {
@@ -21063,6 +21064,7 @@ wire_api = "chat"
             assert!(
                 acp_find_connection_for_conversation_core(
                     &mgr,
+                    &db.conn,
                     42,
                     session_id,
                     AgentType::ClaudeCode
@@ -21076,8 +21078,14 @@ wire_api = "chat"
         // Once a client claims it, it is discoverable again.
         mgr.claim_for_view("c1").await;
         assert!(
-            acp_find_connection_for_conversation_core(&mgr, 42, None, AgentType::ClaudeCode)
-                .await
+            acp_find_connection_for_conversation_core(
+                &mgr,
+                &db.conn,
+                42,
+                None,
+                AgentType::ClaudeCode
+            )
+            .await
                 .expect("ok")
                 .is_some()
         );

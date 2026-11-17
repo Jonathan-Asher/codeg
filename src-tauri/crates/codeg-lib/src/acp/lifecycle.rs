@@ -5222,6 +5222,7 @@ mod tests {
             tasks: Vec::new(),
             out_of_turn: true,
             activity_at,
+            outstanding_tasks: vec![],
         };
         assert!(is_lifecycle_relevant(&background(Some(chrono::Utc::now()))));
         assert!(!is_lifecycle_relevant(&background(None)));

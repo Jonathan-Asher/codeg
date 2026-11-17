@@ -630,6 +630,9 @@ mod tests {
             }],
             settled: vec![],
             watermark: 0,
+            tasks: vec![],
+            out_of_turn: false,
+            activity_at: None,
         }
     }
 

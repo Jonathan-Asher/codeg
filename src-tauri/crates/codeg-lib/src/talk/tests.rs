@@ -121,6 +121,7 @@ impl Fixture {
                 blocks,
                 user_message,
                 talk,
+                ..
             }) => SentPrompt {
                 blocks,
                 user_message,

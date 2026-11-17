@@ -5595,6 +5595,7 @@ mod tests {
                 parent_conversation_id: parent.id,
                 parent_tool_use_id: "tu-out-of-turn".into(),
                 delegation_call_id: "call-out-of-turn".into(),
+                assistant: None,
             }),
         )
         .await

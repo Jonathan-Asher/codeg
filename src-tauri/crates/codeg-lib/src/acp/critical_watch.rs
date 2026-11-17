@@ -1891,7 +1891,9 @@ mod tests {
         );
         assert_eq!(
             classify(&AcpEvent::PermissionResolved {
-                request_id: "r".into()
+                request_id: "r".into(),
+                option_id: None,
+                origin: None,
             }),
             Some(Signal::Boundary)
         );

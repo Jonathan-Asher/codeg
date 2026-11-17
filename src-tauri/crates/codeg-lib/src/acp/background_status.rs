@@ -509,6 +509,7 @@ mod tests {
             tasks,
             out_of_turn,
             activity_at: None,
+            outstanding_tasks: vec![],
         }
     }
 
@@ -528,6 +529,8 @@ mod tests {
                 usage: None,
                 output_file_path: None,
                 tool_call_id: None,
+                current_agent: None,
+                phase: None,
             },
         }
     }
@@ -548,6 +551,8 @@ mod tests {
                 usage: None,
                 output_file_path: None,
                 tool_call_id: None,
+                current_agent: None,
+                phase: None,
             },
         }
     }
@@ -582,6 +587,8 @@ mod tests {
             agent_type: AgentType::Codex,
             task_preview: "run the tests".into(),
             task_id: "task-1".into(),
+            assistant_id: None,
+            assistant_name: None,
         }
     }
 
@@ -672,6 +679,8 @@ mod tests {
                 duration_ms: 1,
                 text_preview: None,
             },
+            assistant_id: None,
+            assistant_name: None,
         });
         assert_eq!(s.background_status(Utc::now()), None);
     }
@@ -940,6 +949,7 @@ mod tests {
             tasks: Vec::new(),
             out_of_turn: false,
             activity_at: None,
+            outstanding_tasks: vec![],
         });
         let bg = s.background_status(Utc::now()).unwrap();
         assert_eq!(bg.task_count, 2);

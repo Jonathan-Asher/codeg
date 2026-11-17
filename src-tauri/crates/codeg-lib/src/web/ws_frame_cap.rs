@@ -981,6 +981,7 @@ mod tests {
                     tasks: vec![],
                     out_of_turn: false,
                     activity_at: None,
+                    outstanding_tasks: vec![],
                 },
             }),
         };

@@ -937,12 +937,6 @@ mod tauri_app {
             // same download progress; lets the upgrade UI survive navigation.
             .manage(crate::update::new_update_state_handle())
             .setup(move |app| {
-                // ⌘W closes a tab, ⇧⌘W the window (see `app_menu`).
-                #[cfg(target_os = "macos")]
-                if let Err(err) = crate::app_menu::install(app.handle()) {
-                    tracing::warn!("[menu] could not install the app menu: {err}");
-                }
-
                 let app_data_dir = app.path().app_data_dir()?;
 
                 // Unify the data root across every consumer:

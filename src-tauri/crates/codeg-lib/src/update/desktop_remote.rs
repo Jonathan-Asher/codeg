@@ -984,6 +984,7 @@ mod tests {
             token: token.map(str::to_string),
             port,
             auto_start,
+            host: None,
         }
     }
 
