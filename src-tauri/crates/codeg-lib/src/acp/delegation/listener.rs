@@ -4630,7 +4630,8 @@ mod tests {
                 "id": 3,
                 "name": "Reviewer",
                 "description": "Reviewer description",
-                "agent_type": "codex"
+                "agent_type": "codex",
+                "agent_label": "Codex CLI"
             }]})
         );
         // A bad token still gets an answer — never a dropped connection, which

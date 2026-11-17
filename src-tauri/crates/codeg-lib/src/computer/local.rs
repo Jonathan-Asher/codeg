@@ -1644,7 +1644,8 @@ mod tests {
         // The copy `tauri build` would compile stays out of every bundle: the
         // CLI bundles a binary target only when its features are among those
         // it was given, and it is never given this one.
-        let manifest: toml::Table = std::fs::read_to_string(root.join("Cargo.toml"))
+        let manifest: toml::Table =
+            std::fs::read_to_string(root.join("crates/codeg-lib/Cargo.toml"))
             .unwrap()
             .parse()
             .unwrap();

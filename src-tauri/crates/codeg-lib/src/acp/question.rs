@@ -2026,7 +2026,13 @@ mod tests {
             raw["message"] = json!(format!(" {text} "));
             let q = expect_questions(classify_elicitation(&raw, ElicitationPeer::Other).unwrap());
             assert_eq!(q.specs[0].question, "文".repeat(MAX_QUESTION_TEXT_CHARS));
-            assert_eq!(q.specs[0].header, "题".repeat(MAX_HEADER_CHARS));
+            // An over-long header is shortened with an ellipsis, not cut.
+            let header = if extra == 0 {
+                "题".repeat(MAX_HEADER_CHARS)
+            } else {
+                format!("{}…", "题".repeat(MAX_HEADER_CHARS - 1))
+            };
+            assert_eq!(q.specs[0].header, header);
             assert_eq!(
                 q.specs[0].options[0].description,
                 "文".repeat(MAX_QUESTION_TEXT_CHARS)

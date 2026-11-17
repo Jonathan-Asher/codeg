@@ -8525,7 +8525,7 @@ mod tests {
             BrokerMessage::ListAssistants(req) => {
                 assert_eq!(req.token, "tok");
                 Some(json!({"assistants": [
-                    {"id": 3, "name": "Reviewer", "description": "Reviews diffs", "agent_type": "codex"}
+                    {"id": 3, "name": "Reviewer", "description": "Reviews diffs", "agent_type": "codex", "agent_label": "Codex CLI"}
                 ]}))
             }
             _ => None,

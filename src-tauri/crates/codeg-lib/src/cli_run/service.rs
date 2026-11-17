@@ -4331,10 +4331,17 @@ mod tests {
         assert_eq!(result.subtype.exit_code(), 5);
         assert_eq!(result.error.as_ref().unwrap().code, "permission_required");
         assert_eq!(result.permission_denials.len(), 1, "refused by the policy");
-        assert_eq!(
-            h.row_status(started.conversation_id).await,
-            ConversationStatus::Cancelled
-        );
+        // The row is converged after the result settles (the stop's cancel
+        // records the user's stop first), so wait for it rather than race it.
+        let mut status = h.row_status(started.conversation_id).await;
+        for _ in 0..100 {
+            if status == ConversationStatus::Cancelled {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            status = h.row_status(started.conversation_id).await;
+        }
+        assert_eq!(status, ConversationStatus::Cancelled);
     }
 
     /// A delegated child's request is already on its state when the root's
