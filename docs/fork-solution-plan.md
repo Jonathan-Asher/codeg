@@ -317,9 +317,11 @@ A real merge of `upstream/main` 4991406e6 (v0.45.0) into `fork/solution-plan` (b
 - **Database.** Upstream's thirteen new migrations are listed in name order between the fork's; nothing applied was
   renamed or removed.
 - **Version.** Base 0.45.0; CI stamps `0.45.1-fork.<run>`.
-- **Open product calls.** Session menus offer both upstream's "Move to ▸" (rows only) and the fork's "Move to project…"
-  (moves the agent's files too). Upstream's draggable chat width and the fork's Session width coexist: picking a
-  Session width drops a dragged one.
+- **Moving sessions.** Only the fork's "Move to project…" (files, idle guard, tab follows) is offered; upstream's
+  record-only "Move to ▸" submenu and the bulk move in Manage conversations were removed (Jonathan, 2026-11-17). The
+  server's `move_conversations` endpoint stays.
+- **Widths.** Upstream's draggable chat width and the fork's Session width coexist: picking a Session width drops a
+  dragged one.
 
 ## Working agreements for the fork
 
