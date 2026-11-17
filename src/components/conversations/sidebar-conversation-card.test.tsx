@@ -295,11 +295,9 @@ describe("SidebarConversationCard critical mark", () => {
   })
 })
 
-describe("SidebarConversationCard move to folder", () => {
-  const onMoveToFolder = vi.fn()
+describe("SidebarConversationCard manage conversations", () => {
   const onManageConversations = vi.fn()
   beforeEach(() => {
-    onMoveToFolder.mockClear()
     onManageConversations.mockClear()
     resetAppWorkspaceStore()
     const base = {
@@ -344,52 +342,16 @@ describe("SidebarConversationCard move to folder", () => {
         onRename={onRename}
         onDelete={onDelete}
         onStatusChange={onStatusChange}
-        onMoveToFolder={onMoveToFolder}
         onManageConversations={onManageConversations}
       />
     )
   }
 
-  function openMoveSubmenu() {
-    fireEvent.keyDown(screen.getByText("Move to"), { key: "ArrowRight" })
-  }
-
-  it("lists the other open folders and hands the pick over", async () => {
-    const c = conv(1)
-    const { getByText } = renderCard(c)
-    fireEvent.contextMenu(getByText("conv-1"))
-    openMoveSubmenu()
-    const other = await screen.findByText("other")
-    // The conversation's own folder is no destination.
-    expect(screen.queryByText("repo")).toBeNull()
-    fireEvent.click(other)
-    expect(onMoveToFolder).toHaveBeenCalledWith(c, 2)
-  })
-
-  it("says so when there is no other folder", async () => {
-    useAppWorkspaceStore.setState({
-      folders: useAppWorkspaceStore.getState().folders.slice(0, 1),
-    })
+  // Only the full "Move to project…" moves a session: the row offers no
+  // record-only move to another folder.
+  it("offers no record-only move to another folder", () => {
     const { getByText } = renderCard(conv(1))
     fireEvent.contextMenu(getByText("conv-1"))
-    openMoveSubmenu()
-    expect(await screen.findByText("No other open folder")).toBeDefined()
-  })
-
-  it("offers the move on a chat conversation", () => {
-    const { getByText } = renderCard({ ...conv(2), kind: "chat" })
-    fireEvent.contextMenu(getByText("conv-2"))
-    expect(screen.getByText("Move to")).toBeDefined()
-  })
-
-  it("does not offer it on a sub-session — it moves with its root", () => {
-    const child: DbConversationSummary = {
-      ...conv(3),
-      kind: "delegate",
-      parent_id: 1,
-    }
-    const { getByText } = renderCard(child)
-    fireEvent.contextMenu(getByText("conv-3"))
     expect(screen.queryByText("Move to")).toBeNull()
   })
 

@@ -120,7 +120,6 @@ import {
   SIDEBAR_HEADING_WEIGHT,
   SIDEBAR_SUBHEADING_WEIGHT,
 } from "./sidebar-conversation-card"
-import { MoveConversationDialog } from "./move-conversation-dialog"
 import {
   applyLayoutMove,
   archivedFolderIds,
@@ -2819,23 +2818,6 @@ export function SidebarConversationList({
     [t]
   )
 
-  // "Move to folder" — the row's submenu picks the folder, this one dialog for
-  // the whole list confirms it, so the card memo keeps bailing out on a stable
-  // callback.
-  const [moveRequest, setMoveRequest] = useState<{
-    conversation: DbConversationSummary
-    folderId: number
-  } | null>(null)
-  const handleMoveToFolder = useCallback(
-    (conversation: DbConversationSummary, folderId: number) =>
-      setMoveRequest({ conversation, folderId }),
-    []
-  )
-  const moveConversationsList = useMemo(
-    () => (moveRequest ? [moveRequest.conversation] : []),
-    [moveRequest]
-  )
-
   const handleNewConversation = useCallback(() => {
     // Starting a conversation returns to the conversation workspace if a
     // workbench route (e.g. Automations) was taking over the content region.
@@ -4130,7 +4112,6 @@ export function SidebarConversationList({
         onToggleCritical={handleToggleCritical}
         onToggleTalk={handleToggleTalk}
         onExportMarkdown={row.pinned ? handleExportMarkdown : undefined}
-        onMoveToFolder={handleMoveToFolder}
         onManageConversations={handleManageConversationsFor}
         depth={row.depth}
         hasChildren={conv.child_count > 0}
@@ -4505,13 +4486,6 @@ export function SidebarConversationList({
           </ContextMenuContent>
         </ContextMenu>
       )}
-
-      <MoveConversationDialog
-        open={moveRequest !== null}
-        onOpenChange={(open) => !open && setMoveRequest(null)}
-        conversations={moveConversationsList}
-        targetFolderId={moveRequest?.folderId ?? null}
-      />
 
       <AlertDialog
         open={removeConfirm !== null}

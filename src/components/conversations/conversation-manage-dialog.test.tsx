@@ -493,31 +493,14 @@ describe("ConversationManageDialog", () => {
     expect(h.closeConversationTab).toHaveBeenCalledWith(1, 1, "claude_code")
   })
 
-  it("moves the selection to another folder and drops what moved from it", async () => {
-    h.moveConvs.mockResolvedValue({
-      moved: [1],
-      skipped: [{ conversationId: 2, reason: "busy" }],
-    })
+  // Sessions move only through "Move to project…", which carries their
+  // files: the bulk actions offer no record-only move.
+  it("offers no record-only move for the selection", async () => {
     const user = renderDialog()
     await screen.findByText("on main")
-
     await user.click(screen.getByText("on main"))
-    await user.click(screen.getByText("on feature"))
-    expect(screen.getByText("2 selected")).toBeTruthy()
-    const listCalls = h.listAll.mock.calls.length
-
-    await user.click(screen.getByRole("button", { name: "Move to…" }))
-    await user.click(paletteRow("beta"))
-    // The pick only asks; nothing moves before the confirmation.
+    expect(screen.getByText("1 selected")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Move to…" })).toBeNull()
     expect(h.moveConvs).not.toHaveBeenCalled()
-    expect(screen.getByText("Move 2 conversations")).toBeTruthy()
-    await user.click(screen.getByRole("button", { name: "Move" }))
-
-    await waitFor(() => expect(h.moveConvs).toHaveBeenCalledWith([1, 2], 3))
-    // The one that stayed is still selected for another go; the list refetches.
-    await waitFor(() => expect(screen.getByText("1 selected")).toBeTruthy())
-    await waitFor(() =>
-      expect(h.listAll.mock.calls.length).toBeGreaterThan(listCalls)
-    )
   })
 })

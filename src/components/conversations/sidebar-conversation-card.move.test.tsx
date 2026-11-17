@@ -106,11 +106,13 @@ describe("SidebarConversationCard Move to project", () => {
     expect(view.queryByText("Source worktree removed")).toBeNull()
   })
 
-  it("keeps the removed-worktree badge when that folder is gone", () => {
+  // The original folder is named in the hover details ("Original working
+  // directory", as upstream shows it); the row itself carries no badge for it.
+  it("shows no runs-in badge when the source folder is gone", () => {
     const view = renderCard(
       conv({ origin_cwd: "/work/gone", working_dir: "/work/app" })
     )
     expect(view.queryByTestId("runs-in-badge")).toBeNull()
-    expect(view.getByText("Source worktree removed")).toBeTruthy()
+    expect(view.queryByText("Source worktree removed")).toBeNull()
   })
 })

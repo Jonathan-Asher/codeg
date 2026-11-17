@@ -123,7 +123,6 @@ import {
   ConversationTagContextSubmenu,
   NewConversationTagDialog,
 } from "./conversation-tag-picker"
-import { MoveToFolderContextSubmenu } from "./move-to-folder-menu"
 import { AgentIcon } from "@/components/agent-icon"
 import { AssistantAvatar } from "@/components/assistants/assistant-avatar"
 import { useBranchChip, useResolvedTags } from "@/hooks/use-conversation-tags"
@@ -246,13 +245,6 @@ interface SidebarConversationCardProps {
   /** Export the conversation to a Markdown file (server-side serializer).
    *  Offered on pinned rows; absent keeps the menu without the item. */
   onExportMarkdown?: (id: number) => void
-  /** A folder was picked in the "Move to folder" submenu — the caller asks for
-   *  confirmation. Offered on root regular and chat conversations only (a
-   *  sub-session moves with its root). */
-  onMoveToFolder?: (
-    conversation: DbConversationSummary,
-    folderId: number
-  ) => void
   /** Opens Manage conversations on the folder this row is listed under.
    *  Offered on root folder conversations only: a chat — and a sub-session,
    *  which may hang under one — lives in no folder a scope there can name. */
@@ -300,7 +292,6 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   onToggleCritical,
   onToggleTalk,
   onExportMarkdown,
-  onMoveToFolder,
   onManageConversations,
   depth = 0,
   hasChildren = false,
@@ -1209,15 +1200,6 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                 )}
               </ContextMenuSubContent>
             </ContextMenuSub>
-            {onMoveToFolder &&
-              !isSubsession &&
-              (conversation.kind === "regular" ||
-                conversation.kind === "chat") && (
-                <MoveToFolderContextSubmenu
-                  currentFolderId={conversation.folder_id}
-                  onPick={(folderId) => onMoveToFolder(conversation, folderId)}
-                />
-              )}
             {onManageConversations &&
               !isSubsession &&
               conversation.kind !== "chat" && (
