@@ -230,9 +230,7 @@ export const GenericRow = memo(function GenericRow({
               <ResultBody text={args} />
             </DetailBox>
           ) : null}
-          {stop ? (
-            <ProviderErrorNotice error={stop} scope="subagent" />
-          ) : null}
+          {stop ? <ProviderErrorNotice error={stop} scope="subagent" /> : null}
           {result?.trim() && !completion?.result && !stop ? (
             <DetailBox
               tone={failed ? "danger" : "neutral"}

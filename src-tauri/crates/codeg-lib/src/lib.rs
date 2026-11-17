@@ -1940,6 +1940,12 @@ mod tauri_app {
                 // it. A windowless launch builds no window at all and reopens
                 // nothing — the Dock or the menu bar icon builds `main` when
                 // asked.
+                if !startup_plan.builds_any_window() {
+                    tracing::info!(
+                        "[windowless] no window built at startup; the Dock icon or the menu \
+                         bar icon opens one"
+                    );
+                }
                 if startup_plan.build_main {
                     let local_requested = startup_focus.is_some();
                     let local_can_hide = windows::can_hide_to_tray();
@@ -1962,11 +1968,6 @@ mod tauri_app {
                         restore.show_local(),
                     );
                     workspace_windows::begin_restore(app.handle(), restore);
-                } else {
-                    tracing::info!(
-                        "[windowless] no window built at startup; the Dock icon or the menu \
-                         bar icon opens one"
-                    );
                 }
 
                 // Quick Ask: register the saved global shortcut now, and build

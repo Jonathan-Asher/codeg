@@ -890,13 +890,6 @@ pub(crate) fn show_local_workspace_window(app: &AppHandle) {
     windows::show_main_window(app);
 }
 
-/// Answer a dock click (macOS) or a second launch (Windows, Linux): the
-/// last-used workspace window, or `main`, rebuilt, when none is left. The
-/// name the notification handlers have always called.
-pub(crate) fn reopen_workspace(app: &AppHandle) {
-    activate_workspace(app);
-}
-
 /// Runs once the remote workspace window `closed` is gone: shows `main` when
 /// [`main_needs_resurfacing`] finds it stranded. `closed` is left out of the
 /// count by name rather than trusting it to have left the window registry

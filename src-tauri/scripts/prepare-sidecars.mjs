@@ -464,7 +464,10 @@ function stubArches(target) {
 
 /** Compile the codeg-talk stub for `arches`; returns its path. */
 function compileTalkStub(arches) {
-  const out = join(mkdtempSync(join(tmpdir(), "codeg-talk-stub-")), "codeg-talk")
+  const out = join(
+    mkdtempSync(join(tmpdir(), "codeg-talk-stub-")),
+    "codeg-talk"
+  )
   execFileSync(
     "clang",
     [

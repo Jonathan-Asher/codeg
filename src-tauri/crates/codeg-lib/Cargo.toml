@@ -352,6 +352,9 @@ javascriptcore-rs = { version = "=1.1.2", optional = true }
 libc = "0.2"
 
 [dev-dependencies]
+# The companion, for the end-to-end tests that drive it against the broker
+# over a real socket (it does not depend on this crate).
+codeg-mcp = { path = "../codeg-mcp" }
 tempfile = "3"
 temp-env = { version = "0.3", features = ["async_closure"] }
 tokio = { version = "1", features = ["test-util", "macros", "rt", "sync", "time"] }

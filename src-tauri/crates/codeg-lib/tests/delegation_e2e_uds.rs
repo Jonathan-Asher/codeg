@@ -767,7 +767,7 @@ fn reviewer_assistant() -> codeg_lib::models::AssistantInfo {
 /// riding the first prompt.
 #[tokio::test]
 async fn end_to_end_uds_assistant_delegation() {
-    use codeg_lib::acp::delegation::companion::{
+    use codeg_mcp::companion::{
         dispatch_line, CompanionContext, CompanionFeatures, InflightCalls, LineAction,
     };
 

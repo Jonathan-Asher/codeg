@@ -747,8 +747,10 @@ fn find_halved_body_prefix(text: &str) -> Option<usize> {
 }
 
 /// The record contains one or more valid internal frames and no user-visible
-/// content. Used by the Codex parser to avoid phantom turns and promotion
-/// coverage from adapters that persist ACP text blocks separately.
+/// content. The Codex parser asks `internal_frames::contains_only_frames`,
+/// which also counts the talk and move frames; this routing-frame-only form is
+/// kept for the tests that pin the frame grammar.
+#[cfg(test)]
 pub(crate) fn contains_only_internal_frames(input: &str) -> bool {
     contains_internal_frames(input) && strip_internal_frames(input).trim().is_empty()
 }

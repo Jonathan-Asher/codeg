@@ -673,9 +673,7 @@ export const CommandRow = memo(function CommandRow({
               output={output}
               commandCut={commandCut}
             />
-            <ModelNotesToggle
-              notes={[{ kind: "jobExit", text: job.notice }]}
-            />
+            <ModelNotesToggle notes={[{ kind: "jobExit", text: job.notice }]} />
           </div>
         ) : (
           <CommandDetail step={step} output={output} commandCut={commandCut} />
