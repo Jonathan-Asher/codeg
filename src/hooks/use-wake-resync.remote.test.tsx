@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 // A remote-workspace window: the hook reaches the window's transport through
 // `onTransportReconnect`, and the transport talks to the Rust proxy through
-// Tauri's `invoke` / `listen`, whose side the test plays.
+// Tauri's `invoke` and its webview's `listen`, whose side the test plays.
 const env = vi.hoisted(() => ({
   invoke: vi.fn(),
   onFrame: null as ((event: { payload: unknown }) => void) | null,
@@ -11,15 +11,19 @@ const env = vi.hoisted(() => ({
 }))
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: env.invoke }))
-vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn(
-    async (_event: string, handler: (event: { payload: unknown }) => void) => {
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({
+    label: "remote-workspace-3",
+    listen: async (
+      _event: string,
+      handler: (event: { payload: unknown }) => void
+    ) => {
       env.onFrame = handler
       return () => {
         env.onFrame = null
       }
-    }
-  ),
+    },
+  }),
 }))
 vi.mock("@/lib/platform", () => ({
   onTransportReconnect: (cb: () => void) =>

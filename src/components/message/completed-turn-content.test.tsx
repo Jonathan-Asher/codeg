@@ -237,7 +237,16 @@ describe("a reply a Stop hook reopened", () => {
       />
     )
 
-    expect(screen.getByText(/Decision for you:/)).toBeInTheDocument()
+    // A running reply's text is animated in, a span per letter.
+    expect(
+      screen.getByText(
+        (_, element) =>
+          !!element?.textContent?.includes("Decision for you:") &&
+          ![...element.children].some((child) =>
+            child.textContent?.includes("Decision for you:")
+          )
+      )
+    ).toBeInTheDocument()
     expect(
       screen.getByRole("button", { name: /Stop hook: Browser check/ })
     ).toBeInTheDocument()

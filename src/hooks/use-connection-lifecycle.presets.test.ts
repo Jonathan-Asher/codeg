@@ -23,7 +23,11 @@ vi.mock("next-intl", () => ({
 vi.mock("@/contexts/acp-connections-context", async () => {
   const cache = await import("@/lib/selector-options-cache")
   return {
-    useAcpActions: () => ({ setActiveKey: vi.fn(), touchActivity: vi.fn() }),
+    useAcpActions: () => ({
+      setActiveKey: vi.fn(),
+      releaseActiveKey: vi.fn(),
+      touchActivity: vi.fn(),
+    }),
     getCachedSelectors: (agentType: string) =>
       cache.getSelectorTemplate(agentType),
   }
@@ -75,6 +79,9 @@ vi.mock("@/hooks/use-connection", () => ({
     configOptions: conn.configOptions,
     isViewer: false,
     backgroundOutstanding: 0,
+    asyncTasks: [],
+    remoteControl: null,
+    delegatedChildren: [],
   }),
 }))
 

@@ -58,6 +58,15 @@ vi.mock("motion/react", async (importOriginal) => {
   }
 })
 
+// The strip reads the workspace view for its maximize control, which is not
+// under test here: a plain unsplit conversation layout, not maximized.
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspaceView: () => ({
+    mode: "conversation",
+    conversationMaximized: false,
+  }),
+  useWorkspaceActions: () => ({ toggleConversationMaximized: vi.fn() }),
+}))
 vi.mock("@/contexts/active-folder-context", () => ({
   useActiveFolder: () => ({ activeFolder: null }),
 }))

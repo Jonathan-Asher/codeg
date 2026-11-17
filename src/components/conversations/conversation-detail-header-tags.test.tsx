@@ -47,9 +47,17 @@ vi.mock("@/stores/app-workspace-store", () => {
   const useStore = (selector: (s: typeof full) => unknown) =>
     selector({ ...full, ...h.state })
   useStore.getState = () => ({ ...full, ...h.state })
+  // The header's fork actions load the tab store, which subscribes to this
+  // store when its module loads.
+  useStore.subscribe = () => () => {}
   return { useAppWorkspaceStore: useStore }
 })
-vi.mock("@/stores/conversation-runtime-store", () => ({
+// The real store for the rest: the header's own badges (history refresh,
+// limit pause) read it through hooks.
+vi.mock("@/stores/conversation-runtime-store", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/stores/conversation-runtime-store")
+  >()),
   getRuntimeSession: () => null,
 }))
 vi.mock("./session-details-dialog", () => ({

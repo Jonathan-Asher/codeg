@@ -168,7 +168,7 @@ function renderList(props: ListProps = {}) {
 /** The fork button in the footer of the reply with this id. */
 function replyForkButton(container: HTMLElement, turnId: string) {
   const row = container.querySelector<HTMLElement>(
-    `[data-find-key="persisted-assistant-${turnId}"]`
+    `[data-find-key="assistant-${turnId}"]`
   )
   if (!row) throw new Error(`no row for ${turnId}`)
   return within(row).getByRole("button", { name: L.forkFromHere })
@@ -178,9 +178,7 @@ function replyForkButton(container: HTMLElement, turnId: string) {
 function liveForkButton() {
   const buttons = screen.queryAllByRole("button", { name: L.forkFromHere })
   return (
-    buttons.find(
-      (b) => !b.closest('[data-find-key^="persisted-assistant-"]')
-    ) ?? null
+    buttons.find((b) => !b.closest('[data-find-key^="assistant-"]')) ?? null
   )
 }
 

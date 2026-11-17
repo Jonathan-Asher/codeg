@@ -266,7 +266,13 @@ const nextFrame = () =>
   })
 
 describe("MessageInput (RichComposer integration)", () => {
-  afterEach(() => cleanup())
+  afterEach(() => {
+    cleanup()
+    // `firePointer` presses with no release after it, and a press still held
+    // makes the next tab switch wait for it to end before focusing the
+    // composer (`whenPointerReleased`). End it, as a real pointer would.
+    fireEvent(document, new MouseEvent("pointerup", { bubbles: true }))
+  })
 
   it("mounts and renders the rich-text composer surface", async () => {
     const { container } = renderInput({})

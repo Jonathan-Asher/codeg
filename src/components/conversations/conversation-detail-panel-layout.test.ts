@@ -86,7 +86,8 @@ describe("ConversationDetailPanel new conversation layout", () => {
     expect(source).not.toContain('visible ? "center" : "hold"')
     // The other hidden subtrees: the conversation surface under a workbench
     // route, the conversation column under maximized files, the file column
-    // under the conversation overlay.
+    // under the conversation overlay (conversation mode, or a maximized
+    // conversation).
     expect(workspaceLayoutSource).toContain(
       'data-slide-freeze={hidden ? "hold" : undefined}'
     )
@@ -94,7 +95,7 @@ describe("ConversationDetailPanel new conversation layout", () => {
       'data-slide-freeze={filesMaximized ? "hold" : undefined}'
     )
     expect(workspaceLayoutSource).toContain(
-      'data-slide-freeze={mode === "conversation" ? "hold" : undefined}'
+      'data-slide-freeze={conversationFillsArea ? "hold" : undefined}'
     )
     expect(globalsCssSource).toContain(
       '.conversation-tab-hidden[data-slide-frozen="hold"]'

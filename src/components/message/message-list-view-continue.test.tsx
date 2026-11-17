@@ -199,7 +199,7 @@ describe("MessageListView: Continue turns", () => {
     ])
     const { container } = renderList({ onEditUserMessage: vi.fn() })
 
-    const row = rowFor(container, "persisted-user-turn-2")
+    const row = rowFor(container, "user-turn-2")
     const divider = row.querySelector("[data-continue-marker]")
     expect(divider).toBeInTheDocument()
     expect(within(row).getByText(L.continued)).toBeInTheDocument()
@@ -210,7 +210,7 @@ describe("MessageListView: Continue turns", () => {
       within(row).queryByRole("button", { name: L.editMessage })
     ).toBeNull()
     // The message before it is still an ordinary bubble.
-    const first = rowFor(container, "persisted-user-turn-0")
+    const first = rowFor(container, "user-turn-0")
     expect(within(first).getByTestId("user-bubble")).toHaveTextContent(
       "write the migration"
     )
@@ -257,14 +257,10 @@ describe("MessageListView: Continue turns", () => {
 
     expect(container.querySelector("[data-continue-marker]")).toBeNull()
     expect(
-      within(rowFor(container, "persisted-user-turn-2")).getByTestId(
-        "user-bubble"
-      )
+      within(rowFor(container, "user-turn-2")).getByTestId("user-bubble")
     ).toHaveTextContent("continue, but skip the seed data")
     expect(
-      within(rowFor(container, "persisted-user-turn-4")).getByTestId(
-        "user-bubble"
-      )
+      within(rowFor(container, "user-turn-4")).getByTestId("user-bubble")
     ).toBeInTheDocument()
   })
 })
@@ -279,7 +275,7 @@ describe("MessageListView: resumed after restart", () => {
     ])
     const { container } = renderList({ onEditUserMessage: vi.fn() })
 
-    const row = rowFor(container, "persisted-user-turn-2")
+    const row = rowFor(container, "user-turn-2")
     expect(row.querySelector("[data-resume-marker]")).toBeInTheDocument()
     expect(within(row).getByText(L.resumedAfterRestart)).toBeInTheDocument()
     expect(
@@ -315,7 +311,7 @@ describe("MessageListView: resumed after restart", () => {
     expect(markers).toHaveLength(1)
     expect(
       markers[0].closest("[data-find-key]")?.getAttribute("data-find-key")
-    ).not.toMatch(/^persisted-/)
+    ).toBe("user-auto-resume-1")
     expect(
       within(markers[0]).getByText(L.resumedAfterRestart)
     ).toBeInTheDocument()
@@ -333,9 +329,7 @@ describe("MessageListView: resumed after restart", () => {
 
     expect(container.querySelector("[data-resume-marker]")).toBeNull()
     expect(
-      within(rowFor(container, "persisted-user-turn-0")).getByTestId(
-        "user-bubble"
-      )
+      within(rowFor(container, "user-turn-0")).getByTestId("user-bubble")
     ).toBeInTheDocument()
   })
 
@@ -354,7 +348,7 @@ describe("MessageListView: resumed after restart", () => {
     ])
     const { container } = renderList()
 
-    const row = rowFor(container, "persisted-user-turn-2")
+    const row = rowFor(container, "user-turn-2")
     const marker = row.querySelector("[data-resume-marker]")
     expect(marker).toBeInTheDocument()
     expect(marker).toHaveAttribute("data-resume-background", "true")
@@ -383,7 +377,7 @@ describe("MessageListView: resumed after restart", () => {
     ])
     const { container } = renderList()
 
-    const row = rowFor(container, "persisted-user-turn-2")
+    const row = rowFor(container, "user-turn-2")
     const marker = row.querySelector("[data-resume-marker]")
     expect(marker).toBeInTheDocument()
     expect(marker).not.toHaveAttribute("data-resume-background")
@@ -403,7 +397,7 @@ describe("MessageListView: continued after the usage limit reset", () => {
     ])
     const { container } = renderList({ onEditUserMessage: vi.fn() })
 
-    const row = rowFor(container, "persisted-user-turn-2")
+    const row = rowFor(container, "user-turn-2")
     expect(
       row.querySelector("[data-limit-continue-marker]")
     ).toBeInTheDocument()
@@ -456,9 +450,7 @@ describe("MessageListView: continued after the usage limit reset", () => {
 
     expect(container.querySelector("[data-limit-continue-marker]")).toBeNull()
     expect(
-      within(rowFor(container, "persisted-user-turn-0")).getByTestId(
-        "user-bubble"
-      )
+      within(rowFor(container, "user-turn-0")).getByTestId("user-bubble")
     ).toBeInTheDocument()
   })
 })

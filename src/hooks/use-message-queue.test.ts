@@ -34,10 +34,13 @@ describe("useMessageQueue bounce FIFO ordering", () => {
     act(() => {
       sent = result.current.dequeue()
     })
+    // An edited message is a new message: it goes out under a fresh client id.
     expect(sent).toEqual({
       ...target,
       draft: draft("edited B"),
+      clientMessageId: expect.stringMatching(/^optimistic-/),
     })
+    expect(sent!.clientMessageId).not.toBe(target.clientMessageId)
   })
 
   it("does not resurrect a removed item when an insertion reply arrives late", () => {

@@ -214,15 +214,15 @@ describe("a conversation opened cold, read back from disk first", () => {
       useOpenedConversation(CONVERSATION_ID)
     )
 
-    // Waiting on the disk: the session exists, nothing is loading, nothing is
-    // loaded, the server has not been asked. "Not loading" is all the gate
-    // used to look at, and it let the connect through with no session id.
+    // Waiting on the disk: the session exists, nothing is loaded, the server
+    // has not been asked. "Not loading" is all the gate used to look at, and
+    // the detail hook used to say exactly that here; it now counts the fetch
+    // it is about to start as loading, and the gate holds either way.
     expect(
       useConversationRuntimeStore
         .getState()
         .byConversationId.has(CONVERSATION_ID)
     ).toBe(true)
-    expect(result.current.loading || result.current.unverified).toBe(false)
     expect(result.current.detail).toBeNull()
     expect(result.current.sessionId).toBeUndefined()
     expect(server).not.toHaveBeenCalled()

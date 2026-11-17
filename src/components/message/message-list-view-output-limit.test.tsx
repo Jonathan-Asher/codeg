@@ -170,7 +170,7 @@ describe("MessageListView: output-limit notice", () => {
 
     expect(notices(container)).toHaveLength(1)
     const row = container.querySelector<HTMLElement>(
-      '[data-find-key="persisted-assistant-turn-1"]'
+      '[data-find-key="assistant-turn-1"]'
     )
     expect(row).not.toBeNull()
     const notice = within(row!).getByRole("status")

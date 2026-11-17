@@ -175,13 +175,13 @@ describe("MessageListView: spoken messages", () => {
     ])
     const { container } = renderList()
 
-    const spoken = row(container, "persisted-user-turn-0")
+    const spoken = row(container, "user-turn-0")
     expect(spoken.querySelector("[data-spoken-marker]")).not.toBeNull()
     expect(within(spoken).getByTitle(SPOKEN)).toBeInTheDocument()
     // Named for a screen reader too, not only on hover.
     expect(within(spoken).getByText(SPOKEN)).toHaveClass("sr-only")
 
-    const typed = row(container, "persisted-user-turn-2")
+    const typed = row(container, "user-turn-2")
     expect(typed.querySelector("[data-spoken-marker]")).toBeNull()
     expect(container.querySelectorAll("[data-spoken-marker]")).toHaveLength(1)
   })

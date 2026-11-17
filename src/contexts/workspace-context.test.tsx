@@ -162,6 +162,7 @@ vi.mock("@/lib/api", () => ({
   acpFindConnectionForConversation: vi.fn(),
   acpConnect: vi.fn(),
   acpDisconnect: vi.fn(),
+  acpReleaseConnection: vi.fn(),
   acpGetSessionSnapshot: vi.fn(),
   acpTouchConnection: vi.fn(),
   getHomeDirectory: vi.fn(),
@@ -5221,6 +5222,9 @@ it("retains mobile conversation identity, connection and runtime through A(files
   vi.mocked(api.acpConnect).mockResolvedValue("mobile-connection")
   vi.mocked(api.acpGetSessionSnapshot).mockResolvedValue(null)
   vi.mocked(api.acpDisconnect).mockReset().mockResolvedValue(undefined)
+  vi.mocked(api.acpReleaseConnection)
+    .mockReset()
+    .mockResolvedValue("disconnected")
   const mounted = vi.fn()
   const unmounted = vi.fn()
   const filesUnmounted = vi.fn()
@@ -5329,13 +5333,15 @@ it("retains mobile conversation identity, connection and runtime through A(files
   expect(unmounted).not.toHaveBeenCalled()
   expect(api.acpConnect).toHaveBeenCalledOnce()
   expect(api.acpDisconnect).not.toHaveBeenCalled()
+  expect(api.acpReleaseConnection).not.toHaveBeenCalled()
   expect(filesUnmounted).toHaveBeenCalledTimes(2)
-  // A real teardown still releases both resources after the retained view closes.
+  // A real teardown still releases both resources after the retained view
+  // closes (a release: the backend keeps a recently viewed session warm).
   await act(async () => {
     view.unmount()
   })
   expect(unmounted).toHaveBeenCalledOnce()
-  expect(api.acpDisconnect).toHaveBeenCalledWith("mobile-connection")
+  expect(api.acpReleaseConnection).toHaveBeenCalledWith("mobile-connection")
   expect(useConversationRuntimeStore.getState().byConversationId.has(42)).toBe(
     false
   )

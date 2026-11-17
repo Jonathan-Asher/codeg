@@ -212,7 +212,7 @@ describe("SessionDetailsTab", () => {
     expect(line).toContainElement(getByText("Claude Code"))
     expect(line).toContainElement(getByText("claude-opus-4-8"))
     // The status is only a dot on the icon; a screen reader hears it here.
-    expect(within(line).getByText("Status: In Progress")).toHaveClass("sr-only")
+    expect(within(line).getByText("Status: Open")).toHaveClass("sr-only")
   })
 
   it("says nothing of when the conversation last moved", () => {
@@ -229,7 +229,7 @@ describe("SessionDetailsTab", () => {
     setupScene({ hasActiveConversation: true, loadedSummary: loaded })
     const { getByTestId, rerender } = renderTab()
     const line = () => getByTestId("session-agent-line")
-    expect(line()).toHaveTextContent("Status: In Progress")
+    expect(line()).toHaveTextContent("Status: Open")
     setupScene({
       hasActiveConversation: true,
       loadedSummary: loaded,

@@ -6030,8 +6030,7 @@
     "stillCantConnect": "Verbindung weiterhin nicht möglich: {message}",
     "loadFailedTitle": "Dieser Remote-Arbeitsbereich konnte nicht geöffnet werden",
     "tryAgain": "Erneut versuchen",
-    "retry": "Wiederholen",
-    "connectionExpired": "Die Remote-Verbindung „{name}“ ist abgelaufen. Aktualisiere ihr Token und lade dieses Fenster neu."
+    "retry": "Wiederholen"
   },
   "ServerFileBrowser": {
     "title": "Serverdatei auswählen",

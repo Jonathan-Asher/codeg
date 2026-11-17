@@ -58,6 +58,11 @@ vi.mock("@/stores/tab-store", () => ({
   useVisibleConversationTabs: () =>
     state.activeTabId ? [{ id: state.activeTabId }] : [],
 }))
+// Tab switching walks the strip's arranged order (grouping/sorting); with no
+// grouping or sorting that is the visible order, which is all these tests need.
+vi.mock("@/hooks/use-arranged-tabs", () => ({
+  useArrangedTabs: <T,>(tabs: readonly T[]) => ({ shown: tabs }),
+}))
 vi.mock("@/contexts/tab-context", () => ({
   useTabActions: () => ({
     openNewConversationTab: vi.fn(),
@@ -98,6 +103,7 @@ vi.mock("@/contexts/workbench-route-context", () => ({
 }))
 vi.mock("@/contexts/search-dialog-context", () => ({
   useSearchDialog: () => ({ open: false, setOpen: vi.fn() }),
+  useSearchDialogSetter: () => vi.fn(),
 }))
 vi.mock("@/hooks/use-shortcut-settings", () => ({
   useShortcutSettings: () => ({ shortcuts: state.shortcuts }),
@@ -351,10 +357,11 @@ describe("WorkspaceChromeController — ⌘W the page hears", () => {
     expect(spies.switchFileTab).not.toHaveBeenCalled()
     expect(jump.defaultPrevented).toBe(true)
 
+    // ⌥⌘W: ⇧⌘W is the close-window shortcut.
     const closeAll = createEvent.keyDown(document, {
       key: "w",
       metaKey: true,
-      shiftKey: true,
+      altKey: true,
     })
     fireEvent(document, closeAll)
     expect(spies.closeAllFileTabs).not.toHaveBeenCalled()

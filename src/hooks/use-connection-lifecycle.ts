@@ -868,19 +868,12 @@ export function useConnectionLifecycle({
   }, [liveReady])
   const handleSetConfigOption = useCallback(
     (configId: string, valueId: string) => {
-      // The connection here still belongs to another agent (a draft mid-switch,
-      // or one whose new pick could not connect), so the options on screen are
-      // the selected agent's cached ones. Applying the edit would hand the
-      // other agent a value from a list that isn't its own, and file it under
-      // that agent's saved preferences. Dropped, as an edit is when there is
-      // no connection here at all.
-      if (connAgentType != null && connAgentType !== agentType) return
-      touchActivity(contextKey)
       if (newSession && !liveReadyRef.current) {
         // A new chat whose session is not ready for it — not started yet,
         // still opening, or still the agent the chat had before a switch.
         // Never to that connection: kept as this agent's saved pick, which
         // the connect applies, and owed to a session already on its way.
+        touchActivity(contextKey)
         saveConfigPreference(agentType, configId, valueId)
         setPresetPicks((prev) => ({
           agentType,
@@ -891,6 +884,14 @@ export function useConnectionLifecycle({
         }))
         return
       }
+      // The connection here still belongs to another agent (one whose new
+      // pick could not connect), so the options on screen are the selected
+      // agent's cached ones. Applying the edit would hand the other agent a
+      // value from a list that isn't its own, and file it under that agent's
+      // saved preferences. Dropped, as an edit is when there is no connection
+      // here at all.
+      if (connAgentType != null && connAgentType !== agentType) return
+      touchActivity(contextKey)
       connSetConfigOption(configId, valueId).catch((e: unknown) =>
         console.error("[ConnLifecycle] setConfigOption:", e)
       )

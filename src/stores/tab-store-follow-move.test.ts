@@ -79,6 +79,8 @@ beforeEach(() => {
     folders: [app, site],
     allFolders: [app, site],
     conversations: [conv(1)],
+    // Loaded: tabs only follow rows once the list is not being refetched.
+    conversationsLoading: false,
   })
   resetTabStore()
   useTabStore.setState({
@@ -137,7 +139,47 @@ describe("an open tab follows its conversation to another project", () => {
     expect(activeTabId).toBe(rawTabs[0].id)
   })
 
-  it("leaves a chat tab and a tab whose row did not move alone", () => {
+  // A chat tab runs in its own scratch directory, bound to the chats folder; it
+  // stays there while its row does.
+  it("leaves a chat tab alone while its row stays a chat", () => {
+    const chats = {
+      id: 9,
+      name: "Chats",
+      path: "/chat",
+      kind: "chat",
+    } as unknown as FolderDetail
+    useAppWorkspaceStore.setState({ allFolders: [app, site, chats] })
+    useTabStore.setState({
+      rawTabs: [
+        {
+          id: "conv-9-claude_code-7",
+          kind: "conversation",
+          folderId: 9,
+          conversationId: 7,
+          agentType: "claude_code",
+          title: "Topic",
+          isPinned: true,
+          isChat: true,
+          workingDir: "/chat/scratch",
+        },
+      ],
+    })
+    useAppWorkspaceStore.setState({
+      conversations: [{ ...conv(9), kind: "chat" }],
+    })
+    expect(useTabStore.getState().rawTabs[0]).toMatchObject({
+      folderId: 9,
+      isChat: true,
+      workingDir: "/chat/scratch",
+    })
+  })
+
+  // A chat moved into a project becomes one of its conversations: its tab
+  // follows and leaves chat mode.
+  it("takes a chat tab along when its chat is moved into a project", () => {
+    useAppWorkspaceStore.setState({
+      allFolders: [app, { ...site, kind: "regular" } as FolderDetail],
+    })
     useTabStore.setState({
       rawTabs: [
         {
@@ -154,9 +196,17 @@ describe("an open tab follows its conversation to another project", () => {
       ],
     })
     useAppWorkspaceStore.setState({ conversations: [conv(2)] })
+    const [tab] = useTabStore.getState().rawTabs
+    expect(tab).toMatchObject({ folderId: 2, isChat: false })
+    expect(tab.workingDir).toBeUndefined()
+  })
+
+  it("leaves a tab whose row did not move alone", () => {
+    useAppWorkspaceStore.setState({ conversations: [conv(1)] })
     expect(useTabStore.getState().rawTabs[0]).toMatchObject({
-      folderId: 9,
-      workingDir: "/chat/scratch",
+      id: "conv-1-claude_code-7",
+      folderId: 1,
+      workingDir: "/work/app",
     })
   })
 })

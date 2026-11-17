@@ -1301,7 +1301,8 @@ describe("sub-agent row: a Pi sub-agent run", () => {
     expect(
       screen.queryByTestId("subagent-run-children")
     ).not.toBeInTheDocument()
-    expect(screen.getByText("Done: 3 files changed.")).toBeInTheDocument()
+    // The result's line under the title and the result in the open panel.
+    expect(screen.getAllByText("Done: 3 files changed.")).toHaveLength(2)
     expect(screen.getByText("Commit?")).toBeInTheDocument()
   })
 

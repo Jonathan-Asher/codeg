@@ -165,7 +165,7 @@ function renderList(props: ListProps = {}) {
 /** The rendered row of the user message with this id. */
 function row(container: HTMLElement, turnId: string): HTMLElement {
   const el = container.querySelector<HTMLElement>(
-    `[data-find-key="persisted-user-${turnId}"]`
+    `[data-find-key="user-${turnId}"]`
   )
   if (!el) throw new Error(`no row for ${turnId}`)
   return el
@@ -230,7 +230,7 @@ describe("MessageListView: where Edit is offered", () => {
       )
     const { container } = renderList({ onEditUserMessage: vi.fn() })
     const pending = container.querySelector<HTMLElement>(
-      '[data-find-key="optimistic-user-optimistic-1"]'
+      '[data-find-key="user-optimistic-1"]'
     )!
     expect(within(pending).getByText("just sent")).toBeInTheDocument()
     expect(

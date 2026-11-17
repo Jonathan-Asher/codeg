@@ -26,6 +26,7 @@ const acp = vi.hoisted(() => ({
 
 vi.mock("@/contexts/acp-connections-context", () => ({
   useAcpActions: () => acp,
+  getCachedSelectors: () => null,
 }))
 
 vi.mock("@/contexts/task-context", () => {
@@ -33,12 +34,14 @@ vi.mock("@/contexts/task-context", () => {
   return { useTaskContext: () => context }
 })
 
+// The unmount teardown lets go through `release` (the backend keeps a recently
+// viewed session warm), never `disconnect`.
 const conn = vi.hoisted(() => ({
   isViewer: false,
   asyncTasks: [] as AsyncTaskRecord[],
   remoteControl: null as RemoteControlInfo | null,
   delegatedChildren: [] as string[],
-  disconnect: (() => Promise.resolve()) as () => Promise<void>,
+  release: (() => Promise.resolve()) as () => Promise<void>,
 }))
 
 vi.mock("@/hooks/use-connection", () => {
@@ -51,7 +54,8 @@ vi.mock("@/hooks/use-connection", () => {
       selectorsReady: true,
       hasCachedSelectors: true,
       connect: noop,
-      disconnect: conn.disconnect,
+      disconnect: noop,
+      release: conn.release,
       sendPrompt: noop,
       setMode: noop,
       setConfigOption: noop,
@@ -97,12 +101,12 @@ function closeView(opts: { isActive?: boolean; transient?: boolean } = {}) {
 }
 
 describe("useConnectionLifecycle unmount teardown", () => {
-  let disconnect: ReturnType<typeof vi.fn>
+  let release: ReturnType<typeof vi.fn>
   let releaseActiveKey: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
-    disconnect = vi.fn().mockResolvedValue(undefined)
-    conn.disconnect = disconnect as unknown as () => Promise<void>
+    release = vi.fn().mockResolvedValue(undefined)
+    conn.release = release as unknown as () => Promise<void>
     conn.isViewer = false
     conn.asyncTasks = []
     conn.remoteControl = null
@@ -120,7 +124,7 @@ describe("useConnectionLifecycle unmount teardown", () => {
 
     closeView()
 
-    expect(disconnect).not.toHaveBeenCalled()
+    expect(release).not.toHaveBeenCalled()
   })
 
   it("keeps an owner alive while Remote Control is on", () => {
@@ -128,7 +132,7 @@ describe("useConnectionLifecycle unmount teardown", () => {
 
     closeView()
 
-    expect(disconnect).not.toHaveBeenCalled()
+    expect(release).not.toHaveBeenCalled()
   })
 
   it("keeps an owner alive while a delegated sub-agent is running", () => {
@@ -137,24 +141,24 @@ describe("useConnectionLifecycle unmount teardown", () => {
 
     closeView()
 
-    expect(disconnect).not.toHaveBeenCalled()
+    expect(release).not.toHaveBeenCalled()
   })
 
-  it("disconnects an owner whose tasks have all settled", () => {
+  it("releases an owner whose tasks have all settled", () => {
     conn.asyncTasks = [backgroundTerminal("completed")]
 
     closeView()
 
-    expect(disconnect).toHaveBeenCalledTimes(1)
+    expect(release).toHaveBeenCalledTimes(1)
   })
 
-  it("still tears a viewer down, busy or not — its disconnect only detaches", () => {
+  it("still tears a viewer down, busy or not — its release only detaches", () => {
     conn.isViewer = true
     conn.asyncTasks = [backgroundTerminal("running")]
 
     closeView()
 
-    expect(disconnect).toHaveBeenCalledTimes(1)
+    expect(release).toHaveBeenCalledTimes(1)
   })
 
   it("gives back the active key it claimed, even while the owner keeps running", () => {
@@ -163,14 +167,14 @@ describe("useConnectionLifecycle unmount teardown", () => {
     closeView({ isActive: true })
 
     expect(acp.setActiveKey).toHaveBeenCalledWith(KEY)
-    expect(disconnect).not.toHaveBeenCalled()
+    expect(release).not.toHaveBeenCalled()
     expect(releaseActiveKey).toHaveBeenCalledWith(KEY)
   })
 
   it("keeps the claim across a transient (reparent) unmount", () => {
     closeView({ isActive: true, transient: true })
 
-    expect(disconnect).not.toHaveBeenCalled()
+    expect(release).not.toHaveBeenCalled()
     expect(releaseActiveKey).not.toHaveBeenCalled()
   })
 })

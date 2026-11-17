@@ -48,7 +48,9 @@ describe("the workspace tab's new chat", () => {
     expect(selectors).toHaveLength(2)
     for (const selector of selectors) {
       expect(selector).toContain("disabled={dbConversationId != null}")
-      expect(selector).not.toMatch(/connecting/i)
+      // Nothing about the connection gates it (comments may still say so).
+      const code = selector.replace(/^\s*\/\/.*$/gm, "")
+      expect(code).not.toMatch(/connecting/i)
     }
   })
 

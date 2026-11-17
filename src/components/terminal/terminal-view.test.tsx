@@ -35,7 +35,9 @@ vi.mock("@xterm/xterm", () => ({
     }
     reset() {}
     write(data: string, parsed?: () => void) {
-      env.written.push(data)
+      // An empty write is the view's "everything before this is parsed"
+      // marker (it holds fits until a replay lands), not output.
+      if (data) env.written.push(data)
       parsed?.()
     }
   },

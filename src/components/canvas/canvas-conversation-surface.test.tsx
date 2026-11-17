@@ -142,6 +142,8 @@ vi.mock("@/lib/notify", () => ({ notify: vi.fn() }))
 const prefs = vi.hoisted(() => ({
   getSavedModeId: vi.fn((): string | null => null),
   saveModePreference: vi.fn(),
+  // A draft's starting picks, shown until its connection reports.
+  useSavedSelectorPrefs: () => null,
 }))
 vi.mock("@/lib/selector-prefs-storage", () => prefs)
 

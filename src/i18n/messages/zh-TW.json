@@ -6030,8 +6030,7 @@
     "stillCantConnect": "仍然無法連線：{message}",
     "loadFailedTitle": "無法開啟此遠端工作區",
     "tryAgain": "重試",
-    "retry": "重試",
-    "connectionExpired": "遠端連線「{name}」已失效。請更新它的 Token，然後重新載入此視窗。"
+    "retry": "重試"
   },
   "ServerFileBrowser": {
     "title": "選擇伺服器檔案",

@@ -1268,7 +1268,9 @@ describe("AcpConnectionsProvider unmount teardown (desktop)", () => {
 // A view claims the active key while it is the one on screen, and has to give
 // the claim back once it is gone for good. A stale active key is touched by the
 // keepalive and skipped by the idle sweep, so the busy owner a closed view left
-// running would never be reclaimed, even after its work settled.
+// running would never be reclaimed, even after its work settled. Closing a view
+// and the idle sweep both let go through `acpReleaseConnection` (the backend
+// keeps a recently viewed session warm, else disconnects it).
 describe("AcpConnectionsProvider active key across a view's lifetime", () => {
   function Pane({
     contextKey,
@@ -1335,7 +1337,7 @@ describe("AcpConnectionsProvider active key across a view's lifetime", () => {
 
       // The tab closes while the terminal runs: the agent is kept, not killed.
       view.rerender(tree([]))
-      expect(h.acpDisconnect).not.toHaveBeenCalled()
+      expect(h.acpReleaseConnection).not.toHaveBeenCalled()
 
       emitAcpEvent(handlers, {
         seq: 3,
@@ -1348,7 +1350,7 @@ describe("AcpConnectionsProvider active key across a view's lifetime", () => {
           CONNECTION_IDLE_TIMEOUT_MS + IDLE_SWEEP_INTERVAL_MS + 1000
         )
       })
-      expect(h.acpDisconnect).toHaveBeenCalledWith("spawned-conn")
+      expect(h.acpReleaseConnection).toHaveBeenCalledWith("spawned-conn")
     } finally {
       vi.useRealTimers()
     }
@@ -1383,7 +1385,7 @@ describe("AcpConnectionsProvider active key across a view's lifetime", () => {
           CONNECTION_IDLE_TIMEOUT_MS + IDLE_SWEEP_INTERVAL_MS + 1000
         )
       })
-      expect(h.acpDisconnect).not.toHaveBeenCalled()
+      expect(h.acpReleaseConnection).not.toHaveBeenCalled()
 
       emitAcpEvent(handlers, {
         seq: 3,
@@ -1397,7 +1399,7 @@ describe("AcpConnectionsProvider active key across a view's lifetime", () => {
           CONNECTION_IDLE_TIMEOUT_MS + IDLE_SWEEP_INTERVAL_MS + 1000
         )
       })
-      expect(h.acpDisconnect).toHaveBeenCalledWith("spawned-conn")
+      expect(h.acpReleaseConnection).toHaveBeenCalledWith("spawned-conn")
     } finally {
       vi.useRealTimers()
     }
@@ -6776,7 +6778,7 @@ describe("Claude Code's Remote Control (claude-agent-acp 0.93.0)", () => {
           CONNECTION_IDLE_TIMEOUT_MS + IDLE_SWEEP_INTERVAL_MS + 1000
         )
       })
-      expect(h.acpDisconnect).not.toHaveBeenCalled()
+      expect(h.acpReleaseConnection).not.toHaveBeenCalled()
 
       // Turned off, it is an idle connection like any other.
       emitAcpEvent(handlers, {
@@ -6790,7 +6792,7 @@ describe("Claude Code's Remote Control (claude-agent-acp 0.93.0)", () => {
           CONNECTION_IDLE_TIMEOUT_MS + IDLE_SWEEP_INTERVAL_MS + 1000
         )
       })
-      expect(h.acpDisconnect).toHaveBeenCalledWith("spawned-conn")
+      expect(h.acpReleaseConnection).toHaveBeenCalledWith("spawned-conn")
     } finally {
       vi.useRealTimers()
     }

@@ -6030,8 +6030,7 @@
     "stillCantConnect": "Ainda não foi possível conectar: {message}",
     "loadFailedTitle": "Não foi possível abrir este espaço de trabalho remoto",
     "tryAgain": "Tentar novamente",
-    "retry": "Tentar de novo",
-    "connectionExpired": "A conexão remota \"{name}\" expirou. Atualize o token dela e recarregue esta janela."
+    "retry": "Tentar de novo"
   },
   "ServerFileBrowser": {
     "title": "Selecionar arquivo do servidor",

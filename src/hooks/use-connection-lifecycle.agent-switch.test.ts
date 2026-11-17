@@ -21,7 +21,7 @@ vi.mock("@/contexts/acp-connections-context", () => {
     releaseActiveKey: vi.fn(),
     touchActivity: vi.fn(),
   }
-  return { useAcpActions: () => actions }
+  return { useAcpActions: () => actions, getCachedSelectors: () => null }
 })
 
 vi.mock("@/contexts/task-context", () => {
@@ -45,6 +45,7 @@ vi.mock("@/hooks/use-connection", () => {
       hasCachedSelectors: true,
       connect: noop,
       disconnect: noop,
+      release: noop,
       sendPrompt: noop,
       setMode: noop,
       setConfigOption: conn.setConfigOption,

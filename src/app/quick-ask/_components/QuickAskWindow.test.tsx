@@ -288,10 +288,11 @@ describe("QuickAskWindow", () => {
     renderWindow()
     expect(screen.getByTestId("qa-question")).toHaveTextContent("What is 2+2?")
     expect(screen.getByTestId("qa-reply")).toHaveTextContent("The answer is 4.")
-    // The tool call sits folded under the reply's header until asked for.
-    expect(screen.queryByText(/Read files/)).not.toBeInTheDocument()
-    fireEvent.click(screen.getByText("Finished working"))
-    expect(screen.getByText(/Read files/)).toBeInTheDocument()
+    // The tool call sits folded under the reply's activity header until asked
+    // for.
+    expect(screen.queryByText("notes.md")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Activity" }))
+    expect(screen.getByText("notes.md")).toBeInTheDocument()
     // The target can't change under an open question.
     expect(screen.getByTestId("qa-target-private")).toBeDisabled()
     expect(screen.getByTestId("qa-input")).toHaveAttribute(

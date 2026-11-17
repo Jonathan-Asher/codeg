@@ -27,6 +27,15 @@ vi.mock("@/components/layout/command-dropdown", () => ({
 vi.mock("@/components/layout/quick-actions-dropdown", () => ({
   QuickActionsDropdown: () => null,
 }))
+vi.mock("@/components/layout/status-bar-plan-usage", () => ({
+  StatusBarPlanUsage: () => null,
+}))
+vi.mock("@/components/layout/workspace-transfers", () => ({
+  StatusBarTransfers: () => null,
+}))
+vi.mock("@/components/connection/connection-banner", () => ({
+  ConnectionStatusPill: () => null,
+}))
 vi.mock("@/components/layout/status-bar-web-service", () => ({
   StatusBarWebService: () => <span data-testid="web-service" />,
 }))

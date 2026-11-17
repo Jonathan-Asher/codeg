@@ -27,6 +27,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { LiveMessage } from "@/contexts/acp-connections-context"
 import { useConnectionLifecycle } from "@/hooks/use-connection-lifecycle"
 import { useConversationDetail } from "@/hooks/use-conversation-detail"
+import { awaitsHistoricalSessionId } from "@/components/conversations/historical-session-gate"
 import type { DbConversationDetail } from "@/lib/types"
 import {
   claimRuntimeSession,
@@ -51,6 +52,7 @@ const stubs = vi.hoisted(() => {
       selectorsReady: false,
       connect,
       disconnect: vi.fn(() => Promise.resolve()),
+      release: vi.fn(() => Promise.resolve()),
       sendPrompt: vi.fn(),
       setMode: vi.fn(),
       setConfigOption: vi.fn(),
@@ -79,6 +81,7 @@ const stubs = vi.hoisted(() => {
 vi.mock("@/hooks/use-connection", () => ({ useConnection: () => stubs.conn }))
 vi.mock("@/contexts/acp-connections-context", () => ({
   useAcpActions: () => stubs.acp,
+  getCachedSelectors: () => null,
 }))
 vi.mock("@/contexts/task-context", () => ({
   useTaskContext: () => stubs.tasks,
@@ -121,7 +124,12 @@ function TabViewGate({
   // The panel's fetch gate: the first load waits for the tab to be shown or
   // made active; once a detail has been held, the view keeps fetching.
   const [heldDetail, setHeldDetail] = useState(false)
-  const { detail, loading: detailLoading } = useConversationDetail(CID, {
+  const {
+    detail,
+    loading: detailLoading,
+    error: detailError,
+    unverified: detailUnverified,
+  } = useConversationDetail(CID, {
     enabled: visible || active || heldDetail,
   })
   if (detail != null && !heldDetail) setHeldDetail(true)
@@ -130,8 +138,17 @@ function TabViewGate({
   )
   const externalId =
     runtimeExternalId ?? detail?.summary.external_id ?? undefined
-  // A persisted, non-cline conversation: the gate is `detailLoading`.
-  const awaitingHistoricalSessionId = detailLoading
+  // A persisted, non-cline conversation opened from its row.
+  const awaitingHistoricalSessionId = awaitsHistoricalSessionId({
+    hasPersistedConversation: true,
+    agentType: "claude_code",
+    opensRow: true,
+    detailLoading,
+    detailUnverified,
+    hasDetail: detail != null,
+    detailFailed: detailError != null,
+    sessionId: externalId,
+  })
   useConnectionLifecycle({
     contextKey: "tab-1",
     agentType: "claude_code",
@@ -302,11 +319,11 @@ describe("TabViewGate mirrors ConversationTabView", () => {
     expect(panel).toContain("isVisible={visible}")
   })
 
-  it("holds the auto-connect on detailLoading", () => {
+  it("holds the auto-connect until the row's session id is known", () => {
     expect(panel).toMatch(
-      /const awaitingHistoricalSessionId =\s+hasPersistedConversation && selectedAgent !== "cline" && detailLoading/
+      /const awaitingHistoricalSessionId = awaitsHistoricalSessionId\(\{\s+hasPersistedConversation,\s+agentType: selectedAgent,\s+opensRow: effectiveConversationId > 0,\s+detailLoading,\s+detailUnverified,\s+hasDetail: detail != null,\s+detailFailed: detailError != null,\s+sessionId: externalId,\s+\}\)/
     )
     expect(panel).toContain("!awaitingHistoricalSessionId &&")
-    expect(panel).toContain("isActive: isActive && canAutoConnect,")
+    expect(panel).toMatch(/isActive: isActive && canAutoConnect\b/)
   })
 })

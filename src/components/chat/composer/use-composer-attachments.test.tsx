@@ -16,8 +16,11 @@ vi.mock("@/lib/platform", () => ({
   isDesktop: () => true,
   openFileDialog: vi.fn(),
 }))
+// `getUploadLimits` asks the transport whether this is a desktop window; a
+// desktop one keeps the fixed caps instead of asking a server.
 vi.mock("@/lib/transport", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/transport")>()),
+  isDesktop: () => true,
   getActiveRemoteConnectionId: () => env.remoteId,
 }))
 

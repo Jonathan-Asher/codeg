@@ -80,6 +80,10 @@ vi.mock("@/stores/tab-store", () => ({
     h.groupOf[tabId] ?? "g-main",
   useVisibleConversationTabs: () => h.tabs,
   useVisibleConversationLayout: () => h.visibleLayout,
+  // The strip arranges its tabs (grouping/sorting) through useArrangedTabs,
+  // which reads the child summaries for the "recent" sort.
+  useTabStore: <T,>(selector: (s: Record<string, unknown>) => T) =>
+    selector({ childSummaries: new Map() }),
 }))
 vi.mock("@/contexts/tab-context", () => {
   const store = {
@@ -233,15 +237,17 @@ describe("TabBar — maximize/restore", () => {
     expect(maximizeButton()).toBeNull()
   })
 
-  // Same arrangement as the file strip: tabs, then the new-tab button, the
-  // window-drag spacer, and maximize flush right.
+  // Same arrangement as the file strip: tabs, then the new-tab button and the
+  // arrange-tabs menu, the window-drag spacer, and maximize flush right.
   it("sits flush right, after the drag spacer", () => {
     renderStrip({ maximizeControl: true })
     const button = maximizeButton()!
     expect(button.nextElementSibling).toBeNull()
     const spacer = button.previousElementSibling
     expect(spacer).toHaveAttribute("data-tauri-drag-region")
-    expect(spacer?.previousElementSibling).toBe(
+    const arrange = spacer?.previousElementSibling
+    expect(arrange).toBe(screen.getByRole("button", { name: "Arrange tabs" }))
+    expect(arrange?.previousElementSibling).toBe(
       screen.getByRole("button", { name: "New Conversation" })
     )
   })

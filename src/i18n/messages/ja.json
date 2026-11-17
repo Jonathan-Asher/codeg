@@ -6030,8 +6030,7 @@
     "stillCantConnect": "まだ接続できません: {message}",
     "loadFailedTitle": "このリモートワークスペースを開けませんでした",
     "tryAgain": "再試行",
-    "retry": "再試行",
-    "connectionExpired": "リモート接続「{name}」の有効期限が切れています。トークンを更新してから、このウィンドウを再読み込みしてください。"
+    "retry": "再試行"
   },
   "ServerFileBrowser": {
     "title": "サーバーファイルを選択",

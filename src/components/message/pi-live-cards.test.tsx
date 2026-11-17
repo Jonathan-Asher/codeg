@@ -184,7 +184,8 @@ describe("a live run card", () => {
     const rows = screen.getAllByTestId("subagent-run-child")
     expect(rows).toHaveLength(2)
     expect(rows[0].textContent).not.toContain("bash")
-    expect(screen.getByText("16 and 9")).toBeInTheDocument()
+    // The result's line under the title and the result in the open panel.
+    expect(screen.getAllByText("16 and 9")).toHaveLength(2)
   })
 
   it("opens a one-child run's transcript as a Pi session with no transcript agent above it", () => {
@@ -252,7 +253,7 @@ describe("which card a run draws from", () => {
       new Map([[LAUNCH, LIVE_CARD]])
     )
     openRow()
-    expect(screen.getByText("from the transcript")).toBeInTheDocument()
+    expect(screen.getAllByText("from the transcript")).toHaveLength(2)
     expect(screen.queryAllByTestId("subagent-run-child")).toHaveLength(0)
   })
 
@@ -275,7 +276,8 @@ describe("which card a run draws from", () => {
       new Map([[LAUNCH, newest]])
     )
     openRow()
-    expect(screen.getByText("the newest card")).toBeInTheDocument()
+    expect(screen.getAllByText("the newest card")).toHaveLength(2)
+    expect(screen.queryByText("the live copy")).not.toBeInTheDocument()
   })
 })
 

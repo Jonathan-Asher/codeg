@@ -1897,6 +1897,9 @@ function sameBuiltValue(a: unknown, b: unknown): boolean {
 
 function sameBuiltTurn(a: MessageTurn, b: MessageTurn): boolean {
   if (a.role !== b.role || a.timestamp !== b.timestamp) return false
+  // A steered message's state moves on (sending, waiting, read) while its
+  // blocks stay the same.
+  if (a.steer_state !== b.steer_state || a.spoken !== b.spoken) return false
   if (a.blocks.length !== b.blocks.length) return false
   for (let i = 0; i < a.blocks.length; i++) {
     if (!sameBuiltValue(a.blocks[i], b.blocks[i])) return false

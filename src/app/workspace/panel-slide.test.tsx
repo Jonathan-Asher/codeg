@@ -320,8 +320,10 @@ describe("slide CSS", () => {
   })
 
   it("keeps the transition length in step with PANEL_SLIDE_MS", () => {
-    expect(ruleBody(".panel-slide-animating > [data-panel]")).toContain(
-      `transition: flex-grow ${PANEL_SLIDE_MS}ms`
-    )
+    // Side panels are pinned in px, so the slide eases flex-basis as well as
+    // flex-grow; both run for the same length.
+    const body = ruleBody(".panel-slide-animating > [data-panel]")
+    expect(body).toContain(`flex-grow ${PANEL_SLIDE_MS}ms`)
+    expect(body).toContain(`flex-basis ${PANEL_SLIDE_MS}ms`)
   })
 })
