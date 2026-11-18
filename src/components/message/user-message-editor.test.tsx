@@ -117,6 +117,19 @@ describe("UserMessageEditor", () => {
     expect(onSave).not.toHaveBeenCalled()
   })
 
+  it("won't resend an edit that is a /btw side question, in any case", () => {
+    const { field, onSave } = renderEditor({ initialText: "/BTW what now?" })
+    expect(screen.getByText(L.editSideQuestion)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: L.editSave })).toBeDisabled()
+    fireEvent.keyDown(field, { key: "Enter", metaKey: true })
+    expect(onSave).not.toHaveBeenCalled()
+    // Made an ordinary message again, it saves.
+    fireEvent.change(field, { target: { value: "what now?" } })
+    expect(screen.queryByText(L.editSideQuestion)).toBeNull()
+    fireEvent.keyDown(field, { key: "Enter", metaKey: true })
+    expect(onSave).toHaveBeenCalledWith("what now?")
+  })
+
   it("won't cancel mid-save — the edit is already under way", () => {
     const { field, onCancel } = renderEditor({ saving: true })
     fireEvent.keyDown(field, { key: "Escape" })

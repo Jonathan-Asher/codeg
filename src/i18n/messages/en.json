@@ -4088,6 +4088,9 @@
         "mentionGroupSkill": "Skills",
         "btwDescription": "Ask a side question: answered from this conversation without tools while the agent keeps working, and not added to the conversation",
         "btwHint": "question",
+        "btwUnsupported": "This agent can't answer /btw side questions. Nothing was sent.",
+        "btwNotReady": "/btw side questions can be asked once the session has connected. Nothing was sent.",
+        "btwQueueEdit": "A /btw side question can't wait in the queue. Ask it from the composer instead.",
         "suggestionTabHint": "Tab",
         "mentionGroupAssistant": "Assistants"
       },
@@ -4406,6 +4409,7 @@
         "editBusy": "Can't edit while a turn is running",
         "editQueued": "Can't edit while messages are waiting in the queue",
         "editNotReady": "Can't edit this message just yet — try again in a moment",
+        "editSideQuestion": "A /btw side question can't be sent as a message",
         "editHint": "Saving starts a new branch from here. The original conversation stays in the sidebar, and file changes are not undone.",
         "editHintInPlace": "Saving continues this conversation from here with the edited message, in place of the original. File changes are not undone.",
         "editHintNewConversation": "This is the first message, so saving starts a new conversation with it. This one stays as it is, and file changes are not undone.",
@@ -9253,6 +9257,7 @@
       "noFiles": "That drop had no image file in it. Copy the image and paste it instead."
     },
     "hint": "Enter to send · Shift+Enter for a new line · Esc to hide",
+    "btwUnsupported": "Quick Ask can't answer /btw side questions. Nothing was sent.",
     "actions": {
       "newQuestion": "New question",
       "openInCodeg": "Open in codeg",

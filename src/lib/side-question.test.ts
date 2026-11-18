@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import {
+  divertSideQuestionDraft,
   parseSideQuestionCommand,
   sideQuestionForkPrompt,
+  sideQuestionOfDraft,
   withSideQuestionCommand,
 } from "./side-question"
 
@@ -21,11 +23,105 @@ describe("parseSideQuestionCommand", () => {
     expect(parseSideQuestionCommand("/btw   ")).toEqual({ question: "" })
   })
 
+  it("reads /btw in any case", () => {
+    expect(parseSideQuestionCommand("/BTW מה העלות?")).toEqual({
+      question: "מה העלות?",
+    })
+    expect(parseSideQuestionCommand("/Btw why")).toEqual({ question: "why" })
+    expect(parseSideQuestionCommand(" \n /bTw")).toEqual({ question: "" })
+  })
+
   it("leaves everything else to be sent as a message", () => {
     expect(parseSideQuestionCommand("/btwx hi")).toBeNull()
+    expect(parseSideQuestionCommand("/BTWX hi")).toBeNull()
+    expect(parseSideQuestionCommand("so /BTW then")).toBeNull()
     expect(parseSideQuestionCommand("tell me /btw something")).toBeNull()
     expect(parseSideQuestionCommand("/compact")).toBeNull()
     expect(parseSideQuestionCommand("")).toBeNull()
+  })
+})
+
+describe("sideQuestionOfDraft", () => {
+  it("reads the draft's display text", () => {
+    expect(
+      sideQuestionOfDraft({
+        displayText: "/BTW why?",
+        blocks: [{ type: "text", text: "/BTW why?" }],
+      })
+    ).toEqual({ question: "why?" })
+  })
+
+  it("falls back to the text blocks of a draft built elsewhere", () => {
+    expect(
+      sideQuestionOfDraft({
+        displayText: "",
+        blocks: [{ type: "text", text: "/btw from blocks" }],
+      })
+    ).toEqual({ question: "from blocks" })
+  })
+
+  it("is null for an ordinary message", () => {
+    expect(
+      sideQuestionOfDraft({
+        displayText: "please run /btw later",
+        blocks: [{ type: "text", text: "please run /btw later" }],
+      })
+    ).toBeNull()
+    expect(
+      sideQuestionOfDraft({
+        displayText: "Attached 1 attachment",
+        blocks: [{ type: "image", data: "AAAA", mime_type: "image/png" }],
+      })
+    ).toBeNull()
+  })
+})
+
+describe("divertSideQuestionDraft", () => {
+  const draft = (text: string) => ({
+    displayText: text,
+    blocks: [{ type: "text" as const, text }],
+  })
+
+  it("asks a queued or edited /BTW where the session answers side questions", () => {
+    const ask = vi.fn()
+    const keep = vi.fn()
+    expect(
+      divertSideQuestionDraft(draft("/BTW how much?"), {
+        supported: true,
+        ask,
+        keep,
+      })
+    ).toBe(true)
+    expect(ask).toHaveBeenCalledWith("how much?")
+    expect(keep).not.toHaveBeenCalled()
+  })
+
+  it("hands the text back, unsent, where it cannot be answered", () => {
+    const ask = vi.fn()
+    const keep = vi.fn()
+    expect(
+      divertSideQuestionDraft(draft("/btw how much?"), {
+        supported: false,
+        ask,
+        keep,
+      })
+    ).toBe(true)
+    expect(keep).toHaveBeenCalledWith("/btw how much?")
+    expect(ask).not.toHaveBeenCalled()
+  })
+
+  it("lets an ordinary message through", () => {
+    const ask = vi.fn()
+    const keep = vi.fn()
+    expect(
+      divertSideQuestionDraft(draft("by the way /btw"), {
+        supported: true,
+        ask,
+        keep,
+      })
+    ).toBe(false)
+    expect(ask).not.toHaveBeenCalled()
+    expect(keep).not.toHaveBeenCalled()
   })
 })
 

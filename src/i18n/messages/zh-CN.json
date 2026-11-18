@@ -4088,6 +4088,9 @@
         "mentionGroupSkill": "技能",
         "btwDescription": "提一个旁支问题：根据当前对话作答，不使用工具，智能体继续工作，且不会加入对话",
         "btwHint": "问题",
+        "btwUnsupported": "此智能体无法回答 /btw 旁支问题。未发送任何内容。",
+        "btwNotReady": "会话连接后才能提出 /btw 旁支问题。未发送任何内容。",
+        "btwQueueEdit": "/btw 旁支问题不能在队列中等待，请直接在输入框中提问。",
         "suggestionTabHint": "Tab",
         "mentionGroupAssistant": "助手"
       },
@@ -4406,6 +4409,7 @@
         "editBusy": "当前有回合正在进行，暂不可编辑",
         "editQueued": "队列中还有待发送的消息，暂不可编辑",
         "editNotReady": "这条消息暂时还不能编辑，请稍后再试",
+        "editSideQuestion": "/btw 旁支问题不能作为消息发送",
         "editHint": "保存后将从此处开一条新分支。原会话保留在侧边栏中，文件改动不会被撤销。",
         "editHintInPlace": "保存后将以编辑后的消息从此处继续当前会话，替换原消息。文件改动不会被撤销。",
         "editHintNewConversation": "这是第一条消息，保存后将用它新建一个会话。当前会话保持不变，文件改动不会被撤销。",
@@ -9253,6 +9257,7 @@
       "noFiles": "拖入的内容不含图片文件。请复制图片后粘贴。"
     },
     "hint": "Enter 发送 · Shift+Enter 换行 · Esc 隐藏",
+    "btwUnsupported": "Quick Ask 无法回答 /btw 旁支问题。未发送任何内容。",
     "actions": {
       "newQuestion": "新问题",
       "openInCodeg": "在 codeg 中打开",

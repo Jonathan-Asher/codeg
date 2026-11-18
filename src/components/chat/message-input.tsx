@@ -429,6 +429,17 @@ const CONTINUE_REPEAT_GUARD_MS = 1500
  *  toast on screen instead of stacking another copy of it. */
 const HELD_WHILE_RESPONDING_TOAST = "composer-held-while-responding"
 
+/** Why a `/btw` stayed in the composer instead of being asked. */
+type SideQuestionRefusal = "unsupported" | "notReady" | "queueEdit"
+
+/** What each {@link SideQuestionRefusal} says, under
+ *  `Folder.chat.messageInput`. */
+const SIDE_QUESTION_REFUSAL_LABEL = {
+  unsupported: "btwUnsupported",
+  notReady: "btwNotReady",
+  queueEdit: "btwQueueEdit",
+} as const satisfies Record<SideQuestionRefusal, string>
+
 function SelectorLoadingChip({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
@@ -597,6 +608,18 @@ export function MessageInput({
   // The editor owns the content now; this mirror of its empty state drives the
   // send button and `hasSendableContent`.
   const [composerEmpty, setComposerEmpty] = useState(true)
+  // Why a `/btw` the user just tried to send stayed in the composer (see
+  // `takeSideQuestion`): shown under the editor until the text changes, for
+  // the draft it was said about (a host that reuses this composer for another
+  // conversation does not carry it over).
+  const [sideQuestionRefusalState, setSideQuestionRefusalState] = useState<{
+    reason: SideQuestionRefusal
+    draftKey: string | null
+  } | null>(null)
+  const sideQuestionRefusal =
+    sideQuestionRefusalState?.draftKey === effectiveDraftStorageKey
+      ? sideQuestionRefusalState.reason
+      : null
   // The prediction a send went past: hidden at once, before the turn's start
   // clears it for every client (see `promptSuggestion`).
   const [dismissedSuggestionId, setDismissedSuggestionId] = useState<
@@ -994,6 +1017,7 @@ export function MessageInput({
     }
     syncComposerEmpty()
     detectSlashTriggerRef.current?.()
+    setSideQuestionRefusalState(null)
   }, [syncComposerEmpty, scheduleDraftSave])
 
   // Arrow-key prompt history. RichComposer only calls this from the document
@@ -1809,19 +1833,33 @@ export function MessageInput({
     historyDraftRef.current = null
   }, [clearAttachments, closeSlashMenu])
 
-  // `/btw …` is a side question, not a message: it goes to `onSideQuestion`
-  // whatever the session is doing — never to the agent as a prompt, into the
-  // queue or into the running turn — and the text leaves the composer. An
-  // attachment stays: it was put there for a message. True when the
-  // composer's text was a side question.
+  // `/btw …` is a side question, never a message: whatever the session is
+  // doing, it does not go to the agent as a prompt, into the queue or into
+  // the running turn. On a session that answers side questions it goes to
+  // `onSideQuestion` and the text leaves the composer (an attachment stays:
+  // it was put there for a message). Anywhere else — an agent that cannot
+  // answer one, a session still connecting, a queued message being edited —
+  // the text stays where it is and the composer says why nothing went. True
+  // when the composer's text was a side question: every send path stops.
   const takeSideQuestion = useCallback((): boolean => {
-    if (!onSideQuestion || isEditingQueueItem) return false
     const editor = editorRef.current?.getEditor()
     if (!editor) return false
     const command = parseSideQuestionCommand(
       serializeDocToDisplayText(editor.state.doc)
     )
     if (!command) return false
+    if (isEditingQueueItem || !onSideQuestion) {
+      setSideQuestionRefusalState({
+        reason: isEditingQueueItem
+          ? "queueEdit"
+          : agentType === "claude_code" && (queueSends || disabled)
+            ? "notReady"
+            : "unsupported",
+        draftKey: effectiveDraftStorageKey,
+      })
+      return true
+    }
+    setSideQuestionRefusalState(null)
     onSideQuestion(command.question)
     editorRef.current?.clear()
     setComposerEmpty(true)
@@ -1835,6 +1873,9 @@ export function MessageInput({
   }, [
     onSideQuestion,
     isEditingQueueItem,
+    agentType,
+    queueSends,
+    disabled,
     closeSlashMenu,
     effectiveDraftStorageKey,
   ])
@@ -2719,6 +2760,15 @@ export function MessageInput({
                 // (see above); RichComposer explains the basis.
                 className={cn("grow", editableMinHeight)}
               />
+              {sideQuestionRefusal && (
+                <p
+                  role="status"
+                  data-testid="composer-btw-notice"
+                  className="shrink-0 px-3 pb-1 text-xs text-muted-foreground"
+                >
+                  {t(SIDE_QUESTION_REFUSAL_LABEL[sideQuestionRefusal])}
+                </p>
+              )}
               <div className="flex shrink-0 items-end justify-between gap-1 px-2 pb-2">
                 <div className="flex min-w-0 items-end gap-1">
                   <ComposerAddMenu

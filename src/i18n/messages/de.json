@@ -4088,6 +4088,9 @@
         "mentionGroupSkill": "Fähigkeiten",
         "btwDescription": "Eine Nebenfrage stellen: aus dieser Unterhaltung ohne Werkzeuge beantwortet, während der Agent weiterarbeitet, und nicht Teil der Unterhaltung",
         "btwHint": "Frage",
+        "btwUnsupported": "Dieser Agent kann keine /btw-Nebenfragen beantworten. Es wurde nichts gesendet.",
+        "btwNotReady": "/btw-Nebenfragen sind möglich, sobald die Sitzung verbunden ist. Es wurde nichts gesendet.",
+        "btwQueueEdit": "Eine /btw-Nebenfrage kann nicht in der Warteschlange warten. Stelle sie stattdessen im Eingabefeld.",
         "suggestionTabHint": "Tab",
         "mentionGroupAssistant": "Assistenten"
       },
@@ -4406,6 +4409,7 @@
         "editBusy": "Bearbeiten nicht möglich, während ein Zug läuft",
         "editQueued": "Bearbeiten nicht möglich, solange Nachrichten in der Warteschlange warten",
         "editNotReady": "Diese Nachricht kann noch nicht bearbeitet werden – bitte gleich erneut versuchen",
+        "editSideQuestion": "Eine /btw-Nebenfrage kann nicht als Nachricht gesendet werden",
         "editHint": "Speichern startet ab hier einen neuen Zweig. Die ursprüngliche Konversation bleibt in der Seitenleiste, Dateiänderungen werden nicht rückgängig gemacht.",
         "editHintInPlace": "Speichern setzt diese Konversation ab hier mit der bearbeiteten Nachricht anstelle der ursprünglichen fort. Dateiänderungen werden nicht rückgängig gemacht.",
         "editHintNewConversation": "Dies ist die erste Nachricht, daher startet Speichern damit eine neue Konversation. Diese hier bleibt unverändert, Dateiänderungen werden nicht rückgängig gemacht.",
@@ -9253,6 +9257,7 @@
       "noFiles": "Das Abgelegte enthielt keine Bilddatei. Kopiere das Bild und füge es stattdessen ein."
     },
     "hint": "Enter zum Senden · Shift+Enter für neue Zeile · Esc zum Ausblenden",
+    "btwUnsupported": "Quick Ask kann keine /btw-Nebenfragen beantworten. Es wurde nichts gesendet.",
     "actions": {
       "newQuestion": "Neue Frage",
       "openInCodeg": "In codeg öffnen",

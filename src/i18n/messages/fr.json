@@ -4088,6 +4088,9 @@
         "mentionGroupSkill": "Compétences",
         "btwDescription": "Poser une question annexe : réponse tirée de cette conversation, sans outils, pendant que l'agent continue de travailler, et non ajoutée à la conversation",
         "btwHint": "question",
+        "btwUnsupported": "Cet agent ne peut pas répondre aux questions annexes /btw. Rien n'a été envoyé.",
+        "btwNotReady": "Les questions annexes /btw seront possibles une fois la session connectée. Rien n'a été envoyé.",
+        "btwQueueEdit": "Une question annexe /btw ne peut pas attendre dans la file. Posez-la plutôt depuis la zone de saisie.",
         "suggestionTabHint": "Tab",
         "mentionGroupAssistant": "Assistants"
       },
@@ -4406,6 +4409,7 @@
         "editBusy": "Impossible de modifier pendant qu'un tour est en cours",
         "editQueued": "Impossible de modifier tant que des messages attendent dans la file",
         "editNotReady": "Impossible de modifier ce message pour le moment, réessayez dans un instant",
+        "editSideQuestion": "Une question annexe /btw ne peut pas être envoyée comme message",
         "editHint": "Enregistrer démarre une nouvelle branche à partir d'ici. La conversation d'origine reste dans la barre latérale, et les modifications de fichiers ne sont pas annulées.",
         "editHintInPlace": "Enregistrer poursuit cette conversation à partir d'ici avec le message modifié, à la place de l'original. Les modifications de fichiers ne sont pas annulées.",
         "editHintNewConversation": "C'est le premier message : enregistrer démarre une nouvelle conversation avec lui. Celle-ci reste telle quelle, et les modifications de fichiers ne sont pas annulées.",
@@ -9253,6 +9257,7 @@
       "noFiles": "Le dépôt ne contenait aucun fichier image. Copiez l'image et collez-la plutôt."
     },
     "hint": "Entrée pour envoyer · Maj+Entrée pour une nouvelle ligne · Échap pour masquer",
+    "btwUnsupported": "Quick Ask ne peut pas répondre aux questions annexes /btw. Rien n'a été envoyé.",
     "actions": {
       "newQuestion": "Nouvelle question",
       "openInCodeg": "Ouvrir dans codeg",

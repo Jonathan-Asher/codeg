@@ -4088,6 +4088,9 @@
         "mentionGroupSkill": "スキル",
         "btwDescription": "サイド質問をする：エージェントが作業を続けたまま、この会話の内容からツールなしで答えます。会話には追加されません",
         "btwHint": "質問",
+        "btwUnsupported": "このエージェントは /btw のサイド質問に答えられません。何も送信されていません。",
+        "btwNotReady": "/btw のサイド質問はセッションの接続後に使えます。何も送信されていません。",
+        "btwQueueEdit": "/btw のサイド質問はキューで待たせられません。入力欄から直接質問してください。",
         "suggestionTabHint": "Tab",
         "mentionGroupAssistant": "アシスタント"
       },
@@ -4406,6 +4409,7 @@
         "editBusy": "ターンの実行中は編集できません",
         "editQueued": "キューにメッセージが待機している間は編集できません",
         "editNotReady": "このメッセージはまだ編集できません。少し待ってからお試しください",
+        "editSideQuestion": "/btw のサイド質問はメッセージとして送信できません",
         "editHint": "保存すると、ここから新しい分岐が始まります。元の会話はサイドバーに残り、ファイルの変更は元に戻りません",
         "editHintInPlace": "保存すると、元のメッセージの代わりに編集したメッセージで、この会話をここから続けます。ファイルの変更は元に戻りません",
         "editHintNewConversation": "最初のメッセージのため、保存するとこのメッセージで新規会話が始まります。この会話はそのまま残り、ファイルの変更は元に戻りません",
@@ -9253,6 +9257,7 @@
       "noFiles": "ドロップした内容に画像ファイルがありません。画像をコピーして貼り付けてください。"
     },
     "hint": "Enter で送信 · Shift+Enter で改行 · Esc で隠す",
+    "btwUnsupported": "Quick Ask は /btw のサイド質問に答えられません。何も送信されていません。",
     "actions": {
       "newQuestion": "新しい質問",
       "openInCodeg": "codeg で開く",
