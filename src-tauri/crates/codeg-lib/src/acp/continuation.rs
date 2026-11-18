@@ -24,7 +24,7 @@ use tokio::sync::broadcast::error::RecvError;
 use crate::acp::auto_resume::{reopen_conversation, ReopenTarget};
 use crate::acp::error::AcpError;
 use crate::acp::manager::ConnectionManager;
-use crate::acp::types::{AcpEvent, PromptInputBlock};
+use crate::acp::types::{AcpEvent, ConnectionStatus, PromptInputBlock};
 use crate::app_error::AppCommandError;
 use crate::db::service::{conversation_service, folder_service};
 use crate::db::AppDatabase;
@@ -156,10 +156,29 @@ pub async fn run_handoff_core(
         ));
     };
 
-    let conn_id = match manager
+    // The connection that has the conversation open — a tab's, most often —
+    // when it can take the prompt now; otherwise the session is opened the
+    // way a tab's connect opens it, sharing a connection still on its way.
+    let live = match manager
         .find_connection_by_conversation_id(conversation_id)
         .await
     {
+        Some(conn_id) => match manager.get_state(&conn_id).await {
+            Some(state) => {
+                let status = state.read().await.status.clone();
+                match status {
+                    ConnectionStatus::Connected => Some(conn_id),
+                    ConnectionStatus::Prompting => {
+                        return Ok(HandoffOutcome::failed(HandoffFailureKind::Busy, None));
+                    }
+                    _ => None,
+                }
+            }
+            None => None,
+        },
+        None => None,
+    };
+    let conn_id = match live {
         Some(conn_id) => conn_id,
         None => {
             let target = ReopenTarget {
@@ -169,7 +188,7 @@ pub async fn run_handoff_core(
                 external_id: row.external_id.clone(),
             };
             tracing::info!(
-                "[ACP] continue in another agent: reopening conversation {conversation_id} for its handoff"
+                "[ACP] continue in another agent: opening conversation {conversation_id} for its handoff"
             );
             match reopen_conversation(db, manager, emitter, data_dir, &target, OWNER_LABEL).await {
                 Ok(conn_id) => conn_id,
