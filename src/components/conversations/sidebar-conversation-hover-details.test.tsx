@@ -14,7 +14,16 @@ import {
   resetAppWorkspaceStore,
   useAppWorkspaceStore,
 } from "@/stores/app-workspace-store"
-import type { DbConversationSummary, FolderDetail } from "@/lib/types"
+import {
+  resetConversationRuntimeStore,
+  useConversationRuntimeStore,
+} from "@/stores/conversation-runtime-store"
+import type { ConversationRuntimeSession } from "@/contexts/conversation-runtime-context"
+import type {
+  DbConversationSummary,
+  FolderDetail,
+  MessageTurn,
+} from "@/lib/types"
 import enMessages from "@/i18n/messages/en.json"
 
 const CREATED_AT = "2026-03-01T10:00:00.000Z"
@@ -100,6 +109,7 @@ afterEach(() => {
   // when it lands would re-render outside `act()`.
   cleanup()
   resetAppWorkspaceStore()
+  resetConversationRuntimeStore()
 })
 
 describe("SidebarConversationHoverDetails", () => {
@@ -249,6 +259,41 @@ describe("SidebarConversationHoverDetails", () => {
     const dot = screen.getByText("·")
     expect(dot.getAttribute("aria-hidden")).toBe("true")
     expect(dot.parentElement?.textContent).toBe("·claude-opus-5")
+  })
+
+  // Conversation 237: the row kept the model the session started on while
+  // its replies moved on. A session this window has loaded names the newest.
+  it("names the newest reply's model over a stale row", () => {
+    seed()
+    const reply = (id: string, model: string): MessageTurn => ({
+      id,
+      role: "assistant",
+      blocks: [],
+      timestamp: "2026-11-18T17:01:38.000Z",
+      model,
+    })
+    useConversationRuntimeStore.setState({
+      byConversationId: new Map([
+        [
+          7,
+          {
+            localTurns: [],
+            detail: {
+              turns: [
+                reply("t1", "claude-fable-5-1"),
+                reply("t2", "claude-fable-5-2"),
+                // `/model`, answered by Claude Code itself.
+                reply("t3", "<synthetic>"),
+              ],
+            },
+          } as unknown as ConversationRuntimeSession,
+        ],
+      ]),
+    })
+    renderBubble(conv({ model: "claude-fable-5-1" }))
+
+    expect(screen.getByText("claude-fable-5-2")).toBeDefined()
+    expect(screen.queryByText("claude-fable-5-1")).toBeNull()
   })
 
   it("omits the model chip and its separator when no model is recorded", () => {

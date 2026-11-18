@@ -58,6 +58,7 @@ vi.mock("@/stores/app-workspace-store", () => ({
 vi.mock("@/hooks/use-connection-status", () => ({
   useConnectionStatus: vi.fn(() => null),
   useHeldTurnBackground: vi.fn(() => null),
+  useLiveSessionModel: vi.fn(() => null),
   useConnectionAttachInfo: vi.fn(() => ({
     state: null,
     phase: null,

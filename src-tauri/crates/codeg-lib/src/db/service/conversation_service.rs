@@ -1624,6 +1624,35 @@ pub async fn seed_model_if_empty(
     Ok(res.rows_affected > 0)
 }
 
+/// Set the session's `model` to the one it runs on now (see
+/// `crate::session_model`, which decides when that is a change). Writes only
+/// when the stored value differs, never to a soft-deleted row, and does not
+/// bump `updated_at`, for the reason [`seed_model_if_empty`] gives. Returns
+/// `true` when a row was written so the caller can broadcast a sidebar upsert.
+pub async fn update_model(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    model: &str,
+) -> Result<bool, DbError> {
+    use sea_orm::sea_query::Expr;
+    let model = model.trim();
+    if model.is_empty() {
+        return Ok(false);
+    }
+    let res = conversation::Entity::update_many()
+        .col_expr(conversation::Column::Model, Expr::value(model))
+        .filter(conversation::Column::Id.eq(conversation_id))
+        .filter(conversation::Column::DeletedAt.is_null())
+        .filter(
+            sea_orm::Condition::any()
+                .add(conversation::Column::Model.is_null())
+                .add(conversation::Column::Model.ne(model)),
+        )
+        .exec(conn)
+        .await?;
+    Ok(res.rows_affected > 0)
+}
+
 /// Lock a row's title WITHOUT rewriting it. For a conversation whose name was
 /// typed by the user somewhere else — a work task's title, an automation's name
 /// — the seed passed to [`create`] already IS the name; all that's missing is
@@ -3949,6 +3978,47 @@ mod tests {
             "a deleted conversation is not something an open can resurrect a \
              column on"
         );
+    }
+
+    #[tokio::test]
+    async fn update_model_moves_a_stale_column_without_bumping_updated_at() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/codeg-update-model").await;
+        let conv = create(
+            &db.conn,
+            folder,
+            AgentType::ClaudeCode,
+            Some("c".into()),
+            None,
+        )
+        .await
+        .expect("create");
+        assert!(seed_model_if_empty(&db.conn, conv.id, "claude-fable-5-1")
+            .await
+            .expect("seed"));
+        let before = get_by_id(&db.conn, conv.id).await.expect("get before");
+
+        // The session moved on: the column follows.
+        assert!(update_model(&db.conn, conv.id, " claude-fable-5-2 ")
+            .await
+            .expect("update"));
+        let after = get_by_id(&db.conn, conv.id).await.expect("get after");
+        assert_eq!(after.model.as_deref(), Some("claude-fable-5-2"));
+        assert_eq!(
+            after.updated_at, before.updated_at,
+            "not conversation activity"
+        );
+
+        // The same value again, or none: no row written.
+        assert!(!update_model(&db.conn, conv.id, "claude-fable-5-2")
+            .await
+            .expect("same"));
+        assert!(!update_model(&db.conn, conv.id, "  ").await.expect("blank"));
+
+        soft_delete(&db.conn, conv.id).await.expect("delete");
+        assert!(!update_model(&db.conn, conv.id, "claude-opus-5-5")
+            .await
+            .expect("deleted"));
     }
 
     #[tokio::test]

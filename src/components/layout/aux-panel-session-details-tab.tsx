@@ -16,6 +16,7 @@ import {
   useConnectionAttachInfo,
   useConnectionStatus,
   useHeldTurnBackground,
+  useLiveSessionModel,
 } from "@/hooks/use-connection-status"
 import { useOptionalAcpActions } from "@/contexts/acp-connection-contexts"
 import { SessionActivityRow } from "@/components/conversations/session-activity"
@@ -113,10 +114,12 @@ export function SessionDetailsTab() {
     (element: HTMLElement | null) => setViewport(element),
     []
   )
+  const liveModel = useLiveSessionModel(activeConversationTab?.id)
   const { summary, model } = resolveActiveSessionDetails(
     activeConversationTab,
     (id) => (id === activeRuntimeId ? runtimeSlice : null),
-    conversations
+    conversations,
+    liveModel
   )
 
   return (

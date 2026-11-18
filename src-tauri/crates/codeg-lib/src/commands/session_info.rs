@@ -147,6 +147,17 @@ impl SessionInfoAccess for DbSessionInfoLookup {
                 // get_folder_conversation_core sets summary.message_count to the
                 // parsed turn count — more accurate than the stored row.
                 info.message_count = Some(detail.summary.message_count);
+                // The parse names the model of the newest reply (see
+                // `crate::session_model`); the row can lag it until the next
+                // detail read writes it back.
+                if let Some(model) = detail
+                    .summary
+                    .model
+                    .clone()
+                    .filter(|m| !m.trim().is_empty())
+                {
+                    info.model = Some(model);
+                }
                 info.stats = detail.session_stats;
                 info.messages = Some(compact_turns(&detail.turns, max));
             }

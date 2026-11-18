@@ -76,6 +76,7 @@ pub mod push;
 #[cfg(all(feature = "tauri-runtime", target_os = "macos"))]
 mod relaunch;
 pub mod runtime_lock;
+pub mod session_model;
 /// Moving a session to another project, with its files.
 pub mod session_move;
 pub mod supervise;

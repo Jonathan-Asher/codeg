@@ -36,21 +36,53 @@ export type RuntimeSessionForDetails = Pick<
   "detail" | "sessionStats" | "localTurns"
 >
 
+/** The "model" Claude Code stamps on the replies it writes itself (a local
+ *  command such as `/model`, an API error notice): no model wrote those. */
+const SYNTHETIC_MODEL = "<synthetic>"
+
 /**
  * Pick the conversation's model from its turns. Only assistant turns carry a
  * `model`, and a conversation can switch models mid-session, so the most recent
  * turn with a model is the best "current model" signal. Returns `null` when no
  * turn records one (e.g. before the first assistant reply).
  *
- * This is the reliable source: `DbConversationSummary.model` is only populated
- * for imported conversations, staying `null` for sessions started live in-app.
+ * This is the reliable source: the row's `model` column follows the session
+ * (see the backend's `session_model`), but only as of the last transcript
+ * read or selector change.
  */
 export function pickModelFromTurns(turns: MessageTurn[]): string | null {
   for (let i = turns.length - 1; i >= 0; i--) {
-    const model = turns[i]?.model
-    if (model) return model
+    const model = turns[i]?.model?.trim()
+    if (model && model !== SYNTHETIC_MODEL) return model
   }
   return null
+}
+
+/**
+ * The model a session runs on, for every view that names it: the newest reply
+ * that names one (live turns first, then the loaded history), else what the
+ * live connection's model selector holds, else the stored column (in the
+ * order `summaries` lists them). The stored column alone is what the
+ * session STARTED on for rows written before the backend kept it in step.
+ */
+export function resolveSessionModel({
+  liveTurns,
+  historyTurns,
+  liveModel,
+  summaries,
+}: {
+  liveTurns?: MessageTurn[] | null
+  historyTurns?: MessageTurn[] | null
+  liveModel?: string | null
+  summaries?: (DbConversationSummary | null | undefined)[]
+}): string | null {
+  return (
+    pickModelFromTurns(liveTurns ?? []) ??
+    pickModelFromTurns(historyTurns ?? []) ??
+    (liveModel?.trim() || null) ??
+    summaries?.map((summary) => summary?.model?.trim()).find(Boolean) ??
+    null
+  )
 }
 
 /**
@@ -123,7 +155,10 @@ function withLiveColumns(
 export function resolveActiveSessionDetails(
   tab: ActiveSessionTabRef | null,
   getSession: (id: number) => RuntimeSessionForDetails | null,
-  conversations: DbConversationSummary[]
+  conversations: DbConversationSummary[],
+  // What the tab's live connection has selected (`readLiveSessionModel`): the
+  // model until the transcript has a reply naming one.
+  liveModel: string | null = null
 ): ActiveSessionDetails {
   const runtimeId = tab?.runtimeConversationId ?? tab?.conversationId ?? null
   const runtimeSession = runtimeId != null ? getSession(runtimeId) : null
@@ -141,13 +176,14 @@ export function resolveActiveSessionDetails(
     runtimeSession?.detail?.session_stats ??
     null
   // `localTurns` holds the live session's freshest turns; `detail.turns` the
-  // cold-loaded history. Prefer the live model, then history, then the (usually
-  // empty) summary column.
-  const model =
-    pickModelFromTurns(runtimeSession?.localTurns ?? []) ??
-    pickModelFromTurns(runtimeSession?.detail?.turns ?? []) ??
-    runtimeSession?.detail?.summary?.model ??
-    summary?.model ??
-    null
+  // cold-loaded history (see `resolveSessionModel`).
+  const model = resolveSessionModel({
+    liveTurns: runtimeSession?.localTurns,
+    historyTurns: runtimeSession?.detail?.turns,
+    liveModel,
+    // The listed row first: upserts keep it current (a selector change, a
+    // transcript read elsewhere); the loaded summary is a snapshot.
+    summaries: [listed, runtimeSession?.detail?.summary, summary],
+  })
   return { summary, stats, model }
 }

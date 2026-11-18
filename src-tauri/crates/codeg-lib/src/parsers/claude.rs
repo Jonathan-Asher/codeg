@@ -1789,13 +1789,18 @@ impl ClaudeParser {
 
                 message_count += 1;
 
-                // Extract model from assistant messages
-                if msg_type == "assistant" && model.is_none() {
-                    model = value
+                // The session's model: the newest reply's, not the first one's
+                // (a `/model` switch moves it), and never the `<synthetic>`
+                // stamp of a reply Claude Code wrote itself.
+                if msg_type == "assistant" {
+                    if let Some(reply_model) = value
                         .get("message")
                         .and_then(|m| m.get("model"))
                         .and_then(|m| m.as_str())
-                        .map(|s| s.to_string());
+                        .filter(|m| !m.is_empty() && *m != crate::session_model::SYNTHETIC_MODEL)
+                    {
+                        model = Some(reply_model.to_string());
+                    }
                 }
 
                 // Extract title from first user message
@@ -2767,8 +2772,13 @@ impl ClaudeRecordAccumulator {
                     .and_then(|m| m.as_str())
                     .map(|s| s.to_string());
 
-                if model.is_none() {
-                    *model = msg_model.clone();
+                // The newest reply's model names the session's (see the list
+                // parse above).
+                if let Some(reply_model) = msg_model
+                    .as_deref()
+                    .filter(|m| !m.is_empty() && *m != crate::session_model::SYNTHETIC_MODEL)
+                {
+                    *model = Some(reply_model.to_string());
                 }
 
                 let content = extract_assistant_content(&value);

@@ -344,6 +344,40 @@ describe("SessionDetailsDialog", () => {
     expect(await findByText("claude-sonnet-4-6")).toBeTruthy()
   })
 
+  it("names the newest reply's model, not a stale stored one (sidebar path)", async () => {
+    // The row (and an older server's summary) kept the model the session
+    // started on; the replies moved on.
+    mockGet.mockResolvedValue({
+      summary: summary({ model: "claude-fable-5-1" }),
+      turns: [
+        {
+          id: "t1",
+          role: "assistant",
+          blocks: [],
+          timestamp: "2026-10-26T11:26:46.000Z",
+          model: "claude-fable-5-1",
+        },
+        {
+          id: "t2",
+          role: "assistant",
+          blocks: [],
+          timestamp: "2026-11-18T17:01:38.000Z",
+          model: "claude-fable-5-2",
+        },
+      ],
+      session_stats: fullStats,
+    })
+    const { findByText, queryByText } = renderWithIntl(
+      <SessionDetailsDialog
+        open
+        onOpenChange={() => {}}
+        summary={summary({ model: "claude-fable-5-1" })}
+      />
+    )
+    expect(await findByText("claude-fable-5-2")).toBeTruthy()
+    expect(queryByText("claude-fable-5-1")).toBeNull()
+  })
+
   it("names the model the way its agent does", async () => {
     // qoder records an account-internal key in its transcripts (`qfmodel`) and
     // advertises the readable name over ACP. This field used to show the key

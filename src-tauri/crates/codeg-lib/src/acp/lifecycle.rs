@@ -717,13 +717,27 @@ async fn record_selector_state(
     let Some((state_arc, emitter)) = manager.get_state_and_emitter(connection_id).await else {
         return Ok(());
     };
-    let (record, conversation_id, external_id, agent_type) = {
+    let (record, conversation_id, external_id, agent_type, model_selector) = {
         let s = state_arc.read().await;
+        // The model selector's option id and the model it holds (see
+        // `connection::current_model_id_from_opts`), for the row's `model`.
+        let model_selector = s.config_options.as_deref().and_then(|opts| {
+            let id = opts
+                .iter()
+                .find(|o| o.category.as_deref() == Some("model"))?
+                .id
+                .clone();
+            Some((
+                id,
+                crate::acp::connection::current_model_id_from_opts(opts)?,
+            ))
+        });
         (
             effective_selector_state(&s),
             s.conversation_id,
             s.external_id.clone(),
             s.agent_type,
+            model_selector,
         )
     };
     let Some(record) = record else {
@@ -740,7 +754,26 @@ async fn record_selector_state(
         }
         (None, None) => return Ok(()),
     };
+    // What the model selector held as last recorded, to tell a model change
+    // from a change to another selector. Only read when there is a model
+    // selector at all.
+    let recorded_model = match &model_selector {
+        Some((option_id, _)) => conversation_service::load_selector_state(db_conn, conversation_id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|stored| stored.config_values.get(option_id).cloned()),
+        None => None,
+    };
     if conversation_service::save_selector_state(db_conn, conversation_id, record.clone()).await? {
+        record_selector_model(
+            db_conn,
+            conversation_id,
+            &record,
+            model_selector.as_ref(),
+            recorded_model.as_deref(),
+        )
+        .await;
         tracing::debug!(
             connection_id,
             conversation_id,
@@ -760,6 +793,57 @@ async fn record_selector_state(
         .await;
     }
     Ok(())
+}
+
+/// Move the row's `model` to the model selector's new value, when the record
+/// just written changed the model (the user picked another, or the agent
+/// reported one it switched to itself, as a `/model` does) and the row names
+/// another model (see `crate::session_model`). Best effort: a failed write
+/// costs the sidebar its model chip until the next transcript read, never the
+/// selector record.
+async fn record_selector_model(
+    db_conn: &DatabaseConnection,
+    conversation_id: i32,
+    record: &conversation_service::ConversationSelectorState,
+    model_selector: Option<&(String, String)>,
+    recorded_model: Option<&str>,
+) {
+    let Some((option_id, model)) = model_selector else {
+        return;
+    };
+    // The record leaves out a model pinned through the environment: the
+    // agent refuses to change it, so it never changes here either.
+    let Some(recorded_now) = record.config_values.get(option_id) else {
+        return;
+    };
+    if recorded_model == Some(recorded_now.as_str()) {
+        return;
+    }
+    let stored = match conversation_service::get_by_id(db_conn, conversation_id).await {
+        Ok(row) => row.model,
+        Err(e) => {
+            tracing::warn!(
+                "[lifecycle] could not read conversation {conversation_id}'s model: {e}"
+            );
+            return;
+        }
+    };
+    let Some(next) = crate::session_model::model_from_selector(stored.as_deref(), Some(model))
+    else {
+        return;
+    };
+    match conversation_service::update_model(db_conn, conversation_id, &next).await {
+        Ok(true) => {
+            crate::session_model::note_selector_change(conversation_id, chrono::Utc::now());
+            tracing::debug!(conversation_id, model = %next, "[lifecycle] the conversation's model follows its selector");
+        }
+        Ok(false) => {}
+        Err(e) => {
+            tracing::warn!(
+                "[lifecycle] could not record conversation {conversation_id}'s model: {e}"
+            );
+        }
+    }
 }
 
 /// On TurnComplete for a delegation child, resolve the pending broker call
@@ -6167,6 +6251,78 @@ mod tests {
             Some(record("plan", &[("model", "opus"), ("effort", "low")])),
             "the record follows what the agent confirmed"
         );
+    }
+
+    /// A model change on the selector — a pick, or a `/model` the agent
+    /// reports — moves the row's `model` column, which the sidebar and the
+    /// session-info tool read; a change to another selector does not.
+    #[tokio::test]
+    async fn a_model_change_moves_the_rows_model() {
+        let db = test_helpers::fresh_in_memory_db().await;
+        let cid = seeded_conversation(&db, "/tmp/selector-model").await;
+        assert!(
+            conversation_service::seed_model_if_empty(&db.conn, cid, "claude-fable-5-1")
+                .await
+                .unwrap()
+        );
+        let mgr = ConnectionManager::new();
+        connection_on(&mgr, "c1", Some(cid), "sess-1", true).await;
+        async fn model_of(db: &crate::db::AppDatabase, cid: i32) -> Option<String> {
+            conversation_service::get_by_id(&db.conn, cid)
+                .await
+                .unwrap()
+                .model
+        }
+
+        agent_confirms(
+            &mgr,
+            "c1",
+            "default",
+            &[("model", "claude-fable-5-2[1m]"), ("effort", "max")],
+        )
+        .await;
+        handle_event(&db.conn, &mgr, &on("c1", 1, AcpEvent::SelectorsReady), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            model_of(&db, cid).await.as_deref(),
+            Some("claude-fable-5-2[1m]")
+        );
+
+        // Another selector moved: the model column is left as it is, even
+        // when a transcript read has since spelled it the resolved way.
+        assert!(
+            conversation_service::update_model(&db.conn, cid, "claude-fable-5-2")
+                .await
+                .unwrap()
+        );
+        agent_confirms(
+            &mgr,
+            "c1",
+            "default",
+            &[("model", "claude-fable-5-2[1m]"), ("effort", "low")],
+        )
+        .await;
+        handle_event(&db.conn, &mgr, &on("c1", 2, options_changed()), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            model_of(&db, cid).await.as_deref(),
+            Some("claude-fable-5-2")
+        );
+
+        // `/model claude-opus-5-5`: the agent reports the new value.
+        agent_confirms(
+            &mgr,
+            "c1",
+            "default",
+            &[("model", "claude-opus-5-5"), ("effort", "low")],
+        )
+        .await;
+        handle_event(&db.conn, &mgr, &on("c1", 3, options_changed()), None)
+            .await
+            .unwrap();
+        assert_eq!(model_of(&db, cid).await.as_deref(), Some("claude-opus-5-5"));
     }
 
     /// While establishment is still running the options are the agent's

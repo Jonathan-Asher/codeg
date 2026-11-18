@@ -11,6 +11,13 @@ import { FolderAliasLabel } from "./folder-alias-label"
 import { InfoItem, SessionIdentityChips } from "./session-details-content"
 import { ConversationTagChip } from "./conversation-tag-chip"
 import { useResolvedTags } from "@/hooks/use-conversation-tags"
+import { useLiveSessionModel } from "@/hooks/use-connection-status"
+import { useTabStore } from "@/stores/tab-store"
+import { useConversationRuntimeStore } from "@/stores/conversation-runtime-store"
+import {
+  pickModelFromTurns,
+  resolveSessionModel,
+} from "./active-session-details"
 
 interface SidebarConversationHoverDetailsProps {
   conversation: DbConversationSummary
@@ -87,7 +94,30 @@ export function SidebarConversationHoverDetails({
   // something else out since. The live branch only fills in for rows that
   // predate the column being written (imported sessions).
   const branch = conversation.git_branch || liveBranch || null
-  const model = conversation.model?.trim() || null
+  // The model the session is on now, named the way the Session info panel
+  // names it (`resolveSessionModel`): the newest reply of a session this
+  // window has loaded, else what its open tab's connection has selected, else
+  // the row, which the backend keeps in step with the session.
+  const openTabId = useTabStore(
+    (s) =>
+      s.tabs.find((tab) => tab.conversationId === conversation.id)?.id ?? null
+  )
+  const runtimeId = useTabStore(
+    (s) =>
+      s.tabs.find((tab) => tab.conversationId === conversation.id)
+        ?.runtimeConversationId ?? conversation.id
+  )
+  const replyModel = useConversationRuntimeStore((s) => {
+    const session = s.byConversationId.get(runtimeId)
+    if (!session) return null
+    return (
+      pickModelFromTurns(session.localTurns) ??
+      pickModelFromTurns(session.detail?.turns ?? [])
+    )
+  })
+  const liveModel = useLiveSessionModel(openTabId)
+  const model =
+    replyModel ?? resolveSessionModel({ liveModel, summaries: [conversation] })
 
   return (
     // `select-none` is load-bearing, not cosmetic. Radix refuses to close a
@@ -113,9 +143,8 @@ export function SidebarConversationHoverDetails({
         </p>
         {/* No status chip: the row the pointer is resting on already badges the
             two states worth flagging — a spinner while running, a cross when
-            cancelled — and the rest read as ordinary either way. `model` is
-            empty for most live sessions (the column is only filled for imported
-            ones), and the chip drops out with it. */}
+            cancelled — and the rest read as ordinary either way. The model
+            chip drops out when nothing names a model yet. */}
         <SessionIdentityChips
           agentType={conversation.agent_type}
           model={model}
