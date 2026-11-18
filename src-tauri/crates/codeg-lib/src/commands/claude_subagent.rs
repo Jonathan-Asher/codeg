@@ -127,6 +127,9 @@ fn shape(
         status: if running { "in_progress" } else { "completed" }.to_string(),
         background: None,
         tag_ids: Vec::new(),
+        // The parent's "Continue in another agent" link is the parent's, not
+        // its sub-agent's.
+        continued_from_id: None,
         ..parent
     };
     // Still at work: its opening prompt is the turn in flight, so the calls
