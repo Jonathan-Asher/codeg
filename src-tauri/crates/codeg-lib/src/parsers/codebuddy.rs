@@ -1297,6 +1297,7 @@ fn agent_stats_from_subagent(
         // CodeBuddy's sub-agent transcript is a file under the parent session,
         // not a session of its own.
         child_session_id: None,
+        subagent_id: None,
     })
 }
 

@@ -13,6 +13,7 @@ use crate::parsers::{
     AgentParser, ParseError,
 };
 
+pub(crate) mod subagent_thread;
 mod transcript_cache;
 
 /// Regex that matches Claude Code system-injected XML tags and their content.
@@ -2159,11 +2160,17 @@ pub(crate) struct ClaudeRecordAccumulator {
     /// the divider, which is what made the reopened conversation disagree with
     /// the one that was just streaming.
     compaction_summary_slot: Option<usize>,
+    /// This feed reads a sub-agent's own transcript
+    /// (`<session>/subagents/agent-<id>.jsonl`, see [`is_sidechain_transcript`])
+    /// rather than a session's: a fork's inherited prefix is dropped at its
+    /// directive (see [`Self::restart_at_fork_directive`]).
+    sidechain: bool,
 }
 
 impl ClaudeRecordAccumulator {
     pub(crate) fn new(session_path: PathBuf) -> Self {
         Self {
+            sidechain: is_sidechain_transcript(&session_path),
             session_path,
             messages: Vec::new(),
             cwd: None,
@@ -2274,6 +2281,17 @@ impl ClaudeRecordAccumulator {
         starts
     }
 
+    /// Start over at a fork's directive message: what this feed took in so far
+    /// is the history the fork inherited (see [`is_fork_directive_record`]),
+    /// not the fork's own thread. The sub-agent files already read stay
+    /// recorded — the transcript cache validates against them.
+    fn restart_at_fork_directive(&mut self) {
+        let mut fresh = Self::new(self.session_path.clone());
+        fresh.subagent_memo = self.subagent_memo.take();
+        fresh.subagent_reads = std::mem::take(&mut self.subagent_reads);
+        *self = fresh;
+    }
+
     /// Feed one raw JSONL line. Blank and non-JSON lines are skipped, mirroring
     /// the historical `BufReader::lines()` loop (whose per-line errors were
     /// skipped via `Err(_) => continue`).
@@ -2319,7 +2337,16 @@ impl ClaudeRecordAccumulator {
                 .is_some_and(|u| self.queued_prompt_ids.contains(u)))
     }
 
-    pub(crate) fn feed_value(&mut self, value: serde_json::Value) {
+    pub(crate) fn feed_value(&mut self, mut value: serde_json::Value) {
+        // A fork's own thread starts at its directive: everything before it in
+        // the fork's transcript is the history it inherited.
+        if self.sidechain
+            && value.get("type").and_then(|t| t.as_str()) == Some("user")
+            && is_fork_directive_record(&value)
+        {
+            self.restart_at_fork_directive();
+            strip_fork_directive(&mut value);
+        }
         // A message typed while the turn ran is read once (see
         // `queued_prompt_ids`).
         if !self.admit_queued_prompt(&value) {
@@ -2351,6 +2378,7 @@ impl ClaudeRecordAccumulator {
             subagent_reads,
             relocated_cwd,
             compaction_summary_slot,
+            sidechain: _,
         } = self;
 
         // A record already taken in is the history written out again by a
@@ -2693,11 +2721,16 @@ impl ClaudeRecordAccumulator {
                             // `is_safe_subagent_id` — rejects separators, `..`, a
                             // Windows drive colon, and NUL).
                             if is_safe_subagent_id(agent_id) {
-                                let subagent_dir = path.with_extension("").join("subagents");
+                                let subagent_dir = subagent_dir_of(path);
                                 let subagent_path =
                                     subagent_dir.join(format!("agent-{}.jsonl", agent_id));
                                 if let Some(memo) = subagent_memo.as_deref() {
                                     let (stamp, parsed) = memo.read(&subagent_path);
+                                    // Its thread can be opened: the card says
+                                    // so only while the file is there.
+                                    if stamp.is_some() {
+                                        stats.subagent_id = Some(agent_id.to_string());
+                                    }
                                     if let Some(parsed) = parsed {
                                         stats.tool_calls = parsed.calls.clone();
                                         stats.timeline = parsed.timeline.clone();
@@ -2710,6 +2743,7 @@ impl ClaudeRecordAccumulator {
                                     }
                                     subagent_reads.push((subagent_path, stamp));
                                 } else if subagent_path.exists() {
+                                    stats.subagent_id = Some(agent_id.to_string());
                                     let (calls, timeline, _, _, duration_ms) =
                                         parse_subagent_tool_calls(&subagent_path);
                                     stats.tool_calls = calls;
@@ -4060,6 +4094,7 @@ fn extract_agent_execution_stats(tur: &serde_json::Value) -> AgentExecutionStats
         // Claude's sub-agent lives inside the parent transcript (a sidechain),
         // not as a session of its own.
         child_session_id: None,
+        subagent_id: None,
     }
 }
 
@@ -4220,6 +4255,66 @@ fn is_fork_directive_record(value: &serde_json::Value) -> bool {
                         .is_some_and(|text| text.starts_with(FORK_BOILERPLATE_OPEN))
             })
         })
+}
+
+/// A fork's directive message as its thread opens with it: the prompt it was
+/// handed, without the boilerplate around it and without the results for the
+/// copied `tool_use`s, which answer calls the thread no longer holds.
+fn strip_fork_directive(value: &mut serde_json::Value) {
+    let Some(blocks) = value
+        .get_mut("message")
+        .and_then(|m| m.get_mut("content"))
+        .and_then(|c| c.as_array_mut())
+    else {
+        return;
+    };
+    blocks.retain(|block| block.get("type").and_then(|t| t.as_str()) != Some("tool_result"));
+    for block in blocks.iter_mut() {
+        let Some(text) = block.get("text").and_then(|t| t.as_str()) else {
+            continue;
+        };
+        if !text.starts_with(FORK_BOILERPLATE_OPEN) {
+            continue;
+        }
+        let rest = text
+            .find(FORK_BOILERPLATE_CLOSE)
+            .map_or("", |at| &text[at + FORK_BOILERPLATE_CLOSE.len()..])
+            .trim_start();
+        let directive = rest
+            .strip_prefix(FORK_DIRECTIVE_LABEL)
+            .map_or(rest, str::trim_start)
+            .to_string();
+        block["text"] = serde_json::Value::String(directive);
+    }
+}
+
+/// How the boilerplate of a fork's directive message ends, and the label
+/// Claude Code puts in front of the prompt after it.
+const FORK_BOILERPLATE_CLOSE: &str = "</fork-boilerplate>";
+const FORK_DIRECTIVE_LABEL: &str = "Your directive:";
+
+/// Whether `path` is a sub-agent's own transcript: an `agent-<id>.jsonl` in a
+/// session's `subagents/` directory.
+pub(crate) fn is_sidechain_transcript(path: &Path) -> bool {
+    path.parent()
+        .and_then(|dir| dir.file_name())
+        .is_some_and(|name| name == "subagents")
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("agent-") && name.ends_with(".jsonl"))
+}
+
+/// Where the sub-agents an Agent call in `transcript` launched write their
+/// transcripts: the session's `<session>/subagents/` directory. Claude Code
+/// keeps every sub-agent of a session there, nested ones included (their
+/// `.meta.json` names a `parentAgentId`), so for a sub-agent's own transcript
+/// it is the directory the transcript itself sits in.
+pub(crate) fn subagent_dir_of(transcript: &Path) -> PathBuf {
+    match transcript.parent() {
+        Some(dir) if is_sidechain_transcript(transcript) => dir.to_path_buf(),
+        _ => transcript.with_extension("").join("subagents"),
+    }
 }
 
 /// One parsed sub-agent transcript: the tool calls, the mixed timeline,

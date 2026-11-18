@@ -603,6 +603,7 @@ fn agent_stats_size(stats: &crate::models::message::AgentExecutionStats) -> usiz
         + opt_str_size(&stats.status)
         + opt_str_size(&stats.recovered_result)
         + opt_str_size(&stats.child_session_id)
+        + opt_str_size(&stats.subagent_id)
         + stats
             .tool_calls
             .iter()
@@ -1105,6 +1106,7 @@ mod tests {
                             .collect(),
                         recovered_result: Some("The \"full\" report\n\t".repeat(400)),
                         child_session_id: Some("019fe6bf-0bcb-70c2-a02d-e5c006dfc32a".into()),
+                        subagent_id: None,
                     }),
                     images: vec![image],
                     exit_code: Some(i64::MIN),
@@ -1242,6 +1244,13 @@ mod tests {
                 "child_session_id",
                 AgentExecutionStats {
                     child_session_id: Some(big.clone()),
+                    ..Default::default()
+                },
+            ),
+            (
+                "subagent_id",
+                AgentExecutionStats {
+                    subagent_id: Some(big.clone()),
                     ..Default::default()
                 },
             ),

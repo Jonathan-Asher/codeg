@@ -1513,6 +1513,7 @@ impl Launch {
                 } else {
                     None
                 },
+                subagent_id: None,
             },
         }
     }
