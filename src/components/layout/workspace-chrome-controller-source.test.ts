@@ -99,9 +99,10 @@ describe("tab close/navigation shortcuts live in the always-mounted controller",
 
   // Each entry carries the slot it was closed from; every opener gets it, so
   // the tab goes back where it was (clamped) instead of at the end of the
-  // strip. One per restorable kind: file, browser, conversation, draft.
+  // strip. One per restorable kind: file, browser, sub-agent, conversation,
+  // draft.
   it("hands the closed tab's slot to each opener when restoring", () => {
-    expect(controllerSource.match(/index: closed\.index/g)).toHaveLength(4)
+    expect(controllerSource.match(/index: closed\.index/g)).toHaveLength(5)
   })
 
   it("removes the keydown shortcut listeners from both tab strips", () => {

@@ -35,6 +35,7 @@ const SURFACES = [
   "src/components/conversations/conversation-detail-panel.tsx",
   "src/components/canvas/canvas-conversation-surface.tsx",
   "src/components/message/live-transcript-view.tsx",
+  "src/components/subagent-tab/subagent-tab-view.tsx",
 ]
 
 describe("MessageListView image root", () => {
