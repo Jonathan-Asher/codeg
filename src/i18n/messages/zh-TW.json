@@ -3054,7 +3054,20 @@
       "bandRunning": "進行中",
       "bandOther": "其他",
       "chatGroup": "聊天",
-      "forking": "正在分叉…"
+      "forking": "正在分叉…",
+      "subagentTab": "子代理"
+    },
+    "subagentTab": {
+      "bar": "<link>{parent}</link> 的子代理 · {type} · 唯讀",
+      "barNoType": "<link>{parent}</link> 的子代理 · 唯讀",
+      "backToParent": "在 {parent} 中顯示其 Agent 卡片",
+      "untitledParent": "所屬工作階段",
+      "fallbackTitle": "子代理",
+      "running": "執行中",
+      "waiting": "正在等待子代理寫下第一則訊息…",
+      "missing": "磁碟上沒有這個子代理的紀錄。",
+      "failed": "無法讀取子代理的紀錄：{message}",
+      "loading": "正在載入子代理的對話…"
     },
     "fileWorkspace": {
       "files": "檔案",

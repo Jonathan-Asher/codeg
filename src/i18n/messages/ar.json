@@ -3054,7 +3054,20 @@
       "bandRunning": "قيد التشغيل",
       "bandOther": "أخرى",
       "chatGroup": "دردشة",
-      "forking": "جارٍ التفريع…"
+      "forking": "جارٍ التفريع…",
+      "subagentTab": "وكيل فرعي"
+    },
+    "subagentTab": {
+      "bar": "وكيل فرعي لـ <link>{parent}</link> · {type} · للقراءة فقط",
+      "barNoType": "وكيل فرعي لـ <link>{parent}</link> · للقراءة فقط",
+      "backToParent": "إظهار بطاقة Agent الخاصة به في {parent}",
+      "untitledParent": "جلسته",
+      "fallbackTitle": "وكيل فرعي",
+      "running": "قيد التشغيل",
+      "waiting": "بانتظار أن يكتب الوكيل الفرعي رسالته الأولى…",
+      "missing": "سجل هذا الوكيل الفرعي غير موجود على القرص.",
+      "failed": "تعذرت قراءة سجل الوكيل الفرعي: {message}",
+      "loading": "جارٍ تحميل محادثة الوكيل الفرعي…"
     },
     "fileWorkspace": {
       "files": "الملفات",

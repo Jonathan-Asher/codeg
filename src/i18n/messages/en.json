@@ -3054,7 +3054,20 @@
       "bandRunning": "Running",
       "bandOther": "Other",
       "chatGroup": "Chat",
-      "forking": "Forking…"
+      "forking": "Forking…",
+      "subagentTab": "Sub-agent"
+    },
+    "subagentTab": {
+      "bar": "Sub-agent of <link>{parent}</link> · {type} · read-only",
+      "barNoType": "Sub-agent of <link>{parent}</link> · read-only",
+      "backToParent": "Show its Agent card in {parent}",
+      "untitledParent": "its session",
+      "fallbackTitle": "Sub-agent",
+      "running": "Running",
+      "waiting": "Waiting for the sub-agent to write its first message…",
+      "missing": "This sub-agent's transcript is not on disk.",
+      "failed": "Couldn't read the sub-agent's transcript: {message}",
+      "loading": "Loading the sub-agent's thread…"
     },
     "fileWorkspace": {
       "files": "Files",

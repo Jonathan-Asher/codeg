@@ -3054,7 +3054,20 @@
       "bandRunning": "実行中",
       "bandOther": "その他",
       "chatGroup": "チャット",
-      "forking": "分岐中…"
+      "forking": "分岐中…",
+      "subagentTab": "サブエージェント"
+    },
+    "subagentTab": {
+      "bar": "<link>{parent}</link> のサブエージェント · {type} · 読み取り専用",
+      "barNoType": "<link>{parent}</link> のサブエージェント · 読み取り専用",
+      "backToParent": "{parent} の Agent カードを表示",
+      "untitledParent": "元のセッション",
+      "fallbackTitle": "サブエージェント",
+      "running": "実行中",
+      "waiting": "サブエージェントの最初のメッセージを待っています…",
+      "missing": "このサブエージェントのトランスクリプトはディスク上にありません。",
+      "failed": "サブエージェントのトランスクリプトを読み込めませんでした: {message}",
+      "loading": "サブエージェントのスレッドを読み込んでいます…"
     },
     "fileWorkspace": {
       "files": "ファイル",

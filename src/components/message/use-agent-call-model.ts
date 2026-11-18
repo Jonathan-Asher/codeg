@@ -33,7 +33,10 @@ import {
 } from "@/lib/agent-run-meta"
 import { useSessionViewerHost } from "./session-viewer-host-context"
 import { useTranscriptAgentType } from "./transcript-agent-context"
+import { useTranscriptConversationId } from "./transcript-conversation-context"
 import { useToolCardMeta } from "./live-tool-cards-context"
+import { claudeSubagentTarget } from "@/lib/claude-subagent"
+import { useTabStore } from "@/stores/tab-store"
 
 /** Convert AgentToolCall[] to tool-call parts: the sub-agent's own steps, as
  *  its nested timeline draws them. */
@@ -223,6 +226,7 @@ export function useAgentCallModel(
   const tProvider = useTranslations("Folder.chat.providerError")
   const tRun = useTranslations("Folder.chat.contentParts.agentRun")
   const transcriptAgentType = useTranscriptAgentType()
+  const transcriptConversationId = useTranscriptConversationId()
   const elapsedLabel = useElapsedLabel()
 
   const isRunning =
@@ -556,11 +560,48 @@ export function useAgentCallModel(
     agentStats?.total_duration_ms || taskOutcome?.durationMs
   )
 
+  // A Claude Code sub-agent: its whole thread, in a tab of its own (Claude
+  // Code only — every other agent's child opens as below). Offered only when
+  // its transcript is known or expected to be on disk (`claudeSubagentTarget`).
+  const claudeSubagent = useMemo(
+    () =>
+      childSession
+        ? null
+        : claudeSubagentTarget({
+            transcriptAgentType,
+            parentConversationId: transcriptConversationId,
+            toolCallId: part.toolCallId,
+            state: part.state,
+            output: part.output,
+            agentStats,
+            backgroundTaskId: backgroundLifecycle?.taskId ?? null,
+            subagentType,
+            description,
+          }),
+    [
+      childSession,
+      transcriptAgentType,
+      transcriptConversationId,
+      part.toolCallId,
+      part.state,
+      part.output,
+      agentStats,
+      backgroundLifecycle,
+      subagentType,
+      description,
+    ]
+  )
+
   // Opening the child's transcript is capsule-level, not body-level: while it
   // runs (and, for codex, even after) the child's session is the only record of
   // its work, so the entry point must not depend on the capsule having a body
   // to expand. Same handler as the body version it replaces.
   const openChildSession = useMemo(() => {
+    if (claudeSubagent) {
+      return () => {
+        useTabStore.getState().openSubagentTab(claudeSubagent)
+      }
+    }
     if (!childSession) return null
     return () =>
       // Preferred: the transcript-level host, which survives this card
@@ -581,6 +622,7 @@ export function useAgentCallModel(
           })
         : setSessionOpen(true)
   }, [
+    claudeSubagent,
     childSession,
     viewerHost,
     subagentType,
@@ -617,6 +659,7 @@ export function useAgentCallModel(
     adaptedToolCalls,
     grokProgress,
     childSession,
+    claudeSubagent,
     viewerHost,
     sessionOpen,
     setSessionOpen,

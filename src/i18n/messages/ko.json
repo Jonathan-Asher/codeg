@@ -3054,7 +3054,20 @@
       "bandRunning": "실행 중",
       "bandOther": "기타",
       "chatGroup": "채팅",
-      "forking": "분기하는 중…"
+      "forking": "분기하는 중…",
+      "subagentTab": "하위 에이전트"
+    },
+    "subagentTab": {
+      "bar": "<link>{parent}</link>의 하위 에이전트 · {type} · 읽기 전용",
+      "barNoType": "<link>{parent}</link>의 하위 에이전트 · 읽기 전용",
+      "backToParent": "{parent}에서 Agent 카드 보기",
+      "untitledParent": "원래 세션",
+      "fallbackTitle": "하위 에이전트",
+      "running": "실행 중",
+      "waiting": "하위 에이전트가 첫 메시지를 쓰기를 기다리는 중…",
+      "missing": "이 하위 에이전트의 기록이 디스크에 없습니다.",
+      "failed": "하위 에이전트의 기록을 읽지 못했습니다: {message}",
+      "loading": "하위 에이전트의 스레드를 불러오는 중…"
     },
     "fileWorkspace": {
       "files": "파일",

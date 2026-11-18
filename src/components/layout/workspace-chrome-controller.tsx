@@ -387,6 +387,20 @@ export function WorkspaceChromeController() {
             })
             return
           }
+          if (closed.kind === "subagent") {
+            // Its session deleted since: nothing to read the thread from.
+            if (isConversationDeleted(closed.target.parentConversationId)) {
+              continue
+            }
+            openConversations()
+            useTabStore.getState().openSubagentTab(closed.target, {
+              pin: closed.isPinned,
+              title: closed.title,
+              index: closed.index,
+              folderId: closed.folderId,
+            })
+            return
+          }
           if (closed.conversationId != null) {
             // A deletion seen at any point wins. `applyConversationRemove`
             // purges what is on the stack when it runs, but a tab that was

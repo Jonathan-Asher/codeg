@@ -1,5 +1,6 @@
 import type { EmulatedBrowserDevice } from "@/lib/browser/browser-device"
 import type { AgentType } from "@/lib/types"
+import type { SubagentTabTarget } from "@/stores/tab-store"
 
 export const CLOSED_TAB_STACK_LIMIT = 20
 
@@ -19,6 +20,19 @@ export type ClosedConversationTab = {
   title: string
   workingDir?: string
   isPinned: boolean
+}
+
+/** A Claude Code sub-agent's thread tab: reopens on the same Agent call. */
+export type ClosedSubagentTab = {
+  kind: "subagent"
+  /** The closed tab's id. Identity for the repeat-push guard in `pushClosedTab`. */
+  key: string
+  /** See `ClosedConversationTab.index`. */
+  index: number
+  folderId: number
+  title: string
+  isPinned: boolean
+  target: SubagentTabTarget
 }
 
 export type ClosedFileTab = {
@@ -53,6 +67,7 @@ export type ClosedBrowserTab = {
 
 export type ClosedWorkspaceTab =
   | ClosedConversationTab
+  | ClosedSubagentTab
   | ClosedFileTab
   | ClosedBrowserTab
 
@@ -91,9 +106,11 @@ export function popClosedTab(): ClosedWorkspaceTab | null {
  * `conversationId`.
  */
 export function forgetClosedConversation(conversationId: number): void {
-  stack = stack.filter(
-    (entry) =>
-      entry.kind !== "conversation" || entry.conversationId !== conversationId
+  stack = stack.filter((entry) =>
+    entry.kind === "conversation"
+      ? entry.conversationId !== conversationId
+      : entry.kind !== "subagent" ||
+        entry.target.parentConversationId !== conversationId
   )
 }
 
@@ -158,6 +175,38 @@ export function snapshotConversationTab(
     workingDir: tab.workingDir,
     isPinned: tab.isPinned,
   }
+}
+
+/**
+ * The record a closing conversation-strip tab leaves: a sub-agent tab reopens
+ * on its Agent call, every other one as `snapshotConversationTab` says.
+ */
+export function snapshotStripTab(
+  tab: {
+    id: string
+    kind: "conversation" | "subagent"
+    folderId: number
+    conversationId: number | null
+    agentType: AgentType
+    title: string
+    workingDir?: string
+    isPinned: boolean
+    subagent?: SubagentTabTarget
+  },
+  index: number
+): ClosedConversationTab | ClosedSubagentTab {
+  if (tab.kind === "subagent" && tab.subagent) {
+    return {
+      kind: "subagent",
+      key: tab.id,
+      index,
+      folderId: tab.folderId,
+      title: tab.title,
+      isPinned: tab.isPinned,
+      target: tab.subagent,
+    }
+  }
+  return snapshotConversationTab(tab, index)
 }
 
 /**
