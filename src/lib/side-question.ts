@@ -1,5 +1,5 @@
 import { buildQuotedMarkdown } from "@/lib/message-quote"
-import type { AvailableCommandInfo, PromptDraft } from "@/lib/types"
+import type { AgentType, AvailableCommandInfo, PromptDraft } from "@/lib/types"
 
 /**
  * Side questions — Claude Code's `/btw`, asked from codeg's composer.
@@ -12,14 +12,30 @@ import type { AvailableCommandInfo, PromptDraft } from "@/lib/types"
  * next question, so a follow-up builds on them (`acp::side_question`).
  *
  * Offered only on a session whose adapter answers side questions (codeg's own
- * claude-agent-acp build advertises it), so the composer adds the command to
- * its `/` menu itself: the agent does not list it. Everywhere else a `/btw`
+ * claude-agent-acp and pi-acp builds advertise it), so the composer adds the
+ * command to its `/` menu itself: the agent does not list it. Everywhere else a `/btw`
  * is still never a message: the composer keeps it and says the session can't
  * answer it, rather than sending it, queueing it or steering it into a turn.
  */
 
 /** The command's name, as typed after the `/`. */
 export const SIDE_QUESTION_COMMAND = "btw"
+
+/** The agents codeg ships an adapter build for that answers side questions.
+ *  Whether a session does is still the adapter's word once it has connected;
+ *  before that, this tells "wait for the connection" from "this agent can't". */
+const SIDE_QUESTION_AGENTS: ReadonlySet<AgentType> = new Set<AgentType>([
+  "claude_code",
+  "pi",
+])
+
+/** Whether a session of `agentType` can answer side questions once it has
+ *  connected (see `SIDE_QUESTION_AGENTS`). */
+export function mayAnswerSideQuestions(
+  agentType: AgentType | null | undefined
+): boolean {
+  return agentType != null && SIDE_QUESTION_AGENTS.has(agentType)
+}
 
 /** What the composer's text asks for: a side question (`question` is empty
  *  for a bare `/btw`, which reopens the answers), or `null` for anything else.

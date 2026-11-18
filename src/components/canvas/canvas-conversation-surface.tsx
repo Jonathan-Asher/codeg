@@ -1151,11 +1151,11 @@ export function CanvasConversationSurface({
     (id: number) => reportPromptSuggestion(id, "accepted"),
     [reportPromptSuggestion]
   )
-  // `/btw` side questions, as in a conversation tab: only on a Claude Code
-  // session whose adapter answers them. The panel's state lives with the
-  // conversation, so it is the same one a tab on it shows.
-  const sideQuestionSupported =
-    agentType === "claude_code" && conn.sideQuestionSupported
+  // `/btw` side questions, as in a conversation tab: on any session whose
+  // adapter answers them (it advertises `_meta.codeg.sideQuestion`). The
+  // panel's state lives with the conversation, so it is the same one a tab on
+  // it shows.
+  const sideQuestionSupported = conn.sideQuestionSupported
   const sideQuestion = useSideQuestion({
     scope:
       dbConversationId != null

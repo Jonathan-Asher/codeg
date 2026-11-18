@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import {
   divertSideQuestionDraft,
+  mayAnswerSideQuestions,
   parseSideQuestionCommand,
   sideQuestionForkPrompt,
   sideQuestionOfDraft,
@@ -38,6 +39,15 @@ describe("parseSideQuestionCommand", () => {
     expect(parseSideQuestionCommand("tell me /btw something")).toBeNull()
     expect(parseSideQuestionCommand("/compact")).toBeNull()
     expect(parseSideQuestionCommand("")).toBeNull()
+  })
+})
+
+describe("mayAnswerSideQuestions", () => {
+  it("names the agents codeg ships a side-question adapter for", () => {
+    expect(mayAnswerSideQuestions("claude_code")).toBe(true)
+    expect(mayAnswerSideQuestions("pi")).toBe(true)
+    expect(mayAnswerSideQuestions("codex")).toBe(false)
+    expect(mayAnswerSideQuestions(null)).toBe(false)
   })
 })
 

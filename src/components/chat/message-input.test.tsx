@@ -3753,6 +3753,23 @@ describe("MessageInput side questions and prompt suggestions", () => {
     )
   })
 
+  it("says to wait for the connection while a Pi session opens", async () => {
+    const onEnqueue = vi.fn()
+    const { handle, editor, onSend } = await mount({
+      agentType: "pi",
+      queueSends: true,
+      onEnqueue,
+    })
+    act(() => handle.setText("/btw ready yet?"))
+    press(editor, "Enter")
+    expect(onEnqueue).not.toHaveBeenCalled()
+    expect(onSend).not.toHaveBeenCalled()
+    expect(handle.getText()).toBe("/btw ready yet?")
+    expect(screen.getByTestId("composer-btw-notice")).toHaveTextContent(
+      MI.btwNotReady
+    )
+  })
+
   it("does not save /btw into a queued message being edited", async () => {
     const onSaveQueueEdit = vi.fn()
     const onSideQuestion = vi.fn()

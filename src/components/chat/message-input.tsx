@@ -74,6 +74,7 @@ import type {
   SessionModeInfo,
 } from "@/lib/types"
 import {
+  mayAnswerSideQuestions,
   parseSideQuestionCommand,
   SIDE_QUESTION_COMMAND,
   withSideQuestionCommand,
@@ -1852,7 +1853,7 @@ export function MessageInput({
       setSideQuestionRefusalState({
         reason: isEditingQueueItem
           ? "queueEdit"
-          : agentType === "claude_code" && (queueSends || disabled)
+          : mayAnswerSideQuestions(agentType) && (queueSends || disabled)
             ? "notReady"
             : "unsupported",
         draftKey: effectiveDraftStorageKey,
