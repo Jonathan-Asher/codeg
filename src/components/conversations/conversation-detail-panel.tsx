@@ -161,6 +161,7 @@ import {
 } from "@/lib/api"
 import { isWindowedDetail } from "@/lib/turn-window"
 import { useSideQuestion } from "@/hooks/use-side-question"
+import { useLiveSessionModel } from "@/hooks/use-connection-status"
 import {
   divertSideQuestionDraft,
   sideQuestionOfDraft,
@@ -4744,6 +4745,7 @@ export function ConversationDetailPanel() {
       ? (s.byConversationId.get(activeRuntimeId) ?? null)
       : null
   )
+  const activeSessionLiveModel = useLiveSessionModel(activeConversationTab?.id)
   const {
     summary: activeSessionSummary,
     stats: activeSessionStats,
@@ -4754,7 +4756,8 @@ export function ConversationDetailPanel() {
     // internal `runtimeId` equals `activeRuntimeId` (identical computation), so
     // resolving that single pre-selected session is exact.
     (id) => (id === activeRuntimeId ? activeRuntimeSession : null),
-    conversations
+    conversations,
+    activeSessionLiveModel
   )
 
   const getExportData = useCallback(async () => {

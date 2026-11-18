@@ -1622,10 +1622,13 @@ pub(crate) struct LoadedFolderConversation {
     /// The kept tool approvals, stamped onto their calls in the turns a
     /// response carries ([`inject_tool_approvals`]).
     approvals: Vec<ToolApprovalInfo>,
-    /// The row's stored `model` column was empty when it was read (before
-    /// the transcript's model replaced it in `summary`): the only case the
-    /// session-model backfill has anything to write.
-    stored_model_empty: bool,
+    /// The row's stored `model` column as it was read, before the
+    /// transcript's model replaced it in `summary`: what the session-model
+    /// sync compares against, in memory, before it writes anything.
+    stored_model: Option<String>,
+    /// The newest reply's model and when it was written
+    /// (`session_model::latest_reply_model`), when the transcript names one.
+    latest_reply: Option<(String, chrono::DateTime<chrono::Utc>)>,
     /// The agent's record of the session is gone while codeg's records show
     /// it had one (see `commands::lost_history`).
     history_unavailable: Option<HistoryUnavailable>,
@@ -2028,19 +2031,24 @@ pub(crate) async fn load_folder_conversation(
     // `turn_context` names a model, so the DB column can stay NULL forever
     // while the rollout file knows the answer.
     //
-    // The parse WINS over the column rather than merely filling a hole in it.
-    // `seed_model_if_empty` now persists the first model a session is seen
-    // using, so "fill only when NULL" would pin this summary — and with it the
-    // details dialog, which reads `summary.model` ahead of the turns — to that
-    // first value for the life of the conversation, and a mid-session `/model`
-    // switch would never show. The stored value stays as the fallback for a
-    // transcript that names no model at all.
-    let stored_model_empty = summary.model.as_deref().is_none_or(str::is_empty);
-    if let Some(model) = parsed
+    // The parse WINS over the column rather than merely filling a hole in it,
+    // and within the parse the NEWEST reply's model wins: a parser's summary
+    // model is the first one it met for some agents (Claude Code's is the
+    // session's very first reply), which would pin this summary — and with it
+    // the details dialog, which reads `summary.model` ahead of the turns — to
+    // the model the session started on, and a `/model` switch would never
+    // show. The parser's summary model stands in for a transcript whose turns
+    // name none, the stored value for one that names no model at all.
+    let stored_model = summary.model.clone().filter(|m| !m.trim().is_empty());
+    let latest_reply = parsed
         .as_ref()
-        .and_then(|d| d.summary.model.clone())
-        .filter(|m| !m.trim().is_empty())
-    {
+        .and_then(|d| crate::session_model::latest_reply_model(&d.turns));
+    if let Some(model) = latest_reply.as_ref().map(|(m, _)| m.clone()).or_else(|| {
+        parsed
+            .as_ref()
+            .and_then(|d| d.summary.model.clone())
+            .filter(|m| !m.trim().is_empty())
+    }) {
         summary.model = Some(model);
     }
 
@@ -2065,7 +2073,8 @@ pub(crate) async fn load_folder_conversation(
         parsed,
         children,
         approvals,
-        stored_model_empty,
+        stored_model,
+        latest_reply,
         history_unavailable,
     })
 }
@@ -2482,13 +2491,19 @@ pub async fn get_folder_conversation_with_live_core(
         }
     }
 
-    // Session-model backfill, the sibling of the auto-title above and for the
-    // same reason: the row was inserted before any model was named, and the
-    // sidebar reads the row rather than the transcript this parse just walked.
-    if backfill_session_model(
+    // Session-model sync, the sibling of the auto-title above and for the
+    // same reason: the sidebar reads the row rather than the transcript this
+    // parse just walked, so the row follows the model the session is on now
+    // (`crate::session_model`) — filled when it was inserted before any model
+    // was named, moved when a reply shows the session has switched.
+    if sync_session_model(
         conn,
         conversation_id,
-        loaded.stored_model_empty,
+        loaded.stored_model.as_deref(),
+        loaded
+            .latest_reply
+            .as_ref()
+            .map(|(model, at)| (model.as_str(), *at)),
         loaded.summary.model.as_deref(),
     )
     .await
@@ -2611,35 +2626,45 @@ pub(crate) fn is_pi_wake_turn(turn: &MessageTurn) -> bool {
     })
 }
 
-/// Write the transcript's `model` to a row whose stored column is empty, and
-/// say whether a row changed.
+/// Bring the row's `model` in step with the transcript just read, and say
+/// whether a row changed: the newest reply's model when it names another
+/// model than the stored one and is not older than the last selector change
+/// (`session_model::model_from_reply`); else, for a transcript whose turns
+/// name no model, `summary_model` into an empty column only.
 ///
-/// A row that already has one is left alone without a statement. An `UPDATE`
-/// takes SQLite's write lock before it looks at a single row, even when its
-/// `WHERE` (`seed_model_if_empty` re-checks emptiness) matches nothing, so
-/// sending one on every detail read put every open of a session behind
-/// whatever else held the lock: the message-search indexer holds it for
-/// seconds, and those reads waited out the 5 s busy timeout and failed with
-/// "database is locked" (seen at 5 to 20 s on reads whose transcript part
-/// took 0.1 to 2 s).
-async fn backfill_session_model(
+/// Decided in memory: a row already on the session's model is left alone
+/// without a statement. An `UPDATE` takes SQLite's write lock before it looks
+/// at a single row, even when its `WHERE` matches nothing, so sending one on
+/// every detail read put every open of a session behind whatever else held
+/// the lock: the message-search indexer holds it for seconds, and those reads
+/// waited out the 5 s busy timeout and failed with "database is locked" (seen
+/// at 5 to 20 s on reads whose transcript part took 0.1 to 2 s).
+async fn sync_session_model(
     conn: &sea_orm::DatabaseConnection,
     conversation_id: i32,
-    stored_model_empty: bool,
-    model: Option<&str>,
+    stored: Option<&str>,
+    latest_reply: Option<(&str, chrono::DateTime<chrono::Utc>)>,
+    summary_model: Option<&str>,
 ) -> bool {
-    if !stored_model_empty {
-        return false;
-    }
-    let Some(model) = model else {
+    let result = if let Some(reply) = latest_reply {
+        let Some(model) =
+            crate::session_model::model_from_reply(conversation_id, stored, Some(reply))
+        else {
+            return false;
+        };
+        conversation_service::update_model(conn, conversation_id, &model).await
+    } else if stored.is_none() {
+        let Some(model) = summary_model else {
+            return false;
+        };
+        conversation_service::seed_model_if_empty(conn, conversation_id, model).await
+    } else {
         return false;
     };
-    match conversation_service::seed_model_if_empty(conn, conversation_id, model).await {
+    match result {
         Ok(written) => written,
         Err(e) => {
-            tracing::error!(
-                "[conversations] session-model backfill failed for {conversation_id}: {e}"
-            );
+            tracing::error!("[conversations] session-model sync failed for {conversation_id}: {e}");
             false
         }
     }
@@ -4110,7 +4135,7 @@ mod tests {
     /// is locked" after the 5 s busy timeout). A row without one still gets
     /// the transcript's.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn the_model_backfill_writes_only_to_a_row_without_a_model() {
+    async fn the_model_sync_writes_nothing_for_a_row_already_on_the_model() {
         use sea_orm::{ConnectionTrait, TransactionTrait};
         let dir = tempfile::tempdir().expect("tempdir");
         let db = crate::db::test_helpers::fresh_disk_db(dir.path()).await;
@@ -4130,6 +4155,7 @@ mod tests {
                 .await
                 .expect("create")
                 .id;
+        let reply_at = chrono::Utc::now();
 
         // Another connection holds the write lock.
         let writer = db.conn.begin().await.expect("begin");
@@ -4140,8 +4166,20 @@ mod tests {
             .await
             .expect("take the write lock");
         let started = std::time::Instant::now();
-        let written = backfill_session_model(&db.conn, with_model, false, Some("sonnet")).await;
+        // The same model, the selector's spelling: in step already.
+        let written = sync_session_model(
+            &db.conn,
+            with_model,
+            Some("opus"),
+            Some(("OPUS[1m]", reply_at)),
+            Some("opus"),
+        )
+        .await;
         assert!(!written);
+        // A transcript whose turns name no model leaves a filled row alone.
+        assert!(
+            !sync_session_model(&db.conn, with_model, Some("opus"), None, Some("sonnet")).await
+        );
         assert!(
             started.elapsed() < std::time::Duration::from_secs(1),
             "a row with a model must not wait for the write lock ({:?})",
@@ -4149,7 +4187,7 @@ mod tests {
         );
         writer.commit().await.expect("commit");
 
-        assert!(backfill_session_model(&db.conn, without_model, true, Some("sonnet")).await);
+        assert!(sync_session_model(&db.conn, without_model, None, None, Some("sonnet")).await);
         let kept = conversation_service::get_by_id(&db.conn, with_model)
             .await
             .expect("row");
@@ -4159,7 +4197,64 @@ mod tests {
         assert_eq!(kept.model.as_deref(), Some("opus"));
         assert_eq!(filled.model.as_deref(), Some("sonnet"));
         // Nothing to write without a model from the transcript.
-        assert!(!backfill_session_model(&db.conn, without_model, true, None).await);
+        assert!(!sync_session_model(&db.conn, without_model, None, None, None).await);
+    }
+
+    /// Conversation 237's case: the row kept the model the session started
+    /// on while the session went on to others. A detail read moves the column
+    /// to the newest reply's model — unless the selector switched it since.
+    #[tokio::test]
+    async fn the_model_sync_moves_a_stale_column_to_the_newest_reply() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/codeg-model-sync").await;
+        let id = conversation_service::create(&db.conn, folder, AgentType::ClaudeCode, None, None)
+            .await
+            .expect("create")
+            .id;
+        assert!(
+            conversation_service::seed_model_if_empty(&db.conn, id, "claude-fable-5-1")
+                .await
+                .expect("seed")
+        );
+        let reply_at = chrono::Utc::now();
+
+        assert!(
+            sync_session_model(
+                &db.conn,
+                id,
+                Some("claude-fable-5-1"),
+                Some(("claude-fable-5-2", reply_at)),
+                Some("claude-fable-5-1"),
+            )
+            .await
+        );
+        let row = conversation_service::get_by_id(&db.conn, id)
+            .await
+            .expect("row");
+        assert_eq!(row.model.as_deref(), Some("claude-fable-5-2"));
+
+        // The selector switched to another model after that reply: the reply
+        // no longer decides, until one is written on the new model.
+        assert!(
+            conversation_service::update_model(&db.conn, id, "claude-opus-5-5")
+                .await
+                .expect("selector write")
+        );
+        crate::session_model::note_selector_change(id, reply_at + chrono::Duration::seconds(5));
+        assert!(
+            !sync_session_model(
+                &db.conn,
+                id,
+                Some("claude-opus-5-5"),
+                Some(("claude-fable-5-2", reply_at)),
+                None,
+            )
+            .await
+        );
+        let row = conversation_service::get_by_id(&db.conn, id)
+            .await
+            .expect("row");
+        assert_eq!(row.model.as_deref(), Some("claude-opus-5-5"));
     }
 
     /// When the row cannot be read at all, the clients are told to resync

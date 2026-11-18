@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  currentModelValue,
   deriveModelGroups,
   filterModelGroups,
   flattenModelGroups,
@@ -43,6 +44,24 @@ function opt(
 ): SessionConfigSelectOptionInfo {
   return { value, name, description }
 }
+
+describe("currentModelValue", () => {
+  it("reads what the model selector holds, the exact id first", () => {
+    const effort = modelOption([opt("low"), opt("max")], {
+      id: "reasoning_effort",
+      category: "model",
+    })
+    const model = modelOption([opt("claude-fable-5-2[1m]"), opt("opus")])
+    expect(currentModelValue([effort, model])).toBe("claude-fable-5-2[1m]")
+    expect(currentModelValue([effort])).toBe("low")
+  })
+
+  it("is null without a model selector or a value", () => {
+    expect(currentModelValue(null)).toBeNull()
+    expect(currentModelValue([])).toBeNull()
+    expect(currentModelValue([modelOption([])])).toBeNull()
+  })
+})
 
 describe("isModelConfigOption", () => {
   it("matches the model option by id", () => {

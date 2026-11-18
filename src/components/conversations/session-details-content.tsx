@@ -24,7 +24,7 @@ import { useCopiedFlag } from "@/hooks/use-copied-flag"
 import type { ConnectionAttachInfo } from "@/hooks/use-connection-status"
 import { useModelLabels } from "@/hooks/use-model-labels"
 import {
-  pickModelFromTurns,
+  resolveSessionModel,
   withLiveSummaryFields,
 } from "./active-session-details"
 import { AgentIcon } from "@/components/agent-icon"
@@ -587,9 +587,14 @@ export function SessionDetailsContent({
             ok: true,
             summary: detail.summary,
             stats: detail.session_stats ?? null,
-            // The summary column is usually empty for live sessions; fall back
-            // to the model recorded on the parsed turns.
-            model: detail.summary.model ?? pickModelFromTurns(detail.turns),
+            // The newest reply's model, as every other view names it (see
+            // `resolveSessionModel`): the summary's is the stored column when
+            // the transcript names none, and on an older server the model the
+            // session started on.
+            model: resolveSessionModel({
+              historyTurns: detail.turns,
+              summaries: [detail.summary],
+            }),
           })
       })
       .catch(() => {

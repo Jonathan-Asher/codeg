@@ -6,6 +6,7 @@ import type { ConnectionStoreApi } from "@/contexts/acp-connections-context"
 // sidebar row, the Session Details tab) that must not load the provider.
 import { useOptionalConnectionStore } from "@/contexts/acp-connection-contexts"
 import { isAttachingPhase } from "@/lib/attach-phase"
+import { currentModelValue } from "@/lib/model-config-groups"
 import {
   backgroundTaskCount,
   isAwaitingBackground,
@@ -188,6 +189,40 @@ export function readHeldTurnBackground(
   const conn = store.getConnection(contextKey)
   if (!conn || !isAwaitingBackground(conn)) return null
   return backgroundTaskCount(conn.backgroundOutstanding, conn.asyncTasks)
+}
+
+/**
+ * The model the live connection keyed `contextKey` has selected (its model
+ * selector's value, see `currentModelValue`), or `null` when there is no such
+ * connection or it publishes no model. What a session-details view shows when
+ * the transcript has no reply naming a model yet.
+ */
+export function readLiveSessionModel(
+  store: Pick<ConnectionStoreApi, "getConnection">,
+  contextKey: string
+): string | null {
+  return currentModelValue(store.getConnection(contextKey)?.configOptions)
+}
+
+/** {@link readLiveSessionModel} as a hook: a primitive snapshot, so the
+ *  caller re-renders when the model changes, not on every streamed token. */
+export function useLiveSessionModel(
+  contextKey: string | null | undefined
+): string | null {
+  const store = useOptionalConnectionStore()
+  const subscribe = useCallback(
+    (onChange: () => void) =>
+      store && contextKey
+        ? store.subscribeKey(contextKey, onChange)
+        : noopUnsubscribe,
+    [store, contextKey]
+  )
+  const getSnapshot = useCallback(
+    () =>
+      store && contextKey ? readLiveSessionModel(store, contextKey) : null,
+    [store, contextKey]
+  )
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
 /**

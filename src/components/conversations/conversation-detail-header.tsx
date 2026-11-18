@@ -90,6 +90,8 @@ import {
 import { LimitPauseHeaderBadge } from "./limit-pause"
 import { HistoryRefreshingIndicator } from "./history-refreshing-indicator"
 import { SessionDetailsDialog } from "./session-details-dialog"
+import { useOptionalConnectionStore } from "@/contexts/acp-connection-contexts"
+import { readLiveSessionModel } from "@/hooks/use-connection-status"
 import {
   MoveToProjectDialog,
   canMoveToProject,
@@ -342,6 +344,7 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
     setDeleteTarget(null)
   }, [deleteTarget, closeTab, refreshConversations])
 
+  const connectionStore = useOptionalConnectionStore()
   const handleOpenDetails = useCallback(() => {
     // Resolve on demand (no reactive whole-session subscription) via the same
     // helper the panel uses; `runtimeId` covers the virtual-key case.
@@ -354,11 +357,12 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
         runtimeConversationId: runtimeConversationId ?? undefined,
       },
       (id) => (id === runtimeId ? session : null),
-      conversations
+      conversations,
+      connectionStore ? readLiveSessionModel(connectionStore, tabId) : null
     )
     if (!resolved.summary) return
     setDetails(resolved)
-  }, [conversationId, runtimeConversationId, runtimeId])
+  }, [conversationId, runtimeConversationId, runtimeId, connectionStore, tabId])
 
   return (
     // Transparent (no surface class): the title header reads as part of the

@@ -27,6 +27,23 @@ export function isModelConfigOption(option: SessionConfigOptionInfo): boolean {
   return option.id === MODEL_CONFIG_OPTION_ID || option.category === "model"
 }
 
+/**
+ * The model a session's model selector holds right now, or `null` when the
+ * agent publishes no model selector (or an empty value). The exact id wins
+ * over the category, as in `model-label-store`: qoder once hung its effort
+ * selector off `category: "model"`.
+ */
+export function currentModelValue(
+  options: readonly SessionConfigOptionInfo[] | null | undefined
+): string | null {
+  if (!options?.length) return null
+  const option =
+    options.find((o) => o.id === MODEL_CONFIG_OPTION_ID) ??
+    options.find(isModelConfigOption)
+  if (!option || option.kind.type !== "select") return null
+  return option.kind.current_value.trim() || null
+}
+
 // The namespace before the FIRST "/", or `null` when there is no usable prefix
 // (no slash, a leading slash, or a trailing slash with an empty suffix). Values
 // like `openrouter/anthropic/claude` group under their first segment.

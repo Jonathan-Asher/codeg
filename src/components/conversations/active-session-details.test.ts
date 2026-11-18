@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from "vitest"
 import {
   pickModelFromTurns,
   resolveActiveSessionDetails,
+  resolveSessionModel,
 } from "./active-session-details"
 import type {
   DbConversationDetail,
@@ -279,6 +280,57 @@ describe("resolveActiveSessionDetails", () => {
     expect(result.model).toBe("hist-model")
   })
 
+  // Conversation 237: the row still named the model the session started on
+  // (Fable 5.1) while the replies had long moved on (Fable 5.2).
+  it("shows the newest reply's model over a stale stored column", () => {
+    const getSession = vi.fn(() =>
+      session({
+        detail: detail({
+          summary: summary({ model: "claude-fable-5-1" }),
+          turns: [
+            turn({ model: "claude-fable-5-1" }),
+            turn({ model: "claude-opus-5-5" }),
+            turn({ model: "claude-fable-5-2" }),
+            // `/model`, answered by Claude Code itself.
+            turn({ model: "<synthetic>" }),
+          ],
+        }),
+        localTurns: [],
+      })
+    )
+    const result = resolveActiveSessionDetails(
+      { conversationId: 5 },
+      getSession,
+      [summary({ model: "claude-fable-5-1" })],
+      "claude-fable-5-2[1m]"
+    )
+    expect(result.model).toBe("claude-fable-5-2")
+  })
+
+  it("falls back to the live selector, then the listed column, before any reply", () => {
+    const getSession = vi.fn(() =>
+      session({
+        detail: detail({ summary: summary({ model: "claude-fable-5-1" }) }),
+        localTurns: [],
+      })
+    )
+    expect(
+      resolveActiveSessionDetails(
+        { conversationId: 5 },
+        getSession,
+        [summary({ model: "claude-opus-5-5" })],
+        "claude-fable-5-2[1m]"
+      ).model
+    ).toBe("claude-fable-5-2[1m]")
+    // Not connected: the listed row, which upserts keep current, wins over
+    // the loaded snapshot.
+    expect(
+      resolveActiveSessionDetails({ conversationId: 5 }, getSession, [
+        summary({ model: "claude-opus-5-5" }),
+      ]).model
+    ).toBe("claude-opus-5-5")
+  })
+
   it("returns a null model when no turn records one", () => {
     const getSession = vi.fn(() =>
       session({ localTurns: [turn({ model: null })] })
@@ -311,5 +363,46 @@ describe("pickModelFromTurns", () => {
 
   it("returns null for an empty list", () => {
     expect(pickModelFromTurns([])).toBeNull()
+  })
+
+  it("skips the synthetic stamp of a reply no model wrote", () => {
+    expect(
+      pickModelFromTurns([
+        turn({ model: "claude-opus-5-5" }),
+        turn({ model: "<synthetic>" }),
+      ])
+    ).toBe("claude-opus-5-5")
+  })
+})
+
+describe("resolveSessionModel", () => {
+  it("prefers a reply, then the live selector, then the first stored column", () => {
+    expect(
+      resolveSessionModel({
+        liveTurns: [turn({ model: "live" })],
+        historyTurns: [turn({ model: "history" })],
+        liveModel: "selector",
+        summaries: [summary({ model: "stored" })],
+      })
+    ).toBe("live")
+    expect(
+      resolveSessionModel({
+        historyTurns: [turn({ model: "history" })],
+        liveModel: "selector",
+      })
+    ).toBe("history")
+    expect(
+      resolveSessionModel({
+        liveModel: "selector",
+        summaries: [summary({ model: "stored" })],
+      })
+    ).toBe("selector")
+    expect(
+      resolveSessionModel({
+        liveModel: "  ",
+        summaries: [null, summary({ model: "" }), summary({ model: "stored" })],
+      })
+    ).toBe("stored")
+    expect(resolveSessionModel({})).toBeNull()
   })
 })
