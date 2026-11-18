@@ -255,6 +255,44 @@ const PHYSICAL_KEY_SIBLINGS: Record<string, string> = {
   _: "-",
 }
 
+/**
+ * `{` and `}` are Shift + the bracket keys. Shift travels as a modifier, so a
+ * shortcut names the key by its unshifted bracket: `mod+shift+{` is
+ * `mod+shift+[`, and a press that typed `{` is the `[` key with Shift held.
+ * Unlike `=`/`+`, the Shift state stays exact: `mod+[` and `mod+shift+[` are
+ * two different chords.
+ */
+const SHIFTED_BRACKET_KEYS: Record<string, string> = {
+  "{": "[",
+  "}": "]",
+}
+
+const BRACKET_CHARACTERS = new Set(["[", "]", "{", "}"])
+
+/** What a US layout types, unshifted, on the punctuation keys `event.code` names. */
+const US_PUNCTUATION_BY_CODE = new Map<string, string>([
+  ["BracketLeft", "["],
+  ["BracketRight", "]"],
+  ["Semicolon", ";"],
+  ["Quote", "'"],
+  ["Comma", ","],
+  ["Period", "."],
+  ["Slash", "/"],
+  ["Backslash", "\\"],
+  ["Backquote", "`"],
+  ["Minus", "-"],
+  ["Equal", "="],
+])
+
+/**
+ * One character of a script other than Latin: Hebrew, Cyrillic, Greek,
+ * Arabic, Thai and so on. Latin letters with diacritics (é, ü, ß, å) and the
+ * symbols every script shares (§, £, °, №) do not count, so AZERTY, QWERTZ and
+ * the Nordic layouts keep the characters they type.
+ */
+const NON_LATIN_SCRIPT_CHARACTER =
+  /^[^\p{Script=Latin}\p{Script=Common}\p{Script=Inherited}]$/u
+
 export interface ParsedShortcut {
   mod: boolean
   alt: boolean
@@ -294,7 +332,7 @@ function normalizeKeyToken(rawKey: string): string | null {
   const key = rawKey.toLowerCase()
   if (!key) return null
 
-  if (key.length === 1) return key
+  if (key.length === 1) return SHIFTED_BRACKET_KEYS[key] ?? key
   if (FUNCTION_KEY_PATTERN.test(key)) return key
 
   const aliased = SPECIAL_KEY_ALIASES[key] ?? key
@@ -455,15 +493,50 @@ type ShortcutEventLike = Pick<
  * 都按不出来**，录制时记下的也会是那个变音字符。
  *
  * 只在 altKey 为真时改道，所以不含 alt 的既有快捷键行为完全不变。
+ *
+ * Two more cases read the key's position instead of the character it typed:
+ *
+ *   - The bracket keys. When `event.code` is BracketLeft/BracketRight and the
+ *     key typed any bracket, the code decides: Hebrew mirrors the pair (the
+ *     physical `[` key types `]`), so the character would point the wrong way.
+ *     Other characters on those keys (QWERTZ `ü`/`+`, Dvorak `/`/`=`, AZERTY
+ *     `^`/`$`) stay on `event.key`. The one layout this misreads is ABNT2,
+ *     whose `[` really is on BracketRight; its `]` sits on Backslash.
+ *   - Non-Latin layouts. A character from another script (Hebrew, Russian,
+ *     Greek, Arabic…) can never spell a binding, so on a key with a US
+ *     position it reads as what US types there: ⌘ + the Hebrew letter on the W
+ *     key is ⌘W.
+ *
+ * Both yield one token per press, so no press reaches two bindings this way.
+ * Latin layouts with no bracket typed are untouched.
  */
 function eventKeyToken(event: ShortcutEventLike): string | null {
-  if (event.altKey && typeof event.code === "string") {
-    const letter = /^Key([A-Z])$/.exec(event.code)
-    if (letter) return letter[1].toLowerCase()
-    const digit = /^Digit([0-9])$/.exec(event.code)
-    if (digit) return digit[1]
+  const code = typeof event.code === "string" ? event.code : ""
+  if (
+    (code === "BracketLeft" || code === "BracketRight") &&
+    BRACKET_CHARACTERS.has(event.key)
+  ) {
+    return code === "BracketLeft" ? "[" : "]"
+  }
+  if (event.altKey) {
+    const letterOrDigit = usLetterOrDigitAtCode(code)
+    if (letterOrDigit) return letterOrDigit
+  }
+  if (NON_LATIN_SCRIPT_CHARACTER.test(event.key)) {
+    const usKey =
+      usLetterOrDigitAtCode(code) ?? US_PUNCTUATION_BY_CODE.get(code) ?? null
+    if (usKey) return usKey
   }
   return normalizeKeyToken(event.key)
+}
+
+/** The letter or digit a US layout types on the key `code` names, if any. */
+function usLetterOrDigitAtCode(code: string): string | null {
+  const letter = /^Key([A-Z])$/.exec(code)
+  if (letter) return letter[1].toLowerCase()
+  const digit = /^Digit([0-9])$/.exec(code)
+  if (digit) return digit[1]
+  return null
 }
 
 export function readShortcutSettings(): ShortcutSettings {

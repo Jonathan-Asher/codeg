@@ -799,10 +799,15 @@ mod tests {
                 async move { wait_until_settled(&manager, CONN, timing(3600), &stop).await },
             )
         };
+        // The reply comes after the hold began, stamped a second later rather
+        // than read off the clock again: macOS's wall clock moves in whole
+        // microseconds, so two reads this close together are often equal, and
+        // a reply stamped at `since` itself is (rightly) not a later one.
         let since = Utc::now();
+        let replied_at = since + chrono::Duration::seconds(1);
         {
             let state = manager.get_state(CONN).await.expect("state");
-            state.write().await.last_background_reply = Some((Utc::now(), "all green".into()));
+            state.write().await.last_background_reply = Some((replied_at, "all green".into()));
         }
         tokio::time::sleep(Duration::from_secs(10)).await;
         manager.disconnect(CONN).await.expect("disconnect");

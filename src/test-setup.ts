@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest"
-import { beforeEach } from "vitest"
+import { afterAll, beforeEach } from "vitest"
 
 import { resetDisclosureStore } from "@/components/message/activity/disclosure-store"
 
@@ -9,6 +9,22 @@ import { resetDisclosureStore } from "@/components/message/activity/disclosure-s
 // reuses the id, and that test's click closes it instead.
 beforeEach(() => {
   resetDisclosureStore()
+})
+
+// Radix's FocusScope (inside every Dialog, Popover and menu) hands focus back
+// on unmount from a zero-delay timer that builds a `CustomEvent` and
+// dispatches it on the scope's container. Testing Library unmounts after each
+// test, so a file whose last test leaves a dialog open still has that timer
+// queued when the file ends. If Vitest tears jsdom down first, the timer
+// builds Node's own `CustomEvent`, jsdom refuses it ("parameter 1 is not of
+// type 'Event'") and the whole run fails on an unhandled error although every
+// test passed. Let such timers run while jsdom is still in place: one
+// zero-delay timer queued after them fires after them. It is the real
+// `setTimeout`, captured here, so a test that left fake timers on cannot stall
+// the wait.
+const realSetTimeout = globalThis.setTimeout
+afterAll(async () => {
+  await new Promise((resolve) => realSetTimeout(resolve, 0))
 })
 
 // jsdom doesn't implement a few layout APIs that ProseMirror's EditorView
