@@ -5,6 +5,7 @@ use serde::Deserialize;
 
 use crate::app_error::AppCommandError;
 use crate::app_state::AppState;
+use crate::commands::claude_subagent::{get_claude_subagent_thread_core, ClaudeSubagentThread};
 use crate::commands::conversations as conv_commands;
 use crate::models::*;
 
@@ -167,6 +168,30 @@ pub async fn get_folder_conversation(
         &state.emitter,
         params.conversation_id,
         window,
+    )
+    .await?;
+    Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetClaudeSubagentThreadParams {
+    pub conversation_id: i32,
+    pub tool_call_id: String,
+    #[serde(default)]
+    pub agent_id: Option<String>,
+}
+
+/// A Claude Code sub-agent's own thread, for its tab.
+pub async fn get_claude_subagent_thread(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<GetClaudeSubagentThreadParams>,
+) -> Result<Json<Option<ClaudeSubagentThread>>, AppCommandError> {
+    let result = get_claude_subagent_thread_core(
+        &state.db.conn,
+        params.conversation_id,
+        params.tool_call_id,
+        params.agent_id,
     )
     .await?;
     Ok(Json(result))

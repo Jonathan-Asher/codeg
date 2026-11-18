@@ -91,6 +91,12 @@ pub struct AgentExecutionStats {
     /// Absent for agents whose sub-agents have no separate session.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub child_session_id: Option<String>,
+    /// Claude Code: the sub-agent's `agentId`, set only when its own
+    /// transcript (`<session>/subagents/agent-<id>.jsonl`) was on disk when
+    /// the card was parsed. Lets the Agent card open that thread in a tab of
+    /// its own (`commands::claude_subagent`). Absent for every other agent.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub subagent_id: Option<String>,
 }
 
 /// Image payload shared by content blocks and ACP wire events.

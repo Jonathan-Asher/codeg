@@ -49,6 +49,16 @@ import { SlideSlot } from "./slide-slot"
 import { ModelLabelProvider } from "./model-label-context"
 import { TranscriptAgentTypeProvider } from "./transcript-agent-context"
 import {
+  TranscriptConversationProvider,
+  useTranscriptConversationId,
+} from "./transcript-conversation-context"
+import {
+  getToolCallJumpVersion,
+  peekToolCallJump,
+  subscribeToolCallJump,
+  takeToolCallJump,
+} from "@/lib/pending-tool-call-jump"
+import {
   LiveToolCardsProvider,
   type LiveToolCards,
 } from "./live-tool-cards-context"
@@ -1865,6 +1875,13 @@ export function MessageListView({
   const session = useConversationRuntimeStore(
     (s) => s.byConversationId.get(conversationId) ?? null
   )
+  // The conversation row this transcript is, for the Agent cards in it that
+  // open a sub-agent's thread; a view keyed by no row (a sub-agent's own tab)
+  // passes on the one around it.
+  const outerTranscriptConversationId = useTranscriptConversationId()
+  const transcriptConversationId =
+    session?.dbConversationId ??
+    (conversationId > 0 ? conversationId : outerTranscriptConversationId)
   const liveMessage = session?.liveMessage ?? null
   const timelineTurns = useConversationRuntimeStore((s) =>
     selectTimelineTurns(s, conversationId)
@@ -2890,6 +2907,36 @@ export function MessageListView({
     }
   }, [])
 
+  // A sub-agent's tab asked to be shown where it came from: once this
+  // transcript is in front and holds that Agent call's turn, scroll to its
+  // card (see `lib/pending-tool-call-jump`).
+  const toolCallJumpVersion = useSyncExternalStore(
+    subscribeToolCallJump,
+    getToolCallJumpVersion,
+    getToolCallJumpVersion
+  )
+  const jumpConversationId =
+    session?.dbConversationId ?? (conversationId > 0 ? conversationId : null)
+  useEffect(() => {
+    if (!isActive || jumpConversationId == null) return
+    const toolCallId = peekToolCallJump(jumpConversationId)
+    if (!toolCallId) return
+    const loaded = threadItems.some(
+      (entry) =>
+        entry.kind === "turn" &&
+        partsContainToolCall(entry.group.parts, toolCallId)
+    )
+    if (!loaded) return
+    takeToolCallJump(jumpConversationId)
+    jumpToToolCall(toolCallId)
+  }, [
+    toolCallJumpVersion,
+    isActive,
+    jumpConversationId,
+    threadItems,
+    jumpToToolCall,
+  ])
+
   // Which status row of the thread speaks for each delegated task: only that
   // one reaches the live sub-agent and carries the decision it is parked on,
   // however many cards the agent's re-polls left. The indexer keeps its last
@@ -3440,13 +3487,15 @@ export function MessageListView({
     <MarkdownImageProvider rootPath={resolvedImageRoot}>
       <ModelLabelProvider value={modelLabel}>
         <TranscriptAgentTypeProvider value={agentType}>
-          <LiveToolCardsProvider value={toolCards}>
-            <DelegationStatusIndexProvider value={delegationStatusIndex}>
-              <KnownInvocationsProvider value={knownInvocations}>
-                {thread}
-              </KnownInvocationsProvider>
-            </DelegationStatusIndexProvider>
-          </LiveToolCardsProvider>
+          <TranscriptConversationProvider value={transcriptConversationId}>
+            <LiveToolCardsProvider value={toolCards}>
+              <DelegationStatusIndexProvider value={delegationStatusIndex}>
+                <KnownInvocationsProvider value={knownInvocations}>
+                  {thread}
+                </KnownInvocationsProvider>
+              </DelegationStatusIndexProvider>
+            </LiveToolCardsProvider>
+          </TranscriptConversationProvider>
         </TranscriptAgentTypeProvider>
       </ModelLabelProvider>
     </MarkdownImageProvider>

@@ -3054,7 +3054,20 @@
       "bandRunning": "Läuft",
       "bandOther": "Sonstige",
       "chatGroup": "Chat",
-      "forking": "Wird verzweigt…"
+      "forking": "Wird verzweigt…",
+      "subagentTab": "Sub-Agent"
+    },
+    "subagentTab": {
+      "bar": "Sub-Agent von <link>{parent}</link> · {type} · schreibgeschützt",
+      "barNoType": "Sub-Agent von <link>{parent}</link> · schreibgeschützt",
+      "backToParent": "Seine Agent-Karte in {parent} zeigen",
+      "untitledParent": "seiner Sitzung",
+      "fallbackTitle": "Sub-Agent",
+      "running": "Läuft",
+      "waiting": "Warte, bis der Sub-Agent seine erste Nachricht schreibt…",
+      "missing": "Das Protokoll dieses Sub-Agents liegt nicht auf der Festplatte.",
+      "failed": "Das Protokoll des Sub-Agents konnte nicht gelesen werden: {message}",
+      "loading": "Verlauf des Sub-Agents wird geladen…"
     },
     "fileWorkspace": {
       "files": "Dateien",

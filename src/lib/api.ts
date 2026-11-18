@@ -96,6 +96,7 @@ import type {
   ConversationDetail,
   ConversationOutline,
   ConversationTurnsPage,
+  ClaudeSubagentThread,
   DbConversationDetail,
   FolderInfo,
   AgentStats,
@@ -3297,6 +3298,24 @@ export async function getFolderConversation(
     conversationId,
     ...(window?.tailTurns != null ? { tailTurns: window.tailTurns } : {}),
     ...(window?.fromIndex != null ? { fromIndex: window.fromIndex } : {}),
+  })
+}
+
+/**
+ * A Claude Code sub-agent's own thread: the sub-agent the Agent call
+ * `toolCallId` of conversation `conversationId` launched. `agentId` when known
+ * (the card's `subagent_id`, a launch acknowledgement, an earlier answer) goes
+ * straight to its file. `null` while it has written no transcript.
+ */
+export async function getClaudeSubagentThread(
+  conversationId: number,
+  toolCallId: string,
+  agentId?: string | null
+): Promise<ClaudeSubagentThread | null> {
+  return getTransport().call("get_claude_subagent_thread", {
+    conversationId,
+    toolCallId,
+    ...(agentId ? { agentId } : {}),
   })
 }
 

@@ -3054,7 +3054,20 @@
       "bandRunning": "En cours",
       "bandOther": "Autres",
       "chatGroup": "Chat",
-      "forking": "Bifurcation…"
+      "forking": "Bifurcation…",
+      "subagentTab": "Sous-agent"
+    },
+    "subagentTab": {
+      "bar": "Sous-agent de <link>{parent}</link> · {type} · lecture seule",
+      "barNoType": "Sous-agent de <link>{parent}</link> · lecture seule",
+      "backToParent": "Afficher sa carte Agent dans {parent}",
+      "untitledParent": "sa session",
+      "fallbackTitle": "Sous-agent",
+      "running": "En cours",
+      "waiting": "En attente du premier message du sous-agent…",
+      "missing": "La transcription de ce sous-agent n'est pas sur le disque.",
+      "failed": "Impossible de lire la transcription du sous-agent : {message}",
+      "loading": "Chargement du fil du sous-agent…"
     },
     "fileWorkspace": {
       "files": "Fichiers",

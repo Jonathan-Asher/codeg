@@ -38,6 +38,8 @@ pub mod canvas;
 pub mod chat_authoring;
 pub mod chat_channel;
 pub mod claude_auth;
+/// A Claude Code sub-agent's own thread, read for its tab (both runtimes).
+pub mod claude_subagent;
 /// The `codeg-cli` access switch (desktop; the server's is a web handler).
 #[cfg(feature = "tauri-runtime")]
 pub mod cli_access;

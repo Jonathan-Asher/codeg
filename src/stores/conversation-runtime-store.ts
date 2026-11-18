@@ -3711,6 +3711,15 @@ export interface RuntimeActions {
     kickoffText?: string | null
   ) => void
   removeConversation: (conversationId: number) => void
+  /**
+   * Show `detail` for a session this client reads by other means than its
+   * own fetch (a Claude Code sub-agent's thread, re-read while it works): as
+   * a quiet fetch would land it, keeping the turns that did not change.
+   */
+  putViewerDetail: (
+    conversationId: number,
+    detail: DbConversationDetail
+  ) => void
   reset: () => void
 }
 
@@ -5896,6 +5905,14 @@ export const useConversationRuntimeStore = create<ConversationRuntimeStore>()((
         value,
         kickoffText,
       }),
+    putViewerDetail: (conversationId, detail) => {
+      dispatch({
+        type: "FETCH_DETAIL_SUCCESS",
+        conversationId,
+        detail,
+        keepUnchanged: true,
+      })
+    },
     removeConversation: (conversationId) => {
       // Invalidate any outstanding fetch for this conversation so a
       // late-arriving response can't resurrect the session with stale

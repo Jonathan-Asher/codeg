@@ -36,12 +36,15 @@ import { FolderTabsEmptyState } from "@/components/conversations/folder-tabs-emp
 import { useTabActions, useTabStore } from "@/contexts/tab-context"
 import {
   groupOfTab,
+  isDraftTab,
+  isSubagentTab,
   useVisibleConversationTabs,
   useVisibleConversationLayout,
   shellGroupOfTab,
   isReparentUnmount,
   reparentedViewRuntimeConversationId,
   trackConversationView,
+  type TabItem,
 } from "@/stores/tab-store"
 import { computeRects, leafIds } from "@/lib/tab-group-layout"
 import { useTaskContext } from "@/contexts/task-context"
@@ -281,6 +284,8 @@ import { useExportLabels } from "@/lib/use-export-labels"
 import { resolveActiveSessionDetails } from "./active-session-details"
 import { awaitsHistoricalSessionId } from "./historical-session-gate"
 import { ConversationDetailHeader } from "./conversation-detail-header"
+import { SubagentTabHeader } from "@/components/subagent-tab/subagent-tab-header"
+import { SubagentTabView } from "@/components/subagent-tab/subagent-tab-view"
 import { SessionDetailsDialog } from "./session-details-dialog"
 import { TalkDock } from "@/components/talk-voice/talk-dock"
 import {
@@ -4484,6 +4489,29 @@ function SplitStripCornerReserve({ side }: { side: "left" | "right" }) {
   return <ChromeReserve width={width} />
 }
 
+/** The title bar over the tab in front: a session's, or a sub-agent
+ *  thread's. */
+function TabTitleBar({
+  tab,
+  folderPath,
+}: {
+  tab: TabItem
+  folderPath?: string
+}) {
+  if (isSubagentTab(tab)) return <SubagentTabHeader tab={tab} />
+  return (
+    <ConversationDetailHeader
+      tabId={tab.id}
+      conversationId={tab.conversationId}
+      runtimeConversationId={tab.runtimeConversationId ?? null}
+      folderId={tab.folderId}
+      folderPath={folderPath}
+      title={tab.title}
+      status={tab.status as ConversationStatus | undefined}
+    />
+  )
+}
+
 export function ConversationDetailPanel() {
   const t = useTranslations("Folder.conversation")
   const tDetails = useTranslations("Folder.sessionDetails")
@@ -4520,7 +4548,7 @@ export function ConversationDetailPanel() {
   } = useTabActions()
   const newConversation = useMemo(() => {
     const activeTab = tabs.find((tab) => tab.id === activeTabId)
-    if (!activeTab || activeTab.conversationId != null) return null
+    if (!activeTab || !isDraftTab(activeTab)) return null
     const workingDir = activeTab.workingDir ?? folder?.path
     if (!workingDir) return null
     return { workingDir, folderId: activeTab.folderId }
@@ -4861,7 +4889,16 @@ export function ConversationDetailPanel() {
     // Visible = tiled (all group members shown) or the group's selected tab.
     const visible = inScope && (canTileG || tab.id === groupSelection[groupId])
     const folderPath = allFolders.find((f) => f.id === tab.folderId)?.path
-    const view = (
+    const view = isSubagentTab(tab) ? (
+      <SubagentTabView
+        tabId={tab.id}
+        target={tab.subagent}
+        folderId={tab.folderId}
+        folderPath={folderPath}
+        isActive={active}
+        isVisible={visible}
+      />
+    ) : (
       <ConversationTabView
         tabId={tab.id}
         conversationId={tab.conversationId}
@@ -4992,15 +5029,19 @@ export function ConversationDetailPanel() {
               }
             }}
           >
-            <ConversationDetailHeader
-              tabId={selTab.id}
-              conversationId={selTab.conversationId}
-              runtimeConversationId={selTab.runtimeConversationId ?? null}
-              folderId={selTab.folderId}
-              folderPath={selTabFolder?.path}
-              title={selTab.title}
-              status={selTab.status as ConversationStatus | undefined}
-            />
+            {isSubagentTab(selTab) ? (
+              <SubagentTabHeader tab={selTab} />
+            ) : (
+              <ConversationDetailHeader
+                tabId={selTab.id}
+                conversationId={selTab.conversationId}
+                runtimeConversationId={selTab.runtimeConversationId ?? null}
+                folderId={selTab.folderId}
+                folderPath={selTabFolder?.path}
+                title={selTab.title}
+                status={selTab.status as ConversationStatus | undefined}
+              />
+            )}
           </div>
         )}
         <div className="relative min-h-0 flex-1 overflow-hidden">
@@ -5050,15 +5091,7 @@ export function ConversationDetailPanel() {
     <>
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
         {!isSplit && activeTab && (
-          <ConversationDetailHeader
-            tabId={activeTab.id}
-            conversationId={activeTab.conversationId}
-            runtimeConversationId={activeTab.runtimeConversationId ?? null}
-            folderId={activeTab.folderId}
-            folderPath={activeTabFolder?.path}
-            title={activeTab.title}
-            status={activeTab.status as ConversationStatus | undefined}
-          />
+          <TabTitleBar tab={activeTab} folderPath={activeTabFolder?.path} />
         )}
         <ContextMenu>
           <ContextMenuTrigger asChild>

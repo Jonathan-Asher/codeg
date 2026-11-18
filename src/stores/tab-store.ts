@@ -54,7 +54,7 @@ import { noteTabActivation, requestComposerFocus } from "@/lib/composer-focus"
 import {
   batchCloseSlots,
   pushClosedTab,
-  snapshotConversationTab,
+  snapshotStripTab,
 } from "@/lib/closed-tab-stack"
 import type {
   AgentType,
@@ -83,9 +83,34 @@ import type {
  * (platform subscriptions, timers, gates).
  */
 
+/**
+ * What a sub-agent tab shows: the thread of the Claude Code sub-agent that an
+ * Agent call in a conversation's transcript launched, read from the
+ * sub-agent's own transcript (`get_claude_subagent_thread`). A sub-agent has
+ * no conversation row of its own, so the tab is keyed by the call.
+ */
+export interface SubagentTabTarget {
+  /** The conversation whose transcript holds the Agent call. */
+  parentConversationId: number
+  /** The Agent call (its `tool_use` id). */
+  toolCallId: string
+  /** The sub-agent's `agentId`, once known: it names its transcript. */
+  agentId?: string | null
+  /** `general-purpose`, `Explore`, … */
+  subagentType?: string | null
+  /** What the call asked of it, in a few words. */
+  description?: string | null
+}
+
 export interface TabItemInternal {
   id: string
-  kind: "conversation"
+  /**
+   * `conversation`: a session (`conversationId` set) or a draft (`null`).
+   * `subagent`: a read-only view of a Claude Code sub-agent's thread
+   * (`subagent`); `conversationId` stays `null`, but it is no draft — see
+   * `isDraftTab`. Device-local, like a draft: never in `opened_tabs`.
+   */
+  kind: "conversation" | "subagent"
   folderId: number
   conversationId: number | null
   /** The runtime session key used by ConversationRuntimeContext.
@@ -123,9 +148,50 @@ export interface TabItemInternal {
    * the "no-folder" chip.
    */
   isChat?: boolean
+  /** Set exactly on a `subagent` tab. */
+  subagent?: SubagentTabTarget
 }
 
 export type TabItem = TabItemInternal
+
+/** An unsent draft: a conversation tab with no conversation yet. A sub-agent
+ *  tab has no conversation either, and is not one. */
+export function isDraftTab(
+  tab: Pick<TabItemInternal, "kind" | "conversationId">
+): boolean {
+  return tab.kind === "conversation" && tab.conversationId == null
+}
+
+/** A read-only view of a Claude Code sub-agent's thread. */
+export function isSubagentTab(
+  tab: TabItemInternal
+): tab is TabItemInternal & { kind: "subagent"; subagent: SubagentTabTarget } {
+  return tab.kind === "subagent" && tab.subagent != null
+}
+
+/** `known` with what `update` adds; the same object when it adds nothing. */
+function mergeSubagentTarget(
+  known: SubagentTabTarget | undefined,
+  update: Partial<SubagentTabTarget>
+): SubagentTabTarget | undefined {
+  if (!known) return known
+  let next: SubagentTabTarget | undefined
+  for (const key of ["agentId", "subagentType", "description"] as const) {
+    const value = update[key]
+    if (value && value !== known[key]) {
+      next = { ...(next ?? known), [key]: value }
+    }
+  }
+  return next ?? known
+}
+
+/** A sub-agent tab's id: stable across restarts, one per Agent call. */
+export function makeSubagentTabId(
+  parentConversationId: number,
+  toolCallId: string
+): string {
+  return `sub-${parentConversationId}-${toolCallId}`
+}
 
 interface DraftRetargetRequest {
   tabId: string
@@ -326,6 +392,33 @@ export interface TabStoreState {
     runtimeConversationId: number
   ) => void
   reorderTabs: (reorderedTabs: TabItem[]) => void
+  /**
+   * Open (or focus) the tab of a Claude Code sub-agent's thread, next to its
+   * parent conversation's tab when that is open (in its group), else in the
+   * focused group. A preview by default: it takes the place of the group's
+   * preview, and a double click pins it. A parent that is itself the group's
+   * preview is pinned first, so opening its sub-agent never closes it.
+   * Returns the tab's id.
+   */
+  openSubagentTab: (
+    target: SubagentTabTarget,
+    opts?: {
+      pin?: boolean
+      title?: string
+      /** rawTabs slot (clamped), from the closed-tab stack. */
+      index?: number
+      /** The folder of the parent, when the caller knows it better. */
+      folderId?: number
+    }
+  ) => string
+  /** Patch what a sub-agent tab knows about its sub-agent (its id once
+   *  read, its type and description, its title and running state). */
+  updateSubagentTab: (
+    tabId: string,
+    patch: Partial<
+      Pick<SubagentTabTarget, "agentId" | "subagentType" | "description">
+    > & { title?: string; status?: ConversationStatus }
+  ) => void
   consumeRemoteActivation: () => boolean
   onPreviewTabReplaced: (callback: (tabId: string) => void) => () => void
 
@@ -432,6 +525,8 @@ let groupPersistTimer: ReturnType<typeof setTimeout> | null = null
 // renderable state). Refreshed whenever `initialTabState()` runs.
 let pendingRestoreDrafts: PersistedDraft[] = []
 let pendingRestoreActiveDraft: string | null = null
+// The same for the pinned sub-agent tabs (see `PersistedSubagentTab`).
+let pendingRestoreSubagents: PersistedSubagentTab[] = []
 let orphanDraftPruneRan = false
 // True once a tab snapshot has actually been read from the backend (hydration,
 // a refetch, or a remote change). Until then the open-tab set is UNKNOWN — a
@@ -604,7 +699,8 @@ function sameDerivedTab(a: TabItemInternal, b: TabItemInternal): boolean {
     a.workingDir === b.workingDir &&
     a.status === b.status &&
     a.agentTypeProvisional === b.agentTypeProvisional &&
-    a.isChat === b.isChat
+    a.isChat === b.isChat &&
+    a.subagent === b.subagent
   )
 }
 
@@ -780,8 +876,10 @@ function sanitizeGroupViews(value: unknown): Record<string, GroupView> {
  * "conversation | new conversation" layout — lost its member on restart and
  * `normalizeTree` collapsed the whole group.
  *
- * `index` is the draft's position in `rawTabs` at save time, so restoring
- * splices it back among the conversation tabs instead of appending. `agentType`
+ * `index` is the draft's position in `rawTabs` at save time (counting only
+ * the tabs a restart brings back: a preview sub-agent tab before it does not
+ * shift it), so restoring splices it back among the conversation tabs instead
+ * of appending. `agentType`
  * is written ONLY for an explicitly-chosen agent (`agentTypeProvisional` is
  * falsy) — persisting a provisional pick would launder a cold-start guess into
  * a user choice, the same rule `last-active-context-storage` documents. Chat
@@ -827,6 +925,69 @@ function sanitizeDrafts(value: unknown): PersistedDraft[] {
   return out
 }
 
+/**
+ * A PINNED sub-agent tab as stored in the group blob, so it survives a restart
+ * the way a draft does (sub-agent tabs never reach `opened_tabs`). A preview is
+ * not kept: it is the tab the next preview replaces anyway. `index` is its
+ * slot at save time, like a draft's.
+ */
+interface PersistedSubagentTab {
+  id: string
+  group: string
+  index: number
+  folderId: number
+  title: string
+  target: SubagentTabTarget
+}
+
+function sanitizeSubagentTabs(value: unknown): PersistedSubagentTab[] {
+  if (!Array.isArray(value)) return []
+  const out: PersistedSubagentTab[] = []
+  const text = (v: unknown) =>
+    typeof v === "string" && v.length > 0 ? v : undefined
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) continue
+    const e = entry as Record<string, unknown>
+    const target = e.target as Record<string, unknown> | null | undefined
+    if (typeof target !== "object" || target === null) continue
+    const parentConversationId = target.parentConversationId
+    const toolCallId = text(target.toolCallId)
+    if (
+      typeof parentConversationId !== "number" ||
+      !Number.isFinite(parentConversationId) ||
+      !toolCallId
+    ) {
+      continue
+    }
+    const id = makeSubagentTabId(parentConversationId, toolCallId)
+    if (e.id !== id) continue
+    if (typeof e.group !== "string" || e.group.length === 0) continue
+    if (typeof e.folderId !== "number" || !Number.isFinite(e.folderId)) continue
+    out.push({
+      id,
+      group: e.group,
+      index:
+        typeof e.index === "number" && Number.isFinite(e.index) && e.index >= 0
+          ? Math.floor(e.index)
+          : out.length,
+      folderId: e.folderId,
+      title: text(e.title) ?? "",
+      target: {
+        parentConversationId,
+        toolCallId,
+        ...(text(target.agentId) ? { agentId: text(target.agentId) } : {}),
+        ...(text(target.subagentType)
+          ? { subagentType: text(target.subagentType) }
+          : {}),
+        ...(text(target.description)
+          ? { description: text(target.description) }
+          : {}),
+      },
+    })
+  }
+  return out
+}
+
 /** Seed group state from the device-local blob (canonical tab ids — they match
  *  nothing until `hydrate` restores canonical-id tabs; `applyGroupInvariants`
  *  defers pruning until then). Falls back to a single group, seeding its tile
@@ -841,6 +1002,7 @@ function readPersistedGroupState(): {
 } {
   pendingRestoreDrafts = []
   pendingRestoreActiveDraft = null
+  pendingRestoreSubagents = []
   const fallback = () => ({
     groupLayout: singleGroupLayout() as LayoutNode,
     groupOf: {} as Record<string, string>,
@@ -856,6 +1018,7 @@ function readPersistedGroupState(): {
       if (parsed && isLayoutNode(parsed.layout)) {
         // Older blobs predate `drafts`/`activeDraft` — both sanitize to empty.
         pendingRestoreDrafts = sanitizeDrafts(parsed.drafts)
+        pendingRestoreSubagents = sanitizeSubagentTabs(parsed.subagents)
         pendingRestoreActiveDraft =
           typeof parsed.activeDraft === "string" ? parsed.activeDraft : null
         return {
@@ -911,16 +1074,34 @@ function persistGroupState() {
   }
   const assignments: Record<string, string> = {}
   const drafts: PersistedDraft[] = []
-  st.rawTabs.forEach((tab, index) => {
+  const subagents: PersistedSubagentTab[] = []
+  // A slot counts only the tabs a restart brings back: a preview sub-agent
+  // tab is not one, so the tabs after it must not count it.
+  let index = 0
+  st.rawTabs.forEach((tab) => {
     const group = groupOfTab(normal.groupOf, normal.layout, tab.id)
     if (tab.conversationId != null) {
       assignments[canonicalId(tab)] = group
+      index += 1
+      return
+    }
+    if (isSubagentTab(tab)) {
+      if (tab.isPinned) {
+        subagents.push({
+          id: tab.id,
+          group,
+          index: index++,
+          folderId: tab.folderId,
+          title: tab.title,
+          target: tab.subagent,
+        })
+      }
       return
     }
     drafts.push({
       id: tab.id,
       group,
-      index,
+      index: index++,
       folderId: tab.folderId,
       ...(tab.isChat === true ? { isChat: true } : {}),
       // Chat drafts get a fresh scratch dir on focus; persisting the old one
@@ -961,8 +1142,9 @@ function persistGroupState() {
     selection: canonicalSelection(normal.selection),
     tileByGroup: normal.tileByGroup,
     drafts,
-    // Only a DRAFT focus needs restoring here; conversation focus rides the
-    // synced `opened_tabs.is_active`.
+    ...(subagents.length > 0 ? { subagents } : {}),
+    // Only a DRAFT (or sub-agent) focus needs restoring here; conversation
+    // focus rides the synced `opened_tabs.is_active`.
     activeDraft:
       activeTab && activeTab.conversationId == null ? activeTab.id : null,
     ...(Object.keys(folderViews).length > 0 ? { views: folderViews } : {}),
@@ -992,12 +1174,40 @@ function mergeRestoredDrafts(restored: TabItemInternal[]): {
 } {
   const pending = pendingRestoreDrafts
   pendingRestoreDrafts = []
-  if (pending.length === 0) return { tabs: restored, groupOf: {} }
+  const pendingSubagents = pendingRestoreSubagents
+  pendingRestoreSubagents = []
+  if (pending.length === 0 && pendingSubagents.length === 0) {
+    return { tabs: restored, groupOf: {} }
+  }
 
   const tabs = [...restored]
   const groupOf: Record<string, string> = {}
   const seen = new Set(restored.map((tab) => tab.id))
-  for (const draft of [...pending].sort((a, b) => a.index - b.index)) {
+  // Drafts and sub-agent tabs splice back in one pass, in slot order: their
+  // indices were taken from the same strip.
+  const local = [
+    ...pending.map((draft) => ({ index: draft.index, draft })),
+    ...pendingSubagents.map((sub) => ({ index: sub.index, sub })),
+  ].sort((a, b) => a.index - b.index)
+  for (const entry of local) {
+    if ("sub" in entry) {
+      const sub = entry.sub
+      if (seen.has(sub.id)) continue
+      seen.add(sub.id)
+      tabs.splice(Math.min(sub.index, tabs.length), 0, {
+        id: sub.id,
+        kind: "subagent",
+        folderId: sub.folderId,
+        conversationId: null,
+        agentType: "claude_code",
+        title: sub.title || runtime.labels.untitledConversation,
+        isPinned: true,
+        subagent: sub.target,
+      })
+      groupOf[sub.id] = sub.group
+      continue
+    }
+    const draft = entry.draft
     if (seen.has(draft.id)) continue
     seen.add(draft.id)
     const resolved = draft.agentType
@@ -1342,7 +1552,7 @@ function focusTab(tabId: string) {
 /** A draft holding nothing to lose: no saved text, and its composer reports
  *  no unsaved typing or image attachment either. */
 function isBlankDraft(tab: TabItemInternal): boolean {
-  if (tab.conversationId != null) return false
+  if (!isDraftTab(tab)) return false
   const key = buildNewConversationDraftStorageKey(tab.id)
   return loadMessageInputDraftV2(key) == null && !hasLiveComposerContent(key)
 }
@@ -1358,7 +1568,7 @@ function isBlankDraft(tab: TabItemInternal): boolean {
 function closeBlankDraftsBeside(keepId: string) {
   const st = useTabStore.getState()
   const kept = st.rawTabs.find((t) => t.id === keepId)
-  if (!kept || kept.conversationId != null) return
+  if (!kept || !isDraftTab(kept)) return
   const scope = folderScope(kept.folderId)
   const group = shellGroupOfTab(st, keepId)
   for (const tab of st.rawTabs) {
@@ -1384,7 +1594,7 @@ function closeBlankDraftsPerGroup() {
   const st = useTabStore.getState()
   const draftsByGroup = new Map<string, TabItemInternal[]>()
   for (const tab of st.rawTabs) {
-    if (tab.conversationId != null) continue
+    if (!isDraftTab(tab)) continue
     const group = groupOfTab(st.groupOf, st.groupLayout, tab.id)
     draftsByGroup.set(group, [...(draftsByGroup.get(group) ?? []), tab])
   }
@@ -1472,7 +1682,9 @@ function alignConversationTabFolders() {
   // server. Wait for the refetch; its settling re-runs the derive.
   if (conversationsLoading) return
   if (conversations.length === 0 && st.childSummaries.size === 0) return
-  if (!st.rawTabs.some((t) => t.conversationId != null)) return
+  if (!st.rawTabs.some((t) => t.conversationId != null || isSubagentTab(t))) {
+    return
+  }
   // Runs on every derive (status ticks included): one pass over the list, not
   // one per tab.
   const roots = new Map(conversations.map((c) => [c.id, c]))
@@ -1482,12 +1694,22 @@ function alignConversationTabFolders() {
     return row && row.agent_type === tab.agentType ? row : undefined
   }
   let changed = false
+  // A sub-agent tab that only follows its parent changes nothing synced.
+  let syncedChanged = false
   let activeTabId = st.activeTabId
   const next: TabItemInternal[] = []
   const keys = new Set<string>()
   for (const tab of st.rawTabs) {
     let item = tab
-    if (tab.conversationId != null) {
+    if (isSubagentTab(tab)) {
+      // A sub-agent's thread lives with its session: in its folder.
+      const parentId = tab.subagent.parentConversationId
+      const parent = roots.get(parentId) ?? st.childSummaries.get(parentId)
+      if (parent && parent.folder_id !== tab.folderId) {
+        item = { ...tab, folderId: parent.folder_id }
+        changed = true
+      }
+    } else if (tab.conversationId != null) {
       const row = rowOf(tab)
       if (row) {
         const rowFolderKind = allFolders.find(
@@ -1508,6 +1730,7 @@ function alignConversationTabFolders() {
             ...(leavesChat ? { isChat: false } : {}),
           }
           changed = true
+          syncedChanged = true
         }
       }
       const key = tabSyncKey(item)
@@ -1517,6 +1740,7 @@ function alignConversationTabFolders() {
           const kept = next.find((t) => tabSyncKey(t) === key)
           if (activeTabId === tab.id) activeTabId = kept?.id ?? null
           changed = true
+          syncedChanged = true
           continue
         }
         keys.add(key)
@@ -1527,8 +1751,10 @@ function alignConversationTabFolders() {
   if (!changed) return
   // A remote apply may have armed the echo guard for the set it just
   // committed; this correction is ours and has to be pushed.
-  applyingRemote = false
-  lastSavedPayload = null
+  if (syncedChanged) {
+    applyingRemote = false
+    lastSavedPayload = null
+  }
   useTabStore.setState({ rawTabs: next, activeTabId })
 }
 
@@ -1791,16 +2017,15 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
     if (index >= 0) {
       const closingTab = prevState.rawTabs[index]
       if (options?.recordForReopen !== false) {
-        pushClosedTab(snapshotConversationTab(closingTab, index))
+        pushClosedTab(snapshotStripTab(closingTab, index))
       }
       const next = prevState.rawTabs.filter((t) => t.id !== tabId)
       // A closing draft's composer text is scoped to that tab's key. Drop it —
       // unless this close spawns the replacement draft, which continues the same
       // slot and inherits the text instead of losing it silently.
-      const closingDraftKey =
-        closingTab.conversationId == null
-          ? buildNewConversationDraftStorageKey(closingTab.id)
-          : null
+      const closingDraftKey = isDraftTab(closingTab)
+        ? buildNewConversationDraftStorageKey(closingTab.id)
+        : null
       // An "ask about this selection" prompt parked for this tab has no panel
       // left to drain it. Drop it rather than leave it in the module buffer for
       // the rest of the session — the tab id is never reused, so it could only
@@ -1893,9 +2118,18 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
         tab.conversationId === conversationId &&
         tab.agentType === agentType
     )
-    if (!target) return
     // Every caller reaches here right after `deleteConversation` — the row is
-    // gone, so the tab must not be offered back by "reopen closed tab".
+    // gone, so the tab must not be offered back by "reopen closed tab". Its
+    // sub-agents' threads go with it.
+    for (const tab of get().rawTabs) {
+      if (
+        isSubagentTab(tab) &&
+        tab.subagent.parentConversationId === conversationId
+      ) {
+        get().closeTab(tab.id, { recordForReopen: false })
+      }
+    }
+    if (!target) return
     get().closeTab(target.id, { recordForReopen: false })
   },
 
@@ -1929,7 +2163,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
       (tab) => !keepIds.has(tab.id)
     )
     for (const [tab, slot] of closing) {
-      pushClosedTab(snapshotConversationTab(tab, slot))
+      pushClosedTab(snapshotStripTab(tab, slot))
     }
     set({ rawTabs: keep, activeTabId: tabId })
     recomputeTabs()
@@ -1939,7 +2173,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
     if (useFolderTabsStore.getState().enabled) {
       const st = get()
       for (const [tab, slot] of batchCloseSlots(st.rawTabs, isTabInScope)) {
-        pushClosedTab(snapshotConversationTab(tab, slot))
+        pushClosedTab(snapshotStripTab(tab, slot))
       }
       set({
         rawTabs: st.rawTabs.filter((tab) => !isTabInScope(tab)),
@@ -1954,7 +2188,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
         return
       }
       for (const [tab, slot] of batchCloseSlots(prevState.rawTabs)) {
-        pushClosedTab(snapshotConversationTab(tab, slot))
+        pushClosedTab(snapshotStripTab(tab, slot))
       }
       set({ rawTabs: [], activeTabId: null })
       recomputeTabs()
@@ -1963,12 +2197,12 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
 
     const prevState = get()
     const seedTab =
-      prevState.rawTabs.find((t) => t.conversationId == null && t.workingDir) ??
+      prevState.rawTabs.find((t) => isDraftTab(t) && t.workingDir) ??
       prevState.rawTabs.find((t) => t.id === prevState.activeTabId) ??
       prevState.rawTabs[0]
     const replacementTab = makeReplacementDraftTab(seedTab)
     for (const [tab, slot] of batchCloseSlots(prevState.rawTabs)) {
-      pushClosedTab(snapshotConversationTab(tab, slot))
+      pushClosedTab(snapshotStripTab(tab, slot))
     }
     set({ rawTabs: [replacementTab], activeTabId: replacementTab.id })
     recomputeTabs()
@@ -2032,7 +2266,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
     if (opts.move) {
       // A draft belongs to the group that spawned it (see `moveTabToGroup`);
       // plain split still seeds the new group with its own draft.
-      if (tab.conversationId == null) return
+      if (isDraftTab(tab)) return
       // Moving the group's only tab would just shift the group — pointless.
       const groupSize = st.rawTabs.filter(
         (t) =>
@@ -2131,7 +2365,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
     // without its slot and hand another a second. Reordering WITHIN the group is
     // unaffected (that path never reaches here). The UI hides both move
     // affordances for drafts; this backstops the programmatic path.
-    if (moving.conversationId == null) return
+    if (isDraftTab(moving)) return
 
     if (opts?.index == null) {
       // Menu move: only the assignment changes — the tab keeps its global
@@ -2288,6 +2522,136 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
     recomputeTabs()
   },
 
+  openSubagentTab: (target, opts) => {
+    const tabId = makeSubagentTabId(
+      target.parentConversationId,
+      target.toolCallId
+    )
+    const known = get().rawTabs.find((t) => t.id === tabId)
+    if (known) {
+      useFolderTabsStore.getState().activateScope(folderScope(known.folderId))
+      noteTabRequested(tabId)
+      // What the opener knows now (the sub-agent's id once its call settled)
+      // replaces what the tab was opened with; nothing it knew is dropped.
+      const merged = mergeSubagentTarget(known.subagent, target)
+      const pin = opts?.pin === true && !known.isPinned
+      if (pin || merged !== known.subagent) {
+        set({
+          rawTabs: get().rawTabs.map((t) =>
+            t.id === tabId
+              ? { ...t, subagent: merged, ...(pin ? { isPinned: true } : {}) }
+              : t
+          ),
+          activeTabId: tabId,
+        })
+        recomputeTabs()
+      } else {
+        focusTab(tabId)
+      }
+      runtime.activateConversationPane()
+      return tabId
+    }
+
+    const parentOf = (tabs: TabItemInternal[]) =>
+      tabs.find(
+        (t) =>
+          t.kind === "conversation" &&
+          t.conversationId === target.parentConversationId
+      )
+    const before = get()
+    const activeTab = before.rawTabs.find((t) => t.id === before.activeTabId)
+    const folderId =
+      opts?.folderId ??
+      parentOf(before.rawTabs)?.folderId ??
+      knownConversationRow(target.parentConversationId, "claude_code")
+        ?.folder_id ??
+      activeTab?.folderId ??
+      0
+    useFolderTabsStore.getState().activateScope(folderScope(folderId))
+
+    const prevState = get()
+    const parent = parentOf(prevState.rawTabs)
+    // Beside its parent, in the parent's group; else where new tabs land.
+    const targetGroup =
+      parent && isTabInScope(parent)
+        ? groupOfTab(prevState.groupOf, prevState.groupLayout, parent.id)
+        : resolveTargetGroup(prevState)
+    const pinned = opts?.pin === true
+    const newTab: TabItemInternal = {
+      id: tabId,
+      kind: "subagent",
+      folderId,
+      conversationId: null,
+      agentType: "claude_code",
+      title:
+        formatConversationTitle(opts?.title) ||
+        target.description ||
+        target.subagentType ||
+        runtime.labels.untitledConversation,
+      isPinned: pinned,
+      subagent: target,
+    }
+    let raw = prevState.rawTabs
+    // A parent shown as the group's preview is in use now: keep it.
+    if (parent && !parent.isPinned) {
+      raw = raw.map((t) => (t.id === parent.id ? { ...t, isPinned: true } : t))
+    }
+    let at: number | undefined
+    let replaced: string | null = null
+    if (!pinned) {
+      const previewIndex = raw.findIndex(
+        (t) =>
+          !t.isPinned &&
+          isTabInScope(t) &&
+          groupOfTab(prevState.groupOf, prevState.groupLayout, t.id) ===
+            targetGroup
+      )
+      if (previewIndex >= 0) {
+        replaced = raw[previewIndex].id
+        raw = raw.filter((t) => t.id !== replaced)
+        at = previewIndex
+      }
+    }
+    if (parent) {
+      const parentIndex = raw.findIndex((t) => t.id === parent.id)
+      if (parentIndex >= 0) at = parentIndex + 1
+    }
+    if (opts?.index != null) at = opts.index
+    set({
+      rawTabs: insertTab(raw, newTab, at),
+      activeTabId: tabId,
+      groupOf: { ...prevState.groupOf, [tabId]: targetGroup },
+      ...(replaced != null
+        ? {
+            previewReplacedTabIds: [
+              ...prevState.previewReplacedTabIds,
+              replaced,
+            ],
+          }
+        : {}),
+    })
+    recomputeTabs()
+    runtime.activateConversationPane()
+    return tabId
+  },
+
+  updateSubagentTab: (tabId, patch) => {
+    const prev = get().rawTabs
+    const tab = prev.find((t) => t.id === tabId)
+    if (!tab || !isSubagentTab(tab)) return
+    const subagent = mergeSubagentTarget(tab.subagent, patch)
+    const title = patch.title ? formatConversationTitle(patch.title) : ""
+    const next: TabItemInternal = {
+      ...tab,
+      subagent,
+      ...(title ? { title } : {}),
+      ...(patch.status !== undefined ? { status: patch.status } : {}),
+    }
+    if (sameDerivedTab(next, tab)) return
+    set({ rawTabs: prev.map((t) => (t.id === tabId ? next : t)) })
+    recomputeTabs()
+  },
+
   openNewConversationTab: (folderId, workingDir, options) => {
     // "New conversation" while a chat conversation is active resolves the active
     // (hidden) chat folder. Never pile a second conversation into a
@@ -2328,7 +2692,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
     const movingDraft =
       options?.retargetTabId != null
         ? get().rawTabs.find(
-            (t) => t.id === options.retargetTabId && t.conversationId == null
+            (t) => t.id === options.retargetTabId && isDraftTab(t)
           )
         : undefined
     if (!movingDraft) {
@@ -2354,7 +2718,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
       movingDraft ??
       prevState.rawTabs.find(
         (t) =>
-          t.conversationId == null &&
+          isDraftTab(t) &&
           isTabInScope(t) &&
           groupOfTab(prevState.groupOf, prevState.groupLayout, t.id) ===
             targetGroup
@@ -2456,7 +2820,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
     const movingDraft =
       options?.retargetTabId != null
         ? before.rawTabs.find(
-            (t) => t.id === options.retargetTabId && t.conversationId == null
+            (t) => t.id === options.retargetTabId && isDraftTab(t)
           )
         : undefined
     useFolderTabsStore.getState().activateScope("global")
@@ -2479,7 +2843,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
     const isTargetDraft = (t: TabItemInternal) =>
       movingDraft
         ? t.id === movingDraft.id
-        : t.conversationId == null && isTabInScope(t) && inTargetGroup(t)
+        : isDraftTab(t) && isTabInScope(t) && inTargetGroup(t)
     const existingDraft = st.rawTabs.find(isTargetDraft)
     const needsDisconnect =
       existingDraft != null &&
@@ -2594,7 +2958,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
       // already bound, retargeted, or left chat mode. Only patch a still-unbound
       // chat draft, and skip a redundant write to keep the reference stable.
       if (
-        tab.conversationId != null ||
+        !isDraftTab(tab) ||
         tab.isChat !== true ||
         tab.workingDir === workingDir
       ) {
@@ -2611,7 +2975,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
     const prev = get().rawTabs
     const next = prev.map((t) => {
       if (t.id !== tabId) return t
-      if (t.conversationId != null) return t // not a draft
+      if (!isDraftTab(t)) return t // not a draft
       if (t.agentType === agentType && !t.agentTypeProvisional) return t
       return { ...t, agentType, agentTypeProvisional: false }
     })
@@ -2624,7 +2988,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
     const prev = get().rawTabs
     const next = prev.map((t) => {
       if (t.id !== tabId) return t
-      if (t.conversationId != null) return t // not a draft
+      if (!isDraftTab(t)) return t // not a draft
       if (t.agentType === agentType && t.agentTypeProvisional) return t
       return { ...t, agentType, agentTypeProvisional: true }
     })
@@ -2847,7 +3211,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
               () =>
                 new Set(
                   get()
-                    .rawTabs.filter((tab) => tab.conversationId == null)
+                    .rawTabs.filter(isDraftTab)
                     .map((tab) => tab.id)
                 )
             )
@@ -3125,7 +3489,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
 
   correctDraftAgents: () => {
     const candidates = get().rawTabs.filter((tab) => {
-      if (tab.conversationId != null) return false
+      if (!isDraftTab(tab)) return false
       if (tab.agentTypeProvisional) return true
       if (!runtime.sortedAvailableAgents.includes(tab.agentType)) return true
       return false
@@ -3139,15 +3503,13 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
           null
         )
         const current = get().rawTabs.find((t) => t.id === tab.id)
-        if (!current || current.conversationId != null) return
+        if (!current || !isDraftTab(current)) return
 
         if (current.agentType === newAgent) {
           if (!current.agentTypeProvisional) return
           const prev = get().rawTabs
           const next = prev.map((t) =>
-            t.id === tab.id &&
-            t.conversationId == null &&
-            t.agentTypeProvisional
+            t.id === tab.id && isDraftTab(t) && t.agentTypeProvisional
               ? { ...t, agentTypeProvisional: false }
               : t
           )
@@ -3167,7 +3529,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
         const prev = get().rawTabs
         const target = prev.find((t) => t.id === tab.id)
         if (!target) return
-        if (target.conversationId != null) return
+        if (!isDraftTab(target)) return
         if (
           target.agentType !== expectedAgent &&
           !target.agentTypeProvisional
@@ -3249,7 +3611,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
         const rawTabs = get().rawTabs
         const target = rawTabs.find((tab) => tab.id === request.tabId)
         if (!target) return
-        if (target.conversationId != null) return
+        if (!isDraftTab(target)) return
         if (
           target.agentType !== request.expectedAgent &&
           !target.agentTypeProvisional
@@ -3317,7 +3679,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
     if (!st.tabsHydrated) return
     const active = st.rawTabs.find((t) => t.id === st.activeTabId)
     if (!active) return
-    if (active.conversationId == null) {
+    if (isDraftTab(active)) {
       saveLastActiveContext({
         folderId: active.folderId,
         isChat: active.isChat === true,
@@ -3374,7 +3736,7 @@ export function pruneOrphanDraftsOnce() {
   const { allFolders } = useAppWorkspaceStore.getState()
   const orphaned = st.rawTabs.filter(
     (tab) =>
-      tab.conversationId == null &&
+      (isDraftTab(tab) || isSubagentTab(tab)) &&
       tab.isChat !== true &&
       !allFolders.some((folder) => folder.id === tab.folderId)
   )
@@ -3450,6 +3812,8 @@ export function useTabActions() {
       bindConversationTab: s.bindConversationTab,
       setTabRuntimeConversationId: s.setTabRuntimeConversationId,
       reorderTabs: s.reorderTabs,
+      openSubagentTab: s.openSubagentTab,
+      updateSubagentTab: s.updateSubagentTab,
       consumeRemoteActivation: s.consumeRemoteActivation,
       onPreviewTabReplaced: s.onPreviewTabReplaced,
     }))
@@ -3610,7 +3974,7 @@ function applyRemoteSnapshot(change: TabsChanged) {
   // in-progress draft.
   const nextTabs = [...remoteTabs, ...unsyncedLocal]
   for (const localDraft of prev.rawTabs) {
-    if (localDraft.conversationId != null) continue
+    if (!isDraftTab(localDraft)) continue
     if (
       localDraft.isChat === true ||
       folders.some((f) => f.id === localDraft.folderId)
@@ -3618,6 +3982,20 @@ function applyRemoteSnapshot(change: TabsChanged) {
       nextTabs.push(localDraft)
     }
   }
+  // Sub-agent tabs are device-local too, and each goes back right after the
+  // tab it followed (most often its parent), not to the end of the strip.
+  prev.rawTabs.forEach((local, i) => {
+    if (!isSubagentTab(local)) return
+    let at = 0
+    for (let j = i - 1; j >= 0; j--) {
+      const k = nextTabs.findIndex((tb) => tb.id === prev.rawTabs[j].id)
+      if (k >= 0) {
+        at = k + 1
+        break
+      }
+    }
+    nextTabs.splice(at, 0, local)
+  })
 
   // Never leave the workspace blank: synthesize a draft when empty.
   if (nextTabs.length === 0) {

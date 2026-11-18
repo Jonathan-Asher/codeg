@@ -508,6 +508,50 @@ async fn get_folder_conversation_accepts_turn_window_params() {
 // Pinned-section reorder
 // ────────────────────────────────────────────────────────────────────────────
 
+/// A Claude Code sub-agent's thread is served over HTTP too (server mode):
+/// `null` while there is none to read, and a typed error for a conversation of
+/// another agent.
+#[tokio::test]
+async fn claude_subagent_thread_is_served_in_server_mode() {
+    let (server, state, _data, _static) = build_test_server_with_state().await;
+    let folder_id = codeg_lib::db::service::folder_service::add_folder(
+        &state.db.conn,
+        "/tmp/codeg-subagent-route-test",
+    )
+    .await
+    .expect("seed folder")
+    .id;
+    let create = |agent| {
+        codeg_lib::commands::conversations::create_conversation_core(
+            &state.db.conn,
+            folder_id,
+            agent,
+            None,
+        )
+    };
+    let claude = create(codeg_lib::models::AgentType::ClaudeCode)
+        .await
+        .expect("create conversation");
+    let codex = create(codeg_lib::models::AgentType::Codex)
+        .await
+        .expect("create conversation");
+
+    let resp = server
+        .post("/api/get_claude_subagent_thread")
+        .add_header("authorization", format!("Bearer {TEST_TOKEN}"))
+        .json(&json!({ "conversationId": claude, "toolCallId": "toolu_01" }))
+        .await;
+    assert_eq!(resp.status_code(), 200);
+    assert_eq!(resp.json::<Value>(), Value::Null);
+
+    let resp = server
+        .post("/api/get_claude_subagent_thread")
+        .add_header("authorization", format!("Bearer {TEST_TOKEN}"))
+        .json(&json!({ "conversationId": codex, "toolCallId": "toolu_01", "agentId": "a1" }))
+        .await;
+    assert!(resp.status_code().is_client_error());
+}
+
 async fn pin_order_of(state: &AppState, conversation_id: i32) -> Option<i32> {
     codeg_lib::db::service::conversation_service::get_by_id(&state.db.conn, conversation_id)
         .await

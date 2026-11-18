@@ -384,6 +384,10 @@ pub fn build_router_with_proxy_auth(
             post(handlers::message_search::message_search),
         )
         .route(
+            "/get_claude_subagent_thread",
+            post(handlers::conversations::get_claude_subagent_thread),
+        )
+        .route(
             "/get_conversation_saved_turns",
             post(handlers::message_search::get_conversation_saved_turns),
         )

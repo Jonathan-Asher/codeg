@@ -10,7 +10,7 @@ import {
 } from "react"
 import { Reorder, useMotionValue } from "motion/react"
 import type { PanInfo } from "motion/react"
-import { X } from "lucide-react"
+import { BotIcon, X } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { cn, handleMiddleClickClose } from "@/lib/utils"
@@ -494,6 +494,13 @@ export const TabItem = memo(function TabItem({
               activity={dotActivity}
               title={dotTitle || undefined}
             />
+            {/* A sub-agent's thread, read-only: said by its icon. */}
+            {tab.kind === "subagent" ? (
+              <BotIcon
+                aria-label={t("subagentTab")}
+                className="size-3.5 shrink-0 text-muted-foreground"
+              />
+            ) : null}
             {isCritical ? <CriticalFlag /> : null}
             {isTalk ? <TalkBadge /> : null}
             <span

@@ -769,8 +769,9 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
         const folderInfo = folderIndex.get(tab.folderId)
         // Drafts are group-bound: no cross-group drag, no move / split-and-move
         // menu items. Within-group sorting (the Reorder.Group itself) is
-        // untouched. See `moveTabToGroup` for why.
-        const isDraft = tab.conversationId == null
+        // untouched. See `moveTabToGroup` for why. A sub-agent's tab has no
+        // conversation either, and is no draft: it moves like a session's.
+        const isDraft = tab.conversationId == null && tab.kind !== "subagent"
         // Neighbours of the active tab inset their workspace-bg baseline so the
         // active tab's transparent reverse-corner foot (which flares over them)
         // doesn't leave a stray line under it (globals.css `data-adjacent-active`).

@@ -159,6 +159,11 @@ export interface AgentExecutionStats {
    *  session" action — `getConversation` resolves it even though the session is
    *  hidden from the sidebar. Absent for every other agent. */
   child_session_id?: string | null
+  /** Claude Code: the sub-agent's `agentId`, set only when its own transcript
+   *  (`<session>/subagents/agent-<id>.jsonl`) was on disk when the card was
+   *  parsed. Lets the Agent card open that thread in a tab of its own. Absent
+   *  for every other agent. */
+  subagent_id?: string | null
 }
 
 /**
@@ -1225,6 +1230,22 @@ export type CanvasBoardChange =
   | { kind: "deleted"; id: number }
 
 export const CANVAS_BOARD_CHANGED_EVENT = "canvas-board://changed"
+
+/**
+ * A Claude Code sub-agent's own thread (`get_claude_subagent_thread`): its
+ * transcript in the shape a session's tab renders, and whether it is still at
+ * work. `detail.summary` is the parent session's row re-labelled for the
+ * sub-agent — no `external_id`, `parent_id` naming the session.
+ */
+export interface ClaudeSubagentThread {
+  agent_id: string
+  subagent_type?: string | null
+  description?: string | null
+  running: boolean
+  /** The title of the session it is a sub-agent of. */
+  parent_title?: string | null
+  detail: DbConversationDetail
+}
 
 export interface DbConversationDetail {
   summary: DbConversationSummary
