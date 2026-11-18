@@ -970,11 +970,11 @@ const ConversationTabView = memo(function ConversationTabView({
   })
   const { status: connStatus, sessionId: connSessionId } = conn
 
-  // `/btw` side questions: only on a Claude Code session whose adapter answers
-  // them (codeg's own claude-agent-acp build). The panel's state lives with
-  // the conversation, so it survives the tab being hidden or remounted.
-  const sideQuestionSupported =
-    selectedAgent === "claude_code" && conn.sideQuestionSupported
+  // `/btw` side questions: on any session whose adapter answers them, i.e.
+  // advertises `_meta.codeg.sideQuestion` (codeg's own claude-agent-acp and
+  // pi-acp builds). The panel's state lives with the conversation, so it
+  // survives the tab being hidden or remounted.
+  const sideQuestionSupported = conn.sideQuestionSupported
   const sideQuestion = useSideQuestion({
     scope:
       dbConversationId != null ? `conv:${dbConversationId}` : `tab:${tabId}`,
