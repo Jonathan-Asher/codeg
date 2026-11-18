@@ -114,6 +114,7 @@ import { Input } from "@/components/ui/input"
 import { ConversationStatusDot } from "./conversation-status-dot"
 import { SessionDetailsDialog } from "./session-details-dialog"
 import { MoveToProjectDialog, canMoveToProject } from "./move-to-project-dialog"
+import { ContinueInAgentMenuItem } from "./continue-in-agent-menu-item"
 import { SidebarConversationHoverDetails } from "./sidebar-conversation-hover-details"
 import { SessionActivityIcon, useBackgroundTitle } from "./session-activity"
 import { limitPauseReason, limitStopReason } from "@/lib/limit-continue"
@@ -1087,6 +1088,14 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                 <FolderInput className="h-4 w-4" />
                 {tMove("menuLabel")}
               </ContextMenuItem>
+            )}
+            {/* A new session on another agent picks the work up (a
+                sub-session goes on with its parent). */}
+            {conversation.parent_id == null && (
+              <ContinueInAgentMenuItem
+                conversationId={conversation.id}
+                item={ContextMenuItem}
+              />
             )}
             {onTogglePin && (
               <ContextMenuItem

@@ -710,6 +710,12 @@ export interface DbConversationSummary {
    * the tag store and skip unknown ones rather than trusting the count.
    */
   tag_ids?: number[]
+  /** "Continue in another agent": the conversation this one continues, whose
+   *  agent wrote it a handoff (see `lib/continue-in-agent.ts`). Draws the
+   *  "Continued from …" banner here and, read the other way round, the
+   *  "Continued in …" one on the old conversation. Absent when it continues
+   *  nothing, and from a server that predates it. */
+  continued_from_id?: number | null
 }
 
 /** One item running for a live session (Rust

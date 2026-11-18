@@ -152,8 +152,56 @@ async fn create_inner(
         assistant_id: Set(assistant_id),
         assistant_snapshot: Set(assistant_snapshot),
         source: Set(None),
+        continued_from_id: Set(None),
     };
     Ok(model.insert(conn).await?)
+}
+
+/// "Continue in another agent": record that `conversation_id` continues
+/// `continued_from_id`, right after the new conversation's row was created
+/// (a new chat only becomes a row on its first send, which is where the
+/// create calls this). Whether the link was written: a source that is gone
+/// (deleted, or never there) or the conversation itself leaves the row
+/// unlinked instead of failing the create — the first message must still go
+/// out.
+///
+/// In the source's own folder the new row also takes the source's
+/// `origin_cwd`, so a session that runs somewhere other than its folder's
+/// path is continued — and reopened later — in that same directory.
+///
+/// Not activity: `updated_at` stays as the create left it.
+pub async fn record_continuation(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    continued_from_id: i32,
+) -> Result<bool, DbError> {
+    if conversation_id == continued_from_id {
+        return Ok(false);
+    }
+    let Some(source) = conversation::Entity::find_by_id(continued_from_id)
+        .filter(conversation::Column::DeletedAt.is_null())
+        .one(conn)
+        .await?
+    else {
+        return Ok(false);
+    };
+    let Some(row) = conversation::Entity::find_by_id(conversation_id)
+        .filter(conversation::Column::DeletedAt.is_null())
+        .one(conn)
+        .await?
+    else {
+        return Ok(false);
+    };
+    let inherit_cwd = row.folder_id == source.folder_id
+        && row.origin_cwd.is_none()
+        && source.origin_cwd.is_some();
+    let mut active: conversation::ActiveModel = row.into();
+    active.continued_from_id = Set(Some(continued_from_id));
+    if inherit_cwd {
+        active.origin_cwd = Set(source.origin_cwd);
+    }
+    active.update(conn).await?;
+    Ok(true)
 }
 
 pub async fn update_status(
@@ -2628,6 +2676,7 @@ impl CarriedOverRow {
             assistant_id: Set(self.assistant_id),
             assistant_snapshot: Set(self.assistant_snapshot),
             source: Set(self.source),
+            continued_from_id: Set(None),
         }
     }
 }
@@ -3109,6 +3158,7 @@ fn conv_to_summary(r: conversation::Model) -> DbConversationSummary {
         source: r.source,
         // Backfilled by `fill_summary_extras`, like `child_count`.
         tag_ids: Vec::new(),
+        continued_from_id: r.continued_from_id,
     }
 }
 

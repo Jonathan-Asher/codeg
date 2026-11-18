@@ -10,6 +10,7 @@ import {
   useState,
   useSyncExternalStore,
   type ComponentProps,
+  type ReactNode,
 } from "react"
 import {
   isLiveTurnId,
@@ -351,6 +352,12 @@ interface MessageListViewProps {
    * referentially stable while its contents are unchanged.
    */
   liveRuns?: LiveRunsSource | null
+  /** Shown above the first message once the thread's start is loaded (the
+   *  "Continued from …" banner). Must be referentially stable. */
+  threadHeader?: ReactNode
+  /** Shown below the last message (the "Continued in …" banner). Must be
+   *  referentially stable. */
+  threadFooter?: ReactNode
 }
 
 /** What `MessageListView` lists under its "N running" chip. */
@@ -1839,6 +1846,8 @@ export function MessageListView({
   onEditUserMessage,
   hasQueuedMessages = false,
   liveRuns = null,
+  threadHeader = null,
+  threadFooter = null,
 }: MessageListViewProps) {
   const t = useTranslations("Folder.chat.messageList")
   const sharedT = useTranslations("Folder.chat.shared")
@@ -3334,6 +3343,8 @@ export function MessageListView({
             prependEpoch={session?.olderTurnsPrependEpoch ?? 0}
             prependScopeKey={conversationId}
             onViewportTopChange={navDemanded ? setViewportTop : undefined}
+            header={threadHeader}
+            footer={threadFooter}
           />
           {/* Stacked, not overlapping: both pin to the thread's bottom centre,
           so the scroll button steps up while the pill is showing. */}

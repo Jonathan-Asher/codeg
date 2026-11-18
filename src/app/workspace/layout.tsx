@@ -96,6 +96,7 @@ import { FileWorkspaceTabBar } from "@/components/files/file-workspace-tab-bar"
 import { FileWorkspaceHeader } from "@/components/files/file-workspace-header"
 import { FileWorkspacePanel } from "@/components/files/file-workspace-panel"
 import { ExternalConflictDialog } from "@/components/files/external-conflict-dialog"
+import { ContinueInAgentHost } from "@/components/conversations/continue-in-agent-dialog"
 import { AppToaster } from "@/components/ui/app-toaster"
 import { WorkspaceTransfersToasts } from "@/components/layout/workspace-transfers"
 import { AutoResumeToasts } from "@/components/layout/auto-resume-toasts"
@@ -1641,6 +1642,14 @@ function WorkspaceLayoutInner({ children }: { children: React.ReactNode }) {
                         variant="silent"
                       >
                         <ExternalConflictDialog />
+                      </AppErrorBoundary>
+                      {/* One for the window: the tab, header and sidebar
+                            menus all open it. */}
+                      <AppErrorBoundary
+                        scope="continue-in-agent-dialog"
+                        variant="silent"
+                      >
+                        <ContinueInAgentHost />
                       </AppErrorBoundary>
                       <SidebarProvider>
                         <AuxPanelProvider>

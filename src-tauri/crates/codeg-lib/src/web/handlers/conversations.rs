@@ -295,6 +295,9 @@ pub struct CreateConversationParams {
     pub folder_id: i32,
     pub agent_type: AgentType,
     pub title: Option<String>,
+    /// "Continue in another agent": the conversation this one continues.
+    #[serde(default)]
+    pub continued_from_id: Option<i32>,
 }
 
 pub async fn create_conversation(
@@ -302,11 +305,12 @@ pub async fn create_conversation(
     Json(params): Json<CreateConversationParams>,
 ) -> Result<Json<i32>, AppCommandError> {
     let db = &state.db;
-    let result = conv_commands::create_conversation_core(
+    let result = conv_commands::create_continuing_conversation_core(
         &db.conn,
         params.folder_id,
         params.agent_type,
         params.title,
+        params.continued_from_id,
     )
     .await?;
     conv_commands::emit_conversation_upsert(&state.emitter, &db.conn, result).await;
@@ -321,6 +325,9 @@ pub struct CreateChatConversationParams {
     /// Reuse an eagerly-created scratch dir (from `create_chat_dir`) instead of
     /// minting a new one, so the ACP cwd stays put across the first send.
     pub existing_dir: Option<String>,
+    /// "Continue in another agent": the conversation this one continues.
+    #[serde(default)]
+    pub continued_from_id: Option<i32>,
 }
 
 pub async fn create_chat_conversation(
@@ -335,6 +342,12 @@ pub async fn create_chat_conversation(
         params.existing_dir.as_deref(),
     )
     .await?;
+    conv_commands::link_new_conversation_continuation(
+        &state.db.conn,
+        result.conversation_id,
+        params.continued_from_id,
+    )
+    .await;
     conv_commands::emit_conversation_upsert(&state.emitter, &state.db.conn, result.conversation_id)
         .await;
     Ok(Json(result))

@@ -115,7 +115,9 @@ describe("the session column reads the variable", () => {
     // The dock: the question card, the plan card, the composer banner, the
     // Talk dock, the feedback notes and the composer.
     ["src/components/chat/conversation-shell.tsx", 6],
-    ["src/components/message/virtualized-message-thread.tsx", 3],
+    // The rows, the loader row, and the header / footer row (the
+    // "Continued from / in" banners).
+    ["src/components/message/virtualized-message-thread.tsx", 4],
     ["src/components/conversations/conversation-detail-panel.tsx", 2],
     ["src/components/chat/pi-project-trust-banner.tsx", 1],
     ["src/components/chat/session-config-stale-banner.tsx", 1],

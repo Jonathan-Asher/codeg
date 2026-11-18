@@ -41,6 +41,14 @@ const VIEWPORT_END_SLACK_PX = 2
 
 /** The loader row's place among the rows virtua draws (see `hasOlder`). */
 const LOAD_OLDER_ROW = Symbol("load-older-row")
+/** The header's and footer's places among those rows (see `header`). */
+const THREAD_HEADER_ROW = Symbol("thread-header-row")
+const THREAD_FOOTER_ROW = Symbol("thread-footer-row")
+type ThreadRow<T> =
+  | T
+  | typeof LOAD_OLDER_ROW
+  | typeof THREAD_HEADER_ROW
+  | typeof THREAD_FOOTER_ROW
 
 /** Room (rem, so it follows the app zoom) left above a part of a row that
  *  `revealFromAbove` brings into view, so it does not land on the edge. */
@@ -186,6 +194,16 @@ interface VirtualizedMessageThreadProps<T> {
    * a fling costs a lookup per frame at most; omit it and nothing is measured.
    */
   onViewportTopChange?: (top: ViewportTop) => void
+  /**
+   * A row above the first item, shown only once nothing older is left to
+   * load (it marks the thread's start — the "Continued from …" banner). It
+   * takes the loader row's place, index 0. Must be referentially stable:
+   * this component is memoized.
+   */
+  header?: ReactNode
+  /** A row below the last item (the "Continued in …" banner). Must be
+   *  referentially stable. */
+  footer?: ReactNode
 }
 
 /** Frames over which a chat-text-size scroll anchor is re-applied. */
@@ -262,6 +280,8 @@ function VirtualizedMessageThreadImpl<T>({
   prependEpoch = 0,
   prependScopeKey,
   onViewportTopChange,
+  header = null,
+  footer = null,
 }: VirtualizedMessageThreadProps<T>) {
   const { scrollRef, state: stickState, stopScroll } = useStickToBottomContext()
   const virtualizerHandleRef = useRef<VirtualizerHandle>(null)
@@ -271,7 +291,11 @@ function VirtualizedMessageThreadImpl<T>({
   // targets (computed over `items`) keep landing on the right row. Mirrored
   // into a ref post-commit (see the sync effect below); scrollToIndex only
   // runs from user interactions, so it always reads a committed value.
-  const rowOffset = hasOlder ? 1 : 0
+  // The header row only marks the thread's start: while older history is
+  // still to load, the loader row sits there instead.
+  const showHeader = !hasOlder && header != null && header !== false
+  const showFooter = footer != null && footer !== false
+  const rowOffset = hasOlder || showHeader ? 1 : 0
   const rowOffsetRef = useRef(rowOffset)
 
   const scrollToIndex = useCallback<MessageScrollContextValue["scrollToIndex"]>(
@@ -392,10 +416,14 @@ function VirtualizedMessageThreadImpl<T>({
     const handle = virtualizerHandleRef.current
     if (!report || !handle) return
     const offset = handle.scrollOffset
+    // Never past the last item: the footer row is not one.
     const index = Math.max(
       0,
-      handle.findItemIndex(offset + VIEWPORT_TOP_PROBE_PX) -
-        rowOffsetRef.current
+      Math.min(
+        itemsRef.current.items.length - 1,
+        handle.findItemIndex(offset + VIEWPORT_TOP_PROBE_PX) -
+          rowOffsetRef.current
+      )
     )
     const atEnd =
       offset + handle.viewportSize >= handle.scrollSize - VIEWPORT_END_SLACK_PX
@@ -459,7 +487,10 @@ function VirtualizedMessageThreadImpl<T>({
         findItemIndex: (at) => handle.findItemIndex(at),
       })
       const { items, getItemKey } = itemsRef.current
-      const index = row === null ? -1 : Math.max(0, row - rowOffsetRef.current)
+      const index =
+        row === null
+          ? -1
+          : Math.min(items.length - 1, Math.max(0, row - rowOffsetRef.current))
       const item = items[index]
       const key = item === undefined ? null : getItemKey(item, index)
       setKeepFromKey((current) => (current === key ? current : key))
@@ -639,12 +670,31 @@ function VirtualizedMessageThreadImpl<T>({
   // render — a reply streaming into a long thread re-renders the thread on
   // every batch, and drawing every row of it each time only for virtua to
   // drop all but the few on screen cost a pass over the whole thread.
-  const rows = useMemo<(T | typeof LOAD_OLDER_ROW)[]>(
-    () => (hasOlder ? [LOAD_OLDER_ROW, ...items] : items),
-    [hasOlder, items]
-  )
+  const rows = useMemo<ThreadRow<T>[]>(() => {
+    const lead: ThreadRow<T>[] = hasOlder
+      ? [LOAD_OLDER_ROW]
+      : showHeader
+        ? [THREAD_HEADER_ROW]
+        : []
+    const tail: ThreadRow<T>[] = showFooter ? [THREAD_FOOTER_ROW] : []
+    if (lead.length === 0 && tail.length === 0) return items
+    return [...lead, ...items, ...tail]
+  }, [hasOlder, showHeader, showFooter, items])
   const total = items.length
-  const renderRow = (row: T | typeof LOAD_OLDER_ROW, index: number) => {
+  const renderRow = (row: ThreadRow<T>, index: number) => {
+    if (row === THREAD_HEADER_ROW || row === THREAD_FOOTER_ROW) {
+      const isHeader = row === THREAD_HEADER_ROW
+      return (
+        <div
+          key={isHeader ? "thread-header-row" : "thread-footer-row"}
+          style={isHeader ? styles.first : styles.last}
+        >
+          <div className={cn("mx-auto chat-content-w px-4", className)}>
+            {isHeader ? header : footer}
+          </div>
+        </div>
+      )
+    }
     if (row === LOAD_OLDER_ROW) {
       return (
         <div key="load-older-row" style={styles.first}>

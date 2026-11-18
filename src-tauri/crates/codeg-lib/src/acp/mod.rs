@@ -25,6 +25,7 @@ pub mod codex_runtime;
 pub mod command_code;
 pub mod computer_tools;
 pub mod connection;
+pub mod continuation;
 pub mod cursor_acp_retry_compat;
 pub mod cursor_ext;
 pub mod custom_registry;

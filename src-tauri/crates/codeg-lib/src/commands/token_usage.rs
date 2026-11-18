@@ -1423,6 +1423,7 @@ mod tests {
                 source: None,
                 assistant_name: None,
                 tag_ids: Vec::new(),
+                continued_from_id: None,
             },
             turns,
             session_stats: stats,

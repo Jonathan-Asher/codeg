@@ -1654,6 +1654,7 @@ mod tests {
             assistant_name: None,
             source: None,
             tag_ids: Vec::new(),
+            continued_from_id: None,
         }
     }
 }

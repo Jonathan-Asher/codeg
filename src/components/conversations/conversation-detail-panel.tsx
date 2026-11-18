@@ -59,6 +59,15 @@ import {
   takeComposerPrefill,
 } from "@/lib/composer-prefill-handoff"
 import { startSessionFromSavedHistory } from "@/lib/saved-history"
+import {
+  clearContinuationLink,
+  peekContinuationLink,
+} from "@/lib/continuation-links"
+import {
+  ContinuedFromBanner,
+  ContinuedInBanner,
+  useContinuationLinks,
+} from "@/components/conversations/continuation-banners"
 import { HistoryUnavailableView } from "@/components/conversations/history-unavailable-view"
 import { useConnectionLifecycle } from "@/hooks/use-connection-lifecycle"
 import {
@@ -2173,6 +2182,9 @@ const ConversationTabView = memo(function ConversationTabView({
       const title = promptDraftTitleSeed(draft, sharedT("attachedResources"))
       const chatSend = sendOwnTab?.isChat === true
       const chatExistingDir = sendOwnTab?.workingDir
+      // "Continue in another agent": this draft continues another session,
+      // and its row records which one as it is created.
+      const continuedFromId = peekContinuationLink(tabId)
 
       void (async () => {
         try {
@@ -2184,7 +2196,8 @@ const ConversationTabView = memo(function ConversationTabView({
             const res = await createChatConversation(
               selectedAgent,
               title,
-              chatExistingDir
+              chatExistingDir,
+              continuedFromId
             )
             newConversationId = res.conversationId
             sendFolderId = res.folderId
@@ -2218,7 +2231,8 @@ const ConversationTabView = memo(function ConversationTabView({
             newConversationId = await createConversation(
               folderId,
               selectedAgent,
-              title
+              title,
+              continuedFromId
             )
             dbConvIdRef.current = newConversationId
             // Set external ID on the stable virtual session (no migration needed —
@@ -2245,6 +2259,7 @@ const ConversationTabView = memo(function ConversationTabView({
             )
           }
           clearMessageInputDraft(buildNewConversationDraftStorageKey(tabId))
+          clearContinuationLink(tabId)
           refreshConversations()
 
           // Now that the row exists, kick off the actual prompt with the
@@ -3765,6 +3780,25 @@ const ConversationTabView = memo(function ConversationTabView({
     ]
   )
 
+  // "Continue in another agent": the banners linking this conversation to
+  // the one it continues (at its start) and the one continuing it (at its
+  // end). Memoized nodes: the virtualized thread is memoized on them.
+  const continuationLinks = useContinuationLinks(dbConversationId ?? null)
+  const continuedFrom = continuationLinks.from
+  const continuedInto = continuationLinks.into
+  const continuationHeader = useMemo(
+    () =>
+      continuedFrom ? (
+        <ContinuedFromBanner conversation={continuedFrom} />
+      ) : null,
+    [continuedFrom]
+  )
+  const continuationFooter = useMemo(
+    () =>
+      continuedInto ? <ContinuedInBanner conversation={continuedInto} /> : null,
+    [continuedInto]
+  )
+
   const messageListNode = (
     <GoalControlProvider value={goalControlValue}>
       <ActivityLiveProvider value={activityLive}>
@@ -3841,6 +3875,8 @@ const ConversationTabView = memo(function ConversationTabView({
               : undefined
           }
           hasQueuedMessages={msgQueue.length > 0}
+          threadHeader={continuationHeader}
+          threadFooter={continuationFooter}
         />
       </ActivityLiveProvider>
     </GoalControlProvider>

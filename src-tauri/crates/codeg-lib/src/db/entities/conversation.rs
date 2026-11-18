@@ -282,6 +282,14 @@ pub struct Model {
     /// value from a newer build never stops an older one decoding the row.
     /// See `m20261017_000002_conversation_source`.
     pub source: Option<String>,
+    /// "Continue in another agent": the conversation this one picked the work
+    /// up from — another agent wrote it a handoff, which this one's first
+    /// message carried. Written once, when this row is created
+    /// (`conversation_service::record_continuation`); `None` for every other
+    /// row. Unrelated to `parent_id`, which only a delegation sets. The
+    /// reverse link (the old conversation's "Continued in …") is read off the
+    /// rows that name it.
+    pub continued_from_id: Option<i32>,
 }
 
 /// [`Model::source`] of a conversation a `codeg-cli` run started.

@@ -21,6 +21,7 @@ import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { CriticalFlag } from "@/components/conversations/critical-flag"
 import { TalkBadge } from "@/components/conversations/talk-badge"
 import { useTalkMenu } from "@/components/talk-voice/use-talk-menu"
+import { ContinueInAgentMenuItem } from "@/components/conversations/continue-in-agent-menu-item"
 import {
   acquireDragSelectionGuard,
   releaseDragSelectionGuard,
@@ -547,6 +548,17 @@ export const TabItem = memo(function TabItem({
             {t("closeOthers")}
           </ContextMenuItem>
           <ContextMenuSeparator />
+          {/* Hand the work to a new session on another agent. A
+              sub-session goes on with its parent. */}
+          {conversationId != null && !isSubsession && (
+            <>
+              <ContinueInAgentMenuItem
+                conversationId={conversationId}
+                item={ContextMenuItem}
+              />
+              <ContextMenuSeparator />
+            </>
+          )}
           {conversationId != null &&
             (!isSubsession || isCritical || isTalk || talkMenu.showEndTalk) && (
               <>
