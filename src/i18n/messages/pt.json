@@ -4075,6 +4075,9 @@
         "mentionGroupSkill": "Habilidades",
         "btwDescription": "Fazer uma pergunta à parte: respondida a partir desta conversa, sem ferramentas, enquanto o agente continua trabalhando, e não adicionada à conversa",
         "btwHint": "pergunta",
+        "btwUnsupported": "Este agente não responde a perguntas à parte /btw. Nada foi enviado.",
+        "btwNotReady": "As perguntas à parte /btw ficam disponíveis quando a sessão estiver conectada. Nada foi enviado.",
+        "btwQueueEdit": "Uma pergunta à parte /btw não pode esperar na fila. Faça-a pela caixa de texto.",
         "suggestionTabHint": "Tab",
         "mentionGroupAssistant": "Assistentes"
       },
@@ -4393,6 +4396,7 @@
         "editBusy": "Não é possível editar enquanto há um turno em andamento",
         "editQueued": "Não é possível editar enquanto há mensagens esperando na fila",
         "editNotReady": "Ainda não é possível editar esta mensagem; tente novamente em instantes",
+        "editSideQuestion": "Uma pergunta à parte /btw não pode ser enviada como mensagem",
         "editHint": "Salvar inicia um novo ramo a partir daqui. A conversa original fica na barra lateral, e as alterações em arquivos não são desfeitas.",
         "editHintInPlace": "Salvar continua esta conversa a partir daqui com a mensagem editada, no lugar da original. As alterações em arquivos não são desfeitas.",
         "editHintNewConversation": "Esta é a primeira mensagem, então salvar inicia uma nova conversa com ela. Esta continua como está, e as alterações em arquivos não são desfeitas.",
@@ -9240,6 +9244,7 @@
       "noFiles": "O que você soltou não tem nenhum arquivo de imagem. Copie a imagem e cole-a."
     },
     "hint": "Enter para enviar · Shift+Enter para nova linha · Esc para ocultar",
+    "btwUnsupported": "O Quick Ask não responde a perguntas à parte /btw. Nada foi enviado.",
     "actions": {
       "newQuestion": "Nova pergunta",
       "openInCodeg": "Abrir no codeg",

@@ -3652,11 +3652,216 @@ describe("MessageInput side questions and prompt suggestions", () => {
     expect(onSend).not.toHaveBeenCalled()
   })
 
-  it("sends /btw as an ordinary message where side questions are off", async () => {
-    const { handle, editor, onSend } = await mount()
+  it.each(["/BTW", "/Btw", "  /bTw"])(
+    "takes %s as the side question too",
+    async (command) => {
+      const onSideQuestion = vi.fn()
+      const onEnqueue = vi.fn()
+      const { handle, editor, onSend } = await mount({
+        onSideQuestion,
+        onEnqueue,
+      })
+      act(() => handle.setText(`${command} מה העלות של בוררות כזאת?`))
+      press(editor, "Enter")
+      expect(onSideQuestion).toHaveBeenCalledWith("מה העלות של בוררות כזאת?")
+      expect(onSend).not.toHaveBeenCalled()
+      expect(onEnqueue).not.toHaveBeenCalled()
+    }
+  )
+
+  it("asks a capitalised /BTW mid-turn without queueing it behind the turn", async () => {
+    const onSideQuestion = vi.fn()
+    const onEnqueue = vi.fn()
+    const { handle, editor, onSend } = await mount({
+      onSideQuestion,
+      onEnqueue,
+      isPrompting: true,
+      onCancel: vi.fn(),
+    })
+    act(() => handle.setText("/BTW what does it cost?"))
+    press(editor, "Enter")
+    expect(onSideQuestion).toHaveBeenCalledWith("what does it cost?")
+    expect(onEnqueue).not.toHaveBeenCalled()
+    expect(onSend).not.toHaveBeenCalled()
+    await waitFor(() => expect(handle.getText()).toBe(""))
+  })
+
+  it("leaves /btwx and a /btw inside the text as ordinary messages", async () => {
+    const onSideQuestion = vi.fn()
+    const { handle, editor, onSend } = await mount({ onSideQuestion })
+    act(() => handle.setText("/BTWX hello"))
+    press(editor, "Enter")
+    act(() => handle.setText("so /btw is a command"))
+    press(editor, "Enter")
+    expect(onSideQuestion).not.toHaveBeenCalled()
+    expect(onSend).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps /btw in the composer with a notice where side questions are off", async () => {
+    const onEnqueue = vi.fn()
+    const { handle, editor, onSend } = await mount({
+      agentType: "codex",
+      onEnqueue,
+    })
     act(() => handle.setText("/btw hello"))
     press(editor, "Enter")
-    expect(onSend).toHaveBeenCalledTimes(1)
+    expect(onSend).not.toHaveBeenCalled()
+    expect(onEnqueue).not.toHaveBeenCalled()
+    expect(handle.getText()).toBe("/btw hello")
+    expect(screen.getByTestId("composer-btw-notice")).toHaveTextContent(
+      MI.btwUnsupported
+    )
+    // Editing the text takes the notice away.
+    act(() => {
+      editor.commands.insertContent("!")
+    })
+    expect(screen.queryByTestId("composer-btw-notice")).toBeNull()
+  })
+
+  it("never queues /btw behind a running turn on an agent without side questions", async () => {
+    const onEnqueue = vi.fn()
+    const { handle, editor, onSend } = await mount({
+      agentType: "codex",
+      isPrompting: true,
+      onCancel: vi.fn(),
+      onEnqueue,
+    })
+    act(() => handle.setText("/BTW what now?"))
+    press(editor, "Enter")
+    expect(onEnqueue).not.toHaveBeenCalled()
+    expect(onSend).not.toHaveBeenCalled()
+    expect(handle.getText()).toBe("/BTW what now?")
+    expect(screen.getByTestId("composer-btw-notice")).toHaveTextContent(
+      MI.btwUnsupported
+    )
+  })
+
+  it("says to wait for the connection while a Claude Code session opens", async () => {
+    const onEnqueue = vi.fn()
+    const { handle, editor, onSend } = await mount({
+      agentType: "claude_code",
+      queueSends: true,
+      onEnqueue,
+    })
+    act(() => handle.setText("/btw is it up?"))
+    press(editor, "Enter")
+    expect(onEnqueue).not.toHaveBeenCalled()
+    expect(onSend).not.toHaveBeenCalled()
+    expect(handle.getText()).toBe("/btw is it up?")
+    expect(screen.getByTestId("composer-btw-notice")).toHaveTextContent(
+      MI.btwNotReady
+    )
+  })
+
+  it("does not save /btw into a queued message being edited", async () => {
+    const onSaveQueueEdit = vi.fn()
+    const onSideQuestion = vi.fn()
+    const { handle, editor, onSend } = await mount({
+      onSideQuestion,
+      isEditingQueueItem: true,
+      editingItemId: "q1",
+      onSaveQueueEdit,
+      onCancelQueueEdit: vi.fn(),
+    })
+    act(() => handle.setText("/btw instead"))
+    press(editor, "Enter")
+    expect(onSaveQueueEdit).not.toHaveBeenCalled()
+    expect(onSideQuestion).not.toHaveBeenCalled()
+    expect(onSend).not.toHaveBeenCalled()
+    expect(handle.getText()).toBe("/btw instead")
+    expect(screen.getByTestId("composer-btw-notice")).toHaveTextContent(
+      MI.btwQueueEdit
+    )
+  })
+
+  describe("mid-turn insert and queue paths", () => {
+    async function mountPrompting(
+      props: Partial<React.ComponentProps<typeof MessageInput>> = {}
+    ) {
+      return mount({
+        isPrompting: true,
+        disabled: true,
+        onCancel: vi.fn(),
+        onEnqueue: vi.fn(),
+        steerChannel: "native",
+        ...props,
+      })
+    }
+
+    it.each([
+      ["with side questions", true],
+      ["without side questions", false],
+    ])("never steers /btw into the turn %s", async (_label, supported) => {
+      const user = userEvent.setup()
+      const onSteer = vi.fn().mockResolvedValue(undefined)
+      const onEnqueue = vi.fn()
+      const onSideQuestion = vi.fn()
+      const { handle } = await mountPrompting({
+        onSteer,
+        onEnqueue,
+        ...(supported ? { onSideQuestion } : { agentType: "codex" }),
+      })
+      act(() => handle.setText("/Btw quick one"))
+      await waitFor(() =>
+        expect(screen.getByLabelText(MI.steerIntoTurn)).toBeInTheDocument()
+      )
+      await user.click(screen.getByLabelText(MI.steerIntoTurn))
+      await user.click(
+        await screen.findByRole("menuitem", { name: MI.steerIntoTurn })
+      )
+      expect(onSteer).not.toHaveBeenCalled()
+      expect(onEnqueue).not.toHaveBeenCalled()
+      if (supported) {
+        expect(onSideQuestion).toHaveBeenCalledWith("quick one")
+      } else {
+        expect(handle.getText()).toBe("/Btw quick one")
+        expect(screen.getByTestId("composer-btw-notice")).toHaveTextContent(
+          MI.btwUnsupported
+        )
+      }
+    })
+
+    it("never queues /btw from the queue button", async () => {
+      const user = userEvent.setup()
+      const onEnqueue = vi.fn()
+      const { handle, onSend } = await mountPrompting({
+        onSteer: vi.fn(),
+        onEnqueue,
+        agentType: "codex",
+      })
+      act(() => handle.setText("/btw later?"))
+      await waitFor(() =>
+        expect(screen.getByTitle(MI.queueMessage)).toBeInTheDocument()
+      )
+      await user.click(screen.getByTitle(MI.queueMessage))
+      expect(onEnqueue).not.toHaveBeenCalled()
+      expect(onSend).not.toHaveBeenCalled()
+      expect(handle.getText()).toBe("/btw later?")
+    })
+
+    it("neither delivers /btw into a held turn nor queues it for the turn's end", async () => {
+      const user = userEvent.setup()
+      const onDeliverNow = vi.fn().mockResolvedValue(undefined)
+      const onEnqueue = vi.fn()
+      const { handle } = await mountPrompting({
+        heldTurnReady: true,
+        onDeliverNow,
+        onEnqueue,
+        agentType: "codex",
+      })
+      act(() => handle.setText("/BTW still there?"))
+      await waitFor(() =>
+        expect(screen.getByTitle(MI.heldTurnSend)).toBeInTheDocument()
+      )
+      await user.click(screen.getByTitle(MI.heldTurnSend))
+      await user.click(screen.getByLabelText(MI.heldTurnQueue))
+      await user.click(
+        await screen.findByRole("menuitem", { name: MI.heldTurnQueue })
+      )
+      expect(onDeliverNow).not.toHaveBeenCalled()
+      expect(onEnqueue).not.toHaveBeenCalled()
+      expect(handle.getText()).toBe("/BTW still there?")
+    })
   })
 
   it("closes the side-question panel on Esc", async () => {

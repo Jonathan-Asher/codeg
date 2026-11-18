@@ -11,6 +11,7 @@ import { useImeGuard } from "@/hooks/use-ime-guard"
 import { detectPlatform } from "@/hooks/use-platform"
 import type { UserImageDisplay } from "@/lib/adapters/ai-elements-adapter"
 import { useKeepOriginalOnEdit } from "@/lib/edit-message-prefs"
+import { parseSideQuestionCommand } from "@/lib/side-question"
 import { detectTextDirection } from "@/lib/text-direction"
 
 /** Why a save can't run right now (the Save button greys out and says so). */
@@ -104,7 +105,15 @@ export function UserMessageEditor({
   }, [draftKey, takeFocus])
 
   const hasContent = text.trim().length > 0 || images.length > 0
-  const canSave = !saving && blocked === null && hasContent
+  // A `/btw` is a side question, never a message (see `lib/side-question`):
+  // saving would send it to the agent as the edited prompt.
+  const isSideQuestion = parseSideQuestionCommand(text) !== null
+  const blockedLabel = isSideQuestion
+    ? "editSideQuestion"
+    : blocked !== null
+      ? USER_EDIT_BLOCKED_LABEL[blocked]
+      : null
+  const canSave = !saving && blocked === null && !isSideQuestion && hasContent
   const isWaiting = saving && waiting
   const save = () => {
     if (isWaiting) {
@@ -190,9 +199,9 @@ export function UserMessageEditor({
             : t("editHintInPlace")}
       </p>
       <div className="flex flex-wrap items-center justify-end gap-2">
-        {blocked !== null && !saving && (
+        {blockedLabel !== null && !saving && (
           <span className="me-auto text-xs text-muted-foreground">
-            {t(USER_EDIT_BLOCKED_LABEL[blocked])}
+            {t(blockedLabel)}
           </span>
         )}
         <Button

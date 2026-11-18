@@ -245,6 +245,25 @@ describe("QuickAskWindow", () => {
     expect(input).toHaveValue("")
   })
 
+  it("keeps a /btw in the input instead of asking it as a question", async () => {
+    renderWindow()
+    const input = screen.getByTestId("qa-input")
+    fireEvent.change(input, { target: { value: "/BTW what is this?" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(h.session.send).not.toHaveBeenCalled()
+    expect(input).toHaveValue("/BTW what is this?")
+    expect(screen.getByTestId("qa-btw-notice")).toHaveTextContent(
+      enMessages.QuickAsk.btwUnsupported
+    )
+    // Typing takes the notice away, and an ordinary question goes.
+    fireEvent.change(input, { target: { value: "what is this?" } })
+    expect(screen.queryByTestId("qa-btw-notice")).toBeNull()
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() =>
+      expect(h.session.send).toHaveBeenCalledWith("what is this?", [])
+    )
+  })
+
   it("puts the question back when it could not be sent", async () => {
     h.session.send = vi.fn(async () => false)
     renderWindow()

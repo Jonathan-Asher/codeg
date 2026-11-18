@@ -30,6 +30,7 @@ import { durableSendCallbacks } from "@/lib/durable-send"
 import { outboxStorageKey } from "@/lib/outbox-storage"
 import { nextSendFailure, type SendFailure } from "@/lib/send-failure"
 import { useQueueAutoSend } from "@/hooks/use-queue-auto-send"
+import { useSideQuestion } from "@/hooks/use-side-question"
 import {
   acpReportPromptSuggestion,
   acpStopAsyncTask,
@@ -1150,6 +1151,21 @@ export function CanvasConversationSurface({
     (id: number) => reportPromptSuggestion(id, "accepted"),
     [reportPromptSuggestion]
   )
+  // `/btw` side questions, as in a conversation tab: only on a Claude Code
+  // session whose adapter answers them. The panel's state lives with the
+  // conversation, so it is the same one a tab on it shows.
+  const sideQuestionSupported =
+    agentType === "claude_code" && conn.sideQuestionSupported
+  const sideQuestion = useSideQuestion({
+    scope:
+      dbConversationId != null
+        ? `conv:${dbConversationId}`
+        : `canvas:${contextKey}`,
+    connectionId,
+    conversationId: dbConversationId ?? null,
+    agentType,
+    supported: sideQuestionSupported,
+  })
 
   const connectionModes = useMemo(
     () => displayModes?.available_modes ?? [],
@@ -1236,6 +1252,7 @@ export function CanvasConversationSurface({
           promptSuggestion={connIsForOtherAgent ? null : conn.promptSuggestion}
           onPromptSuggestionShown={handlePromptSuggestionShown}
           onPromptSuggestionAccepted={handlePromptSuggestionAccepted}
+          sideQuestion={sideQuestionSupported ? sideQuestion : null}
           draftStorageKey={`canvas-draft:${contextKey}`}
           getSentHistory={getSentHistory}
           // The card's own connection key doubles as its composer scope: the

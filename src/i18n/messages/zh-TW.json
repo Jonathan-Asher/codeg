@@ -4075,6 +4075,9 @@
         "mentionGroupSkill": "技能",
         "btwDescription": "提出一個旁支問題：根據目前對話作答，不使用工具，智能體繼續工作，且不會加入對話",
         "btwHint": "問題",
+        "btwUnsupported": "此智能體無法回答 /btw 旁支問題。未傳送任何內容。",
+        "btwNotReady": "工作階段連線後才能提出 /btw 旁支問題。未傳送任何內容。",
+        "btwQueueEdit": "/btw 旁支問題不能在佇列中等待，請直接在輸入框中提問。",
         "suggestionTabHint": "Tab",
         "mentionGroupAssistant": "助手"
       },
@@ -4393,6 +4396,7 @@
         "editBusy": "目前有回合正在進行，暫不可編輯",
         "editQueued": "佇列中還有待發送的訊息，暫不可編輯",
         "editNotReady": "這則訊息暫時還不能編輯，請稍後再試",
+        "editSideQuestion": "/btw 旁支問題不能作為訊息傳送",
         "editHint": "儲存後將從此處開一條新分支。原會話保留在側邊欄中，檔案變更不會被復原。",
         "editHintInPlace": "儲存後將以編輯後的訊息從此處繼續目前會話，取代原訊息。檔案變更不會被復原。",
         "editHintNewConversation": "這是第一則訊息，儲存後將用它新建一個會話。目前會話維持不變，檔案變更不會被復原。",
@@ -9240,6 +9244,7 @@
       "noFiles": "拖入的內容不含圖片檔案。請複製圖片後貼上。"
     },
     "hint": "Enter 傳送 · Shift+Enter 換行 · Esc 隱藏",
+    "btwUnsupported": "Quick Ask 無法回答 /btw 旁支問題。未傳送任何內容。",
     "actions": {
       "newQuestion": "新問題",
       "openInCodeg": "在 codeg 中開啟",

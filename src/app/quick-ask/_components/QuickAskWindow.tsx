@@ -38,6 +38,7 @@ import {
   useNewSessionValues,
   useSelectorTemplate,
 } from "@/lib/selector-options-cache"
+import { parseSideQuestionCommand } from "@/lib/side-question"
 import {
   hideQuickAskWindow,
   openQuickAskConversation,
@@ -315,6 +316,10 @@ export function QuickAskWindow() {
   const [input, setInput] = useState("")
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  // A `/btw` stays in the input: Quick Ask answers no side questions, and as
+  // a question it would go to the agent as a prompt (see `lib/side-question`).
+  // Up until the text changes.
+  const [sideQuestionRefused, setSideQuestionRefused] = useState(false)
 
   // ── Images ──────────────────────────────────────────────────────────────
   // The composer's own attachment engine, in its images-only mode: Quick Ask
@@ -413,6 +418,7 @@ export function QuickAskWindow() {
   const onInputChange = (value: string) => {
     const startedTyping = input.trim().length === 0 && value.trim().length > 0
     setInput(value)
+    setSideQuestionRefused(false)
     // Start the agent while the question is being typed.
     if (startedTyping && !bound) {
       void prepare().catch(() => {})
@@ -421,6 +427,10 @@ export function QuickAskWindow() {
 
   const submit = async () => {
     if (!canSend) return
+    if (parseSideQuestionCommand(input)) {
+      setSideQuestionRefused(true)
+      return
+    }
     const text = input
     const sent: ImageInputAttachment[] = images
     setNotice(null)
@@ -681,6 +691,15 @@ export function QuickAskWindow() {
             data-testid="qa-attach-hint"
           >
             {attachHint}
+          </div>
+        )}
+        {sideQuestionRefused && (
+          <div
+            className="px-1 pb-1 text-[11px] text-muted-foreground"
+            role="status"
+            data-testid="qa-btw-notice"
+          >
+            {t("btwUnsupported")}
           </div>
         )}
         <div className="flex flex-col gap-1.5 rounded-xl border border-border bg-background/80 px-3 py-1.5 focus-within:ring-1 focus-within:ring-ring">

@@ -149,6 +149,10 @@ import {
 } from "@/lib/api"
 import { isWindowedDetail } from "@/lib/turn-window"
 import { useSideQuestion } from "@/hooks/use-side-question"
+import {
+  divertSideQuestionDraft,
+  sideQuestionOfDraft,
+} from "@/lib/side-question"
 import type { PromptSuggestionAction } from "@/lib/types"
 import {
   flushRetryDelayMs,
@@ -969,6 +973,29 @@ const ConversationTabView = memo(function ConversationTabView({
     agentType: selectedAgent,
     supported: sideQuestionSupported,
   })
+  // The last line of defence behind the composer's own `/btw` check: a draft
+  // that is a side question never goes out as a prompt or into the running
+  // turn, whichever path brought it here (a message queued before the
+  // composer knew `/BTW`, an edited message, Talk). Asked as a side question
+  // where the session answers them; elsewhere it goes back to the composer,
+  // with the composer's notice. True when the draft was one.
+  const askSideQuestion = sideQuestion.ask
+  const divertSideQuestion = useCallback(
+    (draft: PromptDraft): boolean =>
+      divertSideQuestionDraft(draft, {
+        supported: sideQuestionSupported,
+        ask: askSideQuestion,
+        keep: (text) => {
+          setComposerInject({ text, mode: "append" })
+          notify({
+            level: "info",
+            key: `btw-refused:${tabId}`,
+            title: tCmp("btwUnsupported"),
+          })
+        },
+      }),
+    [sideQuestionSupported, askSideQuestion, tabId, tCmp]
+  )
   // What the composer did with the predicted prompt, counted on the backend
   // (once per prediction, whichever client reports it). Best effort.
   const reportPromptSuggestion = useCallback(
@@ -1988,6 +2015,8 @@ const ConversationTabView = memo(function ConversationTabView({
       // Says whether the message went out now or waits in the queue.
       opts?: SendOptions
     ): PanelSendResult => {
+      // Never a prompt (see `divertSideQuestion`): nothing waits for it either.
+      if (divertSideQuestion(draft)) return "sent"
       // Capture the tab's chat-draft state + eager scratch dir synchronously,
       // before any await. A folderless chat draft is NOT special-cased here:
       // its first send takes the exact same gated, inline path as a normal new
@@ -2289,6 +2318,7 @@ const ConversationTabView = memo(function ConversationTabView({
       return "sent"
     },
     [
+      divertSideQuestion,
       appendOptimisticTurn,
       removeOptimisticTurn,
       mqEnqueue,
@@ -2632,6 +2662,8 @@ const ConversationTabView = memo(function ConversationTabView({
         blocks: [{ type: "text", text: answer }],
         displayText: answer,
       }
+      // A typed `/btw` is a side question here too, not the answer.
+      if (divertSideQuestion(draft)) return
       // Not connected: the answer waits in the queue like a typed message.
       if (connStatus !== "connected") {
         mqEnqueue(draft, null)
@@ -2678,6 +2710,7 @@ const ConversationTabView = memo(function ConversationTabView({
       })
     },
     [
+      divertSideQuestion,
       appendOptimisticTurn,
       removeOptimisticTurn,
       mqEnqueue,
@@ -2973,6 +3006,17 @@ const ConversationTabView = memo(function ConversationTabView({
         conn.promptCapabilities
       )
       if (!draft) return false
+      // An edit to `/btw …` would fork the session only to send a side
+      // question as its prompt. The editor greys its Save out for one; this
+      // holds for any other caller, and keeps the editor open with the text.
+      if (sideQuestionOfDraft(draft)) {
+        notify({
+          level: "info",
+          key: `edit-failed:${tabId}`,
+          title: tMessageList("editSideQuestion"),
+        })
+        return false
+      }
 
       // The first message has no reply before it to fork at. The edit starts a
       // new conversation on this agent, in this folder, instead — the "ask
@@ -3148,6 +3192,7 @@ const ConversationTabView = memo(function ConversationTabView({
       selectedAgent,
       setExternalId,
       t,
+      tMessageList,
       tabId,
       workingDirForConnection,
     ]
@@ -3954,6 +3999,12 @@ const ConversationTabView = memo(function ConversationTabView({
     async (id: string) => {
       const item = msgQueue.find((m) => m.id === id)
       if (!item) return
+      // A queued `/btw` is not inserted into the turn: it leaves the queue as
+      // a side question (see `divertSideQuestion`).
+      if (divertSideQuestion(item.draft)) {
+        mqRemove(id)
+        return
+      }
       const payload = buildSteerPayload(item.draft)
       // Nothing sendable in this row (no text, and no display text standing in
       // for its attachments). Leave it alone: removing it would delete queued
@@ -3990,6 +4041,7 @@ const ConversationTabView = memo(function ConversationTabView({
     },
     [
       msgQueue,
+      divertSideQuestion,
       feedbackSteer,
       mqRemove,
       feedback.channel,
@@ -4320,6 +4372,7 @@ const ConversationTabView = memo(function ConversationTabView({
                 feedbackAddDisabled={!feedback.canSubmit}
                 injectContent={composerInject}
                 onInjectConsumed={handleComposerInjectConsumed}
+                sideQuestion={sideQuestionSupported ? sideQuestion : null}
                 flush
                 tall
               />
