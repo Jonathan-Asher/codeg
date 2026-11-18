@@ -38,7 +38,7 @@ pub fn latest_reply_model(turns: &[MessageTurn]) -> Option<(String, DateTime<Utc
     turns
         .iter()
         .rev()
-        .filter(|turn| turn.role == TurnRole::Assistant)
+        .filter(|turn| matches!(turn.role, TurnRole::Assistant))
         .find_map(|turn| {
             let model = turn.model.as_deref()?.trim();
             if model.is_empty() || model == SYNTHETIC_MODEL {
