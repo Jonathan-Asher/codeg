@@ -9,14 +9,20 @@
 //! change at turn end bumps `updated_at`) and imports without hooking either
 //! path.
 //!
-//! `updated_at` moves on every turn, so a busy session would have its whole
-//! transcript re-read every minute. Two things keep that cheap: a conversation
-//! that only grew is indexed by appending its new turns (see
-//! `message_search_service::index_conversation`), and [`Pacing`] spaces the
+//! `updated_at` moves on every turn, and every 45 s while a turn streams (the
+//! activity heartbeat), so a busy session would have its whole transcript
+//! re-read every minute. Three things keep that cheap: a conversation that
+//! only grew is indexed by appending its new turns (see
+//! `message_search_service::index_conversation`); [`Pacing`] spaces the
 //! re-reads of one conversation by how long reading it took — a transcript
-//! that takes a second to parse is re-read at most every couple of minutes.
-//! Conversations are indexed one at a time with a pause between them, so the
-//! indexer never queues a burst of writes in front of the app's own.
+//! that takes a second to parse is re-read at most every couple of minutes —
+//! and holds a conversation whose turn is still running to one re-read every
+//! [`RUNNING_REREAD_GAP`], so its growing last turn is not rewritten on every
+//! heartbeat (search lags the newest text by that much, and catches up once
+//! the turn ends); and every write goes in short transactions that back off
+//! while the database is busy. Conversations are indexed one at a time with a
+//! pause between them, so the indexer never queues a burst of writes in front
+//! of the app's own.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -81,6 +87,11 @@ pub async fn message_search(
 const REREAD_COST_FACTOR: u32 = 100;
 /// …but never later than this after its last read.
 const MAX_REREAD_GAP: Duration = Duration::from_secs(30 * 60);
+/// A conversation whose turn is still running is re-read no sooner than this
+/// after its last read: each re-read rewrites its last turn, which grows until
+/// the turn ends. The turn's end moves `updated_at` and clears the running
+/// state, so the finished turn is indexed on the first pass after it settles.
+const RUNNING_REREAD_GAP: Duration = Duration::from_secs(5 * 60);
 /// Pause between two conversations of a pass, so the app's own reads and
 /// writes get the database (and the CPU) in between.
 const BETWEEN_CONVERSATIONS: Duration = Duration::from_millis(100);
@@ -92,11 +103,19 @@ pub struct Pacing {
 }
 
 impl Pacing {
-    /// Whether `conversation_id` may be re-read at `now`.
-    fn due(&self, conversation_id: i32, now: Instant) -> bool {
+    /// Whether `conversation_id` may be re-read at `now`; `running` when a
+    /// turn of it is still in flight.
+    fn due(&self, conversation_id: i32, now: Instant, running: bool) -> bool {
         self.last_read
             .get(&conversation_id)
-            .is_none_or(|(at, took)| now.saturating_duration_since(*at) >= reread_gap(*took))
+            .is_none_or(|(at, took)| {
+                let gap = if running {
+                    reread_gap(*took).max(RUNNING_REREAD_GAP)
+                } else {
+                    reread_gap(*took)
+                };
+                now.saturating_duration_since(*at) >= gap
+            })
     }
 
     fn record(&mut self, conversation_id: i32, at: Instant, took: Duration) {
@@ -175,7 +194,7 @@ where
         message_search_service::list_stale_conversations(conn, settled_before, usize::MAX)
             .await?
             .into_iter()
-            .filter(|conversation| pacing.due(conversation.id, now))
+            .filter(|conversation| pacing.due(conversation.id, now, conversation.running))
             .take(batch)
             .collect();
     for (n, conversation) in stale.iter().enumerate() {
@@ -199,13 +218,14 @@ where
                 .await?;
             }
             Ok(turns) => {
-                message_search_service::index_conversation(
+                let wrote = message_search_service::index_conversation(
                     conn,
                     conversation.id,
                     conversation.updated_at,
                     turns.as_ref(),
                 )
                 .await?;
+                log_write(conversation.id, &wrote);
             }
             Err(err) => {
                 // A transcript that cannot be read (moved, agent uninstalled)
@@ -228,6 +248,34 @@ where
         }
     }
     Ok(stale.len())
+}
+
+/// A transaction this long held up every other writer for as long; the
+/// write-lock watch (`db::watch`) uses the same mark, and cannot time FTS5's
+/// own writes.
+const SLOW_TRANSACTION: Duration = crate::db::watch::SLOW_WRITE_LOCK;
+
+fn log_write(conversation_id: i32, wrote: &message_search_service::IndexWrite) {
+    let longest_ms = wrote.longest.as_millis() as u64;
+    if wrote.longest >= SLOW_TRANSACTION {
+        tracing::warn!(
+            conversation_id,
+            written = wrote.written,
+            deleted = wrote.deleted,
+            transactions = wrote.transactions,
+            longest_ms,
+            "[message-search] an index transaction took {longest_ms} ms"
+        );
+    } else {
+        tracing::debug!(
+            conversation_id,
+            written = wrote.written,
+            deleted = wrote.deleted,
+            transactions = wrote.transactions,
+            longest_ms,
+            "[message-search] indexed a conversation"
+        );
+    }
 }
 
 /// Keep the message index current for the life of the process. See the module
@@ -448,16 +496,39 @@ mod tests {
     fn rereads_are_spaced_by_how_long_the_last_read_took() {
         let now = Instant::now();
         let mut pacing = Pacing::default();
-        assert!(pacing.due(1, now), "never read");
+        assert!(pacing.due(1, now, false), "never read");
 
         pacing.record(1, now, Duration::from_secs(1));
-        assert!(!pacing.due(1, now + Duration::from_secs(60)));
-        assert!(pacing.due(1, now + Duration::from_secs(100)));
-        assert!(pacing.due(2, now), "another conversation");
+        assert!(!pacing.due(1, now + Duration::from_secs(60), false));
+        assert!(pacing.due(1, now + Duration::from_secs(100), false));
+        assert!(pacing.due(2, now, false), "another conversation");
 
         pacing.record(3, now, Duration::from_secs(3600));
-        assert!(!pacing.due(3, now + MAX_REREAD_GAP - Duration::from_secs(1)));
-        assert!(pacing.due(3, now + MAX_REREAD_GAP), "capped");
+        assert!(!pacing.due(3, now + MAX_REREAD_GAP - Duration::from_secs(1), false));
+        assert!(pacing.due(3, now + MAX_REREAD_GAP, false), "capped");
+    }
+
+    /// A running turn's growing last turn is rewritten at most every
+    /// `RUNNING_REREAD_GAP`, however cheap the read; once the turn has ended
+    /// the usual spacing applies again.
+    #[test]
+    fn a_running_turn_is_reread_at_most_every_few_minutes() {
+        let now = Instant::now();
+        let mut pacing = Pacing::default();
+        assert!(pacing.due(1, now, true), "never read: indexed at once");
+
+        pacing.record(1, now, Duration::from_millis(10));
+        for heartbeat in [45, 90, 135, 180, 225, 270] {
+            assert!(
+                !pacing.due(1, now + Duration::from_secs(heartbeat), true),
+                "{heartbeat} s in"
+            );
+        }
+        assert!(pacing.due(1, now + RUNNING_REREAD_GAP, true));
+        assert!(
+            pacing.due(1, now + Duration::from_secs(45), false),
+            "the turn ended: its final text is indexed on the next pass"
+        );
     }
 
     #[tokio::test]
@@ -490,5 +561,68 @@ mod tests {
         .map(|c| c.id)
         .collect();
         assert_eq!(stale, [slow], "still due once its gap has passed");
+    }
+
+    async fn set_turn_state(
+        conn: &DatabaseConnection,
+        id: i32,
+        state: Option<conversation::ConversationTurnState>,
+    ) {
+        let row = conversation::Entity::find_by_id(id)
+            .one(conn)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut active: conversation::ActiveModel = row.into();
+        active.turn_state = Set(state);
+        active.update(conn).await.unwrap();
+    }
+
+    /// The heartbeat of a running turn moves `updated_at` every 45 s; the
+    /// indexer rewrites the growing turn once, then waits, and indexes the
+    /// finished turn as soon as it has ended.
+    #[tokio::test]
+    async fn a_running_turn_is_not_reindexed_on_every_heartbeat() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/fts-proj").await;
+        let id = seed_conversation(&db, folder, AgentType::ClaudeCode).await;
+        set_turn_state(
+            &db.conn,
+            id,
+            Some(conversation::ConversationTurnState::Running),
+        )
+        .await;
+        let read = |_: i32| async { Ok::<_, AppCommandError>(vec![user_turn("still streaming")]) };
+        let mut pacing = Pacing::default();
+
+        set_updated_at(&db.conn, id, 120).await;
+        assert_eq!(
+            index_stale_conversations_with(&db.conn, 25, &mut pacing, read)
+                .await
+                .unwrap(),
+            1,
+            "first read of the running turn"
+        );
+        set_updated_at(&db.conn, id, 60).await;
+        assert_eq!(
+            index_stale_conversations_with(&db.conn, 25, &mut pacing, read)
+                .await
+                .unwrap(),
+            0,
+            "a heartbeat later: still running, read moments ago"
+        );
+
+        // The turn ends. Its last read is recorded as costing nothing, so only
+        // the running state could hold the next one back.
+        set_turn_state(&db.conn, id, None).await;
+        set_updated_at(&db.conn, id, 30).await;
+        pacing.record(id, Instant::now(), Duration::ZERO);
+        assert_eq!(
+            index_stale_conversations_with(&db.conn, 25, &mut pacing, read)
+                .await
+                .unwrap(),
+            1,
+            "the turn ended: indexed again at once"
+        );
     }
 }
