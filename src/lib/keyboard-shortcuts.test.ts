@@ -366,6 +366,302 @@ describe("alt combinations use event.code", () => {
   })
 })
 
+describe("bracket keys and non-Latin layouts go by key position", () => {
+  // Hebrew mirrors the bracket pair (the physical `[` key types `]`), and with
+  // Cmd/Shift held the runtime may report either bracket, its shifted brace,
+  // or a Hebrew letter. Whatever it reports, the physical key decides.
+  const tabBindings = { next: "mod+shift+]", prev: "mod+shift+[" }
+  const bracketKeys = ["]", "[", "}", "{", "ח"]
+
+  function firedTabBindings(event: ReturnType<typeof keyEvent>) {
+    const rivals = Object.values(tabBindings)
+    return (["next", "prev"] as const).filter((name) =>
+      matchShortcutEvent(event, tabBindings[name], rivals)
+    )
+  }
+
+  for (const key of bracketKeys) {
+    it(`fires prev_tab, and only prev_tab, from BracketLeft typing "${key}"`, () => {
+      const event = keyEvent(key, {
+        metaKey: true,
+        shiftKey: true,
+        code: "BracketLeft",
+      })
+      expect(firedTabBindings(event)).toEqual(["prev"])
+    })
+
+    it(`fires next_tab, and only next_tab, from BracketRight typing "${key}"`, () => {
+      const event = keyEvent(key, {
+        metaKey: true,
+        shiftKey: true,
+        code: "BracketRight",
+      })
+      expect(firedTabBindings(event)).toEqual(["next"])
+    })
+  }
+
+  it("keeps the Shift state exact on a bracket binding", () => {
+    for (const key of bracketKeys) {
+      const unshifted = keyEvent(key, { metaKey: true, code: "BracketRight" })
+      expect(matchShortcutEvent(unshifted, "mod+]")).toBe(true)
+      expect(matchShortcutEvent(unshifted, "mod+shift+]")).toBe(false)
+      expect(matchShortcutEvent(unshifted, "mod+[")).toBe(false)
+
+      const shifted = keyEvent(key, {
+        metaKey: true,
+        shiftKey: true,
+        code: "BracketLeft",
+      })
+      expect(matchShortcutEvent(shifted, "mod+shift+[")).toBe(true)
+      expect(matchShortcutEvent(shifted, "mod+[")).toBe(false)
+      expect(matchShortcutEvent(shifted, "mod+shift+]")).toBe(false)
+    }
+  })
+
+  it("reads a brace binding as its bracket key", () => {
+    expect(normalizeShortcut("mod+shift+{")).toBe("mod+shift+[")
+    expect(normalizeShortcut("mod+shift+}")).toBe("mod+shift+]")
+    expect(shortcutsConflict("mod+shift+{", "mod+shift+[")).toBe(true)
+    expect(shortcutsConflict("mod+shift+[", "mod+shift+]")).toBe(false)
+    expect(
+      matchShortcutEvent(
+        keyEvent("{", { metaKey: true, shiftKey: true, code: "BracketLeft" }),
+        "mod+shift+{"
+      )
+    ).toBe(true)
+    // A runtime that omits event.code still lands on the bracket.
+    expect(
+      matchShortcutEvent(
+        keyEvent("}", { metaKey: true, shiftKey: true }),
+        "mod+shift+]"
+      )
+    ).toBe(true)
+    expect(formatShortcutLabel("mod+shift+}", true)).toBe("⌘⇧]")
+  })
+
+  it("matches the Russian bracket-position letters too", () => {
+    expect(
+      firedTabBindings(
+        keyEvent("Х", { metaKey: true, shiftKey: true, code: "BracketLeft" })
+      )
+    ).toEqual(["prev"])
+    expect(
+      firedTabBindings(
+        keyEvent("Ъ", { metaKey: true, shiftKey: true, code: "BracketRight" })
+      )
+    ).toEqual(["next"])
+  })
+
+  it("reads ⌘ + a Hebrew letter as the US letter on that key", () => {
+    // Hebrew-QWERTY puts ש on the W key.
+    const hebrewW = keyEvent("ש", { metaKey: true, code: "KeyW" })
+    expect(matchShortcutEvent(hebrewW, "mod+w")).toBe(true)
+    expect(matchShortcutEvent(hebrewW, "mod+shift+w")).toBe(false)
+    expect(matchShortcutEvent(hebrewW, "mod+e")).toBe(false)
+
+    // SI-1452 (the standard Hebrew layout): ך on L, ת on the comma key.
+    expect(
+      matchShortcutEvent(
+        keyEvent("ך", { metaKey: true, shiftKey: true, code: "KeyL" }),
+        DEFAULT_SHORTCUTS.read_last_reply
+      )
+    ).toBe(true)
+    expect(
+      matchShortcutEvent(
+        keyEvent("ך", { metaKey: true, shiftKey: true, code: "KeyL" }),
+        "mod+l"
+      )
+    ).toBe(false)
+    expect(
+      matchShortcutEvent(
+        keyEvent("ת", { metaKey: true, code: "Comma" }),
+        DEFAULT_SHORTCUTS.open_settings
+      )
+    ).toBe(true)
+  })
+
+  it("does the same for Russian and Greek", () => {
+    expect(
+      matchShortcutEvent(
+        keyEvent("ц", { ctrlKey: true, code: "KeyW" }),
+        "mod+w"
+      )
+    ).toBe(true)
+    expect(
+      matchShortcutEvent(
+        keyEvent("Л", { ctrlKey: true, shiftKey: true, code: "KeyK" }),
+        "mod+shift+k"
+      )
+    ).toBe(true)
+    expect(
+      matchShortcutEvent(
+        keyEvent("ς", { metaKey: true, code: "KeyW" }),
+        "mod+w"
+      )
+    ).toBe(true)
+  })
+
+  it("leaves a non-Latin character on a key with no US position alone", () => {
+    expect(
+      shortcutFromKeyboardEvent(
+        keyEvent("ש", { metaKey: true, code: "IntlBackslash" })
+      )
+    ).toBe("mod+ש")
+    expect(shortcutFromKeyboardEvent(keyEvent("ש", { metaKey: true }))).toBe(
+      "mod+ש"
+    )
+  })
+
+  it("gives a Hebrew press one binding among all the defaults", () => {
+    const fired = (event: ReturnType<typeof keyEvent>) =>
+      SHORTCUT_DEFINITIONS.filter((definition) =>
+        matchShortcutEvent(
+          event,
+          DEFAULT_SHORTCUTS[definition.id],
+          Object.values(DEFAULT_SHORTCUTS)
+        )
+      ).map((definition) => definition.id)
+
+    // SI-1452 puts ל on K and ח on J: ⌘ + either is that one toggle.
+    expect(fired(keyEvent("ל", { metaKey: true, code: "KeyK" }))).toEqual([
+      "toggle_search",
+    ])
+    expect(fired(keyEvent("ח", { metaKey: true, code: "KeyJ" }))).toEqual([
+      "toggle_terminal",
+    ])
+  })
+
+  describe("Latin layouts keep event.key", () => {
+    it("leaves QWERTZ + and ü on the bracket positions alone", () => {
+      const plus = keyEvent("+", { ctrlKey: true, code: "BracketRight" })
+      expect(resolveWindowZoomAction(plus, DEFAULT_SHORTCUTS)).toBe("in")
+      expect(matchShortcutEvent(plus, "mod+]")).toBe(false)
+
+      const umlaut = keyEvent("ü", { metaKey: true, code: "BracketLeft" })
+      expect(matchShortcutEvent(umlaut, "mod+ü")).toBe(true)
+      expect(matchShortcutEvent(umlaut, "mod+[")).toBe(false)
+      expect(shortcutFromKeyboardEvent(umlaut)).toBe("mod+ü")
+    })
+
+    it("leaves the QWERTZ Y/Z swap on event.key", () => {
+      expect(
+        matchShortcutEvent(
+          keyEvent("z", { metaKey: true, code: "KeyY" }),
+          "mod+z"
+        )
+      ).toBe(true)
+      expect(
+        matchShortcutEvent(
+          keyEvent("z", { metaKey: true, code: "KeyY" }),
+          "mod+y"
+        )
+      ).toBe(false)
+    })
+
+    it("leaves AZERTY's accented and shifted keys alone", () => {
+      const eAcute = keyEvent("é", { metaKey: true, code: "Digit2" })
+      expect(shortcutFromKeyboardEvent(eAcute)).toBe("mod+é")
+      expect(matchShortcutEvent(eAcute, "mod+é")).toBe(true)
+      // Digit2's positional fallback yields to the binding that spells it.
+      expect(matchShortcutEvent(eAcute, "mod+2", ["mod+é", "mod+2"])).toBe(
+        false
+      )
+      // With nobody owning "é", the digit row still reaches tab 2.
+      expect(numberedTabIndexFromEvent(eAcute, DEFAULT_SHORTCUTS)).toBe(1)
+
+      const dollar = keyEvent("$", { metaKey: true, code: "BracketRight" })
+      expect(shortcutFromKeyboardEvent(dollar)).toBe("mod+$")
+      expect(matchShortcutEvent(dollar, "mod+]")).toBe(false)
+
+      // AZERTY types "," on the M key.
+      expect(
+        matchShortcutEvent(
+          keyEvent(",", { metaKey: true, code: "KeyM" }),
+          DEFAULT_SHORTCUTS.open_settings
+        )
+      ).toBe(true)
+
+      const section = keyEvent("§", { metaKey: true, code: "Digit6" })
+      expect(shortcutFromKeyboardEvent(section)).toBe("mod+§")
+    })
+
+    it("leaves Dvorak's keys on the characters they type", () => {
+      const equal = keyEvent("=", { metaKey: true, code: "BracketRight" })
+      expect(resolveWindowZoomAction(equal, DEFAULT_SHORTCUTS)).toBe("in")
+      expect(matchShortcutEvent(equal, "mod+]")).toBe(false)
+
+      const slash = keyEvent("/", { metaKey: true, code: "BracketLeft" })
+      expect(matchShortcutEvent(slash, "mod+/")).toBe(true)
+      expect(matchShortcutEvent(slash, "mod+[")).toBe(false)
+
+      // Dvorak's brackets sit on Minus/Equal; they still match by character.
+      expect(
+        matchShortcutEvent(
+          keyEvent("{", { metaKey: true, shiftKey: true, code: "Minus" }),
+          "mod+shift+["
+        )
+      ).toBe(true)
+    })
+  })
+
+  describe("recording", () => {
+    for (const key of bracketKeys) {
+      it(`records ⌘⇧ + the BracketLeft key typing "${key}" as mod+shift+[`, () => {
+        expect(
+          shortcutFromKeyboardEvent(
+            keyEvent(key, {
+              metaKey: true,
+              shiftKey: true,
+              code: "BracketLeft",
+            })
+          )
+        ).toBe("mod+shift+[")
+        expect(
+          shortcutFromKeyboardEvent(
+            keyEvent(key, {
+              metaKey: true,
+              shiftKey: true,
+              code: "BracketRight",
+            })
+          )
+        ).toBe("mod+shift+]")
+      })
+    }
+
+    it("records ⌘ + a Hebrew letter as the US letter on that key", () => {
+      expect(
+        shortcutFromKeyboardEvent(
+          keyEvent("ש", { metaKey: true, code: "KeyW" })
+        )
+      ).toBe("mod+w")
+      expect(
+        shortcutFromKeyboardEvent(
+          keyEvent("ך", { metaKey: true, shiftKey: true, code: "KeyL" })
+        )
+      ).toBe("mod+shift+l")
+      expect(
+        shortcutFromKeyboardEvent(
+          keyEvent("ת", { metaKey: true, code: "Comma" })
+        )
+      ).toBe("mod+,")
+    })
+
+    it("records the US brace press as its bracket key", () => {
+      expect(
+        shortcutFromKeyboardEvent(
+          keyEvent("{", { metaKey: true, shiftKey: true, code: "BracketLeft" })
+        )
+      ).toBe("mod+shift+[")
+    })
+
+    it("still needs a modifier for a non-Latin letter", () => {
+      expect(shortcutFromKeyboardEvent(keyEvent("ש", { code: "KeyW" }))).toBe(
+        null
+      )
+    })
+  })
+})
+
 const defaultZoom = {
   zoom_in: DEFAULT_SHORTCUTS.zoom_in,
   zoom_out: DEFAULT_SHORTCUTS.zoom_out,
