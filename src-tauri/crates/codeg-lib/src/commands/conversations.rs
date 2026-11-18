@@ -3115,6 +3115,44 @@ pub async fn create_conversation_core(
     Ok(model.id)
 }
 
+/// Record that the conversation just created continues `continued_from_id`
+/// ("Continue in another agent"; see
+/// `conversation_service::record_continuation`). Best effort: a link that
+/// cannot be written is logged, and the create stands.
+pub async fn link_new_conversation_continuation(
+    conn: &sea_orm::DatabaseConnection,
+    conversation_id: i32,
+    continued_from_id: Option<i32>,
+) {
+    let Some(from) = continued_from_id else {
+        return;
+    };
+    match conversation_service::record_continuation(conn, conversation_id, from).await {
+        Ok(true) => {}
+        Ok(false) => tracing::info!(
+            "[conversations] conversation {conversation_id} continues {from}, which is gone; left unlinked"
+        ),
+        Err(e) => tracing::warn!(
+            "[conversations] could not record that conversation {conversation_id} continues {from}: {e}"
+        ),
+    }
+}
+
+/// [`create_conversation_core`], plus the "Continue in another agent" link
+/// when the new conversation continues another one. What the
+/// `create_conversation` command and its web handler run.
+pub async fn create_continuing_conversation_core(
+    conn: &sea_orm::DatabaseConnection,
+    folder_id: i32,
+    agent_type: AgentType,
+    title: Option<String>,
+    continued_from_id: Option<i32>,
+) -> Result<i32, AppCommandError> {
+    let id = create_conversation_core(conn, folder_id, agent_type, title).await?;
+    link_new_conversation_continuation(conn, id, continued_from_id).await;
+    Ok(id)
+}
+
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn create_conversation(
@@ -3123,8 +3161,16 @@ pub async fn create_conversation(
     folder_id: i32,
     agent_type: AgentType,
     title: Option<String>,
+    continued_from_id: Option<i32>,
 ) -> Result<i32, AppCommandError> {
-    let id = create_conversation_core(&db.conn, folder_id, agent_type, title).await?;
+    let id = create_continuing_conversation_core(
+        &db.conn,
+        folder_id,
+        agent_type,
+        title,
+        continued_from_id,
+    )
+    .await?;
     emit_conversation_upsert(&EventEmitter::Tauri(app), &db.conn, id).await;
     Ok(id)
 }
@@ -3390,6 +3436,7 @@ pub async fn create_chat_conversation(
     agent_type: AgentType,
     title: Option<String>,
     existing_dir: Option<String>,
+    continued_from_id: Option<i32>,
 ) -> Result<CreateChatConversationResult, AppCommandError> {
     use tauri::Manager;
     let data_dir = app
@@ -3405,6 +3452,7 @@ pub async fn create_chat_conversation(
         existing_dir.as_deref(),
     )
     .await?;
+    link_new_conversation_continuation(&db.conn, result.conversation_id, continued_from_id).await;
     emit_conversation_upsert(&EventEmitter::Tauri(app), &db.conn, result.conversation_id).await;
     Ok(result)
 }
@@ -4258,6 +4306,7 @@ mod tests {
             source: None,
             assistant_name: None,
             tag_ids: Vec::new(),
+            continued_from_id: None,
         }
     }
 
@@ -8697,6 +8746,7 @@ mod tests {
                 source: None,
                 assistant_name: None,
                 tag_ids: Vec::new(),
+                continued_from_id: None,
             },
             turns,
             session_stats: None,

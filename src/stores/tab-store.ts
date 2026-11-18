@@ -46,6 +46,10 @@ import {
 } from "@/lib/message-input-draft"
 import { discardAskSelectionPrompts } from "@/lib/ask-selection-handoff"
 import { discardComposerPrefill } from "@/lib/composer-prefill-handoff"
+import {
+  clearContinuationLink,
+  moveContinuationLink,
+} from "@/lib/continuation-links"
 import { noteTabActivation, requestComposerFocus } from "@/lib/composer-focus"
 import {
   batchCloseSlots,
@@ -1820,6 +1824,8 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
               closingDraftKey,
               buildNewConversationDraftStorageKey(replacementTab.id)
             )
+            // What the draft continues goes with its text.
+            moveContinuationLink(closingTab.id, replacementTab.id)
           }
         }
       } else if (tabId === prevState.activeTabId) {
@@ -1870,6 +1876,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
       }
       if (closingDraftKey && !draftKeyHandedOver) {
         clearMessageInputDraftV2(closingDraftKey)
+        clearContinuationLink(closingTab.id)
       }
       recomputeTabs()
     }

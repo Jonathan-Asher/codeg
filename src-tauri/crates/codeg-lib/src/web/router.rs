@@ -454,6 +454,14 @@ pub fn build_router_with_proxy_auth(
             post(handlers::session_move::move_conversation_to_folder),
         )
         .route(
+            "/continue_in_agent_handoff",
+            post(handlers::continuation::continue_in_agent_handoff),
+        )
+        .route(
+            "/build_mechanical_handoff",
+            post(handlers::continuation::build_mechanical_handoff),
+        )
+        .route(
             "/mark_conversations_viewed",
             post(handlers::conversations::mark_conversations_viewed),
         )

@@ -14,6 +14,10 @@ pub mod limit_continue;
 pub mod push;
 #[cfg(feature = "tauri-runtime")]
 pub mod session_move;
+/// "Continue in another agent": the handoff turn and the plain handoff
+/// (desktop commands).
+#[cfg(feature = "tauri-runtime")]
+pub mod continuation;
 /// `/btw` side questions and prompt suggestions (desktop commands).
 #[cfg(feature = "tauri-runtime")]
 pub mod side_question;

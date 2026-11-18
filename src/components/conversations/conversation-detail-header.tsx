@@ -98,6 +98,7 @@ import {
 import { useTalkMenu } from "@/components/talk-voice/use-talk-menu"
 import { ConversationHeaderTags } from "./conversation-tag-picker"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { ContinueInAgentMenuItem } from "./continue-in-agent-menu-item"
 
 interface ConversationDetailHeaderProps {
   tabId: string
@@ -450,6 +451,14 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
                 <FolderInput className="h-4 w-4" />
                 {tMove("menuLabel")}
               </DropdownMenuItem>
+            )}
+            {/* Hand the work to a new session on another agent (a
+                sub-session goes on with its parent). */}
+            {forkTarget && forkTarget.parent_id == null && (
+              <ContinueInAgentMenuItem
+                conversationId={forkTarget.id}
+                item={DropdownMenuItem}
+              />
             )}
             <DropdownMenuItem disabled={!persisted} onSelect={handleTogglePin}>
               {isPinned ? (

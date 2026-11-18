@@ -27,6 +27,7 @@ pub mod conversation_export;
 pub mod message_search;
 pub mod config_sync;
 pub mod conversation_tags;
+pub mod continuation;
 pub mod conversations;
 pub mod custom_skills;
 pub mod delegation;

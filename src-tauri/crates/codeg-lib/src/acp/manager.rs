@@ -4828,6 +4828,7 @@ impl ConnectionManager {
                         assistant_id: Set(None),
                         assistant_snapshot: Set(None),
                         source: Set(source),
+                        continued_from_id: Set(None),
                     };
                     let inserted = sibling.insert(txn).await?;
                     // The sibling keeps the pre-fork history under the
@@ -5470,6 +5471,7 @@ impl ConnectionManager {
             assistant_id: Set(None),
             assistant_snapshot: Set(None),
             source: Set(source.source.clone()),
+            continued_from_id: Set(None),
         };
         row.insert(db_conn)
             .await

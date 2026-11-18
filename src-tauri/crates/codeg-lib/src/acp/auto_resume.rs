@@ -1096,6 +1096,7 @@ mod tests {
             },
             reason,
             background: None,
+            continued_from_id: None,
             background_raw: None,
             resumes_in_a_row: 0,
         }
@@ -1654,6 +1655,7 @@ mod tests {
             assistant_name: None,
             source: None,
             tag_ids: Vec::new(),
+            continued_from_id: None,
         }
     }
 }

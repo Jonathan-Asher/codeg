@@ -4494,12 +4494,16 @@ export async function createHyperframesProject(params: {
 export async function createConversation(
   folderId: number,
   agentType: AgentType,
-  title?: string
+  title?: string,
+  /** "Continue in another agent": the conversation this one continues. The
+   *  backend records the link with the new row. */
+  continuedFromId?: number | null
 ): Promise<number> {
   return getTransport().call("create_conversation", {
     folderId,
     agentType,
     title: title ?? null,
+    ...(continuedFromId != null ? { continuedFromId } : {}),
   })
 }
 
@@ -4514,13 +4518,60 @@ export async function createChatConversation(
   title?: string,
   // Reuse a scratch dir already minted by `createChatDir` (eager connect) so the
   // ACP cwd never moves across the first send; omit to let the backend mint one.
-  existingDir?: string
+  existingDir?: string,
+  /** See `createConversation`'s `continuedFromId`. */
+  continuedFromId?: number | null
 ): Promise<CreateChatConversationResult> {
   return getTransport().call("create_chat_conversation", {
     agentType,
     title: title ?? null,
     existingDir: existingDir ?? null,
+    ...(continuedFromId != null ? { continuedFromId } : {}),
   })
+}
+
+/** Why the old session's agent could not write a handoff (Rust
+ *  `acp::continuation::HandoffFailureKind`). */
+export type HandoffFailureKind =
+  | "no_session"
+  | "busy"
+  | "connect"
+  | "stopped"
+  | "usage_limit"
+  | "empty"
+  | "timed_out"
+  | "error"
+
+/** How a handoff turn went (Rust `acp::continuation::HandoffOutcome`). */
+export interface ContinuationHandoff {
+  text: string | null
+  failure: { kind: HandoffFailureKind; message: string | null } | null
+}
+
+/** The backend waits up to 30 minutes for the handoff turn to end. */
+const CONTINUATION_HANDOFF_TIMEOUT_MS = 31 * 60_000
+
+/**
+ * "Continue in another agent": ask the conversation's agent for a handoff (a
+ * visible message in that session, opened first when nothing has it open)
+ * and resolve with the turn's final text once it ends — or why there is none.
+ */
+export async function requestContinuationHandoff(
+  conversationId: number
+): Promise<ContinuationHandoff> {
+  return getTransport().call(
+    "continue_in_agent_handoff",
+    { conversationId },
+    { timeoutMs: CONTINUATION_HANDOFF_TIMEOUT_MS }
+  )
+}
+
+/** The plain handoff codeg writes itself: the session's first message,
+ *  folder, branch, `git status --short` and its link (Markdown). */
+export async function buildMechanicalHandoff(
+  conversationId: number
+): Promise<string> {
+  return getTransport().call("build_mechanical_handoff", { conversationId })
 }
 
 /**

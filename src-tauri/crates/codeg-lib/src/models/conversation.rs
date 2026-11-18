@@ -178,6 +178,13 @@ pub struct DbConversationSummary {
     /// the wire when empty, so the frontend reads an absent field as "no tags".
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tag_ids: Vec<i32>,
+    /// Mirror of `conversation.continued_from_id`: the conversation this one
+    /// continues ("Continue in another agent"), whose agent wrote it a
+    /// handoff. Drives the "Continued from …" banner here and, read the other
+    /// way round, the "Continued in …" one on the old conversation. Absent
+    /// when it continues nothing (and from a server that predates it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continued_from_id: Option<i32>,
 }
 
 /// A conversation tag as the UI sees it. `folder_id` is the scope: `None` for
