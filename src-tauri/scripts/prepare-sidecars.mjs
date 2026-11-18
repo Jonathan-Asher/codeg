@@ -275,6 +275,17 @@ function buildMcpSidecar(target) {
     { stdio: "inherit", cwd: SRC_TAURI }
   )
 
+  const built = join(
+    SRC_TAURI,
+    "target",
+    target,
+    "release",
+    `${BIN_NAME}${ext}`
+  )
+  if (!existsSync(built)) {
+    die(`expected ${built} after cargo build, but it does not exist`)
+  }
+
   mkdirSync(BINARIES_DIR, { recursive: true })
   stageFile(built, join(BINARIES_DIR, `${BIN_NAME}-${target}${ext}`))
 }
