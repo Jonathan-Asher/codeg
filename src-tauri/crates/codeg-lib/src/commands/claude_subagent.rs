@@ -34,6 +34,9 @@ pub struct ClaudeSubagentThread {
     pub description: Option<String>,
     /// Still at work: read it again in a moment.
     pub running: bool,
+    /// The title of the session it is a sub-agent of.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_title: Option<String>,
     /// Its transcript, in the shape a session's tab renders. The summary is
     /// the parent session's row re-labelled for the sub-agent: no external id
     /// (it is no session of its own and must never be mistaken for the
@@ -107,6 +110,7 @@ fn shape(
     } = thread;
     let meta = meta.unwrap_or_default();
     let description = meta.description;
+    let parent_title = parent.title.clone();
     let parsed = &detail.summary;
     let summary = DbConversationSummary {
         id: parent.id,
@@ -141,6 +145,7 @@ fn shape(
         subagent_type: meta.agent_type,
         description,
         running,
+        parent_title,
         detail: DbConversationDetail {
             summary,
             turns: detail.turns.clone(),
@@ -150,6 +155,7 @@ fn shape(
             turns_offset: None,
             turns_total: None,
             assistant_turns_before_offset: None,
+            user_turns_before_offset: None,
             prefix_hash: None,
             uncovered_prefix_max_ts: None,
             history_unavailable: None,

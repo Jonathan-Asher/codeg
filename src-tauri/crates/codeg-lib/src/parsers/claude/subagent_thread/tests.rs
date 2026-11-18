@@ -213,7 +213,10 @@ fn a_sub_agents_file_parses_into_the_detail_a_session_has() {
 
     assert_eq!(thread.agent_id, AGENT);
     let detail = &thread.detail;
-    assert_eq!(detail.turns.first().map(|t| &t.role), Some(&TurnRole::User));
+    assert!(matches!(
+        detail.turns.first().map(|t| &t.role),
+        Some(TurnRole::User)
+    ));
     assert_eq!(texts(&detail.turns[0]), vec!["Look in src/".to_string()]);
     let blocks: Vec<&ContentBlock> = detail.turns.iter().flat_map(|t| &t.blocks).collect();
     assert!(
