@@ -76,6 +76,7 @@ mod m20261111_000001_conversation_moved_from_cwd;
 mod m20261112_000001_conversation_background_resume;
 mod m20261112_000001_work_task_writeback_drafts;
 mod m20261112_000002_side_question;
+mod m20261118_000002_message_fts_rows;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -158,6 +159,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261112_000001_conversation_background_resume::Migration),
             Box::new(m20261112_000001_work_task_writeback_drafts::Migration),
             Box::new(m20261112_000002_side_question::Migration),
+            Box::new(m20261118_000002_message_fts_rows::Migration),
         ]
     }
 }

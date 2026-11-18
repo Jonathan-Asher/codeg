@@ -3,12 +3,20 @@
 //! version of each conversation it holds.
 //!
 //!   * **write** — [`index_conversation`] swaps one conversation's rows for a
-//!     freshly parsed set inside a transaction and stamps the
-//!     `conversation.updated_at` they reflect; [`mark_indexed`] drops the rows
-//!     and stamps, for a transcript that could not be read, and
-//!     [`mark_indexed_keeping_rows`] stamps and keeps them, for one that is not
-//!     there at all (the rows are then the last copy of its text). The indexer
-//!     driving them lives in `commands::message_search`.
+//!     freshly parsed set and stamps the `conversation.updated_at` they
+//!     reflect; [`mark_indexed`] drops the rows and stamps, for a transcript
+//!     that could not be read, and [`mark_indexed_keeping_rows`] stamps and
+//!     keeps them, for one that is not there at all (the rows are then the last
+//!     copy of its text). The indexer driving them lives in
+//!     `commands::message_search`.
+//!   * **row map** — `message_fts_rows` records which FTS rowid holds which
+//!     turn, so every delete names its rows by rowid. `message_fts` keeps
+//!     `conversation_id` and `turn_idx` UNINDEXED, and a filter on those reads
+//!     the whole index's text — with the write lock held, for a DELETE. Every
+//!     write to `message_fts` writes the map in the same transaction.
+//!   * **short transactions** — a rewrite is cut into transactions of a few
+//!     dozen rows and kilobytes ([`WriteBatching`]) with a pause between them,
+//!     so the app's own writes never queue long behind the indexer.
 //!   * **saved text** — [`saved_turns`] reads one conversation's rows back,
 //!     for the read-only view of a session whose agent deleted its history.
 //!   * **read** — [`search_messages`] finds every word of a query anywhere in a
@@ -20,15 +28,17 @@
 //! re-indexing.
 
 use std::collections::HashMap;
+use std::ops::Range;
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
-    QuerySelect, Statement, TransactionTrait, Value,
+    ActiveEnum, ColumnTrait, ConnectionTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter,
+    QueryOrder, QuerySelect, RuntimeErr, Statement, TransactionTrait, Value,
 };
 use serde::Serialize;
 
-use crate::db::entities::conversation::{self, ConversationKind};
+use crate::db::entities::conversation::{self, ConversationKind, ConversationTurnState};
 use crate::db::error::DbError;
 use crate::models::message::{ContentBlock, MessageTurn, TurnRole};
 
@@ -78,6 +88,8 @@ pub struct MessageSearchHit {
 pub struct StaleConversation {
     pub id: i32,
     pub updated_at: DateTime<Utc>,
+    /// A turn of it is still running, so its last turn can still grow.
+    pub running: bool,
 }
 
 /// The searchable text of one turn: its text blocks, joined by newlines.
@@ -102,10 +114,6 @@ fn role_name(role: &TurnRole) -> &'static str {
         TurnRole::System => "system",
     }
 }
-
-/// Rows inserted per statement: each statement is a round trip to the
-/// connection's worker while the transaction holds the write lock.
-const INSERT_BATCH: usize = 64;
 
 /// What one turn contributes to the index: its role and text, or `None` for a
 /// turn the index skips (no text, or more than [`MAX_TURN_TEXT_BYTES`]).
@@ -192,7 +200,7 @@ async fn stamp<C: ConnectionTrait>(
     conversation_id: i32,
     source_updated_at: DateTime<Utc>,
     rows: &[TurnRow],
-) -> Result<(), DbError> {
+) -> Result<(), DbErr> {
     let prefix = &rows[..rows.len().saturating_sub(1)];
     conn.execute(Statement::from_sql_and_values(
         conn.get_database_backend(),
@@ -216,69 +224,400 @@ async fn stamp<C: ConnectionTrait>(
     Ok(())
 }
 
+/// How the index's writes are cut into transactions. Each one holds SQLite's
+/// write lock from its first change to its commit, and every other writer —
+/// sending a message, linking a conversation, saving a setting — waits behind
+/// it, failing with "database is locked" once the wait passes `busy_timeout`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WriteBatching {
+    /// Most rows one transaction inserts or deletes…
+    pub max_rows: usize,
+    /// …and most bytes of text. FTS5 tokenizes every byte of a row it inserts
+    /// or deletes (a trigram starts at every character) and merges index
+    /// segments at commit in proportion, so the bytes are what decide how long
+    /// a transaction holds the lock. A single row larger than this goes alone.
+    pub max_bytes: usize,
+    /// Least pause between two transactions of one rewrite; it is never shorter
+    /// than the transaction before it took, so the indexer holds the lock at
+    /// most half the time. A writer queued behind a transaction for a while
+    /// polls for the lock every 100 ms (SQLite's busy handler backs off to
+    /// that), so a shorter gap could close before it looks.
+    pub pause: Duration,
+}
+
+impl WriteBatching {
+    /// The background indexer's. Measured on a copy of a real 50K-row index
+    /// on a box deep in swap: transactions this size held the lock a few
+    /// milliseconds typically and about 120 ms at worst (a segment merge at
+    /// commit), a lone 100 KB turn 10-40 ms, where one transaction for a whole
+    /// large conversation took over a second.
+    pub const INDEXER: Self = Self {
+        max_rows: 64,
+        max_bytes: 64 * 1024,
+        pause: Duration::from_millis(100),
+    };
+}
+
+/// Attempts at one transaction that finds the database busy (another writer
+/// kept the lock past `busy_timeout`) before the conversation is left for the
+/// next pass.
+const BUSY_ATTEMPTS: u32 = 4;
+/// Wait before the first retry of a busy transaction, doubled for each next
+/// one: the indexer steps back while the app is writing.
+const BUSY_BACKOFF: Duration = Duration::from_secs(1);
+
+/// What [`index_conversation`] did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct IndexWrite {
+    /// Rows inserted.
+    pub written: u32,
+    /// Rows deleted.
+    pub deleted: u32,
+    /// Transactions it took.
+    pub transactions: u32,
+    /// Most rows one transaction changed.
+    pub largest_rows: usize,
+    /// Most bytes of text one transaction inserted or deleted.
+    pub largest_bytes: usize,
+    /// Longest one transaction took from begin to commit, including any wait
+    /// for the lock.
+    pub longest: Duration,
+}
+
+/// One row change of a rewrite.
+#[derive(Debug)]
+enum RowChange<'a> {
+    /// Drop an indexed row.
+    Delete { fts_rowid: i64, bytes: usize },
+    /// Index one turn.
+    Insert {
+        turn_idx: i32,
+        role: &'static str,
+        text: &'a str,
+    },
+}
+
+impl RowChange<'_> {
+    fn bytes(&self) -> usize {
+        match self {
+            Self::Delete { bytes, .. } => *bytes,
+            Self::Insert { text, .. } => text.len(),
+        }
+    }
+}
+
+/// `sizes` cut into consecutive ranges of at most `max_rows` items and
+/// `max_bytes` bytes each; an item larger than `max_bytes` gets a range of its
+/// own. Never empty: no items at all make one empty range, the transaction
+/// that still carries the stamp.
+fn batch_ranges(sizes: &[usize], batching: &WriteBatching) -> Vec<Range<usize>> {
+    let max_rows = batching.max_rows.max(1);
+    let mut ranges = Vec::new();
+    let (mut start, mut bytes) = (0, 0);
+    for (at, &size) in sizes.iter().enumerate() {
+        let rows = at - start;
+        if rows > 0 && (rows >= max_rows || bytes + size > batching.max_bytes) {
+            ranges.push(start..at);
+            start = at;
+            bytes = 0;
+        }
+        bytes += size;
+    }
+    ranges.push(start..sizes.len());
+    ranges
+}
+
+fn placeholders(count: usize) -> String {
+    vec!["?"; count].join(", ")
+}
+
+/// The rowids and sizes of one conversation's indexed rows from turn `from`
+/// on, found through the row map.
+async fn indexed_rows_from<C: ConnectionTrait>(
+    conn: &C,
+    conversation_id: i32,
+    from: usize,
+) -> Result<Vec<(i64, usize)>, DbErr> {
+    let rows = conn
+        .query_all(Statement::from_sql_and_values(
+            conn.get_database_backend(),
+            "SELECT fts_rowid, bytes FROM message_fts_rows \
+             WHERE conversation_id = ? AND turn_idx >= ? ORDER BY turn_idx",
+            [conversation_id.into(), (from as i64).into()],
+        ))
+        .await?;
+    rows.into_iter()
+        .map(|row| {
+            let bytes: i64 = row.try_get_by_index(1)?;
+            Ok((
+                row.try_get_by_index(0)?,
+                usize::try_from(bytes).unwrap_or(0),
+            ))
+        })
+        .collect()
+}
+
+/// Drop the rows with these rowids from the index and from the row map. The
+/// map goes first: it is a plain table, so the write-lock watch (`db::watch`)
+/// times the transaction from its start — it does not see FTS5's own writes.
+async fn delete_rows<C: ConnectionTrait>(conn: &C, rowids: &[i64]) -> Result<(), DbErr> {
+    let marks = placeholders(rowids.len());
+    let values: Vec<Value> = rowids.iter().map(|&rowid| rowid.into()).collect();
+    for sql in [
+        format!("DELETE FROM message_fts_rows WHERE fts_rowid IN ({marks})"),
+        format!("DELETE FROM message_fts WHERE rowid IN ({marks})"),
+    ] {
+        conn.execute(Statement::from_sql_and_values(
+            conn.get_database_backend(),
+            sql,
+            values.clone(),
+        ))
+        .await?;
+    }
+    Ok(())
+}
+
+/// Index these turns of one conversation. The row map hands out the rowids
+/// (and, a plain table written first, starts the write-lock watch's clock);
+/// the index rows are then written under them.
+async fn insert_rows<C: ConnectionTrait>(
+    conn: &C,
+    conversation_id: i32,
+    turns: &[(i32, &'static str, &str)],
+) -> Result<(), DbErr> {
+    let backend = conn.get_database_backend();
+    let mut sql =
+        String::from("INSERT INTO message_fts_rows (conversation_id, turn_idx, bytes) VALUES ");
+    let mut values: Vec<Value> = Vec::with_capacity(turns.len() * 3);
+    for (n, (turn_idx, _, text)) in turns.iter().enumerate() {
+        sql.push_str(if n == 0 { "(?, ?, ?)" } else { ", (?, ?, ?)" });
+        values.push(conversation_id.into());
+        values.push((*turn_idx).into());
+        values.push((text.len() as i64).into());
+    }
+    // RETURNING lists the rows in no set order: matched up by turn.
+    sql.push_str(" RETURNING fts_rowid, turn_idx");
+    let assigned: HashMap<i32, i64> = conn
+        .query_all(Statement::from_sql_and_values(backend, sql, values))
+        .await?
+        .into_iter()
+        .map(|row| Ok((row.try_get_by_index(1)?, row.try_get_by_index(0)?)))
+        .collect::<Result<_, DbErr>>()?;
+
+    let mut sql = String::from(
+        "INSERT INTO message_fts (rowid, content, conversation_id, turn_idx, role) VALUES ",
+    );
+    let mut values: Vec<Value> = Vec::with_capacity(turns.len() * 5);
+    for (n, (turn_idx, role, text)) in turns.iter().enumerate() {
+        let rowid = assigned.get(turn_idx).copied().ok_or_else(|| {
+            DbErr::Custom(format!(
+                "message_fts_rows assigned no rowid to turn {turn_idx}"
+            ))
+        })?;
+        sql.push_str(if n == 0 {
+            "(?, ?, ?, ?, ?)"
+        } else {
+            ", (?, ?, ?, ?, ?)"
+        });
+        values.push(rowid.into());
+        values.push((*text).into());
+        values.push(conversation_id.into());
+        values.push((*turn_idx).into());
+        values.push((*role).into());
+    }
+    conn.execute(Statement::from_sql_and_values(backend, sql, values))
+        .await?;
+    Ok(())
+}
+
+/// One transaction of a rewrite. Every statement in it writes — none reads
+/// first — so it never starts on a read snapshot it then cannot upgrade.
+async fn write_batch(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    changes: &[RowChange<'_>],
+    unstamp: bool,
+    stamp_with: Option<(DateTime<Utc>, &[TurnRow])>,
+) -> Result<(), DbErr> {
+    let txn = conn.begin().await?;
+    if unstamp {
+        txn.execute(Statement::from_sql_and_values(
+            txn.get_database_backend(),
+            "UPDATE message_fts_state SET indexed_turns = NULL, prefix_fp = NULL \
+             WHERE conversation_id = ?",
+            [conversation_id.into()],
+        ))
+        .await?;
+    }
+    let deletes: Vec<i64> = changes
+        .iter()
+        .filter_map(|change| match change {
+            RowChange::Delete { fts_rowid, .. } => Some(*fts_rowid),
+            RowChange::Insert { .. } => None,
+        })
+        .collect();
+    if !deletes.is_empty() {
+        delete_rows(&txn, &deletes).await?;
+    }
+    let inserts: Vec<(i32, &'static str, &str)> = changes
+        .iter()
+        .filter_map(|change| match change {
+            RowChange::Insert {
+                turn_idx,
+                role,
+                text,
+            } => Some((*turn_idx, *role, *text)),
+            RowChange::Delete { .. } => None,
+        })
+        .collect();
+    if !inserts.is_empty() {
+        insert_rows(&txn, conversation_id, &inserts).await?;
+    }
+    if let Some((source_updated_at, rows)) = stamp_with {
+        stamp(&txn, conversation_id, source_updated_at, rows).await?;
+    }
+    txn.commit().await
+}
+
+/// Whether `err` is SQLite reporting the database busy: another connection
+/// kept the write lock past `busy_timeout` (or moved on from the snapshot a
+/// transaction started on).
+fn is_busy(err: &DbErr) -> bool {
+    let (DbErr::Exec(RuntimeErr::SqlxError(err))
+    | DbErr::Query(RuntimeErr::SqlxError(err))
+    | DbErr::Conn(RuntimeErr::SqlxError(err))) = err
+    else {
+        return false;
+    };
+    match err {
+        sea_orm::sqlx::Error::Database(db) => db
+            .code()
+            .and_then(|code| code.parse::<i32>().ok())
+            .is_some_and(|code| code & 0xff == 5),
+        _ => false,
+    }
+}
+
+/// [`write_batch`], retried with a growing back-off while the database is
+/// busy. Returns how long the transaction that went through took.
+async fn write_batch_backing_off(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    changes: &[RowChange<'_>],
+    unstamp: bool,
+    stamp_with: Option<(DateTime<Utc>, &[TurnRow])>,
+) -> Result<Duration, DbErr> {
+    let mut attempt = 0;
+    loop {
+        let started = Instant::now();
+        match write_batch(conn, conversation_id, changes, unstamp, stamp_with).await {
+            Ok(()) => return Ok(started.elapsed()),
+            Err(err) if is_busy(&err) && attempt + 1 < BUSY_ATTEMPTS => {
+                let wait = BUSY_BACKOFF * 2u32.pow(attempt);
+                tracing::debug!(
+                    conversation_id,
+                    attempt,
+                    wait_ms = wait.as_millis() as u64,
+                    "[message-search] database busy; backing off"
+                );
+                tokio::time::sleep(wait).await;
+                attempt += 1;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+}
+
 /// Bring one conversation's rows up to `turns` and stamp the
-/// `conversation.updated_at` they were parsed at, in one transaction: a search
-/// never sees the conversation half-written, and the stamp never claims rows
-/// that did not land.
+/// `conversation.updated_at` they were parsed at.
 ///
 /// A conversation that only grew since it was last indexed keeps its rows:
 /// only the turns from its previous last one on are written (see
 /// [`kept_turns`]), so a long session re-indexed after every turn costs a few
-/// rows, not a rewrite of its whole history. Returns how many rows were
-/// written.
+/// rows, not a rewrite of its whole history.
+///
+/// The rows to drop are found through the row map and deleted by rowid. The
+/// changes go in transactions of [`WriteBatching::INDEXER`] size, the stamp in
+/// the last one, so the stamp never claims rows that did not land; a small
+/// change (the usual one: the last turn grew) is a single transaction, and a
+/// search never sees it half-written. A larger rewrite can be seen part-way
+/// for the moment it takes. One that starts from the first turn drops the
+/// stamp's turn count in its first transaction, so if it is cut off (codeg
+/// quits) the next pass rewrites the conversation in full rather than trust
+/// rows it had already deleted.
 pub async fn index_conversation(
     conn: &DatabaseConnection,
     conversation_id: i32,
     source_updated_at: DateTime<Utc>,
     turns: &[MessageTurn],
-) -> Result<u32, DbError> {
+) -> Result<IndexWrite, DbError> {
+    index_conversation_batched(
+        conn,
+        conversation_id,
+        source_updated_at,
+        turns,
+        &WriteBatching::INDEXER,
+    )
+    .await
+}
+
+/// [`index_conversation`] with the transactions cut by `batching`.
+pub async fn index_conversation_batched(
+    conn: &DatabaseConnection,
+    conversation_id: i32,
+    source_updated_at: DateTime<Utc>,
+    turns: &[MessageTurn],
+    batching: &WriteBatching,
+) -> Result<IndexWrite, DbError> {
     let rows = turn_rows(turns);
     let previous = indexed_prefix(conn, conversation_id).await?;
     let kept = kept_turns(previous.as_ref(), &rows);
 
-    let backend = conn.get_database_backend();
-    let txn = conn.begin().await?;
-    if kept == 0 {
-        txn.execute(Statement::from_sql_and_values(
-            backend,
-            "DELETE FROM message_fts WHERE conversation_id = ?",
-            [conversation_id.into()],
-        ))
-        .await?;
-    } else {
-        txn.execute(Statement::from_sql_and_values(
-            backend,
-            "DELETE FROM message_fts WHERE conversation_id = ? AND turn_idx >= ?",
-            [conversation_id.into(), (kept as i64).into()],
-        ))
-        .await?;
-    }
-
-    let fresh: Vec<(usize, &(&'static str, String))> = rows
-        .iter()
-        .enumerate()
-        .skip(kept)
-        .filter_map(|(idx, row)| row.as_ref().map(|row| (idx, row)))
+    let mut changes: Vec<RowChange<'_>> = indexed_rows_from(conn, conversation_id, kept)
+        .await?
+        .into_iter()
+        .map(|(fts_rowid, bytes)| RowChange::Delete { fts_rowid, bytes })
         .collect();
-    for chunk in fresh.chunks(INSERT_BATCH) {
-        let mut sql = String::from(
-            "INSERT INTO message_fts (content, conversation_id, turn_idx, role) VALUES ",
-        );
-        let mut values: Vec<Value> = Vec::with_capacity(chunk.len() * 4);
-        for (n, (idx, (role, text))) in chunk.iter().enumerate() {
-            sql.push_str(if n == 0 { "(?, ?, ?, ?)" } else { ", (?, ?, ?, ?)" });
-            values.push(text.as_str().into());
-            values.push(conversation_id.into());
-            values.push((*idx as i32).into());
-            values.push((*role).into());
-        }
-        txn.execute(Statement::from_sql_and_values(backend, sql, values))
-            .await?;
-    }
+    changes.extend(rows.iter().enumerate().skip(kept).filter_map(|(idx, row)| {
+        row.as_ref().map(|&(role, ref text)| RowChange::Insert {
+            turn_idx: idx as i32,
+            role,
+            text: text.as_str(),
+        })
+    }));
+    let sizes: Vec<usize> = changes.iter().map(RowChange::bytes).collect();
+    let batches = batch_ranges(&sizes, batching);
+    let unstamp_first = kept == 0 && batches.len() > 1 && previous.is_some();
 
-    stamp(&txn, conversation_id, source_updated_at, &rows).await?;
-    txn.commit().await?;
-    Ok(fresh.len() as u32)
+    let mut outcome = IndexWrite::default();
+    let mut last_took = Duration::ZERO;
+    for (n, range) in batches.iter().enumerate() {
+        if n > 0 {
+            tokio::time::sleep(batching.pause.max(last_took)).await;
+        }
+        let batch = &changes[range.clone()];
+        let stamp_with = (n + 1 == batches.len()).then_some((source_updated_at, rows.as_slice()));
+        last_took = write_batch_backing_off(
+            conn,
+            conversation_id,
+            batch,
+            n == 0 && unstamp_first,
+            stamp_with,
+        )
+        .await?;
+
+        outcome.transactions += 1;
+        outcome.longest = outcome.longest.max(last_took);
+        outcome.largest_rows = outcome.largest_rows.max(batch.len());
+        outcome.largest_bytes = outcome.largest_bytes.max(sizes[range.clone()].iter().sum());
+        for change in batch {
+            match change {
+                RowChange::Delete { .. } => outcome.deleted += 1,
+                RowChange::Insert { .. } => outcome.written += 1,
+            }
+        }
+    }
+    Ok(outcome)
 }
 
 /// Stamp a conversation as indexed at `source_updated_at` with no rows — for
@@ -348,8 +687,9 @@ pub async fn saved_turns(
     let rows = conn
         .query_all(Statement::from_sql_and_values(
             conn.get_database_backend(),
-            "SELECT turn_idx, role, content FROM message_fts \
-             WHERE conversation_id = ? ORDER BY turn_idx",
+            "SELECT f.turn_idx, f.role, f.content FROM message_fts_rows r \
+             JOIN message_fts f ON f.rowid = r.fts_rowid \
+             WHERE r.conversation_id = ? ORDER BY r.turn_idx",
             [conversation_id.into()],
         ))
         .await?;
@@ -373,7 +713,7 @@ pub async fn saved_turn_count(
     let row = conn
         .query_one(Statement::from_sql_and_values(
             conn.get_database_backend(),
-            "SELECT COUNT(*) FROM message_fts WHERE conversation_id = ?",
+            "SELECT COUNT(*) FROM message_fts_rows WHERE conversation_id = ?",
             [conversation_id.into()],
         ))
         .await?;
@@ -392,14 +732,19 @@ pub async fn saved_turn_count(
 /// again from the session it holds now, once it has settled.
 ///
 /// Takes any connection so it can join the caller's transaction, and returns
-/// the raw `DbErr` for the same reason.
+/// the raw `DbErr` for the same reason. The rows are deleted by rowid, found
+/// through the row map, so the caller's transaction holds the write lock for
+/// as long as this conversation's text takes to remove, not for a read of the
+/// whole index.
 pub async fn forget_conversation<C: ConnectionTrait>(
     conn: &C,
     conversation_id: i32,
-) -> Result<(), sea_orm::DbErr> {
+) -> Result<(), DbErr> {
     let backend = conn.get_database_backend();
     for sql in [
-        "DELETE FROM message_fts WHERE conversation_id = ?",
+        "DELETE FROM message_fts WHERE rowid IN \
+         (SELECT fts_rowid FROM message_fts_rows WHERE conversation_id = ?)",
+        "DELETE FROM message_fts_rows WHERE conversation_id = ?",
         "DELETE FROM message_fts_state WHERE conversation_id = ?",
     ] {
         conn.execute(Statement::from_sql_and_values(
@@ -436,10 +781,11 @@ pub async fn list_stale_conversations(
         })
         .collect();
 
-    let candidates: Vec<(i32, DateTime<Utc>)> = conversation::Entity::find()
+    let candidates: Vec<(i32, DateTime<Utc>, Option<String>)> = conversation::Entity::find()
         .select_only()
         .column(conversation::Column::Id)
         .column(conversation::Column::UpdatedAt)
+        .column(conversation::Column::TurnState)
         .filter(conversation::Column::DeletedAt.is_null())
         .filter(conversation::Column::ParentId.is_null())
         .filter(conversation::Column::Kind.ne(ConversationKind::Loop))
@@ -449,11 +795,16 @@ pub async fn list_stale_conversations(
         .all(conn)
         .await?;
 
+    let running = ConversationTurnState::Running.to_value();
     Ok(candidates
         .into_iter()
-        .filter(|(id, updated_at)| indexed.get(id) != Some(&updated_at.to_rfc3339()))
+        .filter(|(id, updated_at, _)| indexed.get(id) != Some(&updated_at.to_rfc3339()))
         .take(limit)
-        .map(|(id, updated_at)| StaleConversation { id, updated_at })
+        .map(|(id, updated_at, turn_state)| StaleConversation {
+            id,
+            updated_at,
+            running: turn_state.as_deref() == Some(running.as_str()),
+        })
         .collect())
 }
 
@@ -685,8 +1036,11 @@ mod tests {
     use super::*;
     use crate::acp::delegation::spawner::DelegationLink;
     use crate::db::service::{conversation_service, folder_service};
-    use crate::db::test_helpers::{fresh_in_memory_db, seed_conversation, seed_folder};
+    use crate::db::test_helpers::{
+        fresh_disk_db, fresh_in_memory_db, seed_conversation, seed_folder,
+    };
     use crate::models::agent::AgentType;
+    use sea_orm::DbBackend;
 
     fn turn(role: &str, text: &str) -> MessageTurn {
         serde_json::from_value(serde_json::json!({
@@ -951,13 +1305,22 @@ mod tests {
             turn("assistant", "on it"),
             turn("user", "and the docs"),
         ];
-        assert_eq!(index_conversation(&db.conn, id, Utc::now(), &first).await.unwrap(), 3);
+        assert_eq!(
+            index_conversation(&db.conn, id, Utc::now(), &first)
+                .await
+                .unwrap()
+                .written,
+            3
+        );
 
         let mut grown = first.to_vec();
         grown[2] = turn("user", "and the docs too");
         grown.push(turn("assistant", "both shipped"));
         assert_eq!(
-            index_conversation(&db.conn, id, Utc::now(), &grown).await.unwrap(),
+            index_conversation(&db.conn, id, Utc::now(), &grown)
+                .await
+                .unwrap()
+                .written,
             2,
             "the previous last turn and the new one"
         );
@@ -972,7 +1335,13 @@ mod tests {
         );
 
         // Unchanged: only the last turn is rewritten.
-        assert_eq!(index_conversation(&db.conn, id, Utc::now(), &grown).await.unwrap(), 1);
+        assert_eq!(
+            index_conversation(&db.conn, id, Utc::now(), &grown)
+                .await
+                .unwrap()
+                .written,
+            1
+        );
         assert_eq!(row_texts(&db.conn, id).await.len(), 4);
     }
 
@@ -995,12 +1364,24 @@ mod tests {
             turn("assistant", "renamed"),
             turn("user", "thanks"),
         ];
-        assert_eq!(index_conversation(&db.conn, id, Utc::now(), &edited).await.unwrap(), 3);
+        assert_eq!(
+            index_conversation(&db.conn, id, Utc::now(), &edited)
+                .await
+                .unwrap()
+                .written,
+            3
+        );
         assert!(search(&db.conn, "module").await.is_empty());
         assert_eq!(search(&db.conn, "crate").await.len(), 1);
 
         let shrunk = [turn("user", "rename the crate")];
-        assert_eq!(index_conversation(&db.conn, id, Utc::now(), &shrunk).await.unwrap(), 1);
+        assert_eq!(
+            index_conversation(&db.conn, id, Utc::now(), &shrunk)
+                .await
+                .unwrap()
+                .written,
+            1
+        );
         assert_eq!(row_texts(&db.conn, id).await, [(0, "rename the crate".to_string())]);
     }
 
@@ -1123,6 +1504,387 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(stale(later).await.unwrap().len(), 1);
+    }
+
+    /// Every row of the index, and every entry of its row map, as
+    /// `(rowid, conversation, turn, bytes)`.
+    async fn quads(conn: &DatabaseConnection, sql: &str) -> Vec<(i64, i64, i64, i64)> {
+        conn.query_all(Statement::from_string(conn.get_database_backend(), sql))
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| {
+                (
+                    row.try_get_by_index(0).unwrap(),
+                    row.try_get_by_index(1).unwrap(),
+                    row.try_get_by_index(2).unwrap(),
+                    row.try_get_by_index(3).unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    /// The row map names exactly the rows the index holds.
+    async fn assert_map_matches_index(conn: &DatabaseConnection, step: &str) {
+        let index = quads(
+            conn,
+            "SELECT rowid, conversation_id, turn_idx, length(CAST(content AS BLOB)) \
+             FROM message_fts ORDER BY rowid",
+        )
+        .await;
+        let map = quads(
+            conn,
+            "SELECT fts_rowid, conversation_id, turn_idx, bytes FROM message_fts_rows \
+             ORDER BY fts_rowid",
+        )
+        .await;
+        assert_eq!(map, index, "after {step}");
+    }
+
+    async fn texts(conn: &DatabaseConnection, id: i32) -> Vec<(i32, String)> {
+        saved_turns(conn, id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|turn| (turn.turn_idx, turn.content))
+            .collect()
+    }
+
+    const NO_PAUSE: Duration = Duration::ZERO;
+
+    /// Inserts, a tail re-index, a full rewrite, a shrink, a drop and a
+    /// rebuild all keep the row map in step with the index — in one
+    /// transaction per write, and cut into many.
+    #[tokio::test]
+    async fn the_row_map_follows_every_write() {
+        let tiny = WriteBatching {
+            max_rows: 2,
+            max_bytes: 24,
+            pause: NO_PAUSE,
+        };
+        for batching in [WriteBatching::INDEXER, tiny] {
+            let db = fresh_in_memory_db().await;
+            let conn = &db.conn;
+            let folder = seed_folder(&db, "/tmp/fts-proj").await;
+            let a = seed_conversation(&db, folder, AgentType::ClaudeCode).await;
+            let b = seed_conversation(&db, folder, AgentType::Codex).await;
+            let index = move |id: i32, turns: Vec<MessageTurn>| async move {
+                index_conversation_batched(conn, id, Utc::now(), &turns, &batching)
+                    .await
+                    .unwrap()
+            };
+
+            let first = vec![
+                turn("user", "deploy the parser"),
+                turn("assistant", "on it"),
+                turn("user", "and the docs"),
+            ];
+            index(a, first.clone()).await;
+            index(b, vec![turn("user", "the other conversation")]).await;
+            assert_map_matches_index(conn, "the first index").await;
+
+            let mut grown = first.clone();
+            grown[2] = turn("user", "and the docs too");
+            grown.push(turn("assistant", "both shipped"));
+            let wrote = index(a, grown.clone()).await;
+            assert_eq!((wrote.deleted, wrote.written), (1, 2), "{batching:?}");
+            assert_map_matches_index(conn, "a tail re-index").await;
+            assert_eq!(
+                texts(conn, a).await,
+                [
+                    (0, "deploy the parser".to_string()),
+                    (1, "on it".to_string()),
+                    (2, "and the docs too".to_string()),
+                    (3, "both shipped".to_string()),
+                ]
+            );
+
+            let mut edited = grown.clone();
+            edited[0] = turn("user", "deploy the lexer");
+            let wrote = index(a, edited).await;
+            assert_eq!((wrote.deleted, wrote.written), (4, 4));
+            assert_map_matches_index(conn, "a full rewrite").await;
+            assert!(search(conn, "parser").await.is_empty());
+
+            index(a, vec![turn("user", "deploy the lexer")]).await;
+            assert_map_matches_index(conn, "a shrink").await;
+            assert_eq!(texts(conn, a).await, [(0, "deploy the lexer".to_string())]);
+
+            mark_indexed(conn, a, Utc::now()).await.unwrap();
+            assert_map_matches_index(conn, "an unreadable transcript").await;
+            assert!(texts(conn, a).await.is_empty());
+            assert_eq!(saved_turn_count(conn, a).await.unwrap(), 0);
+
+            index(a, grown.clone()).await;
+            assert_map_matches_index(conn, "a rebuild").await;
+            assert_eq!(saved_turn_count(conn, a).await.unwrap(), 4);
+
+            forget_conversation(conn, a).await.unwrap();
+            assert_map_matches_index(conn, "forgetting").await;
+            assert!(texts(conn, a).await.is_empty());
+            index(a, grown).await;
+            assert_map_matches_index(conn, "a rebuild after forgetting").await;
+
+            assert_eq!(
+                texts(conn, b).await,
+                [(0, "the other conversation".to_string())],
+                "the other conversation was never touched"
+            );
+        }
+    }
+
+    #[test]
+    #[allow(clippy::single_range_in_vec_init)]
+    fn batches_hold_to_the_row_and_byte_limits() {
+        let batching = WriteBatching {
+            max_rows: 3,
+            max_bytes: 10,
+            pause: NO_PAUSE,
+        };
+        let cut = |sizes: &[usize]| batch_ranges(sizes, &batching);
+        assert_eq!(
+            cut(&[]),
+            [0..0],
+            "a stamp-only write still has its transaction"
+        );
+        assert_eq!(cut(&[1; 7]), [0..3, 3..6, 6..7]);
+        assert_eq!(cut(&[4, 4, 4, 4]), [0..2, 2..4]);
+        assert_eq!(
+            cut(&[2, 25, 2]),
+            [0..1, 1..2, 2..3],
+            "an oversized row goes alone"
+        );
+        assert_eq!(cut(&[10, 0]), [0..2]);
+    }
+
+    /// A rewrite larger than one transaction's share goes in several, none
+    /// over the limits, and its stamp lands with the last: the next re-index
+    /// of the grown conversation only appends.
+    #[tokio::test]
+    async fn a_large_rewrite_goes_in_transactions_within_the_limits() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/fts-proj").await;
+        let id = seed_conversation(&db, folder, AgentType::ClaudeCode).await;
+        let batching = WriteBatching {
+            max_rows: 8,
+            max_bytes: 200,
+            pause: NO_PAUSE,
+        };
+        let turns: Vec<MessageTurn> = (0..50)
+            .map(|n| {
+                let role = if n % 2 == 0 { "user" } else { "assistant" };
+                turn(role, &format!("message number {n:02} about the parser"))
+            })
+            .collect();
+
+        let wrote = index_conversation_batched(&db.conn, id, Utc::now(), &turns, &batching)
+            .await
+            .unwrap();
+        assert_eq!((wrote.deleted, wrote.written), (0, 50));
+        assert_eq!(wrote.transactions, 10, "34-byte rows, 5 to a transaction");
+        assert!(wrote.largest_rows <= batching.max_rows);
+        assert!(wrote.largest_bytes <= batching.max_bytes);
+
+        let mut edited = turns.clone();
+        edited[0] = turn("user", "message number 00 about the lexer");
+        let wrote = index_conversation_batched(&db.conn, id, Utc::now(), &edited, &batching)
+            .await
+            .unwrap();
+        assert_eq!((wrote.deleted, wrote.written), (50, 50));
+        assert!(wrote.transactions >= 20);
+        assert!(wrote.largest_rows <= batching.max_rows);
+        assert!(wrote.largest_bytes <= batching.max_bytes);
+        assert_map_matches_index(&db.conn, "a rewrite in many transactions").await;
+
+        let mut grown = edited.clone();
+        grown.push(turn("assistant", "done"));
+        let wrote = index_conversation_batched(&db.conn, id, Utc::now(), &grown, &batching)
+            .await
+            .unwrap();
+        assert_eq!(
+            (wrote.deleted, wrote.written, wrote.transactions),
+            (1, 2, 1),
+            "the stamp of the batched rewrite holds: only the tail is rewritten"
+        );
+    }
+
+    /// Search returns the same hits, in the same order with the same
+    /// snippets and ranks, however the writes were cut.
+    #[tokio::test]
+    async fn search_results_do_not_depend_on_the_transactions() {
+        let whole = WriteBatching {
+            max_rows: usize::MAX,
+            max_bytes: usize::MAX,
+            pause: NO_PAUSE,
+        };
+        let one_by_one = WriteBatching {
+            max_rows: 1,
+            max_bytes: 1,
+            pause: NO_PAUSE,
+        };
+        let conversations = [
+            vec![
+                turn("user", "why does the upload retry loop race"),
+                turn("assistant", "the retry loop re-enters before the lock"),
+            ],
+            vec![
+                turn("user", "修复登录问题，然后重新部署"),
+                turn("assistant", "the db call hit a timeout in the parser"),
+            ],
+            vec![turn("user", "a timeout in the parser, again")],
+        ];
+        let mut results = Vec::new();
+        for batching in [whole, one_by_one] {
+            let db = fresh_in_memory_db().await;
+            let folder = seed_folder(&db, "/tmp/fts-proj").await;
+            for turns in &conversations {
+                let id = seed_conversation(&db, folder, AgentType::ClaudeCode).await;
+                // Indexed twice, the second time rewritten from the first turn.
+                let mut draft = turns.clone();
+                draft[0] = turn("user", "a draft");
+                index_conversation_batched(&db.conn, id, Utc::now(), &draft, &batching)
+                    .await
+                    .unwrap();
+                index_conversation_batched(&db.conn, id, Utc::now(), turns, &batching)
+                    .await
+                    .unwrap();
+            }
+            let mut found = Vec::new();
+            for query in ["retry loop", "parser", "timeout", "登录", "db", "draft"] {
+                found.push(format!("{query}: {:?}", search(&db.conn, query).await));
+            }
+            results.push(found);
+        }
+        assert_eq!(results[0], results[1]);
+        assert!(results[0][1].contains("[[mark]]parser[[/mark]]"));
+        assert!(results[0][5].ends_with(": []"), "the drafts were replaced");
+    }
+
+    /// With 50K rows indexed, dropping one conversation — or its last turn,
+    /// the indexer's usual delete — finds its rows by rowid and takes
+    /// milliseconds; the filter on the UNINDEXED column it replaces reads the
+    /// text of every row, which on a real index under memory pressure took
+    /// seconds.
+    #[tokio::test]
+    async fn deleting_one_conversation_among_50k_rows_takes_milliseconds() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = fresh_disk_db(dir.path()).await;
+        let conn = &db.conn;
+        let backend = conn.get_database_backend();
+        for sql in [
+            "WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < 49999) \
+             INSERT INTO message_fts (rowid, content, conversation_id, turn_idx, role) \
+             SELECT i + 1, \
+                    printf('turn %d of conversation %d about the upload retry loop', \
+                           i % 250, i / 250 + 1), \
+                    i / 250 + 1, i % 250, 'user' \
+             FROM n",
+            "INSERT INTO message_fts_rows (fts_rowid, conversation_id, turn_idx, bytes) \
+             SELECT rowid, conversation_id, turn_idx, length(CAST(content AS BLOB)) \
+             FROM message_fts",
+        ] {
+            conn.execute(Statement::from_string(backend, sql))
+                .await
+                .unwrap();
+        }
+        assert_eq!(saved_turn_count(conn, 7).await.unwrap(), 250);
+
+        let started = Instant::now();
+        forget_conversation(conn, 7).await.unwrap();
+        let whole = started.elapsed();
+
+        let tail = indexed_rows_from(conn, 8, 249).await.unwrap();
+        assert_eq!(tail.len(), 1);
+        let started = Instant::now();
+        let txn = conn.begin().await.unwrap();
+        delete_rows(&txn, &[tail[0].0]).await.unwrap();
+        txn.commit().await.unwrap();
+        let last_turn = started.elapsed();
+
+        // The statement this replaced, rolled back so the map stays whole.
+        let started = Instant::now();
+        let txn = conn.begin().await.unwrap();
+        txn.execute(Statement::from_string(
+            backend,
+            "DELETE FROM message_fts WHERE conversation_id = 9 AND turn_idx >= 249",
+        ))
+        .await
+        .unwrap();
+        let by_filter = started.elapsed();
+        txn.rollback().await.unwrap();
+
+        eprintln!(
+            "50K rows: one conversation by rowid {whole:?}, its last turn {last_turn:?}; \
+             the last turn by the UNINDEXED filter {by_filter:?}"
+        );
+        assert!(whole < Duration::from_millis(250), "{whole:?}");
+        assert!(last_turn < Duration::from_millis(100), "{last_turn:?}");
+        assert_eq!(saved_turn_count(conn, 7).await.unwrap(), 0);
+        assert_eq!(saved_turn_count(conn, 8).await.unwrap(), 249);
+        assert_eq!(saved_turn_count(conn, 9).await.unwrap(), 250);
+        assert_map_matches_index(conn, "the deletes").await;
+    }
+
+    /// A pool of one connection to the database at `path` that fails a write
+    /// at once when another connection holds the lock.
+    async fn impatient_pool(path: &std::path::Path) -> DatabaseConnection {
+        let pool = sea_orm::sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(crate::db::connect_options(path).busy_timeout(Duration::ZERO))
+            .await
+            .unwrap();
+        sea_orm::SqlxSqliteConnector::from_sqlx_sqlite_pool(pool)
+    }
+
+    /// Another writer holding the lock makes the indexer's transaction fail as
+    /// busy; it backs off, retries, and goes through once the lock is free.
+    #[tokio::test]
+    async fn a_busy_database_is_retried_after_a_back_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = fresh_disk_db(dir.path()).await;
+        let folder = seed_folder(&db, "/tmp/fts-proj").await;
+        let id = seed_conversation(&db, folder, AgentType::ClaudeCode).await;
+        let indexer = impatient_pool(&dir.path().join("source.db")).await;
+
+        // The app holds the write lock for a moment.
+        let txn = db.conn.begin().await.unwrap();
+        txn.execute(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "UPDATE conversation SET title = title WHERE id = ?",
+            [id.into()],
+        ))
+        .await
+        .unwrap();
+        let err = indexer
+            .execute(Statement::from_string(
+                DbBackend::Sqlite,
+                "UPDATE message_fts_state SET indexed_at = indexed_at",
+            ))
+            .await
+            .unwrap_err();
+        assert!(is_busy(&err), "{err:?}");
+        let release = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            txn.commit().await.unwrap();
+        });
+
+        let started = Instant::now();
+        let wrote = index_conversation(&indexer, id, Utc::now(), &[turn("user", "after the wait")])
+            .await
+            .unwrap();
+        release.await.unwrap();
+        assert_eq!(wrote.written, 1);
+        assert!(
+            started.elapsed() >= BUSY_BACKOFF,
+            "it waited before retrying"
+        );
+        assert_eq!(ids(&search(&db.conn, "after the wait").await), [id]);
+
+        let syntax = indexer
+            .execute(Statement::from_string(DbBackend::Sqlite, "UPDATE nowhere"))
+            .await
+            .unwrap_err();
+        assert!(!is_busy(&syntax), "only a busy database is retried");
     }
 
     #[test]
