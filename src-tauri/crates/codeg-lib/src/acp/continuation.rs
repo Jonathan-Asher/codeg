@@ -536,10 +536,10 @@ pub async fn build_mechanical_handoff_core(
             .map(|folder| folder.path),
     };
 
-    let reader = conn.clone();
-    let parsed = tokio::time::timeout(TRANSCRIPT_READ_TIMEOUT, async move {
-        crate::commands::conversations::get_folder_conversation_core(&reader, conversation_id).await
-    })
+    let parsed = tokio::time::timeout(
+        TRANSCRIPT_READ_TIMEOUT,
+        crate::commands::conversations::get_folder_conversation_core(conn, conversation_id),
+    )
     .await;
     let (first_user_message, parsed_title) = match parsed {
         Ok(Ok((detail, title))) => (first_user_text(&detail.turns), title),
