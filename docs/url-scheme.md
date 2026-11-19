@@ -15,12 +15,53 @@ in-process and are **not** OS navigation.
 | --- | --- |
 | `codeg://session/214` | Open conversation **214** (Codeg's numeric id) |
 | `codeg://session/<external-id>` | Open by the agent's own session id (Grok UUID, Codex thread id, …) |
-| `codeg://workspace?conversationId=214` | Same lookup. `folderId` and `agent` are optional; when omitted they are read from the row |
+| `codeg://session/214?server=<server>` | Open conversation 214 **on that codeg instance** ([below](#servers)) |
+| `codeg://workspace?conversationId=214` | Same lookup. `folderId` and `agent` are optional; when omitted they are read from the row. Takes `server` too |
 | `codeg://workspace?folderId=3&conversationId=214&agent=grok` | Same, but rejected if folder or agent do not match the row |
 | `codeg://harness/install?ref=<publisher>/<name>` | Open that Harness item on the Harness page's Discover section — opens, never installs ([below](#harness-links)) |
 | `codeg://open` / `codeg://` | Show the workspace, no tab change |
 
-A missing or deleted conversation is a no-op besides showing the workspace.
+A missing or deleted conversation shows the workspace with a notice saying
+so.
+
+## Servers
+
+A conversation id means something only on the codeg instance that issued it:
+on another one the same number is a different session, or none. So every
+session link codeg writes names its instance:
+
+```
+codeg://session/319?server=3f2a9c1e77d04b1a
+```
+
+- **The value.** Each instance (desktop app or `codeg-server`) generates an
+  opaque instance id once and keeps it in `app_metadata` (`instance_id`). Its
+  name is `CODEG_INSTANCE_NAME`, or else the computer's name. Both are in the
+  answer to `POST /api/health` (`instanceId`, `instanceName`) and in
+  `get_instance_identity`.
+- **Who writes it.** Composer `@` session references, the "continue in another
+  agent" handoff, and `codeg-cli`'s run links all name the instance the
+  session is on. A frontend writes its window's server once it has asked it
+  (`get_instance_identity`); until then, and on a server from before instance
+  ids, links go out without `server`.
+- **Matching.** The desktop app matches `server` against itself and its saved
+  remote connections, in this order: an instance id (its own, or the one a
+  connection's server gave when it was saved, tested or opened — kept in
+  `app_metadata` as `remote_workspace_identity.<connection id>`); the name a
+  connection was saved under, in any case; the connection's host (alone, with
+  its port, or as the base URL); the name an instance gives itself. So
+  `?server=MyBox` written by hand works too. A value nothing matches makes the
+  app ask each saved connection's server who it is (a few seconds at most)
+  and match once more.
+- **Where it opens.** No `server`, or this instance's: here, as before. A
+  saved connection's: its workspace window opens (or comes forward) and looks
+  the session up on its own server (`resolve_session_link`); a session that
+  is not there is a notice in that window. Anything else: the local
+  workspace, with a notice naming the server.
+- **In the app.** A session badge in a transcript is clickable: a link for
+  the window's own server (or naming none) opens in place; one naming another
+  server goes through the same path as a click in another app
+  (`open_deep_link`). Codeg Web can only say the session is elsewhere.
 
 ## Examples
 
@@ -44,10 +85,14 @@ window.location.href = "codeg://session/214"
 A resolved link cannot simply be emitted to the workspace: Tauri delivers an
 event only to webviews that have **already** registered a JS listener, and
 queues nothing for the rest. During boot that is every window. So the backend
-parks the resolved target in a single slot and sends a payload-less
-`workspace://deep-link-pending` nudge; the frontend takes the slot (an atomic
-take, so exactly one caller can ever get a given target) both on the nudge and
-once on mount, right after subscribing.
+parks what the link comes to in a slot per workspace window (`main`, or the
+remote workspace window of the server it names) and sends that window a
+payload-less `workspace://deep-link-pending` nudge; the window takes its slot
+through the local shell (`take_pending_deep_link`, an atomic take, so exactly
+one caller can ever get a given target) both on the nudge and once on mount,
+right after subscribing. What it gets is a conversation to open (`focus`), a
+session to look up on its own server (`session`, remote windows), or a
+`notice`.
 
 - **Already running:** the link reaches the live process (macOS Apple Event, or
   Windows/Linux argv through the single-instance plugin). The nudge arrives at

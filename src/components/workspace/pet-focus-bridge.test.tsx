@@ -22,6 +22,7 @@ let addFolderToWorkspaceById: Mock
 let handlers: Map<string, (p: unknown) => void>
 let takePendingDeepLink: Mock
 let takePendingHarnessLink: Mock
+let resolveSessionLink: Mock
 
 const FOCUS = "workspace://focus-conversation"
 const PENDING = "workspace://deep-link-pending"
@@ -34,15 +35,35 @@ let desktop = false
 let takePendingQuickAskFocus: Mock<(...args: unknown[]) => unknown>
 const QUICK_ASK_PENDING = "quick-ask://focus-pending"
 
-vi.mock("@/lib/transport", () => ({
-  getTransport: () => ({
+// One event bus for both: the bridge takes the deep-link nudge from the local
+// shell and the pet panel's request from the window's own transport, which in
+// a local window are the same.
+vi.mock("@/lib/transport", () => {
+  const fakeTransport = () => ({
     subscribe: async (event: string, cb: (p: unknown) => void) => {
       handlers.set(event, cb)
       return () => handlers.delete(event)
     },
-  }),
-  isDesktop: () => desktop,
-}))
+  })
+  return {
+    getTransport: fakeTransport,
+    getShellTransport: fakeTransport,
+    isDesktop: () => desktop,
+  }
+})
+const toastMock = vi.hoisted(() => ({ info: vi.fn(), error: vi.fn() }))
+vi.mock("sonner", () => ({ toast: toastMock }))
+// The key and its values, so a test can tell which message was shown. One
+// function for every render, as next-intl's own translator is.
+const translate = vi.hoisted(
+  () => (key: string, values?: Record<string, string>) =>
+    values ? `${key} ${JSON.stringify(values)}` : key
+)
+vi.mock("next-intl", () => ({ useTranslations: () => translate }))
+vi.mock("@/lib/session-link", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/session-link")>()
+  return { ...actual, loadInstanceIdentity: async () => null }
+})
 vi.mock("@/lib/quick-ask/desktop", () => ({
   takePendingQuickAskFocus: () => takePendingQuickAskFocus(),
   onQuickAskFocusPending: async (cb: () => void) => {
@@ -53,6 +74,7 @@ vi.mock("@/lib/quick-ask/desktop", () => ({
 vi.mock("@/lib/deep-link", () => ({
   takePendingDeepLink: () => takePendingDeepLink(),
   takePendingHarnessLink: () => takePendingHarnessLink(),
+  resolveSessionLink: (args: unknown) => resolveSessionLink(args),
 }))
 
 import {
@@ -79,6 +101,9 @@ describe("PetFocusBridge", () => {
     takePendingQuickAskFocus = vi.fn(async () => [])
     takePendingDeepLink = vi.fn(async () => null)
     takePendingHarnessLink = vi.fn(async () => null)
+    resolveSessionLink = vi.fn(async () => ({ status: "missing" }))
+    toastMock.info.mockReset()
+    toastMock.error.mockReset()
     __resetHarnessLinkForTests()
     addFolderToWorkspaceById = vi.fn()
     resetAppWorkspaceStore()
@@ -134,6 +159,7 @@ describe("PetFocusBridge", () => {
   // it was dropped — the mount drain is what finds it.
   it("opens the tab for a deep link parked before it subscribed", async () => {
     takePendingDeepLink = parkOne({
+      kind: "focus",
       folderId: 7,
       conversationId: 314,
       agent: "grok",
@@ -161,6 +187,7 @@ describe("PetFocusBridge", () => {
     await waitFor(() => expect(handlers.has(PENDING)).toBe(true))
 
     takePendingDeepLink = parkOne({
+      kind: "focus",
       folderId: 7,
       conversationId: 55,
       agent: "codex",
@@ -177,6 +204,7 @@ describe("PetFocusBridge", () => {
     useAppWorkspaceStore.setState({ foldersHydrated: true })
     tabs = { ...tabs, tabsHydrated: true }
     takePendingDeepLink = parkOne({
+      kind: "focus",
       folderId: 7,
       conversationId: 77,
       agent: "grok",
@@ -199,6 +227,7 @@ describe("PetFocusBridge", () => {
     useAppWorkspaceStore.setState({ foldersHydrated: true })
     tabs = { ...tabs, tabsHydrated: true }
     takePendingDeepLink = parkOne({
+      kind: "focus",
       folderId: 7,
       conversationId: 88,
       agent: "grok",
@@ -229,7 +258,12 @@ describe("PetFocusBridge", () => {
       const gate = new Promise<void>((resolve) => {
         release = resolve
       })
-      const take = parkOne({ folderId: 7, conversationId: 101, agent: "grok" })
+      const take = parkOne({
+        kind: "focus",
+        folderId: 7,
+        conversationId: 101,
+        agent: "grok",
+      })
       takePendingDeepLink = vi.fn(async () => {
         await gate
         return take()
@@ -379,6 +413,9 @@ describe("PetFocusBridge — Harness links", () => {
     handlers = new Map()
     takePendingDeepLink = vi.fn(async () => null)
     takePendingHarnessLink = vi.fn(async () => null)
+    resolveSessionLink = vi.fn(async () => ({ status: "missing" }))
+    toastMock.info.mockReset()
+    toastMock.error.mockReset()
     __resetHarnessLinkForTests()
     addFolderToWorkspaceById = vi.fn()
     resetAppWorkspaceStore()
@@ -421,6 +458,7 @@ describe("PetFocusBridge — Harness links", () => {
     await waitFor(() => expect(handlers.has(PENDING)).toBe(true))
 
     takePendingDeepLink = parkOne({
+      kind: "focus",
       folderId: 7,
       conversationId: 12,
       agent: "grok",
@@ -482,5 +520,175 @@ describe("PetFocusBridge — Harness links", () => {
     await waitFor(() => expect(takePendingHarnessLink).toHaveBeenCalled())
     await act(async () => {})
     expect(waitingHarnessLink()).toBeNull()
+  })
+})
+
+// A link can name the server its session lives on. One for a saved remote
+// connection reaches that connection's window as a ref to look up on its own
+// server; one that opens nothing reaches the local window as a notice.
+describe("PetFocusBridge — links for a server", () => {
+  beforeEach(() => {
+    handlers = new Map()
+    desktop = true
+    takePendingQuickAskFocus = vi.fn(async () => [])
+    takePendingDeepLink = vi.fn(async () => null)
+    takePendingHarnessLink = vi.fn(async () => null)
+    resolveSessionLink = vi.fn(async () => ({ status: "missing" }))
+    toastMock.info.mockReset()
+    toastMock.error.mockReset()
+    __resetHarnessLinkForTests()
+    addFolderToWorkspaceById = vi.fn()
+    resetAppWorkspaceStore()
+    useAppWorkspaceStore.setState({
+      foldersHydrated: true,
+      folders: [{ id: 7 }] as never,
+      addFolderToWorkspaceById,
+    })
+    tabs = { tabsHydrated: true, openTab: vi.fn() }
+  })
+  afterEach(() => cleanup())
+
+  const forTheBox = {
+    kind: "session",
+    sessionRef: "319",
+    folderId: null,
+    agent: null,
+    serverName: "Johnnysclawd",
+  }
+
+  it("looks the session up on its own server and opens it", async () => {
+    takePendingDeepLink = parkOne(forTheBox)
+    resolveSessionLink = vi.fn(async () => ({
+      status: "found",
+      target: { folderId: 7, conversationId: 319, agent: "codex" },
+    }))
+    render(<PetFocusBridge />)
+    await waitFor(() =>
+      expect(tabs.openTab).toHaveBeenCalledWith(7, 319, "codex", true)
+    )
+    expect(resolveSessionLink).toHaveBeenCalledWith({
+      sessionRef: "319",
+      folderId: null,
+      agent: null,
+    })
+    expect(toastMock.info).not.toHaveBeenCalled()
+  })
+
+  it("opens one that arrives with a warm nudge", async () => {
+    render(<PetFocusBridge />)
+    await waitFor(() => expect(handlers.has(PENDING)).toBe(true))
+    await act(async () => {})
+    takePendingDeepLink = parkOne({ ...forTheBox, folderId: 7, agent: "grok" })
+    resolveSessionLink = vi.fn(async () => ({
+      status: "found",
+      target: { folderId: 7, conversationId: 319, agent: "grok" },
+    }))
+    await act(async () => {
+      handlers.get(PENDING)!(null)
+    })
+    await waitFor(() =>
+      expect(tabs.openTab).toHaveBeenCalledWith(7, 319, "grok", true)
+    )
+    expect(resolveSessionLink).toHaveBeenCalledWith({
+      sessionRef: "319",
+      folderId: 7,
+      agent: "grok",
+    })
+  })
+
+  it.each([
+    [
+      "missing",
+      async () => ({ status: "missing" }),
+      "info",
+      'notFoundOn {"session":"319","server":"Johnnysclawd"}',
+    ],
+    [
+      "unsupported",
+      async () => ({ status: "unsupported" }),
+      "info",
+      'serverTooOld {"server":"Johnnysclawd"}',
+    ],
+    [
+      "unreachable",
+      async () => {
+        throw new Error("offline")
+      },
+      "error",
+      'lookupFailed {"session":"319","server":"Johnnysclawd"}',
+    ],
+  ] as const)(
+    "says why when the server cannot open it (%s)",
+    async (_, lookup, level, message) => {
+      vi.spyOn(console, "warn").mockImplementation(() => {})
+      takePendingDeepLink = parkOne(forTheBox)
+      resolveSessionLink = vi.fn(lookup)
+      render(<PetFocusBridge />)
+      await waitFor(() =>
+        expect(toastMock[level]).toHaveBeenCalledWith(message)
+      )
+      expect(tabs.openTab).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each([
+    [
+      { reason: "not_found", server: null, sessionRef: "999" },
+      'notFound {"session":"999"}',
+    ],
+    [
+      { reason: "unknown_server", server: "Elsewhere", sessionRef: "319" },
+      'unknownServer {"server":"Elsewhere"}',
+    ],
+    [
+      {
+        reason: "server_unavailable",
+        server: "Johnnysclawd",
+        sessionRef: null,
+      },
+      'serverUnavailable {"server":"Johnnysclawd"}',
+    ],
+  ])(
+    "shows a notice instead of a silent workspace (%j)",
+    async (notice, message) => {
+      takePendingDeepLink = parkOne({ kind: "notice", ...notice })
+      render(<PetFocusBridge />)
+      await waitFor(() => expect(toastMock.info).toHaveBeenCalledWith(message))
+      expect(tabs.openTab).not.toHaveBeenCalled()
+      expect(resolveSessionLink).not.toHaveBeenCalled()
+    }
+  )
+
+  // A transcript badge for this window's server opens through the same
+  // queue, and says what went wrong through the same toasts.
+  it("serves the transcript's session badges", async () => {
+    const { requestConversationFocus } =
+      await import("@/lib/conversation-focus")
+    const { notifySessionLink } = await import("@/lib/session-link")
+    const { unmount } = render(<PetFocusBridge />)
+    await waitFor(() => expect(handlers.has(PENDING)).toBe(true))
+
+    expect(
+      requestConversationFocus({
+        folderId: 7,
+        conversationId: 42,
+        agent: "codex",
+      })
+    ).toBe(true)
+    await waitFor(() =>
+      expect(tabs.openTab).toHaveBeenCalledWith(7, 42, "codex", true)
+    )
+    notifySessionLink({ key: "notFound", values: { session: "5" } })
+    expect(toastMock.info).toHaveBeenCalledWith('notFound {"session":"5"}')
+
+    // Gone with the workspace.
+    unmount()
+    expect(
+      requestConversationFocus({
+        folderId: 7,
+        conversationId: 43,
+        agent: "codex",
+      })
+    ).toBe(false)
   })
 })

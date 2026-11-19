@@ -11,6 +11,7 @@ import {
 import { cn } from "@/lib/utils"
 
 import { FileReferenceActions } from "./file-reference-actions"
+import { SessionReferenceLink } from "./session-reference-link"
 import { useKnownInvocations } from "./known-invocations-context"
 import { parseUserMessageSegments } from "./user-message-segments"
 
@@ -35,11 +36,13 @@ const TextRun = memo(function TextRun({ text }: { text: string }) {
         segment.kind === "reference" ? (
           segment.attrs.refType === "file" && segment.attrs.uri ? (
             // Right-clicking a file badge opens its reveal / copy-path menu. A
-            // non-file reference (session, agent, commit, skill) has no path, so
-            // it stays a bare badge.
+            // session badge opens its session. Any other reference (agent,
+            // commit, skill) stays a bare badge.
             <FileReferenceActions key={index} target={segment.attrs.uri}>
               <ReferenceBadge data={segment.attrs} />
             </FileReferenceActions>
+          ) : segment.attrs.refType === "session" ? (
+            <SessionReferenceLink key={index} data={segment.attrs} />
           ) : (
             <ReferenceBadge key={index} data={segment.attrs} />
           )

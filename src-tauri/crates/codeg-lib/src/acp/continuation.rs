@@ -441,9 +441,9 @@ pub fn format_mechanical_handoff(handoff: &MechanicalHandoff) -> String {
         .filter(|t| !t.is_empty())
         .unwrap_or_else(|| format!("Session {}", handoff.conversation_id));
     out.push_str(&format!(
-        "- **Session**: [{}](codeg://session/{})\n",
+        "- **Session**: [{}]({})\n",
         escape_link_text(&title),
-        handoff.conversation_id
+        crate::deep_link::session_link(handoff.conversation_id)
     ));
     match handoff.folder.as_deref() {
         Some(folder) => out.push_str(&format!("- **Folder**: {}\n", inline_code(folder))),

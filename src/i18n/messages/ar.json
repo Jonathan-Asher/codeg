@@ -11488,5 +11488,15 @@
       "rateLimited": "طلب SRN من Codeg الانتظار قبل إعادة المحاولة.",
       "server": "ردّ SRN بخطأ."
     }
+  },
+  "DeepLink": {
+    "notFound": "لم يتم العثور على الجلسة ⁦{session}⁩.",
+    "notFoundOn": "لم يتم العثور على الجلسة ⁦{session}⁩ على ⁦{server}⁩.",
+    "unknownServer": "هذا الرابط لخادم codeg غير محفوظ هنا (⁦{server}⁩).",
+    "serverUnavailable": "تعذر فتح مساحة العمل الخاصة بـ ⁦{server}⁩.",
+    "lookupFailed": "تعذر البحث عن الجلسة ⁦{session}⁩ على ⁦{server}⁩.",
+    "lookupFailedHere": "تعذر البحث عن الجلسة ⁦{session}⁩.",
+    "serverTooOld": "يعمل ⁦{server}⁩ بإصدار أقدم من codeg لا يمكنه فتح روابط الجلسات.",
+    "otherServer": "هذه الجلسة على خادم codeg آخر (⁦{server}⁩)."
   }
 }

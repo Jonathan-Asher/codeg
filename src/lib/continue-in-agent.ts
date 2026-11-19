@@ -9,6 +9,7 @@ import { parkComposerPrefill } from "@/lib/composer-prefill-handoff"
 import { parkContinuationLink } from "@/lib/continuation-links"
 import { requestComposerFocus } from "@/lib/composer-focus"
 import { setContinuationInProgress } from "@/lib/continue-in-agent-block"
+import { sessionLinkUri } from "@/lib/session-link"
 import {
   saveConfigPreference,
   saveModePreference,
@@ -39,7 +40,8 @@ import {
  *    old one (`continued_from_id`), which draws the banners linking the two.
  *
  * The new agent can read more of the old session itself: the link is a
- * `codeg://session/<id>` reference, which `get_session_info` resolves.
+ * `codeg://session/<id>?server=<instance>` reference, which
+ * `get_session_info` resolves.
  */
 
 // ── When it can run: see `lib/continue-in-agent-block.ts` ──────────────────
@@ -81,7 +83,7 @@ export function buildContinuationPrefill({
   handoff: string
 }): string {
   const name = linkText(title) || `Session ${conversationId}`
-  const line = `Continuing [${name}](codeg://session/${conversationId}) from ${agentLabel}.`
+  const line = `Continuing [${name}](${sessionLinkUri(conversationId)}) from ${agentLabel}.`
   const body = handoff.trim()
   return body ? `${line}\n\n${body}` : line
 }

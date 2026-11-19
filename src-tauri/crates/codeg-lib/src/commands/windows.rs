@@ -1799,7 +1799,7 @@ pub async fn resize_pet_panel(app: AppHandle, height: f64) -> Result<(), AppComm
 ///
 /// Only the pet panel calls this. A `codeg://` OS deep link cannot: the emit
 /// reaches only webviews that have *already* registered a JS listener, which
-/// on a cold start is none of them — see `deep_link::PENDING_FOCUS` for the
+/// on a cold start is none of them — see `deep_link::PENDING_LINKS` for the
 /// handoff that path uses instead.
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]

@@ -51,9 +51,10 @@ pub mod capability {
 /// its `--wait`. Not a result's: the run was not cancelled, it goes on.
 pub const STILL_RUNNING_EXIT_CODE: i32 = 6;
 
-/// The deep link a run's conversation opens at.
+/// The deep link a run's conversation opens at, naming this instance
+/// (`?server=`), so that a click on another computer opens it here.
 pub fn session_link(conversation_id: i32) -> String {
-    format!("codeg://session/{conversation_id}")
+    crate::deep_link::session_link(conversation_id)
 }
 
 // ── hello ────────────────────────────────────────────────────────────────────

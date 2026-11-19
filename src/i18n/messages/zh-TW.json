@@ -11488,5 +11488,15 @@
       "rateLimited": "SRN 要求 Codeg 稍後再試。",
       "server": "SRN 回傳了錯誤。"
     }
+  },
+  "DeepLink": {
+    "notFound": "找不到工作階段 {session}。",
+    "notFoundOn": "在 {server} 上找不到工作階段 {session}。",
+    "unknownServer": "此連結指向一台未在這裡儲存的 codeg 伺服器（{server}）。",
+    "serverUnavailable": "無法開啟 {server} 的工作區。",
+    "lookupFailed": "無法在 {server} 上查詢工作階段 {session}。",
+    "lookupFailedHere": "無法查詢工作階段 {session}。",
+    "serverTooOld": "{server} 執行的 codeg 版本較舊，無法開啟工作階段連結。",
+    "otherServer": "此工作階段位於另一台 codeg 伺服器（{server}）上。"
   }
 }

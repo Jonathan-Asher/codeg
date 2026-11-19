@@ -11488,5 +11488,15 @@
       "rateLimited": "SRN から、しばらく待ってから再試行するよう求められました。",
       "server": "SRN がエラーを返しました。"
     }
+  },
+  "DeepLink": {
+    "notFound": "セッション {session} が見つかりません。",
+    "notFoundOn": "{server} にセッション {session} が見つかりません。",
+    "unknownServer": "このリンクは、ここに保存されていない codeg サーバー（{server}）のものです。",
+    "serverUnavailable": "{server} のワークスペースを開けませんでした。",
+    "lookupFailed": "{server} でセッション {session} を検索できませんでした。",
+    "lookupFailedHere": "セッション {session} を検索できませんでした。",
+    "serverTooOld": "{server} の codeg は古いため、セッションのリンクを開けません。",
+    "otherServer": "このセッションは別の codeg サーバー（{server}）にあります。"
   }
 }

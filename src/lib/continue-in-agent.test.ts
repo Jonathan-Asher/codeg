@@ -20,6 +20,7 @@ import {
   takeComposerPrefill,
 } from "@/lib/composer-prefill-handoff"
 import type { ContinuationHandoff } from "@/lib/api"
+import { __setInstanceIdentityForTests } from "@/lib/session-link"
 import { resetTabStore, useTabStore } from "@/stores/tab-store"
 import { singleGroupLayout } from "@/lib/tab-group-layout"
 
@@ -93,6 +94,27 @@ describe("the new session's composer text", () => {
     ).toBe(
       "Continuing [Fix the login](codeg://session/42) from Claude Code.\n\n## Goal\nShip the login fix."
     )
+  })
+
+  it("names the old session's server once the window knows it", () => {
+    __setInstanceIdentityForTests({
+      instanceId: "0123456789abcdef",
+      name: "box",
+    })
+    try {
+      expect(
+        buildContinuationPrefill({
+          title: "Fix the login",
+          conversationId: 42,
+          agentLabel: "Claude Code",
+          handoff: "",
+        })
+      ).toBe(
+        "Continuing [Fix the login](codeg://session/42?server=0123456789abcdef) from Claude Code."
+      )
+    } finally {
+      __setInstanceIdentityForTests(null)
+    }
   })
 
   it("keeps a title from breaking out of the link", () => {

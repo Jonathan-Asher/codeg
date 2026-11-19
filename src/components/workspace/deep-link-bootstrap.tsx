@@ -1,15 +1,26 @@
 "use client"
 
 import { useCallback, useEffect, useRef } from "react"
+import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { useTabStore, useTabActions } from "@/contexts/tab-context"
-import { takePendingDeepLink, takePendingHarnessLink } from "@/lib/deep-link"
+import { setConversationFocusHandler } from "@/lib/conversation-focus"
+import {
+  resolveSessionLink,
+  takePendingDeepLink,
+  takePendingHarnessLink,
+  type PendingDeepLink,
+} from "@/lib/deep-link"
 import { queueHarnessLink } from "@/lib/harness-link"
 import {
   onQuickAskFocusPending,
   takePendingQuickAskFocus,
 } from "@/lib/quick-ask/desktop"
+import {
+  loadInstanceIdentity,
+  setSessionLinkNotifier,
+} from "@/lib/session-link"
 import { isDesktop } from "@/lib/transport"
 import type { AgentType } from "@/lib/types"
 
@@ -140,6 +151,21 @@ type FocusRequest = {
  * (inside the providers the Harness page needs, which this sits outside of),
  * which opens it once the workspace is ready.
  *
+ * A link can name the codeg server its session lives on
+ * (`codeg://session/<id>?server=…`). One for a saved remote connection is
+ * handed to THAT connection's workspace window, in its own slot, as a session
+ * ref: the local backend cannot see the remote server's sessions, so this
+ * bridge, in the remote window, looks it up on its own server
+ * (`resolveSessionLink`) and opens it, or says it is not there. A link that
+ * opens nothing — no such session, a server nobody saved — arrives as a
+ * notice for the local window, which says why. The slot is claimed through
+ * the local shell in either window, as is its nudge.
+ *
+ * The window's transcript badges (`SessionReferenceLink`) open sessions
+ * through here too: this registers the focus handler and the notifier they
+ * use, and asks the window's server who it is, so the links this window
+ * writes can name it.
+ *
  * Latest workspace state is held in a ref so the single subscription always
  * sees fresh state without re-subscribing on every change. A request that
  * arrives before folders/tabs hydrate is queued and replayed.
@@ -148,6 +174,12 @@ export function PetFocusBridge() {
   const foldersHydrated = useAppWorkspaceStore((s) => s.foldersHydrated)
   const tabsHydrated = useTabStore((s) => s.tabsHydrated)
   const { openTab } = useTabActions()
+  const t = useTranslations("DeepLink")
+  // Read when a link is handled, without re-subscribing on a locale change.
+  const tRef = useRef(t)
+  useEffect(() => {
+    tRef.current = t
+  }, [t])
 
   // Workspace state is read via getState() at attempt time; only the tab
   // half still needs a ref mirror (it lives in a context, not a store).
@@ -218,6 +250,23 @@ export function PetFocusBridge() {
     attempt()
   }, [foldersHydrated, tabsHydrated, attempt])
 
+  // Transcript badges open sessions here, and say here what went wrong.
+  useEffect(() => {
+    const offFocus = setConversationFocusHandler((request) => {
+      pendingRef.current.push(request)
+      attempt()
+    })
+    const offNotice = setSessionLinkNotifier((notice) => {
+      toast.info(tRef.current(notice.key, notice.values))
+    })
+    // Who this window's server is: the links it writes name it.
+    void loadInstanceIdentity()
+    return () => {
+      offFocus()
+      offNotice()
+    }
+  }, [attempt])
+
   useEffect(() => {
     const disposers: Array<() => void> = []
     let cancelled = false
@@ -250,7 +299,9 @@ export function PetFocusBridge() {
       // Nothing to re-park on unmount: the workspace is tearing down, so
       // there is no tab left to open. Dropping it beats resurrecting it.
       if (cancelled || !parked) return
-      pendingRef.current.push(parked)
+      const target = await openableTarget(parked, tRef.current)
+      if (cancelled || !target) return
+      pendingRef.current.push(target)
       attempt()
     }
 
@@ -265,7 +316,8 @@ export function PetFocusBridge() {
 
     void (async () => {
       try {
-        const { getTransport } = await import("@/lib/transport")
+        const { getShellTransport, getTransport } =
+          await import("@/lib/transport")
         const transport = getTransport()
 
         const offFocus = await transport.subscribe<{
@@ -289,7 +341,9 @@ export function PetFocusBridge() {
         if (cancelled) offFocus()
         else disposers.push(offFocus)
 
-        const offPending = await transport.subscribe(
+        // The local shell's, in a remote workspace window too: the desktop
+        // app parks the link and sends the nudge, not the window's server.
+        const offPending = await getShellTransport().subscribe(
           "workspace://deep-link-pending",
           () => {
             void drainDeepLink()
@@ -326,4 +380,69 @@ export function PetFocusBridge() {
   }, [attempt])
 
   return null
+}
+
+type Translate = ReturnType<typeof useTranslations<"DeepLink">>
+
+/**
+ * The conversation a parked link opens in this window, or `null` after
+ * saying why it opens none. A `session` is looked up on this window's own
+ * server, which is where the desktop app sent it.
+ */
+async function openableTarget(
+  parked: PendingDeepLink,
+  t: Translate
+): Promise<FocusRequest | null> {
+  switch (parked.kind) {
+    case "focus":
+      return {
+        folderId: parked.folderId,
+        conversationId: parked.conversationId,
+        agent: parked.agent,
+      }
+    case "notice":
+      toast.info(noticeMessage(parked, t))
+      return null
+    case "session": {
+      const server = parked.serverName || "?"
+      const session = parked.sessionRef
+      try {
+        const lookup = await resolveSessionLink({
+          sessionRef: parked.sessionRef,
+          folderId: parked.folderId,
+          agent: parked.agent,
+        })
+        switch (lookup.status) {
+          case "found":
+            return lookup.target
+          case "missing":
+            toast.info(t("notFoundOn", { session, server }))
+            return null
+          case "unsupported":
+            toast.info(t("serverTooOld", { server }))
+            return null
+        }
+      } catch (err) {
+        console.warn("[PetFocusBridge] session lookup failed:", err)
+        toast.error(t("lookupFailed", { session, server }))
+        return null
+      }
+    }
+  }
+}
+
+function noticeMessage(
+  notice: Extract<PendingDeepLink, { kind: "notice" }>,
+  t: Translate
+): string {
+  const session = notice.sessionRef ?? "?"
+  const server = notice.server || "?"
+  switch (notice.reason) {
+    case "not_found":
+      return t("notFound", { session })
+    case "unknown_server":
+      return t("unknownServer", { server })
+    case "server_unavailable":
+      return t("serverUnavailable", { server })
+  }
 }

@@ -450,6 +450,10 @@ async fn async_main(
         .await
         .expect("Failed to initialize database");
 
+    // Who this instance is, for the session links it writes and the health
+    // answer it gives (`instance_identity`).
+    codeg_lib::instance_identity::init(&db.conn).await;
+
     // Logging phase 2: override the default level from the persisted
     // `logging.level` now that the DB is open. Phase 3 (wiring the emitter)
     // happens once AppState exists, below.

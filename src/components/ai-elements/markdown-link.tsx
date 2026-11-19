@@ -8,6 +8,7 @@ import type { Components, LinkSafetyModalProps } from "streamdown"
 import { ReferenceBadge } from "@/components/chat/composer/badges/reference-badge"
 import { parseCodegReferenceUri } from "@/components/chat/composer/reference-uri"
 import { FileReferenceActions } from "@/components/message/file-reference-actions"
+import { SessionReferenceLink } from "@/components/message/session-reference-link"
 import type { ReferenceAttrs } from "@/components/chat/composer/types"
 import { classifyResourceKind, type ResourceKind } from "@/lib/resource-kind"
 import { cn } from "@/lib/utils"
@@ -114,6 +115,10 @@ export function MarkdownLink({
   // text is the label.
   if (href.toLowerCase().startsWith("codeg:")) {
     const reference = parseCodegReferenceUri(href, nodeText(children))
+    // A session badge opens its session (here, or on the server it names).
+    if (reference?.refType === "session") {
+      return <SessionReferenceLink data={reference} />
+    }
     if (reference) return <ReferenceBadge data={reference} />
   }
 

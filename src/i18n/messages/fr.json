@@ -11488,5 +11488,15 @@
       "rateLimited": "SRN a demandé à Codeg d'attendre avant de réessayer.",
       "server": "SRN a répondu par une erreur."
     }
+  },
+  "DeepLink": {
+    "notFound": "La session {session} est introuvable.",
+    "notFoundOn": "La session {session} est introuvable sur {server}.",
+    "unknownServer": "Ce lien concerne un serveur codeg qui n’est pas enregistré ici ({server}).",
+    "serverUnavailable": "Impossible d’ouvrir l’espace de travail de {server}.",
+    "lookupFailed": "Impossible de rechercher la session {session} sur {server}.",
+    "lookupFailedHere": "Impossible de rechercher la session {session}.",
+    "serverTooOld": "{server} utilise une ancienne version de codeg qui ne peut pas ouvrir les liens de session.",
+    "otherServer": "Cette session se trouve sur un autre serveur codeg ({server})."
   }
 }

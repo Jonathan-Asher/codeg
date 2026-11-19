@@ -30,6 +30,7 @@ pub mod conversation_tags;
 pub mod continuation;
 pub mod conversations;
 pub mod custom_skills;
+pub mod deep_link;
 pub mod delegation;
 pub mod dictation_refine;
 mod error;

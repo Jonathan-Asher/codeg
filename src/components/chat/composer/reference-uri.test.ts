@@ -125,6 +125,30 @@ describe("parseCodegReferenceUri", () => {
     ).toMatchObject({ refType: "session", id: "randomtoken", meta: null })
   })
 
+  // `?server=` says where the session lives, not which one it is: the id is
+  // the path alone, and the uri keeps the whole link for the click.
+  it("reads a session link that names its server", () => {
+    expect(
+      parseCodegReferenceUri(
+        "codeg://session/319?server=0123456789abcdef",
+        "Notes"
+      )
+    ).toMatchObject({
+      refType: "session",
+      id: "319",
+      label: "Notes",
+      uri: "codeg://session/319?server=0123456789abcdef",
+      meta: null,
+    })
+    expect(
+      parseCodegReferenceUri("codeg://session/codex_abc?server=box#x", "")
+    ).toMatchObject({
+      id: "codex_abc",
+      label: "#codex_abc",
+      meta: { agentType: "codex" },
+    })
+  })
+
   it("falls back to #id for an empty session label", () => {
     expect(parseCodegReferenceUri("codeg://session/123", "")?.label).toBe(
       "#123"

@@ -11488,5 +11488,15 @@
       "rateLimited": "SRN asked Codeg to wait before trying again.",
       "server": "SRN answered with an error."
     }
+  },
+  "DeepLink": {
+    "notFound": "Session {session} was not found.",
+    "notFoundOn": "Session {session} was not found on {server}.",
+    "unknownServer": "This link is for a codeg server that isn't saved here ({server}).",
+    "serverUnavailable": "Couldn't open the workspace of {server}.",
+    "lookupFailed": "Couldn't look up session {session} on {server}.",
+    "lookupFailedHere": "Couldn't look up session {session}.",
+    "serverTooOld": "{server} runs an older codeg that can't open session links.",
+    "otherServer": "This session is on another codeg server ({server})."
   }
 }

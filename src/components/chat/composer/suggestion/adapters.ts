@@ -1,6 +1,7 @@
 import type { FlatFileEntry } from "@/hooks/use-file-tree"
 import { formatConversationTitle } from "@/lib/conversation-title"
 import { buildFileUri } from "@/lib/reference-link"
+import { sessionLinkUri } from "@/lib/session-link"
 import {
   type AcpAgentInfo,
   type AssistantInfo,
@@ -98,7 +99,10 @@ export function sessionToSuggestion(
   // whitespace-only title (folding can't turn blank into non-blank).
   const label =
     formatConversationTitle(conversation.title).trim() || `#${conversation.id}`
-  const uri = `codeg://session/${conversation.id}`
+  // Naming the instance the session lives on (`?server=`), so the link still
+  // means this session when it travels: an agent writing it into notes, a
+  // click on it on another computer.
+  const uri = sessionLinkUri(conversation.id)
   return {
     reference: {
       refType: "session",

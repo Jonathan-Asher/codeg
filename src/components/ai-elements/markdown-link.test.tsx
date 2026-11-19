@@ -146,8 +146,10 @@ describe("MarkdownLink", () => {
       render(
         <MarkdownLink href="codeg://session/codex_abc">My chat</MarkdownLink>
       )
-      // It's a badge, not a clickable link.
-      expect(screen.queryByRole("button")).toBeNull()
+      // A badge that opens its session — not a link routed through the
+      // link-safety flow.
+      expect(screen.getByRole("button")).toHaveAttribute("data-session-link")
+      expect(screen.queryByTestId("link-modal")).toBeNull()
       const badge = screen.getByRole("img", { name: "session: My chat" })
       expect(badge).toHaveAttribute("data-reference-badge")
       expect(badge).toHaveAttribute("data-ref-type", "session")

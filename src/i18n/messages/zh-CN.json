@@ -11488,5 +11488,15 @@
       "rateLimited": "SRN 要求 Codeg 稍后再试。",
       "server": "SRN 返回了错误。"
     }
+  },
+  "DeepLink": {
+    "notFound": "未找到会话 {session}。",
+    "notFoundOn": "在 {server} 上未找到会话 {session}。",
+    "unknownServer": "此链接指向一个未在这里保存的 codeg 服务器（{server}）。",
+    "serverUnavailable": "无法打开 {server} 的工作区。",
+    "lookupFailed": "无法在 {server} 上查找会话 {session}。",
+    "lookupFailedHere": "无法查找会话 {session}。",
+    "serverTooOld": "{server} 运行的 codeg 版本较旧，无法打开会话链接。",
+    "otherServer": "此会话位于另一台 codeg 服务器（{server}）上。"
   }
 }

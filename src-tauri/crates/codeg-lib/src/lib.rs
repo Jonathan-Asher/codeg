@@ -57,6 +57,7 @@ pub mod git_repo;
 /// The SpaceRing Harness catalog: the one client, cache and set of rules
 /// every request to it goes through (both runtimes).
 pub mod harness;
+pub mod instance_identity;
 pub mod intern;
 pub mod keyring_store;
 pub mod launch_env;
@@ -1130,6 +1131,9 @@ mod tauri_app {
                     app_version,
                 ))
                 .map_err(|e| e.to_string())?;
+                // Who this instance is, for the session links it writes and the
+                // health answer its web server gives (`instance_identity`).
+                tauri::async_runtime::block_on(crate::instance_identity::init(&database.conn));
                 app.manage(database);
 
                 // The `codeg-cli` startup put first on PATH (`cli_run::shim`),
@@ -2013,6 +2017,16 @@ mod tauri_app {
                 // or restart since) still open their session.
                 notification::install_click_handler(app.handle());
 
+                // A Windows/Linux launch URL that did not start `main` on a
+                // local conversation: one for another server opens that
+                // server's workspace window, one to no live conversation says
+                // so. (macOS delivers its launch URL to `on_open_url` instead.)
+                let left_over =
+                    crate::deep_link::startup_links_left_over(&startup_urls, startup_link.as_deref());
+                if !left_over.is_empty() {
+                    crate::deep_link::handle_raw_urls(app.handle(), &left_over);
+                }
+
                 #[cfg(all(
                     feature = "browser-child",
                     any(target_os = "macos", target_os = "windows", target_os = "linux")
@@ -2583,6 +2597,9 @@ mod tauri_app {
                 windows::focus_conversation,
                 crate::deep_link::take_pending_deep_link,
                 crate::deep_link::take_pending_harness_link,
+                crate::deep_link::open_deep_link,
+                crate::deep_link::resolve_session_link,
+                crate::instance_identity::get_instance_identity,
                 windows::update_traffic_light_position,
                 windows::update_appearance_mode,
                 windows::set_tray_locale,

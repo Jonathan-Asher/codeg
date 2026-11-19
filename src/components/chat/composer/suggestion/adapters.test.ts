@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
 
 import type { FlatFileEntry } from "@/hooks/use-file-tree"
 import type {
@@ -6,6 +6,8 @@ import type {
   DbConversationSummary,
   GitLogEntry,
 } from "@/lib/types"
+
+import { __setInstanceIdentityForTests } from "@/lib/session-link"
 
 import {
   agentToSuggestion,
@@ -87,6 +89,20 @@ describe("sessionToSuggestion", () => {
     expect(sessionToSuggestion({ ...base, title: "x" }).reference.uri).toBe(
       "codeg://session/123"
     )
+  })
+  describe("once the window knows its server", () => {
+    afterEach(() => __setInstanceIdentityForTests(null))
+    // So the link still means this session when it leaves the window: an
+    // agent writing it into notes, a click on it on another computer.
+    it("names the server in the uri, and only there", () => {
+      __setInstanceIdentityForTests({
+        instanceId: "0123456789abcdef",
+        name: "box",
+      })
+      const reference = sessionToSuggestion({ ...base, title: "x" }).reference
+      expect(reference.uri).toBe("codeg://session/123?server=0123456789abcdef")
+      expect(reference.id).toBe("123")
+    })
   })
   it("falls back to #id when the title is empty", () => {
     expect(sessionToSuggestion({ ...base, title: null }).reference.label).toBe(

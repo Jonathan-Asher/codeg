@@ -126,7 +126,10 @@ export function parseCodegReferenceUri(
 
   const session = uri.match(SESSION_URI)
   if (session) {
-    const id = session[1]
+    // `?server=<instance>` (and any fragment) names where the session lives,
+    // not which one it is: the id is the path alone, and `uri` keeps the
+    // whole link so the badge still says where to open it.
+    const id = session[1].replace(/[?#].*$/, "").replace(/\/+$/, "")
     // Current format is `codeg://session/<conversation_id>` (a bare numeric id),
     // which matches no agent-type prefix and so degrades to a session badge
     // without an agent icon — fine, since the live-inserted badge carries the

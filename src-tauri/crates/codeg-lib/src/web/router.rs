@@ -90,6 +90,15 @@ pub fn build_router_with_srn(
             "/get_conversation",
             post(handlers::conversations::get_conversation),
         )
+        // ─── Session links (`codeg://session/<id>?server=…`) ───
+        .route(
+            "/get_instance_identity",
+            post(handlers::deep_link::get_instance_identity),
+        )
+        .route(
+            "/resolve_session_link",
+            post(handlers::deep_link::resolve_session_link),
+        )
         .route(
             "/list_all_conversations",
             post(handlers::conversations::list_all_conversations),
@@ -2825,11 +2834,17 @@ async fn health_check() -> impl IntoResponse {
     // Include the running version so the upgrade UI can confirm — using only a
     // local signal — that a restart actually landed on the new version (and
     // wasn't auto-rolled-back by the supervisor) without depending on the
-    // remote update manifest.
-    Json(serde_json::json!({
-        "status": "ok",
-        "version": crate::update::version::running_app_version(),
-    }))
+    // remote update manifest. And who this instance is (`instanceId`,
+    // `instanceName`): a desktop app that saves or opens this server keeps it,
+    // to match the `server=` of the session links this instance writes.
+    let mut body = serde_json::Map::new();
+    body.insert("status".into(), "ok".into());
+    body.insert(
+        "version".into(),
+        crate::update::version::running_app_version().into(),
+    );
+    body.extend(crate::instance_identity::health_fields());
+    Json(serde_json::Value::Object(body))
 }
 
 async fn api_not_found(uri: axum::http::Uri) -> impl IntoResponse {
