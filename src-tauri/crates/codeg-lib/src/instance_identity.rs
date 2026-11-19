@@ -125,14 +125,15 @@ fn instance_name() -> String {
 
 /// Pure, so the precedence is testable without the process environment.
 fn resolve_name(from_env: Option<&str>, from_host: &str) -> String {
-    from_env
-        .and_then(clean_name)
-        .or_else(|| {
-            (from_host != "unknown")
-                .then(|| clean_name(from_host.strip_suffix(".local").unwrap_or(from_host)))
-                .flatten()
-        })
-        .unwrap_or_else(|| "codeg".to_string())
+    if let Some(name) = from_env.and_then(clean_name) {
+        return name;
+    }
+    if from_host != "unknown" {
+        if let Some(name) = clean_name(from_host.strip_suffix(".local").unwrap_or(from_host)) {
+            return name;
+        }
+    }
+    "codeg".to_string()
 }
 
 /// A name as it is shown: control characters dropped, surrounding space
