@@ -1,8 +1,9 @@
 # Fork solution plan — codeg pains (Jonathan's fork)
 
 **Fork:** https://github.com/Jonathan-Asher/codeg (upstream `xintaofei/codeg`, Apache-2.0; forked at v0.30.9)
-**Current base:** upstream **v0.45.0** (`4991406e6`), merged into `fork/solution-plan` on 2026-11-16 by a real merge
-(previous base v0.32.2, `2774a7e02`). Fork builds are stamped `0.45.1-fork.<run>` (patch + 1 over the base).
+**Current base:** upstream **v0.46.0** (`b457eca0b`), merged into `fork/solution-plan` on 2026-11-19 by a real merge
+(previous bases v0.45.0, `4991406e6`, and v0.32.2, `2774a7e02`). Fork builds are stamped `0.46.1-fork.<run>` (patch + 1
+over the base).
 **Local clone:** `~/Work/codeg` · **Date:** 2026-09-17
 **Priority order agreed:** ① Search index ② Session tree UI ③ Resume/deep-link fork bug ④ Battery.
 Destructive-action safety nets: **not a priority**.
@@ -322,6 +323,35 @@ A real merge of `upstream/main` 4991406e6 (v0.45.0) into `fork/solution-plan` (b
   server's `move_conversations` endpoint stays.
 - **Widths.** Upstream's draggable chat width and the fork's Session width coexist: picking a Session width drops a
   dragged one.
+
+## Upstream v0.46.0 merge (2026-11-19)
+
+A real merge of v0.46.0 (b457eca0b, 34 upstream commits over v0.45.0) into `fork/solution-plan` (branch
+`merge/upstream-0.46`). What it changed for the fork:
+
+- **Layout.** Upstream's new `harness/`, `skills/` and `srn/` modules moved into `crates/codeg-lib`. Upstream made the
+  retained `AppHandle` the only payload of `EventEmitter::Tauri`; the fork's own emitters are built with
+  `EventEmitter::from_app`.
+- **SRN sign-in: off.** The desktop account is on only with `CODEG_SRN_SIGN_IN=on`: off, nothing reads the keychain
+  for a sign-in or asks SpaceRing at startup or on focus, and every `srn_*` command refuses. The frontend's twin is the
+  build variable `NEXT_PUBLIC_CODEG_SRN_SIGN_IN=on`; off, the status bar's leading entry is the quick-actions menu
+  alone. Codeg Web's own SRN sign-in stays off until its operator configures it, as upstream ships it.
+- **Harness catalog: off.** Upstream offers SpaceRing's catalog (Discover, the update check, catalog images) unless
+  `CODEG_HARNESS=off`; the fork turns it on only with `CODEG_HARNESS=on`. The Harness page's MCP and Skills sections,
+  which replaced the old settings pages, work from local files either way.
+- **Suggested reply.** Upstream's button beside Send shows exactly while the fork's ghost text does and accepts like
+  Tab, so the "Prompt suggestions" switch (off) keeps it hidden; a prediction an adapter sends while the switch is off
+  is dropped.
+- **Quick actions.** Upstream folded the quick-actions dropdown into the status bar's SRN menu; the menu keeps the
+  fork's "Local workspace" row.
+- **Session model.** Upstream's memory fix projects the session details before subscribing; the fork's order for the
+  session's model (newest reply, then the live selector, then the listed row) applies on top of it.
+- **Adapters.** codex-acp 2.7.0 (upstream: hook-stop notices). 2.6.0 still runs: an npx launch needs only the command,
+  and Settings offers the upgrade. claude-agent-acp stays pinned at 0.81.1 and pi-acp at 0.0.33; upstream's
+  0.107.3/0.108.0 measurements are kept in the registry notes.
+- **Lint.** eslint-config-next 16.4 (react-hooks 7.1.1): the fork's latest-value refs sync in layout effects; render-time
+  caches and fetch-on-mount effects carry a reasoned disable.
+- **Database.** One new migration, `m20261116_000001_srn_web`, listed in name order between the fork's (78 in all).
 
 ## Working agreements for the fork
 
