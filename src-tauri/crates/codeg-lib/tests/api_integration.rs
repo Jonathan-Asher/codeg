@@ -926,9 +926,10 @@ async fn assistants_round_trip_over_http() {
 //
 // Nothing here may reach spacering.net. The first test runs with the catalog
 // switched off, where no command makes a request; the second only sends what
-// is refused before a request is made. Both set `CODEG_HARNESS` for their
-// duration (`temp_env` runs them one at a time), so neither depends on the
-// environment the tests were started in.
+// is refused before a request is made; the third pins this fork's default
+// (off without the variable). Each sets `CODEG_HARNESS` for its duration
+// (`temp_env` runs them one at a time), so none depends on the environment
+// the tests were started in.
 
 /// The eight commands that ask the catalog, with arguments it would accept.
 fn harness_commands() -> [(&'static str, Value); 8] {
@@ -1006,7 +1007,7 @@ async fn harness_commands_are_routed_and_refuse_when_the_catalog_is_switched_off
 
 #[tokio::test]
 async fn harness_commands_refuse_a_malformed_address_before_asking_the_catalog() {
-    temp_env::async_with_vars([("CODEG_HARNESS", None::<&str>)], async {
+    temp_env::async_with_vars([("CODEG_HARNESS", Some("on"))], async {
         let (server, _data, _static) = build_test_server().await;
         let call = |path: &'static str, args: Value| {
             server
@@ -1051,6 +1052,21 @@ async fn harness_commands_refuse_a_malformed_address_before_asking_the_catalog()
         // The argument is `itemRef`: another spelling is not an argument.
         let resp = call("/api/harness_item", json!({ "item_ref": "anthropics/pdf" })).await;
         assert_eq!(resp.status_code(), 422);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn the_catalog_is_off_without_the_variable() {
+    temp_env::async_with_vars([("CODEG_HARNESS", None::<&str>)], async {
+        let (server, _data, _static) = build_test_server().await;
+        let resp = server
+            .post("/api/harness_status")
+            .add_header("authorization", format!("Bearer {TEST_TOKEN}"))
+            .json(&json!({}))
+            .await;
+        assert_eq!(resp.status_code(), 200);
+        assert_eq!(resp.json::<Value>()["enabled"], false);
     })
     .await;
 }
