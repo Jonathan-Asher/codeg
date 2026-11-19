@@ -109,6 +109,7 @@ impl SessionInfoAccess for DbSessionInfoLookup {
         let mut info = SessionInfo {
             found: true,
             session_id: summary.id,
+            link: Some(crate::deep_link::session_link(summary.id)),
             external_id: summary.external_id.clone(),
             agent_type: Some(agent_type_str(summary.agent_type)),
             title: summary.title.clone().filter(|t| !t.trim().is_empty()),

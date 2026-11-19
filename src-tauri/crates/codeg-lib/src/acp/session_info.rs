@@ -69,6 +69,13 @@ pub struct SessionInfo {
     /// The id that was queried (codeg's internal conversation PK). Echoed so the
     /// companion can render a precise not-found message.
     pub session_id: i32,
+    /// The session's link, naming the instance it lives on
+    /// (`codeg://session/<id>?server=<instance>`): what an agent writes when it
+    /// links the session anywhere (notes, docs, messages), so that a click on
+    /// another computer opens this session and not one with the same number.
+    /// Found sessions only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -195,7 +202,20 @@ mod tests {
         assert_eq!(v["session_id"], 7);
         assert!(v.get("title").is_none());
         assert!(v.get("messages").is_none());
+        assert!(v.get("link").is_none());
         assert!(v.get("note").is_some());
+    }
+
+    #[test]
+    fn a_found_session_serializes_its_link() {
+        let info = SessionInfo {
+            found: true,
+            session_id: 319,
+            link: Some("codeg://session/319?server=0123456789abcdef".into()),
+            ..Default::default()
+        };
+        let v = serde_json::to_value(info).unwrap();
+        assert_eq!(v["link"], "codeg://session/319?server=0123456789abcdef");
     }
 
     #[tokio::test]

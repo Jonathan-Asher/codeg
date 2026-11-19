@@ -4481,6 +4481,9 @@ fn render_session_summary_text(o: &Value) -> String {
     if let Some(t) = s("title") {
         out.push_str(&format!("Title: {t}\n"));
     }
+    if let Some(link) = s("link") {
+        out.push_str(&format!("Link: {link}\n"));
+    }
     let mut meta: Vec<String> = Vec::new();
     if let Some(v) = s("status") {
         meta.push(format!("status: {v}"));
@@ -6184,6 +6187,7 @@ mod tests {
         let outcome = json!({
             "found": true,
             "session_id": 214,
+            "link": "codeg://session/214?server=0123456789abcdef",
             "agent_type": "claude_code",
             "title": "Fix auth flow",
             "status": "completed",
@@ -6206,6 +6210,7 @@ mod tests {
         let text = rendered["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("Session #214 (claude_code)"));
         assert!(text.contains("Fix auth flow"));
+        assert!(text.contains("Link: codeg://session/214?server=0123456789abcdef"));
         assert!(text.contains("status: completed"));
         assert!(text.contains("Workspace: /home/me/proj"));
         assert!(text.contains("Total tokens: 4242"));
