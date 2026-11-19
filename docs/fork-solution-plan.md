@@ -351,7 +351,7 @@ A real merge of v0.46.0 (b457eca0b, 34 upstream commits over v0.45.0) into `fork
   0.107.3/0.108.0 measurements are kept in the registry notes.
 - **Lint.** eslint-config-next 16.4 (react-hooks 7.1.1): the fork's latest-value refs sync in layout effects; render-time
   caches and fetch-on-mount effects carry a reasoned disable.
-- **Database.** One new migration, `m20261116_000001_srn_web`, listed in name order between the fork's (78 in all).
+- **Database.** One new migration, `m20261116_000001_srn_web`, listed in name order between the fork's (79 in all).
 
 ## Working agreements for the fork
 
