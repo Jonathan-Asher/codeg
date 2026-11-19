@@ -1986,8 +1986,10 @@ async fn resolve_asks_a_hundred_at_a_time_and_keeps_the_order() {
 /// interface.
 #[test]
 fn codeg_mcp_offers_agents_no_harness_tool() {
+    // The companion is a crate of its own in this fork; its list is the
+    // file it embeds.
     let tools: Vec<Value> =
-        serde_json::from_str(crate::acp::delegation::companion::TOOL_SCHEMA_JSON)
+        serde_json::from_str(include_str!("../../../codeg-mcp/src/tool_schema.json"))
             .expect("the companion's tool list");
     assert!(!tools.is_empty());
     for tool in &tools {

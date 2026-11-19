@@ -1918,17 +1918,16 @@ mod tauri_app {
                 let startup_db = db::AppDatabase {
                     conn: app.state::<db::AppDatabase>().conn.clone(),
                 };
-                let startup_focus = tauri::async_runtime::block_on(
-                    crate::deep_link::startup_focus_target(&startup_db, &startup_urls),
+                let startup_link = tauri::async_runtime::block_on(
+                    crate::deep_link::startup_link_path(&startup_db, &startup_urls),
                 );
                 let startup_remote = tauri::async_runtime::block_on(
                     system_settings::resolve_startup_remote_connection(&startup_db.conn),
                 );
                 let startup_plan = workspace_windows::plan_startup(windowless.windowless);
-                let workspace_path = startup_focus.as_ref().map_or_else(
-                    || workspace_windows::MAIN_WORKSPACE_PATH.to_string(),
-                    crate::deep_link::FocusTarget::workspace_path,
-                );
+                let workspace_path = startup_link
+                    .clone()
+                    .unwrap_or_else(|| workspace_windows::MAIN_WORKSPACE_PATH.to_string());
 
                 // Before any inspectable webview exists: web inspectors in
                 // this app open in a window of their own instead of docking
@@ -1957,7 +1956,7 @@ mod tauri_app {
                     );
                 }
                 if startup_plan.build_main {
-                    let local_requested = startup_focus.is_some();
+                    let local_requested = startup_link.is_some();
                     let local_can_hide = windows::can_hide_to_tray();
                     let mut restore = tauri::async_runtime::block_on(
                         workspace_windows::load_restore(

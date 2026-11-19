@@ -320,7 +320,7 @@ pub fn take_pending_deep_link() -> Option<FocusTarget> {
 /// the user is after now.
 ///
 /// A Windows/Linux cold start never comes through here. Its link is in the
-/// startup path ([`startup_workspace_path`]), and parked as well, the item
+/// startup path ([`startup_link_path`]), and parked as well, the item
 /// would open a second time.
 static PENDING_HARNESS_LINK: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
@@ -391,7 +391,7 @@ pub fn handle_raw_urls(app: &tauri::AppHandle, urls: &[String]) {
     // only.
     let harness_parked = park_harness_links(urls);
     if harness_parked {
-        windows::show_main_window(app);
+        show_local_workspace_window(app);
         if let Err(err) = app.emit_to("main", PENDING_EVENT, ()) {
             tracing::warn!("[deep-link] failed to signal main window: {err}");
         }
@@ -456,9 +456,9 @@ pub fn handle_argv(app: &tauri::AppHandle, argv: &[String]) {
 /// hydrate — an event emitted here would race the webview's subscription. A
 /// Harness item is the Web address, `/workspace?harness=<ref>`, which
 /// `HarnessLinkBootstrap` opens; it is not parked as well, since a slot
-/// claimed after the address was read would open the item again. A target
-/// also tells setup that this launch is about the local workspace, which
-/// overrides a startup remote workspace.
+/// claimed after the address was read would open the item again. `Some` also
+/// tells setup that this launch is about the local workspace, which overrides
+/// a startup remote workspace.
 ///
 /// This only fires where the plugin already knows the launch URL by the time
 /// the setup hook runs, i.e. Windows/Linux (argv, parsed during plugin setup).
@@ -467,23 +467,31 @@ pub fn handle_argv(app: &tauri::AppHandle, argv: &[String]) {
 /// [`PENDING_HARNESS_LINK`]) instead. The
 /// two paths are mutually exclusive: whichever delivery populated the plugin
 /// before our `on_open_url` listener existed is the one that wins.
-pub async fn startup_focus_target(db: &AppDatabase, urls: &[String]) -> Option<FocusTarget> {
+pub async fn startup_link_path(db: &AppDatabase, urls: &[String]) -> Option<String> {
     for raw in urls {
         let Some(link) = parse_deep_link(raw) else {
             continue;
         };
         match &link {
             DeepLink::Open => continue,
-            DeepLink::Harness { item_ref } => return harness_workspace_path(item_ref),
+            DeepLink::Harness { item_ref } => return Some(harness_workspace_path(item_ref)),
             DeepLink::Session { .. } | DeepLink::Workspace { .. } => {}
         }
         match resolve_deep_link(db, &link).await {
-            Ok(Some(target)) => return Some(target),
+            Ok(Some(target)) => return Some(target.workspace_path()),
             Ok(None) => tracing::info!("[deep-link] startup url did not match a live session: {raw}"),
             Err(err) => tracing::warn!("[deep-link] startup {raw}: {err}"),
         }
     }
     None
+}
+
+/// [`startup_link_path`], or the plain workspace when no startup URL names
+/// anything.
+pub async fn startup_workspace_path(db: &AppDatabase, urls: &[String]) -> String {
+    startup_link_path(db, urls)
+        .await
+        .unwrap_or_else(|| "workspace".into())
 }
 
 #[cfg(test)]
@@ -743,21 +751,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn startup_focus_resolves_the_first_session_url_only() {
+    async fn startup_link_resolves_the_first_session_url_only() {
         let db = fresh_in_memory_db().await;
         let folder = seed_folder(&db, "/tmp/codeg-deep-link-startup").await;
         let id = seed_conversation(&db, folder, AgentType::Grok).await;
 
-        assert_eq!(startup_focus_target(&db, &[]).await, None);
+        assert_eq!(startup_link_path(&db, &[]).await, None);
         assert_eq!(
-            startup_focus_target(&db, &["codeg://open".into()]).await,
+            startup_link_path(&db, &["codeg://open".into()]).await,
             None
         );
         assert_eq!(
-            startup_focus_target(&db, &["codeg://session/999999".into()]).await,
+            startup_link_path(&db, &["codeg://session/999999".into()]).await,
             None
         );
-        let target = startup_focus_target(
+        let path = startup_link_path(
             &db,
             &[
                 "--some-flag".into(),
@@ -768,7 +776,7 @@ mod tests {
         .await
         .expect("the session url resolves");
         assert_eq!(
-            target.workspace_path(),
+            path,
             format!("workspace?folderId={folder}&conversationId={id}&agent=grok")
         );
     }
