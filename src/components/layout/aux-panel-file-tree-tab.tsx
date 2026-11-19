@@ -1303,6 +1303,9 @@ export function FileTreeTab() {
   const [desktopDropDir, setDesktopDropDir] = useState<string | null>(null)
 
   useEffect(() => {
+    // The folder-switch reset clears ref-held lazy-load caches alongside the
+    // state, which cannot happen during render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- folder-switch reset paired with ref cache clearing
     setExpandedPaths(new Set([FILE_TREE_ROOT_PATH]))
     previousExpandedPathsRef.current = new Set([FILE_TREE_ROOT_PATH])
     setGitignoreIgnoredPaths(new Set())
@@ -1345,6 +1348,7 @@ export function FileTreeTab() {
   // by handleTreeSelect survives until the active file next changes. Keyed on
   // folder?.path too, so a folder switch re-derives (or clears) focus.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- user-editable focus re-synced from the external active file
     setFocusedTreePath(selectedTreePath)
   }, [selectedTreePath, folder?.path])
 
@@ -1356,6 +1360,7 @@ export function FileTreeTab() {
     // drops the request). Re-runs once folderStale clears on the settled tree.
     if (!pendingRevealPath || !hasNodes || folderStale) return
     consumePendingRevealPath()
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- consumes a one-shot reveal request from the workspace store
     setExpandedPaths((prev) => {
       const next = new Set(prev)
       next.add(FILE_TREE_ROOT_PATH)
@@ -1437,11 +1442,15 @@ export function FileTreeTab() {
     for (const entry of workspaceState.git) {
       nextStatusByPath.set(entry.path, entry.status)
     }
+    // Mirrors the workspace store snapshot; fetchTree also writes these (the
+    // no-folder reset), so they are not purely derived from the store.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mirrors external workspace store, also written by fetchTree
     setGitStatusByPath(nextStatusByPath)
     setGitEnabled(true)
   }, [workspaceState.git])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mirrors external workspace store, also written by fetchTree
     setLoading(
       workspaceState.health === "resyncing" && workspaceState.seq === 0
     )
@@ -1647,6 +1656,7 @@ export function FileTreeTab() {
 
   useEffect(() => {
     if (!folder?.path) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clears the result of the async gitignore loader below
       setGitignoreIgnoredPaths(new Set())
       return
     }
@@ -2186,6 +2196,7 @@ export function FileTreeTab() {
   useEffect(() => {
     dragSourceRef.current = null
     dragEndedRef.current = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- folder-switch reset paired with ref clearing
     setDesktopDropDir(null)
   }, [folder?.path])
 
@@ -2249,6 +2260,7 @@ export function FileTreeTab() {
     // *destination/source* filesystem". That's true in pure-web mode
     // AND in remote-desktop mode (where the workspace lives on the
     // remote server, not on the local disk the OS dialog would target).
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- browser-only reads after mount keep the static export hydration-safe
     setWebMode(!isDesktop() || isRemoteDesktopMode())
     setFolderUploadSupported(
       "webkitdirectory" in document.createElement("input")
@@ -2338,6 +2350,7 @@ export function FileTreeTab() {
   // against the new one after the deferred render settles and it re-mounts.
   useEffect(() => {
     loadGenRef.current++
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- folder-switch reset paired with the load-generation ref bump
     setRenameTarget(null)
     setCreateParentPath(null)
     setDeleteTarget(null)
@@ -2359,7 +2372,8 @@ export function FileTreeTab() {
 
   const openDirectoryGitActionDialog = useCallback(
     async (action: DirectoryGitAction, target: FileActionTarget) => {
-      if (!folder?.path) return
+      const folderPath = folder?.path
+      if (!folderPath) return
       const gen = loadGenRef.current
       setDirectoryGitActionType(action)
       setDirectoryGitActionTarget(target)
@@ -2370,7 +2384,7 @@ export function FileTreeTab() {
       setDirectoryGitLoading(true)
 
       try {
-        const statusEntries = await gitStatus(folder.path)
+        const statusEntries = await gitStatus(folderPath)
         // Bail if the folder switched while this request was in flight — writing
         // now would clobber (or, on an empty result, close) a dialog reopened
         // under the new folder.
@@ -2430,9 +2444,10 @@ export function FileTreeTab() {
         await openDirectoryGitActionDialog("add", target)
         return
       }
-      if (!folder?.path) return
+      const folderPath = folder?.path
+      if (!folderPath) return
       try {
-        await gitAddFiles(folder.path, [target.path])
+        await gitAddFiles(folderPath, [target.path])
         toast.success(t("toasts.addedToVcs", { name: target.name }))
         await fetchTree()
       } catch (error) {
@@ -2444,7 +2459,8 @@ export function FileTreeTab() {
   )
 
   const loadCompareBranches = useCallback(async () => {
-    if (!folder?.path) {
+    const folderPath = folder?.path
+    if (!folderPath) {
       setCompareBranchList({
         local: [],
         remote: [],
@@ -2458,8 +2474,8 @@ export function FileTreeTab() {
     setCompareBranchLoading(true)
     try {
       const [branchesResult, currentBranchResult] = await Promise.allSettled([
-        gitListAllBranches(folder.path),
-        getGitBranch(folder.path),
+        gitListAllBranches(folderPath),
+        getGitBranch(folderPath),
       ])
       // Bail if the folder switched mid-flight — writing folder-A branches into a
       // compare dialog reopened under folder B would let the user diff against the
@@ -2669,75 +2685,80 @@ export function FileTreeTab() {
   )
 
   const renderDirectoryGitTreeNode = useCallback(
-    (node: DirectoryGitTreeNode): ReactNode => {
-      if (node.kind === "dir") {
-        const leafPaths = directoryGitLeafPathsByDirPath.get(node.path) ?? []
-        const allSelected =
-          leafPaths.length > 0 &&
-          leafPaths.every((path) => directoryGitSelectedPaths.has(path))
-        const partiallySelected =
-          !allSelected &&
-          leafPaths.some((path) => directoryGitSelectedPaths.has(path))
+    (rootNode: DirectoryGitTreeNode): ReactNode => {
+      // Recurse through a local function rather than the memoised callback
+      // itself, which would be read before its declaration completes.
+      const renderNode = (node: DirectoryGitTreeNode): ReactNode => {
+        if (node.kind === "dir") {
+          const leafPaths = directoryGitLeafPathsByDirPath.get(node.path) ?? []
+          const allSelected =
+            leafPaths.length > 0 &&
+            leafPaths.every((path) => directoryGitSelectedPaths.has(path))
+          const partiallySelected =
+            !allSelected &&
+            leafPaths.some((path) => directoryGitSelectedPaths.has(path))
+          return (
+            <FileTreeFolder
+              key={node.path}
+              path={node.path}
+              name={`${allSelected ? "[x]" : partiallySelected ? "[-]" : "[ ]"} ${node.name}`}
+              suffix={`(${node.fileCount})`}
+              suffixClassName="text-muted-foreground/45"
+              title={node.path}
+            >
+              {node.children.map(renderNode)}
+            </FileTreeFolder>
+          )
+        }
+
+        const selected = directoryGitSelectedPaths.has(node.path)
         return (
-          <FileTreeFolder
+          // No padding override: the row keeps the primitive's own px-2 so the
+          // checkbox lands in the column a sibling folder spends on its chevron.
+          <FileTreeFile
             key={node.path}
             path={node.path}
-            name={`${allSelected ? "[x]" : partiallySelected ? "[-]" : "[ ]"} ${node.name}`}
-            suffix={`(${node.fileCount})`}
-            suffixClassName="text-muted-foreground/45"
+            name={node.name}
             title={node.path}
           >
-            {node.children.map(renderDirectoryGitTreeNode)}
-          </FileTreeFolder>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                handleToggleDirectoryGitFile(node.path)
+              }}
+              className={
+                selected
+                  ? "flex h-4 w-4 shrink-0 items-center justify-center rounded border border-primary bg-primary text-primary-foreground transition-colors"
+                  : "flex h-4 w-4 shrink-0 items-center justify-center rounded border border-input transition-colors"
+              }
+              aria-label={t("aria.selectPath", {
+                action: selected ? t("actions.unselect") : t("actions.select"),
+                path: node.path,
+              })}
+              disabled={directoryGitSubmitting}
+            >
+              {selected && <Check className="h-3 w-3" />}
+            </button>
+            <button
+              type="button"
+              className="flex-1 truncate text-left"
+              onClick={(event) => {
+                event.stopPropagation()
+                handleToggleDirectoryGitFile(node.path)
+              }}
+              title={node.path}
+              disabled={directoryGitSubmitting}
+            >
+              {node.name}
+            </button>
+            <span className="w-8 shrink-0 text-right text-3xs font-medium text-muted-foreground">
+              {node.status}
+            </span>
+          </FileTreeFile>
         )
       }
-
-      const selected = directoryGitSelectedPaths.has(node.path)
-      return (
-        // No padding override: the row keeps the primitive's own px-2 so the
-        // checkbox lands in the column a sibling folder spends on its chevron.
-        <FileTreeFile
-          key={node.path}
-          path={node.path}
-          name={node.name}
-          title={node.path}
-        >
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation()
-              handleToggleDirectoryGitFile(node.path)
-            }}
-            className={
-              selected
-                ? "flex h-4 w-4 shrink-0 items-center justify-center rounded border border-primary bg-primary text-primary-foreground transition-colors"
-                : "flex h-4 w-4 shrink-0 items-center justify-center rounded border border-input transition-colors"
-            }
-            aria-label={t("aria.selectPath", {
-              action: selected ? t("actions.unselect") : t("actions.select"),
-              path: node.path,
-            })}
-            disabled={directoryGitSubmitting}
-          >
-            {selected && <Check className="h-3 w-3" />}
-          </button>
-          <button
-            type="button"
-            className="flex-1 truncate text-left"
-            onClick={(event) => {
-              event.stopPropagation()
-              handleToggleDirectoryGitFile(node.path)
-            }}
-            title={node.path}
-            disabled={directoryGitSubmitting}
-          >
-            {node.name}
-          </button>
-          <span className="w-8 shrink-0 text-right text-3xs font-medium text-muted-foreground">
-            {node.status}
-          </span>
-        </FileTreeFile>
-      )
+      return renderNode(rootNode)
     },
     [
       directoryGitLeafPathsByDirPath,
@@ -2749,7 +2770,8 @@ export function FileTreeTab() {
   )
 
   const handleCreateConfirm = useCallback(async () => {
-    if (!folder?.path || createParentPath === null) return
+    const folderPath = folder?.path
+    if (!folderPath || createParentPath === null) return
     const trimmedName = createName.trim()
     if (!trimmedName) {
       setCreateParentPath(null)
@@ -2759,7 +2781,7 @@ export function FileTreeTab() {
     setCreating(true)
     try {
       await createFileTreeEntry(
-        folder.path,
+        folderPath,
         createParentPath,
         trimmedName,
         createKind
@@ -2776,7 +2798,8 @@ export function FileTreeTab() {
   }, [createKind, createName, createParentPath, fetchTree, folder?.path, t])
 
   const handleRenameConfirm = useCallback(async () => {
-    if (!folder?.path || !renameTarget) return
+    const folderPath = folder?.path
+    if (!folderPath || !renameTarget) return
     const nextName = renameValue.trim()
     if (!nextName || nextName === renameTarget.name) {
       setRenameTarget(null)
@@ -2785,7 +2808,7 @@ export function FileTreeTab() {
 
     setRenaming(true)
     try {
-      await renameFileTreeEntry(folder.path, renameTarget.path, nextName)
+      await renameFileTreeEntry(folderPath, renameTarget.path, nextName)
       setRenameTarget(null)
       setRenameValue("")
       await fetchTree()
@@ -2798,10 +2821,11 @@ export function FileTreeTab() {
   }, [fetchTree, folder?.path, renameTarget, renameValue, t])
 
   const handleDeleteConfirm = useCallback(async () => {
-    if (!folder?.path || !deleteTarget) return
+    const folderPath = folder?.path
+    if (!folderPath || !deleteTarget) return
     setDeleting(true)
     try {
-      await deleteFileTreeEntry(folder.path, deleteTarget.path)
+      await deleteFileTreeEntry(folderPath, deleteTarget.path)
       setDeleteTarget(null)
       await fetchTree()
     } catch (error) {
@@ -2813,10 +2837,11 @@ export function FileTreeTab() {
   }, [deleteTarget, fetchTree, folder?.path, t])
 
   const handleRollbackConfirm = useCallback(async () => {
-    if (!folder?.path || !rollbackTarget) return
+    const folderPath = folder?.path
+    if (!folderPath || !rollbackTarget) return
     setRollingBack(true)
     try {
-      await gitRollbackFile(folder.path, rollbackTarget.path)
+      await gitRollbackFile(folderPath, rollbackTarget.path)
       toast.success(t("toasts.rolledBack", { name: rollbackTarget.name }))
       setRollbackTarget(null)
       await fetchTree()
@@ -2829,7 +2854,8 @@ export function FileTreeTab() {
   }, [fetchTree, folder?.path, rollbackTarget, t])
 
   const handleDirectoryGitActionConfirm = useCallback(async () => {
-    if (!folder?.path || !directoryGitActionType) return
+    const folderPath = folder?.path
+    if (!folderPath || !directoryGitActionType) return
     if (directoryGitSelectedPaths.size === 0) return
 
     const selectedPaths = Array.from(directoryGitSelectedPaths)
@@ -2838,7 +2864,7 @@ export function FileTreeTab() {
 
     try {
       if (directoryGitActionType === "add") {
-        await gitAddFiles(folder.path, selectedPaths)
+        await gitAddFiles(folderPath, selectedPaths)
         toast.success(
           t("toasts.addedFilesToVcs", {
             count: selectedPaths.length,
@@ -2846,7 +2872,7 @@ export function FileTreeTab() {
         )
       } else {
         for (const filePath of selectedPaths) {
-          await gitRollbackFile(folder.path, filePath)
+          await gitRollbackFile(folderPath, filePath)
         }
         toast.success(
           t("toasts.rolledBackFiles", {
@@ -2904,8 +2930,9 @@ export function FileTreeTab() {
   )
 
   const rootNodeName = useMemo(() => {
-    if (!folder?.path) return t("workspace")
-    return baseName(folder.path)
+    const folderPath = folder?.path
+    if (!folderPath) return t("workspace")
+    return baseName(folderPath)
   }, [folder?.path, t])
 
   const systemExplorerLabel =

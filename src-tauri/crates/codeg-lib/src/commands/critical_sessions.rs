@@ -24,7 +24,7 @@ pub async fn update_conversation_critical(
 ) -> Result<(), AppCommandError> {
     set_conversation_critical_core(
         &db.conn,
-        &EventEmitter::Tauri(app),
+        &EventEmitter::from_app(&app),
         conversation_id,
         critical,
         stall,
@@ -43,7 +43,7 @@ pub async fn ack_critical_session(
     conversation_id: i32,
 ) -> Result<CriticalAlertsSnapshot, AppCommandError> {
     Ok(ack_critical_session_core(
-        &EventEmitter::Tauri(app),
+        &EventEmitter::from_app(&app),
         conversation_id,
     ))
 }
@@ -55,7 +55,7 @@ pub async fn snooze_critical_session(
     minutes: u32,
 ) -> Result<CriticalAlertsSnapshot, AppCommandError> {
     Ok(snooze_critical_session_core(
-        &EventEmitter::Tauri(app),
+        &EventEmitter::from_app(&app),
         conversation_id,
         minutes,
     ))

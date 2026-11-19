@@ -130,7 +130,9 @@ pub async fn app_update_busy_sessions(
 // ─── desktop build: the app's own updater, for a remote window ───────────
 
 #[cfg(feature = "tauri-runtime")]
-fn desktop_app(state: &AppState) -> Result<tauri::AppHandle, AppCommandError> {
+fn desktop_app(
+    state: &AppState,
+) -> Result<crate::web::event_bridge::RetainedAppHandle, AppCommandError> {
     match &state.emitter {
         crate::web::event_bridge::EventEmitter::Tauri(app) => Ok(app.clone()),
         _ => Err(AppCommandError::invalid_input(

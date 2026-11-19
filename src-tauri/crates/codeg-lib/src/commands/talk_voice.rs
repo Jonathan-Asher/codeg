@@ -115,7 +115,7 @@ impl TalkHost for DesktopHost {
 
     fn status_changed(&self, status: &TalkVoiceStatus) {
         emit_event(
-            &EventEmitter::Tauri(self.app.clone()),
+            &EventEmitter::from_app(&self.app),
             voice::STATUS_EVENT,
             status,
         );
@@ -134,7 +134,7 @@ impl TalkHost for DesktopHost {
                 .clone_ref();
             crate::talk::set_conversation_talk_mode_core(
                 &db,
-                &EventEmitter::Tauri(app.clone()),
+                &EventEmitter::from_app(&app),
                 &manager,
                 conversation_id,
                 enabled,
@@ -165,7 +165,7 @@ pub fn desktop_service(app: &AppHandle) -> Arc<TalkVoiceService> {
         })
     });
     service.models().on_change(|| {
-        let emitter = EventEmitter::Tauri(app.clone());
+        let emitter = EventEmitter::from_app(&app);
         Arc::new(move |status: TalkModelsStatus| emit_event(&emitter, TALK_MODELS_EVENT, &status))
     });
     service

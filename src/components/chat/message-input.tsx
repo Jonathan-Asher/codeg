@@ -1,6 +1,14 @@
 "use client"
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { useTranslations } from "next-intl"
 import { isImeCompositionKey } from "@/lib/ime-composition"
 import { Button } from "@/components/ui/button"
@@ -11,6 +19,7 @@ import {
   ClipboardPaste,
   Clock,
   Copy,
+  Lightbulb,
   MessageSquareText,
   Loader2,
   Play,
@@ -714,6 +723,7 @@ export function MessageInput({
   useEffect(() => {
     // navigator.clipboard is undefined at runtime in non-secure contexts even
     // though the DOM types claim it is always present, so guard with typeof.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- browser-only read after mount keeps static-export hydration consistent
     setClipboardReadSupported(
       typeof navigator !== "undefined" &&
         typeof navigator.clipboard?.readText === "function"
@@ -1267,15 +1277,14 @@ export function MessageInput({
   // types and the filter narrows, the previously-highlighted index can point
   // past the end of the merged list (commands + experts), which would make
   // Enter/Tab a silent no-op. Clamp back to the last available row whenever
-  // the count changes.
-  useEffect(() => {
-    if (
-      slashAutocompleteCount > 0 &&
-      slashSelectedIndex >= slashAutocompleteCount
-    ) {
-      setSlashSelectedIndex(slashAutocompleteCount - 1)
-    }
-  }, [slashAutocompleteCount, slashSelectedIndex])
+  // the count changes. Adjusted during render so no frame (and no key handler)
+  // ever sees the out-of-range index.
+  if (
+    slashAutocompleteCount > 0 &&
+    slashSelectedIndex >= slashAutocompleteCount
+  ) {
+    setSlashSelectedIndex(slashAutocompleteCount - 1)
+  }
 
   // Keep the highlighted row visible inside the popup when keyboard navigation
   // pushes it past the scroll viewport. Without this the cursor silently runs
@@ -1962,10 +1971,14 @@ export function MessageInput({
     buildDraft,
     draftStorageKey: effectiveDraftStorageKey,
   })
-  currentComposerRef.current = {
-    buildDraft,
-    draftStorageKey: effectiveDraftStorageKey,
-  }
+  // Only read after an await in the steer handler, so syncing it after commit
+  // is early enough.
+  useLayoutEffect(() => {
+    currentComposerRef.current = {
+      buildDraft,
+      draftStorageKey: effectiveDraftStorageKey,
+    }
+  })
 
   const handleSend = useCallback(() => {
     // Before every gate below: a side question goes while the agent works,
@@ -2544,15 +2557,33 @@ export function MessageInput({
       </Button>
     )
   ) : (
-    <Button
-      onClick={handleSend}
-      disabled={disabled || !hasSendableContent}
-      size="icon"
-      className="h-8 w-8"
-      title={queueSends && onEnqueue ? t("queueMessage") : t("send")}
-    >
-      <Send className="size-4" />
-    </Button>
+    <div className="flex items-center gap-1">
+      {/* The click twin of Tab for a keyboard without one (a phone reaching
+          the web build): fills the predicted follow-up prompt into the empty
+          composer, sending nothing, and counts as accepting it. Shown exactly
+          while the ghost text is, so never with prompt suggestions off. */}
+      {ghostSuggestion && (
+        <Button
+          onClick={() => acceptGhostSuggestion()}
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          title={t("usePromptSuggestion")}
+          aria-label={t("usePromptSuggestion")}
+        >
+          <Lightbulb className="size-4" />
+        </Button>
+      )}
+      <Button
+        onClick={handleSend}
+        disabled={disabled || !hasSendableContent}
+        size="icon"
+        className="h-8 w-8"
+        title={queueSends && onEnqueue ? t("queueMessage") : t("send")}
+      >
+        <Send className="size-4" />
+      </Button>
+    </div>
   )
 
   return (

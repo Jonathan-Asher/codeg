@@ -26,7 +26,7 @@ pub async fn update_limit_continue_settings(
     settings: LimitContinueSettings,
     db: State<'_, AppDatabase>,
 ) -> Result<LimitContinueSettings, AppCommandError> {
-    save_limit_continue_settings(&db.conn, &EventEmitter::Tauri(app), settings).await
+    save_limit_continue_settings(&db.conn, &EventEmitter::from_app(&app), settings).await
 }
 
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
@@ -35,7 +35,7 @@ pub async fn cancel_limit_continue(
     db: State<'_, AppDatabase>,
     conversation_id: i32,
 ) -> Result<bool, AppCommandError> {
-    cancel_limit_continue_core(&db.conn, &EventEmitter::Tauri(app), conversation_id).await
+    cancel_limit_continue_core(&db.conn, &EventEmitter::from_app(&app), conversation_id).await
 }
 
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
@@ -55,7 +55,7 @@ pub async fn update_conversation_limit_auto_continue(
 ) -> Result<(), AppCommandError> {
     update_limit_auto_continue_core(
         &db.conn,
-        &EventEmitter::Tauri(app),
+        &EventEmitter::from_app(&app),
         conversation_id,
         enabled,
     )

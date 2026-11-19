@@ -401,6 +401,7 @@ export function UpdateProvider({
   // immediately rather than going quiet until the next check. Reading storage
   // during render would break the static-export pass, so it happens here.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- browser-only storage read after mount (static-export hydration)
     syncDismissed()
     const last = readLastCheck(target)
     if (last) adoptCached(last)

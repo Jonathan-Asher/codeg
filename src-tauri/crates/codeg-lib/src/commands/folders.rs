@@ -1197,7 +1197,7 @@ pub async fn open_folder_in_workspace(
     db: tauri::State<'_, AppDatabase>,
     path: String,
 ) -> Result<FolderDetail, AppCommandError> {
-    let emitter = EventEmitter::Tauri(app);
+    let emitter = EventEmitter::from_app(&app);
     open_folder_in_workspace_core(&emitter, &db, path).await
 }
 
@@ -1217,7 +1217,7 @@ pub async fn remove_folder_from_workspace(
     db: tauri::State<'_, AppDatabase>,
     folder_id: i32,
 ) -> Result<(), AppCommandError> {
-    remove_folder_from_workspace_core(&EventEmitter::Tauri(app), &db, folder_id).await
+    remove_folder_from_workspace_core(&EventEmitter::from_app(&app), &db, folder_id).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -1236,7 +1236,7 @@ pub async fn create_folder_group(
     name: String,
     color: Option<String>,
 ) -> Result<FolderGroupDetail, AppCommandError> {
-    create_folder_group_core(&EventEmitter::Tauri(app), &db, name, color).await
+    create_folder_group_core(&EventEmitter::from_app(&app), &db, name, color).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -1248,7 +1248,7 @@ pub async fn update_folder_group(
     name: Option<String>,
     color: Option<String>,
 ) -> Result<FolderGroupDetail, AppCommandError> {
-    update_folder_group_core(&EventEmitter::Tauri(app), &db, group_id, name, color).await
+    update_folder_group_core(&EventEmitter::from_app(&app), &db, group_id, name, color).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -1258,7 +1258,7 @@ pub async fn delete_folder_group(
     db: tauri::State<'_, AppDatabase>,
     group_id: i32,
 ) -> Result<(), AppCommandError> {
-    delete_folder_group_core(&EventEmitter::Tauri(app), &db, group_id).await
+    delete_folder_group_core(&EventEmitter::from_app(&app), &db, group_id).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -1268,7 +1268,7 @@ pub async fn apply_sidebar_layout(
     db: tauri::State<'_, AppDatabase>,
     entries: Vec<SidebarLayoutEntry>,
 ) -> Result<(), AppCommandError> {
-    apply_sidebar_layout_core(&EventEmitter::Tauri(app), &db, entries).await
+    apply_sidebar_layout_core(&EventEmitter::from_app(&app), &db, entries).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -1279,7 +1279,7 @@ pub async fn set_folder_group(
     folder_id: i32,
     group_id: Option<i32>,
 ) -> Result<(), AppCommandError> {
-    set_folder_group_core(&EventEmitter::Tauri(app), &db, folder_id, group_id).await
+    set_folder_group_core(&EventEmitter::from_app(&app), &db, folder_id, group_id).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -1290,7 +1290,7 @@ pub async fn set_folder_archived(
     folder_id: i32,
     archived: bool,
 ) -> Result<FolderDetail, AppCommandError> {
-    set_folder_archived_core(&EventEmitter::Tauri(app), &db, folder_id, archived).await
+    set_folder_archived_core(&EventEmitter::from_app(&app), &db, folder_id, archived).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -1301,7 +1301,7 @@ pub async fn set_folder_group_archived(
     group_id: i32,
     archived: bool,
 ) -> Result<FolderGroupDetail, AppCommandError> {
-    set_folder_group_archived_core(&EventEmitter::Tauri(app), &db, group_id, archived).await
+    set_folder_group_archived_core(&EventEmitter::from_app(&app), &db, group_id, archived).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -1333,7 +1333,7 @@ pub async fn update_folder_default_agent(
     default_agent_type: Option<crate::models::agent::AgentType>,
 ) -> Result<FolderDetail, AppCommandError> {
     update_folder_default_agent_core(
-        &EventEmitter::Tauri(app),
+        &EventEmitter::from_app(&app),
         &db,
         folder_id,
         default_agent_type,
@@ -2202,7 +2202,7 @@ pub async fn git_push(
     // `CODEG_DATA_DIR` reaches the git credential helper invoked by
     // this subprocess.
     let data_dir = crate::paths::resolve_effective_data_dir(&data_dir);
-    let emitter = EventEmitter::Tauri(app.clone());
+    let emitter = EventEmitter::from_app(&app);
     git_push_core(
         &data_dir,
         &emitter,
@@ -3191,7 +3191,7 @@ pub async fn git_commit(
             .strip_prefix("commit-")
             .and_then(|value| value.parse::<i32>().ok())
     });
-    let emitter = EventEmitter::Tauri(app.clone());
+    let emitter = EventEmitter::from_app(&app);
     git_commit_core(&emitter, folder_id, &db.conn, &path, &message, &files).await
 }
 
@@ -3730,7 +3730,7 @@ pub async fn git_remove_worktree(
     force: bool,
 ) -> Result<GitWorktreeRemoval, AppCommandError> {
     git_remove_worktree_core(
-        &EventEmitter::Tauri(app),
+        &EventEmitter::from_app(&app),
         &db,
         path,
         branch_name,

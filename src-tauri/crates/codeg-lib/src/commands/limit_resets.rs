@@ -576,7 +576,7 @@ pub async fn get_limit_resets(
     get_limit_resets_core(
         &db,
         &data_dir,
-        &EventEmitter::Tauri(app),
+        &EventEmitter::from_app(&app),
         force.unwrap_or(false),
     )
     .await
@@ -595,7 +595,7 @@ pub async fn use_limit_reset(
     use_limit_reset_core(
         &db,
         &data_dir,
-        &EventEmitter::Tauri(app),
+        &EventEmitter::from_app(&app),
         provider,
         id,
         conversation_id,

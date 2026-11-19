@@ -110,21 +110,21 @@ pub async fn tts_status(app: tauri::AppHandle) -> Result<TtsStatus, AppCommandEr
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn tts_download_models(app: tauri::AppHandle) -> Result<TtsStatus, AppCommandError> {
     let data_dir = desktop_data_dir(&app);
-    tts_download_models_core(&data_dir, &EventEmitter::Tauri(app))
+    tts_download_models_core(&data_dir, &EventEmitter::from_app(&app))
 }
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn tts_cancel_download(app: tauri::AppHandle) -> Result<TtsStatus, AppCommandError> {
     let data_dir = desktop_data_dir(&app);
-    Ok(tts_cancel_download_core(&data_dir, &EventEmitter::Tauri(app)).await)
+    Ok(tts_cancel_download_core(&data_dir, &EventEmitter::from_app(&app)).await)
 }
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
 pub async fn tts_delete_models(app: tauri::AppHandle) -> Result<TtsStatus, AppCommandError> {
     let data_dir = desktop_data_dir(&app);
-    tts_delete_models_core(&data_dir, &EventEmitter::Tauri(app)).await
+    tts_delete_models_core(&data_dir, &EventEmitter::from_app(&app)).await
 }
 
 #[cfg(feature = "tauri-runtime")]

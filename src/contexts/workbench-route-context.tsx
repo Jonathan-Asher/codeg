@@ -26,6 +26,7 @@ export type WorkbenchRouteId =
   | "tokenUsage"
   | "planUsage"
   | "canvas"
+  | "harness"
 
 interface WorkbenchRouteContextValue {
   routeId: WorkbenchRouteId

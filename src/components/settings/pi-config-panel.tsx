@@ -415,6 +415,7 @@ export function PiConfigPanel({
   // throw away edits the user has not saved yet.
   useEffect(() => {
     let cancelled = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reload of pi's config files when the agent dir changes
     setLoadingCreds(true)
     setConfigLoadError(null)
     if (invalidSavedAgentDir) {
@@ -469,6 +470,7 @@ export function PiConfigPanel({
   useEffect(() => {
     let cancelled = false
     if (invalidSavedAgentDir || invalidSavedCommand) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- the no-fetch branch of the catalog load below
       setCatalog({
         source: catalogSource,
         value: { status: "relative_path", models: [] },
@@ -718,6 +720,7 @@ export function PiConfigPanel({
   }, [])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- binary detection on mount; the loader flips its loading flag first
     void detectPiBinary()
   }, [detectPiBinary])
 
@@ -789,6 +792,7 @@ export function PiConfigPanel({
       return
     }
     let cancelled = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset paired with the command validation fetch below
     setValidation(null)
     acpValidatePiCommand(savedPiCommand)
       .then((result) => {
@@ -821,6 +825,7 @@ export function PiConfigPanel({
   }, [invalidSavedAgentDir])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- trust list fetch from pi's trust.json
     void loadTrustEntries()
   }, [loadTrustEntries])
 

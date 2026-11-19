@@ -22,7 +22,7 @@ pub async fn set_conversation_talk_mode(
 ) -> Result<(), AppCommandError> {
     set_conversation_talk_mode_core(
         &db.conn,
-        &EventEmitter::Tauri(app),
+        &EventEmitter::from_app(&app),
         &manager,
         conversation_id,
         enabled,

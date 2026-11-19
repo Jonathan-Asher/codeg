@@ -37,7 +37,7 @@ pub async fn acp_side_question(
     side_question::ask(
         &manager,
         &db,
-        &EventEmitter::Tauri(app_handle),
+        &EventEmitter::from_app(&app_handle),
         &data_dir,
         SideQuestionTarget {
             connection_id,

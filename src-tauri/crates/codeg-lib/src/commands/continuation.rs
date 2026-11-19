@@ -29,7 +29,7 @@ pub async fn continue_in_agent_handoff(
     run_handoff_core(
         &db,
         &manager,
-        &EventEmitter::Tauri(app),
+        &EventEmitter::from_app(&app),
         &data_dir,
         conversation_id,
     )

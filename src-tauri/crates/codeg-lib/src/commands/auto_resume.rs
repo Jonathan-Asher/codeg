@@ -36,6 +36,6 @@ pub async fn stop_auto_resume(
     db: State<'_, AppDatabase>,
     app: tauri::AppHandle,
 ) -> Result<AutoResumeStatus, AppCommandError> {
-    let emitter = crate::web::event_bridge::EventEmitter::Tauri(app);
+    let emitter = crate::web::event_bridge::EventEmitter::from_app(&app);
     Ok(stop_auto_resume_core(&db.conn, &emitter).await)
 }

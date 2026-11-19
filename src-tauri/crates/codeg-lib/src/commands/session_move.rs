@@ -28,7 +28,7 @@ pub async fn move_conversation_to_folder(
         .unwrap_or_else(|_| std::path::PathBuf::from("."));
     move_conversation_to_folder_core(
         &db,
-        &EventEmitter::Tauri(app),
+        &EventEmitter::from_app(&app),
         &manager,
         &data_dir,
         conversation_id,

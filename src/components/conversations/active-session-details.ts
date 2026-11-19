@@ -24,12 +24,9 @@ export interface ActiveSessionDetails {
 }
 
 /**
- * The slice of a runtime session this resolver actually reads. Narrowed on
- * purpose: these fields change only at turn boundaries, so a caller can
- * subscribe to just them (e.g. via `useShallow`) and avoid the ~60/s re-render
- * a whole-session-object selector incurs during streaming. A full
- * `ConversationRuntimeSession` is still assignable here, so existing callers
- * that pass the whole session are unaffected.
+ * Inputs read while projecting metadata. Do not subscribe to this shape:
+ * `detail` and `localTurns` still own the transcript, including in a persistent
+ * consumer's previous React hook snapshot.
  */
 export type RuntimeSessionForDetails = Pick<
   ConversationRuntimeSession,
@@ -113,6 +110,27 @@ export function withLiveSummaryFields(
 }
 
 /**
+ * Project before subscribing, so a metadata consumer's current and previous
+ * snapshots contain only the values it displays, never a session or turn array.
+ * Its `model` is the one the turns name (live turns first, then the loaded
+ * history), or `null`: the rest of `resolveSessionModel`'s order — the live
+ * selector, then the stored columns — is applied when the snapshot is resolved
+ * (`resolveActiveSessionDetailsFromSnapshot`).
+ */
+export function projectRuntimeSessionDetails(
+  session: RuntimeSessionForDetails | null | undefined
+): ActiveSessionDetails {
+  return {
+    summary: session?.detail?.summary ?? null,
+    stats: session?.sessionStats ?? session?.detail?.session_stats ?? null,
+    model: resolveSessionModel({
+      liveTurns: session?.localTurns,
+      historyTurns: session?.detail?.turns,
+    }),
+  }
+}
+
+/**
  * `summary` with the columns that change while a conversation is open taken
  * from where they are kept current. The loaded detail's summary is a snapshot
  * of when the transcript was fetched, and nothing refreshes it as turns start
@@ -162,28 +180,40 @@ export function resolveActiveSessionDetails(
 ): ActiveSessionDetails {
   const runtimeId = tab?.runtimeConversationId ?? tab?.conversationId ?? null
   const runtimeSession = runtimeId != null ? getSession(runtimeId) : null
+  return resolveActiveSessionDetailsFromSnapshot(
+    tab,
+    projectRuntimeSessionDetails(runtimeSession),
+    conversations,
+    liveModel
+  )
+}
+
+/** Apply live workspace/tab columns after the store's metadata projection. */
+export function resolveActiveSessionDetailsFromSnapshot(
+  tab: ActiveSessionTabRef | null,
+  snapshot: ActiveSessionDetails,
+  conversations: DbConversationSummary[],
+  // What the tab's live connection has selected (`readLiveSessionModel`): the
+  // model until the transcript has a reply naming one.
+  liveModel: string | null = null
+): ActiveSessionDetails {
   const listed =
     tab?.conversationId != null
       ? (conversations.find((c) => c.id === tab.conversationId) ?? null)
       : null
   const summary = withLiveColumns(
-    runtimeSession?.detail?.summary ?? listed,
+    snapshot.summary ?? listed,
     listed,
     tab?.status
   )
-  const stats =
-    runtimeSession?.sessionStats ??
-    runtimeSession?.detail?.session_stats ??
-    null
-  // `localTurns` holds the live session's freshest turns; `detail.turns` the
-  // cold-loaded history (see `resolveSessionModel`).
-  const model = resolveSessionModel({
-    liveTurns: runtimeSession?.localTurns,
-    historyTurns: runtimeSession?.detail?.turns,
-    liveModel,
-    // The listed row first: upserts keep it current (a selector change, a
-    // transcript read elsewhere); the loaded summary is a snapshot.
-    summaries: [listed, runtimeSession?.detail?.summary, summary],
-  })
-  return { summary, stats, model }
+  // The turns' model, else the live selector, else the stored column — the
+  // listed row first: upserts keep it current (a selector change, a
+  // transcript read elsewhere); the loaded summary is a snapshot.
+  const model =
+    snapshot.model ??
+    resolveSessionModel({
+      liveModel,
+      summaries: [listed, snapshot.summary, summary],
+    })
+  return { summary, stats: snapshot.stats, model }
 }

@@ -1115,15 +1115,21 @@ impl SessionState {
         }
     }
 
+    /// Whether this connection offers prompt suggestions at all. Off when the
+    /// owner never composes prompts, or the user turned the predictions off
+    /// ("Prompt suggestions", the master switch). Off, the agent is asked for
+    /// none, and one it sends anyway is dropped (`connection`), so neither
+    /// the composer's ghost text nor its suggested-reply button shows one.
+    pub(crate) fn offers_prompt_suggestions(&self) -> bool {
+        self.wants_prompt_suggestions
+            && self.prompt_suggestions != crate::acp::prompt_suggestions::PromptSuggestions::Off
+    }
+
     /// What this connection's Claude session requests all name in
     /// `_meta.claudeCode`.
     pub(crate) fn claude_session_options(&self) -> crate::acp::connection::ClaudeSessionOptions {
-        use crate::acp::prompt_suggestions::PromptSuggestions;
-        // Off when the owner never composes prompts, or the user turned the
-        // predictions off ("Claude prompt suggestions").
         crate::acp::connection::ClaudeSessionOptions {
-            prompt_suggestions: self.wants_prompt_suggestions
-                && self.prompt_suggestions != PromptSuggestions::Off,
+            prompt_suggestions: self.offers_prompt_suggestions(),
             settings: self.claude_settings.clone(),
         }
     }
