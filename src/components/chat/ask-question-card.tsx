@@ -1199,6 +1199,7 @@ export function AskQuestionCard({
                   )
                 })}
               </TabsList>
+              {/* eslint-disable-next-line react-hooks/refs -- claimFocus hands out callback refs, which read focusRequest at commit, not during render */}
               {questions.map((q, i) => (
                 <TabsContent
                   key={q.id}
@@ -1231,6 +1232,7 @@ export function AskQuestionCard({
               style={promptCardBodyStyle(chosenHeight, "content")}
               className="group/question-body min-h-0 space-y-2.5 overflow-y-auto pr-1"
             >
+              {/* eslint-disable-next-line react-hooks/refs -- claimFocus hands out callback refs, which read focusRequest at commit, not during render */}
               {questions.map((q, i) => (
                 <div key={q.id} className="space-y-2.5">
                   {questionHeading(q, i)}

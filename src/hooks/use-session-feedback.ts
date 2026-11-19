@@ -172,7 +172,10 @@ export function useSessionFeedback({
   const [notes, setNotes] = useState<FeedbackItem[]>([])
   const [carriedNotes, setCarriedNotes] = useState<FeedbackItem[]>([])
   const steerCallbacksRef = useRef({ onSteerSending, onSteerFailed })
-  steerCallbacksRef.current = { onSteerSending, onSteerFailed }
+  // Read by a steer only, which starts from an event after commit.
+  useLayoutEffect(() => {
+    steerCallbacksRef.current = { onSteerSending, onSteerFailed }
+  })
   const [submitting, setSubmitting] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
   // Whether THIS agent actually has the `check_user_feedback` tool (from the

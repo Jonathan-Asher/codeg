@@ -70,6 +70,7 @@ export function ClaudeCodeAuthPanel() {
   }, [fetchStatus])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial status fetch
     void fetchStatus()
   }, [fetchStatus])
 

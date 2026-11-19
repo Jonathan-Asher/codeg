@@ -93,6 +93,7 @@ export function InstantCommandDialog({
     const host = document.createElement("div")
     host.setAttribute("data-instant-command-dialog", "")
     document.body.appendChild(host)
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the host exists only once mounted on the client (static-export prerender)
     setContainer(host)
     return () => {
       host.remove()

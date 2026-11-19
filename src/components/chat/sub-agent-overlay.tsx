@@ -155,7 +155,6 @@ export const SubAgentOverlay = memo(function SubAgentOverlay({
         : []
     const until = Date.now() + FINISHED_LINGER_MS
     // The list itself is the server's; this only remembers what just left.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setFinished((current) => {
       const kept = current.filter((f) => !live.has(runningItemKey(f.item)))
       if (gone.length === 0 && kept.length === current.length) return current

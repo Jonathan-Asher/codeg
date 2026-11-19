@@ -93,6 +93,7 @@ export function PasteSignIn({
   }, [run])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- starts the sign-in flow on mount; run() moves its phase along as it goes
     void run()
     return () => {
       const handle = handleRef.current

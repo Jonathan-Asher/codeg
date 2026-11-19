@@ -1658,6 +1658,7 @@ export function SidebarConversationList({
   // their sessions leave Recent. Depends only on folders and groups, and is
   // reused by content, so status events never rebuild it.
   const archivedIdsRef = useRef<Set<number>>(new Set())
+  /* eslint-disable react-hooks/refs -- render-time identity cache: reuses the previous value when equal so memoised children skip work */
   const archivedIds = useMemo(() => {
     const next = archivedFolderIds({
       folders,
@@ -1668,6 +1669,7 @@ export function SidebarConversationList({
     archivedIdsRef.current = reused
     return reused
   }, [folders, folderGroups, childToParent])
+  /* eslint-enable react-hooks/refs */
 
   // Sessions blocked waiting on the user, keyed by the visible row. Read here
   // (not only for the header chips below) because Recent keeps an archived
@@ -1850,7 +1852,10 @@ export function SidebarConversationList({
     })
   }, [reorderableFolders, folderGroups, archivedIds])
   const archivedLayoutRef = useRef<SidebarLayout>(archivedLayout)
-  archivedLayoutRef.current = archivedLayout
+  // Read by the drag listeners only, which run after commit.
+  useIsomorphicLayoutEffect(() => {
+    archivedLayoutRef.current = archivedLayout
+  })
   const archivedLayoutFolderIds = useMemo(
     () => layoutFolderIds(archivedLayout),
     [archivedLayout]
@@ -1915,6 +1920,7 @@ export function SidebarConversationList({
   // while a limit is in force ("All" needs none), and reused by content so a
   // status event that changes nobody's membership keeps the same Set.
   const alwaysVisibleRef = useRef<ReadonlySet<number>>(new Set<number>())
+  /* eslint-disable react-hooks/refs -- render-time identity cache: reuses the previous value when equal so memoised children skip work */
   const alwaysVisibleIds = useMemo(() => {
     const next: ReadonlySet<number> =
       folderSessionLimit == null
@@ -1937,6 +1943,7 @@ export function SidebarConversationList({
     childrenByParent,
     backgroundByConversationId,
   ])
+  /* eslint-enable react-hooks/refs */
 
   // Flat row model for windowing — the pinned section, the folders section, and
   // every conversation live in this ONE array fed to the single Virtualizer (no
@@ -2010,11 +2017,14 @@ export function SidebarConversationList({
   // Read by the stable toggle handlers below, so the memoized headers never see
   // these change.
   const folderExpandedRef = useRef(folderExpanded)
-  folderExpandedRef.current = folderExpanded
   const rootGroupCollapsedRef = useRef(rootGroupCollapsed)
-  rootGroupCollapsedRef.current = rootGroupCollapsed
   const containerChildrenRef = useRef(containerChildren)
-  containerChildrenRef.current = containerChildren
+  // Synced at commit: the handlers only run from events, after it.
+  useIsomorphicLayoutEffect(() => {
+    folderExpandedRef.current = folderExpanded
+    rootGroupCollapsedRef.current = rootGroupCollapsed
+    containerChildrenRef.current = containerChildren
+  })
 
   // Containers whose "root" row is in the list: while tabs follow the folder,
   // that row — not the container above it — wears the container's selected
@@ -2652,7 +2662,10 @@ export function SidebarConversationList({
   // Next / previous session (⌘⇧↓ / ⌘⇧↑ by default): step through the sessions
   // in the order listed here, opening each the way a click on its row does.
   const selectedConversationRef = useRef(selectedConversation)
-  selectedConversationRef.current = selectedConversation
+  // Read by the shortcut handler only, which runs after commit.
+  useIsomorphicLayoutEffect(() => {
+    selectedConversationRef.current = selectedConversation
+  })
   const isSessionNavSuspended = useCallback(
     () => draggingRef.current !== null,
     []
@@ -3499,6 +3512,7 @@ export function SidebarConversationList({
       childToParent.get(conv.folder_id) ?? conv.folder_id
     )
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reacts to a change of session, a step outside this list's own state
     setFolderExpanded((prev) => {
       if (folderIds.every((id) => prev[id] ?? true)) return prev
       const next = { ...prev }

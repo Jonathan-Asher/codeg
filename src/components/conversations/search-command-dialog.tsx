@@ -206,6 +206,22 @@ const ConversationRow = memo(function ConversationRow({
 })
 
 /**
+ * Whether this opening of the dialog uses the modal fallback, which stacks
+ * with a layer that holds focus. Decided as each open starts, during render,
+ * so the open's first frame already has it, without a second render pass on
+ * the hot path.
+ */
+/* eslint-disable react-hooks/refs -- decided once per open during render; a state round-trip would cost the open a second render */
+function useLegacyShellForThisOpen(open: boolean): boolean {
+  const shellRef = useRef({ open, legacy: false })
+  if (shellRef.current.open !== open) {
+    shellRef.current = { open, legacy: open && focusHeldElsewhere() }
+  }
+  return shellRef.current.legacy
+}
+/* eslint-enable react-hooks/refs */
+
+/**
  * The search dialog (⌘K), which with nothing typed is also the session
  * switcher: ⌘K then Enter goes back to the previous session, like Alt-Tab.
  *
@@ -326,13 +342,8 @@ export function SearchCommandDialog({
 
   // A layer that holds focus (a modal, an open menu) cannot have this dialog
   // stealing focus from under it: opened over one, it uses the modal dialog
-  // as before, which stacks with it. Decided as each open starts, without a
-  // second render pass on the hot path.
-  const shellRef = useRef({ open, legacy: false })
-  if (shellRef.current.open !== open) {
-    shellRef.current = { open, legacy: open && focusHeldElsewhere() }
-  }
-  const legacyShell = shellRef.current.legacy
+  // as before, which stacks with it (`useLegacyShellForThisOpen`).
+  const legacyShell = useLegacyShellForThisOpen(open)
 
   const folderPath = folder?.path ?? ""
 

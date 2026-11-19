@@ -4128,6 +4128,7 @@ const ConversationTabView = memo(function ConversationTabView({
       mqHoldUntilTurnEnd(item.id)
       return
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- marks the delivery this effect starts (an external steer call) in flight
     setHeldDrainInFlight(true)
     void feedbackSteer(payload.text, payload.blocks, item.clientMessageId)
       .then(() => mqRemove(item.id))

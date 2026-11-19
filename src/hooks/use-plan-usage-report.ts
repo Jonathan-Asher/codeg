@@ -71,6 +71,7 @@ export function usePlanUsageReport({
   }, [])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch; load() settles the loading flag after its await
     void load(false)
   }, [load])
 
