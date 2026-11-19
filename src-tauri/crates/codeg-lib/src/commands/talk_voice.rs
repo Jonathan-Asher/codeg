@@ -165,7 +165,7 @@ pub fn desktop_service(app: &AppHandle) -> Arc<TalkVoiceService> {
         })
     });
     service.models().on_change(|| {
-        let emitter = EventEmitter::from_app(&app);
+        let emitter = EventEmitter::from_app(app);
         Arc::new(move |status: TalkModelsStatus| emit_event(&emitter, TALK_MODELS_EVENT, &status))
     });
     service
