@@ -59,6 +59,7 @@ use sha2::{Digest, Sha256};
 use super::ws_frame_cap::IMAGE_PLACEHOLDER_PNG;
 use crate::app_error::AppCommandError;
 use crate::app_state::AppState;
+use crate::models::message::{ContentBlock, ImageData, MessageTurn};
 
 /// The version `/api/health` advertises as `imagePreviews`. A client sends the
 /// opt-in to any server (an older one ignores the field); this tells it the
@@ -526,6 +527,68 @@ pub fn find_image(value: &Value, id: &str) -> Option<(String, String)> {
     }
 }
 
+/// The picture `id` names in a conversation's turns, newest turns first (the
+/// pictures people open are mostly recent ones). The typed places pictures
+/// sit in are compared without a copy; a block is serialized and walked
+/// ([`find_image`]) only when a long string in it could carry one inside.
+pub fn find_image_in_turns(turns: &[MessageTurn], id: &str) -> Option<(String, String)> {
+    let same = |mime: &str, data: &str| {
+        (data.len() > KEEP_INLINE_MAX && is_base64_payload(data) && image_id(mime, data) == id)
+            .then(|| (mime.to_string(), data.to_string()))
+    };
+    let typed = |image: &ImageData| {
+        if image.mime_type.starts_with("image/") {
+            same(&image.mime_type, &image.data)
+        } else {
+            None
+        }
+    };
+    turns.iter().rev().find_map(|turn| {
+        turn.blocks.iter().find_map(|block| {
+            let found = match block {
+                ContentBlock::Image {
+                    data, mime_type, ..
+                } if mime_type.starts_with("image/") => same(mime_type, data),
+                ContentBlock::ImageGeneration {
+                    image: Some(image), ..
+                } => typed(image),
+                ContentBlock::ToolResult { images, .. } => images.iter().find_map(typed),
+                _ => None,
+            };
+            found.or_else(|| {
+                if !may_hide_a_picture(block) {
+                    return None;
+                }
+                serde_json::to_value(block)
+                    .ok()
+                    .and_then(|value| find_image(&value, id))
+            })
+        })
+    })
+}
+
+/// Whether `block` has a string long enough to carry a picture inside it
+/// (JSON as text, a data URL), or free-form JSON that could.
+fn may_hide_a_picture(block: &ContentBlock) -> bool {
+    let long = |s: &Option<String>| s.as_ref().is_some_and(|s| s.len() > KEEP_INLINE_MAX);
+    match block {
+        ContentBlock::Text { text } | ContentBlock::Thinking { text } => {
+            text.len() > KEEP_INLINE_MAX
+        }
+        ContentBlock::ToolUse {
+            input_preview,
+            meta,
+            ..
+        } => long(input_preview) || meta.is_some(),
+        ContentBlock::ToolResult {
+            output_preview,
+            agent_stats,
+            ..
+        } => long(output_preview) || agent_stats.is_some(),
+        _ => false,
+    }
+}
+
 // ── HTTP ────────────────────────────────────────────────────────────────────
 
 fn millis(d: Duration) -> f64 {
@@ -588,18 +651,18 @@ pub async fn serve_conversation_image(
     if !is_image_id(&id) {
         return Ok((StatusCode::NOT_FOUND, "no such image").into_response());
     }
-    let (detail, _) = crate::commands::conversations::get_folder_conversation_core(
+    // The whole transcript, read in place (shared with the transcript cache,
+    // not copied): a long session holds tens of MB of pictures.
+    let loaded = crate::commands::conversations::load_folder_conversation(
         &state.db.conn,
         conversation_id,
+        crate::commands::conversations::ContentNeed::All,
+        crate::parsers::CacheUse::Fill,
     )
     .await?;
-    // Newest turns first: the pictures people open are mostly recent ones.
     let found = tokio::task::spawn_blocking(move || {
-        detail.turns.iter().rev().find_map(|turn| {
-            let value = serde_json::to_value(turn).ok()?;
-            let (mime, data) = find_image(&value, &id)?;
-            Some((mime, decode_base64(&data)?))
-        })
+        find_image_in_turns(loaded.all_turns(), &id)
+            .and_then(|(mime, data)| Some((mime, decode_base64(&data)?)))
     })
     .await
     .map_err(|e| AppCommandError::task_execution_failed(e.to_string()))?;
@@ -827,6 +890,66 @@ mod tests {
         assert!(cache.get("b").is_none());
         assert!(cache.get("a").is_some());
         assert!(cache.get("d").is_some());
+    }
+
+    fn turn(id: &str, blocks: Vec<ContentBlock>) -> MessageTurn {
+        MessageTurn {
+            id: id.into(),
+            role: crate::models::message::TurnRole::Assistant,
+            blocks,
+            timestamp: chrono::Utc::now(),
+            usage: None,
+            duration_ms: None,
+            model: None,
+            completed_at: None,
+            agent_message_id: None,
+            spoken: false,
+        }
+    }
+
+    #[test]
+    fn the_full_picture_is_found_wherever_the_transcript_keeps_it() {
+        let shot = b64(&screenshot_png(900, 600, 20));
+        let generated = b64(&screenshot_png(700, 700, 21));
+        let in_text = b64(&screenshot_png(800, 500, 22));
+        let image = |data: &str| ImageData {
+            data: data.to_string(),
+            mime_type: "image/png".into(),
+            uri: None,
+        };
+        let turns = vec![
+            turn(
+                "t1",
+                vec![ContentBlock::ToolResult {
+                    tool_use_id: Some("toolu_1".into()),
+                    output_preview: None,
+                    is_error: false,
+                    agent_stats: None,
+                    images: vec![image(&shot)],
+                    exit_code: None,
+                }],
+            ),
+            turn(
+                "t2",
+                vec![
+                    ContentBlock::ImageGeneration {
+                        revised_prompt: None,
+                        image: Some(image(&generated)),
+                    },
+                    ContentBlock::Text {
+                        text: format!("data:image/png;base64,{in_text}"),
+                    },
+                ],
+            ),
+        ];
+        for data in [&shot, &generated, &in_text] {
+            let id = image_id("image/png", data);
+            assert_eq!(
+                find_image_in_turns(&turns, &id),
+                Some(("image/png".to_string(), data.to_string()))
+            );
+        }
+        assert_eq!(find_image_in_turns(&turns, &"f".repeat(32)), None);
     }
 
     // ── over HTTP ───────────────────────────────────────────────────────────
