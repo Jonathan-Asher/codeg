@@ -10,6 +10,7 @@ import {
   useCallback,
   useDeferredValue,
   useMemo,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react"
 import { flushSync } from "react-dom"
@@ -94,10 +95,43 @@ function searchFailure(err: unknown): SearchFailure {
     : "failed"
 }
 
-type SearchTab = "conversations" | "messages" | "files"
+type SearchTab = "all" | "conversations" | "messages" | "files"
+
+/** The tabs in order, which is also the order Tab steps through them. */
+const SEARCH_TABS: readonly SearchTab[] = [
+  "all",
+  "conversations",
+  "messages",
+  "files",
+]
+
+const SEARCH_TAB_LABEL_KEYS = {
+  all: "tabAll",
+  conversations: "tabConversations",
+  messages: "tabMessages",
+  files: "tabFiles",
+} as const
+
+/** The tab `step` places from `tab`, wrapping round both ends. */
+export function stepSearchTab(tab: SearchTab, step: 1 | -1): SearchTab {
+  const at = SEARCH_TABS.indexOf(tab)
+  return SEARCH_TABS[(at + step + SEARCH_TABS.length) % SEARCH_TABS.length]
+}
 
 /** Most message hits one search shows. */
 const MESSAGE_SEARCH_LIMIT = 40
+
+/**
+ * The All tab's share of the message search: a few hits under the sessions,
+ * and a row that opens the Messages tab when there are more. It asks for one
+ * more than it shows to know whether there are, waits a little longer than
+ * the Messages tab and skips one-letter queries, so typing a session's title
+ * does not run a full-text search per keystroke.
+ */
+const ALL_TAB_MESSAGE_LIMIT = 5
+const ALL_TAB_MESSAGE_MIN_CHARS = 2
+const ALL_TAB_MESSAGE_DEBOUNCE_MS = 400
+const MESSAGES_TAB_DEBOUNCE_MS = 250
 
 /** Most sessions the recent list shows with nothing typed. */
 const RECENT_SESSION_LIMIT = 30
@@ -143,6 +177,11 @@ function afterNextPaint(fn: () => void): () => void {
 const recentValue = (conv: DbConversationSummary) => `recent-${conv.id}`
 const resultValue = (conv: DbConversationSummary) =>
   `${conv.id}-${formatConversationTitle(conv.title)}`
+// Prefixed: on the All tab a hit shares the list with session rows, whose
+// values are `<id>-<title>` and could otherwise spell the same string.
+const messageHitValue = (hit: MessageSearchHit) =>
+  `message-${hit.conversation_id}-${hit.turn_idx}`
+const SHOW_ALL_MESSAGES_VALUE = "show-all-messages"
 
 interface SearchCommandDialogProps {
   open: boolean
@@ -314,15 +353,33 @@ export function SearchCommandDialog({
   const { openFilePreview } = useWorkspaceActions()
   const { revealInFileTree } = useAuxPanelContext()
 
-  const [activeTab, setActiveTab] = useState<SearchTab>("conversations")
+  const [activeTab, setActiveTab] = useState<SearchTab>("all")
   // The search box owns the keyboard: the dialog opens with the cursor in it,
   // and switching tabs or agent filters leaves it there, so typing always
-  // searches.
+  // searches. The query stays: the next tab searches the same words.
   const inputRef = useRef<HTMLInputElement>(null)
+  // The row the user moved the selection to; until then, the first one.
+  const [pickedValue, setPickedValue] = useState<string | null>(null)
   const switchTab = useCallback((tab: SearchTab) => {
     setActiveTab(tab)
+    // The selection belonged to the other tab's list.
+    setPickedValue(null)
     inputRef.current?.focus()
   }, [])
+  // Tab and Shift+Tab in the search box go to the next or previous search
+  // instead of moving focus, which would only reach the tab buttons.
+  const onSearchKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLInputElement>) => {
+      if (event.key !== "Tab" || event.altKey || event.ctrlKey) return
+      if (event.metaKey || event.nativeEvent.isComposing) return
+      event.preventDefault()
+      // The dialog's focus trap must not move focus on its own either.
+      event.stopPropagation()
+      setActiveTab((tab) => stepSearchTab(tab, event.shiftKey ? -1 : 1))
+      setPickedValue(null)
+    },
+    []
+  )
   const [query, setQuery] = useState("")
   const [agentFilter, setAgentFilter] = useState<AgentType | null>(null)
   const [results, setResults] =
@@ -335,8 +392,6 @@ export function SearchCommandDialog({
   const [messageSearching, setMessageSearching] = useState(false)
   const [messageSearchFailed, setMessageSearchFailed] =
     useState<SearchFailure | null>(null)
-  // The row the user moved the selection to; until then, the first one.
-  const [pickedValue, setPickedValue] = useState<string | null>(null)
   // Relative times are reckoned from here; brought up to date on each open.
   const [now, setNow] = useState(() => Date.now())
 
@@ -347,8 +402,12 @@ export function SearchCommandDialog({
 
   const folderPath = folder?.path ?? ""
 
-  const recentMode =
-    activeTab === "conversations" && showRecent && !query.trim()
+  // The Conversations tab narrows by folder and agent; All searches every
+  // session, the way it searches every message.
+  const conversationTab = activeTab === "conversations" || activeTab === "all"
+  const tabFolderId = activeTab === "conversations" ? scopedFolderId : null
+  const tabAgentFilter = activeTab === "conversations" ? agentFilter : null
+  const recentMode = conversationTab && showRecent && !query.trim()
 
   // The workspace store holds every sidebar row; only when it has none yet
   // (not loaded) does the recent list ask the backend itself.
@@ -389,8 +448,8 @@ export function SearchCommandDialog({
         ? recentSessions(recentSource, {
             knownFolderIds,
             excludeId: currentConversationId,
-            folderId: scopedFolderId,
-            agentType: agentFilter,
+            folderId: tabFolderId,
+            agentType: tabAgentFilter,
             excludeFolderIds: archivedIds,
             limit: RECENT_SESSION_LIMIT,
           })
@@ -400,8 +459,8 @@ export function SearchCommandDialog({
       recentSource,
       knownFolderIds,
       currentConversationId,
-      scopedFolderId,
-      agentFilter,
+      tabFolderId,
+      tabAgentFilter,
       archivedIds,
     ]
   )
@@ -460,7 +519,7 @@ export function SearchCommandDialog({
   )
 
   const doSearch = useCallback(
-    async (q: string, agent: AgentType | null) => {
+    async (q: string, agent: AgentType | null, folderId: number | null) => {
       // With nothing typed, the recent list (narrowed by the agent filter)
       // stands in for results — unless it is turned off.
       if (!q.trim() && (!agent || showRecent)) {
@@ -472,7 +531,7 @@ export function SearchCommandDialog({
       setSearching(true)
       try {
         const data = await listAllConversations({
-          folder_ids: scopedFolderId != null ? [scopedFolderId] : null,
+          folder_ids: folderId != null ? [folderId] : null,
           search: q.trim() || null,
           agent_type: agent,
         })
@@ -485,51 +544,60 @@ export function SearchCommandDialog({
         setSearching(false)
       }
     },
-    [scopedFolderId, showRecent]
+    [showRecent]
   )
 
-  // Debounced search on query change (conversations tab only)
+  // Debounced search on query change (the All and Conversations tabs)
   useEffect(() => {
-    if (activeTab !== "conversations") return
+    if (!conversationTab) return
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
-      doSearch(query, agentFilter)
+      doSearch(query, tabAgentFilter, tabFolderId)
     }, 300)
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
     }
-  }, [query, agentFilter, doSearch, activeTab])
+  }, [query, tabAgentFilter, tabFolderId, doSearch, conversationTab])
 
-  // Debounced message-content search (messages tab only). It spans every
-  // conversation rather than the active folder's: the words of a message are
-  // often all that is remembered of a conversation, including where it ran.
+  // Debounced message-content search (the Messages tab, and a few hits on
+  // All). It spans every conversation rather than the active folder's: the
+  // words of a message are often all that is remembered of a conversation,
+  // including where it ran.
   useEffect(() => {
-    if (activeTab !== "messages") return
+    if (activeTab !== "messages" && activeTab !== "all") return
+    const onAll = activeTab === "all"
     const q = query.trim()
+    const tooShort = onAll && q.length < ALL_TAB_MESSAGE_MIN_CHARS
     let stale = false
-    const timer = setTimeout(() => {
-      if (!q) {
-        setMessageHits(NO_MESSAGE_HITS)
-        setMessageSearchFailed(null)
-        setMessageSearching(false)
-        return
-      }
-      setMessageSearching(true)
-      searchMessages(q, MESSAGE_SEARCH_LIMIT)
-        .then((hits) => {
-          if (stale) return
-          setMessageHits(hits)
-          setMessageSearchFailed(null)
-        })
-        .catch((err: unknown) => {
-          if (stale) return
+    const timer = setTimeout(
+      () => {
+        if (!q || tooShort) {
           setMessageHits(NO_MESSAGE_HITS)
-          setMessageSearchFailed(searchFailure(err))
-        })
-        .finally(() => {
-          if (!stale) setMessageSearching(false)
-        })
-    }, 250)
+          setMessageSearchFailed(null)
+          setMessageSearching(false)
+          return
+        }
+        setMessageSearching(true)
+        searchMessages(
+          q,
+          onAll ? ALL_TAB_MESSAGE_LIMIT + 1 : MESSAGE_SEARCH_LIMIT
+        )
+          .then((hits) => {
+            if (stale) return
+            setMessageHits(hits)
+            setMessageSearchFailed(null)
+          })
+          .catch((err: unknown) => {
+            if (stale) return
+            setMessageHits(NO_MESSAGE_HITS)
+            setMessageSearchFailed(searchFailure(err))
+          })
+          .finally(() => {
+            if (!stale) setMessageSearching(false)
+          })
+      },
+      onAll ? ALL_TAB_MESSAGE_DEBOUNCE_MS : MESSAGES_TAB_DEBOUNCE_MS
+    )
     return () => {
       // The query moved on: an answer still in flight must not replace the
       // results of the newer one.
@@ -548,7 +616,7 @@ export function SearchCommandDialog({
     setSearchFailed(null)
     setMessageSearchFailed(null)
     setMessageSearching(false)
-    setActiveTab("conversations")
+    setActiveTab("all")
     setPickedValue(null)
     // Each opening searches files as they are now, not a native snapshot left
     // over from before it opened.
@@ -653,7 +721,7 @@ export function SearchCommandDialog({
   // (after the usual short dwell), so picking it does not wait on either. An
   // open tab is live already.
   const selectedConversation = useMemo(() => {
-    if (!open || legacyShell || activeTab !== "conversations") return null
+    if (!open || legacyShell || !conversationTab) return null
     if (!selectedValue) return null
     if (recentMode) {
       return recent.find((c) => recentValue(c) === selectedValue) ?? null
@@ -662,7 +730,7 @@ export function SearchCommandDialog({
   }, [
     open,
     legacyShell,
-    activeTab,
+    conversationTab,
     selectedValue,
     recentMode,
     recent,
@@ -735,15 +803,113 @@ export function SearchCommandDialog({
   }, [])
 
   const placeholder =
-    activeTab === "conversations"
-      ? t("placeholder")
-      : activeTab === "messages"
-        ? t("messagePlaceholder")
-        : t("filePlaceholder")
+    activeTab === "all"
+      ? t("allPlaceholder")
+      : activeTab === "conversations"
+        ? t("placeholder")
+        : activeTab === "messages"
+          ? t("messagePlaceholder")
+          : t("filePlaceholder")
 
   const title = folder
     ? t("dialogTitleWithFolder", { name: folder.name })
     : t("dialogTitle")
+
+  // The rows the All and Conversations tabs share.
+  const recentGroup =
+    recentMode && recent.length > 0 ? (
+      <CommandGroup heading={t("recentHeading")}>
+        {recent.map((conv) => (
+          <ConversationRow
+            key={conv.id}
+            value={recentValue(conv)}
+            conversation={conv}
+            onPick={handleSelectConversation}
+            title={
+              formatConversationTitle(conv.title) || t("untitledConversation")
+            }
+            status={conv.status}
+            folderName={folderLabel(conv.folder_id)}
+            agentType={conv.agent_type}
+            time={relativeTime(conv.updated_at)}
+          />
+        ))}
+      </CommandGroup>
+    ) : null
+  const conversationResultGroup = (heading?: string) =>
+    !recentMode && shownResults.length > 0 ? (
+      <CommandGroup heading={heading}>
+        {shownResults.map((conv) => (
+          <ConversationRow
+            key={conv.id}
+            value={resultValue(conv)}
+            conversation={conv}
+            onPick={handleSelectConversation}
+            title={
+              formatConversationTitle(conv.title) || t("untitledConversation")
+            }
+            status={conv.status}
+            folderName={folderLabel(conv.folder_id)}
+            agentType={conv.agent_type}
+            time={relativeTime(conv.created_at)}
+            badge={
+              archivedIds.has(conv.folder_id) ? t("archivedBadge") : undefined
+            }
+          />
+        ))}
+      </CommandGroup>
+    ) : null
+  const renderMessageHit = (hit: MessageSearchHit) => (
+    <CommandItem
+      key={messageHitValue(hit)}
+      value={messageHitValue(hit)}
+      onSelect={() => handleSelectMessageHit(hit)}
+    >
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex items-center gap-2">
+          <span className="flex-1 truncate">
+            {formatConversationTitle(hit.title) || t("untitledConversation")}
+          </span>
+          <span className="text-xs text-muted-foreground shrink-0">
+            {getAgentLabel(hit.agent_type)}
+          </span>
+        </div>
+        {/* The excerpt's own direction: a Hebrew match reads right to left,
+            its role label first on the right, and truncates at its end rather
+            than its start. */}
+        <div
+          dir={detectTextDirection(
+            splitSnippet(hit.snippet)
+              .map((part) => part.text)
+              .join("")
+          )}
+          className="truncate text-xs text-muted-foreground"
+        >
+          <span className="me-1.5 font-medium">
+            {t(MESSAGE_ROLE_KEYS[hit.role])}
+          </span>
+          {splitSnippet(hit.snippet).map((part, i) =>
+            part.marked ? (
+              <mark
+                key={i}
+                className="rounded bg-yellow-400/30 text-foreground dark:bg-yellow-300/25"
+              >
+                {part.text}
+              </mark>
+            ) : (
+              <span key={i}>{part.text}</span>
+            )
+          )}
+        </div>
+      </div>
+    </CommandItem>
+  )
+  const allTabMessageHits =
+    activeTab === "all"
+      ? messageHits.slice(0, ALL_TAB_MESSAGE_LIMIT)
+      : NO_MESSAGE_HITS
+  const allTabHasMoreMessages =
+    activeTab === "all" && messageHits.length > ALL_TAB_MESSAGE_LIMIT
 
   const content: ReactNode = (
     <>
@@ -757,53 +923,33 @@ export function SearchCommandDialog({
         </div>
       )}
 
-      {/* Tabs */}
+      {/* Tabs. Tab in the search box steps through them; the hint says so
+          where there is room for it. */}
       <div className="flex items-center gap-0 border-b px-3">
-        <button
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => switchTab("conversations")}
-          className={cn(
-            "relative h-9 px-3 text-sm font-medium transition-colors",
-            activeTab === "conversations"
-              ? "text-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          )}
+        {SEARCH_TABS.map((tab) => (
+          <button
+            key={tab}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => switchTab(tab)}
+            className={cn(
+              "relative h-9 px-3 text-sm font-medium transition-colors",
+              activeTab === tab
+                ? "text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            {t(SEARCH_TAB_LABEL_KEYS[tab])}
+            {activeTab === tab && (
+              <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-foreground rounded-full" />
+            )}
+          </button>
+        ))}
+        <span
+          aria-hidden="true"
+          className="ms-auto hidden shrink-0 ps-2 text-2xs text-muted-foreground/70 sm:inline"
         >
-          {t("tabConversations")}
-          {activeTab === "conversations" && (
-            <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-foreground rounded-full" />
-          )}
-        </button>
-        <button
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => switchTab("messages")}
-          className={cn(
-            "relative h-9 px-3 text-sm font-medium transition-colors",
-            activeTab === "messages"
-              ? "text-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          )}
-        >
-          {t("tabMessages")}
-          {activeTab === "messages" && (
-            <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-foreground rounded-full" />
-          )}
-        </button>
-        <button
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => switchTab("files")}
-          className={cn(
-            "relative h-9 px-3 text-sm font-medium transition-colors",
-            activeTab === "files"
-              ? "text-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          )}
-        >
-          {t("tabFiles")}
-          {activeTab === "files" && (
-            <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-foreground rounded-full" />
-          )}
-        </button>
+          {t("tabHint")}
+        </span>
       </div>
 
       <CommandInput
@@ -811,6 +957,7 @@ export function SearchCommandDialog({
         placeholder={placeholder}
         value={query}
         onValueChange={setQuery}
+        onKeyDown={onSearchKeyDown}
       />
 
       {/* Agent filter (conversations tab only). Wraps: one chip per agent type
@@ -883,6 +1030,39 @@ export function SearchCommandDialog({
       )}
 
       <CommandList ref={listRef} className="min-h-96">
+        {/* All: sessions by title first, then the messages that match */}
+        {activeTab === "all" && (
+          <>
+            <CommandEmpty>
+              {searching || messageSearching
+                ? t("searching")
+                : !query.trim()
+                  ? t("typeToSearchAll")
+                  : searchFailed && messageSearchFailed
+                    ? t(searchFailed)
+                    : t("noResults")}
+            </CommandEmpty>
+            {recentGroup}
+            {conversationResultGroup(t("sessionsHeading"))}
+            {!recentMode && allTabMessageHits.length > 0 && (
+              <CommandGroup heading={t("messagesHeading")}>
+                {allTabMessageHits.map(renderMessageHit)}
+                {allTabHasMoreMessages && (
+                  <CommandItem
+                    value={SHOW_ALL_MESSAGES_VALUE}
+                    onSelect={() => switchTab("messages")}
+                    className="text-muted-foreground"
+                  >
+                    <span className="flex-1 truncate">
+                      {t("showAllMessages")}
+                    </span>
+                  </CommandItem>
+                )}
+              </CommandGroup>
+            )}
+          </>
+        )}
+
         {/* Conversations tab */}
         {activeTab === "conversations" && (
           <>
@@ -895,51 +1075,8 @@ export function SearchCommandDialog({
                     ? t(searchFailed)
                     : t("noResults")}
             </CommandEmpty>
-            {recentMode && recent.length > 0 && (
-              <CommandGroup heading={t("recentHeading")}>
-                {recent.map((conv) => (
-                  <ConversationRow
-                    key={conv.id}
-                    value={recentValue(conv)}
-                    conversation={conv}
-                    onPick={handleSelectConversation}
-                    title={
-                      formatConversationTitle(conv.title) ||
-                      t("untitledConversation")
-                    }
-                    status={conv.status}
-                    folderName={folderLabel(conv.folder_id)}
-                    agentType={conv.agent_type}
-                    time={relativeTime(conv.updated_at)}
-                  />
-                ))}
-              </CommandGroup>
-            )}
-            {!recentMode && shownResults.length > 0 && (
-              <CommandGroup>
-                {shownResults.map((conv) => (
-                  <ConversationRow
-                    key={conv.id}
-                    value={resultValue(conv)}
-                    conversation={conv}
-                    onPick={handleSelectConversation}
-                    title={
-                      formatConversationTitle(conv.title) ||
-                      t("untitledConversation")
-                    }
-                    status={conv.status}
-                    folderName={folderLabel(conv.folder_id)}
-                    agentType={conv.agent_type}
-                    time={relativeTime(conv.created_at)}
-                    badge={
-                      archivedIds.has(conv.folder_id)
-                        ? t("archivedBadge")
-                        : undefined
-                    }
-                  />
-                ))}
-              </CommandGroup>
-            )}
+            {recentGroup}
+            {conversationResultGroup()}
           </>
         )}
 
@@ -957,52 +1094,7 @@ export function SearchCommandDialog({
             </CommandEmpty>
             {messageHits.length > 0 && (
               <CommandGroup heading={t("messagesHeading")}>
-                {messageHits.map((hit) => (
-                  <CommandItem
-                    key={`${hit.conversation_id}-${hit.turn_idx}`}
-                    value={`${hit.conversation_id}-${hit.turn_idx}`}
-                    onSelect={() => handleSelectMessageHit(hit)}
-                  >
-                    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <div className="flex items-center gap-2">
-                        <span className="flex-1 truncate">
-                          {formatConversationTitle(hit.title) ||
-                            t("untitledConversation")}
-                        </span>
-                        <span className="text-xs text-muted-foreground shrink-0">
-                          {getAgentLabel(hit.agent_type)}
-                        </span>
-                      </div>
-                      {/* The excerpt's own direction: a Hebrew match reads
-                          right to left, its role label first on the right,
-                          and truncates at its end rather than its start. */}
-                      <div
-                        dir={detectTextDirection(
-                          splitSnippet(hit.snippet)
-                            .map((part) => part.text)
-                            .join("")
-                        )}
-                        className="truncate text-xs text-muted-foreground"
-                      >
-                        <span className="me-1.5 font-medium">
-                          {t(MESSAGE_ROLE_KEYS[hit.role])}
-                        </span>
-                        {splitSnippet(hit.snippet).map((part, i) =>
-                          part.marked ? (
-                            <mark
-                              key={i}
-                              className="rounded bg-yellow-400/30 text-foreground dark:bg-yellow-300/25"
-                            >
-                              {part.text}
-                            </mark>
-                          ) : (
-                            <span key={i}>{part.text}</span>
-                          )
-                        )}
-                      </div>
-                    </div>
-                  </CommandItem>
-                ))}
+                {messageHits.map(renderMessageHit)}
               </CommandGroup>
             )}
           </>

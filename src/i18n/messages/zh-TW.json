@@ -2873,7 +2873,13 @@
       "recentHeading": "最近",
       "archivedBadge": "已封存",
       "offline": "離線 — 搜尋需要連線伺服器",
-      "failed": "搜尋失敗，請重試。"
+      "failed": "搜尋失敗，請重試。",
+      "tabAll": "全部",
+      "allPlaceholder": "搜尋會話和訊息...",
+      "typeToSearchAll": "輸入關鍵字搜尋會話和訊息",
+      "sessionsHeading": "會話",
+      "showAllMessages": "顯示所有相符的訊息",
+      "tabHint": "Tab：下一個搜尋"
     },
     "folderTitleBar": {
       "showSidebar": "顯示側邊欄",

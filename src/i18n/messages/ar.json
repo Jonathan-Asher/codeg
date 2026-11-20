@@ -2873,7 +2873,13 @@
       "recentHeading": "الأخيرة",
       "archivedBadge": "مؤرشف",
       "offline": "غير متصل — يحتاج البحث إلى الخادم",
-      "failed": "فشل البحث. حاول مرة أخرى."
+      "failed": "فشل البحث. حاول مرة أخرى.",
+      "tabAll": "الكل",
+      "allPlaceholder": "البحث في المحادثات والرسائل...",
+      "typeToSearchAll": "اكتب للبحث في المحادثات والرسائل",
+      "sessionsHeading": "المحادثات",
+      "showAllMessages": "عرض كل الرسائل المطابقة",
+      "tabHint": "Tab: البحث التالي"
     },
     "folderTitleBar": {
       "showSidebar": "إظهار الشريط الجانبي",

@@ -2873,7 +2873,13 @@
       "recentHeading": "Zuletzt",
       "archivedBadge": "Archiviert",
       "offline": "Offline – die Suche braucht den Server",
-      "failed": "Die Suche ist fehlgeschlagen. Bitte erneut versuchen."
+      "failed": "Die Suche ist fehlgeschlagen. Bitte erneut versuchen.",
+      "tabAll": "Alle",
+      "allPlaceholder": "Konversationen und Nachrichten durchsuchen...",
+      "typeToSearchAll": "Tippen, um Konversationen und Nachrichten zu durchsuchen",
+      "sessionsHeading": "Konversationen",
+      "showAllMessages": "Alle passenden Nachrichten anzeigen",
+      "tabHint": "Tab: nächste Suche"
     },
     "folderTitleBar": {
       "showSidebar": "Seitenleiste anzeigen",

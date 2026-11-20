@@ -2873,7 +2873,13 @@
       "recentHeading": "最近",
       "archivedBadge": "已归档",
       "offline": "离线 — 搜索需要连接服务器",
-      "failed": "搜索失败，请重试。"
+      "failed": "搜索失败，请重试。",
+      "tabAll": "全部",
+      "allPlaceholder": "搜索会话和消息...",
+      "typeToSearchAll": "输入关键词搜索会话和消息",
+      "sessionsHeading": "会话",
+      "showAllMessages": "显示所有匹配的消息",
+      "tabHint": "Tab：下一个搜索"
     },
     "folderTitleBar": {
       "showSidebar": "显示侧边栏",

@@ -2873,7 +2873,13 @@
       "recentHeading": "Recentes",
       "archivedBadge": "Arquivada",
       "offline": "Offline — a pesquisa precisa do servidor",
-      "failed": "A pesquisa falhou. Tente novamente."
+      "failed": "A pesquisa falhou. Tente novamente.",
+      "tabAll": "Tudo",
+      "allPlaceholder": "Buscar conversas e mensagens...",
+      "typeToSearchAll": "Digite para buscar conversas e mensagens",
+      "sessionsHeading": "Conversas",
+      "showAllMessages": "Mostrar todas as mensagens correspondentes",
+      "tabHint": "Tab: próxima busca"
     },
     "folderTitleBar": {
       "showSidebar": "Mostrar barra lateral",

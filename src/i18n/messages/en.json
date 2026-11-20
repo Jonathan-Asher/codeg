@@ -2873,7 +2873,13 @@
       "recentHeading": "Recent",
       "archivedBadge": "Archived",
       "offline": "Offline — search needs the server",
-      "failed": "Search failed. Try again."
+      "failed": "Search failed. Try again.",
+      "tabAll": "All",
+      "allPlaceholder": "Search sessions and messages...",
+      "typeToSearchAll": "Type to search sessions and messages",
+      "sessionsHeading": "Conversations",
+      "showAllMessages": "Show all matching messages",
+      "tabHint": "Tab: next search"
     },
     "folderTitleBar": {
       "showSidebar": "Show Sidebar",

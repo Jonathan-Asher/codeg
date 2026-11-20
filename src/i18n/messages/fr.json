@@ -2873,7 +2873,13 @@
       "recentHeading": "Récentes",
       "archivedBadge": "Archivé",
       "offline": "Hors ligne — la recherche nécessite le serveur",
-      "failed": "La recherche a échoué. Réessayez."
+      "failed": "La recherche a échoué. Réessayez.",
+      "tabAll": "Tout",
+      "allPlaceholder": "Rechercher dans les conversations et les messages...",
+      "typeToSearchAll": "Tapez pour rechercher dans les conversations et les messages",
+      "sessionsHeading": "Conversations",
+      "showAllMessages": "Afficher tous les messages correspondants",
+      "tabHint": "Tab : recherche suivante"
     },
     "folderTitleBar": {
       "showSidebar": "Afficher la barre latérale",

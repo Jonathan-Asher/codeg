@@ -2873,7 +2873,13 @@
       "recentHeading": "最近",
       "archivedBadge": "アーカイブ済み",
       "offline": "オフライン — 検索にはサーバーへの接続が必要です",
-      "failed": "検索に失敗しました。もう一度お試しください。"
+      "failed": "検索に失敗しました。もう一度お試しください。",
+      "tabAll": "すべて",
+      "allPlaceholder": "会話とメッセージを検索...",
+      "typeToSearchAll": "入力して会話とメッセージを検索",
+      "sessionsHeading": "会話",
+      "showAllMessages": "一致するメッセージをすべて表示",
+      "tabHint": "Tab：次の検索"
     },
     "folderTitleBar": {
       "showSidebar": "サイドバーを表示",

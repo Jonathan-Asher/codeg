@@ -2873,7 +2873,13 @@
       "recentHeading": "Recientes",
       "archivedBadge": "Archivada",
       "offline": "Sin conexión: la búsqueda necesita el servidor",
-      "failed": "La búsqueda falló. Inténtalo de nuevo."
+      "failed": "La búsqueda falló. Inténtalo de nuevo.",
+      "tabAll": "Todo",
+      "allPlaceholder": "Buscar conversaciones y mensajes...",
+      "typeToSearchAll": "Escribe para buscar conversaciones y mensajes",
+      "sessionsHeading": "Conversaciones",
+      "showAllMessages": "Ver todos los mensajes coincidentes",
+      "tabHint": "Tab: siguiente búsqueda"
     },
     "folderTitleBar": {
       "showSidebar": "Mostrar barra lateral",
