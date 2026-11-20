@@ -8,6 +8,7 @@ pub mod client_keepalive;
 pub mod compression;
 pub mod event_bridge;
 pub mod handlers;
+pub mod image_previews;
 pub mod live_images;
 pub mod port_probe;
 pub mod proxy_auth;
