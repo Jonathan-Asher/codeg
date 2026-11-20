@@ -1744,11 +1744,18 @@ mod tests {
             .collect();
         assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
 
+        // The shell creates the file for `>>` before printf writes the line,
+        // so wait for the line, not for the file.
         let deadline = Instant::now() + Duration::from_secs(5);
-        while !output.exists() && Instant::now() < deadline {
+        let mut text = String::new();
+        while Instant::now() < deadline {
+            text = std::fs::read_to_string(&output).unwrap_or_default();
+            if !text.is_empty() {
+                break;
+            }
             std::thread::sleep(Duration::from_millis(10));
         }
-        let text = std::fs::read_to_string(&output).expect("spawn marker");
+        assert!(!text.is_empty(), "spawn marker");
         assert_eq!(text.lines().count(), 1, "command was run twice");
         manager.kill(&id).expect("the winning child is reachable");
         let _ = std::fs::remove_file(output);

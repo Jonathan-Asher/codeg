@@ -1395,11 +1395,15 @@ mod tests {
 
     #[test]
     fn allocate_free_port_is_actually_free() {
-        let port = allocate_free_port().expect("should allocate");
-        assert!(port > 0);
-        // We released it, so we can immediately bind it again.
-        let again = std::net::TcpListener::bind(("127.0.0.1", port));
-        assert!(again.is_ok(), "allocated port should be re-bindable");
+        // We released it, so we can immediately bind it again. A test binding
+        // port 0 in parallel can take it in between, which says nothing about
+        // the release, so a few fresh tries are allowed.
+        let rebound = (0..5).any(|_| {
+            let port = allocate_free_port().expect("should allocate");
+            assert!(port > 0);
+            std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
+        });
+        assert!(rebound, "allocated port should be re-bindable");
     }
 
     #[test]
