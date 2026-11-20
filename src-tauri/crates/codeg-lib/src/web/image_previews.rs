@@ -19,6 +19,7 @@
 //!                   "width": 1920, "height": 1080 } }
 //! ```
 //!
+//! - The preview is at most 512 pixels on its long side and aims at 20 KB.
 //! - `data` and `mime_type` always describe the bytes sent inline. A picture
 //!   this server cannot decode (a format the `image` crate here lacks) is sent
 //!   as the small placeholder glyph instead, with `full_image.placeholder:
@@ -76,14 +77,16 @@ pub const FULL_IMAGE_KEY: &str = "full_image";
 /// 24 KB of picture, no larger than a preview would be.
 pub const KEEP_INLINE_MAX: usize = 32 * 1024;
 
-/// A preview aims at this many bytes of JPEG (about 21 KB as base64), taking
+/// A preview aims at this many bytes of JPEG (about 27 KB as base64), taking
 /// the first of [`PREVIEW_STEPS`] that fits.
-const PREVIEW_TARGET_BYTES: usize = 16 * 1024;
+const PREVIEW_TARGET_BYTES: usize = 20 * 1024;
 
 /// Longest side and JPEG quality, tried in order until one fits the target.
 /// A transcript shows pictures at most 320 points high, and a preview is a
-/// stand-in until the full picture is opened.
-const PREVIEW_STEPS: &[(u32, u8)] = &[(512, 70), (384, 62), (256, 55)];
+/// stand-in until the full picture is opened. Dense screenshots (text on a
+/// desktop) mostly land on the second or third step: lowering the quality
+/// saves them little, the size does.
+const PREVIEW_STEPS: &[(u32, u8)] = &[(512, 65), (448, 60), (384, 55), (256, 50)];
 
 /// A picture larger than this on either side is not decoded (its size still
 /// is); it gets the placeholder.
@@ -92,7 +95,7 @@ const MAX_DECODE_SIDE: u32 = 16_384;
 /// Memory a decode may take.
 const MAX_DECODE_ALLOC: u64 = 256 * 1024 * 1024;
 
-/// Previews kept, in bytes of base64 (about 800 screenshots).
+/// Previews kept, in bytes of base64 (about 600 screenshots).
 const CACHE_MAX_BYTES: usize = 16 * 1024 * 1024;
 
 /// Length of an image id: the first 16 bytes of a SHA-256, in hex.
