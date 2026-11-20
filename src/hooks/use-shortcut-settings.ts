@@ -9,12 +9,22 @@ import {
   type ShortcutSettings,
   normalizeShortcut,
   readShortcutSettings,
+  withShortcutTakenOver,
   writeShortcutSettings,
 } from "@/lib/keyboard-shortcuts"
 
 interface UseShortcutSettingsResult {
   shortcuts: ShortcutSettings
   updateShortcut: (actionId: ShortcutActionId, shortcut: string) => boolean
+  /**
+   * Bind `shortcut` to `actionId` and unassign `from`, the actions it takes
+   * the chord from, in one write.
+   */
+  takeOverShortcut: (
+    actionId: ShortcutActionId,
+    shortcut: string,
+    from: readonly ShortcutActionId[]
+  ) => boolean
   resetShortcuts: () => void
 }
 
@@ -62,6 +72,26 @@ export function useShortcutSettings(): UseShortcutSettingsResult {
     []
   )
 
+  const takeOverShortcut = useCallback(
+    (
+      actionId: ShortcutActionId,
+      shortcut: string,
+      from: readonly ShortcutActionId[]
+    ): boolean => {
+      const normalized = normalizeShortcut(shortcut)
+      if (!normalized) return false
+
+      setShortcuts((previous) => {
+        const next = withShortcutTakenOver(previous, actionId, normalized, from)
+        writeShortcutSettings(next)
+        return next
+      })
+
+      return true
+    },
+    []
+  )
+
   const resetShortcuts = useCallback(() => {
     setShortcuts({ ...DEFAULT_SHORTCUTS })
     writeShortcutSettings(DEFAULT_SHORTCUTS)
@@ -70,6 +100,7 @@ export function useShortcutSettings(): UseShortcutSettingsResult {
   return {
     shortcuts,
     updateShortcut,
+    takeOverShortcut,
     resetShortcuts,
   }
 }

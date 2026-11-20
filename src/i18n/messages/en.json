@@ -514,7 +514,8 @@
       "conflict": "Shortcut is already used by \"{title}\"",
       "updated": "Shortcut updated",
       "invalid": "Invalid shortcut, please try again",
-      "reset": "Default shortcuts restored"
+      "reset": "Default shortcuts restored",
+      "takenOver": "{shortcut} now runs “{action}”. Unassigned: {others}."
     },
     "actions": {
       "toggle_search": {
@@ -664,7 +665,31 @@
       "read_last_reply": {
         "title": "Read last reply",
         "description": "Read the newest reply in the current conversation aloud, or stop reading it"
+      },
+      "search_settings": {
+        "title": "Search Settings",
+        "description": "Put the cursor in the search box of the Settings window"
       }
+    },
+    "contexts": {
+      "global": "Everywhere",
+      "workspace": "Workspace",
+      "terminal": "Terminal",
+      "composer": "Message box",
+      "settings": "Settings window"
+    },
+    "focus": {
+      "workspace": "In the workspace",
+      "terminal": "While the terminal has focus",
+      "composer": "While typing a message",
+      "settings": "In the Settings window"
+    },
+    "shadowedBy": "{focus}, {shortcut} runs “{action}” instead.",
+    "shadows": "{focus}, {shortcut} runs this instead of “{action}”.",
+    "conflict": {
+      "message": "{shortcut} is already used by {actions} in the same place, so only one of them can keep it.",
+      "takeOver": "Use it for “{action}” instead",
+      "cancel": "Cancel"
     }
   },
   "SkillsSettings": {

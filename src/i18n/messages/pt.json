@@ -514,7 +514,8 @@
       "conflict": "O atalho já está em uso por \"{title}\"",
       "updated": "Atalho atualizado",
       "invalid": "Atalho inválido, tente novamente",
-      "reset": "Atalhos padrão restaurados"
+      "reset": "Atalhos padrão restaurados",
+      "takenOver": "{shortcut} agora executa “{action}”. Sem atribuição: {others}."
     },
     "actions": {
       "toggle_search": {
@@ -664,7 +665,31 @@
       "read_last_reply": {
         "title": "Ler a última resposta",
         "description": "Lê em voz alta a resposta mais recente da conversa atual, ou para a leitura"
+      },
+      "search_settings": {
+        "title": "Buscar nas configurações",
+        "description": "Coloca o cursor na caixa de busca da janela de configurações"
       }
+    },
+    "contexts": {
+      "global": "Em qualquer lugar",
+      "workspace": "Espaço de trabalho",
+      "terminal": "Terminal",
+      "composer": "Caixa de mensagem",
+      "settings": "Janela de configurações"
+    },
+    "focus": {
+      "workspace": "No espaço de trabalho",
+      "terminal": "Com o foco no terminal",
+      "composer": "Enquanto digita uma mensagem",
+      "settings": "Na janela de configurações"
+    },
+    "shadowedBy": "{focus}, {shortcut} executa “{action}” em vez disso.",
+    "shadows": "{focus}, {shortcut} executa isto em vez de “{action}”.",
+    "conflict": {
+      "message": "{shortcut} já é usado por {actions} no mesmo lugar, então só um deles pode mantê-lo.",
+      "takeOver": "Usar para “{action}”",
+      "cancel": "Cancelar"
     }
   },
   "SkillsSettings": {

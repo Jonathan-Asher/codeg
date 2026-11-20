@@ -514,7 +514,8 @@
       "conflict": "الاختصار مستخدم بالفعل بواسطة \"{title}\"",
       "updated": "تم تحديث الاختصار",
       "invalid": "اختصار غير صالح، يرجى المحاولة مرة أخرى",
-      "reset": "تمت استعادة الاختصارات الافتراضية"
+      "reset": "تمت استعادة الاختصارات الافتراضية",
+      "takenOver": "يُشغّل {shortcut} الآن «{action}». أُلغي تعيين: {others}."
     },
     "actions": {
       "toggle_search": {
@@ -664,7 +665,31 @@
       "read_last_reply": {
         "title": "قراءة آخر رد",
         "description": "قراءة أحدث رد في المحادثة الحالية بصوت عالٍ، أو إيقاف القراءة"
+      },
+      "search_settings": {
+        "title": "البحث في الإعدادات",
+        "description": "ينقل المؤشر إلى مربع البحث في نافذة الإعدادات"
       }
+    },
+    "contexts": {
+      "global": "في كل مكان",
+      "workspace": "مساحة العمل",
+      "terminal": "الطرفية",
+      "composer": "مربع الرسالة",
+      "settings": "نافذة الإعدادات"
+    },
+    "focus": {
+      "workspace": "في مساحة العمل",
+      "terminal": "عندما يكون التركيز على الطرفية",
+      "composer": "أثناء كتابة رسالة",
+      "settings": "في نافذة الإعدادات"
+    },
+    "shadowedBy": "{focus}، يُشغّل {shortcut} «{action}» بدلًا من ذلك.",
+    "shadows": "{focus}، يُشغّل {shortcut} هذا الإجراء بدلًا من «{action}».",
+    "conflict": {
+      "message": "يستخدم {actions} الاختصار {shortcut} في المكان نفسه، لذا يمكن لإجراء واحد فقط الاحتفاظ به.",
+      "takeOver": "استخدامه لـ«{action}» بدلًا من ذلك",
+      "cancel": "إلغاء"
     }
   },
   "SkillsSettings": {

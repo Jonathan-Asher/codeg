@@ -514,7 +514,8 @@
       "conflict": "El atajo ya está en uso por \"{title}\"",
       "updated": "Atajo actualizado",
       "invalid": "Atajo no válido, inténtalo de nuevo",
-      "reset": "Se restauraron los atajos predeterminados"
+      "reset": "Se restauraron los atajos predeterminados",
+      "takenOver": "{shortcut} ahora ejecuta «{action}». Sin asignar: {others}."
     },
     "actions": {
       "toggle_search": {
@@ -664,7 +665,31 @@
       "read_last_reply": {
         "title": "Leer la última respuesta",
         "description": "Lee en voz alta la respuesta más reciente de la conversación actual, o deja de leerla"
+      },
+      "search_settings": {
+        "title": "Buscar en ajustes",
+        "description": "Lleva el cursor al cuadro de búsqueda de la ventana de ajustes"
       }
+    },
+    "contexts": {
+      "global": "En todas partes",
+      "workspace": "Espacio de trabajo",
+      "terminal": "Terminal",
+      "composer": "Cuadro de mensaje",
+      "settings": "Ventana de ajustes"
+    },
+    "focus": {
+      "workspace": "En el espacio de trabajo",
+      "terminal": "Con el foco en la terminal",
+      "composer": "Mientras escribes un mensaje",
+      "settings": "En la ventana de ajustes"
+    },
+    "shadowedBy": "{focus}, {shortcut} ejecuta «{action}» en su lugar.",
+    "shadows": "{focus}, {shortcut} ejecuta esto en lugar de «{action}».",
+    "conflict": {
+      "message": "{shortcut} ya lo usa {actions} en el mismo lugar, así que solo uno puede conservarlo.",
+      "takeOver": "Usarlo para «{action}»",
+      "cancel": "Cancelar"
     }
   },
   "SkillsSettings": {

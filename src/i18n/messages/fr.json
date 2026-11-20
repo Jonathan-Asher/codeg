@@ -514,7 +514,8 @@
       "conflict": "Le raccourci est déjà utilisé par \"{title}\"",
       "updated": "Raccourci mis à jour",
       "invalid": "Raccourci invalide, veuillez réessayer",
-      "reset": "Les raccourcis par défaut ont été restaurés"
+      "reset": "Les raccourcis par défaut ont été restaurés",
+      "takenOver": "{shortcut} exécute maintenant « {action} ». Désormais non attribué : {others}."
     },
     "actions": {
       "toggle_search": {
@@ -664,7 +665,31 @@
       "read_last_reply": {
         "title": "Lire la dernière réponse",
         "description": "Lire à voix haute la réponse la plus récente de la conversation en cours, ou arrêter la lecture"
+      },
+      "search_settings": {
+        "title": "Rechercher dans les réglages",
+        "description": "Place le curseur dans le champ de recherche de la fenêtre des réglages"
       }
+    },
+    "contexts": {
+      "global": "Partout",
+      "workspace": "Espace de travail",
+      "terminal": "Terminal",
+      "composer": "Zone de message",
+      "settings": "Fenêtre des réglages"
+    },
+    "focus": {
+      "workspace": "Dans l’espace de travail",
+      "terminal": "Quand le terminal a le focus",
+      "composer": "Pendant la saisie d’un message",
+      "settings": "Dans la fenêtre des réglages"
+    },
+    "shadowedBy": "{focus}, {shortcut} exécute « {action} » à la place.",
+    "shadows": "{focus}, {shortcut} exécute ceci au lieu de « {action} ».",
+    "conflict": {
+      "message": "{shortcut} est déjà utilisé par {actions} au même endroit : une seule action peut le garder.",
+      "takeOver": "L’utiliser pour « {action} »",
+      "cancel": "Annuler"
     }
   },
   "SkillsSettings": {

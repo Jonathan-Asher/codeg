@@ -514,7 +514,8 @@
       "conflict": "快捷键已被「{title}」占用",
       "updated": "快捷键已更新",
       "invalid": "快捷键无效，请重试",
-      "reset": "已恢复默认快捷键"
+      "reset": "已恢复默认快捷键",
+      "takenOver": "{shortcut} 现在执行“{action}”。已取消分配：{others}。"
     },
     "actions": {
       "toggle_search": {
@@ -664,7 +665,31 @@
       "read_last_reply": {
         "title": "朗读最新回复",
         "description": "朗读当前对话中最新的回复，或停止朗读"
+      },
+      "search_settings": {
+        "title": "搜索设置",
+        "description": "将光标放入设置窗口的搜索框"
       }
+    },
+    "contexts": {
+      "global": "全局",
+      "workspace": "工作区",
+      "terminal": "终端",
+      "composer": "消息输入框",
+      "settings": "设置窗口"
+    },
+    "focus": {
+      "workspace": "在工作区中",
+      "terminal": "终端获得焦点时",
+      "composer": "输入消息时",
+      "settings": "在设置窗口中"
+    },
+    "shadowedBy": "{focus}，{shortcut} 会改为执行“{action}”。",
+    "shadows": "{focus}，{shortcut} 会执行此操作，而不是“{action}”。",
+    "conflict": {
+      "message": "{shortcut} 已在同一位置被 {actions} 使用，只能保留其中一个。",
+      "takeOver": "改为用于“{action}”",
+      "cancel": "取消"
     }
   },
   "SkillsSettings": {

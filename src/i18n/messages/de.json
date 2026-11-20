@@ -514,7 +514,8 @@
       "conflict": "Der Kurzbefehl wird bereits von \"{title}\" verwendet",
       "updated": "Kurzbefehl aktualisiert",
       "invalid": "Ungültiger Kurzbefehl, bitte erneut versuchen",
-      "reset": "Standard-Kurzbefehle wurden wiederhergestellt"
+      "reset": "Standard-Kurzbefehle wurden wiederhergestellt",
+      "takenOver": "{shortcut} führt jetzt „{action}“ aus. Nicht mehr zugewiesen: {others}."
     },
     "actions": {
       "toggle_search": {
@@ -664,7 +665,31 @@
       "read_last_reply": {
         "title": "Letzte Antwort vorlesen",
         "description": "Die neueste Antwort der aktuellen Unterhaltung vorlesen oder das Vorlesen beenden"
+      },
+      "search_settings": {
+        "title": "Einstellungen durchsuchen",
+        "description": "Setzt den Cursor in das Suchfeld des Einstellungsfensters"
       }
+    },
+    "contexts": {
+      "global": "Überall",
+      "workspace": "Arbeitsbereich",
+      "terminal": "Terminal",
+      "composer": "Nachrichtenfeld",
+      "settings": "Einstellungsfenster"
+    },
+    "focus": {
+      "workspace": "Im Arbeitsbereich",
+      "terminal": "Solange das Terminal den Fokus hat",
+      "composer": "Beim Schreiben einer Nachricht",
+      "settings": "Im Einstellungsfenster"
+    },
+    "shadowedBy": "{focus} führt {shortcut} stattdessen „{action}“ aus.",
+    "shadows": "{focus} führt {shortcut} dies statt „{action}“ aus.",
+    "conflict": {
+      "message": "{shortcut} wird an derselben Stelle bereits von {actions} verwendet, also kann nur eine Aktion ihn behalten.",
+      "takeOver": "Stattdessen für „{action}“ verwenden",
+      "cancel": "Abbrechen"
     }
   },
   "SkillsSettings": {
