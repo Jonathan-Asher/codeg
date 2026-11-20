@@ -258,6 +258,11 @@ export interface ToolCallInfo {
   images: ToolCallImage[]
 }
 
+type PermissionToolContext = Pick<
+  ToolCallInfo,
+  "tool_call_id" | "title" | "kind" | "raw_input" | "meta"
+>
+
 export interface PendingPermission {
   request_id: string
   tool_call: unknown
@@ -650,7 +655,7 @@ export interface ConnectionState {
    * out-of-turn stand-in. Cleared when the next prompting turn starts.
    * `null` when empty (the common case allocates nothing).
    */
-  outOfTurnToolCalls: ReadonlyMap<string, ToolCallInfo> | null
+  outOfTurnToolCalls: ReadonlyMap<string, PermissionToolContext> | null
   /**
    * Whether a turn has run on this connection: it has been `prompting` at
    * least once, or the snapshot it was hydrated from says one has (it is
@@ -1557,7 +1562,7 @@ function fillStrippedEditInput(
 
 function mergePermissionToolCallWithLiveInfo(
   toolCall: unknown,
-  liveInfo: ToolCallInfo | null
+  liveInfo: PermissionToolContext | null
 ): unknown {
   if (!liveInfo) return toolCall
 
@@ -1623,7 +1628,7 @@ function mergePermissionToolCallWithLiveInfo(
 
 function mergePendingPermissionWithLiveInfo(
   pendingPermission: PendingPermission | null,
-  liveInfo: ToolCallInfo | null
+  liveInfo: PermissionToolContext | null
 ): PendingPermission | null {
   if (!pendingPermission || !liveInfo) return pendingPermission
   const permissionCallId = extractPermissionToolCallId(
@@ -2189,9 +2194,9 @@ const FRAME_CUT_SETTLE_DELAY_MS = 1_500
 /** Upsert one out-of-turn tool-call info into the bounded registry,
  *  evicting the oldest entry past the cap. Returns a fresh map. */
 function recordOutOfTurnToolCall(
-  existing: ReadonlyMap<string, ToolCallInfo> | null,
-  info: ToolCallInfo
-): ReadonlyMap<string, ToolCallInfo> {
+  existing: ReadonlyMap<string, PermissionToolContext> | null,
+  info: PermissionToolContext
+): ReadonlyMap<string, PermissionToolContext> {
   const next = new Map(existing ?? [])
   next.delete(info.tool_call_id)
   next.set(info.tool_call_id, info)
@@ -2951,17 +2956,12 @@ function connectionsReducer(
       // the garbled-timeline bug), but its context is still recorded so a
       // background permission request can render command/diff details.
       if (conn.status !== "prompting") {
-        const info: ToolCallInfo = {
+        const info: PermissionToolContext = {
           tool_call_id: action.tool_call_id,
           title: action.title,
           kind: action.kind,
-          status: action.status,
-          content: action.content,
           raw_input: action.raw_input,
-          ...replaceLiveToolRawOutput(action.raw_output),
-          locations: action.locations,
           meta,
-          images: action.images ?? [],
         }
         const next = new Map(state)
         next.set(action.contextKey, {
@@ -3065,30 +3065,13 @@ function connectionsReducer(
       // flips back.
       if (conn.status !== "prompting") {
         const existing = conn.outOfTurnToolCalls?.get(action.tool_call_id)
-        const merged: ToolCallInfo = existing
-          ? {
-              ...existing,
-              title: action.title ?? existing.title,
-              status: action.status ?? existing.status,
-              content: action.content ?? existing.content,
-              raw_input: action.raw_input ?? existing.raw_input,
-              locations: action.locations ?? existing.locations,
-              meta: action.meta ?? existing.meta,
-              images: action.images !== null ? action.images : existing.images,
-            }
-          : {
-              tool_call_id: action.tool_call_id,
-              title: action.title ?? action.fallback_title,
-              kind: action.fallback_kind,
-              status: action.status ?? "pending",
-              content: action.content,
-              raw_input: action.raw_input,
-              raw_output_chunks: [],
-              raw_output_total_bytes: 0,
-              locations: action.locations,
-              meta: action.meta,
-              images: action.images ?? [],
-            }
+        const merged: PermissionToolContext = {
+          tool_call_id: action.tool_call_id,
+          title: action.title ?? existing?.title ?? action.fallback_title,
+          kind: existing?.kind ?? action.fallback_kind,
+          raw_input: action.raw_input ?? existing?.raw_input ?? null,
+          meta: action.meta ?? existing?.meta ?? null,
+        }
         const next = new Map(state)
         next.set(action.contextKey, {
           ...conn,
@@ -7889,6 +7872,8 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
   // "responding" with a dead Stop button. `false` means the backend has no
   // live connection under that id, which is exactly the condition to settle.
   useEffect(() => {
+    const pending = new Map<string, Set<string>>()
+    let disposed = false
     const timer = setInterval(() => {
       const currentActiveKey = storeRef.current.activeKey
       const currentOpenTabKeys = heldOpenKeys()
@@ -7919,13 +7904,26 @@ export function AcpConnectionsProvider({ children }: { children: ReactNode }) {
       if (currentActiveKey) consider(currentActiveKey)
       for (const contextKey of currentOpenTabKeys) consider(contextKey)
       for (const { contextKey, connectionId, viewed } of toTouch) {
-        void isConnectionLiveOnBackend(connectionId, viewed).then((live) => {
-          if (!live) markConnectionGone(contextKey, connectionId)
-        })
+        // A slow IPC must not leave another unresolved probe on every tick.
+        const contexts = pending.get(connectionId) ?? new Set<string>()
+        if (contexts.has(contextKey)) continue
+        contexts.add(contextKey)
+        pending.set(connectionId, contexts)
+        void isConnectionLiveOnBackend(connectionId, viewed)
+          .then((live) => {
+            if (!disposed && !live) markConnectionGone(contextKey, connectionId)
+          })
+          .finally(() => {
+            contexts.delete(contextKey)
+            if (contexts.size === 0) pending.delete(connectionId)
+          })
       }
     }, CONNECTION_KEEPALIVE_INTERVAL_MS)
 
-    return () => clearInterval(timer)
+    return () => {
+      disposed = true
+      clearInterval(timer)
+    }
   }, [heldOpenKeys, isConnectionLiveOnBackend, markConnectionGone])
 
   // ── Idle sweep timer ──

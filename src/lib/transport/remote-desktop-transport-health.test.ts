@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 // The transport talks to the Rust proxy through two Tauri APIs: `invoke` for
-// commands and its webview's `listen` for the `remote-ws-event-{id}` frames.
+// commands and its webview's `listen` for the `remote-ws-event-{id}-{label}`
+// frames.
 // Capture the frame handler so tests can play the proxy's side.
 type ListenTarget = { kind: string; label?: string }
 type FrameHandler = (event: { payload: unknown }) => void
@@ -294,8 +295,9 @@ describe("RemoteDesktopTransport liveness hints", () => {
 describe("RemoteDesktopTransport delivery with several windows on one connection", () => {
   // Tauri's rule for `emit_to(EventTarget::webview(label))`: a listener gets
   // the emit when its target is `Any`, or names that same label. The proxy
-  // addresses frames per subscribed window (`emit_internal_to_label` still
-  // does), so this is what the transport has to hold up against.
+  // addresses frames per subscribed window (`emit_frame_to_label`, under that
+  // window's own event name), so this is what the transport has to hold up
+  // against even if the names were shared.
   function emitToWindows(labels: string[], payload: unknown) {
     for (const label of labels) {
       for (const { target, handler } of tauri.listeners) {

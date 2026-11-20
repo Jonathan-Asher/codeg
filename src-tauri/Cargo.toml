@@ -20,7 +20,7 @@ resolver = "2"
 # One version for all four: the companion and the app speak a protocol with no
 # version field, so they always ship from the same commit.
 [workspace.package]
-version = "0.46.0"
+version = "0.47.0"
 authors = ["feitao"]
 edition = "2021"
 
