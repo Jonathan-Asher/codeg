@@ -73,6 +73,7 @@ export function PromptSuggestionSettingsSection() {
 
   return (
     <SettingsSection
+      anchor="general.prompt-suggestions"
       icon={Lightbulb}
       title={t("title")}
       description={t("description")}

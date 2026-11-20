@@ -19,6 +19,7 @@ import {
   shortcutFromKeyboardEvent,
   shortcutShadowsOf,
 } from "@/lib/keyboard-shortcuts"
+import { settingsAnchorForShortcut } from "@/lib/settings-search/registry"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
@@ -179,7 +180,10 @@ export function ShortcutSettings() {
   return (
     <ScrollArea className="h-full">
       <div className="w-full space-y-4 p-3 md:p-4">
-        <section className="rounded-xl border bg-card p-4 space-y-4">
+        <section
+          data-settings-anchor="shortcuts.list"
+          className="rounded-xl border bg-card p-4 space-y-4"
+        >
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <Keyboard className="h-4 w-4 text-muted-foreground" />
@@ -225,6 +229,9 @@ export function ShortcutSettings() {
               return (
                 <div
                   key={definition.id}
+                  data-settings-anchor={settingsAnchorForShortcut(
+                    definition.id
+                  )}
                   className="rounded-lg border px-3 py-2"
                 >
                   <div className="flex items-center justify-between gap-4">

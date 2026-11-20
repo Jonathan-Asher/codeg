@@ -91,6 +91,7 @@ export function ResumeAfterRestartSettingsSection() {
 
   return (
     <SettingsSection
+      anchor="general.auto-resume"
       icon={RotateCw}
       title={t("title")}
       description={t("description")}
@@ -109,6 +110,7 @@ export function ResumeAfterRestartSettingsSection() {
       {settings.enabled && backgroundSupported ? (
         <SettingCard>
           <SettingRow
+            anchor="general.auto-resume.background"
             title={t("backgroundTitle")}
             description={t("backgroundDescription")}
             htmlFor="resume-after-restart-background"

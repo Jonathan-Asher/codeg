@@ -672,7 +672,10 @@ export function LogsSettings() {
         )}
 
         {/* Capture level */}
-        <section className="space-y-3 rounded-xl border bg-card p-4">
+        <section
+          data-settings-anchor="logs.capture"
+          className="space-y-3 rounded-xl border bg-card p-4"
+        >
           <div className="space-y-1">
             <h2 className="text-sm font-semibold">{t("captureTitle")}</h2>
             <p className="text-xs leading-5 text-muted-foreground">
@@ -795,7 +798,10 @@ export function LogsSettings() {
         </section>
 
         {/* Viewer */}
-        <section className="space-y-3 rounded-xl border bg-card p-4">
+        <section
+          data-settings-anchor="logs.viewer"
+          className="space-y-3 rounded-xl border bg-card p-4"
+        >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="space-y-1">
               <h2 className="text-sm font-semibold">{t("viewerTitle")}</h2>
@@ -912,7 +918,10 @@ export function LogsSettings() {
 
         {/* On-disk files (web mode: download for history beyond the buffer) */}
         {!desktop && (
-          <section className="space-y-3 rounded-xl border bg-card p-4">
+          <section
+            data-settings-anchor="logs.files"
+            className="space-y-3 rounded-xl border bg-card p-4"
+          >
             <div className="space-y-1">
               <h2 className="text-sm font-semibold">{t("filesTitle")}</h2>
               <p className="text-xs leading-5 text-muted-foreground">

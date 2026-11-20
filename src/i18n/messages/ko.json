@@ -65,6 +65,13 @@
       "computer_use": "컴퓨터 사용",
       "quick_messages": "빠른 메시지",
       "logs": "실행 로그"
+    },
+    "search": {
+      "label": "설정 검색",
+      "placeholder": "설정 검색",
+      "clear": "검색 지우기",
+      "noResults": "“{query}”와(과) 일치하는 설정이 없습니다",
+      "resultsLabel": "일치하는 설정"
     }
   },
   "AppearanceSettings": {
@@ -11523,5 +11530,49 @@
     "lookupFailedHere": "세션 {session}을(를) 조회하지 못했습니다.",
     "serverTooOld": "{server}의 codeg 버전이 오래되어 세션 링크를 열 수 없습니다.",
     "otherServer": "이 세션은 다른 codeg 서버({server})에 있습니다."
+  },
+  "SettingsSearch": {
+    "keywords": {
+      "appearance": "모양, 테마, 스타일, 인터페이스",
+      "appearance_theme": "다크 모드, 라이트 모드, 야간 모드, 어두운, 밝은",
+      "appearance_theme_mode": "다크 모드, 라이트 모드, 시스템 설정 따르기",
+      "appearance_theme_color": "강조 색상, 팔레트, 색상",
+      "appearance_zoom": "확대, 축소, 배율, 크기",
+      "appearance_chat_text_size": "글꼴 크기, 글자 크기, 텍스트 크기",
+      "appearance_fonts": "서체, 폰트, 고정폭, 합자",
+      "appearance_background": "배경 화면, 이미지, 사진",
+      "appearance_chat_animations": "애니메이션, 움직임, 동작 줄이기",
+      "general_terminal": "셸, 명령줄, 콘솔",
+      "general_rendering": "GPU, 그래픽, 빈 화면, 깜빡임",
+      "general_mention_panel": "멘션, 골뱅이, 참조",
+      "general_close_behavior": "트레이, 종료, 최소화, 닫기 버튼",
+      "general_auto_resume": "재시작, 충돌, 계속, 재개",
+      "general_limit_continue": "사용량 한도, 속도 제한, 할당량",
+      "general_desktop_notifications": "알림, 알리기, 팝업, 배너",
+      "general_window_attention": "Dock, 작업 표시줄, 튀기, 깜빡임, 배지",
+      "general_sounds": "소리, 효과음, 알림음, 비프",
+      "general_read_aloud": "읽어 주기, 음성, 텍스트 음성 변환, TTS",
+      "general_iphone_push": "푸시 알림, 모바일, 휴대폰",
+      "general_dictation": "음성 입력, 받아쓰기, 음성 텍스트 변환, 번역",
+      "general_talk": "음성, 대화, 말하기",
+      "general_talk_mac": "음성, 마이크, 말하기, 핸즈프리",
+      "collaboration_delegation": "하위 에이전트, 위임, 멀티 에이전트",
+      "agents": "에이전트, SDK, CLI, 설치",
+      "model_providers": "API 키, 엔드포인트, 기본 URL, 공급자",
+      "quick_messages": "스니펫, 템플릿, 상용구",
+      "browser_links": "링크 열기, 기본 브라우저, 외부 브라우저",
+      "browser_clear": "쿠키, 캐시, 기록, 사이트 데이터",
+      "computer_use": "화면, 마우스, 키보드, 데스크톱 제어",
+      "computer_use_permissions": "손쉬운 사용, 화면 기록, 개인정보 보호",
+      "shortcuts": "키보드, 단축키, 키 바인딩, 핫키",
+      "version_control_accounts": "자격 증명, 토큰, 비밀번호, 로그인",
+      "chat_channels": "봇, 메신저, 메시징",
+      "web_service": "서버, 원격 접속, 포트, LAN, 휴대폰",
+      "logs": "디버그, 진단, 로그 수준",
+      "system_update": "업그레이드, 버전, 업데이트, 릴리스",
+      "system_autostart": "시작 프로그램, 로그인 항목, 자동 실행",
+      "system_language": "언어, 번역, 로케일",
+      "system_data": "백업, 동기화, 내보내기, 가져오기, 복원"
+    }
   }
 }

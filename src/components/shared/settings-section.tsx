@@ -26,6 +26,11 @@ import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 
 interface SettingsSectionProps {
+  /**
+   * Where the Settings search lands for this section: its id in
+   * `settings-search/registry`. Every section has one (`registry.test.ts`).
+   */
+  anchor?: string
   /** Small glyph in front of the heading; purely decorative. */
   icon?: LucideIcon
   title: React.ReactNode
@@ -79,6 +84,7 @@ interface SettingsSectionProps {
  * stays reachable on the heading line whether the body is showing or not.
  */
 export function SettingsSection({
+  anchor,
   icon: Icon,
   title,
   description,
@@ -121,6 +127,7 @@ export function SettingsSection({
       // would lose keyboard focus the moment it was used.
       <Collapsible open={expanded} onOpenChange={onOpenChange} asChild>
         <section
+          data-settings-anchor={anchor}
           className={cn("overflow-hidden rounded-xl border bg-card", className)}
         >
           {/* `relative` is the anchor the trigger stretches its hit area to,
@@ -184,6 +191,7 @@ export function SettingsSection({
 
   return (
     <section
+      data-settings-anchor={anchor}
       className={cn("space-y-3 rounded-xl border bg-card p-4", className)}
     >
       {/* Same alignment rule as `SettingRow`: with an explanation the control

@@ -65,6 +65,13 @@
       "computer_use": "Uso del ordenador",
       "quick_messages": "Mensajes rápidos",
       "logs": "Registros de ejecución"
+    },
+    "search": {
+      "label": "Buscar ajustes",
+      "placeholder": "Buscar ajustes",
+      "clear": "Borrar búsqueda",
+      "noResults": "Ningún ajuste coincide con «{query}»",
+      "resultsLabel": "Ajustes coincidentes"
     }
   },
   "AppearanceSettings": {
@@ -11523,5 +11530,49 @@
     "lookupFailedHere": "No se pudo buscar la sesión {session}.",
     "serverTooOld": "{server} usa una versión antigua de codeg que no puede abrir enlaces de sesión.",
     "otherServer": "Esta sesión está en otro servidor de codeg ({server})."
+  },
+  "SettingsSearch": {
+    "keywords": {
+      "appearance": "aspecto, tema, estilo, interfaz",
+      "appearance_theme": "modo oscuro, modo claro, modo noche, oscuro, claro",
+      "appearance_theme_mode": "modo oscuro, modo claro, seguir al sistema",
+      "appearance_theme_color": "color de acento, paleta, colores",
+      "appearance_zoom": "escala, tamaño, ampliar, reducir, zoom",
+      "appearance_chat_text_size": "tamaño de letra, tamaño del texto, texto más grande",
+      "appearance_fonts": "tipografía, fuente, monoespaciada, ligaduras",
+      "appearance_background": "fondo de pantalla, imagen, foto",
+      "appearance_chat_animations": "movimiento, animación, reducir movimiento",
+      "general_terminal": "shell, consola, línea de comandos",
+      "general_rendering": "GPU, gráficos, pantalla en blanco, parpadeo",
+      "general_mention_panel": "mención, arroba, referencias",
+      "general_close_behavior": "bandeja, salir, minimizar, botón de cerrar",
+      "general_auto_resume": "reiniciar, fallo, continuar, reanudar",
+      "general_limit_continue": "límite de uso, límite de tasa, cuota",
+      "general_desktop_notifications": "alertas, avisos, ventana emergente, banner",
+      "general_window_attention": "Dock, barra de tareas, rebote, parpadeo, insignia",
+      "general_sounds": "audio, sonido, tono, pitido",
+      "general_read_aloud": "voz, texto a voz, TTS, leer en voz alta",
+      "general_iphone_push": "notificaciones push, móvil, teléfono",
+      "general_dictation": "voz a texto, dictado, transcripción, traducir",
+      "general_talk": "voz, conversación, hablar",
+      "general_talk_mac": "voz, micrófono, hablar, manos libres",
+      "collaboration_delegation": "subagentes, delegar, multiagente",
+      "agents": "agente, SDK, CLI, instalar",
+      "model_providers": "clave de API, endpoint, URL base, proveedor",
+      "quick_messages": "fragmentos, plantillas, respuestas predefinidas",
+      "browser_links": "abrir enlaces, navegador predeterminado, navegador externo",
+      "browser_clear": "cookies, caché, historial, datos de sitios",
+      "computer_use": "pantalla, ratón, teclado, control del escritorio",
+      "computer_use_permissions": "accesibilidad, grabación de pantalla, privacidad",
+      "shortcuts": "teclado, teclas rápidas, combinaciones de teclas",
+      "version_control_accounts": "credenciales, token, contraseña, inicio de sesión",
+      "chat_channels": "bot, mensajería, chat",
+      "web_service": "servidor, acceso remoto, puerto, red local, teléfono",
+      "logs": "depuración, diagnóstico, nivel de registro",
+      "system_update": "actualizar, versión, actualización",
+      "system_autostart": "inicio, elementos de inicio, abrir al arrancar",
+      "system_language": "idioma, traducción, región",
+      "system_data": "copia de seguridad, sincronizar, exportar, importar, restaurar"
+    }
   }
 }

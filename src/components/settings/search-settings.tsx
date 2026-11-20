@@ -21,6 +21,7 @@ export function SearchSettingsSection() {
 
   return (
     <SettingsSection
+      anchor="general.search"
       icon={History}
       title={t("title")}
       description={t("description")}

@@ -9,7 +9,10 @@ export function ChatHtmlSettingsSection() {
   const t = useTranslations("HtmlCodePreview")
   const enabled = useChatHtmlEnabled()
   return (
-    <section className="space-y-4 rounded-xl border bg-card p-4">
+    <section
+      data-settings-anchor="appearance.chat-html"
+      className="space-y-4 rounded-xl border bg-card p-4"
+    >
       <div className="flex items-center gap-2">
         <CodeXml className="h-4 w-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">{t("settingsTitle")}</h2>

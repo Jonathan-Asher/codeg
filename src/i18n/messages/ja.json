@@ -65,6 +65,13 @@
       "computer_use": "コンピューター操作",
       "quick_messages": "クイックメッセージ",
       "logs": "実行ログ"
+    },
+    "search": {
+      "label": "設定を検索",
+      "placeholder": "設定を検索",
+      "clear": "検索をクリア",
+      "noResults": "「{query}」に一致する設定はありません",
+      "resultsLabel": "一致する設定"
     }
   },
   "AppearanceSettings": {
@@ -11523,5 +11530,49 @@
     "lookupFailedHere": "セッション {session} を検索できませんでした。",
     "serverTooOld": "{server} の codeg は古いため、セッションのリンクを開けません。",
     "otherServer": "このセッションは別の codeg サーバー（{server}）にあります。"
+  },
+  "SettingsSearch": {
+    "keywords": {
+      "appearance": "見た目, テーマ, スタイル, インターフェース",
+      "appearance_theme": "ダークモード, ライトモード, 夜間モード, ダーク, ライト",
+      "appearance_theme_mode": "ダークモード, ライトモード, システムに合わせる",
+      "appearance_theme_color": "アクセントカラー, 配色, 色",
+      "appearance_zoom": "拡大, 縮小, ズーム, サイズ, 倍率",
+      "appearance_chat_text_size": "フォントサイズ, 文字サイズ, 文字を大きく",
+      "appearance_fonts": "書体, フォント, 等幅, 合字",
+      "appearance_background": "壁紙, 背景画像, 画像",
+      "appearance_chat_animations": "アニメーション, 動き, 視差効果を減らす",
+      "general_terminal": "シェル, コマンドライン, コンソール",
+      "general_rendering": "GPU, グラフィックス, 画面が真っ白, ちらつき",
+      "general_mention_panel": "メンション, アットマーク, 参照",
+      "general_close_behavior": "トレイ, 終了, 最小化, 閉じるボタン",
+      "general_auto_resume": "再起動, クラッシュ, 続行, 再開",
+      "general_limit_continue": "レート制限, 使用量の上限, クォータ",
+      "general_desktop_notifications": "通知, アラート, ポップアップ, バナー",
+      "general_window_attention": "Dock, タスクバー, バウンド, 点滅, バッジ",
+      "general_sounds": "サウンド, 音, 効果音, ビープ",
+      "general_read_aloud": "読み上げ, 音声, 音声合成, TTS",
+      "general_iphone_push": "プッシュ通知, モバイル, スマホ",
+      "general_dictation": "音声入力, 文字起こし, ディクテーション, 翻訳",
+      "general_talk": "音声, 会話, 話す",
+      "general_talk_mac": "音声, マイク, 話す, ハンズフリー",
+      "collaboration_delegation": "サブエージェント, 委任, マルチエージェント",
+      "agents": "エージェント, SDK, CLI, インストール",
+      "model_providers": "APIキー, エンドポイント, ベースURL, プロバイダー",
+      "quick_messages": "スニペット, テンプレート, 定型文",
+      "browser_links": "リンクを開く, 既定のブラウザ, 外部ブラウザ",
+      "browser_clear": "Cookie, キャッシュ, 履歴, サイトデータ",
+      "computer_use": "画面, マウス, キーボード, デスクトップ操作",
+      "computer_use_permissions": "アクセシビリティ, 画面収録, プライバシー",
+      "shortcuts": "キーボード, ホットキー, キー割り当て, キー",
+      "version_control_accounts": "認証情報, トークン, パスワード, ログイン",
+      "chat_channels": "ボット, チャット, メッセージング",
+      "web_service": "サーバー, リモートアクセス, ポート, LAN, スマホ",
+      "logs": "デバッグ, 診断, ログレベル",
+      "system_update": "アップグレード, バージョン, アップデート, リリース",
+      "system_autostart": "起動時に開く, ログイン項目, 自動起動",
+      "system_language": "言語, 翻訳, ロケール",
+      "system_data": "バックアップ, 同期, エクスポート, インポート, 復元"
+    }
   }
 }

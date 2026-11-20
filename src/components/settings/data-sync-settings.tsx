@@ -47,6 +47,7 @@ export function DataSyncSettings() {
 
   return (
     <SettingsSection
+      anchor="system.data"
       icon={DatabaseBackup}
       title={t("dataTitle")}
       description={t("dataDescription")}

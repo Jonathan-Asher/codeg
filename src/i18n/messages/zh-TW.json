@@ -65,6 +65,13 @@
       "computer_use": "電腦操作",
       "quick_messages": "快捷訊息",
       "logs": "執行日誌"
+    },
+    "search": {
+      "label": "搜尋設定",
+      "placeholder": "搜尋設定",
+      "clear": "清除搜尋",
+      "noResults": "沒有與「{query}」相符的設定",
+      "resultsLabel": "相符的設定"
     }
   },
   "AppearanceSettings": {
@@ -11523,5 +11530,49 @@
     "lookupFailedHere": "無法查詢工作階段 {session}。",
     "serverTooOld": "{server} 執行的 codeg 版本較舊，無法開啟工作階段連結。",
     "otherServer": "此工作階段位於另一台 codeg 伺服器（{server}）上。"
+  },
+  "SettingsSearch": {
+    "keywords": {
+      "appearance": "外觀, 主題, 樣式, 介面, 佈景",
+      "appearance_theme": "深色模式, 淺色模式, 暗色, 夜間模式, 黑暗, 明亮",
+      "appearance_theme_mode": "深色模式, 淺色模式, 跟隨系統",
+      "appearance_theme_color": "強調色, 配色, 顏色",
+      "appearance_zoom": "縮放, 放大, 縮小, 大小, 比例",
+      "appearance_chat_text_size": "字型大小, 字級, 文字大小, 放大文字",
+      "appearance_fonts": "字型, 等寬字型, 連字",
+      "appearance_background": "桌布, 背景圖, 圖片",
+      "appearance_chat_animations": "動畫, 動態效果, 減少動態效果",
+      "general_terminal": "shell, 命令列, 主控台",
+      "general_rendering": "GPU, 顯示卡, 白畫面, 閃爍",
+      "general_mention_panel": "提及, @, 引用",
+      "general_close_behavior": "系統匣, 結束, 最小化, 關閉按鈕",
+      "general_auto_resume": "重新啟動, 當機, 繼續, 恢復",
+      "general_limit_continue": "限額, 用量限制, 配額",
+      "general_desktop_notifications": "通知, 提醒, 彈出視窗, 橫幅",
+      "general_window_attention": "Dock, 工作列, 彈跳, 閃爍, 標記",
+      "general_sounds": "聲音, 音效, 提示音, 鈴聲",
+      "general_read_aloud": "朗讀, 語音, 文字轉語音, TTS",
+      "general_iphone_push": "推播通知, 手機, 行動裝置",
+      "general_dictation": "語音轉文字, 語音輸入, 聽寫, 翻譯",
+      "general_talk": "語音, 對話, 說話",
+      "general_talk_mac": "語音, 麥克風, 說話, 免持",
+      "collaboration_delegation": "子代理, 委派, 多代理",
+      "agents": "代理, SDK, CLI, 安裝",
+      "model_providers": "API 金鑰, 端點, Base URL, 供應商",
+      "quick_messages": "片段, 範本, 常用語",
+      "browser_links": "開啟連結, 預設瀏覽器, 外部瀏覽器",
+      "browser_clear": "Cookie, 快取, 瀏覽紀錄, 網站資料",
+      "computer_use": "螢幕, 滑鼠, 鍵盤, 桌面控制",
+      "computer_use_permissions": "輔助使用, 螢幕錄製, 隱私權",
+      "shortcuts": "鍵盤, 熱鍵, 按鍵綁定, 快速鍵",
+      "version_control_accounts": "憑證, 權杖, 密碼, 登入",
+      "chat_channels": "機器人, 即時通訊, 訊息",
+      "web_service": "伺服器, 遠端存取, 連接埠, 區域網路, 手機",
+      "logs": "偵錯, 診斷, 記錄層級",
+      "system_update": "升級, 版本, 更新, 發行",
+      "system_autostart": "開機啟動, 登入項目, 自動啟動",
+      "system_language": "語言, 翻譯, 地區",
+      "system_data": "備份, 同步, 匯出, 匯入, 還原"
+    }
   }
 }

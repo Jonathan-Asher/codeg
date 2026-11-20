@@ -65,6 +65,13 @@
       "computer_use": "Computernutzung",
       "quick_messages": "Schnellnachrichten",
       "logs": "Laufzeitprotokolle"
+    },
+    "search": {
+      "label": "Einstellungen durchsuchen",
+      "placeholder": "Einstellungen suchen",
+      "clear": "Suche löschen",
+      "noResults": "Keine Einstellung passt zu „{query}“",
+      "resultsLabel": "Passende Einstellungen"
     }
   },
   "AppearanceSettings": {
@@ -11523,5 +11530,49 @@
     "lookupFailedHere": "Sitzung {session} konnte nicht nachgeschlagen werden.",
     "serverTooOld": "Auf {server} läuft eine ältere codeg-Version, die keine Sitzungslinks öffnen kann.",
     "otherServer": "Diese Sitzung liegt auf einem anderen codeg-Server ({server})."
+  },
+  "SettingsSearch": {
+    "keywords": {
+      "appearance": "Aussehen, Design, Stil, Oberfläche",
+      "appearance_theme": "Dunkelmodus, heller Modus, Nachtmodus, dunkel, hell",
+      "appearance_theme_mode": "Dunkelmodus, heller Modus, System folgen",
+      "appearance_theme_color": "Akzentfarbe, Palette, Farben",
+      "appearance_zoom": "Skalierung, Größe, vergrößern, verkleinern",
+      "appearance_chat_text_size": "Schriftgröße, Textgröße, größerer Text",
+      "appearance_fonts": "Schrift, Schriftart, Monospace, Ligaturen",
+      "appearance_background": "Hintergrundbild, Bild, Foto",
+      "appearance_chat_animations": "Bewegung, Animation, Bewegung reduzieren",
+      "general_terminal": "Shell, Konsole, Kommandozeile",
+      "general_rendering": "GPU, Grafik, leerer Bildschirm, Flackern",
+      "general_mention_panel": "Erwähnung, At-Zeichen, Verweise",
+      "general_close_behavior": "Tray, beenden, minimieren, Schließen-Knopf",
+      "general_auto_resume": "Neustart, Absturz, fortsetzen",
+      "general_limit_continue": "Nutzungslimit, Ratenlimit, Kontingent",
+      "general_desktop_notifications": "Benachrichtigungen, Hinweise, Popup, Banner",
+      "general_window_attention": "Dock, Taskleiste, hüpfen, blinken, Kennzeichen",
+      "general_sounds": "Audio, Ton, Klang, Signalton",
+      "general_read_aloud": "Sprachausgabe, Vorlesen, Text-to-Speech, TTS, Stimme",
+      "general_iphone_push": "Push-Benachrichtigungen, Handy, Telefon",
+      "general_dictation": "Spracheingabe, Diktat, Transkription, übersetzen",
+      "general_talk": "Stimme, Gespräch, sprechen",
+      "general_talk_mac": "Stimme, Mikrofon, sprechen, freihändig",
+      "collaboration_delegation": "Subagenten, delegieren, Multi-Agent",
+      "agents": "Agent, SDK, CLI, installieren",
+      "model_providers": "API-Schlüssel, Endpunkt, Basis-URL, Anbieter",
+      "quick_messages": "Textbausteine, Vorlagen, Standardantworten",
+      "browser_links": "Links öffnen, Standardbrowser, externer Browser",
+      "browser_clear": "Cookies, Cache, Verlauf, Websitedaten",
+      "computer_use": "Bildschirm, Maus, Tastatur, Desktopsteuerung",
+      "computer_use_permissions": "Bedienungshilfen, Bildschirmaufnahme, Datenschutz",
+      "shortcuts": "Tastatur, Tastenkürzel, Tastenbelegung, Hotkeys",
+      "version_control_accounts": "Zugangsdaten, Token, Passwort, Anmeldung",
+      "chat_channels": "Bot, Messenger, Nachrichten",
+      "web_service": "Server, Fernzugriff, Port, LAN, Handy",
+      "logs": "Debugging, Diagnose, Protokollstufe",
+      "system_update": "Upgrade, Version, Aktualisierung",
+      "system_autostart": "Autostart, Anmeldeobjekte, beim Start öffnen",
+      "system_language": "Sprache, Übersetzung, Gebietsschema",
+      "system_data": "Sicherung, Synchronisierung, Export, Import, Wiederherstellen"
+    }
   }
 }

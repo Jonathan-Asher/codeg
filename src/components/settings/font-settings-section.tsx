@@ -200,7 +200,10 @@ export function FontSettingsSection() {
   const fieldLabel = "text-xs font-medium text-muted-foreground"
 
   return (
-    <section className="rounded-xl border bg-card p-4 space-y-4">
+    <section
+      data-settings-anchor="appearance.fonts"
+      className="rounded-xl border bg-card p-4 space-y-4"
+    >
       <div className="flex items-center gap-2">
         <Type className="h-4 w-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">{t("fonts.sectionTitle")}</h2>

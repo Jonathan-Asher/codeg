@@ -294,7 +294,7 @@ export function CustomStyleSection() {
       className="overflow-hidden rounded-xl border bg-card"
       asChild
     >
-      <section>
+      <section data-settings-anchor="appearance.custom-style">
         {/* 按钮套在 h2 里（而不是 h2 套在按钮里）：role=button 会把后代语义压平，
             标题就从设置页的标题列表里消失了。这里标题行没有嵌套的可交互元素，用原
             生 button 即可，回车/空格也不用自己接。 */}

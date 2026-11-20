@@ -65,6 +65,13 @@
       "computer_use": "استخدام الحاسوب",
       "quick_messages": "رسائل سريعة",
       "logs": "سجلات التشغيل"
+    },
+    "search": {
+      "label": "البحث في الإعدادات",
+      "placeholder": "ابحث في الإعدادات",
+      "clear": "مسح البحث",
+      "noResults": "لا توجد إعدادات تطابق «{query}»",
+      "resultsLabel": "الإعدادات المطابقة"
     }
   },
   "AppearanceSettings": {
@@ -11523,5 +11530,49 @@
     "lookupFailedHere": "تعذر البحث عن الجلسة ⁦{session}⁩.",
     "serverTooOld": "يعمل ⁦{server}⁩ بإصدار أقدم من codeg لا يمكنه فتح روابط الجلسات.",
     "otherServer": "هذه الجلسة على خادم codeg آخر (⁦{server}⁩)."
+  },
+  "SettingsSearch": {
+    "keywords": {
+      "appearance": "شكل, سمة, نمط, واجهة",
+      "appearance_theme": "الوضع الداكن, الوضع الفاتح, الوضع الليلي, داكن, فاتح",
+      "appearance_theme_mode": "الوضع الداكن, الوضع الفاتح, اتباع النظام",
+      "appearance_theme_color": "لون التمييز, لوحة الألوان, ألوان",
+      "appearance_zoom": "تكبير, تصغير, حجم, مقياس",
+      "appearance_chat_text_size": "حجم الخط, حجم النص, تكبير النص",
+      "appearance_fonts": "خط, نوع الخط, عرض ثابت, ربط الحروف",
+      "appearance_background": "خلفية, صورة, ورق الحائط",
+      "appearance_chat_animations": "حركة, رسوم متحركة, تقليل الحركة",
+      "general_terminal": "صدفة, سطر الأوامر, وحدة التحكم",
+      "general_rendering": "GPU, رسوميات, شاشة فارغة, وميض",
+      "general_mention_panel": "إشارة, علامة @, مراجع",
+      "general_close_behavior": "علبة النظام, خروج, تصغير, زر الإغلاق",
+      "general_auto_resume": "إعادة تشغيل, انهيار, متابعة, استئناف",
+      "general_limit_continue": "حد الاستخدام, حد المعدل, الحصة",
+      "general_desktop_notifications": "تنبيهات, إشعار, نافذة منبثقة, لافتة",
+      "general_window_attention": "Dock, شريط المهام, ارتداد, وميض, شارة",
+      "general_sounds": "صوت, نغمة, تنبيه صوتي",
+      "general_read_aloud": "قراءة بصوت عالٍ, صوت, تحويل النص إلى كلام, TTS",
+      "general_iphone_push": "إشعارات الدفع, الجوال, الهاتف",
+      "general_dictation": "تحويل الكلام إلى نص, إملاء, نسخ, ترجمة",
+      "general_talk": "صوت, محادثة, تحدث",
+      "general_talk_mac": "صوت, ميكروفون, تحدث, دون استخدام اليدين",
+      "collaboration_delegation": "وكلاء فرعيون, تفويض, وكلاء متعددون",
+      "agents": "وكيل, SDK, CLI, تثبيت",
+      "model_providers": "مفتاح API, نقطة النهاية, عنوان URL الأساسي, مزود",
+      "quick_messages": "مقتطفات, قوالب, ردود جاهزة",
+      "browser_links": "فتح الروابط, المتصفح الافتراضي, متصفح خارجي",
+      "browser_clear": "ملفات تعريف الارتباط, ذاكرة التخزين المؤقت, السجل, بيانات المواقع",
+      "computer_use": "الشاشة, الفأرة, لوحة المفاتيح, التحكم في سطح المكتب",
+      "computer_use_permissions": "تسهيلات الاستخدام, تسجيل الشاشة, الخصوصية",
+      "shortcuts": "لوحة المفاتيح, مفاتيح الاختصار, ربط المفاتيح",
+      "version_control_accounts": "بيانات الاعتماد, رمز, كلمة المرور, تسجيل الدخول",
+      "chat_channels": "روبوت, مراسلة فورية, رسائل",
+      "web_service": "خادم, وصول عن بُعد, منفذ, شبكة محلية, هاتف",
+      "logs": "تصحيح الأخطاء, تشخيص, مستوى السجل",
+      "system_update": "ترقية, إصدار, تحديث",
+      "system_autostart": "بدء التشغيل, عناصر تسجيل الدخول, التشغيل عند الإقلاع",
+      "system_language": "اللغة, الترجمة, الإعدادات المحلية",
+      "system_data": "نسخ احتياطي, مزامنة, تصدير, استيراد, استعادة"
+    }
   }
 }

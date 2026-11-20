@@ -65,6 +65,13 @@
       "computer_use": "Computer Use",
       "quick_messages": "Quick Messages",
       "logs": "Runtime Logs"
+    },
+    "search": {
+      "label": "Search settings",
+      "placeholder": "Search settings",
+      "clear": "Clear search",
+      "noResults": "No settings match “{query}”",
+      "resultsLabel": "Matching settings"
     }
   },
   "AppearanceSettings": {
@@ -11523,5 +11530,49 @@
     "lookupFailedHere": "Couldn't look up session {session}.",
     "serverTooOld": "{server} runs an older codeg that can't open session links.",
     "otherServer": "This session is on another codeg server ({server})."
+  },
+  "SettingsSearch": {
+    "keywords": {
+      "appearance": "look, theme, style, interface",
+      "appearance_theme": "dark mode, light mode, night mode, dark, light",
+      "appearance_theme_mode": "dark mode, light mode, follow system",
+      "appearance_theme_color": "accent color, palette, colors",
+      "appearance_zoom": "scale, size, bigger, smaller, magnify",
+      "appearance_chat_text_size": "font size, text size, bigger text, smaller text",
+      "appearance_fonts": "typeface, font family, monospace, ligatures",
+      "appearance_background": "wallpaper, image, picture, photo",
+      "appearance_chat_animations": "motion, animation, reduce motion",
+      "general_terminal": "shell, console, command line",
+      "general_rendering": "GPU, graphics, blank screen, flicker",
+      "general_mention_panel": "mention, at sign, references",
+      "general_close_behavior": "tray, quit, minimize, close button",
+      "general_auto_resume": "restart, crash, continue, resume",
+      "general_limit_continue": "rate limit, usage limit, quota",
+      "general_desktop_notifications": "alerts, notify, popup, banner",
+      "general_window_attention": "dock, taskbar, bounce, flash, badge",
+      "general_sounds": "audio, chime, beep, sound",
+      "general_read_aloud": "speech, text to speech, TTS, voice, speak",
+      "general_iphone_push": "push notifications, mobile, phone",
+      "general_dictation": "speech to text, voice typing, transcription, translate",
+      "general_talk": "voice, conversation, speak",
+      "general_talk_mac": "voice, microphone, speech, hands-free",
+      "collaboration_delegation": "sub-agents, delegate, multi-agent",
+      "agents": "agent, SDK, CLI, install",
+      "model_providers": "API key, endpoint, base URL, provider",
+      "quick_messages": "snippets, templates, canned replies",
+      "browser_links": "open links, default browser, external browser",
+      "browser_clear": "cookies, cache, history, site data",
+      "computer_use": "screen, mouse, keyboard, desktop control",
+      "computer_use_permissions": "accessibility, screen recording, privacy",
+      "shortcuts": "keyboard, hotkeys, key bindings, keys",
+      "version_control_accounts": "credentials, token, password, login",
+      "chat_channels": "bot, IM, messaging",
+      "web_service": "server, remote access, port, LAN, phone",
+      "logs": "debug, diagnostics, log level",
+      "system_update": "upgrade, version, update, release",
+      "system_autostart": "startup, login items, launch at boot",
+      "system_language": "locale, translation, language",
+      "system_data": "backup, sync, export, import, restore"
+    }
   }
 }

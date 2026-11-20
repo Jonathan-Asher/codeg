@@ -215,6 +215,7 @@ export function TalkMacSettingsSection() {
 
   return (
     <SettingsSection
+      anchor="general.talk-mac"
       icon={AudioLines}
       title={t("title")}
       description={t("description")}
@@ -282,6 +283,7 @@ export function TalkMacSettingsSection() {
       {status.supported && prefs && (
         <SettingCard>
           <SettingRow
+            anchor="general.talk-mac.shortcut"
             icon={Keyboard}
             title={t("shortcutEnable")}
             description={t("shortcutEnableDescription")}
@@ -350,6 +352,7 @@ export function TalkMacSettingsSection() {
             )}
           </SettingRow>
           <SettingRow
+            anchor="general.talk-mac.hands-free"
             icon={Ear}
             title={t("handsFree")}
             description={t("handsFreeDescription")}
@@ -380,6 +383,7 @@ export function TalkMacSettingsSection() {
             }
           />
           <SettingRow
+            anchor="general.talk-mac.whisper"
             title={t("whisper")}
             description={t("whisperDescription")}
             htmlFor="talk-mac-whisper"
@@ -421,6 +425,7 @@ export function TalkMacSettingsSection() {
             }
           />
           <SettingRow
+            anchor="general.talk-mac.echo"
             title={t("echo")}
             description={t("echoDescription")}
             control={

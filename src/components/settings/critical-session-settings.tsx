@@ -139,12 +139,14 @@ export function CriticalSessionSettingsSection() {
 
   return (
     <SettingsSection
+      anchor="general.critical"
       icon={Flag}
       title={t("title")}
       description={t("description")}
     >
       <SettingCard>
         <SettingRow
+          anchor="general.critical.idle"
           icon={Hourglass}
           title={t("idleTitle")}
           description={t("idleHint")}
@@ -155,6 +157,7 @@ export function CriticalSessionSettingsSection() {
           )}
         />
         <SettingRow
+          anchor="general.critical.repeat"
           icon={Repeat}
           title={t("repeatTitle")}
           description={t("repeatHint")}
@@ -165,6 +168,7 @@ export function CriticalSessionSettingsSection() {
           )}
         />
         <SettingRow
+          anchor="general.critical.stall"
           icon={TimerOff}
           title={t("stallTitle")}
           description={t("stallHint")}
@@ -175,6 +179,7 @@ export function CriticalSessionSettingsSection() {
           )}
         />
         <SettingRow
+          anchor="general.critical.sound"
           icon={Volume2}
           title={t("soundTitle")}
           description={t("soundHint")}
@@ -191,6 +196,7 @@ export function CriticalSessionSettingsSection() {
         />
         {hasChannels && (
           <SettingRow
+            anchor="general.critical.channel"
             icon={MessageSquare}
             title={t("channelTitle")}
             description={t("channelHint")}

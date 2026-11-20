@@ -4441,3 +4441,28 @@ html.tab-drag-blocked * {
 /* Find-in-chat highlight layers are injected at runtime by useFindHighlights
    (src/components/message/find-in-chat.tsx) — Lightning CSS rejects
    ::highlight() at build time, so the stylesheet never carries them. */
+
+/* ===== Settings search (components/settings/settings-search) =====
+   Where a result landed: a ring and a tint that fade out, so the eye finds the
+   setting the page just scrolled to. `settings-search/reveal` sets the
+   attribute and takes it off again. Inset, because a row sits in a card that
+   clips its overflow: a ring drawn outside it would be cut off. */
+[data-settings-highlight] {
+  animation: settings-highlight 1.6s ease-out;
+}
+@keyframes settings-highlight {
+  0%,
+  35% {
+    box-shadow: inset 0 0 0 2px var(--ring);
+    background-color: color-mix(in oklab, var(--ring) 14%, transparent);
+  }
+  100% {
+    box-shadow: inset 0 0 0 0 transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-settings-highlight] {
+    animation: none;
+    box-shadow: inset 0 0 0 2px var(--ring);
+  }
+}

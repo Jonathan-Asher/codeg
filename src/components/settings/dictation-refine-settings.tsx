@@ -183,12 +183,14 @@ export function DictationRefineSettingsSection() {
 
   return (
     <SettingsSection
+      anchor="general.dictation"
       icon={Languages}
       title={t("title")}
       description={t("description")}
     >
       <SettingCard>
         <SettingRow
+          anchor="general.dictation.provider"
           title={t("provider")}
           description={t("providerHint")}
           control={
@@ -258,6 +260,7 @@ export function DictationRefineSettingsSection() {
           </SettingRow>
         )}
         <SettingRow
+          anchor="general.dictation.api-key"
           icon={KeyRound}
           title={t("apiKey")}
           description={keyDescription}
@@ -307,6 +310,7 @@ export function DictationRefineSettingsSection() {
           }
         />
         <SettingRow
+          anchor="general.dictation.translate"
           title={t("translate")}
           description={t("translateHint")}
           control={

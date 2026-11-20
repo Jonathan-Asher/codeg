@@ -455,6 +455,7 @@ export function AgentToolsSettingsSection() {
 
   return (
     <SettingsSection
+      anchor="collaboration.tools"
       icon={Wrench}
       title={t("title")}
       description={t("description")}
