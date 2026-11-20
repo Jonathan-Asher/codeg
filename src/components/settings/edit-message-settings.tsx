@@ -22,6 +22,7 @@ export function EditMessageSettingsSection() {
 
   return (
     <SettingsSection
+      anchor="general.edit-message"
       icon={CopyPlus}
       title={t("title")}
       description={t("description")}

@@ -240,12 +240,18 @@ export function ChannelListTab() {
       </div>
 
       {channels.length === 0 ? (
-        <section className="rounded-xl border bg-card p-8 text-center">
+        <section
+          data-settings-anchor="chat-channels.list"
+          className="rounded-xl border bg-card p-8 text-center"
+        >
           <MessageCircle className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
           <p className="text-sm text-muted-foreground">{t("noChannels")}</p>
         </section>
       ) : (
-        <section className="space-y-2">
+        <section
+          data-settings-anchor="chat-channels.list"
+          className="space-y-2"
+        >
           {channels.map((ch) => {
             const status = getChannelStatus(ch.id)
             const isConnected = status === "connected"

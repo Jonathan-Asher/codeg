@@ -108,6 +108,7 @@ export function StartupWorkspaceSettingsSection() {
 
   return (
     <SettingsSection
+      anchor="system.startup-workspace"
       icon={MonitorCloud}
       title={t("title")}
       description={empty ? t("noRemote") : t("description")}

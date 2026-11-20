@@ -65,6 +65,13 @@
       "computer_use": "Utilisation de l'ordinateur",
       "quick_messages": "Messages rapides",
       "logs": "Journaux d'exécution"
+    },
+    "search": {
+      "label": "Rechercher un réglage",
+      "placeholder": "Rechercher",
+      "clear": "Effacer la recherche",
+      "noResults": "Aucun réglage ne correspond à « {query} »",
+      "resultsLabel": "Réglages correspondants"
     }
   },
   "AppearanceSettings": {
@@ -514,7 +521,8 @@
       "conflict": "Le raccourci est déjà utilisé par \"{title}\"",
       "updated": "Raccourci mis à jour",
       "invalid": "Raccourci invalide, veuillez réessayer",
-      "reset": "Les raccourcis par défaut ont été restaurés"
+      "reset": "Les raccourcis par défaut ont été restaurés",
+      "takenOver": "{shortcut} exécute maintenant « {action} ». Désormais non attribué : {others}."
     },
     "actions": {
       "toggle_search": {
@@ -664,7 +672,31 @@
       "read_last_reply": {
         "title": "Lire la dernière réponse",
         "description": "Lire à voix haute la réponse la plus récente de la conversation en cours, ou arrêter la lecture"
+      },
+      "search_settings": {
+        "title": "Rechercher dans les réglages",
+        "description": "Place le curseur dans le champ de recherche de la fenêtre des réglages"
       }
+    },
+    "contexts": {
+      "global": "Partout",
+      "workspace": "Espace de travail",
+      "terminal": "Terminal",
+      "composer": "Zone de message",
+      "settings": "Fenêtre des réglages"
+    },
+    "focus": {
+      "workspace": "Dans l’espace de travail",
+      "terminal": "Quand le terminal a le focus",
+      "composer": "Pendant la saisie d’un message",
+      "settings": "Dans la fenêtre des réglages"
+    },
+    "shadowedBy": "{focus}, {shortcut} exécute « {action} » à la place.",
+    "shadows": "{focus}, {shortcut} exécute ceci au lieu de « {action} ».",
+    "conflict": {
+      "message": "{shortcut} est déjà utilisé par {actions} au même endroit : une seule action peut le garder.",
+      "takeOver": "L’utiliser pour « {action} »",
+      "cancel": "Annuler"
     }
   },
   "SkillsSettings": {
@@ -2841,7 +2873,13 @@
       "recentHeading": "Récentes",
       "archivedBadge": "Archivé",
       "offline": "Hors ligne — la recherche nécessite le serveur",
-      "failed": "La recherche a échoué. Réessayez."
+      "failed": "La recherche a échoué. Réessayez.",
+      "tabAll": "Tout",
+      "allPlaceholder": "Rechercher dans les conversations et les messages...",
+      "typeToSearchAll": "Tapez pour rechercher dans les conversations et les messages",
+      "sessionsHeading": "Conversations",
+      "showAllMessages": "Afficher tous les messages correspondants",
+      "tabHint": "Tab : recherche suivante"
     },
     "folderTitleBar": {
       "showSidebar": "Afficher la barre latérale",
@@ -11534,5 +11572,49 @@
     "lookupFailedHere": "Impossible de rechercher la session {session}.",
     "serverTooOld": "{server} utilise une ancienne version de codeg qui ne peut pas ouvrir les liens de session.",
     "otherServer": "Cette session se trouve sur un autre serveur codeg ({server})."
+  },
+  "SettingsSearch": {
+    "keywords": {
+      "appearance": "apparence, thème, style, interface",
+      "appearance_theme": "mode sombre, mode clair, mode nuit, sombre, clair",
+      "appearance_theme_mode": "mode sombre, mode clair, suivre le système",
+      "appearance_theme_color": "couleur d’accent, palette, couleurs",
+      "appearance_zoom": "échelle, taille, agrandir, réduire",
+      "appearance_chat_text_size": "taille de police, taille du texte, texte plus grand",
+      "appearance_fonts": "police, typographie, chasse fixe, ligatures",
+      "appearance_background": "fond d’écran, image, photo",
+      "appearance_chat_animations": "mouvement, animation, réduire les animations",
+      "general_terminal": "shell, console, ligne de commande",
+      "general_rendering": "GPU, graphismes, écran blanc, scintillement",
+      "general_mention_panel": "mention, arobase, références",
+      "general_close_behavior": "zone de notification, quitter, réduire, bouton fermer",
+      "general_auto_resume": "redémarrage, plantage, continuer, reprendre",
+      "general_limit_continue": "limite d’utilisation, limite de débit, quota",
+      "general_desktop_notifications": "alertes, notifier, fenêtre contextuelle, bannière",
+      "general_window_attention": "Dock, barre des tâches, rebond, clignotement, pastille",
+      "general_sounds": "audio, son, carillon, bip",
+      "general_read_aloud": "synthèse vocale, voix, lecture à voix haute, TTS",
+      "general_iphone_push": "notifications push, mobile, téléphone",
+      "general_dictation": "dictée vocale, reconnaissance vocale, transcription, traduire",
+      "general_talk": "voix, conversation, parler",
+      "general_talk_mac": "voix, microphone, parler, mains libres",
+      "collaboration_delegation": "sous-agents, déléguer, multi-agents",
+      "agents": "agent, SDK, CLI, installer",
+      "model_providers": "clé API, point de terminaison, URL de base, fournisseur",
+      "quick_messages": "extraits, modèles, réponses toutes faites",
+      "browser_links": "ouvrir les liens, navigateur par défaut, navigateur externe",
+      "browser_clear": "cookies, cache, historique, données de site",
+      "computer_use": "écran, souris, clavier, contrôle du bureau",
+      "computer_use_permissions": "accessibilité, enregistrement de l’écran, confidentialité",
+      "shortcuts": "clavier, raccourcis clavier, touches, combinaisons",
+      "version_control_accounts": "identifiants, jeton, mot de passe, connexion",
+      "chat_channels": "bot, messagerie, discussion",
+      "web_service": "serveur, accès à distance, port, réseau local, téléphone",
+      "logs": "débogage, diagnostic, niveau de journal",
+      "system_update": "mise à niveau, version, mise à jour",
+      "system_autostart": "démarrage, éléments d’ouverture, lancer au démarrage",
+      "system_language": "langue, traduction, région",
+      "system_data": "sauvegarde, synchronisation, exporter, importer, restaurer"
+    }
   }
 }

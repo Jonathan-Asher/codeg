@@ -190,7 +190,7 @@ export function PetManagerSection() {
       className="overflow-hidden rounded-xl border bg-card"
       asChild
     >
-      <section>
+      <section data-settings-anchor="appearance.pets">
         <CollapsibleTrigger asChild>
           <div
             role="button"

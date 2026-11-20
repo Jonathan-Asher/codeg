@@ -70,6 +70,8 @@ export function SettingNote({
 }
 
 interface SettingRowProps {
+  /** Where the Settings search lands for this row (`settings-search/registry`). */
+  anchor?: string
   /** Small glyph in front of the title; purely decorative. */
   icon?: LucideIcon
   title: React.ReactNode
@@ -91,6 +93,7 @@ interface SettingRowProps {
  * rhythm (type sizes, paddings, where the control sits) can't drift row to row.
  */
 export function SettingRow({
+  anchor,
   icon: Icon,
   title,
   description,
@@ -100,7 +103,10 @@ export function SettingRow({
   className,
 }: SettingRowProps) {
   return (
-    <div className={cn("flex flex-col gap-2 p-3", className)}>
+    <div
+      data-settings-anchor={anchor}
+      className={cn("flex flex-col gap-2 p-3", className)}
+    >
       {/* With an explanation under the title the control aligns to the title
           line; without one there is only that line, so the two center on each
           other instead of hanging off a taller control's top edge. */}

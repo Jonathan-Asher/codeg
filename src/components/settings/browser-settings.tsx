@@ -653,6 +653,7 @@ export function BrowserSettings() {
             {/* One setting with five values, so one row whose control is the
               list — not five rows repeating the same explanation. */}
             <SettingRow
+              anchor="browser.links"
               icon={Link2}
               title={t("defaultTargetTitle")}
               description={t("defaultTargetHint")}
@@ -697,6 +698,7 @@ export function BrowserSettings() {
 
         <SettingCard>
           <SettingRow
+            anchor="browser.rules"
             icon={ListFilter}
             title={t("rulesTitle")}
             description={desktop ? t("rulesHint") : t("rulesHintWeb")}
@@ -717,6 +719,7 @@ export function BrowserSettings() {
                   back in charge of every decision, which is how the browser
                   behaved before this setting existed. */}
               <SettingRow
+                anchor="browser.agent-grant"
                 icon={Bot}
                 title={t("agentGrantTitle")}
                 description={t("agentGrantHint")}
@@ -752,6 +755,7 @@ export function BrowserSettings() {
                   this is a setting to read rather than to toggle on a guess
                   about what "on" means. */}
               <SettingRow
+                anchor="browser.eval"
                 icon={Code2}
                 title={t("evalApprovalTitle")}
                 description={t("evalApprovalHint")}
@@ -791,6 +795,7 @@ export function BrowserSettings() {
               there is what any link can: a local server, through the port
               bridge. */}
           <SettingRow
+            anchor="browser.local-servers"
             icon={ServerCog}
             title={t("serviceOpenTitle")}
             description={t("serviceOpenHint")}
@@ -819,6 +824,7 @@ export function BrowserSettings() {
             }
           />
           <SettingRow
+            anchor="browser.terminal-menu"
             icon={MousePointerClick}
             title={t("terminalMenuTitle")}
             description={t("terminalMenuHint")}
@@ -839,6 +845,7 @@ export function BrowserSettings() {
           {desktop ? (
             <>
               <SettingRow
+                anchor="browser.html-preview"
                 icon={FileCode2}
                 title={t("htmlPreviewTitle")}
                 description={t("htmlPreviewHint")}
@@ -855,6 +862,7 @@ export function BrowserSettings() {
                 }
               />
               <SettingRow
+                anchor="browser.devtools"
                 icon={Wrench}
                 title={t("devtoolsTitle")}
                 description={t("devtoolsHint")}
@@ -868,6 +876,7 @@ export function BrowserSettings() {
                 }
               />
               <SettingRow
+                anchor="browser.surface"
                 icon={AppWindow}
                 title={t("surfaceTitle")}
                 description={t("surfaceHint")}
@@ -896,6 +905,7 @@ export function BrowserSettings() {
                 }
               />
               <SettingRow
+                anchor="browser.suspend"
                 icon={MoonStar}
                 title={t("suspendTitle")}
                 description={t("suspendHint")}
@@ -911,6 +921,7 @@ export function BrowserSettings() {
                 }
               />
               <SettingRow
+                anchor="browser.proxy"
                 icon={Network}
                 title={t("proxyTitle")}
                 description={t("proxyHint")}
@@ -924,6 +935,7 @@ export function BrowserSettings() {
                 </div>
               </SettingRow>
               <SettingRow
+                anchor="browser.downloads"
                 icon={Download}
                 title={t("downloadsTitle")}
                 description={t("downloadsHint", { dir: downloadsDir ?? "…" })}
@@ -947,6 +959,7 @@ export function BrowserSettings() {
               ) : null}
               {profilesSupported ? null : (
                 <SettingRow
+                  anchor="browser.clear"
                   icon={Eraser}
                   title={t("clearTitle")}
                   description={t("clearHint")}
@@ -970,6 +983,7 @@ export function BrowserSettings() {
         {profilesSupported ? (
           <SettingCard>
             <SettingRow
+              anchor="browser.profiles"
               icon={UserRound}
               title={t("profilesTitle")}
               description={t("profilesHint")}

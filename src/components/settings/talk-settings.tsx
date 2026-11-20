@@ -72,12 +72,14 @@ export function TalkSettingsSection() {
 
   return (
     <SettingsSection
+      anchor="general.talk"
       icon={AudioLines}
       title={t("title")}
       description={t("description")}
     >
       <SettingCard>
         <SettingRow
+          anchor="general.talk.language"
           icon={Languages}
           title={t("languageTitle")}
           description={t("languageHint")}
@@ -109,6 +111,7 @@ export function TalkSettingsSection() {
           }
         />
         <SettingRow
+          anchor="general.talk.address"
           icon={UserRound}
           title={t("addressTitle")}
           description={t("addressHint")}

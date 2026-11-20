@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type ComponentType,
   type ReactNode,
@@ -37,25 +38,30 @@ import {
 } from "@/lib/transport/detect"
 import { AppTitleBar } from "@/components/layout/app-title-bar"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { useIsMac } from "@/hooks/use-is-mac"
+import { useShortcutSettings } from "@/hooks/use-shortcut-settings"
 import { Drawer, DrawerContent, DrawerTitle } from "@/components/ui/drawer"
+import { SettingsSearch } from "@/components/settings/settings-search"
+import {
+  formatShortcutLabel,
+  isShortcutRecorderArmed,
+  matchShortcutEvent,
+} from "@/lib/keyboard-shortcuts"
+import type {
+  SettingsPageKey,
+  SettingsSearchEntry,
+} from "@/lib/settings-search/registry"
+import { revealAnchorsFor } from "@/lib/settings-search/search"
+import {
+  revealSettingsAnchor,
+  setPendingSettingsReveal,
+  takePendingSettingsReveal,
+} from "@/lib/settings-search/reveal"
 
 interface SettingsNavItem {
   href: string
-  labelKey:
-    | "general"
-    | "appearance"
-    | "agents"
-    | "model_providers"
-    | "collaboration"
-    | "browser"
-    | "computer_use"
-    | "quick_messages"
-    | "shortcuts"
-    | "version_control"
-    | "chat_channels"
-    | "system"
-    | "web_service"
-    | "logs"
+  /** Also the page's key in the settings search registry. */
+  labelKey: SettingsPageKey
   icon: ComponentType<{ className?: string }>
 }
 
@@ -173,22 +179,41 @@ export function SettingsShell({ children }: SettingsShellProps) {
   const router = useRouter()
   const normalizedPathname = normalizePath(pathname)
   const isMobile = useIsMobile()
+  const isMac = useIsMac()
   const [navOpen, setNavOpen] = useState(false)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const { shortcuts } = useShortcutSettings()
+  const searchShortcut = shortcuts.search_settings
 
   useEffect(() => {
     document.title = `${t("title")} - codeg`
   }, [t])
 
+  // A search result on another page: once that page is the one showing, go
+  // to the setting (see `settings-search/reveal`).
+  useEffect(() => {
+    const anchors = takePendingSettingsReveal(normalizedPathname)
+    if (!anchors) return
+    return revealSettingsAnchor(anchors)
+  }, [normalizedPathname])
+
+  const cancelRevealRef = useRef<(() => void) | null>(null)
+  useEffect(() => () => cancelRevealRef.current?.(), [])
+
+  /** Open `href`, then scroll to the first of `reveal` that shows there. */
   const navigateTo = useCallback(
-    (href: string) => {
+    (href: string, reveal: readonly string[] = []) => {
       if (typeof window === "undefined") return
 
       const target = normalizePath(href)
       const current = normalizePath(window.location.pathname)
       if (current === target) {
         setNavOpen(false)
+        cancelRevealRef.current?.()
+        cancelRevealRef.current = revealSettingsAnchor(reveal)
         return
       }
+      if (reveal.length > 0) setPendingSettingsReveal(target, reveal)
 
       // Preserve current query string so the active remote workspace context
       // (`?remoteConnectionId=N`) carries over to sub-pages — without this,
@@ -208,40 +233,93 @@ export function SettingsShell({ children }: SettingsShellProps) {
     [router, setNavOpen]
   )
 
-  const filteredNavItems = settingsNavItemsFor(detectEnvironment())
+  const environment = detectEnvironment()
+  const filteredNavItems = settingsNavItemsFor(environment)
+
+  const openSearchResult = useCallback(
+    (entry: SettingsSearchEntry) => {
+      const item = filteredNavItems.find((nav) => nav.labelKey === entry.page)
+      if (item) navigateTo(item.href, revealAnchorsFor(entry))
+    },
+    [filteredNavItems, navigateTo]
+  )
+
+  // ⌘F / Ctrl+F (Settings → Shortcuts → Search settings) puts the caret in the
+  // search box, over the browser's find in the web build. On a phone the nav
+  // is a drawer: open it first, then focus once the box has mounted.
+  useEffect(() => {
+    if (!searchShortcut) return
+    let frame: number | null = null
+    const focusSearch = (triesLeft: number) => {
+      const input = searchInputRef.current
+      if (input) {
+        input.focus()
+        input.select()
+        return
+      }
+      if (triesLeft > 0) {
+        frame = requestAnimationFrame(() => focusSearch(triesLeft - 1))
+      }
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing) return
+      if (isShortcutRecorderArmed()) return
+      if (!matchShortcutEvent(event, searchShortcut)) return
+      event.preventDefault()
+      if (isMobile) setNavOpen(true)
+      focusSearch(30)
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => {
+      window.removeEventListener("keydown", onKeyDown)
+      if (frame !== null) cancelAnimationFrame(frame)
+    }
+  }, [isMobile, searchShortcut])
 
   const navContent = (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="px-2 pb-2 text-2xs font-medium text-muted-foreground">
-        {t("preferences")}
-      </div>
-      <ScrollArea className="min-h-0 flex-1">
-        <nav className="space-y-1">
-          {filteredNavItems.map((item) => {
-            const Icon = item.icon
-            const translationKey = `nav.${item.labelKey}` as const
-            const active =
-              normalizedPathname === item.href ||
-              normalizedPathname.startsWith(`${item.href}/`)
-            return (
-              <Button
-                key={item.href}
-                variant={active ? "secondary" : "ghost"}
-                size="sm"
-                className={cn("w-full justify-start px-2")}
-                type="button"
-                onClick={() => navigateTo(item.href)}
-                aria-current={active ? "page" : undefined}
-              >
-                <span className="inline-flex items-center gap-1">
-                  <Icon className="h-3.5 w-3.5" />
-                  {t(translationKey)}
-                </span>
-              </Button>
-            )
-          })}
-        </nav>
-      </ScrollArea>
+      <SettingsSearch
+        pages={filteredNavItems.map((item) => item.labelKey)}
+        desktop={environment === "tauri"}
+        inputRef={searchInputRef}
+        shortcutLabel={
+          searchShortcut && !isMobile
+            ? formatShortcutLabel(searchShortcut, isMac)
+            : undefined
+        }
+        onPick={openSearchResult}
+      >
+        <div className="px-2 pb-2 text-2xs font-medium text-muted-foreground">
+          {t("preferences")}
+        </div>
+        <ScrollArea className="min-h-0 flex-1">
+          <nav className="space-y-1">
+            {filteredNavItems.map((item) => {
+              const Icon = item.icon
+              const translationKey = `nav.${item.labelKey}` as const
+              const active =
+                normalizedPathname === item.href ||
+                normalizedPathname.startsWith(`${item.href}/`)
+              return (
+                <Button
+                  key={item.href}
+                  variant={active ? "secondary" : "ghost"}
+                  size="sm"
+                  className={cn("w-full justify-start px-2")}
+                  type="button"
+                  onClick={() => navigateTo(item.href)}
+                  aria-current={active ? "page" : undefined}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    <Icon className="h-3.5 w-3.5" />
+                    {t(translationKey)}
+                  </span>
+                </Button>
+              )
+            })}
+          </nav>
+        </ScrollArea>
+      </SettingsSearch>
     </div>
   )
 

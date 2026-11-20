@@ -450,6 +450,7 @@ export function ReadAloudSettingsSection() {
 
   return (
     <SettingsSection
+      anchor="general.read-aloud"
       icon={AudioLines}
       title={t("title")}
       description={
@@ -471,6 +472,7 @@ export function ReadAloudSettingsSection() {
       {supported && (
         <SettingCard>
           <SettingRow
+            anchor="general.read-aloud.voice"
             icon={Sparkles}
             title={t("engine")}
             description={
@@ -514,6 +516,7 @@ export function ReadAloudSettingsSection() {
       {supported && engine === "system" && (
         <SettingCard>
           <SettingRow
+            anchor="general.read-aloud.hebrew"
             icon={Languages}
             title={t("hebrewVoice")}
             description={
@@ -535,6 +538,7 @@ export function ReadAloudSettingsSection() {
             }
           />
           <SettingRow
+            anchor="general.read-aloud.english"
             icon={Languages}
             title={t("englishVoice")}
             description={betterVoiceHint("en", prefs.englishVoice)}
@@ -557,6 +561,7 @@ export function ReadAloudSettingsSection() {
       {supported && (
         <SettingCard>
           <SettingRow
+            anchor="general.read-aloud.rate"
             icon={Gauge}
             title={t("rate")}
             control={
@@ -593,6 +598,7 @@ export function ReadAloudSettingsSection() {
             </div>
           </SettingRow>
           <SettingRow
+            anchor="general.read-aloud.auto-read"
             icon={WandSparkles}
             title={t("autoRead")}
             description={t("autoReadHint")}

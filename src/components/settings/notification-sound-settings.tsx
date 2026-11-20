@@ -106,6 +106,7 @@ export function NotificationSoundSettingsSection() {
     // than in a card that repeats "Enable notification sounds". With them on
     // the heading also folds those knobs away, and starts folded.
     <SettingsSection
+      anchor="general.sounds"
       icon={Volume2}
       title={t("title")}
       description={
@@ -140,6 +141,7 @@ export function NotificationSoundSettingsSection() {
       {prefs.enabled && (
         <SettingCard>
           <SettingRow
+            anchor="general.sounds.volume"
             icon={SlidersHorizontal}
             title={t("volume")}
             control={
@@ -176,6 +178,7 @@ export function NotificationSoundSettingsSection() {
           </SettingRow>
 
           <SettingRow
+            anchor="general.sounds.unfocused"
             icon={BellOff}
             title={t("onlyWhenUnfocused")}
             description={t("onlyWhenUnfocusedHint")}
@@ -199,6 +202,7 @@ export function NotificationSoundSettingsSection() {
               a single row whose control is the list — not one row per event,
               which would repeat the same explanation five times. */}
           <SettingRow
+            anchor="general.sounds.events"
             icon={ListMusic}
             title={t("eventsTitle")}
             description={t("eventsHint")}

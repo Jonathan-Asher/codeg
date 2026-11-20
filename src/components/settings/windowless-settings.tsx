@@ -80,6 +80,7 @@ export function WindowlessSettingsSection() {
 
   return (
     <SettingsSection
+      anchor="general.windowless"
       icon={MonitorOff}
       title={t("title")}
       description={t("description")}

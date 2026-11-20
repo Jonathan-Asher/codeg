@@ -137,6 +137,10 @@ function defer<T>() {
   return { promise, resolve }
 }
 
+/** The search box's placeholder on the All tab (the default) and on Conversations. */
+const ALL_PLACEHOLDER = enMessages.Folder.search.allPlaceholder
+const CONVERSATIONS_PLACEHOLDER = enMessages.Folder.search.placeholder
+
 async function openMessagesTab(onOpenChange = vi.fn()) {
   render(
     <NextIntlClientProvider locale="en" messages={enMessages}>
@@ -255,19 +259,22 @@ function conv(
 describe("SearchCommandDialog conversations tab", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    h.searchMessages.mockResolvedValue([])
     folders.active = folders.all[0]
     store.conversations = []
     tabState.tabs = []
     tabState.activeTabId = null
   })
 
-  function renderDialog() {
+  async function renderDialog() {
     render(
       <NextIntlClientProvider locale="en" messages={enMessages}>
         <SearchCommandDialog open onOpenChange={vi.fn()} />
       </NextIntlClientProvider>
     )
-    return userEvent.setup()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("button", { name: "Conversations" }))
+    return user
   }
 
   it("searches every folder by default and names each result's folder", async () => {
@@ -275,7 +282,7 @@ describe("SearchCommandDialog conversations tab", () => {
       conv(1, 3, "Upload fixes"),
       conv(2, 5, "Upload the brief"),
     ])
-    const user = renderDialog()
+    const user = await renderDialog()
 
     await user.type(
       screen.getByPlaceholderText("Search conversations..."),
@@ -291,7 +298,7 @@ describe("SearchCommandDialog conversations tab", () => {
 
   it("narrows to the open folder on request", async () => {
     h.listAllConversations.mockResolvedValue([conv(1, 3, "Upload fixes")])
-    const user = renderDialog()
+    const user = await renderDialog()
 
     await user.click(screen.getByRole("button", { name: "Only codeg" }))
     await user.type(
@@ -313,6 +320,7 @@ describe("SearchCommandDialog recent sessions", () => {
     localStorage.clear()
     folders.active = folders.all[0]
     h.listAllConversations.mockResolvedValue([])
+    h.searchMessages.mockResolvedValue([])
     store.conversations = [
       conv(1, 3, "Release prep", { updated_at: "2026-09-30T10:00:00Z" }),
       conv(2, 5, "Legal brief", {
@@ -401,10 +409,7 @@ describe("SearchCommandDialog recent sessions", () => {
     ])
     const { user } = renderDialog()
 
-    await user.type(
-      screen.getByPlaceholderText("Search conversations..."),
-      "release"
-    )
+    await user.type(screen.getByPlaceholderText(ALL_PLACEHOLDER), "release")
 
     expect(await screen.findByText("Release notes")).toBeTruthy()
     expect(screen.queryByText("Release prep")).toBeNull()
@@ -417,7 +422,7 @@ describe("SearchCommandDialog recent sessions", () => {
     const { user } = renderDialog()
 
     await user.type(
-      screen.getByPlaceholderText("Search conversations..."),
+      screen.getByPlaceholderText(ALL_PLACEHOLDER),
       "release prep"
     )
 
@@ -428,7 +433,7 @@ describe("SearchCommandDialog recent sessions", () => {
   it("shows search results while typing and the recent list once cleared", async () => {
     h.listAllConversations.mockResolvedValue([conv(7, 3, "Upload fixes")])
     const { user } = renderDialog()
-    const input = screen.getByPlaceholderText("Search conversations...")
+    const input = screen.getByPlaceholderText(ALL_PLACEHOLDER)
 
     await user.type(input, "upload")
     expect(await screen.findByText("Upload fixes")).toBeTruthy()
@@ -446,6 +451,8 @@ describe("SearchCommandDialog recent sessions", () => {
     const { user } = renderDialog()
     await waitFor(() => expect(rows().titles).toContain("Legal brief"))
 
+    // The folder scope is the Conversations tab's; All spans every folder.
+    await user.click(screen.getByRole("button", { name: "Conversations" }))
     await user.click(screen.getByRole("button", { name: "Only codeg" }))
 
     expect(rows().titles).toEqual(["Older codeg work"])
@@ -455,7 +462,9 @@ describe("SearchCommandDialog recent sessions", () => {
     localStorage.setItem("settings:search:show-recent", "false")
     renderDialog()
 
-    expect(screen.getByText("Type to search conversations")).toBeTruthy()
+    expect(
+      screen.getByText(enMessages.Folder.search.typeToSearchAll)
+    ).toBeTruthy()
     expect(screen.queryAllByRole("option")).toHaveLength(0)
     expect(screen.queryByText("Release prep")).toBeNull()
   })
@@ -485,6 +494,7 @@ describe("SearchCommandDialog archived folders", () => {
     ]
     folders.groups = [{ id: 9, archived: true }]
     h.listAllConversations.mockResolvedValue([])
+    h.searchMessages.mockResolvedValue([])
     store.conversations = [
       conv(1, 3, "Release prep", { updated_at: "2026-09-30T10:00:00Z" }),
       conv(2, 5, "Legal brief", { updated_at: "2026-09-30T11:00:00Z" }),
@@ -525,10 +535,7 @@ describe("SearchCommandDialog archived folders", () => {
       conv(2, 5, "Upload the brief"),
     ])
     const user = renderDialog()
-    await user.type(
-      screen.getByPlaceholderText("Search conversations..."),
-      "upload"
-    )
+    await user.type(screen.getByPlaceholderText(ALL_PLACEHOLDER), "upload")
 
     const archivedRow = (await screen.findByText("Upload the brief")).closest(
       '[role="option"]'
@@ -550,6 +557,7 @@ describe("SearchCommandDialog as an instant session switcher", () => {
     __resetQuickSwitchTypeaheadForTests()
     folders.active = folders.all[0]
     h.listAllConversations.mockResolvedValue([])
+    h.searchMessages.mockResolvedValue([])
     store.conversations = [
       conv(1, 3, "Release prep", { updated_at: "2026-09-30T10:00:00Z" }),
       conv(2, 5, "Legal brief", {
@@ -628,7 +636,7 @@ describe("SearchCommandDialog as an instant session switcher", () => {
     // Shown at once, the same rows (nothing remounted), the caret in the box.
     expect(screen.getAllByRole("option")[0]).toBe(firstRow)
     expect(listed().selected).toBe(0)
-    expect(screen.getByPlaceholderText("Search conversations...")).toHaveFocus()
+    expect(screen.getByPlaceholderText(ALL_PLACEHOLDER)).toHaveFocus()
     expect(
       document.querySelector('[role="dialog"][data-state="open"]')
     ).not.toBeNull()
@@ -690,7 +698,7 @@ describe("SearchCommandDialog as an instant session switcher", () => {
     for (const key of ["u", "p", "x", "Backspace"]) keydown(composer, key)
     rerender(dialog(true))
 
-    const input = screen.getByPlaceholderText("Search conversations...")
+    const input = screen.getByPlaceholderText(ALL_PLACEHOLDER)
     await waitFor(() => expect(input).toHaveValue("up"))
     expect(input).toHaveFocus()
     expect(keys).not.toHaveBeenCalled()
@@ -700,7 +708,7 @@ describe("SearchCommandDialog as an instant session switcher", () => {
 
   it("leaves shortcuts and keys typed into the switcher alone", async () => {
     render(dialog(true))
-    const input = screen.getByPlaceholderText("Search conversations...")
+    const input = screen.getByPlaceholderText(ALL_PLACEHOLDER)
     const { composer, keys } = focusedComposer()
     armQuickSwitchTypeahead()
 
@@ -726,7 +734,7 @@ describe("SearchCommandDialog as an instant session switcher", () => {
     h.listAllConversations.mockResolvedValue([conv(7, 3, "Upload fixes")])
     const { rerender } = render(dialog(true))
     const user = userEvent.setup()
-    const input = screen.getByPlaceholderText("Search conversations...")
+    const input = screen.getByPlaceholderText(ALL_PLACEHOLDER)
     await user.type(input, "upload")
     expect(await screen.findByText("Upload fixes")).toBeTruthy()
 
@@ -746,7 +754,7 @@ describe("SearchCommandDialog as an instant session switcher", () => {
     const onOpenChange = vi.fn()
     const { rerender } = render(dialog(false, onOpenChange))
     rerender(dialog(true, onOpenChange))
-    expect(screen.getByPlaceholderText("Search conversations...")).toHaveFocus()
+    expect(screen.getByPlaceholderText(ALL_PLACEHOLDER)).toHaveFocus()
 
     const escape = keydown(document.activeElement!, "Escape")
     expect(escape.defaultPrevented).toBe(true)
@@ -821,6 +829,7 @@ describe("SearchCommandDialog focus", () => {
     tabState.tabs = []
     tabState.activeTabId = null
     h.listAllConversations.mockResolvedValue([])
+    h.searchMessages.mockResolvedValue([])
   })
 
   function dialog(open: boolean) {
@@ -835,9 +844,7 @@ describe("SearchCommandDialog focus", () => {
     const user = userEvent.setup()
     render(dialog(true))
 
-    const input = await screen.findByPlaceholderText(
-      enMessages.Folder.search.placeholder
-    )
+    const input = await screen.findByPlaceholderText(ALL_PLACEHOLDER)
     expect(input).toHaveFocus()
 
     await user.keyboard("auth")
@@ -868,15 +875,20 @@ describe("SearchCommandDialog focus", () => {
     const user = userEvent.setup()
     render(dialog(true))
 
-    const input = await screen.findByPlaceholderText(
-      enMessages.Folder.search.placeholder
+    await user.click(
+      screen.getByRole("button", {
+        name: enMessages.Folder.search.tabConversations,
+      })
     )
+    const input = await screen.findByPlaceholderText(CONVERSATIONS_PLACEHOLDER)
     await user.click(screen.getByRole("button", { name: "Codex" }))
     expect(input).toHaveFocus()
 
-    await user.click(
-      screen.getByRole("button", { name: enMessages.Folder.search.allAgents })
-    )
+    // The chip, not the All tab of the same name before it.
+    const [, allAgentsChip] = screen.getAllByRole("button", {
+      name: enMessages.Folder.search.allAgents,
+    })
+    await user.click(allAgentsChip)
     expect(input).toHaveFocus()
   })
 
@@ -890,9 +902,7 @@ describe("SearchCommandDialog focus", () => {
       const user = userEvent.setup()
       render(dialog(true))
 
-      const input = await screen.findByPlaceholderText(
-        enMessages.Folder.search.placeholder
-      )
+      const input = await screen.findByPlaceholderText(ALL_PLACEHOLDER)
       act(() => composer.focus())
       expect(input).toHaveFocus()
 
@@ -912,5 +922,144 @@ describe("SearchCommandDialog focus", () => {
     // then, it runs at once, inside the open.
     rerender(dialog(true))
     expect(h.resetFileTree).toHaveBeenCalledExactlyOnceWith(true)
+  })
+})
+
+describe("SearchCommandDialog All tab", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    __resetQuickSwitchTypeaheadForTests()
+    folders.active = folders.all[0]
+    store.conversations = []
+    tabState.tabs = []
+    tabState.activeTabId = null
+    h.listAllConversations.mockResolvedValue([])
+    h.searchMessages.mockResolvedValue([])
+  })
+
+  function renderDialog(onOpenChange = vi.fn()) {
+    render(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <SearchCommandDialog open onOpenChange={onOpenChange} />
+      </NextIntlClientProvider>
+    )
+    return { user: userEvent.setup(), onOpenChange }
+  }
+
+  /** Each listed row's first line, top to bottom. */
+  function listed() {
+    return screen
+      .queryAllByRole("option")
+      .map((o) => o.querySelector("span.flex-1")?.textContent ?? "")
+  }
+
+  it("opens on All", () => {
+    renderDialog()
+    expect(screen.getByPlaceholderText(ALL_PLACEHOLDER)).toHaveFocus()
+  })
+
+  it("lists matching sessions first and matching messages below them", async () => {
+    h.listAllConversations.mockResolvedValue([conv(9, 3, "Retry loop audit")])
+    h.searchMessages.mockResolvedValue([hit()])
+    const { user } = renderDialog()
+
+    await user.type(screen.getByPlaceholderText(ALL_PLACEHOLDER), "retry loop")
+
+    expect(await screen.findByText("Upload fixes")).toBeTruthy()
+    expect(listed()).toEqual(["Retry loop audit", "Upload fixes"])
+    expect(
+      Array.from(document.querySelectorAll("[cmdk-group-heading]")).map(
+        (heading) => heading.textContent
+      )
+    ).toEqual([
+      enMessages.Folder.search.sessionsHeading,
+      enMessages.Folder.search.messagesHeading,
+    ])
+    // The hit keeps its snippet, matched words marked.
+    const marks = Array.from(document.querySelectorAll("mark"))
+    expect(marks.map((mark) => mark.textContent)).toEqual(["retry", "loop"])
+    // Every session, whatever the folder: All has no scope.
+    expect(h.listAllConversations).toHaveBeenLastCalledWith(
+      expect.objectContaining({ folder_ids: null, search: "retry loop" })
+    )
+    // Only a few hits: one more than it shows, to know whether there are more.
+    expect(h.searchMessages).toHaveBeenLastCalledWith("retry loop", 6)
+  })
+
+  it("opens the session at the message when a hit is picked", async () => {
+    h.searchMessages.mockResolvedValue([hit()])
+    const { user, onOpenChange } = renderDialog()
+
+    await user.type(screen.getByPlaceholderText(ALL_PLACEHOLDER), "retry")
+    await user.click(await screen.findByText("Upload fixes"))
+
+    expect(h.openTab).toHaveBeenCalledWith(3, 7, "codex", true)
+    expect(takePendingFind(7)).toBe("retry")
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("shows the top hits and a row that opens Messages for the rest", async () => {
+    h.searchMessages.mockResolvedValue(
+      Array.from({ length: 6 }, (_, i) =>
+        hit({ conversation_id: 20 + i, title: `Hit ${i + 1}` })
+      )
+    )
+    const { user } = renderDialog()
+    const input = screen.getByPlaceholderText(ALL_PLACEHOLDER)
+
+    await user.type(input, "retry")
+    expect(await screen.findByText("Hit 5")).toBeTruthy()
+    expect(screen.queryByText("Hit 6")).toBeNull()
+
+    h.searchMessages.mockClear()
+    await user.click(screen.getByText(enMessages.Folder.search.showAllMessages))
+
+    const messagesInput = screen.getByPlaceholderText(
+      "Search message content..."
+    )
+    expect(messagesInput).toHaveFocus()
+    expect(messagesInput).toHaveValue("retry")
+    await waitFor(() =>
+      expect(h.searchMessages).toHaveBeenLastCalledWith("retry", 40)
+    )
+    expect(await screen.findByText("Hit 6")).toBeTruthy()
+  })
+
+  it("does not search message content for a single letter", async () => {
+    const { user } = renderDialog()
+    await user.type(screen.getByPlaceholderText(ALL_PLACEHOLDER), "r")
+    await waitFor(() => expect(h.listAllConversations).toHaveBeenCalled())
+    await new Promise((resolve) => setTimeout(resolve, 450))
+    expect(h.searchMessages).not.toHaveBeenCalled()
+  })
+
+  it("moves to the next search with Tab and back with Shift+Tab, keeping the query", async () => {
+    const { user } = renderDialog()
+    const input = screen.getByPlaceholderText(ALL_PLACEHOLDER)
+    await user.type(input, "auth")
+
+    const order = [
+      CONVERSATIONS_PLACEHOLDER,
+      "Search message content...",
+      enMessages.Folder.search.filePlaceholder,
+      ALL_PLACEHOLDER,
+    ]
+    for (const placeholder of order) {
+      await user.keyboard("{Tab}")
+      const box = screen.getByPlaceholderText(placeholder)
+      expect(box).toHaveFocus()
+      expect(box).toHaveValue("auth")
+    }
+
+    await user.keyboard("{Shift>}{Tab}{/Shift}")
+    expect(
+      screen.getByPlaceholderText(enMessages.Folder.search.filePlaceholder)
+    ).toHaveFocus()
+  })
+
+  it("hints that Tab moves to the next search", () => {
+    renderDialog()
+    expect(screen.getByText(enMessages.Folder.search.tabHint)).toBeTruthy()
   })
 })

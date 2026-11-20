@@ -63,6 +63,7 @@ export function LimitContinueSettingsSection() {
 
   return (
     <SettingsSection
+      anchor="general.limit-continue"
       icon={Hourglass}
       title={t("title")}
       description={t("description")}

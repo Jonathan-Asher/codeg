@@ -65,6 +65,13 @@
       "computer_use": "Uso do computador",
       "quick_messages": "Mensagens rápidas",
       "logs": "Registros de execução"
+    },
+    "search": {
+      "label": "Buscar configurações",
+      "placeholder": "Buscar configurações",
+      "clear": "Limpar busca",
+      "noResults": "Nenhuma configuração corresponde a “{query}”",
+      "resultsLabel": "Configurações correspondentes"
     }
   },
   "AppearanceSettings": {
@@ -514,7 +521,8 @@
       "conflict": "O atalho já está em uso por \"{title}\"",
       "updated": "Atalho atualizado",
       "invalid": "Atalho inválido, tente novamente",
-      "reset": "Atalhos padrão restaurados"
+      "reset": "Atalhos padrão restaurados",
+      "takenOver": "{shortcut} agora executa “{action}”. Sem atribuição: {others}."
     },
     "actions": {
       "toggle_search": {
@@ -664,7 +672,31 @@
       "read_last_reply": {
         "title": "Ler a última resposta",
         "description": "Lê em voz alta a resposta mais recente da conversa atual, ou para a leitura"
+      },
+      "search_settings": {
+        "title": "Buscar nas configurações",
+        "description": "Coloca o cursor na caixa de busca da janela de configurações"
       }
+    },
+    "contexts": {
+      "global": "Em qualquer lugar",
+      "workspace": "Espaço de trabalho",
+      "terminal": "Terminal",
+      "composer": "Caixa de mensagem",
+      "settings": "Janela de configurações"
+    },
+    "focus": {
+      "workspace": "No espaço de trabalho",
+      "terminal": "Com o foco no terminal",
+      "composer": "Enquanto digita uma mensagem",
+      "settings": "Na janela de configurações"
+    },
+    "shadowedBy": "{focus}, {shortcut} executa “{action}” em vez disso.",
+    "shadows": "{focus}, {shortcut} executa isto em vez de “{action}”.",
+    "conflict": {
+      "message": "{shortcut} já é usado por {actions} no mesmo lugar, então só um deles pode mantê-lo.",
+      "takeOver": "Usar para “{action}”",
+      "cancel": "Cancelar"
     }
   },
   "SkillsSettings": {
@@ -2841,7 +2873,13 @@
       "recentHeading": "Recentes",
       "archivedBadge": "Arquivada",
       "offline": "Offline — a pesquisa precisa do servidor",
-      "failed": "A pesquisa falhou. Tente novamente."
+      "failed": "A pesquisa falhou. Tente novamente.",
+      "tabAll": "Tudo",
+      "allPlaceholder": "Buscar conversas e mensagens...",
+      "typeToSearchAll": "Digite para buscar conversas e mensagens",
+      "sessionsHeading": "Conversas",
+      "showAllMessages": "Mostrar todas as mensagens correspondentes",
+      "tabHint": "Tab: próxima busca"
     },
     "folderTitleBar": {
       "showSidebar": "Mostrar barra lateral",
@@ -11534,5 +11572,49 @@
     "lookupFailedHere": "Não foi possível procurar a sessão {session}.",
     "serverTooOld": "{server} usa uma versão antiga do codeg que não abre links de sessão.",
     "otherServer": "Esta sessão está em outro servidor do codeg ({server})."
+  },
+  "SettingsSearch": {
+    "keywords": {
+      "appearance": "aparência, tema, estilo, interface",
+      "appearance_theme": "modo escuro, modo claro, modo noturno, escuro, claro",
+      "appearance_theme_mode": "modo escuro, modo claro, seguir o sistema",
+      "appearance_theme_color": "cor de destaque, paleta, cores",
+      "appearance_zoom": "escala, tamanho, ampliar, reduzir",
+      "appearance_chat_text_size": "tamanho da fonte, tamanho do texto, texto maior",
+      "appearance_fonts": "fonte, tipografia, monoespaçada, ligaduras",
+      "appearance_background": "papel de parede, imagem, foto",
+      "appearance_chat_animations": "movimento, animação, reduzir movimento",
+      "general_terminal": "shell, console, linha de comando",
+      "general_rendering": "GPU, gráficos, tela em branco, cintilação",
+      "general_mention_panel": "menção, arroba, referências",
+      "general_close_behavior": "bandeja, sair, minimizar, botão fechar",
+      "general_auto_resume": "reiniciar, falha, continuar, retomar",
+      "general_limit_continue": "limite de uso, limite de taxa, cota",
+      "general_desktop_notifications": "alertas, notificar, pop-up, banner",
+      "general_window_attention": "Dock, barra de tarefas, quicar, piscar, selo",
+      "general_sounds": "áudio, som, toque, bipe",
+      "general_read_aloud": "voz, texto para fala, TTS, ler em voz alta",
+      "general_iphone_push": "notificações push, celular, telefone",
+      "general_dictation": "voz para texto, ditado, transcrição, traduzir",
+      "general_talk": "voz, conversa, falar",
+      "general_talk_mac": "voz, microfone, falar, mãos livres",
+      "collaboration_delegation": "subagentes, delegar, multiagente",
+      "agents": "agente, SDK, CLI, instalar",
+      "model_providers": "chave de API, endpoint, URL base, provedor",
+      "quick_messages": "trechos, modelos, respostas prontas",
+      "browser_links": "abrir links, navegador padrão, navegador externo",
+      "browser_clear": "cookies, cache, histórico, dados de sites",
+      "computer_use": "tela, mouse, teclado, controle da área de trabalho",
+      "computer_use_permissions": "acessibilidade, gravação de tela, privacidade",
+      "shortcuts": "teclado, teclas de atalho, combinações de teclas",
+      "version_control_accounts": "credenciais, token, senha, login",
+      "chat_channels": "bot, mensageiro, mensagens",
+      "web_service": "servidor, acesso remoto, porta, rede local, celular",
+      "logs": "depuração, diagnóstico, nível de log",
+      "system_update": "atualizar, versão, atualização",
+      "system_autostart": "inicialização, itens de login, abrir ao iniciar",
+      "system_language": "idioma, tradução, região",
+      "system_data": "backup, sincronizar, exportar, importar, restaurar"
+    }
   }
 }

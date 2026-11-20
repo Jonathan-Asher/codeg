@@ -62,7 +62,10 @@ export function ClientDiagnosticsSection() {
   }
 
   return (
-    <section className="space-y-3 rounded-xl border bg-card p-4">
+    <section
+      data-settings-anchor="logs.crash-reports"
+      className="space-y-3 rounded-xl border bg-card p-4"
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="space-y-1">
           <h2 className="flex items-center gap-1.5 text-sm font-semibold">

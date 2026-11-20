@@ -474,7 +474,10 @@ export function SystemNetworkSettings() {
           </p>
         </section>
 
-        <section className="rounded-xl border bg-card p-4 space-y-4">
+        <section
+          data-settings-anchor="system.update"
+          className="rounded-xl border bg-card p-4 space-y-4"
+        >
           <div className="flex items-center gap-2">
             {checkingUpdate ? (
               <RefreshCw className="h-4 w-4 text-muted-foreground animate-spin" />
@@ -698,6 +701,7 @@ export function SystemNetworkSettings() {
             lower. */}
         {autostartVisible && (
           <SettingsSection
+            anchor="system.autostart"
             icon={Power}
             title={t("autostartTitle")}
             description={t("autostartDescription")}
@@ -730,7 +734,10 @@ export function SystemNetworkSettings() {
 
         <CliAccessSettings />
 
-        <section className="rounded-xl border bg-card p-4 space-y-4">
+        <section
+          data-settings-anchor="system.proxy"
+          className="rounded-xl border bg-card p-4 space-y-4"
+        >
           <div className="flex items-center gap-2">
             <Wifi className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold">{t("proxyTitle")}</h2>
@@ -822,7 +829,10 @@ export function SystemNetworkSettings() {
           </div>
         </section>
 
-        <section className="rounded-xl border bg-card p-4 space-y-4">
+        <section
+          data-settings-anchor="system.language"
+          className="rounded-xl border bg-card p-4 space-y-4"
+        >
           <div className="flex items-center gap-2">
             <Languages className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold">{t("languageTitle")}</h2>

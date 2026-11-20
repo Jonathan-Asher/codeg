@@ -103,6 +103,7 @@ export function ComputerUseSettings() {
         </section>
 
         <SettingsSection
+          anchor="computer-use.enable"
           icon={Monitor}
           title={t("switch.label")}
           description={t("switch.hint")}
@@ -202,6 +203,7 @@ function DriverSection() {
 
   return (
     <SettingsSection
+      anchor="computer-use.driver"
       icon={HardDrive}
       title={t("title")}
       description={t("description", { version: info?.version ?? "" })}
@@ -312,6 +314,7 @@ function MacPermissions({ enabled }: { enabled: boolean }) {
 
   return (
     <SettingsSection
+      anchor="computer-use.permissions"
       icon={ShieldCheck}
       title={tp("title")}
       description={tp("description")}

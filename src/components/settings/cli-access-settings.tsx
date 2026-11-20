@@ -65,6 +65,7 @@ export function CliAccessSettings() {
 
   return (
     <SettingsSection
+      anchor="system.cli"
       icon={Terminal}
       title={t("cliAccessTitle")}
       description={t("cliAccessDescription")}

@@ -130,12 +130,14 @@ export function PendingReminderSettingsSection() {
 
   return (
     <SettingsSection
+      anchor="general.reminders"
       icon={BellRing}
       title={t("title")}
       description={t("description")}
     >
       <SettingCard>
         <SettingRow
+          anchor="general.reminders.enabled"
           icon={BellRing}
           title={t("enabledTitle")}
           description={t("enabledHint")}
@@ -151,6 +153,7 @@ export function PendingReminderSettingsSection() {
         {settings.enabled && (
           <>
             <SettingRow
+              anchor="general.reminders.schedule"
               icon={Hourglass}
               title={t("scheduleTitle")}
               description={t("scheduleHint")}
@@ -181,6 +184,7 @@ export function PendingReminderSettingsSection() {
               }
             />
             <SettingRow
+              anchor="general.reminders.repeat"
               icon={Repeat}
               title={t("repeatTitle")}
               description={t("repeatHint")}
@@ -209,6 +213,7 @@ export function PendingReminderSettingsSection() {
               }
             />
             <SettingRow
+              anchor="general.reminders.quiet"
               icon={Moon}
               title={t("quietTitle")}
               description={t("quietHint")}

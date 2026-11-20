@@ -375,6 +375,7 @@ export function GeneralSettings() {
             with what the shell currently resolves to under them. A card holding
             a single row would only say the heading back one line lower. */}
         <SettingsSection
+          anchor="general.terminal"
           icon={SquareTerminal}
           title={t("terminalTitle")}
           description={
@@ -426,6 +427,7 @@ export function GeneralSettings() {
           {selectedShellId === TERMINAL_SHELL_OPTION_CUSTOM && (
             <SettingCard>
               <SettingRow
+                anchor="general.terminal.custom-path"
                 icon={FolderCog}
                 title={t("terminalShellCustomPath")}
                 description={t("terminalShellCustomHint")}
@@ -466,6 +468,7 @@ export function GeneralSettings() {
             ON for every command an agent runs, so the heading has to say what
             it does, not which category it files under. */}
         <SettingsSection
+          anchor="general.colorize"
           icon={Palette}
           title={t("colorizeCommandOutput")}
           description={t("colorizeCommandOutputDescription")}
@@ -493,6 +496,7 @@ export function GeneralSettings() {
           // turns acceleration *off*, so labelling it "Rendering" would read as
           // the opposite of what it does.
           <SettingsSection
+            anchor="general.rendering"
             icon={Cpu}
             title={t("disableHardwareAcceleration")}
             description={t("renderingDescription")}

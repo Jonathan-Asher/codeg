@@ -246,6 +246,7 @@ export function MentionPanelSettingsSection() {
 
   return (
     <SettingsSection
+      anchor="general.mention-panel"
       icon={AtSign}
       title={t("title")}
       description={t("description")}

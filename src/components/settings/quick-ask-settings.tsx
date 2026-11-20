@@ -117,12 +117,14 @@ export function QuickAskSettingsSection() {
 
   return (
     <SettingsSection
+      anchor="general.quick-ask"
       icon={MessageCircleQuestion}
       title={t("title")}
       description={t("description")}
     >
       <SettingCard>
         <SettingRow
+          anchor="general.quick-ask.enable"
           icon={Keyboard}
           title={t("enable")}
           description={t("enableDescription")}
@@ -137,6 +139,7 @@ export function QuickAskSettingsSection() {
           }
         />
         <SettingRow
+          anchor="general.quick-ask.shortcut"
           title={t("shortcut")}
           description={t("shortcutDescription")}
           control={
@@ -199,6 +202,7 @@ export function QuickAskSettingsSection() {
           )}
         </SettingRow>
         <SettingRow
+          anchor="general.quick-ask.hide-on-blur"
           title={t("hideOnBlur")}
           description={t("hideOnBlurDescription")}
           htmlFor="quick-ask-hide-on-blur"

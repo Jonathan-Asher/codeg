@@ -459,7 +459,10 @@ export function VersionControlSettings() {
         </section>
 
         {/* ---- Git Configuration ---- */}
-        <section className="rounded-xl border bg-card p-4 space-y-4">
+        <section
+          data-settings-anchor="version-control.git"
+          className="rounded-xl border bg-card p-4 space-y-4"
+        >
           <div className="flex items-center gap-2">
             <GitBranch className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold">{t("gitTitle")}</h2>
@@ -544,7 +547,10 @@ export function VersionControlSettings() {
         </section>
 
         {/* ---- GitHub Accounts ---- */}
-        <section className="rounded-xl border bg-card p-4 space-y-4">
+        <section
+          data-settings-anchor="version-control.github"
+          className="rounded-xl border bg-card p-4 space-y-4"
+        >
           <div className="flex items-center gap-2">
             <Github className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold">{t("githubTitle")}</h2>
@@ -582,7 +588,10 @@ export function VersionControlSettings() {
         </section>
 
         {/* ---- GitLab Accounts ---- */}
-        <section className="rounded-xl border bg-card p-4 space-y-4">
+        <section
+          data-settings-anchor="version-control.gitlab"
+          className="rounded-xl border bg-card p-4 space-y-4"
+        >
           <div className="flex items-center gap-2">
             <Gitlab className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold">{t("gitlabTitle")}</h2>
@@ -620,7 +629,10 @@ export function VersionControlSettings() {
         </section>
 
         {/* ---- Gitea Accounts ---- */}
-        <section className="rounded-xl border bg-card p-4 space-y-4">
+        <section
+          data-settings-anchor="version-control.gitea"
+          className="rounded-xl border bg-card p-4 space-y-4"
+        >
           <div className="flex items-center gap-2">
             <GitFork className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold">{t("giteaTitle")}</h2>
@@ -658,7 +670,10 @@ export function VersionControlSettings() {
         </section>
 
         {/* ---- CNB Accounts ---- */}
-        <section className="rounded-xl border bg-card p-4 space-y-4">
+        <section
+          data-settings-anchor="version-control.cnb"
+          className="rounded-xl border bg-card p-4 space-y-4"
+        >
           <div className="flex items-center gap-2">
             <Cloud className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold">{t("cnbTitle")}</h2>
@@ -696,7 +711,10 @@ export function VersionControlSettings() {
         </section>
 
         {/* ---- Git Accounts (non-forge) ---- */}
-        <section className="rounded-xl border bg-card p-4 space-y-4">
+        <section
+          data-settings-anchor="version-control.accounts"
+          className="rounded-xl border bg-card p-4 space-y-4"
+        >
           <div className="flex items-center gap-2">
             <Globe className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold">

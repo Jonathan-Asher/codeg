@@ -65,6 +65,13 @@
       "computer_use": "电脑操作",
       "quick_messages": "快捷消息",
       "logs": "运行日志"
+    },
+    "search": {
+      "label": "搜索设置",
+      "placeholder": "搜索设置",
+      "clear": "清除搜索",
+      "noResults": "没有与“{query}”匹配的设置",
+      "resultsLabel": "匹配的设置"
     }
   },
   "AppearanceSettings": {
@@ -514,7 +521,8 @@
       "conflict": "快捷键已被「{title}」占用",
       "updated": "快捷键已更新",
       "invalid": "快捷键无效，请重试",
-      "reset": "已恢复默认快捷键"
+      "reset": "已恢复默认快捷键",
+      "takenOver": "{shortcut} 现在执行“{action}”。已取消分配：{others}。"
     },
     "actions": {
       "toggle_search": {
@@ -664,7 +672,31 @@
       "read_last_reply": {
         "title": "朗读最新回复",
         "description": "朗读当前对话中最新的回复，或停止朗读"
+      },
+      "search_settings": {
+        "title": "搜索设置",
+        "description": "将光标放入设置窗口的搜索框"
       }
+    },
+    "contexts": {
+      "global": "全局",
+      "workspace": "工作区",
+      "terminal": "终端",
+      "composer": "消息输入框",
+      "settings": "设置窗口"
+    },
+    "focus": {
+      "workspace": "在工作区中",
+      "terminal": "终端获得焦点时",
+      "composer": "输入消息时",
+      "settings": "在设置窗口中"
+    },
+    "shadowedBy": "{focus}，{shortcut} 会改为执行“{action}”。",
+    "shadows": "{focus}，{shortcut} 会执行此操作，而不是“{action}”。",
+    "conflict": {
+      "message": "{shortcut} 已在同一位置被 {actions} 使用，只能保留其中一个。",
+      "takeOver": "改为用于“{action}”",
+      "cancel": "取消"
     }
   },
   "SkillsSettings": {
@@ -2841,7 +2873,13 @@
       "recentHeading": "最近",
       "archivedBadge": "已归档",
       "offline": "离线 — 搜索需要连接服务器",
-      "failed": "搜索失败，请重试。"
+      "failed": "搜索失败，请重试。",
+      "tabAll": "全部",
+      "allPlaceholder": "搜索会话和消息...",
+      "typeToSearchAll": "输入关键词搜索会话和消息",
+      "sessionsHeading": "会话",
+      "showAllMessages": "显示所有匹配的消息",
+      "tabHint": "Tab：下一个搜索"
     },
     "folderTitleBar": {
       "showSidebar": "显示侧边栏",
@@ -11534,5 +11572,49 @@
     "lookupFailedHere": "无法查找会话 {session}。",
     "serverTooOld": "{server} 运行的 codeg 版本较旧，无法打开会话链接。",
     "otherServer": "此会话位于另一台 codeg 服务器（{server}）上。"
+  },
+  "SettingsSearch": {
+    "keywords": {
+      "appearance": "外观, 主题, 样式, 界面, 皮肤",
+      "appearance_theme": "深色模式, 浅色模式, 暗色, 夜间模式, 黑暗, 明亮",
+      "appearance_theme_mode": "深色模式, 浅色模式, 跟随系统",
+      "appearance_theme_color": "强调色, 配色, 颜色",
+      "appearance_zoom": "缩放, 放大, 缩小, 大小, 比例",
+      "appearance_chat_text_size": "字体大小, 字号, 文字大小, 放大文字",
+      "appearance_fonts": "字体, 等宽字体, 连字",
+      "appearance_background": "壁纸, 背景图, 图片",
+      "appearance_chat_animations": "动画, 动效, 减少动态效果",
+      "general_terminal": "shell, 命令行, 控制台",
+      "general_rendering": "GPU, 显卡, 白屏, 闪烁",
+      "general_mention_panel": "提及, @, 引用",
+      "general_close_behavior": "托盘, 退出, 最小化, 关闭按钮",
+      "general_auto_resume": "重启, 崩溃, 继续, 恢复",
+      "general_limit_continue": "限额, 用量限制, 配额",
+      "general_desktop_notifications": "通知, 提醒, 弹窗, 横幅",
+      "general_window_attention": "程序坞, 任务栏, 跳动, 闪烁, 角标",
+      "general_sounds": "声音, 音效, 提示音, 铃声",
+      "general_read_aloud": "朗读, 语音, 文字转语音, TTS",
+      "general_iphone_push": "推送通知, 手机, 移动端",
+      "general_dictation": "语音转文字, 语音输入, 听写, 翻译",
+      "general_talk": "语音, 对话, 说话",
+      "general_talk_mac": "语音, 麦克风, 说话, 免提",
+      "collaboration_delegation": "子智能体, 委托, 多智能体",
+      "agents": "智能体, SDK, CLI, 安装",
+      "model_providers": "API 密钥, 接口地址, Base URL, 供应商",
+      "quick_messages": "片段, 模板, 常用语",
+      "browser_links": "打开链接, 默认浏览器, 外部浏览器",
+      "browser_clear": "Cookie, 缓存, 历史记录, 网站数据",
+      "computer_use": "屏幕, 鼠标, 键盘, 桌面控制",
+      "computer_use_permissions": "辅助功能, 屏幕录制, 隐私",
+      "shortcuts": "键盘, 热键, 按键绑定, 快捷方式",
+      "version_control_accounts": "凭据, 令牌, 密码, 登录",
+      "chat_channels": "机器人, 即时通讯, 消息",
+      "web_service": "服务器, 远程访问, 端口, 局域网, 手机",
+      "logs": "调试, 诊断, 日志级别",
+      "system_update": "升级, 版本, 更新, 发布",
+      "system_autostart": "开机启动, 登录项, 自启动",
+      "system_language": "语言, 翻译, 区域",
+      "system_data": "备份, 同步, 导出, 导入, 恢复"
+    }
   }
 }

@@ -94,6 +94,7 @@ export function CloseBehaviorSettingsSection() {
 
   return (
     <SettingsSection
+      anchor="general.close-behavior"
       icon={PanelBottomClose}
       title={t("title")}
       description={trayAvailable ? t("description") : t("trayUnavailable")}

@@ -426,6 +426,7 @@ export function ComputerSettingsSection() {
 
   return (
     <SettingsSection
+      anchor="computer-use.sharing"
       icon={AppWindow}
       title={t("title")}
       description={t("description")}
@@ -451,6 +452,7 @@ export function ComputerSettingsSection() {
 
       <SettingCard>
         <SettingRow
+          anchor="computer-use.sharing.ttl"
           title={t("ttl.label")}
           description={t("ttl.hint")}
           htmlFor="computer-grant-ttl"
@@ -499,6 +501,7 @@ export function ComputerSettingsSection() {
         )}
         {desktopHere && (
           <SettingRow
+            anchor="computer-use.sharing.strip"
             icon={PanelTop}
             title={t("strip.label")}
             description={t("strip.hint")}
@@ -584,6 +587,7 @@ export function ComputerSettingsSection() {
       {available && (
         <SettingCard>
           <SettingRow
+            anchor="computer-use.sharing.launch"
             icon={AppWindow}
             title={t("launch.label")}
             description={t("launch.hint")}
@@ -600,6 +604,7 @@ export function ComputerSettingsSection() {
             }
           />
           <SettingRow
+            anchor="computer-use.sharing.clipboard"
             icon={ClipboardList}
             title={t("clipboard.label")}
             description={t("clipboard.hint")}
@@ -722,6 +727,7 @@ function BlocklistRow({
   return (
     <AlertDialog open={confirmRestore} onOpenChange={setConfirmRestore}>
       <SettingRow
+        anchor="computer-use.sharing.blocklist"
         title={t("blocklist.label")}
         description={t("blocklist.hint")}
         htmlFor="computer-blocklist"
@@ -969,6 +975,7 @@ function StopShortcutRow({
 
   return (
     <SettingRow
+      anchor="computer-use.sharing.stop-key"
       icon={Keyboard}
       title={t("label")}
       description={t("hint")}

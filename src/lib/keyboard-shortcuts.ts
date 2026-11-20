@@ -36,6 +36,33 @@ export type ShortcutActionId =
   | "chat_text_zoom_reset"
   | "cycle_session_width"
   | "read_last_reply"
+  | "search_settings"
+
+/**
+ * Where an action's key listener runs, which decides who else can hold the
+ * same chord. Each one is read off the listener that dispatches it:
+ *
+ *   - `global`: `AppearanceProvider`, a capture listener on `window` in every
+ *     window (the workspace, Settings, the rest). It never stops the event, so
+ *     whatever else holds the chord runs too.
+ *   - `workspace`: the workspace window's own shortcuts: the
+ *     `WorkspaceChromeController` chain on `document`, the sidebar's session
+ *     stepping and the transcript's read-aloud. They see a key wherever focus
+ *     is in that window, the terminal and the message box included.
+ *   - `terminal`: `TerminalProvider`, a capture listener on `window` that acts
+ *     only while the terminal panel has focus (or the pointer) and then stops
+ *     the event, so the workspace listeners on `document` never see it.
+ *   - `composer`: the message box and the answer fields (`decideComposerKey`,
+ *     the question and plan cards). They handle the key where it was typed and
+ *     let it go on, so a workspace listener still sees it.
+ *   - `settings`: the Settings window's own listeners.
+ */
+export type ShortcutContext =
+  | "global"
+  | "workspace"
+  | "terminal"
+  | "composer"
+  | "settings"
 
 export interface ShortcutDefinition {
   id: ShortcutActionId
@@ -135,7 +162,52 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: "read_last_reply",
   },
+  {
+    id: "search_settings",
+  },
 ]
+
+/** Each action's context, from the listener that dispatches it (see above). */
+export const SHORTCUT_CONTEXTS: Record<ShortcutActionId, ShortcutContext> = {
+  toggle_search: "workspace",
+  toggle_sidebar: "workspace",
+  toggle_terminal: "workspace",
+  new_terminal_tab: "terminal",
+  close_current_terminal_tab: "terminal",
+  toggle_aux_panel: "workspace",
+  new_conversation: "workspace",
+  open_folder: "workspace",
+  open_settings: "workspace",
+  close_current_tab: "workspace",
+  reopen_last_closed_tab: "workspace",
+  close_all_file_tabs: "workspace",
+  close_window: "workspace",
+  next_tab: "workspace",
+  prev_tab: "workspace",
+  next_session: "workspace",
+  prev_session: "workspace",
+  switch_tab_1: "workspace",
+  switch_tab_2: "workspace",
+  switch_tab_3: "workspace",
+  switch_tab_4: "workspace",
+  switch_tab_5: "workspace",
+  switch_tab_6: "workspace",
+  switch_tab_7: "workspace",
+  switch_tab_8: "workspace",
+  switch_tab_9: "workspace",
+  send_message: "composer",
+  newline_in_message: "composer",
+  toggle_custom_style: "global",
+  zoom_in: "global",
+  zoom_out: "global",
+  zoom_reset: "global",
+  chat_text_zoom_in: "global",
+  chat_text_zoom_out: "global",
+  chat_text_zoom_reset: "global",
+  cycle_session_width: "global",
+  read_last_reply: "workspace",
+  search_settings: "settings",
+}
 
 /** Actions that allow shortcuts without modifier keys (e.g. plain Enter). */
 export const INPUT_SHORTCUT_IDS = new Set<ShortcutActionId>([
@@ -144,22 +216,167 @@ export const INPUT_SHORTCUT_IDS = new Set<ShortcutActionId>([
 ])
 
 /**
- * Pairs that are meant to share a chord: the two actions never apply to the
- * same surface, so one key can serve both.
+ * Where a key press can happen, as far as the listeners above can tell apart.
+ * A context is active in some of them: the workspace's shortcuts hear a key
+ * whether the terminal, the message box or anything else in that window has
+ * focus; the terminal's only while the terminal has it.
  */
-const SHARED_SHORTCUT_PAIRS: Array<[ShortcutActionId, ShortcutActionId]> = [
-  ["new_terminal_tab", "new_conversation"],
-  ["close_current_terminal_tab", "close_current_tab"],
-]
+export type ShortcutFocus = "workspace" | "terminal" | "composer" | "settings"
 
+const ACTIVE_IN: Record<ShortcutContext, readonly ShortcutFocus[]> = {
+  global: ["workspace", "terminal", "composer", "settings"],
+  workspace: ["workspace", "terminal", "composer"],
+  terminal: ["terminal"],
+  composer: ["composer"],
+  settings: ["settings"],
+}
+
+/**
+ * Where an action is for: the focus the user presses it in and expects it to
+ * work. A workspace action that loses its chord while the terminal has focus
+ * still does its job everywhere else in the window; one that loses it in the
+ * workspace itself is broken.
+ */
+const HOME_OF: Record<ShortcutContext, readonly ShortcutFocus[]> = {
+  global: ["workspace", "terminal", "composer", "settings"],
+  workspace: ["workspace"],
+  terminal: ["terminal"],
+  composer: ["composer"],
+  settings: ["settings"],
+}
+
+export function shortcutContextOf(id: ShortcutActionId): ShortcutContext {
+  return SHORTCUT_CONTEXTS[id] ?? "global"
+}
+
+/**
+ * Which of two contexts takes a chord they share, with `focus` holding the
+ * keyboard: `a`, `b`, or `both` when neither stops the other.
+ *
+ * Only one pair has a winner. The terminal's capture listener on `window`
+ * stops the event once it acts, so the workspace's listeners on `document`
+ * never hear it. Every other pair runs both: the global listeners never stop
+ * an event, the message box lets the key go on to the workspace, and two
+ * actions of one context share one listener, where the first match shadows
+ * the rest.
+ */
+function precedence(
+  a: ShortcutContext,
+  b: ShortcutContext
+): "a" | "b" | "both" {
+  if (a === "terminal" && b === "workspace") return "a"
+  if (a === "workspace" && b === "terminal") return "b"
+  return "both"
+}
+
+/** One focus where an action keeps a shared chord and another loses it. */
+export interface ShortcutShadow {
+  focus: ShortcutFocus
+  winner: ShortcutActionId
+  loser: ShortcutActionId
+}
+
+export interface ShortcutPairing {
+  /** Some press would run both, or take one where it is meant to work. */
+  collides: boolean
+  /** Where one of the two loses the chord without being broken by it. */
+  shadows: ShortcutShadow[]
+}
+
+/**
+ * What it means for actions `a` and `b` to hold one chord, from where each
+ * listens. They collide when a focus both are active in would run both, or
+ * would hand the chord to one where the other is meant to work. Otherwise each
+ * loss is a shadow worth saying: while the terminal has focus, the workspace's
+ * action on the terminal's chord does not run.
+ */
+export function pairShortcutActions(
+  a: ShortcutActionId,
+  b: ShortcutActionId
+): ShortcutPairing {
+  const contextA = shortcutContextOf(a)
+  const contextB = shortcutContextOf(b)
+  const shared = ACTIVE_IN[contextA].filter((focus) =>
+    ACTIVE_IN[contextB].includes(focus)
+  )
+  const shadows: ShortcutShadow[] = []
+  for (const focus of shared) {
+    const winner = precedence(contextA, contextB)
+    if (winner === "both") return { collides: true, shadows: [] }
+    const [kept, lost, lostContext] =
+      winner === "a" ? [a, b, contextB] : [b, a, contextA]
+    if (HOME_OF[lostContext].includes(focus)) {
+      return { collides: true, shadows: [] }
+    }
+    shadows.push({ focus, winner: kept, loser: lost })
+  }
+  return { collides: false, shadows }
+}
+
+/** Two actions can hold one chord: no press runs both or breaks either. */
 export function canShareShortcut(
   a: ShortcutActionId,
   b: ShortcutActionId
 ): boolean {
-  return SHARED_SHORTCUT_PAIRS.some(
-    ([left, right]) =>
-      (left === a && right === b) || (left === b && right === a)
-  )
+  return a !== b && !pairShortcutActions(a, b).collides
+}
+
+export interface ShortcutAssignment {
+  /** Actions on the chord that cannot keep it if `actionId` takes it. */
+  clashes: ShortcutActionId[]
+  /** Where the chord would do something else, with both keeping it. */
+  shadows: ShortcutShadow[]
+}
+
+/**
+ * What binding `chord` to `actionId` would do to the other bindings in
+ * `shortcuts`, by matcher semantics (`shortcutsConflict`) and context.
+ */
+export function analyzeShortcutAssignment(
+  actionId: ShortcutActionId,
+  chord: string,
+  shortcuts: ShortcutSettings
+): ShortcutAssignment {
+  const clashes: ShortcutActionId[] = []
+  const shadows: ShortcutShadow[] = []
+  for (const definition of SHORTCUT_DEFINITIONS) {
+    if (definition.id === actionId) continue
+    if (!shortcutsConflict(shortcuts[definition.id], chord)) continue
+    const pairing = pairShortcutActions(actionId, definition.id)
+    if (pairing.collides) clashes.push(definition.id)
+    else shadows.push(...pairing.shadows)
+  }
+  return { clashes, shadows }
+}
+
+/**
+ * The shadows an existing binding lives with, for the settings row to say:
+ * every other action on its chord that it shares a focus with.
+ */
+export function shortcutShadowsOf(
+  actionId: ShortcutActionId,
+  shortcuts: ShortcutSettings
+): ShortcutShadow[] {
+  const chord = shortcuts[actionId]
+  if (!chord) return []
+  return analyzeShortcutAssignment(actionId, chord, shortcuts).shadows
+}
+
+/**
+ * `chord` on `actionId`, and the actions it takes the chord from unassigned,
+ * so no press runs two of them.
+ */
+export function withShortcutTakenOver(
+  shortcuts: ShortcutSettings,
+  actionId: ShortcutActionId,
+  chord: string,
+  from: readonly ShortcutActionId[]
+): ShortcutSettings {
+  const next: ShortcutSettings = { ...shortcuts, [actionId]: chord }
+  for (const id of from) {
+    if (id !== actionId) next[id] = ""
+  }
+  return next
 }
 
 export type ShortcutSettings = Record<ShortcutActionId, string>
@@ -223,6 +440,11 @@ export const DEFAULT_SHORTCUTS: ShortcutSettings = {
   // listen: Cmd/Ctrl+Shift+R is the browsers' hard reload, which the web
   // build must leave alone.
   read_last_reply: "mod+shift+l",
+  // Focus the Settings window's search box. Only that window listens, so it
+  // takes the chord from no workspace binding; in the web build it stands in
+  // for the browser's find on that page, which would only search the one page
+  // on screen.
+  search_settings: "mod+f",
 }
 
 export const SHORTCUTS_STORAGE_KEY = "settings:shortcuts:v1"

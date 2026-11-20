@@ -113,7 +113,10 @@ export function AppearanceSettings() {
     <ScrollArea className="h-full">
       <div className="w-full space-y-4 p-3 md:p-4">
         {/* ===== Theme Mode ===== */}
-        <section className="rounded-xl border bg-card p-4 space-y-4">
+        <section
+          data-settings-anchor="appearance.theme"
+          className="rounded-xl border bg-card p-4 space-y-4"
+        >
           <div className="flex items-center gap-2">
             <Sun className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold">{t("sectionTitle")}</h2>
@@ -175,7 +178,10 @@ export function AppearanceSettings() {
         </section>
 
         {/* ===== Theme Color ===== */}
-        <section className="rounded-xl border bg-card p-4 space-y-4">
+        <section
+          data-settings-anchor="appearance.theme-color"
+          className="rounded-xl border bg-card p-4 space-y-4"
+        >
           <div className="flex items-center gap-2">
             <span
               className="size-4 rounded-full border"
@@ -230,7 +236,10 @@ export function AppearanceSettings() {
         <CustomStyleSection />
 
         {/* ===== Zoom Level ===== */}
-        <section className="rounded-xl border bg-card p-4 space-y-4">
+        <section
+          data-settings-anchor="appearance.zoom"
+          className="rounded-xl border bg-card p-4 space-y-4"
+        >
           <div className="flex items-center gap-2">
             <Type className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold">
@@ -271,6 +280,7 @@ export function AppearanceSettings() {
 
         {/* ===== Chat text size ===== */}
         <section
+          data-settings-anchor="appearance.chat-text-size"
           className="rounded-xl border bg-card p-4 space-y-4"
           data-testid="chat-text-size-section"
         >
@@ -328,6 +338,7 @@ export function AppearanceSettings() {
 
         {/* ===== Session width ===== */}
         <section
+          data-settings-anchor="appearance.session-width"
           className="rounded-xl border bg-card p-4 space-y-4"
           data-testid="session-width-section"
         >
@@ -429,7 +440,10 @@ export function AppearanceSettings() {
         <WorkspaceBackgroundSection />
 
         {/* ===== New conversation — mode selection area ===== */}
-        <section className="rounded-xl border bg-card p-4 space-y-4">
+        <section
+          data-settings-anchor="appearance.welcome-panel"
+          className="rounded-xl border bg-card p-4 space-y-4"
+        >
           <div className="flex items-center gap-2">
             <LayoutGrid className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold">
@@ -453,7 +467,10 @@ export function AppearanceSettings() {
         </section>
 
         {/* ===== Chat animations ===== */}
-        <section className="rounded-xl border bg-card p-4 space-y-4">
+        <section
+          data-settings-anchor="appearance.chat-animations"
+          className="rounded-xl border bg-card p-4 space-y-4"
+        >
           <div className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold">
@@ -479,7 +496,10 @@ export function AppearanceSettings() {
         <ChatHtmlSettingsSection />
 
         {/* ===== Chat content width ===== */}
-        <section className="rounded-xl border bg-card p-4 space-y-4">
+        <section
+          data-settings-anchor="appearance.chat-width"
+          className="rounded-xl border bg-card p-4 space-y-4"
+        >
           <div className="flex items-center gap-2">
             <MoveHorizontal className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold">

@@ -290,6 +290,7 @@ export function DelegationSettingsSection() {
 
   return (
     <SettingsSection
+      anchor="collaboration.delegation"
       icon={Bubbles}
       title={t("title")}
       description={t("description")}
@@ -317,6 +318,7 @@ export function DelegationSettingsSection() {
         <TabsContent value="general" className="pt-2">
           <SettingCard>
             <SettingRow
+              anchor="collaboration.delegation.enable"
               icon={Power}
               title={t("enable")}
               description={t("enableHint")}
@@ -344,6 +346,7 @@ export function DelegationSettingsSection() {
               </p>
             )}
             <SettingRow
+              anchor="collaboration.delegation.depth"
               icon={Gauge}
               title={t("depthLimit")}
               description={t("depthHint", { min: DEPTH_MIN, max: DEPTH_MAX })}

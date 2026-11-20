@@ -189,6 +189,7 @@ export function DesktopNotificationSettingsSection() {
     // it rather than in a card repeating "Enable desktop notifications". With
     // them on the heading also folds those knobs away, and starts folded.
     <SettingsSection
+      anchor="general.desktop-notifications"
       icon={Bell}
       title={t("title")}
       description={t("description")}
@@ -216,6 +217,7 @@ export function DesktopNotificationSettingsSection() {
       {prefs.enabled && permission !== null && (
         <SettingCard>
           <SettingRow
+            anchor="general.desktop-notifications.permission"
             icon={ShieldCheck}
             title={t("permissionTitle")}
             description={t(PERMISSION_HINT_KEYS[permission])}
@@ -318,6 +320,7 @@ export function DesktopNotificationSettingsSection() {
       {prefs.enabled && (
         <SettingCard>
           <SettingRow
+            anchor="general.desktop-notifications.when"
             icon={Clock}
             title={t("whenTitle")}
             description={t("whenHint")}
@@ -352,6 +355,7 @@ export function DesktopNotificationSettingsSection() {
           />
 
           <SettingRow
+            anchor="general.desktop-notifications.hide-body"
             icon={EyeOff}
             title={t("hideBody")}
             description={t("hideBodyHint")}
@@ -371,6 +375,7 @@ export function DesktopNotificationSettingsSection() {
               are a single row whose control is the list — not one row per
               event, which would repeat the same explanation six times. */}
           <SettingRow
+            anchor="general.desktop-notifications.events"
             icon={ListChecks}
             title={t("eventsTitle")}
             description={t("eventsHint")}

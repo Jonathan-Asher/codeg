@@ -83,6 +83,7 @@ export function WindowAttentionSettingsSection() {
 
   return (
     <SettingsSection
+      anchor="general.window-attention"
       icon={PanelBottom}
       title={t("title")}
       description={t(DESCRIPTION_KEYS[platform])}

@@ -236,6 +236,7 @@ export function IphonePushSettingsSection() {
 
   return (
     <SettingsSection
+      anchor="general.iphone-push"
       icon={Smartphone}
       title={t("title")}
       description={t("description")}
@@ -399,6 +400,7 @@ export function IphonePushSettingsSection() {
 
       <SettingCard className="mt-3">
         <SettingRow
+          anchor="general.iphone-push.devices"
           icon={Smartphone}
           title={t("devicesTitle")}
           description={devices.length === 0 ? t("devicesEmpty") : t("awayHint")}
