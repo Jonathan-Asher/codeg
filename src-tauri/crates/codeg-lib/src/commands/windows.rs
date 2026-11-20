@@ -2011,11 +2011,23 @@ const MACOS_TRAY_TEMPLATE_PNG: &[u8] = include_bytes!("../../../../icons/tray-ic
 
 #[cfg(all(feature = "tauri-runtime", target_os = "macos"))]
 fn load_macos_tray_template_icon() -> Result<tauri::image::Image<'static>, String> {
+    load_macos_tray_icon(false)
+}
+
+/// The template icon, with the "needs you" dot when `attention`.
+#[cfg(all(feature = "tauri-runtime", target_os = "macos"))]
+fn load_macos_tray_icon(attention: bool) -> Result<tauri::image::Image<'static>, String> {
     let decoded = image::load_from_memory(MACOS_TRAY_TEMPLATE_PNG)
         .map_err(|e| format!("decode tray template png: {e}"))?
         .to_rgba8();
     let (w, h) = (decoded.width(), decoded.height());
-    Ok(tauri::image::Image::new_owned(decoded.into_raw(), w, h))
+    let rgba = decoded.into_raw();
+    let rgba = if attention {
+        crate::attention_tray::model::with_attention_dot(&rgba, w, h)
+    } else {
+        rgba
+    };
+    Ok(tauri::image::Image::new_owned(rgba, w, h))
 }
 
 /// Stable id namespace for tray menu items. Routed through the app-wide
@@ -2023,7 +2035,17 @@ fn load_macos_tray_template_icon() -> Result<tauri::image::Image<'static>, Strin
 pub const TRAY_MENU_ID_PREFIX: &str = "tray:";
 pub const TRAY_MENU_ID_SHOW: &str = "tray:show";
 pub const TRAY_MENU_ID_QUIT: &str = "tray:quit";
+/// A waiting session's entry: the rest of the id is the `codeg://` link it
+/// opens, so a click never depends on the list it was shown from.
+pub const TRAY_MENU_ID_ATTENTION_PREFIX: &str = "tray:attention:";
 pub const TRAY_ICON_ID: &str = "codeg-tray";
+
+/// The link a waiting session's menu entry opens, or `None` for any other
+/// item.
+pub fn tray_attention_link(id: &str) -> Option<&str> {
+    id.strip_prefix(TRAY_MENU_ID_ATTENTION_PREFIX)
+        .filter(|link| !link.is_empty())
+}
 
 /// True after `install_tray_icon` returns `Ok`. The hide-on-close path
 /// in `lib.rs` consults this so we don't strand the user on systems
@@ -2437,22 +2459,10 @@ pub fn install_tray_icon(
     app: &AppHandle,
     locale: crate::models::system::AppLocale,
 ) -> tauri::Result<()> {
-    use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem};
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
-    let labels = tray_labels_for(locale);
-    let show_item = MenuItem::with_id(
-        app,
-        TRAY_MENU_ID_SHOW,
-        labels.show_workspace,
-        true,
-        None::<&str>,
-    )?;
-    let separator = PredefinedMenuItem::separator(app)?;
-    let quit_item = MenuItem::with_id(app, TRAY_MENU_ID_QUIT, labels.quit, true, None::<&str>)?;
-    let menu = MenuBuilder::new(app)
-        .items(&[&show_item, &separator, &quit_item])
-        .build()?;
+    set_tray_locale_value(locale);
+    let menu = build_tray_menu(app, locale, &tray_attention_view())?;
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ICON_ID)
         .tooltip("Codeg")
@@ -2514,13 +2524,72 @@ pub fn refresh_tray_menu(
     app: &AppHandle,
     locale: crate::models::system::AppLocale,
 ) -> tauri::Result<()> {
-    use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem};
-
+    set_tray_locale_value(locale);
+    // The waiting sessions' entries are worded again by their watch.
+    crate::attention_tray::relabel();
     let Some(tray) = app.tray_by_id(TRAY_ICON_ID) else {
         return Ok(());
     };
+    let menu = build_tray_menu(app, locale, &tray_attention_view())?;
+    tray.set_menu(Some(menu))?;
+    Ok(())
+}
+
+/// The language the tray speaks: the last one `install_tray_icon` or
+/// `refresh_tray_menu` was given.
+#[cfg(feature = "tauri-runtime")]
+static TRAY_LOCALE: Mutex<crate::models::system::AppLocale> =
+    Mutex::new(crate::models::system::AppLocale::En);
+
+/// What the tray shows about the sessions waiting on the user (from
+/// `attention_tray`), kept so a menu rebuilt for a new language keeps it.
+#[cfg(feature = "tauri-runtime")]
+static TRAY_ATTENTION: Mutex<Option<crate::attention_tray::model::TrayView>> = Mutex::new(None);
+
+#[cfg(feature = "tauri-runtime")]
+fn set_tray_locale_value(locale: crate::models::system::AppLocale) {
+    *TRAY_LOCALE.lock().unwrap_or_else(|e| e.into_inner()) = locale;
+}
+
+#[cfg(feature = "tauri-runtime")]
+pub fn tray_locale() -> crate::models::system::AppLocale {
+    *TRAY_LOCALE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+#[cfg(feature = "tauri-runtime")]
+fn tray_attention_view() -> crate::attention_tray::model::TrayView {
+    TRAY_ATTENTION
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .unwrap_or_default()
+}
+
+/// The tray menu: the sessions waiting on the user first (a disabled header,
+/// then one entry each, opening it), then Show Workspace and Quit as always.
+#[cfg(feature = "tauri-runtime")]
+fn build_tray_menu(
+    app: &AppHandle,
+    locale: crate::models::system::AppLocale,
+    attention: &crate::attention_tray::model::TrayView,
+) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem};
 
     let labels = tray_labels_for(locale);
+    let mut builder = MenuBuilder::new(app);
+    if let Some(header) = &attention.header {
+        builder = builder.item(&MenuItem::new(app, header, false, None::<&str>)?);
+        for entry in &attention.entries {
+            builder = builder.item(&MenuItem::with_id(
+                app,
+                format!("{TRAY_MENU_ID_ATTENTION_PREFIX}{}", entry.link),
+                &entry.label,
+                true,
+                None::<&str>,
+            )?);
+        }
+        builder = builder.item(&PredefinedMenuItem::separator(app)?);
+    }
     let show_item = MenuItem::with_id(
         app,
         TRAY_MENU_ID_SHOW,
@@ -2530,12 +2599,53 @@ pub fn refresh_tray_menu(
     )?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItem::with_id(app, TRAY_MENU_ID_QUIT, labels.quit, true, None::<&str>)?;
-    let menu = MenuBuilder::new(app)
-        .items(&[&show_item, &separator, &quit_item])
-        .build()?;
+    builder.items(&[&show_item, &separator, &quit_item]).build()
+}
 
-    tray.set_menu(Some(menu))?;
-    Ok(())
+/// Show what waits on the user on the tray icon, as `update` says changed.
+/// macOS: the template icon with a "needs you" dot and the count beside it,
+/// and a left click opens the list instead of the workspace while anything
+/// waits. Everywhere: the tooltip and the menu's entries.
+#[cfg(feature = "tauri-runtime")]
+pub fn show_tray_attention(
+    app: &AppHandle,
+    view: &crate::attention_tray::model::TrayView,
+    update: &crate::attention_tray::model::TrayUpdate,
+) {
+    *TRAY_ATTENTION.lock().unwrap_or_else(|e| e.into_inner()) = Some(view.clone());
+    let Some(tray) = app.tray_by_id(TRAY_ICON_ID) else {
+        return;
+    };
+    if update.menu {
+        match build_tray_menu(app, tray_locale(), view) {
+            Ok(menu) => {
+                if let Err(e) = tray.set_menu(Some(menu)) {
+                    tracing::warn!("[Tray] failed to set the menu: {e}");
+                }
+            }
+            Err(e) => tracing::warn!("[Tray] failed to build the menu: {e}"),
+        }
+    }
+    if let Some(tooltip) = &update.tooltip {
+        let _ = tray.set_tooltip(Some(tooltip));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(attention) = update.attention_icon {
+            match load_macos_tray_icon(attention) {
+                Ok(icon) => {
+                    if let Err(e) = tray.set_icon_with_as_template(Some(icon), true) {
+                        tracing::warn!("[Tray] failed to set the icon: {e}");
+                    }
+                }
+                Err(e) => tracing::warn!("[Tray] failed to load the icon: {e}"),
+            }
+            let _ = tray.set_show_menu_on_left_click(attention);
+        }
+        if let Some(title) = &update.title {
+            let _ = tray.set_title(title.as_deref());
+        }
+    }
 }
 
 /// Push the current effective UI locale to the system tray. Called by

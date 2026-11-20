@@ -496,10 +496,23 @@ A reminder due while someone looks at that session is skipped; one due in the
 quiet hours waits for their end; several due at once (the machine slept) go
 out as one, the latest.
 
-The desktop shows the count on the dock icon and as "Waiting for you (N)" in
-the sidebar header; its list gives each item's age, and a click opens the
-session. A browser shows the same list (and the count on the app badge of an
-installed web app).
+The desktop shows "Waiting for you (N)" in the sidebar header; its list gives
+each item's age, and a click opens the session. A browser shows the same list
+(and the count on the app badge of an installed web app).
+
+The desktop app's Dock badge and menu-bar icon count the waiting sessions of
+this machine AND of every saved remote connection, its window open or not
+(`attention_tray`): one entry per session, however many items wait under it.
+The app asks each saved connection's `list_pending_items` every 5 s (backing
+off to once a minute while it does not answer, and dropping its sessions after
+three misses in a row), and while that connection's window is open it also
+reads the `app://pending-items` frames of the window's socket, so an answer
+there clears the badge at once. A connection whose server is this machine, or
+the same server saved twice (same instance id), is counted once. While
+anything waits, the menu-bar icon carries a dot and the count, and its menu
+(opened by any click then) lists each session with what it waits for and its
+server; picking one opens it through its `codeg://session/<id>?server=…` link
+([URL scheme](url-scheme.md)).
 
 API (token auth; `POST /api/<name>` on a server, a command on desktop):
 
