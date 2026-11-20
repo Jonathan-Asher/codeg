@@ -643,7 +643,7 @@ mod tests {
         for (x, y, px) in img.enumerate_pixels_mut() {
             state = state.wrapping_mul(1_103_515_245).wrapping_add(12_345);
             let band = ((y / 40) % 3) as u8;
-            let ink = (state >> 16) % 7 == 0 && (x / 6) % 5 != 0;
+            let ink = (state >> 16).is_multiple_of(7) && !(x / 6).is_multiple_of(5);
             *px = if ink {
                 image::Rgb([20, 20, 30])
             } else {
