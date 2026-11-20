@@ -25,9 +25,6 @@ import {
   CheckCircle2,
   Info,
   ChevronRight,
-  ShieldAlert,
-  MessageCircleQuestion,
-  ClipboardCheck,
   Play,
   RotateCw,
   Split,
@@ -36,7 +33,6 @@ import {
   FolderSymlink,
   SquareTerminal,
   ListChecks,
-  type LucideIcon,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useImeGuard } from "@/hooks/use-ime-guard"
@@ -47,11 +43,7 @@ import {
   preconnectConversation,
 } from "@/lib/session-preconnect"
 import { warmConversationFromDisk } from "@/stores/conversation-runtime-store"
-import type {
-  AttentionKind,
-  DbConversationSummary,
-  ConversationStatus,
-} from "@/lib/types"
+import type { DbConversationSummary, ConversationStatus } from "@/lib/types"
 import { useConversationAttention } from "@/stores/conversation-attention-store"
 import { useConversationBackground } from "@/stores/conversation-background-store"
 import { STATUS_ORDER } from "@/lib/types"
@@ -112,6 +104,7 @@ import { isKeyboardFocus } from "@/lib/keyboard-focus"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ConversationStatusDot } from "./conversation-status-dot"
+import { ATTENTION_KIND_VISUAL, AttentionKindBadge } from "./attention-kind"
 import { SessionDetailsDialog } from "./session-details-dialog"
 import { MoveToProjectDialog, canMoveToProject } from "./move-to-project-dialog"
 import { ContinueInAgentMenuItem } from "./continue-in-agent-menu-item"
@@ -263,19 +256,6 @@ interface SidebarConversationCardProps {
    *  "continue"). Offered as a hover action on interrupted rows only; absent
    *  hides it. */
   onContinue?: (conversation: DbConversationSummary) => void
-}
-
-/** Icon and sidebar-message key for each "waiting on you" kind. */
-const ATTENTION_BADGE: Record<
-  AttentionKind,
-  {
-    icon: LucideIcon
-    label: "attentionPermission" | "attentionQuestion" | "attentionPlanApproval"
-  }
-> = {
-  permission: { icon: ShieldAlert, label: "attentionPermission" },
-  question: { icon: MessageCircleQuestion, label: "attentionQuestion" },
-  plan_approval: { icon: ClipboardCheck, label: "attentionPlanApproval" },
 }
 
 export const SidebarConversationCard = memo(function SidebarConversationCard({
@@ -441,7 +421,7 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   // "running" everywhere it shows: the session IS in progress, but the thing
   // to know about it is that it can't continue without you.
   const attention = useConversationAttention(conversation.id)
-  const attentionBadge = attention ? ATTENTION_BADGE[attention] : null
+  const attentionVisual = attention ? ATTENTION_KIND_VISUAL[attention] : null
   // What the session is doing, from its persisted turn state — NOT from
   // `status`, the review state, which stays `in_progress` for a conversation
   // whose turn was killed or which was merely reopened — and from the
@@ -626,13 +606,17 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                           className="h-[0.75rem] w-[0.75rem]"
                         />
                       )}
-                      {attention ? (
+                      {attentionVisual ? (
                         // Left-edge cue, on the agent glyph where the status dot
                         // sits: visible in a scan down the list even before the
-                        // right-hand badge is read.
+                        // right-hand badge is read. In the kind's colour.
                         <span
                           data-testid="conversation-attention-dot"
-                          className="absolute -right-0.5 -bottom-0.5 h-1.5 w-1.5 animate-pulse rounded-full bg-rose-500 ring-2 ring-sidebar dark:bg-rose-400"
+                          data-attention={attention}
+                          className={cn(
+                            "absolute -right-0.5 -bottom-0.5 h-1.5 w-1.5 animate-pulse rounded-full ring-2 ring-sidebar",
+                            attentionVisual.dotClass
+                          )}
                         />
                       ) : (
                         <ConversationStatusDot
@@ -789,21 +773,12 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
                         !isSubsession && "group-hover:hidden"
                       )}
                     >
-                      {attentionBadge ? (
-                        <span
-                          className="relative inline-flex shrink-0 items-center justify-center"
-                          title={tSidebar(attentionBadge.label)}
-                          data-testid="conversation-attention-badge"
-                          data-attention={attention}
-                        >
-                          <attentionBadge.icon
-                            className="h-3.5 w-3.5 text-rose-600 dark:text-rose-400"
-                            aria-hidden
-                          />
-                          <span className="sr-only">
-                            {tSidebar(attentionBadge.label)}
-                          </span>
-                        </span>
+                      {attention && attentionVisual ? (
+                        <AttentionKindBadge
+                          kind={attention}
+                          label={tSidebar(attentionVisual.label)}
+                          testId="conversation-attention-badge"
+                        />
                       ) : inBackground ? (
                         // Idle while background work runs: the sky glyph's
                         // slow pulse, quieter than the working spinner, with

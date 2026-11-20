@@ -3619,6 +3619,37 @@ export function SidebarConversationList({
     archivedAttentionCount += containerAttentionCount(folderId)
   }
 
+  // A folded section hides every row under it: its heading says how many of
+  // them wait on the user, so a question asked in there is never missed. Only
+  // while folded — open, each row (and folder heading) shows its own mark.
+  const waitingAmong = (list: readonly DbConversationSummary[]): number => {
+    let total = 0
+    for (const c of list) if (attentionByConversationId.has(c.id)) total++
+    return total
+  }
+  const foldedSectionAttentionCount = (
+    section: SidebarRowSection
+  ): number | undefined => {
+    if (attentionByConversationId.size === 0) return undefined
+    switch (section) {
+      case "pinned":
+        return waitingAmong(pinned)
+      case "chats":
+        return waitingAmong(chatConversations)
+      case "recent":
+        return waitingAmong(recentConversations)
+      case "folders": {
+        let total = 0
+        for (const folderId of reorderableFolderIds) {
+          total += containerAttentionCount(folderId)
+        }
+        return total
+      }
+      default:
+        return undefined
+    }
+  }
+
   // Which archive switch a header's menu shows (see `FolderArchiveState`).
   const folderArchiveState = (folderId: number): FolderArchiveState => {
     if (folderIndex.get(folderId)?.archived) return "archived"
@@ -3802,7 +3833,11 @@ export function SidebarConversationList({
             row.section === "archived" ? archivedRunningCount : undefined
           }
           attentionCount={
-            row.section === "archived" ? archivedAttentionCount : undefined
+            row.section === "archived"
+              ? archivedAttentionCount
+              : row.expanded
+                ? undefined
+                : foldedSectionAttentionCount(row.section)
           }
           // Recent's kind filter (All / Chat / Folders). Stable callback, so
           // the memo holds; the value only changes when the user picks another one.

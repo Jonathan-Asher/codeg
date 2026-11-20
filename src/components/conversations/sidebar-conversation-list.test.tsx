@@ -3294,6 +3294,44 @@ describe("SidebarConversationList — archived folders and groups", () => {
     ).toContain("1")
   })
 
+  it("badges a folded section with how many of its sessions wait on you", () => {
+    const { sectionFolders } = enMessages.Folder.sidebar
+    seed({
+      folders: [
+        { ...folder(1, "Live"), sort_order: 1, group_id: null },
+      ] as FolderDetail[],
+      conversations: [
+        conv(11, 1, { turn_state: "running" }),
+        conv(12, 1, { turn_state: "running" }),
+      ],
+    })
+    useConversationAttentionStore.setState({
+      byConversationId: new Map<number, AttentionKind>([[12, "question"]]),
+    })
+    render(archiveTree())
+    const badge = () =>
+      sectionToggle(sectionFolders)?.querySelector(
+        '[data-testid="attention-count-badge"]'
+      )
+    // Open: the row and its folder heading say it; the section stays quiet.
+    expect(badge()).toBeFalsy()
+    act(() => {
+      fireEvent.click(sectionToggle(sectionFolders)!)
+    })
+    // Folded: the heading carries it.
+    expect(badge()?.textContent).toContain("1")
+    expect(badge()).toHaveAttribute("title", "1 session waiting for you")
+    // Answered: gone.
+    act(() => {
+      useConversationAttentionStore.setState({ byConversationId: new Map() })
+    })
+    expect(badge()).toBeFalsy()
+    // Leave the section open (its state is remembered) for the next test.
+    act(() => {
+      fireEvent.click(sectionToggle(sectionFolders)!)
+    })
+  })
+
   it("archives a folder from its menu and unarchives it from the Archived section", async () => {
     seed({
       folders: [

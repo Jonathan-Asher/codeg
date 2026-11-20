@@ -19,11 +19,15 @@ import {
   releaseDragSelectionGuard,
 } from "@/lib/drag-selection-guard"
 import { useLongPressDrag } from "@/hooks/use-long-press-drag"
+import { AttentionCountBadge } from "@/components/conversations/attention-count-badge"
 
 interface TabGroupLabelProps {
   runKey: string
   label: string
   count: number
+  /** Tabs of the group waiting on the user: a chip, so a folded group still
+   *  says so. Zero shows nothing. */
+  attentionCount?: number
   collapsed: boolean
   /** Tint vars for the group color; undefined = neutral chip. Stable. */
   accentStyle: CSSProperties | undefined
@@ -53,6 +57,7 @@ export const TabGroupLabel = memo(function TabGroupLabel({
   runKey,
   label,
   count,
+  attentionCount = 0,
   collapsed,
   accentStyle,
   adjacentActive,
@@ -65,6 +70,7 @@ export const TabGroupLabel = memo(function TabGroupLabel({
   onGroupDragEnd,
 }: TabGroupLabelProps) {
   const t = useTranslations("Folder.tabs")
+  const tSidebar = useTranslations("Folder.sidebar")
   const x = useMotionValue(0)
   const [held, setHeld] = useState(false)
 
@@ -177,6 +183,10 @@ export const TabGroupLabel = memo(function TabGroupLabel({
         )}
         <span className="truncate">{label}</span>
         <span className="tabular-nums opacity-60">{count}</span>
+        <AttentionCountBadge
+          count={attentionCount}
+          label={tSidebar("attentionCountBadge", { count: attentionCount })}
+        />
       </button>
     </motion.div>
   )
