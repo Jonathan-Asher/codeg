@@ -16070,7 +16070,8 @@ mod tests {
         assert!(gated, "no prompt could start while the agent forked");
         assert!(lock.try_lock().is_ok(), "and the lock is free again");
         let point = job.fork_point.expect("a named reply");
-        assert_eq!(point.message_id, "turn-3");
+        // Codex's item id for the reply, as the parser names it.
+        assert_eq!(point.message_id, "msg_02");
         assert!(point.message_fingerprint.is_some());
         assert!(cmd_rx.try_recv().is_err());
         assert_eq!(info.title.as_deref(), Some("[Fork] Topic"));

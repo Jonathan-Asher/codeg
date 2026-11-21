@@ -41,12 +41,19 @@ use crate::models::message::{ContentBlock, MessageTurn, TurnRole};
 ///   [`crate::models::MessageTurn::agent_message_id`], and the hash side is
 ///   byte-compatible with what `fingerprint_agent_message` computes (a single
 ///   fingerprint match even wins regardless of occurrence).
-/// * **codex-acp 1.8.0** first matches `message_id` against `items[].id`, then
-///   falls back to hashing each agent message and taking the
-///   `message_occurrence`-th match. Codex rollout files record NO item ids, so
-///   codeg cannot produce one it would recognise — the fingerprint is the only
-///   path that resolves there, and `message_id` is sent as codeg's own turn id
-///   purely because the field is required.
+/// * **codex-acp** (1.8.0 through 2.8.0) reads codex's own history
+///   (`thread/read`) and forks a whole codex TURN: the one holding the named
+///   item. It first matches `message_id` against the id of every item of
+///   every turn, then hashes the text of each `agentMessage` item ON ITS OWN
+///   and takes the `message_occurrence`-th match, counted across all the
+///   session's agent messages. A codex 2.x turn holds several agent messages
+///   (`commentary` between tool calls, then a `final_answer`), so both halves
+///   have to name ONE message as codex holds it — see [`codex_fork_point`].
+///   Recent codex rollouts record each agent message's item id (and
+///   codex keeps it in `thread/read` and in every fork of the thread), which
+///   `crate::parsers::codex` puts in
+///   [`crate::models::MessageTurn::agent_message_id`]; older rollouts record
+///   none, and there the fingerprint is the only half that resolves.
 /// * **deepseek-acp 0.8.0** is the only one that can use BOTH halves, so codeg
 ///   sends both. Its id side accepts either the wire id it stamps on message
 ///   chunks (`<turn>:<step>`) or the session log's own `message.id`, and
@@ -120,24 +127,7 @@ pub fn resolve_fork_point(
     let turn = &turns[idx];
 
     match agent_type {
-        // Codex rollouts carry no item ids, so the id can never match and the
-        // fingerprint is the only thing that resolves. `message_id` is still
-        // required by the wire contract, so it carries codeg's own turn id —
-        // deliberately something codex will not find, which is exactly what
-        // makes it fall through to the fingerprint branch.
-        AgentType::Codex => {
-            let text = turn_text(turn);
-            if text.trim().is_empty() {
-                return None;
-            }
-            let fingerprint = fingerprint_agent_message(&text);
-            let occurrence = fingerprint_occurrence(turns, idx, &fingerprint);
-            Some(ForkPoint {
-                message_id: turn_id.to_string(),
-                message_fingerprint: Some(fingerprint),
-                message_occurrence: u32::try_from(occurrence).ok(),
-            })
-        }
+        AgentType::Codex => codex_fork_point(turns, idx),
         // DeepSeek and Claude 0.75.1 both read the two halves in the same
         // order, so both are sent. The id resolves on its own whenever the
         // transcript named the message, and the fingerprint is what still
@@ -190,6 +180,129 @@ pub fn resolve_fork_point(
         // it; forking at the tail is the honest fallback.
         _ => None,
     }
+}
+
+/// The agent message a Codex fork point names for the reply at `turns[idx]`,
+/// the way codex-acp resolves it (see [`ForkPoint`]): ONE message, by codex's
+/// item id when the rollout recorded one (codeg's own turn id otherwise, which
+/// codex never finds), and by the fingerprint of that message's text, whose
+/// occurrence is counted among every agent message up to it, not among turns.
+///
+/// The parse gives each agent message a turn of its own
+/// (`parsers::codex::group_into_turns`), with codex's text for it: a final
+/// answer citing codex's memories is shown, and hashed, without the
+/// `<oai-mem-citation>` block its rollout record keeps. Each text block still
+/// counts as one message, should a turn ever hold two.
+///
+/// codex forks the whole codex turn holding the message, so any message of
+/// the turn this reply ends lands the fork in the same place. The reply's own
+/// message is named when it has one. A reply that ends in tool calls — a turn
+/// stopped before its answer, a plan followed by its review — names the latest
+/// message before it in the same reply, never one past the user message that
+/// opened the reply, which would belong to an earlier codex turn. `None` when
+/// the reply holds no message: codex has nothing in it to name, and the caller
+/// must not guess (see [`ForkMode::Edit`]).
+fn codex_fork_point(turns: &[MessageTurn], idx: usize) -> Option<ForkPoint> {
+    let opened = turns[..=idx]
+        .iter()
+        .rposition(|t| matches!(t.role, TurnRole::User))
+        .map_or(0, |user| user + 1);
+    let named = (opened..=idx).rev().find(|&i| {
+        let t = &turns[i];
+        matches!(t.role, TurnRole::Assistant)
+            && (t.agent_message_id.is_some() || codex_message_texts(t).next().is_some())
+    })?;
+    let turn = &turns[named];
+    let fingerprint = codex_message_texts(turn)
+        .last()
+        .map(fingerprint_agent_message);
+    // codex-acp lists every agent message of every turn in order and takes the
+    // n-th whose hash matches; the named message is the last text up to here.
+    let occurrence = fingerprint.as_deref().map(|fp| {
+        turns[..=named]
+            .iter()
+            .filter(|t| matches!(t.role, TurnRole::Assistant))
+            .flat_map(codex_message_texts)
+            .filter(|text| fingerprint_agent_message(text) == fp)
+            .count()
+    });
+    Some(ForkPoint {
+        message_id: turn
+            .agent_message_id
+            .clone()
+            .unwrap_or_else(|| turn.id.clone()),
+        message_fingerprint: fingerprint,
+        message_occurrence: occurrence.and_then(|n| u32::try_from(n).ok()),
+    })
+}
+
+/// The agent messages a parsed Codex turn shows, in order: its non-blank text
+/// blocks. A blank one hashes like every other blank message, so it names
+/// nothing.
+fn codex_message_texts(turn: &MessageTurn) -> impl Iterator<Item = &str> {
+    turn.blocks.iter().filter_map(|block| match block {
+        ContentBlock::Text { text } if !text.trim().is_empty() => Some(text.as_str()),
+        _ => None,
+    })
+}
+
+/// Why an edit cannot fork at the reply `turn_id` names, for the user. Shown
+/// after "Couldn't edit the message:".
+fn unresolved_edit_reason(turns: &[MessageTurn], turn_id: &str, agent_type: AgentType) -> String {
+    let reply_is_there = turns
+        .iter()
+        .any(|t| t.id == turn_id && matches!(t.role, TurnRole::Assistant));
+    if reply_is_there && agent_type == AgentType::Codex {
+        return CODEX_REPLY_WITHOUT_MESSAGE.to_string();
+    }
+    "the agent cannot fork at the reply before this message".to_string()
+}
+
+/// Whether the message an edit forking at `turn_id` rewrites — the first user
+/// turn after that reply — is one the user steered into a running Codex turn
+/// (the parser marks it, see `MessageTurn::agent_message_id`).
+///
+/// codex forks whole turns: a fork at the reply before such a message ends
+/// where that turn ends, AFTER the message and everything Codex did with it,
+/// so the edit would land in the wrong place without a word. Refused instead.
+fn edits_a_steered_codex_message(
+    turns: &[MessageTurn],
+    turn_id: &str,
+    agent_type: AgentType,
+) -> bool {
+    if agent_type != AgentType::Codex {
+        return false;
+    }
+    turns
+        .iter()
+        .skip_while(|t| t.id != turn_id)
+        .find(|t| matches!(t.role, TurnRole::User))
+        .is_some_and(|edited| edited.agent_message_id.is_some())
+}
+
+/// The message an edit rewrites was steered into a running Codex turn
+/// ([`edits_a_steered_codex_message`]).
+const CODEX_STEERED_MESSAGE: &str = "this message was sent while Codex was still working, and \
+     Codex can only go back to the end of a turn, so it can't be edited on its own. Edit the \
+     message that started that turn instead. Nothing was changed.";
+
+/// A Codex reply with no agent message in it ([`codex_fork_point`]).
+const CODEX_REPLY_WITHOUT_MESSAGE: &str = "the reply before it has no message from Codex to go \
+     back to (that turn ended before Codex wrote one), so Codex can't continue from there. \
+     Nothing was changed.";
+
+/// codex-acp could not find the point codeg named in its own history.
+const CODEX_POINT_NOT_FOUND: &str = "Codex couldn't find that reply in its own history of \
+     the session, so it can't continue from there. Nothing was changed.";
+
+/// Whether codex-acp refused a `session/fork` because the AIR fork point
+/// names nothing in the session (`resolveForkTurnId`: `invalid_params`, "Fork
+/// point message … was not found in session …").
+fn is_codex_fork_point_miss(e: &agent_client_protocol::Error) -> bool {
+    matches!(
+        e.code,
+        agent_client_protocol::schema::v1::ErrorCode::InvalidParams
+    ) && e.to_string().contains("Fork point message")
 }
 
 /// What a fork is for. Decides what happens when the chosen fork point cannot
@@ -346,12 +459,15 @@ pub fn settle_fork_point(
     }
     match turns {
         Ok(turns) => match resolve_fork_point(turns, turn_id, agent_type) {
+            Some(_) if strict && edits_a_steered_codex_message(turns, turn_id, agent_type) => Err(
+                AcpError::ForkPointUnresolved(CODEX_STEERED_MESSAGE.to_string()),
+            ),
             Some(point) => Ok(Some(point)),
             // Not found, or found but with nothing the agent could match it by
             // (see `resolve_fork_point`) — either way there is no exact point.
-            None if strict => Err(AcpError::ForkPointUnresolved(
-                "the agent cannot fork at the reply before this message".to_string(),
-            )),
+            None if strict => Err(AcpError::ForkPointUnresolved(unresolved_edit_reason(
+                turns, turn_id, agent_type,
+            ))),
             None => Ok(None),
         },
         Err(reason) if strict => Err(AcpError::ForkPointUnresolved(format!(
@@ -641,7 +757,9 @@ impl ForkPoint {
 /// An agent that does not implement it ignores the unknown `_meta` key, so this
 /// is inert rather than an error wherever it isn't understood. An agent that
 /// DOES implement it but cannot resolve the point answers `invalid_params`,
-/// which surfaces as a fork failure the user can retry from a different turn.
+/// which surfaces as a fork failure the user can retry from a different turn —
+/// for Codex as [`AcpError::ForkPointUnresolved`], in words rather than
+/// codex-acp's "Fork point message turn-12 was not found".
 ///
 /// What else the request names depends on the agent; see [`build_fork_request`].
 #[allow(clippy::too_many_arguments)]
@@ -660,7 +778,20 @@ pub async fn fork_session(
         build_fork_request(session_id, agent_type, cwd, mcp_servers, claude, fork_point),
     )
     .await
-    .map_err(|e| AcpError::protocol(format!("session/fork failed: {}", agent_error_text(&e))))
+    .map_err(|e| fork_error(agent_type, fork_point.is_some(), &e))
+}
+
+/// What a failed `session/fork` tells the user.
+fn fork_error(
+    agent_type: AgentType,
+    named_a_point: bool,
+    e: &agent_client_protocol::Error,
+) -> AcpError {
+    if named_a_point && agent_type == AgentType::Codex && is_codex_fork_point_miss(e) {
+        tracing::warn!("[ACP] codex-acp could not resolve the fork point: {e}");
+        return AcpError::ForkPointUnresolved(CODEX_POINT_NOT_FOUND.to_string());
+    }
+    AcpError::protocol(format!("session/fork failed: {}", agent_error_text(e)))
 }
 
 /// The `session/fork` request: the fork point, if any, plus — for Claude and
@@ -1100,13 +1231,214 @@ mod tests {
         );
     }
 
-    /// The fingerprint is the only thing that can resolve on codex, so a turn
-    /// with no text to hash is not a fork point.
+    /// A reply holding no agent message — no item id and no text — names
+    /// nothing codex could find.
     #[test]
     fn codex_declines_a_turn_with_no_text() {
         let mut t = turn("turn-1", TurnRole::Assistant, "", None);
         t.blocks = vec![ContentBlock::Text { text: "   ".into() }];
         assert!(resolve_fork_point(&[t], "turn-1", AgentType::Codex).is_none());
+    }
+
+    fn tool_call(id: &str) -> MessageTurn {
+        let mut t = turn(id, TurnRole::Assistant, "", None);
+        t.blocks = vec![ContentBlock::ToolUse {
+            tool_use_id: Some(format!("call-{id}")),
+            tool_name: "shell".into(),
+            input_preview: None,
+            status: None,
+            meta: None,
+        }];
+        t
+    }
+
+    /// One codex 2.x reply as the parser gives it: a turn per agent message,
+    /// each named by its item id, with the tool calls between them.
+    fn codex_reply_history() -> Vec<MessageTurn> {
+        vec![
+            turn("turn-0", TurnRole::User, "build it", None),
+            turn("turn-1", TurnRole::Assistant, "I'll check.", Some("msg_1")),
+            tool_call("turn-2"),
+            turn("turn-3", TurnRole::Assistant, "Checking.", Some("msg_2")),
+            tool_call("turn-4"),
+            turn("turn-5", TurnRole::Assistant, "Built it.", Some("msg_3")),
+            turn("turn-6", TurnRole::User, "again", None),
+            turn("turn-7", TurnRole::Assistant, "Checking.", Some("msg_4")),
+            tool_call("turn-8"),
+            turn("turn-9", TurnRole::User, "stop", None),
+            tool_call("turn-10"),
+            turn("turn-11", TurnRole::User, "next", None),
+        ]
+    }
+
+    /// The reply's own message is named — by codex's item id, with the hash of
+    /// that one message, not of the reply's text run together.
+    #[test]
+    fn codex_names_one_agent_message_by_item_id() {
+        let turns = codex_reply_history();
+        let point = resolve_fork_point(&turns, "turn-5", AgentType::Codex).unwrap();
+        assert_eq!(point.message_id, "msg_3");
+        assert_eq!(
+            point.message_fingerprint,
+            Some(fingerprint_agent_message("Built it."))
+        );
+        assert_eq!(point.message_occurrence, Some(1));
+    }
+
+    /// codex-acp counts an occurrence among agent MESSAGES of every turn, so a
+    /// final answer equal to an earlier commentary of another reply is the
+    /// second of its text.
+    #[test]
+    fn codex_counts_occurrences_per_message_across_replies() {
+        let turns = codex_reply_history();
+        let commentary = resolve_fork_point(&turns, "turn-3", AgentType::Codex).unwrap();
+        assert_eq!(commentary.message_occurrence, Some(1));
+        let later = resolve_fork_point(&turns, "turn-7", AgentType::Codex).unwrap();
+        assert_eq!(later.message_id, "msg_4");
+        assert_eq!(later.message_occurrence, Some(2));
+
+        // Should a turn ever hold two messages, each counts, and the turn
+        // names its last.
+        let mut merged = turns.clone();
+        merged[5].blocks = vec![
+            ContentBlock::Text {
+                text: "Checking.".into(),
+            },
+            ContentBlock::Text {
+                text: "Checking.".into(),
+            },
+        ];
+        let point = resolve_fork_point(&merged, "turn-5", AgentType::Codex).unwrap();
+        assert_eq!(
+            point.message_fingerprint,
+            Some(fingerprint_agent_message("Checking."))
+        );
+        assert_eq!(point.message_occurrence, Some(3));
+    }
+
+    /// A reply that ends in a tool call (stopped mid-turn) names the latest
+    /// message before it in the same reply; codex forks that whole turn.
+    #[test]
+    fn codex_names_the_reply_s_last_message_when_it_ends_in_a_tool_call() {
+        let turns = codex_reply_history();
+        let point = resolve_fork_point(&turns, "turn-8", AgentType::Codex).unwrap();
+        assert_eq!(point.message_id, "msg_4");
+        assert_eq!(point.message_occurrence, Some(2));
+    }
+
+    /// …but never past the user message that opened the reply: that message
+    /// belongs to an earlier codex turn, and forking there would drop this one.
+    #[test]
+    fn codex_never_names_a_message_from_before_the_reply() {
+        let turns = codex_reply_history();
+        assert!(resolve_fork_point(&turns, "turn-10", AgentType::Codex).is_none());
+        let err = settle_fork_point(
+            Ok(turns.as_slice()),
+            "turn-10",
+            AgentType::Codex,
+            ForkMode::Edit,
+        )
+        .expect_err("nothing to name in that reply");
+        assert!(matches!(err, AcpError::ForkPointUnresolved(_)));
+        assert_eq!(err.to_string(), CODEX_REPLY_WITHOUT_MESSAGE);
+    }
+
+    /// A rollout that recorded no item ids (older codex) is named by the
+    /// fingerprint alone; the id half is codeg's own turn id, which codex never
+    /// finds and so falls through.
+    #[test]
+    fn codex_without_item_ids_forks_by_fingerprint() {
+        let mut turns = codex_reply_history();
+        for t in &mut turns {
+            t.agent_message_id = None;
+        }
+        let point = resolve_fork_point(&turns, "turn-7", AgentType::Codex).unwrap();
+        assert_eq!(point.message_id, "turn-7");
+        assert_eq!(
+            point.message_fingerprint,
+            Some(fingerprint_agent_message("Checking."))
+        );
+        assert_eq!(point.message_occurrence, Some(2));
+    }
+
+    /// A message steered into a running Codex turn cannot be edited: the fork
+    /// before it would end where that turn ends, after the message itself.
+    /// The reply before it is still a fork point for "fork from here", and a
+    /// message that opened a turn edits as before.
+    #[test]
+    fn codex_refuses_to_edit_a_message_steered_into_a_running_turn() {
+        let mut turns = codex_reply_history();
+        // "build it" → I'll check. → [steer] → Checking. → … → "again"
+        let mut steer = turn("turn-2b", TurnRole::User, "faster please", None);
+        steer.agent_message_id = Some("codex-turn-1".into());
+        turns.insert(2, steer);
+        for mode in [ForkMode::Edit, ForkMode::EditInPlace] {
+            let err = settle_fork_point(Ok(turns.as_slice()), "turn-1", AgentType::Codex, mode)
+                .expect_err("the steered message cannot be edited");
+            assert!(matches!(err, AcpError::ForkPointUnresolved(_)), "{err:?}");
+            assert_eq!(err.to_string(), CODEX_STEERED_MESSAGE);
+        }
+        let branch = settle_fork_point(
+            Ok(turns.as_slice()),
+            "turn-1",
+            AgentType::Codex,
+            ForkMode::Branch,
+        )
+        .unwrap()
+        .expect("fork from here still names the reply");
+        assert_eq!(branch.message_id, "msg_1");
+        // "again" opened its turn.
+        let again = settle_fork_point(
+            Ok(turns.as_slice()),
+            "turn-5",
+            AgentType::Codex,
+            ForkMode::Edit,
+        )
+        .unwrap()
+        .expect("a message that opened a turn edits");
+        assert_eq!(again.message_id, "msg_3");
+        // Only Codex forks whole turns.
+        assert!(!edits_a_steered_codex_message(
+            &turns,
+            "turn-1",
+            AgentType::ClaudeCode
+        ));
+    }
+
+    /// A message codex named but codeg shows no text for is still named, by
+    /// its id alone: a hash of nothing would match every blank message.
+    #[test]
+    fn codex_names_a_textless_message_by_id_alone() {
+        let mut turns = codex_reply_history();
+        turns[5].blocks = Vec::new();
+        let point = resolve_fork_point(&turns, "turn-5", AgentType::Codex).unwrap();
+        assert_eq!(point.message_id, "msg_3");
+        assert!(point.message_fingerprint.is_none());
+        assert!(point.message_occurrence.is_none());
+    }
+
+    /// codex-acp's refusal of a point it cannot find reaches the user in
+    /// words; any other fork failure, or another agent's, stays as it was.
+    #[test]
+    fn codex_s_unresolved_fork_point_reads_as_one() {
+        let miss = agent_client_protocol::Error::new(
+            -32602,
+            "Invalid params: Fork point message turn-596 was not found in session S",
+        )
+        .data(serde_json::json!({ "messageId": "turn-596" }));
+        let err = fork_error(AgentType::Codex, true, &miss);
+        assert!(matches!(err, AcpError::ForkPointUnresolved(_)), "{err:?}");
+        assert_eq!(err.to_string(), CODEX_POINT_NOT_FOUND);
+
+        // A tail fork named no point; another agent words its own.
+        for (agent, named) in [(AgentType::Codex, false), (AgentType::ClaudeCode, true)] {
+            let err = fork_error(agent, named, &miss);
+            assert!(err.to_string().contains("session/fork failed"), "{err}");
+        }
+        let other = agent_client_protocol::Error::new(-32603, "app-server exited");
+        assert!(fork_error(AgentType::Codex, true, &other)
+            .to_string()
+            .contains("app-server exited"));
     }
 
     /// DeepSeek reads BOTH halves, so both are sent — unlike codex, whose id
