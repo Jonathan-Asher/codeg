@@ -304,6 +304,11 @@ pub struct MessageTurn {
     /// `None` for every parser with no such id (older codex rollouts record no
     /// item ids, so there codex forks by content fingerprint alone) and for
     /// synthesized turns, which name nothing the agent stored.
+    ///
+    /// One USER turn carries it too: a Codex message steered into a turn that
+    /// was still running holds the id of that codex turn. codex forks whole
+    /// turns, so no fork ends right before such a message, and an edit of it
+    /// is refused (`acp::fork`). `None` on every other user turn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_message_id: Option<String>,
     /// A user turn the user SPOKE, through the phone's Talk mode (see

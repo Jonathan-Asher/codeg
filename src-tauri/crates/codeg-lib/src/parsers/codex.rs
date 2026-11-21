@@ -3646,6 +3646,9 @@ impl CodexParser {
                                     push_turn_start(&mut task_start_markers, ts);
                                 }
                                 context_readings.turn_started();
+                                promotion.name_task(
+                                    payload.get("turn_id").and_then(serde_json::Value::as_str),
+                                );
                             }
                             "user_message" => {
                                 active_agent_count = 0;
@@ -5197,6 +5200,7 @@ impl CodexParser {
                                             .filter(|id| !id.is_empty())
                                             .map(str::to_string)
                                     },
+                                    steered_into: None,
                                 });
                             }
                             "image_generation_call" => {
@@ -5445,11 +5449,16 @@ impl CodexParser {
         //      (message, block) indices from whatever vector it is handed.
         let survivors = promotion.resolve();
         let promoted_user_ordinal = promotion.first_surviving_user_ordinal(&survivors);
+        let steered = promotion.steered_users(&survivors);
         let mut kept: Vec<PendingPromotedMessage> = pending_promotions
             .into_iter()
             .zip(&survivors)
-            .filter(|(_, keep)| **keep)
-            .map(|(pending, _)| pending)
+            .zip(steered)
+            .filter(|((_, keep), _)| **keep)
+            .map(|((mut pending, _), steered_into)| {
+                pending.steered_into = steered_into;
+                pending
+            })
             .collect();
 
         // Resolved before the vector is drained by the splice below.
@@ -5497,7 +5506,14 @@ impl CodexParser {
                         duration_ms: None,
                         model: None,
                         completed_at: Some(pending.timestamp),
-                        agent_message_id: pending.item_id,
+                        // An agent message: codex's item id. A user message:
+                        // the turn it was steered into, if it was (see
+                        // `MessageTurn::agent_message_id`).
+                        agent_message_id: if pending.is_user {
+                            pending.steered_into
+                        } else {
+                            pending.item_id
+                        },
                     }
                 })
                 .collect();
@@ -6721,6 +6737,10 @@ struct PendingPromotedMessage {
     /// (`msg_…`, the same in `item_completed` and in the app-server's thread
     /// history). `None` for users and for records written without one.
     item_id: Option<String>,
+    /// A user record steered into a running codex turn: that turn's id (see
+    /// [`ResponseItemPromotion::steered_users`]). Settled once survivors are
+    /// known.
+    steered_into: Option<String>,
 }
 
 /// Decides which `response_item.payload.type == "message"` records may be
@@ -6766,6 +6786,9 @@ struct ResponseItemPromotion {
     task_segments: Vec<SegmentCoverage>,
     ctx_segments: Vec<SegmentCoverage>,
     saw_task_started: bool,
+    /// The codex turn id each task segment's `task_started` named, parallel
+    /// to `task_segments` (see [`Self::name_task`]).
+    task_turn_ids: Vec<Option<String>>,
     candidates: Vec<PromotionCandidate>,
     /// Index of the assistant candidate that is still a compaction-summary
     /// suspect — i.e. nothing but the accounting of the response that wrote it
@@ -6787,6 +6810,7 @@ impl ResponseItemPromotion {
             task_segments: vec![SegmentCoverage::default()],
             ctx_segments: vec![SegmentCoverage::default()],
             saw_task_started: false,
+            task_turn_ids: vec![None],
             candidates: Vec::new(),
             compaction_watch: None,
             adjacent_summary: None,
@@ -6829,6 +6853,7 @@ impl ResponseItemPromotion {
         if msg_type == "event_msg" && payload_type == "task_started" {
             self.saw_task_started = true;
             self.task_segments.push(SegmentCoverage::default());
+            self.task_turn_ids.push(None);
         } else if msg_type == "turn_context" {
             self.ctx_segments.push(SegmentCoverage::default());
         }
@@ -6955,6 +6980,37 @@ impl ResponseItemPromotion {
             .filter(|(candidate, kept)| **kept && candidate.is_user)
             .map(|(candidate, _)| candidate.ordinal)
             .min()
+    }
+
+    /// Name the task segment the last `task_started` opened by the codex turn
+    /// id it carries.
+    fn name_task(&mut self, turn_id: Option<&str>) {
+        if let Some(last) = self.task_turn_ids.last_mut() {
+            *last = turn_id.filter(|id| !id.is_empty()).map(str::to_string);
+        }
+    }
+
+    /// For each candidate, parallel to `candidates`: the codex turn a surviving
+    /// user message was STEERED into — a user message after the one that
+    /// opened its turn, sent while codex was still working on it — or `None`.
+    ///
+    /// Only where codex's turns are known: a segment opened by a named
+    /// `task_started`. Where the event channel spoke for users the candidates
+    /// are gone and nothing is said, which is the safe answer (see
+    /// `acp::fork`, which refuses an edit of a steered message).
+    fn steered_users(&self, survivors: &[bool]) -> Vec<Option<String>> {
+        let mut opened: HashSet<usize> = HashSet::new();
+        self.candidates
+            .iter()
+            .zip(survivors)
+            .map(|(candidate, kept)| {
+                if !*kept || !candidate.is_user || !self.saw_task_started {
+                    return None;
+                }
+                let turn_id = self.task_turn_ids.get(candidate.task_seg)?.as_ref()?;
+                (!opened.insert(candidate.task_seg)).then(|| turn_id.clone())
+            })
+            .collect()
     }
 }
 
@@ -7278,7 +7334,7 @@ fn group_into_turns(messages: Vec<UnifiedMessage>) -> Vec<MessageTurn> {
                 duration_ms: None,
                 model: None,
                 completed_at: msg.completed_at,
-                agent_message_id: None,
+                agent_message_id: msg.agent_message_id.clone(),
                 spoken: false,
             });
             i += 1;
@@ -17969,7 +18025,8 @@ mod tests {
     /// `id`; several messages per codex turn; a final answer citing codex's
     /// memories, whose record keeps the `<oai-mem-citation>` block the item
     /// leaves out; the same text more than once, including a final answer equal
-    /// to an earlier commentary; and turns stopped before or after a message.
+    /// to an earlier commentary; a note steered into a running turn; and turns
+    /// stopped before or after a message.
     ///
     /// Item ids and texts are codex's: `msg_N` is the N-th agent message, and
     /// [`codex_items`] is the agent-message list `thread/read` returns for it.
@@ -18004,6 +18061,12 @@ mod tests {
                      record_text: &str| {
             lines.push(record(&ts, "event_msg", serde_json::json!({"type": "item_completed", "turn_id": turn, "item": {"type": "AgentMessage", "id": id, "phase": phase, "content": [{"type": "Text", "text": text}]}})));
             lines.push(record(&ts, "response_item", serde_json::json!({"type": "message", "role": "assistant", "id": id, "phase": phase, "status": "completed", "content": [{"type": "output_text", "text": record_text}]})));
+        };
+        // A note sent while the turn runs: no `task_started`, and a
+        // `client_id` on its announcement.
+        let steer = |lines: &mut Vec<serde_json::Value>, ts: String, turn: &str, text: &str| {
+            lines.push(record(&ts, "response_item", serde_json::json!({"type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]})));
+            lines.push(record(&ts, "event_msg", serde_json::json!({"type": "item_completed", "turn_id": turn, "item": {"type": "UserMessage", "id": format!("u-{turn}-steer"), "client_id": "c0ffee", "content": [{"type": "text", "text": text, "text_elements": []}]}})));
         };
         let tool = |lines: &mut Vec<serde_json::Value>, ts: String, call: &str| {
             lines.push(record(&ts, "response_item", serde_json::json!({"type": "function_call", "name": "shell", "call_id": call, "arguments": "{\"command\":[\"ls\"]}"})));
@@ -18062,6 +18125,7 @@ mod tests {
             "Checking.",
             "Checking.",
         );
+        steer(&mut lines, ts(), "t2", "faster please");
         tool(&mut lines, ts(), "c3");
         agent(
             &mut lines,
@@ -18197,13 +18261,25 @@ mod tests {
             .map(|(id, text)| (id.to_string(), text.to_string()))
             .collect();
         assert_eq!(named, expected);
-        // Nothing else claims an id: users, tool calls and results.
-        let named_turns = detail
+        // No other reply claims an id: tool calls and results.
+        let named_replies = detail
             .turns
             .iter()
-            .filter(|t| t.agent_message_id.is_some())
+            .filter(|t| matches!(t.role, TurnRole::Assistant) && t.agent_message_id.is_some())
             .count();
-        assert_eq!(named_turns, codex_items().len());
+        assert_eq!(named_replies, codex_items().len());
+        // Of the users, only the steered note carries one: its codex turn.
+        let users: Vec<Option<&str>> = detail
+            .turns
+            .iter()
+            .filter(|t| matches!(t.role, TurnRole::User))
+            .map(|t| t.agent_message_id.as_deref())
+            .collect();
+        assert_eq!(
+            users,
+            vec![None, None, Some("t2"), None, None, None, None],
+            "build the plugin, again, faster please, once more, look at the logs, and the config, never mind"
+        );
         let shown: String = detail
             .turns
             .iter()
@@ -18289,5 +18365,29 @@ mod tests {
         )
         .unwrap()
         .is_none());
+    }
+
+    /// A note steered into a running turn cannot be edited on its own: codex
+    /// forks whole turns, so the fork before it would end after it. The
+    /// message that opened that turn still edits.
+    #[test]
+    fn a_codex_note_steered_into_a_running_turn_refuses_an_edit() {
+        use crate::acp::fork::{settle_fork_point, ForkMode};
+        let detail = parse_rollout("multi-steer", &multi_message_rollout(), "multi-1");
+        let settle = |edited: &str| {
+            settle_fork_point(
+                Ok(detail.turns.as_slice()),
+                &reply_before(&detail, edited).id,
+                crate::models::AgentType::Codex,
+                ForkMode::Edit,
+            )
+        };
+        let err = settle("faster please").expect_err("a steered note");
+        assert_eq!(err.code(), Some("fork_point_unresolved"));
+        assert!(err.to_string().contains("still working"), "{err}");
+        let opened = settle("again").unwrap().expect("a fork point");
+        assert_eq!(opened.message_id, "msg_3");
+        let after = settle("once more").unwrap().expect("a fork point");
+        assert_eq!(after.message_id, "msg_5");
     }
 }

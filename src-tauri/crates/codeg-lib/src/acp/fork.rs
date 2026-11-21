@@ -258,6 +258,34 @@ fn unresolved_edit_reason(turns: &[MessageTurn], turn_id: &str, agent_type: Agen
     "the agent cannot fork at the reply before this message".to_string()
 }
 
+/// Whether the message an edit forking at `turn_id` rewrites — the first user
+/// turn after that reply — is one the user steered into a running Codex turn
+/// (the parser marks it, see `MessageTurn::agent_message_id`).
+///
+/// codex forks whole turns: a fork at the reply before such a message ends
+/// where that turn ends, AFTER the message and everything Codex did with it,
+/// so the edit would land in the wrong place without a word. Refused instead.
+fn edits_a_steered_codex_message(
+    turns: &[MessageTurn],
+    turn_id: &str,
+    agent_type: AgentType,
+) -> bool {
+    if agent_type != AgentType::Codex {
+        return false;
+    }
+    turns
+        .iter()
+        .skip_while(|t| t.id != turn_id)
+        .find(|t| matches!(t.role, TurnRole::User))
+        .is_some_and(|edited| edited.agent_message_id.is_some())
+}
+
+/// The message an edit rewrites was steered into a running Codex turn
+/// ([`edits_a_steered_codex_message`]).
+const CODEX_STEERED_MESSAGE: &str = "this message was sent while Codex was still working, and \
+     Codex can only go back to the end of a turn, so it can't be edited on its own. Edit the \
+     message that started that turn instead. Nothing was changed.";
+
 /// A Codex reply with no agent message in it ([`codex_fork_point`]).
 const CODEX_REPLY_WITHOUT_MESSAGE: &str = "the reply before it has no message from Codex to go \
      back to (that turn ended before Codex wrote one), so Codex can't continue from there. \
@@ -431,6 +459,9 @@ pub fn settle_fork_point(
     }
     match turns {
         Ok(turns) => match resolve_fork_point(turns, turn_id, agent_type) {
+            Some(_) if strict && edits_a_steered_codex_message(turns, turn_id, agent_type) => Err(
+                AcpError::ForkPointUnresolved(CODEX_STEERED_MESSAGE.to_string()),
+            ),
             Some(point) => Ok(Some(point)),
             // Not found, or found but with nothing the agent could match it by
             // (see `resolve_fork_point`) — either way there is no exact point.
@@ -1328,6 +1359,50 @@ mod tests {
             Some(fingerprint_agent_message("Checking."))
         );
         assert_eq!(point.message_occurrence, Some(2));
+    }
+
+    /// A message steered into a running Codex turn cannot be edited: the fork
+    /// before it would end where that turn ends, after the message itself.
+    /// The reply before it is still a fork point for "fork from here", and a
+    /// message that opened a turn edits as before.
+    #[test]
+    fn codex_refuses_to_edit_a_message_steered_into_a_running_turn() {
+        let mut turns = codex_reply_history();
+        // "build it" → I'll check. → [steer] → Checking. → … → "again"
+        let mut steer = turn("turn-2b", TurnRole::User, "faster please", None);
+        steer.agent_message_id = Some("codex-turn-1".into());
+        turns.insert(2, steer);
+        for mode in [ForkMode::Edit, ForkMode::EditInPlace] {
+            let err = settle_fork_point(Ok(turns.as_slice()), "turn-1", AgentType::Codex, mode)
+                .expect_err("the steered message cannot be edited");
+            assert!(matches!(err, AcpError::ForkPointUnresolved(_)), "{err:?}");
+            assert_eq!(err.to_string(), CODEX_STEERED_MESSAGE);
+        }
+        let branch = settle_fork_point(
+            Ok(turns.as_slice()),
+            "turn-1",
+            AgentType::Codex,
+            ForkMode::Branch,
+        )
+        .unwrap()
+        .expect("fork from here still names the reply");
+        assert_eq!(branch.message_id, "msg_1");
+        // "again" opened its turn.
+        let again = settle_fork_point(
+            Ok(turns.as_slice()),
+            "turn-5",
+            AgentType::Codex,
+            ForkMode::Edit,
+        )
+        .unwrap()
+        .expect("a message that opened a turn edits");
+        assert_eq!(again.message_id, "msg_3");
+        // Only Codex forks whole turns.
+        assert!(!edits_a_steered_codex_message(
+            &turns,
+            "turn-1",
+            AgentType::ClaudeCode
+        ));
     }
 
     /// A message codex named but codeg shows no text for is still named, by
