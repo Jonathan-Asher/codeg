@@ -262,6 +262,12 @@ pub fn build_router_with_srn(
             "/get_folder_conversation",
             post(handlers::conversations::get_folder_conversation),
         )
+        // The full picture behind a preview that `imagePreviews` put in a
+        // history response. See `web::image_previews`.
+        .route(
+            "/conversation_image/{conversation_id}/{image_id}",
+            get(crate::web::image_previews::serve_conversation_image),
+        )
         .route(
             "/conversation_export_markdown",
             post(handlers::conversation_export::conversation_export_markdown),
@@ -2852,6 +2858,11 @@ async fn health_check() -> impl IntoResponse {
         crate::update::version::running_app_version().into(),
     );
     body.extend(crate::instance_identity::health_fields());
+    // History reads take `imagePreviews` (`web::image_previews`).
+    body.insert(
+        "imagePreviews".into(),
+        crate::web::image_previews::IMAGE_PREVIEWS_VERSION.into(),
+    );
     Json(serde_json::Value::Object(body))
 }
 

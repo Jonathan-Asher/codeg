@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
-use axum::{extract::Extension, Json};
+use axum::{
+    extract::Extension,
+    response::{IntoResponse, Response},
+    Json,
+};
 use serde::Deserialize;
 
 use crate::app_error::AppCommandError;
@@ -153,12 +157,17 @@ pub struct GetFolderConversationParams {
     pub tail_turns: Option<usize>,
     #[serde(default)]
     pub from_index: Option<usize>,
+    /// Send large inline pictures as small previews with a reference to the
+    /// full one (`web::image_previews`). Absent: the response it always was.
+    #[serde(default)]
+    pub image_previews: bool,
 }
 
 pub async fn get_folder_conversation(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<GetFolderConversationParams>,
-) -> Result<Json<DbConversationDetail>, AppCommandError> {
+) -> Result<Response, AppCommandError> {
+    let started = std::time::Instant::now();
     let db = &state.db;
     let window = conv_commands::resolve_turn_window_req(params.tail_turns, params.from_index)?;
     let result = conv_commands::get_folder_conversation_with_live_core(
@@ -170,7 +179,10 @@ pub async fn get_folder_conversation(
         window,
     )
     .await?;
-    Ok(Json(result))
+    if !params.image_previews {
+        return Ok(Json(result).into_response());
+    }
+    crate::web::image_previews::preview_response(result, params.conversation_id, started).await
 }
 
 #[derive(Deserialize)]
@@ -203,12 +215,16 @@ pub struct GetFolderConversationTurnsParams {
     pub conversation_id: i32,
     pub before_index: usize,
     pub limit: usize,
+    /// As on `get_folder_conversation`.
+    #[serde(default)]
+    pub image_previews: bool,
 }
 
 pub async fn get_folder_conversation_turns(
     Extension(state): Extension<Arc<AppState>>,
     Json(params): Json<GetFolderConversationTurnsParams>,
-) -> Result<Json<ConversationTurnsPage>, AppCommandError> {
+) -> Result<Response, AppCommandError> {
+    let started = std::time::Instant::now();
     let result = conv_commands::get_folder_conversation_turns_core(
         &state.db.conn,
         params.conversation_id,
@@ -216,7 +232,10 @@ pub async fn get_folder_conversation_turns(
         params.limit,
     )
     .await?;
-    Ok(Json(result))
+    if !params.image_previews {
+        return Ok(Json(result).into_response());
+    }
+    crate::web::image_previews::preview_response(result, params.conversation_id, started).await
 }
 
 #[derive(Deserialize)]
