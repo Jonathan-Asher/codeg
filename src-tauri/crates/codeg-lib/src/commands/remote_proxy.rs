@@ -2415,7 +2415,12 @@ async fn run_ws_task(
         &probe_client,
         &mut shutdown_rx,
         &mut outbound_rx,
-        |frame| forward_frame(&app, &entry, connection_id, frame),
+        |frame| {
+            // The server's pending list, for the menu-bar icon and the Dock
+            // badge: fresher than their poll while this window is open.
+            crate::attention_tray::observe_remote_frame(connection_id, &frame);
+            forward_frame(&app, &entry, connection_id, frame)
+        },
     )
     .await;
 

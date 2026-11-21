@@ -30,6 +30,10 @@ mod app_error;
 mod app_menu;
 pub mod app_state;
 pub mod appimage_env;
+/// The menu-bar icon and Dock badge for sessions waiting on the user, across
+/// this instance and every saved remote connection (desktop only).
+#[cfg(feature = "tauri-runtime")]
+pub mod attention_tray;
 pub mod automation;
 pub mod backgrounds;
 /// Built-in browser. Only its wire types and its grant rules compile in server
@@ -1864,6 +1868,12 @@ mod tauri_app {
                     app.state::<crate::db::AppDatabase>().conn.clone(),
                     crate::web::event_bridge::EventEmitter::from_app(app.handle()),
                 ));
+                // The same, plus every saved remote connection's, on the
+                // menu-bar icon and the Dock badge.
+                crate::attention_tray::spawn(
+                    app.handle().clone(),
+                    app.state::<crate::db::AppDatabase>().conn.clone(),
+                );
 
                 // A session driven outside codeg (another session resuming it,
                 // a terminal) still moves up in the lists when a turn lands in
@@ -2051,6 +2061,12 @@ mod tauri_app {
                 // workspace and quitting are both pure runtime concerns
                 // with no UI state to coordinate.
                 if id.starts_with(windows::TRAY_MENU_ID_PREFIX) {
+                    // A waiting session: opened in the window of the server
+                    // it lives on, like any `codeg://` link.
+                    if let Some(link) = windows::tray_attention_link(&id) {
+                        crate::deep_link::handle_raw_urls(app, &[link.to_string()]);
+                        return;
+                    }
                     match id.as_str() {
                         windows::TRAY_MENU_ID_SHOW => {
                             workspace_windows::show_local_workspace_window(app)

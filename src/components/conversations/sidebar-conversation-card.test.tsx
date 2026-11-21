@@ -925,6 +925,35 @@ describe("SidebarConversationCard waiting-on-you indicator", () => {
     expect(screen.queryByTitle("Running")).not.toBeInTheDocument()
   })
 
+  it("gives each kind its own colour on the row's dot and badge", () => {
+    act(() => {
+      useConversationAttentionStore.setState({
+        byConversationId: new Map([
+          [1, "permission"],
+          [2, "question"],
+          [3, "plan_approval"],
+        ]),
+      })
+    })
+    renderWithIntl(<CardList conversations={BASE} now={NOW} />)
+    const dots = screen.getAllByTestId("conversation-attention-dot")
+    const dotColours = dots.map((dot) =>
+      dot.className.split(" ").find((c) => c.startsWith("bg-"))
+    )
+    expect(dots.map((dot) => dot.getAttribute("data-attention"))).toEqual([
+      "permission",
+      "question",
+      "plan_approval",
+    ])
+    expect(new Set(dotColours).size).toBe(3)
+    for (const colour of dotColours) expect(colour).not.toMatch(/amber|yellow/)
+    const badges = screen.getAllByTestId("conversation-attention-badge")
+    expect(
+      new Set(badges.map((b) => b.querySelector("svg")?.getAttribute("class")))
+        .size
+    ).toBe(3)
+  })
+
   it("re-renders only the card whose attention changed", () => {
     renderWithIntl(<CardList conversations={BASE} now={NOW} />)
     probe.agentIconRenders = 0

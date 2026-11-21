@@ -73,6 +73,7 @@ import {
 import { folderTitleTintVars } from "@/lib/theme-presets"
 import { useTabArrangeStore } from "@/stores/tab-arrangement-store"
 import { useArrangedTabs } from "@/hooks/use-arranged-tabs"
+import { useConversationAttentionStore } from "@/stores/conversation-attention-store"
 import { STRIP_ICON_BTN } from "./strip-icon-button"
 import { TabItem, type TabMoveTarget } from "./tab-item"
 import { ForkPlaceholderTab } from "./fork-placeholder-tab"
@@ -199,6 +200,9 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
   const { arranged, shown: displayTabs } = useArrangedTabs(
     groupTabs,
     displayActiveId
+  )
+  const attentionByConversationId = useConversationAttentionStore(
+    (s) => s.byConversationId
   )
   const isTileMode = !!tileByGroup[stripGroupId]
   const handleToggleTile = useCallback(
@@ -647,7 +651,13 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
   // sequence, so a label flanking the active tab gets the same baseline inset a
   // neighbouring tab would (`data-adjacent-active`, globals.css).
   type StripEntry =
-    | { kind: "label"; runKey: string; count: number; collapsed: boolean }
+    | {
+        kind: "label"
+        runKey: string
+        count: number
+        attentionCount: number
+        collapsed: boolean
+      }
     | { kind: "tab"; tab: TabItemData }
     | { kind: "fork-placeholder"; id: string }
   const arrangedEntries: StripEntry[] = arranged.runs
@@ -656,8 +666,20 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
         const visible = collapsed
           ? run.tabs.filter((tab) => tab.id === displayActiveId)
           : run.tabs
+        // Waiting on the user, so a folded group still says so.
+        const attentionCount = run.tabs.filter(
+          (tab) =>
+            tab.conversationId != null &&
+            attentionByConversationId.has(tab.conversationId)
+        ).length
         return [
-          { kind: "label", runKey: run.key, count: run.tabs.length, collapsed },
+          {
+            kind: "label",
+            runKey: run.key,
+            count: run.tabs.length,
+            attentionCount,
+            collapsed,
+          },
           ...visible.map((tab) => ({ kind: "tab" as const, tab })),
         ]
       })
@@ -750,6 +772,7 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
               runKey={entry.runKey}
               label={visual?.label ?? ""}
               count={entry.count}
+              attentionCount={entry.attentionCount}
               collapsed={entry.collapsed}
               accentStyle={visual?.style}
               adjacentActive={adjacencyAt(pos)}

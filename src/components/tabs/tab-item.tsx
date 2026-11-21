@@ -30,6 +30,11 @@ import type { ConversationStatus } from "@/lib/types"
 import { ConversationStatusDot } from "@/components/conversations/conversation-status-dot"
 import { useBackgroundTitle } from "@/components/conversations/session-activity"
 import { useConversationBackground } from "@/stores/conversation-background-store"
+import { useConversationAttentionStore } from "@/stores/conversation-attention-store"
+import {
+  ATTENTION_KIND_VISUAL,
+  AttentionKindBadge,
+} from "@/components/conversations/attention-kind"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -168,6 +173,7 @@ export const TabItem = memo(function TabItem({
   accentStyle,
 }: TabItemProps) {
   const t = useTranslations("Folder.tabs")
+  const tSidebar = useTranslations("Folder.sidebar")
   const itemRef = useRef<HTMLDivElement>(null)
   // A primitive per tab, so a change to any other conversation's row does not
   // re-render this tab.
@@ -205,6 +211,11 @@ export const TabItem = memo(function TabItem({
       ? "background"
       : null
   const dotTitle = useBackgroundTitle(dotActivity ?? "idle", background, null)
+  // Blocked on the user (permission / question / plan): outranks the status
+  // dot, whose yellow would otherwise say only "running".
+  const attention = useConversationAttentionStore((s) =>
+    conversationId != null ? s.byConversationId.get(conversationId) : undefined
+  )
   const handleToggleCritical = useCallback(() => {
     if (conversationId == null) return
     setConversationCritical(conversationId, !isCritical).catch((err) => {
@@ -489,11 +500,20 @@ export const TabItem = memo(function TabItem({
                 style={accentStyle}
               />
             )}
-            <ConversationStatusDot
-              status={tab.status as ConversationStatus | undefined}
-              activity={dotActivity}
-              title={dotTitle || undefined}
-            />
+            {attention ? (
+              <AttentionKindBadge
+                kind={attention}
+                label={tSidebar(ATTENTION_KIND_VISUAL[attention].label)}
+                testId="tab-attention-badge"
+                className="-mx-0.5"
+              />
+            ) : (
+              <ConversationStatusDot
+                status={tab.status as ConversationStatus | undefined}
+                activity={dotActivity}
+                title={dotTitle || undefined}
+              />
+            )}
             {/* A sub-agent's thread, read-only: said by its icon. */}
             {tab.kind === "subagent" ? (
               <BotIcon

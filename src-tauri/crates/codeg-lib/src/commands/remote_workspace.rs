@@ -237,6 +237,7 @@ pub async fn create_remote_workspace_connection(
     )
     .await?;
     remember_identity(&db, created.id, identity.as_ref()).await;
+    crate::attention_tray::connections_changed();
     Ok(created)
 }
 
@@ -262,6 +263,7 @@ pub async fn update_remote_workspace_connection(
     )
     .await?;
     remember_identity(&db, id, identity.as_ref()).await;
+    crate::attention_tray::connections_changed();
     // The built-in browser's tunnel follows the connection to where it now
     // points, rather than staying on the old address until it drops. A
     // rename leaves it be: closing it would cut every live stream of the
@@ -288,6 +290,7 @@ pub async fn delete_remote_workspace_connection(
         .await
         .map_err(AppCommandError::db)?;
     remember_identity(&db, id, None).await;
+    crate::attention_tray::connections_changed();
     // What the remote host's pages stored in the built-in browser goes with
     // the connection they were opened through.
     crate::browser::remote::forget_connection(&app, id).await;

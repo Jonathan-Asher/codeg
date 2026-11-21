@@ -2,7 +2,9 @@
 //! that can add or clear an item, it reads every live session, asks the
 //! engine what to do, publishes the list, raises the desktop reminders and
 //! hands the pushes to a delivery task (an APNs retry must not hold the next
-//! pass up). The dock badge follows the count on desktop.
+//! pass up). On desktop the list also goes to `attention_tray`, which shows
+//! it, with the saved remote connections', on the menu-bar icon and the Dock
+//! badge.
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -311,26 +313,18 @@ async fn store(db: &DatabaseConnection, stored: &[Stored]) {
     }
 }
 
-/// The dock badge (macOS; where the platform has one).
+/// Hand the list to the desktop's menu-bar icon and Dock badge
+/// (`attention_tray`), which add every saved remote connection's to it and
+/// own the badge.
 #[cfg(feature = "tauri-runtime")]
-fn set_dock_badge(emitter: &EventEmitter, count: u32) {
-    use tauri::Manager;
-    let EventEmitter::Tauri(app) = emitter else {
-        return;
-    };
-    let window = app
-        .get_webview_window("main")
-        .or_else(|| app.webview_windows().into_values().next());
-    if let Some(window) = window {
-        let badge = (count > 0).then_some(i64::from(count));
-        if let Err(e) = window.set_badge_count(badge) {
-            tracing::debug!("[pending] could not set the dock badge: {e}");
-        }
+fn publish_desktop(emitter: &EventEmitter, snapshot: &super::PendingSnapshot) {
+    if matches!(emitter, EventEmitter::Tauri(_)) {
+        crate::attention_tray::note_local(snapshot);
     }
 }
 
 #[cfg(not(feature = "tauri-runtime"))]
-fn set_dock_badge(_emitter: &EventEmitter, _count: u32) {}
+fn publish_desktop(_emitter: &EventEmitter, _snapshot: &super::PendingSnapshot) {}
 
 /// One pass at a time over the live sessions, into the process-wide engine.
 pub(crate) struct Watch {
@@ -339,7 +333,7 @@ pub(crate) struct Watch {
     emitter: EventEmitter,
     jobs: mpsc::UnboundedSender<Vec<Job>>,
     metas: MetaCache,
-    /// The count last published (the dock badge); `None` before the first.
+    /// The count last published; `None` before the first.
     published: Option<u32>,
 }
 
@@ -387,10 +381,8 @@ impl Watch {
         });
         if let Some(snapshot) = snapshot {
             set_pending_count(snapshot.count);
-            if self.published != Some(snapshot.count) {
-                self.published = Some(snapshot.count);
-                set_dock_badge(&self.emitter, snapshot.count);
-            }
+            self.published = Some(snapshot.count);
+            publish_desktop(&self.emitter, &snapshot);
             emit_event(&self.emitter, PENDING_ITEMS_EVENT, &snapshot);
         }
         for reminder in &pass.reminders {

@@ -13,13 +13,7 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import {
-  BellRing,
-  ClipboardCheck,
-  MessageCircleQuestion,
-  ShieldQuestion,
-  type LucideIcon,
-} from "lucide-react"
+import { BellRing } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -33,7 +27,8 @@ import {
   secondsSince,
   waitedDuration,
 } from "@/lib/pending-items"
-import type { PendingItem, PendingKind } from "@/lib/types"
+import type { AttentionKind, PendingItem, PendingKind } from "@/lib/types"
+import { ATTENTION_KIND_VISUAL } from "@/components/conversations/attention-kind"
 import { cn } from "@/lib/utils"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { usePendingItemsStore } from "@/stores/pending-items-store"
@@ -41,10 +36,11 @@ import { usePendingItemsStore } from "@/stores/pending-items-store"
 /** How often the ages catch up while the list is open. */
 const AGE_REFRESH_MS = 30_000
 
-const KIND_ICONS: Record<PendingKind, LucideIcon> = {
-  permission: ShieldQuestion,
-  question: MessageCircleQuestion,
-  plan: ClipboardCheck,
+/** Each kind looks as it does on the session's row and tab. */
+const KIND_VISUAL: Record<PendingKind, AttentionKind> = {
+  permission: "permission",
+  question: "question",
+  plan: "plan_approval",
 }
 
 function PendingItemRow({
@@ -63,7 +59,8 @@ function PendingItemRow({
   )
   const title = liveTitle?.trim() || item.title?.trim() || t("untitled")
   const { unit, count } = waitedDuration(secondsSince(item.asked_at, now))
-  const Icon = KIND_ICONS[item.kind]
+  const visual = ATTENTION_KIND_VISUAL[KIND_VISUAL[item.kind]]
+  const Icon = visual.icon
   return (
     <li>
       <button
@@ -74,7 +71,7 @@ function PendingItemRow({
       >
         <Icon
           aria-hidden="true"
-          className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400"
+          className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", visual.iconClass)}
         />
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="flex min-w-0 items-baseline gap-2">
@@ -136,7 +133,9 @@ export function PendingItemsIndicator({ className }: { className?: string }) {
           size="sm"
           data-pending-indicator
           className={cn(
-            "h-6 shrink-0 gap-1 rounded-md px-1.5 text-xs font-medium text-amber-700 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300",
+            // Rose like the folders' "needs you" chips, never the amber of
+            // "running".
+            "h-6 shrink-0 gap-1 rounded-md bg-rose-500/10 px-1.5 text-xs font-medium text-rose-700 hover:bg-rose-500/15 hover:text-rose-800 dark:bg-rose-400/15 dark:text-rose-300 dark:hover:text-rose-200",
             className
           )}
           title={label}
