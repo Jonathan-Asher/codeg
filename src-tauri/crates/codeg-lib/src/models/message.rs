@@ -294,13 +294,15 @@ pub struct MessageTurn {
     /// fork point (`_meta.jetbrains.air.fork.messageId`) and claude-agent-acp
     /// 0.75.1, codex-acp 1.8.0 and deepseek-acp 0.8.0 all resolve it against
     /// their own message identity, so a fork "up to here" needs the agent's
-    /// spelling of "here". Claude's is `assistant.message.id ?? uuid` and
-    /// DeepSeek's is the session log's `message.id` — both pure functions of
-    /// the stored record, which is why the parsers can derive them offline
-    /// instead of having to have captured the live `messageId` chunk field.
+    /// spelling of "here". Claude's is `assistant.message.id ?? uuid`,
+    /// DeepSeek's is the session log's `message.id` and Codex's is the agent
+    /// message's item id (`msg_…`, recorded by recent codex) — all pure
+    /// functions of the stored record, which is why the parsers can derive them
+    /// offline instead of having to have captured the live `messageId` chunk
+    /// field.
     ///
-    /// `None` for every parser with no such id (codex rollouts record no item
-    /// ids at all, so that side forks by content fingerprint instead) and for
+    /// `None` for every parser with no such id (older codex rollouts record no
+    /// item ids, so there codex forks by content fingerprint alone) and for
     /// synthesized turns, which name nothing the agent stored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_message_id: Option<String>,
