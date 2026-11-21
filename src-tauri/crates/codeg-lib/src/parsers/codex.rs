@@ -18247,6 +18247,7 @@ mod tests {
         let named: Vec<(String, String)> = detail
             .turns
             .iter()
+            .filter(|t| matches!(t.role, TurnRole::Assistant))
             .filter_map(|t| {
                 let id = t.agent_message_id.clone()?;
                 let text = t.blocks.iter().find_map(|b| match b {
