@@ -26,6 +26,9 @@ import {
 } from "@/stores/app-workspace-store"
 import { popClosedTab } from "@/lib/closed-tab-stack"
 import { useArrangedTabs } from "@/hooks/use-arranged-tabs"
+import { shownTabs } from "@/lib/tab-arrangement"
+import { useTabArrangeStore } from "@/stores/tab-arrangement-store"
+import { stepConversationTab, tabStepPreviewId } from "@/stores/tab-step-store"
 import {
   matchShortcutEvent,
   numberedTabIndexFromEvent,
@@ -73,7 +76,10 @@ export function WorkspaceChromeController() {
   const activeTabId = useTabStore((s) => s.activeTabId)
   // Tab switching walks the strip as displayed: grouped or sorted, with
   // collapsed groups folded away (`shownTabs`), not the manual order behind it.
-  const { shown: navTabs } = useArrangedTabs(tabs, activeTabId)
+  const { arranged: navArranged, shown: navTabs } = useArrangedTabs(
+    tabs,
+    activeTabId
+  )
   // Tab-close/navigation shortcuts used to live in the visible tab strips.
   // Mobile no longer mounts those strips, so this always-mounted controller now
   // owns them too (see the keydown handler below).
@@ -277,14 +283,33 @@ export function WorkspaceChromeController() {
       const isPrevTab = matchShortcutEvent(e, shortcuts.prev_tab)
       if (isNextTab || isPrevTab) {
         if (!conversationPaneActive) return
-        if (navTabs.length < 2 || !activeTabId) return
-        const currentIndex = navTabs.findIndex((tab) => tab.id === activeTabId)
+        // A press moves the strip's highlight first and the switch follows
+        // (see `stepConversationTab`), so the next press steps on from the
+        // highlighted tab, which can be ahead of the active one.
+        const fromId = tabStepPreviewId() ?? activeTabId
+        if (navTabs.length < 2 || !fromId) return
+        // The strip keeps the tab it highlights in view next to a folded
+        // group's label, so the walk does too.
+        const walk =
+          fromId === activeTabId
+            ? navTabs
+            : shownTabs(
+                navArranged,
+                useTabArrangeStore.getState().collapsedRuns,
+                fromId
+              )
+        const currentIndex = walk.findIndex((tab) => tab.id === fromId)
         if (currentIndex === -1) return
         e.preventDefault()
         const offset = isNextTab ? 1 : -1
-        const nextIndex =
-          (currentIndex + offset + navTabs.length) % navTabs.length
-        switchTab(navTabs[nextIndex].id)
+        const nextIndex = (currentIndex + offset + walk.length) % walk.length
+        stepConversationTab(
+          walk[nextIndex].id,
+          e,
+          (event) =>
+            matchShortcutEvent(event, shortcuts.next_tab) ||
+            matchShortcutEvent(event, shortcuts.prev_tab)
+        )
         return
       }
 
@@ -450,6 +475,7 @@ export function WorkspaceChromeController() {
     isChatMode,
     tabs,
     navTabs,
+    navArranged,
     activeTabId,
     switchTab,
     closeCurrentTab,
