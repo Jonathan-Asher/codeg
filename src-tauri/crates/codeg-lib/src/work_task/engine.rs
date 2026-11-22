@@ -10760,6 +10760,7 @@ mod tests {
             position,
             is_active: false,
             is_pinned: false,
+            is_anchored: false,
         };
         tab_service::save_all_tabs_cas(
             &db.conn,

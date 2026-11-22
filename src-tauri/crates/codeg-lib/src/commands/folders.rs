@@ -8428,6 +8428,7 @@ mod tests {
                 position: 0,
                 is_active: true,
                 is_pinned: false,
+                is_anchored: false,
             }],
             0,
         )

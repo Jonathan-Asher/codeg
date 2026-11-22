@@ -14,7 +14,10 @@ import {
  * The underlying order (`rawTabs`, persisted via `save_opened_tabs`) is the
  * manual order. Grouping and the non-manual sorts never rewrite it; only a drag
  * under `manual` sorting does (see {@link reinsertInGroupOrder}), so switching
- * back to no grouping always shows the order the user dragged.
+ * back to no grouping always shows the order the user dragged. Two exceptions,
+ * both the user's own doing: dragging a pinned tab (pinned tabs keep the manual
+ * order under every sort, so they always drag), and "Switch to manual order",
+ * which makes the order on screen the manual one.
  */
 export const TAB_GROUP_BYS = ["none", "folder", "status"] as const
 export type TabGroupBy = (typeof TAB_GROUP_BYS)[number]
@@ -89,6 +92,8 @@ interface ArrangeableTab {
   conversationId: number | null
   status?: ConversationStatus
   title?: string
+  /** Pinned to the start of the strip ("Pin tab"; see `TabItemInternal`). */
+  isAnchored?: boolean
 }
 
 export type TabRun<T> =
@@ -96,10 +101,23 @@ export type TabRun<T> =
   | { kind: "status"; key: string; band: TabStatusBand; tabs: T[] }
 
 export interface ArrangedTabs<T> {
+  /** Every tab in display order: the pinned ones, then the rest. */
   ordered: readonly T[]
-  /** Null when ungrouped. */
+  /** The tabs pinned to the start of the strip, in their manual order. They
+   *  are never grouped or sorted. */
+  anchored: readonly T[]
+  /** The rest, grouped. Null when ungrouped. */
   runs: TabRun<T>[] | null
 }
+
+/**
+ * Lane keys for the strip's drag clamp and reorder write-back (`data-tab-run`).
+ * The pinned tabs are a lane of their own, ahead of every group; an ungrouped
+ * strip with pinned tabs puts the rest in a second one. Neither is a group: no
+ * label, nothing to fold or move.
+ */
+export const ANCHORED_RUN_KEY = "anchored"
+export const UNGROUPED_RUN_KEY = "ungrouped"
 
 /**
  * - `needs_you`: blocked on a permission, a question or a plan approval (the
@@ -189,6 +207,10 @@ function bandRank(
 /**
  * Lay the strip out for `view`.
  *
+ * Pinned tabs (`isAnchored`) come first, in their manual order, whatever the
+ * grouping or sort: a browser's pinned tabs. Everything below applies to the
+ * rest.
+ *
  * Grouped: folder groups follow `groupOrder.folder` (unplaced folders after,
  * in the order their first tab appears); status bands follow
  * `groupOrder.status` (see {@link bandOrder}) and empty bands are skipped.
@@ -196,8 +218,8 @@ function bandRank(
  * the manual order, so nothing jumps around except what changed group.
  *
  * `ordered` keeps the tab objects' identity (the strip's reorder list keys on
- * them) and is the very array passed in when nothing is grouped or sorted;
- * `runs` is null when ungrouped.
+ * them) and is the very array passed in when nothing is pinned, grouped or
+ * sorted; `runs` is null when ungrouped.
  */
 export function arrangeTabs<T extends ArrangeableTab>(
   tabs: readonly T[],
@@ -213,12 +235,20 @@ export function arrangeTabs<T extends ArrangeableTab>(
   const sorted = (list: readonly T[]) =>
     sortTabs(list, sort, attention, activity)
 
-  if (view.groupBy === "none") return { ordered: sorted(tabs), runs: null }
+  const anchored = tabs.filter((tab) => tab.isAnchored === true)
+  const rest =
+    anchored.length === 0 ? tabs : tabs.filter((tab) => tab.isAnchored !== true)
+  const withAnchored = (list: readonly T[]): readonly T[] =>
+    anchored.length === 0 ? list : [...anchored, ...list]
+
+  if (view.groupBy === "none") {
+    return { ordered: withAnchored(sorted(rest)), anchored, runs: null }
+  }
 
   let runs: TabRun<T>[]
   if (view.groupBy === "folder") {
     const byFolder = new Map<number, T[]>()
-    for (const tab of tabs) {
+    for (const tab of rest) {
       const list = byFolder.get(tab.folderId)
       if (list) list.push(tab)
       else byFolder.set(tab.folderId, [tab])
@@ -236,7 +266,7 @@ export function arrangeTabs<T extends ArrangeableTab>(
       }))
   } else {
     const byBand = new Map<TabStatusBand, T[]>()
-    for (const tab of tabs) {
+    for (const tab of rest) {
       const band = tabStatusBand(tab, attention)
       const list = byBand.get(band)
       if (list) list.push(tab)
@@ -251,7 +281,11 @@ export function arrangeTabs<T extends ArrangeableTab>(
         tabs: [...sorted(byBand.get(band)!)],
       }))
   }
-  return { ordered: runs.flatMap((run) => run.tabs), runs }
+  return {
+    ordered: withAnchored(runs.flatMap((run) => run.tabs)),
+    anchored,
+    runs,
+  }
 }
 
 export function folderRunKey(folderId: number): string {
@@ -266,9 +300,9 @@ export function statusRunKey(band: TabStatusBand): string {
  * The tabs a strip actually shows, in display order: the arrangement with the
  * collapsed runs folded away. A collapsed run keeps only the active tab, so the
  * tab being worked in never disappears behind its group's label. Ungrouped,
- * nothing collapses. This is also the order the tab-switching shortcuts walk:
- * they follow what is on screen, not the manual order behind a grouped or
- * sorted strip.
+ * nothing collapses; pinned tabs never do. This is also the order the
+ * tab-switching shortcuts walk: they follow what is on screen (the pinned tabs
+ * first), not the manual order behind a grouped or sorted strip.
  */
 export function shownTabs<T extends { id: string }>(
   arranged: ArrangedTabs<T>,
@@ -276,11 +310,31 @@ export function shownTabs<T extends { id: string }>(
   activeTabId: string | null
 ): readonly T[] {
   if (!arranged.runs) return arranged.ordered
-  return arranged.runs.flatMap((run) =>
+  const grouped = arranged.runs.flatMap((run) =>
     collapsedRuns.has(run.key)
       ? run.tabs.filter((tab) => tab.id === activeTabId)
       : run.tabs
   )
+  return arranged.anchored.length === 0
+    ? grouped
+    : [...arranged.anchored, ...grouped]
+}
+
+/**
+ * The tabs "Close to the Right" would close something for: those with an
+ * unpinned tab after them in the strip's display order (`ordered`, folded
+ * groups included). Pinned tabs are never closed by it.
+ */
+export function tabsWithClosableRight<T extends ArrangeableTab>(
+  ordered: readonly T[]
+): ReadonlySet<string> {
+  const ids = new Set<string>()
+  let unpinnedAfter = false
+  for (let i = ordered.length - 1; i >= 0; i--) {
+    if (unpinnedAfter) ids.add(ordered[i].id)
+    if (ordered[i].isAnchored !== true) unpinnedAfter = true
+  }
+  return ids
 }
 
 /**

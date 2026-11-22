@@ -68,6 +68,7 @@ pub async fn list_all_tabs<C: ConnectionTrait>(conn: &C) -> Result<Vec<OpenedTab
                 position: r.position,
                 is_active: r.is_active,
                 is_pinned: r.is_pinned,
+                is_anchored: r.is_anchored,
             })
         })
         .collect())
@@ -134,6 +135,7 @@ pub async fn save_all_tabs<C: ConnectionTrait>(
             position: Set(item.position),
             is_active: Set(is_active),
             is_pinned: Set(item.is_pinned),
+            is_anchored: Set(item.is_anchored),
             created_at: Set(now),
             updated_at: Set(now),
         };

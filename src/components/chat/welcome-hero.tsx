@@ -13,6 +13,7 @@ import {
 type TipKey =
   | "tileTabs"
   | "pinTab"
+  | "pinnedTabs"
   | "shortcutsNewSearch"
   | "slashAtMention"
   | "pasteDropFiles"
@@ -53,6 +54,7 @@ interface TipDef {
 const TIPS: TipDef[] = [
   { key: "tileTabs" },
   { key: "pinTab" },
+  { key: "pinnedTabs" },
   {
     key: "shortcutsNewSearch",
     buildValues: ({ shortcuts, isMac, kbd }) => ({

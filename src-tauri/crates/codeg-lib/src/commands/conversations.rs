@@ -6702,6 +6702,7 @@ mod tests {
             position: 0,
             is_active: false,
             is_pinned: true,
+            is_anchored: false,
         }
     }
 
@@ -6730,6 +6731,7 @@ mod tests {
                 position: 2,
                 is_active: true,
                 is_pinned: true,
+                is_anchored: false,
             },
         ];
         let outcome = save_opened_tabs_core(&db.conn, &emitter, items, 0, "win-a".into())
@@ -6748,6 +6750,60 @@ mod tests {
         let snap = list_opened_tabs_core(&db.conn).await.expect("list");
         assert_eq!(snap.items.len(), 2);
         assert_eq!(snap.version, 1);
+    }
+
+    /// The tab strip's "Pin tab" (`is_anchored`) is stored with the tab and
+    /// comes back with it, apart from `is_pinned` (kept open, not a preview).
+    #[tokio::test]
+    async fn save_opened_tabs_core_round_trips_the_pin_flag() {
+        let db = fresh_in_memory_db().await;
+        let folder_id = seed_folder(&db, "/tmp/codeg-tabs-anchored").await;
+        let c1 = create_conversation_core(&db.conn, folder_id, AgentType::ClaudeCode, None)
+            .await
+            .expect("c1");
+        let c2 = create_conversation_core(&db.conn, folder_id, AgentType::Codex, None)
+            .await
+            .expect("c2");
+        let items = vec![
+            OpenedTab {
+                is_anchored: true,
+                ..conv_tab(folder_id, c1, AgentType::ClaudeCode)
+            },
+            OpenedTab {
+                position: 1,
+                ..conv_tab(folder_id, c2, AgentType::Codex)
+            },
+        ];
+        let outcome = save_opened_tabs_core(&db.conn, &EventEmitter::Noop, items, 0, "a".into())
+            .await
+            .expect("save");
+        assert!(outcome.accepted);
+        let flags = |tabs: &[OpenedTab]| {
+            tabs.iter()
+                .map(|tab| (tab.conversation_id, tab.is_anchored, tab.is_pinned))
+                .collect::<Vec<_>>()
+        };
+        let expected = vec![(Some(c1), true, true), (Some(c2), false, true)];
+        assert_eq!(flags(&outcome.tabs), expected);
+        let snap = list_opened_tabs_core(&db.conn).await.expect("list");
+        assert_eq!(flags(&snap.items), expected);
+    }
+
+    /// A client that predates the pin flag sends none: its tabs are unpinned.
+    #[test]
+    fn opened_tab_without_the_pin_flag_is_unpinned() {
+        let tab: OpenedTab = serde_json::from_value(serde_json::json!({
+            "id": 0,
+            "folder_id": 1,
+            "conversation_id": 2,
+            "agent_type": "claude_code",
+            "position": 0,
+            "is_active": false,
+            "is_pinned": true,
+        }))
+        .expect("an older client's tab deserializes");
+        assert!(!tab.is_anchored);
+        assert!(tab.is_pinned);
     }
 
     #[tokio::test]
@@ -9656,6 +9712,7 @@ mod tests {
             position,
             is_active: position == 0,
             is_pinned: false,
+            is_anchored: false,
         };
         let saved = tab_service::save_all_tabs_cas(&db.conn, vec![tab(root, 0), tab(other, 1)], 0)
             .await

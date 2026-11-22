@@ -338,6 +338,7 @@ async fn a_claude_session_moves_fully_with_its_files_tab_and_events() {
             position: 0,
             is_active: true,
             is_pinned: true,
+            is_anchored: false,
         }],
         0,
     )

@@ -119,7 +119,24 @@ export interface TabItemInternal {
   runtimeConversationId?: number
   agentType: AgentType
   title: string
+  /**
+   * Not a preview: a tab the user is keeping open. A tab without it is the
+   * group's preview (italic title), which the next session opened in the group
+   * replaces; a double click, or starting to work in it, sets it. Synced
+   * (`opened_tabs.is_pinned`). Not what the tab menu's "Pin tab" does: that is
+   * `isAnchored`.
+   */
   isPinned: boolean
+  /**
+   * Pinned to the start of the strip — the tab menu's "Pin tab", a browser's
+   * pinned tab. Shown first and compact whatever the grouping or sort, dragged
+   * only among the other pinned tabs, and skipped by "Close Others", "Close to
+   * the Right" and "Close All" (a plain close still closes it). Implies
+   * `isPinned`: a pinned tab is never a preview. Synced for conversation tabs
+   * (`opened_tabs.is_anchored`); a draft's or a sub-agent tab's rides the
+   * device-local group blob, like the tab itself.
+   */
+  isAnchored?: boolean
   workingDir?: string
   status?: ConversationStatus
   /**
@@ -160,6 +177,14 @@ export function isDraftTab(
   tab: Pick<TabItemInternal, "kind" | "conversationId">
 ): boolean {
   return tab.kind === "conversation" && tab.conversationId == null
+}
+
+/** The group's preview tab: the one the next opened session replaces. Never a
+ *  pinned tab. */
+export function isPreviewTab(
+  tab: Pick<TabItemInternal, "isPinned" | "isAnchored">
+): boolean {
+  return !tab.isPinned && tab.isAnchored !== true
 }
 
 /** A read-only view of a Claude Code sub-agent's thread. */
@@ -313,11 +338,26 @@ export interface TabStoreState {
     conversationId: number,
     agentType: AgentType
   ) => void
+  /** Closes the rest of the tab's group, except the pinned tabs. */
   closeOtherTabs: (tabId: string) => void
+  /**
+   * "Close to the Right": closes the tabs listed after `tabId` in `shownOrder`
+   * (the strip's display order, which only the strip knows: it depends on the
+   * grouping and sort), except the pinned ones.
+   */
+  closeTabsToRight: (tabId: string, shownOrder: readonly string[]) => void
+  /** Closes every tab on screen except the pinned ones. */
   closeAllTabs: () => void
   closeTabsByFolder: (folderId: number) => void
   switchTab: (tabId: string) => void
+  /** Keep a preview open (`isPinned`). Not "Pin tab": see `setTabAnchored`. */
   pinTab: (tabId: string) => void
+  /**
+   * "Pin tab" / "Unpin tab" (`isAnchored`). As in a browser, a newly pinned
+   * tab goes after the pinned tabs already there, and an unpinned one becomes
+   * the first of the rest. Pinning also keeps it open (`isPinned`).
+   */
+  setTabAnchored: (tabId: string, anchored: boolean) => void
   toggleGroupTile: (groupId: string) => void
   splitTab: (
     tabId: string,
@@ -696,6 +736,7 @@ function sameDerivedTab(a: TabItemInternal, b: TabItemInternal): boolean {
     a.agentType === b.agentType &&
     a.title === b.title &&
     a.isPinned === b.isPinned &&
+    (a.isAnchored === true) === (b.isAnchored === true) &&
     a.workingDir === b.workingDir &&
     a.status === b.status &&
     a.agentTypeProvisional === b.agentTypeProvisional &&
@@ -722,7 +763,15 @@ function buildPersistItems(
       position: i,
       is_active: tab.id === activeTabId,
       is_pinned: tab.isPinned,
+      is_anchored: tab.isAnchored === true,
     }))
+}
+
+/** A synced tab's "Pin tab" flag. A server that predates it sends none. */
+function anchoredFromItem(
+  item: OpenedTab
+): Pick<TabItemInternal, "isAnchored"> {
+  return item.is_anchored === true ? { isAnchored: true } : {}
 }
 
 /** Resolve a tab's group: its assignment when it points at a live leaf, else
@@ -893,6 +942,8 @@ interface PersistedDraft {
   isChat?: boolean
   workingDir?: string
   agentType?: AgentType
+  /** Pinned to the start of the strip (`isAnchored`). */
+  anchored?: true
 }
 
 function sanitizeDrafts(value: unknown): PersistedDraft[] {
@@ -920,6 +971,7 @@ function sanitizeDrafts(value: unknown): PersistedDraft[] {
       ...(typeof e.agentType === "string" && e.agentType.length > 0
         ? { agentType: e.agentType as AgentType }
         : {}),
+      ...(e.anchored === true ? { anchored: true as const } : {}),
     })
   }
   return out
@@ -938,6 +990,8 @@ interface PersistedSubagentTab {
   folderId: number
   title: string
   target: SubagentTabTarget
+  /** Pinned to the start of the strip (`isAnchored`). */
+  anchored?: true
 }
 
 function sanitizeSubagentTabs(value: unknown): PersistedSubagentTab[] {
@@ -983,6 +1037,7 @@ function sanitizeSubagentTabs(value: unknown): PersistedSubagentTab[] {
           ? { description: text(target.description) }
           : {}),
       },
+      ...(e.anchored === true ? { anchored: true as const } : {}),
     })
   }
   return out
@@ -1094,6 +1149,7 @@ function persistGroupState() {
           folderId: tab.folderId,
           title: tab.title,
           target: tab.subagent,
+          ...(tab.isAnchored === true ? { anchored: true as const } : {}),
         })
       }
       return
@@ -1110,6 +1166,7 @@ function persistGroupState() {
         ? { workingDir: tab.workingDir }
         : {}),
       ...(tab.agentTypeProvisional ? {} : { agentType: tab.agentType }),
+      ...(tab.isAnchored === true ? { anchored: true as const } : {}),
     })
   })
   // Each folder view lists only its own folder's tabs (drafts by their own
@@ -1202,6 +1259,7 @@ function mergeRestoredDrafts(restored: TabItemInternal[]): {
         agentType: "claude_code",
         title: sub.title || runtime.labels.untitledConversation,
         isPinned: true,
+        ...(sub.anchored ? { isAnchored: true } : {}),
         subagent: sub.target,
       })
       groupOf[sub.id] = sub.group
@@ -1221,6 +1279,7 @@ function mergeRestoredDrafts(restored: TabItemInternal[]): {
       agentType: resolved.agentType,
       title: runtime.labels.newConversation,
       isPinned: true,
+      ...(draft.anchored ? { isAnchored: true } : {}),
       workingDir: draft.workingDir,
       agentTypeProvisional: resolved.provisional,
       ...(draft.isChat === true ? { isChat: true } : {}),
@@ -1975,9 +2034,11 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
 
     // Preview replacement stays within the focused group — a preview parked in
     // another group is left alone (the new tab gets a slot of its own instead).
+    // A pinned tab is never the preview, even one a client predating the pin
+    // flag synced without `isPinned`.
     const previewIndex = prevState.rawTabs.findIndex(
       (t) =>
-        !t.isPinned &&
+        isPreviewTab(t) &&
         isTabInScope(t) &&
         groupOfTab(prevState.groupOf, prevState.groupLayout, t.id) ===
           targetGroup
@@ -2138,18 +2199,21 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
     const target = prevState.rawTabs.find((tab) => tab.id === tabId)
     if (!target) return
     // Group-scoped while split: "others" are the target's group siblings only —
-    // the other groups keep their tabs (IDEA semantics).
+    // the other groups keep their tabs (IDEA semantics). Pinned tabs stay, as
+    // in a browser.
     const { groupOf, groupLayout } = prevState
     const targetGroup = groupOfTab(groupOf, groupLayout, tabId)
     const keep =
       groupLayout.type === "group"
         ? prevState.rawTabs.filter(
-            (tab) => tab.id === tabId || !isTabInScope(tab)
+            (tab) =>
+              tab.id === tabId || !isTabInScope(tab) || tab.isAnchored === true
           )
         : prevState.rawTabs.filter(
             (tab) =>
               tab.id === tabId ||
               !isTabInScope(tab) ||
+              tab.isAnchored === true ||
               groupOfTab(groupOf, groupLayout, tab.id) !== targetGroup
           )
     if (keep.length === prevState.rawTabs.length) {
@@ -2169,7 +2233,52 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
     recomputeTabs()
   },
 
+  closeTabsToRight: (tabId, shownOrder) => {
+    const at = shownOrder.indexOf(tabId)
+    if (at < 0) return
+    const right = new Set(shownOrder.slice(at + 1))
+    const prevState = get()
+    const closes = (tab: TabItemInternal) =>
+      right.has(tab.id) && tab.isAnchored !== true
+    if (!prevState.rawTabs.some(closes)) return
+    for (const [tab, slot] of batchCloseSlots(prevState.rawTabs, closes)) {
+      pushClosedTab(snapshotStripTab(tab, slot))
+    }
+    const rawTabs = prevState.rawTabs.filter((tab) => !closes(tab))
+    // The tab the menu was opened on takes over when the one in front went.
+    const activeClosed =
+      prevState.activeTabId != null &&
+      !rawTabs.some((tab) => tab.id === prevState.activeTabId)
+    set({ rawTabs, ...(activeClosed ? { activeTabId: tabId } : {}) })
+    recomputeTabs()
+  },
+
   closeAllTabs: () => {
+    // Pinned tabs stay, as in a browser. With any of them on screen nothing
+    // needs replacing: the one in front stays, or the first pinned tab takes
+    // over.
+    const current = get()
+    const pinnedOnScreen = current.rawTabs.filter(
+      (tab) => isTabInScope(tab) && tab.isAnchored === true
+    )
+    if (pinnedOnScreen.length > 0) {
+      const closes = (tab: TabItemInternal) =>
+        isTabInScope(tab) && tab.isAnchored !== true
+      if (!current.rawTabs.some(closes)) return
+      for (const [tab, slot] of batchCloseSlots(current.rawTabs, closes)) {
+        pushClosedTab(snapshotStripTab(tab, slot))
+      }
+      const activeStays = pinnedOnScreen.some(
+        (tab) => tab.id === current.activeTabId
+      )
+      set({
+        rawTabs: current.rawTabs.filter((tab) => !closes(tab)),
+        activeTabId: activeStays ? current.activeTabId : pinnedOnScreen[0].id,
+      })
+      recomputeTabs()
+      if (!activeStays) runtime.activateConversationPane()
+      return
+    }
     if (useFolderTabsStore.getState().enabled) {
       const st = get()
       for (const [tab, slot] of batchCloseSlots(st.rawTabs, isTabInScope)) {
@@ -2246,6 +2355,32 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
     if (idx < 0 || prev[idx].isPinned) return
     const next = prev.map((t, i) => (i === idx ? { ...t, isPinned: true } : t))
     set({ rawTabs: next })
+    recomputeTabs()
+  },
+
+  setTabAnchored: (tabId, anchored) => {
+    const prev = get().rawTabs
+    const from = prev.findIndex((t) => t.id === tabId)
+    if (from < 0 || (prev[from].isAnchored === true) === anchored) return
+    // The manual order is what every view falls back to, so it follows the
+    // move a browser makes: a pinned tab goes after the last pinned one, an
+    // unpinned one before the first tab that isn't pinned (the start of the
+    // rest, in whichever group). Pinned tabs show first either way.
+    const without = prev.filter((_, i) => i !== from)
+    let at: number
+    if (anchored) {
+      at = 0
+      without.forEach((t, i) => {
+        if (t.isAnchored === true) at = i + 1
+      })
+    } else {
+      at = without.findIndex((t) => t.isAnchored !== true)
+      if (at < 0) at = without.length
+    }
+    const tab: TabItemInternal = anchored
+      ? { ...prev[from], isAnchored: true, isPinned: true }
+      : { ...prev[from], isAnchored: false }
+    set({ rawTabs: insertTab(without, tab, at) })
     recomputeTabs()
   },
 
@@ -2601,7 +2736,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
     if (!pinned) {
       const previewIndex = raw.findIndex(
         (t) =>
-          !t.isPinned &&
+          isPreviewTab(t) &&
           isTabInScope(t) &&
           groupOfTab(prevState.groupOf, prevState.groupLayout, t.id) ===
             targetGroup
@@ -3111,6 +3246,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
               ? runtime.labels.loadingConversation
               : runtime.labels.newConversation,
           isPinned: it.is_pinned,
+          ...anchoredFromItem(it),
         }))
         const activeItem = snap.items.find(
           (it) => it.is_active && it.conversation_id != null
@@ -3790,10 +3926,12 @@ export function useTabActions() {
       closeTab: s.closeTab,
       closeConversationTab: s.closeConversationTab,
       closeOtherTabs: s.closeOtherTabs,
+      closeTabsToRight: s.closeTabsToRight,
       closeAllTabs: s.closeAllTabs,
       closeTabsByFolder: s.closeTabsByFolder,
       switchTab: s.switchTab,
       pinTab: s.pinTab,
+      setTabAnchored: s.setTabAnchored,
       toggleGroupTile: s.toggleGroupTile,
       splitTab: s.splitTab,
       moveTabToGroup: s.moveTabToGroup,
@@ -3957,6 +4095,7 @@ function applyRemoteSnapshot(change: TabsChanged) {
       agentType: it.agent_type,
       title: existing?.title ?? runtime.labels.loadingConversation,
       isPinned: it.is_pinned,
+      ...anchoredFromItem(it),
       runtimeConversationId: existing?.runtimeConversationId,
       status: existing?.status,
       // Device-local per-tab fields the payload doesn't carry. Rebuilding the

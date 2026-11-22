@@ -90,7 +90,13 @@ pub struct OpenedTab {
     pub agent_type: AgentType,
     pub position: i32,
     pub is_active: bool,
+    /// Kept open: not the preview the next opened session replaces.
     pub is_pinned: bool,
+    /// The tab strip's "Pin tab": shown first whatever the grouping or sort,
+    /// and left open by the bulk close commands. Defaults to false for a
+    /// client that predates it.
+    #[serde(default)]
+    pub is_anchored: bool,
 }
 
 /// Response for `list_opened_tabs`: the persisted tab set plus the current

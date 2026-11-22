@@ -3894,6 +3894,24 @@ html.tab-drag-blocked * {
   padding-right: 1.5rem;
 }
 
+/* A pinned tab ("Pin tab", `data-anchored`) has no close button: its pin mark
+   sits in that column, always shown. So it reserves the column like the active
+   tab does, active or not, and keeps the narrow overflow fade on hover (nothing
+   fades in over its title). */
+.browser-tab-item[data-anchored="true"] .browser-tab-content {
+  padding-right: 1.5rem;
+}
+.browser-tab-item[data-anchored="true"]:not([data-active="true"])
+  .browser-tab-content:hover
+  .browser-tab-label {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    #000 calc(100% - 0.75rem),
+    transparent
+  );
+  mask-image: linear-gradient(to right, #000 calc(100% - 0.75rem), transparent);
+}
+
 /* Non-active embedded tab hover: an inset rounded tint with a larger bottom inset,
    so the hovered label reads as vertically centered inside the highlight (the tab
    and its text never move — only the hover fill insets, mirroring the content's
