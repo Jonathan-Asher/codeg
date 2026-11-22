@@ -10,7 +10,7 @@ import {
 } from "react"
 import { Reorder, useMotionValue } from "motion/react"
 import type { PanInfo } from "motion/react"
-import { BotIcon, X } from "lucide-react"
+import { BotIcon, Pin, X } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { cn, handleMiddleClickClose } from "@/lib/utils"
@@ -18,6 +18,7 @@ import { toErrorMessage } from "@/lib/app-error"
 import { setConversationCritical } from "@/lib/critical-sessions"
 import { setTalkMode } from "@/lib/talk-mode"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
+import { AgentIcon } from "@/components/agent-icon"
 import { CriticalFlag } from "@/components/conversations/critical-flag"
 import { TalkBadge } from "@/components/conversations/talk-badge"
 import { useTalkMenu } from "@/components/talk-voice/use-talk-menu"
@@ -98,8 +99,20 @@ interface TabItemProps {
   onSwitch: (tabId: string) => void
   onClose: (tabId: string) => void
   onCloseOthers: (tabId: string) => void
+  /** An unpinned tab follows this one in the strip. */
+  canCloseToRight?: boolean
+  onCloseToRight?: (tabId: string) => void
   onCloseAll: () => void
+  /** Keep a preview open (double click). Not "Pin tab": see `anchored`. */
   onPin: (tabId: string) => void
+  /** Pinned to the start of the strip ("Pin tab"): compact, with a pin mark
+   *  where the close button would be, and no close button — the tab menu,
+   *  a middle click or the close shortcut still close it. */
+  anchored?: boolean
+  onSetAnchored?: (tabId: string, anchored: boolean) => void
+  /** Set while the strip is sorted: make the order on screen the manual one
+   *  (see `useSwitchToManualOrder`). */
+  onSwitchToManualOrder?: () => void
   onToggleTile: () => void
   onSplit: (tabId: string, direction: SplitDirection, move: boolean) => void
   onMoveToGroup: (tabId: string, targetGroupId: string) => void
@@ -153,8 +166,13 @@ export const TabItem = memo(function TabItem({
   onSwitch,
   onClose,
   onCloseOthers,
+  canCloseToRight = false,
+  onCloseToRight,
   onCloseAll,
   onPin,
+  anchored = false,
+  onSetAnchored,
+  onSwitchToManualOrder,
   onToggleTile,
   onSplit,
   onMoveToGroup,
@@ -368,6 +386,14 @@ export const TabItem = memo(function TabItem({
     onCloseOthers(tab.id)
   }, [onCloseOthers, tab.id])
 
+  const handleCloseToRight = useCallback(() => {
+    onCloseToRight?.(tab.id)
+  }, [onCloseToRight, tab.id])
+
+  const handleToggleAnchored = useCallback(() => {
+    onSetAnchored?.(tab.id, !anchored)
+  }, [anchored, onSetAnchored, tab.id])
+
   const handleSplitRight = useCallback(
     () => onSplit(tab.id, "right", false),
     [onSplit, tab.id]
@@ -411,6 +437,7 @@ export const TabItem = memo(function TabItem({
       data-tab-item
       data-active={embedded && isActive ? "true" : undefined}
       data-adjacent-active={embedded ? adjacentActive : undefined}
+      data-anchored={anchored ? "true" : undefined}
       className={cn(
         reorderable && "cursor-grab active:cursor-grabbing",
         // Embedded (browser-style): every tab is EQUAL width (`basis-48` = 12rem,
@@ -425,9 +452,13 @@ export const TabItem = memo(function TabItem({
         // line is the only separation, and the inner row owns its own
         // `overflow-hidden`. The active tab is raised (`z-10`) so its reverse-corner
         // seat is never covered by a hovered neighbour's flare. Standalone: rounded
-        // pill, intrinsic size + horizontal scroll (mobile).
+        // pill, intrinsic size + horizontal scroll (mobile). A pinned tab is
+        // compact and never shrinks: a fixed 7.5rem, under the 12rem basis of
+        // the rest, whose title is cut short (globals.css `data-anchored`).
         embedded
-          ? "browser-tab-item min-w-28 grow-0 shrink basis-48 data-[active=true]:z-10"
+          ? anchored
+            ? "browser-tab-item w-30 shrink-0 grow-0 data-[active=true]:z-10"
+            : "browser-tab-item min-w-28 grow-0 shrink basis-48 data-[active=true]:z-10"
           : "rounded-full shrink-0",
         !isCoarsePointer &&
           (embedded
@@ -514,11 +545,18 @@ export const TabItem = memo(function TabItem({
                 title={dotTitle || undefined}
               />
             )}
-            {/* A sub-agent's thread, read-only: said by its icon. */}
+            {/* A sub-agent's thread, read-only: said by its icon. A pinned
+                tab's title is cut short, so its agent says which one it is,
+                like a pinned browser tab's site icon. */}
             {tab.kind === "subagent" ? (
               <BotIcon
                 aria-label={t("subagentTab")}
                 className="size-3.5 shrink-0 text-muted-foreground"
+              />
+            ) : anchored ? (
+              <AgentIcon
+                agentType={tab.agentType}
+                className="size-3.5 shrink-0"
               />
             ) : null}
             {isCritical ? <CriticalFlag /> : null}
@@ -538,42 +576,88 @@ export const TabItem = memo(function TabItem({
             >
               {tab.title}
             </span>
-            <button
-              type="button"
-              className={cn(
-                "rounded-md hover:bg-foreground/10",
-                // Embedded: an absolute overlay pinned to the right edge, so it
-                // claims no row space — the label runs the full width and fades
-                // under it (browser-tab-label), instead of the label stopping
-                // short of an always-reserved in-flow button. Centered via
-                // `top-0 bottom-1.5 my-auto` (no transform → crisp on WebKit; the
-                // `bottom-1.5` mirrors the content's `pb-1.5` so it lines up with
-                // the title). Pointer events are gated off while hidden so it can't
-                // eat clicks. Standalone: an in-flow chip in the scroll row.
-                embedded
-                  ? "absolute right-2 top-0 bottom-1.5 my-auto flex h-4 w-4 items-center justify-center"
-                  : "shrink-0 p-0.5",
-                isActive
-                  ? "opacity-100"
-                  : embedded
-                    ? "opacity-0 pointer-events-none group-hover/tab:opacity-100 group-hover/tab:pointer-events-auto"
-                    : "opacity-0 group-hover/tab:opacity-100"
-              )}
-              onClick={(event) => {
-                event.stopPropagation()
-                handleClose()
-              }}
-              aria-label={t("closeConversationTab")}
-            >
-              <X className="h-3 w-3" />
-            </button>
+            {anchored ? (
+              // Where the close button sits on other tabs, always shown. A
+              // pinned tab has no close button, as in a browser.
+              <span
+                role="img"
+                aria-label={t("pinnedMark")}
+                data-tab-pin-mark
+                className={cn(
+                  "text-muted-foreground",
+                  embedded
+                    ? "pointer-events-none absolute right-2 top-0 bottom-1.5 my-auto flex h-4 w-4 items-center justify-center"
+                    : "shrink-0 p-0.5"
+                )}
+              >
+                <Pin className="h-3 w-3" />
+              </span>
+            ) : (
+              <button
+                type="button"
+                className={cn(
+                  "rounded-md hover:bg-foreground/10",
+                  // Embedded: an absolute overlay pinned to the right edge, so it
+                  // claims no row space — the label runs the full width and fades
+                  // under it (browser-tab-label), instead of the label stopping
+                  // short of an always-reserved in-flow button. Centered via
+                  // `top-0 bottom-1.5 my-auto` (no transform → crisp on WebKit; the
+                  // `bottom-1.5` mirrors the content's `pb-1.5` so it lines up with
+                  // the title). Pointer events are gated off while hidden so it can't
+                  // eat clicks. Standalone: an in-flow chip in the scroll row.
+                  embedded
+                    ? "absolute right-2 top-0 bottom-1.5 my-auto flex h-4 w-4 items-center justify-center"
+                    : "shrink-0 p-0.5",
+                  isActive
+                    ? "opacity-100"
+                    : embedded
+                      ? "opacity-0 pointer-events-none group-hover/tab:opacity-100 group-hover/tab:pointer-events-auto"
+                      : "opacity-0 group-hover/tab:opacity-100"
+                )}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  handleClose()
+                }}
+                aria-label={t("closeConversationTab")}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
+          {onSetAnchored && (
+            <ContextMenuItem
+              data-tab-pin-toggle
+              onSelect={handleToggleAnchored}
+            >
+              {anchored ? t("unpinTab") : t("pinTab")}
+            </ContextMenuItem>
+          )}
+          {/* Sorted strips don't drag; this makes the order on screen the
+              manual one so they do. */}
+          {onSwitchToManualOrder && (
+            <ContextMenuItem
+              data-tab-keep-order
+              onSelect={onSwitchToManualOrder}
+            >
+              {t("switchToManualOrder")}
+            </ContextMenuItem>
+          )}
+          {(onSetAnchored || onSwitchToManualOrder) && <ContextMenuSeparator />}
           <ContextMenuItem onSelect={handleClose}>{t("close")}</ContextMenuItem>
           <ContextMenuItem onSelect={handleCloseOthers}>
             {t("closeOthers")}
           </ContextMenuItem>
+          {onCloseToRight && (
+            <ContextMenuItem
+              data-tab-close-right
+              disabled={!canCloseToRight}
+              onSelect={handleCloseToRight}
+            >
+              {t("closeToRight")}
+            </ContextMenuItem>
+          )}
           <ContextMenuSeparator />
           {/* Hand the work to a new session on another agent. A
               sub-session goes on with its parent. */}

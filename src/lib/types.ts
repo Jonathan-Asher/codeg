@@ -600,7 +600,11 @@ export interface OpenedTab {
   agent_type: AgentType
   position: number
   is_active: boolean
+  /** Not a preview (kept open). */
   is_pinned: boolean
+  /** Pinned to the start of the strip ("Pin tab"). Absent from a server that
+   *  predates it. */
+  is_anchored?: boolean
 }
 
 export interface DbConversationSummary {

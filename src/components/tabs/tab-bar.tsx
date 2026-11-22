@@ -19,6 +19,7 @@ import {
   SquarePen,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { useActiveFolder } from "@/contexts/active-folder-context"
@@ -49,6 +50,7 @@ import { useIsCoarsePointer } from "@/hooks/use-is-coarse-pointer"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -56,15 +58,18 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
+  ANCHORED_RUN_KEY,
   STATUS_BAND_COLOR,
   TAB_GROUP_BYS,
   TAB_SORTS,
+  UNGROUPED_RUN_KEY,
   bandOrder,
   effectiveSort,
   folderAccentColor,
   mergeGroupOrder,
   moveGroupKey,
   reinsertInGroupOrder,
+  tabsWithClosableRight,
   type TabGroupBy,
   type TabRun,
   type TabSort,
@@ -72,7 +77,10 @@ import {
 } from "@/lib/tab-arrangement"
 import { folderTitleTintVars } from "@/lib/theme-presets"
 import { useTabArrangeStore } from "@/stores/tab-arrangement-store"
-import { useArrangedTabs } from "@/hooks/use-arranged-tabs"
+import {
+  useArrangedTabs,
+  useSwitchToManualOrder,
+} from "@/hooks/use-arranged-tabs"
 import { useConversationAttentionStore } from "@/stores/conversation-attention-store"
 import { STRIP_ICON_BTN } from "./strip-icon-button"
 import { TabItem, type TabMoveTarget } from "./tab-item"
@@ -100,6 +108,11 @@ const STATUS_BAND_LABEL = {
   running: "bandRunning",
   other: "bandOther",
 } as const satisfies Record<TabStatusBand, string>
+
+/** How far a press on a tab of a sorted strip must travel sideways before it
+ *  reads as an attempt to drag it (and the strip says why it won't move). */
+const DRAG_ATTEMPT_SLOP_PX = 12
+const DRAG_NEEDS_MANUAL_TOAST_ID = "tab-drag-needs-manual-order"
 
 interface TabBarProps {
   /** Split-group strip: render only this group's tabs, highlight the GROUP's
@@ -138,8 +151,10 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
     switchTab,
     closeTab,
     closeOtherTabs,
+    closeTabsToRight,
     closeAllTabs,
     pinTab,
+    setTabAnchored,
     toggleGroupTile,
     splitTab,
     moveTabToGroup,
@@ -201,6 +216,13 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
     groupTabs,
     displayActiveId
   )
+  // Pinned tabs lead the strip under every view. They keep the manual order,
+  // so they always drag — but only among themselves: the pinned run and the
+  // rest are separate drag lanes (like groups), and pinning is done from the
+  // tab menu, not by dragging across.
+  const hasAnchored = arranged.anchored.length > 0
+  const dragLanes = grouped || hasAnchored
+  const switchToManualOrder = useSwitchToManualOrder()
   const attentionByConversationId = useConversationAttentionStore(
     (s) => s.byConversationId
   )
@@ -321,7 +343,8 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
   )
   // Moving a tab to another split group by dragging: only in the plain view
   // (no grouping, manual sort). Grouped, a tab is held inside its own group;
-  // sorted, the order is derived and tabs don't drag at all.
+  // sorted, the order is derived and tabs don't drag at all. A pinned tab is
+  // held among the pinned ones (its menu still moves it).
   const crossDragEnabled =
     groupId != null && isSplit && !grouped && sortIsManual
 
@@ -388,16 +411,24 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
   }, [allFolders])
 
   // Label + stable tint per group run (folder color, or the status band's), and
-  // each tab's run. Stable objects: TabItem is memoized on `accentStyle`.
+  // each tab's run — its drag lane, which for the pinned tabs (and for the rest
+  // of an ungrouped strip that has some) is a lane without a group. Stable
+  // objects: TabItem is memoized on `accentStyle`.
   const runVisuals = useMemo(() => {
     const byRun = new Map<
       string,
       { label: string; style: CSSProperties | undefined }
     >()
     const runOfTab = new Map<string, string>()
+    for (const tab of arranged.anchored) runOfTab.set(tab.id, ANCHORED_RUN_KEY)
     for (const run of arranged.runs ?? []) {
       byRun.set(run.key, runVisual(run))
       for (const tab of run.tabs) runOfTab.set(tab.id, run.key)
+    }
+    if (!arranged.runs && arranged.anchored.length > 0) {
+      for (const tab of arranged.ordered) {
+        if (!runOfTab.has(tab.id)) runOfTab.set(tab.id, UNGROUPED_RUN_KEY)
+      }
     }
     return { byRun, runOfTab }
 
@@ -419,7 +450,27 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
         ),
       }
     }
-  }, [arranged.runs, folderIndex, tTabs])
+  }, [arranged, folderIndex, tTabs])
+
+  // "Close to the Right" follows the strip as displayed (folded groups
+  // included). Read through a ref so the menu callback stays stable: every tab
+  // is memoized, and the order changes with any title or status update.
+  const closableRight = useMemo(
+    () => tabsWithClosableRight(arranged.ordered),
+    [arranged.ordered]
+  )
+  const orderedRef = useRef(arranged.ordered)
+  useEffect(() => {
+    orderedRef.current = arranged.ordered
+  }, [arranged.ordered])
+  const handleCloseToRight = useCallback(
+    (tabId: string) =>
+      closeTabsToRight(
+        tabId,
+        orderedRef.current.map((tab) => tab.id)
+      ),
+    [closeTabsToRight]
+  )
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const isCoarsePointer = useIsCoarsePointer()
@@ -451,31 +502,68 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
   // start only after its first move — too late for the first reorder — so the
   // press itself is recorded.
   const pressedTabIdRef = useRef<string | null>(null)
+  // Where a primary-button press on a tab began, while the strip is sorted:
+  // its tabs don't drag, and a press that starts moving sideways is told why
+  // (once per press) with a way out.
+  const dragAttemptRef = useRef<{ tabId: string; x: number } | null>(null)
   const handlePointerDownCapture = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       const target = event.target as Element | null
-      pressedTabIdRef.current =
+      const tabId =
         target?.closest?.("[data-tab-id]")?.getAttribute("data-tab-id") ?? null
+      pressedTabIdRef.current = tabId
+      dragAttemptRef.current =
+        tabId != null && event.button === 0 && !sortIsManual && !isCoarsePointer
+          ? { tabId, x: event.clientX }
+          : null
     },
-    []
+    [isCoarsePointer, sortIsManual]
   )
+  const handleStripPointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const attempt = dragAttemptRef.current
+      if (!attempt) return
+      if ((event.buttons & 1) === 0) {
+        dragAttemptRef.current = null
+        return
+      }
+      if (Math.abs(event.clientX - attempt.x) < DRAG_ATTEMPT_SLOP_PX) return
+      dragAttemptRef.current = null
+      // Pinned tabs keep the manual order under any sort: they do drag.
+      if (runVisuals.runOfTab.get(attempt.tabId) === ANCHORED_RUN_KEY) return
+      toast(tTabs("dragSortedTitle"), {
+        id: DRAG_NEEDS_MANUAL_TOAST_ID,
+        description: tTabs("dragSortedDescription"),
+        action: {
+          label: tTabs("switchToManualOrder"),
+          onClick: switchToManualOrder,
+        },
+      })
+    },
+    [runVisuals, switchToManualOrder, tTabs]
+  )
+  const handleStripPointerUp = useCallback(() => {
+    dragAttemptRef.current = null
+  }, [])
   // A reorder that is turned down must still re-render the strip: the reorder
   // list stays locked from one reorder until the next render.
   const [, rerender] = useReducer((n: number) => n + 1, 0)
 
   const handleReorder = useCallback(
     (nextTabs: TabItemData[]) => {
-      if (!sortIsManual) return
+      const runOfTab = runVisuals.runOfTab
+      const movedId = touchSortingTabId ?? pressedTabIdRef.current
+      const runKey = movedId != null ? runOfTab.get(movedId) : undefined
+      // Sorted, only the pinned tabs drag: they keep the manual order.
+      if (!sortIsManual && runKey !== ANCHORED_RUN_KEY) return
       if (isCoarsePointer && !touchSortingTabId) return
       let written: TabItemData[] = nextTabs
-      if (grouped) {
-        // Within one group only: every slot must keep a tab of the same group
-        // (the lane clamp in TabItem makes that the only possible outcome; this
-        // is the guard). The moved tab is then re-inserted among its group-mates
-        // in the manual order, leaving every other tab where it was.
-        const runOfTab = runVisuals.runOfTab
-        const movedId = touchSortingTabId ?? pressedTabIdRef.current
-        const runKey = movedId != null ? runOfTab.get(movedId) : undefined
+      if (dragLanes) {
+        // Within one lane only (a group, or the pinned tabs): every slot must
+        // keep a tab of the same lane (the lane clamp in TabItem makes that the
+        // only possible outcome; this is the guard). The moved tab is then
+        // re-inserted among its lane-mates in the manual order, leaving every
+        // other tab where it was.
         const sameGroups =
           nextTabs.length === displayTabs.length &&
           nextTabs.every(
@@ -505,9 +593,9 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
     },
     [
       displayTabs,
+      dragLanes,
       groupId,
       groupTabs,
-      grouped,
       isCoarsePointer,
       reorderGroupTabs,
       reorderTabs,
@@ -517,10 +605,13 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
     ]
   )
 
-  // While grouped: a tab drags only within its own group's span (see
-  // TabItem's lane clamp). Measured from layout boxes (`offsetLeft`, which a
-  // drag's transform doesn't move) at every step, so it follows the swaps.
+  // While grouped, or with pinned tabs: a tab drags only within its own lane's
+  // span (see TabItem's lane clamp). Measured from layout boxes (`offsetLeft`,
+  // which a drag's transform doesn't move) at every step, so it follows the
+  // swaps.
   const dragLane = useCallback((tabId: string) => {
+    // Over another split group's strip, the tab is on its way there: no lane.
+    if (useTabStore.getState().tabDrag?.overGroupId != null) return null
     const strip = scrollRef.current
     const self = strip?.querySelector<HTMLElement>(`[data-tab-id="${tabId}"]`)
     const runKey = self?.getAttribute("data-tab-run")
@@ -534,10 +625,16 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
         right = Math.max(right, el.offsetLeft + el.offsetWidth)
       })
     if (!Number.isFinite(left)) return null
-    return {
-      min: left - self.offsetLeft,
-      max: right - (self.offsetLeft + self.offsetWidth),
+    const min = left - self.offsetLeft
+    const max = right - (self.offsetLeft + self.offsetWidth)
+    // The rest of an ungrouped strip borders only the pinned tabs, at its
+    // start: past its end lies the drop onto another split group.
+    if (runKey === UNGROUPED_RUN_KEY) {
+      return document.documentElement.dir === "rtl"
+        ? { min: -Infinity, max }
+        : { min, max: Infinity }
     }
+    return { min, max }
   }, [])
 
   // ── Moving whole groups (drag a group's label) ───────────────────────────
@@ -646,10 +743,11 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
     return null
   }
 
-  // The strip as displayed: tabs, with a group label ahead of each run while
-  // grouped / sorted. Adjacency to the active tab is computed over THIS
-  // sequence, so a label flanking the active tab gets the same baseline inset a
-  // neighbouring tab would (`data-adjacent-active`, globals.css).
+  // The strip as displayed: the pinned tabs, then the rest, with a group label
+  // ahead of each run while grouped. Adjacency to the active tab is computed
+  // over THIS sequence, so a label flanking the active tab gets the same
+  // baseline inset a neighbouring tab would (`data-adjacent-active`,
+  // globals.css).
   type StripEntry =
     | {
         kind: "label"
@@ -661,28 +759,31 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
     | { kind: "tab"; tab: TabItemData }
     | { kind: "fork-placeholder"; id: string }
   const arrangedEntries: StripEntry[] = arranged.runs
-    ? arranged.runs.flatMap((run): StripEntry[] => {
-        const collapsed = collapsedRuns.has(run.key)
-        const visible = collapsed
-          ? run.tabs.filter((tab) => tab.id === displayActiveId)
-          : run.tabs
-        // Waiting on the user, so a folded group still says so.
-        const attentionCount = run.tabs.filter(
-          (tab) =>
-            tab.conversationId != null &&
-            attentionByConversationId.has(tab.conversationId)
-        ).length
-        return [
-          {
-            kind: "label",
-            runKey: run.key,
-            count: run.tabs.length,
-            attentionCount,
-            collapsed,
-          },
-          ...visible.map((tab) => ({ kind: "tab" as const, tab })),
-        ]
-      })
+    ? [
+        ...arranged.anchored.map((tab) => ({ kind: "tab" as const, tab })),
+        ...arranged.runs.flatMap((run): StripEntry[] => {
+          const collapsed = collapsedRuns.has(run.key)
+          const visible = collapsed
+            ? run.tabs.filter((tab) => tab.id === displayActiveId)
+            : run.tabs
+          // Waiting on the user, so a folded group still says so.
+          const attentionCount = run.tabs.filter(
+            (tab) =>
+              tab.conversationId != null &&
+              attentionByConversationId.has(tab.conversationId)
+          ).length
+          return [
+            {
+              kind: "label",
+              runKey: run.key,
+              count: run.tabs.length,
+              attentionCount,
+              collapsed,
+            },
+            ...visible.map((tab) => ({ kind: "tab" as const, tab })),
+          ]
+        }),
+      ]
     : displayTabs.map((tab) => ({ kind: "tab" as const, tab }))
   // A fork on its way into a new tab stands right after the tab it was taken
   // from (see `stores/fork-placeholder-store`) — in the sequence, so the
@@ -729,6 +830,8 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
       values={displayTabs as TabItemData[]}
       onReorder={handleReorder}
       onPointerDownCapture={handlePointerDownCapture}
+      onPointerMove={handleStripPointerMove}
+      onPointerUp={handleStripPointerUp}
       // Cross-group drop target: group strips advertise their group id for the
       // drag hit-test and tint while a foreign tab hovers.
       data-conv-group-strip={groupId ?? undefined}
@@ -800,6 +903,8 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
         // doesn't leave a stray line under it (globals.css `data-adjacent-active`).
         const adjacentActive = adjacencyAt(pos)
         const runKey = runVisuals.runOfTab.get(tab.id)
+        const anchored = tab.isAnchored === true
+        const reorderable = sortIsManual || anchored
         return (
           <TabItem
             key={tab.id}
@@ -814,15 +919,28 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
             canSplitMove={canSplitMove && !isDraft}
             canMoveToGroup={!isDraft}
             moveTargets={moveTargets}
-            onTabDrag={crossDragEnabled && !isDraft ? handleTabDrag : undefined}
+            onTabDrag={
+              crossDragEnabled && !isDraft && !anchored
+                ? handleTabDrag
+                : undefined
+            }
             onTabDragEnd={
-              crossDragEnabled && !isDraft ? handleTabDragEnd : undefined
+              crossDragEnabled && !isDraft && !anchored
+                ? handleTabDragEnd
+                : undefined
             }
             onSwitch={switchTab}
             onClose={closeTab}
             onCloseOthers={closeOtherTabs}
+            canCloseToRight={closableRight.has(tab.id)}
+            onCloseToRight={handleCloseToRight}
             onCloseAll={closeAllTabs}
             onPin={pinTab}
+            anchored={anchored}
+            onSetAnchored={setTabAnchored}
+            onSwitchToManualOrder={
+              sortIsManual ? undefined : switchToManualOrder
+            }
             onToggleTile={handleToggleTile}
             onSplit={handleSplit}
             onMoveToGroup={moveTabToGroup}
@@ -833,12 +951,12 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
             isTouchSorting={touchSortingTabId === tab.id}
             onTouchSortingStart={setTouchSortingTabId}
             onTouchSortingEnd={handleTouchSortingEnd}
-            reorderable={sortIsManual}
+            reorderable={reorderable}
             dragDisabledHint={
-              sortIsManual ? undefined : tTabs("dragNeedsManualSort")
+              reorderable ? undefined : tTabs("dragNeedsManualSort")
             }
             runKey={runKey}
-            dragLane={grouped && sortIsManual ? dragLane : undefined}
+            dragLane={dragLanes && reorderable ? dragLane : undefined}
             dimmed={runKey != null && groupDrag?.runKey === runKey}
             accentStyle={
               runKey ? runVisuals.byRun.get(runKey)?.style : undefined
@@ -964,6 +1082,24 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
                 )
               })}
             </DropdownMenuRadioGroup>
+            {/* "Manual" above brings back the order last dragged; this keeps
+                the one on screen instead, so nothing moves. */}
+            {!sortIsManual && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  data-tab-keep-order
+                  onSelect={switchToManualOrder}
+                >
+                  <span className="flex flex-col gap-0.5">
+                    <span>{tTabs("switchToManualOrder")}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {tTabs("switchToManualOrderHint")}
+                    </span>
+                  </span>
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
         {/* Drag spacer, floored at `min-w-10` (40px) instead of `min-w-0`: even
