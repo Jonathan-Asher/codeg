@@ -506,20 +506,8 @@ impl Default for RemoteProxyState {
 
 /// Forward an HTTP API call to the remote codeg-server identified by
 /// `connection_id`. The frontend's `RemoteDesktopTransport.call(cmd, args)`
-/// delegates to this; it never opens a fetch from the webview.
-///
-/// Error mapping:
-///
-/// - HTTP 401 → `AppErrorCode::AuthenticationFailed` ("token expired"). The
-///   frontend recognises this code and surfaces the connection-expired UI
-///   in just the calling window — by design we don't broadcast to siblings.
-/// - Other non-2xx with a structured `AppCommandError` body → forwarded
-///   verbatim so the original `code` / `message` / `i18n_key` /
-///   `i18n_params` reach the caller intact. This preserves the i18n
-///   pipeline across the proxy boundary.
-/// - Other non-2xx without a structured body → wrapped as
-///   `NetworkError` with the raw body in `detail`.
-/// - Connect / read errors → wrapped as `NetworkError`.
+/// delegates to this; it never opens a fetch from the webview. Errors are
+/// mapped as `send_remote_api_call` describes.
 #[tauri::command]
 pub async fn remote_http_call(
     db: State<'_, AppDatabase>,
@@ -543,55 +531,134 @@ pub async fn remote_http_call(
     );
 
     let body = args.unwrap_or(Value::Object(serde_json::Map::new()));
-
-    let mut request = proxy
-        .http
-        .post(&url)
-        .bearer_auth(conn.token.trim())
-        .headers(conn.headers.to_header_map())
-        .json(&body);
     // Per-request override beats the client-wide 30s default. Used by the
     // ACP probe path (`describeAgentOptions`) whose backend deadline is
     // longer than 30s — without this override, reqwest would abort here
     // before the backend can return its structured `ProbeTimedOut`.
-    if let Some(ms) = timeout_ms {
-        let requested = Duration::from_millis(ms);
-        request = request.timeout(requested.min(HTTP_TIMEOUT_MAX));
-    }
-    let response = request.send().await.map_err(|e| {
-        AppCommandError::network("Remote HTTP request failed").with_detail(request_error_detail(&e))
-    })?;
+    let timeout = timeout_ms.map(|ms| Duration::from_millis(ms).min(HTTP_TIMEOUT_MAX));
 
-    let status = response.status();
-
-    if status == reqwest::StatusCode::UNAUTHORIZED {
-        return Err(AppCommandError::authentication_failed(
-            "Remote Workspace token is invalid",
-        ));
-    }
-
-    if !status.is_success() {
-        let raw_body = response.text().await.unwrap_or_default();
-        // The remote codeg-server always returns `Json(AppCommandError)`
-        // on errors (see `web/handlers/error.rs::IntoResponse`). Try to
-        // deserialize so the caller sees the original code + i18n hint.
-        if let Ok(structured) = serde_json::from_str::<AppCommandError>(&raw_body) {
-            return Err(structured);
+    send_remote_api_call(&command, || {
+        let request = proxy
+            .http
+            .post(&url)
+            .bearer_auth(conn.token.trim())
+            .headers(conn.headers.to_header_map())
+            .json(&body);
+        match timeout {
+            Some(timeout) => request.timeout(timeout),
+            None => request,
         }
-        return Err(
-            AppCommandError::network(format!("Remote returned HTTP {status}")).with_detail(
-                if raw_body.is_empty() {
-                    status.canonical_reason().unwrap_or("error").to_string()
-                } else {
-                    raw_body
-                },
-            ),
-        );
-    }
-
-    response.json::<Value>().await.map_err(|e| {
-        AppCommandError::network("Failed to parse remote response").with_detail(e.to_string())
     })
+    .await
+}
+
+/// `message` of a remote call whose answer stopped arriving part-way: the
+/// server sent its status and headers, then the body was cut off (the server
+/// restarted, the link dropped) or stalled past the request's deadline. It is
+/// a link failure like a failed send, and the frontend treats the two alike
+/// (`isRemoteUnreachable` in `src/lib/transport/remote-desktop-transport.ts`
+/// matches this text — keep them in sync).
+const REMOTE_RESPONSE_INTERRUPTED: &str = "Remote response was interrupted";
+
+/// Remote API commands that only read, so sending one twice changes nothing.
+/// Every `list_*` / `get_*` handler on codeg-server is a plain read; anything
+/// else may change state and is never resent.
+fn is_read_only_command(command: &str) -> bool {
+    let name = command.trim_start_matches('/');
+    name.starts_with("list_") || name.starts_with("get_")
+}
+
+/// The error for a response body that could not be read to its end.
+///
+/// reqwest reports every such failure, a timeout and a connection closed
+/// mid-body alike, as the bare "error decoding response body": the reason is
+/// only in the source chain, so it goes into `detail` whole.
+fn body_read_error(err: &reqwest::Error) -> AppCommandError {
+    AppCommandError::network(REMOTE_RESPONSE_INTERRUPTED).with_detail(request_error_detail(err))
+}
+
+/// Parse a body that arrived whole. Failing here means the remote sent
+/// something that is not the JSON it should have, not that the link broke.
+fn parse_json_body<T: serde::de::DeserializeOwned>(
+    body: &[u8],
+    message: &str,
+) -> Result<T, AppCommandError> {
+    serde_json::from_slice(body).map_err(|e| {
+        AppCommandError::network(message).with_detail(format!("{e} ({} bytes)", body.len()))
+    })
+}
+
+/// Send one remote API call and read its JSON answer. `build` makes the
+/// request; a read-only command (`is_read_only_command`) whose body is cut off
+/// mid-read gets ONE fresh resend, so a blip during a server restart does not
+/// surface as an error. A body that timed out is not resent: the deadline
+/// already spent is the caller's to spend, not ours to double.
+///
+/// Error mapping:
+///
+/// - HTTP 401 → `AppErrorCode::AuthenticationFailed` ("token expired"). The
+///   frontend recognises this code and surfaces the connection-expired UI
+///   in just the calling window — by design we don't broadcast to siblings.
+/// - Other non-2xx with a structured `AppCommandError` body → forwarded
+///   verbatim so the original `code` / `message` / `i18n_key` /
+///   `i18n_params` reach the caller intact. This preserves the i18n
+///   pipeline across the proxy boundary.
+/// - Other non-2xx without a structured body → wrapped as
+///   `NetworkError` with the raw body in `detail`.
+/// - Connect / send errors → `NetworkError` "Remote HTTP request failed";
+///   a body cut off or stalled → `NetworkError` `REMOTE_RESPONSE_INTERRUPTED`;
+///   both with the full cause chain in `detail`.
+async fn send_remote_api_call<F>(command: &str, build: F) -> Result<Value, AppCommandError>
+where
+    F: Fn() -> reqwest::RequestBuilder,
+{
+    let resend_cut_body = is_read_only_command(command);
+    let mut resent = false;
+    loop {
+        let response = build().send().await.map_err(|e| {
+            AppCommandError::network("Remote HTTP request failed")
+                .with_detail(request_error_detail(&e))
+        })?;
+
+        let status = response.status();
+
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AppCommandError::authentication_failed(
+                "Remote Workspace token is invalid",
+            ));
+        }
+
+        if !status.is_success() {
+            let raw_body = response.text().await.unwrap_or_default();
+            // The remote codeg-server always returns `Json(AppCommandError)`
+            // on errors (see `web/handlers/error.rs::IntoResponse`). Try to
+            // deserialize so the caller sees the original code + i18n hint.
+            if let Ok(structured) = serde_json::from_str::<AppCommandError>(&raw_body) {
+                return Err(structured);
+            }
+            return Err(
+                AppCommandError::network(format!("Remote returned HTTP {status}")).with_detail(
+                    if raw_body.is_empty() {
+                        status.canonical_reason().unwrap_or("error").to_string()
+                    } else {
+                        raw_body
+                    },
+                ),
+            );
+        }
+
+        match response.bytes().await {
+            Ok(body) => return parse_json_body(&body, "Failed to parse remote response"),
+            Err(e) if resend_cut_body && !resent && !e.is_timeout() => {
+                tracing::warn!(
+                    "[RemoteProxy] {command}: response cut off ({}); sending it again",
+                    request_error_detail(&e)
+                );
+                resent = true;
+            }
+            Err(e) => return Err(body_read_error(&e)),
+        }
+    }
 }
 
 /// Cache a previously issued forge image locally. The image URL is a narrow,
@@ -626,7 +693,7 @@ pub async fn remote_cache_forge_image(
                 .headers(conn.headers.to_header_map())
                 .header("X-Requested-With", "XMLHttpRequest")
                 .send().await
-                .map_err(|error| ForgeError::Network(error.without_url().to_string()))?;
+                .map_err(|error| ForgeError::Network(request_error_detail(&error.without_url())))?;
             match response.status().as_u16() {
                 200 => Ok(response),
                 401 => Err(ForgeError::Auth("Remote workspace token was rejected".into())),
@@ -913,10 +980,10 @@ pub async fn remote_upload_attachment(
         );
     }
 
-    response.json::<Value>().await.map_err(|e| {
-        AppCommandError::network("Failed to parse remote upload response")
-            .with_detail(e.to_string())
-    })
+    // Not resent when cut off, unlike `send_remote_api_call`'s reads: the
+    // upload may already have landed.
+    let body = response.bytes().await.map_err(|e| body_read_error(&e))?;
+    parse_json_body(&body, "Failed to parse remote upload response")
 }
 
 /// Best-effort MIME guess by extension. Mirrors the frontend's
@@ -1280,13 +1347,9 @@ async fn upload_one_workspace_path(
         );
     }
 
-    let uploaded = response
-        .json::<RemoteWorkspaceUploadedFile>()
-        .await
-        .map_err(|e| {
-            AppCommandError::network("Failed to parse remote upload response")
-                .with_detail(e.to_string())
-        })?;
+    let body = response.bytes().await.map_err(|e| body_read_error(&e))?;
+    let uploaded: RemoteWorkspaceUploadedFile =
+        parse_json_body(&body, "Failed to parse remote upload response")?;
     emit_workspace_transfer_progress(
         app,
         WorkspaceTransferProgress {
@@ -3589,6 +3652,129 @@ mod tests {
             "the header must survive a same-host hop: {}",
             requests[1]
         );
+    }
+
+    // ─── Remote API calls whose answer is cut off ──────────────────────
+
+    /// Headers promising an 11-byte body, then only five of its bytes before
+    /// the connection closes: a server restarting mid-response.
+    fn cut_off_response() -> String {
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\n\
+         Connection: close\r\n\r\n{\"ok\""
+            .to_string()
+    }
+
+    fn json_response(body: &str) -> String {
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
+             Connection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    /// Hermetic: this box has HTTP_PROXY set, and reqwest does not bypass
+    /// loopback for it.
+    fn loopback_client() -> reqwest::Client {
+        reqwest::Client::builder().no_proxy().build().unwrap()
+    }
+
+    #[test]
+    fn only_list_and_get_commands_count_as_reads() {
+        assert!(is_read_only_command("list_all_conversations"));
+        assert!(is_read_only_command("/get_conversation"));
+        assert!(!is_read_only_command("update_conversation_title"));
+        assert!(!is_read_only_command("delete_conversation"));
+        assert!(!is_read_only_command("acp_prompt"));
+        // A prefix has to start the name, not just appear in it.
+        assert!(!is_read_only_command("forget_list_cache"));
+    }
+
+    #[tokio::test]
+    async fn a_cut_off_answer_says_so_and_keeps_the_reason() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        // One connection only: a resend would find the port closed and fail
+        // with a different message, so the message below also proves that a
+        // command that may change state is never sent twice.
+        let server = tokio::spawn(serve_sequence(listener, vec![cut_off_response()]));
+        let client = loopback_client();
+        let url = format!("http://{addr}/api/delete_conversation");
+
+        let err = send_remote_api_call("delete_conversation", || client.get(&url))
+            .await
+            .expect_err("half a body is not an answer");
+
+        assert_eq!(err.code, AppErrorCode::NetworkError);
+        assert_eq!(err.message, REMOTE_RESPONSE_INTERRUPTED);
+        // reqwest's own text for this is the bare "error decoding response
+        // body"; the cause chain after it is what says what happened.
+        let detail = err.detail.expect("a detail");
+        assert!(
+            detail.starts_with("error decoding response body: ") && detail.len() > 30,
+            "the cause chain must reach the caller: {detail}"
+        );
+        assert_eq!(server.await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_read_cut_off_mid_answer_is_sent_once_more() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(serve_sequence(
+            listener,
+            vec![cut_off_response(), json_response("{\"ok\":true}")],
+        ));
+        let client = loopback_client();
+        let url = format!("http://{addr}/api/list_all_conversations");
+
+        let value = send_remote_api_call("list_all_conversations", || client.get(&url))
+            .await
+            .expect("the second answer arrives whole");
+
+        assert_eq!(value, serde_json::json!({ "ok": true }));
+        assert_eq!(server.await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_read_is_sent_at_most_twice() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        // Two cut-off answers, then the port closes: a third send would fail
+        // to connect and report "Remote HTTP request failed" instead.
+        let server = tokio::spawn(serve_sequence(
+            listener,
+            vec![cut_off_response(), cut_off_response()],
+        ));
+        let client = loopback_client();
+        let url = format!("http://{addr}/api/get_conversation");
+
+        let err = send_remote_api_call("get_conversation", || client.get(&url))
+            .await
+            .expect_err("both answers were cut off");
+
+        assert_eq!(err.message, REMOTE_RESPONSE_INTERRUPTED);
+        assert_eq!(server.await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_whole_answer_that_is_not_json_is_a_parse_failure() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(serve_sequence(listener, vec![json_response("<html>")]));
+        let client = loopback_client();
+        let url = format!("http://{addr}/api/list_all_conversations");
+
+        let err = send_remote_api_call("list_all_conversations", || client.get(&url))
+            .await
+            .expect_err("HTML is not the JSON the call expects");
+
+        // The link worked, so this is not the interrupted case, and it is not
+        // resent: the same server would send the same body again.
+        assert_eq!(err.code, AppErrorCode::NetworkError);
+        assert_eq!(err.message, "Failed to parse remote response");
+        let detail = err.detail.expect("a detail");
+        assert!(detail.ends_with("(6 bytes)"), "got: {detail}");
+        assert_eq!(server.await.unwrap().len(), 1);
     }
 
     #[test]

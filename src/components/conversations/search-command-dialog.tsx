@@ -90,7 +90,9 @@ function searchFailure(err: unknown): SearchFailure {
       : err && typeof err === "object" && "message" in err
         ? String((err as { message: unknown }).message)
         : ""
-  return /timed out|Remote HTTP request failed/.test(message)
+  return /timed out|Remote HTTP request failed|Remote response was interrupted/.test(
+    message
+  )
     ? "offline"
     : "failed"
 }

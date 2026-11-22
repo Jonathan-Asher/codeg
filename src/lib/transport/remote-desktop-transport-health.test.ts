@@ -140,6 +140,26 @@ describe("RemoteDesktopTransport recovery after calls failed", () => {
     expect(invoked("remote_ws_probe")).toBe(1)
   })
 
+  it("treats an answer cut off mid-body as a lost link too", async () => {
+    // What a server restarting mid-response looks like from the proxy.
+    const interrupted = {
+      code: "network_error",
+      message: "Remote response was interrupted",
+      detail: "error decoding response body: request or response body error",
+    }
+    const transport = makeTransport()
+    await startLink(transport)
+    frame("__ready__")
+    tauri.invoke.mockImplementation(async (command: string) => {
+      if (command === "remote_http_call") throw interrupted
+    })
+
+    await expect(transport.call("list_all_conversations")).rejects.toBe(
+      interrupted
+    )
+    expect(invoked("remote_ws_probe")).toBe(1)
+  })
+
   it("asks once for a burst of failed calls, not once per call", async () => {
     const transport = makeTransport()
     await startLink(transport)

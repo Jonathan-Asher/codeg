@@ -84,13 +84,14 @@ function isAuthenticationFailed(err: unknown): boolean {
 }
 
 /**
- * The Rust proxy could not reach the remote at all (connect / read error), or
- * something in front of it — a tunnel, a reverse proxy — answered 5xx without
- * codeg's JSON error body. Errors the remote codeg server returns itself come
- * back structured with their own code, its own `network_error`s included (a
- * failed outbound fetch on the server says nothing about this link), so the
- * proxy's two fixed messages (`remote_http_call` in `remote_proxy.rs`) are
- * what identify the case.
+ * The Rust proxy could not reach the remote at all (connect / send error), its
+ * answer was cut off or stalled mid-body (`REMOTE_RESPONSE_INTERRUPTED` in
+ * `remote_proxy.rs`), or something in front of it — a tunnel, a reverse
+ * proxy — answered 5xx without codeg's JSON error body. Errors the remote
+ * codeg server returns itself come back structured with their own code, its
+ * own `network_error`s included (a failed outbound fetch on the server says
+ * nothing about this link), so the proxy's fixed messages
+ * (`send_remote_api_call` in `remote_proxy.rs`) are what identify the case.
  */
 function isRemoteUnreachable(err: unknown): boolean {
   if (!err || typeof err !== "object") return false
@@ -98,6 +99,7 @@ function isRemoteUnreachable(err: unknown): boolean {
   if (code !== "network_error" || typeof message !== "string") return false
   return (
     message === "Remote HTTP request failed" ||
+    message === "Remote response was interrupted" ||
     /^Remote returned HTTP 5\d\d/.test(message)
   )
 }
