@@ -3704,7 +3704,7 @@ mod tests {
             .await
             .expect_err("half a body is not an answer");
 
-        assert_eq!(err.code, AppErrorCode::NetworkError);
+        assert!(matches!(err.code, AppErrorCode::NetworkError));
         assert_eq!(err.message, REMOTE_RESPONSE_INTERRUPTED);
         // reqwest's own text for this is the bare "error decoding response
         // body"; the cause chain after it is what says what happened.
@@ -3770,7 +3770,7 @@ mod tests {
 
         // The link worked, so this is not the interrupted case, and it is not
         // resent: the same server would send the same body again.
-        assert_eq!(err.code, AppErrorCode::NetworkError);
+        assert!(matches!(err.code, AppErrorCode::NetworkError));
         assert_eq!(err.message, "Failed to parse remote response");
         let detail = err.detail.expect("a detail");
         assert!(detail.ends_with("(6 bytes)"), "got: {detail}");
