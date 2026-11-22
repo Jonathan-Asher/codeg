@@ -3501,3 +3501,81 @@ describe("SidebarConversationList — archived folders and groups", () => {
     expect(menuText).not.toContain("Old group")
   })
 })
+
+describe("SidebarConversationList — a failed refresh", () => {
+  // reqwest's wording for a body cut off mid-read, as the store records it.
+  const RAW = "error decoding response body: request or response body error"
+
+  beforeEach(() => {
+    const folders = [folder(1, "Folder 1")]
+    useAppWorkspaceStore.setState({
+      folders,
+      allFolders: folders,
+      conversations: [conv(11, 1)],
+    })
+  })
+
+  it("keeps the loaded list on screen under a quiet notice", () => {
+    useAppWorkspaceStore.setState({
+      conversationsHydrated: true,
+      conversationsError: RAW,
+    })
+    const { getByTestId, queryByRole } = render(tree())
+
+    expect(document.body.textContent).toContain("conv-11")
+    const notice = getByTestId("conversation-list-refresh-failed")
+    expect(notice).toHaveTextContent("Couldn't refresh — retrying…")
+    // The technical reason is a tooltip, not the message.
+    expect(notice).toHaveAttribute("title", RAW)
+    expect(document.body.textContent).not.toContain("error decoding")
+    expect(queryByRole("button", { name: "Retry" })).toBeNull()
+  })
+
+  it("drops the notice once a refresh succeeds", () => {
+    useAppWorkspaceStore.setState({
+      conversationsHydrated: true,
+      conversationsError: RAW,
+    })
+    const { queryByTestId } = render(tree())
+
+    act(() => {
+      useAppWorkspaceStore.setState({ conversationsError: null })
+    })
+
+    expect(queryByTestId("conversation-list-refresh-failed")).toBeNull()
+    expect(document.body.textContent).toContain("conv-11")
+  })
+
+  it("shows a plain error with Retry when nothing ever loaded", () => {
+    const refreshConversations = vi.fn(async () => {})
+    useAppWorkspaceStore.setState({
+      conversations: [],
+      conversationsHydrated: false,
+      conversationsError: RAW,
+      refreshConversations,
+    })
+    const { getByRole, getByText, queryByTestId } = render(tree())
+
+    expect(getByText("Couldn't load conversations")).toHaveAttribute(
+      "title",
+      RAW
+    )
+    expect(document.body.textContent).not.toContain("error decoding")
+    expect(queryByTestId("conversation-list-refresh-failed")).toBeNull()
+
+    fireEvent.click(getByRole("button", { name: "Retry" }))
+    expect(refreshConversations).toHaveBeenCalledTimes(1)
+  })
+
+  it("disables Retry while a refresh is under way", () => {
+    useAppWorkspaceStore.setState({
+      conversations: [],
+      conversationsHydrated: false,
+      conversationsError: RAW,
+      conversationsLoading: true,
+    })
+    const { getByRole } = render(tree())
+
+    expect(getByRole("button", { name: "Retry" })).toBeDisabled()
+  })
+})

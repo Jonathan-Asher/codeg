@@ -19,7 +19,7 @@ import {
   setFolderGroupArchived as apiSetFolderGroupArchived,
   updateFolderGroup as apiUpdateFolderGroup,
 } from "@/lib/api"
-import { toErrorMessage } from "@/lib/app-error"
+import { extractAppCommandError, toErrorMessage } from "@/lib/app-error"
 import { forgetConversationHistory } from "@/stores/history-cache"
 import {
   forgetClosedConversation,
@@ -62,7 +62,18 @@ export interface AppWorkspaceStoreState {
 
   conversations: DbConversationSummary[]
   conversationsLoading: boolean
+  /**
+   * Why the latest refresh failed, as technical text for a tooltip or a log
+   * (the UI shows its own plain wording). Null again once a refresh succeeds.
+   * A failure never clears `conversations`.
+   */
   conversationsError: string | null
+  /**
+   * True once a refresh has succeeded. From then on `conversations` is a real
+   * list, possibly stale, so a later failure is a notice over it rather than
+   * an error in its place.
+   */
+  conversationsHydrated: boolean
 
   /**
    * Display branch name per folder (null when detached or non-repo).
@@ -90,6 +101,12 @@ export interface AppWorkspaceStoreState {
   activeFolderId: number | null
 
   fetchFolders: () => Promise<void>
+  /**
+   * Re-read the whole conversation list. A failure keeps the list, records
+   * `conversationsError` and schedules a retry on a backoff
+   * (`CONVERSATION_RETRY_DELAYS_MS`), one timer however many callers fail; a
+   * success, from any caller, cancels it.
+   */
   refreshConversations: () => Promise<void>
   /**
    * Non-reactive by-id lookup for callbacks/effects. Render-time reads must
@@ -337,6 +354,72 @@ let lastAppliedFolderFetch = 0
 const gitHeadInFlight = new Map<number, symbol>()
 
 /**
+ * How long to wait before re-reading the conversation list after a failed
+ * refresh, by how many have failed in a row; the last wait repeats for as long
+ * as it keeps failing. A remote server restarts on every release, and a
+ * refresh that lands in that window fails with nothing else coming along to
+ * try again, so without this the sidebar would sit on the failure for good.
+ */
+export const CONVERSATION_RETRY_DELAYS_MS = [2_000, 5_000, 15_000, 30_000]
+
+/** Shortest gap between two refreshes asked for by a wake-up signal. */
+const CONVERSATION_WAKE_GAP_MS = 1_000
+
+/**
+ * Bookkeeping for `refreshConversations`. `conversationFetchSeq` numbers the
+ * refreshes as they start and `lastConversationSuccess` is the newest that
+ * succeeded: a failure older than that says nothing about the list on screen.
+ * The epoch changes on a store reset, so a refresh from before it neither
+ * counts as in flight nor schedules a retry after it.
+ */
+let conversationFetchSeq = 0
+let lastConversationSuccess = 0
+let conversationsInFlight = 0
+let lastConversationFetchAt = 0
+let conversationEpoch = 0
+
+/** The ONE pending retry, and how many retries ran before it. */
+let conversationRetryTimer: ReturnType<typeof setTimeout> | null = null
+let conversationRetryCount = 0
+
+function scheduleConversationRetry(retry: () => void): void {
+  // Already pending: a second failure (another caller's, or a reconnect's)
+  // neither stacks a timer nor moves the one there is.
+  if (conversationRetryTimer !== null) return
+  const delays = CONVERSATION_RETRY_DELAYS_MS
+  const delay = delays[Math.min(conversationRetryCount, delays.length - 1)]
+  conversationRetryCount++
+  conversationRetryTimer = setTimeout(() => {
+    conversationRetryTimer = null
+    // A refresh already under way answers the question either way: its
+    // success ends the retries, and its failure schedules the next one.
+    if (conversationsInFlight > 0) return
+    retry()
+  }, delay)
+}
+
+/**
+ * Drop the pending retry and start the backoff over. A success does this; so
+ * does the window's workspace going away (`AppWorkspaceProvider` unmounting),
+ * when nothing is left on screen to fix.
+ */
+export function cancelConversationRetry(): void {
+  if (conversationRetryTimer !== null) clearTimeout(conversationRetryTimer)
+  conversationRetryTimer = null
+  conversationRetryCount = 0
+}
+
+/**
+ * Failures a retry cannot fix. A rejected token puts the window behind its
+ * sign-in prompt, and the reconnect after it refetches anyway; a connection
+ * that is not found any more has gone away.
+ */
+function isRetryableConversationError(err: unknown): boolean {
+  const code = extractAppCommandError(err)?.code
+  return code !== "authentication_failed" && code !== "not_found"
+}
+
+/**
  * Undo an optimistic folder/group mutation whose request failed, then re-read
  * from the server.
  *
@@ -368,6 +451,7 @@ export const useAppWorkspaceStore = create<AppWorkspaceStoreState>()(
     conversations: [],
     conversationsLoading: true,
     conversationsError: null,
+    conversationsHydrated: false,
 
     branches: new Map(),
     gitHeads: new Map(),
@@ -433,13 +517,33 @@ export const useAppWorkspaceStore = create<AppWorkspaceStoreState>()(
     },
 
     refreshConversations: async () => {
+      const fetchId = ++conversationFetchSeq
+      const epoch = conversationEpoch
+      conversationsInFlight++
+      lastConversationFetchAt = Date.now()
       set({ conversationsLoading: true })
       try {
         const list = await listAllConversations()
-        set({ ...withConversations(list), conversationsError: null })
+        if (epoch === conversationEpoch) {
+          lastConversationSuccess = Math.max(lastConversationSuccess, fetchId)
+          cancelConversationRetry()
+        }
+        set({
+          ...withConversations(list),
+          conversationsError: null,
+          conversationsHydrated: true,
+        })
       } catch (err) {
+        if (epoch !== conversationEpoch) return
+        // A refresh that started later has already landed: the list on screen
+        // is newer than whatever this one failed to fetch.
+        if (fetchId < lastConversationSuccess) return
         set({ conversationsError: toErrorMessage(err) })
+        if (isRetryableConversationError(err)) {
+          scheduleConversationRetry(() => void get().refreshConversations())
+        }
       } finally {
+        if (epoch === conversationEpoch) conversationsInFlight--
         set({ conversationsLoading: false })
       }
     },
@@ -1038,7 +1142,27 @@ export function resetAppWorkspaceStore() {
   folderMutationSeq = 0
   folderFetchSeq = 0
   lastAppliedFolderFetch = 0
+  cancelConversationRetry()
+  // `conversationFetchSeq` keeps counting: ids stay unique across resets.
+  conversationEpoch++
+  lastConversationSuccess = 0
+  conversationsInFlight = 0
+  lastConversationFetchAt = 0
   useAppWorkspaceStore.setState(useAppWorkspaceStore.getInitialState(), true)
+}
+
+/**
+ * Refresh the conversation list now if the last refresh failed, rather than
+ * wait out the retry backoff: for wake-up signals such as the window coming
+ * back to the front. A no-op while the list is fine, while a refresh is under
+ * way, or within a second of the last one.
+ */
+export function retryConversationsIfFailed(): void {
+  const state = useAppWorkspaceStore.getState()
+  if (state.conversationsError === null) return
+  if (conversationsInFlight > 0) return
+  if (Date.now() - lastConversationFetchAt < CONVERSATION_WAKE_GAP_MS) return
+  void state.refreshConversations()
 }
 
 // Reset this backend-scoped store on any (currently-unreachable) in-realm

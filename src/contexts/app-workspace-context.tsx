@@ -6,7 +6,11 @@ import { onTransportReconnect, subscribe } from "@/lib/platform"
 import { useAcpEvent } from "@/contexts/acp-connections-context"
 import { useConversationAttentionSync } from "@/hooks/use-conversation-attention-sync"
 import { useConversationBackgroundSync } from "@/hooks/use-conversation-background-sync"
-import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
+import {
+  cancelConversationRetry,
+  retryConversationsIfFailed,
+  useAppWorkspaceStore,
+} from "@/stores/app-workspace-store"
 import { useConversationRuntimeStore } from "@/stores/conversation-runtime-store"
 import { useTabStore } from "@/stores/tab-store"
 import {
@@ -58,6 +62,23 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
     void refreshConversations()
   }, [])
 
+  // A failed list refresh retries on its own backoff (`refreshConversations`).
+  // The window coming back to the front is a reason not to wait for the next
+  // step. Unmounting ends the retries: nothing is left on screen to fix.
+  useEffect(() => {
+    const onWake = () => {
+      if (document.visibilityState === "hidden") return
+      retryConversationsIfFailed()
+    }
+    window.addEventListener("focus", onWake)
+    document.addEventListener("visibilitychange", onWake)
+    return () => {
+      window.removeEventListener("focus", onWake)
+      document.removeEventListener("visibilitychange", onWake)
+      cancelConversationRetry()
+    }
+  }, [])
+
   // Subscribe to the global `conversation://changed` side-channel so any
   // client's create/rename/delete/status reaches this client's sidebar in real
   // time — independent of whether the conversation is open/attached anywhere.
@@ -94,8 +115,9 @@ export function AppWorkspaceProvider({ children }: AppWorkspaceProviderProps) {
     })()
 
     // Events fired while the WS was disconnected are dropped by the broadcaster
-    // (receiver_count == 0). A full re-fetch on reconnect reconciles. Returns
-    // null on desktop IPC (no disconnect window) → no-op there.
+    // (receiver_count == 0). A full re-fetch on reconnect reconciles, and it
+    // also ends a failed refresh's retry backoff early: the link is back now.
+    // Returns null on desktop IPC (no disconnect window) → no-op there.
     const offReconnect = onTransportReconnect(
       () => useAppWorkspaceStore.getState().refreshConversations(),
       { priority: "lists", key: "conversations" }

@@ -24,6 +24,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronsUp,
+  CloudOff,
   Download,
   ExternalLink,
   FolderClosed,
@@ -40,6 +41,7 @@ import {
   MoreHorizontal,
   Palette,
   Rocket,
+  RotateCw,
   Settings,
   SquarePen,
   Tag,
@@ -1108,6 +1110,7 @@ export function SidebarConversationList({
   const ensureGitHead = useAppWorkspaceStore((s) => s.ensureGitHead)
   const loading = useAppWorkspaceStore((s) => s.conversationsLoading)
   const error = useAppWorkspaceStore((s) => s.conversationsError)
+  const hydrated = useAppWorkspaceStore((s) => s.conversationsHydrated)
   const refreshConversations = useAppWorkspaceStore(
     (s) => s.refreshConversations
   )
@@ -4248,13 +4251,35 @@ export function SidebarConversationList({
     return `${prefix}conv-${row.conversation.agent_type}-${row.conversation.id}`
   }
 
+  // A failed refresh only replaces the list when there is no list to keep.
+  // Once one has loaded it stays on screen, possibly stale, under a quiet
+  // notice while the store retries; the technical reason is a tooltip away.
+  const refreshFailedOverList = error !== null && hydrated
+  const loadFailed = error !== null && !hydrated
+
   return (
     <div className="relative flex flex-col flex-1 min-h-0">
-      {(loading || refreshing) && (
+      {(loading || refreshing) && error === null && (
         // z-20 keeps the refresh spinner above the sticky header overlay (z-10),
         // which lives in a later sibling and would otherwise paint over it.
         <div className="absolute top-0 left-0 right-0 flex items-center justify-center py-1 z-20 pointer-events-none">
           <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+        </div>
+      )}
+
+      {refreshFailedOverList && (
+        <div
+          role="status"
+          title={error ?? undefined}
+          data-testid="conversation-list-refresh-failed"
+          className="flex shrink-0 items-center gap-1.5 px-3 pb-1 text-[0.6875rem] text-muted-foreground"
+        >
+          {loading ? (
+            <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+          ) : (
+            <CloudOff className="h-3 w-3 shrink-0" />
+          )}
+          <span className="truncate">{t("listRefreshFailed")}</span>
         </div>
       )}
 
@@ -4264,11 +4289,24 @@ export function SidebarConversationList({
             <Skeleton key={i} className="h-14 w-full rounded-md" />
           ))}
         </div>
-      ) : error ? (
-        <div className="flex-1 flex items-center justify-center px-3">
-          <p className="text-destructive text-xs">
-            {t("error", { message: error })}
+      ) : loadFailed ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-2 px-3 text-center">
+          <p className="text-destructive text-xs" title={error ?? undefined}>
+            {t("listLoadFailed")}
           </p>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={loading}
+            onClick={() => void refreshConversations()}
+          >
+            {loading ? (
+              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+            ) : (
+              <RotateCw className="h-3.5 w-3.5 mr-1.5" />
+            )}
+            {t("listRetry")}
+          </Button>
         </div>
       ) : showEmptyWorkspaceActions ? (
         <div className="flex-1 flex flex-col items-center justify-center px-3 gap-2">

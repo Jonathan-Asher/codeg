@@ -1,5 +1,5 @@
 import { act, render, screen } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AppWorkspaceProvider } from "@/contexts/app-workspace-context"
 import {
   resetAppWorkspaceStore,
@@ -344,6 +344,92 @@ describe("AppWorkspaceProvider conversation://changed sync", () => {
     unmount()
     expect(h.disposeSpy).toHaveBeenCalledTimes(1)
     expect(h.reconnectUnsubSpy).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("AppWorkspaceProvider recovery after a failed conversation refresh", () => {
+  // What the proxy reports when the server restarts mid-answer.
+  const INTERRUPTED = {
+    code: "network_error",
+    message: "Remote response was interrupted",
+    detail: "error decoding response body: request or response body error",
+  }
+  const errorNow = () => useAppWorkspaceStore.getState().conversationsError
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    h.listAll.mockRejectedValue(INTERRUPTED)
+  })
+
+  afterEach(() => {
+    resetAppWorkspaceStore()
+    vi.useRealTimers()
+  })
+
+  it("retries on its own after the first read fails", async () => {
+    await mountProvider()
+    expect(errorNow()).not.toBeNull()
+
+    h.listAll.mockResolvedValue([makeSummary({ id: 5 })])
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000)
+    })
+
+    expect(h.listAll).toHaveBeenCalledTimes(2)
+    expect(errorNow()).toBeNull()
+    expect(screen.getByTestId("ids")).toHaveTextContent("5")
+  })
+
+  it("refetches on a reconnect, which also ends the backoff", async () => {
+    await mountProvider()
+
+    h.listAll.mockResolvedValue([makeSummary({ id: 5 })])
+    await act(async () => {
+      h.reconnect?.()
+    })
+    expect(h.listAll).toHaveBeenCalledTimes(2)
+    expect(errorNow()).toBeNull()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120_000)
+    })
+    // The pending retry went with the success.
+    expect(h.listAll).toHaveBeenCalledTimes(2)
+  })
+
+  it("refetches at once when the window comes back to the front", async () => {
+    await mountProvider()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000)
+    })
+
+    h.listAll.mockResolvedValue([makeSummary({ id: 5 })])
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"))
+    })
+
+    expect(h.listAll).toHaveBeenCalledTimes(2)
+    expect(errorNow()).toBeNull()
+  })
+
+  it("leaves a healthy list alone on focus", async () => {
+    h.listAll.mockResolvedValue([])
+    await mountProvider()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000)
+      window.dispatchEvent(new Event("focus"))
+    })
+
+    expect(h.listAll).toHaveBeenCalledTimes(1)
+  })
+
+  it("stops retrying once unmounted", async () => {
+    const { unmount } = await mountProvider()
+
+    unmount()
+    await vi.advanceTimersByTimeAsync(120_000)
+
+    expect(h.listAll).toHaveBeenCalledTimes(1)
   })
 })
 
