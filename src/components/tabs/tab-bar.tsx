@@ -78,6 +78,7 @@ import { STRIP_ICON_BTN } from "./strip-icon-button"
 import { TabItem, type TabMoveTarget } from "./tab-item"
 import { ForkPlaceholderTab } from "./fork-placeholder-tab"
 import { useForkPlaceholderStore } from "@/stores/fork-placeholder-store"
+import { useTabStepStore } from "@/stores/tab-step-store"
 import { GroupDropMarker, TabGroupLabel } from "./tab-group-label"
 
 /** i18n keys (Folder.tabs) for the view menu and the status band labels.
@@ -175,8 +176,15 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
           ),
     [tabs, groupId, groupOf, groupLayout]
   )
+  // A next/previous-tab press moves the highlight ahead of the switch itself
+  // (see `stepConversationTab`); the strip holding that tab shows it.
+  const stepPreviewId = useTabStepStore((s) => s.previewTabId)
   const displayActiveId =
-    groupId == null ? activeTabId : (groupSelection[groupId] ?? null)
+    stepPreviewId != null && groupTabs.some((tab) => tab.id === stepPreviewId)
+      ? stepPreviewId
+      : groupId == null
+        ? activeTabId
+        : (groupSelection[groupId] ?? null)
 
   // Display view: grouping (none / work folder / status band) and sorting
   // (manual / status / recent activity / name) are independent choices. Pure
