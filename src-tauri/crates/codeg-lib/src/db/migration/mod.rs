@@ -79,6 +79,7 @@ mod m20261112_000002_side_question;
 mod m20261116_000001_srn_web;
 mod m20261118_000001_conversation_continued_from;
 mod m20261118_000002_message_fts_rows;
+mod m20261122_000001_opened_tab_anchored;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -164,6 +165,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261116_000001_srn_web::Migration),
             Box::new(m20261118_000001_conversation_continued_from::Migration),
             Box::new(m20261118_000002_message_fts_rows::Migration),
+            Box::new(m20261122_000001_opened_tab_anchored::Migration),
         ]
     }
 }
