@@ -81,6 +81,7 @@ mod m20261118_000001_conversation_continued_from;
 mod m20261118_000002_message_fts_rows;
 mod m20261122_000001_opened_tab_anchored;
 mod m20261123_000001_prepared_prompt;
+mod m20261123_000005_token_usage_accounts;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -168,6 +169,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261118_000002_message_fts_rows::Migration),
             Box::new(m20261122_000001_opened_tab_anchored::Migration),
             Box::new(m20261123_000001_prepared_prompt::Migration),
+            Box::new(m20261123_000005_token_usage_accounts::Migration),
         ]
     }
 }

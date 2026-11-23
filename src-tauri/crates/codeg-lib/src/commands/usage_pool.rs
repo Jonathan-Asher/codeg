@@ -283,7 +283,7 @@ struct RawRouting {
 }
 
 #[derive(Debug, Clone)]
-struct PoolConfig {
+pub(crate) struct PoolConfig {
     status_url: String,
     key: Option<ProxyKey>,
     /// Percent.
@@ -1640,6 +1640,7 @@ pub(crate) fn resume_at_from(
 }
 
 pub(crate) mod manage;
+pub(crate) mod records;
 pub mod resets;
 
 #[cfg(test)]

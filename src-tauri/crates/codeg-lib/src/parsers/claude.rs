@@ -15,6 +15,7 @@ use crate::parsers::{
 
 pub(crate) mod subagent_thread;
 mod transcript_cache;
+pub(crate) mod usage_calls;
 
 /// Regex that matches Claude Code system-injected XML tags and their content.
 /// These tags are internal metadata and should not be displayed to users.

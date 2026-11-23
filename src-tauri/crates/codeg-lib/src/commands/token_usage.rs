@@ -1169,6 +1169,10 @@ pub async fn token_usage_sync_core(
         record_fact_schema_version(conn).await?;
     }
 
+    // Per-call rows and the pool's records for the account split, read with
+    // a time budget of their own (see `commands::token_usage_accounts`).
+    crate::commands::token_usage_accounts::sync_after_turns(conn).await;
+
     Ok(result)
 }
 

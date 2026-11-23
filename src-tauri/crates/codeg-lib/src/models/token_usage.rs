@@ -284,3 +284,119 @@ pub struct TokenUsageSyncProgress {
     /// Set on the final tick; absent while running.
     pub result: Option<TokenUsageSyncResult>,
 }
+
+// ─── Sessions by thread and by account ──────────────────────────────────
+
+/// What the session list of the usage page asks for: the dashboard's own
+/// filter, and which accounts to count.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenUsageSessionsQuery {
+    #[serde(default)]
+    pub filter: TokenUsageFilter,
+    /// `None` counts every call. `Some` counts only calls served by the
+    /// named accounts ([`TOKEN_USAGE_NO_ACCOUNT`] for calls no pool record
+    /// matched), and leaves out sessions without per-call data.
+    #[serde(default)]
+    pub accounts: Option<Vec<String>>,
+    /// How many sessions to return (default 8, at most 50).
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+/// The account key of calls no pool record matched: a session that did
+/// not go through the pool, or ran before its records were kept.
+pub const TOKEN_USAGE_NO_ACCOUNT: &str = "__none__";
+
+/// Some usage, in every unit the page shows. `cost_usd` and `pct` are
+/// `None` where they are unknown (an unpriced model, a call no pool record
+/// matched, a session without per-call data).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TokenUsageSlice {
+    pub tokens: u64,
+    pub cost_usd: Option<f64>,
+    /// Percent of the serving account's weekly limit (0–100 scale).
+    pub pct: Option<f64>,
+    pub calls: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TokenUsageAccountShare {
+    pub account: String,
+    pub usage: TokenUsageSlice,
+}
+
+/// The main thread or one sub-agent of a Claude session.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TokenUsageThreadItem {
+    /// `""` for the main thread, else the sub-agent's agent id.
+    pub key: String,
+    pub main: bool,
+    /// The sub-agent's task description.
+    pub label: Option<String>,
+    pub agent_type: Option<String>,
+    pub usage: TokenUsageSlice,
+    pub by_account: Vec<TokenUsageAccountShare>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TokenUsageSessionItem {
+    pub conversation_id: i32,
+    pub title: Option<String>,
+    pub agent_type: String,
+    pub folder_label: Option<String>,
+    pub last_activity_at: Option<DateTime<Utc>>,
+    pub usage: TokenUsageSlice,
+    /// Per-call data exists: the threads and the account split below are
+    /// filled. False for Codex, Pi and every other agent, and for Claude
+    /// sessions not read since the split began.
+    pub detail: bool,
+    pub by_account: Vec<TokenUsageAccountShare>,
+    pub threads: Vec<TokenUsageThreadItem>,
+}
+
+/// One account in the legend.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TokenUsageAccountItem {
+    pub account: String,
+    /// `claude`, `provider`, `link` (reached through a linked pool) or
+    /// `none` for [`TOKEN_USAGE_NO_ACCOUNT`].
+    pub kind: String,
+    /// What the sessions in this filter used on the account.
+    pub usage: TokenUsageSlice,
+    /// Every request the pool served on the account in the window, from
+    /// any client — the account's own meter movement.
+    pub pool_cost_usd: f64,
+    pub pool_pct: f64,
+    pub pool_calls: u64,
+    /// The part of `pool_pct` read off meter steps (the rest is estimated).
+    pub pool_metered_pct: f64,
+    /// Dollars per percent used for estimates on this account.
+    pub usd_per_pct: Option<f64>,
+    /// Measured from the account's own meter steps, not the baseline.
+    pub usd_per_pct_measured: bool,
+}
+
+/// Where the account data comes from.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TokenUsagePoolState {
+    /// A pool config exists on the machine this report comes from.
+    pub configured: bool,
+    /// The last read of its request records worked.
+    pub reachable: bool,
+    /// Why the last read failed (`unreachable`, `unauthorized`,
+    /// `unsupported`, …).
+    pub error: Option<String>,
+    pub last_pulled_at: Option<DateTime<Utc>>,
+    /// The oldest request record held: the account split starts here.
+    pub records_since: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TokenUsageSessionsReport {
+    pub pool: TokenUsagePoolState,
+    pub accounts: Vec<TokenUsageAccountItem>,
+    pub sessions: Vec<TokenUsageSessionItem>,
+    /// Some Claude sessions are still being read; ask again shortly.
+    pub indexing: bool,
+}

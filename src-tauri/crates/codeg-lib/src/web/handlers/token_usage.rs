@@ -9,9 +9,10 @@ use crate::commands::token_usage::{
     token_usage_facets_core, token_usage_report_core, token_usage_status_core,
     token_usage_sync_core, TokenUsageSyncMode,
 };
+use crate::commands::token_usage_accounts::token_usage_sessions_core;
 use crate::models::token_usage::{
-    TokenUsageFacets, TokenUsageFilter, TokenUsageReport, TokenUsageSyncResult,
-    TokenUsageSyncStatus,
+    TokenUsageFacets, TokenUsageFilter, TokenUsageReport, TokenUsageSessionsQuery,
+    TokenUsageSessionsReport, TokenUsageSyncResult, TokenUsageSyncStatus,
 };
 
 #[derive(Deserialize)]
@@ -32,6 +33,20 @@ pub async fn token_usage_report(
     Json(params): Json<TokenUsageReportParams>,
 ) -> Result<Json<TokenUsageReport>, AppCommandError> {
     let report = token_usage_report_core(&state.db.conn, params.filter).await?;
+    Ok(Json(report))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenUsageSessionsParams {
+    pub query: TokenUsageSessionsQuery,
+}
+
+pub async fn token_usage_sessions(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<TokenUsageSessionsParams>,
+) -> Result<Json<TokenUsageSessionsReport>, AppCommandError> {
+    let report = token_usage_sessions_core(&state.db.conn, params.query).await?;
     Ok(Json(report))
 }
 

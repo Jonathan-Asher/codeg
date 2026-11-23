@@ -181,6 +181,7 @@ mod tauri_app {
         session_info as session_info_commands,
         system_settings, terminal as terminal_commands,
         token_usage as token_usage_commands,
+        token_usage_accounts as token_usage_accounts_commands,
         forge as forge_commands, version_control, windows, work_task as work_task_commands,
         workspace_state as workspace_state_commands, workspace_windows,
     };
@@ -2903,6 +2904,7 @@ mod tauri_app {
                 token_usage_commands::token_usage_facets,
                 token_usage_commands::token_usage_status,
                 token_usage_commands::token_usage_sync,
+                token_usage_accounts_commands::token_usage_sessions,
                 plan_usage_commands::get_plan_usage,
                 crate::commands::limit_resets::get_limit_resets,
                 crate::commands::limit_resets::use_limit_reset,

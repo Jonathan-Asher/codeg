@@ -2231,6 +2231,10 @@ pub fn build_router_with_srn(
             "/token_usage_sync",
             post(handlers::token_usage::token_usage_sync),
         )
+        .route(
+            "/token_usage_sessions",
+            post(handlers::token_usage::token_usage_sessions),
+        )
         // ─── Subscription plan usage ───
         .route(
             "/get_plan_usage",
