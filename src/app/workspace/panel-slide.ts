@@ -86,6 +86,33 @@ export function slideHoldStyle(
 }
 
 /**
+ * Inline style for a side panel's content that stays mounted while the panel
+ * is closed (the aux panel's, see AuxPanel). Closed, it is held at `width` —
+ * the width it opens at — exactly where `slideHoldStyle` puts it while it
+ * slides open, so it keeps its layout and the next open only paints it again:
+ * no mount, no layout, no ResizeObserver round. The caller hides it while
+ * closed (`conversation-tab-hidden invisible` + `inert`; `visibility`, not
+ * `display`, which would lay it out from scratch when shown). Sliding open it
+ * keeps that hold; open and settled it is laid out in the flow (`undefined`).
+ */
+export function sidePanelContentHold(
+  edge: "start" | "end",
+  { open, sliding, width }: { open: boolean; sliding: boolean; width: number }
+): CSSProperties | undefined {
+  return !open || sliding ? slideHoldStyle(edge, width) : undefined
+}
+
+/**
+ * Whether a panel counts as shown for work that should wait out its slide:
+ * what it was before a toggle until the slide is over, then what it is now.
+ * Nothing keyed on it changes in the frame that starts a slide or during it —
+ * no re-render inside the toggle's own commit, no fetch landing mid-slide.
+ */
+export function settledShown(open: boolean, sliding: boolean): boolean {
+  return sliding ? !open : open
+}
+
+/**
  * Marks a region that keeps its width while a sidebar/aux panel slides:
  * - `center` — a conversation group's tab stack (the shown tab, and the hidden
  *   ones `absolute inset-0` in it). Held at its width and centred on its

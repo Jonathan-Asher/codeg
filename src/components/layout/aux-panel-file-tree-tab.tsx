@@ -2,6 +2,9 @@
 
 import {
   createContext,
+  type HTMLAttributes,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
   useCallback,
   useContext,
   useDeferredValue,
@@ -9,9 +12,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type HTMLAttributes,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type ReactNode,
 } from "react"
 import { revealItemInDir, subscribe } from "@/lib/platform"
 import ignore from "ignore"
@@ -19,7 +19,10 @@ import { Check, ChevronRight, Link2 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { useActiveFolder } from "@/contexts/active-folder-context"
-import { useAuxPanelContext } from "@/contexts/aux-panel-context"
+import {
+  useAuxPanelActions,
+  useAuxPanelPendingReveal,
+} from "@/contexts/aux-panel-context"
 import { useTabStore } from "@/contexts/tab-context"
 import { useTerminalContext } from "@/contexts/terminal-context"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -28,6 +31,7 @@ import {
   useWorkspaceFileTabs,
 } from "@/contexts/workspace-context"
 import { useWorkspaceStateStore } from "@/hooks/use-workspace-state-store"
+import { useAuxPanelWatchMode } from "./aux-panel-watch"
 import { detectPlatform } from "@/hooks/use-platform"
 import { findOwningFolder } from "@/lib/file-open-target"
 import { AuxPanelNoFolderEmpty } from "@/components/layout/aux-panel-no-folder-empty"
@@ -1142,11 +1146,10 @@ function RenderNode({
 export function FileTreeTab() {
   const t = useTranslations("Folder.fileTreeTab")
   const tCommon = useTranslations("Folder.common")
-  const {
-    pendingRevealPath,
-    consumePendingRevealPath,
-    setOpen: setAuxOpen,
-  } = useAuxPanelContext()
+  // Not the whole panel context: that changes with every toggle of the panel,
+  // which keeps this tab mounted while it is closed.
+  const pendingRevealPath = useAuxPanelPendingReveal()
+  const { consumePendingRevealPath, setOpen: setAuxOpen } = useAuxPanelActions()
   const isMobile = useIsMobile()
   // Defer the folder so a cross-folder conversation-tab switch commits first and
   // this tab's heavy tree rebuild (remount, applyLazyTreeOverrides, per-row
@@ -1181,7 +1184,12 @@ export function FileTreeTab() {
         ?.relPath ?? undefined
     )
   }, [activeFilePath, folder])
-  const workspaceState = useWorkspaceStateStore(folder?.path ?? null)
+  // Kept mounted while the aux panel is closed: the full stream steps down a
+  // while after it closes (aux-panel-watch).
+  const workspaceState = useWorkspaceStateStore(
+    folder?.path ?? null,
+    useAuxPanelWatchMode(folder?.path ?? null)
+  )
   const [nodes, setNodes] = useState<FileTreeNode[]>([])
   // The row the user last clicked (file OR directory). Drives the tree's
   // selection highlight so a clicked directory looks focused too — the active

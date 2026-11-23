@@ -71,8 +71,12 @@ vi.mock("./aux-panel-session-details-tab", () => ({
 vi.mock("./aux-panel-prompts-tab", () => ({
   PreparedPromptsTab: () => <div data-testid="body-prompts" />,
 }))
+const bodyRenders = vi.hoisted(() => ({ fileTree: vi.fn() }))
 vi.mock("./aux-panel-file-tree-tab", () => ({
-  FileTreeTab: () => <div data-testid="body-file_tree" />,
+  FileTreeTab: () => {
+    bodyRenders.fileTree()
+    return <div data-testid="body-file_tree" />
+  },
 }))
 vi.mock("./aux-panel-git-changes-tab", () => ({
   GitChangesTab: () => <div data-testid="body-changes" />,
@@ -102,6 +106,8 @@ const scene = vi.hoisted(() => ({
   provider: null as "github" | "gitlab" | "gitea" | null,
   /** Every folder the panel asked the forge lookup about, in order. */
   providerAsked: [] as (number | null)[],
+  /** The open state the panel last rendered with. */
+  renderedOpen: null as boolean | null,
 }))
 // A live selection and open state, so a press on the rail really switches the
 // panel, and a click that closes it really does.
@@ -113,6 +119,7 @@ vi.mock("@/contexts/aux-panel-context", async () => {
       const [isOpen, setIsOpen] = useState(scene.isOpen)
       const setActiveTab = useCallback((tab: AuxPanelTab) => setTab(tab), [])
       const setOpen = useCallback((open: boolean) => setIsOpen(open), [])
+      scene.renderedOpen = isOpen
       return { isOpen, activeTab, setActiveTab, setOpen }
     },
   }
@@ -263,16 +270,55 @@ describe("AuxPanel", () => {
       mobile: false,
       provider: null,
       providerAsked: [],
+      renderedOpen: null,
     })
     motion.onReorder = null
     motion.dragStart.clear()
     motion.dragEnd.clear()
   })
 
-  it("renders nothing while closed", () => {
+  it("renders nothing until it is first opened", () => {
     scene.isOpen = false
     const { container } = renderPanel()
     expect(container).toBeEmptyDOMElement()
+  })
+
+  it("stays mounted once opened, with every tab body it mounted, when it closes", async () => {
+    const user = userEvent.setup()
+    renderPanel()
+    await user.click(screen.getByRole("tab", { name: "Files" }))
+    const files = screen.getByTestId("body-file_tree")
+    const details = screen.getByTestId("body-session_details")
+
+    // Closed (the tab showing, clicked again): the workspace shell hides it,
+    // and the next open shows these same bodies instead of mounting them.
+    await user.click(screen.getByRole("tab", { name: "Files" }))
+    expect(scene.renderedOpen).toBe(false)
+    expect(screen.getByTestId("body-file_tree")).toBe(files)
+    expect(screen.getByTestId("body-session_details")).toBe(details)
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Files")
+  })
+
+  it("leaves the mounted tab bodies alone when it is toggled", async () => {
+    const user = userEvent.setup()
+    renderPanel()
+    await user.click(screen.getByRole("tab", { name: "Files" }))
+    const renders = bodyRenders.fileTree.mock.calls.length
+    expect(renders).toBeGreaterThan(0)
+
+    await user.click(screen.getByRole("tab", { name: "Files" }))
+    expect(scene.renderedOpen).toBe(false)
+    expect(bodyRenders.fileTree).toHaveBeenCalledTimes(renders)
+  })
+
+  it("mounts no tab body it has not shown while closed", async () => {
+    const user = userEvent.setup()
+    renderPanel()
+    await user.click(screen.getByRole("tab", { name: "Session Details" }))
+    expect(scene.renderedOpen).toBe(false)
+    // Lazy tabs stay lazy: closing mounts nothing new.
+    expect(screen.queryByTestId("body-file_tree")).toBeNull()
+    expect(screen.queryByTestId("body-git_log")).toBeNull()
   })
 
   it("lists every tab on the vertical rail, in the built-in order by default", () => {
@@ -322,16 +368,17 @@ describe("AuxPanel", () => {
 
   it("hides the panel when the tab already showing is clicked again", async () => {
     const user = userEvent.setup()
-    const { container } = renderPanel()
+    renderPanel()
 
     // A first click only switches. Radix selects on the mousedown, so by the
     // time this click lands the tab is selected — it must not count as the
     // second one.
     await user.click(screen.getByRole("tab", { name: "Files" }))
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Files")
+    expect(scene.renderedOpen).toBe(true)
 
     await user.click(screen.getByRole("tab", { name: "Files" }))
-    expect(container).toBeEmptyDOMElement()
+    expect(scene.renderedOpen).toBe(false)
   })
 
   it("keeps the panel when a press on the tab showing turns into a drag", async () => {

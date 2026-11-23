@@ -68,6 +68,7 @@ vi.mock("@/hooks/use-connection-status", () => ({
 }))
 
 import { SessionDetailsTab } from "./aux-panel-session-details-tab"
+import { AuxPanelShownProvider } from "./aux-panel-watch"
 import { useAuxPanelContext } from "@/contexts/aux-panel-context"
 import { useTabStore } from "@/contexts/tab-context"
 import { useConversationRuntimeStore } from "@/stores/conversation-runtime-store"
@@ -341,5 +342,23 @@ describe("SessionDetailsTab", () => {
     setupScene({ hasActiveConversation: true, activeTab: "file_tree" })
     renderTab()
     expect(lastInsightsProps()?.active).toBe(false)
+  })
+
+  // The panel keeps this tab mounted while it is closed; "shown" flips once a
+  // slide is over, so the navigator's rows are asked for after it, not at the
+  // start of it.
+  it("follows the panel being shown, not just its tab being selected", () => {
+    setupScene({ hasActiveConversation: true })
+    const tree = (shown: boolean) => (
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <AuxPanelShownProvider shown={shown}>
+          <SessionDetailsTab />
+        </AuxPanelShownProvider>
+      </NextIntlClientProvider>
+    )
+    const view = render(tree(false))
+    expect(lastInsightsProps()?.active).toBe(false)
+    view.rerender(tree(true))
+    expect(lastInsightsProps()?.active).toBe(true)
   })
 })

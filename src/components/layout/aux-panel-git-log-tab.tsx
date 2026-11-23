@@ -105,6 +105,8 @@ import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useWorkspaceActions } from "@/contexts/workspace-context"
 import { useWorkspaceStateStore } from "@/hooks/use-workspace-state-store"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { jsonEqual } from "@/lib/json-equal"
+import { useAuxPanelShown, useAuxPanelWatchMode } from "./aux-panel-watch"
 import { useImeGuard } from "@/hooks/use-ime-guard"
 import {
   useGitQuickActions,
@@ -1317,7 +1319,12 @@ export function GitLogTab() {
   // resolveTargetFolder). Clears the instant the deferred render catches up.
   const folderStale = activeFolder?.id !== folder?.id
   const { openCommitDiff, openFilePreview } = useWorkspaceActions()
-  const workspaceState = useWorkspaceStateStore(folder?.path ?? null)
+  // Kept mounted while the aux panel is closed: the full stream steps down a
+  // while after it closes (aux-panel-watch).
+  const workspaceState = useWorkspaceStateStore(
+    folder?.path ?? null,
+    useAuxPanelWatchMode(folder?.path ?? null)
+  )
   const isGitRepo = workspaceState.isGitRepo
   const [entries, setEntries] = useState<GitLogEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -1719,12 +1726,18 @@ export function GitLogTab() {
           false
         )
         if (gen !== logGenRef.current) return
-        setEntries(result.entries)
-        entriesRef.current = result.entries
+        // An inline refresh that finds the log as it was leaves it as it was:
+        // the same rows, so nothing for the list to redraw.
+        const unchanged =
+          inline && jsonEqual(entriesRef.current, result.entries)
+        if (!unchanged) {
+          setEntries(result.entries)
+          entriesRef.current = result.entries
+        }
         const more = result.entries.length >= PAGE_SIZE
         setHasMore(more)
         hasMoreRef.current = more
-        if (inline) {
+        if (inline && !unchanged) {
           const commitHashes = new Set(
             result.entries.map((entry) => entry.full_hash)
           )
@@ -2107,6 +2120,35 @@ export function GitLogTab() {
       unlistens.forEach((fn) => fn())
     }
   }, [folderId])
+
+  // The aux panel keeps this tab mounted while it is closed, so reopening it no
+  // longer remounts and refetches the log. What the events above miss — a
+  // commit, reset or fetch made outside the app — still moves the repository's
+  // refs, index or HEAD, and the workspace stream reports those paths. Noted
+  // while the panel is hidden, they refresh the log (inline, as a git event
+  // does) once it is shown again — after its slide; with nothing noted, a
+  // reopen fetches nothing. A batch too large to list its paths counts too.
+  const panelShown = useAuxPanelShown()
+  const changedWhileHiddenRef = useRef(false)
+  const subscribeWorkspaceEnvelopes = workspaceState.subscribeEnvelopes
+  useEffect(() => {
+    if (panelShown || !subscribeWorkspaceEnvelopes) return
+    return subscribeWorkspaceEnvelopes(({ changed_paths }) => {
+      if (
+        changed_paths.length === 0 ||
+        changed_paths.some(
+          (path) => path === ".git" || path.startsWith(".git/")
+        )
+      ) {
+        changedWhileHiddenRef.current = true
+      }
+    })
+  }, [panelShown, subscribeWorkspaceEnvelopes])
+  useEffect(() => {
+    if (!panelShown || !changedWhileHiddenRef.current) return
+    changedWhileHiddenRef.current = false
+    onGitEventRef.current()
+  }, [panelShown])
 
   if (!folder) {
     return <AuxPanelNoFolderEmpty />
