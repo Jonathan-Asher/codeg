@@ -1,11 +1,18 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+} from "react"
 import {
   getWorkspaceSnapshot,
   startWorkspaceStateStream,
   stopWorkspaceStateStream,
 } from "@/lib/api"
+import { jsonEqual } from "@/lib/json-equal"
 import { subscribe } from "@/lib/platform"
 import type {
   FileTreeNode,
@@ -84,15 +91,26 @@ function toErrorMessage(error: unknown): string {
   return String(error)
 }
 
+/**
+ * `next`, or `prev` when the two hold the same data. A resync, the snapshot an
+ * aux tab gets back when it steps up to "full", or a replace delta re-sending
+ * what is already there then leaves the tree / git list the SAME array, so
+ * nothing keyed on it rebuilds: the file tree re-derives every node from a new
+ * tree, and the change list re-sorts and re-groups a new git list.
+ */
+function keepIfEqual<T>(prev: T, next: T): T {
+  return jsonEqual(prev, next) ? prev : next
+}
+
 function applyDeltaToState(
   state: WorkspaceStateView,
   delta: WorkspaceDelta
 ): WorkspaceStateView {
   switch (delta.kind) {
     case "tree_replace":
-      return { ...state, tree: delta.nodes }
+      return { ...state, tree: keepIfEqual(state.tree, delta.nodes) }
     case "git_replace":
-      return { ...state, git: delta.entries }
+      return { ...state, git: keepIfEqual(state.git, delta.entries) }
     case "meta":
       return state
   }
@@ -128,8 +146,8 @@ function applySnapshot(
       seq: snapshot.seq,
       version: snapshot.version,
       health: "healthy",
-      tree: snapshot.tree_snapshot ?? [],
-      git: snapshot.git_snapshot ?? [],
+      tree: keepIfEqual(state.tree, snapshot.tree_snapshot ?? []),
+      git: keepIfEqual(state.git, snapshot.git_snapshot ?? []),
       error: null,
       degraded: snapshot.degraded,
       isGitRepo: snapshot.is_git_repo,
@@ -691,14 +709,39 @@ export function useWorkspaceStateStore(
     return getStore(rootPath)
   }, [rootPath])
 
+  // One token per hook, held for as long as the root is. A `mode` change swaps
+  // it in place (below) instead of releasing and re-acquiring: the release
+  // would drop the store to no holders for a moment, which schedules its
+  // shutdown and, re-acquired in the grace window, pulls a resync — a backend
+  // round trip and a re-render of every subscriber, for nothing. (A kept-
+  // mounted aux tab steps down to "paths" whenever the panel closes.)
+  const modeRef = useRef(mode)
+  const tokenRef = useRef<WorkspaceWatchToken | null>(null)
+  useEffect(() => {
+    modeRef.current = mode
+  }, [mode])
+
   useEffect(() => {
     if (!store || !rootPath) return
-    const token = store.acquire(mode)
+    const token = store.acquire(modeRef.current)
+    tokenRef.current = token
 
     return () => {
-      store.release(token)
+      store.release(tokenRef.current ?? token)
+      tokenRef.current = null
     }
-  }, [rootPath, store, mode])
+  }, [rootPath, store])
+
+  useEffect(() => {
+    const held = tokenRef.current
+    if (!store || !held || held.mode === mode) return
+    // The new mode's token first, then the old one back: a paths→full step
+    // upgrades the backend before anything is let go, and a full→paths step
+    // downgrades it with the stream left up (WorkspaceStateStore.acquire /
+    // release).
+    tokenRef.current = store.acquire(mode)
+    store.release(held)
+  }, [store, mode])
 
   const subscribeToStore = useCallback(
     (onStoreChange: () => void) => {
