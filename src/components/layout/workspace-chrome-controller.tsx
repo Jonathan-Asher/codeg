@@ -5,7 +5,7 @@ import { openSettingsWindow } from "@/lib/api"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useIsActiveChatMode } from "@/hooks/use-is-active-chat-mode"
 import { useSidebarContext } from "@/contexts/sidebar-context"
-import { useAuxPanelContext } from "@/contexts/aux-panel-context"
+import { useAuxPanelActions } from "@/contexts/aux-panel-context"
 import { useTerminalContext } from "@/contexts/terminal-context"
 import { useTabActions, useTabStore } from "@/contexts/tab-context"
 import {
@@ -68,7 +68,7 @@ export function WorkspaceChromeController() {
   const { activeFolder } = useActiveFolder()
   const isChatMode = useIsActiveChatMode()
   const { toggle } = useSidebarContext()
-  const { toggle: toggleAuxPanel } = useAuxPanelContext()
+  const { toggle: toggleAuxPanel } = useAuxPanelActions()
   const { toggle: toggleTerminal } = useTerminalContext()
   const { openNewConversationTab, openTab, switchTab, closeTab } =
     useTabActions()

@@ -35,7 +35,7 @@ vi.mock("@/contexts/workbench-route-context", () => ({
   useWorkbenchRoute: () => ({ setRoute: scene.setRoute }),
 }))
 vi.mock("@/contexts/aux-panel-context", () => ({
-  useAuxPanelContext: () => ({ setOpen: scene.setOpen }),
+  useAuxPanelActions: () => ({ setOpen: scene.setOpen }),
 }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => scene.mobile }))
 vi.mock("@/stores/app-workspace-store", () => {

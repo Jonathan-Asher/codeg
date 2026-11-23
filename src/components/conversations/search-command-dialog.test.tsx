@@ -74,7 +74,7 @@ vi.mock("@/contexts/workspace-context", () => ({
 }))
 
 vi.mock("@/contexts/aux-panel-context", () => ({
-  useAuxPanelContext: () => ({ revealInFileTree: vi.fn() }),
+  useAuxPanelActions: () => ({ revealInFileTree: vi.fn() }),
 }))
 
 const folders = vi.hoisted(() => ({

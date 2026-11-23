@@ -71,6 +71,39 @@ export function useAuxPanelContext() {
   return ctx
 }
 
+/** The panel's actions, without its state. */
+export type AuxPanelActions = Pick<
+  AuxPanelContextValue,
+  | "toggle"
+  | "setOpen"
+  | "setWidth"
+  | "setActiveTab"
+  | "openTab"
+  | "revealInFileTree"
+  | "consumePendingRevealPath"
+>
+
+// The actions alone, one object for the life of the provider: a component that
+// only opens, closes or reveals (the ⌘K dialog, a keyboard shortcut, a tab
+// body) reads them here and does not re-render on every toggle or resize of
+// the panel — useAuxPanelContext's value changes with each.
+const AuxPanelActionsContext = createContext<AuxPanelActions | null>(null)
+
+export function useAuxPanelActions(): AuxPanelActions {
+  const ctx = useContext(AuxPanelActionsContext)
+  if (!ctx) {
+    throw new Error("useAuxPanelActions must be used within AuxPanelProvider")
+  }
+  return ctx
+}
+
+// The path the file tree has been asked to reveal, alone, for the same reason.
+const AuxPanelPendingRevealContext = createContext<string | null>(null)
+
+export function useAuxPanelPendingReveal(): string | null {
+  return useContext(AuxPanelPendingRevealContext)
+}
+
 function clampWidth(width: number, minWidth: number) {
   return Math.max(minWidth, Math.min(MAX_WIDTH, width))
 }
@@ -175,9 +208,33 @@ export function AuxPanelProvider({ children }: AuxPanelProviderProps) {
     ]
   )
 
+  const actions = useMemo<AuxPanelActions>(
+    () => ({
+      toggle,
+      setOpen,
+      setWidth,
+      setActiveTab,
+      openTab,
+      revealInFileTree,
+      consumePendingRevealPath,
+    }),
+    [
+      toggle,
+      setOpen,
+      setWidth,
+      openTab,
+      revealInFileTree,
+      consumePendingRevealPath,
+    ]
+  )
+
   return (
     <AuxPanelContext.Provider value={value}>
-      {children}
+      <AuxPanelActionsContext.Provider value={actions}>
+        <AuxPanelPendingRevealContext.Provider value={pendingRevealPath}>
+          {children}
+        </AuxPanelPendingRevealContext.Provider>
+      </AuxPanelActionsContext.Provider>
     </AuxPanelContext.Provider>
   )
 }
