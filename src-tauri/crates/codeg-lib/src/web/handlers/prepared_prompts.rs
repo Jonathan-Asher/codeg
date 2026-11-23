@@ -152,12 +152,13 @@ mod tests {
         )
         .await
         .unwrap();
-        create_prepared_prompt(
+        let Json(elsewhere) = create_prepared_prompt(
             ext(),
             params(serde_json::json!({ "conversationId": other, "content": "not here" })),
         )
         .await
         .unwrap();
+        assert_eq!(elsewhere.conversation_id, other);
 
         let Json(edited) = update_prepared_prompt(
             ext(),
@@ -192,7 +193,7 @@ mod tests {
         assert_eq!(wire["conversationId"], conv);
         assert_eq!(wire["sortOrder"], 0);
 
-        delete_prepared_prompt(ext(), params(serde_json::json!({ "id": first.id })))
+        let Json(()) = delete_prepared_prompt(ext(), params(serde_json::json!({ "id": first.id })))
             .await
             .unwrap();
 
