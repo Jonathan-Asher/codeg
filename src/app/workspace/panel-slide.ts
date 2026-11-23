@@ -89,11 +89,11 @@ export function slideHoldStyle(
  * Inline style for a side panel's content that stays mounted while the panel
  * is closed (the aux panel's, see AuxPanel). Closed, it is held at `width` —
  * the width it opens at — exactly where `slideHoldStyle` puts it while it
- * slides open, so it keeps its layout and the next open only paints it again:
- * no mount, no layout, no ResizeObserver round. The caller hides it while
- * closed (`conversation-tab-hidden invisible` + `inert`; `visibility`, not
- * `display`, which would lay it out from scratch when shown). Sliding open it
- * keeps that hold; open and settled it is laid out in the flow (`undefined`).
+ * slides, so it keeps its layout and the next open only paints it again: no
+ * mount, no layout, no ResizeObserver round. Its column, 0 wide and
+ * overflow-hidden, is what hides it then (see FolderWorkspaceShell); the
+ * style never changes between closed and sliding, so neither toggle restyles
+ * it. Open and settled it is laid out in the flow (`undefined`).
  */
 export function sidePanelContentHold(
   edge: "start" | "end",

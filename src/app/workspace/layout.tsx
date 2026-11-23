@@ -1265,19 +1265,29 @@ function FolderWorkspaceShell({ children }: { children: React.ReactNode }) {
       : undefined
   // The aux content keeps that place while the panel is CLOSED too: once
   // opened, AuxPanel stays mounted, and closed it is held at the width it
-  // opens at (auxContentWidth) and hidden, so the next open only paints it —
-  // no mount, no layout, nothing to fetch (sidePanelContentHold). Hidden the
-  // way every kept-mounted surface is (KeptMountedSurface): `conversation-tab-
-  // hidden invisible`, inert, and its portalled layers told through
-  // OverlayHostHiddenProvider.
+  // opens at (auxContentWidth), so the next open lays nothing out, mounts
+  // nothing and fetches nothing (sidePanelContentHold).
+  //
+  // Closed, it is hidden by its column alone: 0 wide and overflow-hidden, the
+  // column clips all of it, so it paints nothing and no pointer reaches it. It
+  // takes no style change of its own to hide or show. In WebKit any real one
+  // on it — visibility, opacity, `inert` — re-styles and re-lays out the whole
+  // subtree, 25–35 ms for the file tree, which landed in the frame that starts
+  // the slide, both ways. So it slides out with its column the way it slides
+  // in, and goes inert (off the tab order and the accessibility tree) only
+  // once a closing slide is over, coming back once an opening one is: the
+  // same flip, in a frame where nothing moves. Its portalled layers are told
+  // at once (OverlayHostHiddenProvider).
   const auxContentHold = sidePanelContentHold("start", {
     open: auxOpen,
     sliding: auxAnimating,
     width: auxContentWidth,
   })
+  const auxContentInert = !settledShown(auxOpen, auxAnimating)
   const auxContentRef = useRef<HTMLDivElement | null>(null)
   // Closing used to unmount the content, which also gave the focus back to the
-  // page; hidden and inert it must let go of it the same way.
+  // page; kept mounted it must let go of it the same way, before it slides
+  // out.
   useLayoutEffect(() => {
     if (auxOpen) return
     const content = auxContentRef.current
@@ -1419,17 +1429,14 @@ function FolderWorkspaceShell({ children }: { children: React.ReactNode }) {
               through instead of a second frosted layer over the toolbar. The
               paired `bg-background` is the off-state (image disabled): equivalent
               to the old opaque wrapper, so the 240ms collapse slide still never
-              flashes white while the closed content is hidden. */}
+              flashes white. */}
           <div className="relative h-full min-h-0 overflow-hidden bg-background ws-transparent-bg">
             <OverlayHostHiddenProvider hidden={!auxOpen}>
               <div
                 ref={auxContentRef}
-                className={cn(
-                  "h-full",
-                  !auxOpen && "conversation-tab-hidden invisible"
-                )}
+                className="h-full"
                 style={auxContentHold}
-                inert={!auxOpen || undefined}
+                inert={auxContentInert || undefined}
               >
                 {/* Whether the panel is shown, changing only once a slide is
                     over (until then it is what it was before the toggle): the
