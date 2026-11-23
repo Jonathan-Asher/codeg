@@ -15,6 +15,7 @@ pub mod folder_service;
 pub mod import_service;
 pub mod message_search_service;
 pub mod model_provider_service;
+pub mod prepared_prompt_service;
 pub mod push_device_service;
 pub mod quick_message_service;
 pub mod remote_workspace_connection_service;

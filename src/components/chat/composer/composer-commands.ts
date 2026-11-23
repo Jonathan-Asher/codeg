@@ -25,6 +25,29 @@ export function blankLineAfter(existing: string): string {
 }
 
 /**
+ * Get the editor ready to take `text` at the caret on a line of its own, and
+ * return what to insert there: `text` with a line break before it unless the
+ * caret starts a line, and one after it unless the caret ends one. A selection
+ * collapses to its end first, so inserting never replaces what is selected.
+ *
+ * Lines are hard breaks (the composer's plain-text schema turns `\n` into
+ * one) or the edges of a paragraph.
+ */
+export function prepareOwnLineInsert(editor: Editor, text: string): string {
+  const { to } = editor.state.selection
+  if (!editor.state.selection.empty) {
+    editor.commands.setTextSelection(to)
+  }
+  const { $from } = editor.state.selection
+  const isBreak = (node: { type: { name: string } } | null | undefined) =>
+    node?.type.name === "hardBreak"
+  const startsLine = $from.parentOffset === 0 || isBreak($from.nodeBefore)
+  const endsLine =
+    $from.parentOffset === $from.parent.content.size || isBreak($from.nodeAfter)
+  return `${startsLine ? "" : "\n"}${text}${endsLine ? "" : "\n"}`
+}
+
+/**
  * Whether the composer has nothing sendable. Stricter than `editor.isEmpty`,
  * which is false for a whitespace-only document (the legacy textarea gated the
  * send button on `text.trim()`), but still treats a document holding only an

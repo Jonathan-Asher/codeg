@@ -474,6 +474,19 @@ pub enum ConversationTagChange {
     },
 }
 
+/// A conversation's prepared prompts changed (added, edited, deleted,
+/// reordered, sent, or all of them gone with the conversation). Every window
+/// showing that conversation's Prompts tab re-reads its list; the others
+/// ignore it. A nudge rather than the rows, so a client never has to merge.
+pub const PREPARED_PROMPTS_CHANGED_EVENT: &str = "prepared-prompt://changed";
+
+/// Payload for [`PREPARED_PROMPTS_CHANGED_EVENT`].
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreparedPromptsChange {
+    pub conversation_id: i32,
+}
+
 /// Global side-channel for assistant definitions. Assistants are edited in the
 /// settings window but drawn in every window and client — the mention panel,
 /// delegation cards, sub-session rows.

@@ -62,7 +62,11 @@ import {
   newClientMessageId,
   type RequeueOptions,
 } from "@/hooks/use-message-queue"
-import { routeComposerSend } from "@/lib/background-idle"
+import {
+  routeComposerSend,
+  type ComposerSendRoute,
+} from "@/lib/background-idle"
+import { registerComposerBridge, textPromptDraft } from "@/lib/composer-bridge"
 import { CONTINUE_SHORTCUT, continuePromptDraft } from "@/lib/continue-turn"
 import { buildSteerPayload } from "@/lib/prompt-draft"
 import {
@@ -137,6 +141,7 @@ import {
   applyExpertReference,
   blankLineAfter,
   isComposerEmpty,
+  prepareOwnLineInsert,
   restampSkillPrefixes,
 } from "@/components/chat/composer/composer-commands"
 import { useComposerChromeFocus } from "@/components/chat/composer/use-composer-chrome-focus"
@@ -357,6 +362,13 @@ interface MessageInputProps {
   injectContent?: ComposerInjectContent | null
   onInjectConsumed?: () => void
   /**
+   * Publish this composer under this key (its tab's id) for the rest of the
+   * window (`lib/composer-bridge`): the right-hand panel's prepared prompts
+   * are sent through it, by the route Enter would take, and put into it for
+   * editing. Only a session's own composer sets it.
+   */
+  composerBridgeKey?: string
+  /**
    * `/btw` side questions (see `lib/side-question`), present only on a session
    * that can answer one. The composer offers `/btw` in its `/` menu and hands
    * a `/btw …` message here instead of sending it: it never goes to the agent
@@ -524,6 +536,7 @@ export function MessageInput({
   feedbackAddDisabled,
   injectContent,
   onInjectConsumed,
+  composerBridgeKey,
   getSentHistory,
   onSideQuestion,
   sideQuestionOpen = false,
@@ -2215,6 +2228,33 @@ export function MessageInput({
   // the first send has re-rendered the button away; the backend would bounce
   // that one into the queue and the agent would get "continue" twice.
   const lastContinueAtRef = useRef(0)
+  // The route Enter takes for a plain send right now (see `handleSend`).
+  const plainSendRoute = routeComposerSend({
+    isPrompting,
+    queueSends,
+    canDeliverNow: heldTurnReady,
+    hasEnqueue: Boolean(onEnqueue),
+    hasDeliver: Boolean(onDeliverNow),
+  })
+  // Send a draft that never was in the editor — Continue, a prepared prompt
+  // from the right-hand panel — by `route`, the way `handleSend` sends a typed
+  // one: into a held turn, into the queue, or as the next prompt. The editor
+  // is left alone: the user may be in the middle of writing something else.
+  const sendDraftByRoute = useCallback(
+    (draft: PromptDraft, route: ComposerSendRoute) => {
+      const modeId = showModeSelector ? effectiveModeId : null
+      if (route === "deliver") {
+        void deliverIntoHeldTurn(draft, { fromComposer: false })
+        return
+      }
+      if (route === "enqueue" && onEnqueue) {
+        onEnqueue(draft, modeId)
+        return
+      }
+      onSend(draft, modeId)
+    },
+    [showModeSelector, effectiveModeId, deliverIntoHeldTurn, onEnqueue, onSend]
+  )
   const handleContinue = useCallback(() => {
     // Not ready yet: queue it, or take a waiting one back. The host's queue
     // tells a double click from a second click.
@@ -2225,36 +2265,71 @@ export function MessageInput({
     const now = Date.now()
     if (now - lastContinueAtRef.current < CONTINUE_REPEAT_GUARD_MS) return
     lastContinueAtRef.current = now
-    const draft = continuePromptDraft()
-    const modeId = showModeSelector ? effectiveModeId : null
-    const route = routeComposerSend({
-      isPrompting,
-      queueSends,
-      canDeliverNow: heldTurnReady,
-      hasEnqueue: Boolean(onEnqueue),
-      hasDeliver: Boolean(onDeliverNow),
+    sendDraftByRoute(continuePromptDraft(), plainSendRoute)
+  }, [continueBeforeReady, sendDraftByRoute, plainSendRoute])
+
+  // This composer as the rest of the window sees it (`lib/composer-bridge`):
+  // the right-hand panel's prepared prompts go out through `sendDraftByRoute`
+  // on the route Enter would take, or come in for editing. A send is refused
+  // exactly where `handleSend` refuses one: a composer that is disabled and
+  // neither replying nor queueing (disconnected, settings still loading), a
+  // reply running with no queue to wait in (`handleSend` keeps the draft and
+  // says so), and a held-turn delivery already on its way.
+  const outsideSendRoute: ComposerSendRoute | null =
+    (disabled && !isPrompting && !queueSends) ||
+    (plainSendRoute === "send" && isPrompting) ||
+    (plainSendRoute === "deliver" && delivering)
+      ? null
+      : plainSendRoute
+  const outsideSendRef = useRef<(text: string) => ComposerSendRoute | null>(
+    () => null
+  )
+  const outsideInsertRef = useRef<(text: string) => boolean>(() => false)
+  // Whether the user (or a focus the composer took itself) has put the caret
+  // somewhere in this editor. Until then its selection is wherever the editor
+  // started it, which says nothing about where text should go.
+  const caretPlacedRef = useRef(false)
+  const handleEditorFocus = useCallback(() => {
+    caretPlacedRef.current = true
+    onFocus?.()
+  }, [onFocus])
+  useLayoutEffect(() => {
+    outsideSendRef.current = (text) => {
+      if (outsideSendRoute == null || !text.trim()) return null
+      // As for a typed send: what goes out replaces the prediction offered.
+      if (promptSuggestion) setDismissedSuggestionId(promptSuggestion.id)
+      sendDraftByRoute(textPromptDraft(text), outsideSendRoute)
+      return outsideSendRoute
+    }
+    outsideInsertRef.current = (text) => {
+      const handle = editorRef.current
+      const editor = handle?.getEditor()
+      if (!handle || !editor) return false
+      if (isComposerEmpty(editor)) {
+        // Nothing to keep: the prompt is the message, caret after it.
+        handle.setText(text)
+        handle.focus()
+      } else {
+        // The draft is kept whole and the prompt goes where the caret is, on
+        // a line of its own. A caret never placed means the draft's end.
+        if (!caretPlacedRef.current) {
+          editor.commands.setTextSelection(editor.state.doc.content.size)
+        }
+        handle.insertTextAtCursor(prepareOwnLineInsert(editor, text))
+      }
+      setComposerEmpty(false)
+      return true
+    }
+  })
+  useEffect(() => {
+    if (!composerBridgeKey) return
+    return registerComposerBridge(composerBridgeKey, {
+      sendRoute: outsideSendRoute,
+      isReplying: isPrompting,
+      send: (text) => outsideSendRef.current(text),
+      insert: (text) => outsideInsertRef.current(text),
     })
-    if (route === "deliver") {
-      void deliverIntoHeldTurn(draft, { fromComposer: false })
-      return
-    }
-    if (route === "enqueue" && onEnqueue) {
-      onEnqueue(draft, modeId)
-      return
-    }
-    onSend(draft, modeId)
-  }, [
-    continueBeforeReady,
-    showModeSelector,
-    effectiveModeId,
-    isPrompting,
-    queueSends,
-    heldTurnReady,
-    onEnqueue,
-    onDeliverNow,
-    deliverIntoHeldTurn,
-    onSend,
-  ])
+  }, [composerBridgeKey, outsideSendRoute, isPrompting])
   // ⌘/Ctrl+Enter on the empty composer. RichComposer only asks when neither
   // the send nor the newline binding claims the chord; declining (no Continue
   // on offer) keeps the editor's default for it.
@@ -2773,7 +2848,7 @@ export function MessageInput({
                 onChange={handleComposerChange}
                 onReady={handleComposerReady}
                 onSubmit={handleSend}
-                onFocus={onFocus}
+                onFocus={handleEditorFocus}
                 onPasteFiles={attach.handlePasteFiles}
                 onDropFiles={attach.handleEditorDrop}
                 onPlainPaste={handlePlainPasteShortcut}

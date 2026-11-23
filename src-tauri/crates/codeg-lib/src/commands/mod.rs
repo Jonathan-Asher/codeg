@@ -129,6 +129,7 @@ pub mod notification;
 pub mod notification_answers;
 pub mod pet;
 pub mod plan_usage;
+pub mod prepared_prompts;
 pub mod project_boot;
 pub mod question;
 /// Quick Ask: the global-shortcut question window (desktop) and the cleanup

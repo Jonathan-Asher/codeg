@@ -4216,6 +4216,9 @@ const ConversationTabView = memo(function ConversationTabView({
       }
       injectContent={composerInject}
       onInjectConsumed={handleComposerInjectConsumed}
+      // The right-hand panel's prepared prompts reach this session through
+      // its composer (`lib/composer-bridge`), by the composer's own routes.
+      composerBridgeKey={tabId}
       sideQuestion={sideQuestionSupported ? sideQuestion : null}
       onPromptSuggestionShown={handlePromptSuggestionShown}
       onPromptSuggestionAccepted={handlePromptSuggestionAccepted}

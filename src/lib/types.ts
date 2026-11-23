@@ -5638,6 +5638,31 @@ export interface SideQuestionRecord {
   createdAt: string
 }
 
+/**
+ * A message the user prepared for one conversation, listed in the right-hand
+ * panel's Prompts tab (Rust `PreparedPromptInfo`). Kept on the server the
+ * conversation lives on, so a remote window lists its server's prompts.
+ */
+export interface PreparedPrompt {
+  id: number
+  conversationId: number
+  content: string
+  /** Position in the conversation's list, top to bottom. */
+  sortOrder: number
+  /** When it was last sent from the panel; null until then. */
+  lastSentAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** A conversation's prepared prompts changed: re-read its list (Rust
+ *  `PreparedPromptsChange`). */
+export interface PreparedPromptsChange {
+  conversationId: number
+}
+
+export const PREPARED_PROMPTS_CHANGED_EVENT = "prepared-prompt://changed"
+
 /** "Resume interrupted sessions after restart" (Rust `AutoResumeSettings`),
  *  and under it "Also resume sessions whose background work was stopped". */
 export interface AutoResumeSettings {

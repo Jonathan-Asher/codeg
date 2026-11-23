@@ -59,6 +59,7 @@ pub mod office_watch_proxy;
 pub mod opencode_credentials;
 pub mod pet;
 pub mod plan_usage;
+pub mod prepared_prompts;
 pub mod project_boot;
 pub mod question;
 pub mod push;

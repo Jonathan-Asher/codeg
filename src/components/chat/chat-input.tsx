@@ -133,6 +133,8 @@ interface ChatInputProps {
   allowOfflineCompose?: boolean
   injectContent?: ComposerInjectContent | null
   onInjectConsumed?: () => void
+  /** Pass-through: see `MessageInput.composerBridgeKey`. */
+  composerBridgeKey?: string
   /** `/btw` side questions on this session (see `useSideQuestion`): the panel
    *  above the composer and the composer's `/btw`. Absent where the session
    *  cannot answer one. */
@@ -203,6 +205,7 @@ export const ChatInput = memo(function ChatInput({
   allowOfflineCompose = false,
   injectContent,
   onInjectConsumed,
+  composerBridgeKey,
   sideQuestion = null,
   promptSuggestion = null,
   onPromptSuggestionShown,
@@ -331,6 +334,7 @@ export const ChatInput = memo(function ChatInput({
         feedbackAddDisabled={feedbackAddDisabled}
         injectContent={injectContent}
         onInjectConsumed={onInjectConsumed}
+        composerBridgeKey={composerBridgeKey}
         onSideQuestion={sideQuestion?.ask}
         sideQuestionOpen={sideQuestion?.panel.open ?? false}
         onCloseSideQuestion={sideQuestion?.close}

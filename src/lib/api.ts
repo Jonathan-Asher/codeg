@@ -266,6 +266,7 @@ import type {
   OpenCodeCredentialChange,
   OpenCodeIntegration,
   QuickMessage,
+  PreparedPrompt,
   OfficecliInfo,
   OfficecliSkill,
   SkillSyncReport,
@@ -4855,6 +4856,59 @@ export async function quickMessagesDelete(id: number): Promise<void> {
 
 export async function quickMessagesReorder(ids: number[]): Promise<void> {
   return getTransport().call("quick_messages_reorder", { ids })
+}
+
+// Prepared prompts: a conversation's own list in the right-hand panel's
+// Prompts tab, kept on the server the conversation lives on.
+
+/** The conversation's prepared prompts, top to bottom. */
+export async function listPreparedPrompts(
+  conversationId: number
+): Promise<PreparedPrompt[]> {
+  return getTransport().call("list_prepared_prompts", { conversationId })
+}
+
+/** Add a prompt at the end of the conversation's list. */
+export async function createPreparedPrompt(
+  conversationId: number,
+  content: string
+): Promise<PreparedPrompt> {
+  return getTransport().call("create_prepared_prompt", {
+    conversationId,
+    content,
+  })
+}
+
+/** Replace a prompt's text; its place and its sent mark stay. */
+export async function updatePreparedPrompt(
+  id: number,
+  content: string
+): Promise<PreparedPrompt> {
+  return getTransport().call("update_prepared_prompt", { id, content })
+}
+
+/** Delete a prompt (one already gone is not an error). */
+export async function deletePreparedPrompt(id: number): Promise<void> {
+  return getTransport().call("delete_prepared_prompt", { id })
+}
+
+/** Store the list's order after a drag (`ids` top to bottom); resolves with
+ *  the list as stored. */
+export async function reorderPreparedPrompts(
+  conversationId: number,
+  ids: number[]
+): Promise<PreparedPrompt[]> {
+  return getTransport().call("reorder_prepared_prompts", {
+    conversationId,
+    ids,
+  })
+}
+
+/** Record that the prompt was just sent; it stays in the list. */
+export async function markPreparedPromptSent(
+  id: number
+): Promise<PreparedPrompt> {
+  return getTransport().call("mark_prepared_prompt_sent", { id })
 }
 
 // Token usage dashboard

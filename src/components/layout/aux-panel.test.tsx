@@ -68,6 +68,9 @@ vi.mock("motion/react", async () => {
 vi.mock("./aux-panel-session-details-tab", () => ({
   SessionDetailsTab: () => <div data-testid="body-session_details" />,
 }))
+vi.mock("./aux-panel-prompts-tab", () => ({
+  PreparedPromptsTab: () => <div data-testid="body-prompts" />,
+}))
 vi.mock("./aux-panel-file-tree-tab", () => ({
   FileTreeTab: () => <div data-testid="body-file_tree" />,
 }))
@@ -149,6 +152,7 @@ const KEY = "workspace:right-sidebar-tab-order"
 /** The rail in the built-in order, by name. */
 const BUILT_IN = [
   "Session Details",
+  "Prompts",
   "Files",
   "Changes",
   "Commits",
@@ -167,6 +171,7 @@ const REVERSED: AuxPanelTab[] = [
   "git_log",
   "changes",
   "file_tree",
+  "prompts",
   "session_details",
 ]
 const REVERSED_NAMES = [...BUILT_IN].reverse()
@@ -220,6 +225,14 @@ describe("resolveAuxTabView", () => {
       showFolderTabs: false,
       effectiveTab: "session_details",
     })
+  })
+
+  it("keeps Prompts, the session's own tab, without a folder or in chat mode", () => {
+    expect(resolveAuxTabView("prompts", null, false)).toEqual({
+      showFolderTabs: false,
+      effectiveTab: "prompts",
+    })
+    expect(resolveAuxTabView("prompts", 1, true).effectiveTab).toBe("prompts")
   })
 
   it("collapses to Session Details when no folder is open", () => {
@@ -372,10 +385,12 @@ describe("AuxPanel", () => {
         "automations",
       ])
     )
+    // Written before Prompts existed: it joins right after Session Details.
     expect(railTabs()).toEqual([
       "To-dos",
       "Files",
       "Session Details",
+      "Prompts",
       "Issues",
       "Commits",
       "Changes",
@@ -399,6 +414,7 @@ describe("AuxPanel", () => {
       "Changes",
       "Files",
       "Session Details",
+      "Prompts",
     ])
   })
 
@@ -407,6 +423,7 @@ describe("AuxPanel", () => {
     const dragged = [
       "changes",
       "session_details",
+      "prompts",
       "file_tree",
       "git_log",
       "automations",
@@ -417,6 +434,7 @@ describe("AuxPanel", () => {
     const draggedNames = [
       "Changes",
       "Session Details",
+      "Prompts",
       "Files",
       "Commits",
       "Automations",
@@ -467,6 +485,7 @@ describe("AuxPanel", () => {
     fireEvent.keyDown(changes, { key: "ArrowUp", altKey: true })
     expect(railTabs()).toEqual([
       "Session Details",
+      "Prompts",
       "Changes",
       "Files",
       "Commits",
@@ -477,6 +496,7 @@ describe("AuxPanel", () => {
     ])
     expect(storedOrder()).toEqual([
       "session_details",
+      "prompts",
       "changes",
       "file_tree",
       "git_log",
@@ -487,10 +507,12 @@ describe("AuxPanel", () => {
     ])
     expect(screen.getByRole("tab", { name: "Changes" })).toHaveFocus()
 
-    fireEvent.keyDown(screen.getByRole("tab", { name: "Changes" }), {
-      key: "ArrowUp",
-      altKey: true,
-    })
+    for (let i = 0; i < 2; i++) {
+      fireEvent.keyDown(screen.getByRole("tab", { name: "Changes" }), {
+        key: "ArrowUp",
+        altKey: true,
+      })
+    }
     expect(railTabs()[0]).toBe("Changes")
     expect(screen.getByRole("tab", { name: "Changes" })).toHaveFocus()
 
@@ -503,7 +525,7 @@ describe("AuxPanel", () => {
     expect(localStorage.getItem(KEY)).toBe(before)
 
     // Back down to where it started: the stored value goes with it.
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 3; i++) {
       fireEvent.keyDown(screen.getByRole("tab", { name: "Changes" }), {
         key: "ArrowDown",
         altKey: true,
@@ -524,10 +546,16 @@ describe("AuxPanel", () => {
     expect(localStorage.getItem(KEY)).toBeNull()
   })
 
-  it("hides the rail but keeps the title when only Session Details applies", () => {
+  it("lists only the session's own tabs, in the stored order, when no folder tabs apply", () => {
     localStorage.setItem(
       KEY,
-      JSON.stringify(["git_log", "changes", "file_tree", "session_details"])
+      JSON.stringify([
+        "git_log",
+        "prompts",
+        "changes",
+        "file_tree",
+        "session_details",
+      ])
     )
     scene.chatMode = true
     scene.initialTab = "git_log"
@@ -536,13 +564,67 @@ describe("AuxPanel", () => {
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
       "Session Details"
     )
-    // display:none drops the lone trigger out of the tab order, while it stays
-    // in the DOM for the panel's aria-labelledby.
-    expect(rail()).toHaveClass("hidden")
-    expect(railTabs()).toEqual(["Session Details"])
+    expect(rail()).toBeVisible()
+    expect(railTabs()).toEqual(["Prompts", "Session Details"])
     expect(
       screen.getByRole("tabpanel", { name: "Session Details" })
     ).toBeInTheDocument()
+
+    // A chat session has prompts too.
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Prompts" }), {
+      button: 0,
+    })
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
+      "Prompts"
+    )
+    expect(screen.getByTestId("body-prompts")).toBeVisible()
+  })
+
+  it("moves a session tab past its listed neighbour and keeps the hidden tabs in place", () => {
+    const stored = [
+      "session_details",
+      "file_tree",
+      "prompts",
+      "changes",
+      "git_log",
+      "automations",
+      "tasks",
+      "issues",
+      "pull_requests",
+    ]
+    localStorage.setItem(KEY, JSON.stringify(stored))
+    scene.chatMode = true
+    renderPanel()
+    expect(railTabs()).toEqual(["Session Details", "Prompts"])
+
+    const prompts = screen.getByRole("tab", { name: "Prompts" })
+    act(() => prompts.focus())
+    fireEvent.keyDown(prompts, { key: "ArrowUp", altKey: true })
+    expect(railTabs()).toEqual(["Prompts", "Session Details"])
+    // The two swapped the slots they held; Files never moved.
+    expect(storedOrder()).toEqual([
+      "prompts",
+      "file_tree",
+      "session_details",
+      "changes",
+      "git_log",
+      "automations",
+      "tasks",
+      "issues",
+      "pull_requests",
+    ])
+  })
+
+  it("opens Prompts from the rail, mounting its body on first view", () => {
+    renderPanel()
+    expect(screen.queryByTestId("body-prompts")).toBeNull()
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Prompts" }), {
+      button: 0,
+    })
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
+      "Prompts"
+    )
+    expect(screen.getByTestId("body-prompts")).toBeVisible()
   })
 
   it("lists the tabs in the stored order on mobile, without the title strip or the rail", () => {

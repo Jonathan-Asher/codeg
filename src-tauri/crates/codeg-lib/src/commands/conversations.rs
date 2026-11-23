@@ -3785,6 +3785,14 @@ pub async fn delete_conversation_with_cleanup_core(
         conversation_id,
     )
     .await;
+    // The conversation's prepared prompts go with it, by the same funnel: they
+    // belong to this one conversation and nothing else can use them.
+    crate::commands::prepared_prompts::cleanup_prepared_prompts_for_deleted_conversation(
+        emitter,
+        conn,
+        conversation_id,
+    )
+    .await;
     if let Some(folder_id) = folder_id {
         retire_chat_folder_if_unused(conn, folder_id).await;
     }
@@ -7663,6 +7671,58 @@ mod tests {
             saw_parent_upsert,
             "parent must re-broadcast an Upsert for child_count convergence"
         );
+    }
+
+    #[tokio::test]
+    async fn delete_removes_the_conversations_prepared_prompts() {
+        // Deleting only marks the row, so no foreign key fires: the funnel
+        // removes the prompts itself, tells the windows showing them, and
+        // leaves every other conversation's list alone.
+        use crate::db::service::prepared_prompt_service;
+        use crate::web::event_bridge::PREPARED_PROMPTS_CHANGED_EVENT;
+        let db = fresh_in_memory_db().await;
+        let folder_id = seed_folder(&db, "/tmp/codeg-delete-prepared-prompts").await;
+        let gone = create_conversation_core(&db.conn, folder_id, AgentType::ClaudeCode, None)
+            .await
+            .expect("conversation");
+        let kept = create_conversation_core(&db.conn, folder_id, AgentType::ClaudeCode, None)
+            .await
+            .expect("other conversation");
+        for text in ["one", "two"] {
+            prepared_prompt_service::create(&db.conn, gone, text)
+                .await
+                .expect("prompt");
+        }
+        prepared_prompt_service::create(&db.conn, kept, "stays")
+            .await
+            .expect("other prompt");
+        let (broadcaster, emitter) = sync_test_emitter();
+        let mut rx = broadcaster.subscribe();
+        let manager = crate::acp::manager::ConnectionManager::new();
+
+        delete_conversation_with_cleanup_core(&emitter, &db.conn, &manager, gone)
+            .await
+            .expect("delete");
+
+        assert!(prepared_prompt_service::list(&db.conn, gone)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            prepared_prompt_service::list(&db.conn, kept)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        let mut nudged = false;
+        while let Ok(evt) = rx.try_recv() {
+            if evt.channel == PREPARED_PROMPTS_CHANGED_EVENT {
+                assert_eq!(evt.payload["conversationId"], gone);
+                nudged = true;
+            }
+        }
+        assert!(nudged, "windows showing the list hear that it is gone");
     }
 
     // ──────────────────────────────────────────────────────────────────────

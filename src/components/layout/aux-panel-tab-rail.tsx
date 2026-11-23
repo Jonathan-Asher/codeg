@@ -18,6 +18,7 @@ import {
 } from "@/lib/drag-selection-guard"
 import {
   getAuxTabOrder,
+  mergeAuxTabSubset,
   moveAuxTab,
   sameAuxTabOrder,
   saveAuxTabOrder,
@@ -49,13 +50,17 @@ const MOVE_KEYS = "Alt+ArrowUp Alt+ArrowDown"
 const WHILE_DRAG = { scale: 1.08 }
 
 interface AuxPanelTabRailProps {
-  /** The tabs to list, top to bottom. */
+  /**
+   * The tabs to list, top to bottom: every tab, or only the session's own
+   * while no project folder applies (chat mode, nothing open). Dragging or
+   * nudging moves a tab among these; the hidden ones keep their places.
+   */
   tabs: AuxTabOrder
   /**
-   * Off while only Session Details is shown (chat mode, no folder): the rail
-   * is `hidden` then — display:none takes its lone trigger out of the tab
-   * order, while the trigger stays in the DOM so the panel's
-   * `aria-labelledby` still resolves to a name.
+   * Off while a single tab is listed: the rail is `hidden` then —
+   * display:none takes its lone trigger out of the tab order, while the
+   * trigger stays in the DOM so the panel's `aria-labelledby` still resolves
+   * to a name.
    */
   visible: boolean
   icons: Record<AuxPanelTab, LucideIcon>
@@ -105,10 +110,13 @@ export function AuxPanelTabRail({
     dragOrderRef.current = null
     dragStartRef.current = null
     setDragOrder(null)
+    if (!order || !start) return
+    // The listed tabs in their dragged order, the hidden ones where they were.
+    const next = mergeAuxTabSubset(start, order)
     // A drag that ends where it started writes nothing — otherwise it would
     // replay its starting order over a reorder made elsewhere meanwhile.
-    if (!order || !start || sameAuxTabOrder(order, start)) return
-    saveAuxTabOrder(order)
+    if (sameAuxTabOrder(next, start)) return
+    saveAuxTabOrder(next)
   }, [])
 
   // Moving a tab re-orders the keyed nodes, and a focused node that React
@@ -125,14 +133,19 @@ export function AuxPanelTabRail({
   }, [shown])
 
   // Written from the store's current order rather than this render's copy, so
-  // two quick presses in a row can't have the second undo the first.
-  const move = useCallback((tab: AuxPanelTab, delta: -1 | 1) => {
-    const current = getAuxTabOrder()
-    const next = moveAuxTab(current, tab, delta)
-    if (next === current) return
-    pendingFocusRef.current = tab
-    saveAuxTabOrder(next)
-  }, [])
+  // two quick presses in a row can't have the second undo the first. The tab
+  // moves past its listed neighbour, not past a hidden tab between them.
+  const move = useCallback(
+    (tab: AuxPanelTab, delta: -1 | 1) => {
+      const current = getAuxTabOrder()
+      const listed = current.filter((entry) => tabs.includes(entry))
+      const moved = moveAuxTab(listed, tab, delta)
+      if (moved === listed) return
+      pendingFocusRef.current = tab
+      saveAuxTabOrder(mergeAuxTabSubset(current, moved))
+    },
+    [tabs]
+  )
 
   const setTriggerRef = useCallback(
     (tab: AuxPanelTab, node: HTMLButtonElement | null) => {

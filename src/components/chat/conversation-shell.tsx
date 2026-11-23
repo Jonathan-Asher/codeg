@@ -191,6 +191,8 @@ interface ConversationShellProps {
    *  once the composer has taken it. */
   injectContent?: ComposerInjectContent | null
   onInjectConsumed?: () => void
+  /** Pass-through: see `MessageInput.composerBridgeKey`. */
+  composerBridgeKey?: string
   /** Pass-through: see `ChatInputProps.sideQuestion`. */
   sideQuestion?: SideQuestionController | null
   /** Pass-through: see `MessageInput.promptSuggestion`. */
@@ -276,6 +278,7 @@ export function ConversationShell({
   topBanner,
   injectContent,
   onInjectConsumed,
+  composerBridgeKey,
   sideQuestion,
   promptSuggestion,
   onPromptSuggestionShown,
@@ -447,6 +450,7 @@ export function ConversationShell({
               feedbackAddDisabled={feedbackAddDisabled}
               injectContent={injectContent}
               onInjectConsumed={onInjectConsumed}
+              composerBridgeKey={composerBridgeKey}
               sideQuestion={sideQuestion}
               promptSuggestion={promptSuggestion}
               onPromptSuggestionShown={onPromptSuggestionShown}

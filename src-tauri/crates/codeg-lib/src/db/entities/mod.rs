@@ -19,6 +19,7 @@ pub mod folder_group;
 pub mod folder_link;
 pub mod model_provider;
 pub mod opened_tab;
+pub mod prepared_prompt;
 pub mod prelude;
 pub mod push_device;
 pub mod quick_message;

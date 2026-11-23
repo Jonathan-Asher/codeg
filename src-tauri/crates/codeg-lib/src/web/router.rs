@@ -2147,6 +2147,31 @@ pub fn build_router_with_srn(
             "/quick_messages_reorder",
             post(handlers::quick_messages::quick_messages_reorder),
         )
+        // ─── Prepared prompts (a conversation's Prompts tab) ───
+        .route(
+            "/list_prepared_prompts",
+            post(handlers::prepared_prompts::list_prepared_prompts),
+        )
+        .route(
+            "/create_prepared_prompt",
+            post(handlers::prepared_prompts::create_prepared_prompt),
+        )
+        .route(
+            "/update_prepared_prompt",
+            post(handlers::prepared_prompts::update_prepared_prompt),
+        )
+        .route(
+            "/delete_prepared_prompt",
+            post(handlers::prepared_prompts::delete_prepared_prompt),
+        )
+        .route(
+            "/reorder_prepared_prompts",
+            post(handlers::prepared_prompts::reorder_prepared_prompts),
+        )
+        .route(
+            "/mark_prepared_prompt_sent",
+            post(handlers::prepared_prompts::mark_prepared_prompt_sent),
+        )
         // ─── Automations ───
         .route(
             "/automation_list",

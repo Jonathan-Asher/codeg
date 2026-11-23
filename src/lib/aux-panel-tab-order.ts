@@ -1,9 +1,9 @@
 "use client"
 
 /**
- * The right sidebar's (aux panel's) tabs — Session Details, Files, Changes,
- * Commits, Automations, Tasks, Issues, Pull requests — and the order the user
- * dragged them into on the panel's vertical tab rail.
+ * The right sidebar's (aux panel's) tabs — Session Details, Prompts, Files,
+ * Changes, Commits, Automations, Tasks, Issues, Pull requests — and the order
+ * the user dragged them into on the panel's vertical tab rail.
  *
  * Kept in localStorage next to the panel's own open/width state
  * (`workspace:right-sidebar`): it only shapes this device's UI and nothing on
@@ -20,6 +20,10 @@ const ORDER_KEY = "workspace:right-sidebar-tab-order"
 /**
  * Every aux-panel tab, in the built-in order.
  *
+ * The first two belong to the active session, not its folder: its details and
+ * its prepared prompts. A rail stored before Prompts existed gains it right
+ * after Session Details (see `parseAuxTabOrder`).
+ *
  * The last four are the project's own work, read off the folder the active
  * conversation belongs to: its automations, its task board, and its
  * repository's issues and pull (merge) requests. They follow Commits, so a
@@ -29,6 +33,7 @@ const ORDER_KEY = "workspace:right-sidebar-tab-order"
  */
 export const AUX_PANEL_TABS = [
   "session_details",
+  "prompts",
   "file_tree",
   "changes",
   "git_log",
@@ -42,6 +47,17 @@ export type AuxPanelTab = (typeof AUX_PANEL_TABS)[number]
 
 /** Every tab exactly once, top to bottom. */
 export type AuxTabOrder = readonly AuxPanelTab[]
+
+/** The tabs about the active session itself, shown with or without a project
+ *  folder (a chat session, nothing open). */
+export const SESSION_AUX_TABS: readonly AuxPanelTab[] = [
+  "session_details",
+  "prompts",
+]
+
+export function isSessionAuxTab(tab: AuxPanelTab): boolean {
+  return SESSION_AUX_TABS.includes(tab)
+}
 
 export const DEFAULT_AUX_TAB_ORDER: AuxTabOrder = AUX_PANEL_TABS
 
@@ -112,6 +128,25 @@ export function moveAuxTab(
   next.splice(from, 1)
   next.splice(to, 0, tab)
   return next
+}
+
+/**
+ * `order` with the tabs of `subset` rearranged into `subset`'s order, in the
+ * slots they already hold; every other tab stays where it is. A drag on a rail
+ * showing only some of the tabs (the session's own, with no project open)
+ * reorders those among themselves without moving the hidden ones. Tabs in
+ * `subset` that `order` lacks are ignored. Hands back `order` itself when
+ * nothing moves.
+ */
+export function mergeAuxTabSubset(
+  order: AuxTabOrder,
+  subset: readonly AuxPanelTab[]
+): AuxTabOrder {
+  const moved = [...new Set(subset)].filter((tab) => order.includes(tab))
+  const slots = new Set(moved)
+  let next = 0
+  const merged = order.map((tab) => (slots.has(tab) ? moved[next++] : tab))
+  return sameAuxTabOrder(merged, order) ? order : merged
 }
 
 /**
