@@ -28,6 +28,10 @@ vi.mock("@/lib/api", () => ({
     running: false,
   }),
   tokenUsageSync: h.sync,
+  // A server without the session route: the panel shows the report's list.
+  tokenUsageSessions: async () => {
+    throw new Error("unsupported")
+  },
   opencodeProviderCatalog: async () => [],
 }))
 vi.mock("@/hooks/use-acp-agents", () => ({

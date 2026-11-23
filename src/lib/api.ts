@@ -288,6 +288,8 @@ import type {
   TokenUsageFacets,
   TokenUsageFilter,
   TokenUsageReport,
+  TokenUsageSessionsQuery,
+  TokenUsageSessionsReport,
   TokenUsageSyncResult,
   TokenUsageSyncStatus,
 } from "./types"
@@ -4925,6 +4927,15 @@ export async function tokenUsageFacets(): Promise<TokenUsageFacets> {
 
 export async function tokenUsageStatus(): Promise<TokenUsageSyncStatus> {
   return getTransport().call("token_usage_status")
+}
+
+/** The biggest sessions with their threads (main thread, each sub-agent) and,
+ *  for Claude, which pool account served each call. Served by the machine the
+ *  page talks to, so a remote window shows that server's sessions and pool. */
+export async function tokenUsageSessions(
+  query: TokenUsageSessionsQuery
+): Promise<TokenUsageSessionsReport> {
+  return getTransport().call("token_usage_sessions", { query })
 }
 
 /** `full` drops every stored fact and re-parses every transcript — the escape

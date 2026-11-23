@@ -1,13 +1,6 @@
 "use client"
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ComponentType,
-} from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations, useLocale } from "next-intl"
 import { toast } from "sonner"
 import {
@@ -94,6 +87,7 @@ import type {
   OpenCodeCatalogProvider,
   TokenUsageBucket,
   TokenUsageFacets,
+  TokenUsageFilter,
   TokenUsageReport,
   TokenUsageSyncProgress,
   TokenUsageSyncStatus,
@@ -116,6 +110,8 @@ import {
   SegmentedFilter,
   SingleSelectFilter,
 } from "./token-usage-filters"
+import { Panel } from "./panel"
+import { SessionUsagePanel } from "./session-usage-panel"
 import {
   ARCHETYPE_DESC_KEYS,
   ARCHETYPE_EMOJI,
@@ -228,55 +224,6 @@ function StatCell({
         </div>
       ) : null}
     </div>
-  )
-}
-
-function Panel({
-  title,
-  hint,
-  icon: Icon,
-  actions,
-  children,
-  className,
-}: {
-  title: string
-  hint?: string
-  icon?: ComponentType<{ className?: string }>
-  /** Right-aligned header slot — e.g. a segmented toggle. */
-  actions?: React.ReactNode
-  children: React.ReactNode
-  className?: string
-}) {
-  return (
-    // flex-col so a child marked flex-1 (the heatmap) can absorb the extra
-    // height a side-by-side grid row hands the card.
-    <section
-      className={cn(
-        "flex flex-col rounded-xl border border-border bg-card p-4",
-        className
-      )}
-    >
-      <header className="mb-3 flex shrink-0 flex-wrap items-start justify-between gap-x-4 gap-y-2">
-        <div className="min-w-0">
-          <h2 className="flex items-center gap-1.5 text-[0.8125rem] font-semibold">
-            {Icon ? (
-              <Icon
-                className="size-3.5 text-muted-foreground"
-                aria-hidden="true"
-              />
-            ) : null}
-            {title}
-          </h2>
-          {hint ? (
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              {hint}
-            </p>
-          ) : null}
-        </div>
-        {actions}
-      </header>
-      {children}
-    </section>
   )
 }
 
@@ -426,6 +373,29 @@ export function TokenUsagePage() {
     const el = event.target as HTMLElement | null
     setScrolled((el?.scrollTop ?? 0) > 2)
   }, [])
+
+  // The session list's own filter: the same window and dimensions as the
+  // report, built once per change so the panel refetches only then.
+  const sessionFilter = useMemo<TokenUsageFilter>(
+    () => ({
+      start: rangeStart,
+      end: rangeEnd,
+      folderIds: folderIds.length ? folderIds.map(Number) : null,
+      agentTypes: agentTypes.length ? agentTypes : null,
+      models: models.length ? models : null,
+      bucket: effectiveBucket,
+      tzOffsetMinutes,
+    }),
+    [
+      rangeStart,
+      rangeEnd,
+      folderIds,
+      agentTypes,
+      models,
+      effectiveBucket,
+      tzOffsetMinutes,
+    ]
+  )
 
   const load = useCallback(async () => {
     const id = ++reqRef.current
@@ -624,6 +594,12 @@ export function TokenUsagePage() {
         agentNames.get(value as AgentType) || getAgentLabel(value as AgentType),
     }))
   }, [facets, registeredAgents, agentTypes, agentNames])
+  const sessionAgentLabel = useCallback(
+    (agentType: string) =>
+      agentNames.get(agentType as AgentType) ||
+      getAgentLabel(agentType as AgentType),
+    [agentNames]
+  )
   const modelOptions = useMemo(
     () => (facets?.models ?? []).map((m) => ({ value: m, label: m })),
     [facets]
@@ -1538,42 +1514,14 @@ export function TokenUsagePage() {
                         />
                       </Panel>
 
-                      {/* ─── Top sessions ─── */}
-                      <Panel title={t("topSessionsTitle")}>
-                        {report.top_conversations.length === 0 ? (
-                          <p className="py-6 text-center text-sm text-muted-foreground">
-                            {t("topSessionsEmpty")}
-                          </p>
-                        ) : (
-                          <ol className="divide-y divide-border">
-                            {report.top_conversations.map((c, i) => (
-                              <li
-                                key={c.conversation_id}
-                                className="flex items-center gap-3 py-2 first:pt-0 last:pb-0"
-                              >
-                                <span
-                                  aria-hidden="true"
-                                  className="w-5 shrink-0 font-mono text-[0.625rem] tabular-nums text-muted-foreground/70"
-                                >
-                                  {String(i + 1).padStart(2, "0")}
-                                </span>
-                                <span className="min-w-0 flex-1 truncate text-[0.8125rem]">
-                                  {c.title || t("untitledSession")}
-                                </span>
-                                <span className="hidden shrink-0 truncate text-xs text-muted-foreground sm:block sm:max-w-[10rem]">
-                                  {c.folder_label}
-                                </span>
-                                <span className="shrink-0 text-xs text-muted-foreground">
-                                  {getAgentLabel(c.agent_type as AgentType)}
-                                </span>
-                                <span className="shrink-0 font-mono text-xs tabular-nums">
-                                  {formatTokenCount(c.total_tokens)}
-                                </span>
-                              </li>
-                            ))}
-                          </ol>
-                        )}
-                      </Panel>
+                      {/* ─── Top sessions: threads and accounts ─── */}
+                      <SessionUsagePanel
+                        filter={sessionFilter}
+                        refreshTick={refreshTick}
+                        fallback={report.top_conversations}
+                        agentLabel={sessionAgentLabel}
+                        locale={locale}
+                      />
                     </>
                   )
                 )}
