@@ -2201,13 +2201,18 @@ export async function atomicConfigUpdate(updater) {
                 false
             }
         };
+        // Each request opens a conversation of its own: a running one stays
+        // on the account that served it while that account can serve (the
+        // pool's conversation hold), whatever the order says.
+        let turn = std::sync::atomic::AtomicUsize::new(0);
         let send = || async {
+            let n = turn.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let response = client
                 .post(format!("http://127.0.0.1:{port}/v1/messages"))
                 .header("anthropic-version", "2023-06-01")
                 .json(&serde_json::json!({
                     "model": "claude-sonnet-4-5", "max_tokens": 16,
-                    "messages": [{ "role": "user", "content": "hi" }]
+                    "messages": [{ "role": "user", "content": format!("conversation {n}") }]
                 }))
                 .send()
                 .await
