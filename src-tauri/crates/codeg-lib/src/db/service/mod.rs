@@ -24,6 +24,7 @@ pub mod side_question_service;
 pub mod srn_web_service;
 pub mod tab_service;
 pub mod thread_binding_service;
+pub mod token_usage_accounts_service;
 pub mod token_usage_service;
 pub mod tool_approval_service;
 pub mod work_task_service;

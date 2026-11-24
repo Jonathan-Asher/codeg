@@ -4226,10 +4226,27 @@ html.tab-drag-blocked * {
   --tu-seq-5: color-mix(in oklab, var(--tu-accent) 80%, var(--card));
   --tu-seq-6: var(--tu-accent);
   --tu-seq-7: color-mix(in oklab, var(--tu-accent) 72%, var(--foreground));
+  /* Accounts of the pool (identity, not magnitude): a fixed categorical order,
+     validated for adjacent-pair colour-vision separation in both modes. Each
+     account keeps its slot whatever is switched off; "no pool record" is
+     neutral, never a slot. */
+  --tu-acct-1: #2a78d6;
+  --tu-acct-2: #eb6834;
+  --tu-acct-3: #1baf7a;
+  --tu-acct-4: #eda100;
+  --tu-acct-5: #e87ba4;
+  --tu-acct-6: #008300;
+  --tu-acct-none: color-mix(in oklab, var(--foreground) 22%, var(--card));
 }
 .dark .tu-viz {
   /* 暗色下主色本就落在中亮度带，不需要再压深 */
   --tu-accent: var(--primary);
+  --tu-acct-1: #3987e5;
+  --tu-acct-2: #d95926;
+  --tu-acct-3: #199e70;
+  --tu-acct-4: #c98500;
+  --tu-acct-5: #d55181;
+  --tu-acct-6: #008300;
 }
 /* 中性预设（neutral/zinc/slate/stone/gray）：--primary 是近黑/近白，看板随
    之走全灰阶——不引入任何外来色相，和这些主题「主按钮就是黑白」的语言一致。

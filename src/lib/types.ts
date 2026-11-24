@@ -3357,6 +3357,86 @@ export interface TokenUsageSyncResult {
   pruned_conversations: number
 }
 
+// ─── Usage by session, thread and account (mirrors the tail of
+// `models/token_usage.rs`) ───
+
+/** The account key of calls no pool record matched. */
+export const TOKEN_USAGE_NO_ACCOUNT = "__none__"
+
+export interface TokenUsageSessionsQuery {
+  filter: TokenUsageFilter
+  /** `null` counts every call; a list counts only calls the named accounts
+   *  served (`TOKEN_USAGE_NO_ACCOUNT` for unmatched ones). */
+  accounts: string[] | null
+  limit?: number | null
+}
+
+/** `cost_usd` is at API list prices; `pct` is percent of the serving
+ *  account's weekly limit (0–100). Both are `null` where unknown. */
+export interface TokenUsageSlice {
+  tokens: number
+  cost_usd: number | null
+  pct: number | null
+  calls: number
+}
+
+export interface TokenUsageAccountShare {
+  account: string
+  usage: TokenUsageSlice
+}
+
+export interface TokenUsageThreadItem {
+  /** `""` for the main thread, else the sub-agent's agent id. */
+  key: string
+  main: boolean
+  label: string | null
+  agent_type: string | null
+  usage: TokenUsageSlice
+  by_account: TokenUsageAccountShare[]
+}
+
+export interface TokenUsageSessionItem {
+  conversation_id: number
+  title: string | null
+  agent_type: string
+  folder_label: string | null
+  last_activity_at: string | null
+  usage: TokenUsageSlice
+  /** Per-call data: threads and the account split are filled (Claude). */
+  detail: boolean
+  by_account: TokenUsageAccountShare[]
+  threads: TokenUsageThreadItem[]
+}
+
+export interface TokenUsageAccountItem {
+  account: string
+  /** `claude`, `provider`, `link` (through a linked pool) or `none`. */
+  kind: string
+  usage: TokenUsageSlice
+  pool_cost_usd: number
+  pool_pct: number
+  pool_calls: number
+  pool_metered_pct: number
+  usd_per_pct: number | null
+  usd_per_pct_measured: boolean
+}
+
+export interface TokenUsagePoolState {
+  configured: boolean
+  reachable: boolean
+  error: string | null
+  last_pulled_at: string | null
+  records_since: string | null
+}
+
+export interface TokenUsageSessionsReport {
+  pool: TokenUsagePoolState
+  accounts: TokenUsageAccountItem[]
+  sessions: TokenUsageSessionItem[]
+  /** Some Claude sessions are still being read; ask again shortly. */
+  indexing: boolean
+}
+
 // ─── Subscription plan usage (mirrors `commands/plan_usage.rs`) ───
 
 export type PlanUsageAgent = "claude_code" | "codex"
