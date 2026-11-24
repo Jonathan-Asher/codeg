@@ -32,6 +32,7 @@ fn config_at(base: &str) -> PoolConfig {
         preferred_account: None,
         routing_mode: None,
         accounts: BTreeMap::new(),
+        mirror_priorities: BTreeMap::new(),
     }
 }
 
