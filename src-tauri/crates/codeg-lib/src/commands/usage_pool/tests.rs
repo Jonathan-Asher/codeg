@@ -123,6 +123,7 @@ fn config() -> PoolConfig {
         preferred_account: None,
         routing_mode: None,
         accounts: BTreeMap::new(),
+        mirror_priorities: BTreeMap::new(),
     }
 }
 
@@ -529,6 +530,68 @@ fn the_order_and_reserves_come_from_the_config_without_its_credentials() {
 }
 
 #[test]
+fn a_linked_accounts_place_comes_from_this_pools_mirror_order() {
+    // Two accounts mirrored from a linked pool, its reserve and its own
+    // priority on the mirror row, plus one of this pool's own accounts.
+    let mirror = |name: &str| {
+        json!({
+            "name": name, "type": "oauth", "enabled": true, "status": "active",
+            "remote": true, "priority": 0, "capUtilization": 0.9, "capMode": "fixed",
+            "quota": { "unified5h": 0.1, "unified7d": 0.2 }
+        })
+    };
+    let status = json!({
+        "switchThreshold": 0.9,
+        "accounts": [mirror("a ☁"), mirror("b ☁"), mirror("c ☁"), plain_account("home", true, 0.1, NOW + HOUR, None)]
+    });
+    let raw: RawConfig = serde_json::from_value(json!({
+        "accounts": [
+            { "name": "home", "priority": 1 },
+            // A config entry never lends its settings to a linked row.
+            { "name": "c ☁", "priority": 9, "capUtilization": 0.5 }
+        ],
+        "mirrorAccounts": {
+            "b ☁": { "priority": 0 },
+            "a ☁": { "priority": 2 },
+            "home": { "priority": 7 },
+            "c ☁": { "priority": "first" }
+        }
+    }))
+    .unwrap();
+    let config = PoolConfig::from_raw(raw);
+    assert_eq!(
+        config.mirror_priorities,
+        BTreeMap::from([
+            ("a ☁".to_string(), 2.0),
+            ("b ☁".to_string(), 0.0),
+            ("home".to_string(), 7.0)
+        ])
+    );
+    let pool = build_pool(raw_status(status), &config, NOW);
+    let b = account(&pool, "b ☁");
+    assert!(b.linked);
+    assert_eq!(b.priority, Some(0.0));
+    assert_eq!(account(&pool, "a ☁").priority, Some(2.0));
+    // Unplaced (its entry isn't a number): no place, whatever the row says.
+    assert_eq!(account(&pool, "c ☁").priority, None);
+    // A linked account's reserve is the one its own pool keeps.
+    assert_eq!(
+        account(&pool, "c ☁").reserve_setting,
+        Some(PoolReserveSetting {
+            percent: 10.0,
+            mode: PoolReserveMode::Fixed
+        })
+    );
+    // This pool's own account is placed by its own entry only.
+    let home = account(&pool, "home");
+    assert!(!home.linked);
+    assert_eq!(home.priority, Some(1.0));
+    let serialized = serde_json::to_value(&pool).unwrap();
+    assert_eq!(serialized["accounts"][0]["linked"], true);
+    assert!(serialized["accounts"][3].get("linked").is_none());
+}
+
+#[test]
 fn a_fixed_reserve_holds_the_account_before_the_switch_threshold() {
     // beta at 86% of its 5-hour window, keeping 15% back: held until the
     // window resets, by its reserve rather than the pool's threshold.
@@ -545,7 +608,10 @@ fn a_fixed_reserve_holds_the_account_before_the_switch_threshold() {
     assert!(pool.exhausted, "alpha is out too");
 
     // Under the reserve it serves as before.
-    assert_eq!(account(&held(0.9), "beta").state, PoolAccountState::Available);
+    assert_eq!(
+        account(&held(0.9), "beta").state,
+        PoolAccountState::Available
+    );
 }
 
 #[test]
@@ -572,7 +638,10 @@ fn a_weekly_held_by_its_reserve_reads_as_reserved_not_exhausted() {
             "quota": { "unified7d": 0.91 }
         }),
     );
-    assert_eq!(account(&pool_from(status), "beta").state, PoolAccountState::Reserved);
+    assert_eq!(
+        account(&pool_from(status), "beta").state,
+        PoolAccountState::Reserved
+    );
 }
 
 #[test]

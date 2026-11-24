@@ -3735,6 +3735,10 @@ export interface PlanUsagePoolAccount {
   /** An API provider the pool also routes to (GLM, Kimi), not a Claude
    *  subscription: it can't be the preferred account. Absent = false. */
   provider?: boolean
+  /** Mirrored from a pool this one links to: the account lives on another
+   *  machine, and only its place in this pool's order is set here.
+   *  Absent = false. */
+  linked?: boolean
   /** Its place in the pool's order as configured (lower serves first);
    *  absent or null when the pool has no order. */
   priority?: number | null

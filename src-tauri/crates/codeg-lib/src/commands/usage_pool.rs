@@ -237,6 +237,17 @@ struct RawConfig {
     routing: Option<RawRouting>,
     #[serde(deserialize_with = "lenient_list")]
     accounts: Vec<RawConfigAccount>,
+    /// This pool's own place for each account mirrored from a pool it links
+    /// to, by the mirror's name: `{ "<name> ☁": { "priority": 0 } }`.
+    #[serde(deserialize_with = "lenient_map")]
+    mirror_accounts: BTreeMap<String, RawMirrorAccount>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct RawMirrorAccount {
+    #[serde(deserialize_with = "lenient")]
+    priority: Option<f64>,
 }
 
 /// An account's place in the pool's order and its reserve, as configured;
@@ -294,6 +305,10 @@ pub(crate) struct PoolConfig {
     /// these: the server applies a new order only when it restarts, and the
     /// page shows the order the pool is set to.
     accounts: BTreeMap<String, ConfigAccount>,
+    /// The place in the order of each account mirrored from a linked pool,
+    /// by name. Those accounts live on another machine, so this is all the
+    /// config holds for them.
+    mirror_priorities: BTreeMap<String, f64>,
 }
 
 /// The status endpoint on the proxy's own address. A wildcard bind address
@@ -341,6 +356,16 @@ impl PoolConfig {
                         ),
                     };
                     Some((name, settings))
+                })
+                .collect(),
+            mirror_priorities: raw
+                .mirror_accounts
+                .into_iter()
+                .filter_map(|(name, mirror)| {
+                    Some((
+                        clean_label(Some(name))?,
+                        mirror.priority.filter(|p| p.is_finite())?,
+                    ))
                 })
                 .collect(),
         }
@@ -438,6 +463,9 @@ struct RawAccount {
     cap_utilization: Option<f64>,
     #[serde(deserialize_with = "lenient")]
     cap_mode: Option<String>,
+    /// Mirrored from a pool this one links to.
+    #[serde(deserialize_with = "lenient")]
+    remote: Option<bool>,
 }
 
 #[derive(Default, Deserialize)]
@@ -657,6 +685,10 @@ pub struct PoolAccount {
     /// subscription: the pool can't prefer it.
     #[serde(default, skip_serializing_if = "is_false")]
     pub provider: bool,
+    /// Mirrored from a pool this one links to: the account lives on another
+    /// machine, and only its place in this pool's order is set here.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub linked: bool,
     /// The reserve the pool keeps on the account, if any. Only the gate
     /// below reads it.
     #[serde(skip)]
@@ -1084,12 +1116,24 @@ impl PoolAccount {
         raw: RawAccount,
         current: Option<&str>,
         preferred: Option<&str>,
-        configured: &BTreeMap<String, ConfigAccount>,
+        config: &PoolConfig,
         threshold: f64,
         now: i64,
     ) -> Option<Self> {
         let name = clean_label(raw.name)?;
-        let settings = configured.get(&name).cloned();
+        let linked = raw.remote.unwrap_or(false);
+        // A linked account's settings live with the pool that holds it; this
+        // pool's config only places it in the order.
+        let settings = if linked {
+            None
+        } else {
+            config.accounts.get(&name).cloned()
+        };
+        let priority = if linked {
+            config.mirror_priorities.get(&name).copied()
+        } else {
+            settings.as_ref().and_then(|s| s.priority)
+        };
         let quota = raw.quota.unwrap_or_default();
         let weekly = raw.weekly.unwrap_or_default();
         let observed_at = quota.last_probe_ok_at.max(quota.last_header_quota_at);
@@ -1149,8 +1193,9 @@ impl PoolAccount {
             refresh_failed: raw.refresh_dead.unwrap_or(false),
             observed_at,
             provider: raw.account_type.as_deref() == Some("provider"),
+            linked,
             reserve: PoolReserve::from_raw(raw.cap_utilization, raw.cap_mode.as_deref()),
-            priority: settings.as_ref().and_then(|s| s.priority),
+            priority,
             reserve_setting: match &settings {
                 Some(settings) => settings.reserve,
                 None => PoolReserveSetting::from_cap(raw.cap_utilization, raw.cap_mode.as_deref()),
@@ -1231,7 +1276,7 @@ fn build_pool(raw: RawStatus, config: &PoolConfig, now: i64) -> PlanUsagePool {
                 account,
                 current_account.as_deref(),
                 preferred_account.as_deref(),
-                &config.accounts,
+                config,
                 threshold,
                 now,
             )

@@ -23,15 +23,17 @@
 //!
 //! The server re-reads its config every 15 s and picks up new accounts, new
 //! credentials (which also revive one whose refresh had died), the enabled
-//! flag and the routing live. A new preferred account takes every request
-//! routed after that re-read; requests already running finish where they
-//! are. It does NOT drop a removed account or rename one: those
-//! need the server restarted, which its service manager does after `SIGHUP`
-//! (maxpool's reload trigger when it runs headless: it drains in-flight token
-//! refreshes, persists, and exits for a fresh start). codeg sends it only when
-//! no request is in flight and only to a server that something restarts — a
-//! launchd job or a systemd unit (or `CODEG_MAXPOOL_SUPERVISED=1`); otherwise
-//! it says a restart is needed instead of stopping the pool.
+//! flag, the routing and the order of the accounts it mirrors from a pool it
+//! links to live. A new preferred account takes every request routed after
+//! that re-read; requests already running finish where they are. It does NOT
+//! drop a removed account, rename one or re-read its own accounts'
+//! priorities: those need the server restarted, which its service manager
+//! does after `SIGHUP` (maxpool's reload trigger when it runs headless: it
+//! drains in-flight token refreshes, persists, and exits for a fresh start).
+//! codeg sends it only when no request is in flight and only to a server
+//! that something restarts — a launchd job or a systemd unit (or
+//! `CODEG_MAXPOOL_SUPERVISED=1`); otherwise it says a restart is needed
+//! instead of stopping the pool.
 //!
 //! # Secrets
 //!
@@ -43,7 +45,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::app_error::AppCommandError;
 use crate::pty_flow::{self, FlowSpec, Peeked, PendingFlows, PtyFlow, Waited};
@@ -67,6 +69,9 @@ const IDLE_WAIT: Duration = Duration::from_secs(5 * 60);
 const IDLE_POLL: Duration = Duration::from_secs(3);
 /// How long the pool gets to come back after the restart signal.
 const RESTART_WAIT: Duration = Duration::from_secs(60);
+
+/// The most of a config script's answer that is read.
+const REPORT_MAX_CHARS: usize = 16 * 1024;
 
 const LINK_MARKER: &str = "visit:";
 const PROMPT_MARKER: &str = "Paste authorization code";
@@ -212,20 +217,31 @@ pub(crate) fn valid_new_name(raw: &str) -> Result<String, AppCommandError> {
     Ok(name.to_string())
 }
 
-/// `name` as an account the pool reports now.
+/// `name` as an account the pool reports now and holds itself: one it
+/// mirrors from a pool it links to is changed on the machine that holds it.
 async fn existing_account(name: &str) -> Result<String, AppCommandError> {
     let name = name.trim();
     let reading = super::refresh(Duration::from_secs(5))
         .await
         .ok_or_else(no_pool)?;
-    reading
+    let account = reading
         .accounts
         .iter()
         .find(|a| a.name == name)
-        .map(|a| a.name.clone())
         .ok_or_else(|| {
             AppCommandError::not_found(format!("The pool has no account named \"{name}\"."))
-        })
+        })?;
+    if account.linked {
+        return Err(linked_elsewhere(&account.name));
+    }
+    Ok(account.name.clone())
+}
+
+fn linked_elsewhere(name: &str) -> AppCommandError {
+    AppCommandError::invalid_input(format!(
+        "\"{name}\" comes from a pool this one links to. Change it on the machine that holds \
+         that pool; here it can only be ordered."
+    ))
 }
 
 // ─── Signing an account in ──────────────────────────────────────────────
@@ -526,10 +542,14 @@ pub(crate) async fn remove(name: &str) -> Result<PoolChange, AppCommandError> {
 }
 
 /// What every config script starts with: maxpool's own config module, and
-/// the order helpers. An ordered pool (a Claude account has a `priority`)
-/// also names its first switched-on Claude account as the preferred one:
-/// the running server re-reads `routing` within seconds but `priority` only
-/// when it restarts, so the head of a new order serves at once.
+/// the order helpers. The order holds the pool's own Claude accounts (each
+/// one's `priority`) and the accounts it mirrors from a pool it links to
+/// (`mirrorAccounts`, this pool's priority for each by its mirror name; they
+/// have no entry in `accounts`), on one scale. An ordered pool also names its
+/// first switched-on account as the preferred one: the running server
+/// re-reads `routing` and `mirrorAccounts` within seconds but its own
+/// accounts' `priority` only when it restarts, so the head of a new order
+/// serves at once.
 const SCRIPT_PRELUDE: &str = r#"
 const { pathToFileURL } = await import('node:url');
 const mod = await import(pathToFileURL(process.env.CODEG_MAXPOOL_CONFIG_MODULE).href);
@@ -539,15 +559,29 @@ class Refused extends Error {
 }
 const isClaude = (a) => a.type !== 'provider';
 const rank = (a) => (Number.isFinite(a.priority) ? a.priority : Infinity);
-const isOrdered = (config) => (config.accounts || []).some((a) => isClaude(a) && Number.isFinite(a.priority));
+const mirrorsOf = (config) => {
+  const mirrors = config.mirrorAccounts;
+  if (!mirrors || typeof mirrors !== 'object' || Array.isArray(mirrors)) return [];
+  return Object.entries(mirrors)
+    .filter(([, m]) => m && Number.isFinite(m.priority))
+    .map(([name, m]) => ({ name, priority: m.priority }));
+};
+const isOrdered = (config) =>
+  (config.accounts || []).some((a) => isClaude(a) && Number.isFinite(a.priority)) ||
+  mirrorsOf(config).length > 0;
 const followOrder = (config) => {
-  const head = (config.accounts || [])
+  const own = (config.accounts || []).filter((a) => isClaude(a) && a.enabled !== false);
+  const head = [...own, ...mirrorsOf(config)]
     .map((account, index) => ({ account, index }))
-    .filter(({ account }) => isClaude(account) && account.enabled !== false)
     .sort((x, y) => rank(x.account) - rank(y.account) || x.index - y.index)[0];
   config.routing = head
     ? { ...(config.routing || {}), mode: 'preferred', preferredAccount: head.account.name }
     : { ...(config.routing || {}), mode: 'automatic', preferredAccount: null };
+};
+// A short JSON answer for codeg, written before the script exits.
+const report = async (value) => {
+  const { writeSync } = await import('node:fs');
+  writeSync(1, JSON.stringify(value));
 };
 const update = async (change) => {
   try {
@@ -592,6 +626,15 @@ async fn config_update(
     script: &str,
     env: &[(&str, &str)],
 ) -> Result<Option<i32>, AppCommandError> {
+    Ok(config_update_reporting(pool, script, env).await?.0)
+}
+
+/// [`config_update`], and the short answer the script wrote (`report`).
+async fn config_update_reporting(
+    pool: &Maxpool,
+    script: &str,
+    env: &[(&str, &str)],
+) -> Result<(Option<i32>, String), AppCommandError> {
     let module = config_module(&pool.bin).ok_or_else(|| {
         AppCommandError::dependency_missing(
             "This maxpool install doesn't expose the config module codeg changes the pool with.",
@@ -607,10 +650,10 @@ async fn config_update(
         .env("CODEG_MAXPOOL_CONFIG_MODULE", &module)
         .envs(env.iter().copied())
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true);
-    let status = tokio::time::timeout(CLI_TIMEOUT, command.status())
+    let output = tokio::time::timeout(CLI_TIMEOUT, command.output())
         .await
         .map_err(|_| {
             AppCommandError::task_execution_failed(
@@ -618,7 +661,11 @@ async fn config_update(
             )
         })?
         .map_err(AppCommandError::io)?;
-    Ok(status.code())
+    let answer: String = String::from_utf8_lossy(&output.stdout)
+        .chars()
+        .take(REPORT_MAX_CHARS)
+        .collect();
+    Ok((output.status.code(), answer))
 }
 
 pub(crate) async fn set_enabled(name: &str, enabled: bool) -> Result<PoolChange, AppCommandError> {
@@ -635,7 +682,11 @@ pub(crate) async fn set_enabled(name: &str, enabled: bool) -> Result<PoolChange,
     })
 }
 
-async fn set_enabled_with(pool: &Maxpool, name: &str, enabled: bool) -> Result<(), AppCommandError> {
+async fn set_enabled_with(
+    pool: &Maxpool,
+    name: &str,
+    enabled: bool,
+) -> Result<(), AppCommandError> {
     let code = config_update(
         pool,
         &config_script(SET_ENABLED_SCRIPT),
@@ -751,32 +802,53 @@ async fn set_preferred_with(
     }
 }
 
-/// The pool's order: each Claude account's `priority` (0 first), every one
-/// of them listed exactly once; `null` clears the order and goes back to
-/// automatic balancing. maxpool's `balance` and `prefer-claude` scheduler
-/// modes rank every Claude account alike, so an order moves such a pool to
-/// `sticky`, maxpool's default, where priorities rank them.
+/// The pool's order: every Claude account it lists exactly once, 0 first.
+/// Its own accounts take it as their `priority`; the ones it mirrors from a
+/// pool it links to (`CODEG_MAXPOOL_LINKED`: the running pool lists them, its
+/// config doesn't) go in `mirrorAccounts`, which the running server applies
+/// to those rows live. `null` clears both and goes back to automatic
+/// balancing. maxpool's `balance` and `prefer-claude` scheduler modes rank
+/// every Claude account alike, so an order moves such a pool to `sticky`,
+/// maxpool's default, where priorities rank them. It answers whether a
+/// priority of the pool's own accounts changed (`restart`: the server reads
+/// those only when it starts), or, refusing an order that doesn't match the
+/// pool, what doesn't.
 const SET_ORDER_SCRIPT: &str = r#"
 const order = JSON.parse(process.env.CODEG_MAXPOOL_ORDER || 'null');
-await update((config) => {
+const linked = JSON.parse(process.env.CODEG_MAXPOOL_LINKED || '[]');
+await update(async (config) => {
   const claude = (config.accounts || []).filter(isClaude);
+  const priorities = () => JSON.stringify(claude.map((a) => (Number.isFinite(a.priority) ? a.priority : null)));
+  const before = priorities();
   if (order === null) {
     for (const account of claude) delete account.priority;
+    delete config.mirrorAccounts;
     config.routing = { ...(config.routing || {}), mode: 'automatic', preferredAccount: null };
+    await report({ restart: priorities() !== before });
     return;
   }
-  const names = claude.map((a) => a.name);
-  if (
-    !Array.isArray(order) ||
-    order.length !== names.length ||
-    new Set(order).size !== order.length ||
-    !order.every((name) => names.includes(name))
-  ) {
+  const own = claude.map((a) => a.name);
+  const names = [...own, ...linked.filter((name) => !own.includes(name))];
+  if (!Array.isArray(order) || new Set(order).size !== order.length) throw new Refused(4);
+  const providers = (config.accounts || []).filter((a) => !isClaude(a)).map((a) => a.name);
+  const strangers = order.filter((name) => !names.includes(name));
+  const missing = names.filter((name) => !order.includes(name));
+  if (strangers.length || missing.length) {
+    await report({
+      unknown: strangers.filter((name) => !providers.includes(name)),
+      providers: strangers.filter((name) => providers.includes(name)),
+      missing,
+    });
     throw new Refused(4);
   }
+  const mirrors = {};
   order.forEach((name, index) => {
-    claude.find((a) => a.name === name).priority = index;
+    const account = claude.find((a) => a.name === name);
+    if (account) account.priority = index;
+    else mirrors[name] = { priority: index };
   });
+  if (Object.keys(mirrors).length) config.mirrorAccounts = mirrors;
+  else delete config.mirrorAccounts;
   followOrder(config);
   const scheduler = config.scheduler || {};
   const legacy = scheduler.crossProviderFallbackPolicy;
@@ -786,15 +858,33 @@ await update((config) => {
   if (mode === 'balance' || mode === 'prefer-claude') {
     config.scheduler = { ...scheduler, routingMode: 'sticky' };
   }
+  await report({ restart: priorities() !== before });
 });
 "#;
 
-/// Set the order new requests take through the pool's Claude accounts
-/// (`None` = back to automatic balancing). The head of the order applies
-/// within seconds; maxpool reads priorities only when its server starts, so
-/// the rest waits for the same restart a rename does.
+/// What the order script answers.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct OrderReport {
+    /// A priority of the pool's own accounts changed.
+    restart: bool,
+    /// Named in the order, but not one of the pool's accounts.
+    unknown: Vec<String>,
+    /// Named in the order, but an API provider, which the order doesn't rank.
+    providers: Vec<String>,
+    /// One of the pool's accounts the order leaves out.
+    missing: Vec<String>,
+}
+
+/// Set the order new requests take through the pool's Claude accounts, its
+/// own and the ones it mirrors from a pool it links to (`None` = back to
+/// automatic balancing). The head of the order and the mirrored accounts'
+/// places apply within seconds; maxpool reads its own accounts' priorities
+/// only when its server starts, so a change to those waits for the same
+/// restart a rename does.
 pub(crate) async fn set_order(names: Option<Vec<String>>) -> Result<PoolChange, AppCommandError> {
     let pool = Maxpool::locate()?;
+    let mut linked = None;
     if let Some(names) = &names {
         let unique: std::collections::HashSet<&String> = names.iter().collect();
         if names.is_empty() || unique.len() != names.len() || names.len() > super::MAX_ACCOUNTS {
@@ -802,8 +892,18 @@ pub(crate) async fn set_order(names: Option<Vec<String>>) -> Result<PoolChange, 
                 "An order lists each of the pool's accounts once.",
             ));
         }
+        // The accounts it mirrors from a linked pool: only the running pool
+        // knows them.
+        linked = super::refresh(Duration::from_secs(5)).await.map(|reading| {
+            reading
+                .accounts
+                .iter()
+                .filter(|a| a.linked && !a.provider)
+                .map(|a| a.name.clone())
+                .collect::<Vec<_>>()
+        });
     }
-    set_order_with(&pool, names.as_deref()).await?;
+    let restart = set_order_with(&pool, names.as_deref(), linked.as_deref()).await?;
     tracing::info!(
         "[usage-pool] {} from codeg",
         if names.is_some() {
@@ -814,32 +914,110 @@ pub(crate) async fn set_order(names: Option<Vec<String>>) -> Result<PoolChange, 
     );
     refresh_after_sync();
     Ok(PoolChange {
-        applied: schedule_restart(pool).await,
+        applied: if restart {
+            schedule_restart(pool).await
+        } else {
+            PoolApply::Live
+        },
     })
 }
 
-async fn set_order_with(pool: &Maxpool, names: Option<&[String]>) -> Result<(), AppCommandError> {
+/// Write the order; whether the server must restart to apply all of it.
+/// `linked`: the accounts the running pool mirrors from a pool it links to,
+/// `None` when it isn't answering.
+async fn set_order_with(
+    pool: &Maxpool,
+    names: Option<&[String]>,
+    linked: Option<&[String]>,
+) -> Result<bool, AppCommandError> {
     let order = serde_json::to_string(&names).map_err(|_| {
         AppCommandError::invalid_input("An order lists each of the pool's accounts once.")
     })?;
-    let code = config_update(
+    let linked_json = serde_json::to_string(&linked.unwrap_or_default()).map_err(|_| {
+        AppCommandError::invalid_input("An order lists each of the pool's accounts once.")
+    })?;
+    let (code, out) = config_update_reporting(
         pool,
         &config_script(SET_ORDER_SCRIPT),
-        &[("CODEG_MAXPOOL_ORDER", order.as_str())],
+        &[
+            ("CODEG_MAXPOOL_ORDER", order.as_str()),
+            ("CODEG_MAXPOOL_LINKED", linked_json.as_str()),
+        ],
     )
     .await?;
+    let report: OrderReport = serde_json::from_str(&out).unwrap_or_default();
     match code {
-        Some(0) => Ok(()),
+        Some(0) => Ok(report.restart),
         Some(3) => Err(AppCommandError::dependency_missing(
             "This maxpool version can't be updated from codeg.",
         )),
-        Some(4) => Err(AppCommandError::invalid_input(
-            "The pool's accounts changed while you were ordering them. Try again.",
-        )),
+        Some(4) => Err(order_mismatch(&report, linked.is_some())),
         _ => Err(AppCommandError::task_execution_failed(
             "maxpool's config update failed.",
         )),
     }
+}
+
+/// Names as a reader sees them: `"a"`, `"a" and "b"`, `"a", "b" and "c"`.
+fn quoted(names: &[String]) -> String {
+    let quoted: Vec<String> = names.iter().map(|n| format!("\"{n}\"")).collect();
+    match quoted.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+        Some((last, _)) => last.clone(),
+        None => String::new(),
+    }
+}
+
+/// Why the pool refused an order, as it was.
+fn order_mismatch(report: &OrderReport, pool_answered: bool) -> AppCommandError {
+    let verb = |names: &[String]| if names.len() == 1 { "is" } else { "are" };
+    let again = "Try again with the list as it is now.";
+    let message = if !report.providers.is_empty() {
+        format!(
+            "{} {} an API provider; the order ranks the pool's Claude accounts only.",
+            quoted(&report.providers),
+            verb(&report.providers)
+        )
+    } else if !report.unknown.is_empty() && !pool_answered {
+        format!(
+            "The pool isn't answering, so codeg can't check {}, which {} not in its config \
+             (a pool it links to may hold {}). Try again once it answers.",
+            quoted(&report.unknown),
+            verb(&report.unknown),
+            if report.unknown.len() == 1 {
+                "it"
+            } else {
+                "them"
+            }
+        )
+    } else if !report.unknown.is_empty() && !report.missing.is_empty() {
+        format!(
+            "The pool's accounts changed since this list was shown: {} {} gone and {} {} new. {again}",
+            quoted(&report.unknown),
+            verb(&report.unknown),
+            quoted(&report.missing),
+            verb(&report.missing)
+        )
+    } else if !report.unknown.is_empty() {
+        format!(
+            "{} {} no longer in the pool, so the order can't place {}. {again}",
+            quoted(&report.unknown),
+            verb(&report.unknown),
+            if report.unknown.len() == 1 {
+                "it"
+            } else {
+                "them"
+            }
+        )
+    } else if !report.missing.is_empty() {
+        format!(
+            "The pool now also has {}, which this order leaves out. {again}",
+            quoted(&report.missing)
+        )
+    } else {
+        format!("The order doesn't list each of the pool's accounts once. {again}")
+    };
+    AppCommandError::invalid_input(message)
 }
 
 /// An account's reserve: maxpool's `capUtilization` (`1 - percent/100`) and
@@ -1177,7 +1355,9 @@ pub async fn usage_pool_set_preferred(name: Option<String>) -> Result<PoolChange
 
 #[cfg(feature = "tauri-runtime")]
 #[cfg_attr(feature = "tauri-runtime", tauri::command)]
-pub async fn usage_pool_set_order(names: Option<Vec<String>>) -> Result<PoolChange, AppCommandError> {
+pub async fn usage_pool_set_order(
+    names: Option<Vec<String>>,
+) -> Result<PoolChange, AppCommandError> {
     set_order(names).await
 }
 
@@ -1188,7 +1368,12 @@ pub async fn usage_pool_set_reserve(
     percent: Option<f64>,
     mode: Option<super::PoolReserveMode>,
 ) -> Result<PoolChange, AppCommandError> {
-    set_reserve(&name, percent, mode.unwrap_or(super::PoolReserveMode::Fixed)).await
+    set_reserve(
+        &name,
+        percent,
+        mode.unwrap_or(super::PoolReserveMode::Fixed),
+    )
+    .await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -1540,6 +1725,17 @@ export async function atomicConfigUpdate(updater) {
         list.iter().map(|n| n.to_string()).collect()
     }
 
+    /// The running pool mirrors no account from a linked pool.
+    const NO_LINKED: Option<&[String]> = Some(&[]);
+
+    /// The message of a refused order.
+    async fn refusal(pool: &Maxpool, order: &[&str], linked: Option<&[String]>) -> String {
+        set_order_with(pool, Some(&names(order)), linked)
+            .await
+            .expect_err("refused")
+            .message
+    }
+
     #[tokio::test]
     async fn an_order_ranks_the_claude_accounts_and_its_first_switched_on_one_serves() {
         let dir = tempfile::tempdir().unwrap();
@@ -1547,9 +1743,13 @@ export async function atomicConfigUpdate(updater) {
             eprintln!("node isn't on PATH; skipping");
             return;
         };
-        set_order_with(&pool, Some(&names(&["beta", "alpha"])))
+        let restart = set_order_with(&pool, Some(&names(&["beta", "alpha"])), NO_LINKED)
             .await
             .unwrap();
+        assert!(
+            restart,
+            "the server reads its own accounts' priorities at start"
+        );
         let config = config_of(&pool);
         assert_eq!(config["accounts"][0]["priority"], 1);
         assert_eq!(config["accounts"][1]["priority"], 0);
@@ -1568,8 +1768,14 @@ export async function atomicConfigUpdate(updater) {
         assert_eq!(routing_of(&pool), ("preferred".into(), "alpha".into()));
         assert_eq!(config_of(&pool)["accounts"][1]["enabled"], false);
 
+        // The same order again changes no priority: nothing to restart for.
+        let restart = set_order_with(&pool, Some(&names(&["beta", "alpha"])), NO_LINKED)
+            .await
+            .unwrap();
+        assert!(!restart);
+
         // No order: back to automatic balancing.
-        set_order_with(&pool, None).await.unwrap();
+        assert!(set_order_with(&pool, None, None).await.unwrap());
         let config = config_of(&pool);
         assert!(config["accounts"][0].get("priority").is_none());
         assert!(config["accounts"][1].get("priority").is_none());
@@ -1586,15 +1792,35 @@ export async function atomicConfigUpdate(updater) {
             eprintln!("node isn't on PATH; skipping");
             return;
         };
-        for order in [
-            names(&["alpha"]),
-            names(&["alpha", "alpha"]),
-            names(&["alpha", "beta", "glm"]),
-            names(&["alpha", "nobody"]),
-        ] {
-            assert!(set_order_with(&pool, Some(&order)).await.is_err(), "{order:?}");
-        }
-        assert!(config_of(&pool).get("_generation").is_none(), "nothing written");
+        // Each refusal says what doesn't match.
+        assert_eq!(
+            refusal(&pool, &["alpha"], NO_LINKED).await,
+            "The pool now also has \"beta\", which this order leaves out. Try again with the list \
+             as it is now."
+        );
+        assert_eq!(
+            refusal(&pool, &["alpha", "alpha"], NO_LINKED).await,
+            "The order doesn't list each of the pool's accounts once. Try again with the list as \
+             it is now."
+        );
+        assert_eq!(
+            refusal(&pool, &["alpha", "beta", "glm"], NO_LINKED).await,
+            "\"glm\" is an API provider; the order ranks the pool's Claude accounts only."
+        );
+        assert_eq!(
+            refusal(&pool, &["alpha", "beta", "nobody"], NO_LINKED).await,
+            "\"nobody\" is no longer in the pool, so the order can't place it. Try again with the \
+             list as it is now."
+        );
+        assert_eq!(
+            refusal(&pool, &["alpha", "nobody", "gone"], NO_LINKED).await,
+            "The pool's accounts changed since this list was shown: \"nobody\" and \"gone\" are \
+             gone and \"beta\" is new. Try again with the list as it is now."
+        );
+        assert!(
+            config_of(&pool).get("_generation").is_none(),
+            "nothing written"
+        );
         // Switching an account in a pool with no order leaves its routing be.
         set_enabled_with(&pool, "beta", true).await.unwrap();
         assert_eq!(
@@ -1611,9 +1837,10 @@ export async function atomicConfigUpdate(updater) {
             return;
         };
         let mut config = config_of(&pool);
-        config["scheduler"] = serde_json::json!({ "crossProviderFallbackPolicy": "when-exhausted" });
+        config["scheduler"] =
+            serde_json::json!({ "crossProviderFallbackPolicy": "when-exhausted" });
         std::fs::write(&pool.config, config.to_string()).unwrap();
-        set_order_with(&pool, Some(&names(&["alpha", "beta"])))
+        set_order_with(&pool, Some(&names(&["alpha", "beta"])), NO_LINKED)
             .await
             .unwrap();
         let scheduler = &config_of(&pool)["scheduler"];
@@ -1624,10 +1851,148 @@ export async function atomicConfigUpdate(updater) {
         let mut config = config_of(&pool);
         config["scheduler"] = serde_json::json!({ "routingMode": "prefer-zai" });
         std::fs::write(&pool.config, config.to_string()).unwrap();
-        set_order_with(&pool, Some(&names(&["beta", "alpha"])))
+        set_order_with(&pool, Some(&names(&["beta", "alpha"])), NO_LINKED)
             .await
             .unwrap();
         assert_eq!(config_of(&pool)["scheduler"]["routingMode"], "prefer-zai");
+    }
+
+    /// A pool with no accounts of its own: every one it lists is mirrored
+    /// from the pool it links to (a laptop routing through another machine).
+    fn linked_only_pool(dir: &Path) -> Option<Maxpool> {
+        let pool = fake_config_pool(dir)?;
+        let mut config = config_of(&pool);
+        config["accounts"] = serde_json::json!([]);
+        config["pools"] = serde_json::json!([
+            { "name": "box", "url": "http://127.0.0.1:9", "key": "not-a-real-key" }
+        ]);
+        std::fs::write(&pool.config, config.to_string()).unwrap();
+        Some(pool)
+    }
+
+    #[tokio::test]
+    async fn the_accounts_of_a_linked_pool_are_ordered_in_this_pools_own_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(pool) = linked_only_pool(dir.path()) else {
+            eprintln!("node isn't on PATH; skipping");
+            return;
+        };
+        let linked = names(&["a@example.com ☁", "b@example.com ☁", "c@example.com ☁"]);
+        let restart = set_order_with(
+            &pool,
+            Some(&names(&[
+                "b@example.com ☁",
+                "c@example.com ☁",
+                "a@example.com ☁",
+            ])),
+            Some(&linked),
+        )
+        .await
+        .unwrap();
+        assert!(
+            !restart,
+            "the running pool applies a linked account's place live"
+        );
+        let config = config_of(&pool);
+        assert_eq!(
+            config["mirrorAccounts"],
+            serde_json::json!({
+                "b@example.com ☁": { "priority": 0 },
+                "c@example.com ☁": { "priority": 1 },
+                "a@example.com ☁": { "priority": 2 }
+            })
+        );
+        assert_eq!(config["accounts"], serde_json::json!([]));
+        assert_eq!(config["pools"][0]["key"], "not-a-real-key");
+        assert_eq!(
+            (
+                config["routing"]["mode"].clone(),
+                config["routing"]["preferredAccount"].clone()
+            ),
+            ("preferred".into(), "b@example.com ☁".into())
+        );
+
+        // Cleared: no mirror order, automatic balancing, still nothing to
+        // restart for.
+        assert!(!set_order_with(&pool, None, None).await.unwrap());
+        let config = config_of(&pool);
+        assert!(config.get("mirrorAccounts").is_none());
+        assert_eq!(config["routing"]["mode"], "automatic");
+        assert_eq!(
+            config["routing"]["preferredAccount"],
+            serde_json::Value::Null
+        );
+    }
+
+    #[tokio::test]
+    async fn an_order_mixing_own_and_linked_accounts_ranks_them_on_one_scale() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(pool) = fake_config_pool(dir.path()) else {
+            eprintln!("node isn't on PATH; skipping");
+            return;
+        };
+        let linked = names(&["x ☁", "y ☁"]);
+        let order = |list: &[&str]| {
+            let (list, pool, linked) = (names(list), &pool, &linked);
+            async move { set_order_with(pool, Some(&list), Some(linked)).await }
+        };
+        assert!(
+            order(&["x ☁", "beta", "y ☁", "alpha"]).await.unwrap(),
+            "alpha and beta got a priority"
+        );
+        let config = config_of(&pool);
+        assert_eq!(
+            config["mirrorAccounts"],
+            serde_json::json!({ "x ☁": { "priority": 0 }, "y ☁": { "priority": 2 } })
+        );
+        assert_eq!(config["accounts"][0]["priority"], 3);
+        assert_eq!(config["accounts"][1]["priority"], 1);
+        assert_eq!(routing_of(&pool), ("preferred".into(), "x ☁".into()));
+
+        // Swapping the two linked accounts leaves every priority of the
+        // pool's own accounts as it was: nothing to restart for.
+        assert!(!order(&["y ☁", "beta", "x ☁", "alpha"]).await.unwrap());
+        assert_eq!(routing_of(&pool), ("preferred".into(), "y ☁".into()));
+
+        // Its own accounts first: alpha serves (beta is paused).
+        assert!(order(&["beta", "alpha", "x ☁", "y ☁"]).await.unwrap());
+        assert_eq!(routing_of(&pool), ("preferred".into(), "alpha".into()));
+
+        // Pausing and resuming follows the whole order, linked accounts too.
+        set_enabled_with(&pool, "alpha", false).await.unwrap();
+        assert_eq!(routing_of(&pool), ("preferred".into(), "x ☁".into()));
+        set_enabled_with(&pool, "beta", true).await.unwrap();
+        assert_eq!(routing_of(&pool), ("preferred".into(), "beta".into()));
+    }
+
+    #[tokio::test]
+    async fn an_order_that_misses_or_invents_a_linked_account_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(pool) = linked_only_pool(dir.path()) else {
+            eprintln!("node isn't on PATH; skipping");
+            return;
+        };
+        let linked = names(&["a ☁", "b ☁"]);
+        assert_eq!(
+            refusal(&pool, &["a ☁"], Some(&linked)).await,
+            "The pool now also has \"b ☁\", which this order leaves out. Try again with the list \
+             as it is now."
+        );
+        assert_eq!(
+            refusal(&pool, &["a ☁", "b ☁", "c ☁"], Some(&linked)).await,
+            "\"c ☁\" is no longer in the pool, so the order can't place it. Try again with the list \
+             as it is now."
+        );
+        // The pool not answering is not mistaken for accounts gone.
+        assert_eq!(
+            refusal(&pool, &["a ☁", "b ☁"], None).await,
+            "The pool isn't answering, so codeg can't check \"a ☁\" and \"b ☁\", which are not in \
+             its config (a pool it links to may hold them). Try again once it answers."
+        );
+        assert!(
+            config_of(&pool).get("_generation").is_none(),
+            "nothing written"
+        );
     }
 
     #[tokio::test]
@@ -1638,9 +2003,14 @@ export async function atomicConfigUpdate(updater) {
             return;
         };
         let cap = reserve_cap(10.0).unwrap();
-        set_reserve_with(&pool, "alpha", Some(cap), super::super::PoolReserveMode::Fixed)
-            .await
-            .unwrap();
+        set_reserve_with(
+            &pool,
+            "alpha",
+            Some(cap),
+            super::super::PoolReserveMode::Fixed,
+        )
+        .await
+        .unwrap();
         let alpha = &config_of(&pool)["accounts"][0];
         assert_eq!(alpha["capUtilization"], 0.9);
         assert_eq!(alpha["capMode"], "fixed");
@@ -1669,11 +2039,14 @@ export async function atomicConfigUpdate(updater) {
             assert!(alpha.get(field).is_none(), "{field}");
         }
         assert_eq!(alpha["refreshToken"], "fake-r1");
-        assert!(
-            set_reserve_with(&pool, "nobody", Some(0.9), super::super::PoolReserveMode::Fixed)
-                .await
-                .is_err()
-        );
+        assert!(set_reserve_with(
+            &pool,
+            "nobody",
+            Some(0.9),
+            super::super::PoolReserveMode::Fixed
+        )
+        .await
+        .is_err());
     }
 
     #[test]
@@ -1777,9 +2150,13 @@ export async function atomicConfigUpdate(updater) {
         };
         // The order is on disk before the server starts, as after the
         // restart that applies one.
-        set_order_with(&pool, Some(&names(&["backup", email, "primary"])))
-            .await
-            .unwrap();
+        set_order_with(
+            &pool,
+            Some(&names(&["backup", email, "primary"])),
+            NO_LINKED,
+        )
+        .await
+        .unwrap();
         let mut server = crate::process::tokio_command(&node)
             .arg(src.join("index.js"))
             .arg("server")
@@ -1838,7 +2215,10 @@ export async function atomicConfigUpdate(updater) {
             assert!(response.status().is_success(), "{}", response.status());
             served.lock().unwrap().last().cloned().unwrap_or_default()
         };
-        assert!(wait_for("backup", "priority", 0.into()).await, "the test pool came up");
+        assert!(
+            wait_for("backup", "priority", 0.into()).await,
+            "the test pool came up"
+        );
 
         // First in the order, first served.
         assert_eq!(send().await, "backup");
@@ -1847,9 +2227,14 @@ export async function atomicConfigUpdate(updater) {
         // Held by its reserve (10% kept back, 95% used): the next account in
         // the order takes every new request, ahead of one listed before it
         // in the config.
-        set_reserve_with(&pool, "backup", Some(0.9), super::super::PoolReserveMode::Fixed)
-            .await
-            .unwrap();
+        set_reserve_with(
+            &pool,
+            "backup",
+            Some(0.9),
+            super::super::PoolReserveMode::Fixed,
+        )
+        .await
+        .unwrap();
         assert!(wait_for("backup", "capUtilization", 0.9.into()).await);
         usage.lock().unwrap().insert("backup".to_string(), 0.95);
         assert_eq!(send().await, "backup", "its usage is read from this answer");
@@ -1865,6 +2250,202 @@ export async function atomicConfigUpdate(updater) {
         set_enabled_with(&pool, email, true).await.unwrap();
         assert!(wait_for(email, "enabled", true.into()).await);
         assert_eq!(send().await, email);
+        let _ = server.kill().await;
+    }
+
+    /// A running maxpool that links to another pool (a stand-in here: its
+    /// status lists two accounts, and it records which one each forwarded
+    /// request was pinned to) follows the order codeg writes for the
+    /// mirrored accounts at once: no restart, new requests to the new head.
+    /// Opt-in like the tests above; needs a maxpool with the mirror order
+    /// (`mirrorAccounts`).
+    #[tokio::test]
+    async fn a_running_maxpool_follows_the_order_of_its_linked_accounts_live() {
+        use std::sync::Arc;
+        let Some(src) = std::env::var_os("CODEG_TEST_MAXPOOL_SRC").map(PathBuf::from) else {
+            return;
+        };
+        let Some(node) = crate::commands::acp::resolve_command_on_path("node") else {
+            return;
+        };
+        let now = chrono::Utc::now().timestamp();
+        let pinned: Arc<Mutex<Vec<String>>> = Arc::default();
+        let linked_pool = {
+            let pinned = pinned.clone();
+            let row = |name: &str| {
+                serde_json::json!({
+                    "name": name, "type": "oauth", "provider": "anthropic",
+                    "enabled": true, "status": "active", "inFlight": 0,
+                    "accountUuid": uuid::Uuid::new_v4().to_string(),
+                    "quota": {
+                        "unified5h": 0.1, "unified7d": 0.2,
+                        "unified5hReset": (now + 7_200) * 1000,
+                        "unified7dReset": (now + 3 * 86_400) * 1000
+                    }
+                })
+            };
+            let status = serde_json::json!({ "accounts": [row("a"), row("b")] });
+            axum::Router::new()
+                .route(
+                    "/maxpool/status",
+                    axum::routing::get(move || {
+                        let status = status.clone();
+                        async move { axum::Json(status) }
+                    }),
+                )
+                .fallback(move |headers: axum::http::HeaderMap| {
+                    let pinned = pinned.clone();
+                    async move {
+                        let pin = headers
+                            .get("x-maxpool-pin-account")
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("?")
+                            .to_string();
+                        pinned.lock().unwrap().push(pin);
+                        axum::http::Response::builder()
+                            .status(200)
+                            .header("content-type", "application/json")
+                            .body(axum::body::Body::from(
+                                r#"{"id":"msg_test","type":"message","role":"assistant","model":"claude-test","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}"#,
+                            ))
+                            .unwrap()
+                    }
+                })
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let linked_url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, linked_pool).await;
+        });
+
+        let dir = tempfile::tempdir().unwrap();
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let config = dir.path().join("maxpool.json");
+        // One account of its own (maxpool refuses to start with none unless
+        // it carries the pool-link-only patch), last in the order already.
+        std::fs::write(
+            &config,
+            serde_json::json!({
+                "proxy": { "port": port, "host": "127.0.0.1", "apiKey": "mp-test-key-not-secret" },
+                "upstream": "http://127.0.0.1:9",
+                "preventSleep": false, "updateCheck": false, "autoUpdate": false,
+                "quotaProbeSeconds": 0,
+                "usageRecords": { "enabled": false },
+                "sync": { "accountsIntervalMs": 1000 },
+                "routing": { "mode": "automatic", "preferredAccount": null },
+                "accounts": [{
+                    "name": "home", "type": "oauth", "source": "login", "priority": 2,
+                    "accountUuid": uuid::Uuid::new_v4().to_string(),
+                    "accessToken": "fake-a-home", "refreshToken": "fake-r-home",
+                    "expiresAt": (now + 365 * 86_400) * 1000
+                }],
+                "pools": [{ "name": "box", "url": linked_url, "key": "not-a-real-key" }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let mut server = crate::process::tokio_command(&node)
+            .arg(src.join("index.js"))
+            .arg("server")
+            .env("MAXPOOL_CONFIG", &config)
+            .env("MAXPOOL_DISABLE_QUOTA_PROBE", "1")
+            .env("MAXPOOL_DISABLE_SLEEP_GUARD", "1")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let client = reqwest::Client::new();
+        let status = || async {
+            let response = client
+                .get(format!("http://127.0.0.1:{port}/maxpool/status"))
+                .header("x-api-key", "mp-test-key-not-secret")
+                .send()
+                .await
+                .ok()?;
+            response.json::<serde_json::Value>().await.ok()
+        };
+        // Until the running server reports these priorities.
+        let wait_for = |want: serde_json::Value| {
+            let status = &status;
+            async move {
+                for _ in 0..60 {
+                    if let Some(value) = status().await {
+                        let got: serde_json::Map<String, serde_json::Value> = value["accounts"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .map(|a| {
+                                (
+                                    a["name"].as_str().unwrap_or_default().to_string(),
+                                    a["priority"].clone(),
+                                )
+                            })
+                            .collect();
+                        if serde_json::Value::Object(got) == want {
+                            return Some(value);
+                        }
+                    }
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+                None
+            }
+        };
+        let send = || async {
+            let response = client
+                .post(format!("http://127.0.0.1:{port}/v1/messages"))
+                .header("anthropic-version", "2023-06-01")
+                .json(&serde_json::json!({
+                    "model": "claude-sonnet-4-5", "max_tokens": 16,
+                    "messages": [{ "role": "user", "content": "hi" }]
+                }))
+                .send()
+                .await
+                .unwrap();
+            assert!(response.status().is_success(), "{}", response.status());
+            pinned.lock().unwrap().last().cloned().unwrap_or_default()
+        };
+        assert!(
+            wait_for(serde_json::json!({ "home": 2, "a ☁": 0, "b ☁": 0 }))
+                .await
+                .is_some(),
+            "the test pool came up with the linked accounts"
+        );
+        let pool = Maxpool {
+            bin: src.join("index.js"),
+            config: config.clone(),
+        };
+        let linked = names(&["a ☁", "b ☁"]);
+
+        let restart = set_order_with(&pool, Some(&names(&["b ☁", "a ☁", "home"])), Some(&linked))
+            .await
+            .unwrap();
+        assert!(!restart);
+        let value = wait_for(serde_json::json!({ "home": 2, "a ☁": 1, "b ☁": 0 }))
+            .await
+            .expect("picked up without a restart");
+        assert_eq!(value["routing"]["preferredAccount"], "b ☁");
+        assert_eq!(send().await, "b");
+
+        set_order_with(&pool, Some(&names(&["a ☁", "b ☁", "home"])), Some(&linked))
+            .await
+            .unwrap();
+        assert!(
+            wait_for(serde_json::json!({ "home": 2, "a ☁": 0, "b ☁": 1 }))
+                .await
+                .is_some(),
+            "reordered without a restart"
+        );
+        assert_eq!(send().await, "a");
+        assert!(
+            server.try_wait().unwrap().is_none(),
+            "the same server throughout"
+        );
         let _ = server.kill().await;
     }
 
