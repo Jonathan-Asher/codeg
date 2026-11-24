@@ -65,7 +65,7 @@ vi.mock("@/contexts/sidebar-context", () => ({
   useSidebarContext: () => ({ toggle: vi.fn() }),
 }))
 vi.mock("@/contexts/aux-panel-context", () => ({
-  useAuxPanelContext: () => ({ toggle: vi.fn() }),
+  useAuxPanelActions: () => ({ toggle: vi.fn() }),
 }))
 vi.mock("@/contexts/terminal-context", () => ({
   useTerminalContext: () => ({ toggle: vi.fn() }),

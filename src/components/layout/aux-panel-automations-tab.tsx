@@ -16,7 +16,7 @@ import {
 } from "@/components/automations/automations-page"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { useAuxPanelContext } from "@/contexts/aux-panel-context"
+import { useAuxPanelActions } from "@/contexts/aux-panel-context"
 import { useAutomationsView } from "@/contexts/automations-view-context"
 import { useWorkbenchRoute } from "@/contexts/workbench-route-context"
 import { useActiveProjectFolderId } from "@/hooks/use-active-project-folder"
@@ -69,7 +69,7 @@ export function AutomationsAuxTab() {
   const projectFolderId = useActiveProjectFolderId()
   const allFolders = useAppWorkspaceStore((s) => s.allFolders)
   const { setRoute } = useWorkbenchRoute()
-  const { setOpen } = useAuxPanelContext()
+  const { setOpen } = useAuxPanelActions()
   const isMobile = useIsMobile()
 
   const foldersById = useMemo(

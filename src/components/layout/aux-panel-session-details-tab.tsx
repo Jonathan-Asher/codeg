@@ -25,6 +25,7 @@ import { SessionActivityRow } from "@/components/conversations/session-activity"
 import { CriticalSessionSection } from "@/components/conversations/critical-session-section"
 import { LimitContinueSessionSection } from "@/components/conversations/limit-continue-session-section"
 import { SessionDetailsInsights } from "./session-details-insights"
+import { useAuxPanelShown } from "./aux-panel-watch"
 
 /**
  * The aux-panel "Session Details" tab. Shows the active conversation's identity
@@ -45,8 +46,12 @@ import { SessionDetailsInsights } from "./session-details-insights"
 export function SessionDetailsTab() {
   const t = useTranslations("Folder.sessionDetails")
   const tActivity = useTranslations("Folder.sessionActivity")
-  const { isOpen, activeTab } = useAuxPanelContext()
-  const active = isOpen && activeTab === "session_details"
+  const { activeTab } = useAuxPanelContext()
+  // On screen and done sliding in (aux-panel-watch): the panel stays mounted
+  // while closed, and the message navigator's rows — which the transcript
+  // builds by parsing every turn's diffs — are asked for once a slide is over,
+  // not at the start of one.
+  const active = useAuxPanelShown() && activeTab === "session_details"
 
   const tabs = useTabStore((s) => s.tabs)
   const activeTabId = useTabStore((s) => s.activeTabId)

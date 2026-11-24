@@ -65,6 +65,7 @@ import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useTabStore } from "@/contexts/tab-context"
 import { useWorkspaceActions } from "@/contexts/workspace-context"
 import { useWorkspaceStateStore } from "@/hooks/use-workspace-state-store"
+import { useAuxPanelWatchMode } from "./aux-panel-watch"
 import { useGitQuickActions } from "@/hooks/use-git-quick-actions"
 import { useImeGuard } from "@/hooks/use-ime-guard"
 import {
@@ -530,7 +531,12 @@ export function GitChangesTab() {
   const tabs = useTabStore((s) => s.tabs)
   const activeTabId = useTabStore((s) => s.activeTabId)
   const { openFilePreview, openWorkingTreeDiff } = useWorkspaceActions()
-  const workspaceState = useWorkspaceStateStore(folder?.path ?? null)
+  // Kept mounted while the aux panel is closed: the full stream steps down a
+  // while after it closes (aux-panel-watch).
+  const workspaceState = useWorkspaceStateStore(
+    folder?.path ?? null,
+    useAuxPanelWatchMode(folder?.path ?? null)
+  )
 
   const [expandedTrackedPaths, setExpandedTrackedPaths] = useState<Set<string>>(
     new Set()

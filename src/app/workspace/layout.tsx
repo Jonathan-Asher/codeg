@@ -23,10 +23,17 @@ import {
 } from "react"
 import type { ImperativePanelGroupHandle } from "react-resizable-panels"
 import {
+  settledShown,
+  sidePanelContentHold,
   slideHoldStyle,
   usePanelSlideOnToggle,
   useSlideFreeze,
 } from "./panel-slide"
+import {
+  auxContentWidthFor,
+  resolveShellSides,
+  shellPanelsWidthFor,
+} from "./shell-sides"
 import { FolderTitleBar } from "@/components/layout/folder-title-bar"
 import { Sidebar } from "@/components/layout/sidebar"
 import { StatusBar } from "@/components/layout/status-bar"
@@ -88,6 +95,7 @@ import { FILL_MODE_STYLE } from "@/lib/workspace-background"
 import { TabBar } from "@/components/tabs/tab-bar"
 import { TerminalPanel } from "@/components/terminal/terminal-panel"
 import { AuxPanel } from "@/components/layout/aux-panel"
+import { AuxPanelShownProvider } from "@/components/layout/aux-panel-watch"
 import { ChromeReserve } from "@/components/layout/chrome-reserve"
 import { LeftEdgeChrome } from "@/components/layout/left-edge-chrome"
 import { RightEdgeChrome } from "@/components/layout/right-edge-chrome"
@@ -157,7 +165,6 @@ const FOLDER_MAIN_GROUP_ID = "folder-main-group"
 const FOLDER_MAIN_WORKSPACE_PANEL_ID = "folder-main-workspace-panel"
 const FOLDER_MAIN_TERMINAL_PANEL_ID = "folder-main-terminal-panel"
 const DEFAULT_FUSION_LAYOUT: [number, number] = [56, 44]
-const MIN_CENTER_WIDTH_PX = 420
 const MIN_WORKSPACE_HEIGHT_PX = 220
 const LAYOUT_EPSILON = 0.25
 // Skip-check for re-applying a pixel-derived layout to the library. The
@@ -840,15 +847,8 @@ function FolderWorkspaceShell({ children }: { children: React.ReactNode }) {
 
   const [shellWidth, setShellWidth] = useState(0)
   const [mainHeight, setMainHeight] = useState(0)
-  // The panels split the width LEFT OVER by the dividers, not the container's:
-  // an open divider is a fixed 1px flex item (a closed one is `w-0`), and the
-  // panels' percentages are shares of the remainder. Converting px <-> percent
-  // against the full container width left the side columns up to a pixel off
-  // their requested width, by an amount that changes with every window width —
-  // the divider crept sub-pixel on each resize step.
-  const shellHandlesWidth = (sidebarOpen ? 1 : 0) + (auxOpen ? 1 : 0)
-  const shellPanelsWidth =
-    shellWidth > 0 ? Math.max(1, shellWidth - shellHandlesWidth) : 0
+  // What the panels share once the dividers are taken out (shellPanelsWidthFor).
+  const shellPanelsWidth = shellPanelsWidthFor(shellWidth, sidebarOpen, auxOpen)
   const mainHandlesHeight = terminalOpen ? 1 : 0
   const mainPanelsHeight =
     mainHeight > 0 ? Math.max(1, mainHeight - mainHandlesHeight) : 0
@@ -920,63 +920,34 @@ function FolderWorkspaceShell({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  // The side columns' widths in px: the requested widths, scaled down together
-  // when the window is too narrow to also leave MIN_CENTER_WIDTH_PX between —
-  // but never below a column's own minimum. These px are what is drawn, and
-  // the library clamps its own layout to the panels' minSize, so they have to
-  // land where that clamp would: below it, a column renders narrower than its
-  // content allows (the aux minimum on Windows/Linux is what keeps the
-  // title-bar overlay off the center column), and the library's layout — the
-  // base a handle drag starts from — sits tens of px away from the divider on
-  // screen.
-  const shellSides = useMemo(() => {
-    const requestedLeft = sidebarOpen
-      ? clamp(sidebarWidth, sidebarMinWidth, sidebarMaxWidth)
-      : 0
-    const requestedRight = auxOpen
-      ? clamp(auxWidth, auxMinWidth, auxMaxWidth)
-      : 0
-
-    const totalWidth =
-      shellPanelsWidth > 0
-        ? shellPanelsWidth
-        : requestedLeft + requestedRight + 960
-
-    let left = requestedLeft
-    let right = requestedRight
-
-    const maxSideTotal = Math.max(0, totalWidth - MIN_CENTER_WIDTH_PX)
-    const sideTotal = left + right
-    if (sideTotal > maxSideTotal && sideTotal > 0) {
-      const scale = maxSideTotal / sideTotal
-      left *= scale
-      right *= scale
-
-      // Back up to each open column's minimum the way the library's clamp
-      // does it (validatePanelGroupLayout): a panel raised to its minSize
-      // takes the shortfall from the first panel in order that can spare it —
-      // the sidebar, down to its own minimum, and then the center.
-      let shortfall = 0
-      if (sidebarOpen && left < sidebarMinWidth) {
-        shortfall += sidebarMinWidth - left
-        left = sidebarMinWidth
-      }
-      if (auxOpen && right < auxMinWidth) {
-        shortfall += auxMinWidth - right
-        right = auxMinWidth
-      }
-      if (sidebarOpen && shortfall > 0) {
-        left -= Math.min(shortfall, left - sidebarMinWidth)
-      }
+  // The side columns' widths in px (shell-sides.ts), and the width the aux
+  // content is laid out at: the column's while it is open and, while it is
+  // closed, the width it would open at now — a closed aux panel keeps its
+  // content mounted (AuxPanel), held at that width, so the next open lays
+  // nothing out.
+  const { shellSides, auxContentWidth } = useMemo(() => {
+    const input = {
+      sidebarOpen,
+      sidebarWidth,
+      sidebarMinWidth,
+      sidebarMaxWidth,
+      auxOpen,
+      auxWidth,
+      auxMinWidth,
+      auxMaxWidth,
+      shellWidth,
     }
-
-    return { left, right, totalWidth }
+    const sides = resolveShellSides(input)
+    return {
+      shellSides: sides,
+      auxContentWidth: auxOpen ? sides.right : auxContentWidthFor(input),
+    }
   }, [
     auxMaxWidth,
     auxMinWidth,
     auxOpen,
     auxWidth,
-    shellPanelsWidth,
+    shellWidth,
     sidebarMaxWidth,
     sidebarMinWidth,
     sidebarOpen,
@@ -1292,10 +1263,33 @@ function FolderWorkspaceShell({ children }: { children: React.ReactNode }) {
     sidebarAnimating && sidebarOpen
       ? slideHoldStyle("end", shellSides.left)
       : undefined
-  const auxSlideHold =
-    auxAnimating && auxOpen
-      ? slideHoldStyle("start", shellSides.right)
-      : undefined
+  // The aux content keeps that place while the panel is CLOSED too: once
+  // opened, AuxPanel stays mounted, and closed it is held at the width it
+  // opens at (auxContentWidth) and hidden, so the next open only paints it —
+  // no mount, no layout, nothing to fetch (sidePanelContentHold). Hidden the
+  // way every kept-mounted surface is (KeptMountedSurface): `conversation-tab-
+  // hidden invisible`, inert, and its portalled layers told through
+  // OverlayHostHiddenProvider.
+  const auxContentHold = sidePanelContentHold("start", {
+    open: auxOpen,
+    sliding: auxAnimating,
+    width: auxContentWidth,
+  })
+  const auxContentRef = useRef<HTMLDivElement | null>(null)
+  // Closing used to unmount the content, which also gave the focus back to the
+  // page; hidden and inert it must let go of it the same way.
+  useLayoutEffect(() => {
+    if (auxOpen) return
+    const content = auxContentRef.current
+    const focused = document.activeElement
+    if (
+      content &&
+      focused instanceof HTMLElement &&
+      content.contains(focused)
+    ) {
+      focused.blur()
+    }
+  }, [auxOpen])
 
   return (
     <div
@@ -1425,11 +1419,31 @@ function FolderWorkspaceShell({ children }: { children: React.ReactNode }) {
               through instead of a second frosted layer over the toolbar. The
               paired `bg-background` is the off-state (image disabled): equivalent
               to the old opaque wrapper, so the 240ms collapse slide still never
-              flashes white while AuxPanel `return null`s. */}
+              flashes white while the closed content is hidden. */}
           <div className="relative h-full min-h-0 overflow-hidden bg-background ws-transparent-bg">
-            <div className="h-full" style={auxSlideHold}>
-              {auxElement}
-            </div>
+            <OverlayHostHiddenProvider hidden={!auxOpen}>
+              <div
+                ref={auxContentRef}
+                className={cn(
+                  "h-full",
+                  !auxOpen && "conversation-tab-hidden invisible"
+                )}
+                style={auxContentHold}
+                inert={!auxOpen || undefined}
+              >
+                {/* Whether the panel is shown, changing only once a slide is
+                    over (until then it is what it was before the toggle): the
+                    kept-mounted tabs step their workspace streams down a while
+                    after the panel closes and back up once it has slid open
+                    (aux-panel-watch), and none of that re-renders a tab inside
+                    the toggle's own frame. */}
+                <AuxPanelShownProvider
+                  shown={settledShown(auxOpen, auxAnimating)}
+                >
+                  {auxElement}
+                </AuxPanelShownProvider>
+              </div>
+            </OverlayHostHiddenProvider>
           </div>
         </ResizablePanel>
       </ResizablePanelGroup>

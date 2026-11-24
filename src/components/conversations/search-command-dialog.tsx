@@ -18,7 +18,7 @@ import { formatDistance } from "date-fns"
 import { enUS, zhCN, zhTW } from "date-fns/locale"
 import { File, Folder } from "lucide-react"
 import { useLocale, useTranslations } from "next-intl"
-import { useAuxPanelContext } from "@/contexts/aux-panel-context"
+import { useAuxPanelActions } from "@/contexts/aux-panel-context"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { prefetchConversationDetail } from "@/stores/conversation-runtime-store"
@@ -353,7 +353,7 @@ export function SearchCommandDialog({
   const { openTab } = useTabActions()
   const { openConversations } = useWorkbenchRoute()
   const { openFilePreview } = useWorkspaceActions()
-  const { revealInFileTree } = useAuxPanelContext()
+  const { revealInFileTree } = useAuxPanelActions()
 
   const [activeTab, setActiveTab] = useState<SearchTab>("all")
   // The search box owns the keyboard: the dialog opens with the cursor in it,

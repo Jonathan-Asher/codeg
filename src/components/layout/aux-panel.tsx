@@ -1,6 +1,12 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactElement,
+} from "react"
 import {
   CircleDot,
   Folder,
@@ -212,7 +218,36 @@ export function AuxPanel() {
     ? tabOrder
     : tabOrder.filter(isSessionAuxTab)
 
-  if (!isOpen) return null
+  // On the desktop the panel stays mounted once it has been opened: closing it
+  // only hides it (the workspace shell holds the closed content at the width it
+  // opens at, hidden and inert), so opening it again shows what is already
+  // there instead of mounting every tab body, restarting their workspace
+  // streams and refetching their data mid-slide. Until the first open it
+  // renders nothing, as before. The mobile drawer unmounts it on close.
+  const [keptMounted, setKeptMounted] = useState(false)
+  if (isOpen && !isMobile && !keptMounted) setKeptMounted(true)
+
+  // The tab bodies as elements made once. The panel re-renders on every
+  // toggle (it stays mounted while closed) and no body takes anything from
+  // it, so React skips them instead of re-rendering every mounted tab inside
+  // the toggle's frame — as the workspace shell does with its panes.
+  const bodies = useMemo(
+    () =>
+      ({
+        session_details: <SessionDetailsTab />,
+        prompts: <PreparedPromptsTab />,
+        file_tree: <FileTreeTab />,
+        changes: <GitChangesTab />,
+        git_log: <GitLogTab />,
+        automations: <AutomationsAuxTab />,
+        tasks: <TasksAuxTab />,
+        issues: <ForgeAuxTab auxTab="issues" forgeTab="issues" />,
+        pull_requests: <ForgeAuxTab auxTab="pull_requests" forgeTab="prs" />,
+      }) satisfies Record<AuxPanelTab, ReactElement>,
+    []
+  )
+
+  if (!isOpen && (isMobile || !keptMounted)) return null
 
   const panels = (
     <>
@@ -221,67 +256,63 @@ export function AuxPanel() {
         forceMount
         className="mt-0 flex-1 min-h-0 overflow-hidden"
       >
-        <SessionDetailsTab />
+        {bodies.session_details}
       </TabsContent>
       <TabsContent
         value="prompts"
         forceMount
         className="mt-0 flex-1 min-h-0 overflow-hidden"
       >
-        {mountedTabs.has("prompts") ? <PreparedPromptsTab /> : null}
+        {mountedTabs.has("prompts") ? bodies.prompts : null}
       </TabsContent>
       <TabsContent
         value="file_tree"
         forceMount
         className="mt-0 flex-1 min-h-0 overflow-hidden"
       >
-        {mountedTabs.has("file_tree") ? <FileTreeTab /> : null}
+        {mountedTabs.has("file_tree") ? bodies.file_tree : null}
       </TabsContent>
       <TabsContent
         value="changes"
         forceMount
         className="mt-0 flex-1 min-h-0 overflow-hidden"
       >
-        {mountedTabs.has("changes") ? <GitChangesTab /> : null}
+        {mountedTabs.has("changes") ? bodies.changes : null}
       </TabsContent>
       <TabsContent
         value="git_log"
         forceMount
         className="mt-0 flex-1 min-h-0 overflow-hidden"
       >
-        {mountedTabs.has("git_log") ? <GitLogTab /> : null}
+        {mountedTabs.has("git_log") ? bodies.git_log : null}
       </TabsContent>
       <TabsContent
         value="automations"
         forceMount
         className="mt-0 flex-1 min-h-0 overflow-hidden"
       >
-        {mountedTabs.has("automations") ? <AutomationsAuxTab /> : null}
+        {mountedTabs.has("automations") ? bodies.automations : null}
       </TabsContent>
       <TabsContent
         value="tasks"
         forceMount
         className="mt-0 flex-1 min-h-0 overflow-hidden"
       >
-        {mountedTabs.has("tasks") ? <TasksAuxTab /> : null}
+        {mountedTabs.has("tasks") ? bodies.tasks : null}
       </TabsContent>
       <TabsContent
         value="issues"
         forceMount
         className="mt-0 flex-1 min-h-0 overflow-hidden"
       >
-        {mountedTabs.has("issues") ? (
-          <ForgeAuxTab auxTab="issues" forgeTab="issues" />
-        ) : null}
+        {mountedTabs.has("issues") ? bodies.issues : null}
       </TabsContent>
       <TabsContent
         value="pull_requests"
         forceMount
         className="mt-0 flex-1 min-h-0 overflow-hidden"
       >
-        {mountedTabs.has("pull_requests") ? (
-          <ForgeAuxTab auxTab="pull_requests" forgeTab="prs" />
-        ) : null}
+        {mountedTabs.has("pull_requests") ? bodies.pull_requests : null}
       </TabsContent>
     </>
   )

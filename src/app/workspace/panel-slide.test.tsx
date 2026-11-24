@@ -11,6 +11,8 @@ import {
   SLIDE_FROZEN_ATTR,
   freezeSlideRegions,
   releaseSlideFreeze,
+  settledShown,
+  sidePanelContentHold,
   slideHoldStyle,
   usePanelSlideOnToggle,
   useSlideFreeze,
@@ -287,6 +289,83 @@ describe("slideHoldStyle", () => {
       insetInlineStart: 0,
       width: 320,
     })
+  })
+})
+
+describe("sidePanelContentHold", () => {
+  it("holds closed content where it slides open from, at the width it opens at", () => {
+    const closed = sidePanelContentHold("start", {
+      open: false,
+      sliding: false,
+      width: 320,
+    })
+    expect(closed).toEqual(slideHoldStyle("start", 320))
+    // Opening changes nothing about where it is or how wide: the open only
+    // lets it paint again.
+    expect(
+      sidePanelContentHold("start", { open: true, sliding: true, width: 320 })
+    ).toEqual(closed)
+  })
+
+  it("keeps the hold through the closing slide", () => {
+    expect(
+      sidePanelContentHold("start", { open: false, sliding: true, width: 320 })
+    ).toEqual(slideHoldStyle("start", 320))
+  })
+
+  it("lets go once the panel is open and settled", () => {
+    expect(
+      sidePanelContentHold("start", { open: true, sliding: false, width: 320 })
+    ).toBeUndefined()
+  })
+})
+
+describe("settledShown", () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it("keeps what it was before a toggle until the slide is over", () => {
+    // Opening: not shown yet while it slides.
+    expect(settledShown(true, true)).toBe(false)
+    // Closing: still shown while it slides away.
+    expect(settledShown(false, true)).toBe(true)
+  })
+
+  it("is the open state once no slide runs", () => {
+    expect(settledShown(true, false)).toBe(true)
+    expect(settledShown(false, false)).toBe(false)
+  })
+
+  it("follows the toggle at once under reduced motion, where nothing slides", () => {
+    stubReducedMotion(true)
+    const { result, rerender } = renderHook(
+      ({ open }) => settledShown(open, usePanelSlideOnToggle(open, true)),
+      { initialProps: { open: false } }
+    )
+    rerender({ open: true })
+    expect(result.current).toBe(true)
+    rerender({ open: false })
+    expect(result.current).toBe(false)
+  })
+
+  it("flips once the slide of a real toggle has ended", () => {
+    stubReducedMotion(false)
+    const { result, rerender } = renderHook(
+      ({ open }) => settledShown(open, usePanelSlideOnToggle(open, true)),
+      { initialProps: { open: false } }
+    )
+    expect(result.current).toBe(false)
+    rerender({ open: true })
+    expect(result.current).toBe(false)
+    act(() => {
+      vi.advanceTimersByTime(PANEL_SLIDE_CLEANUP_MS)
+    })
+    expect(result.current).toBe(true)
   })
 })
 

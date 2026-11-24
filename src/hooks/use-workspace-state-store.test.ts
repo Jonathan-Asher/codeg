@@ -7,8 +7,14 @@ import {
   vi,
   type Mock,
 } from "vitest"
-import { getWorkspaceStateStore } from "@/hooks/use-workspace-state-store"
+import { renderHook } from "@testing-library/react"
+import {
+  getWorkspaceStateStore,
+  useWorkspaceStateStore,
+  type WorkspaceWatchMode,
+} from "@/hooks/use-workspace-state-store"
 import * as api from "@/lib/api"
+import * as platform from "@/lib/platform"
 
 // Token-set state machine for the per-root workspace stream store:
 // full/paths subscription modes, upgrade/downgrade transitions against the
@@ -232,6 +238,168 @@ describe("workspace state store full/paths token machine", () => {
 
     store.release(fullToken)
     store.release(pathsToken)
+    await vi.advanceTimersByTimeAsync(700)
+  })
+})
+
+describe("useWorkspaceStateStore mode changes", () => {
+  it("swaps its token on a mode change without letting the stream go", async () => {
+    const { rerender, unmount } = renderHook(
+      ({ mode }: { mode: WorkspaceWatchMode }) =>
+        useWorkspaceStateStore("/machine/h1", mode),
+      { initialProps: { mode: "full" as WorkspaceWatchMode } }
+    )
+    await drain()
+    expect(mockedApi.startWorkspaceStateStream).toHaveBeenCalledTimes(1)
+    expect(mockedApi.startWorkspaceStateStream).toHaveBeenLastCalledWith(
+      "/machine/h1",
+      true
+    )
+    // The start sequence's own catch-up read.
+    const snapshotReads = mockedApi.getWorkspaceSnapshot.mock.calls.length
+
+    // Down to paths: re-registered as paths, the full ref released — and no
+    // catch-up resync, which a release-then-acquire inside the shutdown grace
+    // would have pulled.
+    rerender({ mode: "paths" })
+    await drain()
+    expect(mockedApi.startWorkspaceStateStream).toHaveBeenLastCalledWith(
+      "/machine/h1",
+      false
+    )
+    expect(mockedApi.stopWorkspaceStateStream).toHaveBeenCalledTimes(1)
+    expect(mockedApi.stopWorkspaceStateStream).toHaveBeenLastCalledWith(
+      "/machine/h1",
+      true
+    )
+    await vi.advanceTimersByTimeAsync(700)
+    expect(mockedApi.stopWorkspaceStateStream).toHaveBeenCalledTimes(1)
+
+    // Back up to full: the upgrade, still no resync.
+    rerender({ mode: "full" })
+    await drain()
+    expect(mockedApi.startWorkspaceStateStream).toHaveBeenLastCalledWith(
+      "/machine/h1",
+      true
+    )
+    expect(mockedApi.getWorkspaceSnapshot).toHaveBeenCalledTimes(snapshotReads)
+
+    unmount()
+    await vi.advanceTimersByTimeAsync(700)
+    expect(mockedApi.stopWorkspaceStateStream).toHaveBeenLastCalledWith(
+      "/machine/h1",
+      true
+    )
+  })
+
+  it("re-renders with the same mode without touching the stream", async () => {
+    const { rerender, unmount } = renderHook(
+      ({ mode }: { mode: WorkspaceWatchMode }) =>
+        useWorkspaceStateStore("/machine/h2", mode),
+      { initialProps: { mode: "paths" as WorkspaceWatchMode } }
+    )
+    await drain()
+    rerender({ mode: "paths" })
+    await drain()
+    expect(mockedApi.startWorkspaceStateStream).toHaveBeenCalledTimes(1)
+    expect(mockedApi.stopWorkspaceStateStream).not.toHaveBeenCalled()
+    unmount()
+    await vi.advanceTimersByTimeAsync(700)
+  })
+})
+
+describe("workspace state store keeps unchanged data", () => {
+  const tree = () => [
+    {
+      name: "src",
+      path: "src",
+      kind: "dir" as const,
+      children: [
+        { name: "a.ts", path: "src/a.ts", kind: "file" as const, children: [] },
+      ],
+    },
+  ]
+  const changes = () => [
+    { path: "src/a.ts", status: "M", additions: 1, deletions: 0 },
+  ]
+  const snapshotWith = (
+    rootPath: string,
+    seq: number,
+    treeSnapshot: unknown,
+    statusSnapshot: unknown
+  ) => ({
+    ...fullSnapshot(rootPath, seq),
+    tree_snapshot: treeSnapshot,
+    git_snapshot: statusSnapshot,
+  })
+
+  it("keeps the tree and change list when a snapshot brings the same again", async () => {
+    mockedApi.startWorkspaceStateStream.mockImplementation((rootPath: string) =>
+      Promise.resolve(snapshotWith(rootPath, 0, tree(), changes()))
+    )
+    mockedApi.getWorkspaceSnapshot.mockImplementation((rootPath: string) =>
+      Promise.resolve(snapshotWith(rootPath, 0, tree(), changes()))
+    )
+    const store = getWorkspaceStateStore("/machine/s1")
+    const token = store.acquire("full")
+    await drain()
+    const before = store.getSnapshot()
+    expect(before.tree).toHaveLength(1)
+
+    await store.requestResync("test")
+    const after = store.getSnapshot()
+    expect(after.tree).toBe(before.tree)
+    expect(after.git).toBe(before.git)
+
+    // A real change still lands.
+    const renamed = tree()
+    renamed[0].children[0].name = "b.ts"
+    mockedApi.getWorkspaceSnapshot.mockResolvedValueOnce(
+      snapshotWith("/machine/s1", 0, renamed, changes())
+    )
+    await store.requestResync("test")
+    expect(store.getSnapshot().tree).not.toBe(before.tree)
+    expect(store.getSnapshot().tree).toEqual(renamed)
+    expect(store.getSnapshot().git).toBe(before.git)
+
+    store.release(token)
+    await vi.advanceTimersByTimeAsync(700)
+  })
+
+  it("keeps them when a replace delta re-sends what is there", async () => {
+    mockedApi.startWorkspaceStateStream.mockImplementation((rootPath: string) =>
+      Promise.resolve(snapshotWith(rootPath, 0, tree(), changes()))
+    )
+    mockedApi.getWorkspaceSnapshot.mockImplementation((rootPath: string) =>
+      Promise.resolve(snapshotWith(rootPath, 0, tree(), changes()))
+    )
+    const subscribeMock = platform.subscribe as unknown as Mock
+    subscribeMock.mockClear()
+    const store = getWorkspaceStateStore("/machine/s2")
+    const token = store.acquire("full")
+    await drain()
+    const calls = subscribeMock.mock.calls
+    const listener = calls[calls.length - 1]?.[1] as (event: unknown) => void
+    const before = store.getSnapshot()
+
+    listener({
+      root_path: "/machine/s2",
+      seq: 1,
+      version: 1,
+      kind: "fs_delta",
+      payload: [
+        { kind: "tree_replace", nodes: tree() },
+        { kind: "git_replace", entries: changes() },
+      ],
+      requires_resync: false,
+      changed_paths: ["src/a.ts"],
+    })
+    const after = store.getSnapshot()
+    expect(after.seq).toBe(1)
+    expect(after.tree).toBe(before.tree)
+    expect(after.git).toBe(before.git)
+
+    store.release(token)
     await vi.advanceTimersByTimeAsync(700)
   })
 })
