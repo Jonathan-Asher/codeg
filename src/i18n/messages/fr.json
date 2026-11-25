@@ -2769,6 +2769,8 @@
       "save": "Enregistrer",
       "pin": "Épingler",
       "unpin": "Désépingler",
+      "pinInSidebar": "Épingler dans la barre latérale",
+      "unpinFromSidebar": "Retirer de la barre latérale",
       "markCritical": "Marquer comme critique",
       "unmarkCritical": "Retirer la marque critique",
       "talkOn": "Activer le mode conversation",

@@ -1017,6 +1017,7 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
             accentStyle={
               runKey ? runVisuals.byRun.get(runKey)?.style : undefined
             }
+            onOpenConversations={openConversations}
           />
         )
       })}

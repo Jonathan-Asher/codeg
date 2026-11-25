@@ -12,17 +12,17 @@ import { Reorder, useMotionValue } from "motion/react"
 import type { PanInfo } from "motion/react"
 import { BotIcon, Pin, X } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { toast } from "sonner"
 import { cn, handleMiddleClickClose } from "@/lib/utils"
-import { toErrorMessage } from "@/lib/app-error"
-import { setConversationCritical } from "@/lib/critical-sessions"
-import { setTalkMode } from "@/lib/talk-mode"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { AgentIcon } from "@/components/agent-icon"
 import { CriticalFlag } from "@/components/conversations/critical-flag"
 import { TalkBadge } from "@/components/conversations/talk-badge"
-import { useTalkMenu } from "@/components/talk-voice/use-talk-menu"
-import { ContinueInAgentMenuItem } from "@/components/conversations/continue-in-agent-menu-item"
+import { SessionActionsMenuItems } from "@/components/conversations/session-actions-menu"
+import {
+  openSessionDialog,
+  useKnownConversationSummary,
+} from "@/components/conversations/session-dialog-host"
+import { useSessionActionHandlers } from "@/hooks/use-session-action-handlers"
 import {
   acquireDragSelectionGuard,
   releaseDragSelectionGuard,
@@ -123,8 +123,9 @@ interface TabItemProps {
   isTouchSorting: boolean
   onTouchSortingStart: (tabId: string) => void
   onTouchSortingEnd: () => void
-  /** False while the strip is sorted by status, activity or name: that order
-   *  is derived, so a drag would have nothing coherent to write back. Defaults
+  /** False while the strip is sorted by status or name: that order is
+   *  derived, so a drag would have nothing coherent to write back (a drag on a
+   *  recent-activity strip holds the tab instead, see `TabSortHold`). Defaults
    *  to true. */
   reorderable?: boolean
   /** Appended to the tooltip while `reorderable` is false, saying why. */
@@ -143,6 +144,9 @@ interface TabItemProps {
    *  the tab's top edge, shown while grouped / sorted. Must be referentially
    *  stable per group — this component is memoized. */
   accentStyle?: CSSProperties
+  /** Brings the conversation workspace back over a workbench route, for the
+   *  session menu's "New Conversation". Must be stable. */
+  onOpenConversations?: () => void
 }
 
 /** How far past its group's edge a drag must push before it reads as a
@@ -189,6 +193,7 @@ export const TabItem = memo(function TabItem({
   dragLane,
   dimmed = false,
   accentStyle,
+  onOpenConversations,
 }: TabItemProps) {
   const t = useTranslations("Folder.tabs")
   const tSidebar = useTranslations("Folder.sidebar")
@@ -206,15 +211,6 @@ export const TabItem = memo(function TabItem({
       conversationId != null &&
       s.conversations.find((c) => c.id === conversationId)?.talk_mode === true
   )
-  // A delegation sub-session is driven by its parent and not watched on its
-  // own, so its tab offers no mark (only an unmark, should one be marked).
-  const isSubsession = useAppWorkspaceStore(
-    (s) =>
-      conversationId != null &&
-      s.conversations.find((c) => c.id === conversationId)?.parent_id != null
-  )
-  const talkMenu = useTalkMenu(conversationId, isTalk)
-  const tTalk = useTranslations("TalkVoice")
   // Live background activity the review-status dot can't show: the agent
   // running a turn of its own, or idle while its background tasks run.
   const background = useConversationBackground(conversationId)
@@ -234,18 +230,6 @@ export const TabItem = memo(function TabItem({
   const attention = useConversationAttentionStore((s) =>
     conversationId != null ? s.byConversationId.get(conversationId) : undefined
   )
-  const handleToggleCritical = useCallback(() => {
-    if (conversationId == null) return
-    setConversationCritical(conversationId, !isCritical).catch((err) => {
-      toast.error(t("criticalToggleFailed", { message: toErrorMessage(err) }))
-    })
-  }, [conversationId, isCritical, t])
-  const handleToggleTalk = useCallback(() => {
-    if (conversationId == null) return
-    setTalkMode(conversationId, !isTalk).catch((err) => {
-      toast.error(t("talkToggleFailed", { message: toErrorMessage(err) }))
-    })
-  }, [conversationId, isTalk, t])
 
   const resolvedFolderName = folderName ?? String(tab.folderId)
   const baseTooltip = folderBranch
@@ -659,49 +643,16 @@ export const TabItem = memo(function TabItem({
             </ContextMenuItem>
           )}
           <ContextMenuSeparator />
-          {/* Hand the work to a new session on another agent. A
-              sub-session goes on with its parent. */}
-          {conversationId != null && !isSubsession && (
-            <>
-              <ContinueInAgentMenuItem
-                conversationId={conversationId}
-                item={ContextMenuItem}
-              />
-              <ContextMenuSeparator />
-            </>
+          {/* The session's own actions, the very ones its sidebar row
+              offers (rename, fork, move, continue in another agent, pin,
+              critical, Talk, details, status, delete…). A draft has no
+              session yet, and a sub-agent's thread is no session row. */}
+          {conversationId != null && (
+            <TabSessionActions
+              conversationId={conversationId}
+              onOpenConversations={onOpenConversations}
+            />
           )}
-          {conversationId != null &&
-            (!isSubsession || isCritical || isTalk || talkMenu.showEndTalk) && (
-              <>
-                {(!isSubsession || isCritical) && (
-                  <ContextMenuItem onSelect={handleToggleCritical}>
-                    {isCritical ? t("unmarkCritical") : t("markCritical")}
-                  </ContextMenuItem>
-                )}
-                {/* Talk on this Mac, or its end in the window that holds
-                    it. */}
-                {talkMenu.showEndTalk && (
-                  <ContextMenuItem onSelect={talkMenu.endTalk}>
-                    {tTalk("menuEndTalk")}
-                  </ContextMenuItem>
-                )}
-                {!isSubsession && talkMenu.showTalkOnMac && (
-                  <ContextMenuItem onSelect={talkMenu.startTalk}>
-                    {tTalk("menuTalkOnMac")}
-                  </ContextMenuItem>
-                )}
-                {/* Talk mode held from the phone: turned off here too, for
-                    one a phone left on. Turned on (reply style only) where
-                    Talk on this Mac can't run. */}
-                {(!isSubsession || isTalk) &&
-                  (talkMenu.showTurnOff || talkMenu.showTurnOn) && (
-                    <ContextMenuItem onSelect={handleToggleTalk}>
-                      {isTalk ? t("talkOff") : t("talkOn")}
-                    </ContextMenuItem>
-                  )}
-                <ContextMenuSeparator />
-              </>
-            )}
           {/* IDEA-style split-group vocabulary. Plain "Split" seeds the new
               group with a fresh draft (a conversation can't be open in two
               groups at once), "Split and Move" relocates this tab. */}
@@ -783,3 +734,47 @@ export const TabItem = memo(function TabItem({
     </Reorder.Item>
   )
 })
+
+/**
+ * A tab's session section (`SessionActionsMenuItems`), mounted with the menu's
+ * content, so only while the menu is open: the tab itself subscribes to no
+ * more than the marks it draws. Nothing shows for a session this window has
+ * no summary of yet. Its dialogs open in the workspace's host, clear of the
+ * strip (see `SessionDialogHost`).
+ */
+function TabSessionActions({
+  conversationId,
+  onOpenConversations,
+}: {
+  conversationId: number
+  onOpenConversations?: () => void
+}) {
+  const conversation = useKnownConversationSummary(conversationId)
+  const handlers = useSessionActionHandlers(onOpenConversations)
+  // The sidebar offers Export on its pinned rows (the section that reads as
+  // "my go-to conversations"); a tab offers it for the same sessions.
+  const exportMarkdown =
+    conversation?.pinned_at != null ? handlers.onExportMarkdown : undefined
+  const menuHandlers = useMemo(
+    () => ({ ...handlers, onExportMarkdown: exportMarkdown }),
+    [handlers, exportMarkdown]
+  )
+  const onOpenDialog = useCallback(
+    (kind: Parameters<typeof openSessionDialog>[1]) =>
+      openSessionDialog(conversationId, kind),
+    [conversationId]
+  )
+  if (!conversation) return null
+  return (
+    <>
+      <SessionActionsMenuItems
+        conversation={conversation}
+        handlers={menuHandlers}
+        onOpenDialog={onOpenDialog}
+        item={ContextMenuItem}
+        surface="tab"
+      />
+      <ContextMenuSeparator />
+    </>
+  )
+}

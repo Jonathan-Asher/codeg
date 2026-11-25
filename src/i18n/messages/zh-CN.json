@@ -2769,6 +2769,8 @@
       "save": "保存",
       "pin": "置顶",
       "unpin": "取消置顶",
+      "pinInSidebar": "在侧边栏置顶",
+      "unpinFromSidebar": "取消侧边栏置顶",
       "markCritical": "标记为关键",
       "unmarkCritical": "取消关键标记",
       "talkOn": "开启语音对话模式",

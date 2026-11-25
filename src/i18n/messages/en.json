@@ -2769,6 +2769,8 @@
       "save": "Save",
       "pin": "Pin",
       "unpin": "Unpin",
+      "pinInSidebar": "Pin in sidebar",
+      "unpinFromSidebar": "Unpin from sidebar",
       "markCritical": "Mark as critical",
       "unmarkCritical": "Unmark critical",
       "talkOn": "Turn on Talk mode",

@@ -2769,6 +2769,8 @@
       "save": "Salvar",
       "pin": "Fixar",
       "unpin": "Desafixar",
+      "pinInSidebar": "Fixar na barra lateral",
+      "unpinFromSidebar": "Desafixar da barra lateral",
       "markCritical": "Marcar como crítica",
       "unmarkCritical": "Desmarcar crítica",
       "talkOn": "Ativar o modo conversa",

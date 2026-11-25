@@ -2769,6 +2769,8 @@
       "save": "Speichern",
       "pin": "Anheften",
       "unpin": "Loslösen",
+      "pinInSidebar": "In der Seitenleiste anheften",
+      "unpinFromSidebar": "Aus der Seitenleiste lösen",
       "markCritical": "Als kritisch markieren",
       "unmarkCritical": "Kritisch-Markierung entfernen",
       "talkOn": "Sprechmodus einschalten",

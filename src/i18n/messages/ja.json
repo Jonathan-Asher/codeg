@@ -2769,6 +2769,8 @@
       "save": "保存",
       "pin": "ピン留め",
       "unpin": "ピン留めを解除",
+      "pinInSidebar": "サイドバーにピン留め",
+      "unpinFromSidebar": "サイドバーのピン留めを解除",
       "markCritical": "重要としてマーク",
       "unmarkCritical": "重要マークを解除",
       "talkOn": "トークモードをオンにする",

@@ -2769,6 +2769,8 @@
       "save": "저장",
       "pin": "고정",
       "unpin": "고정 해제",
+      "pinInSidebar": "사이드바에 고정",
+      "unpinFromSidebar": "사이드바 고정 해제",
       "markCritical": "중요로 표시",
       "unmarkCritical": "중요 표시 해제",
       "talkOn": "토크 모드 켜기",
