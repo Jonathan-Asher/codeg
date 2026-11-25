@@ -5,8 +5,10 @@ import type { DbConversationSummary } from "@/lib/types"
 import {
   arrangeTabs,
   effectiveSort,
+  isSortHoldLive,
   shownTabs,
   type ArrangedTabs,
+  type TabSortHold,
 } from "@/lib/tab-arrangement"
 import type { TabItem } from "@/stores/tab-store"
 import { groupOfTab, isTabInScope, useTabStore } from "@/stores/tab-store"
@@ -17,6 +19,16 @@ import { useConversationAttentionStore } from "@/stores/conversation-attention-s
 const NO_CONVERSATIONS: DbConversationSummary[] = []
 const NO_CHILDREN = new Map<number, DbConversationSummary>()
 const NO_ACTIVITY: ReadonlyMap<number, number> = new Map()
+const NO_HOLDS: ReadonlyMap<string, TabSortHold> = new Map()
+
+function holdsMap(
+  record: Readonly<Record<string, TabSortHold>>
+): ReadonlyMap<string, TabSortHold> {
+  const keys = Object.keys(record)
+  return keys.length === 0
+    ? NO_HOLDS
+    : new Map(keys.map((id) => [id, record[id]]))
+}
 
 function parseTime(value: string | undefined): number | undefined {
   if (!value) return undefined
@@ -56,9 +68,45 @@ function useTabActivity(enabled: boolean): ReadonlyMap<number, number> {
 }
 
 /**
+ * Let go of the holds whose tab shows newer activity than when it was
+ * dropped, or is no longer open. The arrangement already ignores a released
+ * hold; this keeps the stored ones from piling up. Only once the tab set is
+ * known — while it is still loading, every tab would read as closed.
+ */
+function useReleaseStaleHolds(
+  enabled: boolean,
+  activity: ReadonlyMap<number, number>,
+  holds: Readonly<Record<string, TabSortHold>>
+) {
+  const tabsHydrated = useTabStore((s) => s.tabsHydrated)
+  useEffect(() => {
+    if (!enabled || !tabsHydrated) return
+    const ids = Object.keys(holds)
+    if (ids.length === 0) return
+    const open = new Map(useTabStore.getState().tabs.map((t) => [t.id, t]))
+    const stale = ids.filter((id) => {
+      const tab = open.get(id)
+      if (!tab) return true
+      const own =
+        tab.conversationId != null
+          ? activity.get(tab.conversationId)
+          : undefined
+      return !isSortHoldLive(holds[id], own)
+    })
+    if (stale.length > 0) {
+      useTabArrangeStore.getState().releaseSortHolds(stale)
+    }
+  }, [enabled, tabsHydrated, activity, holds])
+}
+
+/**
  * A strip's tabs as displayed: grouped and sorted per the user's view
  * choices, with collapsed groups folded away. Shared by the tab strips and the
  * tab-switching shortcuts so both walk exactly the same order.
+ *
+ * Under the recent-activity sort it also hands back what that order is made
+ * of — the activity per conversation and the holds of dragged tabs — so a drag
+ * can work out where its tab now sits.
  */
 export function useArrangedTabs(
   tabs: readonly TabItem[],
@@ -66,29 +114,39 @@ export function useArrangedTabs(
 ): {
   arranged: ArrangedTabs<TabItem>
   shown: readonly TabItem[]
+  activity: ReadonlyMap<number, number>
+  holds: ReadonlyMap<string, TabSortHold>
 } {
   const groupBy = useTabArrangeStore((s) => s.groupBy)
   const sort = useTabArrangeStore((s) => s.sort)
   const groupOrder = useTabArrangeStore((s) => s.groupOrder)
   const collapsedRuns = useTabArrangeStore((s) => s.collapsedRuns)
+  const recent = effectiveSort({ groupBy, sort }) === "recent"
+  const holdRecord = useTabArrangeStore((s) => s.sortHolds)
   const attention = useConversationAttentionStore((s) => s.byConversationId)
   useEffect(() => {
     useTabArrangeStore.getState().hydrate()
   }, [])
-  const activity = useTabActivity(effectiveSort({ groupBy, sort }) === "recent")
+  const activity = useTabActivity(recent)
+  const holds = useMemo(
+    () => (recent ? holdsMap(holdRecord) : NO_HOLDS),
+    [recent, holdRecord]
+  )
+  useReleaseStaleHolds(recent, activity, holdRecord)
   const arranged = useMemo(
     () =>
       arrangeTabs(tabs, { groupBy, sort }, attention, {
         groupOrder,
         activity,
+        holds,
       }),
-    [tabs, groupBy, sort, attention, groupOrder, activity]
+    [tabs, groupBy, sort, attention, groupOrder, activity, holds]
   )
   const shown = useMemo(
     () => shownTabs(arranged, collapsedRuns, activeTabId),
     [arranged, collapsedRuns, activeTabId]
   )
-  return { arranged, shown }
+  return { arranged, shown, activity, holds }
 }
 
 /**
@@ -118,10 +176,13 @@ export function useSwitchToManualOrder(): () => void {
       else byGroup.set(groupId, [tab])
     }
     const split = st.groupLayout.type !== "group"
+    // A held tab stays where it is on screen, so where it was dropped.
+    const holds = holdsMap(view.sortHolds)
     for (const [groupId, list] of byGroup) {
       const { ordered } = arrangeTabs(list, view, attention, {
         groupOrder: view.groupOrder,
         activity,
+        holds,
       })
       if (split) st.reorderGroupTabs(groupId, [...ordered])
       else st.reorderTabs([...ordered])

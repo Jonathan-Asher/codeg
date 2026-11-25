@@ -18,6 +18,10 @@ import {
  * both the user's own doing: dragging a pinned tab (pinned tabs keep the manual
  * order under every sort, so they always drag), and "Switch to manual order",
  * which makes the order on screen the manual one.
+ *
+ * A drag under `recent` sorting doesn't touch the manual order either: the
+ * dropped tab gets a hold ({@link TabSortHold}) that keeps it where it was
+ * dropped until its session shows newer activity.
  */
 export const TAB_GROUP_BYS = ["none", "folder", "status"] as const
 export type TabGroupBy = (typeof TAB_GROUP_BYS)[number]
@@ -84,6 +88,97 @@ export function effectiveSort(view: TabView): TabSort {
   return view.groupBy === "status" && view.sort === "status"
     ? "manual"
     : view.sort
+}
+
+/**
+ * Whether tabs drag under `sort`: the manual order, and recent activity, where
+ * a dropped tab is held in place (see {@link TabSortHold}). Status and name
+ * orders are derived from what the tab is, so a drag would have nothing to
+ * hold on to — a status changes too rarely and a name never.
+ */
+export function sortAllowsDrag(sort: TabSort): boolean {
+  return sort === "manual" || sort === "recent"
+}
+
+/**
+ * A tab dragged on a strip sorted by recent activity, held where it was
+ * dropped. `key` is the activity value it sorts by meanwhile — one between its
+ * new neighbours' — and `heldAt` is its own activity when it was dropped (null:
+ * none known, a draft). The hold lasts until the tab's activity moves past
+ * `heldAt`: new activity sorts it to the front like any active tab.
+ */
+export interface TabSortHold {
+  key: number
+  heldAt: number | null
+}
+
+/** A hold still applies while the tab shows no activity newer than when it
+ *  was dropped. Unknown activity (a summary not loaded yet) keeps it. */
+export function isSortHoldLive(
+  hold: TabSortHold,
+  activity: number | undefined
+): boolean {
+  if (activity == null) return true
+  return hold.heldAt != null && activity <= hold.heldAt
+}
+
+/** What a tab sorts by under `recent`: its live hold, else its activity. */
+function recentSortKey(
+  tab: ArrangeableTab,
+  activity: ReadonlyMap<number, number> | undefined,
+  holds: ReadonlyMap<string, TabSortHold> | undefined
+): number {
+  const own =
+    tab.conversationId != null ? activity?.get(tab.conversationId) : undefined
+  const hold = holds?.get(tab.id)
+  if (hold && isSortHoldLive(hold, own)) return hold.key
+  return own ?? -Infinity
+}
+
+/**
+ * The hold that keeps `movedId` where a drag on a recent-activity strip put it.
+ *
+ * `lane` is the moved tab's lane (its group, or the whole unpinned strip) in
+ * the new on-screen order. The hold sorts it between its new neighbours: half
+ * way between them, just above the first one when it went to the front, just
+ * below the last dated one when it went past them.
+ *
+ * Returns null when no hold is needed (activity alone already puts it there),
+ * and undefined when there is no key to give it: dropped between two tabs that
+ * have no activity at all (drafts), whose order the manual order decides.
+ */
+export function holdForRecentDrop<T extends ArrangeableTab>(
+  lane: readonly T[],
+  movedId: string,
+  activity: ReadonlyMap<number, number> | undefined,
+  holds: ReadonlyMap<string, TabSortHold> | undefined
+): TabSortHold | null | undefined {
+  const at = lane.findIndex((tab) => tab.id === movedId)
+  if (at < 0) return undefined
+  if (lane.length < 2) return null
+  const moved = lane[at]
+  const own =
+    moved.conversationId != null
+      ? activity?.get(moved.conversationId)
+      : undefined
+  const natural = own ?? -Infinity
+  const prev = at > 0 ? recentSortKey(lane[at - 1], activity, holds) : Infinity
+  const next =
+    at < lane.length - 1
+      ? recentSortKey(lane[at + 1], activity, holds)
+      : -Infinity
+  // Its own activity already sorts it here, strictly between the two.
+  if (prev > natural && natural > next) return null
+  const heldAt = own ?? null
+  if (Number.isFinite(prev) && Number.isFinite(next)) {
+    return { key: (prev + next) / 2, heldAt }
+  }
+  if (Number.isFinite(next)) return { key: next + 1, heldAt }
+  if (Number.isFinite(prev)) return { key: prev - 1, heldAt }
+  // Ahead of tabs with no activity at all: the lowest key that still sorts
+  // above them.
+  if (prev === Infinity) return { key: -Number.MAX_VALUE, heldAt }
+  return undefined
 }
 
 interface ArrangeableTab {
@@ -169,14 +264,16 @@ function compareNames(a: string, b: string): number {
  *
  * - `status`: most urgent band first;
  * - `recent`: latest activity (`activity`, ms by conversation id) first; a tab
- *   with no known activity (a draft, a conversation not loaded) goes last;
+ *   with no known activity (a draft, a conversation not loaded) goes last. A
+ *   tab with a live hold (`holds`, by tab id) sorts by the hold's key instead;
  * - `name`: by title, natural order ("Tab 2" before "Tab 10"), case-blind.
  */
 export function sortTabs<T extends ArrangeableTab>(
   tabs: readonly T[],
   sort: TabSort,
   attention: ReadonlyMap<number, AttentionKind>,
-  activity?: ReadonlyMap<number, number>
+  activity?: ReadonlyMap<number, number>,
+  holds?: ReadonlyMap<string, TabSortHold>
 ): readonly T[] {
   if (sort === "manual" || tabs.length < 2) return tabs
   if (sort === "status") {
@@ -184,13 +281,12 @@ export function sortTabs<T extends ArrangeableTab>(
     return [...tabs].sort((a, b) => rank.get(a)! - rank.get(b)!)
   }
   if (sort === "recent") {
-    const at = (tab: T) =>
-      tab.conversationId != null
-        ? (activity?.get(tab.conversationId) ?? -Infinity)
-        : -Infinity
+    const key = new Map(
+      tabs.map((tab) => [tab, recentSortKey(tab, activity, holds)])
+    )
     return [...tabs].sort((a, b) => {
-      const x = at(a)
-      const y = at(b)
+      const x = key.get(a)!
+      const y = key.get(b)!
       return x === y ? 0 : x > y ? -1 : 1
     })
   }
@@ -228,12 +324,14 @@ export function arrangeTabs<T extends ArrangeableTab>(
   options: {
     groupOrder?: TabGroupOrder
     activity?: ReadonlyMap<number, number>
+    /** Tabs dragged on a recent-activity strip (see {@link TabSortHold}). */
+    holds?: ReadonlyMap<string, TabSortHold>
   } = {}
 ): ArrangedTabs<T> {
   const sort = effectiveSort(view)
-  const { groupOrder = EMPTY_GROUP_ORDER, activity } = options
+  const { groupOrder = EMPTY_GROUP_ORDER, activity, holds } = options
   const sorted = (list: readonly T[]) =>
-    sortTabs(list, sort, attention, activity)
+    sortTabs(list, sort, attention, activity, holds)
 
   const anchored = tabs.filter((tab) => tab.isAnchored === true)
   const rest =
