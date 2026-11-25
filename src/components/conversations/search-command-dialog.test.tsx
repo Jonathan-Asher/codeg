@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -12,6 +12,10 @@ import {
   armQuickSwitchTypeahead,
   cancelQuickSwitchTypeahead,
 } from "@/lib/quick-switch-typeahead"
+import {
+  isQuickSwitchReplaceMode,
+  setQuickSwitchReplaceMode,
+} from "@/lib/quick-switch-mode"
 
 const h = vi.hoisted(() => ({
   searchMessages: vi.fn(),
@@ -19,6 +23,26 @@ const h = vi.hoisted(() => ({
   openTab: vi.fn(),
   openConversations: vi.fn(),
   resetFileTree: vi.fn(),
+  openSession: null as unknown as ReturnType<typeof vi.fn>,
+}))
+
+// Where a pick opens is the open rule's business (`useOpenSession`, tested on
+// its own); here it opens as the switcher did before the rule, a kept tab,
+// and records what the pick asked for.
+h.openSession = vi.fn(
+  (
+    target: { id: number; folderId: number; agentType: string },
+    options: { source: string; intent?: string }
+  ) =>
+    h.openTab(
+      target.folderId,
+      target.id,
+      target.agentType,
+      options.source === "switcher"
+    )
+)
+vi.mock("@/hooks/use-open-session", () => ({
+  useOpenSession: () => h.openSession,
 }))
 
 vi.mock("@/components/agent-icon", () => ({ AgentIcon: () => null }))
@@ -1061,5 +1085,122 @@ describe("SearchCommandDialog All tab", () => {
   it("hints that Tab moves to the next search", () => {
     renderDialog()
     expect(screen.getByText(enMessages.Folder.search.tabHint)).toBeTruthy()
+  })
+})
+
+describe("SearchCommandDialog: where the pick opens", () => {
+  const LEGAL = { id: 2, folderId: 5, agentType: "codex" }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    setQuickSwitchReplaceMode(false)
+    folders.active = folders.all[0]
+    h.listAllConversations.mockResolvedValue([])
+    h.searchMessages.mockResolvedValue([])
+    store.conversations = [
+      conv(1, 3, "Release prep", { updated_at: "2026-09-30T10:00:00Z" }),
+      conv(2, 5, "Legal brief", {
+        agent_type: "codex",
+        updated_at: "2026-09-30T11:00:00Z",
+      }),
+    ]
+    tabState.tabs = [
+      {
+        id: "tab-1",
+        kind: "conversation",
+        folderId: 3,
+        conversationId: 1,
+        agentType: "claude_code",
+        title: "Release prep",
+        isPinned: true,
+      },
+    ]
+    tabState.activeTabId = "tab-1"
+  })
+
+  afterEach(() => setQuickSwitchReplaceMode(false))
+
+  function dialog(open: boolean) {
+    return (
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <SearchCommandDialog open={open} onOpenChange={vi.fn()} />
+      </NextIntlClientProvider>
+    )
+  }
+
+  async function shown() {
+    const view = render(dialog(true))
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole("option")[0].getAttribute("aria-selected")
+      ).toBe("true")
+    )
+    return { ...view, user: userEvent.setup() }
+  }
+
+  const lastAsk = () => h.openSession.mock.lastCall?.[1]
+
+  it("leaves Enter to the open rule", async () => {
+    const { user } = await shown()
+    await user.keyboard("{Enter}")
+    expect(h.openSession).toHaveBeenLastCalledWith(LEGAL, {
+      source: "switcher",
+      intent: "auto",
+    })
+  })
+
+  // A pick hands the caret on (the search box lets go of it), so each case
+  // picks once.
+  it("asks for a new tab on ⌘Enter", async () => {
+    const { user } = await shown()
+    await user.keyboard("{Meta>}{Enter}{/Meta}")
+    expect(lastAsk()).toEqual({ source: "switcher", intent: "new_tab" })
+  })
+
+  it("asks for this tab on ⌥Enter", async () => {
+    const { user } = await shown()
+    await user.keyboard("{Alt>}{Enter}{/Alt}")
+    expect(lastAsk()).toEqual({ source: "switcher", intent: "replace" })
+  })
+
+  it("reads ⌘ and ⌥ off a click too", async () => {
+    await shown()
+    fireEvent.click(screen.getByText("Legal brief"), { altKey: true })
+    expect(lastAsk()).toEqual({ source: "switcher", intent: "replace" })
+    fireEvent.click(screen.getByText("Legal brief"), { metaKey: true })
+    expect(lastAsk()).toEqual({ source: "switcher", intent: "new_tab" })
+  })
+
+  it("says it is in switch-this-tab mode, where Enter replaces the session in front", async () => {
+    setQuickSwitchReplaceMode(true)
+    const { user } = await shown()
+    expect(
+      document.querySelector("[data-quick-switch-replace-mode]")
+    ).not.toBeNull()
+    expect(screen.getByText("Switch this tab")).toBeTruthy()
+    await user.keyboard("{Enter}")
+    expect(lastAsk()).toEqual({ source: "switcher", intent: "replace" })
+  })
+
+  it("still opens a new tab on ⌘Enter in switch-this-tab mode", async () => {
+    setQuickSwitchReplaceMode(true)
+    const { user } = await shown()
+    await user.keyboard("{Meta>}{Enter}{/Meta}")
+    expect(lastAsk()).toEqual({ source: "switcher", intent: "new_tab" })
+  })
+
+  it("shows no such banner in the plain switcher", async () => {
+    await shown()
+    expect(
+      document.querySelector("[data-quick-switch-replace-mode]")
+    ).toBeNull()
+  })
+
+  it("goes back to the plain switcher once it closes", async () => {
+    setQuickSwitchReplaceMode(true)
+    const { rerender } = await shown()
+    rerender(dialog(false))
+    expect(isQuickSwitchReplaceMode()).toBe(false)
   })
 })

@@ -78,6 +78,10 @@ import {
   type TabStatusBand,
 } from "@/lib/tab-arrangement"
 import { folderTitleTintVars } from "@/lib/theme-presets"
+import {
+  SESSION_OPEN_MODES,
+  type SessionOpenMode,
+} from "@/lib/session-open-decision"
 import { useTabArrangeStore } from "@/stores/tab-arrangement-store"
 import {
   useArrangedTabs,
@@ -105,6 +109,11 @@ const SORT_LABEL = {
   recent: { label: "sortRecent", hint: "sortRecentHint" },
   name: { label: "sortName", hint: "sortNameHint" },
 } as const satisfies Record<TabSort, { label: string; hint: string }>
+const OPEN_MODE_LABEL = {
+  smart: { label: "openSmart", hint: "openSmartHint" },
+  new_tab: { label: "openNewTab", hint: "openNewTabHint" },
+  replace: { label: "openReplace", hint: "openReplaceHint" },
+} as const satisfies Record<SessionOpenMode, { label: string; hint: string }>
 const STATUS_BAND_LABEL = {
   needs_you: "bandNeedsYou",
   awaiting_reply: "bandAwaitingReply",
@@ -215,6 +224,8 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
   const setSort = useTabArrangeStore((s) => s.setSort)
   const setFolderOrder = useTabArrangeStore((s) => s.setFolderOrder)
   const setBandOrder = useTabArrangeStore((s) => s.setBandOrder)
+  const sessionOpenMode = useTabArrangeStore((s) => s.sessionOpenMode)
+  const setSessionOpenMode = useTabArrangeStore((s) => s.setSessionOpenMode)
   const setSortHold = useTabArrangeStore((s) => s.setSortHold)
   const shownSort = effectiveSort({ groupBy, sort })
   const sortIsManual = shownSort === "manual"
@@ -1157,6 +1168,37 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
                 </DropdownMenuItem>
               </>
             )}
+            {/* Where a session picked in the sidebar or ⌘K opens. A tab
+                preference like the two above, kept per device. */}
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>{tTabs("openSessionIn")}</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={sessionOpenMode}
+              onValueChange={(value) =>
+                setSessionOpenMode(value as SessionOpenMode)
+              }
+            >
+              {SESSION_OPEN_MODES.map((option) => (
+                <DropdownMenuRadioItem
+                  key={option}
+                  value={option}
+                  data-session-open-mode={option}
+                  onSelect={(event) => event.preventDefault()}
+                >
+                  <span className="flex flex-col gap-0.5">
+                    <span>{tTabs(OPEN_MODE_LABEL[option].label)}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {tTabs(OPEN_MODE_LABEL[option].hint)}
+                    </span>
+                  </span>
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+            {/* Whatever the choice, the gesture can ask for one or the
+                other (see `intentFromModifiers`). */}
+            <p className="px-3 pt-1 pb-2 text-xs text-muted-foreground">
+              {tTabs("openModifiersHint")}
+            </p>
           </DropdownMenuContent>
         </DropdownMenu>
         {/* Drag spacer, floored at `min-w-10` (40px) instead of `min-w-0`: even

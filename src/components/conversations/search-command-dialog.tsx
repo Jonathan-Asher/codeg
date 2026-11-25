@@ -11,18 +11,19 @@ import {
   useDeferredValue,
   useMemo,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react"
 import { flushSync } from "react-dom"
 import { formatDistance } from "date-fns"
 import { enUS, zhCN, zhTW } from "date-fns/locale"
-import { File, Folder } from "lucide-react"
+import { ArrowRightLeft, File, Folder } from "lucide-react"
 import { useLocale, useTranslations } from "next-intl"
 import { useAuxPanelContext } from "@/contexts/aux-panel-context"
 import { useActiveFolder } from "@/contexts/active-folder-context"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { prefetchConversationDetail } from "@/stores/conversation-runtime-store"
-import { useTabActions, useTabStore } from "@/contexts/tab-context"
+import { useTabStore } from "@/contexts/tab-context"
 import { useWorkbenchRoute } from "@/contexts/workbench-route-context"
 import { useWorkspaceActions } from "@/contexts/workspace-context"
 import {
@@ -47,6 +48,15 @@ import {
   markQuickSwitchPick,
   markQuickSwitchShown,
 } from "@/lib/quick-switch-perf"
+import {
+  setQuickSwitchReplaceMode,
+  useQuickSwitchMode,
+} from "@/lib/quick-switch-mode"
+import {
+  intentFromModifiers,
+  type SessionOpenIntent,
+} from "@/lib/session-open-decision"
+import { useOpenSession } from "@/hooks/use-open-session"
 import type {
   AgentType,
   ConversationStatus,
@@ -350,7 +360,17 @@ export function SearchCommandDialog({
       ),
     [openConversationKey]
   )
-  const { openTab } = useTabActions()
+  const openSession = useOpenSession()
+  // "Switch this tab" mode (its own shortcut): Enter puts the pick in the tab
+  // in front. ⌘Enter / ⌥Enter (or a click with ⌘ / ⌥) ask for a new tab or
+  // this tab in either mode; they are read off the key or click that picks.
+  const replaceMode = useQuickSwitchMode((s) => s.replace)
+  const pickIntentRef = useRef<SessionOpenIntent | null>(null)
+  const takePickIntent = useCallback((): SessionOpenIntent => {
+    const asked = pickIntentRef.current ?? "auto"
+    pickIntentRef.current = null
+    return asked === "auto" && replaceMode ? "replace" : asked
+  }, [replaceMode])
   const { openConversations } = useWorkbenchRoute()
   const { openFilePreview } = useWorkspaceActions()
   const { revealInFileTree } = useAuxPanelContext()
@@ -372,6 +392,11 @@ export function SearchCommandDialog({
   // instead of moving focus, which would only reach the tab buttons.
   const onSearchKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLInputElement>) => {
+      // Enter picks (the list handles it next): note what its modifiers ask.
+      if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+        pickIntentRef.current = intentFromModifiers(event)
+        return
+      }
       if (event.key !== "Tab" || event.altKey || event.ctrlKey) return
       if (event.metaKey || event.nativeEvent.isComposing) return
       event.preventDefault()
@@ -650,6 +675,9 @@ export function SearchCommandDialog({
       startTransition(() => setNow(Date.now()))
     } else if (!open && wasOpen) {
       cancelQuickSwitchTypeahead()
+      // The next opening is the plain switcher unless its shortcut says not.
+      setQuickSwitchReplaceMode(false)
+      pickIntentRef.current = null
       resetPendingRef.current = true
       cancelResetRef.current = afterNextPaint(() => {
         cancelResetRef.current = null
@@ -681,10 +709,13 @@ export function SearchCommandDialog({
       // isn't stranded behind the route overlay — covers re-selecting the
       // already-active tab, which doesn't change activeTabId.
       openConversations()
-      openTab(conv.folder_id, conv.id, conv.agent_type, true)
+      openSession(
+        { id: conv.id, folderId: conv.folder_id, agentType: conv.agent_type },
+        { source: "switcher", intent: takePickIntent() }
+      )
       onOpenChange(false)
     },
-    [openTab, onOpenChange, openConversations, releaseFocus]
+    [openSession, onOpenChange, openConversations, releaseFocus, takePickIntent]
   )
 
   const handleSelectMessageHit = useCallback(
@@ -694,12 +725,32 @@ export function SearchCommandDialog({
       // its find bar, so the matched turn is highlighted in context even when
       // it sits pages deep — also in a conversation that is already open.
       openConversations()
-      openTab(hit.folder_id, hit.conversation_id, hit.agent_type, true)
+      openSession(
+        {
+          id: hit.conversation_id,
+          folderId: hit.folder_id,
+          agentType: hit.agent_type,
+        },
+        { source: "switcher", intent: takePickIntent() }
+      )
       setPendingFind(hit.conversation_id, query.trim())
       onOpenChange(false)
     },
-    [openTab, onOpenChange, openConversations, query, releaseFocus]
+    [
+      openSession,
+      onOpenChange,
+      openConversations,
+      query,
+      releaseFocus,
+      takePickIntent,
+    ]
   )
+
+  // A click with ⌘ / ⌥ asks for a new tab / this tab, like ⌘Enter / ⌥Enter.
+  // Read in the capture phase, before the row's own click picks it.
+  const handleListClickCapture = useCallback((event: ReactMouseEvent) => {
+    pickIntentRef.current = intentFromModifiers(event)
+  }, [])
 
   const handleSelectFile = useCallback(
     (entry: FlatFileEntry) => {
@@ -915,6 +966,22 @@ export function SearchCommandDialog({
 
   const content: ReactNode = (
     <>
+      {/* "Switch this tab" mode says so first: Enter replaces the session in
+          front rather than opening one beside it. */}
+      {replaceMode && (
+        <div
+          data-quick-switch-replace-mode
+          className="flex items-center gap-2 border-b bg-primary/6 px-4 py-2 text-sm"
+        >
+          <ArrowRightLeft className="h-4 w-4 shrink-0 text-primary" />
+          <span className="min-w-0 flex-1">
+            <span className="font-medium">{t("replaceModeTitle")}</span>
+            <span className="ms-2 text-xs text-muted-foreground">
+              {t("replaceModeHint")}
+            </span>
+          </span>
+        </div>
+      )}
       {/* Folder context header */}
       {folder && (
         <div className="flex items-center gap-2 border-b px-4 py-2.5">
@@ -1031,7 +1098,11 @@ export function SearchCommandDialog({
         </div>
       )}
 
-      <CommandList ref={listRef} className="min-h-96">
+      <CommandList
+        ref={listRef}
+        className="min-h-96"
+        onClickCapture={handleListClickCapture}
+      >
         {/* All: sessions by title first, then the messages that match */}
         {activeTab === "all" && (
           <>

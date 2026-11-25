@@ -529,6 +529,10 @@
         "title": "فتح البحث",
         "description": "إظهار أو إخفاء لوحة البحث في المحادثات"
       },
+      "switch_session_in_tab": {
+        "title": "تبديل الجلسة في علامة التبويب هذه",
+        "description": "يفتح لوحة البحث لعرض جلسة أخرى في علامة التبويب الحالية"
+      },
       "toggle_sidebar": {
         "title": "تبديل الشريط الجانبي الأيسر",
         "description": "إظهار أو إخفاء الشريط الجانبي لقائمة المحادثات"
@@ -2883,7 +2887,9 @@
       "typeToSearchAll": "اكتب للبحث في المحادثات والرسائل",
       "sessionsHeading": "المحادثات",
       "showAllMessages": "عرض كل الرسائل المطابقة",
-      "tabHint": "Tab: البحث التالي"
+      "tabHint": "Tab: البحث التالي",
+      "replaceModeTitle": "تبديل علامة التبويب هذه",
+      "replaceModeHint": "Enter يفتح الجلسة في علامة التبويب هذه · ⌘/Ctrl+Enter في علامة تبويب جديدة"
     },
     "folderTitleBar": {
       "showSidebar": "إظهار الشريط الجانبي",
@@ -3126,6 +3132,14 @@
       "sortRecentHint": "الأحدث نشاطًا أولًا",
       "sortName": "الاسم",
       "sortNameHint": "من الألف إلى الياء",
+      "openSessionIn": "عند فتح جلسة",
+      "openSmart": "ذكي",
+      "openSmartHint": "في علامة التبويب الحالية إن كنت تكتفي بالنظر إليها",
+      "openNewTab": "علامة تبويب جديدة دائمًا",
+      "openNewTabHint": "كما في السابق: النقرة تعرض معاينة، و⌘K تفتح علامة تبويب",
+      "openReplace": "استبدال علامة التبويب الحالية",
+      "openReplaceHint": "في علامة التبويب الحالية ما لم تكن مثبّتة",
+      "openModifiersHint": "⌘/Ctrl مع النقر أو ⌘/Ctrl+Enter: علامة تبويب جديدة · ⌥/Alt مع النقر أو ⌥/Alt+Enter: علامة التبويب هذه",
       "dragNeedsManualSort": "غيّر الترتيب إلى يدوي لتتمكن من السحب",
       "switchToManualOrder": "التبديل إلى الترتيب اليدوي",
       "switchToManualOrderHint": "الإبقاء على الترتيب الظاهر الآن وسحب علامات التبويب انطلاقًا منه",

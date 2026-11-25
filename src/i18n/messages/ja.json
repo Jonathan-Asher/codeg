@@ -529,6 +529,10 @@
         "title": "検索を開く",
         "description": "会話検索パネルを表示または非表示にします"
       },
+      "switch_session_in_tab": {
+        "title": "このタブのセッションを切り替え",
+        "description": "検索パネルを開き、現在のタブに別のセッションを表示します"
+      },
       "toggle_sidebar": {
         "title": "左サイドバーを切り替え",
         "description": "会話一覧サイドバーを表示または非表示にします"
@@ -2883,7 +2887,9 @@
       "typeToSearchAll": "入力して会話とメッセージを検索",
       "sessionsHeading": "会話",
       "showAllMessages": "一致するメッセージをすべて表示",
-      "tabHint": "Tab：次の検索"
+      "tabHint": "Tab：次の検索",
+      "replaceModeTitle": "このタブを切り替え",
+      "replaceModeHint": "Enterでこのタブに開きます · ⌘/Ctrl+Enterで新しいタブ"
     },
     "folderTitleBar": {
       "showSidebar": "サイドバーを表示",
@@ -3126,6 +3132,14 @@
       "sortRecentHint": "最近動きのあった順",
       "sortName": "名前",
       "sortNameHint": "A から Z",
+      "openSessionIn": "セッションを開くとき",
+      "openSmart": "自動",
+      "openSmartHint": "見ているだけのタブなら、そのタブで開きます",
+      "openNewTab": "常に新しいタブ",
+      "openNewTabHint": "従来どおり：クリックはプレビュー、⌘Kはタブを開きます",
+      "openReplace": "現在のタブを置き換える",
+      "openReplaceHint": "固定されていなければ、手前のタブで開きます",
+      "openModifiersHint": "⌘/Ctrl+クリックまたは⌘/Ctrl+Enter：新しいタブ · ⌥/Alt+クリックまたは⌥/Alt+Enter：このタブ",
       "dragNeedsManualSort": "ドラッグするには並べ替えを「手動」にしてください",
       "switchToManualOrder": "手動の並び順に切り替え",
       "switchToManualOrderHint": "今の並び順のまま、タブをドラッグできるようにします",

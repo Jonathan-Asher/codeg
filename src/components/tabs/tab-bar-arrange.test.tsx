@@ -78,6 +78,7 @@ import { TabBar } from "./tab-bar"
 import { useTabStore } from "@/stores/tab-store"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import {
+  SESSION_OPEN_MODE_KEY,
   SORT_HOLDS_KEY,
   useTabArrangeStore,
 } from "@/stores/tab-arrangement-store"
@@ -506,5 +507,23 @@ describe("TabBar recent-activity drag", () => {
     act(() => h.onReorder!(byId("a1", "c1", "b2", "b1", "a2")))
     act(() => useTabArrangeStore.getState().setSort("name"))
     expect(useTabArrangeStore.getState().sortHolds).toEqual({})
+  })
+})
+
+describe("TabBar: where a session opens", () => {
+  it("offers the three choices beside the view and saves the pick", () => {
+    useTabArrangeStore.setState({ sessionOpenMode: "smart" })
+    renderBar()
+    openMenu()
+    const modes = Array.from(
+      document.querySelectorAll("[data-session-open-mode]")
+    ).map((el) => el.getAttribute("data-session-open-mode"))
+    expect(modes).toEqual(["smart", "new_tab", "replace"])
+    expect(screen.getByText("When you open a session")).toBeTruthy()
+    fireEvent.click(
+      document.querySelector('[data-session-open-mode="replace"]')!
+    )
+    expect(useTabArrangeStore.getState().sessionOpenMode).toBe("replace")
+    expect(window.localStorage.getItem(SESSION_OPEN_MODE_KEY)).toBe("replace")
   })
 })

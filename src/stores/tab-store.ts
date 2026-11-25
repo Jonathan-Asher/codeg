@@ -327,6 +327,22 @@ export interface TabStoreState {
     }
   ) => void
   /**
+   * Show a session in place of the tab `tabId`: same slot, same split group,
+   * and that tab's turn left running (the replaced session is released like a
+   * replaced preview: only once idle). The replaced session goes on the
+   * reopen-closed-tab stack. A session already open is focused where it is
+   * instead, and a tab that may not be replaced — pinned, an unsent draft with
+   * something in it, another folder's slot while tabs follow the folder, or
+   * gone — makes this an ordinary `openTab(…, pin)`.
+   */
+  replaceTabWithConversation: (
+    tabId: string,
+    folderId: number,
+    conversationId: number,
+    agentType: AgentType,
+    opts: { pin: boolean; title?: string }
+  ) => void
+  /**
    * `recordForReopen: false` closes without offering the tab to
    * `reopen_last_closed_tab`. Pass it whenever the tab is going away because
    * its conversation no longer exists — resurrecting it would mint a tab (and
@@ -2065,6 +2081,88 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
       rawTabs: insertTab(prevState.rawTabs, newTab, opts?.index),
       activeTabId: tabId,
       groupOf: { ...prevState.groupOf, [tabId]: targetGroup },
+    })
+    recomputeTabs()
+    runtime.activateConversationPane()
+  },
+
+  replaceTabWithConversation: (
+    tabId,
+    requestedFolderId,
+    conversationId,
+    agentType,
+    { pin, title }
+  ) => {
+    const folderId = canonicalConversationFolder(
+      requestedFolderId,
+      conversationId,
+      agentType
+    )
+    const prevState = get()
+    const index = prevState.rawTabs.findIndex((t) => t.id === tabId)
+    const target = index >= 0 ? prevState.rawTabs[index] : undefined
+    const replaceable =
+      target != null &&
+      target.isAnchored !== true &&
+      (!isDraftTab(target) || isBlankDraft(target)) &&
+      (!useFolderTabsStore.getState().enabled ||
+        folderScope(target.folderId) === folderScope(folderId)) &&
+      findTabIndexForConversation(
+        prevState.rawTabs,
+        folderId,
+        agentType,
+        conversationId
+      ) < 0
+    if (!target || !replaceable) {
+      get().openTab(folderId, conversationId, agentType, pin, title)
+      return
+    }
+    useFolderTabsStore.getState().activateScope(folderScope(folderId))
+    const state = get()
+    const slot = state.rawTabs.findIndex((t) => t.id === target.id)
+    if (slot < 0) return
+    const group = groupOfTab(state.groupOf, state.groupLayout, target.id)
+    const resolvedTitle =
+      formatConversationTitle(
+        title ??
+          useAppWorkspaceStore
+            .getState()
+            .conversations.find(
+              (c) =>
+                c.id === conversationId &&
+                c.agent_type === agentType &&
+                c.folder_id === folderId
+            )?.title
+      ) || runtime.labels.untitledConversation
+    const newId = makeConversationTabId(folderId, agentType, conversationId)
+    const newTab: TabItemInternal = {
+      id: newId,
+      kind: "conversation",
+      folderId,
+      conversationId,
+      agentType,
+      title: resolvedTitle,
+      isPinned: pin,
+    }
+    // ⌘⇧T brings the replaced session back. An empty draft has nothing to
+    // bring back; its (empty) composer state goes with it.
+    if (isDraftTab(target)) {
+      clearMessageInputDraftV2(buildNewConversationDraftStorageKey(target.id))
+      clearContinuationLink(target.id)
+    } else {
+      pushClosedTab(snapshotStripTab(target, slot))
+    }
+    discardAskSelectionPrompts(target.id)
+    discardComposerPrefill(target.id)
+    const rawTabs = [...state.rawTabs]
+    rawTabs[slot] = newTab
+    set({
+      rawTabs,
+      activeTabId: newId,
+      groupOf: { ...state.groupOf, [newId]: group },
+      // Released like a replaced preview: disconnected only once idle, so a
+      // turn still running in it goes on (see `disconnectIfIdle`).
+      previewReplacedTabIds: [...state.previewReplacedTabIds, target.id],
     })
     recomputeTabs()
     runtime.activateConversationPane()
@@ -3923,6 +4021,7 @@ export function useTabActions() {
   return useTabStore(
     useShallow((s) => ({
       openTab: s.openTab,
+      replaceTabWithConversation: s.replaceTabWithConversation,
       closeTab: s.closeTab,
       closeConversationTab: s.closeConversationTab,
       closeOtherTabs: s.closeOtherTabs,

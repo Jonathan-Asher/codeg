@@ -7,6 +7,7 @@ import {
   useCallback,
   type CSSProperties,
   type FocusEvent,
+  type MouseEvent as ReactMouseEvent,
 } from "react"
 import {
   Loader2,
@@ -40,6 +41,10 @@ import {
 import { useOptionalAcpActions } from "@/contexts/acp-connection-contexts"
 import { cn } from "@/lib/utils"
 import { formatConversationTitle } from "@/lib/conversation-title"
+import {
+  intentFromModifiers,
+  type SessionOpenIntent,
+} from "@/lib/session-open-decision"
 import type { SessionActionHandlers } from "@/hooks/use-session-action-handlers"
 import { CriticalFlag } from "@/components/conversations/critical-flag"
 import { TalkBadge } from "@/components/conversations/talk-badge"
@@ -164,7 +169,15 @@ interface SidebarConversationCardProps {
   timeLabel?: string
   relativeTimeAt?: string
   relativeTimeClock?: SidebarRelativeClock
-  onSelect: (id: number, agentType: string, folderId: number) => void
+  /** A click on the row. `intent` is what its modifiers asked for: ⌘ (Ctrl
+   *  elsewhere) a new tab, ⌥ (Alt) this tab, none the "When you open a
+   *  session" rule (see `lib/session-open-decision`). */
+  onSelect: (
+    id: number,
+    agentType: string,
+    folderId: number,
+    intent?: SessionOpenIntent
+  ) => void
   onDoubleClick?: (id: number, agentType: string, folderId: number) => void
   onRename: (id: number, newTitle: string) => Promise<void>
   onDelete: (id: number, agentType: string, folderId: number) => Promise<void>
@@ -272,14 +285,17 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   const isSubsession = conversation.parent_id != null
   const branch = useBranchChip(isSubsession ? null : conversation.git_branch)
 
-  const handleClick = useCallback(() => {
-    onSelect(conversation.id, conversation.agent_type, conversation.folder_id)
-  }, [
-    onSelect,
-    conversation.id,
-    conversation.agent_type,
-    conversation.folder_id,
-  ])
+  const handleClick = useCallback(
+    (event: ReactMouseEvent) => {
+      onSelect(
+        conversation.id,
+        conversation.agent_type,
+        conversation.folder_id,
+        intentFromModifiers(event)
+      )
+    },
+    [onSelect, conversation.id, conversation.agent_type, conversation.folder_id]
+  )
 
   // Resting the pointer on a row starts opening its session in the
   // background (debounced, capped and deduplicated in `session-preconnect`

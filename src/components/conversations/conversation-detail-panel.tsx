@@ -270,6 +270,7 @@ import {
   buildNewConversationDraftStorageKey,
   clearMessageInputDraft,
 } from "@/lib/message-input-draft"
+import { noteTabSend } from "@/lib/tab-send-recency"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -2045,6 +2046,10 @@ const ConversationTabView = memo(function ConversationTabView({
       // is live and the prompt is delivered inline — never parked in the queue.
       const sendOwnTab = ownTab
       const fromQueueFlush = opts?.fromQueueFlush ?? false
+      // What he wrote just now, not the queue going out by itself: the tab
+      // counts as one he is working in for a while (see
+      // `lib/session-open-decision`).
+      if (!fromQueueFlush) noteTabSend(tabId)
       const modeIdForQueue = selectedModeIdArg ?? null
       const clientMessageId = opts?.clientMessageId ?? newClientMessageId()
       // The composer cleared itself the moment it handed the draft over, so

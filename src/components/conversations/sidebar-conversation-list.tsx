@@ -214,6 +214,8 @@ import { FolderAliasLabel } from "./folder-alias-label"
 import { toErrorMessage } from "@/lib/app-error"
 import { isSessionRunning } from "@/lib/session-activity"
 import { continueInterruptedSession } from "@/lib/session-continue"
+import type { SessionOpenIntent } from "@/lib/session-open-decision"
+import { useOpenSession } from "@/hooks/use-open-session"
 
 // Layout effect on the client (so the sticky overlay is positioned before
 // paint) but a no-op-safe passive effect during the static-export prerender.
@@ -2632,10 +2634,33 @@ export function SidebarConversationList({
   // these callbacks. That removes the `conversations` closure dependency, which
   // is what keeps these references stable across status events — the linchpin
   // for the card `memo` actually bailing out (see Phase 1 of the perf plan).
+  // A click opens the session where the "When you open a session" rule says:
+  // its own tab, in place of the tab in front, or as a preview (see
+  // `lib/session-open-decision`), with ⌘/Ctrl-click and ⌥/Alt-click asking
+  // for a new tab or this one.
+  const openSession = useOpenSession()
   const handleSelect = useCallback(
-    (id: number, agentType: string, folderId: number) => {
+    (
+      id: number,
+      agentType: string,
+      folderId: number,
+      intent?: SessionOpenIntent
+    ) => {
       // Selecting a conversation returns to the conversation workspace if a
       // workbench route (e.g. Automations) was taking over the content region.
+      openConversations()
+      openSession(
+        { id, folderId, agentType: agentType as AgentType },
+        { source: "sidebar", intent }
+      )
+    },
+    [openSession, openConversations]
+  )
+
+  // Stepping through the list by keyboard keeps the preview a plain click
+  // always made: each step would otherwise eat the tab it stepped from.
+  const handleStepSelect = useCallback(
+    (id: number, agentType: string, folderId: number) => {
       openConversations()
       openTab(folderId, id, agentType as Parameters<typeof openTab>[2], false)
     },
@@ -2663,12 +2688,12 @@ export function SidebarConversationList({
   )
   const handleSessionNavOpen = useCallback(
     (conversation: DbConversationSummary) =>
-      handleSelect(
+      handleStepSelect(
         conversation.id,
         conversation.agent_type,
         conversation.folder_id
       ),
-    [handleSelect]
+    [handleStepSelect]
   )
   useSidebarSessionNav({
     rowsRef,

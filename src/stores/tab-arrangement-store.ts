@@ -15,6 +15,11 @@ import {
   type TabStatusBand,
   type TabView,
 } from "@/lib/tab-arrangement"
+import {
+  DEFAULT_SESSION_OPEN_MODE,
+  SESSION_OPEN_MODES,
+  type SessionOpenMode,
+} from "@/lib/session-open-decision"
 
 /** Per-device display preferences, like the sidebar's view options. */
 export const GROUP_BY_KEY = "workspace:tab-group-by"
@@ -28,6 +33,8 @@ export const COLLAPSED_KEY = "workspace:tab-arrange-collapsed"
 /** Tabs dragged on a recent-activity strip, held where they were dropped:
  *  `{ [tabId]: { key, heldAt } }` (see `TabSortHold`). */
 export const SORT_HOLDS_KEY = "workspace:tab-sort-holds"
+/** "When you open a session": smart / new_tab / replace. */
+export const SESSION_OPEN_MODE_KEY = "workspace:session-open-mode"
 
 function read(key: string): string | null {
   try {
@@ -117,6 +124,12 @@ export function loadSortHolds(): Record<string, TabSortHold> {
   }
 }
 
+export function loadSessionOpenMode(): SessionOpenMode {
+  if (typeof window === "undefined") return DEFAULT_SESSION_OPEN_MODE
+  const raw = read(SESSION_OPEN_MODE_KEY)
+  return isOneOf(SESSION_OPEN_MODES, raw) ? raw : DEFAULT_SESSION_OPEN_MODE
+}
+
 function loadCollapsed(): string[] {
   if (typeof window === "undefined") return []
   try {
@@ -139,6 +152,9 @@ interface TabArrangeState {
    *  Cleared whenever the sort changes: a hold only means something against
    *  the activity order it was dropped into. */
   sortHolds: Readonly<Record<string, TabSortHold>>
+  /** Where a session picked in the sidebar or ⌘K opens (see
+   *  `lib/session-open-decision`). */
+  sessionOpenMode: SessionOpenMode
   hydrated: boolean
   /** Read the stored choices. Called from an effect (not at module load) so the
    *  first client render matches the prerendered HTML. Idempotent. */
@@ -154,6 +170,7 @@ interface TabArrangeState {
   setSortHold: (tabId: string, hold: TabSortHold | null) => void
   /** Drop the holds of these tabs (released by new activity, or closed). */
   releaseSortHolds: (tabIds: readonly string[]) => void
+  setSessionOpenMode: (mode: SessionOpenMode) => void
 }
 
 function writeHolds(holds: Readonly<Record<string, TabSortHold>>) {
@@ -167,6 +184,7 @@ export const useTabArrangeStore = create<TabArrangeState>((set, get) => ({
   groupOrder: EMPTY_GROUP_ORDER,
   collapsedRuns: new Set(),
   sortHolds: NO_HOLDS,
+  sessionOpenMode: DEFAULT_SESSION_OPEN_MODE,
   hydrated: false,
   hydrate: () => {
     if (get().hydrated) return
@@ -175,6 +193,7 @@ export const useTabArrangeStore = create<TabArrangeState>((set, get) => ({
       groupOrder: loadGroupOrder(),
       collapsedRuns: new Set(loadCollapsed()),
       sortHolds: loadSortHolds(),
+      sessionOpenMode: loadSessionOpenMode(),
       hydrated: true,
     })
   },
@@ -235,5 +254,9 @@ export const useTabArrangeStore = create<TabArrangeState>((set, get) => ({
     for (const id of tabIds) delete next[id]
     writeHolds(next)
     set({ sortHolds: next })
+  },
+  setSessionOpenMode: (mode) => {
+    write(SESSION_OPEN_MODE_KEY, mode)
+    set({ sessionOpenMode: mode })
   },
 }))
