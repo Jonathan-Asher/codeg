@@ -1,4 +1,10 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react"
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 import type { ReactNode } from "react"
@@ -358,6 +364,70 @@ describe("the dialog", () => {
     expect(savePicks).toHaveBeenCalledWith("codex", {
       modeId: null,
       configValues: { effort: "high" },
+    })
+  })
+
+  it("does not offer Grok's permission mode, which a new session takes from the Grok settings", async () => {
+    vi.mocked(useAcpAgents).mockReturnValue({
+      agents: [agent("claude_code"), agent("grok")],
+      fresh: true,
+      refresh: async () => {},
+    })
+    const select = (
+      id: string,
+      category: string,
+      values: string[],
+      current: string
+    ): SessionConfigOptionInfo => ({
+      id,
+      name: id === "model" ? "Model" : "Mode",
+      description: null,
+      category,
+      kind: {
+        type: "select",
+        current_value: current,
+        options: values.map((v) => ({ value: v, name: v, description: null })),
+        groups: [],
+      },
+      recommended_value: current,
+    })
+    rememberSelectorTemplate("grok", {
+      modes: null,
+      configOptions: [
+        select("model", "model", ["grok-4.6", "grok-4.5"], "grok-4.6"),
+        select(
+          "mode",
+          "mode",
+          ["default", "auto", "bypassPermissions"],
+          "bypassPermissions"
+        ),
+      ],
+    })
+    const source = conv()
+    useAppWorkspaceStore.setState({ conversations: [source] })
+    const savePicks = vi.fn()
+    const { user, openNewConversationTab } = renderDialog(source, {
+      requestHandoff: async () => ({ text: "handoff", failure: null }),
+      savePicks,
+    })
+
+    const chip = screen.getByRole("button", { name: /Agent settings/ })
+    expect(chip).toHaveAccessibleName(/Model grok-4\.6/)
+    expect(chip).not.toHaveAccessibleName(/Always approve/)
+    await user.click(chip)
+    const popover = await screen.findByRole("dialog", {
+      name: "Agent settings",
+    })
+    expect(within(popover).getByRole("group", { name: "Model" })).toBeTruthy()
+    expect(within(popover).queryByRole("group", { name: "Mode" })).toBeNull()
+    expect(within(popover).queryByText(/Always approve/)).toBeNull()
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Continue" }))
+
+    await waitFor(() => expect(openNewConversationTab).toHaveBeenCalled())
+    expect(savePicks).toHaveBeenCalledWith("grok", {
+      modeId: null,
+      configValues: {},
     })
   })
 

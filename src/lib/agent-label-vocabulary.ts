@@ -18,6 +18,12 @@
  * untouched: a missing translation must degrade to the agent's own words, not
  * to a blank or a raw id.
  *
+ * Grok's permission selector (`mode`: Ask / Auto / Always approve, plus a
+ * launch-time mode shown as the session's fixed base) is codeg's own: the
+ * backend builds it, in English, from Grok's `--permission-mode` ids (see
+ * `acp::grok_permission`). Its labels are localised here by the same rule.
+ * Grok's model and effort selectors are Grok's and pass through.
+ *
  * Deliberately NOT translated, even though they are Chinese too:
  * - **Model names and descriptions.** They come from the user's own
  *   `~/.dsh/settings.yaml` (`llm-deepseek.models`); rewriting user data would
@@ -123,6 +129,35 @@ const DEEPSEEK_PERMISSION_OPTIONS = {
   "reject-once": { name: "deepseekPermissionRejectOnce", kind: "reject_once" },
 } as const satisfies Record<string, LabelEntry & { readonly kind: string }>
 
+/** The permission selector codeg builds for Grok, keyed by its option id. */
+const GROK_OPTIONS = {
+  mode: { name: "grokOptionMode", description: "grokOptionModeDescription" },
+} as const satisfies Record<string, LabelEntry>
+
+/**
+ * Its values: Grok's own `--permission-mode` ids. The three launch modes that
+ * cannot be switched to live share one note saying so.
+ */
+const GROK_VALUES = {
+  mode: {
+    default: { name: "grokModeAsk", description: "grokModeAskDescription" },
+    auto: { name: "grokModeAuto", description: "grokModeAutoDescription" },
+    bypassPermissions: {
+      name: "grokModeAlwaysApprove",
+      description: "grokModeAlwaysApproveDescription",
+    },
+    acceptEdits: {
+      name: "grokModeAcceptEdits",
+      description: "grokModeFixedDescription",
+    },
+    plan: { name: "grokModePlan", description: "grokModeFixedDescription" },
+    dontAsk: {
+      name: "grokModeDontAsk",
+      description: "grokModeFixedDescription",
+    },
+  },
+} as const satisfies Record<string, Record<string, LabelEntry>>
+
 /** Every message key this module can ask for, under the `AgentVocabulary` namespace. */
 export type AgentVocabularyKey =
   | TableKeys<typeof DEEPSEEK_MODES>
@@ -130,6 +165,8 @@ export type AgentVocabularyKey =
   | TableKeys<(typeof DEEPSEEK_VALUES)["reasoning"]>
   | TableKeys<(typeof DEEPSEEK_VALUES)["sandbox"]>
   | TableKeys<typeof DEEPSEEK_PERMISSION_OPTIONS>
+  | TableKeys<typeof GROK_OPTIONS>
+  | TableKeys<(typeof GROK_VALUES)["mode"]>
 
 /**
  * `useTranslations("AgentVocabulary")` narrowed to what this module uses. A
@@ -138,11 +175,38 @@ export type AgentVocabularyKey =
  */
 export type AgentVocabularyTranslator = (key: AgentVocabularyKey) => string
 
-/** The only agent with a vocabulary to rewrite, today. */
-const DEEPSEEK: AgentType = "deepseek"
+/** One agent's tables, widened so they can be looked up by id. */
+interface Vocabulary {
+  readonly modes: Record<string, LabelEntry>
+  readonly options: Record<string, LabelEntry>
+  readonly values: Record<string, Record<string, LabelEntry>>
+  readonly permissionOptions: Record<
+    string,
+    LabelEntry & { readonly kind: string }
+  >
+}
 
-function isDeepSeek(agentType: AgentType | null | undefined): boolean {
-  return agentType === DEEPSEEK
+const DEEPSEEK_VOCABULARY: Vocabulary = {
+  modes: DEEPSEEK_MODES,
+  options: DEEPSEEK_OPTIONS,
+  values: DEEPSEEK_VALUES,
+  permissionOptions: DEEPSEEK_PERMISSION_OPTIONS,
+}
+
+const GROK_VOCABULARY: Vocabulary = {
+  modes: {},
+  options: GROK_OPTIONS,
+  values: GROK_VALUES,
+  permissionOptions: {},
+}
+
+/** The agents with a vocabulary to rewrite, today. */
+function vocabularyOf(
+  agentType: AgentType | null | undefined
+): Vocabulary | null {
+  if (agentType === "deepseek") return DEEPSEEK_VOCABULARY
+  if (agentType === "grok") return GROK_VOCABULARY
+  return null
 }
 
 function lookup<T>(table: Record<string, T>, id: string): T | undefined {
@@ -152,15 +216,13 @@ function lookup<T>(table: Record<string, T>, id: string): T | undefined {
   return Object.prototype.hasOwnProperty.call(table, id) ? table[id] : undefined
 }
 
-/** Widened once, so the per-option value tables can be looked up by id. */
-const DEEPSEEK_VALUE_TABLES: Record<
-  string,
-  Record<string, LabelEntry>
-> = DEEPSEEK_VALUES
-
 /** The entry for one value, under the option that owns it. */
-function valueEntry(configId: string, valueId: string): LabelEntry | undefined {
-  const table = lookup(DEEPSEEK_VALUE_TABLES, configId)
+function valueEntry(
+  vocabulary: Vocabulary,
+  configId: string,
+  valueId: string
+): LabelEntry | undefined {
+  const table = lookup(vocabulary.values, configId)
   return table ? lookup(table, valueId) : undefined
 }
 
@@ -206,9 +268,10 @@ export function localizeSessionModes(
   modes: SessionModeInfo[],
   t: AgentVocabularyTranslator
 ): SessionModeInfo[] {
-  if (!isDeepSeek(agentType)) return modes
+  const vocabulary = vocabularyOf(agentType)
+  if (!vocabulary) return modes
   return mapPreservingIdentity(modes, (mode) =>
-    relabel(mode, lookup(DEEPSEEK_MODES, mode.id), t)
+    relabel(mode, lookup(vocabulary.modes, mode.id), t)
   )
 }
 
@@ -219,17 +282,19 @@ export function localizeModeLabel(
   fallback: string,
   t: AgentVocabularyTranslator
 ): string {
-  if (!isDeepSeek(agentType)) return fallback
-  const entry = lookup(DEEPSEEK_MODES, modeId)
+  const vocabulary = vocabularyOf(agentType)
+  if (!vocabulary) return fallback
+  const entry = lookup(vocabulary.modes, modeId)
   return entry ? t(entry.name as AgentVocabularyKey) : fallback
 }
 
 function localizeSelectOption(
+  vocabulary: Vocabulary,
   configId: string,
   option: SessionConfigSelectOptionInfo,
   t: AgentVocabularyTranslator
 ): SessionConfigSelectOptionInfo {
-  return relabel(option, valueEntry(configId, option.value), t)
+  return relabel(option, valueEntry(vocabulary, configId, option.value), t)
 }
 
 /** Localise one config option: its own label, and its select values. */
@@ -238,16 +303,17 @@ export function localizeConfigOption(
   option: SessionConfigOptionInfo,
   t: AgentVocabularyTranslator
 ): SessionConfigOptionInfo {
-  if (!isDeepSeek(agentType)) return option
-  const relabelled = relabel(option, lookup(DEEPSEEK_OPTIONS, option.id), t)
+  const vocabulary = vocabularyOf(agentType)
+  if (!vocabulary) return option
+  const relabelled = relabel(option, lookup(vocabulary.options, option.id), t)
   if (relabelled.kind.type !== "select") return relabelled
   const kind = relabelled.kind
   const options = mapPreservingIdentity(kind.options, (item) =>
-    localizeSelectOption(option.id, item, t)
+    localizeSelectOption(vocabulary, option.id, item, t)
   )
   const groups = mapPreservingIdentity(kind.groups, (group) => {
     const groupOptions = mapPreservingIdentity(group.options, (item) =>
-      localizeSelectOption(option.id, item, t)
+      localizeSelectOption(vocabulary, option.id, item, t)
     )
     return groupOptions === group.options
       ? group
@@ -262,7 +328,7 @@ export function localizeConfigOptions(
   options: SessionConfigOptionInfo[],
   t: AgentVocabularyTranslator
 ): SessionConfigOptionInfo[] {
-  if (!isDeepSeek(agentType)) return options
+  if (!vocabularyOf(agentType)) return options
   return mapPreservingIdentity(options, (option) =>
     localizeConfigOption(agentType, option, t)
   )
@@ -280,8 +346,9 @@ export function localizeConfigValueLabel(
   fallback: string,
   t: AgentVocabularyTranslator
 ): string {
-  if (!isDeepSeek(agentType) || !valueId) return fallback
-  const entry = valueEntry(configId, valueId)
+  const vocabulary = vocabularyOf(agentType)
+  if (!vocabulary || !valueId) return fallback
+  const entry = valueEntry(vocabulary, configId, valueId)
   return entry ? t(entry.name as AgentVocabularyKey) : fallback
 }
 
@@ -292,8 +359,9 @@ export function localizeConfigOptionLabel(
   fallback: string,
   t: AgentVocabularyTranslator
 ): string {
-  if (!isDeepSeek(agentType)) return fallback
-  const entry = lookup(DEEPSEEK_OPTIONS, configId)
+  const vocabulary = vocabularyOf(agentType)
+  if (!vocabulary) return fallback
+  const entry = lookup(vocabulary.options, configId)
   return entry ? t(entry.name as AgentVocabularyKey) : fallback
 }
 
@@ -303,9 +371,10 @@ export function localizePermissionOptions(
   options: PermissionOptionInfo[],
   t: AgentVocabularyTranslator
 ): PermissionOptionInfo[] {
-  if (!isDeepSeek(agentType)) return options
+  const vocabulary = vocabularyOf(agentType)
+  if (!vocabulary) return options
   return mapPreservingIdentity(options, (option) => {
-    const entry = lookup(DEEPSEEK_PERMISSION_OPTIONS, option.option_id)
+    const entry = lookup(vocabulary.permissionOptions, option.option_id)
     if (!entry || entry.kind !== option.kind) return option
     const name = t(entry.name as AgentVocabularyKey)
     return name === option.name ? option : { ...option, name }

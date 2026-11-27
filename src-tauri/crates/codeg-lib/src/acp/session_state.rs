@@ -493,6 +493,25 @@ pub struct SessionState {
     /// can never overrule that establishment's fresher handshake.
     /// Backend-internal — not serialized.
     pub grok_catalog_broadcast: Option<GrokModelCatalog>,
+    /// Grok only: the permission mode this connection's grok process was
+    /// launched in (its `--permission-mode`), the base of the composer's
+    /// permission selector (see `acp::grok_permission`). Set at launch;
+    /// `None` for every other agent. Backend-internal — not serialized.
+    pub grok_launch_mode: Option<crate::acp::grok_permission::GrokLaunchMode>,
+    /// Grok only: when codeg last switched the session's permission mode, so
+    /// a roster report built before the switch reached grok is not taken for
+    /// grok's answer (see `grok_permission::reconcile_reported_yolo`).
+    /// Backend-internal — not serialized.
+    pub grok_permission_switched_at: Option<std::time::Instant>,
+    /// Grok only: the session's permission mode is the conversation's own
+    /// choice — picked in this conversation (the composer, `codeg run --mode`,
+    /// a task's saved selection) or re-applied from its selector record, which
+    /// only ever holds such a pick. While `false` the session follows the mode
+    /// the Grok settings launch it in, and its selector record leaves the mode
+    /// out (`lifecycle::effective_selector_state`), so a later change to those
+    /// settings reaches it on the next reconnect. Backend-internal — not
+    /// serialized.
+    pub grok_permission_picked: bool,
 
     /// Kiro only: the reasoning-effort state from its latest
     /// `_kiro.dev/metadata` (which arrives on its own schedule — after
@@ -1179,6 +1198,9 @@ impl SessionState {
             config_options: None,
             grok_model_specs: None,
             grok_catalog_broadcast: None,
+            grok_launch_mode: None,
+            grok_permission_switched_at: None,
+            grok_permission_picked: false,
             kiro_reasoning: None,
             pi_startup_banner: None,
             asserted_config_values: BTreeMap::new(),

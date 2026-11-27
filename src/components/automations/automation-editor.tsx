@@ -255,7 +255,8 @@ export function AutomationEditor({
       const { mode_id, config_values } = effectiveSelections(
         snapshot,
         modeId,
-        configValues
+        configValues,
+        agentType
       )
       // Capture friendly labels for the chosen agent/folder/mode/options so the
       // detail page renders names, not raw value ids — and keeps doing so if the

@@ -40,7 +40,10 @@ import {
   useNewSessionValues,
   useSelectorTemplate,
 } from "@/lib/selector-options-cache"
-import { useSavedSelectorPrefs } from "@/lib/selector-prefs-storage"
+import {
+  isSessionOnlyConfigOption,
+  useSavedSelectorPrefs,
+} from "@/lib/selector-prefs-storage"
 import type { AgentType, DbConversationSummary } from "@/lib/types"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { useContinueInAgentStore } from "@/stores/continue-in-agent-store"
@@ -88,12 +91,19 @@ function ContinuationSelectors({
       }),
       picks.configValues
     )
-    const configOptions = vocabulary.configOptions(shown.configOptions ?? [])
+    const agentOptions = vocabulary.configOptions(shown.configOptions ?? [])
+    // An option whose pick belongs to one session (Grok's permission mode) is
+    // not offered: a new session starts in the mode its agent's settings
+    // launch it in, so a pick here would not reach it. Its composer switches
+    // it once the session is open.
+    const configOptions = agentOptions.filter(
+      (option) => !isSessionOnlyConfigOption(agentType, option.id)
+    )
     const modes = shown.modes
     // As in the composer: the mode list is the agent's selector only when it
     // publishes no config options.
     const showMode =
-      configOptions.length === 0 &&
+      agentOptions.length === 0 &&
       modes != null &&
       modes.available_modes.length > 0
     const currentModeId =
@@ -109,7 +119,7 @@ function ContinuationSelectors({
       currentModeId,
       modeTitle: tInput("modeLabel"),
     })
-  }, [template, saved, newSessionValues, picks, vocabulary, tInput])
+  }, [template, saved, newSessionValues, picks, vocabulary, tInput, agentType])
 
   const handleChange = useCallback(
     (target: SessionSettingTarget, value: string) => {

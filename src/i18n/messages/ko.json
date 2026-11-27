@@ -2107,7 +2107,19 @@
     "deepseekSandboxFullAccess": "전체 접근(샌드박스 없음)",
     "deepseekSandboxFullAccessDescription": "파일 제한을 전혀 적용하지 않습니다. 결과를 이해할 때만 선택하세요.",
     "deepseekPermissionAllowOnce": "이번만 허용",
-    "deepseekPermissionRejectOnce": "거부"
+    "deepseekPermissionRejectOnce": "거부",
+    "grokOptionMode": "모드",
+    "grokOptionModeDescription": "세션 권한 모드",
+    "grokModeAsk": "묻기",
+    "grokModeAskDescription": "편집과 명령 전에 묻습니다",
+    "grokModeAuto": "자동",
+    "grokModeAutoDescription": "Grok이 각 호출을 검토하고 확실하지 않을 때만 묻습니다",
+    "grokModeAlwaysApprove": "항상 허용",
+    "grokModeAlwaysApproveDescription": "모든 도구 호출을 묻지 않고 실행합니다(거부 규칙은 계속 적용)",
+    "grokModeAcceptEdits": "편집 자동 승인",
+    "grokModePlan": "계획",
+    "grokModeDontAsk": "묻지 않음",
+    "grokModeFixedDescription": "시작할 때 Grok 설정으로 정해지며 이 세션 동안 고정됩니다"
   },
   "SettingsPages": {
     "agentsLoading": "에이전트 설정을 불러오는 중...",

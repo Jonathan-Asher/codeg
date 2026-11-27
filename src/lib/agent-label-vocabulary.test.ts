@@ -1,7 +1,16 @@
 import { createTranslator } from "next-intl"
 import { describe, expect, it } from "vitest"
 
+import ar from "@/i18n/messages/ar.json"
+import de from "@/i18n/messages/de.json"
 import en from "@/i18n/messages/en.json"
+import es from "@/i18n/messages/es.json"
+import fr from "@/i18n/messages/fr.json"
+import jaMessages from "@/i18n/messages/ja.json"
+import ko from "@/i18n/messages/ko.json"
+import pt from "@/i18n/messages/pt.json"
+import zhCN from "@/i18n/messages/zh-CN.json"
+import zhTW from "@/i18n/messages/zh-TW.json"
 import {
   localizeConfigOptionLabel,
   localizeConfigOptions,
@@ -19,6 +28,19 @@ import type {
 
 // The real production translator against the real catalogue: a key that is not
 // in `en.json` fails here rather than silently rendering its own name.
+const ALL_LOCALES = {
+  ar,
+  de,
+  en,
+  es,
+  fr,
+  ja: jaMessages,
+  ko,
+  pt,
+  "zh-CN": zhCN,
+  "zh-TW": zhTW,
+}
+
 const t = createTranslator({
   locale: "en",
   messages: en,
@@ -266,5 +288,100 @@ describe("permission options", () => {
   it("leaves other agents alone, by reference", () => {
     const claude = options()
     expect(localizePermissionOptions("claude_code", claude, t)).toBe(claude)
+  })
+})
+
+describe("Grok's permission selector", () => {
+  // As the backend builds it (`acp::grok_permission`), in English.
+  function grokMode(
+    current: string,
+    base = "default"
+  ): SessionConfigOptionInfo {
+    const baseName =
+      base === "default"
+        ? "Ask"
+        : base === "plan"
+          ? "Plan"
+          : "Auto-approve edits"
+    return selectOption(
+      "mode",
+      "Mode",
+      [
+        [base, baseName],
+        ["auto", "Auto"],
+        ["bypassPermissions", "Always approve"],
+      ],
+      current
+    )
+  }
+
+  const ja = createTranslator({
+    locale: "ja",
+    messages: jaMessages,
+    namespace: "AgentVocabulary",
+  }) as AgentVocabularyTranslator
+
+  it("is localised by its value ids, in any locale", () => {
+    const [mode] = localizeConfigOptions("grok", [grokMode("auto")], ja)
+    expect(mode.name).toBe("モード")
+    if (mode.kind.type !== "select") throw new Error("unreachable")
+    expect(mode.kind.options.map((o) => [o.value, o.name])).toEqual([
+      ["default", "確認する"],
+      ["auto", "自動"],
+      ["bypassPermissions", "常に許可"],
+    ])
+    expect(mode.kind.current_value).toBe("auto")
+    expect(
+      localizeConfigValueLabel("grok", "mode", "bypassPermissions", "x", t)
+    ).toBe("Always approve")
+  })
+
+  it("says a launch-time mode is fixed for the session", () => {
+    const [mode] = localizeConfigOptions(
+      "grok",
+      [grokMode("acceptEdits", "acceptEdits")],
+      t
+    )
+    if (mode.kind.type !== "select") throw new Error("unreachable")
+    expect(mode.kind.options[0]).toEqual({
+      value: "acceptEdits",
+      name: "Auto-approve edits",
+      description: "Set at launch in Grok settings; fixed for this session",
+    })
+  })
+
+  it("leaves Grok's own model and effort selectors alone, by reference", () => {
+    const model = selectOption(
+      "model",
+      "Model",
+      [["grok-4.6", "Grok 4.6"]],
+      "grok-4.6"
+    )
+    const effort = selectOption(
+      "reasoning_effort",
+      "Reasoning effort",
+      [["high", "High"]],
+      "high"
+    )
+    const [localizedModel, localizedEffort] = localizeConfigOptions(
+      "grok",
+      [model, effort],
+      ja
+    )
+    expect(localizedModel).toBe(model)
+    expect(localizedEffort).toBe(effort)
+  })
+
+  it("has every string in every locale", () => {
+    const keys = Object.keys(en.AgentVocabulary).filter((k) =>
+      k.startsWith("grok")
+    )
+    expect(keys.length).toBe(12)
+    for (const [locale, messages] of Object.entries(ALL_LOCALES)) {
+      const vocabulary = messages.AgentVocabulary as Record<string, string>
+      for (const key of keys) {
+        expect(vocabulary[key], `${locale} ${key}`).toBeTruthy()
+      }
+    }
   })
 })

@@ -3143,6 +3143,10 @@ async fn build_agent(
     stderr_tail: &Arc<StderrTail>,
     scratch: Option<&Path>,
     prompt_suggestions: bool,
+    // Grok's `--permission-mode` for this launch, read once by the caller so
+    // the session state records the same mode the process starts in (see
+    // `SessionState::grok_launch_mode`). Ignored for every other agent.
+    grok_permission_mode: Option<&str>,
 ) -> Result<(AcpAgent, crate::acp::reported_usage::PromptUsageMode), AcpError> {
     // A conversation can outlive the custom-agent definition it was started
     // with (the user deleted it in settings). `get_agent_meta` cannot report
@@ -3207,8 +3211,8 @@ async fn build_agent(
                     return Err(AcpError::PiProjectTrustRequired(message));
                 }
             }
-            // Resolve the config-derived preset HERE (like Grok's
-            // `grok_launch_permission_mode` below) so the policy helper stays a
+            // Resolve the config-derived preset HERE (as `run_connection` does
+            // Grok's `grok_launch_permission_mode`) so the policy helper stays a
             // pure function over the env list.
             let (codex_initial_mode, inherited_codex_config) = if agent_type == AgentType::Codex {
                 (
@@ -3303,14 +3307,15 @@ async fn build_agent(
             //    (default/acceptEdits/auto/dontAsk/bypassPermissions/plan), read
             //    from the Grok panel's `[ui].permission_mode`. Only passed for a
             //    non-`default` mode; `default`/unset leaves it off so ACP
-            //    permission requests still reach codeg's UI. (Grok exposes no ACP
-            //    `modes` channel for permission — verified against 0.2.99 — so this
-            //    launch flag, not a live `session/set_mode`, is the control point.)
+            //    permission requests still reach codeg's UI. Grok exposes no ACP
+            //    `modes` for permission, so this flag is the mode every session of
+            //    the process STARTS in; the composer's selector switches a running
+            //    session from there (see `acp::grok_permission`).
             if agent_type == AgentType::Grok {
                 parts.push("--no-auto-update".into());
-                if let Some(mode) = crate::commands::acp::grok_launch_permission_mode() {
+                if let Some(mode) = grok_permission_mode {
                     parts.push("--permission-mode".into());
-                    parts.push(mode);
+                    parts.push(mode.to_string());
                 }
             }
             for a in args.iter().chain(npx_launch_extra_args(agent_type)) {
@@ -3739,6 +3744,7 @@ async fn build_connection_agent(
     connection_id: &str,
     session_id: Option<&str>,
     prompt_suggestions: bool,
+    grok_permission_mode: Option<&str>,
 ) -> Result<(AcpAgent, crate::acp::reported_usage::PromptUsageMode), AcpError> {
     // Per-launch temp directory, created BEFORE the spawn because it has to
     // exist by the time the child looks: a self-extracting agent binary creates
@@ -3755,6 +3761,7 @@ async fn build_connection_agent(
         stderr_tail,
         scratch.as_ref().map(|s| s.path()),
         prompt_suggestions,
+        grok_permission_mode,
     )
     .await
     {
@@ -4011,6 +4018,18 @@ pub async fn spawn_agent_connection(
     // (`apply_codex_prompt_suggestion_policy`).
     let wants_prompt_suggestions = initial_state.wants_prompt_suggestions
         && initial_state.prompt_suggestions != PromptSuggestions::Off;
+    // Grok's launch permission mode (the Grok settings' `[ui].permission_mode`),
+    // read ONCE: the flag the process gets and the base its permission selector
+    // shows have to be the same mode.
+    let grok_permission_flag = if agent_type == AgentType::Grok {
+        let flag = crate::commands::acp::grok_launch_permission_mode();
+        initial_state.grok_launch_mode = Some(
+            crate::acp::grok_permission::GrokLaunchMode::from_flag(flag.as_deref()),
+        );
+        flag
+    } else {
+        None
+    };
 
     let session_state = Arc::new(RwLock::new(initial_state));
 
@@ -4055,6 +4074,7 @@ pub async fn spawn_agent_connection(
         &connection_id,
         session_id.as_deref(),
         wants_prompt_suggestions,
+        grok_permission_flag.as_deref(),
     )
     .await?;
     session_state.write().await.prompt_usage_mode = prompt_usage_mode;
@@ -4243,6 +4263,7 @@ pub async fn spawn_agent_connection(
                 &conn_id,
                 Some(&restart.session_id),
                 wants_prompt_suggestions,
+                grok_permission_flag.as_deref(),
             )
             .await
             {
@@ -5874,6 +5895,14 @@ const GROK_MODEL_OPTION_ID: &str = MODEL_CONFIG_OPTION_ID;
 /// `session/set_model` request's `_meta.reasoningEffort` — so effort is a live
 /// composer control, not just a global config.toml default.
 const GROK_EFFORT_OPTION_ID: &str = "reasoning_effort";
+/// The category codeg gives Grok's reasoning-effort selector: the ACP
+/// `thought_level`, as Claude Code's `effort` and Kiro's `reasoning_effort`
+/// carry. Grok files its effort rows under `category:"mode"` in
+/// `x.ai/sessionConfig`, but `mode` is the permission selector's
+/// (`acp::grok_permission`), and every client finds "the mode" by that
+/// category: the iPhone's options sheet, `codeg run --mode`, the composer's
+/// "model / effort / mode" order.
+const GROK_EFFORT_CATEGORY: &str = "thought_level";
 
 /// Stable `AcpEvent::Error` code the frontend localizes when a Grok model switch
 /// is rejected because the conversation is already bound to a different agent
@@ -6062,7 +6091,7 @@ fn build_grok_effort_option(
         id: GROK_EFFORT_OPTION_ID.to_string(),
         name: "Reasoning effort".to_string(),
         description: None,
-        category: Some("mode".to_string()),
+        category: Some(GROK_EFFORT_CATEGORY.to_string()),
         kind: SessionConfigKindInfo::Select(SessionConfigSelectInfo {
             current_value,
             options,
@@ -6390,7 +6419,7 @@ fn synthesize_grok_config_options(
             id: GROK_EFFORT_OPTION_ID.to_string(),
             name: "Reasoning effort".to_string(),
             description: None,
-            category: Some("mode".to_string()),
+            category: Some(GROK_EFFORT_CATEGORY.to_string()),
             kind: SessionConfigKindInfo::Select(SessionConfigSelectInfo {
                 current_value: current,
                 options: effort_opts,
@@ -7699,6 +7728,159 @@ async fn apply_grok_preferred_options(
     }
 }
 
+/// The permission mode this connection's grok process was launched in. Ask
+/// when none was recorded (a state built without a launch, as in tests).
+async fn grok_launch_mode(
+    state: &Arc<RwLock<SessionState>>,
+) -> crate::acp::grok_permission::GrokLaunchMode {
+    state
+        .read()
+        .await
+        .grok_launch_mode
+        .clone()
+        .unwrap_or(crate::acp::grok_permission::GrokLaunchMode::Ask)
+}
+
+/// Switch a running Grok session's permission mode: the
+/// `_x.ai/yolo_mode_changed` notification Grok's own TUI sends, with both
+/// flags set (see `acp::grok_permission`). Fire-and-forget on the wire; the
+/// switch time is recorded so a roster report that crossed it is not read as
+/// grok's answer. `Ok(false)` when the launch mode does not offer `value`.
+async fn send_grok_permission_switch(
+    cx: &ConnectionTo<Agent>,
+    session_id: &SessionId,
+    state: &Arc<RwLock<SessionState>>,
+    launch: &crate::acp::grok_permission::GrokLaunchMode,
+    value: &str,
+) -> Result<bool, agent_client_protocol::Error> {
+    let Some(params) =
+        crate::acp::grok_permission::switch_params(launch, session_id.0.as_ref(), value)
+    else {
+        return Ok(false);
+    };
+    let notification = UntypedMessage::new(
+        crate::acp::grok_permission::GROK_YOLO_MODE_CHANGED_METHOD,
+        params,
+    )?;
+    cx.send_notification_to(Agent, notification)?;
+    state.write().await.grok_permission_switched_at = Some(std::time::Instant::now());
+    tracing::info!("[ACP][grok] permission mode switched to {value}");
+    Ok(true)
+}
+
+/// On connect, put the session back in the permission mode its conversation
+/// picked. On a resume or load that value also rode the request's `_meta`
+/// (see `grok_session_permission_meta`); the notification is what also covers
+/// Ask on a process launched in Auto, which `_meta` cannot express.
+///
+/// A value here is always the conversation's own choice: its selector record
+/// holds the mode only once it was picked there, a spawn's saved selection
+/// names it only when the user chose it, and a fork passes its parent's only
+/// when the parent picked it. So it marks the session as having picked
+/// (`SessionState::grok_permission_picked`), even when the session already
+/// runs in it, and the record keeps it. With no value (a new session, whose
+/// connect drops the per-agent pick in `resolve_connect_selector_prefs`, or a
+/// conversation that never picked) the session runs in the mode the Grok
+/// settings launched it in.
+async fn apply_grok_preferred_permission(
+    cx: &ConnectionTo<Agent>,
+    session_id: &SessionId,
+    state: &Arc<RwLock<SessionState>>,
+    launch: &crate::acp::grok_permission::GrokLaunchMode,
+    opts: &mut [SessionConfigOptionInfo],
+    preferred_config_values: &BTreeMap<String, String>,
+) {
+    use crate::acp::grok_permission::{current_value, set_current, GROK_PERMISSION_OPTION_ID};
+    let Some(pref) = preferred_config_values.get(GROK_PERMISSION_OPTION_ID) else {
+        return;
+    };
+    // A mode this launch does not offer (Ask, picked before the Grok settings
+    // moved to a fixed launch mode): the session stays in its launch mode, and
+    // the record keeps the pick for a launch that offers it again (a record
+    // write only replaces the keys it carries).
+    if !launch.offers(pref) {
+        tracing::info!(
+            "[ACP][grok] recorded permission mode '{pref}' is not offered by this launch; kept {}",
+            launch.initial_value()
+        );
+        return;
+    }
+    state.write().await.grok_permission_picked = true;
+    if current_value(opts) == Some(pref.as_str()) {
+        return;
+    }
+    match send_grok_permission_switch(cx, session_id, state, launch, pref).await {
+        Ok(true) => {
+            set_current(opts, pref);
+        }
+        Ok(false) => {}
+        Err(e) => tracing::error!("[ACP][grok] failed to re-apply permission mode '{pref}': {e}"),
+    }
+}
+
+/// The `_meta` a Grok `session/resume` or `session/load` carries so the
+/// session comes back in the permission mode its conversation last had (the
+/// documented `yoloMode` / `autoMode` keys), merged into whatever `_meta` the
+/// request already has. Every other agent's, and a connect with no saved mode,
+/// come back unchanged.
+fn grok_session_permission_meta(
+    agent_type: AgentType,
+    meta: Option<serde_json::Map<String, serde_json::Value>>,
+    launch: Option<&crate::acp::grok_permission::GrokLaunchMode>,
+    preferred_config_values: &BTreeMap<String, String>,
+) -> Option<serde_json::Map<String, serde_json::Value>> {
+    if agent_type != AgentType::Grok {
+        return meta;
+    }
+    let (Some(launch), Some(value)) = (
+        launch,
+        preferred_config_values.get(crate::acp::grok_permission::GROK_PERMISSION_OPTION_ID),
+    ) else {
+        return meta;
+    };
+    crate::acp::grok_permission::with_establish_meta(meta, launch, value)
+}
+
+/// Move the permission selector to what grok's `_x.ai/sessions/changed` roster
+/// says about Always approve, when that disagrees with the selector (grok's own
+/// `/always-approve`, or a grok that came back asking). Emitted only when the
+/// selector moved.
+async fn apply_grok_session_roster(
+    state: &Arc<RwLock<SessionState>>,
+    emitter: &EventEmitter,
+    params: &serde_json::Value,
+) {
+    use crate::acp::grok_permission as perm;
+    let mut moved_to: Option<String> = None;
+    emit_with_state_built(state, emitter, |s| {
+        let yolo = perm::reported_yolo(params, s.external_id.as_deref()?)?;
+        let launch = s
+            .grok_launch_mode
+            .clone()
+            .unwrap_or(perm::GrokLaunchMode::Ask);
+        let mut opts = s.config_options.clone()?;
+        let since_switch = s.grok_permission_switched_at.map(|at| at.elapsed());
+        let next = perm::reconcile_reported_yolo(
+            &launch,
+            perm::current_value(&opts)?,
+            yolo,
+            since_switch,
+        )?
+        .to_string();
+        perm::set_current(&mut opts, &next);
+        moved_to = Some(next);
+        Some(AcpEvent::SessionConfigOptions {
+            config_options: opts,
+        })
+    })
+    .await;
+    if let Some(value) = moved_to {
+        tracing::info!(
+            "[ACP][grok] grok reports always-approve changed; permission selector now {value}"
+        );
+    }
+}
+
 /// The Grok model selector's current value, read from an in-memory options list.
 fn current_grok_model_id_from_opts(opts: &[SessionConfigOptionInfo]) -> Option<String> {
     opts.iter()
@@ -7826,11 +8008,12 @@ fn grok_live_usage_step(
     (Some((used, size)) != last).then_some((used, size))
 }
 
-/// Route a composer config-option change for Grok. Both live selectors go
-/// through `session/set_model`: the model selector switches the model, and the
-/// reasoning-effort selector re-sends the current model with an
+/// Route a composer config-option change for Grok. The model and effort
+/// selectors go through `session/set_model`: the model selector switches the
+/// model, and the reasoning-effort selector re-sends the current model with an
 /// `_meta.reasoningEffort` override (the `~/.grok/config.toml`
-/// `default_reasoning_effort` stays the at-birth global default). Re-emits the
+/// `default_reasoning_effort` stays the at-birth global default). The
+/// permission selector goes out as `_x.ai/yolo_mode_changed`. Re-emits the
 /// options with the new `current_value` so the backend snapshot stays authoritative.
 ///
 /// A cross-agent-type switch rejected on an established conversation
@@ -7849,10 +8032,32 @@ async fn set_grok_config_option(
     config_id: String,
     value_id: String,
 ) -> Result<SetterOutcome, agent_client_protocol::Error> {
+    // The permission selector is codeg's own and goes out on its own channel
+    // (see `acp::grok_permission`). Grok does not answer the notification, so
+    // the pick is `Accepted`; its next roster report says whether Always
+    // approve took.
+    if config_id == crate::acp::grok_permission::GROK_PERMISSION_OPTION_ID {
+        let launch = grok_launch_mode(state).await;
+        if !send_grok_permission_switch(cx, session_id, state, &launch, &value_id).await? {
+            return Ok(SetterOutcome::NotExecuted);
+        }
+        // The conversation's own choice from here on: the selector record the
+        // re-emit below writes keeps it, and a reconnect re-applies it.
+        state.write().await.grok_permission_picked = true;
+        emit_with_state_built(state, emitter, |s| {
+            let mut opts = s.config_options.clone()?;
+            crate::acp::grok_permission::set_current(&mut opts, &value_id);
+            Some(AcpEvent::SessionConfigOptions {
+                config_options: opts,
+            })
+        })
+        .await;
+        return Ok(SetterOutcome::Accepted);
+    }
     // Resolve the `set_model` args for whichever selector changed. A model pick
     // is the model itself (no effort override); an effort pick re-sends the
     // current model carrying the new `_meta.reasoningEffort`. Any other id is a
-    // no-op (defensive — the composer only offers these two).
+    // no-op (defensive — the composer only offers these).
     let (model_id, effort) = if config_id == GROK_MODEL_OPTION_ID {
         (value_id.clone(), None)
     } else if config_id == GROK_EFFORT_OPTION_ID {
@@ -8044,6 +8249,13 @@ async fn apply_and_emit_session_config_options(
             // session birth, and on a catalog broadcast). `None` when empty
             // keeps the switch path on the flat-fallback branch.
             state.write().await.grok_model_specs = (!specs.is_empty()).then(|| specs.clone());
+            // The permission selector codeg builds itself, starting on the mode
+            // the process was launched in (see `acp::grok_permission`).
+            let launch = grok_launch_mode(state).await;
+            opts.push(crate::acp::grok_permission::permission_option(
+                &launch,
+                launch.initial_value(),
+            ));
             // Grok's picker comes from its handshake, not a config-option list:
             // its values are what the agent picked on its own, read before the
             // replay below rewrites them (see
@@ -8056,6 +8268,15 @@ async fn apply_and_emit_session_config_options(
                 &mut opts,
                 preferred_config_values,
                 &specs,
+            )
+            .await;
+            apply_grok_preferred_permission(
+                cx,
+                &session_id,
+                state,
+                &launch,
+                &mut opts,
+                preferred_config_values,
             )
             .await;
             emit_grok_established_picker(state, emitter, opts).await;
@@ -10117,6 +10338,13 @@ async fn run_connection(
             state: Arc::clone(&state),
             emitter: emitter.clone(),
         })
+        // Grok's session roster names no session at the top level either; it
+        // is what reports Always approve back. See the type docs.
+        .with_handler(GrokSessionRoster {
+            agent_type,
+            state: Arc::clone(&state),
+            emitter: emitter.clone(),
+        })
         // OpenCode's sub-agent notifications name no session either; each is
         // rewritten into the session update it carries. See the type docs.
         .with_handler(OpenCodeChildSessionUpdates { agent_type })
@@ -11043,6 +11271,9 @@ async fn run_connection(
             // Fixed for the connection, so every session request below names
             // the same Claude settings (see `claude_raw_sdk_session_meta`).
             let claude = state.read().await.claude_session_options();
+            // Grok: the mode the process was launched in, which the permission
+            // `_meta` on a resume or load is worked out against.
+            let grok_launch = state.read().await.grok_launch_mode.clone();
 
             // One startup-retry budget for the whole resume → load → new
             // chain below (see `retry_session_establishment`).
@@ -11058,7 +11289,7 @@ async fn run_connection(
                 // we fall through to the session/load block below, so the
                 // effective chain is resume → load → new.
                 if supports_resume {
-                    let resume_req = build_resume_session_request(
+                    let mut resume_req = build_resume_session_request(
                         agent_type,
                         SessionId::new(sid.clone()),
                         &cwd,
@@ -11066,6 +11297,12 @@ async fn run_connection(
                         &claude,
                     )
                     .named_for(agent_type, session_name.as_deref());
+                    resume_req.meta = grok_session_permission_meta(
+                        agent_type,
+                        resume_req.meta.take(),
+                        grok_launch.as_ref(),
+                        &preferred_config_values,
+                    );
                     attach.enter(AttachPhase::Resuming).await;
                     let resume_result = match attach
                         .run(retry_session_establishment(
@@ -11224,7 +11461,7 @@ async fn run_connection(
                 // keep it. Every other agent keeps the plain typed send.
                 let mut load_models_raw: Option<serde_json::Value> = None;
                 let load_result = if attempted_load {
-                    let load_req = build_load_session_request(
+                    let mut load_req = build_load_session_request(
                         agent_type,
                         SessionId::new(sid.clone()),
                         &cwd,
@@ -11232,6 +11469,12 @@ async fn run_connection(
                         &claude,
                     )
                     .named_for(agent_type, session_name.as_deref());
+                    load_req.meta = grok_session_permission_meta(
+                        agent_type,
+                        load_req.meta.take(),
+                        grok_launch.as_ref(),
+                        &preferred_config_values,
+                    );
                     attach.enter(AttachPhase::Loading).await;
                     if matches!(agent_type, AgentType::Kiro | AgentType::Hermes) {
                         match attach
@@ -15484,13 +15727,21 @@ async fn handle_fork_or_exit(
     // `emit_session_config_options_values` always writes the list — an agent
     // with no config options leaves an empty one, not a stale one.
     let inherited_mode_id = fork_info.inherited_mode_id;
-    let inherited_config_values = state
-        .read()
-        .await
-        .config_options
-        .as_deref()
-        .map(current_config_option_values)
-        .unwrap_or_default();
+    let inherited_config_values = {
+        let s = state.read().await;
+        let mut values = s
+            .config_options
+            .as_deref()
+            .map(current_config_option_values)
+            .unwrap_or_default();
+        // Grok's permission mode goes to the fork only when the parent picked
+        // it; otherwise the fork, like its parent, runs in the launch mode
+        // (see `SessionState::grok_permission_picked`).
+        if s.agent_type == AgentType::Grok && !s.grok_permission_picked {
+            values.remove(crate::acp::grok_permission::GROK_PERMISSION_OPTION_ID);
+        }
+        values
+    };
 
     tracing::info!(
         "[ACP] Fork transition: attaching to forked session {} (original: {})",
@@ -24705,6 +24956,47 @@ impl<Counterpart: Role> HandleDispatchFrom<Counterpart> for GrokModelCatalogBroa
 
     fn describe_chain(&self) -> impl std::fmt::Debug {
         "GrokModelCatalogBroadcasts"
+    }
+}
+
+/// Claims Grok's `_x.ai/sessions/changed` roster broadcast, which carries each
+/// session's Always approve flag (`yolo`), and moves the permission selector
+/// when grok's flag and the selector disagree (see `acp::grok_permission`).
+///
+/// Like the model catalog broadcast, the frame has no top-level `sessionId`
+/// (its sessions are in `upserted[]`), so no session router claims it and the
+/// runtime would drop it. Grok sends it when a turn starts and ends. Handled
+/// inline, taking only the session state's lock, as the catalog is.
+struct GrokSessionRoster {
+    agent_type: AgentType,
+    state: Arc<RwLock<SessionState>>,
+    emitter: EventEmitter,
+}
+
+impl<Counterpart: Role> HandleDispatchFrom<Counterpart> for GrokSessionRoster {
+    async fn handle_dispatch_from(
+        &mut self,
+        message: Dispatch,
+        _connection: ConnectionTo<Counterpart>,
+    ) -> Result<Handled<Dispatch>, agent_client_protocol::Error> {
+        match message {
+            Dispatch::Notification(notification)
+                if self.agent_type == AgentType::Grok
+                    && notification.method()
+                        == crate::acp::grok_permission::GROK_SESSIONS_CHANGED_METHOD =>
+            {
+                apply_grok_session_roster(&self.state, &self.emitter, notification.params()).await;
+                Ok(Handled::Yes)
+            }
+            message => Ok(Handled::No {
+                message,
+                retry: false,
+            }),
+        }
+    }
+
+    fn describe_chain(&self) -> impl std::fmt::Debug {
+        "GrokSessionRoster"
     }
 }
 
@@ -41944,7 +42236,8 @@ mod tests {
 
         let effort = &opts[1];
         assert_eq!(effort.id, GROK_EFFORT_OPTION_ID);
-        assert_eq!(effort.category.as_deref(), Some("mode"));
+        // Grok's own `mode` category is the permission selector's in codeg.
+        assert_eq!(effort.category.as_deref(), Some("thought_level"));
         let effort_sel = expect_select(&effort.kind);
         assert_eq!(effort_sel.options.len(), 2);
         assert_eq!(effort_sel.current_value, "high", "the `selected` effort is current");
@@ -49459,6 +49752,7 @@ mod tests {
             &tail,
             None,
             false,
+            None,
         )
         .await
         .expect("Qoder's launch builds");
@@ -49508,7 +49802,7 @@ mod tests {
             temp_env::async_with_vars([("PATH", Some(path.as_os_str()))], async {
                 let tail = Arc::new(StderrTail::new());
                 let (agent, _) =
-                    build_agent(AgentType::Qoder, &env, &workspace, &tail, None, false)
+                    build_agent(AgentType::Qoder, &env, &workspace, &tail, None, false, None)
                         .await
                         .unwrap();
                 let (stdin, mut stdout, mut stderr, mut child) = agent.spawn_process().unwrap();
@@ -51567,6 +51861,18 @@ mod tests {
     #[serde(transparent)]
     struct TestSetModelRequest(serde_json::Value);
 
+    /// `_x.ai/yolo_mode_changed` as the agent receives it, the raw params.
+    #[derive(
+        Debug,
+        Clone,
+        serde::Serialize,
+        serde::Deserialize,
+        agent_client_protocol::JsonRpcNotification,
+    )]
+    #[notification(method = "_x.ai/yolo_mode_changed")]
+    #[serde(transparent)]
+    struct TestYoloModeChanged(serde_json::Value);
+
     /// `run_conversation_loop` for a Grok session, attached to a scripted agent.
     struct GrokLoop {
         state: Arc<RwLock<SessionState>>,
@@ -51577,6 +51883,8 @@ mod tests {
         seen: Vec<AcpEvent>,
         /// Every `session/set_model` the agent received, in order.
         set_models: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+        /// Every `_x.ai/yolo_mode_changed` the agent received, in order.
+        yolo_switches: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
         go: Arc<tokio::sync::Notify>,
         respond: Arc<tokio::sync::Notify>,
         after: Arc<tokio::sync::Notify>,
@@ -51605,6 +51913,8 @@ mod tests {
             let agent_after = Arc::clone(&after);
             let set_models = Arc::new(std::sync::Mutex::new(Vec::new()));
             let agent_set_models = Arc::clone(&set_models);
+            let yolo_switches = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let agent_yolo_switches = Arc::clone(&yolo_switches);
             let agent = tokio::spawn(async move {
                 let _ = Agent
                     .builder()
@@ -51658,6 +51968,13 @@ mod tests {
                         },
                         on_receive_notification!(),
                     )
+                    .on_receive_notification(
+                        async move |switch: TestYoloModeChanged, _cx: ConnectionTo<Client>| {
+                            agent_yolo_switches.lock().unwrap().push(switch.0);
+                            Ok(())
+                        },
+                        on_receive_notification!(),
+                    )
                     .on_receive_request(
                         async move |_req: ForkSessionRequest,
                                     responder: Responder<ForkSessionResponse>,
@@ -51689,6 +52006,7 @@ mod tests {
             let (cmd_tx, mut cmd_rx) = mpsc::channel(16);
             let loop_state = Arc::clone(&state);
             let catalog_state = Arc::clone(&state);
+            let roster_state = Arc::clone(&state);
             let asks = Arc::new(RecordingAsks::default());
             let injection = DelegationInjection {
                 questions: Arc::clone(&asks) as Arc<dyn crate::acp::question::SessionQuestionAccess>,
@@ -51706,6 +52024,12 @@ mod tests {
                     .with_handler(GrokModelCatalogBroadcasts {
                         agent_type: AgentType::Grok,
                         state: catalog_state,
+                        emitter: EventEmitter::Noop,
+                    })
+                    // The session roster names no session at the top level either.
+                    .with_handler(GrokSessionRoster {
+                        agent_type: AgentType::Grok,
+                        state: roster_state,
                         emitter: EventEmitter::Noop,
                     })
                     .connect_with(client_end, async move |cx: ConnectionTo<Agent>| {
@@ -51751,6 +52075,7 @@ mod tests {
                 events,
                 seen: Vec::new(),
                 set_models,
+                yolo_switches,
                 go,
                 respond,
                 after,
@@ -52774,6 +53099,483 @@ mod tests {
                 .unwrap()
                 .contains_key("grok-4.7"),
             "a later switch to a new model finds its spec"
+        );
+    }
+
+    // ── Grok's permission selector (`acp::grok_permission`) ───────────────
+
+    /// A `_x.ai/sessions/changed` roster frame as grok 1.0.89 sends it when a
+    /// turn starts or ends (one entry, for the session the loop runs).
+    fn grok_roster_frame(yolo: bool) -> GrokFrame {
+        (
+            "_x.ai/sessions/changed",
+            serde_json::json!({
+                "upserted": [{
+                    "sessionId": "s1", "title": null, "cwd": "/tmp", "isWorktree": false,
+                    "modelId": "grok-4.6", "yolo": yolo, "activity": "idle", "resident": true,
+                    "lastChangeUnixMs": 1795810828663_u64, "origin": {"kind": "local"}
+                }],
+                "removed": []
+            }),
+        )
+    }
+
+    /// The handshake picker plus codeg's permission selector on `current`, for
+    /// a process launched in `launch`, as an establishment leaves the state.
+    async fn seed_grok_permission_picker(
+        grok: &GrokLoop,
+        launch: crate::acp::grok_permission::GrokLaunchMode,
+        current: &str,
+    ) {
+        let (mut opts, specs) = grok_handshake_picker("medium");
+        opts.push(crate::acp::grok_permission::permission_option(
+            &launch, current,
+        ));
+        let mut st = grok.state.write().await;
+        st.config_options = Some(opts);
+        st.grok_model_specs = Some(specs);
+        st.grok_launch_mode = Some(launch);
+        st.external_id = Some("s1".to_string());
+    }
+
+    fn permission_value(opts: &[SessionConfigOptionInfo]) -> Option<String> {
+        crate::acp::grok_permission::current_value(opts).map(str::to_string)
+    }
+
+    /// The permission values the emitted pickers held, in order.
+    fn permission_values_emitted(seen: &[AcpEvent]) -> Vec<String> {
+        config_option_events(seen)
+            .iter()
+            .filter_map(|opts| permission_value(opts))
+            .collect()
+    }
+
+    /// The switches the agent received, once `n` have arrived (or 5 s passed).
+    /// For `n == 0`, after a short quiet spell, so a stray switch still shows.
+    async fn yolo_switches_received(grok: &GrokLoop, n: usize) -> Vec<serde_json::Value> {
+        if n == 0 {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            return grok.yolo_switches.lock().unwrap().clone();
+        }
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let got = grok.yolo_switches.lock().unwrap().clone();
+            if got.len() >= n || tokio::time::Instant::now() > deadline {
+                return got;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Picking a mode in the composer switches the RUNNING session with the
+    /// notification grok's own TUI sends, both flags set; the selector follows
+    /// in the snapshot every client reads. Nothing goes out as a model switch.
+    #[tokio::test]
+    async fn picking_a_grok_permission_mode_switches_the_running_session() {
+        use crate::acp::grok_permission::GrokLaunchMode;
+        let mut grok = GrokLoop::start(GrokScript::default()).await;
+        seed_grok_permission_picker(&grok, GrokLaunchMode::Ask, "default").await;
+
+        for value in ["bypassPermissions", "auto", "default"] {
+            let (reply, answer) = oneshot::channel();
+            grok.send(ConnectionCommand::SetConfigOption {
+                reply: Some(reply),
+                config_id: "mode".to_string(),
+                value_id: value.to_string(),
+            })
+            .await;
+            assert_eq!(answer.await.unwrap(), Ok(SetterOutcome::Accepted));
+            grok.until("the switch's re-emit", |e| {
+                matches!(e, AcpEvent::SessionConfigOptions { config_options }
+                    if permission_value(config_options).as_deref() == Some(value))
+            })
+            .await;
+        }
+        assert_eq!(
+            yolo_switches_received(&grok, 3).await,
+            [
+                serde_json::json!({"sessionId": "s1", "yolo_mode": true, "auto_mode": false}),
+                serde_json::json!({"sessionId": "s1", "yolo_mode": false, "auto_mode": true}),
+                serde_json::json!({"sessionId": "s1", "yolo_mode": false, "auto_mode": false}),
+            ]
+        );
+        assert!(grok.set_models.lock().unwrap().is_empty());
+        let st = grok.state.read().await;
+        let opts = st.config_options.as_deref().unwrap();
+        assert_eq!(permission_value(opts).as_deref(), Some("default"));
+        assert!(
+            st.grok_permission_picked,
+            "a pick is the conversation's own, Ask included"
+        );
+        assert_eq!(
+            expect_select(&opts[1].kind).current_value,
+            "medium",
+            "the other selectors are untouched"
+        );
+        drop(st);
+        grok.shutdown().await;
+    }
+
+    /// A mode the launch does not offer — Ask in a session launched in a fixed
+    /// mode — sends nothing and moves nothing.
+    #[tokio::test]
+    async fn a_grok_permission_mode_the_launch_does_not_offer_is_not_sent() {
+        use crate::acp::grok_permission::GrokLaunchMode;
+        let grok = GrokLoop::start(GrokScript::default()).await;
+        seed_grok_permission_picker(
+            &grok,
+            GrokLaunchMode::Fixed("acceptEdits".into()),
+            "acceptEdits",
+        )
+        .await;
+        let (reply, answer) = oneshot::channel();
+        grok.send(ConnectionCommand::SetConfigOption {
+            reply: Some(reply),
+            config_id: "mode".to_string(),
+            value_id: "default".to_string(),
+        })
+        .await;
+        assert_eq!(answer.await.unwrap(), Ok(SetterOutcome::NotExecuted));
+        assert!(yolo_switches_received(&grok, 0).await.is_empty());
+        assert_eq!(
+            permission_value(grok.state.read().await.config_options.as_deref().unwrap()).as_deref(),
+            Some("acceptEdits")
+        );
+        assert!(!grok.state.read().await.grok_permission_picked);
+        grok.shutdown().await;
+    }
+
+    /// Grok's roster is the read-back: Always approve turned on and off behind
+    /// codeg's back (grok's own `/always-approve`) moves the selector each time.
+    #[tokio::test]
+    async fn grok_reporting_always_approve_moves_the_permission_selector() {
+        use crate::acp::grok_permission::GrokLaunchMode;
+        let mut grok = GrokLoop::start(GrokScript {
+            later: vec![
+                grok_roster_frame(true),
+                grok_roster_frame(true),
+                grok_roster_frame(false),
+                grok_barrier(),
+            ],
+            ..GrokScript::default()
+        })
+        .await;
+        seed_grok_permission_picker(&grok, GrokLaunchMode::Auto, "auto").await;
+        grok.release_later();
+        grok.until_barrier().await;
+        assert_eq!(
+            permission_values_emitted(&grok.seen),
+            ["bypassPermissions", "auto"],
+            "a repeated report moves nothing; off lands on the launch mode"
+        );
+        assert_eq!(
+            permission_value(grok.state.read().await.config_options.as_deref().unwrap()).as_deref(),
+            Some("auto")
+        );
+        assert!(
+            yolo_switches_received(&grok, 0).await.is_empty(),
+            "a report is not answered"
+        );
+        assert!(
+            !grok.state.read().await.grok_permission_picked,
+            "a mode grok moved to by itself is not the conversation's pick"
+        );
+        grok.shutdown().await;
+    }
+
+    /// A report grok built before codeg's switch reached it can arrive after
+    /// the switch; it is not taken for grok's answer.
+    #[tokio::test]
+    async fn a_grok_roster_that_crosses_a_permission_switch_is_ignored() {
+        use crate::acp::grok_permission::GrokLaunchMode;
+        let mut grok = GrokLoop::start(GrokScript {
+            later: vec![grok_roster_frame(false), grok_barrier()],
+            ..GrokScript::default()
+        })
+        .await;
+        seed_grok_permission_picker(&grok, GrokLaunchMode::Ask, "default").await;
+        grok.send(ConnectionCommand::SetConfigOption {
+            reply: None,
+            config_id: "mode".to_string(),
+            value_id: "bypassPermissions".to_string(),
+        })
+        .await;
+        grok.until("the switch's re-emit", |e| {
+            matches!(e, AcpEvent::SessionConfigOptions { config_options }
+                if permission_value(config_options).as_deref() == Some("bypassPermissions"))
+        })
+        .await;
+        grok.release_later();
+        grok.until_barrier().await;
+        assert_eq!(
+            permission_value(grok.state.read().await.config_options.as_deref().unwrap()).as_deref(),
+            Some("bypassPermissions")
+        );
+        grok.shutdown().await;
+    }
+
+    /// One Grok establishment against a fake agent that records the
+    /// permission switches it receives: the process was launched in `launch`,
+    /// and the connect carries `preferred`. Returns the state and the switches.
+    async fn establish_grok_with_permission(
+        launch: crate::acp::grok_permission::GrokLaunchMode,
+        preferred: BTreeMap<String, String>,
+        expect_switches: usize,
+    ) -> (Arc<RwLock<SessionState>>, Vec<serde_json::Value>) {
+        let switches = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let agent_switches = Arc::clone(&switches);
+        let (client_end, agent_end) = agent_client_protocol::Channel::duplex();
+        let agent = tokio::spawn(async move {
+            let _ = Agent
+                .builder()
+                .on_receive_request(
+                    async |_req: NewSessionRequest,
+                           responder: Responder<NewSessionResponse>,
+                           _cx: ConnectionTo<Client>| {
+                        responder.respond(NewSessionResponse::new(SessionId::new("s1")))
+                    },
+                    on_receive_request!(),
+                )
+                .on_receive_notification(
+                    async move |switch: TestYoloModeChanged, _cx: ConnectionTo<Client>| {
+                        agent_switches.lock().unwrap().push(switch.0);
+                        Ok(())
+                    },
+                    on_receive_notification!(),
+                )
+                .connect_with(agent_end, async |_cx: ConnectionTo<Client>| {
+                    std::future::pending::<Result<(), agent_client_protocol::Error>>().await
+                })
+                .await;
+        });
+
+        let mut st = SessionState::new(
+            "conn-grok".to_string(),
+            AgentType::Grok,
+            None,
+            "win".to_string(),
+            None,
+        );
+        st.grok_launch_mode = Some(launch);
+        let state = Arc::new(RwLock::new(st));
+        let establishment_state = Arc::clone(&state);
+        let wait_switches = Arc::clone(&switches);
+        let (meta, models) = grok_bundled_handshake();
+        Client
+            .builder()
+            .connect_with(client_end, async move |cx: ConnectionTo<Agent>| {
+                let raw = cx
+                    .send_request_to(
+                        Agent,
+                        UntypedMessage::new("session/new", NewSessionRequest::new("/tmp"))?,
+                    )
+                    .block_task()
+                    .await?;
+                let response: NewSessionResponse = serde_json::from_value(raw)
+                    .map_err(agent_client_protocol::Error::into_internal_error)?;
+                let mut session = AgentSession::attach(&cx, response)?;
+                let specs = parse_grok_model_specs(Some(&models));
+                apply_and_emit_session_config_options(
+                    &cx,
+                    &mut session,
+                    &establishment_state,
+                    &EventEmitter::Noop,
+                    AgentType::Grok,
+                    Some(&meta),
+                    Some(&specs),
+                    Some(&models),
+                    None,
+                    &preferred,
+                    Vec::new(),
+                )
+                .await;
+                // The switch is a notification: give the agent time to read it
+                // (and a stray one time to show when none is expected).
+                if expect_switches == 0 {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+                let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+                while wait_switches.lock().unwrap().len() < expect_switches
+                    && tokio::time::Instant::now() < deadline
+                {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Ok(())
+            })
+            .await
+            .expect("the establishment runs");
+        agent.abort();
+        let got = switches.lock().unwrap().clone();
+        (state, got)
+    }
+
+    /// A new session shows the mode the Grok settings launched it in and
+    /// switches nothing; the launch mode is also what the agent chose.
+    #[tokio::test]
+    async fn a_new_grok_session_shows_its_launch_permission_mode() {
+        use crate::acp::grok_permission::GrokLaunchMode;
+        for (launch, shown) in [
+            (GrokLaunchMode::Ask, "default"),
+            (GrokLaunchMode::Auto, "auto"),
+            (GrokLaunchMode::AlwaysApprove, "bypassPermissions"),
+            (GrokLaunchMode::Fixed("plan".into()), "plan"),
+        ] {
+            let (state, switches) =
+                establish_grok_with_permission(launch.clone(), BTreeMap::new(), 0).await;
+            assert!(switches.is_empty(), "{launch:?}");
+            let st = state.read().await;
+            let opts = st.config_options.as_deref().expect("a picker");
+            assert_eq!(
+                opts.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
+                [GROK_MODEL_OPTION_ID, GROK_EFFORT_OPTION_ID, "mode"]
+            );
+            // "The mode" by category is the permission selector, whatever the
+            // order: clients look it up that way.
+            assert_eq!(
+                opts.iter()
+                    .filter(|o| o.category.as_deref() == Some("mode"))
+                    .map(|o| o.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["mode"]
+            );
+            assert_eq!(permission_value(opts).as_deref(), Some(shown), "{launch:?}");
+            assert_eq!(
+                st.agent_chosen_config_values
+                    .get("mode")
+                    .map(String::as_str),
+                Some(shown)
+            );
+            assert!(
+                !st.grok_permission_picked,
+                "{launch:?}: the launch mode is no pick, so the record leaves it out"
+            );
+        }
+    }
+
+    /// A resumed session comes back in the mode its conversation recorded,
+    /// including Ask on a process the Grok settings launch in Auto — the one
+    /// case the documented `_meta` cannot express.
+    #[tokio::test]
+    async fn a_resumed_grok_session_comes_back_in_its_recorded_permission_mode() {
+        use crate::acp::grok_permission::GrokLaunchMode;
+        let preferred = |mode: &str| BTreeMap::from([("mode".to_string(), mode.to_string())]);
+
+        let (state, switches) =
+            establish_grok_with_permission(GrokLaunchMode::Auto, preferred("default"), 1).await;
+        assert_eq!(
+            switches,
+            [serde_json::json!({"sessionId": "s1", "yolo_mode": false, "auto_mode": false})]
+        );
+        let st = state.read().await;
+        assert_eq!(
+            permission_value(st.config_options.as_deref().unwrap()).as_deref(),
+            Some("default")
+        );
+        assert_eq!(
+            st.agent_chosen_config_values
+                .get("mode")
+                .map(String::as_str),
+            Some("auto"),
+            "what the launch gave, from before the replay"
+        );
+        assert!(st.grok_permission_switched_at.is_some());
+        assert!(st.grok_permission_picked, "a recorded mode stays recorded");
+        drop(st);
+
+        let (state, switches) =
+            establish_grok_with_permission(GrokLaunchMode::Ask, preferred("bypassPermissions"), 1)
+                .await;
+        assert_eq!(
+            switches,
+            [serde_json::json!({"sessionId": "s1", "yolo_mode": true, "auto_mode": false})]
+        );
+        assert_eq!(
+            permission_value(state.read().await.config_options.as_deref().unwrap()).as_deref(),
+            Some("bypassPermissions")
+        );
+
+        // Already in it: nothing to send, and still the conversation's pick,
+        // so a later change to the launch mode does not move it.
+        let (state, switches) =
+            establish_grok_with_permission(GrokLaunchMode::Auto, preferred("auto"), 0).await;
+        assert!(switches.is_empty());
+        assert!(state.read().await.grok_permission_picked);
+
+        // A fixed mode recorded under an older Grok setting is not offered now:
+        // the session runs in the launch mode, which is not recorded over it.
+        let (state, switches) =
+            establish_grok_with_permission(GrokLaunchMode::Ask, preferred("acceptEdits"), 0).await;
+        assert!(switches.is_empty());
+        assert_eq!(
+            permission_value(state.read().await.config_options.as_deref().unwrap()).as_deref(),
+            Some("default")
+        );
+        assert!(!state.read().await.grok_permission_picked);
+    }
+
+    /// The resume and load a reconnect sends carry the recorded mode in the
+    /// documented `_meta` keys; other agents' requests and a connect with no
+    /// recorded mode are left alone.
+    #[test]
+    fn a_grok_reconnect_names_its_permission_mode_on_resume_and_load() {
+        use crate::acp::grok_permission::GrokLaunchMode;
+        let claude = ClaudeSessionOptions::new(true);
+        let cwd = std::path::PathBuf::from("/tmp/codeg");
+        let preferred = BTreeMap::from([("mode".to_string(), "auto".to_string())]);
+
+        let mut resume = build_resume_session_request(
+            AgentType::Grok,
+            SessionId::new("s1"),
+            &cwd,
+            Vec::new(),
+            &claude,
+        );
+        resume.meta = grok_session_permission_meta(
+            AgentType::Grok,
+            resume.meta.take(),
+            Some(&GrokLaunchMode::Ask),
+            &preferred,
+        );
+        assert_eq!(
+            serde_json::to_value(&resume).unwrap()["_meta"],
+            serde_json::json!({"autoMode": true})
+        );
+
+        let mut load = build_load_session_request(
+            AgentType::Grok,
+            SessionId::new("s1"),
+            &cwd,
+            Vec::new(),
+            &claude,
+        );
+        load.meta = grok_session_permission_meta(
+            AgentType::Grok,
+            load.meta.take(),
+            Some(&GrokLaunchMode::Ask),
+            &BTreeMap::from([("mode".to_string(), "bypassPermissions".to_string())]),
+        );
+        assert_eq!(
+            serde_json::to_value(&load).unwrap()["_meta"],
+            serde_json::json!({"yoloMode": true})
+        );
+
+        assert_eq!(
+            grok_session_permission_meta(
+                AgentType::Grok,
+                None,
+                Some(&GrokLaunchMode::Ask),
+                &BTreeMap::new()
+            ),
+            None
+        );
+        assert_eq!(
+            grok_session_permission_meta(
+                AgentType::ClaudeCode,
+                None,
+                Some(&GrokLaunchMode::Ask),
+                &preferred
+            ),
+            None
         );
     }
 

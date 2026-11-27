@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select"
 import { SessionSettingsPicker } from "@/components/chat/session-settings-picker"
 import { buildSessionSettings } from "@/lib/session-settings"
+import { isSessionOnlyConfigOption } from "@/lib/selector-prefs-storage"
 import { cn } from "@/lib/utils"
 import type {
   AgentOptionsSnapshot,
@@ -269,17 +270,31 @@ export function useBooleanOptionLabels(): { on: string; off: string } {
  *
  * Kept right beside `withSelection` so the display rule and the save rule
  * can't drift.
+ *
+ * The exception is an option whose value belongs to one session and has a
+ * default of its own in the agent's settings (Grok's permission mode, see
+ * `isSessionOnlyConfigOption`): it is saved only when picked here. Left
+ * untouched, every run starts in the mode those settings launch it in, and a
+ * later change to them reaches the task — pinning the probe's value would
+ * freeze whatever the settings said on the day the task was saved.
  */
 export function effectiveSelections(
   snapshot: AgentOptionsSnapshot | null,
   modeId: string | null,
-  configValues: Record<string, string>
+  configValues: Record<string, string>,
+  agentType?: AgentType | null
 ): { mode_id: string | null; config_values: Record<string, string> } {
   // No probe landed → nothing concrete was ever shown; persist the raw overrides.
   if (!snapshot) return { mode_id: modeId, config_values: configValues }
 
   const config: Record<string, string> = {}
   for (const option of snapshot.config_options) {
+    if (
+      configValues[option.id] === undefined &&
+      agentType &&
+      isSessionOnlyConfigOption(agentType, option.id)
+    )
+      continue
     // A switch shows its current state when untouched, so it pins it too.
     const effective =
       configValues[option.id] ??
