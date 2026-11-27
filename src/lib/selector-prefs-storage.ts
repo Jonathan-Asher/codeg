@@ -243,7 +243,12 @@ export function saveModePreference(
  * its conversation (the backend records it there and re-applies it on
  * resume), and a pick made in a new chat before its session is ready still
  * reaches that session as a pending pick. The backend also drops it from a
- * new session's connect, for clients that still save it.
+ * new session's connect, for clients that still save it, and records it on a
+ * conversation only once it is picked there.
+ *
+ * For the same reason "Continue in another agent" does not offer it (its
+ * picks reach the new session only as saved per-agent picks), and the task
+ * and automation editors save it only when it is picked in them.
  */
 export function isSessionOnlyConfigOption(
   agentType: string,

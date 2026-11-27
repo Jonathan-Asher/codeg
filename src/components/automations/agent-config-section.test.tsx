@@ -477,3 +477,60 @@ describe("effectiveSelections and snapshotLabels with switches", () => {
     ).toEqual({ config_labels: { model: "Haiku" } })
   })
 })
+
+describe("effectiveSelections with Grok's permission mode", () => {
+  const select = (
+    id: string,
+    category: string,
+    current: string,
+    values: string[]
+  ): SessionConfigOptionInfo => ({
+    id,
+    name: id,
+    description: null,
+    category,
+    kind: {
+      type: "select",
+      current_value: current,
+      options: values.map((value) => ({
+        value,
+        name: value,
+        description: null,
+      })),
+      groups: [],
+    },
+  })
+  // What a probe of a Grok launched in Always approve reports.
+  const GROK: AgentOptionsSnapshot = {
+    modes: null,
+    available_commands: [],
+    config_options: [
+      select("model", "model", "grok-4.6", ["grok-4.6", "grok-4.5"]),
+      select("reasoning_effort", "thought_level", "high", ["low", "high"]),
+      select("mode", "mode", "bypassPermissions", [
+        "default",
+        "auto",
+        "bypassPermissions",
+      ]),
+    ],
+  }
+
+  it("leaves it unset when untouched, so each run starts in the Grok settings' mode", () => {
+    expect(effectiveSelections(GROK, null, {}, "grok")).toEqual({
+      mode_id: null,
+      config_values: { model: "grok-4.6", reasoning_effort: "high" },
+    })
+  })
+
+  it("saves it once picked in the editor", () => {
+    expect(
+      effectiveSelections(GROK, null, { mode: "default" }, "grok").config_values
+    ).toEqual({ model: "grok-4.6", reasoning_effort: "high", mode: "default" })
+  })
+
+  it("still pins another agent's mode as shown", () => {
+    expect(
+      effectiveSelections(GROK, null, {}, "claude_code").config_values.mode
+    ).toBe("bypassPermissions")
+  })
+})

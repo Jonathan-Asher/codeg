@@ -290,7 +290,8 @@ function TaskEditorBody({
     const { mode_id, config_values } = effectiveSelections(
       snapshot,
       modeId,
-      configValues
+      configValues,
+      agentType
     )
     return {
       prompt_blocks: blocks,

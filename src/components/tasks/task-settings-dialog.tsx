@@ -315,7 +315,8 @@ function TaskSettingsBody({
       const { mode_id, config_values } = effectiveSelections(
         snapshot,
         modeId,
-        configValues
+        configValues,
+        agentType
       )
       const parsed = Number.parseInt(maxConcurrent, 10)
       // A percentage the box can't represent (blank, or typed past 100) reads
