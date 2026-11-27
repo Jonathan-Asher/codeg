@@ -7761,12 +7761,19 @@ async fn send_grok_permission_switch(
 }
 
 /// On connect, put the session back in the permission mode its conversation
-/// last had. On a resume or load that value also rode the request's `_meta`
+/// picked. On a resume or load that value also rode the request's `_meta`
 /// (see `grok_session_permission_meta`); the notification is what also covers
-/// Ask on a process launched in Auto, which `_meta` cannot express. A new
-/// session gets no value here (`resolve_connect_selector_prefs` drops the
-/// per-agent pick), so it starts in the Grok settings' mode; a fork gets its
-/// parent's.
+/// Ask on a process launched in Auto, which `_meta` cannot express.
+///
+/// A value here is always the conversation's own choice: its selector record
+/// holds the mode only once it was picked there, a spawn's saved selection
+/// names it only when the user chose it, and a fork passes its parent's only
+/// when the parent picked it. So it marks the session as having picked
+/// (`SessionState::grok_permission_picked`), even when the session already
+/// runs in it, and the record keeps it. With no value (a new session, whose
+/// connect drops the per-agent pick in `resolve_connect_selector_prefs`, or a
+/// conversation that never picked) the session runs in the mode the Grok
+/// settings launched it in.
 async fn apply_grok_preferred_permission(
     cx: &ConnectionTo<Agent>,
     session_id: &SessionId,
@@ -7779,6 +7786,18 @@ async fn apply_grok_preferred_permission(
     let Some(pref) = preferred_config_values.get(GROK_PERMISSION_OPTION_ID) else {
         return;
     };
+    // A mode this launch does not offer (Ask, picked before the Grok settings
+    // moved to a fixed launch mode): the session stays in its launch mode, and
+    // the record keeps the pick for a launch that offers it again (a record
+    // write only replaces the keys it carries).
+    if !launch.offers(pref) {
+        tracing::info!(
+            "[ACP][grok] recorded permission mode '{pref}' is not offered by this launch; kept {}",
+            launch.initial_value()
+        );
+        return;
+    }
+    state.write().await.grok_permission_picked = true;
     if current_value(opts) == Some(pref.as_str()) {
         return;
     }
@@ -7786,12 +7805,7 @@ async fn apply_grok_preferred_permission(
         Ok(true) => {
             set_current(opts, pref);
         }
-        // A mode this launch does not offer (a fixed launch mode from before
-        // the Grok settings changed): the session stays in its launch mode.
-        Ok(false) => tracing::info!(
-            "[ACP][grok] saved permission mode '{pref}' is not offered by this launch; kept {}",
-            launch.initial_value()
-        ),
+        Ok(false) => {}
         Err(e) => tracing::error!("[ACP][grok] failed to re-apply permission mode '{pref}': {e}"),
     }
 }
@@ -8019,6 +8033,9 @@ async fn set_grok_config_option(
         if !send_grok_permission_switch(cx, session_id, state, &launch, &value_id).await? {
             return Ok(SetterOutcome::NotExecuted);
         }
+        // The conversation's own choice from here on: the selector record the
+        // re-emit below writes keeps it, and a reconnect re-applies it.
+        state.write().await.grok_permission_picked = true;
         emit_with_state_built(state, emitter, |s| {
             let mut opts = s.config_options.clone()?;
             crate::acp::grok_permission::set_current(&mut opts, &value_id);
@@ -15702,13 +15719,21 @@ async fn handle_fork_or_exit(
     // `emit_session_config_options_values` always writes the list — an agent
     // with no config options leaves an empty one, not a stale one.
     let inherited_mode_id = fork_info.inherited_mode_id;
-    let inherited_config_values = state
-        .read()
-        .await
-        .config_options
-        .as_deref()
-        .map(current_config_option_values)
-        .unwrap_or_default();
+    let inherited_config_values = {
+        let s = state.read().await;
+        let mut values = s
+            .config_options
+            .as_deref()
+            .map(current_config_option_values)
+            .unwrap_or_default();
+        // Grok's permission mode goes to the fork only when the parent picked
+        // it; otherwise the fork, like its parent, runs in the launch mode
+        // (see `SessionState::grok_permission_picked`).
+        if s.agent_type == AgentType::Grok && !s.grok_permission_picked {
+            values.remove(crate::acp::grok_permission::GROK_PERMISSION_OPTION_ID);
+        }
+        values
+    };
 
     tracing::info!(
         "[ACP] Fork transition: attaching to forked session {} (original: {})",
@@ -53169,6 +53194,10 @@ mod tests {
         let st = grok.state.read().await;
         let opts = st.config_options.as_deref().unwrap();
         assert_eq!(permission_value(opts).as_deref(), Some("default"));
+        assert!(
+            st.grok_permission_picked,
+            "a pick is the conversation's own, Ask included"
+        );
         assert_eq!(
             expect_select(&opts[1].kind).current_value,
             "medium",
@@ -53203,6 +53232,7 @@ mod tests {
             permission_value(grok.state.read().await.config_options.as_deref().unwrap()).as_deref(),
             Some("acceptEdits")
         );
+        assert!(!grok.state.read().await.grok_permission_picked);
         grok.shutdown().await;
     }
 
@@ -53236,6 +53266,10 @@ mod tests {
         assert!(
             yolo_switches_received(&grok, 0).await.is_empty(),
             "a report is not answered"
+        );
+        assert!(
+            !grok.state.read().await.grok_permission_picked,
+            "a mode grok moved to by itself is not the conversation's pick"
         );
         grok.shutdown().await;
     }
@@ -53393,6 +53427,10 @@ mod tests {
                     .map(String::as_str),
                 Some(shown)
             );
+            assert!(
+                !st.grok_permission_picked,
+                "{launch:?}: the launch mode is no pick, so the record leaves it out"
+            );
         }
     }
 
@@ -53423,6 +53461,7 @@ mod tests {
             "what the launch gave, from before the replay"
         );
         assert!(st.grok_permission_switched_at.is_some());
+        assert!(st.grok_permission_picked, "a recorded mode stays recorded");
         drop(st);
 
         let (state, switches) =
@@ -53437,12 +53476,15 @@ mod tests {
             Some("bypassPermissions")
         );
 
-        // Already in it: nothing to send.
-        let (_, switches) =
+        // Already in it: nothing to send, and still the conversation's pick,
+        // so a later change to the launch mode does not move it.
+        let (state, switches) =
             establish_grok_with_permission(GrokLaunchMode::Auto, preferred("auto"), 0).await;
         assert!(switches.is_empty());
+        assert!(state.read().await.grok_permission_picked);
 
-        // A fixed mode recorded under an older Grok setting is not offered now.
+        // A fixed mode recorded under an older Grok setting is not offered now:
+        // the session runs in the launch mode, which is not recorded over it.
         let (state, switches) =
             establish_grok_with_permission(GrokLaunchMode::Ask, preferred("acceptEdits"), 0).await;
         assert!(switches.is_empty());
@@ -53450,6 +53492,7 @@ mod tests {
             permission_value(state.read().await.config_options.as_deref().unwrap()).as_deref(),
             Some("default")
         );
+        assert!(!state.read().await.grok_permission_picked);
     }
 
     /// The resume and load a reconnect sends carry the recorded mode in the

@@ -17,6 +17,14 @@
 //!   resuming the session starts in its launch mode again, which is why
 //!   codeg re-applies the session's choice on every reconnect.
 //!
+//! What is re-applied is only a mode the conversation PICKED (in the composer,
+//! with `codeg run --mode`, or saved in a task's selection): the Grok settings'
+//! permission mode is the default for every session that never picked one, so a
+//! session that did not follows those settings when they change, from its next
+//! reconnect on. The selector record leaves the mode out until a pick
+//! (`SessionState::grok_permission_picked`), and a new session never starts
+//! from another chat's pick.
+//!
 //! The documented route, `_meta.yoloMode` / `_meta.autoMode` on
 //! `session/load` and `session/resume`, also works on a running session and on
 //! a new process, but it cannot turn Auto off (`autoMode: false` is ignored,

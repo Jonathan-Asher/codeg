@@ -680,7 +680,11 @@ pub(crate) async fn handle_event(
 /// `SelectorsReady` that ends establishment records the settled ones).
 ///
 /// Values pinned through the environment are left out: the agent refuses to
-/// change them, so they are not the conversation's choice to remember.
+/// change them, so they are not the conversation's choice to remember. So is
+/// Grok's permission mode until the conversation picks one: until then it is
+/// the mode the Grok settings launch every session in, which a later change to
+/// those settings must reach on the next reconnect, not a value to pin
+/// (`SessionState::grok_permission_picked`).
 fn effective_selector_state(
     state: &SessionState,
 ) -> Option<conversation_service::ConversationSelectorState> {
@@ -693,6 +697,9 @@ fn effective_selector_state(
         .map(crate::acp::connection::current_config_option_values)
         .unwrap_or_default();
     config_values.retain(|id, _| !state.env_pinned_config_option_ids.contains(id));
+    if state.agent_type == crate::models::AgentType::Grok && !state.grok_permission_picked {
+        config_values.remove(crate::acp::grok_permission::GROK_PERMISSION_OPTION_ID);
+    }
     let record = conversation_service::ConversationSelectorState {
         mode_id: state.current_mode.clone(),
         config_values,
@@ -6506,6 +6513,87 @@ mod tests {
         )
         .await;
         assert_eq!(values, prefs(&[("mode", "plan")]));
+    }
+
+    /// Grok's permission mode is recorded only once the conversation picks
+    /// one. Until then the session runs in the mode the Grok settings launch it
+    /// in, and a resume after those settings changed has to follow them: the
+    /// record leaves the mode out, so the resume re-applies nothing for it.
+    #[tokio::test]
+    async fn a_grok_permission_mode_is_recorded_only_once_picked() {
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/selector-grok-pick").await;
+        let cid = conversation_service::create(&db.conn, folder_id, AgentType::Grok, None, None)
+            .await
+            .unwrap()
+            .id;
+        conversation_service::bind_external_id(&db.conn, cid, "grok-sess", &[])
+            .await
+            .unwrap();
+        let mgr = ConnectionManager::new();
+        connection_on(&mgr, "c1", Some(cid), "grok-sess", true).await;
+        let state = mgr.get_state("c1").await.expect("connection");
+        state.write().await.agent_type = AgentType::Grok;
+        let grok_options = |mode: &str| AcpEvent::SessionConfigOptions {
+            config_options: [("model", "grok-4.6"), ("reasoning_effort", "high"), ("mode", mode)]
+                .iter()
+                .map(|(id, value)| select_option(id, value))
+                .collect(),
+        };
+        /// The permission mode a resume of the session would re-apply.
+        async fn resumed_mode(db: &crate::db::AppDatabase) -> Option<String> {
+            let (_, values) = resolve_connect_selector_prefs(
+                &db.conn,
+                AgentType::Grok,
+                Some("grok-sess"),
+                None,
+                BTreeMap::new(),
+            )
+            .await;
+            values.get("mode").cloned()
+        }
+
+        // Launched in Always approve, nothing picked: not recorded.
+        state
+            .write()
+            .await
+            .apply_event(&grok_options("bypassPermissions"));
+        handle_event(&db.conn, &mgr, &on("c1", 1, AcpEvent::SelectorsReady), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            record_of(&db, cid).await.map(|r| r.config_values),
+            Some(prefs(&[("model", "grok-4.6"), ("reasoning_effort", "high")]))
+        );
+        assert_eq!(
+            resumed_mode(&db).await,
+            None,
+            "a resume follows whatever the Grok settings launch it in now"
+        );
+
+        // Grok moved by itself (its own `/always-approve off`): still no pick.
+        state.write().await.apply_event(&grok_options("default"));
+        handle_event(&db.conn, &mgr, &on("c1", 2, options_changed()), None)
+            .await
+            .unwrap();
+        assert_eq!(resumed_mode(&db).await, None);
+
+        // The user picks Ask: from then on it is the conversation's, and every
+        // later change of it is recorded too.
+        {
+            let mut s = state.write().await;
+            s.grok_permission_picked = true;
+            s.apply_event(&grok_options("default"));
+        }
+        handle_event(&db.conn, &mgr, &on("c1", 3, options_changed()), None)
+            .await
+            .unwrap();
+        assert_eq!(resumed_mode(&db).await.as_deref(), Some("default"));
+        state.write().await.apply_event(&grok_options("auto"));
+        handle_event(&db.conn, &mgr, &on("c1", 4, options_changed()), None)
+            .await
+            .unwrap();
+        assert_eq!(resumed_mode(&db).await.as_deref(), Some("auto"));
     }
 
     /// The row a selector change lands on is broadcast, so every client's copy

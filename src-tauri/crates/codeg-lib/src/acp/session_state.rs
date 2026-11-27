@@ -503,6 +503,15 @@ pub struct SessionState {
     /// grok's answer (see `grok_permission::reconcile_reported_yolo`).
     /// Backend-internal — not serialized.
     pub grok_permission_switched_at: Option<std::time::Instant>,
+    /// Grok only: the session's permission mode is the conversation's own
+    /// choice — picked in this conversation (the composer, `codeg run --mode`,
+    /// a task's saved selection) or re-applied from its selector record, which
+    /// only ever holds such a pick. While `false` the session follows the mode
+    /// the Grok settings launch it in, and its selector record leaves the mode
+    /// out (`lifecycle::effective_selector_state`), so a later change to those
+    /// settings reaches it on the next reconnect. Backend-internal — not
+    /// serialized.
+    pub grok_permission_picked: bool,
 
     /// Kiro only: the reasoning-effort state from its latest
     /// `_kiro.dev/metadata` (which arrives on its own schedule — after
@@ -1191,6 +1200,7 @@ impl SessionState {
             grok_catalog_broadcast: None,
             grok_launch_mode: None,
             grok_permission_switched_at: None,
+            grok_permission_picked: false,
             kiro_reasoning: None,
             pi_startup_banner: None,
             asserted_config_values: BTreeMap::new(),
