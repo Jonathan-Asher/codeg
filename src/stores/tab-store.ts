@@ -331,10 +331,12 @@ export interface TabStoreState {
    * Show a session in place of the tab `tabId`: same slot, same split group,
    * and that tab's turn left running (the replaced session is released like a
    * replaced preview: only once idle). The replaced session goes on the
-   * reopen-closed-tab stack. A session already open is focused where it is
-   * instead, and a tab that may not be replaced — pinned, an unsent draft with
-   * something in it, a message open in its editor, another folder's slot while
-   * tabs follow the folder, or gone — makes this an ordinary `openTab(…, pin)`.
+   * reopen-closed-tab stack, as a kept tab: ⌘⇧T then brings it back beside
+   * the session that took its place, where a preview would take that one's
+   * slot. A session already open is focused where it is instead, and a tab
+   * that may not be replaced — pinned, an unsent draft with something in it,
+   * a message open in its editor, another folder's slot while tabs follow the
+   * folder, or gone — makes this an ordinary `openTab(…, pin)`.
    */
   replaceTabWithConversation: (
     tabId: string,
@@ -2146,13 +2148,15 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
       title: resolvedTitle,
       isPinned: pin,
     }
-    // ⌘⇧T brings the replaced session back. An empty draft has nothing to
-    // bring back; its (empty) composer state goes with it.
+    // ⌘⇧T brings the replaced session back, kept: as a preview it would
+    // take the preview slot of the session now in its place (or of another
+    // in the group) instead of coming back beside it. An empty draft has
+    // nothing to bring back; its (empty) composer state goes with it.
     if (isDraftTab(target)) {
       clearMessageInputDraftV2(buildNewConversationDraftStorageKey(target.id))
       clearContinuationLink(target.id)
     } else {
-      pushClosedTab(snapshotStripTab(target, slot))
+      pushClosedTab({ ...snapshotStripTab(target, slot), isPinned: true })
     }
     discardAskSelectionPrompts(target.id)
     discardComposerPrefill(target.id)

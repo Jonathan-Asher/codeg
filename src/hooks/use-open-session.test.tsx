@@ -333,3 +333,31 @@ describe("replaceTabWithConversation: a message being edited", () => {
     })
   })
 })
+
+describe("⌘⇧T after a replacement", () => {
+  it("brings a replaced preview back beside the session that took its slot", () => {
+    seed([sessionTab(9), sessionTab(1, { isPinned: false })], id(1))
+    open(2, { source: "sidebar" })
+    expect(ids()).toEqual([id(9), id(2)])
+    const closed = popClosedTab()
+    // Kept: as a preview it would take the preview slot the new one holds.
+    expect(closed).toMatchObject({ conversationId: 1, isPinned: true })
+    if (closed?.kind !== "conversation") throw new Error("no conversation")
+    act(() =>
+      useTabStore
+        .getState()
+        .openTab(
+          closed.folderId,
+          closed.conversationId!,
+          closed.agentType,
+          closed.isPinned,
+          closed.title,
+          { index: closed.index }
+        )
+    )
+    expect(ids()).toEqual([id(9), id(1), id(2)])
+    expect(
+      useTabStore.getState().rawTabs.find((t) => t.id === id(2))?.isPinned
+    ).toBe(false)
+  })
+})
