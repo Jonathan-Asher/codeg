@@ -5895,6 +5895,14 @@ const GROK_MODEL_OPTION_ID: &str = MODEL_CONFIG_OPTION_ID;
 /// `session/set_model` request's `_meta.reasoningEffort` — so effort is a live
 /// composer control, not just a global config.toml default.
 const GROK_EFFORT_OPTION_ID: &str = "reasoning_effort";
+/// The category codeg gives Grok's reasoning-effort selector: the ACP
+/// `thought_level`, as Claude Code's `effort` and Kiro's `reasoning_effort`
+/// carry. Grok files its effort rows under `category:"mode"` in
+/// `x.ai/sessionConfig`, but `mode` is the permission selector's
+/// (`acp::grok_permission`), and every client finds "the mode" by that
+/// category: the iPhone's options sheet, `codeg run --mode`, the composer's
+/// "model / effort / mode" order.
+const GROK_EFFORT_CATEGORY: &str = "thought_level";
 
 /// Stable `AcpEvent::Error` code the frontend localizes when a Grok model switch
 /// is rejected because the conversation is already bound to a different agent
@@ -6083,7 +6091,7 @@ fn build_grok_effort_option(
         id: GROK_EFFORT_OPTION_ID.to_string(),
         name: "Reasoning effort".to_string(),
         description: None,
-        category: Some("mode".to_string()),
+        category: Some(GROK_EFFORT_CATEGORY.to_string()),
         kind: SessionConfigKindInfo::Select(SessionConfigSelectInfo {
             current_value,
             options,
@@ -6411,7 +6419,7 @@ fn synthesize_grok_config_options(
             id: GROK_EFFORT_OPTION_ID.to_string(),
             name: "Reasoning effort".to_string(),
             description: None,
-            category: Some("mode".to_string()),
+            category: Some(GROK_EFFORT_CATEGORY.to_string()),
             kind: SessionConfigKindInfo::Select(SessionConfigSelectInfo {
                 current_value: current,
                 options: effort_opts,
@@ -42228,7 +42236,8 @@ mod tests {
 
         let effort = &opts[1];
         assert_eq!(effort.id, GROK_EFFORT_OPTION_ID);
-        assert_eq!(effort.category.as_deref(), Some("mode"));
+        // Grok's own `mode` category is the permission selector's in codeg.
+        assert_eq!(effort.category.as_deref(), Some("thought_level"));
         let effort_sel = expect_select(&effort.kind);
         assert_eq!(effort_sel.options.len(), 2);
         assert_eq!(effort_sel.current_value, "high", "the `selected` effort is current");
@@ -53419,6 +53428,15 @@ mod tests {
             assert_eq!(
                 opts.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
                 [GROK_MODEL_OPTION_ID, GROK_EFFORT_OPTION_ID, "mode"]
+            );
+            // "The mode" by category is the permission selector, whatever the
+            // order: clients look it up that way.
+            assert_eq!(
+                opts.iter()
+                    .filter(|o| o.category.as_deref() == Some("mode"))
+                    .map(|o| o.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["mode"]
             );
             assert_eq!(permission_value(opts).as_deref(), Some(shown), "{launch:?}");
             assert_eq!(

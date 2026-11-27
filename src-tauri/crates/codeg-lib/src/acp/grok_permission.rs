@@ -50,7 +50,9 @@ use crate::acp::types::{
 };
 
 /// The selector's id: the one Claude Code's permission-mode selector uses, so
-/// the composer orders and summarizes it the same way.
+/// the composer orders and summarizes it the same way. Its category, `mode`,
+/// is Grok's only one: the reasoning-effort selector is `thought_level`, so
+/// every client that looks for "the mode" by category finds this one.
 pub(crate) const GROK_PERMISSION_OPTION_ID: &str = "mode";
 
 /// The notification that switches a running session (what Grok's TUI sends).
