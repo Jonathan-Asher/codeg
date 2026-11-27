@@ -6445,6 +6445,69 @@ mod tests {
         assert!(values.is_empty(), "no other conversation's pick: {values:?}");
     }
 
+    /// Grok's permission mode is a session's own: a new chat starts in the mode
+    /// the Grok settings launch it in even when the client still sends the
+    /// last pick, while a resume keeps the mode its conversation recorded.
+    /// Other agents' `mode` picks still seed a new chat.
+    #[tokio::test]
+    async fn a_new_grok_session_does_not_start_from_the_last_permission_pick() {
+        let db = test_helpers::fresh_in_memory_db().await;
+        let folder_id = test_helpers::seed_folder(&db, "/tmp/selector-grok").await;
+        let grok = conversation_service::create(&db.conn, folder_id, AgentType::Grok, None, None)
+            .await
+            .unwrap()
+            .id;
+        conversation_service::bind_external_id(&db.conn, grok, "grok-sess", &[])
+            .await
+            .unwrap();
+        conversation_service::save_selector_state(
+            &db.conn,
+            grok,
+            record("default", &[("model", "grok-4.6"), ("mode", "auto")]),
+        )
+        .await
+        .unwrap();
+        let client_pick = prefs(&[("model", "grok-4.5"), ("mode", "bypassPermissions")]);
+
+        let (_, values) = resolve_connect_selector_prefs(
+            &db.conn,
+            AgentType::Grok,
+            None,
+            None,
+            client_pick.clone(),
+        )
+        .await;
+        assert_eq!(
+            values,
+            prefs(&[("model", "grok-4.5")]),
+            "the model pick still seeds it"
+        );
+
+        let (_, values) = resolve_connect_selector_prefs(
+            &db.conn,
+            AgentType::Grok,
+            Some("grok-sess"),
+            None,
+            client_pick,
+        )
+        .await;
+        assert_eq!(
+            values.get("mode").map(String::as_str),
+            Some("auto"),
+            "a resume re-applies its own mode"
+        );
+
+        let (_, values) = resolve_connect_selector_prefs(
+            &db.conn,
+            AgentType::ClaudeCode,
+            None,
+            None,
+            prefs(&[("mode", "plan")]),
+        )
+        .await;
+        assert_eq!(values, prefs(&[("mode", "plan")]));
+    }
+
     /// The row a selector change lands on is broadcast, so every client's copy
     /// of the conversation's record — what a tab shows while its session is
     /// not attached — follows the change.

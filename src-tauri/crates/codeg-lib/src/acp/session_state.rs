@@ -493,6 +493,16 @@ pub struct SessionState {
     /// can never overrule that establishment's fresher handshake.
     /// Backend-internal — not serialized.
     pub grok_catalog_broadcast: Option<GrokModelCatalog>,
+    /// Grok only: the permission mode this connection's grok process was
+    /// launched in (its `--permission-mode`), the base of the composer's
+    /// permission selector (see `acp::grok_permission`). Set at launch;
+    /// `None` for every other agent. Backend-internal — not serialized.
+    pub grok_launch_mode: Option<crate::acp::grok_permission::GrokLaunchMode>,
+    /// Grok only: when codeg last switched the session's permission mode, so
+    /// a roster report built before the switch reached grok is not taken for
+    /// grok's answer (see `grok_permission::reconcile_reported_yolo`).
+    /// Backend-internal — not serialized.
+    pub grok_permission_switched_at: Option<std::time::Instant>,
 
     /// Kiro only: the reasoning-effort state from its latest
     /// `_kiro.dev/metadata` (which arrives on its own schedule — after
@@ -1179,6 +1189,8 @@ impl SessionState {
             config_options: None,
             grok_model_specs: None,
             grok_catalog_broadcast: None,
+            grok_launch_mode: None,
+            grok_permission_switched_at: None,
             kiro_reasoning: None,
             pi_startup_banner: None,
             asserted_config_values: BTreeMap::new(),

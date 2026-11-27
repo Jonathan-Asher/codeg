@@ -12327,6 +12327,21 @@ pub(crate) async fn acp_update_agent_preferences_and_refresh(
     Ok(refresh_config_staleness(manager, db, data_dir, &[agent_type], ConfigStaleKind::AgentConfig).await)
 }
 
+/// Drop the per-agent picks that are a session's own and never a new
+/// session's default. Grok's permission mode is one: a new Grok session starts
+/// in the mode the Grok settings launch it in, whatever was last picked in
+/// another chat (an older client may still save that pick per agent). A resume
+/// gets its conversation's own record instead, so it keeps its mode.
+fn without_session_only_picks(
+    agent_type: AgentType,
+    mut values: BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    if agent_type == AgentType::Grok {
+        values.remove(crate::acp::grok_permission::GROK_PERMISSION_OPTION_ID);
+    }
+    values
+}
+
 /// The selectors a UI connect should establish, given what the client sent.
 ///
 /// The client sends its saved per-AGENT picks on every connect (they are what
@@ -12350,7 +12365,10 @@ pub async fn resolve_connect_selector_prefs(
     preferred_config_values: BTreeMap<String, String>,
 ) -> (Option<String>, BTreeMap<String, String>) {
     let Some(session_id) = session_id.filter(|s| !s.is_empty()) else {
-        return (preferred_mode_id, preferred_config_values);
+        return (
+            preferred_mode_id,
+            without_session_only_picks(agent_type, preferred_config_values),
+        );
     };
     match crate::db::service::conversation_service::find_selector_state_for_session(
         conn, session_id, agent_type,
