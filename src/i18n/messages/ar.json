@@ -2103,7 +2103,19 @@
     "deepseekSandboxFullAccess": "وصول كامل (بدون عزل)",
     "deepseekSandboxFullAccessDescription": "لا يطبّق أي قيود على الملفات. اخترْه فقط إذا كنت تدرك العواقب.",
     "deepseekPermissionAllowOnce": "السماح مرة واحدة",
-    "deepseekPermissionRejectOnce": "رفض"
+    "deepseekPermissionRejectOnce": "رفض",
+    "grokOptionMode": "الوضع",
+    "grokOptionModeDescription": "وضع أذونات الجلسة",
+    "grokModeAsk": "السؤال",
+    "grokModeAskDescription": "يسأل قبل التعديلات والأوامر",
+    "grokModeAuto": "تلقائي",
+    "grokModeAutoDescription": "يتحقق Grok من كل استدعاء ولا يسأل إلا عند الشك",
+    "grokModeAlwaysApprove": "الموافقة دائمًا",
+    "grokModeAlwaysApproveDescription": "ينفّذ كل استدعاءات الأدوات دون سؤال، وتظل قواعد الرفض سارية",
+    "grokModeAcceptEdits": "الموافقة التلقائية على التعديلات",
+    "grokModePlan": "خطة",
+    "grokModeDontAsk": "عدم السؤال",
+    "grokModeFixedDescription": "يُحدَّد عند البدء من إعدادات Grok، وهو ثابت طوال هذه الجلسة"
   },
   "SettingsPages": {
     "agentsLoading": "جارٍ تحميل إعدادات الوكلاء...",

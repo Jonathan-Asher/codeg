@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 import {
   getSavedModeId,
   getSavedPrefsForConnect,
+  isSessionOnlyConfigOption,
   saveConfigPreference,
   saveModePreference,
   useSavedSelectorPrefs,
@@ -29,6 +30,24 @@ describe("selector-prefs-storage", () => {
       modeId: "plan",
       configValues: { model: "gpt-5.3-codex" },
     })
+  })
+
+  it("never saves Grok's permission mode as a new chat's default", () => {
+    // A new Grok session starts in the mode the Grok settings launch it in;
+    // the other Grok picks, and every other agent's mode, are still kept.
+    saveConfigPreference("grok", "mode", "bypassPermissions")
+    saveConfigPreference("grok", "model", "grok-4.6")
+    saveConfigPreference("claude_code", "mode", "plan")
+    expect(getSavedPrefsForConnect("grok")).toEqual({
+      modeId: null,
+      configValues: { model: "grok-4.6" },
+    })
+    expect(getSavedPrefsForConnect("claude_code").configValues).toEqual({
+      mode: "plan",
+    })
+    expect(isSessionOnlyConfigOption("grok", "mode")).toBe(true)
+    expect(isSessionOnlyConfigOption("grok", "model")).toBe(false)
+    expect(isSessionOnlyConfigOption("claude_code", "mode")).toBe(false)
   })
 
   it("reports nothing for an agent with no saved prefs", () => {

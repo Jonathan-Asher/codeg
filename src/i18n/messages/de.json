@@ -2103,7 +2103,19 @@
     "deepseekSandboxFullAccess": "Vollzugriff (keine Sandbox)",
     "deepseekSandboxFullAccessDescription": "Wendet überhaupt keine Dateibeschränkungen an. Wähle das nur, wenn du die Folgen kennst.",
     "deepseekPermissionAllowOnce": "Einmal erlauben",
-    "deepseekPermissionRejectOnce": "Ablehnen"
+    "deepseekPermissionRejectOnce": "Ablehnen",
+    "grokOptionMode": "Modus",
+    "grokOptionModeDescription": "Berechtigungsmodus der Sitzung",
+    "grokModeAsk": "Fragen",
+    "grokModeAskDescription": "Fragt vor Bearbeitungen und Befehlen",
+    "grokModeAuto": "Auto",
+    "grokModeAutoDescription": "Grok prüft jeden Aufruf und fragt nur, wenn es unsicher ist",
+    "grokModeAlwaysApprove": "Immer zulassen",
+    "grokModeAlwaysApproveDescription": "Führt jeden Tool-Aufruf ohne Nachfrage aus; Verbotsregeln gelten weiterhin",
+    "grokModeAcceptEdits": "Bearbeitungen automatisch genehmigen",
+    "grokModePlan": "Plan",
+    "grokModeDontAsk": "Nicht fragen",
+    "grokModeFixedDescription": "Beim Start in den Grok-Einstellungen festgelegt; für diese Sitzung fest"
   },
   "SettingsPages": {
     "agentsLoading": "Agent-Einstellungen werden geladen...",

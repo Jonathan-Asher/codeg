@@ -2103,7 +2103,19 @@
     "deepseekSandboxFullAccess": "完全開放（無沙箱）",
     "deepseekSandboxFullAccessDescription": "不施加任何檔案限制。僅在你清楚後果時選擇。",
     "deepseekPermissionAllowOnce": "允許本次",
-    "deepseekPermissionRejectOnce": "拒絕"
+    "deepseekPermissionRejectOnce": "拒絕",
+    "grokOptionMode": "模式",
+    "grokOptionModeDescription": "工作階段權限模式",
+    "grokModeAsk": "詢問",
+    "grokModeAskDescription": "編輯和執行命令前先詢問",
+    "grokModeAuto": "自動",
+    "grokModeAutoDescription": "Grok 逐一檢查呼叫，只在不確定時詢問",
+    "grokModeAlwaysApprove": "永遠允許",
+    "grokModeAlwaysApproveDescription": "不經詢問執行所有工具呼叫；拒絕規則仍然有效",
+    "grokModeAcceptEdits": "自動批准編輯",
+    "grokModePlan": "計畫",
+    "grokModeDontAsk": "不詢問",
+    "grokModeFixedDescription": "啟動時由 Grok 設定決定，本工作階段內固定"
   },
   "SettingsPages": {
     "agentsLoading": "載入 Agent 設定中...",
