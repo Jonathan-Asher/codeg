@@ -215,7 +215,7 @@ import { toErrorMessage } from "@/lib/app-error"
 import { isSessionRunning } from "@/lib/session-activity"
 import { continueInterruptedSession } from "@/lib/session-continue"
 import type { SessionOpenIntent } from "@/lib/session-open-decision"
-import { useOpenSession } from "@/hooks/use-open-session"
+import { useKeepOpenedSession, useOpenSession } from "@/hooks/use-open-session"
 
 // Layout effect on the client (so the sticky overlay is positioned before
 // paint) but a no-op-safe passive effect during the static-export prerender.
@@ -2667,12 +2667,15 @@ export function SidebarConversationList({
     [openTab, openConversations]
   )
 
+  // A tab that stays, beside the one in front: when the first click of the
+  // double-click showed the session in place of that tab, it comes back.
+  const keepSession = useKeepOpenedSession()
   const handleDoubleClick = useCallback(
     (id: number, agentType: string, folderId: number) => {
       openConversations()
-      openTab(folderId, id, agentType as Parameters<typeof openTab>[2], true)
+      keepSession({ id, folderId, agentType: agentType as AgentType })
     },
-    [openTab, openConversations]
+    [keepSession, openConversations]
   )
 
   // Next / previous session (⌘⇧↓ / ⌘⇧↑ by default): step through the sessions

@@ -114,6 +114,11 @@ export function forgetClosedConversation(conversationId: number): void {
   )
 }
 
+/** Forget the entry recorded for one tab (by its id): it is back already. */
+export function forgetClosedTab(key: string): void {
+  stack = stack.filter((entry) => entry.key !== key)
+}
+
 /** Forget everything recorded for a folder that no longer exists. */
 export function forgetClosedTabsInFolder(folderId: number): void {
   stack = stack.filter((entry) => entry.folderId !== folderId)

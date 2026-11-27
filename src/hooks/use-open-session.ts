@@ -41,6 +41,27 @@ export type SessionOpenSource = "sidebar" | "switcher"
 
 type ConnectionReader = Pick<ConnectionStoreApi, "getConnection"> | null
 
+/**
+ * How long after a click showed a session in place of the tab in front a
+ * double-click on the same row still takes that back. The double-click itself
+ * comes within the system's double-click time of its first click; this only
+ * bounds how stale the remembered replacement may be. Taking it back too late
+ * costs nothing: it is what a double-click always did.
+ */
+export const KEEP_UNDO_WINDOW_MS = 2_000
+
+/** The latest replacement the Smart rule made (not one asked for), for
+ *  {@link useKeepOpenedSession}. */
+let lastSmartReplace: {
+  id: number
+  agentType: AgentType
+  at: number
+} | null = null
+
+export function resetOpenSessionForTests(): void {
+  lastSmartReplace = null
+}
+
 /** The composer key a conversation-strip tab keeps its draft and outbox
  *  under; a sub-agent's read-only thread has none. */
 function composerKeyOf(tab: TabItem): string | null {
@@ -153,6 +174,14 @@ export function useOpenSession(): (
         now: Date.now(),
       })
       const keep = source === "switcher"
+      // A switch leaves it: the second click of a double-click lands on the
+      // tab the first one just filled.
+      if (decision.action !== "switch") {
+        lastSmartReplace =
+          decision.action === "replace" && intent === "auto" && mode === "smart"
+            ? { id: target.id, agentType: target.agentType, at: Date.now() }
+            : null
+      }
       switch (decision.action) {
         case "replace":
           replaceTabWithConversation(
@@ -174,5 +203,32 @@ export function useOpenSession(): (
       return decision
     },
     [openTab, replaceTabWithConversation, connections]
+  )
+}
+
+/**
+ * A double-click on a sidebar row: the session in a tab that stays, beside
+ * the tab that was in front, as a double-click always opened it. Its first
+ * click may already have shown the session in place of that tab by the Smart
+ * rule; that is taken back first, so the tab comes back where it was (see
+ * `undoTabReplacement`).
+ */
+export function useKeepOpenedSession(): (target: SessionOpenTarget) => void {
+  const { openTab } = useTabActions()
+  return useCallback(
+    (target) => {
+      const last = lastSmartReplace
+      lastSmartReplace = null
+      if (
+        last &&
+        last.id === target.id &&
+        last.agentType === target.agentType &&
+        Date.now() - last.at <= KEEP_UNDO_WINDOW_MS
+      ) {
+        useTabStore.getState().undoTabReplacement(target.id, target.agentType)
+      }
+      openTab(target.folderId, target.id, target.agentType, true)
+    },
+    [openTab]
   )
 }

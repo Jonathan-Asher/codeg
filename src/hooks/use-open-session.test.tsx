@@ -31,7 +31,12 @@ import {
   useTabStore,
   type TabItemInternal,
 } from "@/stores/tab-store"
-import { useOpenSession } from "./use-open-session"
+import {
+  KEEP_UNDO_WINDOW_MS,
+  resetOpenSessionForTests,
+  useKeepOpenedSession,
+  useOpenSession,
+} from "./use-open-session"
 
 vi.mock("@/lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api")>()),
@@ -118,12 +123,32 @@ function open(
   return decision!
 }
 
+/** A double-click on the row of `conversationId`, after its clicks. */
+function keep(conversationId: number) {
+  const { result } = renderHook(() => useKeepOpenedSession())
+  act(() => {
+    result.current({
+      id: conversationId,
+      folderId: 1,
+      agentType: "claude_code",
+    })
+  })
+}
+
+/** A double-click as the sidebar sees it: two clicks, then the double-click. */
+function doubleClick(conversationId: number) {
+  open(conversationId, { source: "sidebar" })
+  open(conversationId, { source: "sidebar" })
+  keep(conversationId)
+}
+
 beforeEach(() => {
   resetTabStore()
   resetAppWorkspaceStore()
   resetClosedTabStackForTests()
   resetTabSendRecencyForTests()
   resetOpenMessageEditsForTests()
+  resetOpenSessionForTests()
   useConversationAttentionStore.setState({ byConversationId: new Map() })
   useTabArrangeStore.setState({ hydrated: true, sessionOpenMode: "smart" })
   window.localStorage.clear()
@@ -359,5 +384,85 @@ describe("⌘⇧T after a replacement", () => {
     expect(
       useTabStore.getState().rawTabs.find((t) => t.id === id(2))?.isPinned
     ).toBe(false)
+  })
+})
+
+describe("a double-click on a sidebar row", () => {
+  it("keeps the tab in front, with the session in a kept tab beside it", () => {
+    seed([sessionTab(9), sessionTab(1), sessionTab(3)], id(1))
+    doubleClick(2)
+    expect(ids()).toEqual([id(9), id(1), id(2), id(3)])
+    expect(active()).toBe(id(2))
+    expect(
+      useTabStore.getState().rawTabs.find((t) => t.id === id(2))?.isPinned
+    ).toBe(true)
+    // Back, so not on the reopen stack, and not released either.
+    expect(popClosedTab()).toBeNull()
+    expect(useTabStore.getState().previewReplacedTabIds).not.toContain(id(1))
+  })
+
+  it("keeps the tab in its split group", () => {
+    seed([sessionTab(9), sessionTab(1)], id(1))
+    act(() => useTabStore.getState().splitTab(id(1), "right", { move: true }))
+    const st = useTabStore.getState()
+    const group = groupOfTab(st.groupOf, st.groupLayout, id(1))
+    doubleClick(2)
+    const after = useTabStore.getState()
+    expect(groupOfTab(after.groupOf, after.groupLayout, id(1))).toBe(group)
+    expect(groupOfTab(after.groupOf, after.groupLayout, id(2))).toBe(group)
+  })
+
+  it("keeps an empty draft in front", () => {
+    const draft = sessionTab(0, {
+      id: "draft-1",
+      conversationId: null,
+      workingDir: "/repo",
+    })
+    seed([draft], draft.id)
+    doubleClick(2)
+    expect(ids()).toEqual([draft.id, id(2)])
+  })
+
+  it("still takes a preview's place, as a click on a row always did", () => {
+    seed([sessionTab(9), sessionTab(1, { isPinned: false })], id(1))
+    doubleClick(2)
+    expect(ids()).toEqual([id(9), id(2)])
+    expect(useTabStore.getState().rawTabs[1].isPinned).toBe(true)
+  })
+
+  it("only pins when nothing was replaced", () => {
+    seed([sessionTab(1)], id(1))
+    noteTabSend(id(1))
+    doubleClick(2)
+    expect(ids()).toEqual([id(1), id(2)])
+    expect(useTabStore.getState().rawTabs[1].isPinned).toBe(true)
+  })
+
+  it("leaves a replacement he asked for (⌥) alone", () => {
+    seed([sessionTab(1)], id(1))
+    open(2, { source: "sidebar", intent: "replace" })
+    keep(2)
+    expect(ids()).toEqual([id(2)])
+  })
+
+  it("leaves a replacement made a while ago alone", () => {
+    vi.useFakeTimers()
+    try {
+      seed([sessionTab(1)], id(1))
+      open(2, { source: "sidebar" })
+      vi.advanceTimersByTime(KEEP_UNDO_WINDOW_MS + 1)
+      open(2, { source: "sidebar" })
+      keep(2)
+      expect(ids()).toEqual([id(2)])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("leaves a replacement of another row alone", () => {
+    seed([sessionTab(1)], id(1))
+    open(2, { source: "sidebar" })
+    keep(3)
+    expect(ids()).toEqual([id(2), id(3)])
   })
 })

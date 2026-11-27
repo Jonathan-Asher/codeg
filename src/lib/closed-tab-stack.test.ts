@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import {
   CLOSED_TAB_STACK_LIMIT,
   batchCloseSlots,
+  forgetClosedTab,
   peekClosedTab,
   popClosedTab,
   pushClosedTab,
@@ -40,6 +41,14 @@ function drainKeys(): string[] {
 }
 
 describe("closed tab stack", () => {
+  it("forgets one tab's entry, leaving the rest in order", () => {
+    pushClosedTab(conversation(1))
+    pushClosedTab(conversation(2))
+    pushClosedTab(conversation(3))
+    forgetClosedTab("conv-2")
+    expect(drainKeys()).toEqual(["conv-3", "conv-1"])
+  })
+
   it("restores the most recently closed tab first", () => {
     pushClosedTab(
       snapshotConversationTab(

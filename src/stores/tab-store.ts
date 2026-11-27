@@ -53,6 +53,7 @@ import {
 import { noteTabActivation, requestComposerFocus } from "@/lib/composer-focus"
 import {
   batchCloseSlots,
+  forgetClosedTab,
   pushClosedTab,
   snapshotStripTab,
 } from "@/lib/closed-tab-stack"
@@ -346,6 +347,15 @@ export interface TabStoreState {
     opts: { pin: boolean; title?: string }
   ) => void
   /**
+   * Take back the latest `replaceTabWithConversation`, while the session it
+   * showed (`conversationId`) still holds that slot: the tab it replaced comes
+   * back in its slot and group, just before it, and leaves the reopen stack;
+   * the session stays in front. A replaced preview stays gone — showing
+   * another session always took the preview. Returns whether it did. For a
+   * double-click on a sidebar row, whose first click did the replacing.
+   */
+  undoTabReplacement: (conversationId: number, agentType: AgentType) => boolean
+  /**
    * `recordForReopen: false` closes without offering the tab to
    * `reopen_last_closed_tab`. Pass it whenever the tab is going away because
    * its conversation no longer exists — resurrecting it would mint a tab (and
@@ -602,6 +612,10 @@ const childSeedBuffer = new Map<
 >()
 let seedEpoch = 0
 const previewReplacedCallbacks = new Set<(tabId: string) => void>()
+// The latest `replaceTabWithConversation`, for `undoTabReplacement`: the tab
+// it replaced, as it was, and the tab that took its slot.
+let lastReplacement: { replaced: TabItemInternal; byTabId: string } | null =
+  null
 let correctionRan = false
 let recoveryRan = false
 // Tracks the last `conversations` reference recomputeTabs derived against, so
@@ -2170,8 +2184,43 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
       // turn still running in it goes on (see `disconnectIfIdle`).
       previewReplacedTabIds: [...state.previewReplacedTabIds, target.id],
     })
+    lastReplacement = { replaced: target, byTabId: newId }
     recomputeTabs()
     runtime.activateConversationPane()
+  },
+
+  undoTabReplacement: (conversationId, agentType) => {
+    const last = lastReplacement
+    lastReplacement = null
+    if (!last || isPreviewTab(last.replaced)) return false
+    const state = get()
+    const slot = state.rawTabs.findIndex((t) => t.id === last.byTabId)
+    const by = slot >= 0 ? state.rawTabs[slot] : undefined
+    if (
+      !by ||
+      by.conversationId !== conversationId ||
+      by.agentType !== agentType ||
+      state.rawTabs.some((t) => t.id === last.replaced.id)
+    ) {
+      return false
+    }
+    const rawTabs = [...state.rawTabs]
+    rawTabs.splice(slot, 0, last.replaced)
+    set({
+      rawTabs,
+      groupOf: {
+        ...state.groupOf,
+        [last.replaced.id]: groupOfTab(state.groupOf, state.groupLayout, by.id),
+      },
+      // Not released after all, if that has not run yet; once it has, the tab
+      // connects again when shown, like any other tab coming back.
+      previewReplacedTabIds: state.previewReplacedTabIds.filter(
+        (id) => id !== last.replaced.id
+      ),
+    })
+    forgetClosedTab(last.replaced.id)
+    recomputeTabs()
+    return true
   },
 
   closeTab: (tabId, options) => {
@@ -4091,6 +4140,7 @@ export function resetTabStore() {
   childSeedBuffer.clear()
   seedEpoch = 0
   previewReplacedCallbacks.clear()
+  lastReplacement = null
   correctionRan = false
   recoveryRan = false
   orphanDraftPruneRan = false
