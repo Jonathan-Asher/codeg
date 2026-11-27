@@ -529,6 +529,10 @@
         "title": "Open Search",
         "description": "Show or hide the conversation search panel"
       },
+      "switch_session_in_tab": {
+        "title": "Switch Session in This Tab",
+        "description": "Open the search panel to show another session in the current tab"
+      },
       "toggle_sidebar": {
         "title": "Toggle Left Sidebar",
         "description": "Show or hide the conversation list sidebar"
@@ -2769,6 +2773,8 @@
       "save": "Save",
       "pin": "Pin",
       "unpin": "Unpin",
+      "pinInSidebar": "Pin in sidebar",
+      "unpinFromSidebar": "Unpin from sidebar",
       "markCritical": "Mark as critical",
       "unmarkCritical": "Unmark critical",
       "talkOn": "Turn on Talk mode",
@@ -2881,7 +2887,9 @@
       "typeToSearchAll": "Type to search sessions and messages",
       "sessionsHeading": "Conversations",
       "showAllMessages": "Show all matching messages",
-      "tabHint": "Tab: next search"
+      "tabHint": "Tab: next search",
+      "replaceModeTitle": "Switch this tab",
+      "replaceModeHint": "Enter opens the session in this tab · ⌘/Ctrl+Enter in a new tab"
     },
     "folderTitleBar": {
       "showSidebar": "Show Sidebar",
@@ -3124,6 +3132,14 @@
       "sortRecentHint": "Most recently active first",
       "sortName": "Name",
       "sortNameHint": "A to Z",
+      "openSessionIn": "When you open a session",
+      "openSmart": "Smart",
+      "openSmartHint": "In the tab in front if you're only looking at it",
+      "openNewTab": "Always a new tab",
+      "openNewTabHint": "As before: a click previews, ⌘K opens a tab",
+      "openReplace": "Replace the current tab",
+      "openReplaceHint": "In the tab in front, unless it's pinned",
+      "openModifiersHint": "⌘/Ctrl-click or ⌘/Ctrl+Enter: a new tab · ⌥/Alt-click or ⌥/Alt+Enter: this tab",
       "dragNeedsManualSort": "Switch Sort to Manual to drag",
       "switchToManualOrder": "Switch to manual order",
       "switchToManualOrderHint": "Keep the order you see and drag tabs from there",

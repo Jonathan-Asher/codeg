@@ -529,6 +529,10 @@
         "title": "Abrir búsqueda",
         "description": "Muestra u oculta el panel de búsqueda de conversaciones"
       },
+      "switch_session_in_tab": {
+        "title": "Cambiar la sesión de esta pestaña",
+        "description": "Abre el panel de búsqueda para mostrar otra sesión en la pestaña actual"
+      },
       "toggle_sidebar": {
         "title": "Alternar barra lateral izquierda",
         "description": "Muestra u oculta la barra lateral de lista de conversaciones"
@@ -2769,6 +2773,8 @@
       "save": "Guardar",
       "pin": "Fijar",
       "unpin": "Dejar de fijar",
+      "pinInSidebar": "Fijar en la barra lateral",
+      "unpinFromSidebar": "Quitar de la barra lateral",
       "markCritical": "Marcar como crítica",
       "unmarkCritical": "Quitar marca crítica",
       "talkOn": "Activar el modo conversación",
@@ -2881,7 +2887,9 @@
       "typeToSearchAll": "Escribe para buscar conversaciones y mensajes",
       "sessionsHeading": "Conversaciones",
       "showAllMessages": "Ver todos los mensajes coincidentes",
-      "tabHint": "Tab: siguiente búsqueda"
+      "tabHint": "Tab: siguiente búsqueda",
+      "replaceModeTitle": "Cambiar esta pestaña",
+      "replaceModeHint": "Intro abre la sesión en esta pestaña · ⌘/Ctrl+Intro en una nueva"
     },
     "folderTitleBar": {
       "showSidebar": "Mostrar barra lateral",
@@ -3124,6 +3132,14 @@
       "sortRecentHint": "Las más recientes primero",
       "sortName": "Nombre",
       "sortNameHint": "De la A a la Z",
+      "openSessionIn": "Al abrir una sesión",
+      "openSmart": "Inteligente",
+      "openSmartHint": "En la pestaña actual si solo la estás mirando",
+      "openNewTab": "Siempre una pestaña nueva",
+      "openNewTabHint": "Como antes: un clic la previsualiza, ⌘K abre una pestaña",
+      "openReplace": "Reemplazar la pestaña actual",
+      "openReplaceHint": "En la pestaña actual, salvo que esté fijada",
+      "openModifiersHint": "⌘/Ctrl+clic o ⌘/Ctrl+Intro: pestaña nueva · ⌥/Alt+clic o ⌥/Alt+Intro: esta pestaña",
       "dragNeedsManualSort": "Cambia Ordenar a Manual para arrastrar",
       "switchToManualOrder": "Cambiar a orden manual",
       "switchToManualOrderHint": "Mantén el orden que ves y arrastra las pestañas desde ahí",

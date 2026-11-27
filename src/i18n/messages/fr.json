@@ -529,6 +529,10 @@
         "title": "Ouvrir la recherche",
         "description": "Afficher ou masquer le panneau de recherche de conversations"
       },
+      "switch_session_in_tab": {
+        "title": "Changer la session de cet onglet",
+        "description": "Ouvre le panneau de recherche pour afficher une autre session dans l'onglet actuel"
+      },
       "toggle_sidebar": {
         "title": "Basculer la barre latérale gauche",
         "description": "Afficher ou masquer la barre latérale de liste des conversations"
@@ -2769,6 +2773,8 @@
       "save": "Enregistrer",
       "pin": "Épingler",
       "unpin": "Désépingler",
+      "pinInSidebar": "Épingler dans la barre latérale",
+      "unpinFromSidebar": "Retirer de la barre latérale",
       "markCritical": "Marquer comme critique",
       "unmarkCritical": "Retirer la marque critique",
       "talkOn": "Activer le mode conversation",
@@ -2881,7 +2887,9 @@
       "typeToSearchAll": "Tapez pour rechercher dans les conversations et les messages",
       "sessionsHeading": "Conversations",
       "showAllMessages": "Afficher tous les messages correspondants",
-      "tabHint": "Tab : recherche suivante"
+      "tabHint": "Tab : recherche suivante",
+      "replaceModeTitle": "Changer cet onglet",
+      "replaceModeHint": "Entrée ouvre la session dans cet onglet · ⌘/Ctrl+Entrée dans un nouvel onglet"
     },
     "folderTitleBar": {
       "showSidebar": "Afficher la barre latérale",
@@ -3124,6 +3132,14 @@
       "sortRecentHint": "Les plus récemment actifs d'abord",
       "sortName": "Nom",
       "sortNameHint": "De A à Z",
+      "openSessionIn": "À l'ouverture d'une session",
+      "openSmart": "Intelligent",
+      "openSmartHint": "Dans l'onglet affiché si vous ne faites que le consulter",
+      "openNewTab": "Toujours un nouvel onglet",
+      "openNewTabHint": "Comme avant : un clic ouvre un aperçu, ⌘K ouvre un onglet",
+      "openReplace": "Remplacer l'onglet actuel",
+      "openReplaceHint": "Dans l'onglet affiché, sauf s'il est épinglé",
+      "openModifiersHint": "⌘/Ctrl-clic ou ⌘/Ctrl+Entrée : nouvel onglet · ⌥/Alt-clic ou ⌥/Alt+Entrée : cet onglet",
       "dragNeedsManualSort": "Passez le tri en Manuel pour faire glisser",
       "switchToManualOrder": "Passer à l'ordre manuel",
       "switchToManualOrderHint": "Garder l'ordre affiché et faire glisser les onglets à partir de là",

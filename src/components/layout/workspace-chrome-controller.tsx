@@ -49,6 +49,10 @@ import { useVisibleConversationTabs } from "@/stores/tab-store"
 import { WorkspaceFolderDialog } from "@/components/layout/workspace-folder-dialog"
 import { armQuickSwitchTypeahead } from "@/lib/quick-switch-typeahead"
 import { markQuickSwitchKey } from "@/lib/quick-switch-perf"
+import {
+  isQuickSwitchReplaceMode,
+  setQuickSwitchReplaceMode,
+} from "@/lib/quick-switch-mode"
 
 /** The search dialog, bound to the shared open-state. */
 function SearchDialogHost() {
@@ -225,7 +229,23 @@ export function WorkspaceChromeController() {
         // ⌘K then Enter is one gesture: keys that follow belong to the
         // switcher even if they beat its search box to focus.
         armQuickSwitchTypeahead()
-        setSearchOpen((prev) => !prev)
+        // Over the "switch this tab" switcher it goes back to the plain one
+        // rather than closing it.
+        const fromReplace = isQuickSwitchReplaceMode()
+        setQuickSwitchReplaceMode(false)
+        setSearchOpen((prev) => (prev && fromReplace ? true : !prev))
+        return
+      }
+      if (matchShortcutEvent(e, shortcuts.switch_session_in_tab)) {
+        e.preventDefault()
+        markQuickSwitchKey()
+        armQuickSwitchTypeahead()
+        // The same switcher, where Enter replaces the session in front.
+        // Pressed again over it, it closes; over the plain one, it turns it
+        // into this mode.
+        const wasReplace = isQuickSwitchReplaceMode()
+        setQuickSwitchReplaceMode(true)
+        setSearchOpen((prev) => !(prev && wasReplace))
         return
       }
       if (matchShortcutEvent(e, shortcuts.toggle_sidebar)) {

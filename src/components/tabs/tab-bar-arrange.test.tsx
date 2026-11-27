@@ -77,7 +77,11 @@ vi.mock("@/contexts/workbench-route-context", () => ({
 import { TabBar } from "./tab-bar"
 import { useTabStore } from "@/stores/tab-store"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
-import { useTabArrangeStore } from "@/stores/tab-arrangement-store"
+import {
+  SESSION_OPEN_MODE_KEY,
+  SORT_HOLDS_KEY,
+  useTabArrangeStore,
+} from "@/stores/tab-arrangement-store"
 import {
   resetForkPlaceholderStore,
   useForkPlaceholderStore,
@@ -385,5 +389,141 @@ describe("TabBar: a fork on its way into a new tab", () => {
       useForkPlaceholderStore.getState().open("closed-meanwhile")
     })
     expect(strip(container)).toEqual(["a1", "b1", "a2", "c1", "b2"])
+  })
+})
+
+describe("TabBar recent-activity drag", () => {
+  const BASE = Date.parse("2026-11-01T10:00:00Z")
+  // Activity: c1 newest, then b2, b1, a2, a1 (oldest).
+  const AT: Record<string, number> = { a1: 1, a2: 2, b1: 3, b2: 4, c1: 5 }
+  const byId = (...wanted: string[]) =>
+    wanted.map((id) => TABS.find((t) => t.id === id)!)
+  function conversations(at: Record<string, number>) {
+    return TABS.map((t) => ({
+      id: t.conversationId!,
+      folder_id: t.folderId,
+      title: t.title,
+      title_locked: false,
+      agent_type: "claude_code",
+      status: "completed",
+      kind: "regular",
+      model: null,
+      git_branch: null,
+      external_id: null,
+      message_count: 1,
+      child_count: 0,
+      created_at: new Date(BASE).toISOString(),
+      updated_at: new Date(BASE + at[t.id] * 60_000).toISOString(),
+      pinned_at: null,
+    })) as unknown as ReturnType<
+      typeof useAppWorkspaceStore.getState
+    >["conversations"]
+  }
+  function press(container: HTMLElement, tabId: string) {
+    fireEvent.pointerDown(container.querySelector(`[data-tab-id="${tabId}"]`)!)
+  }
+  const storedHolds = () =>
+    JSON.parse(window.localStorage.getItem(SORT_HOLDS_KEY) ?? "{}") as Record<
+      string,
+      unknown
+    >
+
+  beforeEach(() => {
+    useAppWorkspaceStore.setState({ conversations: conversations(AT) })
+    seed(TABS)
+    useTabStore.setState({ tabsHydrated: true })
+    setView({ sort: "recent", sortHolds: {} })
+  })
+
+  afterEach(() => {
+    cleanup()
+    useAppWorkspaceStore.setState({ conversations: [] })
+    useTabStore.setState({ tabsHydrated: false })
+    setView({ sortHolds: {} })
+  })
+
+  it("lets its tabs drag", () => {
+    const { container } = renderBar()
+    const item = container.querySelector('[data-tab-id="a1"]')!
+    expect(item.className).toContain("cursor-grab")
+  })
+
+  it("holds a dropped tab where it was dropped, without touching the manual order", () => {
+    const { container } = renderBar()
+    expect(shownIds(container)).toEqual(["c1", "b2", "b1", "a2", "a1"])
+    press(container, "a1")
+    act(() => h.onReorder!(byId("a1", "c1", "b2", "b1", "a2")))
+    expect(shownIds(container)).toEqual(["a1", "c1", "b2", "b1", "a2"])
+    expect(reorderTabs).not.toHaveBeenCalled()
+    // Kept with the other tab view prefs, so a restart keeps the order.
+    expect(Object.keys(storedHolds())).toEqual(["a1"])
+  })
+
+  it("keeps it there while other tabs sort by activity around it", () => {
+    const { container } = renderBar()
+    press(container, "a1")
+    act(() => h.onReorder!(byId("c1", "b2", "a1", "b1", "a2")))
+    expect(shownIds(container)).toEqual(["c1", "b2", "a1", "b1", "a2"])
+    // b1 gets new activity: to the front, past the held a1.
+    act(() =>
+      useAppWorkspaceStore.setState({
+        conversations: conversations({ ...AT, b1: 10 }),
+      })
+    )
+    expect(shownIds(container)).toEqual(["b1", "c1", "b2", "a1", "a2"])
+  })
+
+  it("lets go once the held tab's session has new activity", () => {
+    const { container } = renderBar()
+    press(container, "c1")
+    act(() => h.onReorder!(byId("b2", "b1", "a2", "c1", "a1")))
+    expect(shownIds(container)).toEqual(["b2", "b1", "a2", "c1", "a1"])
+    act(() =>
+      useAppWorkspaceStore.setState({
+        conversations: conversations({ ...AT, c1: 20 }),
+      })
+    )
+    expect(shownIds(container)).toEqual(["c1", "b2", "b1", "a2", "a1"])
+    expect(useTabArrangeStore.getState().sortHolds).toEqual({})
+    expect(storedHolds()).toEqual({})
+  })
+
+  it("holds a drag inside a folder group, and turns down one into another group", () => {
+    setView({ groupBy: "folder", sort: "recent", sortHolds: {} })
+    const { container } = renderBar()
+    // Folder 1: a2, a1 · folder 2: b2, b1 · folder 3: c1.
+    expect(shownIds(container)).toEqual(["a2", "a1", "b2", "b1", "c1"])
+    press(container, "a1")
+    act(() => h.onReorder!(byId("a1", "a2", "b2", "b1", "c1")))
+    expect(shownIds(container)).toEqual(["a1", "a2", "b2", "b1", "c1"])
+    press(container, "b1")
+    act(() => h.onReorder!(byId("a1", "b1", "a2", "b2", "c1")))
+    expect(Object.keys(useTabArrangeStore.getState().sortHolds)).toEqual(["a1"])
+  })
+
+  it("forgets the holds when the sort changes", () => {
+    const { container } = renderBar()
+    press(container, "a1")
+    act(() => h.onReorder!(byId("a1", "c1", "b2", "b1", "a2")))
+    act(() => useTabArrangeStore.getState().setSort("name"))
+    expect(useTabArrangeStore.getState().sortHolds).toEqual({})
+  })
+})
+
+describe("TabBar: where a session opens", () => {
+  it("offers the three choices beside the view and saves the pick", () => {
+    useTabArrangeStore.setState({ sessionOpenMode: "smart" })
+    renderBar()
+    openMenu()
+    const modes = Array.from(
+      document.querySelectorAll("[data-session-open-mode]")
+    ).map((el) => el.getAttribute("data-session-open-mode"))
+    expect(modes).toEqual(["smart", "new_tab", "replace"])
+    expect(screen.getByText("When you open a session")).toBeTruthy()
+    fireEvent.click(
+      document.querySelector('[data-session-open-mode="replace"]')!
+    )
+    expect(useTabArrangeStore.getState().sessionOpenMode).toBe("replace")
+    expect(window.localStorage.getItem(SESSION_OPEN_MODE_KEY)).toBe("replace")
   })
 })

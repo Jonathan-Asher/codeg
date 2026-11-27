@@ -529,6 +529,10 @@
         "title": "Abrir busca",
         "description": "Mostra ou oculta o painel de busca de conversas"
       },
+      "switch_session_in_tab": {
+        "title": "Trocar a sessão desta aba",
+        "description": "Abre o painel de busca para mostrar outra sessão na aba atual"
+      },
       "toggle_sidebar": {
         "title": "Alternar barra lateral esquerda",
         "description": "Mostra ou oculta a barra lateral da lista de conversas"
@@ -2769,6 +2773,8 @@
       "save": "Salvar",
       "pin": "Fixar",
       "unpin": "Desafixar",
+      "pinInSidebar": "Fixar na barra lateral",
+      "unpinFromSidebar": "Desafixar da barra lateral",
       "markCritical": "Marcar como crítica",
       "unmarkCritical": "Desmarcar crítica",
       "talkOn": "Ativar o modo conversa",
@@ -2881,7 +2887,9 @@
       "typeToSearchAll": "Digite para buscar conversas e mensagens",
       "sessionsHeading": "Conversas",
       "showAllMessages": "Mostrar todas as mensagens correspondentes",
-      "tabHint": "Tab: próxima busca"
+      "tabHint": "Tab: próxima busca",
+      "replaceModeTitle": "Trocar esta aba",
+      "replaceModeHint": "Enter abre a sessão nesta aba · ⌘/Ctrl+Enter em uma aba nova"
     },
     "folderTitleBar": {
       "showSidebar": "Mostrar barra lateral",
@@ -3124,6 +3132,14 @@
       "sortRecentHint": "Mais recentemente ativas primeiro",
       "sortName": "Nome",
       "sortNameHint": "De A a Z",
+      "openSessionIn": "Ao abrir uma sessão",
+      "openSmart": "Inteligente",
+      "openSmartHint": "Na aba atual, se você só estiver olhando para ela",
+      "openNewTab": "Sempre uma aba nova",
+      "openNewTabHint": "Como antes: um clique mostra uma prévia, ⌘K abre uma aba",
+      "openReplace": "Substituir a aba atual",
+      "openReplaceHint": "Na aba atual, a menos que esteja fixada",
+      "openModifiersHint": "⌘/Ctrl+clique ou ⌘/Ctrl+Enter: aba nova · ⌥/Alt+clique ou ⌥/Alt+Enter: esta aba",
       "dragNeedsManualSort": "Mude Ordenar para Manual para arrastar",
       "switchToManualOrder": "Mudar para ordem manual",
       "switchToManualOrderHint": "Mantém a ordem que você vê e permite arrastar as abas a partir dela",

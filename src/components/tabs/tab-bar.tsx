@@ -66,9 +66,11 @@ import {
   bandOrder,
   effectiveSort,
   folderAccentColor,
+  holdForRecentDrop,
   mergeGroupOrder,
   moveGroupKey,
   reinsertInGroupOrder,
+  sortAllowsDrag,
   tabsWithClosableRight,
   type TabGroupBy,
   type TabRun,
@@ -76,6 +78,10 @@ import {
   type TabStatusBand,
 } from "@/lib/tab-arrangement"
 import { folderTitleTintVars } from "@/lib/theme-presets"
+import {
+  SESSION_OPEN_MODES,
+  type SessionOpenMode,
+} from "@/lib/session-open-decision"
 import { useTabArrangeStore } from "@/stores/tab-arrangement-store"
 import {
   useArrangedTabs,
@@ -103,6 +109,11 @@ const SORT_LABEL = {
   recent: { label: "sortRecent", hint: "sortRecentHint" },
   name: { label: "sortName", hint: "sortNameHint" },
 } as const satisfies Record<TabSort, { label: string; hint: string }>
+const OPEN_MODE_LABEL = {
+  smart: { label: "openSmart", hint: "openSmartHint" },
+  new_tab: { label: "openNewTab", hint: "openNewTabHint" },
+  replace: { label: "openReplace", hint: "openReplaceHint" },
+} as const satisfies Record<SessionOpenMode, { label: string; hint: string }>
 const STATUS_BAND_LABEL = {
   needs_you: "bandNeedsYou",
   awaiting_reply: "bandAwaitingReply",
@@ -213,17 +224,26 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
   const setSort = useTabArrangeStore((s) => s.setSort)
   const setFolderOrder = useTabArrangeStore((s) => s.setFolderOrder)
   const setBandOrder = useTabArrangeStore((s) => s.setBandOrder)
+  const sessionOpenMode = useTabArrangeStore((s) => s.sessionOpenMode)
+  const setSessionOpenMode = useTabArrangeStore((s) => s.setSessionOpenMode)
+  const setSortHold = useTabArrangeStore((s) => s.setSortHold)
   const shownSort = effectiveSort({ groupBy, sort })
   const sortIsManual = shownSort === "manual"
+  // Recent activity drags too: a dropped tab is held where it was dropped
+  // until its session shows new activity (see `TabSortHold`).
+  const sortDrags = sortAllowsDrag(shownSort)
+  const sortIsRecent = shownSort === "recent"
   const grouped = groupBy !== "none"
   // A group or band can be folded to its label (click the label). The tab in
   // use stays visible next to a folded label, so it never vanishes.
   const collapsedRuns = useTabArrangeStore((s) => s.collapsedRuns)
   const toggleRunCollapsed = useTabArrangeStore((s) => s.toggleRunCollapsed)
-  const { arranged, shown: displayTabs } = useArrangedTabs(
-    groupTabs,
-    displayActiveId
-  )
+  const {
+    arranged,
+    shown: displayTabs,
+    activity,
+    holds,
+  } = useArrangedTabs(groupTabs, displayActiveId)
   // Pinned tabs lead the strip under every view. They keep the manual order,
   // so they always drag — but only among themselves: the pinned run and the
   // rest are separate drag lanes (like groups), and pinning is done from the
@@ -351,8 +371,9 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
   )
   // Moving a tab to another split group by dragging: only in the plain view
   // (no grouping, manual sort). Grouped, a tab is held inside its own group;
-  // sorted, the order is derived and tabs don't drag at all. A pinned tab is
-  // held among the pinned ones (its menu still moves it).
+  // sorted, the order is derived (a recent-activity drag only holds a tab in
+  // its own strip). A pinned tab is held among the pinned ones (its menu still
+  // moves it).
   const crossDragEnabled =
     groupId != null && isSplit && !grouped && sortIsManual
 
@@ -521,11 +542,11 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
         target?.closest?.("[data-tab-id]")?.getAttribute("data-tab-id") ?? null
       pressedTabIdRef.current = tabId
       dragAttemptRef.current =
-        tabId != null && event.button === 0 && !sortIsManual && !isCoarsePointer
+        tabId != null && event.button === 0 && !sortDrags && !isCoarsePointer
           ? { tabId, x: event.clientX }
           : null
     },
-    [isCoarsePointer, sortIsManual]
+    [isCoarsePointer, sortDrags]
   )
   const handleStripPointerMove = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -562,9 +583,43 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
       const runOfTab = runVisuals.runOfTab
       const movedId = touchSortingTabId ?? pressedTabIdRef.current
       const runKey = movedId != null ? runOfTab.get(movedId) : undefined
-      // Sorted, only the pinned tabs drag: they keep the manual order.
-      if (!sortIsManual && runKey !== ANCHORED_RUN_KEY) return
+      // Sorted by status or name, only the pinned tabs drag: they keep the
+      // manual order.
+      if (!sortDrags && runKey !== ANCHORED_RUN_KEY) return
       if (isCoarsePointer && !touchSortingTabId) return
+      // Sorted by recent activity: the moved tab is held where it now sits
+      // among its lane-mates (its group, or the whole strip), between its new
+      // neighbours' activity; the manual order stays as it is.
+      if (sortIsRecent && runKey !== ANCHORED_RUN_KEY) {
+        const sameLanes =
+          nextTabs.length === displayTabs.length &&
+          nextTabs.every(
+            (tab, i) => runOfTab.get(tab.id) === runOfTab.get(displayTabs[i].id)
+          )
+        const hold =
+          movedId != null && sameLanes
+            ? holdForRecentDrop(
+                nextTabs.filter((tab) => runOfTab.get(tab.id) === runKey),
+                movedId,
+                activity,
+                holds
+              )
+            : undefined
+        const before = movedId != null ? holds.get(movedId) : undefined
+        const unchanged =
+          hold === undefined ||
+          (hold === null
+            ? before == null
+            : before?.key === hold.key && before?.heldAt === hold.heldAt)
+        // A reorder that changes nothing must still re-render: the list stays
+        // locked until the next render.
+        if (movedId == null || unchanged) {
+          rerender()
+          return
+        }
+        setSortHold(movedId, hold)
+        return
+      }
       let written: TabItemData[] = nextTabs
       if (dragLanes) {
         // Within one lane only (a group, or the pinned tabs): every slot must
@@ -600,15 +655,19 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
       }
     },
     [
+      activity,
       displayTabs,
       dragLanes,
       groupId,
       groupTabs,
+      holds,
       isCoarsePointer,
       reorderGroupTabs,
       reorderTabs,
       runVisuals,
-      sortIsManual,
+      setSortHold,
+      sortDrags,
+      sortIsRecent,
       touchSortingTabId,
     ]
   )
@@ -912,7 +971,7 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
         const adjacentActive = adjacencyAt(pos)
         const runKey = runVisuals.runOfTab.get(tab.id)
         const anchored = tab.isAnchored === true
-        const reorderable = sortIsManual || anchored
+        const reorderable = sortDrags || anchored
         return (
           <TabItem
             key={tab.id}
@@ -969,6 +1028,7 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
             accentStyle={
               runKey ? runVisuals.byRun.get(runKey)?.style : undefined
             }
+            onOpenConversations={openConversations}
           />
         )
       })}
@@ -1108,6 +1168,37 @@ export function TabBar({ groupId, maximizeControl = false }: TabBarProps) {
                 </DropdownMenuItem>
               </>
             )}
+            {/* Where a session picked in the sidebar or ⌘K opens. A tab
+                preference like the two above, kept per device. */}
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>{tTabs("openSessionIn")}</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={sessionOpenMode}
+              onValueChange={(value) =>
+                setSessionOpenMode(value as SessionOpenMode)
+              }
+            >
+              {SESSION_OPEN_MODES.map((option) => (
+                <DropdownMenuRadioItem
+                  key={option}
+                  value={option}
+                  data-session-open-mode={option}
+                  onSelect={(event) => event.preventDefault()}
+                >
+                  <span className="flex flex-col gap-0.5">
+                    <span>{tTabs(OPEN_MODE_LABEL[option].label)}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {tTabs(OPEN_MODE_LABEL[option].hint)}
+                    </span>
+                  </span>
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+            {/* Whatever the choice, the gesture can ask for one or the
+                other (see `intentFromModifiers`). */}
+            <p className="px-3 pt-1 pb-2 text-xs text-muted-foreground">
+              {tTabs("openModifiersHint")}
+            </p>
           </DropdownMenuContent>
         </DropdownMenu>
         {/* Drag spacer, floored at `min-w-10` (40px) instead of `min-w-0`: even

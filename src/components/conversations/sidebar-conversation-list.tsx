@@ -61,21 +61,15 @@ import {
   openImportSessionsWindow,
   openInCode,
   openProjectBootWindow,
-  updateConversationTitle,
-  updateConversationStatus,
-  updateConversationPinned,
   reorderConversationPins,
-  conversationExportMarkdown,
   updateFolderColor,
   updateFolderAlias,
   updateFolderDefaultAgent,
-  deleteConversation,
   listChildConversations,
 } from "@/lib/api"
 import { isDesktop, revealItemInDir } from "@/lib/platform"
 import type {
   AgentType,
-  ConversationStatus,
   DbConversationSummary,
   FolderDetail,
   FolderGroupDetail,
@@ -172,7 +166,8 @@ import {
 import { useConversationAttentionStore } from "@/stores/conversation-attention-store"
 import { useConversationBackgroundStore } from "@/stores/conversation-background-store"
 import { SidebarFolderGroupHeader } from "./sidebar-folder-group-header"
-import { ConversationManageDialog } from "./conversation-manage-dialog"
+import { openConversationManager } from "./conversation-manage-host"
+import { useSessionActionHandlers } from "@/hooks/use-session-action-handlers"
 import { openConversationTagsManager } from "./conversation-tags-manager"
 import {
   EMPTY_TAG_FILTER,
@@ -217,10 +212,10 @@ import {
 import { cn } from "@/lib/utils"
 import { FolderAliasLabel } from "./folder-alias-label"
 import { toErrorMessage } from "@/lib/app-error"
-import { setConversationCritical } from "@/lib/critical-sessions"
-import { setTalkMode } from "@/lib/talk-mode"
 import { isSessionRunning } from "@/lib/session-activity"
 import { continueInterruptedSession } from "@/lib/session-continue"
+import type { SessionOpenIntent } from "@/lib/session-open-decision"
+import { useKeepOpenedSession, useOpenSession } from "@/hooks/use-open-session"
 
 // Layout effect on the client (so the sticky overlay is positioned before
 // paint) but a no-op-safe passive effect during the static-export prerender.
@@ -1142,7 +1137,6 @@ export function SidebarConversationList({
   const tabs = useTabStore((s) => s.tabs)
   const {
     openTab,
-    closeConversationTab,
     closeTabsByFolder,
     openNewConversationTab,
     openChatModeTab,
@@ -1314,9 +1308,6 @@ export function SidebarConversationList({
     folderId: number
     folderName: string
   } | null>(null)
-  // Folder the "manage conversations" dialog opens on — its initial scope; the
-  // dialog itself can then widen to the workspace or point at another folder.
-  const [manageFolderId, setManageFolderId] = useState<number | null>(null)
   const [cloneOpen, setCloneOpen] = useState(false)
   const [browserOpen, setBrowserOpen] = useState(false)
   // The folder group each dialog's folder lands in: set by a group heading's
@@ -2591,8 +2582,11 @@ export function SidebarConversationList({
     [folderIndex]
   )
 
+  // The dialog opens on that folder — its initial scope; it can then widen to
+  // the workspace or point at another folder. Drawn by the workspace's host,
+  // which a conversation tab's menu opens too.
   const handleManageConversations = useCallback((folderId: number) => {
-    setManageFolderId(folderId)
+    openConversationManager(folderId)
   }, [])
 
   // From a row: the folder whose header the row is listed under — its own
@@ -2601,7 +2595,7 @@ export function SidebarConversationList({
   // at, like that header's own menu entry would.
   const handleManageConversationsFor = useCallback(
     (conversation: DbConversationSummary) => {
-      setManageFolderId(
+      openConversationManager(
         displayChildToParent.get(conversation.folder_id) ??
           conversation.folder_id
       )
@@ -2640,22 +2634,48 @@ export function SidebarConversationList({
   // these callbacks. That removes the `conversations` closure dependency, which
   // is what keeps these references stable across status events — the linchpin
   // for the card `memo` actually bailing out (see Phase 1 of the perf plan).
+  // A click opens the session where the "When you open a session" rule says:
+  // its own tab, in place of the tab in front, or as a preview (see
+  // `lib/session-open-decision`), with ⌘/Ctrl-click and ⌥/Alt-click asking
+  // for a new tab or this one.
+  const openSession = useOpenSession()
   const handleSelect = useCallback(
-    (id: number, agentType: string, folderId: number) => {
+    (
+      id: number,
+      agentType: string,
+      folderId: number,
+      intent?: SessionOpenIntent
+    ) => {
       // Selecting a conversation returns to the conversation workspace if a
       // workbench route (e.g. Automations) was taking over the content region.
+      openConversations()
+      openSession(
+        { id, folderId, agentType: agentType as AgentType },
+        { source: "sidebar", intent }
+      )
+    },
+    [openSession, openConversations]
+  )
+
+  // Stepping through the list by keyboard keeps the preview a plain click
+  // always made: each step would otherwise eat the tab it stepped from.
+  const handleStepSelect = useCallback(
+    (id: number, agentType: string, folderId: number) => {
       openConversations()
       openTab(folderId, id, agentType as Parameters<typeof openTab>[2], false)
     },
     [openTab, openConversations]
   )
 
+  // A tab that stays, beside the one in front: when the first click of the
+  // double-click showed the session in place of that tab, it comes back.
+  const keepSession = useKeepOpenedSession()
   const handleDoubleClick = useCallback(
     (id: number, agentType: string, folderId: number) => {
       openConversations()
-      openTab(folderId, id, agentType as Parameters<typeof openTab>[2], true)
+      keepSession({ id, folderId, agentType: agentType as AgentType })
     },
-    [openTab, openConversations]
+    [keepSession, openConversations]
   )
 
   // Next / previous session (⌘⇧↓ / ⌘⇧↑ by default): step through the sessions
@@ -2671,12 +2691,12 @@ export function SidebarConversationList({
   )
   const handleSessionNavOpen = useCallback(
     (conversation: DbConversationSummary) =>
-      handleSelect(
+      handleStepSelect(
         conversation.id,
         conversation.agent_type,
         conversation.folder_id
       ),
-    [handleSelect]
+    [handleStepSelect]
   )
   useSidebarSessionNav({
     rowsRef,
@@ -2698,78 +2718,19 @@ export function SidebarConversationList({
     [openConversations]
   )
 
-  const handleRename = useCallback(
-    async (id: number, newTitle: string) => {
-      await updateConversationTitle(id, newTitle)
-      refreshConversations()
-    },
-    [refreshConversations]
-  )
-
-  const handleDelete = useCallback(
-    async (id: number, agentType: string, folderId: number) => {
-      await deleteConversation(id)
-      // No-op if no matching tab is open (the context guards on its tab ref).
-      closeConversationTab(
-        folderId,
-        id,
-        agentType as Parameters<typeof openTab>[2]
-      )
-      refreshConversations()
-    },
-    [closeConversationTab, refreshConversations]
-  )
-
-  const handleStatusChange = useCallback(
-    async (id: number, status: ConversationStatus) => {
-      updateConversationLocal(id, { status })
-      await updateConversationStatus(id, status)
-    },
-    [updateConversationLocal]
-  )
-
-  const handleTogglePin = useCallback(
-    async (id: number, nextPinned: boolean) => {
-      // Optimistic: instantly move the row into / out of the Pinned section. The
-      // upsert echo (emit_conversation_upsert) reconciles the exact server
-      // `pinned_at`; on failure the next refresh / WS reconnect corrects it
-      // (mirrors handleStatusChange's lenient pattern). Stable callback — only
-      // `updateConversationLocal` as a dep — so the card memo keeps bailing out.
-      // Like the backend, a pin toggle drops any manual Pinned-section position.
-      updateConversationLocal(id, {
-        pinned_at: nextPinned ? new Date().toISOString() : null,
-        pin_order: null,
-      })
-      await updateConversationPinned(id, nextPinned)
-    },
-    [updateConversationLocal]
-  )
-
-  // Optimistic like the pin (the row's flag flips at once, and flips back if
-  // the backend refuses). Stable: `t` only changes with the locale.
-  const handleToggleCritical = useCallback(
-    async (id: number, nextCritical: boolean) => {
-      try {
-        await setConversationCritical(id, nextCritical)
-      } catch (err) {
-        toast.error(t("criticalToggleFailed", { message: toErrorMessage(err) }))
-      }
-    },
-    [t]
-  )
-
-  // The same for Talk mode (held from the phone; turned off here for one a
-  // phone left on).
-  const handleToggleTalk = useCallback(
-    async (id: number, nextTalk: boolean) => {
-      try {
-        await setTalkMode(id, nextTalk)
-      } catch (err) {
-        toast.error(t("talkToggleFailed", { message: toErrorMessage(err) }))
-      }
-    },
-    [t]
-  )
+  // The session menu's actions, shared with a conversation tab's menu (see
+  // `useSessionActionHandlers`). Stable references: the card memo depends on
+  // them.
+  const {
+    onRename: handleRename,
+    onDelete: handleDelete,
+    onStatusChange: handleStatusChange,
+    onTogglePin: handleTogglePin,
+    onToggleCritical: handleToggleCritical,
+    onToggleTalk: handleToggleTalk,
+    onExportMarkdown: handleExportMarkdown,
+    onNewConversation: handleNewConversationForFolder,
+  } = useSessionActionHandlers(openConversations)
 
   // ── Pinned-section drag reorder ──────────────────────────────────────────
   // Pointer-driven (see `usePinnedPointerReorder` for why not HTML5 drag):
@@ -2833,26 +2794,6 @@ export function SidebarConversationList({
     beginPinDrag,
   } = usePinnedPointerReorder({ pinnedIds, onCommit: commitPinOrder })
 
-  // Export to Markdown from the card's context menu (offered on pinned rows —
-  // the section that reads as "my go-to conversations"). The server serializes
-  // the transcript and writes it next to the conversation's workspace; we just
-  // surface the path.
-  const handleExportMarkdown = useCallback(
-    async (id: number) => {
-      try {
-        const path = await conversationExportMarkdown(id)
-        toast.success(t("toasts.exportMarkdownDone", { path }))
-      } catch (err) {
-        toast.error(
-          t("toasts.exportMarkdownFailed", {
-            message: toErrorMessage(err),
-          })
-        )
-      }
-    },
-    [t]
-  )
-
   const handleNewConversation = useCallback(() => {
     // Starting a conversation returns to the conversation workspace if a
     // workbench route (e.g. Automations) was taking over the content region.
@@ -2867,18 +2808,6 @@ export function SidebarConversationList({
     }
     openNewConversationTab(activeFolder.id, activeFolder.path)
   }, [activeFolder, openChatModeTab, openNewConversationTab, openConversations])
-
-  const handleNewConversationForFolder = useCallback(
-    (folderId: number) => {
-      const folder = folderIndex.get(folderId)
-      if (!folder) return
-      // Starting a conversation returns to the conversation workspace if a
-      // workbench route (e.g. Automations) was taking over the content region.
-      openConversations()
-      openNewConversationTab(folderId, folder.path)
-    },
-    [folderIndex, openNewConversationTab, openConversations]
-  )
 
   // "Import local sessions" now lives in a dedicated picker window (scan →
   // folder-grouped multi-select → batch import). The folder context-menu entry
@@ -4678,14 +4607,6 @@ export function SidebarConversationList({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {manageFolderId != null && (
-        <ConversationManageDialog
-          open
-          onOpenChange={(o) => !o && setManageFolderId(null)}
-          folderId={manageFolderId}
-        />
-      )}
 
       <CloneDialog
         open={cloneOpen}

@@ -2,42 +2,27 @@
 
 import {
   memo,
+  useMemo,
   useState,
   useCallback,
   type CSSProperties,
   type FocusEvent,
+  type MouseEvent as ReactMouseEvent,
 } from "react"
 import {
-  AtSign,
-  AudioLines,
-  MicOff,
-  Pencil,
-  Trash2,
-  Circle,
-  SquarePen,
   Loader2,
   XCircle,
   Pin,
   PinOff,
-  Flag,
-  FlagOff,
-  FileDown,
   CheckCircle2,
-  Info,
   ChevronRight,
   Play,
   RotateCw,
-  Split,
-  PhoneOff,
-  FolderInput,
   FolderSymlink,
   SquareTerminal,
-  ListChecks,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { useImeGuard } from "@/hooks/use-ime-guard"
 import { useTabStore } from "@/contexts/tab-context"
-import { emitAttachSessionToSession } from "@/lib/session-attachment-events"
 import {
   cancelConversationPreconnect,
   preconnectConversation,
@@ -46,7 +31,6 @@ import { warmConversationFromDisk } from "@/stores/conversation-runtime-store"
 import type { DbConversationSummary, ConversationStatus } from "@/lib/types"
 import { useConversationAttention } from "@/stores/conversation-attention-store"
 import { useConversationBackground } from "@/stores/conversation-background-store"
-import { STATUS_ORDER } from "@/lib/types"
 import { backgroundTaskTotal, summaryActivity } from "@/lib/session-activity"
 import { ATTACH_PHASE_LABEL_KEYS, isAttachingPhase } from "@/lib/attach-phase"
 import { getAgentLabel } from "@/lib/custom-agents"
@@ -58,69 +42,40 @@ import { useOptionalAcpActions } from "@/contexts/acp-connection-contexts"
 import { cn } from "@/lib/utils"
 import { formatConversationTitle } from "@/lib/conversation-title"
 import {
-  conversationForkBlock,
-  type ConversationForkBlock,
-} from "@/lib/fork-conversation"
-import {
-  useForkBlockLabel,
-  useForkConversation,
-} from "@/hooks/use-fork-conversation"
+  intentFromModifiers,
+  type SessionOpenIntent,
+} from "@/lib/session-open-decision"
+import type { SessionActionHandlers } from "@/hooks/use-session-action-handlers"
 import { CriticalFlag } from "@/components/conversations/critical-flag"
 import { TalkBadge } from "@/components/conversations/talk-badge"
-import { useTalkMenu } from "@/components/talk-voice/use-talk-menu"
 import {
   ContextMenu,
   ContextMenuTrigger,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuSub,
-  ContextMenuSubTrigger,
-  ContextMenuSubContent,
-  ContextMenuSeparator,
 } from "@/components/ui/context-menu"
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import {
   HoverCard,
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card"
 import { isKeyboardFocus } from "@/lib/keyboard-focus"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { ConversationStatusDot } from "./conversation-status-dot"
 import {
   SidebarRelativeTime,
   type SidebarRelativeClock,
 } from "./sidebar-relative-time"
 import { ATTENTION_KIND_VISUAL, AttentionKindBadge } from "./attention-kind"
-import { SessionDetailsDialog } from "./session-details-dialog"
-import { MoveToProjectDialog, canMoveToProject } from "./move-to-project-dialog"
-import { ContinueInAgentMenuItem } from "./continue-in-agent-menu-item"
+import {
+  SessionActionDialogs,
+  SessionActionsMenuItems,
+  type SessionDialogKind,
+} from "./session-actions-menu"
 import { SidebarConversationHoverDetails } from "./sidebar-conversation-hover-details"
 import { SessionActivityIcon, useBackgroundTitle } from "./session-activity"
 import { limitPauseReason, limitStopReason } from "@/lib/limit-continue"
 import { useLimitResetParts } from "./limit-pause"
 import { ConversationTagChips } from "./conversation-tag-chip"
-import {
-  ConversationTagContextSubmenu,
-  NewConversationTagDialog,
-} from "./conversation-tag-picker"
 import { AgentIcon } from "@/components/agent-icon"
 import { AssistantAvatar } from "@/components/assistants/assistant-avatar"
 import { useBranchChip, useResolvedTags } from "@/hooks/use-conversation-tags"
@@ -194,21 +149,6 @@ export function SubsessionAncestorRails({ depth }: { depth: number }) {
   )
 }
 
-/**
- * The conversation tab whose composer "add to session" writes into — the active
- * one — or null when no conversation tab is open. Reads the store imperatively so
- * it can serve both the menu's disabled state and the click itself.
- *
- * Deliberately no self-mention guard: the composer's own `@` panel lists every
- * session including the one being typed in, so the sidebar matches it.
- */
-function resolveAttachTabId(): string | null {
-  const { tabs, activeTabId } = useTabStore.getState()
-  const activeTab = tabs.find((tab) => tab.id === activeTabId)
-  if (!activeTab || activeTab.kind !== "conversation") return null
-  return activeTab.id
-}
-
 /** Chips drawn inline — the branch chip included — before the rest fold into
  *  "+N". Two is what a default-width sidebar can afford beside a
  *  still-readable title; the chips shrink (and truncate) before the title
@@ -229,7 +169,15 @@ interface SidebarConversationCardProps {
   timeLabel?: string
   relativeTimeAt?: string
   relativeTimeClock?: SidebarRelativeClock
-  onSelect: (id: number, agentType: string, folderId: number) => void
+  /** A click on the row. `intent` is what its modifiers asked for: ⌘ (Ctrl
+   *  elsewhere) a new tab, ⌥ (Alt) this tab, none the "When you open a
+   *  session" rule (see `lib/session-open-decision`). */
+  onSelect: (
+    id: number,
+    agentType: string,
+    folderId: number,
+    intent?: SessionOpenIntent
+  ) => void
   onDoubleClick?: (id: number, agentType: string, folderId: number) => void
   onRename: (id: number, newTitle: string) => Promise<void>
   onDelete: (id: number, agentType: string, folderId: number) => Promise<void>
@@ -289,32 +237,43 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   onContinue,
 }: SidebarConversationCardProps) {
   const t = useTranslations("Folder.conversationCard")
-  const ime = useImeGuard()
   const tSidebar = useTranslations("Folder.sidebar")
   const tActivity = useTranslations("Folder.sessionActivity")
   const tPhase = useTranslations("Folder.chat.attachPhase")
-  const tStatus = useTranslations("Folder.statusLabels")
-  const tDetails = useTranslations("Folder.sessionDetails")
-  const tMove = useTranslations("Folder.moveSession")
   const timeLabelClassName = cn(
     "relative shrink-0 tabular-nums text-[0.71875rem]",
     isSelected
       ? "font-medium text-muted-foreground"
       : "font-normal text-muted-foreground/70"
   )
-  const [renameOpen, setRenameOpen] = useState(false)
-  const [deleteOpen, setDeleteOpen] = useState(false)
-  const [detailsOpen, setDetailsOpen] = useState(false)
-  const [moveOpen, setMoveOpen] = useState(false)
-  const [renameValue, setRenameValue] = useState("")
-  const [attachTabId, setAttachTabId] = useState<string | null>(null)
-  // Why "Fork" can't run, snapshotted when the menu opens like `attachTabId`;
-  // the backend still refuses a fork the state changed under.
-  const [forkBlock, setForkBlock] = useState<ConversationForkBlock | null>(null)
+  // The session menu's dialogs (rename, delete, details, move, new tag): the
+  // menu is the one every session menu shares (`SessionActionsMenuItems`).
+  const [dialog, setDialog] = useState<SessionDialogKind | null>(null)
   const [hoverOpen, setHoverOpen] = useState(false)
-  const forkConversation = useForkConversation()
-  const forkBlockLabel = useForkBlockLabel()
-  const [newTagOpen, setNewTagOpen] = useState(false)
+  const handlers = useMemo<SessionActionHandlers>(
+    () => ({
+      onRename,
+      onDelete,
+      onStatusChange,
+      onNewConversation,
+      onTogglePin,
+      onToggleCritical,
+      onToggleTalk,
+      onExportMarkdown,
+      onManageConversations,
+    }),
+    [
+      onRename,
+      onDelete,
+      onStatusChange,
+      onNewConversation,
+      onTogglePin,
+      onToggleCritical,
+      onToggleTalk,
+      onExportMarkdown,
+      onManageConversations,
+    ]
+  )
   // Subscribes to tag DEFINITIONS only (rare), and re-resolves only when this
   // row's own `tag_ids` array changes — a status event elsewhere never lands.
   const tags = useResolvedTags(conversation.tag_ids)
@@ -326,14 +285,17 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   const isSubsession = conversation.parent_id != null
   const branch = useBranchChip(isSubsession ? null : conversation.git_branch)
 
-  const handleClick = useCallback(() => {
-    onSelect(conversation.id, conversation.agent_type, conversation.folder_id)
-  }, [
-    onSelect,
-    conversation.id,
-    conversation.agent_type,
-    conversation.folder_id,
-  ])
+  const handleClick = useCallback(
+    (event: ReactMouseEvent) => {
+      onSelect(
+        conversation.id,
+        conversation.agent_type,
+        conversation.folder_id,
+        intentFromModifiers(event)
+      )
+    },
+    [onSelect, conversation.id, conversation.agent_type, conversation.folder_id]
+  )
 
   // Resting the pointer on a row starts opening its session in the
   // background (debounced, capped and deduplicated in `session-preconnect`
@@ -363,72 +325,22 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
     conversation.folder_id,
   ])
 
-  // Snapshotted on open instead of subscribed: one card renders per visible
-  // sidebar row, so a live `useTabStore` selector here would add a store
-  // subscription — and a re-render on every tab switch — to each of them for a
-  // value only the context menu reads. This snapshot drives the DISABLED STATE
-  // only; the click re-resolves (see `handleAttachToSession`).
-  const handleMenuOpenChange = useCallback(
-    (open: boolean) => {
-      if (!open) return
-      // The context menu takes the row over; drop the details bubble so the
-      // two don't stack on the same spot.
-      setHoverOpen(false)
-      setAttachTabId(resolveAttachTabId())
-      setForkBlock(conversationForkBlock(conversation))
-    },
-    [conversation]
-  )
-
-  const handleFork = useCallback(
-    () => forkConversation(conversation),
-    [forkConversation, conversation]
-  )
+  // What the menu reads as it opens (the tab "Add to session" writes into,
+  // why Fork can't run) the shared section reads as it mounts, which is when
+  // the menu opens: one card renders per visible sidebar row, and a live
+  // subscription for it in each would be all cost.
+  const handleMenuOpenChange = useCallback((open: boolean) => {
+    if (!open) return
+    // The context menu takes the row over; drop the details bubble so the
+    // two don't stack on the same spot.
+    setHoverOpen(false)
+  }, [])
 
   // See `isKeyboardFocus`: suppress Radix's open-on-focus unless the focus
   // really came from the keyboard, so clicking a row doesn't pop the bubble.
   const handleHoverTriggerFocus = useCallback((event: FocusEvent) => {
     if (!isKeyboardFocus(event.target)) event.preventDefault()
   }, [])
-
-  const handleAttachToSession = useCallback(() => {
-    // Re-resolved at click time rather than reused from the open-time snapshot:
-    // the workspace's `mod+w` / `mod+tab` handler sits on `document`, and Radix
-    // lets modifier combos through to it while the menu is open, so the active
-    // tab really can change under an open menu. Posting to the stale id would
-    // drop the badge into a closed (or now-background) composer and read to the
-    // user as "nothing happened".
-    const tabId = resolveAttachTabId()
-    if (!tabId) return
-    emitAttachSessionToSession({ tabId, conversation })
-  }, [conversation])
-
-  const handleRenameOpen = useCallback(() => {
-    setRenameValue(conversation.title || "")
-    setRenameOpen(true)
-  }, [conversation.title])
-
-  const handleRenameConfirm = useCallback(async () => {
-    const trimmed = renameValue.trim()
-    if (trimmed && trimmed !== conversation.title) {
-      await onRename(conversation.id, trimmed)
-    }
-    setRenameOpen(false)
-  }, [renameValue, conversation.id, conversation.title, onRename])
-
-  const handleDeleteConfirm = useCallback(async () => {
-    await onDelete(
-      conversation.id,
-      conversation.agent_type,
-      conversation.folder_id
-    )
-    setDeleteOpen(false)
-  }, [
-    conversation.id,
-    conversation.agent_type,
-    conversation.folder_id,
-    onDelete,
-  ])
 
   const status = conversation.status as ConversationStatus
   // Blocked on the user (permission / question / plan approval). Outranks
@@ -506,8 +418,6 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
   const isPinned = conversation.pinned_at != null
   const isCritical = conversation.critical === true
   const isTalk = conversation.talk_mode === true
-  const talkMenu = useTalkMenu(conversation.id, isTalk)
-  const tTalk = useTranslations("TalkVoice")
   const isCompleted = status === "completed"
 
   return (
@@ -1034,187 +944,12 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
             </HoverCardTrigger>
           </ContextMenuTrigger>
           <ContextMenuContent>
-            {onNewConversation && (
-              <>
-                <ContextMenuItem
-                  onSelect={() => onNewConversation(conversation.folder_id)}
-                >
-                  <SquarePen className="h-4 w-4" />
-                  {t("newConversation")}
-                </ContextMenuItem>
-                <ContextMenuSeparator />
-              </>
-            )}
-            <ContextMenuItem onSelect={handleRenameOpen}>
-              <Pencil className="h-4 w-4" />
-              {t("rename")}
-            </ContextMenuItem>
-            {/* A copy forked at the latest finished reply, in a new tab; this
-                row stays as it is. A disabled item takes no pointer, so its
-                wrapper carries the reason. */}
-            {forkBlock ? (
-              <div title={forkBlockLabel(forkBlock)}>
-                <ContextMenuItem disabled>
-                  <Split className="h-4 w-4" />
-                  {t("fork")}
-                </ContextMenuItem>
-              </div>
-            ) : (
-              <ContextMenuItem onSelect={handleFork}>
-                <Split className="h-4 w-4" />
-                {t("fork")}
-              </ContextMenuItem>
-            )}
-            {/* Another project, with the agent's files where it keys them
-                by folder. A chat or a sub-session (it moves with its
-                parent) has none to leave. */}
-            {canMoveToProject(conversation) && (
-              <ContextMenuItem onSelect={() => setMoveOpen(true)}>
-                <FolderInput className="h-4 w-4" />
-                {tMove("menuLabel")}
-              </ContextMenuItem>
-            )}
-            {/* A new session on another agent picks the work up (a
-                sub-session goes on with its parent). */}
-            {conversation.parent_id == null && (
-              <ContinueInAgentMenuItem
-                conversationId={conversation.id}
-                item={ContextMenuItem}
-              />
-            )}
-            {onTogglePin && (
-              <ContextMenuItem
-                onSelect={() => onTogglePin(conversation.id, !isPinned)}
-              >
-                {isPinned ? (
-                  <PinOff className="h-4 w-4" />
-                ) : (
-                  <Pin className="h-4 w-4" />
-                )}
-                {isPinned ? t("unpin") : t("pin")}
-              </ContextMenuItem>
-            )}
-            {/* A sub-session is driven by its parent, so it is not watched
-                on its own (as in Session Details); one marked anyway can
-                still be unmarked. */}
-            {onToggleCritical && (!isSubsession || isCritical) && (
-              <ContextMenuItem
-                onSelect={() => onToggleCritical(conversation.id, !isCritical)}
-              >
-                {isCritical ? (
-                  <FlagOff className="h-4 w-4" />
-                ) : (
-                  <Flag className="h-4 w-4" />
-                )}
-                {isCritical ? t("unmarkCritical") : t("markCritical")}
-              </ContextMenuItem>
-            )}
-            {/* Talk on this Mac, or its end in the window that holds it. Not
-                offered on a sub-session, like the mark. */}
-            {talkMenu.showEndTalk && (
-              <ContextMenuItem onSelect={talkMenu.endTalk}>
-                <PhoneOff className="h-4 w-4" />
-                {tTalk("menuEndTalk")}
-              </ContextMenuItem>
-            )}
-            {!isSubsession && talkMenu.showTalkOnMac && (
-              <ContextMenuItem onSelect={talkMenu.startTalk}>
-                <AudioLines className="h-4 w-4" />
-                {tTalk("menuTalkOnMac")}
-              </ContextMenuItem>
-            )}
-            {/* Talk mode held from the phone; turned off here too, for one a
-                phone left on. Turned on (reply style only) where Talk on this
-                Mac can't run. */}
-            {onToggleTalk &&
-              (!isSubsession || isTalk) &&
-              (talkMenu.showTurnOff || talkMenu.showTurnOn) && (
-                <ContextMenuItem
-                  onSelect={() => onToggleTalk(conversation.id, !isTalk)}
-                >
-                  {isTalk ? (
-                    <MicOff className="h-4 w-4" />
-                  ) : (
-                    <AudioLines className="h-4 w-4" />
-                  )}
-                  {isTalk ? t("talkOff") : t("talkOn")}
-                </ContextMenuItem>
-              )}
-            {onExportMarkdown && (
-              <ContextMenuItem
-                onSelect={() => onExportMarkdown(conversation.id)}
-              >
-                <FileDown className="h-4 w-4" />
-                {t("exportMarkdown")}
-              </ContextMenuItem>
-            )}
-            <ContextMenuItem onSelect={() => setDetailsOpen(true)}>
-              <Info className="h-4 w-4" />
-              {tDetails("menuLabel")}
-            </ContextMenuItem>
-            {/* Mirrors the file tree's "add to session": inserts an `@`-style
-              mention of THIS conversation into the active session's composer.
-              Disabled only when no conversation tab is open — there is no
-              composer to write into then. */}
-            <ContextMenuItem
-              onSelect={handleAttachToSession}
-              disabled={!attachTabId}
-            >
-              <AtSign className="h-4 w-4" />
-              {t("attachToCurrentSession")}
-            </ContextMenuItem>
-            <ContextMenuSeparator />
-            {/* Sub-sessions opt out like they do of pinning: a sub-agent run
-                is not a conversation the user files away, and the sidebar
-                filter only ever matches root rows. */}
-            {!isSubsession && (
-              <ConversationTagContextSubmenu
-                conversationId={conversation.id}
-                folderId={conversation.folder_id}
-                tagIds={conversation.tag_ids}
-                onNewTag={() => setNewTagOpen(true)}
-              />
-            )}
-            <ContextMenuSub>
-              <ContextMenuSubTrigger>
-                <Circle className="h-4 w-4" />
-                {t("status")}
-              </ContextMenuSubTrigger>
-              <ContextMenuSubContent>
-                {STATUS_ORDER.filter((s) => s !== conversation.status).map(
-                  (s) => (
-                    <ContextMenuItem
-                      key={s}
-                      onSelect={() => onStatusChange(conversation.id, s)}
-                    >
-                      <ConversationStatusDot status={s} />
-                      {tStatus(s)}
-                    </ContextMenuItem>
-                  )
-                )}
-              </ContextMenuSubContent>
-            </ContextMenuSub>
-            {onManageConversations &&
-              !isSubsession &&
-              conversation.kind !== "chat" && (
-                <>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem
-                    onSelect={() => onManageConversations(conversation)}
-                  >
-                    <ListChecks className="h-4 w-4" />
-                    {tSidebar("folderHeaderMenu.manageConversations")}
-                  </ContextMenuItem>
-                </>
-              )}
-            <ContextMenuSeparator />
-            <ContextMenuItem
-              variant="destructive"
-              onSelect={() => setDeleteOpen(true)}
-            >
-              <Trash2 className="h-4 w-4" />
-              {t("delete")}
-            </ContextMenuItem>
+            <SessionActionsMenuItems
+              conversation={conversation}
+              handlers={handlers}
+              onOpenDialog={setDialog}
+              item={ContextMenuItem}
+            />
           </ContextMenuContent>
         </ContextMenu>
         {/* Inert to the pointer. Radix keeps a hover card open for as long as a
@@ -1236,77 +971,13 @@ export const SidebarConversationCard = memo(function SidebarConversationCard({
         </HoverCardContent>
       </HoverCard>
 
-      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("renameConversation")}</DialogTitle>
-          </DialogHeader>
-          <Input
-            value={renameValue}
-            onChange={(e) => setRenameValue(e.target.value)}
-            {...ime.props}
-            onKeyDown={(e) => {
-              if (ime.isComposing(e)) return
-              if (e.key === "Enter") handleRenameConfirm()
-            }}
-            autoFocus
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRenameOpen(false)}>
-              {t("cancel")}
-            </Button>
-            <Button onClick={handleRenameConfirm}>{t("save")}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("deleteConversationTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("deleteConversationDescription", {
-                title:
-                  formatConversationTitle(conversation.title) ||
-                  t("untitledConversation"),
-              })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteConfirm}>
-              {t("delete")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {detailsOpen && (
-        <SessionDetailsDialog
-          open
-          onOpenChange={setDetailsOpen}
-          summary={conversation}
-        />
-      )}
-
-      {moveOpen && (
-        <MoveToProjectDialog
-          open
-          onOpenChange={setMoveOpen}
-          conversation={conversation}
-        />
-      )}
-      {/* A sibling of the menu, mounted only while open: the menu unmounts
-          its content on select, and one dormant dialog per sidebar row would
-          be all cost. */}
-      {newTagOpen && (
-        <NewConversationTagDialog
-          open
-          onOpenChange={setNewTagOpen}
-          conversationId={conversation.id}
-          folderId={conversation.folder_id}
-        />
-      )}
+      <SessionActionDialogs
+        conversation={conversation}
+        dialog={dialog}
+        onDialogChange={setDialog}
+        onRename={onRename}
+        onDelete={onDelete}
+      />
     </>
   )
 })

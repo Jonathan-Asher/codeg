@@ -529,6 +529,10 @@
         "title": "Suche öffnen",
         "description": "Zeigt das Konversations-Suchpanel an oder blendet es aus"
       },
+      "switch_session_in_tab": {
+        "title": "Sitzung in diesem Tab wechseln",
+        "description": "Öffnet das Suchpanel, um im aktuellen Tab eine andere Sitzung zu zeigen"
+      },
       "toggle_sidebar": {
         "title": "Linke Seitenleiste umschalten",
         "description": "Zeigt die Seitenleiste mit der Konversationsliste an oder blendet sie aus"
@@ -2769,6 +2773,8 @@
       "save": "Speichern",
       "pin": "Anheften",
       "unpin": "Loslösen",
+      "pinInSidebar": "In der Seitenleiste anheften",
+      "unpinFromSidebar": "Aus der Seitenleiste lösen",
       "markCritical": "Als kritisch markieren",
       "unmarkCritical": "Kritisch-Markierung entfernen",
       "talkOn": "Sprechmodus einschalten",
@@ -2881,7 +2887,9 @@
       "typeToSearchAll": "Tippen, um Konversationen und Nachrichten zu durchsuchen",
       "sessionsHeading": "Konversationen",
       "showAllMessages": "Alle passenden Nachrichten anzeigen",
-      "tabHint": "Tab: nächste Suche"
+      "tabHint": "Tab: nächste Suche",
+      "replaceModeTitle": "Diesen Tab wechseln",
+      "replaceModeHint": "Enter öffnet die Sitzung in diesem Tab · ⌘/Strg+Enter in einem neuen Tab"
     },
     "folderTitleBar": {
       "showSidebar": "Seitenleiste anzeigen",
@@ -3124,6 +3132,14 @@
       "sortRecentHint": "Zuletzt aktive zuerst",
       "sortName": "Name",
       "sortNameHint": "A bis Z",
+      "openSessionIn": "Beim Öffnen einer Sitzung",
+      "openSmart": "Automatisch",
+      "openSmartHint": "Im vorderen Tab, wenn er nur angesehen wird",
+      "openNewTab": "Immer ein neuer Tab",
+      "openNewTabHint": "Wie bisher: Ein Klick zeigt eine Vorschau, ⌘K öffnet einen Tab",
+      "openReplace": "Aktuellen Tab ersetzen",
+      "openReplaceHint": "Im vorderen Tab, außer er ist angeheftet",
+      "openModifiersHint": "⌘/Strg-Klick oder ⌘/Strg+Enter: neuer Tab · ⌥/Alt-Klick oder ⌥/Alt+Enter: dieser Tab",
       "dragNeedsManualSort": "Zum Ziehen die Sortierung auf Manuell stellen",
       "switchToManualOrder": "Zur manuellen Reihenfolge wechseln",
       "switchToManualOrderHint": "Die jetzige Reihenfolge behalten und Tabs von dort aus ziehen",

@@ -394,6 +394,27 @@ describe("MessageListView: the in-place editor", () => {
     expect(screen.queryByRole("group", { name: L.editMessage })).toBeNull()
   })
 
+  it("tells the host while an editor is open, until it closes or the list goes", async () => {
+    const onEditingChange = vi.fn()
+    const { container, unmount } = await openEditor("turn-2", {
+      onEditingChange,
+    })
+    expect(onEditingChange.mock.calls).toEqual([[true]])
+    // Another message's editor takes over: still one open.
+    await userEvent.click(editButton(container, "turn-0")!)
+    expect(onEditingChange.mock.calls).toEqual([[true]])
+    await userEvent.click(screen.getByRole("button", { name: L.editCancel }))
+    expect(onEditingChange.mock.calls).toEqual([[true], [false]])
+    await userEvent.click(editButton(container, "turn-2")!)
+    unmount()
+    expect(onEditingChange.mock.calls).toEqual([
+      [true],
+      [false],
+      [true],
+      [false],
+    ])
+  })
+
   it("stays open with the text when the edit doesn't go out", async () => {
     // The host has already said why (a toast); the user's text must survive.
     let settle: (sent: boolean) => void = () => {}

@@ -529,6 +529,10 @@
         "title": "打開搜尋",
         "description": "打開或關閉會話搜尋面板"
       },
+      "switch_session_in_tab": {
+        "title": "在此分頁切換會話",
+        "description": "打開搜尋面板，在目前分頁顯示另一個會話"
+      },
       "toggle_sidebar": {
         "title": "切換左側邊欄",
         "description": "顯示或隱藏會話列表側邊欄"
@@ -2769,6 +2773,8 @@
       "save": "儲存",
       "pin": "置頂",
       "unpin": "取消置頂",
+      "pinInSidebar": "在側邊欄置頂",
+      "unpinFromSidebar": "取消側邊欄置頂",
       "markCritical": "標記為關鍵",
       "unmarkCritical": "取消關鍵標記",
       "talkOn": "開啟語音對話模式",
@@ -2881,7 +2887,9 @@
       "typeToSearchAll": "輸入關鍵字搜尋會話和訊息",
       "sessionsHeading": "會話",
       "showAllMessages": "顯示所有相符的訊息",
-      "tabHint": "Tab：下一個搜尋"
+      "tabHint": "Tab：下一個搜尋",
+      "replaceModeTitle": "切換此分頁",
+      "replaceModeHint": "Enter 在此分頁開啟會話 · ⌘/Ctrl+Enter 在新分頁開啟"
     },
     "folderTitleBar": {
       "showSidebar": "顯示側邊欄",
@@ -3124,6 +3132,14 @@
       "sortRecentHint": "最近活躍的排在最前",
       "sortName": "名稱",
       "sortNameHint": "從 A 到 Z",
+      "openSessionIn": "開啟會話時",
+      "openSmart": "智慧",
+      "openSmartHint": "目前分頁只是在看時，就在其中開啟",
+      "openNewTab": "總是新分頁",
+      "openNewTabHint": "與以前相同：單擊預覽，⌘K 開啟分頁",
+      "openReplace": "取代目前分頁",
+      "openReplaceHint": "在目前分頁開啟，除非它已固定",
+      "openModifiersHint": "⌘/Ctrl+點擊或 ⌘/Ctrl+Enter：新分頁 · ⌥/Alt+點擊或 ⌥/Alt+Enter：此分頁",
       "dragNeedsManualSort": "將排序切換為「手動」即可拖曳",
       "switchToManualOrder": "切換為手動排序",
       "switchToManualOrderHint": "保留目前看到的順序，之後可拖曳分頁",

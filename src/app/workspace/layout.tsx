@@ -107,6 +107,8 @@ import { FileWorkspaceHeader } from "@/components/files/file-workspace-header"
 import { FileWorkspacePanel } from "@/components/files/file-workspace-panel"
 import { ExternalConflictDialog } from "@/components/files/external-conflict-dialog"
 import { ContinueInAgentHost } from "@/components/conversations/continue-in-agent-dialog"
+import { ConversationManageHost } from "@/components/conversations/conversation-manage-host"
+import { SessionDialogHost } from "@/components/conversations/session-dialog-host"
 import { AppToaster } from "@/components/ui/app-toaster"
 import { WorkspaceTransfersToasts } from "@/components/layout/workspace-transfers"
 import { AutoResumeToasts } from "@/components/layout/auto-resume-toasts"
@@ -1667,6 +1669,17 @@ function WorkspaceLayoutInner({ children }: { children: React.ReactNode }) {
                         variant="silent"
                       >
                         <ContinueInAgentHost />
+                      </AppErrorBoundary>
+                      {/* A session's dialogs and Manage conversations, for
+                            the menus that can't hold them: a tab's (inside
+                            the strip's drag list) and the sidebar's while it
+                            is collapsed. */}
+                      <AppErrorBoundary
+                        scope="session-dialogs"
+                        variant="silent"
+                      >
+                        <SessionDialogHost />
+                        <ConversationManageHost />
                       </AppErrorBoundary>
                       <SidebarProvider>
                         <AuxPanelProvider>

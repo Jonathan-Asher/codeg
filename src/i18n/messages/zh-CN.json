@@ -529,6 +529,10 @@
         "title": "打开搜索",
         "description": "打开或关闭会话搜索面板"
       },
+      "switch_session_in_tab": {
+        "title": "在此标签页切换会话",
+        "description": "打开搜索面板，在当前标签页显示另一个会话"
+      },
       "toggle_sidebar": {
         "title": "切换左侧边栏",
         "description": "显示或隐藏会话列表侧边栏"
@@ -2769,6 +2773,8 @@
       "save": "保存",
       "pin": "置顶",
       "unpin": "取消置顶",
+      "pinInSidebar": "在侧边栏置顶",
+      "unpinFromSidebar": "取消侧边栏置顶",
       "markCritical": "标记为关键",
       "unmarkCritical": "取消关键标记",
       "talkOn": "开启语音对话模式",
@@ -2881,7 +2887,9 @@
       "typeToSearchAll": "输入关键词搜索会话和消息",
       "sessionsHeading": "会话",
       "showAllMessages": "显示所有匹配的消息",
-      "tabHint": "Tab：下一个搜索"
+      "tabHint": "Tab：下一个搜索",
+      "replaceModeTitle": "切换此标签页",
+      "replaceModeHint": "Enter 在此标签页打开会话 · ⌘/Ctrl+Enter 在新标签页打开"
     },
     "folderTitleBar": {
       "showSidebar": "显示侧边栏",
@@ -3124,6 +3132,14 @@
       "sortRecentHint": "最近活跃的排在最前",
       "sortName": "名称",
       "sortNameHint": "从 A 到 Z",
+      "openSessionIn": "打开会话时",
+      "openSmart": "智能",
+      "openSmartHint": "当前标签页只是在看时，就在其中打开",
+      "openNewTab": "总是新标签页",
+      "openNewTabHint": "与以前相同：单击预览，⌘K 打开标签页",
+      "openReplace": "替换当前标签页",
+      "openReplaceHint": "在当前标签页打开，除非它已固定",
+      "openModifiersHint": "⌘/Ctrl+单击或 ⌘/Ctrl+Enter：新标签页 · ⌥/Alt+单击或 ⌥/Alt+Enter：此标签页",
       "dragNeedsManualSort": "将排序切换为“手动”即可拖动",
       "switchToManualOrder": "切换为手动排序",
       "switchToManualOrderHint": "保留当前看到的顺序，之后可拖动标签页",

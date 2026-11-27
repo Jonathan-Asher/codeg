@@ -1,5 +1,6 @@
 export type ShortcutActionId =
   | "toggle_search"
+  | "switch_session_in_tab"
   | "toggle_sidebar"
   | "toggle_terminal"
   | "new_terminal_tab"
@@ -71,6 +72,9 @@ export interface ShortcutDefinition {
 export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: "toggle_search",
+  },
+  {
+    id: "switch_session_in_tab",
   },
   {
     id: "toggle_sidebar",
@@ -170,6 +174,7 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
 /** Each action's context, from the listener that dispatches it (see above). */
 export const SHORTCUT_CONTEXTS: Record<ShortcutActionId, ShortcutContext> = {
   toggle_search: "workspace",
+  switch_session_in_tab: "workspace",
   toggle_sidebar: "workspace",
   toggle_terminal: "workspace",
   new_terminal_tab: "terminal",
@@ -383,6 +388,10 @@ export type ShortcutSettings = Record<ShortcutActionId, string>
 
 export const DEFAULT_SHORTCUTS: ShortcutSettings = {
   toggle_search: "mod+k",
+  // The same switcher, in its "switch this tab" mode: Enter loads the pick
+  // into the tab in front. Search's own key with Shift, matched by position
+  // like every letter binding, so ⌘⇧ + the Hebrew letter on K is this too.
+  switch_session_in_tab: "mod+shift+k",
   toggle_sidebar: "mod+b",
   toggle_terminal: "mod+j",
   new_terminal_tab: "mod+t",

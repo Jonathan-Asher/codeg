@@ -53,9 +53,11 @@ import {
 import { noteTabActivation, requestComposerFocus } from "@/lib/composer-focus"
 import {
   batchCloseSlots,
+  forgetClosedTab,
   pushClosedTab,
   snapshotStripTab,
 } from "@/lib/closed-tab-stack"
+import { hasOpenMessageEdit } from "@/lib/open-message-edits"
 import type {
   AgentType,
   ConversationChange,
@@ -327,6 +329,33 @@ export interface TabStoreState {
     }
   ) => void
   /**
+   * Show a session in place of the tab `tabId`: same slot, same split group,
+   * and that tab's turn left running (the replaced session is released like a
+   * replaced preview: only once idle). The replaced session goes on the
+   * reopen-closed-tab stack, as a kept tab: ⌘⇧T then brings it back beside
+   * the session that took its place, where a preview would take that one's
+   * slot. A session already open is focused where it is instead, and a tab
+   * that may not be replaced — pinned, an unsent draft with something in it,
+   * a message open in its editor, another folder's slot while tabs follow the
+   * folder, or gone — makes this an ordinary `openTab(…, pin)`.
+   */
+  replaceTabWithConversation: (
+    tabId: string,
+    folderId: number,
+    conversationId: number,
+    agentType: AgentType,
+    opts: { pin: boolean; title?: string }
+  ) => void
+  /**
+   * Take back the latest `replaceTabWithConversation`, while the session it
+   * showed (`conversationId`) still holds that slot: the tab it replaced comes
+   * back in its slot and group, just before it, and leaves the reopen stack;
+   * the session stays in front. A replaced preview stays gone — showing
+   * another session always took the preview. Returns whether it did. For a
+   * double-click on a sidebar row, whose first click did the replacing.
+   */
+  undoTabReplacement: (conversationId: number, agentType: AgentType) => boolean
+  /**
    * `recordForReopen: false` closes without offering the tab to
    * `reopen_last_closed_tab`. Pass it whenever the tab is going away because
    * its conversation no longer exists — resurrecting it would mint a tab (and
@@ -583,6 +612,10 @@ const childSeedBuffer = new Map<
 >()
 let seedEpoch = 0
 const previewReplacedCallbacks = new Set<(tabId: string) => void>()
+// The latest `replaceTabWithConversation`, for `undoTabReplacement`: the tab
+// it replaced, as it was, and the tab that took its slot.
+let lastReplacement: { replaced: TabItemInternal; byTabId: string } | null =
+  null
 let correctionRan = false
 let recoveryRan = false
 // Tracks the last `conversations` reference recomputeTabs derived against, so
@@ -2068,6 +2101,126 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
     })
     recomputeTabs()
     runtime.activateConversationPane()
+  },
+
+  replaceTabWithConversation: (
+    tabId,
+    requestedFolderId,
+    conversationId,
+    agentType,
+    { pin, title }
+  ) => {
+    const folderId = canonicalConversationFolder(
+      requestedFolderId,
+      conversationId,
+      agentType
+    )
+    const prevState = get()
+    const index = prevState.rawTabs.findIndex((t) => t.id === tabId)
+    const target = index >= 0 ? prevState.rawTabs[index] : undefined
+    const replaceable =
+      target != null &&
+      target.isAnchored !== true &&
+      (!isDraftTab(target) || isBlankDraft(target)) &&
+      !hasOpenMessageEdit(target.id) &&
+      (!useFolderTabsStore.getState().enabled ||
+        folderScope(target.folderId) === folderScope(folderId)) &&
+      findTabIndexForConversation(
+        prevState.rawTabs,
+        folderId,
+        agentType,
+        conversationId
+      ) < 0
+    if (!target || !replaceable) {
+      get().openTab(folderId, conversationId, agentType, pin, title)
+      return
+    }
+    useFolderTabsStore.getState().activateScope(folderScope(folderId))
+    const state = get()
+    const slot = state.rawTabs.findIndex((t) => t.id === target.id)
+    if (slot < 0) return
+    const group = groupOfTab(state.groupOf, state.groupLayout, target.id)
+    const resolvedTitle =
+      formatConversationTitle(
+        title ??
+          useAppWorkspaceStore
+            .getState()
+            .conversations.find(
+              (c) =>
+                c.id === conversationId &&
+                c.agent_type === agentType &&
+                c.folder_id === folderId
+            )?.title
+      ) || runtime.labels.untitledConversation
+    const newId = makeConversationTabId(folderId, agentType, conversationId)
+    const newTab: TabItemInternal = {
+      id: newId,
+      kind: "conversation",
+      folderId,
+      conversationId,
+      agentType,
+      title: resolvedTitle,
+      isPinned: pin,
+    }
+    // ⌘⇧T brings the replaced session back, kept: as a preview it would
+    // take the preview slot of the session now in its place (or of another
+    // in the group) instead of coming back beside it. An empty draft has
+    // nothing to bring back; its (empty) composer state goes with it.
+    if (isDraftTab(target)) {
+      clearMessageInputDraftV2(buildNewConversationDraftStorageKey(target.id))
+      clearContinuationLink(target.id)
+    } else {
+      pushClosedTab({ ...snapshotStripTab(target, slot), isPinned: true })
+    }
+    discardAskSelectionPrompts(target.id)
+    discardComposerPrefill(target.id)
+    const rawTabs = [...state.rawTabs]
+    rawTabs[slot] = newTab
+    set({
+      rawTabs,
+      activeTabId: newId,
+      groupOf: { ...state.groupOf, [newId]: group },
+      // Released like a replaced preview: disconnected only once idle, so a
+      // turn still running in it goes on (see `disconnectIfIdle`).
+      previewReplacedTabIds: [...state.previewReplacedTabIds, target.id],
+    })
+    lastReplacement = { replaced: target, byTabId: newId }
+    recomputeTabs()
+    runtime.activateConversationPane()
+  },
+
+  undoTabReplacement: (conversationId, agentType) => {
+    const last = lastReplacement
+    lastReplacement = null
+    if (!last || isPreviewTab(last.replaced)) return false
+    const state = get()
+    const slot = state.rawTabs.findIndex((t) => t.id === last.byTabId)
+    const by = slot >= 0 ? state.rawTabs[slot] : undefined
+    if (
+      !by ||
+      by.conversationId !== conversationId ||
+      by.agentType !== agentType ||
+      state.rawTabs.some((t) => t.id === last.replaced.id)
+    ) {
+      return false
+    }
+    const rawTabs = [...state.rawTabs]
+    rawTabs.splice(slot, 0, last.replaced)
+    set({
+      rawTabs,
+      groupOf: {
+        ...state.groupOf,
+        [last.replaced.id]: groupOfTab(state.groupOf, state.groupLayout, by.id),
+      },
+      // Not released after all, if that has not run yet; once it has, the tab
+      // connects again when shown, like any other tab coming back.
+      previewReplacedTabIds: state.previewReplacedTabIds.filter(
+        (id) => id !== last.replaced.id
+      ),
+    })
+    forgetClosedTab(last.replaced.id)
+    recomputeTabs()
+    return true
   },
 
   closeTab: (tabId, options) => {
@@ -3923,6 +4076,7 @@ export function useTabActions() {
   return useTabStore(
     useShallow((s) => ({
       openTab: s.openTab,
+      replaceTabWithConversation: s.replaceTabWithConversation,
       closeTab: s.closeTab,
       closeConversationTab: s.closeConversationTab,
       closeOtherTabs: s.closeOtherTabs,
@@ -3986,6 +4140,7 @@ export function resetTabStore() {
   childSeedBuffer.clear()
   seedEpoch = 0
   previewReplacedCallbacks.clear()
+  lastReplacement = null
   correctionRan = false
   recoveryRan = false
   orphanDraftPruneRan = false
