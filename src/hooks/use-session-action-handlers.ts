@@ -14,13 +14,32 @@ import {
 } from "@/lib/api"
 import { toErrorMessage } from "@/lib/app-error"
 import { setConversationCritical } from "@/lib/critical-sessions"
+import { loadShowWorktrees } from "@/lib/sidebar-view-mode-storage"
 import { setTalkMode } from "@/lib/talk-mode"
 import type {
   AgentType,
   ConversationStatus,
   DbConversationSummary,
+  FolderDetail,
 } from "@/lib/types"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
+
+/**
+ * The folder whose sidebar header a session's row is listed under: its own,
+ * or — while "Show worktrees" is off — the repo a worktree's sessions are
+ * merged into, when that repo is open too (the sidebar's `childToParent`).
+ */
+export function listedUnderFolderId(
+  folderId: number,
+  openFolders: readonly Pick<FolderDetail, "id" | "parent_id">[],
+  showWorktrees: boolean
+): number {
+  if (showWorktrees) return folderId
+  const parentId = openFolders.find((f) => f.id === folderId)?.parent_id
+  return parentId != null && openFolders.some((f) => f.id === parentId)
+    ? parentId
+    : folderId
+}
 
 /**
  * What a session's menu does, wherever it is shown — a sidebar row or a
@@ -169,9 +188,17 @@ export function useSessionActionHandlers(
     [openConversations, openNewConversationTab]
   )
 
+  // On the folder the sidebar lists the session under, as its row's menu
+  // opens it, with the sidebar's own "Show worktrees" setting.
   const onManageConversations = useCallback(
     (conversation: DbConversationSummary) =>
-      openConversationManager(conversation.folder_id),
+      openConversationManager(
+        listedUnderFolderId(
+          conversation.folder_id,
+          useAppWorkspaceStore.getState().folders,
+          loadShowWorktrees()
+        )
+      ),
     []
   )
 
