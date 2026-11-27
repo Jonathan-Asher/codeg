@@ -11,6 +11,10 @@ import {
   saveMessageInputDraft,
 } from "@/lib/message-input-draft"
 import {
+  resetOpenMessageEditsForTests,
+  setOpenMessageEdit,
+} from "@/lib/open-message-edits"
+import {
   noteTabSend,
   resetTabSendRecencyForTests,
 } from "@/lib/tab-send-recency"
@@ -119,6 +123,7 @@ beforeEach(() => {
   resetAppWorkspaceStore()
   resetClosedTabStackForTests()
   resetTabSendRecencyForTests()
+  resetOpenMessageEditsForTests()
   useConversationAttentionStore.setState({ byConversationId: new Map() })
   useTabArrangeStore.setState({ hydrated: true, sessionOpenMode: "smart" })
   window.localStorage.clear()
@@ -213,6 +218,13 @@ describe("useOpenSession: the tab in front is in use", () => {
     expectNotReplaced()
   })
 
+  it("opens beside a tab with an earlier message open in its editor", () => {
+    seed([sessionTab(1)], id(1))
+    setOpenMessageEdit(id(1), "list", true)
+    expect(open(2, { source: "switcher" })).toEqual({ action: "default" })
+    expectNotReplaced()
+  })
+
   it("opens beside a tab he sent a message from a minute ago", () => {
     seed([sessionTab(1)], id(1))
     noteTabSend(id(1), Date.now() - 60_000)
@@ -270,6 +282,15 @@ describe("useOpenSession: asked for one or the other", () => {
     expect(useTabStore.getState().rawTabs[0].isAnchored).toBe(true)
   })
 
+  it("never drops a message being edited: ⌥ opens a new tab instead", () => {
+    seed([sessionTab(1)], id(1))
+    setOpenMessageEdit(id(1), "list", true)
+    expect(open(2, { source: "sidebar", intent: "replace" })).toEqual({
+      action: "new_tab",
+    })
+    expect(ids()).toEqual([id(1), id(2)])
+  })
+
   it("follows the setting: Always a new tab opens as before", () => {
     useTabArrangeStore.setState({ sessionOpenMode: "new_tab" })
     seed([sessionTab(1)], id(1))
@@ -286,5 +307,29 @@ describe("useOpenSession: asked for one or the other", () => {
       tabId: id(1),
     })
     expect(ids()).toEqual([id(2)])
+  })
+})
+
+describe("replaceTabWithConversation: a message being edited", () => {
+  it("is never replaced, asked directly: the session opens as usual", () => {
+    seed([sessionTab(1)], id(1))
+    setOpenMessageEdit(id(1), "list", true)
+    act(() =>
+      useTabStore
+        .getState()
+        .replaceTabWithConversation(id(1), 1, 2, "claude_code", { pin: true })
+    )
+    expect(ids()).toEqual([id(1), id(2)])
+    expect(popClosedTab()).toBeNull()
+  })
+
+  it("can be replaced again once its editor has closed", () => {
+    seed([sessionTab(1)], id(1))
+    setOpenMessageEdit(id(1), "list", true)
+    setOpenMessageEdit(id(1), "list", false)
+    expect(open(2, { source: "sidebar" })).toEqual({
+      action: "replace",
+      tabId: id(1),
+    })
   })
 })

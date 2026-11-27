@@ -32,6 +32,9 @@ export interface CurrentTabState {
   /** Its composer holds something: text (saved or still being typed), an
    *  attachment, or a file on its way in. */
   composerHasContent: boolean
+  /** An "Edit message" editor is open on one of its earlier messages: its
+   *  text lives only in the view, which showing another session unmounts. */
+  messageEditOpen: boolean
   /** Messages wait in its queue. */
   queued: boolean
   /** A turn is running, or background work the session started. */
@@ -59,12 +62,13 @@ export type SessionOpenDecision =
  * "Just looking": nothing in the tab in front would be lost or interrupted by
  * showing another session there. All of it must hold: a session (or an empty
  * draft), not pinned, nothing running or waiting on him, an empty composer
- * with nothing queued, and no message sent from it in the last ten minutes.
+ * with nothing queued and no message being edited, and no message sent from
+ * it in the last ten minutes.
  */
 export function isJustLooking(tab: CurrentTabState, now: number): boolean {
   if (tab.kind === "subagent") return false
   if (tab.anchored || !tab.sameScope) return false
-  if (tab.composerHasContent || tab.queued) return false
+  if (tab.composerHasContent || tab.queued || tab.messageEditOpen) return false
   if (tab.working || tab.waitingOnUser) return false
   if (tab.lastSentAt != null && now - tab.lastSentAt < RECENT_SEND_WINDOW_MS) {
     return false
@@ -77,11 +81,16 @@ export function isJustLooking(tab: CurrentTabState, now: number): boolean {
  * no obstacle — replacing never stops it, the session goes on in the
  * background — but a pinned tab is never replaced, and neither is one whose
  * composer holds something that could be lost with it (an attachment is never
- * saved) or whose queue still waits to go out.
+ * saved), whose queue still waits to go out, or with a message being edited
+ * (that text is saved nowhere).
  */
 export function canReplaceTab(tab: CurrentTabState): boolean {
   return (
-    !tab.anchored && tab.sameScope && !tab.composerHasContent && !tab.queued
+    !tab.anchored &&
+    tab.sameScope &&
+    !tab.composerHasContent &&
+    !tab.queued &&
+    !tab.messageEditOpen
   )
 }
 

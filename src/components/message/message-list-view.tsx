@@ -348,6 +348,14 @@ interface MessageListViewProps {
    */
   onEditUserMessage?: (request: UserMessageEditRequest) => Promise<boolean>
   /**
+   * An editor opened on a user message (`true`), or the last one closed
+   * (`false`, also when the list unmounts with one open). What is typed there
+   * lives only in this list, so the host can keep the view that holds it from
+   * being swapped out (see `lib/open-message-edits`). MUST be referentially
+   * stable.
+   */
+  onEditingChange?: (open: boolean) => void
+  /**
    * Messages are waiting in the composer's queue. Editing greys out until they
    * have gone: they were written after the message being edited, and would
    * otherwise follow the edit into the new branch.
@@ -1854,6 +1862,7 @@ export function MessageListView({
   onForkFromTurn,
   forkWhileRunning = false,
   onEditUserMessage,
+  onEditingChange,
   hasQueuedMessages = false,
   liveRuns = null,
   threadHeader = null,
@@ -2395,6 +2404,14 @@ export function MessageListView({
     key: string
     saving: boolean
   } | null>(null)
+  // Told to the host while an editor is open, and again once none is (or the
+  // list goes with one open): its text exists nowhere else.
+  const editOpen = editing !== null
+  useEffect(() => {
+    if (!editOpen || !onEditingChange) return
+    onEditingChange(true)
+    return () => onEditingChange(false)
+  }, [editOpen, onEditingChange])
   // Set synchronously, so a second Save landing before `saving` renders can't
   // start a second edit while the first is still forking.
   const editSavingRef = useRef(false)

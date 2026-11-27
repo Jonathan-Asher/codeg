@@ -19,6 +19,7 @@ function looking(over: Partial<CurrentTabState> = {}): CurrentTabState {
     kind: "conversation",
     anchored: false,
     composerHasContent: false,
+    messageEditOpen: false,
     queued: false,
     working: false,
     waitingOnUser: false,
@@ -56,6 +57,7 @@ describe("isJustLooking", () => {
     ["a permission, question or plan waiting", { waitingOnUser: true }],
     ["text or an attachment in the composer", { composerHasContent: true }],
     ["messages in the queue", { queued: true }],
+    ["an earlier message open in its editor", { messageEditOpen: true }],
     [
       "another folder's slot while tabs follow the folder",
       { sameScope: false },
@@ -143,13 +145,17 @@ describe("decideSessionOpen", () => {
     ).toEqual({ action: "new_tab" })
   })
 
-  it("never drops a draft or a queue: an explicit this-tab opens a new one", () => {
+  it("never drops a draft, a queue or a message edit: an explicit this-tab opens a new one", () => {
     for (const over of [
       { kind: "draft" as const, composerHasContent: true },
       { composerHasContent: true },
       { queued: true },
+      { messageEditOpen: true },
     ]) {
       expect(decide({ intent: "replace", current: looking(over) })).toEqual({
+        action: "new_tab",
+      })
+      expect(decide({ mode: "replace", current: looking(over) })).toEqual({
         action: "new_tab",
       })
     }

@@ -10,6 +10,7 @@ import {
   hasLiveComposerContent,
   loadMessageInputDraftV2,
 } from "@/lib/message-input-draft"
+import { hasOpenMessageEdit } from "@/lib/open-message-edits"
 import { loadOutbox, outboxStorageKey } from "@/lib/outbox-storage"
 import { deriveSessionActivity } from "@/lib/session-activity"
 import {
@@ -54,7 +55,7 @@ function composerKeyOf(tab: TabItem): string | null {
  * stores as they are now: the review state and turn state of its session,
  * this client's live connection to it (first-hand, so a turn streaming here
  * counts before the server says so), what waits on the user, its composer,
- * draft and queue, and when he last sent from it.
+ * draft and queue, a message being edited, and when he last sent from it.
  */
 export function readCurrentTabState(
   tab: TabItem,
@@ -103,6 +104,7 @@ export function readCurrentTabState(
     kind,
     anchored: tab.isAnchored === true,
     composerHasContent,
+    messageEditOpen: hasOpenMessageEdit(tab.id),
     queued,
     working:
       activity === "working" ||

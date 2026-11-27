@@ -56,6 +56,7 @@ import {
   pushClosedTab,
   snapshotStripTab,
 } from "@/lib/closed-tab-stack"
+import { hasOpenMessageEdit } from "@/lib/open-message-edits"
 import type {
   AgentType,
   ConversationChange,
@@ -332,8 +333,8 @@ export interface TabStoreState {
    * replaced preview: only once idle). The replaced session goes on the
    * reopen-closed-tab stack. A session already open is focused where it is
    * instead, and a tab that may not be replaced — pinned, an unsent draft with
-   * something in it, another folder's slot while tabs follow the folder, or
-   * gone — makes this an ordinary `openTab(…, pin)`.
+   * something in it, a message open in its editor, another folder's slot while
+   * tabs follow the folder, or gone — makes this an ordinary `openTab(…, pin)`.
    */
   replaceTabWithConversation: (
     tabId: string,
@@ -2105,6 +2106,7 @@ export const useTabStore = create<TabStoreState>()((set, get) => ({
       target != null &&
       target.isAnchored !== true &&
       (!isDraftTab(target) || isBlankDraft(target)) &&
+      !hasOpenMessageEdit(target.id) &&
       (!useFolderTabsStore.getState().enabled ||
         folderScope(target.folderId) === folderScope(folderId)) &&
       findTabIndexForConversation(

@@ -271,6 +271,7 @@ import {
   clearMessageInputDraft,
 } from "@/lib/message-input-draft"
 import { noteTabSend } from "@/lib/tab-send-recency"
+import { useTrackOpenMessageEdit } from "@/hooks/use-track-open-message-edit"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -3230,6 +3231,9 @@ const ConversationTabView = memo(function ConversationTabView({
   useEffect(() => {
     handleEditUserMessageRef.current = handleEditUserMessage
   }, [handleEditUserMessage])
+  // An open "Edit message" keeps the tab from being swapped for another
+  // session, and a preview opening one is kept.
+  const handleEditingChange = useTrackOpenMessageEdit(tabId)
   // An editor's Save. Before the session is ready the edit waits for it: the
   // editor says so, and its Save (a second click) or Esc takes it back (see
   // `lib/pending-actions`). Resolves like `handleEditUserMessage` once it ran,
@@ -3934,6 +3938,7 @@ const ConversationTabView = memo(function ConversationTabView({
               ? handleEditRequest
               : undefined
           }
+          onEditingChange={handleEditingChange}
           hasQueuedMessages={msgQueue.length > 0}
           threadHeader={continuationHeader}
           threadFooter={continuationFooter}
