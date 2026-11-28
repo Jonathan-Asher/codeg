@@ -16,11 +16,16 @@
  *      conversation's record (`DbConversationSummary.selector_state`, kept per
  *      conversation by the backend), or — for a brand-new chat only — the
  *      per-agent picks it will be started with;
- *   3. for a brand-new chat, an option it has no pick for shows what the
+ *   3. an option whose pick belongs to one session and is never saved per
+ *      agent or recorded until it is picked (Grok's permission mode, see
+ *      `isSessionOnlyConfigOption`) shows what every session that never picked
+ *      it runs with — the mode the Grok settings launch it in — so it is not
+ *      left out of a chip that shows the session's other values;
+ *   4. for a brand-new chat, an option it has no pick for shows what the
  *      chat will start with: what the agent's last brand-new session started
  *      with (`lib/selector-options-cache`), else the value the agent itself
  *      recommends;
- *   4. otherwise nothing (the composer shows its loading placeholder).
+ *   5. otherwise nothing (the composer shows its loading placeholder).
  * Never another session's current values.
  */
 
@@ -250,6 +255,11 @@ export function withSelectorPicks(
  * `live` must be the tab's OWN connection (null when there is none, or when it
  * is still bound to a different agent than the one the tab shows).
  *
+ * `sessionDefaults`: the values of the session-only options (see the module
+ * doc) for a session that never picked them, laid after `stored`. They only
+ * complete a row that shows something already: alone they would replace the
+ * loading placeholder with a chip of that one option.
+ *
  * `defaults`: further value layers for an option `stored` does not fill — only
  * a brand-new chat has any (what it will start with; see the module doc).
  */
@@ -257,15 +267,24 @@ export function resolveDisplayedSelectors({
   live,
   stored,
   template,
+  sessionDefaults = null,
   defaults = [],
 }: {
   live: DisplayedSelectors | null
   stored: SelectorValues | null
   template: DisplayedSelectors | null
+  sessionDefaults?: SelectorValues | null
   defaults?: readonly (SelectorValues | null | undefined)[]
 }): DisplayedSelectors {
   if (live && live.modes != null && live.configOptions != null) return live
-  const fallback = overlaySelectorLayers(template, [stored, ...defaults])
+  let fallback = overlaySelectorLayers(template, [stored, ...defaults])
+  if (sessionDefaults && fallback !== NO_SELECTORS) {
+    fallback = overlaySelectorLayers(template, [
+      stored,
+      sessionDefaults,
+      ...defaults,
+    ])
+  }
   if (!live) return fallback
   const modes = live.modes ?? fallback.modes
   const configOptions = live.configOptions ?? fallback.configOptions

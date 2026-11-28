@@ -7,6 +7,7 @@ import {
   useAcpActions,
 } from "@/contexts/acp-connections-context"
 import { useTaskContext } from "@/contexts/task-context"
+import { useGrokLaunchPermissionMode } from "@/hooks/use-acp-agents"
 import { useConnection, type UseConnectionReturn } from "@/hooks/use-connection"
 import { describeError, extractAppCommandError } from "@/lib/app-error"
 import { notify } from "@/lib/notify"
@@ -30,6 +31,7 @@ import {
 import {
   getSavedPrefsForConnect,
   saveConfigPreference,
+  sessionOnlyDefaults,
 } from "@/lib/selector-prefs-storage"
 import { TurnBusyError } from "@/lib/turn-busy"
 import { ConversationMovedError } from "@/lib/conversation-moved"
@@ -339,6 +341,16 @@ export function useConnectionLifecycle({
     newSession && presetPicks?.agentType === agentType
       ? presetPicks.values
       : null
+  // Grok's permission mode is never saved per agent nor recorded on a
+  // conversation until it is picked there, so until the session reports, the
+  // stored values never name it: it shows the mode the Grok settings launch the
+  // session in, which is what a new chat starts in and a chat that never picked
+  // one comes back in.
+  const grokLaunchPermissionMode = useGrokLaunchPermissionMode()
+  const sessionDefaults = useMemo(
+    () => sessionOnlyDefaults(agentType, grokLaunchPermissionMode),
+    [agentType, grokLaunchPermissionMode]
+  )
   const displayed = useMemo(
     () =>
       withSelectorPicks(
@@ -348,6 +360,7 @@ export function useConnectionLifecycle({
           template: hasTemplate
             ? { modes: templateModes, configOptions: templateConfigOptions }
             : null,
+          sessionDefaults,
           defaults: newSession ? [newSessionValues, recommendedValues] : [],
         }),
         // Until the session has taken them, the picks stay on screen over
@@ -362,6 +375,7 @@ export function useConnectionLifecycle({
       hasTemplate,
       templateModes,
       templateConfigOptions,
+      sessionDefaults,
       newSession,
       newSessionValues,
       recommendedValues,

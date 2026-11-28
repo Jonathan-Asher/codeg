@@ -18,6 +18,7 @@
  */
 
 import { useMemo, useSyncExternalStore } from "react"
+import type { SelectorValues } from "@/lib/selector-display"
 import type { SessionModeStateInfo } from "@/lib/types"
 
 const STORAGE_KEY = "codeg:selector-prefs"
@@ -255,6 +256,39 @@ export function isSessionOnlyConfigOption(
   configId: string
 ): boolean {
   return agentType === "grok" && configId === "mode"
+}
+
+/** The `--permission-mode` ids codeg launches Grok with; anything else in the
+ *  Grok settings launches it without one, in Ask (`default`). */
+const GROK_LAUNCH_PERMISSION_MODES: ReadonlySet<string> = new Set([
+  "auto",
+  "bypassPermissions",
+  "acceptEdits",
+  "plan",
+  "dontAsk",
+])
+
+/**
+ * What every session that never picked a session-only option runs with, as a
+ * selector layer: Grok's permission mode is the one its Grok settings
+ * (`[ui].permission_mode`, passed as `grokPermissionMode`) launch grok in —
+ * the mode a new chat starts in and a chat that never picked one comes back
+ * in. The backend's `GrokLaunchMode::initial_value` makes the same call, from
+ * the same settings, for the selector it builds.
+ *
+ * `null` (nothing claimed) while `grokPermissionMode` is `undefined` — the
+ * agent list has not loaded — and for every other agent.
+ */
+export function sessionOnlyDefaults(
+  agentType: string,
+  grokPermissionMode: string | null | undefined
+): SelectorValues | null {
+  if (agentType !== "grok" || grokPermissionMode === undefined) return null
+  const mode =
+    grokPermissionMode && GROK_LAUNCH_PERMISSION_MODES.has(grokPermissionMode)
+      ? grokPermissionMode
+      : "default"
+  return { modeId: null, configValues: { mode } }
 }
 
 export function saveConfigPreference(

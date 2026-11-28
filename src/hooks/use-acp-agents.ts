@@ -208,6 +208,20 @@ export function useAcpAgents(): UseAcpAgentsResult {
   return { agents, fresh, refresh }
 }
 
+/**
+ * Grok's launch permission mode from the agent registry (its Grok settings'
+ * `[ui].permission_mode`, `null` when unset), or `undefined` while the registry
+ * holds no Grok entry. A plain read of the shared store: it subscribes to no
+ * updates of its own and fetches nothing, so the views that read it per tab add
+ * no work. The app's always-mounted registry consumers keep it current.
+ */
+export function useGrokLaunchPermissionMode(): string | null | undefined {
+  return useAcpAgentsStore((s) => {
+    const grok = s.agents.find((agent) => agent.agent_type === "grok")
+    return grok ? (grok.grok_settings?.permission_mode ?? null) : undefined
+  })
+}
+
 /** Test-only: reset the shared store + module race/refcount state to a clean
  *  slate (disposing any live subscription). */
 export function resetAcpAgentsStore(): void {
